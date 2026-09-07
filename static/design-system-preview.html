@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NOVAI OS · Design System Preview</title>
     <!-- 引入并扩展 marvis-shared.css（99 个语义变量） -->
-    <link rel="stylesheet" href="/static/css/marvis-shared.css" />
-    <link rel="stylesheet" href="/static/css/os-tokens.css" />
-    <link rel="stylesheet" href="/static/css/os-glass.css" />
-    <link rel="stylesheet" href="/static/css/os-motion.css" />
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941" />
+    <link rel="stylesheet" href="/static/css/os-tokens.css?v=1.0.113.1788752364" />
+    <link rel="stylesheet" href="/static/css/os-glass.css?v=1.0.113.1788752411" />
+    <link rel="stylesheet" href="/static/css/os-motion.css?v=1.0.113.1788752449" />
     <style>
       * { box-sizing: border-box; }
       body {
@@ -144,6 +144,20 @@
       }
       .native-trigger:hover { background: var(--surface-tertiary); }
     </style>
+
+    <!-- 预渲染主题引导：在首帧前同步恢复持久化偏好，避免白/黑闪 -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("novai-os:theme") || "system";
+          document.documentElement.setAttribute("data-os-theme", t);
+          if (localStorage.getItem("novai-os:reduce-motion") === "1")
+            document.documentElement.setAttribute("data-os-reduce-motion", "true");
+          if (localStorage.getItem("novai-os:reduce-transparency") === "1")
+            document.documentElement.setAttribute("data-os-reduce-transparency", "true");
+        } catch (e) {}
+      })();
+    </script>
 
     <script type="module">
       import { initThemeRuntime } from "/static/os/theme/themeRuntime.js";

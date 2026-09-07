@@ -56,7 +56,10 @@ export function createGlassDialog({
     b.type = "button";
     b.className = "os-dialog__btn" + (a.primary ? " is-primary" : "");
     b.textContent = a.label;
-    if (a.onClick) b.addEventListener("click", () => a.onClick(close));
+    b.addEventListener("click", () => {
+      if (a.onClick) a.onClick(close);
+      else close();
+    });
     actionsEl.appendChild(b);
   });
 
@@ -66,14 +69,32 @@ export function createGlassDialog({
   if (actions.length) inner.appendChild(actionsEl);
   dialog.setContent(inner);
 
+  // 基础可访问性：role / aria-modal + 初始聚焦
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  overlay.setAttribute("role", "presentation");
+
   overlay.appendChild(dialog);
 
+  function cleanup() {
+    document.removeEventListener("keydown", onKey);
+  }
   function close() {
+    cleanup();
     overlay.remove();
   }
+  const onKey = (e) => {
+    if (e.key === "Escape") close();
+  };
+  document.addEventListener("keydown", onKey);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) close();
   });
+
+  // 挂载后聚焦首个可交互元素
+  const focusTarget = dialog.querySelector("button") || dialog;
+  focusTarget.focus();
+
   return { overlay, dialog, close };
 }
 

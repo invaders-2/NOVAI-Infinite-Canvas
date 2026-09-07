@@ -52,6 +52,18 @@ export function createGlassContextMenu({ items = [], x = 0, y = 0, tier = "thin"
     list.appendChild(btn);
   });
   surface.setContent(list);
+
+  // 基础可访问性：Escape 关闭 + 初始聚焦首项
+  const firstBtn = list.querySelector("button");
+  if (firstBtn) firstBtn.focus();
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      document.removeEventListener("keydown", onKey);
+      surface.remove();
+    }
+  };
+  document.addEventListener("keydown", onKey);
+
   return surface;
 }
 

@@ -15,26 +15,45 @@ const VARIANTS = {
 
 const STYLE_ID = "os-glass-button-style";
 const CSS = `
-.os-btn { display: inline-flex; }
+.os-btn { display: inline-flex; transition: transform var(--motion-fast) var(--ease-spring); }
 .os-btn__native {
   appearance: none; -webkit-appearance: none;
   margin: 0; border: 0; background: transparent;
   font-family: var(--font-system); font-size: 14px; font-weight: 600;
   line-height: 1; color: var(--text-primary);
   padding: 10px 20px; cursor: pointer; width: 100%; height: 100%;
-  border-radius: inherit; transition: opacity var(--motion-fast) var(--ease-standard);
+  border-radius: inherit;
+  transition: opacity var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 .os-btn__native:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.os-btn:active { transform: scale(0.97); }
+
+/* primary = CTA（accent，D3=C） */
 .os-btn--primary .os-btn__native { color: var(--text-on-accent); }
 .os-btn--primary { background: var(--accent); }
 .os-btn--primary .os-glass__bg { background: var(--accent); }
 .os-btn--primary .os-glass__refraction { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.os-btn--primary:hover .os-glass__bg { background: var(--accent-hover); }
+.os-btn--primary:active .os-glass__bg { background: var(--accent-active); }
+
+/* secondary = 玻璃中性体 */
 .os-btn--secondary .os-btn__native { color: var(--text-primary); }
+.os-btn--secondary:hover .os-glass__bg { background: var(--glass-fill-strong); }
+
+/* ghost = 透明玻璃 */
 .os-btn--ghost { background: transparent; }
 .os-btn--ghost .os-glass__bg { background: transparent; }
 .os-btn--ghost .os-btn__native { color: var(--text-secondary); }
+.os-btn--ghost:hover .os-glass__bg { background: var(--glass-fill); }
+
+/* danger = 语义危险色（不得使用 accent） */
 .os-btn--danger .os-btn__native { color: var(--semantic-danger); }
-.os-btn--danger .os-glass__bg { background: var(--accent-soft); }
+.os-btn--danger .os-glass__bg { background: var(--glass-fill-strong); }
+.os-btn--danger:hover .os-glass__bg { background: var(--semantic-danger); }
+.os-btn--danger:hover .os-btn__native { color: #ffffff; }
+
 .os-btn--disabled { opacity: 0.45; pointer-events: none; }
 `;
 
