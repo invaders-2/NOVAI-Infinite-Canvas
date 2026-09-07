@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-os-theme="system">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NOVAI OS · Design System Preview</title>
+    <!-- 引入并扩展 marvis-shared.css（99 个语义变量） -->
+    <link rel="stylesheet" href="/static/css/marvis-shared.css" />
+    <link rel="stylesheet" href="/static/css/os-tokens.css" />
+    <link rel="stylesheet" href="/static/css/os-glass.css" />
+    <link rel="stylesheet" href="/static/css/os-motion.css" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: var(--font-system);
+        background: var(--surface-primary);
+        color: var(--text-primary);
+        transition: background var(--motion-normal) var(--ease-standard),
+          color var(--motion-normal) var(--ease-standard);
+      }
+      .wrap { max-width: 980px; margin: 0 auto; padding: 32px 24px 80px; }
+      .topbar {
+        position: sticky; top: 0; z-index: var(--z-dock);
+        display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between;
+        padding: 14px 18px; margin-bottom: 28px;
+        background: var(--surface-overlay);
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+        backdrop-filter: blur(20px) saturate(160%);
+        border-bottom: 1px solid var(--border-subtle);
+      }
+      .seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--radius-pill); background: var(--surface-secondary); }
+      .seg button {
+        font-family: var(--font-system); font-size: 13px; font-weight: 600; color: var(--text-secondary);
+        border: 0; background: transparent; padding: 7px 14px; border-radius: var(--radius-pill); cursor: pointer;
+        transition: all var(--motion-fast) var(--ease-standard);
+      }
+      .seg button.is-active { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--shadow-xs); }
+      .toggles { display: inline-flex; gap: 18px; font-size: 13px; color: var(--text-secondary); }
+      .toggles label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+      .resolved { font-size: 12px; color: var(--text-tertiary); }
+      section { margin-bottom: 40px; }
+      h1 { font-size: 26px; font-weight: 700; margin: 0 0 6px; }
+      h2 { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 16px; }
+      .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+      .demo-label { font-size: 12px; color: var(--text-tertiary); margin-top: 8px; }
+      .brand-sample { font-family: var(--font-display); font-size: 32px; font-weight: 700; color: var(--text-primary); }
+      .brand-note { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; max-width: 320px; }
+      .swatch-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .swatch { width: 64px; height: 64px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); display: flex; align-items: flex-end; justify-content: center; padding: 6px; font-size: 10px; color: var(--text-tertiary); }
+      .accent-swatch { background: var(--accent); color: var(--text-on-accent); font-weight: 600; }
+      .motion-box { width: 80px; height: 80px; border-radius: var(--radius-md); background: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="seg" id="themeSeg">
+        <button data-theme="light">Light</button>
+        <button data-theme="dark">Dark</button>
+        <button data-theme="system">System</button>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="tgMotion" /> Reduce Motion</label>
+        <label><input type="checkbox" id="tgTrans" /> Reduce Transparency</label>
+      </div>
+      <div class="resolved" id="resolvedLabel"></div>
+    </div>
+
+    <div class="wrap">
+      <h1>NOVAI OS · Design System</h1>
+      <p class="resolved">Liquid Glass · Light / Dark / System · Accent #CDFF00 (CTA only) · System font stack</p>
+
+      <!-- Buttons -->
+      <section>
+        <h2>Buttons</h2>
+        <div class="row" id="demoButtons"></div>
+        <div class="demo-label">primary = CTA（accent）；secondary / ghost / danger 为玻璃中性体</div>
+      </section>
+
+      <!-- Inputs -->
+      <section>
+        <h2>Inputs</h2>
+        <div class="row" id="demoInputs"></div>
+      </section>
+
+      <!-- Panels -->
+      <section>
+        <h2>Panels / Cards</h2>
+        <div class="grid" id="demoPanels"></div>
+      </section>
+
+      <!-- Context Menu / Dialog / Tooltip / Notification -->
+      <section>
+        <h2>Overlays</h2>
+        <div class="row">
+          <button class="native-trigger" id="trigMenu">Open Context Menu</button>
+          <button class="native-trigger" id="trigDialog">Open Dialog</button>
+          <button class="native-trigger" id="trigTooltip">Show Tooltip</button>
+          <button class="native-trigger" id="trigNotify">Push Notification</button>
+        </div>
+        <div class="demo-label">这些是玻璃组件的原生触发按钮（非 OS 组件，仅用于演示）</div>
+      </section>
+
+      <!-- Accent semantics -->
+      <section>
+        <h2>Accent #CDFF00 — 仅六类语义</h2>
+        <div class="swatch-row">
+          <div class="swatch accent-swatch">CTA</div>
+          <div class="swatch" style="border-color: var(--accent)">Active</div>
+          <div class="swatch" style="outline: 2px solid var(--accent); outline-offset: -2px">Focus</div>
+          <div class="swatch" style="background: var(--accent-soft)">Selection</div>
+          <div class="swatch" style="border-top: 3px solid var(--accent)">Progress</div>
+          <div class="swatch" style="box-shadow: inset 0 0 0 2px var(--accent)">AI active</div>
+        </div>
+        <div class="demo-label">accent 不得用于大面积背景 / 正文 / 非交互装饰</div>
+      </section>
+
+      <!-- Typography -->
+      <section>
+        <h2>Typography</h2>
+        <p>OS UI 使用系统字体栈（<code>--font-system</code>）。Space Grotesk 仅保留给以下非系统 UI 场景：</p>
+        <div class="brand-sample">NOVAI OS</div>
+        <div class="brand-note">此处的 brand sample 使用 <code>--font-display: "Space Grotesk"</code>，仅作 Welcome / 品牌展示 / 官网示例，不进入 Desktop / Dock / Window / Menu / Dialog / Settings / App UI。</div>
+      </section>
+
+      <!-- Motion -->
+      <section>
+        <h2>Motion</h2>
+        <div class="row">
+          <div class="motion-box os-anim-pop-in"></div>
+          <button class="native-trigger" id="trigMotion">Replay Animation</button>
+        </div>
+      </section>
+    </div>
+
+    <style>
+      .native-trigger {
+        font-family: var(--font-system); font-size: 13px; font-weight: 600; color: var(--text-primary);
+        background: var(--surface-secondary); border: 1px solid var(--border-subtle);
+        padding: 9px 16px; border-radius: var(--radius-sm); cursor: pointer;
+        transition: background var(--motion-fast) var(--ease-standard);
+      }
+      .native-trigger:hover { background: var(--surface-tertiary); }
+    </style>
+
+    <script type="module">
+      import { initThemeRuntime } from "/static/os/theme/themeRuntime.js";
+      import { restoreAll, saveThemePref, saveReduceMotion, saveReduceTransparency } from "/static/os/theme/themePersistence.js";
+      import { createGlassButton } from "/static/os/ui/glassButton.js";
+      import { createGlassInput } from "/static/os/ui/glassInput.js";
+      import { createGlassPanel } from "/static/os/ui/glassPanel.js";
+      import { createGlassContextMenu } from "/static/os/ui/glassContextMenu.js";
+      import { createGlassDialog } from "/static/os/ui/glassDialog.js";
+      import { createGlassTooltip } from "/static/os/ui/glassTooltip.js";
+      import { createGlassNotification } from "/static/os/ui/glassNotification.js";
+
+      // 1) 恢复持久化偏好并初始化运行时
+      const runtime = initThemeRuntime({
+        initial: "system",
+        onChange: ({ theme, resolved }) => {
+          saveThemePref(theme);
+          syncSeg(theme);
+          document.getElementById("resolvedLabel").textContent = `theme=${theme} · resolved=${resolved}`;
+        },
+      });
+      restoreAll({ onTheme: (t) => runtime.setTheme(t) });
+      document.getElementById("resolvedLabel").textContent = `theme=${runtime.getTheme()} · resolved=${runtime.getResolved()}`;
+      document.getElementById("tgMotion").checked = document.documentElement.hasAttribute("data-os-reduce-motion");
+      document.getElementById("tgTrans").checked = document.documentElement.hasAttribute("data-os-reduce-transparency");
+
+      function syncSeg(theme) {
+        document.querySelectorAll("#themeSeg button").forEach((b) => {
+          b.classList.toggle("is-active", b.dataset.theme === theme);
+        });
+      }
+      syncSeg(runtime.getTheme());
+
+      document.getElementById("themeSeg").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-theme]");
+        if (btn) runtime.setTheme(btn.dataset.theme);
+      });
+      document.getElementById("tgMotion").addEventListener("change", (e) => saveReduceMotion(e.target.checked));
+      document.getElementById("tgTrans").addEventListener("change", (e) => saveReduceTransparency(e.target.checked));
+
+      // 2) Buttons
+      const btnWrap = document.getElementById("demoButtons");
+      [["primary", "Primary CTA"], ["secondary", "Secondary"], ["ghost", "Ghost"], ["danger", "Danger"]].forEach(([v, label]) => {
+        btnWrap.appendChild(createGlassButton({ label, variant: v }));
+      });
+
+      // 3) Inputs
+      const inputWrap = document.getElementById("demoInputs");
+      inputWrap.appendChild(createGlassInput({ placeholder: "Type something…" }));
+      inputWrap.appendChild(createGlassInput({ placeholder: "Search…", value: "" }));
+
+      // 4) Panels
+      const panelWrap = document.getElementById("demoPanels");
+      panelWrap.appendChild(createGlassPanel({ title: "ultraThin", tier: "ultraThin", content: "最薄玻璃层，适合非聚焦表面。" }));
+      panelWrap.appendChild(createGlassPanel({ title: "thin", tier: "thin", content: "输入框 / 轻量卡片。" }));
+      panelWrap.appendChild(createGlassPanel({ title: "regular", tier: "regular", content: "标准面板 / 卡片。" }));
+      panelWrap.appendChild(createGlassPanel({ title: "thick", tier: "thick", content: "高聚焦弹层 / 强调容器。" }));
+
+      // 5) Overlays
+      document.getElementById("trigMenu").addEventListener("click", (e) => {
+        const m = createGlassContextMenu({
+          x: e.clientX, y: e.clientY,
+          items: [
+            { label: "Open", onClick: () => console.log("open") },
+            { label: "Rename", onClick: () => console.log("rename") },
+            { separator: true },
+            { label: "Delete", danger: true, onClick: () => console.log("delete") },
+          ],
+        });
+        document.body.appendChild(m);
+        const close = (ev) => { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener("click", close); } };
+        setTimeout(() => document.addEventListener("click", close), 0);
+      });
+
+      document.getElementById("trigDialog").addEventListener("click", () => {
+        const { overlay } = createGlassDialog({
+          title: "Confirm Action",
+          body: "This is a Liquid Glass dialog. Accent is reserved for CTA buttons only.",
+          actions: [
+            { label: "Cancel" },
+            { label: "Confirm", primary: true, onClick: (close) => close() },
+          ],
+        });
+        document.body.appendChild(overlay);
+      });
+
+      document.getElementById("trigTooltip").addEventListener("mouseenter", (e) => {
+        const tip = createGlassTooltip({ text: "Glass tooltip (system font)" });
+        tip.style.position = "fixed";
+        tip.style.left = `${e.clientX}px`;
+        tip.style.top = `${e.clientY + 18}px`;
+        document.body.appendChild(tip);
+        e.target._tip = tip;
+      });
+      document.getElementById("trigTooltip").addEventListener("mouseleave", (e) => {
+        if (e.target._tip) { e.target._tip.remove(); e.target._tip = null; }
+      });
+
+      document.getElementById("trigNotify").addEventListener("click", () => {
+        const { node } = createGlassNotification({ title: "Saved", message: "Your changes are persisted.", duration: 3500 });
+        node.style.position = "fixed";
+        node.style.right = "24px";
+        node.style.bottom = "24px";
+        document.body.appendChild(node);
+      });
+
+      // 6) Motion replay
+      document.getElementById("trigMotion").addEventListener("click", () => {
+        const box = document.querySelector(".motion-box");
+        box.classList.remove("os-anim-pop-in");
+        void box.offsetWidth; // reflow
+        box.classList.add("os-anim-pop-in");
+      });
+    </script>
+  </body>
+</html>

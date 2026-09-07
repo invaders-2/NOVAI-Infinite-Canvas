@@ -1,0 +1,202 @@
+/* ============================================================================
+ * NOVAI OS · Design Tokens (os-tokens.css)
+ * 引入并扩展 marvis-shared.css（99 个语义变量）。
+ * OS 层专用 Token 定义：surface / text / border / glass / accent / font。
+ *
+ * 主题切换：<html data-os-theme="light|dark|system">
+ *   - light / dark 为显式态
+ *   - system 由 CSS @media (prefers-color-scheme) 解析，无需 JS 介入视觉
+ *
+ * 决策约束（D3=C / D4=B）：
+ *   - --accent: #CDFF00 仅用于 CTA / active / focus / selection / progress / AI active 六类语义
+ *   - --font-system 为 OS 全部 UI 默认字体栈
+ *   - --font-display (Space Grotesk) 仅留给 Welcome / 品牌展示 / 官网，不进入 OS 组件
+ * ========================================================================== */
+
+/* ---------- 系统字体栈（OS 默认，D4=B） ---------- */
+:root {
+  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue",
+    Arial, sans-serif;
+  /* 仅非系统 UI 场景使用；OS 组件禁止引用 */
+  --font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ============================== LIGHT ============================== */
+:root,
+[data-os-theme="light"] {
+  /* Surface */
+  --surface-primary: #ffffff;
+  --surface-secondary: #f5f5f7;
+  --surface-tertiary: #ebebf0;
+  --surface-overlay: rgba(255, 255, 255, 0.72);
+
+  /* Text */
+  --text-primary: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --text-tertiary: #8e8e93;
+  --text-on-accent: #1d1d1f;
+
+  /* Border */
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.16);
+
+  /* Glass material base (被 os-glass.css 引用) */
+  --glass-fill: rgba(255, 255, 255, 0.55);
+  --glass-fill-strong: rgba(255, 255, 255, 0.72);
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-edge: rgba(255, 255, 255, 0.65);
+  --glass-shadow: rgba(0, 0, 0, 0.12);
+  --glass-tint: 255, 255, 255; /* rgb 分量，供 backdrop-filter 着色 */
+
+  /* Accent (D3=C，限定六类语义) */
+  --accent: #cdff00;
+  --accent-hover: #b8e600;
+  --accent-active: #a6d100;
+  --accent-soft: rgba(205, 255, 0, 0.16);
+
+  /* Semantic */
+  --semantic-success: #34c759;
+  --semantic-warning: #ff9f0a;
+  --semantic-danger: #ff3b30;
+  --semantic-info: #0a84ff;
+
+  /* Elevation */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.18);
+
+  /* Radius */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
+
+  /* Spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Z-index */
+  --z-wallpaper: 0;
+  --z-icon: 10;
+  --z-window: 100;
+  --z-dock: 800;
+  --z-assistant: 900;
+  --z-menu: 1000;
+  --z-dialog: 1100;
+  --z-notification: 1200;
+}
+
+/* ============================== DARK ============================== */
+[data-os-theme="dark"] {
+  --surface-primary: #0a0a0c;
+  --surface-secondary: #161619;
+  --surface-tertiary: #1f1f24;
+  --surface-overlay: rgba(20, 20, 24, 0.72);
+
+  --text-primary: #f5f5f7;
+  --text-secondary: #a1a1a6;
+  --text-tertiary: #6e6e73;
+  --text-on-accent: #0a0a0c;
+
+  --border-subtle: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.2);
+
+  --glass-fill: rgba(30, 30, 35, 0.55);
+  --glass-fill-strong: rgba(36, 36, 42, 0.72);
+  --glass-highlight: rgba(255, 255, 255, 0.16);
+  --glass-edge: rgba(255, 255, 255, 0.22);
+  --glass-shadow: rgba(0, 0, 0, 0.55);
+  --glass-tint: 30, 30, 35;
+
+  --accent: #cdff00;
+  --accent-hover: #d4ff2b;
+  --accent-active: #b8e600;
+  --accent-soft: rgba(205, 255, 0, 0.2);
+
+  --semantic-success: #30d158;
+  --semantic-warning: #ffd60a;
+  --semantic-danger: #ff453a;
+  --semantic-info: #0a84ff;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.7);
+}
+
+/* ============================== SYSTEM ============================== */
+/* system 默认等同于 light，由媒体查询在深色外观下翻转为 dark 值 */
+[data-os-theme="system"] {
+  --surface-primary: #ffffff;
+  --surface-secondary: #f5f5f7;
+  --surface-tertiary: #ebebf0;
+  --surface-overlay: rgba(255, 255, 255, 0.72);
+  --text-primary: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --text-tertiary: #8e8e93;
+  --text-on-accent: #1d1d1f;
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --glass-fill: rgba(255, 255, 255, 0.55);
+  --glass-fill-strong: rgba(255, 255, 255, 0.72);
+  --glass-highlight: rgba(255, 255, 255, 0.9);
+  --glass-edge: rgba(255, 255, 255, 0.65);
+  --glass-shadow: rgba(0, 0, 0, 0.12);
+  --glass-tint: 255, 255, 255;
+  --accent: #cdff00;
+  --accent-hover: #b8e600;
+  --accent-active: #a6d100;
+  --accent-soft: rgba(205, 255, 0, 0.16);
+  --semantic-success: #34c759;
+  --semantic-warning: #ff9f0a;
+  --semantic-danger: #ff3b30;
+  --semantic-info: #0a84ff;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-os-theme="system"] {
+    --surface-primary: #0a0a0c;
+    --surface-secondary: #161619;
+    --surface-tertiary: #1f1f24;
+    --surface-overlay: rgba(20, 20, 24, 0.72);
+    --text-primary: #f5f5f7;
+    --text-secondary: #a1a1a6;
+    --text-tertiary: #6e6e73;
+    --text-on-accent: #0a0a0c;
+    --border-subtle: rgba(255, 255, 255, 0.1);
+    --border-strong: rgba(255, 255, 255, 0.2);
+    --glass-fill: rgba(30, 30, 35, 0.55);
+    --glass-fill-strong: rgba(36, 36, 42, 0.72);
+    --glass-highlight: rgba(255, 255, 255, 0.16);
+    --glass-edge: rgba(255, 255, 255, 0.22);
+    --glass-shadow: rgba(0, 0, 0, 0.55);
+    --glass-tint: 30, 30, 35;
+    --accent: #cdff00;
+    --accent-hover: #d4ff2b;
+    --accent-active: #b8e600;
+    --accent-soft: rgba(205, 255, 0, 0.2);
+    --semantic-success: #30d158;
+    --semantic-warning: #ffd60a;
+    --semantic-danger: #ff453a;
+    --semantic-info: #0a84ff;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.7);
+  }
+}

@@ -12423,6 +12423,11 @@ async def lan_info():
 async def index():
     return static_html_response("index.html")
 
+@app.get("/os-preview")
+async def os_preview():
+    # Phase 1 入口：NOVAI OS Design System + Theme Runtime 验收页（不影响 / 老壳）
+    return static_html_response("design-system-preview.html")
+
 @app.get("/api/view")
 def view_image(filename: str, type: str = "input", subfolder: str = ""):
     # 先按原逻辑去各 ComfyUI 后端找

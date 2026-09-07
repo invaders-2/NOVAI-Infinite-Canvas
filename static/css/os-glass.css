@@ -1,0 +1,139 @@
+/* ============================================================================
+ * NOVAI OS · Liquid Glass Material (os-glass.css)
+ * 统一玻璃材质：折射 / 动态高光 / 边缘高亮 / 内部反射 / 多层透明度。
+ * 结构由 static/os/ui/glassSurface.js 生成（6 层 DOM）。
+ * 材质等级：ultraThin < thin < regular < thick
+ *
+ * 降级：<html data-os-reduce-transparency="true"> 时降低 blur 半径、提高填充不透明度。
+ * ========================================================================== */
+
+.os-glass {
+  position: relative;
+  border-radius: var(--radius-lg);
+  isolation: isolate;
+  overflow: hidden;
+}
+
+/* 6 层 */
+.os-glass__bg,
+.os-glass__refraction,
+.os-glass__highlight,
+.os-glass__border,
+.os-glass__shadow,
+.os-glass__content {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.os-glass__content {
+  position: relative;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+/* 背景着色层 */
+.os-glass__bg {
+  background: var(--glass-fill);
+}
+
+/* 折射层：真正的 backdrop-filter 在这里 */
+.os-glass__refraction {
+  background: rgba(var(--glass-tint), 0.04);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  backdrop-filter: blur(28px) saturate(160%);
+}
+
+/* 顶部动态高光（内部反射） */
+.os-glass__highlight {
+  background: linear-gradient(
+    180deg,
+    var(--glass-highlight) 0%,
+    rgba(var(--glass-tint), 0) 38%
+  );
+  opacity: 0.6;
+  mix-blend-mode: screen;
+}
+
+/* 边缘高亮（1px 内描边 + 外发光） */
+.os-glass__border {
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 0 rgba(var(--glass-tint), 0.5);
+}
+
+/* 投影层 */
+.os-glass__shadow {
+  box-shadow: var(--shadow-md);
+  border-radius: inherit;
+}
+
+/* ---------- 材质等级 ---------- */
+.os-glass--ultraThin .os-glass__refraction {
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  backdrop-filter: blur(8px) saturate(120%);
+}
+.os-glass--ultraThin .os-glass__bg {
+  background: var(--glass-fill);
+  opacity: 0.7;
+}
+
+.os-glass--thin .os-glass__refraction {
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+}
+.os-glass--thin .os-glass__bg {
+  background: var(--glass-fill);
+  opacity: 0.82;
+}
+
+.os-glass--regular .os-glass__refraction {
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  backdrop-filter: blur(28px) saturate(160%);
+}
+.os-glass--regular .os-glass__bg {
+  background: var(--glass-fill-strong);
+}
+
+.os-glass--thick .os-glass__refraction {
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+}
+.os-glass--thick .os-glass__bg {
+  background: var(--glass-fill-strong);
+}
+
+/* ---------- 降级：Reduce Transparency ---------- */
+[data-os-reduce-transparency="true"] .os-glass__refraction {
+  -webkit-backdrop-filter: blur(4px) saturate(110%);
+  backdrop-filter: blur(4px) saturate(110%);
+}
+[data-os-reduce-transparency="true"] .os-glass__bg {
+  background: var(--surface-secondary);
+}
+[data-os-reduce-transparency="true"] .os-glass__highlight {
+  opacity: 0.25;
+}
+
+/* ---------- 非激活窗口降 blur（性能，R10） ---------- */
+.os-glass--inactive .os-glass__refraction {
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+  backdrop-filter: blur(14px) saturate(130%);
+}
+
+/* ---------- 组件快捷类（供 glassXxx.js 使用） ---------- */
+.os-glass--button {
+  border-radius: var(--radius-pill);
+}
+.os-glass--input {
+  border-radius: var(--radius-sm);
+}
+.os-glass--panel {
+  border-radius: var(--radius-lg);
+}
+.os-glass--menu,
+.os-glass--dialog,
+.os-glass--tooltip,
+.os-glass--notification {
+  border-radius: var(--radius-md);
+}
