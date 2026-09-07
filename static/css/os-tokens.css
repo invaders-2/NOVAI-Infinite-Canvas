@@ -55,12 +55,25 @@
   --border-strong: rgba(0, 0, 0, 0.16);
 
   /* Glass material base (被 os-glass.css 引用) */
-  --glass-fill: rgba(255, 255, 255, 0.55);
-  --glass-fill-strong: rgba(255, 255, 255, 0.72);
+  --glass-fill: rgba(255, 255, 255, 0.70);
+  --glass-fill-strong: rgba(255, 255, 255, 0.86);
   --glass-highlight: rgba(255, 255, 255, 0.9);
   --glass-edge: rgba(255, 255, 255, 0.65);
   --glass-shadow: rgba(0, 0, 0, 0.12);
   --glass-tint: 255, 255, 255; /* rgb 分量，供 backdrop-filter 着色 */
+
+  /* ---------- Material Tier 明度分级（相对 --bg-material #F5F5F7 的白叠加） ----------
+     Low-haze Liquid Material：每档靠 fill 实度 + tint + internal light + luminance 分级，
+     不只是 blur 差异。目标：看得见这块材质，但看不到边框。 */
+  --glass-fill-ultraThin: rgba(255, 255, 255, 0.55); /* ≈ +2.0% 明度 */
+  --glass-fill-thin: rgba(255, 255, 255, 0.70);      /* ≈ +2.9% */
+  --glass-fill-regular: rgba(255, 255, 255, 0.84);   /* ≈ +3.5% */
+  --glass-fill-thick: rgba(255, 255, 255, 0.96);     /* ≈ +4.0% */
+
+  /* Input 嵌入差（比背景略深，形成"嵌入材质"的凹陷感；无阴影、无边框） */
+  --input-fill: rgba(0, 0, 0, 0.035);
+  --input-fill-hover: rgba(0, 0, 0, 0.045);
+  --input-fill-focus: rgba(0, 0, 0, 0.06);
 
   /* ---------- 系统通用交互（中性；Primary CTA = 黑底白字） ---------- */
   --interactive-primary: #1d1d1f;
@@ -82,11 +95,11 @@
   --semantic-danger: #ff3b30;
   --semantic-info: #0a84ff;
 
-  /* Elevation（极轻：阴影透明度约 5%，只保留一点点漂浮感，不允许明显黑影） */
+  /* Elevation（极轻：系统 Surface 阴影一律 3%～5%，不允许可感知的黑影） */
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.035);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.045);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.05);
 
   /* Icon System（统一线性图标 Token；stroke 规范见 static/os/icons/osIcon.js） */
   --icon-primary: #1d1d1f;
@@ -142,12 +155,23 @@
   --border-subtle: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.2);
 
-  --glass-fill: rgba(30, 30, 35, 0.55);
-  --glass-fill-strong: rgba(36, 36, 42, 0.72);
-  --glass-highlight: rgba(255, 255, 255, 0.16);
-  --glass-edge: rgba(255, 255, 255, 0.22);
+  --glass-fill: rgba(30, 30, 35, 0.72);
+  --glass-fill-strong: rgba(36, 36, 42, 0.86);
+  --glass-highlight: rgba(255, 255, 255, 0.12);
+  --glass-edge: rgba(255, 255, 255, 0.18);
   --glass-shadow: rgba(0, 0, 0, 0.55);
   --glass-tint: 30, 30, 35;
+
+  /* Material Tier 明度分级（Dark：相对 --bg-material #0F1012 的中性提亮） */
+  --glass-fill-ultraThin: rgba(255, 255, 255, 0.05);
+  --glass-fill-thin: rgba(255, 255, 255, 0.075);
+  --glass-fill-regular: rgba(255, 255, 255, 0.10);
+  --glass-fill-thick: rgba(255, 255, 255, 0.13);
+
+  /* Input 嵌入差（Dark：比背景更深的凹陷） */
+  --input-fill: rgba(0, 0, 0, 0.30);
+  --input-fill-hover: rgba(0, 0, 0, 0.26);
+  --input-fill-focus: rgba(0, 0, 0, 0.20);
 
   /* 系统通用交互（中性；Primary CTA = 白底黑字） */
   --interactive-primary: #f5f5f7;
@@ -197,12 +221,23 @@
   --text-tertiary: #8e8e93;
   --border-subtle: rgba(0, 0, 0, 0.08);
   --border-strong: rgba(0, 0, 0, 0.16);
-  --glass-fill: rgba(255, 255, 255, 0.55);
-  --glass-fill-strong: rgba(255, 255, 255, 0.72);
+  --glass-fill: rgba(255, 255, 255, 0.70);
+  --glass-fill-strong: rgba(255, 255, 255, 0.86);
   --glass-highlight: rgba(255, 255, 255, 0.9);
   --glass-edge: rgba(255, 255, 255, 0.65);
   --glass-shadow: rgba(0, 0, 0, 0.12);
   --glass-tint: 255, 255, 255;
+
+  /* Material Tier 明度分级（Light 侧） */
+  --glass-fill-ultraThin: rgba(255, 255, 255, 0.55);
+  --glass-fill-thin: rgba(255, 255, 255, 0.70);
+  --glass-fill-regular: rgba(255, 255, 255, 0.84);
+  --glass-fill-thick: rgba(255, 255, 255, 0.96);
+
+  /* Input 嵌入差（Light） */
+  --input-fill: rgba(0, 0, 0, 0.035);
+  --input-fill-hover: rgba(0, 0, 0, 0.045);
+  --input-fill-focus: rgba(0, 0, 0, 0.06);
 
   --interactive-primary: #1d1d1f;
   --interactive-primary-hover: #3a3a3c;
@@ -223,9 +258,9 @@
 
   /* Elevation（极轻） */
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.035);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.045);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.05);
 
   /* Icon System */
   --icon-primary: #1d1d1f;
@@ -249,12 +284,23 @@
     --text-tertiary: #6e6e73;
     --border-subtle: rgba(255, 255, 255, 0.1);
     --border-strong: rgba(255, 255, 255, 0.2);
-    --glass-fill: rgba(30, 30, 35, 0.55);
-    --glass-fill-strong: rgba(36, 36, 42, 0.72);
-    --glass-highlight: rgba(255, 255, 255, 0.16);
-    --glass-edge: rgba(255, 255, 255, 0.22);
+    --glass-fill: rgba(30, 30, 35, 0.72);
+    --glass-fill-strong: rgba(36, 36, 42, 0.86);
+    --glass-highlight: rgba(255, 255, 255, 0.12);
+    --glass-edge: rgba(255, 255, 255, 0.18);
     --glass-shadow: rgba(0, 0, 0, 0.55);
     --glass-tint: 30, 30, 35;
+
+    /* Material Tier 明度分级（Dark） */
+    --glass-fill-ultraThin: rgba(255, 255, 255, 0.05);
+    --glass-fill-thin: rgba(255, 255, 255, 0.075);
+    --glass-fill-regular: rgba(255, 255, 255, 0.10);
+    --glass-fill-thick: rgba(255, 255, 255, 0.13);
+
+    /* Input 嵌入差（Dark） */
+    --input-fill: rgba(0, 0, 0, 0.30);
+    --input-fill-hover: rgba(0, 0, 0, 0.26);
+    --input-fill-focus: rgba(0, 0, 0, 0.20);
 
     --interactive-primary: #f5f5f7;
     --interactive-primary-hover: #d8d8dc;

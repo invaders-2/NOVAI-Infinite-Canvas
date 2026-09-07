@@ -1,13 +1,18 @@
 /* ============================================================================
  * NOVAI OS · Liquid Glass Material Engine (os-glass.css)
- * 真实材质：折射色散 / 多层内部反射 / 边缘曲面高光 / sheen 镜面 / 多层悬浮阴影
+ * Low-haze Liquid Material（默认材质 = 此前 Reduce Transparency = ON 的干净方向）
+ *
+ * 默认材质原则：
+ *   - 低透明度 / 低 haze / 弱 blur / 少背景穿透 / 较清晰表面 / 接近半实
+ *   - 完全没有可见 border / hairline / outline；层级只由材质承担
+ *   - 4 档 thickness = 真实材质差异（fill 实度 + tint + 内部受光 + 明度 + blur）
+ *     不是"只有 blur 不同，其他全一样"
+ *   - 系统 Surface 阴影一律 3%～5%，不允许可感知黑影
+ *
  * 6 层 DOM（由 glassSurface.js 生成）：bg / refraction / highlight / border / shadow / content
  * + ::after 伪元素 = sheen 镜面高光（hover 时一道光斑滑过）
  *
- * 4 档 thickness = 真实材质差异（厚度+折射+受光+阴影综合），不是简单 blur 差异
- * 完全去除 box-shadow inset 边框表达；层级只由材质承担
- *
- * 降级：<html data-os-reduce-transparency="true"> 降低 blur、关 sheen/highlight/border
+ * 降级：<html data-os-reduce-transparency="true"> 进一步去 haze（默认已接近）
  * 动效：<html data-os-reduce-motion="true"> 去 sheen 动画与 lift
  * ========================================================================== */
 
@@ -17,8 +22,11 @@
   isolation: isolate;
   overflow: hidden;
   transform: translateZ(0); /* 开启 GPU 合成层 */
-  transition: transform var(--motion-normal, 240ms) var(--ease-spring, cubic-bezier(.34, 1.56, .64, 1)),
-              box-shadow var(--motion-normal, 240ms) var(--ease-standard);
+  /* 投影挂在根上：根虽有 overflow:hidden，但自身 box-shadow 不被自身 overflow 裁切 */
+  box-shadow: var(--glass-shadow-stack, 0 2px 6px rgba(0, 0, 0, 0.03));
+  transition: transform var(--motion-normal, 240ms) var(--ease-material, cubic-bezier(.2, 0, .2, 1)),
+              box-shadow var(--motion-normal, 240ms) var(--ease-material, cubic-bezier(.2, 0, .2, 1)),
+              background var(--motion-normal, 240ms) var(--ease-material, cubic-bezier(.2, 0, .2, 1));
 }
 
 /* ---------- 6 层 base ---------- */
@@ -56,10 +64,10 @@
       rgba(var(--glass-tint, 255, 255, 255), var(--glass-refraction-strength, 0.04)) 270deg,
       transparent 360deg
     );
-  -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(var(--glass-saturation, 150%));
-  backdrop-filter: blur(var(--glass-blur, 20px)) saturate(var(--glass-saturation, 150%));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 8px)) saturate(var(--glass-saturation, 110%));
+  backdrop-filter: blur(var(--glass-blur, 8px)) saturate(var(--glass-saturation, 110%));
   mix-blend-mode: overlay;
-  opacity: 0.55;
+  opacity: 0.3; /* 低 haze：默认材质不再雾蒙蒙 */
 }
 
 /* ---------- 3. 顶部受光（内部反射） ---------- */
@@ -84,13 +92,17 @@
   opacity: 0.5;
 }
 
-/* ---------- 5. 投影：多层柔阴影 = 悬浮感 ---------- */
+/* ---------- 5. 投影 ----------
+   投影在上方 .os-glass 根元素上绘制。根元素有 overflow:hidden，
+   若挂在内部 __shadow 层会被裁掉（元素自身 box-shadow 不受自身 overflow 影响）。
+   __shadow 层仅保留 DOM 结构以兼容 glassSurface.js 的 6 层约定，不绘制。 */
 .os-glass__shadow {
-  box-shadow: var(--glass-shadow-stack, 0 8px 24px rgba(0, 0, 0, 0.12));
+  box-shadow: none;
   border-radius: inherit;
 }
 
-/* ---------- sheen 镜面高光（hover 时一道光斑滑过） ---------- */
+/* ---------- sheen 镜面高光（hover 时一道光斑滑过） ----------
+   Low-haze：强度压低（0.45 → 0.26），只是"材质活了一下"，不抢视觉 */
 .os-glass::after {
   content: "";
   position: absolute;
@@ -99,7 +111,7 @@
   background: linear-gradient(
     105deg,
     transparent 30%,
-    rgba(255, 255, 255, 0.45) 50%,
+    rgba(255, 255, 255, 0.26) 50%,
     transparent 70%
   );
   transform: translateX(-120%);
@@ -108,95 +120,111 @@
   mix-blend-mode: overlay;
   opacity: 0;
   transition: opacity var(--motion-fast, 160ms) var(--ease-standard),
-              transform var(--motion-slow, 700ms) var(--ease-spring, cubic-bezier(.34, 1.56, .64, 1));
+              transform var(--motion-slow, 360ms) var(--ease-material, cubic-bezier(.2, 0, .2, 1));
 }
 .os-glass:hover::after {
   opacity: 1;
   transform: translateX(120%);
   transition: opacity var(--motion-fast, 160ms) var(--ease-standard),
-              transform 900ms var(--ease-spring, cubic-bezier(.34, 1.56, .64, 1));
+              transform var(--motion-slow, 360ms) var(--ease-material, cubic-bezier(.2, 0, .2, 1));
 }
 
-/* ---------- 4 档 thickness 真实材质差异 ---------- */
+/* ---------- 4 档 thickness：真实材质差异（Low-haze Liquid Material） ----------
+   每档差异 = fill 实度（明度）+ tint + 内部受光（ambient）+ blur + 阴影厚度
+   默认整体降低 blur 强度：NOVAI OS 采用 Low-haze，不是传统重毛玻璃 */
 .os-glass--ultraThin {
-  --glass-blur: 8px;
-  --glass-saturation: 120%;
-  --glass-refraction-strength: 0.02;
-  --glass-ambient: 0.4;
+  --glass-fill: var(--glass-fill-ultraThin);
+  --glass-blur: 4px;
+  --glass-saturation: 104%;
+  --glass-refraction-strength: 0.015;
+  --glass-ambient: 0.18;
   --glass-shadow-stack:
-    0 1px 2px rgba(0, 0, 0, 0.02),
+    0 1px 2px rgba(0, 0, 0, 0.025),
     0 2px 6px rgba(0, 0, 0, 0.03);
   --glass-lift: -1px;
+  --glass-scale: 1.01;
   --glass-shadow-stack-hover:
     0 2px 4px rgba(0, 0, 0, 0.03),
-    0 6px 14px rgba(0, 0, 0, 0.045);
+    0 6px 14px rgba(0, 0, 0, 0.035);
 }
 
 .os-glass--thin {
-  --glass-blur: 16px;
-  --glass-saturation: 140%;
-  --glass-refraction-strength: 0.04;
-  --glass-ambient: 0.5;
+  --glass-fill: var(--glass-fill-thin);
+  --glass-blur: 8px;
+  --glass-saturation: 108%;
+  --glass-refraction-strength: 0.02;
+  --glass-ambient: 0.24;
   --glass-shadow-stack:
     0 2px 6px rgba(0, 0, 0, 0.03),
-    0 8px 20px rgba(0, 0, 0, 0.045);
-  --glass-lift: -2px;
+    0 8px 18px rgba(0, 0, 0, 0.035);
+  --glass-lift: -1px;
+  --glass-scale: 1.015;
   --glass-shadow-stack-hover:
-    0 3px 8px rgba(0, 0, 0, 0.04),
-    0 14px 32px rgba(0, 0, 0, 0.055);
+    0 3px 8px rgba(0, 0, 0, 0.035),
+    0 12px 26px rgba(0, 0, 0, 0.04);
 }
 
 .os-glass--regular {
-  --glass-blur: 28px;
-  --glass-saturation: 160%;
-  --glass-refraction-strength: 0.06;
-  --glass-ambient: 0.6;
+  --glass-fill: var(--glass-fill-regular);
+  --glass-blur: 12px;
+  --glass-saturation: 112%;
+  --glass-refraction-strength: 0.03;
+  --glass-ambient: 0.3;
   --glass-shadow-stack:
-    0 4px 12px rgba(0, 0, 0, 0.04),
-    0 18px 40px rgba(0, 0, 0, 0.05);
-  --glass-lift: -3px;
+    0 3px 10px rgba(0, 0, 0, 0.035),
+    0 14px 32px rgba(0, 0, 0, 0.04);
+  --glass-lift: -2px;
+  --glass-scale: 1.02;
   --glass-shadow-stack-hover:
-    0 6px 16px rgba(0, 0, 0, 0.045),
-    0 24px 56px rgba(0, 0, 0, 0.06);
+    0 5px 14px rgba(0, 0, 0, 0.04),
+    0 20px 44px rgba(0, 0, 0, 0.045);
 }
 
 .os-glass--thick {
-  --glass-blur: 40px;
-  --glass-saturation: 180%;
-  --glass-refraction-strength: 0.08;
-  --glass-ambient: 0.75;
+  --glass-fill: var(--glass-fill-thick);
+  --glass-blur: 18px;
+  --glass-saturation: 116%;
+  --glass-refraction-strength: 0.04;
+  --glass-ambient: 0.38;
   --glass-shadow-stack:
-    0 8px 20px rgba(0, 0, 0, 0.045),
-    0 32px 64px rgba(0, 0, 0, 0.055);
-  --glass-lift: -4px;
+    0 6px 16px rgba(0, 0, 0, 0.04),
+    0 24px 52px rgba(0, 0, 0, 0.045);
+  --glass-lift: -2px;
+  --glass-scale: 1.02;
   --glass-shadow-stack-hover:
-    0 12px 28px rgba(0, 0, 0, 0.05),
-    0 44px 88px rgba(0, 0, 0, 0.065);
+    0 8px 22px rgba(0, 0, 0, 0.045),
+    0 32px 68px rgba(0, 0, 0, 0.05);
 }
 
-/* ---------- hover 抬起（组件选择启用 .os-glass--interactive） ---------- */
+/* ---------- hover 抬起（组件选择启用 .os-glass--interactive） ----------
+   轻微抬起 + micro scale（1.01～1.02），不做明显 bounce；
+   active 轻微压下（0.98～0.99）。曲线统一走 --ease-material（无 overshoot）。 */
 .os-glass--interactive {
   cursor: pointer;
-  transition: transform var(--motion-normal, 240ms) var(--ease-spring, cubic-bezier(.34, 1.56, .64, 1)),
-              box-shadow var(--motion-normal, 240ms) var(--ease-standard);
+  transition: transform var(--motion-normal, 240ms) var(--ease-material, cubic-bezier(.2, 0, .2, 1)),
+              box-shadow var(--motion-normal, 240ms) var(--ease-material, cubic-bezier(.2, 0, .2, 1)),
+              background var(--motion-normal, 240ms) var(--ease-material, cubic-bezier(.2, 0, .2, 1));
 }
 .os-glass--interactive:hover {
-  transform: translateY(var(--glass-lift, -2px));
+  transform: translateY(var(--glass-lift, -1px)) scale(var(--glass-scale, 1.02));
   box-shadow: var(--glass-shadow-stack-hover, var(--glass-shadow-stack));
 }
+.os-glass--interactive:hover .os-glass__bg {
+  background: var(--glass-fill-strong, var(--glass-fill));
+}
 .os-glass--interactive:active {
-  transform: translateY(0) scale(0.98);
-  transition-duration: 100ms;
+  transform: translateY(0) scale(0.985);
+  transition-duration: var(--motion-instant, 100ms);
 }
 
-/* ---------- 降级：Reduce Transparency ---------- */
+/* ---------- 降级：Reduce Transparency ----------
+   默认材质已经是 low-haze 半实方向，此处只是进一步去掉残余 haze：
+   关掉 backdrop blur / refraction / highlight / sheen，保留 4 档 fill 明度差
+   （保证 Surface 与背景、以及档位之间仍然可区分）。 */
 [data-os-reduce-transparency="true"] .os-glass__refraction {
-  -webkit-backdrop-filter: blur(4px) saturate(110%);
-  backdrop-filter: blur(4px) saturate(110%);
-  opacity: 0.3;
-}
-[data-os-reduce-transparency="true"] .os-glass__bg {
-  background: var(--surface-secondary);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  opacity: 0;
 }
 [data-os-reduce-transparency="true"] .os-glass::after,
 [data-os-reduce-transparency="true"] .os-glass__highlight,
@@ -215,9 +243,9 @@
 
 /* ---------- 非激活窗口（性能，R10） ---------- */
 .os-glass--inactive .os-glass__refraction {
-  -webkit-backdrop-filter: blur(14px) saturate(130%);
-  backdrop-filter: blur(14px) saturate(130%);
-  opacity: 0.4;
+  -webkit-backdrop-filter: blur(6px) saturate(104%);
+  backdrop-filter: blur(6px) saturate(104%);
+  opacity: 0.2;
 }
 
 /* ---------- 组件快捷类 ---------- */

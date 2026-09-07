@@ -1,7 +1,9 @@
 // ============================================================================
 // NOVAI OS · Glass Input (glassInput.js)
-// 文本输入：嵌进玻璃表面（下凹 inset shadow，材质表达，非边框）
-// focus：下凹加深 + 内部 ambient 提亮 + 中性柔和 glow（无青柠 focus ring、无常驻 1px 描边）
+// 输入框 = "嵌入材质中的柔和输入区域"，不是漂浮卡片。
+//   - 无 border / 无 outline / 无 focus ring / 无阴影（inset 与外阴影全部去掉）
+//   - 状态只靠 surface 明度差：Normal 极轻 → Hover 轻微变化 → Focus 材质加深
+//   - 无重 blur、无雾蒙蒙叠层（tier 默认 ultraThin，走 low-haze 默认材质）
 // 字体：--font-system（D4=B）
 // 依赖：glassSurface.js
 // ============================================================================
@@ -11,13 +13,12 @@ const STYLE_ID = "os-glass-input-style";
 const CSS = `
 .os-input {
   display: block; min-width: 220px;
-  /* 嵌进玻璃：内阴影下凹（材质表达，非等宽边框） */
-  box-shadow:
-    inset 0 1px 2px rgba(0, 0, 0, 0.10),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
-  transition: box-shadow var(--motion-normal) var(--ease-standard),
-              background var(--motion-normal) var(--ease-standard);
+  /* 无阴影：既无 inset 下凹，也无外投影；层级完全由 surface 明度承担 */
+  box-shadow: none;
+  transition: background var(--motion-normal) var(--ease-material),
+              box-shadow var(--motion-normal) var(--ease-material);
 }
+.os-input .os-glass__bg { background: var(--input-fill); }
 .os-input__native {
   appearance: none; -webkit-appearance: none;
   margin: 0; border: 0; background: transparent; width: 100%;
@@ -27,14 +28,10 @@ const CSS = `
 }
 .os-input__native::placeholder { color: var(--text-tertiary); }
 .os-input__native:focus { outline: none; }
-/* focus：无 focus ring / 无 outline / 无描边；靠下凹加深 + 表面提亮 + 极轻阴影表达 */
-.os-input.is-focused {
-  box-shadow:
-    inset 0 2px 4px rgba(0, 0, 0, 0.14),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.06),
-    0 2px 8px rgba(0, 0, 0, 0.05);
-}
-.os-input.is-focused .os-glass__bg { background: var(--glass-fill-strong); }
+/* hover：轻微亮度变化 */
+.os-input:hover .os-glass__bg { background: var(--input-fill-hover); }
+/* focus：材质加深（明度差），无 ring / 无 outline / 无阴影 */
+.os-input.is-focused .os-glass__bg { background: var(--input-fill-focus); }
 `;
 
 function ensureStyle() {
@@ -49,7 +46,7 @@ export function createGlassInput({
   placeholder = "",
   value = "",
   type = "text",
-  tier = "thin",
+  tier = "ultraThin", /* 无重 blur：输入区走最薄一档（4px），保持 low-haze */
   onChange = null,
 } = {}) {
   ensureStyle();

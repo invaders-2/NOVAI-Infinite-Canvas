@@ -13,7 +13,9 @@
   /* 缓动曲线 */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* 轻微回弹 */
+  /* 材质态默认曲线：无 overshoot，不做明显 bounce（hover / active / surface 过渡一律走它） */
+  --ease-material: cubic-bezier(0.2, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* 仅 AI 光效等例外允许轻微回弹 */
   --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
 }
 

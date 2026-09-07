@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NOVAI OS · Material Lab</title>
   <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941" />
-  <link rel="stylesheet" href="/static/css/os-tokens.css?v=1.0.113.1788761983" />
-  <link rel="stylesheet" href="/static/css/os-glass.css?v=1.0.113.1788762032" />
-  <link rel="stylesheet" href="/static/css/os-motion.css?v=1.0.113.1788752449" />
+  <link rel="stylesheet" href="/static/css/os-tokens.css?v=1.0.113.1788774444" />
+  <link rel="stylesheet" href="/static/css/os-glass.css?v=1.0.113.1788774657" />
+  <link rel="stylesheet" href="/static/css/os-motion.css?v=1.0.113.1788774417" />
   <style>
     * { box-sizing: border-box; }
     /* ---------- 背景：纯色（仅用于观察材质本身；无渐变 / 无氛围色 / 无光晕） ----------
@@ -26,8 +26,9 @@
       display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between;
       padding: 12px 16px; margin: 0 0 32px;
       background: var(--surface-overlay);
-      -webkit-backdrop-filter: blur(28px) saturate(180%);
-      backdrop-filter: blur(28px) saturate(180%);
+      /* Low-haze：topbar 也压低 blur，不再雾蒙蒙 */
+      -webkit-backdrop-filter: blur(12px) saturate(112%);
+      backdrop-filter: blur(12px) saturate(112%);
       box-shadow: var(--shadow-sm);
       border-radius: var(--radius-lg);
     }
@@ -119,8 +120,7 @@
 
     .ai-stream {
       width: 240px; height: 10px; border-radius: var(--radius-pill);
-      overflow: hidden; background: var(--surface-secondary); position: relative;
-      box-shadow: inset 0 1px 2px rgba(0,0,0,0.08);
+      overflow: hidden; background: var(--input-fill); position: relative;
     }
     .ai-stream::after {
       content: ""; position: absolute; top: 0; bottom: 0; width: 45%;
@@ -156,13 +156,12 @@
       </div>
       <div class="toggles">
         <label><input type="checkbox" id="tgMotion" /> Reduce Motion</label>
-        <label><input type="checkbox" id="tgTrans" /> Reduce Transparency</label>
       </div>
       <div class="resolved" id="resolvedLabel"></div>
     </div>
 
     <h1>NOVAI OS · Material Lab</h1>
-    <p class="lede">Liquid Glass · 折射色散 · 多层内部反射 · 边缘曲面高光 · sheen 镜面 · 多层悬浮阴影 · hover 抬起活起来</p>
+    <p class="lede">Low-haze Liquid Material · 半实材质 · 低雾化 · 无边框 · 阴影 3–5% · 线性图标 · 青柠仅 Send / AI 光效。背景为纯色，只作材质承载，不抢 UI。</p>
 
     <!-- Brand Accent 大尺寸演示 -->
     <section>
@@ -198,14 +197,23 @@
 
     <!-- Inputs -->
     <section>
-      <h2>Inputs · 嵌进玻璃表面，focus 加深下凹</h2>
+      <h2>Inputs · 嵌入材质的柔和输入区（无阴影 / 无边框 / 无 ring）</h2>
       <div class="row" id="demoInputs"></div>
+      <div class="demo-label">无 border / 无 outline / 无 focus ring / 无 inset 与外阴影。Normal → Hover → Focus 只靠 surface 明度差推进，Focus 时材质加深。</div>
+    </section>
+
+    <!-- Icon Buttons -->
+    <section>
+      <h2>Icon Buttons · 0 visible border / 0 ring</h2>
+      <div class="row" id="demoIconButtons"></div>
+      <div class="demo-label">状态只通过 surface 明度、brightness、micro scale 表达。图标被材质托住，没有被框在小框里。尺寸 28 / 32 / 40 / 48（图标 16 / 18 / 20 / 24）。</div>
     </section>
 
     <!-- Material Tiers -->
     <section>
-      <h2>Material Tiers · 4 档真实材质差异（厚度 / 折射 / 受光 / 阴影）</h2>
+      <h2>Material Tiers · 4 档低雾化真实材质差（明度 / 实度 / tint / 内部受光 / 厚度）</h2>
       <div class="grid" id="demoPanels"></div>
+      <div class="demo-label">四档差异 = fill 实度（相对背景的明度差）+ material tint + 内部受光 + blur 厚度，不是"只有 blur 不同"。都能与纯色背景区分，但都不靠边框。</div>
     </section>
 
     <!-- Overlays -->
@@ -229,6 +237,15 @@
         <div class="swatch swatch--focus">Focus</div>
       </div>
       <div class="demo-label">active / selection / focus 走 --surface-active / --selection-neutral / --focus-neutral；层级靠材质（透明度、阴影、ambient）</div>
+    </section>
+
+    <!-- Accessibility Test（非主要视觉开关） -->
+    <section>
+      <h2>Accessibility Test · Reduce Transparency</h2>
+      <div class="row">
+        <label class="toggles"><input type="checkbox" id="tgTrans" /> Reduce Transparency</label>
+      </div>
+      <div class="demo-label">底层能力保留，但不再是主要视觉开关。默认材质本身已经采用此前 Reduce Transparency = ON 的干净方向（低雾化、半实、清晰）；打开此项只是进一步去掉残余 haze。正式系统上位于 System Settings → Accessibility → Display。</div>
     </section>
 
     <!-- Typography -->
@@ -272,6 +289,7 @@
     import { createGlassDialog } from "/static/os/ui/glassDialog.js";
     import { createGlassTooltip } from "/static/os/ui/glassTooltip.js";
     import { createGlassNotification } from "/static/os/ui/glassNotification.js";
+    import { createGlassIconButton } from "/static/os/ui/glassIconButton.js";
     import { createIcon } from "/static/os/icons/osIcon.js";
 
     const runtime = initThemeRuntime({
@@ -332,10 +350,34 @@
     inputWrap.appendChild(createGlassInput({ placeholder: "Search…", value: "" }));
 
     const panelWrap = document.getElementById("demoPanels");
-    panelWrap.appendChild(createGlassPanel({ title: "ultraThin", tier: "ultraThin", content: "最薄玻璃层。轻阴影、浅 blur。适合非聚焦表面。" }));
-    panelWrap.appendChild(createGlassPanel({ title: "thin", tier: "thin", content: "薄玻璃。柔阴影、medium blur。适合输入框 / 轻量卡片。" }));
-    panelWrap.appendChild(createGlassPanel({ title: "regular", tier: "regular", content: "标准玻璃。深阴影、丰富 blur。适合标准面板 / 卡片。" }));
-    panelWrap.appendChild(createGlassPanel({ title: "thick", tier: "thick", content: "厚玻璃。最深阴影、最强 blur + 内部多层反射。适合高聚焦弹层。" }));
+    panelWrap.appendChild(createGlassPanel({ title: "ultraThin", tier: "ultraThin", content: "最薄。fill 实度最低（≈+2% 明度）、blur 4px、内部受光最弱。适合非聚焦表面。" }));
+    panelWrap.appendChild(createGlassPanel({ title: "thin", tier: "thin", content: "薄材质。fill ≈+2.9%、blur 8px。适合输入区 / 轻量卡片。" }));
+    panelWrap.appendChild(createGlassPanel({ title: "regular", tier: "regular", content: "标准。fill ≈+3.5%、blur 12px、内部受光更明显。适合标准面板 / 卡片。" }));
+    panelWrap.appendChild(createGlassPanel({ title: "thick", tier: "thick", content: "最厚。fill ≈+4%（近半实）、blur 18px、内部受光最强。适合高聚焦弹层。" }));
+
+    /* Icon Buttons：0 border / 0 ring，状态靠材质 */
+    const iconBtnWrap = document.getElementById("demoIconButtons");
+    [
+      ["close", "sm", "Close"],
+      ["search", "md", "Search"],
+      ["add", "md", "Add"],
+      ["settings", "lg", "Settings"],
+      ["ai", "lg", "AI Assistant"],
+      ["delete", "xl", "Delete"],
+    ].forEach(([name, size, label]) => {
+      iconBtnWrap.appendChild(
+        createGlassIconButton({
+          icon: name,
+          size,
+          label,
+          onClick: () => console.log(`icon button: ${name}`),
+        })
+      );
+    });
+    /* 一个 selected 态示例：材质加深，不是描边 */
+    iconBtnWrap.appendChild(
+      createGlassIconButton({ icon: "check", size: "lg", label: "Selected", selected: true })
+    );
 
     document.getElementById("trigMenu").addEventListener("click", (e) => {
       const m = createGlassContextMenu({

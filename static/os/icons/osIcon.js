@@ -42,13 +42,12 @@ const PATHS = {
   // Back / Forward：Chevron 风格（不用粗箭头）
   chevronLeft: '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
   chevronRight: '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
-  // AI Assistant：极简几何线性 symbol（默认黑白灰；AI 工作时才加青柠光效）
+  // AI Assistant：极简几何线性 symbol（菱形轮廓 + 内核）
+  //   不用机器人头像 / 魔法棒 / 星星堆叠 / 放射光芒；
+  //   Idle 为中性黑白灰（--icon-*），只有"工作时"外围才出现青柠 glow / beam / flow。
   ai:
-    '<circle cx="12" cy="12" r="3.2"/>' +
-    '<path d="M12 3.6v2.1"/><path d="M12 18.3v2.1"/>' +
-    '<path d="M3.6 12h2.1"/><path d="M18.3 12h2.1"/>' +
-    '<path d="M6.3 6.3l1.5 1.5"/><path d="M16.2 16.2l1.5 1.5"/>' +
-    '<path d="M17.7 6.3l-1.5 1.5"/><path d="M7.8 16.2l-1.5 1.5"/>',
+    '<path d="M12 2.8 21.2 12 12 21.2 2.8 12 12 2.8z"/>' +
+    '<circle cx="12" cy="12" r="3.4"/>',
   // Settings
   settings:
     '<circle cx="12" cy="12" r="3.1"/>' +
