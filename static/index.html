@@ -3933,8 +3933,8 @@
         const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
         const DEFAULT_PAGE_ID = 'zimage';
         const PAGE_IDS = ['home','zimage','enhance','klein','angle','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
-        const PROJECT_URL = 'https://github.com/invaders-2/NOVAI';
-        let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/invaders-2/NOVAI/main/VERSION' };
+        const PROJECT_URL = 'https://github.com/invaders-2/NOVAI-Infinite-Canvas';
+        let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/invaders-2/NOVAI-Infinite-Canvas/main/VERSION' };
         let updateConnectivityResult = null;
         let projectUpdateRunning = false;
         let projectUpdateAbort = null;  // 当前更新请求的 AbortController，便于用户中途取消
@@ -4854,8 +4854,8 @@
                 { name:'Gitee 更新列表', url:gitee.tree_url || 'https://gitee.com/api/v5/repos/invaders/novai/git/trees/main?recursive=1', source:'gitee', required:true },
                 { name:'Gitee 版本文件', url:gitee.version_url || 'https://gitee.com/invaders/novai/raw/main/VERSION', source:'gitee', required:true },
                 { name:'Gitee 主页', url:'https://gitee.com/', source:'gitee' },
-                { name:'GitHub 更新列表', url:github.tree_url || appInfo.tree_url || 'https://api.github.com/repos/invaders-2/NOVAI/git/trees/main?recursive=1', source:'github', required:true },
-                { name:'GitHub 版本文件', url:github.version_url || appInfo.version_url || 'https://raw.githubusercontent.com/invaders-2/NOVAI/main/VERSION', source:'github', required:true },
+                { name:'GitHub 更新列表', url:github.tree_url || appInfo.tree_url || 'https://api.github.com/repos/invaders-2/NOVAI-Infinite-Canvas/git/trees/main?recursive=1', source:'github', required:true },
+                { name:'GitHub 版本文件', url:github.version_url || appInfo.version_url || 'https://raw.githubusercontent.com/invaders-2/NOVAI-Infinite-Canvas/main/VERSION', source:'github', required:true },
                 { name:'GitHub 主页', url:'https://github.com/', source:'github' },
                 { name:'Google 连通性', url:'https://www.google.com/generate_204', source:'reference' },
             ];
