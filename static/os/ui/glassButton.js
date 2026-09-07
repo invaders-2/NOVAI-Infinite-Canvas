@@ -1,7 +1,8 @@
 // ============================================================================
 // NOVAI OS · Glass Button (glassButton.js)
 // 变体：primary(CTA, accent) / secondary / ghost / danger
-// 字体：--font-system（D4=B）。primary 使用 --accent（D3=C，CTA 场景）
+// 字体：--font-system（D4=B）。primary 走 --interactive-primary（中性：Light 黑底白字 / Dark 白底黑字）
+// 青柠 --brand-accent 不用于普通按钮，仅保留给 Send Button 与 AI 光效
 // 依赖：glassSurface.js
 // ============================================================================
 import { createGlassSurface } from "./glassSurface.js";
@@ -15,7 +16,11 @@ const VARIANTS = {
 
 const STYLE_ID = "os-glass-button-style";
 const CSS = `
-.os-btn { display: inline-flex; transition: transform var(--motion-fast) var(--ease-spring); }
+.os-btn {
+  display: inline-flex;
+  transition: transform var(--motion-fast) var(--ease-spring),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
 .os-btn__native {
   appearance: none; -webkit-appearance: none;
   margin: 0; border: 0; background: transparent;
@@ -27,30 +32,32 @@ const CSS = `
     background var(--motion-fast) var(--ease-standard),
     color var(--motion-fast) var(--ease-standard);
 }
-.os-btn__native:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* focus：中性柔和 glow（非青柠、非发丝描边） */
+.os-btn__native:focus-visible { outline: none; }
+.os-btn:focus-within { box-shadow: 0 0 0 3px var(--focus-neutral); }
 .os-btn:active { transform: scale(0.97); }
 
-/* primary = CTA（accent，D3=C） */
-.os-btn--primary .os-btn__native { color: var(--text-on-accent); }
-.os-btn--primary { background: var(--accent); }
-.os-btn--primary .os-glass__bg { background: var(--accent); }
+/* primary = 系统主交互（中性：Light 黑底白字 / Dark 白底黑字） */
+.os-btn--primary .os-btn__native { color: var(--text-on-interactive-primary); }
+.os-btn--primary { background: var(--interactive-primary); }
+.os-btn--primary .os-glass__bg { background: var(--interactive-primary); }
 .os-btn--primary .os-glass__refraction { backdrop-filter: none; -webkit-backdrop-filter: none; }
-.os-btn--primary:hover .os-glass__bg { background: var(--accent-hover); }
-.os-btn--primary:active .os-glass__bg { background: var(--accent-active); }
+.os-btn--primary:hover .os-glass__bg { background: var(--interactive-primary-hover); }
+.os-btn--primary:active .os-glass__bg { background: var(--interactive-primary-active); }
 
 /* secondary = 玻璃中性体 */
 .os-btn--secondary .os-btn__native { color: var(--text-primary); }
-.os-btn--secondary:hover .os-glass__bg { background: var(--glass-fill-strong); }
+.os-btn--secondary:hover .os-glass__bg { background: var(--interactive-secondary); }
 
 /* ghost = 透明玻璃 */
 .os-btn--ghost { background: transparent; }
 .os-btn--ghost .os-glass__bg { background: transparent; }
 .os-btn--ghost .os-btn__native { color: var(--text-secondary); }
-.os-btn--ghost:hover .os-glass__bg { background: var(--glass-fill); }
+.os-btn--ghost:hover .os-glass__bg { background: var(--interactive-secondary); }
 
-/* danger = 语义危险色（不得使用 accent） */
+/* danger = 语义危险色（不使用 brand-accent） */
 .os-btn--danger .os-btn__native { color: var(--semantic-danger); }
-.os-btn--danger .os-glass__bg { background: var(--glass-fill-strong); }
+.os-btn--danger .os-glass__bg { background: var(--interactive-secondary); }
 .os-btn--danger:hover .os-glass__bg { background: var(--semantic-danger); }
 .os-btn--danger:hover .os-btn__native { color: #ffffff; }
 

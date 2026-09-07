@@ -1,14 +1,28 @@
 /* ============================================================================
  * NOVAI OS · Design Tokens (os-tokens.css)
  * 引入并扩展 marvis-shared.css（99 个语义变量）。
- * OS 层专用 Token 定义：surface / text / border / glass / accent / font。
+ * OS 层专用 Token 定义：surface / text / border / glass / interactive / brand-accent / font。
  *
  * 主题切换：<html data-os-theme="light|dark|system">
  *   - light / dark 为显式态
  *   - system 由 CSS @media (prefers-color-scheme) 解析，无需 JS 介入视觉
  *
- * 决策约束（D3=C / D4=B）：
- *   - --accent: #CDFF00 仅用于 CTA / active / focus / selection / progress / AI active 六类语义
+ * 视觉主体（2026-09-07 修订）：黑 / 白 / 中性灰 ≥ 95%，Liquid Glass 主体保持中性。
+ *
+ * Brand Accent #CDFF00 已降级为 Micro Accent（--brand-accent），仅允许：
+ *   - AI Assistant active indicator
+ *   - AI 正在执行时的小型状态点 / 光晕
+ *   - 极细的关键 active indicator
+ *   - 少量品牌识别元素
+ *   - 极少数需要特别强调的关键状态
+ * 禁止用于：大面积按钮背景 / Window·Panel·Card 背景 / Dock 主背景 / Dialog 主背景 /
+ *          Menu hover / 普通 selected / 大面积 focus / 页面大标题 / 大块装饰光晕
+ *
+ * 系统通用交互一律走中性 Token（Light/Dark 分别解析为中性色）：
+ *   --interactive-primary / --interactive-secondary /
+ *   --selection-neutral / --focus-neutral / --surface-active
+ *
+ * 决策约束（D3=C 收紧版 / D4=B）：
  *   - --font-system 为 OS 全部 UI 默认字体栈
  *   - --font-display (Space Grotesk) 仅留给 Welcome / 品牌展示 / 官网，不进入 OS 组件
  * ========================================================================== */
@@ -35,7 +49,6 @@
   --text-primary: #1d1d1f;
   --text-secondary: #6e6e73;
   --text-tertiary: #8e8e93;
-  --text-on-accent: #1d1d1f;
 
   /* Border */
   --border-subtle: rgba(0, 0, 0, 0.08);
@@ -49,11 +62,19 @@
   --glass-shadow: rgba(0, 0, 0, 0.12);
   --glass-tint: 255, 255, 255; /* rgb 分量，供 backdrop-filter 着色 */
 
-  /* Accent (D3=C，限定六类语义) */
-  --accent: #cdff00;
-  --accent-hover: #b8e600;
-  --accent-active: #a6d100;
-  --accent-soft: rgba(205, 255, 0, 0.16);
+  /* ---------- 系统通用交互（中性；Primary CTA = 黑底白字） ---------- */
+  --interactive-primary: #1d1d1f;
+  --interactive-primary-hover: #3a3a3c;
+  --interactive-primary-active: #000000;
+  --text-on-interactive-primary: #ffffff;
+  --interactive-secondary: rgba(0, 0, 0, 0.06);
+  --selection-neutral: rgba(0, 0, 0, 0.08);
+  --focus-neutral: rgba(0, 0, 0, 0.22);
+  --surface-active: rgba(0, 0, 0, 0.1);
+
+  /* ---------- Brand Accent（Micro，禁止大面积使用） ---------- */
+  --brand-accent: #cdff00;
+  --brand-accent-soft: rgba(205, 255, 0, 0.16);
 
   /* Semantic */
   --semantic-success: #34c759;
@@ -107,7 +128,6 @@
   --text-primary: #f5f5f7;
   --text-secondary: #a1a1a6;
   --text-tertiary: #6e6e73;
-  --text-on-accent: #0a0a0c;
 
   --border-subtle: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.2);
@@ -119,10 +139,19 @@
   --glass-shadow: rgba(0, 0, 0, 0.55);
   --glass-tint: 30, 30, 35;
 
-  --accent: #cdff00;
-  --accent-hover: #d4ff2b;
-  --accent-active: #b8e600;
-  --accent-soft: rgba(205, 255, 0, 0.2);
+  /* 系统通用交互（中性；Primary CTA = 白底黑字） */
+  --interactive-primary: #f5f5f7;
+  --interactive-primary-hover: #d8d8dc;
+  --interactive-primary-active: #ffffff;
+  --text-on-interactive-primary: #0a0a0c;
+  --interactive-secondary: rgba(255, 255, 255, 0.1);
+  --selection-neutral: rgba(255, 255, 255, 0.14);
+  --focus-neutral: rgba(255, 255, 255, 0.34);
+  --surface-active: rgba(255, 255, 255, 0.16);
+
+  /* Brand Accent（Micro） */
+  --brand-accent: #cdff00;
+  --brand-accent-soft: rgba(205, 255, 0, 0.2);
 
   --semantic-success: #30d158;
   --semantic-warning: #ffd60a;
@@ -145,7 +174,6 @@
   --text-primary: #1d1d1f;
   --text-secondary: #6e6e73;
   --text-tertiary: #8e8e93;
-  --text-on-accent: #1d1d1f;
   --border-subtle: rgba(0, 0, 0, 0.08);
   --border-strong: rgba(0, 0, 0, 0.16);
   --glass-fill: rgba(255, 255, 255, 0.55);
@@ -154,10 +182,19 @@
   --glass-edge: rgba(255, 255, 255, 0.65);
   --glass-shadow: rgba(0, 0, 0, 0.12);
   --glass-tint: 255, 255, 255;
-  --accent: #cdff00;
-  --accent-hover: #b8e600;
-  --accent-active: #a6d100;
-  --accent-soft: rgba(205, 255, 0, 0.16);
+
+  --interactive-primary: #1d1d1f;
+  --interactive-primary-hover: #3a3a3c;
+  --interactive-primary-active: #000000;
+  --text-on-interactive-primary: #ffffff;
+  --interactive-secondary: rgba(0, 0, 0, 0.06);
+  --selection-neutral: rgba(0, 0, 0, 0.08);
+  --focus-neutral: rgba(0, 0, 0, 0.22);
+  --surface-active: rgba(0, 0, 0, 0.1);
+
+  --brand-accent: #cdff00;
+  --brand-accent-soft: rgba(205, 255, 0, 0.16);
+
   --semantic-success: #34c759;
   --semantic-warning: #ff9f0a;
   --semantic-danger: #ff3b30;
@@ -177,7 +214,6 @@
     --text-primary: #f5f5f7;
     --text-secondary: #a1a1a6;
     --text-tertiary: #6e6e73;
-    --text-on-accent: #0a0a0c;
     --border-subtle: rgba(255, 255, 255, 0.1);
     --border-strong: rgba(255, 255, 255, 0.2);
     --glass-fill: rgba(30, 30, 35, 0.55);
@@ -186,10 +222,19 @@
     --glass-edge: rgba(255, 255, 255, 0.22);
     --glass-shadow: rgba(0, 0, 0, 0.55);
     --glass-tint: 30, 30, 35;
-    --accent: #cdff00;
-    --accent-hover: #d4ff2b;
-    --accent-active: #b8e600;
-    --accent-soft: rgba(205, 255, 0, 0.2);
+
+    --interactive-primary: #f5f5f7;
+    --interactive-primary-hover: #d8d8dc;
+    --interactive-primary-active: #ffffff;
+    --text-on-interactive-primary: #0a0a0c;
+    --interactive-secondary: rgba(255, 255, 255, 0.1);
+    --selection-neutral: rgba(255, 255, 255, 0.14);
+    --focus-neutral: rgba(255, 255, 255, 0.34);
+    --surface-active: rgba(255, 255, 255, 0.16);
+
+    --brand-accent: #cdff00;
+    --brand-accent-soft: rgba(205, 255, 0, 0.2);
+
     --semantic-success: #30d158;
     --semantic-warning: #ffd60a;
     --semantic-danger: #ff453a;

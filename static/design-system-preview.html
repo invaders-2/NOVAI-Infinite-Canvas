@@ -6,8 +6,8 @@
     <title>NOVAI OS · Design System Preview</title>
     <!-- 引入并扩展 marvis-shared.css（99 个语义变量） -->
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941" />
-    <link rel="stylesheet" href="/static/css/os-tokens.css?v=1.0.113.1788752364" />
-    <link rel="stylesheet" href="/static/css/os-glass.css?v=1.0.113.1788752411" />
+    <link rel="stylesheet" href="/static/css/os-tokens.css?v=1.0.113.1788761983" />
+    <link rel="stylesheet" href="/static/css/os-glass.css?v=1.0.113.1788762032" />
     <link rel="stylesheet" href="/static/css/os-motion.css?v=1.0.113.1788752449" />
     <style>
       * { box-sizing: border-box; }
@@ -28,7 +28,8 @@
         background: var(--surface-overlay);
         -webkit-backdrop-filter: blur(20px) saturate(160%);
         backdrop-filter: blur(20px) saturate(160%);
-        border-bottom: 1px solid var(--border-subtle);
+        /* 层级靠材质与阴影，不使用 1px 发丝线 */
+        box-shadow: var(--shadow-sm);
       }
       .seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--radius-pill); background: var(--surface-secondary); }
       .seg button {
@@ -49,9 +50,53 @@
       .brand-sample { font-family: var(--font-display); font-size: 32px; font-weight: 700; color: var(--text-primary); }
       .brand-note { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; max-width: 320px; }
       .swatch-row { display: flex; gap: 10px; flex-wrap: wrap; }
-      .swatch { width: 64px; height: 64px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); display: flex; align-items: flex-end; justify-content: center; padding: 6px; font-size: 10px; color: var(--text-tertiary); }
-      .accent-swatch { background: var(--accent); color: var(--text-on-accent); font-weight: 600; }
-      .motion-box { width: 80px; height: 80px; border-radius: var(--radius-md); background: var(--accent); }
+      .swatch { width: 64px; height: 64px; border-radius: var(--radius-md); background: var(--surface-secondary); display: flex; align-items: flex-end; justify-content: center; padding: 6px; font-size: 10px; color: var(--text-tertiary); box-shadow: var(--shadow-xs); }
+      .swatch--active { background: var(--surface-active); }
+      .swatch--selection { background: var(--selection-neutral); }
+      .swatch--focus { box-shadow: 0 0 0 3px var(--focus-neutral); }
+      .motion-box { width: 80px; height: 80px; border-radius: var(--radius-md); background: var(--interactive-primary); }
+
+      /* Send Button：青柠唯一主要静态品牌识别点（小面积，仅发送 / 执行 AI 指令） */
+      .send-btn {
+        width: 40px; height: 40px; border-radius: 50%; border: 0; cursor: pointer;
+        background: var(--brand-accent); color: #0a0a0c; font-size: 16px; font-weight: 700;
+        display: inline-flex; align-items: center; justify-content: center;
+        box-shadow: 0 4px 14px rgba(205, 255, 0, 0.28);
+        transition: transform var(--motion-fast) var(--ease-spring),
+          box-shadow var(--motion-fast) var(--ease-standard);
+      }
+      .send-btn:hover { transform: scale(1.06); box-shadow: 0 6px 18px rgba(205, 255, 0, 0.38); }
+      .send-btn:active { transform: scale(0.96); }
+
+      /* AI 光效：Orb 光晕 / thinking 光流（克制：blur + gradient + 低透明度） */
+      .ai-orb {
+        position: relative; width: 44px; height: 44px; border-radius: 50%;
+        background: radial-gradient(circle at 32% 28%, rgba(205,255,0,0.55), rgba(205,255,0,0.08) 62%, transparent 74%);
+      }
+      .ai-orb::after {
+        content: ""; position: absolute; inset: -10px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(205,255,0,0.22), transparent 68%);
+        filter: blur(10px);
+        animation: os-ai-pulse 2.4s var(--ease-standard) infinite;
+      }
+      @keyframes os-ai-pulse {
+        0%, 100% { opacity: 0.45; transform: scale(1); }
+        50% { opacity: 0.95; transform: scale(1.08); }
+      }
+      .ai-stream {
+        width: 180px; height: 8px; border-radius: var(--radius-pill);
+        overflow: hidden; background: var(--surface-secondary); position: relative;
+      }
+      .ai-stream::after {
+        content: ""; position: absolute; top: 0; bottom: 0; width: 46%;
+        background: linear-gradient(90deg, transparent, rgba(205,255,0,0.75), transparent);
+        filter: blur(1px);
+        animation: os-ai-stream 1.6s linear infinite;
+      }
+      @keyframes os-ai-stream {
+        from { transform: translateX(-60%); }
+        to { transform: translateX(240%); }
+      }
     </style>
   </head>
   <body>
@@ -70,13 +115,13 @@
 
     <div class="wrap">
       <h1>NOVAI OS · Design System</h1>
-      <p class="resolved">Liquid Glass · Light / Dark / System · Accent #CDFF00 (CTA only) · System font stack</p>
+      <p class="resolved">黑白灰 + Liquid Glass · Light / Dark / System · 青柠 #CDFF00 仅用于 Send / AI 光效 · 系统字体栈</p>
 
       <!-- Buttons -->
       <section>
         <h2>Buttons</h2>
         <div class="row" id="demoButtons"></div>
-        <div class="demo-label">primary = CTA（accent）；secondary / ghost / danger 为玻璃中性体</div>
+        <div class="demo-label">primary = 系统主交互（Light 黑底白字 / Dark 白底黑字，中性）；secondary / ghost / danger 为玻璃中性体</div>
       </section>
 
       <!-- Inputs -->
@@ -103,18 +148,40 @@
         <div class="demo-label">这些是玻璃组件的原生触发按钮（非 OS 组件，仅用于演示）</div>
       </section>
 
-      <!-- Accent semantics -->
+      <!-- Brand Accent：仅 Send Button 与 AI 光效 -->
       <section>
-        <h2>Accent #CDFF00 — 仅六类语义</h2>
-        <div class="swatch-row">
-          <div class="swatch accent-swatch">CTA</div>
-          <div class="swatch" style="border-color: var(--accent)">Active</div>
-          <div class="swatch" style="outline: 2px solid var(--accent); outline-offset: -2px">Focus</div>
-          <div class="swatch" style="background: var(--accent-soft)">Selection</div>
-          <div class="swatch" style="border-top: 3px solid var(--accent)">Progress</div>
-          <div class="swatch" style="box-shadow: inset 0 0 0 2px var(--accent)">AI active</div>
+        <h2>Brand Accent #CDFF00 — 仅 Send Button 与 AI 光效</h2>
+        <div class="row" style="gap: 26px; align-items: center;">
+          <div style="display: flex; flex-direction: column; gap: 8px; align-items: center;">
+            <button class="send-btn" type="button" aria-label="Send">↑</button>
+            <span class="demo-label">Send（唯一青柠按钮）</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px; align-items: center;">
+            <div class="ai-orb"></div>
+            <span class="demo-label">AI Orb 光晕</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div class="ai-stream"></div>
+            <span class="demo-label">AI thinking 光流</span>
+          </div>
         </div>
-        <div class="demo-label">accent 不得用于大面积背景 / 正文 / 非交互装饰</div>
+        <div class="demo-label" style="max-width: 660px; margin-top: 14px;">
+          青柠仅用于：Send Button、AI 光束、AI 流光 / 能量轨迹、AI 工作时光效、极少数品牌动画。<br />
+          禁止用于：普通按钮与 CTA、Menu、Context Menu、Tab、Selected、Hover、Focus、Dock / Window active、
+          Input focus、Card、Panel、Dialog、Tooltip、Notification、页面标题、大面积背景、普通状态点。
+        </div>
+      </section>
+
+      <!-- 中性交互状态 -->
+      <section>
+        <h2>中性交互状态（系统通用，非青柠）</h2>
+        <div class="swatch-row">
+          <div class="swatch">Surface</div>
+          <div class="swatch swatch--active">Active</div>
+          <div class="swatch swatch--selection">Selection</div>
+          <div class="swatch swatch--focus">Focus</div>
+        </div>
+        <div class="demo-label">active / selected / focus 一律走 --surface-active / --selection-neutral / --focus-neutral；Light / Dark 分别解析为中性色。层级靠材质（透明度、折射、厚度、高光、阴影），不靠 1px 发丝线。</div>
       </section>
 
       <!-- Typography -->
@@ -138,11 +205,13 @@
     <style>
       .native-trigger {
         font-family: var(--font-system); font-size: 13px; font-weight: 600; color: var(--text-primary);
-        background: var(--surface-secondary); border: 1px solid var(--border-subtle);
+        background: var(--surface-secondary); border: 0;
         padding: 9px 16px; border-radius: var(--radius-sm); cursor: pointer;
-        transition: background var(--motion-fast) var(--ease-standard);
+        box-shadow: var(--shadow-xs);
+        transition: background var(--motion-fast) var(--ease-standard),
+          box-shadow var(--motion-fast) var(--ease-standard);
       }
-      .native-trigger:hover { background: var(--surface-tertiary); }
+      .native-trigger:hover { background: var(--surface-tertiary); box-shadow: var(--shadow-sm); }
     </style>
 
     <!-- 预渲染主题引导：在首帧前同步恢复持久化偏好，避免白/黑闪 -->

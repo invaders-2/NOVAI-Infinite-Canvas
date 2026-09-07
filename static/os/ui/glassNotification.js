@@ -11,7 +11,7 @@ const CSS = `
 .os-notification { min-width: 280px; max-width: 360px; padding: 14px 16px; z-index: var(--z-notification); }
 .os-notification__title { font-family: var(--font-system); font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 .os-notification__msg { font-family: var(--font-system); font-size: 13px; line-height: 1.45; color: var(--text-secondary); }
-.os-notification__dot { position: absolute; top: 14px; right: 14px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.os-notification__dot { position: absolute; top: 14px; right: 14px; width: 8px; height: 8px; border-radius: 50%; background: var(--interactive-primary); }
 `;
 
 function ensureStyle() {

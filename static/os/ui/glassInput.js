@@ -1,6 +1,6 @@
 // ============================================================================
 // NOVAI OS · Glass Input (glassInput.js)
-// 文本输入：focus 态高亮（accent 描边，D3=C）、placeholder 样式
+// 文本输入：focus 用中性 glow + surface 提亮；无青柠 focus ring、无常驻 1px 描边
 // 字体：--font-system（D4=B）
 // 依赖：glassSurface.js
 // ============================================================================
@@ -8,7 +8,10 @@ import { createGlassSurface } from "./glassSurface.js";
 
 const STYLE_ID = "os-glass-input-style";
 const CSS = `
-.os-input { display: block; min-width: 220px; }
+.os-input {
+  display: block; min-width: 220px;
+  transition: box-shadow var(--motion-fast) var(--ease-standard);
+}
 .os-input__native {
   appearance: none; -webkit-appearance: none;
   margin: 0; border: 0; background: transparent; width: 100%;
@@ -18,9 +21,8 @@ const CSS = `
 }
 .os-input__native::placeholder { color: var(--text-tertiary); }
 .os-input__native:focus { outline: none; }
-.os-input.is-focused .os-glass__border {
-  box-shadow: inset 0 0 0 1.5px var(--accent), inset 0 1px 0 0 rgba(255,255,255,0.5);
-}
+/* focus：中性柔和 glow + surface 提亮；无常驻 1px 描边、无青柠 focus ring */
+.os-input.is-focused { box-shadow: 0 0 0 3px var(--focus-neutral); }
 .os-input.is-focused .os-glass__bg { background: var(--glass-fill-strong); }
 `;
 
