@@ -27,12 +27,12 @@ const CSS = `
 }
 .os-input__native::placeholder { color: var(--text-tertiary); }
 .os-input__native:focus { outline: none; }
-/* focus：下凹加深 + 内部 ambient 提亮 + 中性柔和 glow */
+/* focus：无 focus ring / 无 outline / 无描边；靠下凹加深 + 表面提亮 + 极轻阴影表达 */
 .os-input.is-focused {
   box-shadow:
     inset 0 2px 4px rgba(0, 0, 0, 0.14),
     inset 0 -1px 0 rgba(255, 255, 255, 0.06),
-    0 0 0 3px var(--focus-neutral);
+    0 2px 8px rgba(0, 0, 0, 0.05);
 }
 .os-input.is-focused .os-glass__bg { background: var(--glass-fill-strong); }
 `;

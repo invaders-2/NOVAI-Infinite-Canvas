@@ -33,7 +33,7 @@ const CSS = `
 .os-dialog__btn:active { transform: scale(0.97); }
 .os-dialog__btn.is-primary { background: var(--interactive-primary); color: var(--text-on-interactive-primary); }
 .os-dialog__btn.is-primary:hover { background: var(--interactive-primary-hover); }
-.os-dialog__btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-neutral); }
+.os-dialog__btn:focus-visible { outline: none; transform: translateY(-1px); }
 `;
 
 function ensureStyle() {

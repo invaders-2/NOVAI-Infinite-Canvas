@@ -82,11 +82,21 @@
   --semantic-danger: #ff3b30;
   --semantic-info: #0a84ff;
 
-  /* Elevation */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.18);
+  /* Elevation（极轻：阴影透明度约 5%，只保留一点点漂浮感，不允许明显黑影） */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.06);
+
+  /* Icon System（统一线性图标 Token；stroke 规范见 static/os/icons/osIcon.js） */
+  --icon-primary: #1d1d1f;
+  --icon-secondary: #6e6e73;
+  --icon-tertiary: #8e8e93;
+  --icon-disabled: #c7c7cc;
+  --icon-on-brand: #0a0a0c; /* 青柠底上的图标色（Send Button） */
+
+  /* Material Lab 背景（纯色，仅用于观察材质本身；无渐变、无氛围色） */
+  --bg-material: #f5f5f7;
 
   /* Radius */
   --radius-xs: 6px;
@@ -158,10 +168,21 @@
   --semantic-danger: #ff453a;
   --semantic-info: #0a84ff;
 
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.7);
+  /* Elevation（Dark：同样保持极轻，仅轻微拉开层次） */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.36);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.42);
+
+  /* Icon System（Dark） */
+  --icon-primary: #f5f5f7;
+  --icon-secondary: #a1a1a6;
+  --icon-tertiary: #6e6e73;
+  --icon-disabled: #48484a;
+  --icon-on-brand: #0a0a0c;
+
+  /* Material Lab 背景（Dark 纯色） */
+  --bg-material: #0f1012;
 }
 
 /* ============================== SYSTEM ============================== */
@@ -199,10 +220,22 @@
   --semantic-warning: #ff9f0a;
   --semantic-danger: #ff3b30;
   --semantic-info: #0a84ff;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.18);
+
+  /* Elevation（极轻） */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.06);
+
+  /* Icon System */
+  --icon-primary: #1d1d1f;
+  --icon-secondary: #6e6e73;
+  --icon-tertiary: #8e8e93;
+  --icon-disabled: #c7c7cc;
+  --icon-on-brand: #0a0a0c;
+
+  /* Material Lab 背景（纯色） */
+  --bg-material: #f5f5f7;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -239,9 +272,21 @@
     --semantic-warning: #ffd60a;
     --semantic-danger: #ff453a;
     --semantic-info: #0a84ff;
-    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
-    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.6);
-    --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.7);
+
+    /* Elevation（Dark 极轻） */
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.24);
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.30);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.36);
+    --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.42);
+
+    /* Icon System（Dark） */
+    --icon-primary: #f5f5f7;
+    --icon-secondary: #a1a1a6;
+    --icon-tertiary: #6e6e73;
+    --icon-disabled: #48484a;
+    --icon-on-brand: #0a0a0c;
+
+    /* Material Lab 背景（Dark 纯色） */
+    --bg-material: #0f1012;
   }
 }

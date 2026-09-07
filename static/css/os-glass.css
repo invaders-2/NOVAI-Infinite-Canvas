@@ -73,14 +73,15 @@
   mix-blend-mode: screen;
 }
 
-/* ---------- 4. 边缘曲面高光（多重 radial，模拟曲面玻璃反光） ----------
-   刻意完全不使用 box-shadow inset；边缘由多层 radial gradient 表达 */
+/* ---------- 4. 边缘受光（非均匀：仅顶部/底部极轻受光） ----------
+   不是边框、不是描边：只用极淡径向渐变表达"玻璃边缘受光"；
+   刻意不使用 box-shadow inset，四周无等宽线条，视觉上不得呈现"画了一圈" */
 .os-glass__border {
   background:
-    radial-gradient(ellipse 90% 40% at 50% 0%, rgba(255, 255, 255, 0.35), transparent 60%),
-    radial-gradient(ellipse 90% 40% at 50% 100%, rgba(255, 255, 255, 0.10), transparent 60%);
+    radial-gradient(ellipse 90% 40% at 50% 0%, rgba(255, 255, 255, 0.20), transparent 62%),
+    radial-gradient(ellipse 90% 40% at 50% 100%, rgba(255, 255, 255, 0.05), transparent 62%);
   mix-blend-mode: screen;
-  opacity: 0.75;
+  opacity: 0.5;
 }
 
 /* ---------- 5. 投影：多层柔阴影 = 悬浮感 ---------- */
@@ -123,12 +124,12 @@
   --glass-refraction-strength: 0.02;
   --glass-ambient: 0.4;
   --glass-shadow-stack:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 2px 6px rgba(0, 0, 0, 0.06);
+    0 1px 2px rgba(0, 0, 0, 0.02),
+    0 2px 6px rgba(0, 0, 0, 0.03);
   --glass-lift: -1px;
   --glass-shadow-stack-hover:
-    0 2px 4px rgba(0, 0, 0, 0.06),
-    0 6px 14px rgba(0, 0, 0, 0.10);
+    0 2px 4px rgba(0, 0, 0, 0.03),
+    0 6px 14px rgba(0, 0, 0, 0.045);
 }
 
 .os-glass--thin {
@@ -137,12 +138,12 @@
   --glass-refraction-strength: 0.04;
   --glass-ambient: 0.5;
   --glass-shadow-stack:
-    0 2px 6px rgba(0, 0, 0, 0.08),
-    0 8px 20px rgba(0, 0, 0, 0.10);
+    0 2px 6px rgba(0, 0, 0, 0.03),
+    0 8px 20px rgba(0, 0, 0, 0.045);
   --glass-lift: -2px;
   --glass-shadow-stack-hover:
-    0 3px 8px rgba(0, 0, 0, 0.10),
-    0 14px 32px rgba(0, 0, 0, 0.14);
+    0 3px 8px rgba(0, 0, 0, 0.04),
+    0 14px 32px rgba(0, 0, 0, 0.055);
 }
 
 .os-glass--regular {
@@ -151,12 +152,12 @@
   --glass-refraction-strength: 0.06;
   --glass-ambient: 0.6;
   --glass-shadow-stack:
-    0 4px 12px rgba(0, 0, 0, 0.10),
-    0 18px 40px rgba(0, 0, 0, 0.14);
+    0 4px 12px rgba(0, 0, 0, 0.04),
+    0 18px 40px rgba(0, 0, 0, 0.05);
   --glass-lift: -3px;
   --glass-shadow-stack-hover:
-    0 6px 16px rgba(0, 0, 0, 0.12),
-    0 24px 56px rgba(0, 0, 0, 0.18);
+    0 6px 16px rgba(0, 0, 0, 0.045),
+    0 24px 56px rgba(0, 0, 0, 0.06);
 }
 
 .os-glass--thick {
@@ -165,12 +166,12 @@
   --glass-refraction-strength: 0.08;
   --glass-ambient: 0.75;
   --glass-shadow-stack:
-    0 8px 20px rgba(0, 0, 0, 0.14),
-    0 32px 64px rgba(0, 0, 0, 0.20);
+    0 8px 20px rgba(0, 0, 0, 0.045),
+    0 32px 64px rgba(0, 0, 0, 0.055);
   --glass-lift: -4px;
   --glass-shadow-stack-hover:
-    0 12px 28px rgba(0, 0, 0, 0.18),
-    0 44px 88px rgba(0, 0, 0, 0.26);
+    0 12px 28px rgba(0, 0, 0, 0.05),
+    0 44px 88px rgba(0, 0, 0, 0.065);
 }
 
 /* ---------- hover 抬起（组件选择启用 .os-glass--interactive） ---------- */

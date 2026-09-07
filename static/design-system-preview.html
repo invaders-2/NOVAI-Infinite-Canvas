@@ -10,32 +10,15 @@
   <link rel="stylesheet" href="/static/css/os-motion.css?v=1.0.113.1788752449" />
   <style>
     * { box-sizing: border-box; }
-    /* ---------- 彩色 wallpaper（让玻璃有东西可折射；不像白底贴纸） ---------- */
+    /* ---------- 背景：纯色（仅用于观察材质本身；无渐变 / 无氛围色 / 无光晕） ----------
+       Light #F5F5F7 / Dark #0F1012 —— 由 --bg-material Token 控制 */
     body {
       margin: 0;
       min-height: 100vh;
       font-family: var(--font-system);
       color: var(--text-primary);
-      background:
-        radial-gradient(ellipse 80% 60% at 18% 8%,  rgba(120, 180, 255, 0.42), transparent 60%),
-        radial-gradient(ellipse 70% 60% at 82% 18%, rgba(255, 170, 220, 0.38), transparent 60%),
-        radial-gradient(ellipse 90% 60% at 50% 95%, rgba(255, 215, 160, 0.32), transparent 60%),
-        radial-gradient(ellipse 60% 50% at 92% 78%, rgba(180, 150, 255, 0.36), transparent 60%),
-        radial-gradient(ellipse 50% 40% at 8% 60%,   rgba(150, 255, 220, 0.30), transparent 60%),
-        var(--surface-primary);
-      background-attachment: fixed;
+      background: var(--bg-material);
       transition: background-color var(--motion-normal) var(--ease-standard);
-    }
-    [data-os-theme="dark"] body,
-    [data-os-theme="system"] body:where([data-os-resolved="dark"]) {
-      background:
-        radial-gradient(ellipse 80% 60% at 18% 8%,  rgba(60, 110, 200, 0.45), transparent 60%),
-        radial-gradient(ellipse 70% 60% at 82% 18%, rgba(200, 80, 160, 0.40), transparent 60%),
-        radial-gradient(ellipse 90% 60% at 50% 95%, rgba(200, 130, 60, 0.32), transparent 60%),
-        radial-gradient(ellipse 60% 50% at 92% 78%, rgba(120, 60, 220, 0.42), transparent 60%),
-        radial-gradient(ellipse 50% 40% at 8% 60%,   rgba(40, 180, 160, 0.32), transparent 60%),
-        var(--surface-primary);
-      background-attachment: fixed;
     }
     .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 24px 100px; }
     .topbar {
@@ -69,6 +52,9 @@
     .brand-sample { font-family: var(--font-display); font-size: 36px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.02em; }
     .brand-note { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; max-width: 360px; }
     .swatch-row { display: flex; gap: 14px; flex-wrap: wrap; }
+    .icon-row { display: flex; flex-wrap: wrap; gap: 26px; align-items: center; }
+    .icon-cell { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+    .icon-cell span { font-size: 11px; color: var(--text-tertiary); }
     .swatch {
       width: 120px; height: 80px; border-radius: var(--radius-lg);
       background: var(--surface-secondary);
@@ -79,33 +65,34 @@
     }
     .swatch--active { background: var(--surface-active); box-shadow: var(--shadow-sm); }
     .swatch--selection { background: var(--selection-neutral); box-shadow: var(--shadow-sm); }
-    .swatch--focus { background: var(--surface-secondary); box-shadow: 0 0 0 4px var(--focus-neutral), var(--shadow-sm); }
+    /* focus 用材质/亮度 + 轻微深度表达，不画一圈 ring */
+    .swatch--focus { background: var(--surface-tertiary); box-shadow: var(--shadow-md); }
     .motion-box { width: 80px; height: 80px; border-radius: var(--radius-md); background: var(--interactive-primary); }
 
-    /* ---------- Send Button：青柠圆 + 强 sheen + hover 抬起 ---------- */
+    /* ---------- Send Button：青柠最主要静态品牌识别点 ----------
+       圆形 / 背景 #CDFF00 / 无边框 / 无 outline / 阴影极轻
+       内部图标为真正 SVG 线性上箭头（osIcon.js）：stroke 1.6，黑色，round cap/join，视觉居中
+       Button 44px · Icon 20px · hover scale 1.03 · active scale 0.97 */
     .send-btn {
-      width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: pointer;
-      background: var(--brand-accent); color: #0a0a0c; font-size: 22px; font-weight: 700;
+      width: 44px; height: 44px; border-radius: 50%;
+      border: 0; outline: none; cursor: pointer; padding: 0;
+      background: var(--brand-accent);
       display: inline-flex; align-items: center; justify-content: center;
-      box-shadow:
-        0 0 0 1px rgba(0,0,0,0.04),
-        0 6px 20px rgba(205, 255, 0, 0.35),
-        0 24px 48px rgba(205, 255, 0, 0.18);
+      box-shadow: 0 4px 14px rgba(205, 255, 0, 0.16);
       transition: transform var(--motion-normal) var(--ease-spring),
                   box-shadow var(--motion-normal) var(--ease-standard);
       position: relative; overflow: hidden;
     }
     .send-btn::after {
       content: ""; position: absolute; inset: 0; border-radius: 50%;
-      background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.55) 50%, transparent 70%);
+      background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.5) 50%, transparent 70%);
       transform: translateX(-120%);
       pointer-events: none;
       mix-blend-mode: overlay;
     }
-    .send-btn:hover { transform: translateY(-2px) scale(1.04);
-      box-shadow: 0 0 0 1px rgba(0,0,0,0.04), 0 10px 28px rgba(205, 255, 0, 0.45), 0 32px 64px rgba(205, 255, 0, 0.22); }
+    .send-btn:hover { transform: scale(1.03); box-shadow: 0 6px 18px rgba(205, 255, 0, 0.22); }
     .send-btn:hover::after { animation: os-send-sheen 900ms var(--ease-spring) both; }
-    .send-btn:active { transform: translateY(0) scale(0.96); }
+    .send-btn:active { transform: scale(0.97); }
     @keyframes os-send-sheen { from { transform: translateX(-120%); } to { transform: translateX(120%); } }
 
     /* ---------- AI Orb：大尺寸径向光晕 + pulse + 多层光 ---------- */
@@ -182,7 +169,7 @@
       <h2>Brand Accent · 青柠 #CDFF00（仅 Send / AI 光效）</h2>
       <div class="row row--lg" style="align-items: center;">
         <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
-          <button class="send-btn" type="button" aria-label="Send">↑</button>
+          <button class="send-btn" type="button" aria-label="Send" id="sendBtn"></button>
           <span class="demo-label">Send · hover 抬起 + sheen 滑过</span>
         </div>
         <div class="ai-orb-wrap">
@@ -193,6 +180,13 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Icon System -->
+    <section>
+      <h2>Icon System · 统一线性图标</h2>
+      <div class="icon-row" id="demoIcons"></div>
+      <div class="demo-label">全部 Linear / Stroke 风格；stroke-linecap &amp; stroke-linejoin 均为 round。规范：16px→1.4 / 18px→1.5 / 20px→1.6 / 24px→1.7 / 32px+→≤1.8；尺寸体系 12/14/16/18/20/24/32/48/64。颜色走 --icon-primary / secondary / tertiary / disabled，青柠底用 --icon-on-brand。禁止实心 / 粗黑 / 卡通 / 彩色与跨库混搭。</div>
     </section>
 
     <!-- Buttons -->
@@ -278,6 +272,7 @@
     import { createGlassDialog } from "/static/os/ui/glassDialog.js";
     import { createGlassTooltip } from "/static/os/ui/glassTooltip.js";
     import { createGlassNotification } from "/static/os/ui/glassNotification.js";
+    import { createIcon } from "/static/os/icons/osIcon.js";
 
     const runtime = initThemeRuntime({
       initial: "system",
@@ -305,6 +300,27 @@
     });
     document.getElementById("tgMotion").addEventListener("change", (e) => saveReduceMotion(e.target.checked));
     document.getElementById("tgTrans").addEventListener("change", (e) => saveReduceTransparency(e.target.checked));
+
+    /* Send Button：真正 SVG 线性上箭头（替代原字体字符 ↑） */
+    document.getElementById("sendBtn").appendChild(
+      createIcon({ name: "send", size: 20, color: "var(--icon-on-brand)" })
+    );
+
+    /* Icon System 演示：统一线性图标 */
+    const iconWrap = document.getElementById("demoIcons");
+    [
+      ["send", "Send"], ["close", "Close"], ["search", "Search"], ["add", "Add"],
+      ["delete", "Delete"], ["chevronLeft", "Back"], ["chevronRight", "Forward"],
+      ["ai", "AI"], ["settings", "Settings"], ["check", "Check"], ["minus", "Minus"],
+    ].forEach(([n, label]) => {
+      const cell = document.createElement("div");
+      cell.className = "icon-cell";
+      cell.appendChild(createIcon({ name: n, size: 24 }));
+      const cap = document.createElement("span");
+      cap.textContent = label;
+      cell.appendChild(cap);
+      iconWrap.appendChild(cell);
+    });
 
     const btnWrap = document.getElementById("demoButtons");
     [["primary", "Primary CTA"], ["secondary", "Secondary"], ["ghost", "Ghost"], ["danger", "Danger"]].forEach(([v, label]) => {

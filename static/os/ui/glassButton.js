@@ -26,9 +26,11 @@ const CSS = `
   border-radius: inherit;
   transition: color var(--motion-fast) var(--ease-standard);
 }
-/* focus：中性柔和 glow；无 outline 无发丝描边 */
+/* focus：无 outline / 无 focus ring / 无描边；靠材质亮度与阴影深度表达 */
 .os-btn__native:focus-visible { outline: none; }
-.os-btn:focus-within { box-shadow: 0 0 0 4px var(--focus-neutral); }
+.os-btn:focus-within { box-shadow: var(--glass-shadow-stack-hover, var(--glass-shadow-stack)); }
+.os-btn--secondary:focus-within .os-glass__bg,
+.os-btn--ghost:focus-within .os-glass__bg { background: var(--surface-tertiary); }
 
 /* primary = 系统主交互（中性：Light 黑底白字 / Dark 白底黑字）
    实色 + sheen 镜面（白底/黑底上都能看到光斑滑过） */
