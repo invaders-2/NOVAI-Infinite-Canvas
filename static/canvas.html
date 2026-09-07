@@ -7,19 +7,19 @@
     <title>无限画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.112.1788425234">
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.112.1788425234">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.112.1788425217">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.112.1788425234">
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.112.1788425217"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.112.1788425217"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.112.1788425234"></script>
-    <script src="/static/js/theme.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/shared/media.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.112.1788425217"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/i18n.js?v=1.0.112.1788425217"></script>
+    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.113.1788488941">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.113.1788488941">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.113.1788488941">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.113.1788488941"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.113.1788488941"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/theme.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/shared/media.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.113.1788488941"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/i18n.js?v=1.0.113.1788488941"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -44,7 +44,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
     width: 100%; height: 100%; overflow: hidden;
 }
 #board {
-    width: 100%; height: calc(100% - var(--topbar-h, 52px));
+    width: 100%; height: 100%;
     position: relative; overflow: hidden;
 }
 #world { width: 100%; height: 100%; }
@@ -72,7 +72,7 @@ body.theme-dark:not(.canvas-node-drag):not(.canvas-node-resize):not(.canvas-sele
 
 /* ═══ 工具栏单行：不换行，横向滚动兜底（canvas.css 统一管理） ═══ */
 /* --- Marvis 增强覆盖 (canvas.html) --- */
-.topbar { background: transparent !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border-bottom: none !important; box-shadow: none !important; }
+.topbar { left: calc(var(--studio-sidebar-inset, 16px) / var(--studio-ui-scale, 1)); background: transparent !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border-bottom: none !important; box-shadow: none !important; }
 /* Canvas nav - Apple glass (light mode) */
 .panel.canvas-nav {
     background: rgba(255,255,255,0.48) !important;
@@ -519,7 +519,7 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         </div>
     </div>
 
-    <script defer src="/static/js/ltx-director-timeline.js?v=1.0.112.1788425217"></script>
-    <script defer src="/static/js/canvas.js?v=1.0.112.1788425234"></script>
+    <script defer src="/static/js/ltx-director-timeline.js?v=1.0.113.1788488941"></script>
+    <script defer src="/static/js/canvas.js?v=1.0.113.1788488941"></script>
 </body>
 </html>

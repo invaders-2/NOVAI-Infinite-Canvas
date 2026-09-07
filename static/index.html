@@ -33,12 +33,12 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/theme.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/i18n.js?v=1.0.112.1788425217"></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.112.1788425217">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.112.1788425234">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/theme.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/i18n.js?v=1.0.113.1788488941"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.113.1788488941">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941">
     <style>
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -192,9 +192,9 @@
             max-width: 220px;
             height: calc(100vh - 30px);
             border-radius: 26px;
-            background: transparent;
-            backdrop-filter: none;
-            -webkit-backdrop-filter: none;
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(40px) saturate(200%);
+            -webkit-backdrop-filter: blur(40px) saturate(200%);
             transition: width 0.3s ease-out, background 0.3s ease-out, backdrop-filter 0.3s ease-out, box-shadow 0.3s ease-out;
             display: flex;
             flex-direction: column;
@@ -585,7 +585,7 @@
 
         /* 画布路由全屏出血：去掉外壳 padding 与舞台圆角/左边距，仅画布路由生效 */
         body.route-canvas .app-shell { padding: 0; }
-        body.route-canvas .stage { margin: 0; border-radius: 0; }
+        body.route-canvas .stage { position: absolute; inset: 0; margin: 0; border-radius: 0; }
         /* 画布路由 + Windows 无边框标题栏：显式让出 48px 标题栏高度，防止被上面 margin:0 覆盖，保证 iframe 内网格从标题栏下方铺满 */
         body.route-canvas.has-frameless-titlebar .stage { margin-top: 48px; }
         /* 边栏不跟随全屏出血：保持与其他页面一致的 15px 内缩，避免无边框窗口下贴到窗口边缘/压住红绿灯 */
@@ -3334,17 +3334,17 @@
                     <div class="skeleton-card"></div>
                 </div>
             </div>
-            <iframe id="frame-home" src="/static/home.html?v=1.0.112.1788425234" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.112.1788425234" scrolling="yes"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=1.0.112.1788425234" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=1.0.112.1788425234" scrolling="yes"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=1.0.112.1788425233" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=1.0.112.1788425234" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.112.1788425234" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.112.1788425234" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.112.1788425234" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.112.1788425234" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.112.1788425234" scrolling="yes"></iframe>
+            <iframe id="frame-home" src="/static/home.html?v=1.0.113.1788699012" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
+            <iframe id="frame-enhance" data-src="/static/enhance.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
+            <iframe id="frame-angle" data-src="/static/angle.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.113.1788699012" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -3975,6 +3975,16 @@
             setSidebarPinned(localStorage.getItem(SIDEBAR_PINNED_KEY) === '1', { skipRemember:true });
         }
 
+        function syncCanvasSidebarInset() {
+            const sidebar = document.getElementById('studioSidebar');
+            const frame = document.getElementById('frame-canvas');
+            if (!sidebar || !frame || !frame.classList.contains('active')) return;
+            const inset = Math.max(16, sidebar.getBoundingClientRect().right - frame.getBoundingClientRect().left + 17);
+            try {
+                frame.contentDocument?.documentElement.style.setProperty('--studio-sidebar-inset', `${inset}px`);
+            } catch(e) {}
+        }
+
 
         function setSidebarSettingsCollapsed(collapsed, options = {}) {
             const group = document.getElementById('settings-fold-group');
@@ -4034,6 +4044,7 @@
             syncThemeToFrame(target);
             syncLanguageToFrame(target);
             syncScaleToFrame(target);
+            syncCanvasSidebarInset();
             if(id === 'comfyui-settings') {
                 setSidebarSettingsCollapsed(false, { skipRemember:true });
             }
@@ -4541,6 +4552,7 @@
 
         window.addEventListener('studio-ui-scale-change', () => {
             broadcastScaleToFrames();
+            syncCanvasSidebarInset();
         });
 
         // init icon state on load
@@ -4553,7 +4565,10 @@
             if(sidebar) {
                 sidebar.addEventListener('mouseenter', () => pauseScaleInFrames());
                 sidebar.addEventListener('mouseleave', () => pauseScaleInFrames());
+                new ResizeObserver(syncCanvasSidebarInset).observe(sidebar);
             }
+            window.addEventListener('resize', syncCanvasSidebarInset);
+            syncCanvasSidebarInset();
             checkForUpdates();
         });
 
@@ -4563,6 +4578,7 @@
                 syncThemeToFrame(f);
                 syncLanguageToFrame(f);
                 syncScaleToFrame(f);
+                if (f.id === 'frame-canvas') syncCanvasSidebarInset();
             });
         });
 

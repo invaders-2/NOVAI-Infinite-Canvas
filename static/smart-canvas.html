@@ -7,17 +7,17 @@
     <title data-i18n="smart.title">智能画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.112.1788425234">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.112.1788425234">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.112.1788425217">
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.112.1788425217"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.112.1788425234"></script>
-    <script src="/static/js/theme.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/shared/media.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.112.1788425217"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.112.1788425217"></script>
-    <script src="/static/js/i18n.js?v=1.0.112.1788425217"></script>
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.113.1788488941">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.113.1788488941">
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.113.1788488941"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/theme.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/shared/media.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.113.1788488941"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.113.1788488941"></script>
+    <script src="/static/js/i18n.js?v=1.0.113.1788488941"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -69,6 +69,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
 .minimap-arrange-btn, .chat-toggle {
     position: fixed;
 }
+.smart-back, .smart-title { left: calc(var(--studio-sidebar-inset, 16px) / var(--studio-ui-scale, 1)); }
 /* chat modal 保持在 resize 时可用 */
 .chat-modal {
     position: fixed;
@@ -625,6 +626,6 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         <div id="smartSuggestBtns" class="smart-suggest-btns"></div>
         <button type="button" class="smart-suggest-close" onclick="closeSmartSuggestions()" title="关闭"><i data-lucide="x"></i></button>
     </div>
-    <script defer src="/static/js/smart-canvas.js?v=1.0.112.1788425234"></script>
+    <script defer src="/static/js/smart-canvas.js?v=1.0.113.1788488941"></script>
 </body>
 </html>
