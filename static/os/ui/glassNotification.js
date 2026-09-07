@@ -1,17 +1,32 @@
 // ============================================================================
 // NOVAI OS · Glass Notification (glassNotification.js)
-// 通知条：title / message / 可选 action；自动滑入。返回 { node, dismiss }
+// 通知条：title / message / 状态点；spring 滑入（来自 os-motion.css）
+// sheen 来自 os-glass.css 的 .os-glass::after
 // 字体：--font-system（D4=B）
-// 依赖：glassSurface.js
+// 依赖：glassSurface.js + os-glass.css
 // ============================================================================
 import { createGlassSurface } from "./glassSurface.js";
 
 const STYLE_ID = "os-glass-notification-style";
 const CSS = `
-.os-notification { min-width: 280px; max-width: 360px; padding: 14px 16px; z-index: var(--z-notification); }
-.os-notification__title { font-family: var(--font-system); font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
-.os-notification__msg { font-family: var(--font-system); font-size: 13px; line-height: 1.45; color: var(--text-secondary); }
-.os-notification__dot { position: absolute; top: 14px; right: 14px; width: 8px; height: 8px; border-radius: 50%; background: var(--interactive-primary); }
+.os-notification {
+  min-width: 300px; max-width: 380px;
+  padding: 16px 44px 16px 18px;
+  z-index: var(--z-notification);
+}
+.os-notification__title {
+  font-family: var(--font-system); font-size: 14px; font-weight: 600;
+  color: var(--text-primary); margin: 0 0 4px;
+}
+.os-notification__msg {
+  font-family: var(--font-system); font-size: 13px; line-height: 1.5;
+  color: var(--text-secondary);
+}
+.os-notification__dot {
+  position: absolute; top: 20px; right: 18px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--interactive-primary);
+}
 `;
 
 function ensureStyle() {
@@ -29,7 +44,11 @@ export function createGlassNotification({
   duration = 4000,
 } = {}) {
   ensureStyle();
-  const surface = createGlassSurface({ tier, variant: "notification", className: "os-notification os-anim-slide-up" });
+  const surface = createGlassSurface({
+    tier,
+    variant: "notification",
+    className: "os-notification os-anim-slide-up",
+  });
 
   const titleEl = document.createElement("div");
   titleEl.className = "os-notification__title";

@@ -1,105 +1,166 @@
 <!DOCTYPE html>
 <html lang="zh-CN" data-os-theme="system">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NOVAI OS · Design System Preview</title>
-    <!-- 引入并扩展 marvis-shared.css（99 个语义变量） -->
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941" />
-    <link rel="stylesheet" href="/static/css/os-tokens.css?v=1.0.113.1788761983" />
-    <link rel="stylesheet" href="/static/css/os-glass.css?v=1.0.113.1788762032" />
-    <link rel="stylesheet" href="/static/css/os-motion.css?v=1.0.113.1788752449" />
-    <style>
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        font-family: var(--font-system);
-        background: var(--surface-primary);
-        color: var(--text-primary);
-        transition: background var(--motion-normal) var(--ease-standard),
-          color var(--motion-normal) var(--ease-standard);
-      }
-      .wrap { max-width: 980px; margin: 0 auto; padding: 32px 24px 80px; }
-      .topbar {
-        position: sticky; top: 0; z-index: var(--z-dock);
-        display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between;
-        padding: 14px 18px; margin-bottom: 28px;
-        background: var(--surface-overlay);
-        -webkit-backdrop-filter: blur(20px) saturate(160%);
-        backdrop-filter: blur(20px) saturate(160%);
-        /* 层级靠材质与阴影，不使用 1px 发丝线 */
-        box-shadow: var(--shadow-sm);
-      }
-      .seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--radius-pill); background: var(--surface-secondary); }
-      .seg button {
-        font-family: var(--font-system); font-size: 13px; font-weight: 600; color: var(--text-secondary);
-        border: 0; background: transparent; padding: 7px 14px; border-radius: var(--radius-pill); cursor: pointer;
-        transition: all var(--motion-fast) var(--ease-standard);
-      }
-      .seg button.is-active { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--shadow-xs); }
-      .toggles { display: inline-flex; gap: 18px; font-size: 13px; color: var(--text-secondary); }
-      .toggles label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
-      .resolved { font-size: 12px; color: var(--text-tertiary); }
-      section { margin-bottom: 40px; }
-      h1 { font-size: 26px; font-weight: 700; margin: 0 0 6px; }
-      h2 { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 16px; }
-      .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
-      .demo-label { font-size: 12px; color: var(--text-tertiary); margin-top: 8px; }
-      .brand-sample { font-family: var(--font-display); font-size: 32px; font-weight: 700; color: var(--text-primary); }
-      .brand-note { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; max-width: 320px; }
-      .swatch-row { display: flex; gap: 10px; flex-wrap: wrap; }
-      .swatch { width: 64px; height: 64px; border-radius: var(--radius-md); background: var(--surface-secondary); display: flex; align-items: flex-end; justify-content: center; padding: 6px; font-size: 10px; color: var(--text-tertiary); box-shadow: var(--shadow-xs); }
-      .swatch--active { background: var(--surface-active); }
-      .swatch--selection { background: var(--selection-neutral); }
-      .swatch--focus { box-shadow: 0 0 0 3px var(--focus-neutral); }
-      .motion-box { width: 80px; height: 80px; border-radius: var(--radius-md); background: var(--interactive-primary); }
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NOVAI OS · Material Lab</title>
+  <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941" />
+  <link rel="stylesheet" href="/static/css/os-tokens.css?v=1.0.113.1788761983" />
+  <link rel="stylesheet" href="/static/css/os-glass.css?v=1.0.113.1788762032" />
+  <link rel="stylesheet" href="/static/css/os-motion.css?v=1.0.113.1788752449" />
+  <style>
+    * { box-sizing: border-box; }
+    /* ---------- 彩色 wallpaper（让玻璃有东西可折射；不像白底贴纸） ---------- */
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-system);
+      color: var(--text-primary);
+      background:
+        radial-gradient(ellipse 80% 60% at 18% 8%,  rgba(120, 180, 255, 0.42), transparent 60%),
+        radial-gradient(ellipse 70% 60% at 82% 18%, rgba(255, 170, 220, 0.38), transparent 60%),
+        radial-gradient(ellipse 90% 60% at 50% 95%, rgba(255, 215, 160, 0.32), transparent 60%),
+        radial-gradient(ellipse 60% 50% at 92% 78%, rgba(180, 150, 255, 0.36), transparent 60%),
+        radial-gradient(ellipse 50% 40% at 8% 60%,   rgba(150, 255, 220, 0.30), transparent 60%),
+        var(--surface-primary);
+      background-attachment: fixed;
+      transition: background-color var(--motion-normal) var(--ease-standard);
+    }
+    [data-os-theme="dark"] body,
+    [data-os-theme="system"] body:where([data-os-resolved="dark"]) {
+      background:
+        radial-gradient(ellipse 80% 60% at 18% 8%,  rgba(60, 110, 200, 0.45), transparent 60%),
+        radial-gradient(ellipse 70% 60% at 82% 18%, rgba(200, 80, 160, 0.40), transparent 60%),
+        radial-gradient(ellipse 90% 60% at 50% 95%, rgba(200, 130, 60, 0.32), transparent 60%),
+        radial-gradient(ellipse 60% 50% at 92% 78%, rgba(120, 60, 220, 0.42), transparent 60%),
+        radial-gradient(ellipse 50% 40% at 8% 60%,   rgba(40, 180, 160, 0.32), transparent 60%),
+        var(--surface-primary);
+      background-attachment: fixed;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 24px 100px; }
+    .topbar {
+      position: sticky; top: 12px; z-index: var(--z-dock);
+      display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between;
+      padding: 12px 16px; margin: 0 0 32px;
+      background: var(--surface-overlay);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      backdrop-filter: blur(28px) saturate(180%);
+      box-shadow: var(--shadow-sm);
+      border-radius: var(--radius-lg);
+    }
+    .seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--radius-pill); background: var(--surface-secondary); }
+    .seg button {
+      font-family: var(--font-system); font-size: 13px; font-weight: 600; color: var(--text-secondary);
+      border: 0; background: transparent; padding: 7px 14px; border-radius: var(--radius-pill); cursor: pointer;
+      transition: all var(--motion-fast) var(--ease-standard);
+    }
+    .seg button.is-active { background: var(--surface-primary); color: var(--text-primary); box-shadow: var(--shadow-xs); }
+    .toggles { display: inline-flex; gap: 18px; font-size: 13px; color: var(--text-secondary); }
+    .toggles label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+    .resolved { font-size: 12px; color: var(--text-tertiary); }
+    section { margin-bottom: 40px; }
+    h1 { font-size: 30px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
+    .lede { font-size: 14px; color: var(--text-secondary); margin: 0 0 26px; max-width: 720px; }
+    h2 { font-size: 12px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 14px; }
+    .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+    .row--lg { gap: 26px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
+    .demo-label { font-size: 12px; color: var(--text-tertiary); margin-top: 10px; }
+    .brand-sample { font-family: var(--font-display); font-size: 36px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.02em; }
+    .brand-note { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; max-width: 360px; }
+    .swatch-row { display: flex; gap: 14px; flex-wrap: wrap; }
+    .swatch {
+      width: 120px; height: 80px; border-radius: var(--radius-lg);
+      background: var(--surface-secondary);
+      display: flex; align-items: flex-end; justify-content: center;
+      padding: 8px; font-size: 11px; color: var(--text-tertiary);
+      box-shadow: var(--shadow-xs);
+      transition: box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+    }
+    .swatch--active { background: var(--surface-active); box-shadow: var(--shadow-sm); }
+    .swatch--selection { background: var(--selection-neutral); box-shadow: var(--shadow-sm); }
+    .swatch--focus { background: var(--surface-secondary); box-shadow: 0 0 0 4px var(--focus-neutral), var(--shadow-sm); }
+    .motion-box { width: 80px; height: 80px; border-radius: var(--radius-md); background: var(--interactive-primary); }
 
-      /* Send Button：青柠唯一主要静态品牌识别点（小面积，仅发送 / 执行 AI 指令） */
-      .send-btn {
-        width: 40px; height: 40px; border-radius: 50%; border: 0; cursor: pointer;
-        background: var(--brand-accent); color: #0a0a0c; font-size: 16px; font-weight: 700;
-        display: inline-flex; align-items: center; justify-content: center;
-        box-shadow: 0 4px 14px rgba(205, 255, 0, 0.28);
-        transition: transform var(--motion-fast) var(--ease-spring),
-          box-shadow var(--motion-fast) var(--ease-standard);
-      }
-      .send-btn:hover { transform: scale(1.06); box-shadow: 0 6px 18px rgba(205, 255, 0, 0.38); }
-      .send-btn:active { transform: scale(0.96); }
+    /* ---------- Send Button：青柠圆 + 强 sheen + hover 抬起 ---------- */
+    .send-btn {
+      width: 56px; height: 56px; border-radius: 50%; border: 0; cursor: pointer;
+      background: var(--brand-accent); color: #0a0a0c; font-size: 22px; font-weight: 700;
+      display: inline-flex; align-items: center; justify-content: center;
+      box-shadow:
+        0 0 0 1px rgba(0,0,0,0.04),
+        0 6px 20px rgba(205, 255, 0, 0.35),
+        0 24px 48px rgba(205, 255, 0, 0.18);
+      transition: transform var(--motion-normal) var(--ease-spring),
+                  box-shadow var(--motion-normal) var(--ease-standard);
+      position: relative; overflow: hidden;
+    }
+    .send-btn::after {
+      content: ""; position: absolute; inset: 0; border-radius: 50%;
+      background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.55) 50%, transparent 70%);
+      transform: translateX(-120%);
+      pointer-events: none;
+      mix-blend-mode: overlay;
+    }
+    .send-btn:hover { transform: translateY(-2px) scale(1.04);
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.04), 0 10px 28px rgba(205, 255, 0, 0.45), 0 32px 64px rgba(205, 255, 0, 0.22); }
+    .send-btn:hover::after { animation: os-send-sheen 900ms var(--ease-spring) both; }
+    .send-btn:active { transform: translateY(0) scale(0.96); }
+    @keyframes os-send-sheen { from { transform: translateX(-120%); } to { transform: translateX(120%); } }
 
-      /* AI 光效：Orb 光晕 / thinking 光流（克制：blur + gradient + 低透明度） */
-      .ai-orb {
-        position: relative; width: 44px; height: 44px; border-radius: 50%;
-        background: radial-gradient(circle at 32% 28%, rgba(205,255,0,0.55), rgba(205,255,0,0.08) 62%, transparent 74%);
-      }
-      .ai-orb::after {
-        content: ""; position: absolute; inset: -10px; border-radius: 50%;
-        background: radial-gradient(circle, rgba(205,255,0,0.22), transparent 68%);
-        filter: blur(10px);
-        animation: os-ai-pulse 2.4s var(--ease-standard) infinite;
-      }
-      @keyframes os-ai-pulse {
-        0%, 100% { opacity: 0.45; transform: scale(1); }
-        50% { opacity: 0.95; transform: scale(1.08); }
-      }
-      .ai-stream {
-        width: 180px; height: 8px; border-radius: var(--radius-pill);
-        overflow: hidden; background: var(--surface-secondary); position: relative;
-      }
-      .ai-stream::after {
-        content: ""; position: absolute; top: 0; bottom: 0; width: 46%;
-        background: linear-gradient(90deg, transparent, rgba(205,255,0,0.75), transparent);
-        filter: blur(1px);
-        animation: os-ai-stream 1.6s linear infinite;
-      }
-      @keyframes os-ai-stream {
-        from { transform: translateX(-60%); }
-        to { transform: translateX(240%); }
-      }
-    </style>
-  </head>
-  <body>
+    /* ---------- AI Orb：大尺寸径向光晕 + pulse + 多层光 ---------- */
+    .ai-orb-wrap { display: flex; align-items: center; gap: 18px; }
+    .ai-orb {
+      position: relative; width: 72px; height: 72px; border-radius: 50%;
+      background: radial-gradient(circle at 32% 28%, rgba(205,255,0,0.85), rgba(205,255,0,0.20) 55%, transparent 72%);
+      box-shadow: 0 8px 32px rgba(205, 255, 0, 0.25);
+    }
+    .ai-orb::before {
+      content: ""; position: absolute; inset: 6px; border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.45), transparent 55%);
+    }
+    .ai-orb::after {
+      content: ""; position: absolute; inset: -22px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(205,255,0,0.28), transparent 65%);
+      filter: blur(14px);
+      animation: os-ai-pulse 2.4s var(--ease-standard) infinite;
+    }
+    @keyframes os-ai-pulse {
+      0%, 100% { opacity: 0.5; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.12); }
+    }
+
+    .ai-stream {
+      width: 240px; height: 10px; border-radius: var(--radius-pill);
+      overflow: hidden; background: var(--surface-secondary); position: relative;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.08);
+    }
+    .ai-stream::after {
+      content: ""; position: absolute; top: 0; bottom: 0; width: 45%;
+      background: linear-gradient(90deg, transparent, rgba(205,255,0,0.85), transparent);
+      filter: blur(1px);
+      animation: os-ai-stream 1.6s linear infinite;
+    }
+    @keyframes os-ai-stream {
+      from { transform: translateX(-60%); }
+      to { transform: translateX(260%); }
+    }
+
+    .native-trigger {
+      font-family: var(--font-system); font-size: 13px; font-weight: 600; color: var(--text-primary);
+      background: var(--surface-secondary); border: 0;
+      padding: 10px 18px; border-radius: var(--radius-pill); cursor: pointer;
+      box-shadow: var(--shadow-xs);
+      transition: background var(--motion-fast) var(--ease-standard),
+                  transform var(--motion-fast) var(--ease-spring),
+                  box-shadow var(--motion-fast) var(--ease-standard);
+    }
+    .native-trigger:hover { background: var(--surface-tertiary); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+    .native-trigger:active { transform: scale(0.97); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
     <div class="topbar">
       <div class="seg" id="themeSeg">
         <button data-theme="light">Light</button>
@@ -113,233 +174,206 @@
       <div class="resolved" id="resolvedLabel"></div>
     </div>
 
-    <div class="wrap">
-      <h1>NOVAI OS · Design System</h1>
-      <p class="resolved">黑白灰 + Liquid Glass · Light / Dark / System · 青柠 #CDFF00 仅用于 Send / AI 光效 · 系统字体栈</p>
+    <h1>NOVAI OS · Material Lab</h1>
+    <p class="lede">Liquid Glass · 折射色散 · 多层内部反射 · 边缘曲面高光 · sheen 镜面 · 多层悬浮阴影 · hover 抬起活起来</p>
 
-      <!-- Buttons -->
-      <section>
-        <h2>Buttons</h2>
-        <div class="row" id="demoButtons"></div>
-        <div class="demo-label">primary = 系统主交互（Light 黑底白字 / Dark 白底黑字，中性）；secondary / ghost / danger 为玻璃中性体</div>
-      </section>
-
-      <!-- Inputs -->
-      <section>
-        <h2>Inputs</h2>
-        <div class="row" id="demoInputs"></div>
-      </section>
-
-      <!-- Panels -->
-      <section>
-        <h2>Panels / Cards</h2>
-        <div class="grid" id="demoPanels"></div>
-      </section>
-
-      <!-- Context Menu / Dialog / Tooltip / Notification -->
-      <section>
-        <h2>Overlays</h2>
-        <div class="row">
-          <button class="native-trigger" id="trigMenu">Open Context Menu</button>
-          <button class="native-trigger" id="trigDialog">Open Dialog</button>
-          <button class="native-trigger" id="trigTooltip">Show Tooltip</button>
-          <button class="native-trigger" id="trigNotify">Push Notification</button>
+    <!-- Brand Accent 大尺寸演示 -->
+    <section>
+      <h2>Brand Accent · 青柠 #CDFF00（仅 Send / AI 光效）</h2>
+      <div class="row row--lg" style="align-items: center;">
+        <div style="display: flex; flex-direction: column; gap: 10px; align-items: center;">
+          <button class="send-btn" type="button" aria-label="Send">↑</button>
+          <span class="demo-label">Send · hover 抬起 + sheen 滑过</span>
         </div>
-        <div class="demo-label">这些是玻璃组件的原生触发按钮（非 OS 组件，仅用于演示）</div>
-      </section>
-
-      <!-- Brand Accent：仅 Send Button 与 AI 光效 -->
-      <section>
-        <h2>Brand Accent #CDFF00 — 仅 Send Button 与 AI 光效</h2>
-        <div class="row" style="gap: 26px; align-items: center;">
-          <div style="display: flex; flex-direction: column; gap: 8px; align-items: center;">
-            <button class="send-btn" type="button" aria-label="Send">↑</button>
-            <span class="demo-label">Send（唯一青柠按钮）</span>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 8px; align-items: center;">
-            <div class="ai-orb"></div>
-            <span class="demo-label">AI Orb 光晕</span>
-          </div>
+        <div class="ai-orb-wrap">
+          <div class="ai-orb"></div>
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <div class="ai-stream"></div>
-            <span class="demo-label">AI thinking 光流</span>
+            <span class="demo-label">AI Orb 光晕 + AI thinking 光流</span>
           </div>
         </div>
-        <div class="demo-label" style="max-width: 660px; margin-top: 14px;">
-          青柠仅用于：Send Button、AI 光束、AI 流光 / 能量轨迹、AI 工作时光效、极少数品牌动画。<br />
-          禁止用于：普通按钮与 CTA、Menu、Context Menu、Tab、Selected、Hover、Focus、Dock / Window active、
-          Input focus、Card、Panel、Dialog、Tooltip、Notification、页面标题、大面积背景、普通状态点。
-        </div>
-      </section>
+      </div>
+    </section>
 
-      <!-- 中性交互状态 -->
-      <section>
-        <h2>中性交互状态（系统通用，非青柠）</h2>
-        <div class="swatch-row">
-          <div class="swatch">Surface</div>
-          <div class="swatch swatch--active">Active</div>
-          <div class="swatch swatch--selection">Selection</div>
-          <div class="swatch swatch--focus">Focus</div>
-        </div>
-        <div class="demo-label">active / selected / focus 一律走 --surface-active / --selection-neutral / --focus-neutral；Light / Dark 分别解析为中性色。层级靠材质（透明度、折射、厚度、高光、阴影），不靠 1px 发丝线。</div>
-      </section>
+    <!-- Buttons -->
+    <section>
+      <h2>Buttons · hover 抬起 + sheen 镜面</h2>
+      <div class="row" id="demoButtons"></div>
+      <div class="demo-label">primary = 系统主交互（Light 黑底白字 / Dark 白底黑字）；secondary / ghost / danger 玻璃中性体</div>
+    </section>
 
-      <!-- Typography -->
-      <section>
-        <h2>Typography</h2>
-        <p>OS UI 使用系统字体栈（<code>--font-system</code>）。Space Grotesk 仅保留给以下非系统 UI 场景：</p>
-        <div class="brand-sample">NOVAI OS</div>
-        <div class="brand-note">此处的 brand sample 使用 <code>--font-display: "Space Grotesk"</code>，仅作 Welcome / 品牌展示 / 官网示例，不进入 Desktop / Dock / Window / Menu / Dialog / Settings / App UI。</div>
-      </section>
+    <!-- Inputs -->
+    <section>
+      <h2>Inputs · 嵌进玻璃表面，focus 加深下凹</h2>
+      <div class="row" id="demoInputs"></div>
+    </section>
 
-      <!-- Motion -->
-      <section>
-        <h2>Motion</h2>
-        <div class="row">
-          <div class="motion-box os-anim-pop-in"></div>
-          <button class="native-trigger" id="trigMotion">Replay Animation</button>
-        </div>
-      </section>
-    </div>
+    <!-- Material Tiers -->
+    <section>
+      <h2>Material Tiers · 4 档真实材质差异（厚度 / 折射 / 受光 / 阴影）</h2>
+      <div class="grid" id="demoPanels"></div>
+    </section>
 
-    <style>
-      .native-trigger {
-        font-family: var(--font-system); font-size: 13px; font-weight: 600; color: var(--text-primary);
-        background: var(--surface-secondary); border: 0;
-        padding: 9px 16px; border-radius: var(--radius-sm); cursor: pointer;
-        box-shadow: var(--shadow-xs);
-        transition: background var(--motion-fast) var(--ease-standard),
-          box-shadow var(--motion-fast) var(--ease-standard);
-      }
-      .native-trigger:hover { background: var(--surface-tertiary); box-shadow: var(--shadow-sm); }
-    </style>
+    <!-- Overlays -->
+    <section>
+      <h2>Overlays · Menu / Dialog / Tooltip / Notification</h2>
+      <div class="row">
+        <button class="native-trigger" id="trigMenu">Open Context Menu</button>
+        <button class="native-trigger" id="trigDialog">Open Dialog</button>
+        <button class="native-trigger" id="trigTooltip">Show Tooltip</button>
+        <button class="native-trigger" id="trigNotify">Push Notification</button>
+      </div>
+    </section>
 
-    <!-- 预渲染主题引导：在首帧前同步恢复持久化偏好，避免白/黑闪 -->
-    <script>
-      (function () {
-        try {
-          var t = localStorage.getItem("novai-os:theme") || "system";
-          document.documentElement.setAttribute("data-os-theme", t);
-          if (localStorage.getItem("novai-os:reduce-motion") === "1")
-            document.documentElement.setAttribute("data-os-reduce-motion", "true");
-          if (localStorage.getItem("novai-os:reduce-transparency") === "1")
-            document.documentElement.setAttribute("data-os-reduce-transparency", "true");
-        } catch (e) {}
-      })();
-    </script>
+    <!-- 中性交互状态 -->
+    <section>
+      <h2>中性交互状态 · 材质差（不靠 1px 边框）</h2>
+      <div class="swatch-row">
+        <div class="swatch">Surface</div>
+        <div class="swatch swatch--active">Active</div>
+        <div class="swatch swatch--selection">Selection</div>
+        <div class="swatch swatch--focus">Focus</div>
+      </div>
+      <div class="demo-label">active / selection / focus 走 --surface-active / --selection-neutral / --focus-neutral；层级靠材质（透明度、阴影、ambient）</div>
+    </section>
 
-    <script type="module">
-      import { initThemeRuntime } from "/static/os/theme/themeRuntime.js";
-      import { restoreAll, saveThemePref, saveReduceMotion, saveReduceTransparency } from "/static/os/theme/themePersistence.js";
-      import { createGlassButton } from "/static/os/ui/glassButton.js";
-      import { createGlassInput } from "/static/os/ui/glassInput.js";
-      import { createGlassPanel } from "/static/os/ui/glassPanel.js";
-      import { createGlassContextMenu } from "/static/os/ui/glassContextMenu.js";
-      import { createGlassDialog } from "/static/os/ui/glassDialog.js";
-      import { createGlassTooltip } from "/static/os/ui/glassTooltip.js";
-      import { createGlassNotification } from "/static/os/ui/glassNotification.js";
+    <!-- Typography -->
+    <section>
+      <h2>Typography</h2>
+      <p style="margin: 0 0 12px;">OS UI 使用系统字体栈（<code>--font-system</code>）。Space Grotesk 仅保留给品牌展示：</p>
+      <div class="brand-sample">NOVAI OS</div>
+      <div class="brand-note">brand sample 使用 <code>--font-display: "Space Grotesk"</code>，仅作 Welcome / 品牌展示 / 官网示例，不进入 OS 组件。</div>
+    </section>
 
-      // 1) 恢复持久化偏好并初始化运行时
-      const runtime = initThemeRuntime({
-        initial: "system",
-        onChange: ({ theme, resolved }) => {
-          saveThemePref(theme);
-          syncSeg(theme);
-          document.getElementById("resolvedLabel").textContent = `theme=${theme} · resolved=${resolved}`;
-        },
+    <!-- Motion -->
+    <section>
+      <h2>Motion</h2>
+      <div class="row">
+        <div class="motion-box os-anim-pop-in"></div>
+        <button class="native-trigger" id="trigMotion">Replay Animation</button>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("novai-os:theme") || "system";
+        document.documentElement.setAttribute("data-os-theme", t);
+        if (localStorage.getItem("novai-os:reduce-motion") === "1")
+          document.documentElement.setAttribute("data-os-reduce-motion", "true");
+        if (localStorage.getItem("novai-os:reduce-transparency") === "1")
+          document.documentElement.setAttribute("data-os-reduce-transparency", "true");
+      } catch (e) {}
+    })();
+  </script>
+
+  <script type="module">
+    import { initThemeRuntime } from "/static/os/theme/themeRuntime.js";
+    import { restoreAll, saveThemePref, saveReduceMotion, saveReduceTransparency } from "/static/os/theme/themePersistence.js";
+    import { createGlassButton } from "/static/os/ui/glassButton.js";
+    import { createGlassInput } from "/static/os/ui/glassInput.js";
+    import { createGlassPanel } from "/static/os/ui/glassPanel.js";
+    import { createGlassContextMenu } from "/static/os/ui/glassContextMenu.js";
+    import { createGlassDialog } from "/static/os/ui/glassDialog.js";
+    import { createGlassTooltip } from "/static/os/ui/glassTooltip.js";
+    import { createGlassNotification } from "/static/os/ui/glassNotification.js";
+
+    const runtime = initThemeRuntime({
+      initial: "system",
+      onChange: ({ theme, resolved }) => {
+        saveThemePref(theme);
+        syncSeg(theme);
+        document.getElementById("resolvedLabel").textContent = `theme=${theme} · resolved=${resolved}`;
+      },
+    });
+    restoreAll({ onTheme: (t) => runtime.setTheme(t) });
+    document.getElementById("resolvedLabel").textContent = `theme=${runtime.getTheme()} · resolved=${runtime.getResolved()}`;
+    document.getElementById("tgMotion").checked = document.documentElement.hasAttribute("data-os-reduce-motion");
+    document.getElementById("tgTrans").checked = document.documentElement.hasAttribute("data-os-reduce-transparency");
+
+    function syncSeg(theme) {
+      document.querySelectorAll("#themeSeg button").forEach((b) => {
+        b.classList.toggle("is-active", b.dataset.theme === theme);
       });
-      restoreAll({ onTheme: (t) => runtime.setTheme(t) });
-      document.getElementById("resolvedLabel").textContent = `theme=${runtime.getTheme()} · resolved=${runtime.getResolved()}`;
-      document.getElementById("tgMotion").checked = document.documentElement.hasAttribute("data-os-reduce-motion");
-      document.getElementById("tgTrans").checked = document.documentElement.hasAttribute("data-os-reduce-transparency");
+    }
+    syncSeg(runtime.getTheme());
 
-      function syncSeg(theme) {
-        document.querySelectorAll("#themeSeg button").forEach((b) => {
-          b.classList.toggle("is-active", b.dataset.theme === theme);
-        });
-      }
-      syncSeg(runtime.getTheme());
+    document.getElementById("themeSeg").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-theme]");
+      if (btn) runtime.setTheme(btn.dataset.theme);
+    });
+    document.getElementById("tgMotion").addEventListener("change", (e) => saveReduceMotion(e.target.checked));
+    document.getElementById("tgTrans").addEventListener("change", (e) => saveReduceTransparency(e.target.checked));
 
-      document.getElementById("themeSeg").addEventListener("click", (e) => {
-        const btn = e.target.closest("button[data-theme]");
-        if (btn) runtime.setTheme(btn.dataset.theme);
+    const btnWrap = document.getElementById("demoButtons");
+    [["primary", "Primary CTA"], ["secondary", "Secondary"], ["ghost", "Ghost"], ["danger", "Danger"]].forEach(([v, label]) => {
+      btnWrap.appendChild(createGlassButton({ label, variant: v }));
+    });
+
+    const inputWrap = document.getElementById("demoInputs");
+    inputWrap.appendChild(createGlassInput({ placeholder: "Type something…" }));
+    inputWrap.appendChild(createGlassInput({ placeholder: "Search…", value: "" }));
+
+    const panelWrap = document.getElementById("demoPanels");
+    panelWrap.appendChild(createGlassPanel({ title: "ultraThin", tier: "ultraThin", content: "最薄玻璃层。轻阴影、浅 blur。适合非聚焦表面。" }));
+    panelWrap.appendChild(createGlassPanel({ title: "thin", tier: "thin", content: "薄玻璃。柔阴影、medium blur。适合输入框 / 轻量卡片。" }));
+    panelWrap.appendChild(createGlassPanel({ title: "regular", tier: "regular", content: "标准玻璃。深阴影、丰富 blur。适合标准面板 / 卡片。" }));
+    panelWrap.appendChild(createGlassPanel({ title: "thick", tier: "thick", content: "厚玻璃。最深阴影、最强 blur + 内部多层反射。适合高聚焦弹层。" }));
+
+    document.getElementById("trigMenu").addEventListener("click", (e) => {
+      const m = createGlassContextMenu({
+        x: e.clientX, y: e.clientY,
+        items: [
+          { label: "Open", onClick: () => console.log("open") },
+          { label: "Rename", onClick: () => console.log("rename") },
+          { separator: true },
+          { label: "Delete", danger: true, onClick: () => console.log("delete") },
+        ],
       });
-      document.getElementById("tgMotion").addEventListener("change", (e) => saveReduceMotion(e.target.checked));
-      document.getElementById("tgTrans").addEventListener("change", (e) => saveReduceTransparency(e.target.checked));
+      document.body.appendChild(m);
+      const close = (ev) => { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener("click", close); } };
+      setTimeout(() => document.addEventListener("click", close), 0);
+    });
 
-      // 2) Buttons
-      const btnWrap = document.getElementById("demoButtons");
-      [["primary", "Primary CTA"], ["secondary", "Secondary"], ["ghost", "Ghost"], ["danger", "Danger"]].forEach(([v, label]) => {
-        btnWrap.appendChild(createGlassButton({ label, variant: v }));
+    document.getElementById("trigDialog").addEventListener("click", () => {
+      const { overlay } = createGlassDialog({
+        title: "Confirm Action",
+        body: "This is a Liquid Glass dialog. 深遮罩 ambient blur + 大圆角玻璃面板。",
+        actions: [
+          { label: "Cancel" },
+          { label: "Confirm", primary: true, onClick: (close) => close() },
+        ],
       });
+      document.body.appendChild(overlay);
+    });
 
-      // 3) Inputs
-      const inputWrap = document.getElementById("demoInputs");
-      inputWrap.appendChild(createGlassInput({ placeholder: "Type something…" }));
-      inputWrap.appendChild(createGlassInput({ placeholder: "Search…", value: "" }));
+    document.getElementById("trigTooltip").addEventListener("mouseenter", (e) => {
+      const tip = createGlassTooltip({ text: "Glass tooltip (system font)" });
+      tip.style.position = "fixed";
+      tip.style.left = `${e.clientX}px`;
+      tip.style.top = `${e.clientY + 18}px`;
+      document.body.appendChild(tip);
+      e.target._tip = tip;
+    });
+    document.getElementById("trigTooltip").addEventListener("mouseleave", (e) => {
+      if (e.target._tip) { e.target._tip.remove(); e.target._tip = null; }
+    });
 
-      // 4) Panels
-      const panelWrap = document.getElementById("demoPanels");
-      panelWrap.appendChild(createGlassPanel({ title: "ultraThin", tier: "ultraThin", content: "最薄玻璃层，适合非聚焦表面。" }));
-      panelWrap.appendChild(createGlassPanel({ title: "thin", tier: "thin", content: "输入框 / 轻量卡片。" }));
-      panelWrap.appendChild(createGlassPanel({ title: "regular", tier: "regular", content: "标准面板 / 卡片。" }));
-      panelWrap.appendChild(createGlassPanel({ title: "thick", tier: "thick", content: "高聚焦弹层 / 强调容器。" }));
+    document.getElementById("trigNotify").addEventListener("click", () => {
+      const { node } = createGlassNotification({ title: "Saved", message: "Your changes are persisted.", duration: 3500 });
+      node.style.position = "fixed";
+      node.style.right = "24px";
+      node.style.bottom = "24px";
+      document.body.appendChild(node);
+    });
 
-      // 5) Overlays
-      document.getElementById("trigMenu").addEventListener("click", (e) => {
-        const m = createGlassContextMenu({
-          x: e.clientX, y: e.clientY,
-          items: [
-            { label: "Open", onClick: () => console.log("open") },
-            { label: "Rename", onClick: () => console.log("rename") },
-            { separator: true },
-            { label: "Delete", danger: true, onClick: () => console.log("delete") },
-          ],
-        });
-        document.body.appendChild(m);
-        const close = (ev) => { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener("click", close); } };
-        setTimeout(() => document.addEventListener("click", close), 0);
-      });
-
-      document.getElementById("trigDialog").addEventListener("click", () => {
-        const { overlay } = createGlassDialog({
-          title: "Confirm Action",
-          body: "This is a Liquid Glass dialog. Accent is reserved for CTA buttons only.",
-          actions: [
-            { label: "Cancel" },
-            { label: "Confirm", primary: true, onClick: (close) => close() },
-          ],
-        });
-        document.body.appendChild(overlay);
-      });
-
-      document.getElementById("trigTooltip").addEventListener("mouseenter", (e) => {
-        const tip = createGlassTooltip({ text: "Glass tooltip (system font)" });
-        tip.style.position = "fixed";
-        tip.style.left = `${e.clientX}px`;
-        tip.style.top = `${e.clientY + 18}px`;
-        document.body.appendChild(tip);
-        e.target._tip = tip;
-      });
-      document.getElementById("trigTooltip").addEventListener("mouseleave", (e) => {
-        if (e.target._tip) { e.target._tip.remove(); e.target._tip = null; }
-      });
-
-      document.getElementById("trigNotify").addEventListener("click", () => {
-        const { node } = createGlassNotification({ title: "Saved", message: "Your changes are persisted.", duration: 3500 });
-        node.style.position = "fixed";
-        node.style.right = "24px";
-        node.style.bottom = "24px";
-        document.body.appendChild(node);
-      });
-
-      // 6) Motion replay
-      document.getElementById("trigMotion").addEventListener("click", () => {
-        const box = document.querySelector(".motion-box");
-        box.classList.remove("os-anim-pop-in");
-        void box.offsetWidth; // reflow
-        box.classList.add("os-anim-pop-in");
-      });
-    </script>
-  </body>
+    document.getElementById("trigMotion").addEventListener("click", () => {
+      const box = document.querySelector(".motion-box");
+      box.classList.remove("os-anim-pop-in");
+      void box.offsetWidth;
+      box.classList.add("os-anim-pop-in");
+    });
+  </script>
+</body>
 </html>

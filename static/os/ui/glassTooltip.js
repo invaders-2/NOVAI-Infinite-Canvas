@@ -1,15 +1,19 @@
 // ============================================================================
 // NOVAI OS · Glass Tooltip (glassTooltip.js)
-// 轻量提示气泡。返回节点，由调用方定位（absolute/fixed）
+// 轻量提示气泡。极小圆角 + sheen on hover（来自 os-glass.css）
+// 返回节点，由调用方定位（absolute/fixed）
 // 字体：--font-system（D4=B）
-// 依赖：glassSurface.js
+// 依赖：glassSurface.js + os-glass.css
 // ============================================================================
 import { createGlassSurface } from "./glassSurface.js";
 
 const STYLE_ID = "os-glass-tooltip-style";
 const CSS = `
-.os-tooltip { padding: 6px 10px; z-index: var(--z-menu); pointer-events: none; }
-.os-tooltip__text { font-family: var(--font-system); font-size: 12px; color: var(--text-primary); white-space: nowrap; }
+.os-tooltip { padding: 6px 12px; z-index: var(--z-menu); pointer-events: none; }
+.os-tooltip__text {
+  font-family: var(--font-system); font-size: 12px; color: var(--text-primary);
+  white-space: nowrap; font-weight: 500;
+}
 `;
 
 function ensureStyle() {

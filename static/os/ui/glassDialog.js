@@ -1,8 +1,9 @@
 // ============================================================================
 // NOVAI OS · Glass Dialog (glassDialog.js)
-// 模态：遮罩 + 内容 + 入场动画（scale-in）。返回 { overlay, dialog, close }
+// 模态：遮罩（深色 + ambient blur 让背后 wallpaper 模糊）+ 内容 + 入场 spring
+// 大圆角玻璃面板，靠材质与多层阴影悬浮，hover sheen 由 os-glass.css 提供
 // 字体：--font-system（D4=B）
-// 依赖：glassSurface.js
+// 依赖：glassSurface.js + os-glass.css
 // ============================================================================
 import { createGlassSurface } from "./glassSurface.js";
 
@@ -11,13 +12,28 @@ const CSS = `
 .os-dialog-overlay {
   position: fixed; inset: 0; z-index: var(--z-dialog);
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.32);
-  animation: os-fade-in var(--motion-fast) var(--ease-standard) both;
+  background: rgba(0, 0, 0, 0.42);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
+  backdrop-filter: blur(24px) saturate(120%);
+  animation: os-fade-in var(--motion-normal) var(--ease-standard) both;
 }
-.os-dialog { min-width: 320px; max-width: 92vw; padding: 22px; }
+.os-dialog { min-width: 360px; max-width: 92vw; padding: 26px; }
 .os-dialog__title { font-family: var(--font-system); font-size: 17px; font-weight: 600; color: var(--text-primary); margin: 0 0 10px; }
 .os-dialog__body { font-family: var(--font-system); font-size: 14px; line-height: 1.55; color: var(--text-secondary); }
-.os-dialog__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.os-dialog__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.os-dialog__btn {
+  appearance: none; border: 0; cursor: pointer;
+  font-family: var(--font-system); font-size: 14px; font-weight: 600;
+  padding: 10px 20px; border-radius: var(--radius-pill);
+  background: var(--surface-tertiary); color: var(--text-primary);
+  transition: background var(--motion-fast) var(--ease-standard),
+              transform var(--motion-fast) var(--ease-spring);
+}
+.os-dialog__btn:hover { background: var(--interactive-secondary); transform: translateY(-1px); }
+.os-dialog__btn:active { transform: scale(0.97); }
+.os-dialog__btn.is-primary { background: var(--interactive-primary); color: var(--text-on-interactive-primary); }
+.os-dialog__btn.is-primary:hover { background: var(--interactive-primary-hover); }
+.os-dialog__btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-neutral); }
 `;
 
 function ensureStyle() {
@@ -32,7 +48,7 @@ export function createGlassDialog({
   title = "",
   body = "",
   actions = [],
-  tier = "regular",
+  tier = "thick",
 } = {}) {
   ensureStyle();
   const overlay = document.createElement("div");
@@ -69,7 +85,6 @@ export function createGlassDialog({
   if (actions.length) inner.appendChild(actionsEl);
   dialog.setContent(inner);
 
-  // 基础可访问性：role / aria-modal + 初始聚焦
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
   overlay.setAttribute("role", "presentation");
@@ -91,7 +106,6 @@ export function createGlassDialog({
     if (e.target === overlay) close();
   });
 
-  // 挂载后聚焦首个可交互元素
   const focusTarget = dialog.querySelector("button") || dialog;
   focusTarget.focus();
 

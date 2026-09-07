@@ -1,9 +1,9 @@
 // ============================================================================
 // NOVAI OS · Glass Button (glassButton.js)
-// 变体：primary(CTA, accent) / secondary / ghost / danger
+// 变体：primary(CTA, 中性) / secondary / ghost / danger
 // 字体：--font-system（D4=B）。primary 走 --interactive-primary（中性：Light 黑底白字 / Dark 白底黑字）
 // 青柠 --brand-accent 不用于普通按钮，仅保留给 Send Button 与 AI 光效
-// 依赖：glassSurface.js
+// 依赖：glassSurface.js + os-glass.css（提供 .os-glass--interactive hover-lift + ::after sheen）
 // ============================================================================
 import { createGlassSurface } from "./glassSurface.js";
 
@@ -16,38 +16,34 @@ const VARIANTS = {
 
 const STYLE_ID = "os-glass-button-style";
 const CSS = `
-.os-btn {
-  display: inline-flex;
-  transition: transform var(--motion-fast) var(--ease-spring),
-    box-shadow var(--motion-fast) var(--ease-standard);
-}
+.os-btn { display: inline-flex; }
 .os-btn__native {
   appearance: none; -webkit-appearance: none;
   margin: 0; border: 0; background: transparent;
   font-family: var(--font-system); font-size: 14px; font-weight: 600;
   line-height: 1; color: var(--text-primary);
-  padding: 10px 20px; cursor: pointer; width: 100%; height: 100%;
+  padding: 11px 22px; cursor: pointer; width: 100%; height: 100%;
   border-radius: inherit;
-  transition: opacity var(--motion-fast) var(--ease-standard),
-    background var(--motion-fast) var(--ease-standard),
-    color var(--motion-fast) var(--ease-standard);
+  transition: color var(--motion-fast) var(--ease-standard);
 }
-/* focus：中性柔和 glow（非青柠、非发丝描边） */
+/* focus：中性柔和 glow；无 outline 无发丝描边 */
 .os-btn__native:focus-visible { outline: none; }
-.os-btn:focus-within { box-shadow: 0 0 0 3px var(--focus-neutral); }
-.os-btn:active { transform: scale(0.97); }
+.os-btn:focus-within { box-shadow: 0 0 0 4px var(--focus-neutral); }
 
-/* primary = 系统主交互（中性：Light 黑底白字 / Dark 白底黑字） */
+/* primary = 系统主交互（中性：Light 黑底白字 / Dark 白底黑字）
+   实色 + sheen 镜面（白底/黑底上都能看到光斑滑过） */
 .os-btn--primary .os-btn__native { color: var(--text-on-interactive-primary); }
 .os-btn--primary { background: var(--interactive-primary); }
 .os-btn--primary .os-glass__bg { background: var(--interactive-primary); }
-.os-btn--primary .os-glass__refraction { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.os-btn--primary .os-glass__refraction { -webkit-backdrop-filter: none; backdrop-filter: none; opacity: 0.25; }
+.os-btn--primary .os-glass__highlight,
+.os-btn--primary .os-glass__border { opacity: 0.55; }
 .os-btn--primary:hover .os-glass__bg { background: var(--interactive-primary-hover); }
 .os-btn--primary:active .os-glass__bg { background: var(--interactive-primary-active); }
 
-/* secondary = 玻璃中性体 */
+/* secondary = 玻璃中性体（带 hover sheen） */
 .os-btn--secondary .os-btn__native { color: var(--text-primary); }
-.os-btn--secondary:hover .os-glass__bg { background: var(--interactive-secondary); }
+.os-btn--secondary:hover .os-glass__bg { background: var(--surface-tertiary); }
 
 /* ghost = 透明玻璃 */
 .os-btn--ghost { background: transparent; }
@@ -55,7 +51,7 @@ const CSS = `
 .os-btn--ghost .os-btn__native { color: var(--text-secondary); }
 .os-btn--ghost:hover .os-glass__bg { background: var(--interactive-secondary); }
 
-/* danger = 语义危险色（不使用 brand-accent） */
+/* danger = 语义危险色 */
 .os-btn--danger .os-btn__native { color: var(--semantic-danger); }
 .os-btn--danger .os-glass__bg { background: var(--interactive-secondary); }
 .os-btn--danger:hover .os-glass__bg { background: var(--semantic-danger); }
@@ -85,6 +81,7 @@ export function createGlassButton({
     variant: "button",
     className: "os-btn",
   });
+  surface.classList.add("os-glass--interactive"); /* 启用 os-glass.css 的 hover-lift + sheen */
   surface.classList.add(VARIANTS[variant] || VARIANTS.primary);
 
   const btn = document.createElement("button");

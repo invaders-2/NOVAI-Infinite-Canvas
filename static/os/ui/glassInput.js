@@ -1,6 +1,7 @@
 // ============================================================================
 // NOVAI OS · Glass Input (glassInput.js)
-// 文本输入：focus 用中性 glow + surface 提亮；无青柠 focus ring、无常驻 1px 描边
+// 文本输入：嵌进玻璃表面（下凹 inset shadow，材质表达，非边框）
+// focus：下凹加深 + 内部 ambient 提亮 + 中性柔和 glow（无青柠 focus ring、无常驻 1px 描边）
 // 字体：--font-system（D4=B）
 // 依赖：glassSurface.js
 // ============================================================================
@@ -10,19 +11,29 @@ const STYLE_ID = "os-glass-input-style";
 const CSS = `
 .os-input {
   display: block; min-width: 220px;
-  transition: box-shadow var(--motion-fast) var(--ease-standard);
+  /* 嵌进玻璃：内阴影下凹（材质表达，非等宽边框） */
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.10),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+  transition: box-shadow var(--motion-normal) var(--ease-standard),
+              background var(--motion-normal) var(--ease-standard);
 }
 .os-input__native {
   appearance: none; -webkit-appearance: none;
   margin: 0; border: 0; background: transparent; width: 100%;
   font-family: var(--font-system); font-size: 14px; line-height: 1.4;
   color: var(--text-primary);
-  padding: 10px 14px; border-radius: inherit;
+  padding: 11px 16px; border-radius: inherit;
 }
 .os-input__native::placeholder { color: var(--text-tertiary); }
 .os-input__native:focus { outline: none; }
-/* focus：中性柔和 glow + surface 提亮；无常驻 1px 描边、无青柠 focus ring */
-.os-input.is-focused { box-shadow: 0 0 0 3px var(--focus-neutral); }
+/* focus：下凹加深 + 内部 ambient 提亮 + 中性柔和 glow */
+.os-input.is-focused {
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.14),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 3px var(--focus-neutral);
+}
 .os-input.is-focused .os-glass__bg { background: var(--glass-fill-strong); }
 `;
 

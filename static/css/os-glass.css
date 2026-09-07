@@ -1,10 +1,14 @@
 /* ============================================================================
- * NOVAI OS · Liquid Glass Material (os-glass.css)
- * 统一玻璃材质：折射 / 动态高光 / 边缘高亮 / 内部反射 / 多层透明度。
- * 结构由 static/os/ui/glassSurface.js 生成（6 层 DOM）。
- * 材质等级：ultraThin < thin < regular < thick
+ * NOVAI OS · Liquid Glass Material Engine (os-glass.css)
+ * 真实材质：折射色散 / 多层内部反射 / 边缘曲面高光 / sheen 镜面 / 多层悬浮阴影
+ * 6 层 DOM（由 glassSurface.js 生成）：bg / refraction / highlight / border / shadow / content
+ * + ::after 伪元素 = sheen 镜面高光（hover 时一道光斑滑过）
  *
- * 降级：<html data-os-reduce-transparency="true"> 时降低 blur 半径、提高填充不透明度。
+ * 4 档 thickness = 真实材质差异（厚度+折射+受光+阴影综合），不是简单 blur 差异
+ * 完全去除 box-shadow inset 边框表达；层级只由材质承担
+ *
+ * 降级：<html data-os-reduce-transparency="true"> 降低 blur、关 sheen/highlight/border
+ * 动效：<html data-os-reduce-motion="true"> 去 sheen 动画与 lift
  * ========================================================================== */
 
 .os-glass {
@@ -12,9 +16,12 @@
   border-radius: var(--radius-lg);
   isolation: isolate;
   overflow: hidden;
+  transform: translateZ(0); /* 开启 GPU 合成层 */
+  transition: transform var(--motion-normal, 240ms) var(--ease-spring, cubic-bezier(.34, 1.56, .64, 1)),
+              box-shadow var(--motion-normal, 240ms) var(--ease-standard);
 }
 
-/* 6 层 */
+/* ---------- 6 层 base ---------- */
 .os-glass__bg,
 .os-glass__refraction,
 .os-glass__highlight,
@@ -29,112 +36,206 @@
 .os-glass__content {
   position: relative;
   pointer-events: auto;
-  z-index: 1;
+  z-index: 2;
 }
 
-/* 背景着色层 */
+/* ---------- 1. 背景着色（surface tint） ---------- */
 .os-glass__bg {
-  background: var(--glass-fill);
+  background: var(--glass-fill, rgba(255, 255, 255, 0.55));
+  transition: background var(--motion-normal, 240ms) var(--ease-standard);
 }
 
-/* 折射层：真正的 backdrop-filter 在这里 */
+/* ---------- 2. 折射层：conic-gradient 模拟折射色散 + backdrop-filter ---------- */
 .os-glass__refraction {
-  background: rgba(var(--glass-tint), 0.04);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
-  backdrop-filter: blur(28px) saturate(160%);
+  background:
+    conic-gradient(
+      from 0deg at 50% 50%,
+      transparent 0deg,
+      rgba(var(--glass-tint, 255, 255, 255), var(--glass-refraction-strength, 0.04)) 90deg,
+      transparent 180deg,
+      rgba(var(--glass-tint, 255, 255, 255), var(--glass-refraction-strength, 0.04)) 270deg,
+      transparent 360deg
+    );
+  -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(var(--glass-saturation, 150%));
+  backdrop-filter: blur(var(--glass-blur, 20px)) saturate(var(--glass-saturation, 150%));
+  mix-blend-mode: overlay;
+  opacity: 0.55;
 }
 
-/* 顶部动态高光（内部反射） */
+/* ---------- 3. 顶部受光（内部反射） ---------- */
 .os-glass__highlight {
   background: linear-gradient(
     180deg,
-    var(--glass-highlight) 0%,
-    rgba(var(--glass-tint), 0) 38%
+    var(--glass-highlight, rgba(255, 255, 255, 0.7)) 0%,
+    rgba(var(--glass-tint, 255, 255, 255), 0) 38%
   );
-  opacity: 0.6;
+  opacity: var(--glass-ambient, 0.6);
   mix-blend-mode: screen;
 }
 
-/* 边缘高亮（非均匀：仅顶部受光方向 + soft inner highlight）
-   刻意不使用 inset 0 0 0 1px 等宽发丝线——层级由材质承担，不靠 1px 边框 */
+/* ---------- 4. 边缘曲面高光（多重 radial，模拟曲面玻璃反光） ----------
+   刻意完全不使用 box-shadow inset；边缘由多层 radial gradient 表达 */
 .os-glass__border {
-  box-shadow:
-    inset 0 1px 0 0 var(--glass-edge),
-    inset 0 10px 22px -14px rgba(var(--glass-tint), 0.55);
+  background:
+    radial-gradient(ellipse 90% 40% at 50% 0%, rgba(255, 255, 255, 0.35), transparent 60%),
+    radial-gradient(ellipse 90% 40% at 50% 100%, rgba(255, 255, 255, 0.10), transparent 60%);
+  mix-blend-mode: screen;
+  opacity: 0.75;
 }
 
-/* 投影层 */
+/* ---------- 5. 投影：多层柔阴影 = 悬浮感 ---------- */
 .os-glass__shadow {
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--glass-shadow-stack, 0 8px 24px rgba(0, 0, 0, 0.12));
   border-radius: inherit;
 }
 
-/* ---------- 材质等级 ---------- */
-.os-glass--ultraThin .os-glass__refraction {
-  -webkit-backdrop-filter: blur(8px) saturate(120%);
-  backdrop-filter: blur(8px) saturate(120%);
+/* ---------- sheen 镜面高光（hover 时一道光斑滑过） ---------- */
+.os-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.45) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  pointer-events: none;
+  z-index: 3;
+  mix-blend-mode: overlay;
+  opacity: 0;
+  transition: opacity var(--motion-fast, 160ms) var(--ease-standard),
+              transform var(--motion-slow, 700ms) var(--ease-spring, cubic-bezier(.34, 1.56, .64, 1));
 }
-.os-glass--ultraThin .os-glass__bg {
-  background: var(--glass-fill);
-  opacity: 0.7;
+.os-glass:hover::after {
+  opacity: 1;
+  transform: translateX(120%);
+  transition: opacity var(--motion-fast, 160ms) var(--ease-standard),
+              transform 900ms var(--ease-spring, cubic-bezier(.34, 1.56, .64, 1));
 }
 
-.os-glass--thin .os-glass__refraction {
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  backdrop-filter: blur(16px) saturate(140%);
-}
-.os-glass--thin .os-glass__bg {
-  background: var(--glass-fill);
-  opacity: 0.82;
-}
-
-.os-glass--regular .os-glass__refraction {
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
-  backdrop-filter: blur(28px) saturate(160%);
-}
-.os-glass--regular .os-glass__bg {
-  background: var(--glass-fill-strong);
+/* ---------- 4 档 thickness 真实材质差异 ---------- */
+.os-glass--ultraThin {
+  --glass-blur: 8px;
+  --glass-saturation: 120%;
+  --glass-refraction-strength: 0.02;
+  --glass-ambient: 0.4;
+  --glass-shadow-stack:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 2px 6px rgba(0, 0, 0, 0.06);
+  --glass-lift: -1px;
+  --glass-shadow-stack-hover:
+    0 2px 4px rgba(0, 0, 0, 0.06),
+    0 6px 14px rgba(0, 0, 0, 0.10);
 }
 
-.os-glass--thick .os-glass__refraction {
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  backdrop-filter: blur(40px) saturate(180%);
+.os-glass--thin {
+  --glass-blur: 16px;
+  --glass-saturation: 140%;
+  --glass-refraction-strength: 0.04;
+  --glass-ambient: 0.5;
+  --glass-shadow-stack:
+    0 2px 6px rgba(0, 0, 0, 0.08),
+    0 8px 20px rgba(0, 0, 0, 0.10);
+  --glass-lift: -2px;
+  --glass-shadow-stack-hover:
+    0 3px 8px rgba(0, 0, 0, 0.10),
+    0 14px 32px rgba(0, 0, 0, 0.14);
 }
-.os-glass--thick .os-glass__bg {
-  background: var(--glass-fill-strong);
+
+.os-glass--regular {
+  --glass-blur: 28px;
+  --glass-saturation: 160%;
+  --glass-refraction-strength: 0.06;
+  --glass-ambient: 0.6;
+  --glass-shadow-stack:
+    0 4px 12px rgba(0, 0, 0, 0.10),
+    0 18px 40px rgba(0, 0, 0, 0.14);
+  --glass-lift: -3px;
+  --glass-shadow-stack-hover:
+    0 6px 16px rgba(0, 0, 0, 0.12),
+    0 24px 56px rgba(0, 0, 0, 0.18);
+}
+
+.os-glass--thick {
+  --glass-blur: 40px;
+  --glass-saturation: 180%;
+  --glass-refraction-strength: 0.08;
+  --glass-ambient: 0.75;
+  --glass-shadow-stack:
+    0 8px 20px rgba(0, 0, 0, 0.14),
+    0 32px 64px rgba(0, 0, 0, 0.20);
+  --glass-lift: -4px;
+  --glass-shadow-stack-hover:
+    0 12px 28px rgba(0, 0, 0, 0.18),
+    0 44px 88px rgba(0, 0, 0, 0.26);
+}
+
+/* ---------- hover 抬起（组件选择启用 .os-glass--interactive） ---------- */
+.os-glass--interactive {
+  cursor: pointer;
+  transition: transform var(--motion-normal, 240ms) var(--ease-spring, cubic-bezier(.34, 1.56, .64, 1)),
+              box-shadow var(--motion-normal, 240ms) var(--ease-standard);
+}
+.os-glass--interactive:hover {
+  transform: translateY(var(--glass-lift, -2px));
+  box-shadow: var(--glass-shadow-stack-hover, var(--glass-shadow-stack));
+}
+.os-glass--interactive:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 100ms;
 }
 
 /* ---------- 降级：Reduce Transparency ---------- */
 [data-os-reduce-transparency="true"] .os-glass__refraction {
   -webkit-backdrop-filter: blur(4px) saturate(110%);
   backdrop-filter: blur(4px) saturate(110%);
+  opacity: 0.3;
 }
 [data-os-reduce-transparency="true"] .os-glass__bg {
   background: var(--surface-secondary);
 }
-[data-os-reduce-transparency="true"] .os-glass__highlight {
-  opacity: 0.25;
+[data-os-reduce-transparency="true"] .os-glass::after,
+[data-os-reduce-transparency="true"] .os-glass__highlight,
+[data-os-reduce-transparency="true"] .os-glass__border {
+  display: none;
 }
 
-/* ---------- 非激活窗口降 blur（性能，R10） ---------- */
+/* ---------- 动效降级 ---------- */
+[data-os-reduce-motion="true"] .os-glass,
+[data-os-reduce-motion="true"] .os-glass::after {
+  transition: none;
+}
+[data-os-reduce-motion="true"] .os-glass--interactive:hover {
+  transform: none;
+}
+
+/* ---------- 非激活窗口（性能，R10） ---------- */
 .os-glass--inactive .os-glass__refraction {
   -webkit-backdrop-filter: blur(14px) saturate(130%);
   backdrop-filter: blur(14px) saturate(130%);
+  opacity: 0.4;
 }
 
-/* ---------- 组件快捷类（供 glassXxx.js 使用） ---------- */
+/* ---------- 组件快捷类 ---------- */
 .os-glass--button {
   border-radius: var(--radius-pill);
 }
 .os-glass--input {
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 .os-glass--panel {
   border-radius: var(--radius-lg);
 }
 .os-glass--menu,
-.os-glass--dialog,
-.os-glass--tooltip,
 .os-glass--notification {
   border-radius: var(--radius-md);
+}
+.os-glass--dialog {
+  border-radius: var(--radius-xl);
+}
+.os-glass--tooltip {
+  border-radius: var(--radius-sm);
 }
