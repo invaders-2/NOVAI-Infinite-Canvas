@@ -212,7 +212,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 GLOBAL_LOOP = None
 APP_VERSION = "1.0.86"
-GITHUB_REPO_URL = "https://github.com/invaders-2/NOVAI"
+GITHUB_REPO_URL = "https://github.com/invaders-2/NOVAI-Infinite-Canvas"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/invaders-2/NOVAI/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/invaders-2/NOVAI/git/trees/main?recursive=1"
 GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/invaders-2/NOVAI/main"
