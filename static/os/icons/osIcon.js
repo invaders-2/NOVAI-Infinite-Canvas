@@ -1,5 +1,12 @@
 // ============================================================================
 // NOVAI OS · Icon System (osIcon.js)
+// ⛔ FROZEN — Design System / Material Baseline v1.0（2026-09-08, 1d9c0fa）
+//    本文件是 NOVAI OS 唯一的 Icon 真实来源。完整基线见
+//    docs/NOVAI_OS_DESIGN_BASELINE.md
+//    · 需要新图标 → 追加进 PATHS，禁止引入第二套图标库
+//    · 禁止实心 / 粗黑 / Emoji / 卡通 / 彩色系统图标 / 跨库混搭
+//    · 后续 Phase 一律通过 createIcon() 消费，不得自建图标体系
+//
 // 统一线性图标：Linear / Outline / Stroke 风格
 //   - 不使用实心图标 / 粗黑图标 / 卡通图标 / 彩色系统图标
 //   - 不混搭不同图标库

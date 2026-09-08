@@ -1,7 +1,11 @@
 // ============================================================================
 // NOVAI OS · Glass Surface Primitive (glassSurface.js)
+// ⛔ FROZEN — Design System / Material Baseline v1.0（2026-09-08, 1d9c0fa）
+//    所有 OS 组件必须通过本文件消费冻结材质，不得自行拼装玻璃层。
+//    完整基线见 docs/NOVAI_OS_DESIGN_BASELINE.md
+//
 // 生成 6 层 DOM 玻璃材质：bg / refraction / highlight / border / shadow / content
-// 材质等级：ultraThin | thin | regular | thick
+// 材质等级：ultraThin | thin | regular | thick（唯一 4 档，禁止扩展）
 //
 // 依赖：os-tokens.css + os-glass.css（由宿主页面引入）
 // 字体：默认走 --font-system（D4=B）；本模块不引用 --font-display
@@ -31,7 +35,14 @@ export function createGlassSurface(options = {}) {
   const root = document.createElement("div");
   root.className = `os-glass os-glass--${tier}`;
   if (variant) root.classList.add(`os-glass--${variant}`);
-  if (className) root.classList.add(className);
+  // className 允许传空格分隔的多个 token（如 "os-notification os-anim-slide-up"）。
+  // DOMTokenList.add() 不接受含空格的单个字符串，必须拆开逐个 add。
+  if (className) {
+    String(className)
+      .split(/\s+/)
+      .filter(Boolean)
+      .forEach((token) => root.classList.add(token));
+  }
   if (inactive) root.classList.add("os-glass--inactive");
 
   for (const name of LAYERS) {

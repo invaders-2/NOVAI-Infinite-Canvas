@@ -1,5 +1,12 @@
 /* ============================================================================
  * NOVAI OS · Liquid Glass Material Engine (os-glass.css)
+ * ⛔ FROZEN — Design System / Material Baseline v1.0（2026-09-08, 1d9c0fa）
+ *    本文件是 NOVAI OS 唯一的 Glass Material 真实来源。
+ *    完整基线见 docs/NOVAI_OS_DESIGN_BASELINE.md
+ *    · 唯一材质层级：ultraThin / thin / regular / thick（禁止新增第 5 档）
+ *    · 组件禁止私自写 backdrop-filter / blur / border / box-shadow 硬编码
+ *    · 后续 Phase 一律通过 glassSurface.js 消费本文件的材质
+ *
  * Low-haze Liquid Material（默认材质 = 此前 Reduce Transparency = ON 的干净方向）
  *
  * 默认材质原则：

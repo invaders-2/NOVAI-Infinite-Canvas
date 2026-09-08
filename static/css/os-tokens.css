@@ -1,5 +1,13 @@
 /* ============================================================================
  * NOVAI OS · Design Tokens (os-tokens.css)
+ * ⛔ FROZEN — Design System / Material Baseline v1.0（2026-09-08, 1d9c0fa）
+ *    本文件是 NOVAI OS 唯一的 Design Token 真实来源。
+ *    完整基线见 docs/NOVAI_OS_DESIGN_BASELINE.md
+ *    · 需要新 Token → 追加到本文件既有作用域，禁止另建 token 文件
+ *    · 禁止新建平行前缀（--os2-* / --phase2-* / 组件私有色值）
+ *    · 后续 Phase（Desktop / Dock / Window / App / Dialog / Menu / AI Assistant）
+ *      必须消费本文件的 Token，不得自建第二套设计体系
+ *
  * 引入并扩展 marvis-shared.css（99 个语义变量）。
  * OS 层专用 Token 定义：surface / text / border / glass / interactive / brand-accent / font。
  *

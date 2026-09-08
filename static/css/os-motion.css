@@ -1,6 +1,11 @@
 /* ============================================================================
  * NOVAI OS · Motion Tokens (os-motion.css)
- * 统一 Motion Language：时长档位 + spring 曲线 + reduced-motion 降级。
+ * ⛔ FROZEN — Design System / Material Baseline v1.0（2026-09-08, 1d9c0fa）
+ *    完整基线见 docs/NOVAI_OS_DESIGN_BASELINE.md
+ *    · 时长只允许 100 / 160 / 240 / 360ms
+ *    · 交互态默认走 --ease-material（无 overshoot，不做明显 bounce）
+ *    · --ease-spring 仅允许 AI Beam / Thinking 等流体光效例外
+ * 统一 Motion Language：时长档位 + 曲线 + reduced-motion 降级。
  * macOS / Windows 必须共用同一套 Motion 规则（允许原生渲染差异）。
  * ========================================================================== */
 
