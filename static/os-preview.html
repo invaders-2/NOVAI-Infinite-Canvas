@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<!--
+  NOVAI OS · Desktop Preview (Phase 2)
+
+  路由（D6 Cutover 前）：
+    /os-preview              → 本页：NOVAI OS Desktop Preview
+    /design-system-preview   → Phase 1 Material Lab / Design System Preview
+    /                        → Legacy NOVAI
+
+  本页只做装配：主题引导 + 挂载 Desktop。
+  所有视觉一律消费 Phase 1 冻结基线（os-tokens / os-glass / os-motion / osIcon / glassSurface）。
+-->
+<html lang="zh-CN" data-os-theme="system">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NOVAI OS · Desktop Preview</title>
+  <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941" />
+  <link rel="stylesheet" href="/static/css/os-tokens.css?v=1.0.113.1788829941" />
+  <link rel="stylesheet" href="/static/css/os-glass.css?v=1.0.113.1788829955" />
+  <link rel="stylesheet" href="/static/css/os-motion.css?v=1.0.113.1788829984" />
+  <link rel="stylesheet" href="/static/css/os-shell.css?v=1.0.113.1788837719" />
+  <style>
+    /* 桌面背景：纯色。禁止渐变 / 环境色 / 大面积 glow —— 背景只承载材质。 */
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: var(--font-system);
+      color: var(--text-primary);
+      background: var(--bg-material);
+      transition: background-color var(--motion-normal) var(--ease-material);
+      overflow: hidden;
+    }
+    #desktopMount { width: 100%; height: 100%; }
+    .os-boot {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-system); font-size: 13px; color: var(--text-tertiary);
+    }
+  </style>
+</head>
+<body>
+  <div id="desktopMount"><div class="os-boot">Loading NOVAI OS…</div></div>
+
+  <script>
+    /* 预渲染引导：先落地主题再渲染，避免 FOUC */
+    (function () {
+      try {
+        var t = localStorage.getItem("novai-os:theme") || "system";
+        document.documentElement.setAttribute("data-os-theme", t);
+        if (localStorage.getItem("novai-os:reduce-motion") === "1")
+          document.documentElement.setAttribute("data-os-reduce-motion", "true");
+        if (localStorage.getItem("novai-os:reduce-transparency") === "1")
+          document.documentElement.setAttribute("data-os-reduce-transparency", "true");
+      } catch (e) {}
+    })();
+  </script>
+
+  <script type="module">
+    import { initThemeRuntime } from "/static/os/theme/themeRuntime.js";
+    import { restoreAll, saveThemePref } from "/static/os/theme/themePersistence.js";
+    import { createDesktop } from "/static/os/shell/osDesktop.js";
+    import { emit } from "/static/os/core/osBus.js";
+
+    const runtime = initThemeRuntime({
+      initial: "system",
+      onChange: ({ theme, resolved }) => {
+        saveThemePref(theme);
+        emit("theme:changed", { theme, resolved });
+      },
+    });
+    restoreAll({ onTheme: (t) => runtime.setTheme(t) });
+
+    const mount = document.getElementById("desktopMount");
+    mount.innerHTML = "";
+
+    try {
+      const desktop = await createDesktop({ mount, themeRuntime: runtime });
+      // 暴露给验收脚本（只读诊断，不承担业务逻辑）
+      window.__novaiDesktop = desktop;
+    } catch (err) {
+      console.error("[os-preview] Desktop 初始化失败", err);
+      mount.innerHTML = "";
+      const box = document.createElement("div");
+      box.className = "os-boot";
+      box.textContent = "Desktop 初始化失败，请查看 Console。";
+      mount.appendChild(box);
+    }
+  </script>
+</body>
+</html>

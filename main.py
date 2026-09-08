@@ -12425,7 +12425,15 @@ async def index():
 
 @app.get("/os-preview")
 async def os_preview():
-    # Phase 1 入口：NOVAI OS Design System + Theme Runtime 验收页（不影响 / 老壳）
+    # Phase 2 起：NOVAI OS Desktop Preview（Desktop Shell）。
+    # Phase 1 的 Material Lab 已迁至 /design-system-preview（见下）。
+    return static_html_response("os-preview.html")
+
+
+@app.get("/design-system-preview")
+async def design_system_preview():
+    # Phase 1 入口：NOVAI OS Design System / Material Lab 验收页。
+    # 原挂在 /os-preview，Phase 2 起 /os-preview 让位给 Desktop Preview。
     return static_html_response("design-system-preview.html")
 
 @app.get("/api/view")

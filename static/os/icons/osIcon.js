@@ -63,6 +63,33 @@ const PATHS = {
   check: '<path d="M4.5 12.5l5 5 10-10.5"/>',
   // Minus
   minus: '<path d="M5.5 12h13"/>',
+  // ---------- Phase 2 · 第一方 App 图标（同为线性 stroke 语言，视觉重量一致） ----------
+  // Image Generation：相框 + 取景点 + 地平线
+  image:
+    '<rect x="3.2" y="4.8" width="17.6" height="14.4" rx="2.6"/>' +
+    '<circle cx="8.4" cy="9.6" r="1.5"/>' +
+    '<path d="M4.4 18.2l4.6-4.8 3.2 3.4 2.8-3 4.6 4.4"/>',
+  // Infinite Canvas：视口四角 + 中心节点
+  canvas:
+    '<path d="M4 9.2V6.6A2.6 2.6 0 0 1 6.6 4h2.6"/>' +
+    '<path d="M14.8 4h2.6A2.6 2.6 0 0 1 20 6.6v2.6"/>' +
+    '<path d="M20 14.8v2.6a2.6 2.6 0 0 1-2.6 2.6h-2.6"/>' +
+    '<path d="M9.2 20H6.6A2.6 2.6 0 0 1 4 17.4v-2.6"/>' +
+    '<circle cx="12" cy="12" r="2.2"/>',
+  // Assets / Launcher：四宫格
+  grid:
+    '<rect x="4" y="4" width="7" height="7" rx="1.6"/>' +
+    '<rect x="13" y="4" width="7" height="7" rx="1.6"/>' +
+    '<rect x="4" y="13" width="7" height="7" rx="1.6"/>' +
+    '<rect x="13" y="13" width="7" height="7" rx="1.6"/>',
+  // Chat：对话气泡
+  chat:
+    '<path d="M20 12.6c0 3.6-3.6 6.5-8 6.5a9.6 9.6 0 0 1-2.4-.3L5.6 20.8l1.3-3.4A6.9 6.9 0 0 1 4 12.6c0-3.6 3.6-6.5 8-6.5s8 2.9 8 6.5z"/>',
+  // Workflow：两节点 + 连线
+  workflow:
+    '<rect x="3.6" y="4.2" width="6.8" height="5.2" rx="1.6"/>' +
+    '<rect x="13.6" y="14.6" width="6.8" height="5.2" rx="1.6"/>' +
+    '<path d="M7 9.4v4a1.8 1.8 0 0 0 1.8 1.8h4.8"/>',
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
