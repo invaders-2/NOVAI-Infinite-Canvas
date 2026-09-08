@@ -182,12 +182,24 @@ Token：`--surface-active` / `--selection-neutral` / `--focus-neutral` / `--inte
 
 ## 十四、验收命令
 
+> **路由映射（Phase 2 起生效）**
+>
+> | 路由 | 指向 | 说明 |
+> |---|---|---|
+> | `/os-preview` | `static/os-preview.html` | **Phase 2+ NOVAI OS Desktop Preview** |
+> | `/design-system-preview` | `static/design-system-preview.html` | **Phase 1 Material Lab / Design System Preview** |
+> | `/` | `static/index.html` | Legacy NOVAI（D6 Cutover 前不变） |
+>
+> ⚠️ Phase 1 期间 Material Lab 曾挂在 `/os-preview`；Phase 2 起该路径让位给 Desktop Preview。
+> 历史文档中出现的 `/os-preview` = Material Lab，一律按上表理解为 `/design-system-preview`。
+
 ```bash
 cd /Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main
 NOVAI_PORT=3100 /usr/bin/python3 main.py
 
 # 验收
-curl -s --noproxy '*' -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3100/os-preview   # 200
-curl -s --noproxy '*' -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3100/             # 200（Legacy）
-curl -s --noproxy '*' http://127.0.0.1:3100/api/apps                                       # {"apps":[]}
+curl -s --noproxy '*' -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3100/os-preview              # 200（Desktop Preview）
+curl -s --noproxy '*' -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3100/design-system-preview  # 200（Phase 1 Material Lab）
+curl -s --noproxy '*' -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3100/                       # 200（Legacy）
+curl -s --noproxy '*' http://127.0.0.1:3100/api/apps                                               # {"apps":[]} 或已注册 App
 ```
