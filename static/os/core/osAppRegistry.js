@@ -10,10 +10,21 @@
 // 这样 Phase 5 第一方 App manifest 化后，只要后端注册了同 id 的 App，
 // 前端会自动切到真实数据，无需改前端代码。
 //
-// 注意：GET /api/apps 的返回形状（来自 AppRegistry.list_apps）是
-//   { apps: [ { id, title, version, state, capabilities:[{id,risk,title}] } ] }
-// **不含 entry 字段** —— 远程 App 是能力型的，不能编造 UI entry。
-// 因此 normalizeRemote 的 entry 恒为 null，Window Host 会显示"无 UI entry"占位。
+// 注意：GET /api/apps 的返回形状（来自 AppRegistry.list_apps，Phase 5 起）是
+//   { apps: [ {
+//       id, title, description, version, state,
+//       entry,            // 已解析为 /apps/<id>/<entry> 的可直连 URL
+//       keepAlive,        // 'always' | 'session' | 'ephemeral'
+//       singleton,        // bool
+//       permissions,      // string[]
+//       capabilities:[{id,risk,title}]
+//   } ] }
+// 第一方 App（如 chat）迁移到 registry 后，entry 由后端真实返回，
+// normalizeRemote 直接采用，不再恒为 null，Window Host 正常加载 UI。
+//
+// 图标/类型等"OS 展示元数据"仍走 Normalize Layer：
+//   契约 schema.icon 要求 /^\\/apps// 的 URL，与 OS 命名图标体系（osIcon.js）不兼容，
+//   故 manifest 不带 icon，这里用 ICON_BY_ID 把 registry id 映射到命名图标。
 // ============================================================================
 import { BUILTIN_APPS } from "./builtinApps.js";
 import { emit } from "./osBus.js";
@@ -51,16 +62,25 @@ function normalizeBuiltin(app) {
   };
 }
 
+// OS 展示元数据：registry id → 命名图标（osIcon.js 仅接受命名图标，
+// 不接受 /apps/... URL，故 icon 不来自 manifest，而在此映射）。
+const ICON_BY_ID = {
+  chat: "chat",
+  "image-generation": "image",
+  "infinite-canvas": "canvas",
+  assets: "grid",
+};
+
 function normalizeRemote(app) {
-  // /api/apps 当前不返回 singleton / keepAlive / permissions / entry，给安全默认；
-  // 后端 list_apps 补齐这些字段后自动采用真实值。
+  // 后端 list_apps 现已返回 entry / keepAlive / singleton / permissions / description，
+  // 这里直接采用真实值；缺失时回安全默认。
   const keepAliveMode = app.keepAlive || "session";
   return {
     id: app.id,
     name: app.title || app.id,
-    desc: "",
-    icon: "grid", // 远程 App 无图标契约，统一用中性四宫格
-    entry: null, // list_apps 不返回 entry，不编造
+    desc: app.description || "",
+    icon: ICON_BY_ID[app.id] || app.icon || "grid",
+    entry: app.entry || null, // 后端已解析为 /apps/<id>/<entry> 可直连 URL
     source: "registry",
     version: String(app.version || "0.0.0"),
     state: app.state || "unknown",

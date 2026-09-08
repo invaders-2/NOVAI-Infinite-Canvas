@@ -64,16 +64,6 @@ export const BUILTIN_APPS = [
     kind: "library",
   },
   {
-    id: "chat",
-    name: "Chat",
-    desc: "对话助手",
-    icon: "chat",
-    entry: "/static/gpt-chat.html",
-    singleton: true,
-    keepAliveMode: "session",
-    kind: "assistant",
-  },
-  {
     id: "api-settings",
     name: "API Settings",
     desc: "接口与凭据设置",

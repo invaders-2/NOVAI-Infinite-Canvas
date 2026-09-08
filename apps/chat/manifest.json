@@ -1,0 +1,37 @@
+{
+  "format": "novai-app/v1",
+  "id": "chat",
+  "version": "1.0.0",
+  "name": "Chat",
+  "description": "对话助手：面向 NOVAI 内核的多轮对话与意图执行入口",
+  "entry": "chat.html",
+  "singleton": true,
+  "keepAlive": "session",
+  "dataVersion": 1,
+  "permissions": [
+    "model.execute",
+    "prompt.read"
+  ],
+  "capabilities": [
+    {
+      "id": "chat.ask",
+      "title": "对话提问",
+      "description": "向 Chat 发送一条消息并获取回复",
+      "risk": "write",
+      "handler": {
+        "type": "frontend-bridge",
+        "targets": ["chat"]
+      }
+    },
+    {
+      "id": "chat.summarize",
+      "title": "总结对话",
+      "description": "总结当前 Chat 会话要点",
+      "risk": "read",
+      "handler": {
+        "type": "frontend-bridge",
+        "targets": ["chat"]
+      }
+    }
+  ]
+}

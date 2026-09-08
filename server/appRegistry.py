@@ -213,16 +213,31 @@ class AppRegistry:
         return self._apps.get(app_id)
 
     def list_apps(self, include_failed: bool = False) -> List[Dict[str, Any]]:
-        """返回供 GET /api/apps 消费的 App 清单（规范约定形状）。"""
+        """返回供 GET /api/apps 消费的 App 清单（规范约定形状）。
+
+        除 id/title/version/state/capabilities 外，Phase 5 起补回契约原生字段：
+        entry / keepAlive / singleton / permissions / description。
+        - entry：manifest 的相对路径（契约 ^[^/].*\\.html$）在此解析为可直连的
+          /apps/<id>/<entry> URL，前端无需再拼接；非法/缺失则为 None。
+        - keepAlive / singleton / permissions：前端 normalizeRemote 已读取这些字段，
+          此处补齐后迁移后的第一方 App 才能保留真实生命周期与权限声明。
+        """
         out: List[Dict[str, Any]] = []
         for rec in self._apps.values():
             if not include_failed and rec.state != "healthy":
                 continue
+            raw_entry = rec.manifest.get("entry")
+            entry_url = ("/apps/%s/%s" % (rec.id, raw_entry)) if raw_entry else None
             out.append({
                 "id": rec.id,
                 "title": rec.manifest.get("name", rec.id),
+                "description": rec.manifest.get("description") or "",
                 "version": str(rec.manifest.get("version", "0.0.0")),
                 "state": rec.state,
+                "entry": entry_url,
+                "keepAlive": rec.manifest.get("keepAlive", "session"),
+                "singleton": bool(rec.manifest.get("singleton", True)),
+                "permissions": list(rec.manifest.get("permissions", []) or []),
                 "capabilities": [
                     {
                         "id": c.id,
