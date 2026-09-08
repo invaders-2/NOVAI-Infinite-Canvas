@@ -38,6 +38,8 @@ export const BUILTIN_APPS = [
     desc: "图像生成 · 统一的图像创作入口",
     icon: "image",
     entry: "/static/online.html",
+    singleton: true,
+    keepAliveMode: "session",
     kind: "create",
   },
   {
@@ -47,6 +49,8 @@ export const BUILTIN_APPS = [
     desc: "无限画布 · 基于 smart-canvas",
     icon: "canvas",
     entry: "/static/smart-canvas.html",
+    singleton: true,
+    keepAliveMode: "session",
     kind: "create",
   },
   {
@@ -55,6 +59,8 @@ export const BUILTIN_APPS = [
     desc: "素材库管理",
     icon: "grid",
     entry: "/static/asset-manager.html",
+    singleton: true,
+    keepAliveMode: "session",
     kind: "library",
   },
   {
@@ -63,6 +69,8 @@ export const BUILTIN_APPS = [
     desc: "对话助手",
     icon: "chat",
     entry: "/static/gpt-chat.html",
+    singleton: true,
+    keepAliveMode: "session",
     kind: "assistant",
   },
   {
@@ -71,6 +79,8 @@ export const BUILTIN_APPS = [
     desc: "接口与凭据设置",
     icon: "settings",
     entry: "/static/api-settings.html",
+    singleton: true,
+    keepAliveMode: "session",
     kind: "settings",
   },
   {
@@ -81,6 +91,8 @@ export const BUILTIN_APPS = [
     desc: "工作流设置 · 后端与节点配置",
     icon: "workflow",
     entry: "/static/comfyui-settings.html",
+    singleton: true,
+    keepAliveMode: "session",
     kind: "settings",
   },
 ];

@@ -146,6 +146,11 @@ export function byAppId(appId) {
   return all().find((w) => w.appId === appId) || null;
 }
 
+/** 按 instanceId 查窗口（App Runtime 复用/聚焦实例时用；窗口关闭后返回 null） */
+export function byInstanceId(instanceId) {
+  return all().find((w) => w.instanceId === instanceId) || null;
+}
+
 /** 非 minimized 窗口中 z 最高的那个（焦点候选） */
 export function topmost() {
   const visible = all().filter((w) => w.state !== "minimized");
@@ -204,6 +209,7 @@ export function reset() {
 export const list = all;
 export const get = byId;
 export const getByAppId = byAppId;
+export const getByInstanceId = byInstanceId;
 /** ⚠️ Phase 2 语义 = "highest z"；Phase 3 语义 = "focusedId"（可能为空） */
 export const getActiveId = getFocusedId;
 export const resetStore = reset;
@@ -226,6 +232,7 @@ export default {
   all,
   byId,
   byAppId,
+  byInstanceId,
   topmost,
   topmostId,
   getFocusedId,

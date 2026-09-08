@@ -52,6 +52,7 @@ function payload(win, source) {
   return {
     id: win.id,
     appId: win.appId,
+    instanceId: win.instanceId || null,
     title: win.title,
     state: win.state,
     rect: { ...win.rect },
@@ -101,17 +102,27 @@ function compactZ() {
 
 /**
  * 打开（或激活）一个 App 的窗口。
- * singleton 语义：同一 appId 同时只有一个实例；
+ *
+ * ⚠️ Phase 4：singleton / multi 决策已上提到 App Runtime（osAppRuntime）。
+ * 本函数只负责"窗口视图"：若传入 instanceId 且存在对应窗口则复用/聚焦；
+ * 否则（含无 instanceId 的兼容调用）按 appId 兜底。窗口记录携带 instanceId，
+ * 供 Runtime 反向关联 AppInstance。
+ *
  *   - 已开 normal    → 只聚焦
  *   - 已开 minimized → restore + 聚焦
- *   - 未开 / 已关闭  → 创建**新的**窗口实例（新 id）
+ *   - 未开 / 已关闭  → 创建**新的**窗口（新 id）
+ *
  * @param {{id:string,name?:string}} app
- * @param {'user'|'ai'|'system'} source
+ * @param {Object|string} [options] 字符串时视作 source；对象时 { instanceId?, source? }
  */
-export function open(app, source = "user") {
+export function open(app, options = {}) {
+  const source = typeof options === "string" ? options : (options && options.source) || "user";
+  const instanceId =
+    typeof options === "object" && options && options.instanceId ? options.instanceId : null;
   if (!app || !app.id) return null;
 
-  const existing = store.byAppId(app.id);
+  // 优先按 instanceId 命中（App Runtime 复用/聚焦同一实例）；无则回退 appId（兼容旧调用）
+  const existing = instanceId ? store.byInstanceId(instanceId) : store.byAppId(app.id);
   if (existing) {
     if (existing.state === "minimized") return restore(existing.id, source);
     return focusWindow(existing.id, source);
@@ -123,13 +134,13 @@ export function open(app, source = "user") {
     win = {
       id,
       appId: app.id,
+      instanceId: instanceId || null,
       title: app.name || app.id,
       state: "normal",
       rect: nextRect(),
       prevRect: null,
       minSize: { ...MIN_SIZE },
       z: store.nextZ(),
-      singleton: true,
       createdAt: Date.now(),
     };
     store.insert(win);

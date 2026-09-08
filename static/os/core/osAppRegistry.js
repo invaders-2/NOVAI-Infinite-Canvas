@@ -23,10 +23,16 @@ const APPS_ENDPOINT = "/api/apps";
 /** 归一化后的统一形状 */
 // {
 //   id, name, desc, icon, entry, source: 'builtin' | 'registry',
-//   version, state, capabilities: [{ id, risk, title }]
+//   version, state, capabilities: [{ id, risk, title }], permissions: string[],
+//   kind, singleton: boolean,
+//   keepAliveMode: 'always' | 'session' | 'ephemeral',   // ★ 唯一真实保活字段
+//   keepAliveOnWindowClose: boolean                        // ★ 派生：keepAliveMode !== 'ephemeral'
 // }
 
 function normalizeBuiltin(app) {
+  // Phase 4：builtinApps.js 条目无 singleton / keepAlive，这里补默认。
+  // keepAliveMode 是唯一真实字段（与后端 schema 枚举对齐）；keepAliveOnWindowClose 仅派生。
+  const keepAliveMode = app.keepAliveMode || "session";
   return {
     id: app.id,
     name: app.name || app.id,
@@ -37,11 +43,18 @@ function normalizeBuiltin(app) {
     version: "builtin",
     state: "healthy",
     capabilities: [],
+    permissions: Array.isArray(app.permissions) ? app.permissions : [],
     kind: app.kind || "app",
+    singleton: app.singleton !== false, // 默认 true
+    keepAliveMode,
+    keepAliveOnWindowClose: keepAliveMode !== "ephemeral",
   };
 }
 
 function normalizeRemote(app) {
+  // /api/apps 当前不返回 singleton / keepAlive / permissions / entry，给安全默认；
+  // 后端 list_apps 补齐这些字段后自动采用真实值。
+  const keepAliveMode = app.keepAlive || "session";
   return {
     id: app.id,
     name: app.title || app.id,
@@ -52,7 +65,11 @@ function normalizeRemote(app) {
     version: String(app.version || "0.0.0"),
     state: app.state || "unknown",
     capabilities: Array.isArray(app.capabilities) ? app.capabilities : [],
+    permissions: Array.isArray(app.permissions) ? app.permissions : [],
     kind: "app",
+    singleton: app.singleton !== false,
+    keepAliveMode,
+    keepAliveOnWindowClose: keepAliveMode !== "ephemeral",
   };
 }
 

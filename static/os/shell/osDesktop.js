@@ -24,6 +24,8 @@
 import { on, emit } from "../core/osBus.js";
 import { loadApps, getApp, getApps, getDiagnostics } from "../core/osAppRegistry.js";
 import * as wm from "../core/osWindowManager.js";
+import * as appRuntime from "../core/osAppRuntime.js";
+import * as appStore from "../core/osAppStore.js";
 import { createSystemBar, IDLE_LABEL } from "./osSystemBar.js";
 import { createDesktopIcon } from "./osDesktopIcon.js";
 import { createDock } from "./osDock.js";
@@ -57,13 +59,11 @@ export async function createDesktop({ mount, themeRuntime = null } = {}) {
     theme: themeRuntime ? themeRuntime.getTheme() : "system",
     onThemeChange: (t) => themeRuntime && themeRuntime.setTheme(t),
     onAi: () =>
-      launchApp({
-        id: "ai-assistant",
-        name: "AI Assistant",
-        icon: "ai",
-        entry: null,
-        source: "system",
-      }),
+      // AI Assistant 不是注册 App，走直接 wm.open（无 AppInstance，appRuntime 会拒绝）
+      wm.open(
+        { id: "ai-assistant", name: "AI Assistant", icon: "ai", entry: null },
+        "system"
+      ),
   });
   root.appendChild(sysbar.node);
 
@@ -127,8 +127,8 @@ export async function createDesktop({ mount, themeRuntime = null } = {}) {
     const snap = wm.getState();
     host.sync(snap);
 
-    // minimized 仍算运行 —— 运行指示保留，只弱化
-    dock.setRunning(new Set(snap.windows.map((w) => w.appId)));
+    // 运行指示来自 App Store：含 background（关窗后实例在 session 内保活 → 点仍亮）
+    dock.setRunning(appRuntime.getAliveAppIds());
     dock.setMinimized(
       new Set(
         snap.windows.filter((w) => w.state === "minimized").map((w) => w.appId)
@@ -142,6 +142,7 @@ export async function createDesktop({ mount, themeRuntime = null } = {}) {
   }
 
   on("store:change", syncWindows);
+  on("app-store:change", syncWindows);
 
   /* ---------------- 点击桌面空白 → 清空焦点 ----------------
      （Focus Policy 确认结果：清 focus）
@@ -165,8 +166,8 @@ export async function createDesktop({ mount, themeRuntime = null } = {}) {
   function launchApp(app, source = "desktop-icon") {
     if (!app || !app.id) return null;
     emit("app:launch", { appId: app.id, source });
-    // 未开 → 创建；已开 normal → 聚焦；已开 minimized → 还原 + 聚焦
-    return wm.open(app, source);
+    // App 生命周期交给 App Runtime（singleton / keepAlive / 实例管理）
+    return appRuntime.launch(app.id, source);
   }
 
   /* ---------------- 渲染 App 清单 ---------------- */
@@ -207,7 +208,7 @@ export async function createDesktop({ mount, themeRuntime = null } = {}) {
     getWorkArea: () => wm.getWorkArea(),
     launch: launchApp,
     // Window Manager 直面（Phase 3；未来 AI Assistant 走同一套 API）
-    openApp: (app, source) => wm.open(app, source),
+    openApp: (app, source) => appRuntime.launch(app && app.id, source),
     focusWindow: (id) => wm.focus(id),
     blurWindows: () => wm.blur(),
     moveWindow: (id, x, y) => wm.move(id, x, y),
