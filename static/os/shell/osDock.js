@@ -102,6 +102,20 @@ export function createDock({ apps = [], onActivate = null, onOpenLauncher = null
     }
   }
 
+  /**
+   * 标记处于 minimized 的 App。
+   * ⚠️ minimized ≠ 停止运行：运行指示点**保留**，只是弱化（降透明度）。
+   *    这与"窗口 UI 隐藏、App Runtime 继续运行"的语义一致。
+   * @param {Set<string>|Array<string>} minimizedAppIds
+   */
+  function setMinimized(minimizedAppIds) {
+    const set =
+      minimizedAppIds instanceof Set ? minimizedAppIds : new Set(minimizedAppIds || []);
+    for (const [appId, entry] of entries) {
+      entry.item.classList.toggle("is-minimized", set.has(appId));
+    }
+  }
+
   /** 高亮当前前台窗口所属 App（明度，不是描边） */
   function setActive(appId) {
     for (const [id, entry] of entries) {
@@ -120,6 +134,7 @@ export function createDock({ apps = [], onActivate = null, onOpenLauncher = null
   return {
     node: surface,
     setRunning,
+    setMinimized,
     setActive,
     setApps,
     refresh: build,

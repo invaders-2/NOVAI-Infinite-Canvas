@@ -161,104 +161,9 @@
 }
 .os-sysbar__theme[data-preview-only="true"] { opacity: 0.72; }
 
-/* ---------------- Window Host ---------------- */
-.os-window-layer {
-  position: absolute;
-  inset: 0;
-  z-index: var(--z-window);
-  pointer-events: none;
-}
-
-.os-window {
-  position: absolute;
-  pointer-events: auto;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.os-window .os-glass__content { flex: 0 0 auto; }
-
-.os-window__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
-  min-height: 44px;
-  transition: background var(--motion-fast) var(--ease-material);
-}
-.os-window.is-active .os-window__bar { background: var(--surface-active); }
-
-.os-window__title {
-  font-family: var(--font-system);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.os-window.is-active .os-window__title { color: var(--text-primary); }
-
-.os-window__close { flex: 0 0 auto; }
-
-.os-window__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  position: relative;
-}
-.os-window__frame {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  outline: none;
-  display: block;
-  background: transparent;
-}
-
-.os-window__placeholder {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-8);
-  text-align: center;
-}
-.os-window__placeholder-glyph { opacity: 0.7; }
-.os-window__placeholder-title {
-  margin: var(--space-2) 0 0;
-  font-family: var(--font-system);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-.os-window__placeholder-desc {
-  margin: 0;
-  max-width: 380px;
-  font-family: var(--font-system);
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--text-tertiary);
-}
-.os-window__caps {
-  margin: var(--space-3) 0 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  justify-content: center;
-}
-.os-window__caps li {
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  background: var(--interactive-secondary);
-  font-family: var(--font-system);
-  font-size: 11px;
-  color: var(--text-secondary);
-}
+/* ---------------- Window ----------------
+   Phase 3：窗口相关样式已迁出到 os-window.css（Window Manager 布局层）。
+   os-shell.css 只保留 Desktop / System Bar / Dock / Launcher 的布局。 */
 
 /* ---------------- Dock ---------------- */
 .os-dock {
@@ -290,6 +195,11 @@
 }
 /* 运行指示：中性明度点，不是彩色、不是青柠 */
 .os-dock__item.is-running .os-dock__dot { background: var(--icon-primary); }
+/* minimized：仍在运行，只弱化（降透明度）—— 不是"未运行" */
+.os-dock__item.is-minimized .os-dock__dot {
+  opacity: 0.4;
+  transition: opacity var(--motion-fast) var(--ease-material);
+}
 .os-dock__divider {
   width: 1px;
   height: 28px;
@@ -308,13 +218,23 @@
   padding: var(--space-5);
   opacity: 0;
   pointer-events: none;
+  /* ⚠️ 关闭态必须 visibility:hidden：os-glass.css 给 .os-glass__content 设了
+     pointer-events:auto，会把这里的 none 推翻 —— 只写 none 的话 Launcher
+     即使 opacity:0 仍是一块压在桌面中央的隐形点击陷阱，会吞掉窗口点击。
+     visibility 延迟到淡出结束再切，保证淡出动画仍可见。 */
+  visibility: hidden;
   transition: opacity var(--motion-fast) var(--ease-material),
-              transform var(--motion-normal) var(--ease-material);
+              transform var(--motion-normal) var(--ease-material),
+              visibility 0s linear var(--motion-fast);
 }
 .os-launcher.is-open {
   opacity: 1;
   pointer-events: auto;
+  visibility: visible;
   transform: translate(-50%, -50%) scale(1);
+  transition: opacity var(--motion-fast) var(--ease-material),
+              transform var(--motion-normal) var(--ease-material),
+              visibility 0s;
 }
 .os-launcher__head {
   display: flex;

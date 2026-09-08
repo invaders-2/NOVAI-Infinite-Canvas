@@ -18,6 +18,9 @@ import { createGlassSurface } from "../ui/glassSurface.js";
 import { createGlassIconButton } from "../ui/glassIconButton.js";
 import { THEMES } from "../theme/themeRuntime.js";
 
+/** 无焦点窗口时 System Bar 的"当前 App"空态文案 */
+export const IDLE_LABEL = "NOVAI OS";
+
 /**
  * @param {Object} options
  * @param {string} [options.theme] 当前主题
@@ -43,7 +46,7 @@ export function createSystemBar({ theme = "system", onThemeChange = null, onAi =
 
   const current = document.createElement("span");
   current.className = "os-sysbar__current";
-  current.textContent = "Desktop";
+  current.textContent = IDLE_LABEL;
   left.appendChild(current);
 
   const right = document.createElement("div");
@@ -94,7 +97,8 @@ export function createSystemBar({ theme = "system", onThemeChange = null, onAi =
   }
 
   function setCurrentApp(name) {
-    current.textContent = name || "Desktop";
+    // 空态：无焦点窗口时显示 OS 名，而不是残留上一个 App 名，也不是空白
+    current.textContent = name || IDLE_LABEL;
   }
 
   setTheme(theme);

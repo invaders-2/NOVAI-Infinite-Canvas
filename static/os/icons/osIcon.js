@@ -63,6 +63,15 @@ const PATHS = {
   check: '<path d="M4.5 12.5l5 5 10-10.5"/>',
   // Minus
   minus: '<path d="M5.5 12h13"/>',
+  // ---------- Phase 3 · Window Controls（中性线性，禁止红黄绿圆点） ----------
+  // Minimize：靠下的一条横线（读作"收下去"，与居中的 minus 语义区分）
+  minimize: '<path d="M5.5 17.5h13"/>',
+  // Maximize：单个圆角方框（空框，未最大化）
+  maximize: '<rect x="4.6" y="4.6" width="14.8" height="14.8" rx="2.4"/>',
+  // Restore：前窗 + 后窗上沿（经典"向下还原"，双窗错位）
+  restore:
+    '<rect x="4.6" y="8.6" width="10.8" height="10.8" rx="2"/>' +
+    '<path d="M8.6 8.6V6.4a1.8 1.8 0 0 1 1.8-1.8h7.2a1.8 1.8 0 0 1 1.8 1.8v7.2a1.8 1.8 0 0 1-1.8 1.8h-2.2"/>',
   // ---------- Phase 2 · 第一方 App 图标（同为线性 stroke 语言，视觉重量一致） ----------
   // Image Generation：相框 + 取景点 + 地平线
   image:

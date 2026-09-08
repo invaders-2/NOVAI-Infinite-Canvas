@@ -147,6 +147,11 @@
   --z-menu: 1000;
   --z-dialog: 1100;
   --z-notification: 1200;
+  /* 临时交互层：resize 句柄 / drag shield。
+     ⚠️ 仅用于 .os-window-layer 内部 —— 该层是 z=100 的独立层叠上下文，
+        内部 z 再大也越不过 Dock / System Bar，天然形成护栏。
+        禁止在 root 层使用本值（否则会盖住 Dock）。 */
+  --z-interaction: 1500;
 }
 
 /* ============================== DARK ============================== */
