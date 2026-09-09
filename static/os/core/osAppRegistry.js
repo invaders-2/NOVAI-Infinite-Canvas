@@ -34,10 +34,21 @@ const APPS_ENDPOINT = "/api/apps";
 /** 归一化后的统一形状 */
 // {
 //   id, name, desc, icon, entry, source: 'builtin' | 'registry',
-//   version, state, capabilities: [{ id, risk, title }], permissions: string[],
+//   version, state, permissions: string[],
 //   kind, singleton: boolean,
 //   keepAliveMode: 'always' | 'session' | 'ephemeral',   // ★ 唯一真实保活字段
-//   keepAliveOnWindowClose: boolean                        // ★ 派生：keepAliveMode !== 'ephemeral'
+//   keepAliveOnWindowClose: boolean,                     // ★ 派生：keepAliveMode !== 'ephemeral'
+//
+//   ★ Capabilities 语义（Phase 5 Hardening）
+//   capabilities            = manifest 原始声明（= declaredCapabilities 的别名）
+//   declaredCapabilities    = **声明**：manifest 元数据，只说明"这个 App 宣称有什么能力"
+//   executableCapabilities  = **可执行**：当前已真正绑定 Action / Adapter handler 的能力
+//
+//   Phase 5 尚无 Action System → executableCapabilities 恒为 []。
+//   因此 chat.ask / chat.summarize 目前只是 declared，尚未 executable；
+//   不因"声明了"就假设可调用，调用面前必须先查 executable。
+//   ⛔ 不修改后端严格 schema（novai-app-v1，additionalProperties:false）来加字段，
+//      这一层语义区分完全落在前端 Normalize Layer。
 // }
 
 function normalizeBuiltin(app) {
@@ -54,6 +65,8 @@ function normalizeBuiltin(app) {
     version: "builtin",
     state: "healthy",
     capabilities: [],
+    declaredCapabilities: [], // 声明：builtin 描述符不带 manifest 能力
+    executableCapabilities: [], // 可执行：Phase 5 无 Action System → 恒为空
     permissions: Array.isArray(app.permissions) ? app.permissions : [],
     kind: app.kind || "app",
     singleton: app.singleton !== false, // 默认 true
@@ -75,6 +88,8 @@ function normalizeRemote(app) {
   // 后端 list_apps 现已返回 entry / keepAlive / singleton / permissions / description，
   // 这里直接采用真实值；缺失时回安全默认。
   const keepAliveMode = app.keepAlive || "session";
+  // manifest 能力 = declared（元数据声明）；executable 需真正绑定 Action/Adapter handler
+  const declared = Array.isArray(app.capabilities) ? app.capabilities : [];
   return {
     id: app.id,
     name: app.title || app.id,
@@ -84,7 +99,9 @@ function normalizeRemote(app) {
     source: "registry",
     version: String(app.version || "0.0.0"),
     state: app.state || "unknown",
-    capabilities: Array.isArray(app.capabilities) ? app.capabilities : [],
+    capabilities: declared, // = declaredCapabilities 别名，保留向后兼容
+    declaredCapabilities: declared,
+    executableCapabilities: [], // Phase 5 无 Action System → 尚无已绑定 handler 的能力
     permissions: Array.isArray(app.permissions) ? app.permissions : [],
     kind: "app",
     singleton: app.singleton !== false,
