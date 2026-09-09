@@ -20,6 +20,9 @@ NOVAI-Setup-*.exe
 # 运行时数据（不推送）
 assets/
 !assets/models/
+# 例外：apps/assets/ 是 Phase 5 App Registry 的第一方 App 包（源码，必须入库），
+#       不是运行时素材数据目录；没有这条会被上面的 assets/ 规则连带忽略。
+!/apps/assets/
 data/api_providers.json
 data/asset_library.json
 data/prompt_libraries.json

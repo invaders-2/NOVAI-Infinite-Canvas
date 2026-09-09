@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Assets</title>
+<!--
+  NOVAI OS · Thin Migration Entry（apps/assets/assets.html）
+
+  用途：仅作为 Registry manifest（novai-app/v1，entry:"assets.html"）要求的**真实 entry 文件**存在。
+        它必须真实可达（adapter.prepare 的 Entry Validation 会 HEAD 探测它）。
+
+  ⛔ 不复制 Legacy 业务源码：真实 UI 仍只有唯一一份 /static/asset-manager.html
+     （业务实现在 /static/js/asset-manager.js，4,766 行 IIFE）。
+  ⛔ 不嵌套 iframe：这里是**同一个 iframe 内**直接导航，因此
+     - 不产生 iframe-in-iframe
+     - 不额外增加一条 history 记录（用 location.replace，而非 assign / href）
+     - osWindowFrame 的 focus bridge 绑在 iframe **元素**上，同 iframe 导航不使其失效
+     - singleton / session keepAlive 复用语义完全不变
+
+  为什么可以直接用 thin-entry（已审计确认）：
+     asset-manager.js 对 parent. / top. / postMessage / electron shim 的依赖数均为 **0**，
+     是一个自包含 IIFE，所有静态资源均为 /static/... 绝对路径 → 独立加载无父框架依赖。
+
+  链路：manifest → /apps/assets/assets.html（thin） ──同 iframe 导航──▶ /static/asset-manager.html
+-->
+<script>
+  location.replace("/static/asset-manager.html");
+</script>
+</head>
+<body>
+  <noscript>
+    <p>正在打开素材库…<a href="/static/asset-manager.html">点击继续</a></p>
+  </noscript>
+</body>
+</html>

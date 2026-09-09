@@ -53,16 +53,8 @@ export const BUILTIN_APPS = [
     keepAliveMode: "session",
     kind: "create",
   },
-  {
-    id: "assets",
-    name: "Assets",
-    desc: "素材库管理",
-    icon: "grid",
-    entry: "/static/asset-manager.html",
-    singleton: true,
-    keepAliveMode: "session",
-    kind: "library",
-  },
+  // CHANGE: assets（Phase 5.2）已迁移到 apps/assets/，由后端 Registry 真实发现；
+  //         条目已从本文件移除（registry 同 id 优先覆盖，删掉才是真正收敛）。
   {
     id: "api-settings",
     name: "API Settings",

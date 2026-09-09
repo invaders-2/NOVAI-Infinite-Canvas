@@ -1,0 +1,86 @@
+{
+  "format": "novai-app/v1",
+  "id": "assets",
+  "version": "1.0.0",
+  "name": "Assets",
+  "description": "素材库管理：图片资产 / 工作流 / 提示词库 / 画布资产 / 本地素材",
+  "entry": "assets.html",
+  "singleton": true,
+  "keepAlive": "session",
+  "dataVersion": 1,
+  "defaultSize": { "width": 1180, "height": 720 },
+  "permissions": [
+    "assets.read",
+    "assets.write",
+    "assets.delete",
+    "storage.settings.read",
+    "storage.settings.write",
+    "workflow.read",
+    "workflow.write",
+    "prompt.read",
+    "prompt.write",
+    "model.execute"
+  ],
+  "capabilities": [
+    {
+      "id": "assets.list",
+      "title": "素材列表",
+      "description": "按库/分类浏览素材条目（图片资产、工作流、提示词、画布资产、本地素材）",
+      "risk": "read",
+      "handler": { "type": "frontend-bridge", "targets": ["assets"] }
+    },
+    {
+      "id": "assets.upload",
+      "title": "上传素材",
+      "description": "上传图片/视频/音频/JSON/ZIP 等到素材库",
+      "risk": "write",
+      "handler": { "type": "frontend-bridge", "targets": ["assets"] }
+    },
+    {
+      "id": "assets.preview",
+      "title": "素材预览",
+      "description": "预览图片/视频/音频等素材",
+      "risk": "read",
+      "handler": { "type": "frontend-bridge", "targets": ["assets"] }
+    },
+    {
+      "id": "assets.download",
+      "title": "下载素材",
+      "description": "下载选中素材（含画布资产 zip 批量下载）",
+      "risk": "read",
+      "handler": { "type": "frontend-bridge", "targets": ["assets"] }
+    },
+    {
+      "id": "assets.move",
+      "title": "移动素材",
+      "description": "在库/分类之间移动素材条目",
+      "risk": "write",
+      "handler": { "type": "frontend-bridge", "targets": ["assets"] }
+    },
+    {
+      "id": "assets.rename",
+      "title": "重命名素材",
+      "description": "重命名素材条目与库/分类",
+      "risk": "write",
+      "handler": { "type": "frontend-bridge", "targets": ["assets"] }
+    },
+    {
+      "id": "assets.delete",
+      "title": "删除素材",
+      "description": "删除素材条目（单个/批量），同时清理本地文件",
+      "risk": "delete",
+      "confirmation": {
+        "required": true,
+        "message": "确认删除选中的 {count} 个素材？删除后本地文件也会被移除。"
+      },
+      "handler": { "type": "frontend-bridge", "targets": ["assets"] }
+    },
+    {
+      "id": "assets.storage_settings",
+      "title": "素材保存目录",
+      "description": "查看与修改自定义素材保存目录",
+      "risk": "write",
+      "handler": { "type": "frontend-bridge", "targets": ["assets"] }
+    }
+  ]
+}
