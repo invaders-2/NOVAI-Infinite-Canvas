@@ -138,6 +138,39 @@ async function openWindowFor(inst, def, source) {
 }
 
 /**
+ * 激活实例当前窗口：**区分 focus 与 restore + focus**。
+ *
+ * ⛔ 不去删 focusWindow() 里对 minimized 的保护 —— 那是 WM 的正确基础语义
+ *    （最小化窗口不该被"隐形聚焦"）。真正的问题在 Runtime：此前"用户激活 App"
+ *    一律只调 focus，没区分两种意图，导致 Dock 点已最小化的 App 毫无反应。
+ *
+ * 语义（桌面标准行为）：
+ *   running + visible   → focus
+ *   running + minimized → restore（restore 内部已完成 focus 并 emit window:focused）
+ *
+ * ⛔ 不新建 window、不新建 instance：始终作用于实例已有的最后一个 windowId，
+ *    保证 minimize → restore 是 same instanceId + same windowId。
+ * ⛔ 不把 minimize 当 close/background：minimized 不改变实例 state。
+ *
+ * @param {Object} inst AppInstance
+ * @param {string} source
+ * @returns {string|null} 被激活的 windowId
+ */
+function focusOrRestoreWindow(inst, source) {
+  if (!inst || inst.windowIds.length === 0) return null;
+  const windowId = inst.windowIds[inst.windowIds.length - 1];
+  const win = wm.get(windowId);
+  if (!win) return null;
+  if (win.state === "minimized") {
+    wm.restore(windowId, source);
+  } else {
+    // normal / maximized 都只 focus（maximized 绝不能被"还原"成 normal）
+    wm.focus(windowId, source);
+  }
+  return windowId;
+}
+
+/**
  * 启动 App。
  * singleton：若已有非 stopped/error 实例 → 复用（有窗口则聚焦；background 则重建窗口）。
  * ⚠️ 异步（Entry Validation 在建窗前 await）。调用方若不关心结果可 fire-and-forget，
@@ -164,7 +197,8 @@ export async function launch(appId, source = "user") {
     const existing = store.byAppId(appId);
     if (existing) {
       if (existing.windowIds.length > 0) {
-        wm.focus(existing.windowIds[existing.windowIds.length - 1], source);
+        // 已有窗口：minimized → restore，否则 focus（Dock / Launcher / Desktop Icon 都走这里）
+        focusOrRestoreWindow(existing, source);
         store.update(existing.instanceId, { lastActiveAt: ts() });
         return existing;
       }
@@ -205,9 +239,11 @@ export async function activate(instanceId, source = "user") {
   const inst = store.byInstanceId(instanceId);
   if (!inst) return null;
   if (inst.windowIds.length > 0) {
-    wm.focus(inst.windowIds[inst.windowIds.length - 1], source);
+    focusOrRestoreWindow(inst, source);
     store.update(instanceId, { lastActiveAt: ts() });
-  } else if (inst.state === "background") {
+  } else if (inst.state === "background" || inst.state === "error") {
+    // background（session keepAlive，无窗口）→ 复用同 instanceId 重建窗口；
+    // error → clean retry：重新走 preflight，失败仍不建窗、不留 ghost window。
     return openWindowFor(inst, inst.def, source);
   }
   return inst;

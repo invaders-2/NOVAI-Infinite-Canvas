@@ -1035,6 +1035,11 @@ async function refreshCanvasAssets(){
 }
 async function loadAll(){
     setStatus('加载中...');
+    // ⚠️ Promise.all() 只消费**第一个** iterable：此前 loadSharedFolders() / loadLocalAssets()
+    //    被当作第 5、6 个**参数**传入，虽因 JS 参数求值规则被触发，却不在等待集合内，
+    //    因此 loadAll() 返回时本地素材 / 共享文件夹可能尚未就绪（race condition）。
+    //    修法：统一放进同一个 iterable，使 await 真正覆盖全部 6 个加载任务。
+    //    两个 loader 内部各有 try/catch，不会 reject 拖垮整体。
     const [assetData, promptData, providerData, canvasAssetData] = await Promise.all([
         apiJson('/api/asset-library'),
         apiJson('/api/prompt-libraries'),
