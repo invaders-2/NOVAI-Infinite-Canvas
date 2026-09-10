@@ -7,19 +7,22 @@
     <title>无限画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.113.1788488941">
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.113.1788488941">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.113.1788488941">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941">
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.113.1788488941"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.113.1788488941"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/theme.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/shared/media.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.113.1788488941"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/i18n.js?v=1.0.113.1788488941"></script>
+    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.113.1789032410">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.113.1789031438">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.113.1788941139">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1789032891">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.113.1788942289"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.113.1789027650"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/theme.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/media.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/workflow-utils.js?v=1.0.113.1789023665"></script>
+    <script src="/static/js/shared/node-registry.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/matrix-run.js?v=1.0.113.1789028257"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/i18n.js?v=1.0.113.1788942289"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -404,6 +407,8 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                         <button type="button" data-image-edit-mode="brush"><i data-lucide="paintbrush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeBrush">画笔</span></button>
                         <button type="button" data-image-edit-mode="resize"><i data-lucide="minimize-2" class="w-3.5 h-3.5"></i><span>缩放</span></button>
                         <button type="button" data-image-edit-mode="grid"><i data-lucide="grid-3x3" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeGrid">宫格切分</span></button>
+                        <button type="button" data-image-edit-mode="adjust" title="专业调色"><i data-lucide="wand-sparkles" class="w-3.5 h-3.5"></i><span>调色</span></button>
+                        
                     </div>
                     <button class="preview-icon-btn" type="button" onclick="closeImageEditor()" title="关闭" data-i18n-title="common.close"><i data-lucide="x" class="w-4 h-4"></i></button>
                 </div>
@@ -470,7 +475,7 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                 <div id="imageEditStage" class="image-edit-stage">
                     <div class="image-edit-stage-inner">
                         <div id="cropCanvas" class="crop-canvas">
-                            <img id="cropImage" alt="crop source">
+                            <img id="cropImage" alt="crop source" draggable="false">
                             <canvas id="editDrawCanvas" class="edit-draw-canvas"></canvas>
                             <canvas id="editTextCanvas" class="edit-text-canvas"></canvas>
                             <div id="cropBox" class="crop-box">
@@ -519,7 +524,9 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         </div>
     </div>
 
-    <script defer src="/static/js/ltx-director-timeline.js?v=1.0.113.1788488941"></script>
-    <script defer src="/static/js/canvas.js?v=1.0.113.1788488941"></script>
+    <script defer src="/static/js/ltx-director-timeline.js?v=1.0.113.1788942289"></script>
+    <script defer src="/static/vendor/js/glfx.js?v=1.0.113.1788945229"></script>
+    <script defer src="/static/js/image-adjust-editor.js?v=1.0.113.1789010284"></script>
+    <script defer src="/static/js/canvas.js?v=1.0.113.1789034854"></script>
 </body>
 </html>

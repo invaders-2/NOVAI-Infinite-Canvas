@@ -1654,6 +1654,8 @@ function serializableCanvasNode(node){
     delete copy._cascadeIdx;
     delete copy._cascadeFailed;
     delete copy._activeLoopCtx;
+    delete copy.activeRowText;
+    delete copy.activeRowRefs;
     return copy;
 }
 function serializableCanvasNodes(list=nodes){
@@ -1668,6 +1670,8 @@ async function saveCanvas(){
     sanitizeConnections();
     savingCanvasNow = true;
     saveCanvasAgain = false;
+    // revision 统一机制：保存前检测执行上下文变化，精确 bump 受影响 rows（single-bump：本次比较一次）
+    syncTableContextSnapshots();
     try {
         const res = await fetch(`/api/canvases/${canvas.id}`, {
             method:'PUT',
@@ -2291,7 +2295,11 @@ async function openCanvas(id){
         setCanvasMode(true);
         renderCanvasList();
         render();
+        // revision 统一机制：加载完成后拍一次执行上下文签名快照，作为后续变化检测的基准
+        initTableContextSnapshots();
         resumeCanvasImageTasks();
+        // Phase 2C：刷新/首次打开时恢复 active Backend Run（只 GET + poll，不重新 POST /execute）
+        void resumeBackendRuns();
         startCanvasRemotePolling();
         setStatus('Ready');
         consumePendingImport();
@@ -2700,6 +2708,7 @@ document.getElementById('editTextCanvas')?.addEventListener('dblclick', event =>
 // 图片编辑区滚轮缩放
 document.getElementById('imageEditStage').addEventListener('wheel', event => {
     if(!cropState) return;
+    if(imageEditMode === 'adjust' && event.target && event.target.closest && event.target.closest('#imageAdjustTools')) return;
     event.preventDefault();
     event.stopPropagation();
     const stage = event.currentTarget;
@@ -2776,7 +2785,36 @@ function addLoopNode(point){
 }
 function addGroupNode(point){
     const p = point || defaultPoint(40, 0);
-    return addNode({id:uid('grp'), type:'group', x:p.x, y:p.y, w:300, h:220, items:[]});
+    return addNode({id:uid('grp'), type:'group', x:p.x, y:p.y, w:420, h:280, title:'工作流群组', items:[], runStatus:'', runError:''});
+}
+function newMatrixRow(index=0){
+    const previous = index > 0 ? '' : '';
+    return NovaWorkflowUtils.normalizeMatrixRow({
+        rowId:uid('row'),
+        order:index,
+        selected:true,
+        name:`步骤 ${index + 1}`,
+        prompt:'',
+        references:[],
+        dependencies:previous ? [previous] : [],
+        type:'image',
+        status:'draft',
+        overlay:{text:'', x:32, y:32, fontSize:36, color:'#ffffff', align:'left'}
+    }, index);
+}
+function addMatrixNode(point){
+    const p = point || defaultPoint(40, 0);
+    const node = NovaWorkflowUtils.normalizeMatrixNode({
+        id:uid('matrix'), type:'matrix', x:p.x, y:p.y, w:680, h:440, title:'多维表格',
+        mode:'batch', rows:[newMatrixRow(0), newMatrixRow(1)],
+        globalContext:{productReference:'', palette:'', font:'', outline:'', commonWidth:1024},
+        previousOutputs:{text:'', image:'', video:''},
+        matrixExpanded:false,
+        sourceMappings:[],
+        targetMappings:[]
+    });
+    node.rows[1].dependencies = [];
+    return addNode(node);
 }
 function pickMediaForNode(nodeId){
     const input = document.createElement('input');
@@ -3732,6 +3770,8 @@ function createInputGroupFromOutput(node, point){
         items:imageNodes.map(img => img.id)
     };
     nodes.push(group);
+    // 建组即按原图比例排整齐
+    arrangeCanvasGroupMembers(group);
     return group;
 }
 function convertOutputNodeToInputGroup(nodeId){
@@ -3842,7 +3882,7 @@ function createLinkedNode(type){
     const fromId = state.originKind === 'out' ? origin.id : created.id;
     const toId = state.originKind === 'out' ? created.id : origin.id;
     if(canConnect(fromId, toId) && !connections.some(c => c.from === fromId && c.to === toId)){
-        connections.push({id:uid('c'), from:fromId, to:toId});
+        connections.push(makeMatrixLink(fromId, toId));
         syncLatestGeneratedOutputToConnection(fromId, toId);
         syncGeneratorInputs();
         scheduleSave();
@@ -3854,6 +3894,7 @@ function createNodeByType(type, point){
     if(type === 'prompt') return addPromptNode(point);
     if(type === 'loop') return addLoopNode(point);
     if(type === 'group') return addGroupNode(point);
+    if(NovaNodeRegistry.isTaskTableType(type)) return addMatrixNode(point);
     if(type === 'llm') return addLLMNode(point);
     if(type === 'generator') return addGeneratorNode(point);
     if(type === 'midjourney') return addMidjourneyNode(point);
@@ -3871,6 +3912,7 @@ function menuAdd(type){
     if(type === 'image') addImageNode(menuPoint);
     if(type === 'prompt') addPromptNode(menuPoint);
     if(type === 'loop') addLoopNode(menuPoint);
+    if(NovaNodeRegistry.isTaskTableType(type)) addMatrixNode(menuPoint);
     if(type === 'llm') addLLMNode(menuPoint);
     if(type === 'generator') addGeneratorNode(menuPoint);
     if(type === 'midjourney') addMidjourneyNode(menuPoint);
@@ -4837,7 +4879,8 @@ function setImageEditMode(mode, userTouched=false){
     if(userTouched) imageEditModeTouched = true;
     const prevImageEditMode = imageEditMode;
     if(mode !== 'brush') removeEditTextInlineEditor(true);
-    imageEditMode = ['preview','crop','outpaint','mask','brush','resize','grid'].includes(mode) ? mode : 'crop';
+    imageEditMode = ['preview','crop','outpaint','mask','brush','resize','grid','adjust'].includes(mode) ? mode : 'crop';
+    if(prevImageEditMode === 'adjust' && imageEditMode !== 'adjust' && window.imageAdjustLeaveMode) window.imageAdjustLeaveMode();
     const isPreview = imageEditMode === 'preview';
     const cropCanvasEl = document.getElementById('cropCanvas');
     cropCanvasEl.classList.toggle('preview-mode', isPreview);
@@ -4846,6 +4889,7 @@ function setImageEditMode(mode, userTouched=false){
     cropCanvasEl.classList.toggle('resize-mode', imageEditMode === 'resize');
     cropCanvasEl.classList.toggle('grid-mode', imageEditMode === 'grid');
     cropCanvasEl.classList.toggle('outpaint-mode', imageEditMode === 'outpaint');
+    cropCanvasEl.classList.toggle('adjust-mode', imageEditMode === 'adjust');
     _syncGridCustomCursor();
     document.querySelectorAll('[data-image-edit-mode]').forEach(btn => btn.classList.toggle('active', btn.dataset.imageEditMode === imageEditMode));
     document.getElementById('imageCropTools')?.classList.toggle('active', imageEditMode === 'crop');
@@ -4853,6 +4897,7 @@ function setImageEditMode(mode, userTouched=false){
     document.getElementById('imageBrushTools').classList.toggle('active', imageEditMode === 'brush');
     document.getElementById('imageResizeTools')?.classList.toggle('active', imageEditMode === 'resize');
     document.getElementById('imageGridTools').classList.toggle('active', imageEditMode === 'grid');
+    document.getElementById('imageAdjustTools')?.classList.toggle('active', imageEditMode === 'adjust');
     syncGridGapValue();
     syncImageResizeControls();
     const title = document.getElementById('imageEditTitle');
@@ -4864,7 +4909,11 @@ function setImageEditMode(mode, userTouched=false){
         sub.textContent = tr('canvas.previewHint');
     } else {
         apply.style.display = '';
-        if(imageEditMode === 'resize'){
+        if(imageEditMode === 'adjust'){
+            title.textContent = '专业调色';
+            sub.textContent = '预设与参数实时预览，应用后生成新图片节点';
+            apply.innerHTML = `<i data-lucide="wand-sparkles" class="w-4 h-4"></i><span>应用调色</span>`;
+        } else if(imageEditMode === 'resize'){
             title.textContent = '缩放图片';
             sub.textContent = '选择缩小倍数，应用会替换当前原图';
             apply.innerHTML = `<i data-lucide="minimize-2" class="w-4 h-4"></i><span>应用缩放</span>`;
@@ -4882,6 +4931,7 @@ function setImageEditMode(mode, userTouched=false){
     if(isPreview) clearEditDrawing(true);
     else if(imageEditMode === 'grid') refreshGridSplitPreview();
     else if(imageEditMode === 'outpaint') resetOutpaintBox();
+    else if(imageEditMode === 'adjust'){ clearEditDrawing(true); if(window.imageAdjustEnterMode) window.imageAdjustEnterMode(); }
     else if(imageEditMode === 'crop' || imageEditMode === 'resize') clearEditDrawing(true);
     else if(prevImageEditMode === 'grid') clearEditDrawing(true); // 离开 grid 时主动清掉画布上残留的分割线预览
     syncEditDrawingHistoryButtons();
@@ -5644,7 +5694,7 @@ function openImageEditor(nodeId, initialMode='crop'){
     const node = nodes.find(n => n.id === nodeId);
     if(!node?.url) return;
     if(mediaKindForNode(node) !== 'image') return;
-    if(!['preview','crop','outpaint','mask','brush','resize','grid'].includes(initialMode)) initialMode = 'crop';
+    if(!['preview','crop','outpaint','mask','brush','resize','grid','adjust'].includes(initialMode)) initialMode = 'crop';
     cropState = {nodeId, x:0, y:0, w:0, h:0};
     // 重置自定义宫格状态
     gridCustomMode = false;
@@ -6088,6 +6138,7 @@ function applyImageEdit(){
     if(imageEditMode === 'brush') return applyImageBrush();
     if(imageEditMode === 'resize') return applyImageResize();
     if(imageEditMode === 'grid') return applyImageGridSplit();
+    if(imageEditMode === 'adjust') return applyImageAdjust();
     return applyImageCrop();
 }
 
@@ -6176,7 +6227,21 @@ function measureCanvasOriginalImageNodes(root=nodesEl){
     });
 }
 
+// 群组成员索引：群组排版会把成员缩到比 .node 默认 min-width:220px 更小，渲染时靠
+// 'canvas-group-member' 这个类放开最小尺寸——否则算好的小格子会被撑回 220px、互相压住。
+// 放在 render 开头重建一次，避免每个节点都去扫一遍群组。
+let canvasGroupMemberIndex = new Set();
+function refreshCanvasGroupMemberIndex(){
+    const set = new Set();
+    nodes.forEach(group => {
+        if(group && group.type === 'group' && Array.isArray(group.items)){
+            group.items.forEach(id => set.add(id));
+        }
+    });
+    canvasGroupMemberIndex = set;
+}
 function render(){
+    refreshCanvasGroupMemberIndex();
     const outputScrolls = captureOutputScrolls();
     const mediaStates = captureMediaPlaybackStates();
     const reusableMediaNodes = new Map();
@@ -6370,13 +6435,253 @@ function destroyLTXEditor(node){
 function isNodeDragSurface(target){
     return !isNodeControl(target) && !target.closest('.port, .resize-handle, .output-img-wrap');
 }
+function ensureMatrixState(node){
+    const expanded = Boolean(node.matrixExpanded);
+    const running = Boolean(node.running);
+    const stopRequested = Boolean(node.stopRequested);
+    Object.assign(node, NovaWorkflowUtils.normalizeMatrixNode(node));
+    node.matrixExpanded = expanded;
+    node.running = running;
+    node.stopRequested = stopRequested;
+    node.title = node.title || node.name || '多维表格';
+    node.name = node.title;
+    ensureMatrixMappings(node);
+    return node;
+}
+function matrixStatusLabel(status){
+    return {idle:'待运行', draft:'草稿', queued:'排队中', running:'运行中', done:'完成', failed:'失败', stale:'待更新', stopped:'已停止'}[status] || '草稿';
+}
+function matrixSourceType(node){
+    if(!node) return 'text';
+    const refs = mediaRefsFromNode(node);
+    if(refs.some(ref => (ref.kind || mediaKindForRef(ref.url)) === 'video')) return 'video';
+    if(refs.some(ref => (ref.kind || mediaKindForRef(ref.url)) === 'image')) return 'image';
+    return 'text';
+}
+function ensureMatrixMappings(node){
+    const incoming = connections.filter(connection => connection.to === node.id);
+    const validIds = new Set(incoming.map(connection => connection.id));
+    node.sourceMappings = (node.sourceMappings || []).filter(mapping => validIds.has(mapping.connectionId));
+    incoming.forEach(connection => {
+        const source = nodes.find(candidate => candidate.id === connection.from);
+        const mediaType = connection.mediaType || matrixSourceType(source);
+        let mapping = node.sourceMappings.find(item => item.connectionId === connection.id);
+        if(!mapping){
+            const purpose = connection.purpose || (mediaType === 'text' ? 'context' : (connection.rowId ? 'row' : 'unassigned'));
+            mapping = NovaWorkflowUtils.normalizeConnectionMapping({...connection, purpose, mediaType}, 'source');
+            node.sourceMappings.push(mapping);
+        }
+        connection.rowId = mapping.rowId || connection.rowId || '';
+        connection.purpose = mapping.purpose;
+        connection.slot = mapping.slot || connection.slot || (mapping.rowId ? 'references' : 'context');
+        connection.mediaType = mapping.mediaType || mediaType;
+    });
+    const outgoing = connections.filter(connection => connection.from === node.id);
+    const targetIds = new Set(outgoing.map(connection => connection.id));
+    node.targetMappings = (node.targetMappings || []).filter(mapping => targetIds.has(mapping.connectionId));
+    outgoing.forEach(connection => {
+        const target = nodes.find(candidate => candidate.id === connection.to);
+        const targetType = connection.targetType || matrixTargetTypeForNode(target);
+        let mapping = node.targetMappings.find(item => item.connectionId === connection.id);
+        if(!mapping){
+            mapping = NovaWorkflowUtils.normalizeConnectionMapping({...connection, targetType, mediaType:targetType}, 'target');
+            node.targetMappings.push(mapping);
+        } else if(connection.rowId){
+            // 多行多 target：行→目标拖线后，把 connection.rowId 回写到 mapping（source 侧同款同步）
+            mapping.rowId = connection.rowId;
+        }
+        connection.rowId = mapping.rowId || connection.rowId || '';
+        connection.targetType = mapping.targetType || targetType;
+        connection.mediaType = connection.targetType;
+    });
+}
+function matrixTargetTypeForNode(node){
+    return ['video', 'ltxDirector', 'minimax'].includes(node?.type) ? 'video' : 'image';
+}
+function matrixSourceName(source){
+    if(!source) return '来源已删除';
+    return source.name || source.title || (source.type === 'llm' ? 'LLM 文本' : source.type === 'prompt' ? '提示词' : source.type === 'image' ? '素材' : source.type);
+}
+function matrixRefThumb(ref){
+    const kind = ref.kind || mediaKindForRef(ref.url);
+    if(kind === 'image' && ref.url) return `<img src="${escapeAttr(ref.url)}" alt="参考图">`;
+    if(kind === 'video') return `<span class="matrix-ref-media"><i data-lucide="film"></i></span>`;
+    return `<span class="matrix-ref-media"><i data-lucide="file-text"></i></span>`;
+}
+function matrixRowReferences(node, row){
+    const mapped = matrixUpstreamContext(node).refs.filter(ref => ref.purpose === 'row' && ref.rowId === row.rowId);
+    return NovaWorkflowUtils.uniqueRefs([...(row.references || []), ...mapped]);
+}
+function matrixResultSummary(row){
+    const refs = row.output?.refs || row.resultRefs || [];
+    const images = refs.filter(ref => (ref.kind || mediaKindForRef(ref.url)) === 'image').length;
+    const videos = refs.filter(ref => (ref.kind || mediaKindForRef(ref.url)) === 'video').length;
+    return [row.output?.text || row.resultText ? '文本' : '', images ? `图片 ${images}` : '', videos ? `视频 ${videos}` : ''].filter(Boolean).join(' · ') || '—';
+}
+function matrixRangeOptions(node, selectedId){
+    return node.rows.map((row, index) => `<option value="${escapeAttr(row.rowId)}" ${row.rowId === selectedId ? 'selected' : ''}>${index + 1}. ${escapeHtml(row.name)}</option>`).join('');
+}
+function matrixDependencyOptions(node, row){
+    const selected = new Set(row.dependencies || []);
+    return node.rows.filter(candidate => candidate.rowId !== row.rowId).map(candidate => `<option value="${escapeAttr(candidate.rowId)}" ${selected.has(candidate.rowId) ? 'selected' : ''}>${escapeHtml(candidate.name)}</option>`).join('');
+}
+function renderMatrixSources(node){
+    if(!node.sourceMappings.length) return '<div class="matrix-empty-note">尚未连接上游文字、图片或视频。</div>';
+    return node.sourceMappings.map(mapping => {
+        const source = nodes.find(candidate => candidate.id === mapping.sourceNodeId);
+        const refs = mediaRefsFromNode(source);
+        const kind = mapping.mediaType || matrixSourceType(source);
+        return `<div class="matrix-source-map ${mapping.purpose === 'unassigned' ? 'needs-choice' : ''}" data-mapping-id="${escapeAttr(mapping.connectionId)}">
+            <div class="matrix-source-preview">${refs[0] ? matrixRefThumb({...refs[0], kind}) : `<span class="matrix-ref-media"><i data-lucide="${kind === 'text' ? 'file-text' : kind === 'video' ? 'film' : 'image'}"></i></span>`}</div>
+            <div class="matrix-source-meta"><strong>${escapeHtml(matrixSourceName(source))}</strong><span>${escapeHtml(kind)} · ${refs.length || (kind === 'text' ? 1 : 0)} 项</span></div>
+            <select data-matrix-map-purpose>
+                <option value="unassigned" ${mapping.purpose === 'unassigned' ? 'selected' : ''}>请选择用途</option>
+                <option value="shared" ${mapping.purpose === 'shared' ? 'selected' : ''}>共用参考</option>
+                <option value="row" ${mapping.purpose === 'row' ? 'selected' : ''}>每步参考</option>
+                <option value="context" ${mapping.purpose === 'context' ? 'selected' : ''}>提示上下文</option>
+            </select>
+            <select data-matrix-map-row ${mapping.purpose === 'row' ? '' : 'disabled'}><option value="">选择步骤</option>${matrixRangeOptions(node, mapping.rowId)}</select>
+            <button type="button" data-matrix-map-disconnect title="断开连接"><i data-lucide="unlink"></i></button>
+        </div>`;
+    }).join('');
+}
+function renderMatrixResults(node){
+    const completed = node.rows.filter(row => (row.output?.refs || row.resultRefs || []).length);
+    if(node.view === 'table') return '';
+    if(!completed.length) return '<div class="matrix-empty-note">运行后将在这里显示结果。</div>';
+    if(node.view === 'long'){
+        const images = completed.flatMap(row => (row.output?.refs || row.resultRefs || []).filter(ref => (ref.kind || mediaKindForRef(ref.url)) === 'image').slice(0, 1).map(ref => ({row, ref})));
+        return `<div class="matrix-long-preview">${images.map(({row, ref}) => `<div class="matrix-long-segment"><img src="${escapeAttr(ref.url)}" alt="${escapeAttr(row.name)}">${row.overlay?.text ? `<span style="left:${Number(row.overlay.x) || 0}px;top:${Number(row.overlay.y) || 0}px;color:${escapeAttr(row.overlay.color)};font-size:${Math.max(8, Number(row.overlay.fontSize) || 36)}px;text-align:${escapeAttr(row.overlay.align)}">${escapeHtml(row.overlay.text)}</span>` : ''}</div>`).join('')}</div>`;
+    }
+    return `<div class="matrix-gallery">${completed.flatMap(row => (row.output?.refs || row.resultRefs || []).map(ref => `<div class="matrix-gallery-item">${matrixRefThumb(ref)}<strong>${escapeHtml(row.name)}</strong><span>${(ref.kind || mediaKindForRef(ref.url)) === 'video' ? '视频片段' : '图片结果'}</span></div>`)).join('')}</div>`;
+}
+function renderMatrixBody(node){
+    ensureMatrixState(node);
+    const wrap = document.createElement('div');
+    wrap.className = `matrix-node-card ${node.matrixExpanded ? 'expanded' : 'compact'}`;
+    const counts = node.rows.reduce((acc, row) => { acc[row.status] = (acc[row.status] || 0) + 1; return acc; }, {});
+    if(!node.matrixExpanded){
+        wrap.innerHTML = `<div class="matrix-compact-summary" title="双击展开完整编辑">
+            <div><strong>${escapeHtml(node.title)}</strong><span>${node.mode === 'continuous' ? '连续' : '批量'} · ${node.rows.length} 步 · 完成 ${counts.done || 0} · 待更新 ${counts.stale || 0}</span></div>
+            <div class="matrix-compact-actions"><button type="button" data-matrix-check>检查输入</button><button type="button" data-matrix-run-all ${node.running ? 'disabled' : ''}>${node.running ? '运行中' : '运行所选'}</button><button type="button" data-matrix-expand>展开</button></div>
+        </div>`;
+        wrap.ondblclick = event => { if(event.target.closest('button')) return; node.matrixExpanded = true; render(); scheduleSave(); };
+        wrap.querySelector('[data-matrix-check]').onclick = () => checkMatrixInputs(node.id, true);
+        wrap.querySelector('[data-matrix-run-all]').onclick = () => runMatrixRows(node.id);
+        wrap.querySelector('[data-matrix-expand]').onclick = () => { node.matrixExpanded = true; render(); scheduleSave(); };
+        return wrap;
+    }
+    const rangeCount = NovaWorkflowUtils.rangeRows(node).length;
+    wrap.innerHTML = `
+        <div class="matrix-toolbar">
+            <input class="matrix-name-input" data-matrix-name value="${escapeAttr(node.title)}" aria-label="表格名称">
+            <div class="matrix-mode-toggle"><button type="button" data-matrix-mode="batch" class="${node.mode === 'batch' ? 'active' : ''}">批量</button><button type="button" data-matrix-mode="continuous" class="${node.mode === 'continuous' ? 'active' : ''}">连续</button></div>
+            <button type="button" data-matrix-check><i data-lucide="search-check"></i>检查输入</button>
+            <button type="button" data-matrix-add><i data-lucide="plus"></i>新增行</button>
+            <button type="button" data-matrix-collapse>收起</button>
+        </div>
+        <div class="matrix-range-bar"><span>生成范围</span><select data-matrix-range="start">${matrixRangeOptions(node, node.range.startRowId)}</select><i data-lucide="arrow-right"></i><select data-matrix-range="end">${matrixRangeOptions(node, node.range.endRowId)}</select><strong>共 ${rangeCount} 步</strong><button type="button" data-matrix-run-all ${node.running ? 'disabled' : ''}><i data-lucide="play"></i>${node.running ? '运行中' : `运行所选 ${rangeCount} 步`}</button><button type="button" data-matrix-stop ${node.running ? '' : 'disabled'}><i data-lucide="square"></i>停止</button></div>
+        <details class="matrix-input-panel" open><summary>输入来源与用途映射</summary><div class="matrix-source-list">${renderMatrixSources(node)}</div></details>
+        <div class="matrix-global-grid">
+            <input data-matrix-global="productReference" value="${escapeAttr(node.globalContext.productReference)}" placeholder="共用商品参考">
+            <input data-matrix-global="palette" value="${escapeAttr(node.globalContext.palette)}" placeholder="统一配色">
+            <input data-matrix-global="font" value="${escapeAttr(node.globalContext.font)}" placeholder="统一字体">
+            <input data-matrix-global="outline" value="${escapeAttr(node.globalContext.outline)}" placeholder="内容大纲 / 版式规范">
+            <input data-matrix-global="commonWidth" type="number" min="256" max="4096" value="${Number(node.globalContext.commonWidth) || 1024}" title="统一宽度">
+        </div>
+        <div class="matrix-token-help">连续模式可用 {{上一行文字}}、{{上一行图片}}、{{上一行视频}}；共享字段可用 {{商品参考}}、{{配色}}、{{字体}}、{{内容大纲}}</div>
+        ${(node.validationErrors || []).length ? `<div class="matrix-validation-errors">${node.validationErrors.map(error => `<div data-error-row="${escapeAttr(error.rowId || '')}">${escapeHtml(error.message)}</div>`).join('')}</div>` : ''}
+        <div class="matrix-rows">${node.rows.map((row, index) => `
+            <div class="matrix-row ${escapeAttr(row.status || 'draft')}" data-row-id="${escapeAttr(row.rowId)}">
+                <button type="button" class="matrix-row-ref-port" data-matrix-ref-port data-row-id="${escapeAttr(row.rowId)}" title="拖到图片或视频节点，为本步骤连接参考"><i data-lucide="plus"></i></button>
+                <input type="checkbox" data-matrix-selected ${row.selected !== false ? 'checked' : ''} aria-label="选择步骤">
+                <span class="matrix-row-index">${index + 1}</span>
+                <input data-matrix-field="name" value="${escapeAttr(row.name)}" placeholder="步骤名">
+                <textarea data-matrix-field="prompt" placeholder="任务 / 提示词">${escapeHtml(row.prompt || row.task || '')}</textarea>
+                <div class="matrix-row-refs">${matrixRowReferences(node, row).map(ref => `<span title="${escapeAttr(ref.name || ref.url)}">${matrixRefThumb(ref)}</span>`).join('') || '<em>连接参考</em>'}</div>
+                <select multiple data-matrix-dependencies title="依赖步骤">${matrixDependencyOptions(node, row)}</select>
+                <select data-matrix-field="type"><option value="image" ${row.type === 'image' ? 'selected' : ''}>图片</option><option value="video" ${row.type === 'video' ? 'selected' : ''}>视频</option></select>
+                <span class="matrix-row-status" title="${escapeAttr(row.error || '')}">${matrixStatusLabel(row.status)}<small>${escapeHtml(matrixResultSummary(row))}</small></span>
+                <button type="button" data-matrix-run-row title="${row.status === 'done' ? '单独重做此行' : '运行此行'}"><i data-lucide="${row.status === 'done' ? 'refresh-cw' : 'play'}"></i></button>
+                <button type="button" data-matrix-remove title="删除行"><i data-lucide="trash-2"></i></button>
+                ${row.error ? `<div class="matrix-row-error">${escapeHtml(row.error).slice(0, 120)}</div>` : ''}
+                <details class="matrix-overlay-editor"><summary>可编辑文字叠加</summary><div><input data-matrix-overlay="text" value="${escapeAttr(row.overlay?.text || '')}" placeholder="文字"><input data-matrix-overlay="fontSize" type="number" min="8" max="240" value="${Number(row.overlay?.fontSize) || 36}" title="字号"><input data-matrix-overlay="color" type="color" value="${escapeAttr(row.overlay?.color || '#ffffff')}" title="颜色"><input data-matrix-overlay="x" type="number" value="${Number(row.overlay?.x) || 0}" title="X"><input data-matrix-overlay="y" type="number" value="${Number(row.overlay?.y) || 0}" title="Y"><select data-matrix-overlay="align"><option value="left" ${row.overlay?.align === 'left' ? 'selected' : ''}>左对齐</option><option value="center" ${row.overlay?.align === 'center' ? 'selected' : ''}>居中</option><option value="right" ${row.overlay?.align === 'right' ? 'selected' : ''}>右对齐</option></select></div></details>
+            </div>`).join('')}</div>
+        <div class="matrix-view-bar"><button type="button" data-matrix-view="table" class="${node.view === 'table' ? 'active' : ''}">表格</button><button type="button" data-matrix-view="gallery" class="${node.view === 'gallery' ? 'active' : ''}">画册</button><button type="button" data-matrix-view="long" class="${node.view === 'long' ? 'active' : ''}">长图预览</button><button type="button" data-matrix-stitch>生成预览</button><button type="button" data-matrix-export>导出长图</button><label class="matrix-file-btn">导入 CSV<input type="file" accept=".csv,text/csv" data-matrix-csv></label><button type="button" data-matrix-llm>导入上游 LLM 草稿</button></div>
+        <div class="matrix-result-view">${renderMatrixResults(node)}</div>`;
+    wrap.ondblclick = event => { if(event.target.closest('input,textarea,select,button,details')) return; node.matrixExpanded = false; render(); scheduleSave(); };
+    wrap.querySelector('[data-matrix-name]').oninput = event => { node.title = event.target.value; node.name = event.target.value; scheduleSave(); };
+    wrap.querySelectorAll('[data-matrix-mode]').forEach(button => button.onclick = () => { node.mode = button.dataset.matrixMode; render(); scheduleSave(); });
+    wrap.querySelector('[data-matrix-check]').onclick = () => checkMatrixInputs(node.id, true);
+    wrap.querySelector('[data-matrix-collapse]').onclick = () => { node.matrixExpanded = false; render(); scheduleSave(); };
+    wrap.querySelectorAll('[data-matrix-range]').forEach(select => select.onchange = event => { node.range[select.dataset.matrixRange === 'start' ? 'startRowId' : 'endRowId'] = event.target.value; node.validationErrors = []; render(); scheduleSave(); });
+    wrap.querySelectorAll('[data-matrix-global]').forEach(input => input.oninput = event => {
+        const key = event.target.dataset.matrixGlobal;
+        node.globalContext[key] = key === 'commonWidth' ? Math.max(256, Number(event.target.value) || 1024) : event.target.value;
+        node.rows = node.rows.map(row => row.status === 'done' ? {...row, status:'stale', error:'共享规范已变化，待更新'} : row);
+        scheduleSave();
+    });
+    wrap.querySelector('[data-matrix-add]').onclick = () => {
+        const row = newMatrixRow(node.rows.length);
+        if(node.mode === 'continuous' && node.rows.length) row.dependencies = [node.rows[node.rows.length - 1].rowId];
+        node.rows.push(row); node.range.endRowId = row.rowId; render(); scheduleSave();
+    };
+    wrap.querySelector('[data-matrix-run-all]').onclick = () => runMatrixRows(node.id);
+    wrap.querySelector('[data-matrix-stop]').onclick = () => stopMatrixRows(node.id);
+    wrap.querySelector('[data-matrix-stitch]').onclick = () => stitchMatrixImages(node.id, {download:false});
+    wrap.querySelector('[data-matrix-export]').onclick = () => stitchMatrixImages(node.id, {download:true});
+    wrap.querySelector('[data-matrix-llm]').onclick = () => importMatrixRowsFromUpstreamLLM(node.id);
+    wrap.querySelector('[data-matrix-csv]').onchange = event => importMatrixCsv(node.id, event.target.files?.[0]);
+    wrap.querySelectorAll('[data-matrix-view]').forEach(button => button.onclick = () => { node.view = button.dataset.matrixView; render(); scheduleSave(); });
+    wrap.querySelectorAll('.matrix-source-map').forEach(mapEl => {
+        const mapping = node.sourceMappings.find(item => item.connectionId === mapEl.dataset.mappingId);
+        if(!mapping) return;
+        const purpose = mapEl.querySelector('[data-matrix-map-purpose]');
+        const rowSelect = mapEl.querySelector('[data-matrix-map-row]');
+        purpose.onchange = () => {
+            mapping.purpose = purpose.value;
+            if(mapping.purpose !== 'row') mapping.rowId = '';
+            const connection = connections.find(item => item.id === mapping.connectionId);
+            if(connection) Object.assign(connection, {purpose:mapping.purpose, rowId:mapping.rowId, slot:mapping.purpose === 'row' ? 'references' : 'context'});
+            render(); scheduleSave();
+        };
+        rowSelect.onchange = () => {
+            mapping.rowId = rowSelect.value;
+            mapping.purpose = mapping.rowId ? 'row' : 'unassigned';
+            const connection = connections.find(item => item.id === mapping.connectionId);
+            if(connection) Object.assign(connection, {rowId:mapping.rowId, purpose:mapping.purpose, slot:'references'});
+            render(); scheduleSave();
+        };
+        mapEl.querySelector('[data-matrix-map-disconnect]').onclick = () => { connections = connections.filter(item => item.id !== mapping.connectionId); syncGeneratorInputs(); render(); scheduleSave(); };
+    });
+    wrap.querySelectorAll('.matrix-row').forEach(rowEl => {
+        const rowId = rowEl.dataset.rowId;
+        const index = node.rows.findIndex(row => row.rowId === rowId);
+        rowEl.querySelector('[data-matrix-ref-port]').onmousedown = event => { if(event.button === 0) startMatrixRowLink(event, node.id, rowId); };
+        rowEl.querySelector('[data-matrix-selected]').onchange = event => updateMatrixRowField(node, index, 'selected', event.target.checked);
+        rowEl.querySelectorAll('[data-matrix-field]').forEach(input => input.oninput = event => updateMatrixRowField(node, index, input.dataset.matrixField, event.target.value));
+        rowEl.querySelector('[data-matrix-dependencies]').onchange = event => updateMatrixRowField(node, index, 'dependencies', [...event.target.selectedOptions].map(option => option.value));
+        rowEl.querySelectorAll('[data-matrix-overlay]').forEach(input => input.oninput = event => {
+            const overlay = {...node.rows[index].overlay};
+            const field = input.dataset.matrixOverlay;
+            overlay[field] = ['fontSize', 'x', 'y'].includes(field) ? Number(event.target.value) : event.target.value;
+            updateMatrixRowField(node, index, 'overlay', NovaWorkflowUtils.normalizeOverlay(overlay));
+        });
+        rowEl.querySelector('[data-matrix-run-row]').onclick = () => runMatrixRows(node.id, [rowId]);
+        rowEl.querySelector('[data-matrix-remove]').onclick = () => {
+            if(node.rows.length <= 1) return;
+            removeMatrixRow(node, rowId); render(); scheduleSave();
+        };
+    });
+    return wrap;
+}
 function renderNode(node){
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
-    el.className = `node ${node.type}-node ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
+    el.className = `node ${node.type}-node ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${canvasGroupMemberIndex.has(node.id) ? 'canvas-group-member' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
     el.style.width = `${node.w || size.w}px`;
@@ -6403,16 +6708,22 @@ function renderNode(node){
         if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'midjourney' ? 'Midjourney' : node.type === 'minimax' ? 'MiniMax H3' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
-    const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : NovaNodeRegistry.isTaskTableNode(node) ? '多维表格' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'midjourney' ? 'Midjourney' : node.type === 'minimax' ? 'MiniMax H3' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : (['group','matrix'].includes(node.type) ? (node.title || title) : title);
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax','group'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
         return `<span class="node-run-status ${node.runStatus}"><span class="dot"></span>${escapeHtml(label)}${node._cascadeIdx?' '+node._cascadeIdx:''}</span>`;
     })() : '';
-    el.innerHTML = `<div class="node-head"><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px">${statusHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    const titleHtml = node.type === 'group' ? `<input class="group-title-input" value="${escapeAttr(displayTitle)}" aria-label="群组名称">` : `<span class="node-title">${escapeHtml(displayTitle)}</span>`;
+    const groupRunHtml = node.type === 'group' ? `<button class="group-run-btn" type="button" title="运行群组" data-run-group="${escapeAttr(node.id)}"><i data-lucide="play"></i></button>` : '';
+    el.innerHTML = `<div class="node-head">${titleHtml}<div style="display:flex;align-items:center;gap:8px">${statusHtml}${groupRunHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    const groupTitleInput = el.querySelector('.group-title-input');
+    if(groupTitleInput) groupTitleInput.oninput = event => { node.title = event.target.value; scheduleSave(); };
+    const groupRunButton = el.querySelector('[data-run-group]');
+    if(groupRunButton) groupRunButton.onclick = () => runCanvasGroup(node.id);
     const body = document.createElement('div');
     body.className = 'node-body';
     if(node.type === 'image') {
@@ -6529,11 +6840,13 @@ function renderNode(node){
         const items = (node.items || []).map(id => nodes.find(n => n.id === id)).filter(Boolean);
         const imgCount = items.filter(n => n.type === 'image').length;
         const promptCount = items.filter(n => n.type === 'prompt').length;
+        const runnableCount = items.filter(n => canvasRunTypes().includes(n.type) || NovaNodeRegistry.isTaskTableNode(n)).length;
         const parts = [];
         if(imgCount) parts.push(`${imgCount} ${tr('canvas.imageCount')}`);
         if(promptCount) parts.push(`${promptCount} ${tr('canvas.promptCount')}`);
+        if(runnableCount) parts.push(`${runnableCount} 个任务`);
         const text = parts.length ? `${parts.join(' · ')} ${tr('canvas.grouped')}` : tr('canvas.groupEmpty');
-        body.innerHTML = `<div class="text-[11px] text-gray-400">${text}</div>`;
+        body.innerHTML = `<div class="text-[11px] text-gray-400">${text}</div>${node.runError ? `<div class="group-run-error">${escapeHtml(node.runError).slice(0, 140)}</div>` : ''}`;
         const previewItems = groupImageItems(node);
         if(previewItems.length){
             const openGroupPreview = e => {
@@ -6554,6 +6867,7 @@ function renderNode(node){
             body.ondblclick = openGroupPreview;
         }
     }
+    if(NovaNodeRegistry.isTaskTableNode(node)) body.appendChild(renderMatrixBody(node));
     if(node.type === 'promptGroup') {
         const promptNodes = (node.items || []).map(id => nodes.find(n => n.id === id)).filter(Boolean);
         body.innerHTML = `<div class="text-[11px] text-gray-400">${promptNodes.length} ${tr('canvas.promptCount')} ${tr('canvas.grouped')}</div>`;
@@ -6586,10 +6900,13 @@ function renderNode(node){
         if(e.button !== 0 || !isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','midjourney','comfy','ltxDirector','output','llm','msgen','video','rh','minimax'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','midjourney','comfy','ltxDirector','llm','msgen','video','rh','minimax','output'].includes(node.type);
-    if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
-    if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
+    const canInput = ['generator','midjourney','comfy','ltxDirector','output','llm','msgen','video','rh','minimax','matrix'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','midjourney','comfy','ltxDirector','llm','msgen','video','rh','minimax','output','matrix'].includes(node.type);
+    // 端口 = 44px 不可见命中区 + 里面的 .port-dot（24px 外圈 + 加号）。
+    // 外圈和加号分别用真实的 border-color / background-color 画，改色才能平滑过渡
+    //（之前加号是两条渐变画的，渐变改色是瞬变的，鼠标一碰上就“啪”地变黑）。
+    if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"><span class="port-dot"></span></div>`);
+    if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"><span class="port-dot"></span></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
     el.querySelector('.node-head').onmousedown = e => {
         if(e.button !== 0) return;
@@ -6606,9 +6923,45 @@ function renderNode(node){
     el.querySelector('.resize-handle').onmousedown = e => { if(e.button === 0 && !e.shiftKey) startNodeResize(e, node); };
     el.ondragstart = e => { e.preventDefault(); e.stopPropagation(); };
     const out = el.querySelector('.port.out');
-    if(out) out.onmousedown = e => { if(e.button === 0 && !e.shiftKey){ e.preventDefault(); startLink(e, node.id, 'out'); } };
     const inp = el.querySelector('.port.in');
-    if(inp) inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey){ e.preventDefault(); startLink(e, node.id, 'in'); } };
+    [out, inp].filter(Boolean).forEach(port => {
+        port.onmousedown = e => {
+            if(e.button === 0 && !e.shiftKey){ e.preventDefault(); startLink(e, node.id, port.classList.contains('out') ? 'out' : 'in'); }
+        };
+        // hover 命中时外圈+加号沿鼠标方向小范围跟随位移；移开恢复原位
+        const PORT_FOLLOW_LIMIT = 8;
+        port.addEventListener('mousemove', e => {
+            if(tempLink) return;
+            const r = port.getBoundingClientRect();
+            let dx = e.clientX - (r.left + r.width / 2);
+            let dy = e.clientY - (r.top + r.height / 2);
+            const dist = Math.hypot(dx, dy);
+            if(dist > PORT_FOLLOW_LIMIT){
+                dx *= PORT_FOLLOW_LIMIT / dist;
+                dy *= PORT_FOLLOW_LIMIT / dist;
+            }
+            port.style.setProperty('--pdx', dx.toFixed(2) + 'px');
+            port.style.setProperty('--pdy', dy.toFixed(2) + 'px');
+        });
+        port.addEventListener('mouseleave', () => {
+            port.style.removeProperty('--pdx');
+            port.style.removeProperty('--pdy');
+        });
+    });
+    // 手柄停留增强：移出节点后短暂保持端口可命中，避免鼠标刚离开节点边缘手柄就消失
+    const lingerTimerKey = '_portLingerTimer';
+    el.addEventListener('mouseenter', () => {
+        if(el[lingerTimerKey]){ clearTimeout(el[lingerTimerKey]); el[lingerTimerKey] = null; }
+        el.classList.remove('port-linger');
+    });
+    el.addEventListener('mouseleave', () => {
+        if(el[lingerTimerKey]) return;
+        el.classList.add('port-linger');
+        el[lingerTimerKey] = setTimeout(() => {
+            el.classList.remove('port-linger');
+            el[lingerTimerKey] = null;
+        }, 300);
+    });
     return el;
 }
 function bindOutputWrap(wrap, node){
@@ -6755,6 +7108,7 @@ function defaultNodeSize(type){
     if(type === 'image') return {w:260, h:336};
     if(type === 'prompt') return {w:310, h:0};
     if(type === 'loop') return {w:336, h:0};
+    if(NovaNodeRegistry.isTaskTableType(type)) return {w:680, h:440};
     if(type === 'llm') return {w:420, h:590};
     if(type === 'generator') return {w:380, h:0};
     if(type === 'midjourney') return {w:380, h:0};
@@ -8344,6 +8698,7 @@ function renderLLMNodePane(container, node){
             <button class="llm-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="play" class="w-4 h-4"></i>${node.running ? tr('canvas.running') : 'Run LLM'}</button>
             ${cascadeBtnHtml(node)}
         </div>
+        <button class="llm-matrix-draft" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="table-2"></i>生成多维表格</button>
         ${retryBarHtml(node)}
     `;
     const inputEl = container.querySelector('.llm-input-output');
@@ -8354,6 +8709,7 @@ function renderLLMNodePane(container, node){
     bindScrollableText(container.querySelector('.llm-result-output'));
     container.querySelector('.llm-pane-resizer').onmousedown = e => startLLMPaneResize(e, node);
     container.querySelector('.llm-run').onclick = e => { e.stopPropagation(); runLLMNode(node.id); };
+    container.querySelector('.llm-matrix-draft').onclick = e => { e.stopPropagation(); generateMatrixFromLLMNode(node.id); };
     bindCascadeButtons(container, node.id);
     const copyBtn = container.querySelector('.llm-output-copy');
     if(copyBtn){
@@ -8582,6 +8938,7 @@ function llmInputText(node){
         if(n.type === 'loop') return renderLoopPrompt(n);
         if(n.type === 'promptGroup') return (n.items || []).map(id => nodes.find(x => x.id === id)).filter(Boolean).map(p => p.text || '').filter(Boolean).join('\n\n');
         if(n.type === 'llm') return n.outputText || '';
+        if(NovaNodeRegistry.isTaskTableNode(n)) return n.activeRowText || '';
         return '';
     }).filter(Boolean).join('\n\n');
 }
@@ -8596,6 +8953,7 @@ function llmInputImages(node){
         if(n.type === 'group'){
             (n.items || []).map(id => nodes.find(x => x.id === id)).filter(x => x?.type === 'image' && x?.url && mediaKindForNode(x) === 'image').forEach(img => urls.push(img.url));
         }
+        if(NovaNodeRegistry.isTaskTableNode(n)) (n.activeRowRefs || []).filter(ref => ref?.url && (ref.kind || mediaKindForRef(ref.url)) === 'image').forEach(ref => urls.push(ref.url));
     });
     return urls;
 }
@@ -8610,6 +8968,7 @@ function llmInputVideos(node){
         if(n.type === 'group'){
             (n.items || []).map(id => nodes.find(x => x.id === id)).filter(x => x?.type === 'image' && x?.url && mediaKindForNode(x) === 'video').forEach(video => urls.push(video.url));
         }
+        if(NovaNodeRegistry.isTaskTableNode(n)) (n.activeRowRefs || []).filter(ref => ref?.url && (ref.kind || mediaKindForRef(ref.url)) === 'video').forEach(ref => urls.push(ref.url));
     });
     return urls;
 }
@@ -11160,11 +11519,15 @@ async function runRhModelNode(node, opts={}){
     }
     else refreshRunNodes(node, out);
     try {
-        const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(payload, {cascadeTargetId})));
+        const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(payload, {cascadeTargetId, matrixNodeId:opts.matrixNodeId, matrixRowId:opts.matrixRowId, runContext:opts.runContext})));
+        // P0-3：登记本次行任务对应的后端 task_id，Stop 时才能真正取消，而不是只停前端
+        (taskInfos || []).forEach(info => trackMatrixTask(opts.matrixNodeId, info?.task_id));
         if(!out){
             let outputs = [];
             for(const task of taskInfos){
                 const result = await waitCanvasImageTaskResult(task.task_id, {cascadeTargetId});
+                // Phase 2C：把带归属章的原始结果交给 Run 层，归属不再靠差集猜
+                if(Array.isArray(opts.taskResults)) opts.taskResults.push(result);
                 outputs.push(...(result.images || []));
                 run.request = requestMetaFromResult(result);
             }
@@ -11192,7 +11555,7 @@ async function runRhModelNode(node, opts={}){
         refreshRunNodes(node, out);
         scheduleSave();
         await saveCanvas();
-        const statuses = await Promise.all(taskInfos.map(task => pollCanvasImageTask(task.task_id, {cascadeTargetId})));
+        const statuses = await Promise.all(taskInfos.map(task => pollCanvasImageTask(task.task_id, {cascadeTargetId, taskResults:opts.taskResults})));
         if(statuses.includes('aborted')) throw cascadeAbortError(cascadeStopMessage());
         if(statuses.includes('failed')) throw new Error(node.runError || tr('canvas.generationFailed'));
     } catch(err) {
@@ -11580,6 +11943,12 @@ function generatorSources(gen){
             return {id:n.id, type:'promptGroup', label:`提示词 ${prompts.length} 个`, refs:[], prompt:prompts.join('\n\n')};
         }
         if(n.type === 'llm' && (n.mode || 'node') === 'node' && n.outputText) return {id:n.id, type:'llm', label:(n.outputText || 'LLM').slice(0, 32), refs:[], prompt:n.outputText || ''};
+        if(NovaNodeRegistry.isTaskTableNode(n)) {
+            const payload = gen?._matrixPayload?.matrixNodeId === n.id ? gen._matrixPayload : null;
+            const prompt = payload?.prompt || n.activeRowText || '';
+            const refs = payload?.refs || n.activeRowRefs || [];
+            return {id:n.id, type:'matrix', label:(prompt || '表格行').slice(0, 32), refs:refs.filter(ref => ref?.url), prompt};
+        }
         return null;
     }).flat().filter(Boolean);
 }
@@ -11674,11 +12043,15 @@ async function runGenerator(genId, opts={}){
         setTimeout(() => { gen.running = false; refreshRunNodes(gen, out); }, 2000);
     }
     try {
-        const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(payload, {cascadeTargetId})));
+        const taskInfos = await Promise.all(Array.from({length:count}, () => createCanvasImageTask(payload, {cascadeTargetId, matrixNodeId:opts.matrixNodeId, matrixRowId:opts.matrixRowId, runContext:opts.runContext})));
+        // P0-3：登记本次行任务对应的后端 task_id，Stop 时才能真正取消，而不是只停前端
+        (taskInfos || []).forEach(info => trackMatrixTask(opts.matrixNodeId, info?.task_id));
         if(!out){
             let outputs = [];
             for(const task of taskInfos){
                 const result = await waitCanvasImageTaskResult(task.task_id, {cascadeTargetId});
+                // Phase 2C：把带归属章的原始结果交给 Run 层，归属不再靠差集猜
+                if(Array.isArray(opts.taskResults)) opts.taskResults.push(result);
                 outputs.push(...(result.images || []));
                 run.request = requestMetaFromResult(result);
             }
@@ -11706,7 +12079,7 @@ async function runGenerator(genId, opts={}){
         refreshRunNodes(gen, out);
         scheduleSave();
         await saveCanvas();
-        const statuses = await Promise.all(taskInfos.map(task => pollCanvasImageTask(task.task_id, {cascadeTargetId})));
+        const statuses = await Promise.all(taskInfos.map(task => pollCanvasImageTask(task.task_id, {cascadeTargetId, taskResults:opts.taskResults})));
         if(statuses.includes('aborted')) throw cascadeAbortError(cascadeStopMessage());
         if(statuses.includes('failed')) throw new Error(gen.runError || tr('canvas.generationFailed'));
     } catch(err) {
@@ -11965,29 +12338,45 @@ async function runVideoNode(nodeId, opts={}){
     if(!opts.cascade){ node.running = true; refreshRunNodes(node, out); }
     else refreshRunNodes(node, out);
     try {
-        const result = await cascadeFetch('/api/canvas-video', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                prompt,
-                provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),
-                model:node.model || 'veo3-fast',
-                duration:Number(node.duration || 5),
-                aspect_ratio:node.aspectRatio || '16:9',
-                resolution:node.resolution || '',
-                images:refs,
-                videos:manualVideoUrlForNode(node)
-                    ? [manualVideoUrlForNode(node)]
-                    : videoRefs.map(ref => tempShUploadedUrlForNode(node, ref.url)),
-                audios:audioRefs.map(ref => ref.url).filter(Boolean),
-                enhance_prompt:Boolean(node.enhancePrompt),
-                enable_upsample:Boolean(node.enableUpsample),
-                watermark:Boolean(node.watermark),
-                camerafixed:Boolean(node.cameraFixed),
-                generate_audio:Boolean(node.generateAudio),
-                multimodal:Boolean(node.multimodal)
-            })
-        }, {cascadeTargetId}).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.videoFailed'))); return r.json(); });
+        const body = {
+            prompt,
+            provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),
+            model:node.model || 'veo3-fast',
+            duration:Number(node.duration || 5),
+            aspect_ratio:node.aspectRatio || '16:9',
+            resolution:node.resolution || '',
+            images:refs,
+            videos:manualVideoUrlForNode(node)
+                ? [manualVideoUrlForNode(node)]
+                : videoRefs.map(ref => tempShUploadedUrlForNode(node, ref.url)),
+            audios:audioRefs.map(ref => ref.url).filter(Boolean),
+            enhance_prompt:Boolean(node.enhancePrompt),
+            enable_upsample:Boolean(node.enableUpsample),
+            watermark:Boolean(node.watermark),
+            camerafixed:Boolean(node.cameraFixed),
+            generate_audio:Boolean(node.generateAudio),
+            multimodal:Boolean(node.multimodal)
+        };
+        // Phase 2D：矩阵派发视频时带归属上下文下发
+        if(opts.runContext) body.run_context = opts.runContext;
+        let result;
+        if(opts.runContext){
+            // 矩阵场景：视频强制异步排队（可取消），产物由后端盖章到 result.refs
+            const taskRes = await cascadeFetch('/api/canvas-video?async=1', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify(body)
+            }, {cascadeTargetId}).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.videoFailed'))); return r.json(); });
+            // Phase 2D：矩阵派发的视频任务纳入可取消集合（供 Stop 真正取消）
+            if(opts.matrixNodeId && taskRes?.task_id) trackMatrixTask(opts.matrixNodeId, taskRes.task_id);
+            result = await waitCanvasVideoTaskResult(taskRes.task_id, {cascadeTargetId, taskResults:opts.taskResults});
+        } else {
+            result = await cascadeFetch('/api/canvas-video', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify(body)
+            }, {cascadeTargetId}).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.videoFailed'))); return r.json(); });
+        }
         const meta = collectRunMeta(out, pendingId);
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
         const outputUrls = resultMediaUrls(result).map(item => {
@@ -12925,6 +13314,8 @@ async function runComfyNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || (node.running && !opts.cascade)) return;
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
+    // Phase 2D：Comfy 作为矩阵目标时透传 Run 归属上下文与结果收集器
+    const comfyTaskOptions = {cascadeTargetId, runContext:opts.runContext, taskResults:opts.taskResults, matrixNodeId:opts.matrixNodeId};
     const sources = orderedSources(node, generatorSources(node));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
     const allRefs = sources.flatMap(s => s.refs || []);
@@ -12961,7 +13352,7 @@ async function runComfyNode(nodeId, opts={}){
                 workflow_json:'Z-Image.json',
                 type:'zimage',
                 client_id:CLIENT_ID
-            }, {cascadeTargetId});
+            }, comfyTaskOptions);
             run.request = requestMetaFromResult(result);
             images = comfyResultOutputs(result);
         } else if(mode === 'enhance'){
@@ -12975,7 +13366,7 @@ async function runComfyNode(nodeId, opts={}){
                 },
                 type:'enhance',
                 client_id:CLIENT_ID
-            }, {cascadeTargetId});
+            }, comfyTaskOptions);
             run.request = requestMetaFromResult(enhance);
             if(enhance.error) throw new Error(actionFailed('canvas.comfyEnhance', enhance.error));
             if(!enhance.images?.length) throw new Error(noReturnedImage('canvas.comfyEnhance'));
@@ -13029,7 +13420,7 @@ async function runComfyNode(nodeId, opts={}){
                 params,
                 type:'workflow-custom',
                 client_id:CLIENT_ID
-            }, {cascadeTargetId});
+            }, comfyTaskOptions);
             run.request = requestMetaFromResult(result);
             if(result.error) throw new Error(actionFailed('canvas.comfyCustom', result.error));
             images = comfyResultOutputs(result);
@@ -13052,7 +13443,7 @@ async function runComfyNode(nodeId, opts={}){
                     "314": { value:Boolean(names[2]) }
                 },
                 client_id:CLIENT_ID
-            }, {cascadeTargetId});
+            }, comfyTaskOptions);
             run.request = requestMetaFromResult(result);
             if(result.error) throw new Error(actionFailed('canvas.comfyEdit', result.error));
             if(!result.images?.length) throw new Error(noReturnedImage('canvas.comfyEdit'));
@@ -13253,6 +13644,588 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'video') return runVideoNode(node.id, runOpts);
     if(node.type === 'rh') return runRhNode(node.id, runOpts);
     return Promise.resolve();
+}
+function matrixUpstreamContext(node){
+    ensureMatrixMappings(node);
+    const texts = [], upstreamTexts = [];
+    const refs = [];
+    connections.filter(connection => connection.to === node.id).forEach(connection => {
+        const source = nodes.find(candidate => candidate.id === connection.from);
+        if(!source) return;
+        const mapping = node.sourceMappings.find(item => item.connectionId === connection.id) || NovaWorkflowUtils.normalizeConnectionMapping(connection, 'source');
+        const text = source.type === 'llm' ? source.outputText : source.type === 'prompt' ? source.text : NovaNodeRegistry.isTaskTableNode(source) ? source.activeRowText : '';
+        if(text){
+            texts.push(text);
+            upstreamTexts.push({sourceNodeId:source.id, connectionId:connection.id, value:text});
+        }
+        mediaRefsFromNode(source).forEach(ref => refs.push({
+            ...ref,
+            id:ref.id || `${connection.id}:${ref.url || ref.name || 'ref'}`,
+            sourceNodeId:source.id,
+            connectionId:connection.id,
+            rowId:mapping.rowId,
+            purpose:mapping.purpose
+        }));
+    });
+    return {text:texts.join('\n\n'), upstreamTexts, refs:refs.filter(ref => ref?.url || ref?.value)};
+}
+function updateMatrixRowField(node, index, field, value){
+    ensureMatrixState(node);
+    const row = node.rows[index];
+    if(!row) return;
+    const patch = {[field]:value, userEdited:true, userEditedFields:[...new Set([...(row.userEditedFields || []), field])]};
+    if(field === 'prompt') patch.task = value;
+    if(field === 'type') patch.outputType = value;
+    node.rows = NovaWorkflowUtils.patchRowAndMarkDependents(node.rows, index, patch, node.mode === 'continuous');
+    scheduleSave();
+}
+function removeMatrixRow(node, rowId){
+    const removedIndex = node.rows.findIndex(row => row.rowId === rowId);
+    if(removedIndex < 0) return;
+    node.rows = node.rows.filter(row => row.rowId !== rowId).map(row => ({...row, dependencies:(row.dependencies || []).filter(id => id !== rowId)}));
+    connections = connections.filter(connection => !(connection.to === node.id && connection.rowId === rowId));
+    node.sourceMappings = (node.sourceMappings || []).filter(mapping => mapping.rowId !== rowId);
+    node.targetMappings = (node.targetMappings || []).filter(mapping => mapping.rowId !== rowId);
+    if(!node.rows.length) node.rows = [newMatrixRow(0)];
+    if(!node.rows.some(row => row.rowId === node.range.startRowId)) node.range.startRowId = node.rows[Math.min(removedIndex, node.rows.length - 1)].rowId;
+    if(!node.rows.some(row => row.rowId === node.range.endRowId)) node.range.endRowId = node.rows[Math.min(removedIndex, node.rows.length - 1)].rowId;
+}
+function matrixTargetDescriptors(node){
+    ensureMatrixMappings(node);
+    return connections.filter(connection => connection.from === node.id).map(connection => {
+        const target = nodes.find(candidate => candidate.id === connection.to);
+        if(!target || !canvasRunTypes().includes(target.type)) return null;
+        const mapping = node.targetMappings.find(item => item.connectionId === connection.id);
+        const matrixType = mapping?.targetType || connection.targetType || matrixTargetTypeForNode(target);
+        return {...target, matrixType, connectionId:connection.id, targetType:matrixType, _matrixTargetNode:target};
+    }).filter(Boolean);
+}
+function matrixTargets(node, rowType, payload=null){
+    let targets = NovaWorkflowUtils.routeTargets(rowType, matrixTargetDescriptors(node));
+    const mappings = (payload?.mapping?.targets || []).filter(mapping => (!mapping.rowId || mapping.rowId === payload.rowId) && (!mapping.targetType || mapping.targetType === rowType));
+    if(mappings.length){
+        const ids = new Set(mappings.map(mapping => mapping.connectionId || mapping.targetNodeId));
+        targets = targets.filter(target => ids.has(target.connectionId) || ids.has(target.id));
+    }
+    return targets;
+}
+// ---- save-time 检测：执行上下文（target model/provider/modelParams + fieldMapping + global/shared refs + routing）变化 → 精确 bump ----
+// 统一入口，避免在每个 input/change handler 里散写 revision += 1。
+// 流程：load 时 initTableContextSnapshots() 拍快照；saveCanvas 前 syncTableContextSnapshots() 比较并 bump。
+const tableContextSnapshots = new Map();  // tableNodeId -> {rowId: signature}
+
+function captureTableRowSignatures(tableNode){
+    const build = (t, r) => NovaWorkflowUtils.buildRowExecutionContext(t, r, {nodes, connections});
+    const allRows = (tableNode?.rows ?? []).map(r => String(r.rowId ?? r.id ?? '')).filter(Boolean);
+    return NovaWorkflowUtils.captureRowExecutionSignatures(tableNode, allRows, build);
+}
+function initTableContextSnapshots(){
+    tableContextSnapshots.clear();
+    nodes.forEach(node => {
+        if(!NovaNodeRegistry.isTaskTableNode(node)) return;
+        tableContextSnapshots.set(node.id, captureTableRowSignatures(node));
+    });
+}
+function syncTableContextSnapshots(){
+    nodes.forEach(node => {
+        if(!NovaNodeRegistry.isTaskTableNode(node)) return;
+        const now = captureTableRowSignatures(node);
+        const prev = tableContextSnapshots.get(node.id) || {};
+        const changedIds = Object.keys(now).filter(rowId => now[rowId] !== prev[rowId]);
+        if(changedIds.length){
+            const build = (t, r) => NovaWorkflowUtils.buildRowExecutionContext(t, r, {nodes, connections});
+            node.rows = NovaWorkflowUtils.markRowsChangedSince(node, prev, build);
+            node.rows = NovaWorkflowUtils.markRowsAndDependentsStale(node.rows, changedIds);
+        }
+        tableContextSnapshots.set(node.id, now);
+    });
+}
+// Phase 2C-1：并行 Backend Run persistence path（不替代 browserMatrixRunner）。
+// 前端唯一入口：sync → buildExecutionSnapshotDTO → POST /api/runs → 用 Backend 返回的权威 ID。
+async function createBackendRun(node){
+    if(!node || !NovaNodeRegistry.isTaskTableNode(node)) throw new Error('不是表格节点');
+    syncTableContextSnapshots();
+    const snapshots = (node.rows || [])
+        .filter(row => row.selected !== false)
+        .map(row => NovaWorkflowUtils.buildExecutionSnapshotDTO(node, row, {nodes, connections}));
+    const selected = (node.rows || []).filter(row => row.selected !== false).map(row => row.rowId);
+    // 每 Run 并发（Section 9）：复用节点既有 batchConcurrency，clamp 到后端 1..8
+    const concurrency = Math.max(1, Math.min(8, Number(node.batchConcurrency) || 2));
+    const res = await fetch('/api/runs', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            canvas_id:(typeof canvas !== 'undefined' && canvas ? canvas.id : '') || '',
+            table_node_id:node.id,
+            mode:node.mode,
+            concurrency,
+            selected_row_ids:selected,
+            row_snapshots:snapshots
+        })
+    });
+    if(!res.ok) throw new Error(await responseErrorMessage(res, '创建 Run 失败'));
+    const run = await res.json();
+    node.backendRunId = run.run_id;
+    return run;
+}
+if(typeof window !== 'undefined'){
+    window.__NOVAI_CREATE_BACKEND_RUN__ = createBackendRun;
+    window.__NOVAI_CREATE_BACKEND_RUN_BY_ID__ = nodeId => createBackendRun(nodes.find(n => n.id === nodeId));
+}
+// Phase 2C-3：前端 Backend execute 路径（Section 59）。
+// sync → POST /api/runs → POST /api/runs/{run_id}/execute（scheduler + concurrency + DAG）
+// → poll GET /api/runs/{run_id} → 同步 RowRun 状态。
+// Browser 禁止逐行 execute 来模拟 DAG；与 legacy browserMatrixRunner 并存。
+async function pollRunUntilSettled(runId, shouldStop){
+    for(let i = 0; i < 600; i++){
+        if(shouldStop && shouldStop()) return null;  // 停止请求 → 正常返回（不抛超时）
+        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+        if(!res.ok) throw new Error(await responseErrorMessage(res, '读取 Run 失败'));
+        const run = await res.json();
+        // 终态 Run（含 cancel 后 stopped）立即返回
+        if(['done','partial','failed','blocked','stopped'].includes(run.status)) return run;
+        const active = (run.row_runs || []).filter(rr => ['draft','ready','queued','running','canceling'].includes(rr.status));
+        if(!active.length) return run;
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw new Error('Run 轮询超时');
+}
+async function executeBackendRun(node){
+    if(!node || !NovaNodeRegistry.isTaskTableNode(node)) throw new Error('不是表格节点');
+    if(node.running) return {skipped:true};
+    syncTableContextSnapshots();
+    node.running = true;
+    node.stopRequested = false;
+    render(); scheduleSave();
+    try {
+        const run = await createBackendRun(node);
+        node.backendRunId = run.run_id;
+        node.lastRunId = run.run_id;
+        // 整 Run execute（Section 59）：由 backend scheduler 决定派发，前端不逐行 execute
+        const startRes = await fetch(`/api/runs/${encodeURIComponent(run.run_id)}/execute`, {method:'POST'});
+        if(!startRes.ok){
+            const body = await startRes.json().catch(() => ({}));
+            const detail = body?.detail;
+            const message = Array.isArray(detail?.errors) && detail.errors.length
+                ? detail.errors[0].message : (detail?.message || detail || 'Run 启动失败');
+            throw new Error(message);
+        }
+        const finalRun = await pollRunUntilSettled(run.run_id, () => Boolean(node.stopRequested));
+        if(!finalRun){ node.running = false; render(); scheduleSave(); return {run_id: run.run_id, status: 'stopped', row_runs: []}; }
+        applyBackendRunToRows(node, finalRun);
+        node.running = false;
+        render(); scheduleSave();
+        return {run_id: run.run_id, status: finalRun.status, row_runs: finalRun.row_runs};
+    } catch(error){
+        node.running = false;
+        render(); scheduleSave();
+        throw error;
+    }
+}
+// 用后端 Run 的确定性 result_refs 回写 node.rows（rowId → row_run 映射，绝不按行号）。
+// 执行完成与刷新恢复共用同一回写逻辑。
+function applyBackendRunToRows(node, run){
+    const byRowId = new Map(((run && run.row_runs) || []).map(rr => [String(rr.row_id), rr]));
+    node.rows = (node.rows || []).map(row => {
+        const rr = byRowId.get(String(row.rowId));
+        if(!rr) return row;
+        const stale = rr.status === 'done' && Number(row.revision || 1) > Number(rr.row_revision || 1);
+        return {
+            ...row,
+            status: stale ? 'stale' : rr.status,
+            blocked: rr.blocked || {},
+            stopReason: rr.stop_reason || '',
+            resultRefs: rr.result_refs || [],
+            lastRunRevision: rr.row_revision,
+            output: {...(row.output || {}), refs: rr.result_refs || [], runId: run.run_id, rowRunId: rr.row_run_id, taskId: rr.task_id}
+        };
+    });
+    return node.rows;
+}
+// Section 35-37：页面加载 / 刷新时恢复 active Backend Run。
+// 只 GET active Run + poll（不重新 POST /api/runs、不重新 POST execute）。
+async function resumeBackendRuns(){
+    if(!backendRunEnabled) return [];
+    const tableNodes = (nodes || []).filter(n => NovaNodeRegistry.isTaskTableNode(n));
+    const resumed = [];
+    for(const node of tableNodes){
+        if(node.running) continue;
+        try {
+            const cid = (typeof canvas !== 'undefined' && canvas ? canvas.id : '') || '';
+            const res = await fetch(`/api/runs?canvas_id=${encodeURIComponent(cid)}&table_node_id=${encodeURIComponent(node.id)}&active=1`);
+            if(!res.ok) continue;
+            const data = await res.json();
+            const items = data.items || [];
+            if(!items.length) continue;
+            // latest active run：started_at 优先，再 created_at，再 run_id（与后端 latest_active_run 一致）
+            const run = items.slice().sort((a, b) =>
+                (Number(b.started_at) || 0) - (Number(a.started_at) || 0)
+                || (Number(b.created_at) || 0) - (Number(a.created_at) || 0)
+                || String(b.run_id).localeCompare(String(a.run_id)))[0];
+            node.backendRunId = run.run_id;
+            // 未启动（draft，无 started_at）的 Run 不接管，避免把从未执行的 Run 显示成运行中
+            if(!run.started_at){ resumed.push({nodeId:node.id, runId:run.run_id, status:'draft'}); continue; }
+            node.running = true;
+            render();
+            const finalRun = await pollRunUntilSettled(run.run_id, () => Boolean(node.stopRequested));
+            if(finalRun) applyBackendRunToRows(node, finalRun);
+            node.running = false;
+            render(); scheduleSave();
+            resumed.push({nodeId:node.id, runId:run.run_id, status: finalRun ? finalRun.status : 'stopped'});
+        } catch(error){
+            node.running = false;
+            render();
+            console.warn('[BackendRun] active Run 恢复失败', error);
+        }
+    }
+    return resumed;
+}
+// Section 58/64：feature flag。OFF → legacy browserMatrixRunner；ON → Backend Run path。
+// Phase 2C Final Cutover（Gate C）：默认 ON。legacy 只能显式 OFF 使用，禁止 silent fallback。
+let backendRunEnabled = true;
+if(typeof window !== 'undefined'){
+    window.__NOVAI_EXECUTE_BACKEND_RUN__ = executeBackendRun;
+    window.__NOVAI_EXECUTE_BACKEND_RUN_BY_ID__ = nodeId => executeBackendRun(nodes.find(n => n.id === nodeId));
+    window.__NOVAI_BACKEND_RUN_ENABLED__ = () => backendRunEnabled;
+    window.__NOVAI_SET_BACKEND_RUN_ENABLED__ = value => { backendRunEnabled = !!value; };
+    window.__NOVAI_RESUME_BACKEND_RUNS__ = resumeBackendRuns;
+}
+// 锁与结果归属下沉到共享层（可单测），两画布共用同一语义
+const runWithMatrixTargetLock = NovaWorkflowUtils.createMatrixTargetLock();
+function matrixTaskIdFor(nodeId, rowId){ return NovaWorkflowUtils.matrixTaskId(nodeId, rowId); }
+// 每个表格节点在跑的后端任务 ID，供 Stop 真正取消（P0-3）
+const matrixActiveTaskIds = new Map();
+// 运行中的 Run 句柄（nodeId -> Run）。不落盘，仅在内存里供收尾用。
+const matrixActiveRuns = new Map();
+function trackMatrixTask(matrixNodeId, taskId){
+    if(!matrixNodeId || !taskId) return;
+    if(!matrixActiveTaskIds.has(matrixNodeId)) matrixActiveTaskIds.set(matrixNodeId, new Set());
+    matrixActiveTaskIds.get(matrixNodeId).add(String(taskId));
+}
+function clearMatrixTasks(matrixNodeId){ matrixActiveTaskIds.delete(matrixNodeId); }
+function matrixTaskIdsFor(matrixNodeId){ return [...(matrixActiveTaskIds.get(matrixNodeId) || [])]; }
+function checkMatrixInputs(nodeId, announce=false){
+    const node = nodes.find(candidate => candidate.id === nodeId && NovaNodeRegistry.isTaskTableNode(candidate));
+    if(!node) return {valid:false, errors:[]};
+    ensureMatrixState(node);
+    const validation = NovaWorkflowUtils.validateMatrix(node, {targets:matrixTargetDescriptors(node)});
+    node.validationErrors = validation.errors;
+    if(announce){
+        render();
+        if(validation.valid) setStatus(`输入检查通过，共 ${validation.rows.length} 步`);
+        else setStatus(`发现 ${validation.errors.length} 个问题`);
+    }
+    return validation;
+}
+async function cancelMatrixBackendTasks(nodeId){
+    const ids = matrixTaskIdsFor(nodeId);
+    if(!ids.length) return {requested:0, cancelled:0, failed:0};
+    const results = await Promise.all(ids.map(async id => {
+        try {
+            const res = await fetch(`/api/tasks/${encodeURIComponent(id)}/cancel`, {method:'POST'});
+            if(!res.ok) return 'failed';
+            const data = await res.json().catch(() => ({}));
+            // 后端区分：已受理取消(cancel_requested) vs 已真正取消(cancelled)
+            return data?.status === 'cancelled' ? 'cancelled' : 'requested';
+        } catch(error){
+            return 'failed';
+        }
+    }));
+    return {
+        requested:results.filter(item => item === 'requested').length,
+        cancelled:results.filter(item => item === 'cancelled').length,
+        failed:results.filter(item => item === 'failed').length
+    };
+}
+function stopMatrixRows(nodeId){
+    const node = nodes.find(candidate => candidate.id === nodeId && NovaNodeRegistry.isTaskTableNode(candidate));
+    if(!node?.running) return;
+    node.stopRequested = true;
+    node.cancelState = 'cancel_requested';
+    setStatus('正在停止表格任务；当前请求完成后不再启动新步骤');
+    render(); scheduleSave();
+    // Section 45：Backend mode 下 Stop 走 Run cancel（后端负责传播到 child Tasks），
+    // 不再由 Browser 逐个猜 task_id 逐个 cancel。
+    if(backendRunEnabled && node.backendRunId){
+        void fetch(`/api/runs/${encodeURIComponent(node.backendRunId)}/cancel`, {method:'POST'})
+            .then(res => { if(!res.ok) throw new Error('cancel 失败'); return res.json(); })
+            .then(() => { const active = nodes.find(c => c.id === nodeId); if(active){ active.cancelState = 'cancel_requested'; render(); scheduleSave(); } })
+            .catch(error => { console.error('[BackendRun] cancel 失败', error); setStatus(`停止失败：${error.message}`); });
+        return;
+    }
+    // P0-3（legacy path）：前端停止后必须取消后端任务，否则后端继续跑并继续扣费
+    void cancelMatrixBackendTasks(nodeId).then(summary => {
+        const active = nodes.find(candidate => candidate.id === nodeId);
+        if(!active) return;
+        active.cancelSummary = summary;
+        // 只要还有任务停在“已受理”状态，就不能宣称已真正停止
+        active.cancelState = summary.cancelled > 0 && summary.requested === 0 ? 'cancelled' : 'cancel_requested';
+        setStatus(summary.requested
+            ? `已请求取消 ${summary.requested} 个任务，等待供应商确认`
+            : `已停止 ${summary.cancelled} 个任务`);
+        render(); scheduleSave();
+    });
+}
+// 不再用「执行前条数 slice」猜结果：改为执行前 URL 集合差集，并给每个结果打上归属
+// task_id -> row_id -> matrix_node_id -> target_node_id，便于后续 Run 层接管
+function matrixRunResultRefs(target, beforeUrls, expectedType, attribution={}){
+    const before = beforeUrls instanceof Set ? beforeUrls : new Set();
+    return NovaWorkflowUtils.matrixOwnedRefs(
+        generatedImageRefs(target).map(ref => ({...ref, kind:ref.kind || mediaKindForRef(ref.url)})),
+        before,
+        expectedType,
+        attribution
+    );
+}
+// Phase 2C：Run 层（Task Engine 之上的编排层）。
+// 归属链 run_id → row_id → task_id → result 由后端 task.run_context 与 result.refs 直接确定，
+// 不再依赖「执行前 URL 集合差集」猜结果——差集只在后端没盖章时作为 legacy fallback。
+function browserMatrixRunner(node){
+    const run = NovaMatrixRun.createRun({
+        tableNodeId:node.id,
+        canvasId:(typeof canvas !== 'undefined' && canvas ? canvas.id : '') || '',
+        mode:node.mode,
+        selectedRowIds:(node.rows || []).map(row => row.rowId)
+    });
+    NovaMatrixRun.setRunStatus(run, 'running');
+    node.lastRunId = run.run_id;
+    node.lastRun = NovaMatrixRun.serializeRun(run);
+    // 运行期句柄（不落盘）：供 runMatrixRows 在结束时给 Run 收尾
+    matrixActiveRuns.set(node.id, run);
+    return async payload => {
+        const rowId = payload.rowId;
+        const row = (node.rows || []).find(item => String(item.rowId) === String(rowId));
+        const matrixTaskId = matrixTaskIdFor(node.id, rowId);
+        const matrixPayload = {...payload, matrixNodeId:node.id, matrixTaskId};
+        if(typeof window.__NOVAI_MATRIX_RUNNER__ === 'function') return window.__NOVAI_MATRIX_RUNNER__(JSON.parse(JSON.stringify(matrixPayload)), {nodeId:node.id});
+        const targets = matrixTargets(node, payload.type, payload);
+        if(!targets.length) throw new Error(`步骤未连接${payload.type === 'video' ? '视频' : '图片'}生成节点`);
+        const collected = [];
+        try {
+            for(const descriptor of targets){
+                const target = descriptor._matrixTargetNode || nodes.find(candidate => candidate.id === descriptor.id);
+                if(!target) continue;
+                const attribution = {matrixTaskId, matrixRowId:rowId, matrixNodeId:node.id, matrixTargetNodeId:target.id};
+                // 归属上下文：先把 row_revision/target_node_id 落到 RowRun，再用 RowRun 构建
+                // runContext（含 row_run_id），后端存进 task.run_context 并盖到每个产物上。
+                NovaMatrixRun.patchRowRun(run, rowId, {row_revision:Number(row?.revision || 1), target_node_id:target.id});
+                const runContext = NovaMatrixRun.runContextFor(run, NovaMatrixRun.rowRun(run, rowId));
+                // Snapshot：启动即冻结，且复用统一 Execution Context（不另建第二套参数定义）
+                const execCtx = NovaWorkflowUtils.buildRowExecutionContext(node, row, {nodes, connections});
+                const snapshot = NovaMatrixRun.buildExecutionSnapshot({
+                    rowId, rowRevision:Number(row?.revision || 1), payload, target,
+                    model:String(execCtx.model || ''), providerId:String(execCtx.provider || ''),
+                    params:execCtx.modelParams || {}, targetNodeId:execCtx.targetNodeId || ''
+                });
+                NovaMatrixRun.patchRowRun(run, rowId, {status:'running', target_node_id:target.id, snapshot, started_at:Date.now() / 1000});
+                const taskResults = [];
+                let beforeUrls = new Set();
+                let owned = [];
+                // 快照必须在锁内取：锁外取快照是并发下行结果互相污染的直接原因
+                await runWithMatrixTargetLock(target.id, async () => {
+                    beforeUrls = new Set(generatedImageRefs(target).map(ref => ref.url));
+                    target._matrixPayload = matrixPayload;
+                    try {
+                        await runCascadeNodeByType(target, {cascade:true, matrixRowId:rowId, matrixNodeId:node.id, matrixTaskId, runContext, taskResults, cascadeTargetId:''});
+                    } finally {
+                        delete target._matrixPayload;
+                    }
+                    // 优先确定性归属：直接按 run_id + row_id 取后端盖过章的产物
+                    owned = taskResults.flatMap(result => NovaMatrixRun.ownedRefs(result, run.run_id, rowId));
+                    // 后端没盖章（老任务 / 未走 Run 链路）才回落到 URL 差集
+                    if(!owned.length) owned = matrixRunResultRefs(target, beforeUrls, payload.type, attribution);
+                });
+                collected.push(...owned);
+                // task_id 从产物归属章上取——这是 run_id → row_id → task_id → result 的最后一环
+                const taskId = owned.map(ref => ref.task_id).filter(Boolean)[0] || '';
+                NovaMatrixRun.patchRowRun(run, rowId, {target_node_id:target.id, task_id:taskId, result_refs:owned});
+            }
+            if(!collected.length) throw new Error(`${payload.type === 'video' ? '视频' : '图片'}节点没有返回本次新结果`);
+            NovaMatrixRun.patchRowRun(run, rowId, {status:'done', error:''});
+        } catch(error){
+            // 行失败也要落到 RowRun 上，否则 Run 里会留下永远 running 的行
+            NovaMatrixRun.patchRowRun(run, rowId, {status:'failed', error:error?.message || String(error)});
+            node.lastRun = NovaMatrixRun.serializeRun(run);
+            throw error;
+        }
+        node.lastRun = NovaMatrixRun.serializeRun(run);
+        // Phase 2D：把本次派发使用的 revision 与 run_id 回传给 executeMatrix，
+        // 由它在成功回写时落 lastRunRevision / resultVersion / executionId
+        return {text:'', refs:collected, updatedAt:Date.now(), revision:Number(row?.revision || 1), runId:run.run_id};
+    };
+}
+async function runMatrixRows(nodeId, rowIds=null, options={}){
+    const node = nodes.find(candidate => candidate.id === nodeId && NovaNodeRegistry.isTaskTableNode(candidate));
+    if(!node || node.running) return;
+    ensureMatrixState(node);
+    // Pre-Run Sync：在创建 Run / Execution Snapshot 之前，先把执行上下文变化同步成 revision/stale，
+    // 避免「改了参数 → debounce save 还没发生 → 点运行」时 Snapshot 拿到旧 revision + 新参数的不一致状态。
+    syncTableContextSnapshots();
+    if(Array.isArray(rowIds)){
+        const ids = new Set(rowIds.map(String));
+        const selected = node.rows.filter(row => ids.has(row.rowId));
+        if(!selected.length) return;
+        node.range = {startRowId:selected[0].rowId, endRowId:selected[selected.length - 1].rowId};
+        node.rows = node.rows.map(row => ({...row, selected:ids.has(row.rowId)}));
+    }
+    const validation = checkMatrixInputs(node.id, false);
+    if(!validation.valid){
+        render(); scheduleSave();
+        const message = validation.errors[0]?.message || '表格输入检查失败';
+        if(options.throwOnError) throw new Error(message);
+        alert(message);
+        return;
+    }
+    // Section 58-64：feature flag ON → Backend Run path（backend scheduler 决定 DAG/concurrency）
+    if(backendRunEnabled){
+        // Section 43/A7：Backend 出错必须明确报错，绝不 silent fallback 到 legacy（防重复扣费）
+        try {
+            await executeBackendRun(node);
+        } catch(error){
+            render(); scheduleSave();
+            const message = error?.message || String(error);
+            setStatus(`运行失败：${message}`);
+            if(options.throwOnError) throw error;
+            alert(`运行失败：${message}`);
+        }
+        return;
+    }
+    const upstream = matrixUpstreamContext(node);
+    const context = {
+        targets:matrixTargetDescriptors(node),
+        upstreamRefs:upstream.refs,
+        upstreamTexts:upstream.upstreamTexts,
+        concurrency:Math.max(1, Math.min(4, Number(node.batchConcurrency) || 2)),
+        shouldStop:() => Boolean(node.stopRequested),
+        onUpdate:next => {
+            node.rows = next.rows;
+            node.running = next.running;
+            node.validationErrors = next.validationErrors || [];
+            render(); scheduleSave();
+        }
+    };
+    try {
+        const result = await NovaWorkflowUtils.executeMatrix(node, context, browserMatrixRunner(node));
+        node.rows = result.rows;
+        node.running = false;
+        node.stopRequested = Boolean(result.stopRequested);
+        node.validationErrors = result.validationErrors || [];
+    } catch(error){
+        node.running = false;
+        if(options.throwOnError) throw error;
+        alert(error.message || '表格任务运行失败');
+    } finally {
+        delete node.activeRowText;
+        delete node.activeRowRefs;
+        clearMatrixTasks(node.id);
+        // Run 收尾：停到终态再落盘，否则画布里会留下永远 running 的 Run
+        const finishedRun = matrixActiveRuns.get(node.id);
+        if(finishedRun){
+            NovaMatrixRun.setRunStatus(finishedRun, node.stopRequested ? 'stopped' : 'done');
+            node.lastRun = NovaMatrixRun.serializeRun(finishedRun);
+            matrixActiveRuns.delete(node.id);
+        }
+        render(); scheduleSave();
+    }
+}
+function parseMatrixImportedRows(text){
+    try {
+        const parsed = JSON.parse(String(text || ''));
+        const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.rows) ? parsed.rows : [];
+        if(list.length) return list.map(item => ({task:String(item.task || item.prompt || ''), overlay:String(item.overlay || item.textOverlay || '')}));
+    } catch(error){}
+    return String(text || '').split(/\r?\n/).map(task => task.trim()).filter(Boolean).map(task => ({task, overlay:''}));
+}
+function mergeImportedMatrixRows(node, incoming){
+    const prepared = (incoming || []).filter(row => row.task || row.overlay).map((row, index) => ({...newMatrixRow(index), ...row}));
+    node.rows = NovaWorkflowUtils.mergeRowsWithoutOverwrite(node.rows, prepared);
+    render(); scheduleSave();
+}
+function importMatrixRowsFromUpstreamLLM(nodeId){
+    const node = nodes.find(candidate => candidate.id === nodeId && NovaNodeRegistry.isTaskTableNode(candidate));
+    if(!node) return;
+    const text = connections.filter(connection => connection.to === node.id)
+        .map(connection => nodes.find(candidate => candidate.id === connection.from))
+        .filter(source => source?.type === 'llm' && source.outputText)
+        .map(source => source.outputText).join('\n');
+    if(!text){ alert('没有可导入的上游 LLM 文本'); return; }
+    mergeImportedMatrixRows(node, parseMatrixImportedRows(text));
+}
+async function importMatrixCsv(nodeId, file){
+    const node = nodes.find(candidate => candidate.id === nodeId && NovaNodeRegistry.isTaskTableNode(candidate));
+    if(!node || !file) return;
+    mergeImportedMatrixRows(node, NovaWorkflowUtils.parseCsvRows(await file.text()));
+}
+function loadMatrixImage(url){
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error(`图片无法读取，可能被跨域限制：${url}`));
+        image.src = url;
+    });
+}
+async function stitchMatrixImages(nodeId){
+    const node = nodes.find(candidate => candidate.id === nodeId && NovaNodeRegistry.isTaskTableNode(candidate));
+    if(!node) return;
+    const entries = node.rows.map(row => ({row, ref:(row.resultRefs || []).find(ref => (ref.kind || mediaKindForRef(ref.url)) === 'image')})).filter(entry => entry.ref?.url);
+    if(!entries.length){ alert('没有可拼接的图片结果'); return; }
+    try {
+        const images = await Promise.all(entries.map(entry => loadMatrixImage(entry.ref.url)));
+        const layout = NovaWorkflowUtils.verticalStitchLayout(images.map(image => ({width:image.naturalWidth, height:image.naturalHeight})), node.globalContext.commonWidth || 1024, 0);
+        const output = document.createElement('canvas');
+        output.width = layout.width; output.height = layout.height;
+        const ctx = output.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, output.width, output.height);
+        layout.placements.forEach((placement, index) => {
+            ctx.drawImage(images[index], placement.x, placement.y, placement.drawWidth, placement.drawHeight);
+            const overlay = entries[index].row.overlay || '';
+            if(!overlay) return;
+            const fontSize = Math.max(22, Math.round(output.width * .035));
+            ctx.font = `600 ${fontSize}px ${node.globalContext.font || 'sans-serif'}`;
+            const lines = NovaWorkflowUtils.overlayTextLines(overlay, output.width - 64, value => ctx.measureText(value).width, 5);
+            const boxHeight = lines.length * fontSize * 1.35 + 28;
+            ctx.fillStyle = 'rgba(0,0,0,.58)'; ctx.fillRect(0, placement.y + placement.drawHeight - boxHeight, output.width, boxHeight);
+            ctx.fillStyle = '#fff'; lines.forEach((line, lineIndex) => ctx.fillText(line, 32, placement.y + placement.drawHeight - boxHeight + 24 + fontSize * (lineIndex + 1)));
+        });
+        createImageCardFromOutput(output.toDataURL('image/png'), {x:Number(node.x) + Number(node.w || 680) + 80, y:Number(node.y)});
+    } catch(error){ alert(error.message || '长图拼接失败'); }
+}
+async function runCanvasGroup(groupId){
+    const group = nodes.find(node => node.id === groupId && node.type === 'group');
+    if(!group || group.runStatus === 'running') return;
+    const memberIds = new Set(group.items || []);
+    const runnable = [...memberIds].map(id => nodes.find(node => node.id === id)).filter(node => node && (canvasRunTypes().includes(node.type) || NovaNodeRegistry.isTaskTableNode(node)));
+    if(!runnable.length){ alert('群组内没有可运行节点'); return; }
+    const runnableIds = runnable.map(node => node.id);
+    const relayIds = [...memberIds].filter(id => nodes.find(node => node.id === id)?.type === 'output');
+    const internalEdges = NovaWorkflowUtils.flattenRelayConnections(runnableIds, connections.filter(connection => memberIds.has(connection.from) && memberIds.has(connection.to)), relayIds);
+    const graph = NovaWorkflowUtils.topologicalLayers(runnableIds, internalEdges);
+    if(graph.cycleIds.length){
+        group.runStatus = 'failed'; group.runError = `检测到循环：${graph.cycleIds.join(', ')}`; render(); scheduleSave(); alert(group.runError); return;
+    }
+    group.runStatus = 'running'; group.runError = ''; render();
+    try {
+        for(const layer of graph.layers){
+            const settled = await Promise.allSettled(layer.map(async id => {
+                const node = nodes.find(candidate => candidate.id === id);
+                node.runStatus = 'running'; node.runError = ''; node._cascadeFailed = true; render();
+                try {
+                    if(NovaNodeRegistry.isTaskTableNode(node)) await runMatrixRows(node.id, null, {throwOnError:true});
+                    else await runCascadeNodeByType(node, {cascade:true, groupId});
+                    node.runStatus = 'done';
+                } catch(error){
+                    node.runStatus = 'failed'; node.runError = error.message || String(error); throw error;
+                } finally { render(); scheduleSave(); }
+            }));
+            const failure = settled.find(result => result.status === 'rejected');
+            if(failure) throw failure.reason;
+        }
+        group.runStatus = 'done';
+    } catch(error){
+        group.runStatus = 'failed'; group.runError = error.message || String(error);
+    }
+    render(); scheduleSave();
 }
 async function runCascadeNodeWithLoopContext(node, ctx, opts={}){
     const previous = loopContext;
@@ -13932,22 +14905,30 @@ function findPendingTask(taskId){
     return null;
 }
 async function createCanvasImageTask(payload, options={}){
+    // Phase 2C：Run 归属上下文随请求体发给后端。后端存进 task.run_context，
+    // 出结果时用同一份上下文给每个产物盖章（result.refs），归属即确定性。
+    const body = options.runContext ? {...payload, run_context:options.runContext} : payload;
     const res = await cascadeFetch('/api/canvas-image-tasks', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(payload)
+        body:JSON.stringify(body)
     }, options);
     if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.generationFailed')));
     return res.json();
 }
 async function createCanvasComfyTask(payload, options={}){
+    // Phase 2D：Comfy 任务同样带 Run 归属上下文下发，后端盖章到 result.refs
+    const body = options.runContext ? {...payload, run_context:options.runContext} : payload;
     const res = await cascadeFetch('/api/canvas-comfy-tasks', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(payload)
+        body:JSON.stringify(body)
     }, options);
     if(!res.ok) throw new Error(await responseErrorMessage(res, actionFailed('canvas.comfyGenerate')));
-    return res.json();
+    const task = await res.json();
+    // Phase 2D：矩阵派发的 Comfy 任务纳入可取消集合（供 Stop 真正取消）
+    if(options.matrixNodeId && task?.task_id) trackMatrixTask(options.matrixNodeId, task.task_id);
+    return task;
 }
 async function waitCanvasComfyTaskResult(taskId, options={}){
     if(!taskId) throw new Error(actionFailed('canvas.comfyGenerate'));
@@ -13960,7 +14941,11 @@ async function waitCanvasComfyTaskResult(taskId, options={}){
             throw new Error(await responseErrorMessage(res, actionFailed('canvas.comfyGenerate')));
         }
         const data = await res.json();
-        if(data.status === 'succeeded') return data.result || {};
+        if(data.status === 'succeeded'){
+            // Phase 2D：把带归属章的原始结果交给 Run 层（归属不再靠差集猜）
+            if(Array.isArray(options?.taskResults)) options.taskResults.push(data.result || {});
+            return data.result || {};
+        }
         if(data.status === 'failed') throw new Error(data.error || actionFailed('canvas.comfyGenerate'));
         await sleep(1600);
     }
@@ -13968,6 +14953,27 @@ async function waitCanvasComfyTaskResult(taskId, options={}){
 async function runQueuedComfyGenerate(payload, options={}){
     const task = await createCanvasComfyTask(payload, options);
     return waitCanvasComfyTaskResult(task.task_id, options);
+}
+async function waitCanvasVideoTaskResult(taskId, options={}){
+    if(!taskId) throw new Error(tr('canvas.videoFailed'));
+    while(true){
+        const cascadeTargetId = cascadeTargetIdFromOptions(options);
+        if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
+        const res = await cascadeFetch(`/api/tasks/${encodeURIComponent(taskId)}`, {}, {cascadeTargetId});
+        if(!res.ok){
+            if(res.status === 404) throw new Error(cascadeBackendRestartMessage());
+            throw new Error(await responseErrorMessage(res, tr('canvas.videoFailed')));
+        }
+        const data = await res.json();
+        if(data.status === 'succeeded'){
+            // Phase 2D：把带归属章的原始结果交给 Run 层
+            if(Array.isArray(options?.taskResults)) options.taskResults.push(data.result || {});
+            return data.result || {};
+        }
+        if(data.status === 'failed') throw new Error(data.error || tr('canvas.videoFailed'));
+        if(data.status === 'cancelled') throw new Error(`${tr('canvas.videoFailed')}（任务已取消）`);
+        await sleep(1800);
+    }
 }
 function extractUpstreamTaskId(text){
     const match = String(text || '').match(/(?:task_id|taskId|task id)\s*[=:：]\s*([A-Za-z0-9_.:-]+)/i);
@@ -14063,6 +15069,8 @@ async function pollCanvasImageTask(taskId, options={}){
             }
             const data = await res.json();
             if(data.status === 'succeeded'){
+                // Phase 2C：把带归属章的原始结果交给 Run 层（归属不再靠差集猜）
+                if(Array.isArray(options?.taskResults)) options.taskResults.push(data.result || {});
                 completeCanvasImageTask(taskId, data.result || {});
                 return 'succeeded';
             }
@@ -15502,7 +16510,8 @@ function startNodeDrag(e, node){
         [...selected].forEach(id => collect(nodes.find(n => n.id === id)));
     }
     const children = [...collected.values()];
-    dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y};
+    const memberGroup = nodes.find(group => group.type === 'group' && (group.items || []).includes(dragTarget.id));
+    dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y, memberGroupId:memberGroup?.id || ''};
     snapState = computeSnapCandidates(dragTarget.id);
     document.body.classList.add('canvas-node-drag');
     window.onmousemove = onNodeDrag;
@@ -15510,6 +16519,10 @@ function startNodeDrag(e, node){
 }
 // ── 吸附对齐 ──
 const SNAP_IN = 5;
+const CANVAS_GROUP_GRID = 24;
+const CANVAS_GROUP_GRID_SCREEN_SNAP = 8;
+const CANVAS_GROUP_GRID_PADDING = 24;
+const CANVAS_GROUP_GRID_HEADER = 64;
 let snapRaf = 0;
 function clearSnapLines(){ snapGuides.innerHTML = ''; }
 function renderSnapLines(lines){
@@ -15617,6 +16630,13 @@ function onNodeDrag(e){
         if(ys){ adjDy = dy + (ys.target - ys.value); snapLines.push({type:'h', pos:ys.target}); }
         renderSnapLines(snapLines);
     }
+    const memberGroup = dragNode.memberGroupId ? nodes.find(n => n.id === dragNode.memberGroupId) : null;
+    if(memberGroup){
+        const gridSnap = canvasGroupGridMagnetDelta(memberGroup, dragNode.ox + adjDx, dragNode.oy + adjDy, viewport.scale);
+        if(gridSnap.dx){ adjDx += gridSnap.dx; snapLines.push({type:'v', pos:gridSnap.x}); }
+        if(gridSnap.dy){ adjDy += gridSnap.dy; snapLines.push({type:'h', pos:gridSnap.y}); }
+        if(gridSnap.dx || gridSnap.dy) renderSnapLines(snapLines);
+    }
     dragNode.node.x = dragNode.ox + adjDx;
     dragNode.node.y = dragNode.oy + adjDy;
     const el = nodesEl.querySelector(`.node[data-id="${dragNode.node.id}"]`);
@@ -15667,9 +16687,37 @@ function onNodeResize(e){
         el.style.width = `${resizeNode.node.w}px`;
         el.style.height = `${resizeNode.node.h}px`;
     }
+    // 群组：拉伸时按新框实时重排组内成员——分组框就是布局的输入（和智能画布一致）
+    if(resizeNode.node.type === 'group') arrangeCanvasGroupMembers(resizeNode.node);
     scheduleLinksRender();
     renderSelectionHub();
     scheduleMinimapRender();
+}
+// 多行多 target：从某一行拖线到目标节点时，把 rowId 记进临时上下文，
+// 连接建立后写入 connection.rowId 与 targetMapping.rowId，实现按行指定目标。
+let matrixRowLinkContext = null;
+function startMatrixRowLink(e, nodeId, rowId){
+    if(!e || e.button !== 0) return;
+    matrixRowLinkContext = {nodeId, rowId};
+    startLink(e, nodeId, 'out');
+}
+function makeMatrixLink(fromId, toId){
+    const conn = {id:uid('c'), from:fromId, to:toId};
+    if(matrixRowLinkContext && fromId === matrixRowLinkContext.nodeId){
+        conn.rowId = matrixRowLinkContext.rowId;
+    }
+    return conn;
+}
+function connectMatrixRowToTarget(fromId, toId){
+    const existing = connections.find(c => c.from === fromId && c.to === toId);
+    if(!existing){
+        pushUndo();
+        connections.push(makeMatrixLink(fromId, toId));
+        syncLatestGeneratedOutputToConnection(fromId, toId);
+    } else if(matrixRowLinkContext && fromId === matrixRowLinkContext.nodeId){
+        // 已有连线（通用）→ 升级为按行指定（routing 变化由 save-time 的 syncTableContextSnapshots 检测 bump）
+        existing.rowId = matrixRowLinkContext.rowId;
+    }
 }
 function startLink(e, originId, originKind){
     e.preventDefault();
@@ -15677,55 +16725,101 @@ function startLink(e, originId, originKind){
     originKind = originKind || 'out';
     const src = portPoint(originId, originKind);
     const source = nodes.find(n => n.id === originId);
+    const targetKind = originKind === 'out' ? 'in' : 'out';
     tempLink = {from:originId, originKind, x1:src.x, y1:src.y, x2:src.x, y2:src.y};
+    // hover/选中浮现的端口由 CSS 负责；这里把「可接收该连线」的候选目标端口打标，
+    // 拖线过程中随鼠标悬停高亮（link-candidate + is-active），结束后统一清理。
+    const bodyEl = document.body;
+    const candidatePorts = [];
+    nodes.forEach(t => {
+        if(!t || t.id === originId) return;
+        const fromId = originKind === 'out' ? originId : t.id;
+        const toId = originKind === 'out' ? t.id : originId;
+        if(!canConnect(fromId, toId)) return;
+        const portEl = nodesEl.querySelector(`.node[data-id="${CSS.escape(t.id)}"] > .port.${targetKind}`);
+        if(!portEl) return;
+        portEl.classList.add('link-candidate');
+        candidatePorts.push(portEl);
+    });
+    bodyEl.classList.add('canvas-port-linking');
+    const clearCandidatePorts = () => {
+        candidatePorts.forEach(port => port?.classList.remove('link-candidate', 'is-active'));
+        bodyEl.classList.remove('canvas-port-linking');
+    };
+    const setActiveTargetPort = port => {
+        candidatePorts.forEach(p => { if(p !== port) p.classList.remove('is-active'); });
+        if(port && candidatePorts.includes(port)) port.classList.add('is-active');
+    };
     window.onmousemove = e2 => {
         const p = screenToWorld(e2.clientX, e2.clientY);
         tempLink.x2 = p.x;
         tempLink.y2 = p.y;
         renderLinks();
+        const hitPort = document.elementFromPoint(e2.clientX, e2.clientY)?.closest(`.port.${targetKind}`) || null;
+        setActiveTargetPort(hitPort);
     };
     window.onmouseup = e2 => {
-        const targetKind = originKind === 'out' ? 'in' : 'out';
-        const targetPort = nearestPort(e2.clientX, e2.clientY, targetKind);
-        const target = targetPort?.closest('.node');
-        if(target){
-            const targetId = target.dataset.id;
+        const hitEl = document.elementFromPoint(e2.clientX, e2.clientY);
+        const directPort = hitEl?.closest(`.port.${targetKind}`) || null;
+        clearCandidatePorts();
+        const nearest = nearestPort(e2.clientX, e2.clientY, targetKind, 64);
+        const targetPort = directPort || nearest;
+        const targetNode = targetPort ? targetPort.closest('.node') : null;
+        const droppedOnSource = targetNode ? targetNode.dataset.id === originId : false;
+        if(targetNode && !droppedOnSource){
+            const targetId = targetNode.dataset.id;
             const fromId = originKind === 'out' ? originId : targetId;
             const toId = originKind === 'out' ? targetId : originId;
             if(canConnect(fromId, toId)){
-                if(!connections.some(c => c.from === fromId && c.to === toId)){
-                    pushUndo();
-                    connections.push({id:uid('c'), from:fromId, to:toId});
-                    syncLatestGeneratedOutputToConnection(fromId, toId);
+                connectMatrixRowToTarget(fromId, toId);
+                syncGeneratorInputs();
+                scheduleSave();
+                render();
+            }
+        } else if(!droppedOnSource && !directPort){
+            // 容差吸附：松开时落在「可连接且有目标侧端口」的节点 body 上，自动吸附其端口完成连接
+            const bodyNode = hitEl?.closest('.node');
+            let bodyConnected = false;
+            if(bodyNode && bodyNode.dataset.id && bodyNode.dataset.id !== originId){
+                const fromId = originKind === 'out' ? originId : bodyNode.dataset.id;
+                const toId = originKind === 'out' ? bodyNode.dataset.id : originId;
+                if(canConnect(fromId, toId) && bodyNode.querySelector(`> .port.${targetKind}`)){
+                    connectMatrixRowToTarget(fromId, toId);
+                    syncGeneratorInputs();
+                    scheduleSave();
+                    render();
+                    bodyConnected = true;
                 }
-                syncGeneratorInputs();
-                scheduleSave();
-                render();
             }
-        } else if(originKind === 'out'){
-            if(source && CANVAS_GENERATOR_TYPES.includes(source.type)){
-                const p = screenToWorld(e2.clientX, e2.clientY);
-                pushUndo();
-                const out = {id:uid('out'), type:'output', x:p.x, y:p.y - 63, images:[]};
-                nodes.push(out);
-                connections.push({id:uid('c'), from:source.id, to:out.id});
-                syncLatestGeneratedOutputToConnection(source.id, out.id);
-                syncGeneratorInputs();
-                scheduleSave();
-                render();
-            } else {
-                openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY);
+            if(!bodyConnected){
+                if(originKind === 'out'){
+                    if(source && CANVAS_GENERATOR_TYPES.includes(source.type)){
+                        const p = screenToWorld(e2.clientX, e2.clientY);
+                        pushUndo();
+                        const out = {id:uid('out'), type:'output', x:p.x, y:p.y - 63, images:[]};
+                        nodes.push(out);
+                        connections.push({id:uid('c'), from:source.id, to:out.id});
+                        syncLatestGeneratedOutputToConnection(source.id, out.id);
+                        syncGeneratorInputs();
+                        scheduleSave();
+                        render();
+                    } else {
+                        openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY);
+                    }
+                } else if(originKind === 'in'){
+                    openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY);
+                }
             }
-        } else if(originKind === 'in'){
-            openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY);
         }
         tempLink = null;
+        matrixRowLinkContext = null;
         window.onmousemove = null;
         window.onmouseup = null;
         renderLinks();
     };
 }
-function nearestPort(clientX, clientY, kind){
+function nearestPort(clientX, clientY, kind, maxDist){
+    const limit = maxDist > 0 ? maxDist : 48;
     const selector = `.port.${kind}`;
     const direct = document.elementFromPoint(clientX, clientY)?.closest(selector);
     if(direct) return direct;
@@ -15741,7 +16835,7 @@ function nearestPort(clientX, clientY, kind){
             best = port;
         }
     });
-    return bestDistance <= 48 ? best : null;
+    return bestDistance <= limit ? best : null;
 }
 function wouldCreateGeneratorCycle(fromId, toId){
     const seen = new Set();
@@ -15779,9 +16873,10 @@ function canConnect(fromId, toId){
         const allowPrompt = Boolean(to.showPrompt) && ['prompt','promptGroup','loop','llm'].includes(from.type);
         return allowImage || allowPrompt;
     }
-    if(to.type === 'llm') return ['prompt','loop','promptGroup','llm','image','group','output'].includes(from.type);
+    if(NovaNodeRegistry.isTaskTableNode(to)) return ['prompt','loop','promptGroup','llm','image','group','output','generator','midjourney','msgen','comfy','ltxDirector','video','rh'].includes(from.type);
+    if(to.type === 'llm') return ['prompt','loop','promptGroup','llm','image','group','output','matrix'].includes(from.type);
     if(from.type === 'llm') return CANVAS_GENERATOR_TYPES.includes(to.type);
-    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm'].includes(from.type);
+    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','matrix'].includes(from.type);
 }
 function sanitizeConnections(){
     connections = (connections || []).filter(c => canConnect(c.from, c.to));
@@ -15793,7 +16888,7 @@ function endDrag(event=null){
         const moved = [dragNode.node, ...(dragNode.children || []).map(c => c.node)].filter(Boolean);
         // 拖动 group/promptGroup 自身时不重新评估（成员跟着一起走，包含关系不变）
         const draggedGroup = moved.some(n => n.type === 'group' || n.type === 'promptGroup');
-        if(!draggedGroup) updateGroupMembership(moved);
+        if(!draggedGroup) updateGroupMembership(moved, dragNode.node);
     }
     dragNode = null;
     clearSnapLines(); snapState = null;
@@ -15921,6 +17016,15 @@ function arrangeIdsByConnections(ids){
 function arrangeSelectedCanvasNodes(){
     if(!canvas || !selected.size) return;
     const explicit = [...selected].filter(id => nodes.some(n => n.id === id));
+    // 只选中一个群组时，「整理」= 按原图比例重排组内成员（对应智能画布的分组整理）
+    if(explicit.length === 1){
+        const only = nodes.find(n => n.id === explicit[0]);
+        if(only && only.type === 'group'){
+            pushUndo();
+            if(arrangeCanvasGroupMembers(only)){ render(); scheduleSave(); }
+            return;
+        }
+    }
     const ids = canvasArrangeAtomicIds(explicit.length > 1 ? explicit : connectedClusterIds(explicit[0]));
     if(ids.length < 2) return;
     pushUndo();
@@ -15947,59 +17051,195 @@ function handoffExistingInputsToGroup(group, children){
     });
     return true;
 }
-function updateGroupMembership(movedNodes){
-    const pairs = [
-        {childType:'image', groupType:'group'},
-        {childType:'prompt', groupType:'group'},
-        {childType:'prompt', groupType:'promptGroup'}
-    ];
-    let changed = false;
-    const handoffGroupConnections = (group, child) => {
-        if(!group || group.type !== 'group' || !['image','prompt'].includes(child?.type)) return;
-        const directTargets = connections
-            .filter(c => c.from === child.id)
-            .map(c => nodes.find(n => n.id === c.to))
-            .filter(n => n && CANVAS_GENERATOR_TYPES.includes(n.type));
-        const groupTargets = connections
-            .filter(c => c.from === group.id)
-            .map(c => nodes.find(n => n.id === c.to))
-            .filter(n => n && CANVAS_GENERATOR_TYPES.includes(n.type));
-        const targets = new Map([...directTargets, ...groupTargets].map(n => [n.id, n]));
-        targets.forEach(target => {
-            const before = connections.length;
-            connections = connections.filter(c => !(c.from === child.id && c.to === target.id));
-            if(connections.length !== before) changed = true;
-            if(!connections.some(c => c.from === group.id && c.to === target.id) && canConnect(group.id, target.id)){
-                connections.push({id:uid('c'), from:group.id, to:target.id});
-                changed = true;
-            }
-        });
-    };
-    pairs.forEach(({childType, groupType}) => {
-        const groups = nodes.filter(n => n.type === groupType);
-        const children = movedNodes.filter(n => n?.type === childType);
-        if(!children.length || !groups.length) return;
-        children.forEach(child => {
-            const cr = nodeRect(child);
-            const containing = groups.find(g => {
-                const gr = nodeRect(g);
-                return cr.cx >= gr.x && cr.cx <= gr.x + gr.w && cr.cy >= gr.y && cr.cy <= gr.y + gr.h;
-            });
-            groups.forEach(g => {
-                if(g === containing) return;
-                const idx = (g.items || []).indexOf(child.id);
-                if(idx >= 0){ g.items.splice(idx, 1); changed = true; }
-            });
-            if(containing){
-                containing.items = containing.items || [];
-                if(!containing.items.includes(child.id)){ containing.items.push(child.id); changed = true; }
-                handoffGroupConnections(containing, child);
-            }
-        });
+// 群组成员的基准宽高比：优先读真实图片的 naturalWidth/Height，也就是「原图比例」；
+// 视频、或图片还没加载完时，退回它当前的宽高比。
+function canvasGroupMemberAspect(member){
+    if(!member) return 0;
+    const el = nodesEl.querySelector('[data-id="' + CSS.escape(member.id) + '"]');
+    const img = el ? el.querySelector('img') : null;
+    if(img && img.naturalWidth > 0 && img.naturalHeight > 0) return img.naturalWidth / img.naturalHeight;
+    const rect = nodeRect(member);
+    return rect.h > 0 ? rect.w / rect.h : 0;
+}
+// 只改样式、不整块重渲染——群组连拖带缩放时每帧都会走到这里。
+function syncCanvasNodeBox(node){
+    if(!node) return;
+    const el = nodesEl.querySelector('[data-id="' + CSS.escape(node.id) + '"]');
+    if(!el) return;
+    el.classList.add('sized');
+    el.style.left = node.x + 'px';
+    el.style.top = node.y + 'px';
+    // min-width/height 归零：图片节点默认会被内容撑到最小尺寸，不归零的话渲染出来的框
+    // 会比算好的格子宽十几像素，多列时会挤到相邻格子上。
+    el.style.minWidth = '0';
+    el.style.minHeight = '0';
+    el.style.width = node.w + 'px';
+    el.style.height = node.h + 'px';
+}
+// 群组成员按「原图比例」排成整齐网格。规则与智能画布的 arrangeSmartGroupMembers 完全一致：
+//   1) 分组框是布局的输入——格子宽度先横向铺满，高度由成员里最大的宽高比反推；
+//   2) 高度超出框 = 这一行放太多，换更多列；
+//   3) 在「横向仍然铺满（≥90% 宽）」的候选里挑格子面积最大的，余量留在上下并居中。
+function arrangeCanvasGroupMembers(group, options={}){
+    if(!group || group.type !== 'group') return false;
+    const members = (group.items || []).map(id => nodes.find(node => node.id === id)).filter(Boolean);
+    if(!members.length) return false;
+    const gap = 24, pad = 24, top = 64;
+    const boxW = Math.max(220, Math.round(Number(group.w) || 420));
+    const boxH = Math.max(180, Math.round(Number(group.h) || 280));
+    const innerW = Math.max(0, boxW - pad * 2);
+    const innerH = Math.max(0, boxH - top - pad);
+    // 阅读顺序（先行后列），保证反复整理结果稳定
+    const ordered = members.slice().sort((a, b) => {
+        const ra = nodeRect(a), rb = nodeRect(b);
+        const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
+        if(Math.abs(dy) > 24) return dy;
+        return (Number(ra.x) || 0) - (Number(rb.x) || 0);
     });
-    if(changed){
+    const aspects = ordered.map(canvasGroupMemberAspect).filter(value => value > 0 && Number.isFinite(value));
+    const refAspect = aspects.length ? Math.min(5, Math.max(0.2, Math.max.apply(null, aspects))) : 1;
+    const count = ordered.length;
+    const cands = [];
+    const maxCols = Math.max(1, Math.min(count, 8));
+    for(let cols = 1; cols <= maxCols; cols++){
+        const rows = Math.ceil(count / cols);
+        const wByWidth = Math.floor((innerW - (cols - 1) * gap) / cols);
+        const hByHeight = Math.floor((innerH - (rows - 1) * gap) / rows);
+        const w = Math.min(wByWidth, Math.round(hByHeight * refAspect));
+        const h = Math.floor(w / refAspect);
+        if(w < 48 || h < 48) continue;
+        const gridW = cols * w + (cols - 1) * gap;
+        const gridH = rows * h + (rows - 1) * gap;
+        if(gridW > innerW || gridH > innerH) continue;
+        cands.push({cols:cols, rows:rows, w:w, h:h, gridW:gridW, gridH:gridH, fill:(innerW > 0 ? gridW / innerW : 1), score:w * h});
+    }
+    const wide = cands.filter(cand => cand.fill >= 0.9);
+    const pool = (wide.length ? wide : cands).slice().sort((a, b) => b.score - a.score);
+    let chosen = pool[0] || null;
+    if(!chosen){
+        // 框小到一列都放不下：单列排开，然后把分组撑到刚好装下。
+        // （格子不能小于 .node 的 min-width:220，硬塞只会让成员互相压住。）
+        const w = Math.max(48, Math.floor(innerW));
+        const h = Math.max(48, Math.floor(w / refAspect));
+        chosen = {cols:1, rows:count, w:w, h:h, gridW:w, gridH:count * h + (count - 1) * gap, grow:true};
+    }
+    if(chosen.grow){
+        const needW = Math.round(boxW <= 0 ? 420 : Math.max(boxW, chosen.gridW + pad * 2));
+        const needH = Math.round(Math.max(boxH, chosen.gridH + top + pad));
+        if(needW > boxW || needH > boxH){
+            group.w = needW;
+            group.h = needH;
+            syncCanvasNodeBox(group);
+        }
+    }
+    const offsetY = Math.max(0, Math.round((innerH - chosen.gridH) / 2));
+    const originX = Number(group.x) + pad + Math.max(0, Math.round((innerW - chosen.gridW) / 2));
+    const originY = Number(group.y) + top + offsetY;
+    ordered.forEach((member, index) => {
+        const col = index % chosen.cols;
+        const row = Math.floor(index / chosen.cols);
+        member.x = Math.round(originX + col * (chosen.w + gap));
+        member.y = Math.round(originY + row * (chosen.h + gap));
+        member.w = chosen.w;
+        member.h = chosen.h;
+        if(options.syncDom !== false) syncCanvasNodeBox(member);
+    });
+    return true;
+}
+function canvasGroupGridAnchor(group){
+    return {
+        x:(Number(group?.x) || 0) + CANVAS_GROUP_GRID_PADDING,
+        y:(Number(group?.y) || 0) + CANVAS_GROUP_GRID_HEADER
+    };
+}
+function canvasGroupGridMagnetDelta(group, x, y, scale=1){
+    const anchor = canvasGroupGridAnchor(group);
+    const targetX = anchor.x + Math.round((Number(x) - anchor.x) / CANVAS_GROUP_GRID) * CANVAS_GROUP_GRID;
+    const targetY = anchor.y + Math.round((Number(y) - anchor.y) / CANVAS_GROUP_GRID) * CANVAS_GROUP_GRID;
+    const threshold = CANVAS_GROUP_GRID_SCREEN_SNAP / Math.max(0.05, Number(scale) || 1);
+    const rawDx = targetX - Number(x);
+    const rawDy = targetY - Number(y);
+    return {
+        dx:Math.abs(rawDx) <= threshold ? rawDx : 0,
+        dy:Math.abs(rawDy) <= threshold ? rawDy : 0,
+        x:targetX,
+        y:targetY
+    };
+}
+function snapCanvasGroupDragBatch(group, movedNodes, primaryNode){
+    const batch = (movedNodes || []).filter(Boolean);
+    if(!group || !batch.length) return false;
+    const primary = batch.includes(primaryNode) ? primaryNode : batch[0];
+    const anchor = canvasGroupGridAnchor(group);
+    const minX = Math.min(...batch.map(node => Number(node.x) || 0));
+    const minY = Math.min(...batch.map(node => Number(node.y) || 0));
+    const minColumn = Math.max(0, Math.ceil(((Number(primary.x) || 0) - minX) / CANVAS_GROUP_GRID));
+    const minRow = Math.max(0, Math.ceil(((Number(primary.y) || 0) - minY) / CANVAS_GROUP_GRID));
+    const column = Math.max(minColumn, Math.round(((Number(primary.x) || 0) - anchor.x) / CANVAS_GROUP_GRID));
+    const row = Math.max(minRow, Math.round(((Number(primary.y) || 0) - anchor.y) / CANVAS_GROUP_GRID));
+    const dx = anchor.x + column * CANVAS_GROUP_GRID - (Number(primary.x) || 0);
+    const dy = anchor.y + row * CANVAS_GROUP_GRID - (Number(primary.y) || 0);
+    batch.forEach(node => {
+        node.x = (Number(node.x) || 0) + dx;
+        node.y = (Number(node.y) || 0) + dy;
+    });
+    const previousW = Number(group.w) || nodeRect(group).w;
+    const previousH = Number(group.h) || nodeRect(group).h;
+    const members = batch.filter(node => (group.items || []).includes(node.id));
+    if(members.length){
+        const maxRight = Math.max(...members.map(node => {
+            const rect = nodeRect(node);
+            return (Number(node.x) || 0) + rect.w;
+        }));
+        const maxBottom = Math.max(...members.map(node => {
+            const rect = nodeRect(node);
+            return (Number(node.y) || 0) + rect.h;
+        }));
+        const groupRect = nodeRect(group);
+        group.w = Math.max(previousW || groupRect.w, maxRight - (Number(group.x) || 0) + CANVAS_GROUP_GRID_PADDING);
+        group.h = Math.max(previousH || groupRect.h, maxBottom - (Number(group.y) || 0) + CANVAS_GROUP_GRID_PADDING);
+    }
+    return Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001 || group.w !== previousW || group.h !== previousH;
+}
+function updateGroupMembership(movedNodes, primaryNode=null){
+    let membershipChanged = false;
+    const groups = nodes.filter(node => node.type === 'group');
+    const containingByNodeId = new Map();
+    movedNodes.filter(child => child && !['group','promptGroup'].includes(child.type)).forEach(child => {
+        const cr = nodeRect(child);
+        const containing = groups.find(group => {
+            const gr = nodeRect(group);
+            return cr.cx >= gr.x && cr.cx <= gr.x + gr.w && cr.cy >= gr.y && cr.cy <= gr.y + gr.h;
+        });
+        groups.forEach(group => {
+            if(group === containing) return;
+            const before = (group.items || []).length;
+            group.items = (group.items || []).filter(id => id !== child.id);
+            if(group.items.length !== before) membershipChanged = true;
+        });
+        if(containing){
+            containingByNodeId.set(child.id, containing);
+            containing.items = containing.items || [];
+            if(!containing.items.includes(child.id)){
+                containing.items.push(child.id);
+                membershipChanged = true;
+            }
+        }
+    });
+    const snapGroup = containingByNodeId.get(primaryNode?.id) || containingByNodeId.values().next().value || null;
+    // 成员有增减（拖进/拖出）就按「原图比例」整组重排，对应智能画布的拖入自动整理；
+    // 只是组内挪位置时保留原来的 24px 磁吸手感。
+    let snapped = false;
+    if(snapGroup){
+        snapped = membershipChanged
+            ? arrangeCanvasGroupMembers(snapGroup)
+            : snapCanvasGroupDragBatch(snapGroup, movedNodes, primaryNode);
+    }
+    if(membershipChanged){
         syncGeneratorInputs();
         refreshGeneratorInputViews();
+    }
+    if(membershipChanged || snapped){
         render();
         scheduleSave();
     }
@@ -16009,12 +17249,14 @@ function portPoint(id, kind){
     const n = nodes.find(x => x.id === id);
     if(!n) return {x:0,y:0};  // 真正的孤儿连线（节点已删除）：renderLinks 会跳过它
     const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
-    const port = el?.querySelector(`.port.${kind}`);
-    if(port){
-        const r = port.getBoundingClientRect();
-        return screenToWorld(r.left + r.width / 2, r.top + r.height / 2);
+    if(el){
+        // 连线锚点固定落在节点本体边缘的垂直中点（out=右缘、in=左缘），
+        // 不再跟随外凸手柄（.port）中心，避免节点与线之间留出空隙。
+        const r = el.getBoundingClientRect();
+        const cx = kind === 'out' ? r.right : r.left;
+        return screenToWorld(cx, r.top + r.height / 2);
     }
-    // 没有 DOM（节点渲染失败被跳过）或没找到端口时，用节点存储的几何坐标兜底，
+    // 没有 DOM（节点渲染失败被跳过）或没找到节点时，用节点存储的几何坐标兜底，
     // 让连线仍画在节点附近，而不是落到 (0,0) 或干脆消失。
     const w = (el?.offsetWidth) || n.w || 260, h = (el?.offsetHeight) || n.h || 160;
     const nx = Number(n.x) || 0, ny = Number(n.y) || 0;
@@ -16817,4 +18059,50 @@ window.zoomBarZoomIn = zoomBarZoomIn;
 window.zoomBarZoomOut = zoomBarZoomOut;
 window.undoEditDrawing = undoEditDrawing;
 window.undoGridCustomLine = undoGridCustomLine;
+/* ═══ 专业调色（image-adjust-editor.js）桥接：暴露 IIFE 内部能力 ═══ */
+window.imageAdjust = {
+    currentSource: function () {
+        const node = nodes.find(n => n.id === (cropState && cropState.nodeId));
+        const img = document.getElementById('cropImage');
+        const url = (node && node.url) || (img && img.src);
+        return { url: url || '', name: (node && (node.name || node.title)) || 'image' };
+    },
+    upload: function (blob, name) { return uploadCroppedBlob(blob, name); },
+    addResult: async function (file, fromAI) {
+        const node = nodes.find(n => n.id === (cropState && cropState.nodeId));
+        if (!node) return;
+        addGeneratedImageNode(file, node, fromAI ? 'ai' : 'adj', 0, { role: fromAI ? 'ai_enhance' : 'adjust' });
+    },
+    finish: function () { closeImageEditor(); render(); scheduleSave(); }
+};
+
+/* ═══ 图片编辑区拖动平移（预览模式拖任意处；其它模式拖空白处）═══ */
+(function(){
+    const stage = document.getElementById('imageEditStage');
+    if(!stage) return;
+    const ci = document.getElementById('cropImage');
+    if(ci) ci.draggable = false;
+    let panning = false, panX = 0, panY = 0, panL = 0, panT = 0;
+    stage.addEventListener('pointerdown', event => {
+        if(event.button !== 0) return;
+        if(event.target && event.target.closest && event.target.closest('#imageAdjustTools, #adjustCompareDivider')) return;
+        const onCanvas = event.target && event.target.closest && event.target.closest('#cropCanvas');
+        if(imageEditMode !== 'preview' && imageEditMode !== 'adjust' && onCanvas) return;
+        panning = true;
+        panX = event.clientX; panY = event.clientY;
+        panL = stage.scrollLeft; panT = stage.scrollTop;
+        try { stage.setPointerCapture(event.pointerId); } catch(e) {}
+        stage.classList.add('panning');
+        event.preventDefault();
+    });
+    stage.addEventListener('pointermove', event => {
+        if(!panning) return;
+        stage.scrollLeft = panL - (event.clientX - panX);
+        stage.scrollTop = panT - (event.clientY - panY);
+    });
+    const endPan = () => { if(!panning) return; panning = false; stage.classList.remove('panning'); };
+    stage.addEventListener('pointerup', endPan);
+    stage.addEventListener('pointercancel', endPan);
+    stage.addEventListener('pointerleave', endPan);
+})();
 })();
