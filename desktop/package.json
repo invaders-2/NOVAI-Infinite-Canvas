@@ -1,6 +1,6 @@
 {
   "name": "novai-desktop",
-  "version": "1.0.113",
+  "version": "1.0.115",
   "description": "NOVAI 无限画布 AI 创作平台 — 桌面客户端 (Electron)",
   "main": "main.js",
   "homepage": "https://github.com/invaders-2/NOVAI",
