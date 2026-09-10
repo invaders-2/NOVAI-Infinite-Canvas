@@ -34,6 +34,7 @@ const inputPromptPreview = document.getElementById('inputPromptPreview');
 const minimap = document.getElementById('minimap');
 const minimapContent = document.getElementById('minimapContent');
 const smartArrangeBtn = document.getElementById('smartArrangeBtn');
+const smartRunSelectedBtn = document.getElementById('smartRunSelectedBtn');
 const imageEditModal = document.getElementById('imageEditModal');
 const smartLogModal = document.getElementById('smartLogModal');
 const snapGuides = document.getElementById('snapGuides');
@@ -139,6 +140,10 @@ let promptTemplateGroupEditMode = false;
 let promptPresetDeleteArmed = false;
 let createMenuPoint = {x:0, y:0};
 let createMenuGroupId = '';
+// 拖线未命中有效下游时弹出节点选择面板：记录拖出端口，选中菜单项后自动连线
+let createMenuDropConnect = null;
+// 拖线松手同一事件序列内浏览器还会派发 click 到空白画布，会立刻关掉刚打开的菜单，用该标志吞掉这一次
+let suppressNextShellClick = false;
 let nodeClipboard = null;
 let imageClickTimer = null;
 let suppressImageClickUntil = 0;
@@ -154,6 +159,10 @@ let smartCascadeStopRequested = false;
 let smartCascadeSilentSelection = false;
 let smartCascadeRunPath = null;
 const smartCascadeRuns = new Map();
+let smartRunSelectedRunning = false;
+let smartRunSelectedAbort = false;
+let smartRunSelectedCacheKey = '';
+let smartRunSelectedCacheList = [];
 let smartLoopContext = null;
 let transientSmartCloudLinks = [];
 let runBtnCooldownToken = 0;
@@ -1232,6 +1241,9 @@ function isSmartImageNode(node){
 function isSmartGroupNode(node){
     return Boolean(node && node.type === 'smart-group');
 }
+function isSmartMatrixNode(node){
+    return Boolean(NovaWorkflowUtils?.isMatrixNode?.(node));
+}
 function isSmartRunnableNode(node){
     return Boolean(isSmartImageNode(node) || isSmartGroupNode(node));
 }
@@ -1279,6 +1291,9 @@ function normalizeLegacySmartNode(node){
     if(!node.type) node.type = 'smart-image';
     if(node.type === 'smart-image') delete node.imageMode;
     if(node.type === 'smart-image' && node.historyFor) node.isHistoryGroup = true;
+    // 多维表格统一走共享迁移：legacy smart-matrix(v0) / matrix(v1) -> 统一 matrix(v2)
+    // 之前这里调用未定义的 ensureSmartMatrixState，加载含表格的画布会抛 ReferenceError 白屏
+    if(NovaWorkflowUtils?.isMatrixNode?.(node)) return NovaWorkflowUtils.migrateMatrixNode(node);
     return node;
 }
 function validOutpaintSize(node){
@@ -1503,6 +1518,7 @@ function syncSelectionUi(){
     if(selectedImage.nodeId) touchedIds.add(selectedImage.nodeId);
     world.classList.toggle('smart-multi-selected', ids.length > 1);
     smartArrangeBtn?.classList.toggle('visible', ids.length > 0);
+    syncRunSelectedButton();
     smartNodeElementsByIds(touchedIds).forEach(el => {
         const id = el.dataset.id || '';
         el.classList.toggle('selected', isNodeSelected(id));
@@ -1587,10 +1603,10 @@ function smartGroupMembers(node){
     });
 }
 function smartGroupCompactMembers(node){
-    return smartGroupMembers(node).filter(member => member?.type === 'smart-prompt' || member?.type === 'smart-loop');
+    return smartGroupMembers(node).filter(member => member?.type === 'smart-prompt' || member?.type === 'smart-loop' || NovaWorkflowUtils?.isMatrixNode?.(member));
 }
 function isSmartGroupCompactMember(node){
-    return Boolean(node && (node.type === 'smart-prompt' || node.type === 'smart-loop') && smartGroupContainingNode(node.id));
+    return Boolean(node && (['smart-prompt','smart-loop'].includes(node.type) || NovaWorkflowUtils?.isMatrixNode?.(node)) && smartGroupContainingNode(node.id));
 }
 // 分组当前缩放比例（1=原始）。分组就像“画布中的画布”：缩放分组时组内所有成员（含提示词）整体等比缩放+
 // 重排。缩放过程用每次手势开始时的快照实时计算（见 resize 处理），不存持久基准，避免移动成员后再缩放位置回退。
@@ -1633,6 +1649,15 @@ function absorbImageNodeIntoSmartGroup(group, child){
     nodes.forEach(g => { if(isSmartGroupNode(g) && Array.isArray(g.items)) g.items = g.items.filter(id => id !== child.id); });
     return true;
 }
+function smartImageMustRemainGroupMember(child){
+    if(!isSmartImageNode(child)) return false;
+    if(!(child.images || []).some(image => image?.url)) return true;
+    if((canvas?.connections || []).some(connection => connection.from === child.id || connection.to === child.id)) return true;
+    if(Array.isArray(child.inputNodeIds) && child.inputNodeIds.length) return true;
+    if(child.pending || child.queued || child.jimengPending) return true;
+    if(child.runPrompt || child.promptDraftText || child.promptDraftHtml || child.sourceNodeId) return true;
+    return Boolean(child.runSettings && Object.keys(child.runSettings).length);
+}
 function addNodeToSmartGroup(group, child){
     if(!isSmartGroupNode(group) || !child || child.id === group.id) return false;
     const items = Array.isArray(group.items) ? group.items.slice() : [];
@@ -1655,9 +1680,8 @@ function addNodeToSmartGroup(group, child){
         nodes.forEach(g => { if(isSmartGroupNode(g) && Array.isArray(g.items)) g.items = g.items.filter(id => id !== child.id); });
         return true;
     }
-    // 图片节点：收进卡片内的缩略图网格（不再作为画布上的独立节点）。
-    if(isSmartImageNode(child)) return absorbImageNodeIntoSmartGroup(group, child);
-    // 提示词 / 循环：仍作为画布上的成员节点。
+    // 纯静态媒体仍沿用缩略图吸收；工作流节点、生成位和有连线图片必须保留真实 ID。
+    if(isSmartImageNode(child) && !smartImageMustRemainGroupMember(child)) return absorbImageNodeIntoSmartGroup(group, child);
     if(items.includes(child.id)) return false;
     group.items = [...items, child.id];
     scaleSmartGroupMemberToZoom(group, child, zoom);
@@ -1703,39 +1727,68 @@ function smartGroupImageRefs(group){
     });
     return refs;
 }
+// 卡片缩略图网格【真正会画出来】的图片：只有被分组吸收的（nodeId === 分组自身）。
+// 带连线/生成态等原因必须保留为真实节点的图片成员（见 smartImageMustRemainGroupMember）
+// 已经作为节点画在分组框里了，卡片再画一遍就是同一张图多出一层。
+function smartGroupCardImageRefs(group){
+    if(!isSmartGroupNode(group)) return [];
+    return (group.images || [])
+        .map((img, index) => ({nodeId:group.id, index, source:img, item:imageForDisplay(img)}))
+        .filter(ref => ref.item?.url);
+}
+// 组内以「真实图片节点」形式存在的成员（有图、非分组），按阅读顺序（先行后列）排序。
+function smartGroupMemberImageNodes(group){
+    return smartGroupMembers(group)
+        .filter(node => isSmartImageNode(node) && (node.images || []).some(img => img?.url))
+        .sort((a, b) => {
+            const ra = nodeRect(a), rb = nodeRect(b);
+            const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
+            if(Math.abs(dy) > 24) return dy;
+            return (Number(ra.x) || 0) - (Number(rb.x) || 0);
+        });
+}
 function smartGroupThumbLayout(node){
-    const refs = smartGroupImageRefs(node).filter(ref => ref.item?.url);
+    const refs = smartGroupCardImageRefs(node);
     if(!refs.length) return null;
     const compactMembers = smartGroupCompactMembers(node);
-    const count = refs.length + compactMembers.length;
+    const memberImages = smartGroupMemberImageNodes(node);
+    // 卡片缩略图 + 紧凑成员 + 组内真实图片节点 一起占用同一套格子。
+    // 这是「组内布局跟着分组尺寸走」的关键：count 含全部内容，格子按框拟合，
+    // 拉伸分组时重算的格子会同时反映到卡片缩略图和组内图片节点上。
+    const count = refs.length + compactMembers.length + memberImages.length;
     const items = refs.map(ref => ref.item);
     const explicitW = Number(node?.w);
     const explicitH = Number(node?.h);
     const hasExplicit = Number.isFinite(explicitW) && explicitW >= SMART_GROUP_MIN_WIDTH
         && Number.isFinite(explicitH) && explicitH >= SMART_GROUP_MIN_HEIGHT;
+    const boxW = hasExplicit ? Math.round(explicitW) : 0;
+    const boxH = hasExplicit ? Math.round(explicitH) : 0;
     const scale = mediaNodeDefaultScale({type:'smart-image', images:items, scale:node?.scale});
     const summarySpace = 28;
     const outerPad = 32;
     if(count === 1){
+        // 单图分组：一张图撑满卡片（保持老样子）
         if(hasExplicit){
             return {
                 refs,
                 compactMembers,
+                memberImages,
                 cols:1,
                 rows:1,
                 visibleRows:1,
-                width:Math.round(explicitW),
-                height:Math.round(explicitH),
+                width:boxW,
+                height:boxH,
                 thumb:Math.round(96 * scale),
                 single:true,
-                innerW:Math.max(24, Math.round(explicitW - outerPad)),
-                innerH:Math.max(24, Math.round(explicitH - outerPad - summarySpace))
+                innerW:Math.max(24, Math.round(boxW - outerPad)),
+                innerH:Math.max(24, Math.round(boxH - outerPad - summarySpace))
             };
         }
         const single = singleImageLayout(refs[0].item, {}, scale);
         return {
             refs,
             compactMembers,
+            memberImages,
             ...single,
             width:Math.max(SMART_GROUP_MIN_WIDTH, Math.round(single.width + outerPad)),
             height:Math.max(SMART_GROUP_MIN_HEIGHT, Math.round(single.height + outerPad + summarySpace)),
@@ -1744,10 +1797,46 @@ function smartGroupThumbLayout(node){
         };
     }
     const gap = 8;
-    const maxVisibleRows = compactMembers.length ? count : SMART_GROUP_MAX_VISIBLE_ROWS;
+    // 组内有真实图片节点时铺满整个框、不出现滚动条——否则改分组尺寸时内容看不出变化。
+    const maxVisibleRows = memberImages.length ? count
+        : (compactMembers.length ? count : SMART_GROUP_MAX_VISIBLE_ROWS);
     if(hasExplicit){
-        const fitted = groupImageGridLayout(count, Math.max(72, explicitW - outerPad), Math.max(56, explicitH - outerPad - summarySpace), 100000, 0, gap, maxVisibleRows);
-        return {...fitted, refs, compactMembers, width:Math.round(explicitW), height:Math.round(explicitH)};
+        // 分组框决定格子宽度：先横向铺满，格子高度再由「原图比例」反推。
+        const innerW = Math.max(0, boxW - outerPad);
+        const innerH = Math.max(0, boxH - outerPad - summarySpace);
+        // 按原图比例：内容里最宽的那张决定格子比例（不同比例时取最大），
+        // 格子比例 = 图片比例，图片正好铺满格子，不裁切、不左右留边。
+        const aspects = [];
+        refs.forEach(ref => { const size = mediaLayoutSize(ref.item); if(size.width > 0 && size.height > 0) aspects.push(size.width / size.height); });
+        memberImages.forEach(node => { const size = mediaLayoutSize((node.images || [])[0]); if(size.width > 0 && size.height > 0) aspects.push(size.width / size.height); });
+        const refAspect = aspects.length ? Math.min(5, Math.max(0.2, Math.max(...aspects))) : 1;
+        // 一行放几张：先按宽度算出格子多大，再用「原图比例」定高度；
+        // 高度超出框就说明这一行放太多了，会被下面的 if 排除掉。
+        // 最后在「横向仍然铺满（≥90% 宽）」的候选里挑格子面积最大的——
+        // 也就是优先把左右铺满、把余量留在上下（正是「上下可留空」）。
+        const cands = [];
+        const maxCols = Math.max(1, Math.min(count, 8));
+        for(let c = 1; c <= maxCols; c++){
+            const r = Math.ceil(count / c);
+            const wByWidth = Math.floor((innerW - (c - 1) * gap) / c);
+            const hByHeight = Math.floor((innerH - (r - 1) * gap) / r);
+            const w = Math.min(wByWidth, Math.round(hByHeight * refAspect));
+            const h = Math.floor(w / refAspect);
+            if(w < 24 || h < 24) continue;
+            const gridW = c * w + (c - 1) * gap;
+            const gridH = r * h + (r - 1) * gap;
+            if(gridW > innerW || gridH > innerH) continue;
+            cands.push({cols:c, rows:r, thumb:w, thumbH:h, gridW, gridH, fill:innerW > 0 ? gridW / innerW : 1, score:w * h});
+        }
+        const wide = cands.filter(cand => cand.fill >= 0.9);
+        const pool = (wide.length ? wide : cands).slice().sort((a, b) => b.score - a.score);
+        const chosen = pool[0] || null;
+        if(chosen){
+            const offsetY = Math.max(0, Math.round((innerH - Math.min(chosen.gridH, innerH)) / 2));
+            return {refs, compactMembers, memberImages, cols:chosen.cols, rows:chosen.rows, visibleRows:chosen.rows, thumb:chosen.thumb, thumbH:chosen.thumbH, gridH:chosen.gridH, contentOffsetY:offsetY, width:boxW, height:boxH};
+        }
+        const fitted = groupImageGridLayout(count, Math.max(72, innerW), Math.max(56, innerH), 100000, 0, gap, maxVisibleRows);
+        return {...fitted, refs, compactMembers, memberImages, thumbH:fitted.thumb, width:boxW, height:boxH};
     }
     const thumb = Math.round(MEDIA_GROUP_THUMB_BASE * scale);
     const cell = thumb + gap;
@@ -1759,10 +1848,12 @@ function smartGroupThumbLayout(node){
     return {
         refs,
         compactMembers,
+        memberImages,
         cols,
         rows,
         visibleRows,
         thumb,
+        thumbH:thumb,
         width:Math.max(SMART_GROUP_MIN_WIDTH, Math.round(gridW + outerPad)),
         height:Math.max(SMART_GROUP_MIN_HEIGHT, Math.round(gridH + outerPad + summarySpace))
     };
@@ -1770,42 +1861,109 @@ function smartGroupThumbLayout(node){
 const SMART_GROUP_ARRANGE_PADDING = 18;
 const SMART_GROUP_ARRANGE_GAP = 16;
 const SMART_GROUP_ARRANGE_HEADER = 44;
+const SMART_GROUP_DRAG_GRID = 24;
+const SMART_GROUP_DRAG_GRID_SCREEN_SNAP = 8;
+const SMART_GROUP_DRAG_PADDING = 24;
+const SMART_GROUP_DRAG_HEADER = 64;
+function smartGroupDragGridAnchor(group){
+    return {
+        x:(Number(group?.x) || 0) + SMART_GROUP_DRAG_PADDING,
+        y:(Number(group?.y) || 0) + SMART_GROUP_DRAG_HEADER
+    };
+}
+function smartGroupGridMagnetDelta(group, x, y, scale=1){
+    const anchor = smartGroupDragGridAnchor(group);
+    const targetX = anchor.x + Math.round((Number(x) - anchor.x) / SMART_GROUP_DRAG_GRID) * SMART_GROUP_DRAG_GRID;
+    const targetY = anchor.y + Math.round((Number(y) - anchor.y) / SMART_GROUP_DRAG_GRID) * SMART_GROUP_DRAG_GRID;
+    const threshold = SMART_GROUP_DRAG_GRID_SCREEN_SNAP / Math.max(0.05, Number(scale) || 1);
+    const rawDx = targetX - Number(x);
+    const rawDy = targetY - Number(y);
+    return {
+        dx:Math.abs(rawDx) <= threshold ? rawDx : 0,
+        dy:Math.abs(rawDy) <= threshold ? rawDy : 0,
+        x:targetX,
+        y:targetY
+    };
+}
+function snapSmartGroupDragBatch(group, draggedNodes, primaryNode){
+    const batch = (draggedNodes || []).filter(node => node && nodes.some(item => item.id === node.id));
+    const members = batch.filter(node => (group?.items || []).includes(node.id));
+    if(!group || !members.length) return false;
+    const primary = members.includes(primaryNode) ? primaryNode : members[0];
+    const anchor = smartGroupDragGridAnchor(group);
+    const minX = Math.min(...batch.map(node => Number(node.x) || 0));
+    const minY = Math.min(...batch.map(node => Number(node.y) || 0));
+    const minColumn = Math.max(0, Math.ceil(((Number(primary.x) || 0) - minX) / SMART_GROUP_DRAG_GRID));
+    const minRow = Math.max(0, Math.ceil(((Number(primary.y) || 0) - minY) / SMART_GROUP_DRAG_GRID));
+    const column = Math.max(minColumn, Math.round(((Number(primary.x) || 0) - anchor.x) / SMART_GROUP_DRAG_GRID));
+    const row = Math.max(minRow, Math.round(((Number(primary.y) || 0) - anchor.y) / SMART_GROUP_DRAG_GRID));
+    const dx = anchor.x + column * SMART_GROUP_DRAG_GRID - (Number(primary.x) || 0);
+    const dy = anchor.y + row * SMART_GROUP_DRAG_GRID - (Number(primary.y) || 0);
+    batch.forEach(node => {
+        node.x = (Number(node.x) || 0) + dx;
+        node.y = (Number(node.y) || 0) + dy;
+    });
+    const previousW = Number(group.w) || nodeRect(group).width;
+    const previousH = Number(group.h) || nodeRect(group).height;
+    const maxRight = Math.max(...members.map(node => {
+        const rect = nodeRect(node);
+        return (Number(node.x) || 0) + rect.width;
+    }));
+    const maxBottom = Math.max(...members.map(node => {
+        const rect = nodeRect(node);
+        return (Number(node.y) || 0) + rect.height;
+    }));
+    const groupRect = nodeRect(group);
+    group.w = Math.max(previousW || groupRect.width, maxRight - (Number(group.x) || 0) + SMART_GROUP_DRAG_PADDING);
+    group.h = Math.max(previousH || groupRect.height, maxBottom - (Number(group.y) || 0) + SMART_GROUP_DRAG_PADDING);
+    return Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001 || group.w !== previousW || group.h !== previousH;
+}
 // 把分组内的成员整理成整齐的网格（先行后列保持当前阅读顺序），列数尽量接近正方形，
 // 每个成员在所属单元格内居中；最后把分组框尺寸收敛到正好包住所有成员。
 function arrangeSmartGroupMembers(group, options={}){
     if(!isSmartGroupNode(group)) return false;
-    const hasThumbImages = smartGroupImageRefs(group).some(ref => ref.item?.url);
+    // 只有当卡片真的会画出缩略图时才走「缩略图网格」这条路；组里只有真实图片节点时
+    // 交给下面的自然尺寸网格去排，否则会因为 layout 为空而直接 return、图片节点永远排不整齐。
+    const hasThumbImages = smartGroupCardImageRefs(group).length > 0;
     if(hasThumbImages){
         const compactMembers = smartGroupCompactMembers(group);
         if(!options.skipUndo) pushUndo();
         const layout = smartGroupThumbLayout(group);
         if(!layout) return true;
         const refs = layout.refs || [];
-        const thumb = Math.max(28, Math.round(Number(layout.thumb) || 96));
+        const memberImages = layout.memberImages || smartGroupMemberImageNodes(group);
+        const thumb = Math.max(24, Math.round(Number(layout.thumb) || 96));
+        const thumbH = Math.max(24, Math.round(Number(layout.thumbH) || thumb));
         const gap = 8;
         const cols = Math.max(1, Number(layout.cols) || 1);
         const gridW = cols * thumb + Math.max(0, cols - 1) * gap;
-        const contentW = Math.max(0, Math.round(Number(layout.width) || SMART_GROUP_DEFAULT_WIDTH) - 32);
+        // 分组框就是布局的输入：有尺寸就沿用，没有才用自然尺寸初始化。
+        const boxW = Math.max(SMART_GROUP_MIN_WIDTH, Math.round(Number(group.w) || Number(layout.width) || SMART_GROUP_DEFAULT_WIDTH));
+        const boxH = Math.max(SMART_GROUP_MIN_HEIGHT, Math.round(Number(group.h) || Number(layout.height) || SMART_GROUP_DEFAULT_HEIGHT));
+        group.w = boxW;
+        group.h = boxH;
+        const contentW = Math.max(0, boxW - 32);
         const originX = (Number(group.x) || 0) + 16 + Math.max(0, Math.round((contentW - gridW) / 2));
-        const originY = (Number(group.y) || 0) + 16 + 28;
-        group.w = Math.max(SMART_GROUP_MIN_WIDTH, Math.round(Number(layout.width) || SMART_GROUP_DEFAULT_WIDTH));
-        group.h = Math.max(SMART_GROUP_MIN_HEIGHT, Math.round(Number(layout.height) || SMART_GROUP_DEFAULT_HEIGHT));
+        const originY = (Number(group.y) || 0) + 16 + 28 + Math.max(0, Math.round(Number(layout.contentOffsetY) || 0));
+        // 卡片缩略图占前 refs.length 个格子（由卡片自己画），后面的格子依次给紧凑成员和真实图片节点。
+        // 统一切成格子大小的方块，整组就是一张等距网格；拉伸分组时格子重算，它们跟着一起重排。
+        const placeCell = (member, index) => {
+            const col = index % cols;
+            const row = Math.floor(index / cols);
+            member.x = Math.round(originX + col * (thumb + gap));
+            member.y = Math.round(originY + row * (thumbH + gap));
+            member.w = thumb;
+            member.h = thumbH;
+            member.scale = 1;
+        };
         const ordered = compactMembers.slice().sort((a, b) => {
             const ra = nodeRect(a), rb = nodeRect(b);
             const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
             if(Math.abs(dy) > 24) return dy;
             return (Number(ra.x) || 0) - (Number(rb.x) || 0);
         });
-        ordered.forEach((member, memberIndex) => {
-            const index = refs.length + memberIndex;
-            const col = index % cols;
-            const row = Math.floor(index / cols);
-            member.x = Math.round(originX + col * (thumb + gap));
-            member.y = Math.round(originY + row * (thumb + gap));
-            member.w = thumb;
-            member.h = thumb;
-            member.scale = 1;
-        });
+        ordered.forEach((member, memberIndex) => placeCell(member, refs.length + memberIndex));
+        memberImages.forEach((member, imageIndex) => placeCell(member, refs.length + ordered.length + imageIndex));
         if(group._memberZoom !== undefined) group._memberZoom = 1;
         if(options.syncDom) syncSmartGroupMemberElements(group);
         return true;
@@ -2100,6 +2258,7 @@ function smartGroupImageGridLayout(node){
     return {cols, rows, visibleRows, width, height, thumb:baseThumb};
 }
 function imageLayout(images, scale=1, node=null){
+    if(NovaWorkflowUtils?.isMatrixNode?.(node)) return {cols:1, rows:1, width:Math.max(620, Number(node.w) || 680), height:Math.max(360, Number(node.h) || 440), thumb:96, single:true};
     if(node?.type === 'smart-group'){
         const groupThumbLayout = smartGroupThumbLayout(node);
         if(groupThumbLayout) return groupThumbLayout;
@@ -2331,6 +2490,7 @@ function viewportCenter(){
 function renderMinimap(){
     if(!minimapContent || !minimapViewport) return;
     smartArrangeBtn?.classList.toggle('visible', selectedNodeIds().length > 0);
+    syncRunSelectedButton();
     const width = minimapContent.clientWidth || 170;
     const height = minimapContent.clientHeight || 108;
     const viewW = shell.clientWidth / viewport.scale;
@@ -4643,9 +4803,21 @@ function executeChatActions(actions){
 }
 function toggleChatPanel(){
     chatModal.classList.toggle('open');
-    if(!chatModal.classList.contains('open')) closeAgentHistoryPanel();
+    var opened = chatModal.classList.contains('open');
+    if(!opened){
+        closeAgentHistoryPanel();
+        chatTypewriterStop(true);
+        return;
+    }
     var inp = document.getElementById('chatInput');
-    if(chatModal.classList.contains('open') && inp){ setTimeout(function(){ inp.focus(); syncChatContext(); refreshChatModels(); renderChatWelcomeIfEmpty(); }, 200); }
+    setTimeout(function(){
+        syncChatContext();
+        refreshChatModels();
+        renderChatWelcomeIfEmpty();
+        // 已经有对话 → 直接把焦点给输入框；空对话 → 让打字机先说话，点一下才接管。
+        if(chatMessages.length){ if(inp) inp.focus(); }
+        else chatTypewriterStart();
+    }, 200);
 }
 // ── Agent 历史记录面板（只读展示，不做删除）──
 var agentHistoryMode = 'canvas'; // 'canvas'=当前画布 / 'all'=全部
@@ -4899,6 +5071,7 @@ function createChatMsgEl(role){
 function addChatMessage(role, text, images){
     chatMessages.push({role:role, text:text, images:images||[]});
     removeChatWelcome();
+    chatTypewriterStop(true);
     var parts = createChatMsgEl(role);
     var box = document.getElementById('chatMessages');
     var imgsHtml = (images||[]).length ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">'+images.map(function(u){return '<img src="'+escapeHtml(u)+'" style="width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--border)">'}).join('')+'</div>' : '';
@@ -4906,7 +5079,7 @@ function addChatMessage(role, text, images){
     box.appendChild(parts.div);
     parts.div.scrollIntoView({behavior:'smooth',block:'end'});
 }
-// ── 空状态欢迎卡：示例指令 chips 点击即用 ──
+// ── 空状态（Spectrum「AI Chat Card」的居中三段式）：浮动图标胶囊 + 问候 + 说明 ──
 var chatWelcomeExamples = [
     '生成一张红色杯子的图',
     '用选中的图做电商主图',
@@ -4922,14 +5095,8 @@ function renderChatWelcomeIfEmpty(){
     w.className = 'chat-welcome';
     w.innerHTML =
         '<div class="chat-welcome-icon"><i data-lucide="message-square-text"></i></div>' +
-        '<div class="chat-welcome-title">你好，我是画布助手</div>' +
-        '<div class="chat-welcome-sub">直接告诉我你想做什么，我会规划步骤并在你确认后执行<br>试试下面的示例：</div>' +
-        '<div class="chat-welcome-chips">' +
-        chatWelcomeExamples.map(function(t){
-            return '<button type="button" class="chat-welcome-chip" onclick="fillChatExample(this)">' + escapeHtml(t) + '</button>';
-        }).join('') +
-        '</div>' +
-        '<div class="chat-welcome-tip"><i data-lucide="paperclip"></i> 上传素材或选中画布节点，生成时会自动作为参考</div>';
+        '<p class="chat-welcome-title">你好，我是画布助手</p>' +
+        '<p class="chat-welcome-sub">告诉我你想做什么，我会先规划步骤，等你确认后再执行</p>';
     box.appendChild(w);
     refreshIcons();
 }
@@ -4937,14 +5104,167 @@ function removeChatWelcome(){
     var w = document.querySelector('.chat-welcome');
     if(w) w.remove();
 }
-function fillChatExample(btn){
-    var inp = document.getElementById('chatInput');
-    if(!inp) return;
-    inp.value = btn.textContent.trim();
-    inp.style.height = 'auto';
-    inp.style.height = Math.min(inp.scrollHeight, 100) + 'px';
-    inp.focus();
+// ═══ Spectrum「AI Chat Card」的打字机 ═══
+// 空对话时，把示例指令逐字打进 composer（打完停一会儿再删掉，循环）；点一下输入区就「接管」，
+// 示例文字直接变成你的输入。时间参数与组件一致：type 48 / delete 14 / hold 3400 / gap 900。
+var CHAT_TW = { typeMs: 48, deleteMs: 14, holdMs: 3400, gapMs: 900, startDelayMs: 400 };
+var chatTypewriter = { timer: null, running: false, taken: false, idx: 0, pos: 0, phase: 'idle' };
+function chatPrefersReducedMotion(){
+    try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){ return false; }
 }
+function chatTypewriterEls(){
+    var box = document.getElementById('chatComposerBox');
+    var tw = document.getElementById('chatTypewriter');
+    return { box: box, tw: tw, text: tw ? tw.querySelector('.chat-tw-text') : null };
+}
+function chatTypewriterCanRun(){
+    if(chatTypewriter.taken) return false;
+    if(!chatModal.classList.contains('open')) return false;
+    if(chatMessages.length) return false;
+    var inp = document.getElementById('chatInput');
+    return !(inp && inp.value && inp.value.trim());
+}
+function chatTypewriterStop(clearText){
+    if(chatTypewriter.timer){ clearTimeout(chatTypewriter.timer); chatTypewriter.timer = null; }
+    chatTypewriter.running = false;
+    chatTypewriter.phase = 'idle';
+    var els = chatTypewriterEls();
+    if(els.box) els.box.classList.remove('is-typing');
+    var send = document.getElementById('chatSendBtn');
+    if(send) send.classList.remove('is-holding');
+    if(clearText && els.text) els.text.textContent = '';
+}
+function chatTypewriterPulseSend(){
+    var send = document.getElementById('chatSendBtn');
+    if(!send || chatTypewriter.taken) return;
+    send.classList.remove('is-holding');
+    void send.offsetWidth;
+    send.classList.add('is-holding');
+}
+function chatTypewriterStart(){
+    if(!chatTypewriterCanRun()){ chatTypewriterStop(true); return; }
+    var els = chatTypewriterEls();
+    if(!els.box || !els.tw || !els.text) return;
+    if(chatTypewriter.timer){ clearTimeout(chatTypewriter.timer); chatTypewriter.timer = null; }
+    chatTypewriter.running = true;
+    chatTypewriter.idx = 0;
+    chatTypewriter.pos = 0;
+    chatTypewriter.phase = 'typing';
+    els.box.classList.add('is-typing');
+    els.text.textContent = '';
+    // 尊重「减弱动态效果」：直接静态显示第一条，不做循环动画
+    if(chatPrefersReducedMotion()){
+        els.text.textContent = chatWelcomeExamples[0] || '';
+        return;
+    }
+    chatTypewriter.timer = setTimeout(chatTypewriterStep, CHAT_TW.startDelayMs);
+}
+function chatTypewriterStep(){
+    chatTypewriter.timer = null;
+    if(!chatTypewriter.running) return;
+    if(!chatTypewriterCanRun()){ chatTypewriterStop(true); return; }
+    var els = chatTypewriterEls();
+    if(!els.text) return;
+    var list = chatWelcomeExamples;
+    var phrase = list[chatTypewriter.idx % list.length] || '';
+    if(chatTypewriter.phase === 'waiting'){
+        chatTypewriter.phase = 'typing';
+        chatTypewriter.pos = 0;
+        els.text.textContent = '';
+        chatTypewriter.timer = setTimeout(chatTypewriterStep, chatTypewriterJitter(CHAT_TW.typeMs));
+        return;
+    }
+    if(chatTypewriter.phase === 'typing'){
+        chatTypewriter.pos += 1;
+        els.text.textContent = phrase.slice(0, chatTypewriter.pos);
+        if(chatTypewriter.pos >= phrase.length){
+            chatTypewriter.phase = 'holding';
+            chatTypewriterPulseSend();
+            chatTypewriter.timer = setTimeout(chatTypewriterStep, CHAT_TW.holdMs);
+        } else {
+            chatTypewriter.timer = setTimeout(chatTypewriterStep, chatTypewriterJitter(CHAT_TW.typeMs));
+        }
+        return;
+    }
+    if(chatTypewriter.phase === 'holding'){
+        chatTypewriter.phase = 'deleting';
+        chatTypewriter.timer = setTimeout(chatTypewriterStep, CHAT_TW.deleteMs);
+        return;
+    }
+    // deleting
+    chatTypewriter.pos -= 1;
+    els.text.textContent = phrase.slice(0, Math.max(0, chatTypewriter.pos));
+    if(chatTypewriter.pos <= 0){
+        chatTypewriter.idx += 1;
+        chatTypewriter.phase = 'waiting';
+        chatTypewriter.timer = setTimeout(chatTypewriterStep, CHAT_TW.gapMs);
+    } else {
+        chatTypewriter.timer = setTimeout(chatTypewriterStep, CHAT_TW.deleteMs);
+    }
+}
+function chatTypewriterJitter(base){ return base * (0.6 + Math.random() * 0.8); }
+// 用户接管：把正在打的示例交给真实输入框并聚焦（Spectrum 的 takeOver）
+function chatTypewriterTakeOver(){
+    if(!chatTypewriter.running) return false;
+    var els = chatTypewriterEls();
+    var typed = els.text ? els.text.textContent : '';
+    chatTypewriter.taken = true;
+    chatTypewriterStop(false);
+    var inp = document.getElementById('chatInput');
+    if(inp){
+        if(typed){ inp.value = typed; }
+        inp.style.height = 'auto';
+        inp.style.height = Math.min(inp.scrollHeight, 100) + 'px';
+        requestAnimationFrame(function(){ inp.focus(); });
+    }
+    return true;
+}
+window.chatTypewriterTakeOver = chatTypewriterTakeOver;
+// 点输入区（不含两个圆形按钮）就接管
+(function bindChatComposerTakeOver(){
+    var box = document.getElementById('chatComposerBox');
+    if(!box) return;
+    box.addEventListener('mousedown', function(e){
+        if(e.target.closest('.chat-round-btn, input[type=file]')) return;
+        if(!chatTypewriter.running) return;
+        e.preventDefault();
+        chatTypewriterTakeOver();
+    });
+    // 键盘也要能唤醒：焦点还在画布上时按字符键 → 接管并吞掉这次按键，
+    // 免得同一个 z / a 又被画布的快捷键接走。
+    window.addEventListener('keydown', function(e){
+        if(!chatTypewriter.running) return;
+        if(e.ctrlKey || e.metaKey || e.altKey) return;
+        if(e.key === 'Escape' || e.key === 'Tab') return;
+        if(e.key.length !== 1 && e.key !== 'Backspace') return;
+        if(isEditableTarget(e.target)) return;
+        if(e.target && e.target.closest && e.target.closest('button, .chat-composer-box')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        chatTypewriterTakeOver();
+    }, true);
+})();
+// Spectrum 头部的重置按钮：清空本次对话 + 图标转一圈 + 打字机重来
+function resetChatConversation(){
+    var btn = document.querySelector('.chat-reset-btn');
+    var ico = btn ? btn.querySelector('.chat-reset-ico') : null;
+    if(btn && ico){
+        btn.__spin = (Number(btn.__spin) || 0) + 360;
+        ico.style.transform = 'rotate(' + btn.__spin + 'deg)';
+    }
+    chatMessages = [];
+    var box = document.getElementById('chatMessages');
+    if(box) box.innerHTML = '';
+    hideChatMentions();
+    removeChatWelcome();
+    var inp = document.getElementById('chatInput');
+    if(inp){ inp.value = ''; inp.style.height = 'auto'; }
+    chatTypewriter.taken = false;
+    chatTypewriterStop(true);
+    renderChatWelcomeIfEmpty();
+    chatTypewriterStart();
+}
+window.resetChatConversation = resetChatConversation;
 // ── 打字机效果：助手文本逐步显示 ──
 function typewriteText(el, text, done){
     if(!el) return;
@@ -7565,7 +7885,7 @@ function migrateSmartGroupImageMembers(){
     nodes.filter(isSmartGroupNode).forEach(group => {
         const imageMemberIds = (Array.isArray(group.items) ? group.items : [])
             .map(id => nodes.find(n => n.id === id))
-            .filter(m => m && isSmartImageNode(m) && (m.images || []).some(img => img?.url))
+            .filter(m => m && isSmartImageNode(m) && (m.images || []).some(img => img?.url) && !smartImageMustRemainGroupMember(m))
             .map(m => m.id);
         imageMemberIds.forEach(id => {
             const member = nodes.find(n => n.id === id);
@@ -7754,6 +8074,22 @@ function createSmartGroupNode(x, y, options={}){
     scheduleSave();
     return node;
 }
+function newSmartMatrixRow(index=0){
+    return {id:uid('row'), task:'', overlay:'', status:'idle', error:'', resultRefs:[], dependsOnPrevious:index > 0, userEdited:false};
+}
+function createSmartMatrixNode(x, y, options={}){
+    if(!options.skipUndo) pushUndo();
+    const node = {
+        id:uid('matrix'), type:(NovaWorkflowUtils?.MATRIX_NODE_TYPE || 'matrix'), x, y, w:680, h:440, title:'多维表格', mode:'batch',
+        rows:[newSmartMatrixRow(0), newSmartMatrixRow(1)],
+        globalContext:{productReference:'', palette:'', font:'', outline:'', commonWidth:1024},
+        previousOutputs:{text:'', image:'', video:''}, created_at:Date.now()
+    };
+    nodes.push(node);
+    if(options.select !== false) selectedId = node.id;
+    render(); scheduleSave();
+    return node;
+}
 function cloneSmartNode(node, dx=0, dy=0){
     const copy = JSON.parse(JSON.stringify(node));
     copy.id = uid(
@@ -7763,6 +8099,8 @@ function cloneSmartNode(node, dx=0, dy=0){
             ? 'loop'
             : node.type === 'smart-group'
             ? 'group'
+            : NovaWorkflowUtils?.isMatrixNode?.(node)
+            ? 'matrix'
             : 'smart'
     );
     copy.x = (Number(node.x) || 0) + dx;
@@ -8127,7 +8465,8 @@ function updateNodeElementDuringResize(node){
 }
 function syncSmartGroupMemberElements(group){
     if(!isSmartGroupNode(group)) return;
-    smartGroupCompactMembers(group).forEach(member => {
+    // 紧凑成员和真实图片节点都要同步：拉伸分组时它们都按新格子重排，DOM 必须跟着走。
+    [...smartGroupCompactMembers(group), ...smartGroupMemberImageNodes(group)].forEach(member => {
         const el = world.querySelector(`.image-node[data-id="${CSS.escape(member.id)}"]`);
         if(el){
             el.style.left = `${member.x || 0}px`;
@@ -8980,45 +9319,67 @@ function smartLoopBodyHtml(node){
         </div>
     </div>`;
 }
+// 分组自定义名称：默认「智能分组」，兼容历史落库的「万能分组」写法。
+function smartGroupDisplayTitle(node){
+    const raw = node?.title === '万能分组' ? '智能分组' : (node?.title || '');
+    return String(raw || '智能分组');
+}
+// 分组卡片顶部信息行：分组图标 + 可编辑名称 + 成员统计。
+// 名称平时只是一行文字（无底框、无边框），hover/focus 才给一点点底提示——和传统画布的
+// .group-title-input 同一套语义，只是位置在卡片自己的信息行里（分组的 node-head 是隐藏的）。
+function smartGroupSummaryHtml(node, summary){
+    return '<div class="smart-group-summary">'
+        + '<i data-lucide="group"></i>'
+        + `<input class="smart-group-title-input" type="text" value="${escapeAttr(smartGroupDisplayTitle(node))}" placeholder="分组名称" aria-label="分组名称" spellcheck="false" autocomplete="off" maxlength="48">`
+        + `<span class="smart-group-summary-count">${escapeHtml(summary)}</span>`
+        + '</div>';
+}
 function smartGroupBodyHtml(node){
     const groupThumbLayout = smartGroupThumbLayout(node);
-    const refThumbs = groupThumbLayout?.refs || [];
+    // refs 已经是「卡片真正会画的图片」= 被分组吸收的（nodeId === 分组自身）。
+    // 带连线/生成态等原因必须保留为真实节点的图片成员（见 smartImageMustRemainGroupMember）
+    // 已经作为节点画在分组框里了，卡片再画一遍就是同一张图多出一层。
+    const cardThumbs = groupThumbLayout?.refs || [];
     const members = smartGroupMembers(node);
     const counts = members.reduce((acc, member) => {
         if(member.type === 'smart-prompt') acc.prompt += 1;
         else if(member.type === 'smart-loop') acc.loop += 1;
         return acc;
-    }, {prompt:0, media:refThumbs.length, loop:0});
+    }, {prompt:0, media:smartGroupImageRefs(node).length, loop:0});
     const summary = [
         counts.prompt ? `${counts.prompt} 提示词` : '',
         counts.media ? `${counts.media} 图片` : '',
         counts.loop ? `${counts.loop} 循环` : ''
     ].filter(Boolean).join(' · ') || '双击或拖入图片';
-    if(refThumbs.length){
+    if(cardThumbs.length){
         const totalThumbs = Math.max(1, Number(groupThumbLayout?.rows || 1) * Number(groupThumbLayout?.cols || 1));
-        if(totalThumbs === 1 && refThumbs.length === 1){
-            const ref = refThumbs[0];
+        if(totalThumbs === 1 && cardThumbs.length === 1){
+            const ref = cardThumbs[0];
             const innerW = Math.max(24, Number(groupThumbLayout.innerW || groupThumbLayout.width || SMART_GROUP_DEFAULT_WIDTH));
             const innerH = Math.max(24, Number(groupThumbLayout.innerH || groupThumbLayout.height || SMART_GROUP_DEFAULT_HEIGHT));
             const canDelete = ref.nodeId === node.id;
             return `<div class="smart-group-card has-thumbs">
-                <div class="smart-group-summary"><i data-lucide="group"></i><span>${escapeHtml(summary)}</span></div>
+                ${smartGroupSummaryHtml(node, summary)}
                 <div class="image-wrap smart-group-single-thumb ${selectedImage.nodeId === ref.nodeId && Number(selectedImage.index) === Number(ref.index) ? 'image-selected' : ''}" data-ref-node-id="${escapeAttr(ref.nodeId)}" data-ref-image-index="${ref.index}" data-image-index="${ref.index}" data-media-signature="${escapeAttr(`${mediaKindForItem(ref.item)}:${ref.item?.url || ''}`)}" style="--node-img-w:${innerW}px;--node-img-h:${innerH}px">${singleMediaHtml(ref.item, innerW, innerH)}${imageNameBadgeHtml(ref.item)}${imageResolutionBadgeHtml(ref.item)}${canDelete ? `<button class="mini-x image-delete" type="button" data-image-index="${ref.index}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button>` : ''}</div>
             </div>`;
         }
-        const groupMaxVisibleRows = (groupThumbLayout.compactMembers || []).length ? Number(groupThumbLayout.rows || 1) : SMART_GROUP_MAX_VISIBLE_ROWS;
+        // 组内有真实图片节点时铺满整个框，行数不截断（否则格子会被 max-height 裁掉）。
+        const groupMaxVisibleRows = ((groupThumbLayout.memberImages || []).length || (groupThumbLayout.compactMembers || []).length) ? Number(groupThumbLayout.rows || 1) : SMART_GROUP_MAX_VISIBLE_ROWS;
         const visibleRows = Math.max(1, Math.min(groupMaxVisibleRows, Number(groupThumbLayout.visibleRows || groupThumbLayout.rows || 1)));
-        const maxHeight = Math.max(44, visibleRows * Number(groupThumbLayout.thumb || 96) + Math.max(0, visibleRows - 1) * 8);
+        const groupCellH = Math.max(24, Math.round(Number(groupThumbLayout.thumbH) || Number(groupThumbLayout.thumb) || 96));
+        // 网格在框内垂直居中：上下留白对称（图片比例和分组框比例不一致时的余量）
+        const contentOffsetY = Math.max(0, Math.round(Number(groupThumbLayout.contentOffsetY) || 0));
+        const maxHeight = Math.max(44, visibleRows * groupCellH + Math.max(0, visibleRows - 1) * 8);
         return `<div class="smart-group-card has-thumbs">
-            <div class="smart-group-summary"><i data-lucide="group"></i><span>${escapeHtml(summary)}</span></div>
-            <div class="thumb-grid smart-group-thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${groupThumbLayout.cols}; --thumb-size:${groupThumbLayout.thumb}px; --thumb-max-height:${maxHeight}px">${refThumbs.map(ref => {
+            ${smartGroupSummaryHtml(node, summary)}
+            <div class="thumb-grid smart-group-thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${groupThumbLayout.cols}; --thumb-size:${groupThumbLayout.thumb}px; --group-thumb-h:${groupCellH}px; --thumb-max-height:${maxHeight}px; margin-top:${contentOffsetY}px">${cardThumbs.map(ref => {
                 const canDelete = ref.nodeId === node.id;
                 return `<div class="thumb-item ${selectedImage.nodeId === ref.nodeId && Number(selectedImage.index) === Number(ref.index) ? 'image-selected' : ''}" data-ref-node-id="${escapeAttr(ref.nodeId)}" data-ref-image-index="${ref.index}" data-image-index="${ref.index}" data-media-signature="${escapeAttr(`${mediaKindForItem(ref.item)}:${ref.item?.url || ''}`)}">${thumbMediaHtml(ref.item)}${imageNameBadgeHtml(ref.item)}${imageResolutionBadgeHtml(ref.item)}${canDelete ? `<button class="mini-x image-delete" type="button" data-image-index="${ref.index}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button>` : ''}</div>`;
             }).join('')}</div>
         </div>`;
     }
     return `<div class="smart-group-card">
-        <div class="smart-group-summary"><i data-lucide="group"></i><span>${escapeHtml(summary)}</span></div>
+        ${smartGroupSummaryHtml(node, summary)}
         ${members.length ? '' : `<div class="smart-group-empty"><i data-lucide="plus"></i><span>拖入图片自动收进分组</span></div>`}
     </div>`;
 }
@@ -9464,13 +9825,17 @@ function showLocalMattingFallback(node, index, message){
         mattingForSmartNode(node, index);
     };
 }
-// 智能分组顶部小菜单：整理排列 / 预览（整组左右切换）/ 宫格拼接 / 批量下载 / 解散分组。
+// 智能分组顶部小菜单：一键运行 / 整理排列 / 预览（整组左右切换）/ 宫格拼接 / 批量下载 / 解散分组。
 // 与多图节点的 smart-node-floating-menu 同款样式与定位（选中分组时浮在卡片上方）。
 function smartGroupToolbarHtml(node){
     if(!isSmartGroupNode(node)) return '';
     const hasContent = (node.images || []).some(img => img?.url) || smartGroupMembers(node).length > 0;
     const imageCount = (node.images || []).filter(img => img?.url).length;
     const actions = [
+        // 一键运行：把组内所有可运行的链路结尾节点依次跑一遍（和框选「运行选中」同一套机器）。
+        // 这里不预先算可运行数量——canRunSmartCascade 要遍历链路图，放在 render 里每个分组每次都算太贵，
+        // 改成点的时候再判定，没得跑就提示。
+        {key:'run', icon:'play', label:'一键运行', enabled:true},
         {key:'arrange', icon:'layout-grid', label:'整理排列', enabled:hasContent},
         {key:'preview', icon:'eye', label:'预览', enabled:imageCount > 0},
         {key:'grid', icon:'grid-3x3', label:'宫格拼接', enabled:imageCount > 1},
@@ -9481,6 +9846,12 @@ function smartGroupToolbarHtml(node){
         <button type="button" data-smart-group-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.tip || action.label)}">
             <i data-lucide="${escapeAttr(action.icon)}"></i><span>${escapeHtml(action.label)}</span>
         </button>`).join('')}</div>`;
+}
+// 分组「一键运行」的目标：组内所有可运行的链路结尾（图片）节点。
+// 组里被吸收的缩略图只是素材，真正能跑的是这些成员节点（提示词 → 图片 这样的链路）。
+function smartGroupRunnableCascadeTargets(group){
+    if(!isSmartGroupNode(group)) return [];
+    return smartGroupMembers(group).filter(node => canRunSmartCascade(node));
 }
 function runSmartGroupToolbarAction(nodeId, action){
     const group = nodes.find(n => n.id === nodeId);
@@ -9494,6 +9865,13 @@ function runSmartGroupToolbarAction(nodeId, action){
         return;
     }
     if(action === 'ungroup'){ ungroupNode(nodeId); return; }
+    if(action === 'run'){
+        runCascadeTargetList(smartGroupRunnableCascadeTargets(group), {
+            emptyText:'分组里没有可运行的链路结尾图片节点',
+            doneText:'分组已运行 '
+        });
+        return;
+    }
     // 图片已收进分组（group.images），预览/下载/拼接直接复用单节点机器（分组就是一个多图容器）。
     const imageCount = (group.images || []).filter(img => img?.url).length;
     if(!imageCount){ toast('分组内没有图片'); return; }
@@ -9584,7 +9962,8 @@ function render(){
         .sort((a, b) => (isSmartGroupNode(a) ? 0 : 1) - (isSmartGroupNode(b) ? 0 : 1))
         .map(node => {
         const imgs = node.images || [];
-        const title = node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        // 分组名是用户输入，直接进 innerHTML 会变成注入点（node-head 平时 display:none，但 DOM 已经建出来了）。
+        const title = node.type === 'smart-group' ? escapeHtml(smartGroupDisplayTitle(node)) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -9649,6 +10028,7 @@ function render(){
     syncSmartSelectedImageResolution(world);
     measureSmartNodeImages();
     refreshRunTimerPills();
+    sbSyncStarBorderFrames();
     return;
     world.innerHTML = '';
     if(composerEl) world.appendChild(composerEl);
@@ -10175,9 +10555,12 @@ function updatePortDragVisual(){
         targetNodeEl?.querySelector(`.node-port[data-port="${portDragState.hoverPort}"]`)?.classList.add('is-active');
     }
 }
-function handlePortDrop(drag, e){
+function handlePortDrop(drag, e, hitElAtDrop){
+    const srcEl = world.querySelector(`.image-node[data-id="${drag.fromId}"]`);
+    srcEl?.classList.remove('port-source');
     const {targetId, targetPort, hit} = (() => {
-        const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+        // 释放点元素需在移除 port-dragging 前捕获（mouseup 分支已传 hitElAtDrop）
+        const hitEl = hitElAtDrop || document.elementFromPoint(e.clientX, e.clientY);
         const portEl = hitEl?.closest?.('.node-port');
         const nodeEl = portEl?.closest?.('.image-node') || hitEl?.closest?.('.image-node');
         let id = '', port = '';
@@ -10186,8 +10569,9 @@ function handlePortDrop(drag, e){
             if(portEl){
                 port = portEl.dataset.port;
             } else {
-                const rect = nodeEl.getBoundingClientRect();
-                port = (e.clientX - rect.left) < rect.width / 2 ? 'in' : 'out';
+                // 落在节点 body（未点中端口）：直接吸附该节点可连接侧端口
+                const altPort = drag.fromPort === 'out' ? 'in' : 'out';
+                port = nodeEl.querySelector(`.node-port[data-port="${altPort}"]`) ? altPort : '';
             }
         }
         return {targetId:id, targetPort:port, hit:hitEl};
@@ -10211,6 +10595,31 @@ function handlePortDrop(drag, e){
     if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
         discardPendingUndo(); render(); return;
     }
+    // 拖到任意节点（含源节点自身/不可连节点）body 上但未建立连接时静默取消，不再于节点上方凭空建节点
+    if(hit?.closest?.('.image-node')){ discardPendingUndo(); render(); return; }
+    // 容差吸附：释放点不在手柄/节点上，但在 64px 内存在目标侧手柄 → 自动吸附连接
+    const nearPort = nearestSmartPortForDrop(e.clientX, e.clientY, drag.fromPort === 'out' ? 'in' : 'out', drag.fromId);
+    if(nearPort){
+        const nodeEl = nearPort.closest('.image-node');
+        if(nodeEl?.dataset.id){
+            const fromId = drag.fromPort === 'out' ? drag.fromId : nodeEl.dataset.id;
+            const toId = drag.fromPort === 'out' ? nodeEl.dataset.id : drag.fromId;
+            if(connectInputNode(fromId, toId)){
+                commitPendingUndo();
+                render();
+                scheduleSave();
+                return;
+            }
+        }
+    }
+    // 未命中任何有效下游：与右键点击一致，自动弹出「节点选择面板」，选中后在 createNodeFromMenu 中建节点并尝试自动连线
+    if(createMenu){
+        discardPendingUndo();
+        suppressNextShellClick = true;
+        setTimeout(() => { suppressNextShellClick = false; }, 0);
+        openCreateMenu(e, {fromPortDrop:{fromId: drag.fromId, fromPort: drag.fromPort}});
+        return;
+    }
     const p = screenToWorld(e);
     undoSuppressed = true;
     const newNode = createImageNodeAt(p, [], {select:true, skipUndo:true});
@@ -10221,6 +10630,21 @@ function handlePortDrop(drag, e){
     commitPendingUndo();
     render();
     scheduleSave();
+}
+function nearestSmartPortForDrop(clientX, clientY, kind, fromId){
+    let best = null;
+    let bestDistance = Infinity;
+    world.querySelectorAll(`.node-port[data-port="${kind}"]`).forEach(port => {
+        const nodeEl = port.closest('.image-node');
+        if(!nodeEl?.dataset.id || nodeEl.dataset.id === fromId) return;
+        const r = port.getBoundingClientRect();
+        const d = Math.hypot(clientX - (r.left + r.width / 2), clientY - (r.top + r.height / 2));
+        if(d < bestDistance){
+            bestDistance = d;
+            best = port;
+        }
+    });
+    return bestDistance <= 64 ? best : null;
 }
 function pickMediaForSmartNode(nodeId){
     const input = document.createElement('input');
@@ -10238,6 +10662,46 @@ function pickMediaForSmartNode(nodeId){
     document.body.appendChild(input);
     input.click();
 }
+// 分组自定义名称输入框：直接在卡片信息行里改名。
+// 输入过程中只写 model + scheduleSave（不 render），否则会重建 DOM、光标丢失；
+// 鼠标事件全部 stopPropagation，避免点标题被当成「选中节点 / 双击建节点 / 开始拖拽」。
+function bindSmartGroupTitleInput(el, node){
+    const input = el.querySelector('.smart-group-title-input');
+    if(!input) return;
+    ['pointerdown','mousedown','click','dblclick'].forEach(type => {
+        input.addEventListener(type, e => e.stopPropagation());
+    });
+    // 记住进入编辑前的名字，Escape 才能真的撤销（oninput 已经把新值写进 model 了）。
+    let titleBeforeEdit = '';
+    let reverting = false;
+    input.addEventListener('focus', () => { titleBeforeEdit = String(node.title || ''); reverting = false; });
+    input.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if(e.key === 'Enter'){ e.preventDefault(); input.blur(); }
+        if(e.key === 'Escape'){
+            e.preventDefault();
+            reverting = true;
+            node.title = titleBeforeEdit;
+            input.value = smartGroupDisplayTitle(node);
+            scheduleSave();
+            input.blur();
+        }
+    });
+    input.oninput = e => {
+        e.stopPropagation();
+        node.title = String(e.target.value || '');
+        scheduleSave();
+    };
+    // 失焦时收敛：去掉首尾空白；清空则回落到默认名，避免卡片上出现无名分组。
+    input.onchange = e => {
+        e.stopPropagation();
+        if(reverting){ reverting = false; return; }
+        const next = String(e.target.value || '').trim();
+        node.title = next || '智能分组';
+        e.target.value = node.title;
+        scheduleSave();
+    };
+}
 function bindNodeEvents(){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
@@ -10253,6 +10717,7 @@ function bindNodeEvents(){
                 selectedImage = {nodeId:'', index:-1};
                 openCreateMenu(e, {groupId:id});
             };
+            bindSmartGroupTitleInput(el, nodeForControls);
         }
         el.onclick = e => {
             e.stopPropagation();
@@ -10551,7 +11016,8 @@ function bindNodeEvents(){
                 const n = nodes.find(x => x.id === dragId);
                 return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
             }).filter(Boolean);
-            dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
+            const memberGroup = smartGroupContainingNode(node.id);
+            dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey), memberGroupId:memberGroup?.id || ''};
             snapState = computeSnapCandidates(dragState.groupIds);
             document.body.classList.add('smart-node-drag');
             capturePendingUndo();
@@ -10571,12 +11037,47 @@ function bindNodeEvents(){
                     moved:false
                 };
                 shell.classList.add('port-dragging');
+                shell.dataset.portDrag = portType;
+                el.classList.add('port-source');
                 capturePendingUndo();
                 ensurePortDragPathElement();
                 updatePortDragVisual();
             });
+            // hover 命中时外圈+加号沿鼠标方向小范围跟随位移；移开恢复原位
+            const PORT_FOLLOW_LIMIT = 8;
+            port.addEventListener('mousemove', e => {
+                if(portDragState) return;
+                const r = port.getBoundingClientRect();
+                let dx = e.clientX - (r.left + r.width / 2);
+                let dy = e.clientY - (r.top + r.height / 2);
+                const dist = Math.hypot(dx, dy);
+                if(dist > PORT_FOLLOW_LIMIT){
+                    dx *= PORT_FOLLOW_LIMIT / dist;
+                    dy *= PORT_FOLLOW_LIMIT / dist;
+                }
+                port.style.setProperty('--pdx', dx.toFixed(2) + 'px');
+                port.style.setProperty('--pdy', dy.toFixed(2) + 'px');
+            });
+            port.addEventListener('mouseleave', () => {
+                port.style.removeProperty('--pdx');
+                port.style.removeProperty('--pdy');
+            });
             port.addEventListener('click', e => { e.stopPropagation(); });
             port.addEventListener('dblclick', e => { e.stopPropagation(); });
+        });
+        // 手柄停留增强：移出节点后短暂保持端口可命中，避免鼠标刚离开节点边缘手柄就消失
+        const lingerTimerKey = '_portLingerTimer';
+        el.addEventListener('mouseenter', () => {
+            if(el[lingerTimerKey]){ clearTimeout(el[lingerTimerKey]); el[lingerTimerKey] = null; }
+            el.classList.remove('port-linger');
+        });
+        el.addEventListener('mouseleave', () => {
+            if(el[lingerTimerKey]) return;
+            el.classList.add('port-linger');
+            el[lingerTimerKey] = setTimeout(() => {
+                el.classList.remove('port-linger');
+                el[lingerTimerKey] = null;
+            }, 300);
         });
         el.onmousedown = beginNodeDrag;
         el.ondragover = e => setSmartDropCopyEffect(e);
@@ -11129,7 +11630,8 @@ function setImageEditMode(mode, userTouched=false){
     if(userTouched) imageEditModeTouched = true;
     const prev = imageEditMode;
     if(mode !== 'brush') removeEditTextInlineEditor(true);
-    imageEditMode = ['preview','crop','outpaint','mask','brush','resize','grid'].includes(mode) ? mode : 'preview';
+    imageEditMode = ['preview','crop','outpaint','mask','brush','resize','grid','adjust'].includes(mode) ? mode : 'preview';
+    if(prev === 'adjust' && imageEditMode !== 'adjust' && window.imageAdjustLeaveMode) window.imageAdjustLeaveMode();
     const cropCanvasEl = document.getElementById('cropCanvas');
     const previewStageEl = document.getElementById('previewStage');
     const editStageEl = document.getElementById('imageEditStage');
@@ -11160,6 +11662,7 @@ function setImageEditMode(mode, userTouched=false){
     cropCanvasEl.classList.toggle('resize-mode', imageEditMode === 'resize');
     cropCanvasEl.classList.toggle('grid-mode', imageEditMode === 'grid');
     cropCanvasEl.classList.toggle('outpaint-mode', imageEditMode === 'outpaint');
+    cropCanvasEl.classList.toggle('adjust-mode', imageEditMode === 'adjust');
     syncGridCustomCursor();
     document.querySelectorAll('[data-image-edit-mode]').forEach(btn => btn.classList.toggle('active', btn.dataset.imageEditMode === imageEditMode));
     document.getElementById('imagePreviewTools').classList.toggle('active', isPreview && !isVideoPreview);
@@ -11168,12 +11671,13 @@ function setImageEditMode(mode, userTouched=false){
     document.getElementById('imageBrushTools').classList.toggle('active', imageEditMode === 'brush');
     document.getElementById('imageResizeTools')?.classList.toggle('active', imageEditMode === 'resize');
     document.getElementById('imageGridTools').classList.toggle('active', imageEditMode === 'grid');
+    document.getElementById('imageAdjustTools')?.classList.toggle('active', imageEditMode === 'adjust');
     if(imageEditMode === 'grid' && gridOperationMode === 'join' && !canGridJoinCurrentNode()) gridOperationMode = 'split';
     syncGridOperationControls();
     syncGridGapValue();
     syncImageResizeControls();
     const applyBtn = document.getElementById('imageEditApplyBtn');
-    document.getElementById('compareToggleBtn').style.display = isPreview && !isVideoPreview ? 'inline-flex' : 'none';
+    document.getElementById('compareToggleBtn').style.display = 'none';
     document.getElementById('panoramaToggleBtn').style.display = isPreview && !isVideoPreview ? 'inline-flex' : 'none';
     document.getElementById('panoramaExportBtn').style.display = isPreview && !isVideoPreview && panoramaState.enabled ? 'inline-flex' : 'none';
     document.getElementById('compareThumbs').style.display = 'none';
@@ -11186,7 +11690,11 @@ function setImageEditMode(mode, userTouched=false){
         ensureImageEditBaseSize(true);
         applyImageEditZoom();
         applyBtn.style.display = '';
-        if(imageEditMode === 'resize'){
+        if(imageEditMode === 'adjust'){
+            document.getElementById('imageEditTitle').textContent = '专业调色';
+            document.getElementById('imageEditSub').textContent = '预设与参数实时预览，应用后生成新图片节点';
+            applyBtn.innerHTML = `<i data-lucide="wand-sparkles" class="w-4 h-4"></i><span>应用调色</span>`;
+        } else if(imageEditMode === 'resize'){
             document.getElementById('imageEditTitle').textContent = '缩放图片';
             document.getElementById('imageEditSub').textContent = '选择缩小倍数，应用会替换当前原图';
             applyBtn.innerHTML = `<i data-lucide="minimize-2" class="w-4 h-4"></i><span>应用缩放</span>`;
@@ -11214,6 +11722,7 @@ function setImageEditMode(mode, userTouched=false){
     }
     resizeEditDrawCanvas();
     if(imageEditMode === 'grid') refreshGridSplitPreview();
+    else if(imageEditMode === 'adjust'){ clearEditDrawing(true); if(window.imageAdjustEnterMode) window.imageAdjustEnterMode(); requestAnimationFrame(() => { syncImageEditOverflow(); }); }
     else if(imageEditMode === 'crop' || imageEditMode === 'resize' || imageEditMode === 'outpaint' || prev === 'grid') clearEditDrawing(true);
     syncEditDrawingHistoryButtons();
     syncBrushToolButtons();
@@ -13452,6 +13961,7 @@ function applyImageEdit(){
     if(imageEditMode === 'brush') return applyImageBrush();
     if(imageEditMode === 'resize') return applyImageResize();
     if(imageEditMode === 'grid') return applyImageGridSplit();
+    if(imageEditMode === 'adjust') return applyImageAdjust();
     return applyImageCrop();
 }
 let lastComposerNodeId = '';
@@ -16137,6 +16647,80 @@ function syncCascadeRunButton(node=selectedNode()){
         : `<i data-lucide="workflow"></i><span>${escapeHtml(tr('smart.loopRunAll'))}</span>`;
     refreshIcons();
 }
+/* ── 框选运行：一键运行框选中的链路结尾节点 ── */
+function runnableSelectedCascadeTargets(){
+    const ids = selectedNodeIds();
+    const connCount = (canvas && canvas.connections && canvas.connections.length) || 0;
+    const key = ids.join('|') + '@' + nodes.length + '#' + connCount;
+    if(key === smartRunSelectedCacheKey) return smartRunSelectedCacheList;
+    const out = [];
+    const seen = new Set();
+    for(const id of ids){
+        if(!id || seen.has(id)) continue;
+        seen.add(id);
+        const node = nodes.find(n => n.id === id);
+        if(node && canRunSmartCascade(node)) out.push(node);
+    }
+    smartRunSelectedCacheKey = key;
+    smartRunSelectedCacheList = out;
+    return out;
+}
+function syncRunSelectedButton(){
+    if(!smartRunSelectedBtn) return;
+    const running = smartRunSelectedRunning;
+    const visible = running ? true : runnableSelectedCascadeTargets().length > 0;
+    smartRunSelectedBtn.classList.toggle('visible', visible);
+    smartRunSelectedBtn.classList.toggle('is-stop', running);
+    const mode = running ? 'stop' : 'run';
+    if(smartRunSelectedBtn.dataset.runMode !== mode){
+        smartRunSelectedBtn.dataset.runMode = mode;
+        smartRunSelectedBtn.innerHTML = running
+            ? '<i data-lucide="square"></i><span>停止</span>'
+            : '<i data-lucide="workflow"></i><span>运行选中</span>';
+        refreshIcons();
+    }
+}
+// 一批「链路结尾」节点依次跑完。框选运行和分组「一键运行」共用这段机器：
+// 同一条链只跑一次、可中途停止（smartRunSelectedAbort）、跑完把选中状态还原。
+async function runCascadeTargetList(targets, options={}){
+    if(smartRunSelectedRunning) return;
+    const list = (targets || []).filter(node => node && canRunSmartCascade(node));
+    if(!list.length){ toast(options.emptyText || '没有可运行的链路结尾图片节点'); return; }
+    if(smartCascadeAnyRunning()){ toast('已有链路正在运行'); return; }
+    const keepId = selectedId;
+    const keepIds = Array.isArray(selectedIds) ? selectedIds.slice() : [];
+    const keepImage = {nodeId:(selectedImage && selectedImage.nodeId) || '', index:Number(selectedImage && selectedImage.index)};
+    smartRunSelectedAbort = false;
+    smartRunSelectedRunning = true;
+    let aborted = false;
+    let done = 0;
+    syncRunSelectedButton();
+    try {
+        for(const target of list){
+            if(smartRunSelectedAbort){ aborted = true; break; }
+            const live = nodes.find(n => n.id === target.id);
+            if(!live || !canRunSmartCascade(live)) continue;
+            await runSmartCascade(live);
+            done += 1;
+        }
+    } finally {
+        if(smartRunSelectedAbort) aborted = true;
+        smartRunSelectedRunning = false;
+        smartRunSelectedAbort = false;
+        smartRunSelectedCacheKey = '';
+        /* 运行结束恢复框选，方便继续操作 */
+        selectedId = keepId;
+        selectedIds = keepIds;
+        selectedImage = keepImage;
+        render();
+        syncSelectionUi();
+        syncRunSelectedButton();
+    }
+    if(done > 1 && !aborted) toast((options.doneText || '已运行 ') + done + ' 条链路');
+}
+async function runSelectedNodesCascade(){
+    return runCascadeTargetList(runnableSelectedCascadeTargets(), {emptyText:'框选里没有可运行的链路结尾图片节点'});
+}
 function loadNodePromptDraftToInput(node){
     if(node?.promptDraftHtml) {
         const hasToken = String(node.promptDraftHtml || '').includes('mention-image-token');
@@ -16438,6 +17022,7 @@ async function runLoopRoundIntoSlot(loopNode, rootNode, outputSlot, loopIndex, c
             runPath.states[edgeKey] = 'active';
             scheduleConnectionLayerRefresh();
         }
+        canvasFxRunEdge(rootNode.id, outputSlot.id);
         render();
         settings = previousSettings;
         let result;
@@ -16709,6 +17294,7 @@ async function runSmartCascade(targetNode=null){
                             runState.runPath.states[edgeKey] = 'active';
                             scheduleConnectionLayerRefresh();
                         }
+                        canvasFxRunEdge(source.id, target.id);
                         if(target.type === 'smart-loop'){
                             outputs = outputImagesForNode(source, true, ctx).filter(img => img?.url);
                             sharedRefs = cascadeRefsFromOutputs(outputs, source);
@@ -16773,6 +17359,7 @@ async function runSmartCascade(targetNode=null){
             ? trf(loopMode === 'parallel' ? 'smart.loopParallelRoundsDone' : 'smart.loopRunRoundsDone', {n:totalRounds})
             : tr('smart.loopRunDone'));
     } catch(e) {
+        if(e?.smartCascadeStopped) smartRunSelectedAbort = true;
         if(parallelLimit === 1) smartLoopContext = null;
         selectedId = originalSelected;
         settings = originalSettings;
@@ -17861,17 +18448,20 @@ function addDraggedNodeToSmartGroup(draggedNode, group){
     return addDraggedNodesToSmartGroup(draggedNode ? [draggedNode] : [], group);
 }
 // 把一个或多个被拖动的节点批量加入目标分组（支持多选拖入）。入组后只整理一次并选中目标分组。
-function addDraggedNodesToSmartGroup(draggedNodes, group){
+function addDraggedNodesToSmartGroup(draggedNodes, group, primaryNode=null){
     if(!group || !isSmartGroupNode(group)) return false;
     const list = (draggedNodes || []).filter(n => n && n.id !== group.id);
     if(!list.length) return false;
-    let added = false;
+    let handled = false;
     list.forEach(n => {
-        if(addNodeToSmartGroup(group, n)) added = true;
+        if((group.items || []).includes(n.id)) handled = true;
+        else if(addNodeToSmartGroup(group, n)) handled = true;
     });
-    if(!added) return false;
-    // 提示词/循环成员入组后自动整理成网格（图片已收进卡片网格，自动平铺）。
-    arrangeSmartGroupMembers(group, {skipUndo:true});
+    if(!handled) return false;
+    // 拖进「已有缩略图的分组」后自动排整齐：卡片缩略图网格 + 组内真实图片节点一起按图片重排。
+    // 没有缩略图的分组仍走原来的 24px 磁吸对齐，避免改变既有手感。
+    if(smartGroupCardImageRefs(group).length) arrangeSmartGroupMembers(group, {skipUndo:true});
+    else snapSmartGroupDragBatch(group, list, primaryNode);
     selectedIds = [];
     // 图片被吸收进分组（原节点已删除），统一选中目标分组；仅当单个提示词/循环节点拖入时保持选中它。
     const survivingSingle = list.length === 1 && nodes.some(n => n.id === list[0].id) ? list[0].id : '';
@@ -17882,13 +18472,15 @@ function addDraggedNodesToSmartGroup(draggedNodes, group){
 function closeCreateMenu(){
     createMenu?.classList.remove('open');
     createMenuGroupId = '';
+    createMenuDropConnect = null;
 }
 function openCreateMenu(event, options={}){
     if(!createMenu) return;
     createMenuPoint = screenToWorld(event);
     createMenuGroupId = options.groupId || '';
-    const w = 500;
-    const h = 114;
+    createMenuDropConnect = options.fromPortDrop || null;
+    const w = 190;
+    const h = 210;
     const left = Math.max(14, Math.min(window.innerWidth - w - 14, event.clientX + 8));
     const top = Math.max(14, Math.min(window.innerHeight - h - 14, event.clientY + 8));
     createMenu.style.left = `${left}px`;
@@ -17908,15 +18500,29 @@ function addCreatedNodeToMenuGroup(node){
 function createNodeFromMenu(type){
     const p = createMenuPoint || viewportCenter();
     const groupId = createMenuGroupId;
+    const dropConnect = createMenuDropConnect;
     closeCreateMenu();
-    if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
     let created = null;
-    if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
+    if(type === 'group') created = createSmartGroupNode(p.x - 170, p.y - 110);
+    else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
     else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
+    else if(type === 'matrix') created = createSmartMatrixNode(p.x - 340, p.y - 220);
     else created = createImageNodeAt(p);
-    createMenuGroupId = groupId;
-    addCreatedNodeToMenuGroup(created);
-    createMenuGroupId = '';
+    if(!created) return created;
+    if(type !== 'group'){
+        createMenuGroupId = groupId;
+        addCreatedNodeToMenuGroup(created);
+        createMenuGroupId = '';
+    }
+    if(dropConnect && type !== 'group'){
+        // 拖线空白弹出的选择器：新节点建好后，尽量自动建立「拖出端口 ↔ 新节点」连线
+        const fromId = dropConnect.fromPort === 'out' ? dropConnect.fromId : created.id;
+        const toId = dropConnect.fromPort === 'out' ? created.id : dropConnect.fromId;
+        if(connectInputNode(fromId, toId)){
+            render();
+            scheduleSave();
+        }
+    }
     return created;
 }
 shell.addEventListener('mousedown', e => {
@@ -17991,6 +18597,7 @@ shell.ondblclick = e => {
     openCreateMenu(e);
 };
 shell.onclick = e => {
+    if(suppressNextShellClick){ suppressNextShellClick = false; return; }
     if(selectionJustFinished) return;
     if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.slash-menu,.slash-sub')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
@@ -18007,10 +18614,110 @@ minimap?.addEventListener('mousedown', e => {
     centerViewportOnWorldPoint(minimapEventToWorld(e));
 });
 smartArrangeBtn?.addEventListener('mousedown', e => e.stopPropagation());
+smartRunSelectedBtn?.addEventListener('mousedown', e => e.stopPropagation());
+smartRunSelectedBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if(smartRunSelectedRunning){ smartRunSelectedAbort = true; requestSmartCascadeStop(); return; }
+    runSelectedNodesCascade();
+});
 smartArrangeBtn?.addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();
     arrangeSelectedSmartNodes();
+});
+/* ═══ 端口磁性跟随：鼠标靠近节点时，端口向外探出并追随鼠标 ═══ */
+const PORT_FOLLOW_RANGE = 80;   /* 生效半径（屏幕像素） */
+const PORT_FOLLOW_KEEP = 48;     /* 鼠标移到节点外侧时的保持半径 */
+const PORT_FOLLOW_MAX = 18;      /* 最大探出距离（屏幕像素） */
+const PORT_FOLLOW_PULL = 0.55;   /* 跟随强度 */
+const PORT_BASE_OFFSET = 18;     /* 端口中心距节点边缘（世界单位：CSS -30px + 半径 12px），改 CSS 尺寸/外移时必须同步 */
+let portFollowNodeEl = null;
+let portFollowPoint = null;
+let portFollowRaf = 0;
+
+function portFollowReset(nodeEl){
+    if(!nodeEl) return;
+    nodeEl.classList.remove('port-follow');
+    nodeEl.querySelectorAll('.node-port').forEach(port => {
+        port.style.removeProperty('--port-fx');
+        port.style.removeProperty('--port-fy');
+    });
+}
+function portFollowNearNode(nodeEl, x, y){
+    const r = nodeEl.getBoundingClientRect();
+    const dx = Math.max(r.left - x, 0, x - r.right);
+    const dy = Math.max(r.top - y, 0, y - r.bottom);
+    return Math.hypot(dx, dy) <= PORT_FOLLOW_KEEP;
+}
+function portFollowTarget(x, y, active){
+    const direct = document.elementFromPoint(x, y)?.closest?.('.image-node') || null;
+    if(direct) return direct;
+    /* 鼠标已移到节点外侧（比如在端口上），只要仍在保持半径内就继续跟随 */
+    if(active && active.isConnected && portFollowNearNode(active, x, y)) return active;
+    return null;
+}
+function portFollowTick(){
+    portFollowRaf = 0;
+    const point = portFollowPoint;
+    if(!point){
+        portFollowReset(portFollowNodeEl);
+        portFollowNodeEl = null;
+        return;
+    }
+    /* 拖拽连线、拖拽/缩放节点时不跟随，避免干扰 */
+    if(portDragState || document.body.classList.contains('smart-node-drag') || document.body.classList.contains('smart-node-resize')){
+        portFollowReset(portFollowNodeEl);
+        portFollowNodeEl = null;
+        return;
+    }
+    const nodeEl = portFollowTarget(point.x, point.y, portFollowNodeEl);
+    if(nodeEl !== portFollowNodeEl){
+        portFollowReset(portFollowNodeEl);
+        portFollowNodeEl = nodeEl;
+    }
+    if(!nodeEl || !nodeEl.isConnected) return;
+    nodeEl.classList.add('port-follow');
+    const scale = Math.max(0.05, Number(viewport.scale) || 1);
+    const nr = nodeEl.getBoundingClientRect();
+    const baseY = nr.top + nr.height / 2;
+    const offset = PORT_BASE_OFFSET * scale;
+    nodeEl.querySelectorAll('.node-port').forEach(port => {
+        const baseX = port.classList.contains('port-out') ? nr.right + offset : nr.left - offset;
+        const dx = point.x - baseX;
+        const dy = point.y - baseY;
+        const dist = Math.hypot(dx, dy);
+        if(dist < 0.5 || dist >= PORT_FOLLOW_RANGE){
+            port.style.removeProperty('--port-fx');
+            port.style.removeProperty('--port-fy');
+            return;
+        }
+        const pull = (1 - dist / PORT_FOLLOW_RANGE) * PORT_FOLLOW_PULL;
+        let ox = dx * pull;
+        let oy = dy * pull;
+        const mag = Math.hypot(ox, oy);
+        if(mag > PORT_FOLLOW_MAX){
+            ox = ox / mag * PORT_FOLLOW_MAX;
+            oy = oy / mag * PORT_FOLLOW_MAX;
+        }
+        port.style.setProperty('--port-fx', (ox / scale).toFixed(2) + 'px');
+        port.style.setProperty('--port-fy', (oy / scale).toFixed(2) + 'px');
+    });
+}
+function schedulePortFollow(){
+    if(!portFollowRaf) portFollowRaf = requestAnimationFrame(portFollowTick);
+}
+document.addEventListener('mousemove', event => {
+    portFollowPoint = {x:event.clientX, y:event.clientY};
+    schedulePortFollow();
+}, {passive:true});
+document.addEventListener('mouseleave', () => {
+    portFollowPoint = null;
+    schedulePortFollow();
+});
+window.addEventListener('blur', () => {
+    portFollowPoint = null;
+    schedulePortFollow();
 });
 window.onmousemove = e => {
     lastMouseWorld = screenToWorld(e);
@@ -18032,12 +18739,14 @@ window.onmousemove = e => {
             targetId = nodeEl.dataset.id;
             if(portEl){
                 targetPort = portEl.dataset.port;
+                const compatible = (portDragState.fromPort === 'out' && targetPort === 'in') || (portDragState.fromPort === 'in' && targetPort === 'out');
+                if(!compatible){ targetId = ''; targetPort = ''; }
             } else {
-                const rect = nodeEl.getBoundingClientRect();
-                targetPort = (e.clientX - rect.left) < rect.width / 2 ? 'in' : 'out';
+                // 落在节点 body（未点中端口）：直接吸附该节点可连接侧端口作为拖线目标
+                const altPort = portDragState.fromPort === 'out' ? 'in' : 'out';
+                targetPort = nodeEl.querySelector(`.node-port[data-port="${altPort}"]`) ? altPort : '';
+                if(!targetPort) targetId = '';
             }
-            const compatible = (portDragState.fromPort === 'out' && targetPort === 'in') || (portDragState.fromPort === 'in' && targetPort === 'out');
-            if(!compatible){ targetId = ''; targetPort = ''; }
         }
         portDragState.hoverTargetId = targetId;
         portDragState.hoverPort = targetPort;
@@ -18119,7 +18828,8 @@ window.onmousemove = e => {
             // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。
             node.w = Math.max(minW, Math.round(resizeState.startW + dx));
             node.h = Math.max(minH, Math.round(resizeState.startH + dy));
-            if(smartGroupCompactMembers(node).length) arrangeSmartGroupMembers(node, {skipUndo:true, syncDom:true});
+            // 组内布局跟着分组尺寸走：按新框重算格子，卡片缩略图和组内图片节点一起重排。
+            arrangeSmartGroupMembers(node, {skipUndo:true, syncDom:true});
             updateNodeElementDuringResize(node);
             return;
         }
@@ -18292,6 +19002,13 @@ window.onmousemove = e => {
     } else {
         clearSnapLines();
     }
+    const memberGroup = dragState.memberGroupId ? nodes.find(n => n.id === dragState.memberGroupId) : null;
+    if(memberGroup && !isSmartGroupNode(node)){
+        const gridSnap = smartGroupGridMagnetDelta(memberGroup, dragState.ox + adjustedDx, dragState.oy + adjustedDy, viewport.scale);
+        if(gridSnap.dx){ adjustedDx += gridSnap.dx; snapLines.push({type:'v', pos:gridSnap.x}); }
+        if(gridSnap.dy){ adjustedDy += gridSnap.dy; snapLines.push({type:'h', pos:gridSnap.y}); }
+        if(gridSnap.dx || gridSnap.dy) renderSnapLines(snapLines);
+    }
     (dragState.group || [{id:dragState.id, ox:dragState.ox, oy:dragState.oy}]).forEach(item => {
         const n = nodes.find(x => x.id === item.id);
         if(!n) return;
@@ -18327,10 +19044,14 @@ window.onmouseup = e => {
     document.body.classList.remove('smart-board-pan');
     if(portDragState){
         const drag = portDragState;
+        // 先于 class 清理捕获释放点元素：端口手柄 pointer-events 依赖 hover/port-dragging 态，
+        // 一旦移除该态 elementFromPoint 将无法命中手柄，容差/自动吸附判定就会失效
+        const dropHit = document.elementFromPoint(e.clientX, e.clientY);
         portDragState = null;
         shell.classList.remove('port-dragging');
+        delete shell.dataset.portDrag;
         clearPortDragVisual();
-        handlePortDrop(drag, e);
+        handlePortDrop(drag, e, dropHit);
         return;
     }
     if(promptResizeState){ promptResizeState = null; scheduleSave(); }
@@ -18434,7 +19155,7 @@ window.onmouseup = e => {
             render();
         } else if(
             smartGroupTarget &&
-            addDraggedNodesToSmartGroup(draggedNodes.length ? draggedNodes : [draggedNode], smartGroupTarget)
+            addDraggedNodesToSmartGroup(draggedNodes.length ? draggedNodes : [draggedNode], smartGroupTarget, draggedNode)
         ){
             stateChanged = true;
             render();
@@ -18565,8 +19286,23 @@ document.addEventListener('gestureend', e => {
 document.addEventListener('wheel', e => {
     if (e.ctrlKey || e.metaKey) e.preventDefault();
 }, { capture: true, passive: false });
+/* 滚轮不得穿透到画布的元素：输入区、浮层面板与弹窗。
+   shell 的 wheel 监听在捕获阶段，比面板自身的冒泡监听先跑，
+   所以必须在这里就放行，靠面板上的 stopPropagation 是拦不住的。 */
+const WHEEL_LOCK_SELECTOR = [
+    '.composer', '.smart-back', '.image-edit-modal', '.asset-panel', '.asset-toggle',
+    '.smart-log-toggle', '.smart-shortcut-toggle', '.smart-workflow-toggle',
+    '.workflow-transfer-panel', '.log-modal', '.shortcut-modal',
+    '.prompt-node-segments', '.prompt-node-text', '.prompt-node-llm', '.smart-group-list',
+    '[data-thumb-scroll]',
+    '.prompt-template-panel', '.prompt-preset-panel', '.mention-picker', '.mention-preview',
+    '.slash-menu', '.smart-popover', '.loop-number-popover', '.create-menu',
+    '.chat-modal', '.version-panel', '.smart-log-lightbox', '.asset-dialog-backdrop',
+    '.asset-hover-preview', '.smart-suggest-bar', '.smart-video-player'
+].join(',');
 shell.addEventListener('wheel', e => {
-    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
+
+    if(e.target.closest(WHEEL_LOCK_SELECTOR)) return;
     e.preventDefault();
     const now = Date.now();
     // 超过 200ms 没有新的捏合事件，重置累积器（新一轮手势）
@@ -19317,7 +20053,7 @@ document.getElementById('previewStage').addEventListener('mousedown', event => {
 });
 document.getElementById('imageEditStage').addEventListener('mousedown', event => {
     if(imageEditMode === 'preview' || event.button !== 0) return;
-    if(event.target.closest('.image-edit-actions, .preview-tools-overlay, .preview-download-overlay, .crop-box, .crop-handle')) return;
+    if(event.target.closest('.image-edit-actions, .preview-tools-overlay, .preview-download-overlay, .crop-box, .crop-handle, #imageAdjustTools, #adjustCompareDivider')) return;
     if(event.target.closest('#editDrawCanvas, #editTextCanvas, .edit-text-inline') && imageEditMode !== 'crop') return;
     const stage = event.currentTarget;
     if(stage.scrollWidth <= stage.clientWidth && stage.scrollHeight <= stage.clientHeight) return;
@@ -19422,6 +20158,7 @@ document.querySelectorAll('[data-panorama-ratio]').forEach(btn => {
 });
 document.getElementById('imageEditStage').addEventListener('wheel', event => {
     if(!cropState) return;
+    if(imageEditMode === 'adjust' && event.target && event.target.closest && event.target.closest('#imageAdjustTools')) return;
     event.preventDefault();
     event.stopPropagation();
     if(imageEditMode === 'preview'){
@@ -19699,7 +20436,6 @@ window.resetGridJoinLayout = resetGridJoinLayout;
 window.restoreCanvasVersion = restoreCanvasVersion;
 window.sendChatMessage = sendChatMessage;
 window.agentPlanAction = agentPlanAction;
-window.fillChatExample = fillChatExample;
 window.chatUploadClick = chatUploadClick;
 window.chatUploadSelected = chatUploadSelected;
 window.setBrushTool = setBrushTool;
@@ -19721,4 +20457,341 @@ window.zoomBarFitAll = zoomBarFitAll;
 window.zoomBarReset = zoomBarReset;
 window.zoomBarZoomIn = zoomBarZoomIn;
 window.zoomBarZoomOut = zoomBarZoomOut;
+// ── 网格点范围点亮：鼠标周围 24px 网格点逐点变亮（星星点亮，中心最亮、向外平滑衰减）──
+(function(){
+    if(!shell || !document.body) return;
+    var cv = document.createElement('canvas');
+    var ctx = cv.getContext('2d');
+    if(!ctx) return;
+    cv.className = 'grid-glow-canvas';
+    shell.insertBefore(cv, shell.firstChild); // 位于 world 点阵之上、节点/连线之下
+    var STEP = 24, R = 320, raf = 0, px = -9999, py = -9999, shown = false;
+    var dpr = window.devicePixelRatio || 1;
+    function themeRGB(){
+        var dark = document.body.classList.contains('theme-dark') || document.body.classList.contains('studio-theme-dark');
+        return dark ? '255,255,255' : '56,62,78'; // 深色亮白点 / 浅色深墨点（区域内点更醒目）
+    }
+    function draw(){
+        raf = 0;
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        if(!shown) return;
+        var rgb = themeRGB();
+        // 与 .shell 背景点阵严格同相位：
+        // radial-gradient 平铺单元的渐变中心在瓦片中心，故背景点落在 ox+12、ox+36…
+        // 即 ox + STEP/2 起、步长 STEP；shell 无 border/padding，平铺起点即其边框盒左上角
+        var rect = shell.getBoundingClientRect();
+        var ox = rect.left, oy = rect.top;
+        var hx = ox + STEP / 2, hy = oy + STEP / 2;
+        var x0 = hx + Math.floor((px - R - hx) / STEP) * STEP;
+        var y0 = hy + Math.floor((py - R - hy) / STEP) * STEP;
+        for(var gy = y0; gy <= py + R; gy += STEP){
+            for(var gx = x0; gx <= px + R; gx += STEP){
+                var dx = gx - px, dy = gy - py;
+                var d = Math.sqrt(dx * dx + dy * dy);
+                if(d > R) continue;
+                var t = 1 - d / R;
+                var a = t * t * (3 - 2 * t) * 0.55; // smoothstep：中心最亮、向外平滑衰减（低调亮度）
+                if(a < 0.04) continue;
+                var size = 1.2 + a * 1.0;           // 与背景 2px 点同尺寸量级，中心略大更亮
+                ctx.fillStyle = 'rgba(' + rgb + ',' + a.toFixed(3) + ')';
+                ctx.fillRect(gx - size / 2, gy - size / 2, size, size);
+            }
+        }
+    }
+    function queue(x, y){
+        px = x; py = y;
+        shown = true;
+        if(!raf) raf = requestAnimationFrame(draw);
+    }
+    function hide(){
+        if(!shown) return;
+        shown = false;
+        if(!raf) raf = requestAnimationFrame(draw);
+    }
+    function busy(){
+        return !!(dragState || panState || selectionState || portDragState
+            || document.body.classList.contains('smart-board-pan')
+            || document.body.classList.contains('smart-selecting')
+            || document.body.classList.contains('smart-node-drag')
+            || document.body.classList.contains('smart-node-resize')
+            || shell.classList.contains('panning')
+            || shell.classList.contains('port-dragging')
+            || shell.classList.contains('zoom-preview'));
+    }
+    var UI_SEL = '.image-node,.smart-group,.history-group,.grid-node,.node-card,.smart-node,.smart-link,.edge,' +
+        '.smart-node-floating-menu,.node-resize-handle,.node-port,.thumb-item,.prompt-node-control,' +
+        '.composer,.smart-back,.smart-title,.asset-panel,.asset-dock,.asset-dialog,.asset-toggle,.asset-hover-preview,' +
+        '.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-log-panel,.workflow-panel,' +
+        '.log-modal,.shortcut-modal,.image-edit-modal,.preview-modal,.chat-modal,.chat-drag,.smart-minimap,' +
+        '.create-menu,.slash-menu,.slash-sub,.mention-picker,.canvas-zoombar,.zoombar,.smart-toast,.toast,' +
+        'button,select,input,textarea,label,a,[contenteditable="true"]';
+    window.addEventListener('pointermove', function(e){
+        if(busy() || (e.target && e.target.closest && e.target.closest(UI_SEL))){ hide(); return; }
+        queue(e.clientX, e.clientY);
+    }, {passive:true});
+    window.addEventListener('pointerdown', hide, {passive:true});
+    window.addEventListener('pointerout', function(e){ if(!e.relatedTarget) hide(); }, {passive:true});
+    window.addEventListener('resize', function(){
+        dpr = window.devicePixelRatio || 1;
+        cv.width = Math.max(1, Math.round(window.innerWidth * dpr));
+        cv.height = Math.max(1, Math.round(window.innerHeight * dpr));
+        cv.style.width = window.innerWidth + 'px';
+        cv.style.height = window.innerHeight + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if(!raf) raf = requestAnimationFrame(draw);
+    });
+    dpr = window.devicePixelRatio || 1;
+    cv.width = Math.max(1, Math.round(window.innerWidth * dpr));
+    cv.height = Math.max(1, Math.round(window.innerHeight * dpr));
+    cv.style.width = window.innerWidth + 'px';
+    cv.style.height = window.innerHeight + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+})();
+
+// ── 生成动态特效：特效1 节点外圈 StarBorder 细光（React Bits star-border 机制扩展：
+// .sb-frame CSS DOM 光层：两个相位差半圈的径向渐变光斑层沿四边轨道循环 + mask 露出四边各 2px 光带）
+// + 特效2 连线发射光束（逐跳传播，SVG .canvas-fx-layer 仅服务光束）──
+// .sb-frame 与 .image-node 同位，overflow:hidden 圆角裁切，z-index 1 位于连线层(z0)与节点层(z2)之间，
+// pointer-events:none 不拦截拖拽/连线/右键；busy 由 smartNodeInFlight 驱动，
+// sbSyncStarBorderFrames()（render 后 + 500ms scanner）负责创建/跟随/移除，结束生成即消失。
+var FX_BEAM_DUR_MS = 620;
+var SB_PX = 2;   // StarBorder thickness：上下光带各露出 2px
+var fxNS = 'http://www.w3.org/2000/svg';
+var canvasFxScannerTimer = 0;
+var canvasFxWatchTimer = 0;
+var canvasFxRaf = 0;
+var canvasFxRunning = false;
+var canvasFxLayer = null;
+var canvasFxBeams = [];
+
+function canvasFxNodeIsGeneration(node){
+    if(!node || isHistoryGroupNode(node)) return false;
+    var t = node.type || '';
+    if(t === 'smart-prompt' || t === 'smart-loop' || t === 'smart-group') return false;
+    return true;
+}
+function canvasFxNodeBusy(node){
+    return canvasFxNodeIsGeneration(node) && smartNodeInFlight(node);
+}
+function ensureCanvasFxLayer(){
+    if(!world || !world.isConnected) return null;
+    if(canvasFxLayer && canvasFxLayer.isConnected) return canvasFxLayer;
+    var svg = world.querySelector('svg.canvas-fx-layer');
+    if(svg){ canvasFxLayer = svg; return svg; }
+    svg = document.createElementNS(fxNS, 'svg');
+    svg.setAttribute('class', 'canvas-fx-layer');
+    svg.setAttribute('width', '6000');
+    svg.setAttribute('height', '4000');
+    svg.setAttribute('viewBox', '0 0 6000 4000');
+    world.appendChild(svg);
+    canvasFxLayer = svg;
+    return svg;
+}
+function canvasFxGroup(cls){
+    var layer = ensureCanvasFxLayer();
+    if(!layer) return null;
+    var g = layer.querySelector('g.' + cls);
+    if(!g){
+        g = document.createElementNS(fxNS, 'g');
+        g.setAttribute('class', cls);
+        layer.appendChild(g);
+    }
+    return g;
+}
+function canvasFxCircle(g, x, y, r, fill, alpha){
+    var c = document.createElementNS(fxNS, 'circle');
+    c.setAttribute('cx', String(Math.round(x * 10) / 10));
+    c.setAttribute('cy', String(Math.round(y * 10) / 10));
+    c.setAttribute('r', String(r));
+    c.setAttribute('fill', fill);
+    c.setAttribute('opacity', String(alpha));
+    g.appendChild(c);
+    return c;
+}
+// StarBorder 帧对账：busy 节点 → 创建/跟随 .sb-frame；非 busy → 移除。
+// .sb-frame 与节点同位，高为节点高 + SB_PX*2（四边各外扩 2px 光带区域）；
+// 具体发光/动画全部由 CSS 类 .sb-glow.sb-orbit-a/b + keyframes 驱动（光带沿边框绕圈）。
+function sbSyncStarBorderFrames(){
+    if(!world || !world.isConnected) return;
+    var busy = new Set();
+    var i, node, frame, gTop, gBottom, rect;
+    for(i = 0; i < nodes.length; i++){
+        node = nodes[i];
+        if(!canvasFxNodeBusy(node)) continue;
+        busy.add(node.id);
+        rect = nodeRect(node);
+        frame = world.querySelector('.sb-frame[data-sb-id="' + CSS.escape(node.id) + '"]');
+        if(frame){
+            frame.style.left = (rect.x - SB_PX) + 'px';
+            frame.style.top = (rect.y - SB_PX) + 'px';
+            frame.style.width = (rect.width + SB_PX * 2) + 'px';
+            frame.style.height = (rect.height + SB_PX * 2) + 'px';
+            continue;
+        }
+        frame = document.createElement('div');
+        frame.className = 'sb-frame';
+        frame.setAttribute('data-sb-id', node.id);
+        frame.style.cssText = 'left:' + (rect.x - SB_PX) + 'px;top:' + (rect.y - SB_PX) + 'px;width:' + (rect.width + SB_PX * 2) + 'px;height:' + (rect.height + SB_PX * 2) + 'px;';
+        gTop = document.createElement('div');
+        gTop.className = 'sb-glow sb-orbit-a';
+        gBottom = document.createElement('div');
+        gBottom.className = 'sb-glow sb-orbit-b';
+        frame.appendChild(gTop);
+        frame.appendChild(gBottom);
+        world.appendChild(frame);
+    }
+    world.querySelectorAll('.sb-frame').forEach(function(f){
+        if(!busy.has(f.getAttribute('data-sb-id'))) f.remove();
+    });
+}
+function canvasFxBezierAt(b, t){
+    var u = 1 - t;
+    var x = u * u * u * b.fx + 3 * u * u * t * b.c1x + 3 * u * t * t * b.c2x + t * t * t * b.tx;
+    var y = u * u * u * b.fy + 3 * u * u * t * b.c1y + 3 * u * t * t * b.c2y + t * t * t * b.ty;
+    return [x, y];
+}
+function canvasFxBezierFor(fr, tr){
+    var fx = fr.x + fr.width, fy = fr.y + fr.height / 2;
+    var tx = tr.x, ty = tr.y + tr.height / 2;
+    var dx = Math.max(50, Math.abs(tx - fx) * 0.45);
+    var dy = Math.max(36, Math.abs(ty - fy) * 0.45);
+    return {fx: fx, fy: fy, c1x: fx + dx, c1y: fy, c2x: tx - dx, c2y: ty, tx: tx, ty: ty};
+}
+function canvasFxLaunchBeam(fromId, toId){
+    if(!world || !world.isConnected) return;
+    var from = nodes.find(function(n){ return n.id === fromId; });
+    var to = nodes.find(function(n){ return n.id === toId; });
+    if(!from || !to) return;
+    var hasVisibleConn = (canvas?.connections || []).some(function(c){
+        return c.from === fromId && c.to === toId && ['input', 'flow'].indexOf(c.kind || 'flow') !== -1;
+    });
+    if(!hasVisibleConn) return;
+    var fs = smartGroupScopeId(fromId);
+    var tsScope = smartGroupScopeId(toId);
+    if(fs && tsScope && fs === tsScope) return;
+    var vTo = to;
+    if(tsScope && tsScope !== toId){
+        var group = nodes.find(function(n){ return n.id === tsScope; });
+        if(!group) return;
+        vTo = group;
+    }
+    var fr = nodeRect(from);
+    var tr = nodeRect(vTo);
+    var b = canvasFxBezierFor(fr, tr);
+    if(Math.hypot(b.tx - b.fx, b.ty - b.fy) < 3) return;
+    canvasFxBeams.push({fromId: fromId, toId: toId, b: b, startTs: performance.now(), dur: FX_BEAM_DUR_MS});
+    canvasFxRequestLoop();
+}
+function canvasFxRunEdge(fromId, toId){
+    var to = nodes.find(function(n){ return n.id === toId; });
+    if(!to || to.type === 'smart-loop') return;
+    canvasFxLaunchBeam(fromId, toId);
+}
+function canvasFxTick(ts){
+    canvasFxRaf = 0;
+    if(!ensureCanvasFxLayer()) return;
+    if(canvasFxBeams.length){
+        canvasFxBeams = canvasFxBeams.filter(function(b){ return (ts - b.startTs) < b.dur; });
+    }
+    if(!canvasFxBeams.length){
+        var layer = ensureCanvasFxLayer();
+        if(layer){
+            var ga = layer.querySelector('g.fx-gen'); if(ga) ga.replaceChildren();
+            var gb = layer.querySelector('g.fx-beam'); if(gb) gb.replaceChildren();
+        }
+        canvasFxRunning = false;
+        return;
+    }
+    canvasFxDrawBeams(ts);
+    canvasFxRaf = requestAnimationFrame(canvasFxTick);
+}
+function canvasFxBeamTailAlpha(k){
+    return [0.14, 0.34, 0.88][k];
+}
+function canvasFxBeamTailWidth(k){
+    return [0.7, 1.2, 1.8][k];
+}
+function canvasFxDrawBeams(ts){
+    var g = canvasFxGroup('fx-beam');
+    if(!g) return;
+    g.replaceChildren();
+    for(var i = 0; i < canvasFxBeams.length; i++){
+        var beam = canvasFxBeams[i];
+        var p = Math.min(1, Math.max(0, (ts - beam.startTs) / beam.dur));
+        if(p >= 1) continue;
+        var fadeIn = p < 0.08 ? p / 0.08 : 1;
+        var fadeOut = p > 0.76 ? (1 - p) / 0.24 : 1;
+        var alpha = Math.max(0, Math.min(1, fadeIn * (p > 0.76 ? fadeOut : 1)));
+        var headT = p;
+        var t0 = Math.max(0, headT - 0.2);
+        // 细丝尾：沿贝塞尔从尾到头分成 3 段，逐段加粗变亮（近头最亮），形成细丝流光
+        for(var k = 0; k < 3; k++){
+            var a0 = k / 3, a1 = (k + 1) / 3;
+            var d = '';
+            for(var s = 0; s <= 6; s++){
+                var t = t0 + (headT - t0) * (a0 + (a1 - a0) * s / 6);
+                var pt = canvasFxBezierAt(beam.b, t);
+                d += (s === 0 ? 'M' : 'L') + Math.round(pt[0] * 10) / 10 + ' ' + Math.round(pt[1] * 10) / 10;
+            }
+            var seg = document.createElementNS(fxNS, 'path');
+            seg.setAttribute('d', d);
+            seg.setAttribute('fill', 'none');
+            seg.setAttribute('stroke', '#e3efff');
+            seg.setAttribute('stroke-width', String(canvasFxBeamTailWidth(k)));
+            seg.setAttribute('stroke-linecap', 'round');
+            seg.setAttribute('opacity', String(Math.max(0, Math.min(1, alpha * canvasFxBeamTailAlpha(k)))));
+            g.appendChild(seg);
+        }
+        // 头部亮点：柔和外晕 + 白芯，扫过细丝前端
+        var head = canvasFxBezierAt(beam.b, headT);
+        canvasFxCircle(g, head[0], head[1], 5, 'rgba(170,214,255,0.25)', alpha);
+        canvasFxCircle(g, head[0], head[1], 2.3, '#ffffff', Math.min(1, alpha + 0.1));
+    }
+}
+function canvasFxRequestLoop(){
+    if(canvasFxRunning) return;
+    canvasFxRunning = true;
+    canvasFxRaf = requestAnimationFrame(canvasFxTick);
+}
+function canvasFxScanner(){
+    canvasFxScannerTimer = 0;
+    sbSyncStarBorderFrames();
+    if(canvasFxRunning || !world || !world.isConnected) return;
+    for(var i = 0; i < nodes.length; i++){
+        if(canvasFxNodeBusy(nodes[i])){ canvasFxRequestLoop(); return; }
+    }
+}
+function canvasFxScheduleScanner(){
+    if(canvasFxScannerTimer) return;
+    canvasFxScannerTimer = setTimeout(canvasFxScanner, 450);
+}
+// 常驻低频兜底：任何节点进入生成态即可自举 rAF 特效循环（不依赖连线光束触发），
+// 特效循环运行时 canvasFxRunning 为 true 会自动跳过本扫描，开销可忽略
+canvasFxWatchTimer = setInterval(canvasFxScanner, 500);
+/* ═══ 专业调色（image-adjust-editor.js）桥接：暴露 IIFE 内部能力 ═══ */
+window.imageAdjust = {
+    currentSource: function () {
+        const cur = currentEditImage();
+        const node = cur && cur.node;
+        const image = cur && cur.image;
+        const img = document.getElementById('cropImage');
+        const url = (node && node.url) || (image && image.url) || (img && img.src);
+        return { url: url || '', name: (node && (node.name || node.title)) || (image && image.name) || 'image' };
+    },
+    upload: function (blob, name) { return uploadCroppedBlob(blob, name); },
+    addResult: async function (file, fromAI) {
+        const cur = currentEditImage();
+        const node = cur && cur.node;
+        if (!node) return;
+        const layout = typeof imageLayout === 'function' ? imageLayout(node.images || [], nodeScale(node), node) : { width: 260 };
+        const x = (node.x || 0) + (layout.width || 260) + 40;
+        const items = [{ url: file.url, name: file.name }];
+        const outNode = createNode(x, (node.y || 0) + 12, items);
+        if (outNode) { outNode.title = fromAI ? 'AI 细节增强' : '调色'; }
+        if (outNode && typeof addConnection === 'function') {
+            try { addConnection(node.id, outNode.id); } catch (e) {}
+        }
+    },
+    finish: function () { closeImageEditor(); render(); scheduleSave(); }
+};
 })();

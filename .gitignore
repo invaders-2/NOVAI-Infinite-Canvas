@@ -31,6 +31,17 @@ data/conversations/
 data/media_previews/
 data/projects.json
 data/update_backups/
+# 下面这些是运行时产生的用户数据（画布版本快照 / Agent 会话 / 运行调度 / 素材索引），
+# 之前漏在 .gitignore 外，会随 git add -A 混进仓库，这里补齐。
+data/canvas_versions/
+data/agent_sessions/
+data/runs/
+data/tasks/
+data/assets_registry.json
+data/memory_library.json
+data/persona_library.json
+data/stub_jobs.json
+data/stub_provider.json
 history.json
 static/runninghub/api_providers.json
 

@@ -7,17 +7,20 @@
     <title data-i18n="smart.title">智能画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.113.1788488941">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1788488941">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.113.1788488941">
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.113.1788488941"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/theme.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/shared/media.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.113.1788488941"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.113.1788488941"></script>
-    <script src="/static/js/i18n.js?v=1.0.113.1788488941"></script>
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.113.1789033067">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.113.1789032891">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.113.1788941139">
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.113.1789027650"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/theme.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/media.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/workflow-utils.js?v=1.0.113.1789023665"></script>
+    <script src="/static/js/shared/node-registry.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/shared/matrix-run.js?v=1.0.113.1789028257"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.113.1788942289"></script>
+    <script src="/static/js/i18n.js?v=1.0.113.1788942289"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -40,7 +43,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
         /* ═══ Canvas/SVG 响应式：跟随窗口缩放 ═══ */
 #shell { width: 100%; height: 100%; overflow: hidden; }
 /* world 是无限画布坐标系：节点允许位于负坐标/超出视口，不能加 overflow:hidden（会把视口外节点裁掉） */
-#world { width: 100%; height: 100%; position: relative; }
+/* position 必须为 absolute + 钉在 shell 左上角：若为 relative，world 会随前面的 snapGuides 等兄弟元素被推到下方，
+   导致 screenToWorld 换算的坐标与实际渲染位置相差一个固定偏移（节点“跑到别处/不显示”）。 */
+#world { width: 100%; height: 100%; position: absolute; left: 0; top: 0; }
 
 /* ═══ 节点 hover：macOS 卡片式（.image-node 实体规则见 smart-canvas.css） ═══ */
 .node:hover {
@@ -198,36 +203,10 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         <button class="smart-back" type="button" onclick="backToCanvasList()"><i data-lucide="arrow-left"></i><span data-i18n="canvas.backToList">返回画布列表</span></button>
         <div id="smartTitle" class="smart-title" data-i18n="smart.title">智能画布</div>
         <div id="createMenu" class="create-menu">
-            <div class="create-menu-grid">
-                <button class="create-card" type="button" data-create-type="image">
-                    <span class="create-card-icon"><i data-lucide="upload-cloud"></i></span>
-                    <span>
-                        <div class="create-card-title">上传</div>
-                        <div class="create-card-sub" data-i18n="smart.createImportNodeSub">图片、音频、视频都能导入</div>
-                    </span>
-                </button>
-                <button class="create-card" type="button" data-create-type="group">
-                    <span class="create-card-icon"><i data-lucide="group"></i></span>
-                    <span>
-                        <div class="create-card-title">分组</div>
-                        <div class="create-card-sub">把提示词、图片、循环收进同一组</div>
-                    </span>
-                </button>
-                <button class="create-card" type="button" data-create-type="prompt">
-                    <span class="create-card-icon"><i data-lucide="text-cursor-input"></i></span>
-                    <span>
-                        <div class="create-card-title">提示词</div>
-                        <div class="create-card-sub">手写或用 LLM 生成文本</div>
-                    </span>
-                </button>
-                <button class="create-card" type="button" data-create-type="loop">
-                    <span class="create-card-icon"><i data-lucide="repeat-2"></i></span>
-                    <span>
-                        <div class="create-card-title">循环</div>
-                        <div class="create-card-sub">控制运行轮数、批次和变量</div>
-                    </span>
-                </button>
-            </div>
+            <button class="menu-btn" type="button" data-create-type="image"><i data-lucide="upload-cloud" class="w-4 h-4"></i><span>上传</span></button>
+            <button class="menu-btn" type="button" data-create-type="group"><i data-lucide="group" class="w-4 h-4"></i><span>分组</span></button>
+            <button class="menu-btn" type="button" data-create-type="prompt"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span>提示词</span></button>
+            <button class="menu-btn" type="button" data-create-type="loop"><i data-lucide="repeat-2" class="w-4 h-4"></i><span>循环</span></button>
         </div>
         <input id="fileInput" type="file" accept="image/*,video/*,audio/*" multiple hidden>
         <div id="promptPresetPanel" class="prompt-preset-panel">
@@ -265,7 +244,10 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
             <div id="promptTemplateCats" class="prompt-template-cats"></div>
             <div id="promptTemplateBody" class="prompt-template-body"></div>
         </div>
-        <button id="smartArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid"></i><span>整理选中</span></button>
+        <div class="minimap-selection-actions">
+            <button id="smartRunSelectedBtn" class="minimap-arrange-btn selected-run-btn" type="button" title="运行框选节点" aria-label="运行框选节点"><i data-lucide="workflow"></i><span>运行选中</span></button>
+            <button id="smartArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid"></i><span>整理选中</span></button>
+        </div>
         <button id="chatToggleBtn" class="chat-toggle" onclick="toggleChatPanel()" title="画布对话助手"><i data-lucide="message-square"></i></button>
         <button id="versionHistoryBtn" class="chat-toggle version-history-toggle" onclick="openCanvasVersionsPanel()" title="版本历史" aria-label="版本历史"><i data-lucide="history"></i></button>
         <div id="minimap" class="smart-minimap" aria-hidden="true">
@@ -401,6 +383,8 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                         <button type="button" data-image-edit-mode="brush"><i data-lucide="paintbrush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeBrush">画笔</span></button>
                         <button type="button" data-image-edit-mode="resize"><i data-lucide="minimize-2" class="w-3.5 h-3.5"></i><span>缩放</span></button>
                         <button type="button" data-image-edit-mode="grid"><i data-lucide="grid-3x3" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeGrid">宫格切分</span></button>
+                        <button type="button" data-image-edit-mode="adjust" title="专业调色"><i data-lucide="wand-sparkles" class="w-3.5 h-3.5"></i><span>调色</span></button>
+                        
                     </div>
                     <button class="preview-icon-btn" type="button" onclick="closeImageEditor()" title="关闭" data-i18n-title="common.close"><i data-lucide="x" class="w-4 h-4"></i></button>
                 </div>
@@ -515,7 +499,7 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                     <div class="image-edit-stage-inner">
                         <div id="previewStage" class="preview-stage" style="display:none">
                             <div id="previewFrame" class="preview-frame">
-                                <img id="previewCurrentImage" class="preview-current" alt="current">
+                                <img id="previewCurrentImage" class="preview-current" alt="current" draggable="false">
                                 <video id="previewCurrentVideo" class="preview-current preview-current-video" controls preload="metadata" crossorigin="anonymous" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback" style="display:none"></video>
                                 <div id="panoramaStage" class="panorama-stage" style="display:none">
                                     <canvas id="panoramaCanvas"></canvas>
@@ -528,7 +512,7 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                             </div>
                         </div>
                         <div id="cropCanvas" class="crop-canvas">
-                            <img id="cropImage" alt="crop source">
+                            <img id="cropImage" alt="crop source" draggable="false">
                             <div id="gridJoinCanvas" class="grid-join-canvas"></div>
                             <canvas id="editDrawCanvas" class="edit-draw-canvas"></canvas>
                             <canvas id="editTextCanvas" class="edit-text-canvas"></canvas>
@@ -584,11 +568,14 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
     </div>
     <div id="chatModal" class="chat-modal" style="left:50%;top:50%;transform:translate(-50%,-50%)">
         <div class="chat-modal-header">
-            <span class="chat-modal-title"><i data-lucide="sparkles" class="w-4 h-4"></i> 画布助手</span>
-            <div style="display:flex;align-items:center;gap:6px">
-                <select id="chatModelSelect" class="chat-model-select" onchange="changeChatModel(this.value)"></select>
-                <button class="chat-history-btn" onclick="toggleAgentHistoryPanel()" title="历史记录"><i data-lucide="history"></i></button>
-                <button class="chat-modal-close" onclick="toggleChatPanel()"><i data-lucide="x"></i></button>
+            <div class="chat-head-text">
+                <h3 class="chat-modal-title">画布助手</h3>
+                <p class="chat-modal-sub">今天想在画布上做什么？</p>
+            </div>
+            <div class="chat-head-actions">
+                <button class="chat-icon-btn chat-history-btn" type="button" onclick="toggleAgentHistoryPanel()" title="历史记录" aria-label="历史记录"><i data-lucide="history"></i></button>
+                <button class="chat-icon-btn chat-reset-btn" type="button" onclick="resetChatConversation()" title="重置对话" aria-label="重置对话"><span class="chat-reset-ico"><i data-lucide="refresh-cw"></i></span></button>
+                <button class="chat-icon-btn chat-modal-close" type="button" onclick="toggleChatPanel()" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
             </div>
         </div>
         <div id="agentHistoryPanel" class="agent-history-panel">
@@ -603,13 +590,21 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
             <div id="agentHistoryList" class="agent-history-list"></div>
         </div>
         <div id="chatMessages" class="chat-messages"></div>
-        <div class="chat-input-row">
-            <button id="chatUploadBtn" class="chat-upload" onclick="chatUploadClick()" title="上传素材（图片/视频，生成时自动作为参考）"><i data-lucide="paperclip"></i></button>
-            <input type="file" id="chatUploadInput" accept="image/*,video/*" multiple style="display:none" onchange="chatUploadSelected(this)">
-            <textarea id="chatInput" class="chat-input" placeholder="试试：生成一张红色杯子的图 / 用选中的图做电商主图..." rows="1"></textarea>
-            <button id="chatSendBtn" class="chat-send" onclick="sendChatMessage()"><i data-lucide="send"></i></button>
+        <div class="chat-composer">
+            <div id="chatComposerBox" class="chat-composer-box">
+                <textarea id="chatInput" class="chat-input" placeholder="问我任何事…" rows="1"></textarea>
+                <input type="file" id="chatUploadInput" accept="image/*,video/*" multiple style="display:none" onchange="chatUploadSelected(this)">
+                <div id="chatTypewriter" class="chat-typewriter" aria-hidden="true"><span class="chat-tw-text"></span><span class="chat-tw-caret"></span></div>
+                <div class="chat-composer-actions">
+                    <div class="chat-composer-left">
+                        <button id="chatUploadBtn" class="chat-round-btn chat-attach" type="button" onclick="chatUploadClick()" title="上传素材（图片/视频，生成时自动作为参考）" aria-label="添加素材"><i data-lucide="plus"></i></button>
+                        <select id="chatModelSelect" class="chat-model-select" onchange="changeChatModel(this.value)" title="对话模型"></select>
+                    </div>
+                    <button id="chatSendBtn" class="chat-round-btn chat-send" type="button" onclick="sendChatMessage()" aria-label="发送"><i data-lucide="arrow-up"></i></button>
+                </div>
+            </div>
+            <div id="chatContext" class="chat-context"></div>
         </div>
-        <div id="chatContext" class="chat-context"></div>
         <div class="chat-resize"></div>
     </div>
     <!-- V2: 版本历史面板 -->
@@ -626,6 +621,8 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         <div id="smartSuggestBtns" class="smart-suggest-btns"></div>
         <button type="button" class="smart-suggest-close" onclick="closeSmartSuggestions()" title="关闭"><i data-lucide="x"></i></button>
     </div>
-    <script defer src="/static/js/smart-canvas.js?v=1.0.113.1788488941"></script>
+    <script defer src="/static/vendor/js/glfx.js?v=1.0.113.1788945229"></script>
+    <script defer src="/static/js/image-adjust-editor.js?v=1.0.113.1789010284"></script>
+    <script defer src="/static/js/smart-canvas.js?v=1.0.113.1789032958"></script>
 </body>
 </html>

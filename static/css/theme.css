@@ -189,10 +189,10 @@ body.studio-theme-dark .mini-ratio {
     border-color: transparent !important;
 }
 
-html.studio-theme-dark body input,
+html.studio-theme-dark body input:not(.group-title-input),
 html.studio-theme-dark body textarea,
 html.studio-theme-dark body select,
-body.studio-theme-dark input,
+body.studio-theme-dark input:not(.group-title-input),
 body.studio-theme-dark textarea,
 body.studio-theme-dark select {
     color: var(--text) !important;
@@ -539,7 +539,11 @@ body.studio-theme-dark .shell.theme-dark {
     --soft-2: var(--surface-2);
     --line: var(--border-2);
     --line-2: rgba(120, 120, 120, .22);
-    --text: var(--text);
+    /* 这里原本是 `--text: var(--text);` —— 自定义属性引用自身构成循环，CSS 会把整条 token
+       在该作用域判为 guaranteed-invalid。.shell 是画布根节点，一坏就等于「画布内所有
+       var(--text) 全部失效」：文字色退回继承所以看不出异常，但用 --text 画 border/background
+       的元素会直接消失（连接端口的「加号+外圈」在深色主题下就是这样没的）。
+       删掉这行，让它正常从 :root 继承即可。 */
     --muted: var(--text-3);
     --faint: var(--text-3);
     --shadow: rgba(0,0,0,.2);
@@ -767,13 +771,6 @@ html.studio-theme-dark body .shell .input-index,
 body.studio-theme-dark .shell .input-index {
     background: var(--accent) !important;
     color: var(--bg) !important;
-}
-
-html.studio-theme-dark body .shell .port::after,
-body.studio-theme-dark .shell .port::after {
-    background: var(--accent) !important;
-    border-color: transparent !important;
-    box-shadow: 0 0 0 1px var(--border-2) !important;
 }
 
 html.studio-theme-dark body .shell .drop-overlay,
@@ -1066,10 +1063,10 @@ body.studio-theme-dark .mode-glider + .mode-btn.active {
     color: var(--bg) !important;
 }
 
-html.studio-theme-dark body input,
+html.studio-theme-dark body input:not(.group-title-input),
 html.studio-theme-dark body textarea,
 html.studio-theme-dark body select,
-body.studio-theme-dark input,
+body.studio-theme-dark input:not(.group-title-input),
 body.studio-theme-dark textarea,
 body.studio-theme-dark select {
     background-color: var(--bg) !important;
@@ -1220,7 +1217,7 @@ html.studio-theme-dark body .resolution-toggle,
 html.studio-theme-dark body .select-shell,
 html.studio-theme-dark body .mode-switch,
 html.studio-theme-dark body .mini-ratio,
-html.studio-theme-dark body input,
+html.studio-theme-dark body input:not(.group-title-input),
 html.studio-theme-dark body textarea,
 html.studio-theme-dark body select,
 body.studio-theme-dark .model-pill,
@@ -1229,7 +1226,7 @@ body.studio-theme-dark .resolution-toggle,
 body.studio-theme-dark .select-shell,
 body.studio-theme-dark .mode-switch,
 body.studio-theme-dark .mini-ratio,
-body.studio-theme-dark input,
+body.studio-theme-dark input:not(.group-title-input),
 body.studio-theme-dark textarea,
 body.studio-theme-dark select {
     background-color: var(--bg) !important;
@@ -1793,49 +1790,13 @@ body.studio-theme-dark .shadow-slate-900\/5 {
    不覆盖 marvis-shared.css 中已有的语义变量
    ═══════════════════════════════════════════ */
 
-/* ── 统一圆角 ── */
+/* ── 统一字体（--font-display 统一为 Space Grotesk 品牌字体） ── */
 :root {
-    --radius-sidebar: 24px;
-    --radius-card: 20px;
-    --radius-button: 16px;
-    --radius-input: 16px;
-    --radius-modal: 24px;
-    --radius-sm: 12px;
-    --radius-xs: 8px;
-}
-
-/* ── 统一间距 ── */
-:root {
-    --space-page: 32px;
-    --space-module: 24px;
-    --space-card: 20px;
-    --space-button: 16px;
-    --space-text: 8px;
-}
-
-/* ── 统一阴影（设计系统语义层） ── */
-:root {
-    --shadow-card: 0 10px 30px rgba(0,0,0,0.05);
-    --shadow-elevated: 0 20px 40px rgba(0,0,0,0.08);
-    --shadow-float: 0 4px 16px rgba(0,0,0,0.04);
-}
-
-/* ── 统一字体 ── */
-:root {
-    --font-display: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-body: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono: 'SF Mono', 'Menlo', 'Monaco', monospace;
-    --font-cjk: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 /* ── 统一动画工具类 ── */
-.anim-hover {
-    transition: all 0.2s ease-out;
-}
-.anim-hover:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-elevated);
-}
 .anim-scale-hover:hover {
     transform: scale(1.03);
     transition: transform 0.2s ease-out;

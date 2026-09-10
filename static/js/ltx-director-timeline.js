@@ -365,7 +365,7 @@ const STYLES = `
   }
   .pr-timeline-viewport::-webkit-scrollbar-thumb:hover {
     background: #666;
-    border-color: #000;
+    border-color:var(--text);
   }
   .pr-zoom-controls {
     display: flex;
