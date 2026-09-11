@@ -1,0 +1,37 @@
+# 国内镜像同步：把 GitHub Release 的安装包补到 Gitee（自动分卷）
+#
+# 为什么单独做一条流水线：build-win / build-mac 的产物在 dist-desktop/，而 tag 构建时
+# 调用的 .github/scripts/sync-domestic-release.sh 只管 desktop/release/ 下的 electron 产物。
+# 安装包体积超过 Gitee 单附件 100MB 限制后，那边只会留下几十 KB 的 yml/blockmap，
+# 所以这里专门负责「下载安装包 → 分卷 → 传 Gitee」。
+#
+# 触发：手动（Actions → sync-mirrors → Run workflow，填 tag）。
+# 说明：没有挂 push:tags 触发，因为 tag 推上去时 build-win/build-mac 还要跑十几分钟，
+#       这时 Release 里还没有安装包；等两个构建完了再手动跑一次即可。
+name: sync-mirrors
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag（例如 v1.0.115）'
+        required: true
+        default: 'v1.0.115'
+
+permissions:
+  contents: read
+
+jobs:
+  gitee-installers:
+    name: Gitee 安装包分卷同步
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 同步安装包到 Gitee
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: bash .github/scripts/sync-gitee-installers.sh "${{ github.event.inputs.tag }}"
