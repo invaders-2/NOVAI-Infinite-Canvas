@@ -40,8 +40,16 @@ if [ ! -s "$WORK/list.txt" ]; then echo "::warning::该 tag 下没有 NOVAI-Setu
 
 # ---- 2. Gitee Release：取 id，没有就建
 API="https://gitee.com/api/v5/repos/$GITEE_OWNER/$GITEE_REPO"
-RID=$(curl -sS --max-time 60 "$API/releases/tags/$TAG?access_token=$GITEE_TOKEN" \
-      | python3 -c "import sys,json;print(json.load(sys.stdin).get('id','') or '')" 2>/dev/null)
+curl -sS --max-time 60 "$API/releases/tags/$TAG?access_token=$GITEE_TOKEN" -o "$WORK/gitee.json"
+RID=$(python3 -c "import sys,json;print(json.load(open('$WORK/gitee.json')).get('id','') or '')" 2>/dev/null)
+# 已有附件名：脚本可重复执行，已传过的分卷直接跳过（否则每次跑都会多一份重名附件）
+python3 -c "
+import json
+try:
+    d = json.load(open('$WORK/gitee.json'))
+    print('\n'.join([a.get('name') or '' for a in (d.get('assets') or [])]))
+except Exception:
+    pass" > "$WORK/existing.txt" 2>/dev/null || true
 if [ -z "$RID" ]; then
   echo "   Gitee 上没有 $TAG 的 Release，新建一个"
   RID=$(curl -sS --max-time 60 -X POST "$API/releases" \
@@ -74,6 +82,10 @@ while IFS=$'\t' read -r name aid size; do
 
   for p in "$WORK/parts"/*; do
     pn=$(basename "$p"); ps=$(stat -c%s "$p")
+    if grep -qxF "$pn" "$WORK/existing.txt" 2>/dev/null; then
+      echo "   $pn 已存在，跳过"
+      continue
+    fi
     echo "   上传 $pn ($(( ps / 1048576 )) MB)"
     code=$(curl -sS --max-time 2400 -X POST "$API/releases/$RID/attach_files" \
       -F "access_token=$GITEE_TOKEN" -F "file=@$p" -o "$WORK/up.json" -w '%{http_code}')
