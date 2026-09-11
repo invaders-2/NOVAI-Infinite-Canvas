@@ -319,15 +319,16 @@ def _dir_writable(path: str) -> bool:
         return False
 
 def resolve_default_assets_dir() -> str:
-    """默认素材目录：优先数据目录（APPDATA/NOVAI/assets），仅 Windows/Linux
-    安装目录可写且确需随安装盘存储时才跟随安装目录。
+    """默认素材目录：老用户一律沿用它已有的数据目录（APPDATA/NOVAI/assets）；
+    只有全新安装、且安装目录可写时，才把素材放在安装目录旁（方便选大容量盘）。
     兜底规则（避免升级后素材库"消失"）：
-    - macOS .app 包内不承载用户素材（升级会被整体替换、包内可能被打进空壳目录），
-      只要数据目录存在即一律回落数据目录；
-    - Windows/Linux：安装目录不可写（C:\\Program Files 需管理员权限 /
-      AppImage 挂载只读）→ 回落数据目录；
-    - 老用户数据目录里已有素材、安装目录下还没有 assets（或只有空壳）→
-      继续用数据目录（不搬动、不隐藏存量素材）。
+    - 数据目录里已经有素材 → 一律继续用它，不搬动、不隐藏存量素材；
+    - macOS .app 包内不承载用户素材（升级会被整体替换）；
+    - Windows/Linux：安装目录不可写（C:\\Program Files / AppImage 只读）→ 回落数据目录。
+
+    注意：**不要**再拿「安装目录 assets 是否为空」当判据。安装包会把内置素材
+    （assets/library、assets/models 等）拷进安装目录，那里永远不为空，导致老用户被
+    静默切到安装目录、数据目录里的历史图片全部 404（1.0.115 及之前的线上问题）。
     """
     fallback = os.path.join(_DATA_ROOT, "assets")
     install_root = os.environ.get("NOVAI_INSTALL_DIR") or os.environ.get("NOVAI_APP_DIR", "")
@@ -337,16 +338,9 @@ def resolve_default_assets_dir() -> str:
         fallback_has_data = os.path.isdir(fallback) and bool(os.listdir(fallback))
     except Exception:
         fallback_has_data = False
-    # macOS .app 包内不承载用户素材
-    if sys.platform == "darwin" and fallback_has_data:
+    if fallback_has_data:
         return fallback
     candidate = os.path.join(install_root, "assets")
-    try:
-        candidate_empty = (not os.path.isdir(candidate)) or (not os.listdir(candidate))
-    except Exception:
-        candidate_empty = False
-    if candidate_empty and fallback_has_data:
-        return fallback
     if _dir_writable(candidate):
         return candidate
     return fallback
@@ -1691,6 +1685,37 @@ def get_changelog():
     except Exception:
         return {"version": "", "items": []}
 app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
+
+# 素材目录兜底：历史版本在「数据目录」与「安装目录」之间切换过（见 resolve_default_assets_dir），
+# 同一台机器上的存量素材可能被拆成两处（老图在数据目录、切换后新上传的图在安装目录）。
+# 只挂一个目录会让另一处的图片全部 404，所以 /assets 找不到时再去另一处找一次 —— 两边都可见。
+def _assets_fallback_dir() -> str:
+    """ASSETS_DIR 之外的另一个候选素材目录（找不到合适的就返回空串）。"""
+    install_root = os.environ.get("NOVAI_INSTALL_DIR") or os.environ.get("NOVAI_APP_DIR", "")
+    if not install_root:
+        return ""
+    other = os.path.join(install_root, "assets")
+    try:
+        if os.path.isdir(other) and os.path.realpath(other) != os.path.realpath(ASSETS_DIR):
+            return other
+    except Exception:
+        pass
+    return ""
+
+ASSETS_FALLBACK_DIR = _assets_fallback_dir()
+
+@app.middleware("http")
+async def assets_fallback_middleware(request, call_next):
+    response = await call_next(request)
+    if response.status_code == 404 and ASSETS_FALLBACK_DIR:
+        path = request.url.path
+        if path.startswith("/assets/"):
+            root = os.path.abspath(ASSETS_FALLBACK_DIR)
+            alt = os.path.normpath(os.path.join(root, path[len("/assets/"):]))
+            # 防目录穿越：规范化后必须仍在兜底目录内
+            if (alt == root or alt.startswith(root + os.sep)) and os.path.isfile(alt):
+                return FileResponse(alt)
+    return response
 
 # --- Pydantic 模型 ---
 
