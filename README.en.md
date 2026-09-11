@@ -158,6 +158,7 @@ The app checks all three sources for the latest version on startup, pushes updat
 - **Canvas assistant redesigned**: now follows Spectrum's "AI Chat Card" — the empty state types sample prompts into the composer (click to take over), sunken composer, round attach/send buttons, one-click reset
 - **Connection ports rebuilt**: white outlined plus-in-circle that thickens and scales on hover/select; fixes ports being invisible in dark theme and disappearing when hovered
 - **Fix**: smart canvas `#world` was positioned relative, shifting coordinate math so nodes rendered in the wrong place or not at all
+- **Fix**: smart canvas image preview's **compare with original** entry point was never visible — the button was set to `display:none` by earlier logic and nothing restored it; visibility is now owned by the preview panel (hidden for video / 360 panorama, shown for images, greyed out when there is no upstream to compare)
 - **Fix (important)**: historical assets missing after upgrading on Windows — the asset directory was mis-resolved because the installer ships bundled assets into the install folder, silently switching existing users there so every historical image 404'd; existing users now always keep their data directory, and `/assets` falls back to the other folder so assets on either side stay visible
 
 ### v1.0.114

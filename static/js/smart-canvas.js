@@ -12217,7 +12217,7 @@ function refreshComparePanel(){
         if(compareLayer) compareLayer.style.display = 'none';
         if(compareHandle) compareHandle.style.display = 'none';
         if(thumbsEl){ thumbsEl.style.display = 'none'; thumbsEl.innerHTML = ''; }
-        if(toggle) toggle.classList.remove('active');
+        if(toggle){ toggle.classList.remove('active'); toggle.style.display = 'none'; }
         updatePreviewMetaHint(tr('smart.panoramaHint'));
         return;
     }
@@ -12253,6 +12253,7 @@ function refreshComparePanel(){
             toggle.style.opacity = '.45';
             toggle.classList.remove('active');
             toggle.title = tr('smart.compareEmpty');
+            toggle.style.display = 'none';   // 视频没有「原图」可对比，直接不显示
         }
         if(panoramaToggle) panoramaToggle.style.display = 'none';
         updatePreviewMetaHint(editing.node?.runPrompt ? `${tr('smart.runPromptPrefix')}${editing.node.runPrompt.slice(0, 60)}` : '');
@@ -12303,6 +12304,9 @@ function refreshComparePanel(){
     const hasSource = sources.length > 0;
     if(toggle){
         toggle.disabled = !hasSource;
+        // 显隐必须由这里决定：syncImageEditModeUi 会先把按钮置为 display:none 再调本函数，
+        // 之前这里只改 disabled/opacity/title、没人恢复 display，导致「对比原图」永远不可见。
+        toggle.style.display = 'inline-flex';
         toggle.style.opacity = hasSource ? '1' : '.45';
         toggle.title = hasSource ? tr('smart.compareHover') : tr('smart.compareEmpty');
         toggle.classList.toggle('active', hasSource && previewCompareOn);
