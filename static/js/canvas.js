@@ -2816,23 +2816,6 @@ function addMatrixNode(point){
     node.rows[1].dependencies = [];
     return addNode(node);
 }
-// 纯数据网格「多维表格」（对齐 DX OS builtin.table）。它不执行、不持有 task_id，
-// 数据模型唯一真值源是 shared/table-grid.js。默认 3 列 3 行，与 DX OS 新建表格一致。
-function addDataTableNode(point){
-    const p = point || defaultPoint(40, 0);
-    const node = {
-        id:uid('dtable'),
-        type:'data-table',
-        x:p.x, y:p.y, w:600, h:380,
-        title:'多维表格',
-        table:NovaTableGrid.normalizeTable({
-            columns:['字段 1', '字段 2', '字段 3'],
-            rows:[['', '', ''], ['', '', ''], ['', '', '']],
-        }).table,
-        tableExpanded:true,
-    };
-    return addNode(node);
-}
 function pickMediaForNode(nodeId){
     const input = document.createElement('input');
     input.type = 'file';
@@ -3911,7 +3894,6 @@ function createNodeByType(type, point){
     if(type === 'prompt') return addPromptNode(point);
     if(type === 'loop') return addLoopNode(point);
     if(type === 'group') return addGroupNode(point);
-    if(type === 'data-table') return addDataTableNode(point);
     if(NovaNodeRegistry.isTaskTableType(type)) return addMatrixNode(point);
     if(type === 'llm') return addLLMNode(point);
     if(type === 'generator') return addGeneratorNode(point);
@@ -3930,7 +3912,6 @@ function menuAdd(type){
     if(type === 'image') addImageNode(menuPoint);
     if(type === 'prompt') addPromptNode(menuPoint);
     if(type === 'loop') addLoopNode(menuPoint);
-    if(type === 'data-table') addDataTableNode(menuPoint);
     if(NovaNodeRegistry.isTaskTableType(type)) addMatrixNode(menuPoint);
     if(type === 'llm') addLLMNode(menuPoint);
     if(type === 'generator') addGeneratorNode(menuPoint);
@@ -6574,114 +6555,6 @@ function renderMatrixResults(node){
     }
     return `<div class="matrix-gallery">${completed.flatMap(row => (row.output?.refs || row.resultRefs || []).map(ref => `<div class="matrix-gallery-item">${matrixRefThumb(ref)}<strong>${escapeHtml(row.name)}</strong><span>${(ref.kind || mediaKindForRef(ref.url)) === 'video' ? '视频片段' : '图片结果'}</span></div>`)).join('')}</div>`;
 }
-// ---- 纯数据网格「多维表格」渲染 ---------------------------------------------
-// 数据模型唯一真值源：shared/table-grid.js（normalizeTable / applyOperation / planTableOperation）。
-// 本函数只负责把数据画出来并绑定编辑事件；列名去重、行列上限、单元格截断都在数据层。
-// 单元格编辑走 O(1) 直接赋值（ri/ci 来自已渲染数据、value 必为字符串），
-// 结构性操作才走数据层 applyOperation —— 否则每次按键都要全表归一化。
-const DTABLE_RENDER_ROW_LIMIT = 100;
-
-function ensureDataTableState(node){
-    // NovaTableGrid 未加载时保持原状，绝不抛错打断整个画布渲染
-    if(typeof NovaTableGrid === 'undefined') return node.table || null;
-    node.table = NovaTableGrid.normalizeTable(node.table).table;
-    return node.table;
-}
-
-function renderDataTableBody(node){
-    const table = ensureDataTableState(node);
-    const wrap = document.createElement('div');
-    wrap.className = 'dtable-node-card';
-    if(!table){
-        wrap.innerHTML = '<div class="dtable-empty">数据网格模块未加载</div>';
-        return wrap;
-    }
-    const columns = table.columns || [];
-    const rows = table.rows || [];
-    const selected = new Set(table.selectedRows || []);
-    const shown = rows.slice(0, DTABLE_RENDER_ROW_LIMIT);
-    const gutter = '<th class="dtable-gutter"></th>';
-    const headCells = columns.map((title, ci) =>
-        '<th><div class="dtable-col-head"><input data-dtable-col-title="' + ci + '" value="' + escapeAttr(title) + '" aria-label="列名">'
-        + '<button type="button" data-dtable-col-del="' + ci + '" title="删除列"><i data-lucide="x"></i></button></div></th>'
-    ).join('');
-    const bodyRows = shown.map((row, ri) => {
-        const cells = columns.map((_, ci) =>
-            '<td><input class="dtable-cell" data-dtable-cell="' + ri + ':' + ci + '" value="' + escapeAttr(row[ci] || '') + '"></td>'
-        ).join('');
-        return '<tr class="' + (selected.has(ri) ? 'is-selected' : '') + '">'
-            + '<th class="dtable-gutter"><input type="checkbox" data-dtable-row-sel="' + ri + '"' + (selected.has(ri) ? ' checked' : '') + ' aria-label="选择行">'
-            + '<span class="dtable-rownum">' + (ri + 1) + '</span>'
-            + '<button type="button" data-dtable-row-del="' + ri + '" title="删除行"><i data-lucide="x"></i></button></th>'
-            + cells + '</tr>';
-    }).join('');
-    const emptyGrid = (!columns.length || !rows.length)
-        ? '<div class="dtable-empty">' + (columns.length ? '暂无行，点「行」新增' : '暂无列，点「列」新增') + '</div>'
-        : '';
-    wrap.innerHTML = [
-        '<div class="dtable-toolbar">',
-            '<input class="dtable-title-input" data-dtable-title value="' + escapeAttr(node.title || '多维表格') + '" aria-label="表格名称">',
-            '<button type="button" data-dtable-add-row><i data-lucide="plus"></i>行</button>',
-            '<button type="button" data-dtable-add-col><i data-lucide="plus"></i>列</button>',
-            '<span class="dtable-count">' + rows.length + ' 行 × ' + columns.length + ' 列</span>',
-        '</div>',
-        emptyGrid,
-        (!emptyGrid && shown.length)
-            ? '<div class="dtable-scroll"><table class="dtable-grid"><thead><tr>' + gutter + headCells + '</tr></thead><tbody>' + bodyRows + '</tbody></table></div>'
-            : '',
-        (rows.length > shown.length)
-            ? '<div class="dtable-hint">仅显示前 ' + DTABLE_RENDER_ROW_LIMIT + ' 行（共 ' + rows.length + ' 行），数据完整保留</div>'
-            : '',
-    ].join('');
-
-    const redraw = () => { render(); scheduleSave(); };
-    wrap.querySelector('[data-dtable-title]').oninput = event => { node.title = event.target.value; scheduleSave(); };
-    wrap.querySelector('[data-dtable-add-row]').onclick = () => {
-        if(rows.length >= NovaTableGrid.MAX_ROWS){ setStatus('表格最多允许 ' + NovaTableGrid.MAX_ROWS + ' 行'); return; }
-        node.table = NovaTableGrid.applyOperation(node.table, 'append_row', { values: [] });
-        redraw();
-    };
-    wrap.querySelector('[data-dtable-add-col]').onclick = () => {
-        try { node.table = NovaTableGrid.applyOperation(node.table, 'add_column', { title: '字段 ' + (columns.length + 1) }); redraw(); }
-        catch(error){ setStatus(error.message); }
-    };
-    wrap.querySelectorAll('[data-dtable-col-del]').forEach(button => button.onclick = () => {
-        try { node.table = NovaTableGrid.applyOperation(node.table, 'delete_column', { column: Number(button.dataset.dtableColDel) + 1 }); redraw(); }
-        catch(error){ setStatus(error.message); }
-    });
-    wrap.querySelectorAll('[data-dtable-col-title]').forEach(input => input.onchange = () => {
-        // 表头重名由数据层追加 (2)/(3) 去重，与 DX OS 归一行为一致
-        const index = Number(input.dataset.dtableColTitle);
-        const next = NovaTableGrid.cloneTable(node.table);
-        const titles = next.columns.slice();
-        titles[index] = input.value;
-        next.columns = titles;
-        node.table = NovaTableGrid.normalizeTable(next).table;
-        redraw();
-    });
-    wrap.querySelectorAll('[data-dtable-row-del]').forEach(button => button.onclick = () => {
-        try { node.table = NovaTableGrid.applyOperation(node.table, 'delete_row', { row: Number(button.dataset.dtableRowDel) + 1 }); redraw(); }
-        catch(error){ setStatus(error.message); }
-    });
-    wrap.querySelectorAll('[data-dtable-row-sel]').forEach(box => box.onchange = () => {
-        const index = Number(box.dataset.dtableRowSel);
-        const set = new Set(node.table.selectedRows || []);
-        if(box.checked) set.add(index); else set.delete(index);
-        node.table.selectedRows = [...set].sort((a, b) => a - b);
-        scheduleSave();
-    });
-    wrap.querySelectorAll('[data-dtable-cell]').forEach(input => input.oninput = event => {
-        const parts = String(input.dataset.dtableCell).split(':');
-        const ri = Number(parts[0]), ci = Number(parts[1]);
-        const row = node.table.rows[ri];
-        if(!row || ci >= row.length) return;
-        const value = String(event.target.value);
-        row[ci] = value.length > NovaTableGrid.MAX_CELL_CHARS ? value.slice(0, NovaTableGrid.MAX_CELL_CHARS) : value;
-        scheduleSave();
-    });
-    return wrap;
-}
-
 function renderMatrixBody(node){
     ensureMatrixState(node);
     const wrap = document.createElement('div');
@@ -6716,11 +6589,6 @@ function renderMatrixBody(node){
             <input data-matrix-global="outline" value="${escapeAttr(node.globalContext.outline)}" placeholder="内容大纲 / 版式规范">
             <input data-matrix-global="commonWidth" type="number" min="256" max="4096" value="${Number(node.globalContext.commonWidth) || 1024}" title="统一宽度">
         </div>
-        <div class="matrix-columns-bar">
-            <span class="matrix-columns-label">数据列</span>
-            ${((node.tableSchema && node.tableSchema.columns) || []).map(function(column){ return '<span class="matrix-column-chip"><input data-matrix-column-title="' + escapeAttr(column.key) + '" value="' + escapeAttr(column.title) + '" aria-label="数据列名称"><button type="button" data-matrix-column-remove="' + escapeAttr(column.key) + '" title="删除数据列"><i data-lucide="x"></i></button></span>'; }).join('')}
-            <button type="button" data-matrix-column-add><i data-lucide="plus"></i>新增列</button>
-        </div>
         <div class="matrix-token-help">连续模式可用 {{上一行文字}}、{{上一行图片}}、{{上一行视频}}；共享字段可用 {{商品参考}}、{{配色}}、{{字体}}、{{内容大纲}}</div>
         ${(node.validationErrors || []).length ? `<div class="matrix-validation-errors">${node.validationErrors.map(error => `<div data-error-row="${escapeAttr(error.rowId || '')}">${escapeHtml(error.message)}</div>`).join('')}</div>` : ''}
         <div class="matrix-rows">${node.rows.map((row, index) => `
@@ -6730,7 +6598,6 @@ function renderMatrixBody(node){
                 <span class="matrix-row-index">${index + 1}</span>
                 <input data-matrix-field="name" value="${escapeAttr(row.name)}" placeholder="步骤名">
                 <textarea data-matrix-field="prompt" placeholder="任务 / 提示词">${escapeHtml(row.prompt || row.task || '')}</textarea>
-                ${((node.tableSchema && node.tableSchema.columns) || []).map(function(column){ return '<input class="matrix-cell-input" data-matrix-cell="' + escapeAttr(column.key) + '" value="' + escapeAttr((row.extra || {})[column.key] || '') + '" placeholder="' + escapeAttr(column.title) + '" title="' + escapeAttr(column.title) + '" style="--matrix-cell-w:' + (Number(column.width) || 96) + 'px">'; }).join('')}
                 <div class="matrix-row-refs">${matrixRowReferences(node, row).map(ref => `<span title="${escapeAttr(ref.name || ref.url)}">${matrixRefThumb(ref)}</span>`).join('') || '<em>连接参考</em>'}</div>
                 <select multiple data-matrix-dependencies title="依赖步骤">${matrixDependencyOptions(node, row)}</select>
                 <select data-matrix-field="type"><option value="image" ${row.type === 'image' ? 'selected' : ''}>图片</option><option value="video" ${row.type === 'video' ? 'selected' : ''}>视频</option></select>
@@ -6801,34 +6668,10 @@ function renderMatrixBody(node){
             updateMatrixRowField(node, index, 'overlay', NovaWorkflowUtils.normalizeOverlay(overlay));
         });
         rowEl.querySelector('[data-matrix-run-row]').onclick = () => runMatrixRows(node.id, [rowId]);
-        rowEl.querySelectorAll('[data-matrix-cell]').forEach(input => input.oninput = event => {
-            try {
-                node.rows = NovaWorkflowUtils.setTableColumnValue(node.tableSchema, node.rows, index, { key: input.dataset.matrixCell }, event.target.value);
-                scheduleSave();
-            } catch(error){ setStatus(error.message); }
-        });
         rowEl.querySelector('[data-matrix-remove]').onclick = () => {
             if(node.rows.length <= 1) return;
             removeMatrixRow(node, rowId); render(); scheduleSave();
         };
-    });
-    wrap.querySelector('[data-matrix-column-add]').onclick = () => {
-        try {
-            const out = NovaWorkflowUtils.addTableColumn(node.tableSchema, node.rows, '新列');
-            node.tableSchema = out.schema; node.rows = out.rows; render(); scheduleSave();
-        } catch(error){ setStatus(error.message); }
-    };
-    wrap.querySelectorAll('[data-matrix-column-remove]').forEach(button => button.onclick = () => {
-        try {
-            const out = NovaWorkflowUtils.deleteTableColumn(node.tableSchema, node.rows, { key: button.dataset.matrixColumnRemove });
-            node.tableSchema = out.schema; node.rows = out.rows; render(); scheduleSave();
-        } catch(error){ setStatus(error.message); }
-    });
-    wrap.querySelectorAll('[data-matrix-column-title]').forEach(input => input.onchange = () => {
-        try {
-            node.tableSchema = NovaWorkflowUtils.renameTableColumn(node.tableSchema, { key: input.dataset.matrixColumnTitle }, input.value);
-            render(); scheduleSave();
-        } catch(error){ setStatus(error.message); }
     });
     return wrap;
 }
@@ -7024,18 +6867,13 @@ function renderNode(node){
             body.ondblclick = openGroupPreview;
         }
     }
-    if(NovaNodeRegistry.isTypeOf(node, 'data-table')) body.appendChild(renderDataTableBody(node));
     if(NovaNodeRegistry.isTaskTableNode(node)) body.appendChild(renderMatrixBody(node));
     if(node.type === 'promptGroup') {
         const promptNodes = (node.items || []).map(id => nodes.find(n => n.id === id)).filter(Boolean);
         body.innerHTML = `<div class="text-[11px] text-gray-400">${promptNodes.length} ${tr('canvas.promptCount')} ${tr('canvas.grouped')}</div>`;
     }
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
-    if(node.type === 'generator'){
-        body.appendChild(renderGeneratorBody(node));
-        const fanoutPanel = renderTableFanoutControl(node);
-        if(fanoutPanel) body.appendChild(fanoutPanel);
-    }
+    if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
     if(node.type === 'midjourney') body.appendChild(renderMidjourneyBody(node));
     if(node.type === 'minimax') body.appendChild(renderMiniMaxBody(node));
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
@@ -9134,128 +8972,6 @@ function llmInputVideos(node){
     });
     return urls;
 }
-// ---- 表格逐行扇出（生成节点侧）-----------------------------------------------
-// DX OS 的 llm-table-batch 语义：「表格逐行驱动生成节点，画布按行产生多个结果组」。
-// 因此触发点在**生成节点**上，表格只提供数据、自身不执行。
-// 仅当上游连着一张 data-table 时控件才出现 —— 不影响任何既有生成路径。
-function upstreamDataTable(node){
-    for(const link of connections.filter(item => item.to === node.id)){
-        const source = nodes.find(candidate => candidate.id === link.from);
-        if(source && NovaNodeRegistry.isTypeOf(source, 'data-table')) return source;
-    }
-    return null;
-}
-
-// 生成节点的共享参考图（所有行共用同一份）。逐行各自的参考图来自表格输入列，
-// 属于后续增量；这里只取上游媒体节点，复用既有收集函数，不自造。
-function fanoutSharedReferences(node){
-    try {
-        const sources = (typeof generatorSources === 'function' ? generatorSources(node) : []) || [];
-        const refs = sources.filter(Boolean).flatMap(source => source.refs || []);
-        return imageRefsOnly(refs);
-    } catch(error){
-        console.warn('[Fanout] 收集参考图失败（忽略）', error);
-        return [];
-    }
-}
-
-function fanoutRowsFromTable(tableNode){
-    const table = NovaTableGrid.normalizeTable(tableNode.table).table;
-    return table.rows.map((cells, rowIndex) => {
-        const values = {};
-        table.columns.forEach((title, ci) => { values[title] = cells[ci] || ''; });
-        return {row_index: rowIndex, values};
-    });
-}
-
-function renderTableFanoutControl(node){
-    const tableNode = upstreamDataTable(node);
-    if(!tableNode || typeof NovaTableGrid === 'undefined') return null;
-    const table = NovaTableGrid.normalizeTable(tableNode.table).table;
-    const wrap = document.createElement('div');
-    wrap.className = 'fanout-panel';
-    wrap.innerHTML = '<div class="fanout-head"><span class="fanout-title">逐行生成</span>'
-        + '<span class="fanout-meta">来自「' + escapeHtml(tableNode.title || '多维表格') + '」· '
-        + table.rows.length + ' 行 × ' + table.columns.length + ' 列</span></div>'
-        + '<div class="fanout-actions"><button type="button" data-fanout-run' + (node.running ? ' disabled' : '') + '>逐行生成（' + table.rows.length + ' 行）</button>'
-        + '<span class="fanout-status" data-fanout-status></span></div>'
-        + '<div class="fanout-rows" data-fanout-rows></div>';
-    wrap.querySelector('[data-fanout-run]').onclick = () => runTableFanout(node, tableNode);
-    return wrap;
-}
-
-async function runTableFanout(node, tableNode){
-    const rows = fanoutRowsFromTable(tableNode);
-    if(!rows.length){ alert('表格没有数据行'); return; }
-    const template = String(node.prompt || '').trim();
-    if(!template){ alert('请先在生成节点里填写提示词；用 {列名} 引用表格单元格，例如「{商品} 的产品图」'); return; }
-    const panel = document.querySelector('.fanout-panel');
-    const statusEl = panel ? panel.querySelector('[data-fanout-status]') : null;
-    const rowsEl = panel ? panel.querySelector('[data-fanout-rows]') : null;
-    const button = panel ? panel.querySelector('[data-fanout-run]') : null;
-    const setStatus = text => { if(statusEl) statusEl.textContent = text; };
-    if(button) button.disabled = true;
-    if(rowsEl) rowsEl.innerHTML = '';
-    // 每次点击视为一次新的批量（新 requestId）；幂等键用于「同一次提交重试」，
-    // 而不是阻止用户主动重跑 —— 与 DX OS 的重跑语义一致。
-    const requestId = uid('fanout');
-    setStatus('提交中…');
-    try {
-        const res = await fetch('/api/table/fanout', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                canvas_id:(typeof canvas !== 'undefined' && canvas ? canvas.id : '') || '',
-                table_node_id:tableNode.id,
-                generator_node_id:node.id,
-                prompt_template:template,
-                provider_id:node.apiProvider || node.provider_id || 'comfly',
-                model:node.model || '',
-                size:node.size || '1024x1024',
-                quality:node.quality || 'auto',
-                reference_images:fanoutSharedReferences(node),
-                rows,
-                request_id:requestId,
-            }),
-        });
-        if(!res.ok){ const body = await res.json().catch(() => ({})); throw new Error(body.detail || ('HTTP ' + res.status)); }
-        let payload = await res.json();
-        setStatus('已派发 ' + payload.launched + ' 个任务' + (payload.skipped ? '，跳过 ' + payload.skipped + ' 行' : ''));
-        renderFanoutRows(rowsEl, payload);
-        // 轮询直到所有任务收敛（复用既有 /api/table/fanout/{id} 状态同步）
-        for(let i = 0; i < 600; i += 1){
-            const pending = (payload.items || []).filter(item => item.task_id && !['succeeded','failed','cancelled'].includes(item.task_status));
-            if(!pending.length) break;
-            await new Promise(resolve => setTimeout(resolve, 1500));
-            const poll = await fetch('/api/table/fanout/' + encodeURIComponent(requestId));
-            if(!poll.ok) break;
-            payload = await poll.json();
-            renderFanoutRows(rowsEl, payload);
-            setStatus('进行中…');
-        }
-        const urls = (payload.items || []).flatMap(item => item.result_urls || []);
-        if(urls.length){
-            node.images = urls.map((url, index) => ({url, name:'fanout-' + (index + 1) + '.png', kind:'image'}));
-        }
-        const done = (payload.items || []).filter(item => item.task_status === 'succeeded').length;
-        const blocked = (payload.items || []).filter(item => item.status === 'blocked').length;
-        setStatus('完成 ' + done + ' 行' + (blocked ? '，拦截 ' + blocked + ' 行' : ''));
-        render(); scheduleSave();
-    } catch(error){
-        setStatus('失败：' + (error?.message || error));
-        if(button) button.disabled = false;
-    }
-}
-
-function renderFanoutRows(container, payload){
-    if(!container) return;
-    container.innerHTML = (payload.items || []).map(item => {
-        const state = item.task_status || item.status;
-        const detail = item.status === 'blocked' ? (item.reason || '不可执行') : (state || '');
-        return '<div class="fanout-row ' + escapeAttr(state || '') + '"><span class="fanout-row-index">' + (item.row_index + 1) + '</span>'
-            + '<span class="fanout-row-state">' + escapeHtml(String(detail).slice(0, 160)) + '</span></div>';
-    }).join('');
-}
-
 function renderGeneratorBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'generator-body';
@@ -14188,70 +13904,18 @@ function trackMatrixTask(matrixNodeId, taskId){
 }
 function clearMatrixTasks(matrixNodeId){ matrixActiveTaskIds.delete(matrixNodeId); }
 function matrixTaskIdsFor(matrixNodeId){ return [...(matrixActiveTaskIds.get(matrixNodeId) || [])]; }
-// 行快照 → 握手 intent：判定下沉到 NovaWorkflowUtils.rowIntent（共享层可单测，
-// 并与后端 _run_row_intent 跨语言对拍，见 tests/test_row_intent_parity.py）。
-function rowIntentFromSnapshot(snapshot){ return NovaWorkflowUtils.rowIntent(snapshot); }
-// 后端握手预检：让用户在点「运行」之前就看到哪些步骤的 target 不可用。
-// 注意这不是唯一防线——后端 _run_launch_row 会独立再校验一次（防前端绕过）。
-// 同一 (provider, model, intent) 只握手一次，避免 N 行打 N 次请求。
-async function preflightMatrixRows(node, rowIds=null){
-    const wanted = rowIds ? new Set(rowIds.map(String)) : null;
-    const rows = (node.rows || []).filter(row => row.selected !== false && (!wanted || wanted.has(String(row.rowId))));
-    if(!rows.length) return {errors:[], checked:0};
-    const groups = new Map();
-    rows.forEach(row => {
-        const snapshot = NovaWorkflowUtils.buildExecutionSnapshotDTO(node, row, {nodes, connections});
-        const intent = rowIntentFromSnapshot(snapshot);
-        const key = [snapshot.provider_id || '', snapshot.model || '', intent].join('|');
-        if(!groups.has(key)) groups.set(key, {snapshot, intent, rows:[]});
-        groups.get(key).rows.push(row);
-    });
-    const errors = [];
-    let checked = 0;
-    for(const entry of groups.values()){
-        const query = new URLSearchParams({
-            provider_id: entry.snapshot.provider_id || '',
-            model: entry.snapshot.model || '',
-            intent: entry.intent,
-        });
-        let descriptor = null, failure = '';
-        try {
-            const res = await fetch('/api/ai/descriptor?' + query.toString());
-            if(res.ok) descriptor = await res.json();
-            else { const body = await res.json().catch(() => ({})); failure = body.detail || ('握手失败 HTTP ' + res.status); }
-        } catch(error){ failure = error?.message || String(error); }
-        checked += 1;
-        const execution = descriptor?.execution || null;
-        if(!failure && execution?.available) continue;
-        const reason = failure || (execution?.reasons || []).join('；') || 'target 不可用';
-        entry.rows.forEach(row => errors.push({
-            code:'preflight.unavailable', rowId:row.rowId, field:'provider',
-            message:`${row.name || row.rowId}：${reason}`,
-        }));
-    }
-    return {errors, checked};
-}
-async function checkMatrixInputs(nodeId, announce=false){
+function checkMatrixInputs(nodeId, announce=false){
     const node = nodes.find(candidate => candidate.id === nodeId && NovaNodeRegistry.isTaskTableNode(candidate));
     if(!node) return {valid:false, errors:[]};
     ensureMatrixState(node);
     const validation = NovaWorkflowUtils.validateMatrix(node, {targets:matrixTargetDescriptors(node)});
-    let errors = (validation.errors || []).slice();
-    // 本地校验先过，再做后端握手（省掉必然失败的请求）；预检本身失败不阻断本地结论。
-    let preflight = {errors:[], checked:0};
-    if(!errors.length){
-        try { preflight = await preflightMatrixRows(node); }
-        catch(error){ console.warn('[Preflight] 握手预检失败（忽略）', error); }
-        errors = errors.concat(preflight.errors);
-    }
-    node.validationErrors = errors;
-    const result = {...validation, errors, valid:Boolean(validation.valid) && !preflight.errors.length, preflight};
+    node.validationErrors = validation.errors;
     if(announce){
         render();
-        if(result.valid) setStatus(`检查通过：${validation.rows.length} 步，已握手 ${preflight.checked} 个 target`);
-        else setStatus(`发现 ${errors.length} 个问题`);
+        if(validation.valid) setStatus(`输入检查通过，共 ${validation.rows.length} 步`);
+        else setStatus(`发现 ${validation.errors.length} 个问题`);
     }
-    return result;
+    return validation;
 }
 async function cancelMatrixBackendTasks(nodeId){
     const ids = matrixTaskIdsFor(nodeId);
@@ -14404,7 +14068,7 @@ async function runMatrixRows(nodeId, rowIds=null, options={}){
         node.range = {startRowId:selected[0].rowId, endRowId:selected[selected.length - 1].rowId};
         node.rows = node.rows.map(row => ({...row, selected:ids.has(row.rowId)}));
     }
-    const validation = await checkMatrixInputs(node.id, false);
+    const validation = checkMatrixInputs(node.id, false);
     if(!validation.valid){
         render(); scheduleSave();
         const message = validation.errors[0]?.message || '表格输入检查失败';

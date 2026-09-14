@@ -259,152 +259,6 @@
         };
     }
 
-    // ---- 多维表格数据列（DXOS 风格 columns + cells）--------------------------
-    // 设计边界：列与单元格是**纯数据层**，与执行字段（prompt/references/type/dependencies…）解耦。
-    // extra / tableSchema 刻意不加入 EXECUTION_INPUT_KEYS —— 改单元格不 bump revision、
-    // 不把行标 stale。要参与执行的字段仍走行顶层字段（沿用既有机制，不另造一套）。
-    const TABLE_SCHEMA_VERSION = 1;
-    const TABLE_MAX_COLUMNS = 200;
-    const TABLE_MAX_CELL_CHARS = 20000;
-    const TABLE_MAX_COLUMN_TITLE = 120;
-    const TABLE_UNNAMED_COLUMN = '未命名列';
-    const TABLE_COLUMN_KEY = /^[a-z][a-z0-9_-]{0,63}$/;
-
-    function tableColumnKey(title, seen){
-        let base = String(title || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-        if(!base || !TABLE_COLUMN_KEY.test(base)) base = 'col';
-        let key = base, n = 1;
-        while(seen[key]){ n += 1; key = base + '-' + n; }
-        seen[key] = true;
-        return key;
-    }
-
-    // 列名：trim → 空则「未命名列」→ 截断 120 → 同名追加 (2)/(3)…
-    function normalizeTableColumns(columns){
-        const list = Array.isArray(columns) ? columns.slice(0, TABLE_MAX_COLUMNS) : [];
-        const seenKey = Object.create(null), seenTitle = Object.create(null), out = [];
-        list.forEach(item => {
-            const source = item && typeof item === 'object' ? item : {title:item};
-            let title = String(source.title ?? source.name ?? '').trim();
-            if(!title) title = TABLE_UNNAMED_COLUMN;
-            if(title.length > TABLE_MAX_COLUMN_TITLE) title = title.slice(0, TABLE_MAX_COLUMN_TITLE);
-            if(seenTitle[title]){ seenTitle[title] += 1; title = title + '(' + seenTitle[title] + ')'; }
-            else seenTitle[title] = 1;
-            let key = String(source.key || '').trim().toLowerCase();
-            if(!TABLE_COLUMN_KEY.test(key) || seenKey[key]) key = tableColumnKey(title, seenKey);
-            else seenKey[key] = true;
-            const width = Number(source.width);
-            out.push({
-                key, title, type:'text', source:'custom',
-                width:Number.isFinite(width) ? Math.max(48, Math.min(480, width)) : 96,
-                editable:source.editable !== false
-            });
-        });
-        return out;
-    }
-
-    function normalizeTableSchema(schema){
-        const source = schema && typeof schema === 'object' ? schema : {};
-        return {
-            version:TABLE_SCHEMA_VERSION,
-            columns:normalizeTableColumns(source.columns),
-            inputColumns:Math.max(0, Math.min(TABLE_MAX_COLUMNS, Number(source.inputColumns) || 0)),
-            inputDetached:source.inputDetached === true
-        };
-    }
-
-    function tableCellToString(value){
-        if(value === null || value === undefined) return '';
-        if(typeof value === 'string') return value.length > TABLE_MAX_CELL_CHARS ? value.slice(0, TABLE_MAX_CELL_CHARS) : value;
-        if(typeof value === 'object'){
-            let text; try { text = JSON.stringify(value); } catch(e){ text = String(value); }
-            return text.length > TABLE_MAX_CELL_CHARS ? text.slice(0, TABLE_MAX_CELL_CHARS) : text;
-        }
-        return String(value);
-    }
-
-    // 单元格数据：只保留 schema 中存在的列，全部转字符串并截断。
-    function normalizeRowExtra(extra, schema){
-        const source = extra && typeof extra === 'object' ? extra : {};
-        const columns = schema && Array.isArray(schema.columns) ? schema.columns : null;
-        const keys = columns ? columns.map(column => column.key) : Object.keys(source);
-        const out = {};
-        keys.forEach(key => { if(source[key] !== undefined) out[key] = tableCellToString(source[key]); });
-        return out;
-    }
-
-    // 列定位：key → 标题（要求唯一）→ 1-based 序号。
-    function resolveTableColumnIndex(schema, selector={}){
-        const columns = (schema && schema.columns) || [];
-        const key = String(selector.key || '').trim();
-        if(key){
-            const byKey = columns.findIndex(column => column.key === key);
-            if(byKey < 0) throw new Error('不存在数据列「' + key + '」');
-            return byKey;
-        }
-        const title = String(selector.title || selector.columnName || '').trim();
-        if(title){
-            const hits = columns.map((column, index) => (column.title === title ? index : -1)).filter(index => index >= 0);
-            if(!hits.length) throw new Error('不存在数据列「' + title + '」');
-            if(hits.length > 1) throw new Error('数据列名「' + title + '」不唯一');
-            return hits[0];
-        }
-        const num = Number(selector.column);
-        if(!Number.isInteger(num) || num < 1 || num > columns.length) throw new Error('数据列序号必须是 1–' + columns.length);
-        return num - 1;
-    }
-
-    // 纯函数：返回 {schema, rows}，不改动入参（调用方负责写回节点）。
-    function addTableColumn(schema, rows, title){
-        const next = normalizeTableSchema(schema);
-        if(next.columns.length >= TABLE_MAX_COLUMNS) throw new Error('数据列最多 ' + TABLE_MAX_COLUMNS + ' 列');
-        next.columns = normalizeTableColumns(next.columns.concat([{title}]));
-        const nextRows = (rows || []).map(row => ({...row, extra:normalizeRowExtra(row?.extra, next)}));
-        return {schema:next, rows:nextRows};
-    }
-
-    function deleteTableColumn(schema, rows, selector){
-        const next = normalizeTableSchema(schema);
-        const index = resolveTableColumnIndex(next, selector);
-        const key = next.columns[index].key;
-        next.columns = next.columns.filter((_, i) => i !== index);
-        const nextRows = (rows || []).map(row => {
-            const extra = {...(row?.extra || {})};
-            delete extra[key];
-            return {...row, extra:normalizeRowExtra(extra, next)};
-        });
-        return {schema:next, rows:nextRows};
-    }
-
-    // 改列名只动 title；key 保持稳定（否则已填单元格会全部孤儿）。
-    // normalizeTableColumns 对「已有合法且唯一」的 key 是保留的，因此这里只需回填 title 再归一。
-    function renameTableColumn(schema, selector, title){
-        const next = normalizeTableSchema(schema);
-        const index = resolveTableColumnIndex(next, selector);
-        next.columns = next.columns.map((column, i) => (i === index ? {...column, title:String(title ?? '')} : column));
-        next.columns = normalizeTableColumns(next.columns);
-        return next;
-    }
-
-    // 行快照 → 握手 intent。与后端 main.py 的 _run_row_intent 必须逐字一致：
-    // 两边不一致会出现「前端预检通过、后端提交时 blocked」。改动请同步两处并跑
-    // tests/test_row_intent_parity.py 做跨语言对拍。
-    function rowIntent(snapshot){
-        const hasRefs = Array.isArray(snapshot?.references) && snapshot.references.length > 0;
-        if(String(snapshot?.type || 'image').toLowerCase() === 'video') return hasRefs ? 'video.image_to_video' : 'video.generate';
-        return hasRefs ? 'image.edit' : 'image.generate';
-    }
-
-    function setTableColumnValue(schema, rows, rowIndex, selector, value){
-        const index = Number(rowIndex);
-        if(!Number.isInteger(index) || index < 0 || index >= (rows || []).length) throw new Error('行序号必须是 1–' + ((rows || []).length));
-        const columnIndex = resolveTableColumnIndex(schema, selector);
-        const key = schema.columns[columnIndex].key;
-        return (rows || []).map((row, i) => i === index
-            ? {...row, extra:{...(row?.extra || {}), [key]:tableCellToString(value)}}
-            : row);
-    }
-
     function normalizeMatrixRow(row={}, index=0, previousRowId='', options={}){
         const source = row && typeof row === 'object' ? row : {prompt:String(row || '')};
         const rowId = matrixRowId(source.rowId || source.id);
@@ -452,8 +306,6 @@
             lastRunRevision:Math.max(0, Number(source.lastRunRevision) || 0),
             resultVersion:Math.max(0, Number(source.resultVersion) || 0),
             executionId:String(source.executionId || ''),
-            // 数据列单元格（纯数据层，与执行语义解耦）
-            extra:normalizeRowExtra(source.extra)
         };
     }
 
@@ -475,7 +327,6 @@
             mode:source.mode === 'continuous' ? 'continuous' : 'batch',
             view:['table', 'gallery', 'long'].includes(source.view) ? source.view : 'table',
             rows,
-            tableSchema:normalizeTableSchema(source.tableSchema),
             globalContext:{...{productReference:'', palette:'', font:'', outline:'', commonWidth:1024}, ...(source.globalContext || {})},
             sharedReferences:(Array.isArray(source.sharedReferences) ? source.sharedReferences : []).map(ref => normalizeRef(ref, {purpose:'shared'})),
             sourceMappings:Array.isArray(source.sourceMappings) ? source.sourceMappings.map(mapping => normalizeConnectionMapping(mapping, 'source')) : [],
@@ -885,5 +736,5 @@
         if(line && lines.length < maxLines) lines.push(line); return lines;
     }
 
-    return {MATRIX_VERSION, MATRIX_TYPES, MATRIX_STATUSES, MATRIX_NODE_TYPE, LEGACY_MATRIX_NODE_TYPES, EXECUTION_INPUT_KEYS, isExecutionField, computeRowExecutionSignature, markRowChangedIfExecutionInputsDiffer, buildRowExecutionContext, buildExecutionSnapshotDTO, extractModelParams, extractExecutionModelParams, extractGlobalReferences, rowsConsumingTarget, captureRowExecutionSignatures, markRowsChangedSince, markRowsAndDependentsStale, rowIsStale, isMatrixNode, migrateMatrixNode, createMatrixTargetLock, matrixTaskId, matrixOwnedRefs, matrixRowId, normalizeRef, normalizeOverlay, normalizeMatrixRow, normalizeMatrixNode, normalizeConnectionMapping, rowResult, patchRow, patchRowById, dependentRowIds, markDependentsStale, markFollowingRowsStale, patchRowAndMarkDependents, mergeRowsWithoutOverwrite, routeTargets, rangeRows, validateMatrix, executionPlan, uniqueRefs, mappedUpstreamRefs, rowTargetMappings, buildRowPayload, createMockRunner, executeMatrix, topologicalLayers, resolveContinuousTokens, continuousSnapshot, flattenRelayConnections, parseCsvRows, verticalStitchLayout, overlayTextLines, TABLE_SCHEMA_VERSION, TABLE_MAX_COLUMNS, TABLE_MAX_CELL_CHARS, TABLE_UNNAMED_COLUMN, normalizeTableColumns, normalizeTableSchema, normalizeRowExtra, resolveTableColumnIndex, tableCellToString, addTableColumn, deleteTableColumn, renameTableColumn, setTableColumnValue, rowIntent};
+    return {MATRIX_VERSION, MATRIX_TYPES, MATRIX_STATUSES, MATRIX_NODE_TYPE, LEGACY_MATRIX_NODE_TYPES, EXECUTION_INPUT_KEYS, isExecutionField, computeRowExecutionSignature, markRowChangedIfExecutionInputsDiffer, buildRowExecutionContext, buildExecutionSnapshotDTO, extractModelParams, extractExecutionModelParams, extractGlobalReferences, rowsConsumingTarget, captureRowExecutionSignatures, markRowsChangedSince, markRowsAndDependentsStale, rowIsStale, isMatrixNode, migrateMatrixNode, createMatrixTargetLock, matrixTaskId, matrixOwnedRefs, matrixRowId, normalizeRef, normalizeOverlay, normalizeMatrixRow, normalizeMatrixNode, normalizeConnectionMapping, rowResult, patchRow, patchRowById, dependentRowIds, markDependentsStale, markFollowingRowsStale, patchRowAndMarkDependents, mergeRowsWithoutOverwrite, routeTargets, rangeRows, validateMatrix, executionPlan, uniqueRefs, mappedUpstreamRefs, rowTargetMappings, buildRowPayload, createMockRunner, executeMatrix, topologicalLayers, resolveContinuousTokens, continuousSnapshot, flattenRelayConnections, parseCsvRows, verticalStitchLayout, overlayTextLines};
 });

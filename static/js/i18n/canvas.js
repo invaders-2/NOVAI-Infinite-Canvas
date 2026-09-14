@@ -32,7 +32,6 @@
         "canvas.loop": { zh: "循环", en: "Loop" },
         "canvas.loopNode": { zh: "循环节点", en: "Loop Node" },
         "canvas.matrixNode": { zh: "多维表格", en: "Data Table" },
-        "canvas.matrixBatchNode": { zh: "批量生成表", en: "Batch Task Table" },
         "canvas.loopCount": { zh: "次数", en: "Runs" },
         "canvas.loopStart": { zh: "起始", en: "Start" },
         "canvas.loopSerial": { zh: "循环", en: "Batch" },
