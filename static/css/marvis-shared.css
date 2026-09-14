@@ -1,0 +1,417 @@
+/* === NOVAI Design Token System (marvis-shared.css) === */
+/* 单一真实来源：所有颜色、字体、阴影、圆角、动效的语义化变量 */
+
+:root {
+    /* ── 字体 ── */
+    --font-sans: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /* ── 背景层 ── */
+    --bg: #f5f5f5;
+    --surface: #ffffff;
+    --surface-2: #fafafa;
+    --elevated: #ffffff;
+    --overlay: rgba(255, 255, 255, 0.6);
+    --canvas-bg: #f5f5f5;
+    --panel-bg: rgba(255, 255, 255, 0.92);
+    --sidebar-bg: rgba(255, 255, 255, 0.6);
+    --stage-bg: #ffffff;
+
+    /* ── 文字层（对齐 Spectrum UI 纯中性） ── */
+    --text: #0a0a0a;
+    --text-2: #737373;
+    --text-3: #8a8a8a;
+    --text-on-accent: #fafafa;
+    --accent: #171717;
+    --accent-hover: #2b2b2b;
+    --accent-pressed: #0a0a0a;
+    --accent-text: #fafafa;
+    --accent-subtle: rgba(10, 10, 10, 0.08);
+
+    /* ── 语义色（统一到 Apple 风，与 NOVAI OS 冻结基线一致） ── */
+    --danger: #ff3b30;
+    --danger-bg: rgba(255, 59, 48, 0.12);
+    --danger-border: rgba(255, 59, 48, 0.30);
+    --danger-text: #d70015;
+    --success: #34c759;
+    --success-bg: rgba(52, 199, 89, 0.12);
+    --success-border: rgba(52, 199, 89, 0.30);
+    --success-text: #248a3d;
+    --warning: #ff9f0a;
+    --warning-bg: rgba(255, 159, 10, 0.12);
+    --warning-border: rgba(255, 159, 10, 0.30);
+    --warning-text: #b25000;
+    --info: #0a84ff;
+    --info-bg: rgba(10, 132, 255, 0.12);
+    --info-border: rgba(10, 132, 255, 0.30);
+    --info-text: #0040dd;
+
+    /* ── 边框 ── */
+    --border: rgba(0, 0, 0, 0.06);
+    --border-2: rgba(0, 0, 0, 0.12);
+    --border-strong: rgba(0, 0, 0, 0.20);
+    --nav-hover-bg: rgba(0, 0, 0, 0.04);
+    --divider: rgba(0, 0, 0, 0.06);
+    --scrollbar: rgba(0, 0, 0, 0.12);
+
+    /* ── 阴影 ── */
+    --shadow-sm: 0 0.5px 1.5px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03);
+    --shadow-md: 0 2px 6px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.05);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.06), 0 16px 40px rgba(0,0,0,0.08);
+    --shadow-xl: 0 8px 24px rgba(0,0,0,0.08), 0 24px 64px rgba(0,0,0,0.12);
+    /* 原始阴影色（用于自定义 box-shadow 组合） */
+    --shadow-color: rgba(0,0,0,0.06);
+    --shadow-color-lg: rgba(0,0,0,0.10);
+
+    /* ── 网格点 ── */
+    --grid-color: #c8c8c8;
+
+    /* ── 圆角（对齐 Spectrum UI / shadcn：4 / 6 / 8 / 12 / 16 / 999） ── */
+    --radius-xs: 4px;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --radius-pill: 999px;
+    --radius-full: 999px;
+
+    /* ── 间距 Scale ── */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-12: 48px;
+
+    /* ── 字号 Scale ── */
+    --text-xs: 11px;
+    --text-sm: 12px;
+    --text-base: 14px;
+    --text-lg: 16px;
+    --text-xl: 20px;
+    --text-2xl: 26px;
+    --text-3xl: 32px;
+
+    /* ── 字重 Scale（统一：400 / 500 / 600 / 700） ── */
+    --font-weight-regular: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+
+    /* ── 行高 Scale ── */
+    --leading-tight: 1.25;
+    --leading-snug: 1.375;
+    --leading-normal: 1.5;
+    --leading-relaxed: 1.625;
+
+    /* ── 字距 Scale（随字号：大字号收紧、小字号微展） ── */
+    --tracking-3xl: -0.02em;
+    --tracking-2xl: -0.01em;
+    --tracking-xl: -0.01em;
+    --tracking-lg: 0em;
+    --tracking-base: 0.01em;
+    --tracking-sm: 0.015em;
+    --tracking-xs: 0.02em;
+
+    /* ── 动效（Apple ease） ── */
+    --ease-apple: cubic-bezier(0.25, 0.1, 0.25, 1.0);
+    --fluid-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --fast-ease: var(--ease-apple);
+    --duration-fast: 200ms;
+    --duration-normal: 300ms;
+    --duration-slow: 400ms;
+
+    /* ── 语义别名（统一收编旧页面映射变量，指向全局 token） ── */
+    --panel: var(--panel-bg);
+    --panel-solid: var(--surface);
+    --card: var(--surface);
+    --soft: var(--nav-hover-bg);
+    --soft-2: var(--surface-2);
+    --line: var(--border);
+    --line-2: var(--border-2);
+    --line-strong: var(--border-strong);
+    --muted: var(--text-2);
+    --faint: var(--text-3);
+    --strong: var(--accent);
+    --strong-text: var(--accent-text);
+    --page: var(--bg);
+    --ok: var(--success);
+    --grid: var(--grid-color);
+    --ease: var(--fast-ease);
+    --shadow: var(--shadow-color);
+}
+
+/* ── 暗色模式：只需重定义变量值 ── */
+html.theme-dark,
+html.studio-theme-dark,
+body.theme-dark,
+body.studio-theme-dark {
+    /* 背景层 */
+    --bg: #0a0a0a;
+    --surface: #0f0f0f;
+    --surface-2: #171717;
+    --elevated: #1a1a1a;
+    --overlay: rgba(10, 10, 10, 0.6);
+    --canvas-bg: #0a0a0a;
+    --panel-bg: rgba(20, 20, 20, 0.92);
+    --sidebar-bg: rgba(10, 10, 10, 0.6);
+    --stage-bg: #0f0f0f;
+
+    /* 文字层（对齐 Spectrum UI 纯中性） */
+    --text: #fafafa;
+    --text-2: #a3a3a3;
+    --text-3: #8a8a8a;
+    --text-on-accent: #0a0a0a;
+    --accent: #fafafa;
+    --accent-hover: #ffffff;
+    --accent-pressed: #d4d4d4;
+    --accent-text: #0a0a0a;
+    --accent-subtle: rgba(250, 250, 250, 0.12);
+
+    /* 语义色（Apple 风暗色微调，与 NOVAI OS 冻结基线一致） */
+    --danger: #ff453a;
+    --danger-bg: rgba(255, 69, 58, 0.12);
+    --danger-border: rgba(255, 69, 58, 0.30);
+    --danger-text: #ff6961;
+    --success: #30d158;
+    --success-bg: rgba(48, 209, 88, 0.12);
+    --success-border: rgba(48, 209, 88, 0.30);
+    --success-text: #30d158;
+    --warning: #ffd60a;
+    --warning-bg: rgba(255, 214, 10, 0.12);
+    --warning-border: rgba(255, 214, 10, 0.30);
+    --warning-text: #ffd60a;
+    --info: #0a84ff;
+    --info-bg: rgba(10, 132, 255, 0.12);
+    --info-border: rgba(10, 132, 255, 0.30);
+    --info-text: #409cff;
+
+    /* 边框 */
+    --border: rgba(255, 255, 255, 0.06);
+    --border-2: rgba(255, 255, 255, 0.12);
+    --border-strong: rgba(255, 255, 255, 0.20);
+    --nav-hover-bg: rgba(255, 255, 255, 0.06);
+    --divider: rgba(255, 255, 255, 0.06);
+    --scrollbar: rgba(255, 255, 255, 0.16);
+
+    /* 阴影（暗色更深） */
+    --shadow-sm: 0 0.5px 1.5px rgba(0,0,0,0.20), 0 1px 3px rgba(0,0,0,0.18);
+    --shadow-md: 0 2px 6px rgba(0,0,0,0.26), 0 8px 24px rgba(0,0,0,0.30);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.30), 0 16px 40px rgba(0,0,0,0.34);
+    --shadow-xl: 0 8px 24px rgba(0,0,0,0.34), 0 24px 64px rgba(0,0,0,0.42);
+    --shadow-color: rgba(0,0,0,0.28);
+    --shadow-color-lg: rgba(0,0,0,0.42);
+
+    /* 网格点 */
+    --grid-color: rgba(120,120,120,0.16);
+}
+
+/* ── 滚动条 ── */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar) transparent;
+}
+
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: var(--radius-full); }
+*::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* ── 基础排版 ── */
+body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: var(--bg);
+    color: var(--text);
+    letter-spacing: var(--tracking-base);
+}
+
+/* ── 等宽文本工具类 ── */
+.mono, code, pre, kbd, samp {
+    font-family: var(--font-mono);
+}
+
+/* ── 极简悬浮浅灰滚动条 ── */
+*::-webkit-scrollbar {
+    width: 10px !important;
+    height: 10px !important;
+    background: transparent !important;
+}
+*::-webkit-scrollbar-track {
+    background: transparent !important;
+    border: none !important;
+}
+*::-webkit-scrollbar-thumb {
+    background-color: #d8d8d8 !important;
+    border: 3px solid transparent !important;
+    border-right-width: 5px !important;
+    background-clip: padding-box !important;
+    border-radius: var(--radius-sm) !important;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background-color: #c0c0c0 !important;
+}
+*::-webkit-scrollbar-corner {
+    background: transparent !important;
+}
+* {
+    scrollbar-width: thin !important;
+    scrollbar-color: #d8d8d8 transparent !important;
+}
+
+/* settings-embed — 嵌入 iframe 时隐藏滚动条 */
+html.settings-embed, html.settings-embed * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+html.settings-embed::-webkit-scrollbar,
+html.settings-embed *::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+}
+
+/* ═══════════════════════════════════════════
+   NOVAI 交互增强动画工具类（追加）
+   ═══════════════════════════════════════════ */
+
+/* ── 按钮 ripple 点击波纹效果 ── */
+.btn-ripple {
+    position: relative;
+    overflow: hidden;
+}
+.btn-ripple::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%),
+                rgba(255, 255, 255, 0.3) 0%,
+                transparent 60%);
+    opacity: 0;
+    transition: opacity 0.4s ease-out;
+    pointer-events: none;
+}
+.btn-ripple:active::after {
+    opacity: 1;
+    transition: opacity 0s;
+}
+
+/* ── Switch 开关弹簧动画 ── */
+.switch-spring {
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.switch-spring:active {
+    transform: scale(0.92);
+}
+/* iOS-style switch knob spring */
+.ios-switch input:checked + .ios-slider:before {
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ios-switch .ios-slider:before {
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ═══════════════════════════════════════════
+   Apple 规范（WWDC 2026 八大原则）视觉补齐追加层
+   ═══════════════════════════════════════════ */
+
+/* ── 亮色顶边：标题栏/侧边栏顶部 1px 高光 ── */
+.frameless-titlebar,
+.sidebar {
+    border-top: 1px solid rgba(255, 255, 255, 0.4);
+}
+html.theme-dark .frameless-titlebar,
+html.theme-dark .sidebar,
+body.theme-dark .frameless-titlebar,
+body.theme-dark .sidebar {
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ── 滚动边缘渐变：标题栏底部分隔线改渐隐过渡 ── */
+.frameless-titlebar {
+    border-bottom: none;
+}
+.frameless-titlebar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border) 12%, var(--border) 88%, transparent);
+    pointer-events: none;
+}
+
+/* ── 滚动内容容器边缘渐隐遮罩（侧边栏底部淡出） ── */
+.sidebar nav {
+    -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
+}
+
+/* ── Vibrancy 文字：半透明表面文字更高对比/字重 ── */
+.frameless-titlebar {
+    color: var(--text);
+    font-weight: 500;
+    text-shadow: 0 0.5px 0 rgba(255, 255, 255, 0.4);
+}
+html.theme-dark .frameless-titlebar,
+body.theme-dark .frameless-titlebar {
+    text-shadow: 0 0.5px 0 rgba(0, 0, 0, 0.35);
+}
+.sidebar {
+    --text-2: #58585e;
+    --text-3: #6e6e73;
+    text-shadow: 0 0.5px 0 rgba(255, 255, 255, 0.35);
+}
+html.theme-dark .sidebar,
+body.theme-dark .sidebar {
+    --text-2: #b3b3b8;
+    --text-3: #8e8e93;
+    text-shadow: 0 0.5px 0 rgba(0, 0, 0, 0.35);
+}
+
+/* ── 字距随字号：大标题收紧、小字微展 ── */
+.frameless-titlebar .titlebar-logo {
+    letter-spacing: var(--tracking-sm);
+}
+.sidebar .logo-text {
+    letter-spacing: var(--tracking-sm);
+}
+.sidebar nav .nav-item,
+.sidebar nav .side-pill {
+    letter-spacing: var(--tracking-xs);
+}
+
+/* ── 降级：prefers-reduced-motion 关闭/减弱 blur 与动画 ── */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    .frameless-titlebar,
+    .sidebar {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+}
+
+/* ── 降级：prefers-reduced-transparency 提高半透明表面不透明度 ── */
+@media (prefers-reduced-transparency: reduce) {
+    :root {
+        --overlay: rgba(255, 255, 255, 0.94);
+        --sidebar-bg: rgba(255, 255, 255, 0.94);
+        --panel-bg: rgba(255, 255, 255, 0.94);
+    }
+    html.theme-dark,
+    html.studio-theme-dark,
+    body.theme-dark,
+    body.studio-theme-dark {
+        --overlay: rgba(13, 13, 13, 0.94);
+        --sidebar-bg: rgba(13, 13, 13, 0.94);
+        --panel-bg: rgba(20, 20, 20, 0.94);
+    }
+}

@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOVAI - 首页</title>
+    <script>(function(){try{var t=localStorage.getItem('studio_theme')||localStorage.getItem('canvas_theme')||'light';if(t==='dark'){document.documentElement.classList.add('studio-theme-dark');document.documentElement.classList.add('theme-dark');}}catch(e){}})();</script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.115.1789114960">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
+    <link rel="stylesheet" href="/static/css/nv-beam.css?v=1.0.115.1789114960">
+    <style>
+        /* ═══ V4 Apple-style Glassmorphism Design System ═══ */
+        :root {
+            --v4-bg: #f5f5f7;
+            --v4-text: #1d1d1f;
+            --v4-muted: #656569;
+            --v4-card-bg: rgba(255, 255, 255, 0.6);
+            --v4-card-solid: rgba(255, 255, 255, 0.92);
+            --v4-card-shadow: rgba(0, 0, 0, 0.06);
+            --v4-card-shadow-hover: rgba(0, 0, 0, 0.1);
+            --v4-btn-bg: #1d1d1f;
+            --v4-btn-text: #ffffff;
+            --v4-focus-ring: #1d1d1f;
+            --v4-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+            --v4-ease-hover: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .theme-dark, [data-theme="dark"] {
+            --v4-bg: #0c0c0c;
+            --v4-text: #f5f5f7;
+            --v4-muted: #96969a;
+            --v4-card-bg: rgba(30, 30, 30, 0.6);
+            --v4-card-solid: rgba(30, 30, 30, 0.88);
+            --v4-card-shadow: rgba(0, 0, 0, 0.3);
+            --v4-card-shadow-hover: rgba(0, 0, 0, 0.5);
+            --v4-btn-bg: #f5f5f7;
+            --v4-btn-text: #1d1d1f;
+            --v4-focus-ring: rgba(245,245,247,0.6);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--v4-bg);
+            color: var(--v4-text);
+            min-height: 100vh;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 0 24px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            scrollbar-width: none;
+            overflow-x: hidden;
+            max-width: 100vw;
+        }
+        body::-webkit-scrollbar { width: 6px; }
+        body::-webkit-scrollbar-track { background: transparent; }
+        body::-webkit-scrollbar-thumb { background: transparent; border-radius: 10px; transition: background 0.3s ease; }
+        body:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); }
+        .theme-dark body::-webkit-scrollbar-thumb { background: transparent; }
+        .theme-dark body:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); }
+        body { scrollbar-width: none; }
+        body:hover { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.2) transparent; }
+        .theme-dark body:hover { scrollbar-color: rgba(255,255,255,0.2) transparent; }
+
+        .home-container {
+            width: 100%;
+            max-width: 860px;
+            padding: 56px 0 48px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* ===== 欢迎工作台头部 ===== */
+        .hp-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            animation: fadeUp 0.7s var(--v4-ease-out) both;
+        }
+
+        .hp-head h1 {
+            font-size: 48px;
+            font-weight: 400;
+            letter-spacing: 0.02em;
+            line-height: 1.1;
+            margin: 0;
+            background: linear-gradient(135deg, var(--v4-text) 0%, var(--v4-muted) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hp-head .sub {
+            font-size: 13px;
+            color: var(--v4-muted);
+            margin-top: 5px;
+            font-weight: 400;
+        }
+
+        .hp-sec-label {
+            font-size: 10.5px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--v4-muted);
+            margin-top: 28px;
+            margin-bottom: 12px;
+            padding-left: 4px;
+        }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ===== 创作工具区 ===== */
+        .hp-tools {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            animation: fadeUp 0.7s var(--v4-ease-out) 0.08s both;
+        }
+
+        .hp-tool {
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid transparent;
+            border-radius: 14px;
+            padding: 16px 16px 14px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
+            transition: transform 0.25s cubic-bezier(0.25,0.1,0.25,1), box-shadow 0.25s, border-color 0.25s;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .hp-tool:nth-child(2) { animation-delay: 0.14s; }
+        .hp-tool:nth-child(3) { animation-delay: 0.2s; }
+
+        .hp-tool:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 14px 30px -12px var(--v4-card-shadow-hover);
+            border-color: rgba(0,0,0,0.1);
+        }
+        .theme-dark .hp-tool:hover { border-color: rgba(255,255,255,0.1); }
+
+        .hp-tool:active {
+            transform: translateY(0) scale(0.98);
+        }
+
+        .hp-tool:focus-visible {
+            outline: 2px solid var(--v4-focus-ring);
+            outline-offset: 2px;
+        }
+
+        .hp-tool-icon {
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 9px;
+            background: var(--v4-bg);
+            color: var(--v4-muted);
+            flex-shrink: 0;
+        }
+
+        .hp-tool-icon svg {
+            width: 15px;
+            height: 15px;
+        }
+
+        .hp-tool h4 {
+            font-size: 13.5px;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            margin: 0;
+            color: var(--v4-text);
+        }
+
+        .hp-tool p {
+            font-size: 11.5px;
+            font-weight: 400;
+            color: var(--v4-muted);
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        /* ===== 主操作区 ===== */
+        .hp-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            animation: fadeUp 0.7s var(--v4-ease-out) 0.3s both;
+        }
+
+        .hp-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: none;
+            cursor: pointer;
+            font-family: var(--font-sans, inherit);
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 12px;
+            padding: 14px 32px;
+            letter-spacing: 0.01em;
+            text-decoration: none;
+            transition: all 0.35s var(--v4-ease-out);
+        }
+
+        .hp-btn:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
+        .hp-btn:active { transform: scale(0.97); }
+        .hp-btn:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+
+        .hp-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .hp-btn-primary {
+            background: var(--v4-btn-bg);
+            color: var(--v4-btn-text);
+        }
+        .theme-dark .hp-btn-primary { box-shadow: 0 8px 20px -8px rgba(0,0,0,0.6); }
+        .hp-btn-primary:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
+
+        /* ===== 开始创作按钮：动态光束边框（nv-beam，与在线生图页生成按钮同款柠檬绿） ===== */
+        #hpCreateBtn.nv-beam { --beam-core: rgba(180,255,60,.8); --beam-mid: rgba(180,255,60,.35); --beam-glow: rgba(180,255,60,.4); }
+        /* 深色主题：按钮保持深底（与浅色主题按钮同色），柠檬绿光束在深底上清晰可见 */
+        html.theme-dark #hpCreateBtn, html.studio-theme-dark #hpCreateBtn {
+            background: #1d1d1f !important;
+            color: #fff !important;
+        }
+
+        .hp-btn-ghost {
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid transparent;
+            color: var(--v4-text);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow);
+        }
+        .hp-btn-ghost:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); border-color: rgba(0,0,0,0.08); }
+        .theme-dark .hp-btn-ghost:hover { border-color: rgba(255,255,255,0.08); }
+
+        /* ===== 最近项目 ===== */
+        .recent-section {
+            animation: fadeUp 0.7s var(--v4-ease-out) 0.38s both;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--v4-muted);
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            padding-left: 4px;
+        }
+
+        .view-all-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            background: none;
+            border: none;
+            padding: 2px 4px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--v4-muted);
+            cursor: pointer;
+            border-radius: 6px;
+            transition: color 0.2s ease-out;
+            font-family: inherit;
+        }
+
+        .view-all-btn:hover {
+            color: var(--v4-text);
+        }
+
+        .view-all-btn:focus-visible {
+            outline: 2px solid var(--v4-focus-ring);
+            outline-offset: 2px;
+        }
+
+        .view-all-btn svg {
+            width: 12px;
+            height: 12px;
+        }
+
+        .view-all-btn[hidden] {
+            display: none;
+        }
+
+        .hp-proj-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        .hp-proj {
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid transparent;
+            border-radius: 14px;
+            overflow: hidden;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow);
+            transition: transform 0.25s cubic-bezier(0.25,0.1,0.25,1), box-shadow 0.25s, border-color 0.25s;
+            text-decoration: none;
+            color: var(--v4-text);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .hp-proj:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 10px 28px -8px var(--v4-card-shadow-hover);
+            border-color: rgba(0,0,0,0.09);
+        }
+        .theme-dark .hp-proj:hover { border-color: rgba(255,255,255,0.09); }
+
+        .hp-proj:focus-visible {
+            outline: 2px solid var(--v4-focus-ring);
+            outline-offset: 2px;
+        }
+
+        .hp-proj-thumb {
+            position: relative;
+            aspect-ratio: 16 / 9;
+            background: var(--v4-bg);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .hp-proj-thumb img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .hp-proj-thumb .ph-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.8;
+        }
+        .hp-proj-thumb .ph-icon svg {
+            width: 22px;
+            height: 22px;
+        }
+
+        .hp-proj-tag {
+            position: absolute;
+            right: 6px;
+            bottom: 6px;
+            font-size: 10px;
+            font-weight: 500;
+            line-height: 1;
+            padding: 3px 6px;
+            border-radius: 6px;
+            background: rgba(0,0,0,0.55);
+            color: #fff;
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+        }
+        .theme-dark .hp-proj-tag { background: rgba(255,255,255,0.18); }
+
+        .hp-proj-info {
+            background: var(--v4-card-bg);
+            padding: 9px 10px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .hp-proj-name {
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .hp-proj-time {
+            font-size: 10px;
+            color: var(--v4-muted);
+        }
+
+        .hp-proj-new {
+            border: 1.5px dashed rgba(0,0,0,0.18);
+            background: transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            box-shadow: none;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            min-height: 0;
+            color: var(--v4-muted);
+            border-radius: 14px;
+        }
+        .theme-dark .hp-proj-new { border-color: rgba(255,255,255,0.22); }
+
+        .hp-proj-new:hover {
+            border-color: rgba(0,0,0,0.4);
+            background: var(--v4-card-bg);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            transform: translateY(-2px);
+        }
+        .theme-dark .hp-proj-new:hover { border-color: rgba(255,255,255,0.45); }
+
+        .hp-proj-new .plus {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: var(--v4-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 400;
+            line-height: 1;
+        }
+
+        .hp-proj-new .new-label {
+            font-size: 11.5px;
+            font-weight: 500;
+            color: var(--v4-muted);
+        }
+
+        .recent-empty {
+            font-size: 13px;
+            color: var(--v4-muted);
+            padding: 24px 0;
+            text-align: center;
+            grid-column: 1 / -1;
+        }
+
+        /* ===== 底部状态 ===== */
+        .status-bar {
+            text-align: center;
+            animation: fadeUp 0.7s var(--v4-ease-out) 0.44s both;
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--v4-muted);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #34c759;
+            animation: nano-pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes nano-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+
+        /* ===== 响应式 ===== */
+        @media (max-width: 640px) {
+            .home-container {
+                padding: 40px 0 32px;
+                gap: 18px;
+            }
+            .hp-head h1 { font-size: 21px; }
+            .hp-tools {
+                grid-template-columns: 1fr;
+            }
+            .hp-proj-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .hp-head { flex-direction: column; gap: 12px; }
+            .hp-actions { flex-wrap: wrap; }
+        }
+
+        /* ===== 局域网访问通知条 ===== */
+        .lan-notice {
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 14px 18px;
+            margin-bottom: 8px;
+            background: var(--v4-card-solid);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            border-radius: 14px;
+            box-shadow: 0 2px 12px var(--v4-card-shadow);
+            animation: fadeUp 0.5s var(--v4-ease-out) both;
+            position: relative;
+        }
+        .theme-dark .lan-notice,
+        [data-theme="dark"] .lan-notice {
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+        .lan-notice.visible { display: flex; }
+        .lan-notice-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            flex: 1;
+        }
+        .lan-notice-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--v4-text);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .lan-notice-title svg {
+            width: 14px;
+            height: 14px;
+            color: var(--v4-focus-ring);
+            flex-shrink: 0;
+        }
+        .lan-notice-url {
+            font-size: 12px;
+            color: var(--v4-muted);
+            font-family:var(--font-mono);
+            word-break: break-all;
+        }
+        .lan-notice-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .lan-qr-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            background: transparent;
+            color: var(--v4-text);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s var(--v4-ease-hover);
+            position: relative;
+        }
+        .lan-qr-btn:hover {
+            background: var(--v4-focus-ring);
+            color: #fff;
+            border-color: var(--v4-focus-ring);
+        }
+        .lan-qr-btn svg { width: 16px; height: 16px; }
+        .lan-qr-popup {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            padding: 12px;
+            background: var(--v4-card-solid);
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+            z-index: 100;
+            white-space: nowrap;
+        }
+        .theme-dark .lan-qr-popup,
+        [data-theme="dark"] .lan-qr-popup {
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+        .lan-qr-popup.show { display: block; }
+        .lan-qr-popup img {
+            display: block;
+            width: 140px;
+            height: 140px;
+            border-radius: 6px;
+        }
+        .lan-qr-popup-label {
+            font-size: 11px;
+            color: var(--v4-muted);
+            text-align: center;
+            margin-top: 6px;
+        }
+        .lan-close-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            border: none;
+            background: transparent;
+            color: var(--v4-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s var(--v4-ease-hover);
+        }
+        .lan-close-btn:hover {
+            background: rgba(0, 0, 0, 0.06);
+            color: var(--v4-text);
+        }
+        .theme-dark .lan-close-btn:hover,
+        [data-theme="dark"] .lan-close-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .lan-close-btn svg { width: 14px; height: 14px; }
+
+        @media (max-width: 640px) {
+            .lan-notice { flex-direction: column; align-items: stretch; }
+            .lan-notice-actions { justify-content: flex-end; }
+        }
+    </style>
+</head>
+<body>
+    <div class="home-container">
+        <!-- 欢迎工作台头部 -->
+        <section class="hp-head">
+            <div>
+                <h1>欢迎回来</h1>
+                <p class="sub" id="hpSub">继续你的创意之旅</p>
+            </div>
+        </section>
+
+        <!-- 最近项目 -->
+        <section class="recent-section">
+            <div class="hp-sec-label">最近项目</div>
+            <div class="hp-proj-grid" id="recentProjects">
+                <div class="recent-empty">暂无最近画布，点击下方新建开始创作</div>
+            </div>
+        </section>
+
+        <!-- 主操作区 -->
+        <section class="hp-actions">
+            <button class="hp-btn hp-btn-primary nv-beam" id="hpCreateBtn" onclick="createNewCanvas()">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5v14M5 12h14"/>
+                </svg>
+                开始创作
+            </button>
+            <button class="hp-btn hp-btn-ghost" id="hpImportBtn" onclick="continueLast()">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                继续上次
+            </button>
+        </section>
+
+        <!-- 创作工具 -->
+        <div class="hp-sec-label">创作工具</div>
+        <section class="hp-tools">
+            <div class="hp-tool" onclick="parent.postMessage({type:'navigate',route:'online'},'*')">
+                <div class="hp-tool-icon">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/>
+                        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                </div>
+                <h4>在线生图</h4>
+                <p>文生图、图生图等多种 AI 生成模式</p>
+            </div>
+
+            <div class="hp-tool" onclick="parent.postMessage({type:'navigate',route:'gpt-chat'},'*')">
+                <div class="hp-tool-icon">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                </div>
+                <h4>GPT 对话</h4>
+                <p>AI 助手辅助创意构思与提示词优化</p>
+            </div>
+
+            <div class="hp-tool" onclick="parent.postMessage({type:'navigate',route:'asset-manager'},'*')">
+                <div class="hp-tool-icon">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 19.5V6.8A2.8 2.8 0 0 1 6.8 4h10.4A2.8 2.8 0 0 1 20 6.8v12.7"/>
+                        <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22h11a2.5 2.5 0 0 0 2.5-2.5V8.8A2.8 2.8 0 0 0 17.2 6H6.8A2.8 2.8 0 0 0 4 8.8v10.7z"/>
+                    </svg>
+                </div>
+                <h4>素材库</h4>
+                <p>集中管理生成作品与上传素材</p>
+            </div>
+        </section>
+
+        <!-- 底部状态 -->
+        <section class="status-bar">
+            <div class="status-indicator">
+                <span class="status-dot"></span>
+                系统就绪
+            </div>
+        </section>
+
+        <!-- 局域网访问通知条（手机/iPad 扫码访问） -->
+        <div class="lan-notice" id="lanNotice">
+            <div class="lan-notice-text">
+                <div class="lan-notice-title">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                        <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                        <line x1="12" y1="20" x2="12.01" y2="20"/>
+                    </svg>
+                    <span>手机 / iPad 访问</span>
+                </div>
+                <div class="lan-notice-url" id="lanNoticeUrl"></div>
+            </div>
+            <div class="lan-notice-actions">
+                <button class="lan-qr-btn" id="lanQrBtn" title="显示二维码">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="7" height="7"/>
+                        <rect x="14" y="3" width="7" height="7"/>
+                        <rect x="3" y="14" width="7" height="7"/>
+                        <line x1="14" y1="14" x2="14" y2="14.01"/>
+                        <line x1="20" y1="14" x2="20" y2="14.01"/>
+                        <line x1="14" y1="20" x2="14" y2="20.01"/>
+                        <line x1="17" y1="17" x2="17" y2="17.01"/>
+                        <line x1="20" y1="20" x2="20" y2="20.01"/>
+                    </svg>
+                    <div class="lan-qr-popup" id="lanQrPopup">
+                        <img id="lanQrImg" alt="二维码"/>
+                        <div class="lan-qr-popup-label">扫码访问</div>
+                    </div>
+                </button>
+                <button class="lan-close-btn" id="lanCloseBtn" title="关闭">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Listen for theme changes from parent
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'studio-theme') {
+                if (e.data.theme === 'dark') {
+                    document.documentElement.classList.add('theme-dark');
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                    document.documentElement.classList.remove('theme-dark');
+                    document.documentElement.setAttribute('data-theme', 'light');
+                }
+            }
+        });
+
+        // ===== 局域网访问通知条 =====
+        (async function initLanNotice() {
+            var notice = document.getElementById('lanNotice');
+            if (!notice) return;
+            // 用户关闭过就不再显示
+            if (localStorage.getItem('lan_notice_closed') === '1') return;
+
+            try {
+                var res = await fetch('/api/lan-info');
+                var data = await res.json();
+                if (!data.available || !data.url) return;
+
+                document.getElementById('lanNoticeUrl').textContent = data.url;
+                if (data.qr_data_url) {
+                    document.getElementById('lanQrImg').src = data.qr_data_url;
+                }
+                notice.classList.add('visible');
+            } catch (e) {
+                // 接口不可用就静默隐藏
+            }
+        })();
+
+        // 二维码弹窗：hover/click 切换
+        (function initLanQrPopup() {
+            var btn = document.getElementById('lanQrBtn');
+            var popup = document.getElementById('lanQrPopup');
+            if (!btn || !popup) return;
+            var hideTimer = null;
+            function show() { clearTimeout(hideTimer); popup.classList.add('show'); }
+            function hide() { hideTimer = setTimeout(function(){ popup.classList.remove('show'); }, 200); }
+            btn.addEventListener('mouseenter', show);
+            btn.addEventListener('mouseleave', hide);
+            popup.addEventListener('mouseenter', show);
+            popup.addEventListener('mouseleave', hide);
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                popup.classList.toggle('show');
+            });
+            document.addEventListener('click', function(e) {
+                if (!btn.contains(e.target) && !popup.contains(e.target)) {
+                    popup.classList.remove('show');
+                }
+            });
+        })();
+
+        // 关闭按钮
+        document.getElementById('lanCloseBtn').addEventListener('click', function() {
+            document.getElementById('lanNotice').classList.remove('visible');
+            localStorage.setItem('lan_notice_closed', '1');
+        });
+
+        // 最新画布
+        function renderRecentProjects() {
+            var grid = document.getElementById('recentProjects');
+            if (!grid) return;
+            fetch('/api/recent-canvases', { cache: 'no-store' })
+                .then(function(r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
+                .then(function(canvases) {
+                    if (!canvases || !Array.isArray(canvases)) canvases = [];
+                    console.log('[home] Recent canvases:', canvases);
+                    var recent = canvases.slice(0, 3);
+                    var html = '';
+                    recent.forEach(function(c) {
+                        try {
+                            var name = escapeHtml(c.title || c.name || '未命名画布');
+                            var canvasId = c.id || '';
+                            var kindLabel = (c.kind === 'smart') ? '智能画布' : '画布';
+                            var timeText = formatUpdateTime(c.updated_at || c.lastOpened);
+                            var encId = canvasId ? encodeURIComponent(canvasId) : '';
+                            var onclick = encId
+                                ? "parent.postMessage({type:'navigate',route:'canvas',canvasId:'" + encId + "'},'*')"
+                                : "parent.postMessage({type:'navigate',route:'canvas'},'*')";
+                            var thumb = c.thumbnail || '';
+                            var thumbHtml = thumb
+                                ? '<img src="' + escapeHtml(thumb) + '" loading="lazy" onerror="this.remove()">'
+                                : '<span class="ph-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>';
+                            html += '<div class="hp-proj" onclick="' + onclick + '" role="link" tabindex="0">' +
+                                '<div class="hp-proj-thumb">' + thumbHtml + '<span class="hp-proj-tag">' + kindLabel + '</span></div>' +
+                                '<div class="hp-proj-info">' +
+                                    '<div class="hp-proj-name">' + name + '</div>' +
+                                    '<div class="hp-proj-time">更新于 ' + timeText + '</div>' +
+                                '</div>' +
+                                '</div>';
+                        } catch(e) {
+                            console.warn('[home] Failed to render canvas card:', e, c);
+                        }
+                    });
+                    html += '<div class="hp-proj hp-proj-new" onclick="createNewCanvas()" role="button" tabindex="0">' +
+                        '<div class="plus">+</div>' +
+                        '<div class="new-label">新建项目</div>' +
+                        '</div>';
+                    grid.innerHTML = html;
+                })
+                .catch(function(err) { console.error('[home] Failed to load recent canvases:', err); });
+        }
+
+        function createNewCanvas() {
+            fetch('/api/canvases', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: '画布 ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+                    icon: 'layers',
+                    kind: 'classic',
+                    project: 'default',
+                    board_x: 40,
+                    board_y: 40
+                })
+            })
+            .then(function(r) {
+                if (!r.ok) throw new Error('create canvas failed');
+                return r.json();
+            })
+            .then(function(data) {
+                var nc = data && data.canvas;
+                if (!nc) throw new Error('no canvas in response');
+                var enc = encodeURIComponent(nc.id);
+                var project = encodeURIComponent(nc.project || 'default');
+                parent.postMessage({ type: 'navigate', route: 'canvas', canvasId: nc.id }, '*');
+            })
+            .catch(function(err) { console.error('[home] create canvas failed:', err); alert('创建画布失败'); });
+        }
+
+        function continueLast() {
+            fetch('/api/recent-canvases', { cache: 'no-store' })
+                .then(function(r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
+                .then(function(canvases) {
+                    var list = (canvases && Array.isArray(canvases)) ? canvases : [];
+                    if (!list.length) {
+                        alert('还没有画布，先开始创作吧');
+                        return;
+                    }
+                    var latest = list[0];
+                    var encId = latest.id ? encodeURIComponent(latest.id) : '';
+                    if (encId) {
+                        parent.postMessage({ type: 'navigate', route: 'canvas', canvasId: encId }, '*');
+                    } else {
+                        parent.postMessage({ type: 'navigate', route: 'canvas' }, '*');
+                    }
+                })
+                .catch(function(err) { console.error('[home] continueLast failed:', err); alert('打开失败，请重试'); });
+        }
+
+        // 监听从父页面发来的刷新消息（如切换回首页时）
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'canvas-focus') {
+                renderRecentProjects();
+            }
+        });
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', renderRecentProjects);
+        } else {
+            renderRecentProjects();
+        }
+
+        function formatUpdateTime(timestamp) {
+            if (!timestamp) return '';
+            var d = new Date(timestamp);
+            if (isNaN(d.getTime())) return '';
+            var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+            return (d.getMonth() + 1) + '/' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        }
+
+        function getTimeAgo(timestamp) {
+            if (!timestamp) return '';
+            var diff = Date.now() - timestamp;
+            var mins = Math.floor(diff / 60000);
+            if (mins < 1) return '刚刚';
+            if (mins < 60) return mins + ' 分钟前';
+            var hours = Math.floor(mins / 60);
+            if (hours < 24) return hours + ' 小时前';
+            var days = Math.floor(hours / 24);
+            if (days < 30) return days + ' 天前';
+            return new Date(timestamp).toLocaleDateString();
+        }
+
+        function escapeHtml(str) {
+            var div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

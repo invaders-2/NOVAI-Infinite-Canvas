@@ -1,0 +1,43 @@
+{
+  "manifestVersion": 5,
+  "id": "com.daxiong.canvas.assets",
+  "name": "大雄画布工具",
+  "version": "0.3.0",
+  "main": "index.html",
+  "host": {
+    "app": "PS",
+    "minVersion": "24.0.0"
+  },
+  "requiredPermissions": {
+    "network": {
+      "domains": "all"
+    },
+    "launchProcess": {
+      "schemes": ["http", "https"]
+    },
+    "localFileSystem": "request"
+  },
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "assetPanel",
+      "label": "大雄画布工具",
+      "minimumSize": {
+        "width": 280,
+        "height": 360
+      },
+      "maximumSize": {
+        "width": 2400,
+        "height": 2400
+      },
+      "preferredDockedSize": {
+        "width": 460,
+        "height": 820
+      },
+      "preferredFloatingSize": {
+        "width": 720,
+        "height": 900
+      }
+    }
+  ]
+}

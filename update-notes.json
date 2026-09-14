@@ -1,0 +1,156 @@
+{
+  "versions": [
+    {
+      "version": "1.0.96",
+      "date": "2026-08-02",
+      "changes": [
+        "画布修复与智能画布缩放工具栏",
+        "Launcher 64位兼容与最大化图标修复"
+      ]
+    },
+    {
+      "version": "1.0.95",
+      "date": "2026-07-31",
+      "changes": [
+        "Win客户端：彻底修复放大按钮无效（改用EnumWindows按PID枚举主窗口，最可靠方式）"
+      ]
+    },
+    {
+      "version": "1.0.94",
+      "date": "2026-07-31",
+      "changes": [
+        "修复在线更新后重启黑屏：改用逐文件覆盖替代整删整建，彻底解决Win更新后html文件丢失问题"
+      ]
+    },
+    {
+      "version": "1.0.93",
+      "date": "2026-07-31",
+      "changes": [
+        "Win客户端：修复放大按钮无效（改用pywebview native handle获取窗口句柄）",
+        "画布：底部新增胶囊缩放工具栏（适应画布/定位/缩放/百分比/全屏）",
+        "画布：支持浮窗全屏模式，ESC退出",
+        "修复静态页面丢失导致黑屏500问题"
+      ]
+    },
+    {
+      "version": "1.0.92",
+      "date": "2026-07-31",
+      "changes": [
+        "Win客户端：修复下载图片点保存无反应（pywebview返回元组导致写入失败）",
+        "Win客户端：修复全屏覆盖系统任务栏问题",
+        "素材库：默认保存路径改为安装目录，不再指向系统C盘",
+        "素材库：Win/Mac均支持系统弹窗选择文件夹",
+        "素材库：更换保存路径后自动搬迁旧素材并提示重启"
+      ]
+    },
+    {
+      "version": "1.0.88",
+      "date": "2026-07-25",
+      "changes": [
+        "手势缩放修复：NovaViewport 依赖内联化（safeScale/viewportTransform/screenToWorld），新增 canvasWheelZoomFactor 函数，修复触摸板/触屏捏合缩放异常"
+      ]
+    },
+    {
+      "version": "1.0.87",
+      "date": "2026-07-25",
+      "changes": [
+        "智能画布修复：Composer popover 溢出裁剪修复（overflow: visible）、smart-popover 定位偏移修复",
+        "端口参数支持：main.py 支持命令行参数/环境变量自定义端口（NOVAI_PORT）",
+        "Photoshop 素材连接器：Windows 打包脚本与 manifest 更新",
+        "静态资源版本号刷新：canvas-list、smart-canvas 等页面缓存版本号同步更新"
+      ]
+    },
+    {
+      "version": "1.0.86",
+      "date": "2026-07-22",
+      "changes": [
+        "云端构建流水线：Windows/Mac 云端打包流水线，自动构建发布",
+        "轮播图资源入库：修复更新后轮播图失效问题",
+        "无边框窗口修复：Win 无边框窗口拖动/边缘缩放/标题栏布局修复",
+        "Mac 签名优化：dmg ad-hoc 签名防「已损坏」提示，修复 dmg 签名被拷贝破坏",
+        "编码修复：修复 Windows 云端构建中文编码问题"
+      ]
+    },
+    {
+      "version": "1.0.85",
+      "date": "2026-07-20",
+      "changes": [
+        "智能画布修复：composer 定位、弹窗裁切、边栏偏移、标题栏布局等修复"
+      ]
+    },
+    {
+      "version": "1.0.84",
+      "date": "2026-07-18",
+      "changes": [
+        "画布列表卡片支持最多4张图片2x2网格预览（后端 canvas_record 新增 thumbnails 字段）",
+        "桌面应用端：无边框窗口+系统托盘（关闭按钮最小化到托盘）+ 局域网访问（手机/iPad 同网络可访问）",
+        "桌面图标更新：白底黑logo圆角设计，符合 logo 视觉系统规定",
+        "局域网访问：/api/lan-info 接口返回二维码，NSIS 安装时自动添加防火墙规则放行 3000 端口",
+        "修复：64位 ctypes WndProc 指针截断崩溃、pystray 打包 ModuleNotFound、端口占用等",
+        "代码仓库纯净版整理：完善 .gitignore，排除设计概念稿/测试截图/备份文件"
+      ]
+    },
+    {
+      "version": "1.0.83",
+      "date": "2026-07-17",
+      "changes": [
+        "前端六轮性能优化：Lucide图标子集化（体积减少90%）、共享模块提取（NovaUtils/NovaMedia）、Marvis风格CSS去重、定时器泄漏修复、rAF暂停机制、touch-mouse布局缓存",
+        "GPT聊天模型选择弹窗重构：左右两栏布局，悬停联动切换供应商，动态高度自适应",
+        "修复GPT聊天功能无法使用（TDZ错误导致空白）、Lucide图标不显示、素材库英文错误信息",
+        "API设置与工作流设置页面设计同步为Marvis风格",
+        "新增7个后端API端点（存储管理、图片检测、分类Prompt、模型规范化、RH钱包状态）",
+        "轮询改为setTimeout递归防竞态、node.running过早清零修复、sendChatMessage防重入"
+      ]
+    },
+    {
+      "version": "1.0.77",
+      "date": "2026-07-14",
+      "changes": [
+        "即梦CLI脚本加入更新白名单，可通过更新机制自动推送"
+      ]
+    },
+    {
+      "version": "1.0.76",
+      "date": "2026-07-13",
+      "changes": [
+        "即梦CLI安装/登录脚本升级为原生方案（Windows exe直装，Mac curl方案），移除WSL依赖"
+      ]
+    },
+    {
+      "version": "1.0.60",
+      "date": "2026-07-12",
+      "changes": [
+        "所有 API 请求默认不走系统代理（直连），避免被 VPN 拖慢/干扰 SSL",
+        "需走代理时设环境变量 NOVAI_USE_PROXY=1 恢复"
+      ]
+    },
+    {
+      "version": "1.0.59",
+      "date": "2026-07-12",
+      "changes": [
+        "SSL 跳过验证改为环境变量控制（NOVAI_SKIP_SSL_VERIFY=1 启用），默认不跳过",
+        "适配所有 VPN/代理场景，不再硬编码关闭 SSL 验证"
+      ]
+    },
+    {
+      "version": "1.0.58",
+      "date": "2026-07-12",
+      "changes": [
+        "修复 HTTPS 请求 SSL record layer failure 错误（强制 HTTP/1.1）",
+        "图片生成轮询间隔优化（10s→5s 初始等待，5s→3s 轮询）",
+        "侧边栏与右侧面板间距修正、底部圆角对齐",
+        "预设提示词新增电商分类入口（6 个电商预设）"
+      ]
+    },
+    {
+      "version": "1.0.57",
+      "date": "2026-07-12",
+      "changes": [
+        "侧边栏添加窗口拖拽支持",
+        "侧边栏底部增加边距，内容区对齐优化",
+        "素材库灰色边框改为透明",
+        "网页版各处 UI 对齐同步修复"
+      ]
+    }
+  ]
+}

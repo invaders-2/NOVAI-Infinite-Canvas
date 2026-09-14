@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <title>素材库管理</title>
+    <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.115.1789114960"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/theme.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.115.1789114960"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789114960">
+    <link rel="stylesheet" href="/static/css/asset-manager.css?v=1.0.115.1789114960">
+
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
+<style>
+/* ═══ V4 Apple-style Glassmorphism 设计变量 ═══ */
+:root {
+    --v4-bg: #f5f5f7;
+    --v4-text: #1d1d1f;
+    --v4-muted: #656569;
+    --v4-faint: #98989d;
+    --v4-card-bg: rgba(255, 255, 255, 0.6);
+    --v4-card-solid: rgba(255, 255, 255, 0.92);
+    --v4-card-shadow: rgba(0, 0, 0, 0.06);
+    --v4-card-shadow-hover: rgba(0, 0, 0, 0.1);
+    --v4-btn-bg: #1d1d1f;
+    --v4-btn-text: #ffffff;
+    --v4-focus-ring: #1d1d1f;
+    --v4-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --v4-ease-hover: cubic-bezier(0.4, 0, 0.2, 1);
+    --v4-accent: #1d1d1f;
+    --v4-accent-soft: rgba(29,29,31,0.08);
+    --v4-danger: #ef4444;
+    --v4-danger-soft: rgba(239,68,68,0.08);
+    --v4-success: #10b981;
+}
+.theme-dark, [data-theme="dark"], body.theme-dark {
+    --v4-bg: #0c0c0c;
+    --v4-text: #f5f5f7;
+    --v4-muted: #96969a;
+    --v4-faint: #7d7d80;
+    --v4-card-bg: rgba(30, 30, 30, 0.6);
+    --v4-card-solid: rgba(30, 30, 30, 0.88);
+    --v4-card-shadow: rgba(0, 0, 0, 0.3);
+    --v4-card-shadow-hover: rgba(0, 0, 0, 0.5);
+    --v4-btn-bg: #f5f5f7;
+    --v4-btn-text: #1d1d1f;
+    --v4-focus-ring: rgba(245,245,247,0.6);
+    --v4-accent: #f5f5f7;
+    --v4-accent-soft: rgba(245,245,247,0.12);
+}
+
+/* ═══ 全局 ═══ */
+body {
+    background: var(--v4-bg) !important;
+    color: var(--v4-text) !important;
+    overflow: hidden !important;
+    font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif) !important;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scrollbar-width: none;
+}
+body::-webkit-scrollbar { width: 0; height: 0; display: none; }
+* { scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* ═══ PAGE CONTAINER ═══ */
+.asset-page {
+    height: 100vh !important;
+    padding: 16px 22px !important;
+    gap: 12px !important;
+}
+
+/* ═══ HEADER ═══ */
+.asset-page-head {
+    padding: 14px 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+.asset-title,
+.asset-page-head .asset-title {
+    font-size: 18px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.02em !important;
+    color: var(--v4-text) !important;
+}
+.asset-sub,
+.asset-page-head .asset-sub {
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    color: var(--v4-muted) !important;
+    margin-top: 4px !important;
+}
+.asset-status {
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px solid transparent !important;
+    border-radius: 10px !important;
+    font-weight: 500 !important;
+    font-size: 11px !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
+}
+.asset-btn {
+    border-radius: 10px !important;
+    border: 1px solid transparent !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    color: var(--v4-text) !important;
+    font-weight: 500 !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow) !important;
+    transition: all 0.3s var(--v4-ease-out) !important;
+}
+.asset-btn:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover) !important;
+    border-color: rgba(0,0,0,0.08) !important;
+    background: var(--v4-card-solid) !important;
+    color: var(--v4-text) !important;
+}
+.theme-dark .asset-btn:hover { border-color: rgba(255,255,255,0.08) !important; }
+.asset-btn.primary {
+    background: var(--v4-btn-bg) !important;
+    color: var(--v4-btn-text) !important;
+    border-color: transparent !important;
+}
+.asset-btn.primary:hover {
+    background: var(--v4-btn-bg) !important;
+    transform: scale(1.03) !important;
+    border-color: transparent !important;
+}
+.asset-btn.danger:hover {
+    color: var(--v4-danger) !important;
+    border-color: rgba(239,68,68,0.28) !important;
+    background: var(--v4-danger-soft) !important;
+}
+
+.asset-icon-btn {
+    border-radius: 10px !important;
+    border: 1px solid transparent !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    color: var(--v4-muted) !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
+    transition: all 0.3s var(--v4-ease-out) !important;
+}
+.asset-icon-btn:hover {
+    color: var(--v4-text) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover) !important;
+    border-color: rgba(0,0,0,0.08) !important;
+    background: var(--v4-card-solid) !important;
+}
+.theme-dark .asset-icon-btn:hover { border-color: rgba(255,255,255,0.08) !important; }
+
+/* ═══ TABS ═══ */
+.asset-tabs {
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    border: 1px solid transparent !important;
+    border-radius: 14px !important;
+    padding: 5px !important;
+    gap: 2px !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow) !important;
+}
+.asset-tabs button {
+    height: 34px !important;
+    padding: 0 14px !important;
+    border-radius: 10px !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.01em !important;
+    color: var(--v4-muted) !important;
+    background: transparent !important;
+    transition: all 0.25s var(--v4-ease-out) !important;
+}
+.asset-tabs button:hover {
+    color: var(--v4-text) !important;
+    background: var(--v4-bg) !important;
+}
+.asset-tabs button.active {
+    background: var(--v4-btn-bg) !important;
+    color: var(--v4-btn-text) !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow) !important;
+}
+.asset-tabs svg, .asset-btn svg, .asset-icon-btn svg {
+    width: 14px !important; height: 14px !important;
+}
+
+/* ═══ 三栏面板 ═══ */
+.asset-manager-root {
+    gap: 12px !important;
+    grid-template-columns: 320px minmax(580px, 1fr) 320px !important;
+}
+
+.asset-panel {
+    border-radius: 16px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    border: 1px solid transparent !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow) !important;
+    overflow: hidden !important;
+}
+
+.panel-head {
+    padding: 14px 14px !important;
+    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
+    min-height: 48px !important;
+}
+.theme-dark .panel-head { border-bottom-color: rgba(255,255,255,0.06) !important; }
+.panel-title strong {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+}
+html body .asset-page .asset-panel .panel-head .panel-title strong {
+    font-weight: 600 !important;
+}
+.panel-title span {
+    font-size: 10px !important;
+    font-weight: 400 !important;
+    color: var(--v4-faint) !important;
+}
+html body .asset-page .asset-panel .panel-head .panel-title span {
+    font-weight: 400 !important;
+}
+
+/* ═══ NAV TREE ═══ */
+.nav-row {
+    border-radius: 10px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s var(--v4-ease-hover) !important;
+}
+.nav-row:hover { background: var(--v4-bg) !important; }
+.nav-row.active {
+    background: var(--v4-accent-soft) !important;
+    border-color: var(--v4-accent) !important;
+    box-shadow: 0 0 0 1px var(--v4-accent) !important;
+}
+.nav-row-name { font-weight: 500 !important; }
+.nav-row-count {
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    background: var(--v4-bg) !important;
+}
+.nav-row.active .nav-row-count {
+    background: var(--v4-accent) !important;
+    color: #fff !important;
+}
+.nav-group-title {
+    font-size: 10px !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.06em !important;
+}
+
+/* Tree rows */
+.tree-row {
+    border-radius: 9px !important;
+    transition: all 0.2s var(--v4-ease-hover) !important;
+    font-weight: 500 !important;
+}
+.tree-row:hover { background: var(--v4-bg) !important; }
+.tree-row.active {
+    background: var(--v4-accent-soft) !important;
+    border-color: rgba(0,113,227,0.18) !important;
+    box-shadow: none !important;
+}
+.tree-row.active::before {
+    background: var(--v4-accent) !important;
+    opacity: 1 !important;
+}
+.tree-row-name { font-weight: 500 !important; }
+.tree-child .tree-row-name { font-weight: 400 !important; }
+.tree-row-count { font-weight: 500 !important; border-radius: 8px !important; }
+.tree-row.active .tree-row-count {
+    background: var(--v4-accent) !important;
+    color: #fff !important;
+}
+.tree-children { border-left-color: rgba(128,128,128,0.15) !important; }
+.nav-section-title { font-weight: 500 !important; }
+.tree-smart-title { font-weight: 500 !important; }
+
+/* ═══ CONTENT TOOLBAR ═══ */
+.content-toolbar {
+    padding: 12px 14px !important;
+    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
+}
+.theme-dark .content-toolbar { border-bottom-color: rgba(255,255,255,0.06) !important; }
+.content-heading strong {
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+}
+html body .asset-page .asset-content .content-toolbar .content-heading strong {
+    font-weight: 600 !important;
+}
+.content-heading span {
+    font-size: 10px !important;
+    font-weight: 400 !important;
+}
+html body .asset-page .asset-content .content-toolbar .content-heading span {
+    font-weight: 400 !important;
+}
+.asset-search-wrap {
+    border-radius: 10px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px solid transparent !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
+}
+.asset-search {
+    font-weight: 500 !important;
+    font-size: 11px !important;
+}
+
+/* ═══ MANAGE TOOLS ═══ */
+.manage-tools {
+    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
+    background: rgba(128,128,128,0.03) !important;
+}
+.theme-dark .manage-tools { border-bottom-color: rgba(255,255,255,0.06) !important; }
+.manage-select {
+    border-radius: 9px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px solid transparent !important;
+    font-weight: 500 !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
+}
+
+/* ═══ ASSET CARDS ═══ */
+.asset-card {
+    border-radius: 14px !important;
+    border: 1px solid transparent !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow) !important;
+    transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out), border-color 0.35s var(--v4-ease-out) !important;
+    overflow: hidden !important;
+}
+.asset-card:hover {
+    transform: translateY(-4px) scale(1.02) !important;
+    box-shadow: 0 4px 20px -4px var(--v4-card-shadow-hover) !important;
+    border-color: rgba(0,0,0,0.12) !important;
+}
+.theme-dark .asset-card:hover { border-color: rgba(255,255,255,0.08) !important; }
+.asset-card.active {
+    border-color: var(--v4-accent) !important;
+    box-shadow: 0 0 0 1px var(--v4-accent), 0 4px 16px -4px var(--v4-card-shadow) !important;
+}
+.asset-thumb {
+    background: var(--v4-bg) !important;
+}
+.asset-card-body { padding: 8px 10px !important; gap: 4px !important; }
+.asset-card-name {
+    font-size: 11px !important;
+    font-weight: 500 !important;
+}
+.asset-card-meta {
+    font-size: 10px !important;
+    font-weight: 400 !important;
+    color: var(--v4-faint) !important;
+}
+.asset-card-actions button {
+    border-radius: 8px !important;
+    background: var(--v4-card-bg) !important;
+    border: 1px solid transparent !important;
+    transition: all 0.2s var(--v4-ease-hover) !important;
+}
+.asset-card-actions button:hover {
+    color: var(--v4-text) !important;
+    background: var(--v4-card-solid) !important;
+}
+.asset-card-quick {
+    border-radius: 9px !important;
+    background: var(--v4-card-solid) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px solid transparent !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow) !important;
+}
+.asset-kind-badge {
+    border-radius: 8px !important;
+    background: var(--v4-card-solid) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid transparent !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 12px -2px var(--v4-card-shadow) !important;
+}
+
+/* ═══ PROMPT ROWS ═══ */
+.prompt-row {
+    border-radius: 14px !important;
+    border: 1px solid transparent !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow) !important;
+    transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out), border-color 0.35s var(--v4-ease-out) !important;
+}
+.prompt-row:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover) !important;
+    border-color: rgba(0,0,0,0.08) !important;
+}
+.theme-dark .prompt-row:hover { border-color: rgba(255,255,255,0.08) !important; }
+.prompt-row.active {
+    border-color: var(--v4-accent) !important;
+    background: var(--v4-accent-soft) !important;
+    box-shadow: none !important;
+}
+.prompt-row-title strong {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+}
+.prompt-tag {
+    font-weight: 500 !important;
+    border-radius: 8px !important;
+}
+.prompt-row-text {
+    font-weight: 400 !important;
+    opacity: 0.82 !important;
+}
+.prompt-row-scene {
+    font-weight: 400 !important;
+}
+
+/* ═══ UPLOAD CARDS ═══ */
+.upload-grid-card {
+    border-radius: 14px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px dashed rgba(128,128,128,0.2) !important;
+    box-shadow: none !important;
+    transition: all 0.3s var(--v4-ease-out) !important;
+}
+.upload-grid-card:hover {
+    border-color: var(--v4-accent) !important;
+    background: var(--v4-accent-soft) !important;
+}
+.upload-body strong { font-weight: 500 !important; }
+.upload-body small { font-weight: 400 !important; }
+
+/* ═══ DETAIL PANEL ═══ */
+.detail-scroll { padding: 14px !important; gap: 14px !important; }
+.detail-empty {
+    border-radius: 14px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px dashed rgba(128,128,128,0.15) !important;
+    font-weight: 500 !important;
+}
+.detail-name {
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+}
+.detail-media {
+    border-radius: 14px !important;
+    border: 1px solid transparent !important;
+    background: var(--v4-card-bg) !important;
+    overflow: hidden !important;
+}
+.detail-meta {
+    border-radius: 12px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px solid transparent !important;
+}
+.detail-meta span { font-weight: 500 !important; }
+.detail-meta strong { font-weight: 500 !important; }
+.detail-url {
+    border-radius: 12px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px solid transparent !important;
+}
+.detail-caption-card {
+    border-radius: 14px !important;
+    border: 1px solid transparent !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+}
+.detail-caption-head {
+    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
+}
+.detail-caption-head strong { font-weight: 600 !important; }
+.detail-caption-textarea { font-weight: 400 !important; }
+
+/* ═══ PROMPT BLOCKS ═══ */
+.prompt-block {
+    border-radius: 14px !important;
+    border: 1px solid transparent !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+}
+.prompt-block-head {
+    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
+    font-weight: 500 !important;
+}
+.prompt-block-body {
+    font-weight: 400 !important;
+    background: transparent !important;
+}
+.prompt-detail-title {
+    font-size: 16px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+}
+.prompt-detail-scene { font-weight: 400 !important; }
+
+/* ═══ PARAMS / AVATAR ═══ */
+.param-row {
+    border-radius: 12px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px solid transparent !important;
+}
+.param-row strong { font-weight: 500 !important; }
+.param-row span { font-weight: 400 !important; }
+
+/* ═══ EMPTY STATE ═══ */
+.empty-state {
+    border-radius: 14px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px dashed rgba(128,128,128,0.15) !important;
+    font-weight: 500 !important;
+}
+
+/* ═══ CLIPBOARD BAR ═══ */
+.asset-clipboard-bar {
+    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
+    background: rgba(128,128,128,0.03) !important;
+    font-weight: 500 !important;
+}
+
+/* ═══ DROP ZONE ═══ */
+.asset-drop {
+    border-radius: 14px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px dashed rgba(128,128,128,0.2) !important;
+    font-weight: 500 !important;
+}
+.asset-drop.drag-over {
+    border-color: var(--v4-accent) !important;
+    background: var(--v4-accent-soft) !important;
+}
+
+/* ═══ SIDE UPLOAD CARD ═══ */
+.side-upload-card {
+    border-radius: 14px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px dashed rgba(128,128,128,0.2) !important;
+}
+.side-upload-card strong { font-weight: 500 !important; }
+.side-upload-card span { font-weight: 400 !important; }
+.side-upload-card.drag-over {
+    border-color: var(--v4-accent) !important;
+    background: var(--v4-accent-soft) !important;
+}
+
+/* ═══ CLASSIFICATION CHIPS ═══ */
+.classification-chips span, .classification-chips button {
+    border-radius: 10px !important;
+    font-weight: 500 !important;
+}
+.classification-chips button.active {
+    background: var(--v4-accent) !important;
+    border-color: var(--v4-accent) !important;
+    color: #fff !important;
+}
+
+/* ═══ SMART CLASS PILLS ═══ */
+.smart-class-pill {
+    border-radius: 10px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s var(--v4-ease-hover) !important;
+}
+.smart-class-pill.active {
+    background: var(--v4-accent) !important;
+    border-color: var(--v4-accent) !important;
+    color: #fff !important;
+}
+
+/* ═══ TREE ACTION BAR ═══ */
+.tree-action-bar {
+    border-radius: 12px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px solid transparent !important;
+}
+.tree-action-bar button { font-weight: 500 !important; }
+
+/* ═══ NAV HINT ═══ */
+.nav-hint {
+    border-radius: 12px !important;
+    background: var(--v4-card-bg) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    border: 1px solid transparent !important;
+    font-weight: 400 !important;
+}
+
+/* ═══ SCROLLBAR ═══ */
+.nav-scroll::-webkit-scrollbar-thumb,
+.content-scroll::-webkit-scrollbar-thumb,
+.detail-scroll::-webkit-scrollbar-thumb {
+    background: rgba(128,128,128,0.3) !important;
+}
+.nav-scroll::-webkit-scrollbar,
+.content-scroll::-webkit-scrollbar,
+.detail-scroll::-webkit-scrollbar { width: 5px !important; }
+.nav-scroll::-webkit-scrollbar-track,
+.content-scroll::-webkit-scrollbar-track,
+.detail-scroll::-webkit-scrollbar-track { background: transparent !important; }
+.nav-scroll,
+.content-scroll,
+.detail-scroll { scrollbar-width: thin !important; scrollbar-color: rgba(128,128,128,0.3) transparent !important; }
+
+/* ═══ LIGHTBOX ═══ */
+.asset-lightbox {
+    background: rgba(11, 11, 11, 0.88) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+}
+
+/* ═══ RESPONSIVE ═══ */
+@media (max-width: 1280px) {
+    .asset-manager-root {
+        grid-template-columns: 280px minmax(0, 1fr) !important;
+    }
+}
+@media (max-width: 820px) {
+    .asset-page { padding: 12px !important; }
+    .asset-manager-root { grid-template-columns: 1fr !important; }
+    .asset-tabs button { padding: 0 10px !important; font-size: 11px !important; }
+}
+
+</style>
+</head>
+<body>
+    <div class="asset-page">
+        <header class="asset-page-head">
+            <div>
+                <div class="asset-title">素材库管理</div>
+                <div class="asset-sub">按库、分组、内容和预览管理素材与提示词。</div>
+            </div>
+            <div class="asset-head-actions">
+                <div id="assetStatus" class="asset-status">准备就绪</div>
+                <button id="storageSettingsBtn" class="asset-btn" type="button"><i data-lucide="settings"></i><span>偏好设置</span></button>
+                <button id="refreshBtn" class="asset-btn" type="button"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
+            </div>
+        </header>
+
+        <div class="asset-tabs">
+            <button id="assetTabAssets" class="active" type="button" data-tab="assets"><i data-lucide="image"></i><span>图片资产</span></button>
+            <button id="assetTabWorkflows" type="button" data-tab="workflows"><i data-lucide="workflow"></i><span>工作流管理</span></button>
+            <button id="assetTabPrompts" type="button" data-tab="prompts"><i data-lucide="text-cursor-input"></i><span>提示词库</span></button>
+            <button id="assetTabCanvasAssets" type="button" data-tab="canvas-assets"><i data-lucide="layout-dashboard"></i><span>画布资产</span></button>
+            <button id="assetTabLocal" type="button" data-tab="local"><i data-lucide="folder-open"></i><span>本地素材</span></button>
+        </div>
+
+        <main id="assetManagerRoot" class="asset-manager-root"></main>
+
+        <!-- 素材存储目录设置 -->
+        <div id="storagePathSection" class="storage-path-section" style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin-top:8px;border-radius:14px;background:var(--v4-card-bg);backdrop-filter:blur(20px) saturate(150%);-webkit-backdrop-filter:blur(20px) saturate(150%);border:1px solid transparent;box-shadow:0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow);">
+            <i data-lucide="folder-open" style="width:15px;height:15px;color:var(--v4-muted);flex:0 0 auto;"></i>
+            <span style="font-size:11px;color:var(--v4-muted);font-weight:500;flex:0 0 auto;">素材保存路径:</span>
+            <span class="storage-current-path" style="flex:1;font-size:11px;color:var(--v4-text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">加载中...</span>
+            <button class="asset-btn storage-select-btn" type="button" onclick="selectStorageDir()" style="font-size:11px;padding:5px 12px;flex:0 0 auto;"><i data-lucide="folder-search" style="width:13px;height:13px;"></i><span>选择</span></button>
+            <button class="asset-btn storage-open-btn" type="button" onclick="openStorageDir()" style="font-size:11px;padding:5px 12px;flex:0 0 auto;"><i data-lucide="external-link" style="width:13px;height:13px;"></i><span>打开</span></button>
+        </div>
+    </div>
+
+    <input id="assetUploadInput" type="file" accept="image/*,video/*,audio/*,.json,.zip,application/json,application/zip" multiple hidden>
+    <script defer src="/static/js/asset-manager.js?v=1.0.115.1789114960"></script>
+    <script>
+    /* --- 素材存储目录管理 --- */
+    async function loadStorageConfig() {
+        try {
+            const resp = await fetch('/api/config/storage');
+            const data = await resp.json();
+            const el = document.querySelector('.storage-current-path');
+            if (el) el.textContent = data.path || '默认路径';
+        } catch(e) {
+            const el = document.querySelector('.storage-current-path');
+            if (el) el.textContent = '无法加载';
+        }
+    }
+
+    async function selectStorageDir() {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.select_directory) {
+            // 桌面客户端：调原生文件夹选择弹窗
+            const path = await window.pywebview.api.select_directory();
+            if (path) saveAndUpdatePath(path);
+        } else if (typeof window.showDirectoryPicker === 'function') {
+            // 现代浏览器：File System Access API 系统文件夹弹窗
+            try {
+                const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+                saveAndUpdatePath(handle.name);
+            } catch(e) {
+                if (e && e.name !== 'AbortError') alert('选择文件夹失败: ' + e.message);
+            }
+        } else {
+            // 兜底：简单输入框
+            const path = prompt('请输入素材保存目录路径：');
+            if (path && path.trim()) saveAndUpdatePath(path.trim());
+        }
+    }
+
+    async function saveAndUpdatePath(path) {
+        try {
+            const res = await fetch('/api/config/storage', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path: path})
+            });
+            const data = await res.json();
+            const el = document.querySelector('.storage-current-path');
+            if (el) el.textContent = data.path || path;
+            const migrated = data.migrated || 0;
+            const msg = migrated > 0
+                ? `素材路径已更新，已搬迁 ${migrated} 个文件。\n\n需要重启 NOVAI 才能生效，现在重启吗？`
+                : '素材路径已更新。\n\n需要重启 NOVAI 才能生效，现在重启吗？';
+            if (confirm(msg)) {
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.quit_app) {
+                    window.pywebview.api.quit_app();
+                } else {
+                    alert('请手动重启 NOVAI。');
+                }
+            }
+        } catch(e) {
+            alert('保存失败: ' + e.message);
+        }
+    }
+
+    function openStorageDir() {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.open_data_dir) {
+            window.pywebview.api.open_data_dir();
+        } else {
+            alert('请在桌面应用中打开素材目录');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        loadStorageConfig();
+    });
+    </script>
+</body>
+</html>

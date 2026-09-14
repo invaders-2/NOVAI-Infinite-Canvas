@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Settings - Dark Premium Preview</title>
+    <style>
+        @import url('https://fonts.googleapis.cn/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-base: #121212;
+            --bg-sidebar: #1A1A1A;
+            --bg-card: #222222;
+            --bg-card-hover: #282828;
+            --bg-input: #1A1A1A;
+            --bg-elevated: #2A2A2A;
+            --border-subtle: rgba(255, 255, 255, 0.04);
+            --border-light: rgba(255, 255, 255, 0.06);
+            --text-primary: #FFFFFF;
+            --text-secondary: #AAAAAA;
+            --text-muted: #666666;
+            --text-dim: #444444;
+            --accent-green: #34C759;
+            --accent-blue: #2E75CC;
+            --accent-amber: #D4A83A;
+            --accent-red: #FF453A;
+            --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 2px rgba(255, 255, 255, 0.05);
+            --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.06);
+            --shadow-button: 0 2px 6px rgba(0, 0, 0, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.06);
+            --radius-sm: 8px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --font: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+            --font-mono: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg-base);
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* === Scrollbar === */
+        * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.08) transparent; }
+        *::-webkit-scrollbar { width: 6px; }
+        *::-webkit-scrollbar-track { background: transparent; }
+        *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 999px; }
+        *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); }
+
+        /* === Layout === */
+        .page { display: flex; min-height: 100vh; padding: 12px; gap: 12px; }
+
+        /* === Sidebar === */
+        .sidebar {
+            width: 260px;
+            min-width: 260px;
+            background: var(--bg-sidebar);
+            border-radius: var(--radius-lg);
+            padding: 20px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: var(--shadow-card);
+            height: calc(100vh - 24px);
+            position: sticky;
+            top: 12px;
+            overflow-y: auto;
+        }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+        }
+        .sidebar-brand-icon {
+            width: 32px; height: 32px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-card);
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: var(--shadow-button);
+        }
+        .sidebar-brand-icon svg { width: 16px; height: 16px; color: var(--text-secondary); }
+        .sidebar-brand-name { font-size: 15px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.02em; }
+        .sidebar-brand-sub { font-size: 10px; color: var(--text-muted); font-weight: 500; margin-top: 1px; }
+
+        .sidebar-section-title {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            padding: 12px 10px 6px;
+        }
+
+        .sidebar-divider {
+            height: 1px;
+            background: var(--border-light);
+            margin: 4px 10px;
+        }
+
+        /* Provider Card in Sidebar */
+        .provider-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+        }
+        .provider-item:hover { background: var(--bg-elevated); }
+        .provider-item.active {
+            background: var(--bg-elevated);
+            box-shadow: var(--shadow-button);
+        }
+        .provider-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 50%;
+            transform: translateY(-50%);
+            width: 3px; height: 16px;
+            border-radius: 3px;
+            background: var(--text-secondary);
+        }
+        .provider-icon {
+            width: 28px; height: 28px;
+            border-radius: 7px;
+            background: var(--bg-card);
+            display: flex; align-items: center; justify-content: center;
+            flex: 0 0 auto;
+            box-shadow: inset 0 1px 1px rgba(255,255,255,0.04);
+        }
+        .provider-icon svg { width: 14px; height: 14px; color: var(--text-muted); }
+        .provider-item.active .provider-icon svg { color: var(--text-secondary); }
+        .provider-info { min-width: 0; flex: 1; }
+        .provider-name {
+            font-size: 13px; font-weight: 600;
+            color: var(--text-secondary);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .provider-item.active .provider-name { color: var(--text-primary); }
+        .provider-meta {
+            font-size: 10px; font-weight: 500;
+            color: var(--text-dim);
+            margin-top: 1px;
+        }
+        .provider-status-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            flex: 0 0 auto;
+            box-shadow: 0 0 6px rgba(52, 199, 89, 0.4);
+        }
+
+        /* Add Provider Button */
+        .add-provider-btn {
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+            width: 100%; height: 38px;
+            border: 1px dashed rgba(255,255,255,0.1);
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 12px; font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .add-provider-btn:hover {
+            border-color: rgba(255,255,255,0.18);
+            color: var(--text-secondary);
+            background: var(--bg-elevated);
+        }
+        .add-provider-btn svg { width: 14px; height: 14px; }
+
+        /* CLI Section */
+        .cli-btn {
+            display: flex; align-items: center; gap: 8px;
+            width: 100%; min-height: 34px;
+            padding: 0 10px;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 11.5px; font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .cli-btn:hover { background: var(--bg-elevated); color: var(--text-secondary); border-color: rgba(255,255,255,0.1); }
+        .cli-btn svg { width: 14px; height: 14px; flex: 0 0 auto; }
+
+        /* === Main Content === */
+        .main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            padding-bottom: 40px;
+        }
+
+        /* Content Header */
+        .content-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-card);
+        }
+        .content-header-left { display: flex; align-items: center; gap: 14px; }
+        .content-header-icon {
+            width: 40px; height: 40px;
+            border-radius: var(--radius-md);
+            background: var(--bg-elevated);
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: var(--shadow-button);
+        }
+        .content-header-icon svg { width: 20px; height: 20px; color: var(--text-secondary); }
+        .content-title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: var(--text-primary); }
+        .content-sub { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-top: 2px; }
+        .content-header-actions { display: flex; gap: 8px; }
+
+        /* Buttons */
+        .btn {
+            height: 36px; padding: 0 16px;
+            border-radius: var(--radius-sm);
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            font-size: 12px; font-weight: 600;
+            border: 1px solid var(--border-light);
+            background: var(--bg-elevated);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: var(--shadow-button);
+            white-space: nowrap;
+        }
+        .btn:hover { background: var(--bg-card-hover); color: var(--text-primary); border-color: rgba(255,255,255,0.12); }
+        .btn svg { width: 14px; height: 14px; }
+
+        .btn-primary {
+            background: var(--text-primary);
+            color: var(--bg-base);
+            border-color: var(--text-primary);
+        }
+        .btn-primary:hover {
+            background: #e0e0e0;
+            border-color: #e0e0e0;
+            color: var(--bg-base);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255,255,255,0.1);
+        }
+
+        .btn-danger {
+            background: transparent;
+            color: var(--accent-red);
+            border-color: rgba(255, 69, 58, 0.2);
+        }
+        .btn-danger:hover {
+            background: rgba(255, 69, 58, 0.1);
+            border-color: rgba(255, 69, 58, 0.35);
+        }
+
+        /* === Section Card === */
+        .section-card {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-card);
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding-bottom: 16px;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--border-light);
+        }
+        .section-title {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+        .section-desc {
+            font-size: 11.5px;
+            font-weight: 500;
+            color: var(--text-dim);
+            margin-top: 4px;
+            max-width: 400px;
+        }
+
+        /* === Form Fields === */
+        .form-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .field-group { display: flex; flex-direction: column; gap: 8px; }
+        .field-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
+        }
+        .field-hint {
+            font-size: 10.5px;
+            font-weight: 500;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+        .field-hint code {
+            padding: 1px 5px;
+            border-radius: 4px;
+            background: var(--bg-elevated);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        .input-frame {
+            display: flex;
+            align-items: center;
+            padding: 4px;
+            background: var(--bg-input);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-light);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.15);
+        }
+        .input-frame:focus-within {
+            border-color: rgba(255,255,255,0.18);
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.15), 0 0 0 2px rgba(255,255,255,0.04);
+        }
+        .input-frame input {
+            width: 100%;
+            height: 34px;
+            padding: 0 10px;
+            border: 0;
+            background: transparent;
+            color: var(--text-primary);
+            outline: none;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: var(--font);
+        }
+        .input-frame input::placeholder { color: var(--text-dim); }
+
+        /* === API Key Panel === */
+        .key-panel {
+            padding: 16px;
+            background: var(--bg-input);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-light);
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.12);
+        }
+        .key-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 10px;
+            align-items: center;
+        }
+        .key-actions { display: flex; gap: 6px; }
+        .key-btn {
+            width: 40px; height: 40px;
+            border-radius: var(--radius-sm);
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid var(--border-light);
+            background: var(--bg-card);
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: var(--shadow-button);
+        }
+        .key-btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.15); background: var(--bg-elevated); }
+        .key-btn svg { width: 16px; height: 16px; }
+        .key-btn.danger:hover { color: var(--accent-red); border-color: rgba(255,69,58,0.3); background: rgba(255,69,58,0.08); }
+
+        /* === Verify Row === */
+        .verify-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-light);
+            margin-top: 4px;
+        }
+
+        .select-frame {
+            display: flex;
+            align-items: center;
+            padding: 4px;
+            background: var(--bg-input);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-light);
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.15);
+        }
+        .select-frame select {
+            height: 28px;
+            padding: 0 8px;
+            border: 0;
+            background: transparent;
+            color: var(--text-secondary);
+            outline: none;
+            font-size: 11.5px;
+            font-weight: 600;
+            font-family: var(--font);
+            cursor: pointer;
+        }
+        .select-frame select option { background: var(--bg-card); color: var(--text-primary); }
+
+        /* === Models Section === */
+        .models-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 16px 20px;
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-card);
+        }
+        .models-toolbar-actions { display: flex; gap: 8px; }
+
+        .model-block {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            padding: 20px 24px;
+            box-shadow: var(--shadow-card);
+        }
+        .model-block-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding-bottom: 14px;
+            margin-bottom: 12px;
+            border-bottom: 1px solid var(--border-light);
+        }
+        .model-block-title {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+        .model-block-desc {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-dim);
+            margin-top: 3px;
+        }
+
+        /* Model Row */
+        .model-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+            transition: background 0.12s ease;
+        }
+        .model-row:hover { background: var(--bg-elevated); }
+        .model-row + .model-row { margin-top: 2px; }
+        .model-name {
+            font-size: 12.5px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .model-tag {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--bg-elevated);
+            color: var(--text-dim);
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .model-delete {
+            width: 28px; height: 28px;
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--text-dim);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            opacity: 0;
+        }
+        .model-row:hover .model-delete { opacity: 1; }
+        .model-delete:hover { color: var(--accent-red); background: rgba(255,69,58,0.08); }
+        .model-delete svg { width: 14px; height: 14px; }
+
+        /* Empty state */
+        .model-empty {
+            padding: 20px;
+            text-align: center;
+            color: var(--text-dim);
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px dashed rgba(255,255,255,0.06);
+            border-radius: var(--radius-sm);
+        }
+
+        /* Status pill */
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            height: 24px;
+            padding: 0 10px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 600;
+            background: rgba(52, 199, 89, 0.1);
+            color: var(--accent-green);
+            border: 1px solid rgba(52, 199, 89, 0.15);
+        }
+        .status-pill-dot {
+            width: 5px; height: 5px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        /* Model count badge */
+        .count-badge {
+            min-width: 24px; height: 20px;
+            padding: 0 6px;
+            border-radius: 5px;
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: 700;
+        }
+
+        /* Ghost button (small) */
+        .ghost-btn {
+            height: 30px;
+            padding: 0 10px;
+            border-radius: 6px;
+            display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+            font-size: 11px; font-weight: 600;
+            border: 1px solid var(--border-light);
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .ghost-btn:hover { color: var(--text-secondary); border-color: rgba(255,255,255,0.12); background: var(--bg-elevated); }
+        .ghost-btn svg { width: 13px; height: 13px; }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .page { flex-direction: column; }
+            .sidebar { width: 100%; min-width: 100%; height: auto; position: static; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <div class="sidebar-brand-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                </div>
+                <div>
+                    <div class="sidebar-brand-name">API Settings</div>
+                    <div class="sidebar-brand-sub">NOVAI v1.0.18</div>
+                </div>
+            </div>
+
+            <div class="sidebar-section-title">Platforms</div>
+
+            <div class="provider-item active">
+                <div class="provider-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 2v10l7-7"/></svg>
+                </div>
+                <div class="provider-info">
+                    <div class="provider-name">OpenAI</div>
+                    <div class="provider-meta">api.openai.com/v1</div>
+                </div>
+                <div class="provider-status-dot"></div>
+            </div>
+
+            <div class="provider-item">
+                <div class="provider-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                </div>
+                <div class="provider-info">
+                    <div class="provider-name">ModelScope</div>
+                    <div class="provider-meta">api-inference.modelscope.cn</div>
+                </div>
+            </div>
+
+            <div class="provider-item">
+                <div class="provider-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12l4 6-10 13L2 9z"/></svg>
+                </div>
+                <div class="provider-info">
+                    <div class="provider-name">Comfly</div>
+                    <div class="provider-meta">api.comfly.tech/v1</div>
+                </div>
+            </div>
+
+            <div class="provider-item">
+                <div class="provider-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                </div>
+                <div class="provider-info">
+                    <div class="provider-name">Volcengine</div>
+                    <div class="provider-meta">ark.cn-beijing.volces.com</div>
+                </div>
+            </div>
+
+            <div class="provider-item">
+                <div class="provider-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+                </div>
+                <div class="provider-info">
+                    <div class="provider-name">RunningHub</div>
+                    <div class="provider-meta">api.runninghub.ai</div>
+                </div>
+            </div>
+
+            <button class="add-provider-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                Add Platform
+            </button>
+
+            <div class="sidebar-divider"></div>
+
+            <div class="sidebar-section-title">CLI Settings</div>
+
+            <button class="cli-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="12" r="3"/></svg>
+                Jimeng CLI
+            </button>
+            <button class="cli-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                GPT CLI
+            </button>
+
+            <div style="margin-top:auto; padding:12px 10px;">
+                <div style="padding:14px; background:var(--bg-elevated); border-radius:var(--radius-md); border:1px solid var(--border-light); box-shadow:var(--shadow-button);">
+                    <div style="font-size:11px; font-weight:700; color:var(--text-secondary); margin-bottom:4px;">Need an API Key?</div>
+                    <div style="font-size:10px; color:var(--text-dim); line-height:1.5; margin-bottom:10px;">Check recommended platforms for quick setup.</div>
+                    <button class="btn" style="width:100%; height:32px; font-size:11px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><path d="M12 3v18"/><path d="M18 9l-6-6-6 6"/></svg>
+                        View Recommendations
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Header -->
+            <div class="content-header">
+                <div class="content-header-left">
+                    <div class="content-header-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 2v10l7-7"/></svg>
+                    </div>
+                    <div>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <div class="content-title">OpenAI</div>
+                            <div class="status-pill"><div class="status-pill-dot"></div>Connected</div>
+                        </div>
+                        <div class="content-sub">Configure API Key, base URL, and available models</div>
+                    </div>
+                </div>
+                <div class="content-header-actions">
+                    <button class="btn btn-danger">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        Delete
+                    </button>
+                    <button class="btn btn-primary">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                        Save
+                    </button>
+                </div>
+            </div>
+
+            <!-- Basic Info -->
+            <div class="section-card">
+                <div class="section-header">
+                    <div>
+                        <div class="section-title">Basic Information</div>
+                        <div class="section-desc">Platform display name, unique ID, and request endpoint</div>
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="field-group">
+                        <div class="field-label">Platform Name</div>
+                        <div class="input-frame">
+                            <input type="text" value="OpenAI" placeholder="e.g. Comfly">
+                        </div>
+                        <div class="field-hint">Platform ID: <code>openai</code></div>
+                    </div>
+                    <div class="field-group">
+                        <div class="field-label">Base URL</div>
+                        <div class="input-frame">
+                            <input type="text" value="https://api.openai.com/v1" placeholder="https://api.example.com/v1">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API Key -->
+            <div class="section-card">
+                <div class="section-header">
+                    <div>
+                        <div class="section-title">API Key</div>
+                        <div class="section-desc">Key is encrypted and stored securely on the backend</div>
+                    </div>
+                </div>
+                <div class="key-panel">
+                    <div class="key-row">
+                        <div class="input-frame">
+                            <input type="password" value="sk-proj-xxxxxxxxxxxxxxxxxxxx" placeholder="Enter API Key...">
+                        </div>
+                        <div class="key-actions">
+                            <button class="key-btn" title="Save Key">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            </button>
+                            <button class="key-btn danger" title="Clear Key">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="field-hint" style="margin-top:10px;">Key saved. Last 4 chars: <code>xxxx</code></div>
+                </div>
+
+                <!-- Verify Row -->
+                <div class="verify-row">
+                    <button class="btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        Test Connection
+                    </button>
+                    <button class="btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2 2"/></svg>
+                        Test Protocol
+                    </button>
+                    <div class="select-frame">
+                        <select>
+                            <option>OpenAI Standard</option>
+                            <option>Async Protocol</option>
+                            <option>Gemini Protocol</option>
+                            <option>RunningHub</option>
+                        </select>
+                    </div>
+                    <div class="select-frame">
+                        <select>
+                            <option>Image: OpenAI Std</option>
+                            <option>Image: OpenAI JSON</option>
+                            <option>Image: OpenAI Proxy</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Models Toolbar -->
+            <div class="models-toolbar">
+                <div>
+                    <div class="section-title">Model List</div>
+                    <div class="section-desc" style="margin-top:3px;">Auto-fetch all available models from upstream API</div>
+                </div>
+                <div class="models-toolbar-actions">
+                    <button class="btn btn-primary">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Fetch Models
+                    </button>
+                    <button class="btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                        Select Models
+                    </button>
+                </div>
+            </div>
+
+            <!-- Image Models -->
+            <div class="model-block">
+                <div class="model-block-head">
+                    <div>
+                        <div class="model-block-title">Image Models</div>
+                        <div class="model-block-desc">Used by online image generation and canvas API</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div class="count-badge">6</div>
+                        <button class="ghost-btn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                            Add
+                        </button>
+                    </div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">gpt-image-1</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">dall-e-3</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">dall-e-2</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">nano-banana-2</div>
+                    <div class="model-tag">auto</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">seedream-4.0</div>
+                    <div class="model-tag">auto</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">flux-1.1-pro</div>
+                    <div class="model-tag">auto</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+            </div>
+
+            <!-- Chat Models -->
+            <div class="model-block">
+                <div class="model-block-head">
+                    <div>
+                        <div class="model-block-title">Chat Models</div>
+                        <div class="model-block-desc">Used by GPT chat and LLM nodes</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div class="count-badge">4</div>
+                        <button class="ghost-btn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                            Add
+                        </button>
+                    </div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">gpt-4o</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">gpt-4o-mini</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">o3-mini</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">deepseek-chat</div>
+                    <div class="model-tag">auto</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+            </div>
+
+            <!-- Video Models -->
+            <div class="model-block">
+                <div class="model-block-head">
+                    <div>
+                        <div class="model-block-title">Video Models</div>
+                        <div class="model-block-desc">Used by canvas video generation nodes</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <div class="count-badge">2</div>
+                        <button class="ghost-btn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                            Add
+                        </button>
+                    </div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">sora-2</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+                <div class="model-row">
+                    <div class="model-name">seedance-2.0</div>
+                    <div class="model-tag">auto</div>
+                    <div class="model-delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></div>
+                </div>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

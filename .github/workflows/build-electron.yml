@@ -1,0 +1,137 @@
+# NOVAI Electron 桌面版云端打包流水线
+# 触发：手动触发（Actions 页面 Run workflow）或推送 v* 标签（自动发布 GitHub Release）
+# 构建链：PyInstaller 打后端二进制（免 Python 分发）→ electron-builder 打 Electron 壳
+# 产物：desktop/release/*（artifact；打 v 标签时发 Release，供 electron-updater 自动更新）
+name: build-electron
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build-${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            builder: --mac
+          - platform: windows-latest
+            builder: --win
+          - platform: ubuntu-latest
+            builder: --linux
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build backend binary (PyInstaller)
+        shell: bash
+        run: |
+          mkdir -p desktop/resources/backend
+          pyinstaller --onefile --console -y --name NOVAI \
+            --hidden-import=uvicorn.logging \
+            --hidden-import=uvicorn.loops.auto \
+            --hidden-import=uvicorn.protocols.http.auto \
+            main.py
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp dist/NOVAI.exe desktop/resources/backend/NOVAI.exe
+          else
+            cp dist/NOVAI desktop/resources/backend/NOVAI
+          fi
+          # 注意：resources/backend 里只能放后端二进制本身。
+          # VERSION/requirements.txt 已由 package.json 的 extraResources 从
+          # .version / ../requirements.txt 拷到同一目标路径，再拷一份会因
+          # 目标重名（EEXIST hard link 冲突）导致 mac/linux 打包失败。
+
+      - name: Install Electron deps
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+
+      # 把 PyInstaller 后端二进制登记进 electron-builder 的 extraResources，
+      # 使安装包内 Resources/backend 包含可执行后端（目标机免 Python）。
+      - name: Register backend binary for electron-builder
+        working-directory: desktop
+        run: |
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));const ext=p.build.extraResources||[];if(!ext.some(e=>e.to==='backend' && e.from==='resources/backend')){ext.push({from:'resources/backend',to:'backend'});p.build.extraResources=ext;fs.writeFileSync('package.json',JSON.stringify(p,null,2));}console.log('registered');"
+
+      - name: Build Electron app
+        working-directory: desktop
+        run: npx electron-builder ${{ matrix.builder }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVAI-electron
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+            desktop/release/*.blockmap
+            desktop/release/latest*.yml
+          if-no-files-found: warn
+
+      - name: Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          # 版本号带 "-"（如 v1.0.112-beta.1）的 tag 标记为 prerelease，
+          # 正式版客户端（allowPrerelease=false）不会收到测试版更新
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+            desktop/release/*.blockmap
+            desktop/release/latest*.yml
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 国内用户拉不动 GitHub Releases：把更新产物同步到国内镜像。
+      # - ModelScope（bllack/NOVAI-releases 模型仓库）：客户端自动更新的国内源，
+      #   Electron 端 GitHub 检查失败时自动切换到这个 generic 更新地址。
+      # - Gitee（invaders/novai Release 附件）：人工下载镜像（网页下载有验证码，
+      #   不适合做自动更新源，只兜底手动安装）。
+      # 需要在仓库 Settings → Secrets 配置：MODELSCOPE_TOKEN、GITEE_TOKEN（可选）。
+      # 该步骤失败不影响主构建（continue-on-error），产物仍可从 GitHub Release 获取。
+      - name: Sync update artifacts to domestic mirrors (tag only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
+        timeout-minutes: 25
+        shell: bash
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RUNNER_OS: ${{ runner.os }}
+        run: bash .github/scripts/sync-domestic-release.sh

@@ -1,0 +1,1810 @@
+html.studio-theme-dark,
+html.studio-theme-dark body,
+body.studio-theme-dark {
+    color-scheme: dark;
+    background: var(--bg) !important;
+    color: var(--text) !important;
+}
+
+html,
+body {
+    overscroll-behavior: auto;
+}
+
+* {
+    scrollbar-width: thin !important;
+    scrollbar-color: rgba(120, 120, 120, .5) transparent !important;
+}
+
+*::-webkit-scrollbar {
+    width: 8px !important;
+    height: 8px !important;
+    background: transparent !important;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+
+*::-webkit-scrollbar-thumb {
+    min-height: 36px;
+    background-color: rgba(120, 120, 120, .4) !important;
+    border: 2px solid transparent !important;
+    background-clip: padding-box !important;
+    border-radius:var(--radius-full) !important;
+    transition: background-color 0.2s;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(120, 120, 120, .6) !important;
+}
+
+*::-webkit-scrollbar-corner {
+    background: transparent !important;
+}
+
+/* 变量由 marvis-shared.css 统一提供 */
+
+html.studio-theme-dark body .app-shell,
+html.studio-theme-dark body .sidebar,
+html.studio-theme-dark body .stage,
+body.studio-theme-dark .app-shell,
+body.studio-theme-dark .sidebar,
+body.studio-theme-dark .stage {
+    background: var(--bg) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .stage,
+body.studio-theme-dark .stage {
+    box-shadow: inset 0 2px 8px -2px rgba(0,0,0,.3), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+html.studio-theme-dark body .nav-item,
+body.studio-theme-dark .nav-item {
+    color: var(--text-2);
+}
+
+html.studio-theme-dark body .nav-item:hover,
+body.studio-theme-dark .nav-item:hover {
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .nav-item.active,
+body.studio-theme-dark .nav-item.active {
+    background: var(--text) !important;
+    color: var(--surface-2) !important;
+    box-shadow: 0 8px 20px -4px rgba(0,0,0,.4);
+}
+
+html.studio-theme-dark body .logo-ring,
+body.studio-theme-dark .logo-ring {
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body #logo-dot,
+body.studio-theme-dark #logo-dot {
+    background: var(--text) !important;
+}
+
+html.studio-theme-dark body .nano-monitor,
+body.studio-theme-dark .nano-monitor {
+    background: rgba(20, 20, 20, .92) !important;
+    color: var(--text);
+    border-color: transparent !important;
+    box-shadow: 0 8px 24px -4px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.06);
+}
+
+html.studio-theme-dark body .divider,
+body.studio-theme-dark .divider {
+    background: rgba(245, 245, 245, .12) !important;
+}
+
+html.studio-theme-dark body .theme-dock-btn,
+body.studio-theme-dark .theme-dock-btn {
+    background: var(--surface);
+    border-color: transparent;
+    color: var(--text-2);
+    transition: all 0.2s ease;
+}
+
+html.studio-theme-dark body .theme-dock-btn:hover,
+html.studio-theme-dark body .theme-dock-btn.active,
+body.studio-theme-dark .theme-dock-btn:hover,
+body.studio-theme-dark .theme-dock-btn.active {
+    background: var(--text);
+    border-color: transparent;
+    color: var(--surface-2);
+}
+
+html.studio-theme-dark body .console-card,
+html.studio-theme-dark body .nano-input,
+html.studio-theme-dark body .upload-item,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .masonry-item,
+html.studio-theme-dark body .work-panel,
+html.studio-theme-dark body .setting-row,
+html.studio-theme-dark body .tool-panel,
+html.studio-theme-dark body .control-panel,
+html.studio-theme-dark body .topbar,
+html.studio-theme-dark body .composer,
+html.studio-theme-dark body .composer-body,
+html.studio-theme-dark body .bubble.assistant,
+html.studio-theme-dark body .history-popover,
+html.studio-theme-dark body .thread-item,
+html.studio-theme-dark body .lightbox-card,
+html.studio-theme-dark body #lightboxCard,
+html.studio-theme-dark body .bg-white,
+html.studio-theme-dark body .bg-gray-50,
+html.studio-theme-dark body .bg-slate-50,
+html.studio-theme-dark body .bg-gray-50\/50,
+html.studio-theme-dark body .bg-white\/90,
+html.studio-theme-dark body .bg-\[\#f8f8f8\],
+body.studio-theme-dark .console-card,
+body.studio-theme-dark .nano-input,
+body.studio-theme-dark .upload-item,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .masonry-item,
+body.studio-theme-dark .work-panel,
+body.studio-theme-dark .setting-row,
+body.studio-theme-dark .tool-panel,
+body.studio-theme-dark .control-panel,
+body.studio-theme-dark .topbar,
+body.studio-theme-dark .composer,
+body.studio-theme-dark .composer-body,
+body.studio-theme-dark .bubble.assistant,
+body.studio-theme-dark .history-popover,
+body.studio-theme-dark .thread-item,
+body.studio-theme-dark .lightbox-card,
+body.studio-theme-dark #lightboxCard,
+body.studio-theme-dark .bg-white,
+body.studio-theme-dark .bg-gray-50,
+body.studio-theme-dark .bg-slate-50,
+body.studio-theme-dark .bg-gray-50\/50,
+body.studio-theme-dark .bg-white\/90,
+body.studio-theme-dark .bg-\[\#f8f8f8\] {
+    background-color: var(--bg) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .bg-gray-100,
+html.studio-theme-dark body .bg-slate-100,
+html.studio-theme-dark body .select-shell,
+html.studio-theme-dark body .model-pill,
+html.studio-theme-dark body .ratio-grid,
+html.studio-theme-dark body .resolution-toggle,
+html.studio-theme-dark body .mode-switch,
+html.studio-theme-dark body .mini-ratio,
+body.studio-theme-dark .bg-gray-100,
+body.studio-theme-dark .bg-slate-100,
+body.studio-theme-dark .select-shell,
+body.studio-theme-dark .model-pill,
+body.studio-theme-dark .ratio-grid,
+body.studio-theme-dark .resolution-toggle,
+body.studio-theme-dark .mode-switch,
+body.studio-theme-dark .mini-ratio {
+    background-color: var(--bg) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body input:not(.group-title-input),
+html.studio-theme-dark body textarea,
+html.studio-theme-dark body select,
+body.studio-theme-dark input:not(.group-title-input),
+body.studio-theme-dark textarea,
+body.studio-theme-dark select {
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body input::placeholder,
+html.studio-theme-dark body textarea::placeholder,
+body.studio-theme-dark input::placeholder,
+body.studio-theme-dark textarea::placeholder {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .text-black,
+html.studio-theme-dark body .text-gray-700,
+html.studio-theme-dark body .text-slate-700,
+html.studio-theme-dark body .setting-title,
+html.studio-theme-dark body h1,
+html.studio-theme-dark body h2,
+html.studio-theme-dark body h3,
+body.studio-theme-dark .text-black,
+body.studio-theme-dark .text-gray-700,
+body.studio-theme-dark .text-slate-700,
+body.studio-theme-dark .setting-title,
+body.studio-theme-dark h1,
+body.studio-theme-dark h2,
+body.studio-theme-dark h3 {
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .text-gray-300,
+html.studio-theme-dark body .text-gray-400,
+html.studio-theme-dark body .text-gray-500,
+html.studio-theme-dark body .text-slate-400,
+html.studio-theme-dark body .text-slate-500,
+html.studio-theme-dark body .setting-meta,
+html.studio-theme-dark body .label-nano,
+body.studio-theme-dark .text-gray-300,
+body.studio-theme-dark .text-gray-400,
+body.studio-theme-dark .text-gray-500,
+body.studio-theme-dark .text-slate-400,
+body.studio-theme-dark .text-slate-500,
+body.studio-theme-dark .setting-meta,
+body.studio-theme-dark .label-nano {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .border-gray-100,
+html.studio-theme-dark body .border-gray-200,
+html.studio-theme-dark body .border-gray-300,
+html.studio-theme-dark body .border-slate-100,
+html.studio-theme-dark body .border-slate-200,
+html.studio-theme-dark body .border-black,
+html.studio-theme-dark body .border-white,
+html.studio-theme-dark body .border-\[\var(--text)\],
+html.studio-theme-dark body .border-\[\#f0f0f0\],
+body.studio-theme-dark .border-gray-100,
+body.studio-theme-dark .border-gray-200,
+body.studio-theme-dark .border-gray-300,
+body.studio-theme-dark .border-slate-100,
+body.studio-theme-dark .border-slate-200,
+body.studio-theme-dark .border-black,
+body.studio-theme-dark .border-white,
+body.studio-theme-dark .border-\[\var(--text)\],
+body.studio-theme-dark .border-\[\#f0f0f0\] {
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .glass-btn,
+html.studio-theme-dark body .btn-action-dark,
+html.studio-theme-dark body .send-btn,
+html.studio-theme-dark body .gen-btn,
+html.studio-theme-dark body .comfy-run,
+html.studio-theme-dark body .llm-run,
+html.studio-theme-dark body .primary-btn,
+html.studio-theme-dark body .bg-black,
+body.studio-theme-dark .glass-btn,
+body.studio-theme-dark .btn-action-dark,
+body.studio-theme-dark .send-btn,
+body.studio-theme-dark .gen-btn,
+body.studio-theme-dark .comfy-run,
+body.studio-theme-dark .llm-run,
+body.studio-theme-dark .primary-btn,
+body.studio-theme-dark .bg-black {
+    background-color: var(--accent) !important;
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .glass-btn:hover,
+html.studio-theme-dark body .btn-action-dark:hover,
+html.studio-theme-dark body .bg-black:hover,
+body.studio-theme-dark .glass-btn:hover,
+body.studio-theme-dark .btn-action-dark:hover,
+body.studio-theme-dark .bg-black:hover {
+    background-color: var(--accent-hover) !important;
+}
+
+html.studio-theme-dark body .gallery-lightbox,
+html.studio-theme-dark body #lightbox,
+body.studio-theme-dark .gallery-lightbox,
+body.studio-theme-dark #lightbox {
+    background: rgba(12, 12, 12, .78) !important;
+    backdrop-filter: blur(33px) saturate(1.05);
+}
+
+html.studio-theme-dark body .masonry-item:hover,
+html.studio-theme-dark body .console-card:focus-within,
+html.studio-theme-dark body .select-shell:focus-within,
+body.studio-theme-dark .masonry-item:hover,
+body.studio-theme-dark .console-card:focus-within,
+body.studio-theme-dark .select-shell:focus-within {
+    border-color: transparent !important;
+    box-shadow: 0 20px 44px rgba(0,0,0,.28) !important;
+}
+
+html.studio-theme-dark body .console-card textarea,
+html.studio-theme-dark body #prompt,
+html.studio-theme-dark body #promptInput,
+body.studio-theme-dark .console-card textarea,
+body.studio-theme-dark #prompt,
+body.studio-theme-dark #promptInput {
+    color: var(--text) !important;
+    caret-color: var(--accent);
+}
+
+html.studio-theme-dark body .size-btn,
+html.studio-theme-dark body .model-option,
+html.studio-theme-dark body .ratio-option,
+html.studio-theme-dark body .resolution-option,
+html.studio-theme-dark body .mini-ratio button,
+html.studio-theme-dark body .mode-switch button,
+body.studio-theme-dark .size-btn,
+body.studio-theme-dark .model-option,
+body.studio-theme-dark .ratio-option,
+body.studio-theme-dark .resolution-option,
+body.studio-theme-dark .mini-ratio button,
+body.studio-theme-dark .mode-switch button {
+    background: var(--bg) !important;
+    border-color: transparent !important;
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .size-btn:hover,
+html.studio-theme-dark body .model-option:hover,
+html.studio-theme-dark body .ratio-option:hover,
+html.studio-theme-dark body .resolution-option:hover,
+body.studio-theme-dark .size-btn:hover,
+body.studio-theme-dark .model-option:hover,
+body.studio-theme-dark .ratio-option:hover,
+body.studio-theme-dark .resolution-option:hover {
+    border-color: transparent !important;
+    color: var(--accent) !important;
+}
+
+html.studio-theme-dark body .size-btn.active,
+html.studio-theme-dark body .model-option.active,
+html.studio-theme-dark body .ratio-option.active,
+html.studio-theme-dark body .resolution-option.active,
+html.studio-theme-dark body .mini-ratio button.active,
+html.studio-theme-dark body .mode-switch button.active,
+body.studio-theme-dark .size-btn.active,
+body.studio-theme-dark .model-option.active,
+body.studio-theme-dark .ratio-option.active,
+body.studio-theme-dark .resolution-option.active,
+body.studio-theme-dark .mini-ratio button.active,
+body.studio-theme-dark .mode-switch button.active {
+    background: var(--accent) !important;
+    border-color: transparent !important;
+    color: var(--bg) !important;
+    box-shadow: 0 10px 24px rgba(0,0,0,.2) !important;
+}
+
+html.studio-theme-dark body .ios-slider,
+body.studio-theme-dark .ios-slider {
+    background: var(--surface-2) !important;
+}
+
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider {
+    background: var(--accent) !important;
+}
+
+html.studio-theme-dark body .ios-slider:before,
+body.studio-theme-dark .ios-slider:before {
+    background: var(--bg) !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.38) !important;
+}
+
+html.studio-theme-dark body .composer-wrap,
+body.studio-theme-dark .composer-wrap {
+    background: linear-gradient(to top,var(--bg) 82%,rgba(12, 12, 12, 0)) !important;
+}
+
+html.studio-theme-dark body .canvas-gate,
+body.studio-theme-dark .canvas-gate {
+    background-color: var(--bg) !important;
+    background-image: radial-gradient(rgba(120, 120, 120, .18) 1px, transparent 1px) !important;
+}
+
+html.studio-theme-dark body .gate-panel,
+html.studio-theme-dark body .canvas-item,
+html.studio-theme-dark body .canvas-open,
+body.studio-theme-dark .gate-panel,
+body.studio-theme-dark .canvas-item,
+body.studio-theme-dark .canvas-open {
+    background: var(--surface) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .canvas-item:hover,
+body.studio-theme-dark .canvas-item:hover {
+    background: var(--surface-2) !important;
+}
+
+html.studio-theme-dark body .canvas-item.active,
+body.studio-theme-dark .canvas-item.active {
+    background: var(--surface-2) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .canvas-card-title,
+html.studio-theme-dark body .gate-title,
+html.studio-theme-dark body .gate-name-input,
+body.studio-theme-dark .canvas-card-title,
+body.studio-theme-dark .gate-title,
+body.studio-theme-dark .gate-name-input {
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .canvas-card-time,
+html.studio-theme-dark body .gate-subtitle,
+body.studio-theme-dark .canvas-card-time {
+    color: var(--text-3) !important;
+}
+
+body.studio-theme-dark .gate-subtitle {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .canvas-preview-mark,
+html.studio-theme-dark body .canvas-delete,
+html.studio-theme-dark body .secondary-btn,
+html.studio-theme-dark body .gate-back,
+html.studio-theme-dark body .gate-trash-entry,
+html.studio-theme-dark body .create-cancel,
+html.studio-theme-dark body .gate-create-row,
+html.studio-theme-dark body .gate-actions,
+html.studio-theme-dark body .trash-note,
+html.studio-theme-dark body .emoji-picker,
+html.studio-theme-dark body .create-menu,
+html.studio-theme-dark body .selection-hub,
+html.studio-theme-dark body .output-preview,
+body.studio-theme-dark .canvas-preview-mark,
+body.studio-theme-dark .canvas-delete,
+body.studio-theme-dark .secondary-btn,
+body.studio-theme-dark .gate-back,
+body.studio-theme-dark .gate-trash-entry,
+body.studio-theme-dark .create-cancel,
+body.studio-theme-dark .gate-create-row,
+body.studio-theme-dark .gate-actions,
+body.studio-theme-dark .trash-note,
+body.studio-theme-dark .emoji-picker,
+body.studio-theme-dark .create-menu,
+body.studio-theme-dark .selection-hub,
+body.studio-theme-dark .output-preview {
+    background: var(--bg) !important;
+    border-color: transparent !important;
+    color: var(--accent) !important;
+}
+
+html.studio-theme-dark body .gate-trash-badge,
+body.studio-theme-dark .gate-trash-badge {
+    background: var(--accent) !important;
+    color: var(--bg) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .secondary-btn.active,
+body.studio-theme-dark .secondary-btn.active {
+    background: var(--accent) !important;
+    border-color: transparent !important;
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .canvas-delete:hover,
+html.studio-theme-dark body .create-cancel:hover,
+body.studio-theme-dark .canvas-delete:hover,
+body.studio-theme-dark .create-cancel:hover {
+    background: rgba(248,113,113,.14) !important;
+    border-color: rgba(248,113,113,.32) !important;
+    color: var(--danger-text) !important;
+}
+
+html.studio-theme-dark body .canvas-restore:hover,
+body.studio-theme-dark .canvas-restore:hover {
+    background: rgba(16,185,129,.14) !important;
+    border-color: rgba(16,185,129,.32) !important;
+    color: var(--success-text) !important;
+}
+
+html.studio-theme-dark body .canvas-delete-box,
+body.studio-theme-dark .canvas-delete-box {
+    background: var(--surface-2) !important;
+    border: 1px solid transparent;
+}
+
+html.studio-theme-dark body .canvas-confirm-btn,
+html.studio-theme-dark body .create-confirm,
+body.studio-theme-dark .canvas-confirm-btn,
+body.studio-theme-dark .create-confirm {
+    background: var(--accent) !important;
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .output-resolution,
+body.studio-theme-dark .output-resolution {
+    background: rgba(17,17,17,.86) !important;
+    color: var(--accent) !important;
+}
+
+html.studio-theme-dark body .shell .topbar,
+body.studio-theme-dark .shell .topbar {
+    background: transparent !important;
+    border-color: transparent !important;
+    backdrop-filter: none !important;
+}
+
+html.studio-theme-dark body .shell,
+html.studio-theme-dark body .shell .board,
+body.studio-theme-dark .shell,
+body.studio-theme-dark .shell .board {
+    background-color: var(--bg) !important;
+    background-image: radial-gradient(rgba(120, 120, 120, .18) 1px, transparent 1px) !important;
+}
+
+html.studio-theme-dark body .shell.theme-dark,
+body.studio-theme-dark .shell.theme-dark {
+    --page: var(--bg);
+    --grid: rgba(120, 120, 120, .18);
+    --panel: rgba(17,17,17,.88);
+    --card: var(--surface);
+    --card-solid: var(--surface);
+    --soft: var(--bg);
+    --soft-2: var(--surface-2);
+    --line: var(--border-2);
+    --line-2: rgba(120, 120, 120, .22);
+    /* 这里原本是 `--text: var(--text);` —— 自定义属性引用自身构成循环，CSS 会把整条 token
+       在该作用域判为 guaranteed-invalid。.shell 是画布根节点，一坏就等于「画布内所有
+       var(--text) 全部失效」：文字色退回继承所以看不出异常，但用 --text 画 border/background
+       的元素会直接消失（连接端口的「加号+外圈」在深色主题下就是这样没的）。
+       删掉这行，让它正常从 :root 继承即可。 */
+    --muted: var(--text-3);
+    --faint: var(--text-3);
+    --shadow: rgba(0,0,0,.2);
+    --strong: var(--accent);
+    --strong-text: var(--bg);
+}
+
+html.studio-theme-dark body .shell .panel,
+body.studio-theme-dark .shell .panel {
+    background: rgba(17,17,17,.86) !important;
+    border: 1px solid transparent !important;
+    box-shadow: 0 14px 36px rgba(0,0,0,.18) !important;
+}
+
+html.studio-theme-dark body .shell .node,
+body.studio-theme-dark .shell .node {
+    background: var(--surface) !important;
+    border-color: transparent !important;
+    box-shadow: 0 16px 42px rgba(0,0,0,.22) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .shell .node-head,
+body.studio-theme-dark .shell .node-head {
+    background: var(--surface) !important;
+    border-bottom-color: transparent !important;
+}
+
+html.studio-theme-dark body .shell .node-title,
+body.studio-theme-dark .shell .node-title {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .shell .node.selected,
+body.studio-theme-dark .shell .node.selected {
+    outline-color: rgba(255, 255, 255, .1) !important;
+}
+
+html.studio-theme-dark body .shell .toolbar,
+body.studio-theme-dark .shell .toolbar {
+    gap: 8px;
+}
+
+html.studio-theme-dark body .shell .tool-btn,
+html.studio-theme-dark body .shell .select-lite,
+html.studio-theme-dark body .shell .gen-count-row,
+html.studio-theme-dark body .shell .seg,
+html.studio-theme-dark body .shell .llm-mode,
+html.studio-theme-dark body .shell .mode-tabs,
+body.studio-theme-dark .shell .tool-btn,
+body.studio-theme-dark .shell .select-lite,
+body.studio-theme-dark .shell .gen-count-row,
+body.studio-theme-dark .shell .seg,
+body.studio-theme-dark .shell .llm-mode,
+body.studio-theme-dark .shell .mode-tabs {
+    background: var(--bg) !important;
+    border: 1px solid transparent !important;
+    box-shadow: none !important;
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .shell .gen-settings,
+html.studio-theme-dark body .shell .setting-row,
+html.studio-theme-dark body .shell .comfy-settings,
+body.studio-theme-dark .shell .gen-settings,
+body.studio-theme-dark .shell .setting-row,
+body.studio-theme-dark .shell .comfy-settings {
+    background: var(--bg) !important;
+    border: 1px solid transparent !important;
+    box-shadow: none !important;
+    color: var(--accent) !important;
+}
+
+html.studio-theme-dark body .shell .setting-title,
+body.studio-theme-dark .shell .setting-title {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .shell .setting-input,
+html.studio-theme-dark body .shell .setting-check,
+html.studio-theme-dark body .shell .gen-count-input,
+body.studio-theme-dark .shell .setting-input,
+body.studio-theme-dark .shell .setting-check,
+body.studio-theme-dark .shell .gen-count-input {
+    background: var(--surface) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+    box-shadow: none !important;
+}
+
+html.studio-theme-dark body .shell .gen-step-btn,
+body.studio-theme-dark .shell .gen-step-btn {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .shell .gen-step-btn:hover,
+body.studio-theme-dark .shell .gen-step-btn:hover {
+    background: var(--surface-2) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .shell .tool-btn:hover,
+html.studio-theme-dark body .shell .select-lite:hover,
+body.studio-theme-dark .shell .tool-btn:hover,
+body.studio-theme-dark .shell .select-lite:hover {
+    background: var(--surface) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .shell .llm-mode button,
+html.studio-theme-dark body .shell .seg button,
+html.studio-theme-dark body .shell .mode-tabs button,
+body.studio-theme-dark .shell .llm-mode button,
+body.studio-theme-dark .shell .seg button,
+body.studio-theme-dark .shell .mode-tabs button {
+    background: transparent !important;
+    border-color: transparent !important;
+    color: var(--text-3) !important;
+    box-shadow: none !important;
+}
+
+html.studio-theme-dark body .shell .llm-mode button.active,
+html.studio-theme-dark body .shell .seg button.active,
+html.studio-theme-dark body .shell .mode-tabs button.active,
+body.studio-theme-dark .shell .llm-mode button.active,
+body.studio-theme-dark .shell .seg button.active,
+body.studio-theme-dark .shell .mode-tabs button.active {
+    background: var(--accent) !important;
+    border-color: transparent !important;
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .shell .llm-system,
+html.studio-theme-dark body .shell .llm-chat-input,
+html.studio-theme-dark body .shell .llm-chat-log,
+html.studio-theme-dark body .shell .llm-output,
+html.studio-theme-dark body .shell .llm-chat-pane,
+body.studio-theme-dark .shell .llm-system,
+body.studio-theme-dark .shell .llm-chat-input,
+body.studio-theme-dark .shell .llm-chat-log,
+body.studio-theme-dark .shell .llm-output,
+body.studio-theme-dark .shell .llm-chat-pane {
+    background: var(--bg) !important;
+    border-color: transparent !important;
+    color: var(--accent) !important;
+}
+
+html.studio-theme-dark body .shell .llm-pane-resizer::before,
+body.studio-theme-dark .shell .llm-pane-resizer::before {
+    background: var(--surface-2) !important;
+}
+
+html.studio-theme-dark body .shell .llm-bubble.assistant,
+body.studio-theme-dark .shell .llm-bubble.assistant {
+    background: var(--surface-2) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .shell .llm-bubble.user,
+body.studio-theme-dark .shell .llm-bubble.user {
+    background: var(--accent) !important;
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .shell .image-node img,
+html.studio-theme-dark body .shell .output-grid img,
+html.studio-theme-dark body .shell .output-preview img,
+html.studio-theme-dark body .shell .blank-image,
+html.studio-theme-dark body .shell .input-item,
+html.studio-theme-dark body .shell .prompt-node textarea,
+html.studio-theme-dark body .shell .llm-system,
+html.studio-theme-dark body .shell .llm-chat-input,
+html.studio-theme-dark body .shell .model-input,
+body.studio-theme-dark .shell .image-node img,
+body.studio-theme-dark .shell .output-grid img,
+body.studio-theme-dark .shell .output-preview img,
+body.studio-theme-dark .shell .blank-image,
+body.studio-theme-dark .shell .input-item,
+body.studio-theme-dark .shell .prompt-node textarea,
+body.studio-theme-dark .shell .llm-system,
+body.studio-theme-dark .shell .llm-chat-input,
+body.studio-theme-dark .shell .model-input {
+    background: var(--bg) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .shell .blank-image,
+body.studio-theme-dark .shell .blank-image {
+    color: var(--text-3) !important;
+    border-style: dashed !important;
+}
+
+html.studio-theme-dark body .shell .blank-image:hover,
+html.studio-theme-dark body .shell .blank-image.drag-over,
+body.studio-theme-dark .shell .blank-image:hover,
+body.studio-theme-dark .shell .blank-image.drag-over {
+    background: var(--surface) !important;
+    border-color: transparent !important;
+    color: var(--accent) !important;
+}
+
+html.studio-theme-dark body .shell .image-caption,
+body.studio-theme-dark .shell .image-caption {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .shell .input-label,
+body.studio-theme-dark .shell .input-label {
+    background: rgba(12, 12, 12, .78) !important;
+    color: var(--accent) !important;
+}
+
+html.studio-theme-dark body .shell .prompt-list .bg-slate-50,
+html.studio-theme-dark body .shell .prompt-list .border-slate-100,
+body.studio-theme-dark .shell .prompt-list .bg-slate-50,
+body.studio-theme-dark .shell .prompt-list .border-slate-100 {
+    background: var(--bg) !important;
+    border-color: transparent !important;
+    color: var(--accent-hover) !important;
+}
+
+html.studio-theme-dark body .shell .input-index,
+body.studio-theme-dark .shell .input-index {
+    background: var(--accent) !important;
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .shell .drop-overlay,
+body.studio-theme-dark .shell .drop-overlay {
+    background: rgba(12, 12, 12, .44) !important;
+    color: var(--accent-hover) !important;
+    backdrop-filter: blur(3px) !important;
+}
+
+html.studio-theme-dark body .output-drag-preview,
+body.studio-theme-dark .output-drag-preview,
+.output-drag-preview {
+    position: fixed;
+    left: -10000px;
+    top: -10000px;
+    width: 150px;
+    height: 150px;
+    padding: 8px;
+    border-radius:var(--radius-lg);
+    background: var(--bg);
+    border: 1px solid transparent;
+    box-shadow: 0 16px 40px rgba(0,0,0,.28);
+    pointer-events: none;
+    z-index: -1;
+}
+
+.output-drag-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius:var(--radius-md);
+    background: var(--bg);
+}
+
+html.studio-theme-dark body .shell .resize-handle,
+body.studio-theme-dark .shell .resize-handle {
+    background: rgba(17,17,17,.86) !important;
+    border-color: transparent !important;
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .shell .resize-handle:hover,
+body.studio-theme-dark .shell .resize-handle:hover {
+    background: var(--surface) !important;
+    border-color: transparent !important;
+    color: var(--accent) !important;
+}
+
+/* Standalone studio pages: zimage / enhance / klein / angle */
+html.studio-theme-dark body .layout-container,
+body.studio-theme-dark .layout-container,
+html.studio-theme-dark body .container-box,
+body.studio-theme-dark .container-box {
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .mode-switcher,
+html.studio-theme-dark body .engine-panel,
+html.studio-theme-dark body .engine-switch,
+html.studio-theme-dark body .ios-slider,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .gallery-lightbox,
+html.studio-theme-dark body #lightbox,
+html.studio-theme-dark body #compareContainer,
+html.studio-theme-dark body #compareContainerKlein,
+html.studio-theme-dark body #lightboxImg,
+body.studio-theme-dark .mode-switcher,
+body.studio-theme-dark .engine-panel,
+body.studio-theme-dark .engine-switch,
+body.studio-theme-dark .ios-slider,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .gallery-lightbox,
+body.studio-theme-dark #lightbox,
+body.studio-theme-dark #compareContainer,
+body.studio-theme-dark #compareContainerKlein,
+body.studio-theme-dark #lightboxImg {
+    background-color: var(--bg) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .mode-glider,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .ios-slider:before,
+body.studio-theme-dark .mode-glider,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .ios-slider:before {
+    background: var(--accent) !important;
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .mode-btn.active,
+html.studio-theme-dark body .engine-btn.active,
+body.studio-theme-dark .mode-btn.active,
+body.studio-theme-dark .engine-btn.active {
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .mode-btn,
+html.studio-theme-dark body .engine-btn,
+html.studio-theme-dark body .cloud-status,
+body.studio-theme-dark .mode-btn,
+body.studio-theme-dark .engine-btn,
+body.studio-theme-dark .cloud-status {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .engine-btn:not(.active):hover,
+body.studio-theme-dark .engine-btn:not(.active):hover {
+    background: rgba(222, 222, 222, .08) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .upload-item:hover,
+html.studio-theme-dark body .upload-item.drag-over,
+body.studio-theme-dark .upload-item:hover,
+body.studio-theme-dark .upload-item.drag-over {
+    background: var(--surface) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .glass-btn,
+html.studio-theme-dark body .btn-render,
+html.studio-theme-dark body #downloadBtn,
+html.studio-theme-dark body #lightboxDownload,
+body.studio-theme-dark .glass-btn,
+body.studio-theme-dark .btn-render,
+body.studio-theme-dark #downloadBtn,
+body.studio-theme-dark #lightboxDownload {
+    background: var(--accent) !important;
+    color: var(--bg) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .glass-btn:hover,
+html.studio-theme-dark body .btn-render:hover,
+body.studio-theme-dark .glass-btn:hover,
+body.studio-theme-dark .btn-render:hover {
+    background: var(--text) !important;
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body input[type=range]::-webkit-slider-runnable-track,
+body.studio-theme-dark input[type=range]::-webkit-slider-runnable-track {
+    background: var(--surface-2) !important;
+}
+
+html.studio-theme-dark body input[type=range]::-webkit-slider-thumb,
+body.studio-theme-dark input[type=range]::-webkit-slider-thumb {
+    background: var(--accent) !important;
+}
+
+html.studio-theme-dark body .masonry-item img,
+html.studio-theme-dark body .result-frame img,
+body.studio-theme-dark .masonry-item img,
+body.studio-theme-dark .result-frame img {
+    background-color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .bg-black,
+body.studio-theme-dark .bg-black {
+    background-color: var(--accent) !important;
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .hover\:text-black:hover,
+body.studio-theme-dark .hover\:text-black:hover {
+    color: var(--text) !important;
+}
+
+/* Final neutral dark pass: remove blue-tinted surfaces from tool pages. */
+html.studio-theme-dark,
+html.studio-theme-dark body,
+body.studio-theme-dark {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+}
+
+body.studio-theme-dark {
+    --bg: var(--bg);
+    --bg-base: var(--bg);
+    --page: var(--bg);
+    --card: var(--bg);
+    --card-solid: var(--bg);
+    --soft: var(--bg);
+    --soft-2: var(--surface);
+    --panel: rgba(14, 14, 14, .92);
+    --text: var(--text);
+    --text-main: var(--text);
+    --line: var(--surface-2);
+    --line-2: var(--border-strong);
+}
+
+html.studio-theme-dark body .app-shell,
+html.studio-theme-dark body .sidebar,
+html.studio-theme-dark body .stage,
+html.studio-theme-dark body .shell,
+body.studio-theme-dark .app-shell,
+body.studio-theme-dark .sidebar,
+body.studio-theme-dark .stage,
+body.studio-theme-dark .shell {
+    background: var(--bg) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .console-card,
+html.studio-theme-dark body .nano-input,
+html.studio-theme-dark body .upload-item,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .masonry-item,
+html.studio-theme-dark body .engine-panel,
+html.studio-theme-dark body .engine-switch,
+html.studio-theme-dark body .mode-switcher,
+html.studio-theme-dark body .setting-row,
+html.studio-theme-dark body .provider-switch,
+html.studio-theme-dark body .ios-slider,
+html.studio-theme-dark body #compareContainer,
+html.studio-theme-dark body #lightboxImg,
+html.studio-theme-dark body #lightbox .bg-white,
+html.studio-theme-dark body .bg-white,
+html.studio-theme-dark body .bg-white\/90,
+html.studio-theme-dark body .bg-white\/95,
+html.studio-theme-dark body .bg-gray-50,
+html.studio-theme-dark body .bg-gray-50\/50,
+html.studio-theme-dark body .bg-gray-100,
+html.studio-theme-dark body .bg-gray-200,
+html.studio-theme-dark body .bg-\[\#f8f8f8\],
+html.studio-theme-dark body .bg-\[\#fafafa\],
+body.studio-theme-dark .console-card,
+body.studio-theme-dark .nano-input,
+body.studio-theme-dark .upload-item,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .masonry-item,
+body.studio-theme-dark .engine-panel,
+body.studio-theme-dark .engine-switch,
+body.studio-theme-dark .mode-switcher,
+body.studio-theme-dark .setting-row,
+body.studio-theme-dark .provider-switch,
+body.studio-theme-dark .ios-slider,
+body.studio-theme-dark #compareContainer,
+body.studio-theme-dark #lightboxImg,
+body.studio-theme-dark #lightbox .bg-white,
+body.studio-theme-dark .bg-white,
+body.studio-theme-dark .bg-white\/90,
+body.studio-theme-dark .bg-white\/95,
+body.studio-theme-dark .bg-gray-50,
+body.studio-theme-dark .bg-gray-50\/50,
+body.studio-theme-dark .bg-gray-100,
+body.studio-theme-dark .bg-gray-200,
+body.studio-theme-dark .bg-\[\#f8f8f8\],
+body.studio-theme-dark .bg-\[\#fafafa\] {
+    background-color: var(--bg) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body #lightbox,
+body.studio-theme-dark #lightbox {
+    background: rgba(10, 10, 10, .96) !important;
+}
+
+html.studio-theme-dark body .glass-btn,
+html.studio-theme-dark body .btn-render,
+html.studio-theme-dark body .mode-glider,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider,
+html.studio-theme-dark body #cloud-progress-bar,
+body.studio-theme-dark .glass-btn,
+body.studio-theme-dark .btn-render,
+body.studio-theme-dark .mode-glider,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider,
+body.studio-theme-dark #cloud-progress-bar {
+    background: var(--text) !important;
+    color: var(--bg) !important;
+    border-color: var(--text) !important;
+}
+
+html.studio-theme-dark body .mode-btn.active,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .text-black,
+body.studio-theme-dark .mode-btn.active,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .text-black {
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .mode-glider + .mode-btn.active,
+body.studio-theme-dark .mode-glider + .mode-btn.active {
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body input:not(.group-title-input),
+html.studio-theme-dark body textarea,
+html.studio-theme-dark body select,
+body.studio-theme-dark input:not(.group-title-input),
+body.studio-theme-dark textarea,
+body.studio-theme-dark select {
+    background-color: var(--bg) !important;
+    border-color: var(--border-strong) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .border-gray-100,
+html.studio-theme-dark body .border-gray-200,
+html.studio-theme-dark body .border-gray-200\/50,
+html.studio-theme-dark body .border-black,
+body.studio-theme-dark .border-gray-100,
+body.studio-theme-dark .border-gray-200,
+body.studio-theme-dark .border-gray-200\/50,
+body.studio-theme-dark .border-black {
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .text-gray-300,
+html.studio-theme-dark body .text-gray-400,
+html.studio-theme-dark body .text-gray-500,
+html.studio-theme-dark body .text-gray-600,
+html.studio-theme-dark body .text-gray-700,
+html.studio-theme-dark body .text-gray-800,
+body.studio-theme-dark .text-gray-300,
+body.studio-theme-dark .text-gray-400,
+body.studio-theme-dark .text-gray-500,
+body.studio-theme-dark .text-gray-600,
+body.studio-theme-dark .text-gray-700,
+body.studio-theme-dark .text-gray-800 {
+    color: var(--text-2) !important;
+}
+
+html.studio-theme-dark body h1,
+html.studio-theme-dark body h2,
+html.studio-theme-dark body h3,
+html.studio-theme-dark body label,
+body.studio-theme-dark h1,
+body.studio-theme-dark h2,
+body.studio-theme-dark h3,
+body.studio-theme-dark label {
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .mode-switcher .mode-btn.active,
+html.studio-theme-dark body .engine-switch .engine-btn.active,
+body.studio-theme-dark .mode-switcher .mode-btn.active,
+body.studio-theme-dark .engine-switch .engine-btn.active {
+    color: var(--bg) !important;
+}
+
+/* Online-generation dark pass: soft blue-gray instead of heavy black. */
+html.studio-theme-dark,
+html.studio-theme-dark body,
+body.studio-theme-dark {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+}
+
+body.studio-theme-dark {
+    --bg: var(--bg);
+    --bg-base: var(--bg);
+    --page: var(--bg);
+    --card: var(--surface);
+    --card-solid: var(--surface);
+    --soft: var(--bg);
+    --soft-2: var(--surface-2);
+    --panel: rgba(21,21,21,.92);
+    --text: var(--text);
+    --text-main: var(--text);
+    --line: var(--surface-2);
+    --line-2: var(--border-strong);
+}
+
+html.studio-theme-dark body .app-shell,
+html.studio-theme-dark body .sidebar,
+html.studio-theme-dark body .stage,
+html.studio-theme-dark body .shell,
+body.studio-theme-dark .app-shell,
+body.studio-theme-dark .sidebar,
+body.studio-theme-dark .stage,
+body.studio-theme-dark .shell {
+    background: var(--bg) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .stage,
+body.studio-theme-dark .stage {
+    background: var(--bg) !important;
+}
+
+html.studio-theme-dark body .console-card,
+html.studio-theme-dark body .nano-input,
+html.studio-theme-dark body .upload-item,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .masonry-item,
+html.studio-theme-dark body .engine-panel,
+html.studio-theme-dark body .tool-panel,
+html.studio-theme-dark body .control-panel,
+html.studio-theme-dark body .engine-switch,
+html.studio-theme-dark body .mode-switcher,
+html.studio-theme-dark body .setting-row,
+html.studio-theme-dark body .ios-slider,
+html.studio-theme-dark body #compareContainer,
+html.studio-theme-dark body #lightboxImg,
+html.studio-theme-dark body #lightbox .bg-white,
+html.studio-theme-dark body .bg-white,
+html.studio-theme-dark body .bg-white\/90,
+html.studio-theme-dark body .bg-white\/95,
+html.studio-theme-dark body .bg-gray-50,
+html.studio-theme-dark body .bg-gray-50\/50,
+html.studio-theme-dark body .bg-gray-100,
+html.studio-theme-dark body .bg-gray-200,
+html.studio-theme-dark body .bg-\[\#f8f8f8\],
+html.studio-theme-dark body .bg-\[\#fafafa\],
+body.studio-theme-dark .console-card,
+body.studio-theme-dark .nano-input,
+body.studio-theme-dark .upload-item,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .masonry-item,
+body.studio-theme-dark .engine-panel,
+body.studio-theme-dark .tool-panel,
+body.studio-theme-dark .control-panel,
+body.studio-theme-dark .engine-switch,
+body.studio-theme-dark .mode-switcher,
+body.studio-theme-dark .setting-row,
+body.studio-theme-dark .ios-slider,
+body.studio-theme-dark #compareContainer,
+body.studio-theme-dark #lightboxImg,
+body.studio-theme-dark #lightbox .bg-white,
+body.studio-theme-dark .bg-white,
+body.studio-theme-dark .bg-white\/90,
+body.studio-theme-dark .bg-white\/95,
+body.studio-theme-dark .bg-gray-50,
+body.studio-theme-dark .bg-gray-50\/50,
+body.studio-theme-dark .bg-gray-100,
+body.studio-theme-dark .bg-gray-200,
+body.studio-theme-dark .bg-\[\#f8f8f8\],
+body.studio-theme-dark .bg-\[\#fafafa\] {
+    background-color: var(--surface) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .model-pill,
+html.studio-theme-dark body .ratio-grid,
+html.studio-theme-dark body .resolution-toggle,
+html.studio-theme-dark body .select-shell,
+html.studio-theme-dark body .mode-switch,
+html.studio-theme-dark body .mini-ratio,
+html.studio-theme-dark body input:not(.group-title-input),
+html.studio-theme-dark body textarea,
+html.studio-theme-dark body select,
+body.studio-theme-dark .model-pill,
+body.studio-theme-dark .ratio-grid,
+body.studio-theme-dark .resolution-toggle,
+body.studio-theme-dark .select-shell,
+body.studio-theme-dark .mode-switch,
+body.studio-theme-dark .mini-ratio,
+body.studio-theme-dark input:not(.group-title-input),
+body.studio-theme-dark textarea,
+body.studio-theme-dark select {
+    background-color: var(--bg) !important;
+    border-color: var(--border-strong) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .size-select,
+html.studio-theme-dark body .size-custom,
+body.studio-theme-dark .size-select,
+body.studio-theme-dark .size-custom {
+    background-color: var(--bg) !important;
+    border-color: var(--border-strong) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body #lightbox,
+body.studio-theme-dark #lightbox {
+    background: rgba(12, 12, 12, .9) !important;
+}
+
+html.studio-theme-dark body .glass-btn,
+html.studio-theme-dark body .btn-render,
+html.studio-theme-dark body .mode-glider,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .model-option.active,
+html.studio-theme-dark body .ratio-option.active,
+html.studio-theme-dark body .resolution-option.active,
+html.studio-theme-dark body .provider-btn.active,
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider,
+html.studio-theme-dark body #cloud-progress-bar,
+html.studio-theme-dark body #downloadBtn,
+html.studio-theme-dark body #lightboxDownload,
+html.studio-theme-dark body .bg-black,
+body.studio-theme-dark .glass-btn,
+body.studio-theme-dark .btn-render,
+body.studio-theme-dark .mode-glider,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .model-option.active,
+body.studio-theme-dark .ratio-option.active,
+body.studio-theme-dark .resolution-option.active,
+body.studio-theme-dark .provider-btn.active,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider,
+body.studio-theme-dark #cloud-progress-bar,
+body.studio-theme-dark #downloadBtn,
+body.studio-theme-dark #lightboxDownload,
+body.studio-theme-dark .bg-black {
+    background: var(--accent) !important;
+    color: var(--bg) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .mode-btn,
+html.studio-theme-dark body .engine-btn,
+html.studio-theme-dark body .model-option,
+html.studio-theme-dark body .ratio-option,
+html.studio-theme-dark body .resolution-option,
+html.studio-theme-dark body .provider-btn,
+body.studio-theme-dark .mode-btn,
+body.studio-theme-dark .engine-btn,
+body.studio-theme-dark .model-option,
+body.studio-theme-dark .ratio-option,
+body.studio-theme-dark .resolution-option {
+    color: var(--text-3) !important;
+}
+
+body.studio-theme-dark .provider-btn {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .provider-switch button,
+body.studio-theme-dark .provider-switch button {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .mode-btn:hover,
+html.studio-theme-dark body .engine-btn:hover,
+html.studio-theme-dark body .model-option:hover,
+html.studio-theme-dark body .ratio-option:hover,
+html.studio-theme-dark body .resolution-option:hover,
+html.studio-theme-dark body .provider-btn:hover,
+body.studio-theme-dark .mode-btn:hover,
+body.studio-theme-dark .engine-btn:hover,
+body.studio-theme-dark .model-option:hover,
+body.studio-theme-dark .ratio-option:hover,
+body.studio-theme-dark .resolution-option:hover,
+body.studio-theme-dark .provider-btn:hover {
+    background: rgba(222, 222, 222, .08) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .provider-switch button:hover,
+body.studio-theme-dark .provider-switch button:hover {
+    background: rgba(222, 222, 222, .08) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .mode-btn.active,
+html.studio-theme-dark body .engine-btn.active,
+html.studio-theme-dark body .model-option.active,
+html.studio-theme-dark body .ratio-option.active,
+html.studio-theme-dark body .resolution-option.active,
+html.studio-theme-dark body .provider-btn.active,
+html.studio-theme-dark body .mode-switcher .mode-btn.active,
+html.studio-theme-dark body .engine-switch .engine-btn.active,
+body.studio-theme-dark .mode-btn.active,
+body.studio-theme-dark .engine-btn.active,
+body.studio-theme-dark .model-option.active,
+body.studio-theme-dark .ratio-option.active,
+body.studio-theme-dark .resolution-option.active,
+body.studio-theme-dark .provider-btn.active,
+body.studio-theme-dark .mode-switcher .mode-btn.active,
+body.studio-theme-dark .engine-switch .engine-btn.active {
+    color: var(--bg) !important;
+}
+
+html.studio-theme-dark body .provider-switch button.active,
+body.studio-theme-dark .provider-switch button.active {
+    background: var(--accent) !important;
+    color: var(--bg) !important;
+    border-color: transparent !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18) !important;
+}
+
+html.studio-theme-dark body .mode-switcher,
+body.studio-theme-dark .mode-switcher,
+html.studio-theme-dark body .provider-switch,
+body.studio-theme-dark .provider-switch,
+html.studio-theme-dark body .engine-switch,
+body.studio-theme-dark .engine-switch {
+    background: var(--bg) !important;
+    border: 1px solid var(--border-strong) !important;
+    box-shadow: none !important;
+}
+
+html.studio-theme-dark body .mode-glider,
+body.studio-theme-dark .mode-glider {
+    background: var(--accent) !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18) !important;
+}
+
+html.studio-theme-dark body .mode-btn,
+body.studio-theme-dark .mode-btn,
+html.studio-theme-dark body .engine-btn,
+body.studio-theme-dark .engine-btn,
+html.studio-theme-dark body .provider-btn,
+body.studio-theme-dark .provider-btn {
+    border-radius:var(--radius-full) !important;
+    letter-spacing: .02em !important;
+}
+
+html.studio-theme-dark body .provider-switch button,
+body.studio-theme-dark .provider-switch button {
+    border-radius:var(--radius-full) !important;
+    min-height: 30px !important;
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    letter-spacing: .02em !important;
+}
+
+html.studio-theme-dark body .border-gray-100,
+html.studio-theme-dark body .border-gray-200,
+html.studio-theme-dark body .border-gray-200\/50,
+html.studio-theme-dark body .border-black,
+body.studio-theme-dark .border-gray-100,
+body.studio-theme-dark .border-gray-200,
+body.studio-theme-dark .border-gray-200\/50,
+body.studio-theme-dark .border-black {
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .text-gray-300,
+html.studio-theme-dark body .text-gray-400,
+html.studio-theme-dark body .text-gray-500,
+html.studio-theme-dark body .text-gray-600,
+html.studio-theme-dark body .text-gray-700,
+html.studio-theme-dark body .text-gray-800,
+body.studio-theme-dark .text-gray-300,
+body.studio-theme-dark .text-gray-400,
+body.studio-theme-dark .text-gray-500,
+body.studio-theme-dark .text-gray-600,
+body.studio-theme-dark .text-gray-700,
+body.studio-theme-dark .text-gray-800 {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body h1,
+html.studio-theme-dark body h2,
+html.studio-theme-dark body h3,
+html.studio-theme-dark body label,
+body.studio-theme-dark h1,
+body.studio-theme-dark h2,
+body.studio-theme-dark h3,
+body.studio-theme-dark label {
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body input[type=range]::-webkit-slider-runnable-track,
+body.studio-theme-dark input[type=range]::-webkit-slider-runnable-track {
+    background: var(--surface-2) !important;
+}
+
+html.studio-theme-dark body input[type=range]::-webkit-slider-thumb,
+body.studio-theme-dark input[type=range]::-webkit-slider-thumb {
+    background: var(--accent) !important;
+    border-color: var(--bg) !important;
+}
+
+html.studio-theme-dark body ::placeholder,
+body.studio-theme-dark ::placeholder {
+    color: var(--text-3) !important;
+}
+
+/* Z-image console polish: keep the prompt field open and make ModelScope readable. */
+html.studio-theme-dark body #prompt,
+body.studio-theme-dark #prompt {
+    background: transparent !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .console-card > .bg-gray-50\/50,
+body.studio-theme-dark .console-card > .bg-gray-50\/50 {
+    background: transparent !important;
+}
+
+html.studio-theme-dark body #prompt::placeholder,
+body.studio-theme-dark #prompt::placeholder {
+    color: var(--text-3) !important;
+}
+
+/* GPT chat dark polish: avoid harsh black bars around text areas. */
+html.studio-theme-dark body .chat-shell,
+body.studio-theme-dark .chat-shell,
+html.studio-theme-dark body .messages,
+body.studio-theme-dark .messages {
+    background: var(--bg) !important;
+}
+
+html.studio-theme-dark body .topbar,
+body.studio-theme-dark .topbar {
+    background: rgba(12, 12, 12, .9) !important;
+    border-bottom-color: var(--surface-2) !important;
+}
+
+html.studio-theme-dark body .composer-wrap,
+body.studio-theme-dark .composer-wrap {
+    background: linear-gradient(to top,var(--bg) 82%,rgba(12, 12, 12, 0)) !important;
+}
+
+html.studio-theme-dark body .composer,
+body.studio-theme-dark .composer,
+html.studio-theme-dark body .history-popover,
+body.studio-theme-dark .history-popover {
+    background: var(--surface) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+    box-shadow: 0 18px 44px rgba(0,0,0,.24) !important;
+}
+
+html.studio-theme-dark body .composer-body,
+body.studio-theme-dark .composer-body {
+    background: var(--bg) !important;
+    border-color: var(--border-strong) !important;
+}
+
+html.studio-theme-dark body #messageInput,
+body.studio-theme-dark #messageInput {
+    background: transparent !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body #messageInput::placeholder,
+body.studio-theme-dark #messageInput::placeholder {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .title-block h1,
+body.studio-theme-dark .title-block h1 {
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .title-block p,
+body.studio-theme-dark .title-block p {
+    color: var(--text-3) !important;
+}
+
+html.studio-theme-dark body .action-btn,
+body.studio-theme-dark .action-btn,
+html.studio-theme-dark body .thread-item,
+body.studio-theme-dark .thread-item {
+    background: var(--bg) !important;
+    border-color: var(--border-strong) !important;
+    color: var(--accent) !important;
+}
+
+html.studio-theme-dark body .action-btn:hover,
+body.studio-theme-dark .action-btn:hover,
+html.studio-theme-dark body .thread-item:hover,
+body.studio-theme-dark .thread-item:hover {
+    background: var(--surface-2) !important;
+    color: var(--text) !important;
+}
+
+html.studio-theme-dark body .bubble.user,
+body.studio-theme-dark .bubble.user {
+    background: var(--surface-2) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border-strong) !important;
+    box-shadow: 0 10px 24px rgba(0,0,0,.18) !important;
+}
+
+html.studio-theme-dark body .bubble.assistant,
+body.studio-theme-dark .bubble.assistant {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+    border-color: transparent !important;
+    box-shadow: 0 8px 20px rgba(0,0,0,.14) !important;
+}
+
+html.studio-theme-dark body .bubble.assistant.streaming::after,
+body.studio-theme-dark .bubble.assistant.streaming::after {
+    background: var(--accent) !important;
+}
+
+html.studio-theme-dark body .bubble img.generated,
+body.studio-theme-dark .bubble img.generated {
+    border-color: var(--border-strong) !important;
+}
+
+/* Dark-card clipping: keep inner fills from poking through rounded top corners. */
+html.studio-theme-dark body .console-card,
+html.studio-theme-dark body .nano-input,
+html.studio-theme-dark body .upload-item,
+html.studio-theme-dark body .result-frame,
+html.studio-theme-dark body .masonry-item,
+html.studio-theme-dark body .engine-panel,
+html.studio-theme-dark body .tool-panel,
+html.studio-theme-dark body .control-panel,
+html.studio-theme-dark body .composer,
+html.studio-theme-dark body .history-popover,
+html.studio-theme-dark body .model-panel,
+html.studio-theme-dark body .gate-panel,
+body.studio-theme-dark .console-card,
+body.studio-theme-dark .nano-input,
+body.studio-theme-dark .upload-item,
+body.studio-theme-dark .result-frame,
+body.studio-theme-dark .masonry-item,
+body.studio-theme-dark .engine-panel,
+body.studio-theme-dark .tool-panel,
+body.studio-theme-dark .control-panel,
+body.studio-theme-dark .composer,
+body.studio-theme-dark .history-popover,
+body.studio-theme-dark .model-panel,
+body.studio-theme-dark .gate-panel {
+    overflow: hidden !important;
+    background-clip: padding-box !important;
+}
+
+html.studio-theme-dark body .shell .node,
+body.studio-theme-dark .shell .node {
+    background-clip: padding-box !important;
+}
+
+html.studio-theme-dark body .shell .node-head,
+body.studio-theme-dark .shell .node-head {
+    border-radius: 21px 21px 0 0 !important;
+    overflow: hidden !important;
+    background-clip: padding-box !important;
+}
+
+/* Switch contrast: keep iOS toggles visible on blue-gray panels. */
+html.studio-theme-dark body .ios-switch .ios-slider,
+body.studio-theme-dark .ios-switch .ios-slider {
+    background: var(--surface-2) !important;
+    border: 1px solid var(--border-strong) !important;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.28), 0 0 0 1px rgba(222, 222, 222, .05) !important;
+}
+
+html.studio-theme-dark body .ios-switch .ios-slider:before,
+body.studio-theme-dark .ios-switch .ios-slider:before {
+    background: var(--text) !important;
+    box-shadow: 0 3px 9px rgba(0,0,0,.32) !important;
+}
+
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider {
+    background: var(--accent) !important;
+    border-color: transparent !important;
+    box-shadow: 0 0 0 3px rgba(222, 222, 222, .12) !important;
+}
+
+html.studio-theme-dark body .ios-switch input:checked + .ios-slider:before,
+body.studio-theme-dark .ios-switch input:checked + .ios-slider:before {
+    background: var(--bg) !important;
+    box-shadow: 0 2px 7px rgba(18,18,18,.22) !important;
+}
+
+html.studio-theme-dark body .shell .comfy-random-btn.active,
+body.studio-theme-dark .shell .comfy-random-btn.active {
+    background: var(--text) !important;
+    background-color: var(--text) !important;
+    color: var(--surface-2) !important;
+    border-color: transparent !important;
+}
+
+html.studio-theme-dark body .shell .comfy-random-btn.active svg,
+body.studio-theme-dark .shell .comfy-random-btn.active svg {
+    fill: none !important;
+    stroke: var(--surface-2) !important;
+}
+
+/* ── 深色模式：覆盖所有 gray/slate 中深色背景 ── */
+html.studio-theme-dark body .bg-gray-300,
+html.studio-theme-dark body .bg-gray-400,
+html.studio-theme-dark body .bg-gray-500,
+html.studio-theme-dark body .bg-gray-600,
+html.studio-theme-dark body .bg-gray-700,
+html.studio-theme-dark body .bg-gray-800,
+html.studio-theme-dark body .bg-gray-900,
+html.studio-theme-dark body .bg-gray-950,
+html.studio-theme-dark body .bg-slate-300,
+html.studio-theme-dark body .bg-slate-400,
+html.studio-theme-dark body .bg-slate-500,
+html.studio-theme-dark body .bg-slate-600,
+html.studio-theme-dark body .bg-slate-700,
+html.studio-theme-dark body .bg-slate-800,
+html.studio-theme-dark body .bg-slate-900,
+html.studio-theme-dark body .bg-slate-950,
+body.studio-theme-dark .bg-gray-300,
+body.studio-theme-dark .bg-gray-400,
+body.studio-theme-dark .bg-gray-500,
+body.studio-theme-dark .bg-gray-600,
+body.studio-theme-dark .bg-gray-700,
+body.studio-theme-dark .bg-gray-800,
+body.studio-theme-dark .bg-gray-900,
+body.studio-theme-dark .bg-gray-950,
+body.studio-theme-dark .bg-slate-300,
+body.studio-theme-dark .bg-slate-400,
+body.studio-theme-dark .bg-slate-500,
+body.studio-theme-dark .bg-slate-600,
+body.studio-theme-dark .bg-slate-700,
+body.studio-theme-dark .bg-slate-800,
+body.studio-theme-dark .bg-slate-900,
+body.studio-theme-dark .bg-slate-950 {
+    background-color: var(--bg) !important;
+    --tw-bg-opacity: 1 !important;
+}
+
+/* ── 深色模式：覆盖 gray/slate 边框 ── */
+html.studio-theme-dark body .border-gray-300,
+html.studio-theme-dark body .border-gray-400,
+html.studio-theme-dark body .border-gray-500,
+html.studio-theme-dark body .border-gray-600,
+html.studio-theme-dark body .border-gray-700,
+html.studio-theme-dark body .border-gray-800,
+html.studio-theme-dark body .border-gray-900,
+html.studio-theme-dark body .border-slate-300,
+html.studio-theme-dark body .border-slate-400,
+html.studio-theme-dark body .border-slate-500,
+html.studio-theme-dark body .border-slate-600,
+html.studio-theme-dark body .border-slate-700,
+html.studio-theme-dark body .border-slate-800,
+html.studio-theme-dark body .border-slate-900,
+body.studio-theme-dark .border-gray-300,
+body.studio-theme-dark .border-gray-400,
+body.studio-theme-dark .border-gray-500,
+body.studio-theme-dark .border-gray-600,
+body.studio-theme-dark .border-gray-700,
+body.studio-theme-dark .border-gray-800,
+body.studio-theme-dark .border-gray-900,
+body.studio-theme-dark .border-slate-300,
+body.studio-theme-dark .border-slate-400,
+body.studio-theme-dark .border-slate-500,
+body.studio-theme-dark .border-slate-600,
+body.studio-theme-dark .border-slate-700,
+body.studio-theme-dark .border-slate-800,
+body.studio-theme-dark .border-slate-900 {
+    border-color: transparent !important;
+}
+
+/* ── 深色模式：覆盖 gray/slate 文字色 ── */
+html.studio-theme-dark body .text-gray-200,
+html.studio-theme-dark body .text-gray-900,
+html.studio-theme-dark body .text-slate-200,
+html.studio-theme-dark body .text-slate-300,
+html.studio-theme-dark body .text-slate-600,
+html.studio-theme-dark body .text-slate-700,
+html.studio-theme-dark body .text-slate-800,
+html.studio-theme-dark body .text-slate-900,
+body.studio-theme-dark .text-gray-200,
+body.studio-theme-dark .text-gray-900,
+body.studio-theme-dark .text-slate-200,
+body.studio-theme-dark .text-slate-300,
+body.studio-theme-dark .text-slate-600,
+body.studio-theme-dark .text-slate-700,
+body.studio-theme-dark .text-slate-800,
+body.studio-theme-dark .text-slate-900 {
+    color: var(--text-2) !important;
+}
+
+/* ── 深色模式：hover 态 background ── */
+html.studio-theme-dark body .hover\:bg-gray-100:hover,
+html.studio-theme-dark body .hover\:bg-gray-200:hover,
+html.studio-theme-dark body .hover\:bg-slate-100:hover,
+html.studio-theme-dark body .hover\:bg-slate-200:hover,
+body.studio-theme-dark .hover\:bg-gray-100:hover,
+body.studio-theme-dark .hover\:bg-gray-200:hover,
+body.studio-theme-dark .hover\:bg-slate-100:hover,
+body.studio-theme-dark .hover\:bg-slate-200:hover {
+    background-color: var(--surface-2) !important;
+}
+
+/* ── 深色模式：divide 分割线 ── */
+html.studio-theme-dark body .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+html.studio-theme-dark body .divide-gray-300 > :not([hidden]) ~ :not([hidden]),
+html.studio-theme-dark body .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+html.studio-theme-dark body .divide-slate-300 > :not([hidden]) ~ :not([hidden]),
+body.studio-theme-dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+body.studio-theme-dark .divide-gray-300 > :not([hidden]) ~ :not([hidden]),
+body.studio-theme-dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+body.studio-theme-dark .divide-slate-300 > :not([hidden]) ~ :not([hidden]) {
+    border-color: transparent !important;
+}
+
+/* ── 深色模式：ring 聚焦环 ── */
+html.studio-theme-dark body .ring-gray-300,
+html.studio-theme-dark body .ring-gray-400,
+html.studio-theme-dark body .ring-slate-300,
+html.studio-theme-dark body .ring-slate-400,
+body.studio-theme-dark .ring-gray-300,
+body.studio-theme-dark .ring-gray-400,
+body.studio-theme-dark .ring-slate-300,
+body.studio-theme-dark .ring-slate-400 {
+    --tw-ring-color: var(--surface-2) !important;
+}
+
+/* ── 深色模式：placeholder 占位文字 ── */
+html.studio-theme-dark body .placeholder-gray-400::placeholder,
+html.studio-theme-dark body .placeholder-gray-500::placeholder,
+html.studio-theme-dark body .placeholder-slate-400::placeholder,
+html.studio-theme-dark body .placeholder-slate-500::placeholder,
+body.studio-theme-dark .placeholder-gray-400::placeholder,
+body.studio-theme-dark .placeholder-gray-500::placeholder,
+body.studio-theme-dark .placeholder-slate-400::placeholder,
+body.studio-theme-dark .placeholder-slate-500::placeholder {
+    color: var(--text-3) !important;
+}
+
+/* ── 深色模式：shadow 阴影（去蓝调） ── */
+html.studio-theme-dark body .shadow-gray-900\/5,
+html.studio-theme-dark body .shadow-slate-900\/5,
+body.studio-theme-dark .shadow-gray-900\/5,
+body.studio-theme-dark .shadow-slate-900\/5 {
+    --tw-shadow-color: rgba(0,0,0,.3) !important;
+}
+
+/* ═══════════════════════════════════════════
+   NOVAI 全局设计系统统一 CSS 变量（追加）
+   不覆盖 marvis-shared.css 中已有的语义变量
+   ═══════════════════════════════════════════ */
+
+/* ── 统一字体（--font-display 统一为 Space Grotesk 品牌字体） ── */
+:root {
+    --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* ── 统一动画工具类 ── */
+.anim-scale-hover:hover {
+    transform: scale(1.03);
+    transition: transform 0.2s ease-out;
+}
+.anim-fade-in {
+    animation: novai-fade-in 0.22s ease-out;
+}
+@keyframes novai-fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}

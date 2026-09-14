@@ -1,0 +1,51 @@
+# NOVAI Mac 云端打包流水线
+# 触发：手动触发（Actions 页面 Run workflow），或推送 v* 标签（同时发布 Release）
+# 构建链：build-mac.py（PyInstaller --windowed --onedir 打 launcher.py → NOVAI.app → hdiutil 打 DMG）
+# 产物：dist-desktop/NOVAI-Setup-<VERSION>.dmg
+name: build-mac
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # build-mac.py 的 install_deps 会自装 pyinstaller/pywebview/pyobjc，这里先装业务依赖
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pywebview pyobjc
+
+      - name: Build (.app + DMG)
+        run: python build-mac.py
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVAI-Setup-mac
+          path: dist-desktop/NOVAI-Setup-*.dmg
+          if-no-files-found: error
+
+      - name: Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-desktop/NOVAI-Setup-*.dmg
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

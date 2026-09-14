@@ -1,0 +1,63 @@
+# NOVAI Windows 云端打包流水线
+# 触发：手动触发（Actions 页面 Run workflow），或推送 v* 标签（同时发布 Release）
+# 构建链：build-all.py（PyInstaller 打 launcher.py → dist-desktop/NOVAI.exe → NSIS 打安装包）
+# 产物：dist-desktop/NOVAI-Setup-<VERSION>.exe
+name: build-win
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pywebview
+
+      # 云端 clone 不含 gitignore 排除的 assets/ 目录，但 build-all.py 的 copy_assets
+      # 会 os.listdir('assets')、installer.nsi 会 File /r "assets\*.*"，缺目录/空匹配都会失败。
+      # 放一个占位文件兜底（安装包里的 assets 只剩图标类静态文件，用户数据本来就被脚本排除）。
+      - name: Placeholder for gitignored assets dir
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force assets | Out-Null; New-Item -ItemType File -Force assets/.keep | Out-Null
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Build (PyInstaller + NSIS installer)
+        run: python build-all.py
+        env:
+          # Windows runner 默认 stdout 编码是 cp1252，build-all.py 打印中文会 UnicodeEncodeError
+          PYTHONUTF8: '1'
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVAI-Setup-windows
+          path: dist-desktop/NOVAI-Setup-*.exe
+          if-no-files-found: error
+
+      - name: Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-desktop/NOVAI-Setup-*.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,13 @@
+fastapi>=0.100
+uvicorn[standard]>=0.23
+requests>=2.28
+aiofiles>=22.1
+pydantic>=2.0
+python-multipart>=0.0.6
+httpx>=0.24
+pillow>=9.0
+pystray>=0.19
+qrcode>=7.4
+opencv-python-headless>=4.9
+onnxruntime>=1.17
+jsonschema>=4.0

@@ -1,0 +1,281 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://novai.local/schemas/novai-app-v1.schema.json",
+  "title": "novai-app/v1",
+  "description": "NOVAI App 契约 v1.2 的 JSON Schema，供 AppRegistry.install() 校验 manifest.json。契约正文见 docs/app-contract.md（本文与之冲突时以契约为准）。本 schema 对 manifest 根对象与 capability 项均启用 additionalProperties:false，任何未声明字段都会被拒——这是故意的，契约冻结期需要靠机器拦住手滑。",
+  "type": "object",
+  "required": [
+    "format",
+    "id",
+    "version",
+    "entry",
+    "capabilities",
+    "permissions",
+    "keepAlive",
+    "singleton",
+    "dataVersion"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "novai-app/v1",
+      "description": "契约标识，必须是 novai-app/v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "description": "全局唯一 App id，必须等于 apps/ 下的目录名"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?$",
+      "description": "semver 版本号"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "icon": {
+      "type": "string",
+      "pattern": "^/apps/",
+      "description": "图标路径，必须以 /apps/ 开头"
+    },
+    "minKernelVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+      "description": "要求的最低内核版本；低于此版本内核拒绝安装"
+    },
+    "dataVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "数据结构版本号，破坏性变更时 +1。v1.1 C9：声明保留，内核本轮不执行迁移"
+    },
+    "migrations": {
+      "type": "array",
+      "maxItems": 0,
+      "description": "v1.1 C9：第一方 App 阶段恒为空数组，内核不执行迁移逻辑"
+    },
+    "entry": {
+      "type": "string",
+      "pattern": "^[^/].*\\.html$",
+      "description": "入口 HTML，相对 manifest 所在目录的相对路径"
+    },
+    "defaultSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 320, "maximum": 7680 },
+        "height": { "type": "integer", "minimum": 240, "maximum": 4320 }
+      }
+    },
+    "singleton": {
+      "type": "boolean",
+      "description": "true=内核只保留一个实例，切换时复用；v1.1 C4：singleton 不进入 LRU 淘汰候选集"
+    },
+    "keepAlive": {
+      "type": "string",
+      "enum": ["always", "session", "ephemeral"],
+      "description": "always=常驻不销毁；session=受 LRU 上限约束；ephemeral=用完即毁"
+    },
+    "permissions": {
+      "type": "array",
+      "description": "声明该 App 需要的权限点；未声明的权限在 invoke 时被内核直接拒绝。命名空间是封闭词表（assets/canvas/storage.settings/storage.secrets/network/shell/system/kernel/comfy/workflow/model/video/prompt），新增业务域时在此补一行——故意不做通配，让拼错的权限在 install 阶段就被拦下",
+      "items": {
+        "type": "string",
+        "pattern": "^(assets|canvas|storage\\.settings|storage\\.secrets|network|shell|system|kernel|comfy|workflow|model|video|prompt)\\.(read|write|delete|execute)$"
+      },
+      "uniqueItems": true
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "domains": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "允许直连的域名白名单；支持 *.（通配子域）与精确域名，空数组表示不直连外部"
+        },
+        "methods": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"] },
+          "uniqueItems": true
+        },
+        "maxResponseBytes": { "type": "integer", "minimum": 1024 }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "v1.2 C13：App UI 集成，字段名与语义对齐 MCP Apps 的 _meta.ui",
+      "properties": {
+        "csp": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "connectDomains": { "type": "array", "items": { "type": "string" } },
+            "resourceDomains": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/capability" }
+    }
+  },
+  "definitions": {
+    "jsonSchemaObject": {
+      "type": "object",
+      "description": "JSON Schema 对象。v1.2 C12：必须与 MCP tool 的 inputSchema/outputSchema 同构（type/properties/required 子集）",
+      "properties": {
+        "type": { "type": "string" },
+        "properties": { "type": "object" },
+        "required": { "type": "array", "items": { "type": "string" } },
+        "additionalProperties": { "type": ["boolean", "object"] },
+        "description": { "type": "string" },
+        "title": { "type": "string" },
+        "default": true,
+        "enum": { "type": "array" },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" }
+      }
+    },
+    "handler": {
+      "type": "object",
+      "description": "能力的实现方式。四种 handler 通过 type 区分，各自的必填字段用 if/then 约束",
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "enum": ["app-api", "frontend-bridge", "mcp-tool", "skill"] },
+        "method": { "type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"] },
+        "path": {
+          "oneOf": [
+            { "type": "string", "pattern": "^/api/" },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "pattern": "^/api/" },
+              "description": "v1.1 C1：数组=多端点聚合，必须配 aggregate"
+            }
+          ]
+        },
+        "aggregate": {
+          "type": "string",
+          "enum": ["concat", "first", "last", "byScope", "merge"],
+          "description": "多端点返回结果的归并方式"
+        },
+        "targets": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "frontend-bridge 用。v1.1 C3：降级为文档性描述，实际寻址以信封 to 字段为准"
+        },
+        "server": {
+          "type": "string",
+          "description": "mcp-tool 用：内核侧注册的 MCP server 名。v1.2 C14：mcp 配置在内核，不在 App"
+        },
+        "tool": { "type": "string", "description": "mcp-tool 用：MCP server 暴露的工具名" },
+        "script": { "type": "string", "description": "skill 用：脚本相对路径" },
+        "entrypoint": { "type": "string", "description": "skill 用：脚本内的入口函数名" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "app-api" } }, "required": ["type"] },
+          "then": { "required": ["method", "path"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "frontend-bridge" } }, "required": ["type"] },
+          "then": {
+            "description": "v1.1 C3：targets 已降级为文档性描述（仅供 resolve(intent) 展示），不参与寻址，故不设为必填。实际寻址以信封 to 字段为准"
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "mcp-tool" } }, "required": ["type"] },
+          "then": { "required": ["server", "tool"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "skill" } }, "required": ["type"] },
+          "then": { "required": ["script"] }
+        },
+        {
+          "if": { "properties": { "path": { "type": "array" } }, "required": ["path"] },
+          "then": { "required": ["aggregate"] }
+        }
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "required": ["id", "title", "risk", "handler"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "能力 id，小写点分，段内允许下划线，如 assets.search / assets.send_to_canvas。段内不允许连字符与大写（契约 §3.2 的示例含下划线，故正则必须放行）"
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "description": { "type": "string", "maxLength": 300 },
+        "intent": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "v1.2 C12：降级为路由标签，仅供内核 resolve(intent) 做意图裁剪，不参与 schema 定义"
+        },
+        "risk": {
+          "type": "string",
+          "enum": ["read", "write", "delete", "external", "system"],
+          "description": "风险五级。v1.2 C12：可由 MCP annotations 推断默认值，manifest 显式覆盖优先"
+        },
+        "handler": { "$ref": "#/definitions/handler" },
+        "inputSchema": { "$ref": "#/definitions/jsonSchemaObject" },
+        "outputSchema": { "$ref": "#/definitions/jsonSchemaObject" },
+        "params": {
+          "$ref": "#/definitions/jsonSchemaObject",
+          "description": "deprecated：v1.2 C12 起改用 inputSchema，迁移期作为别名接受"
+        },
+        "returns": {
+          "$ref": "#/definitions/jsonSchemaObject",
+          "description": "deprecated：v1.2 C12 起改用 outputSchema，迁移期作为别名接受"
+        },
+        "confirmation": { "$ref": "#/definitions/confirmation" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "risk": { "const": "delete" } }, "required": ["risk"] },
+          "then": {
+            "required": ["confirmation"],
+            "properties": {
+              "confirmation": { "properties": { "required": { "const": true } }, "required": ["required"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "risk": { "const": "external" } }, "required": ["risk"] },
+          "then": {
+            "required": ["confirmation"],
+            "properties": {
+              "confirmation": { "properties": { "required": { "const": true } }, "required": ["required"] }
+            }
+          }
+        }
+      ]
+    },
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required"],
+      "properties": {
+        "required": { "type": "boolean", "description": "risk 为 delete/external 时必须为 true" },
+        "message": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "确认弹窗文案，支持 {count} 等占位符"
+        }
+      }
+    }
+  }
+}

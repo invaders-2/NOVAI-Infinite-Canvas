@@ -1,0 +1,1571 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-studio-scale="off">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <title>画布工作台</title>
+    <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.115.1789114960"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.115.1789114960"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/theme.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.115.1789114960"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/i18n.js?v=1.0.115.1789114960"></script>
+    <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.115.1789114960">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789114960">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
+
+    <style>
+        /* ═══ V4 Apple-style Glassmorphism Design System ═══ */
+        :root {
+            --v4-bg: #f5f5f7;
+            --v4-text: #1d1d1f;
+            --v4-muted: #656569;
+            --v4-card-bg: rgba(255, 255, 255, 0.6);
+            --v4-card-shadow: rgba(0, 0, 0, 0.06);
+            --v4-card-shadow-hover: rgba(0, 0, 0, 0.1);
+            --v4-btn-bg: #1d1d1f;
+            --v4-btn-text: #ffffff;
+            --v4-focus-ring: #1d1d1f;
+            --v4-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+            --v4-ease-hover: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .theme-dark, [data-theme="dark"] {
+            --v4-bg: #0c0c0c;
+            --v4-text: #f5f5f7;
+            --v4-muted: #96969a;
+            --v4-card-bg: rgba(30, 30, 30, 0.6);
+            --v4-card-shadow: rgba(0, 0, 0, 0.3);
+            --v4-card-shadow-hover: rgba(0, 0, 0, 0.5);
+            --v4-btn-bg: #f5f5f7;
+            --v4-btn-text: #1d1d1f;
+            --v4-focus-ring: rgba(245,245,247,0.6);
+        }
+
+        * { margin:0; padding:0; box-sizing:border-box; }
+
+        /* ═══ 隐藏滚动条 ═══ */
+        html { scrollbar-width: none; -ms-overflow-style: none; }
+        html::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+        html, body {
+            overflow-y: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            touch-action: pan-y;
+        }
+        body::-webkit-scrollbar { display: none; width: 0; height: 0; }
+        body {
+            font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+            background: var(--v4-bg);
+            color: var(--v4-text);
+            min-height: 100vh;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 0 24px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        #workspace { display: none; }
+
+        .page {
+            width: 100%;
+            max-width: 960px;
+            padding: 72px 0 80px;
+            display: flex;
+            flex-direction: column;
+            gap: 40px;
+        }
+
+        /* ═══ ANIMATION ═══ */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ═══ HERO ═══ */
+        .hero {
+            display: flex;
+            align-items: center;
+            gap: 56px;
+            padding: 8px 0 16px;
+            min-height: 340px;
+            animation: fadeUp 0.7s var(--v4-ease-out) both;
+        }
+        .hero-left { flex: 1; min-width: 0; }
+        .hero-right { flex: 1; min-width: 0; }
+
+        .hero-title {
+            font-size: 48px;
+            font-weight: 400;
+            letter-spacing: 0.02em;
+            line-height: 1.1;
+            margin-bottom: 14px;
+            background: linear-gradient(135deg, var(--v4-text) 0%, var(--v4-muted) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-desc {
+            font-size: 15px;
+            color: var(--v4-muted);
+            max-width: 400px;
+            margin-bottom: 28px;
+            line-height: 1.6;
+            font-weight: 400;
+        }
+        .hero-actions { display: flex; gap: 12px; }
+
+        .btn-primary {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--v4-btn-bg);
+            color: var(--v4-btn-text);
+            border: none;
+            border-radius: 12px;
+            padding: 14px 32px;
+            font-size: 14px; font-weight: 500;
+            cursor: pointer;
+            transition: all 0.35s var(--v4-ease-out);
+            text-decoration: none;
+            letter-spacing: 0.01em;
+            font-family: var(--font-sans, inherit);
+        }
+        .btn-primary:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
+        .btn-primary:active { transform: scale(0.97); }
+        .btn-primary:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+
+        .btn-secondary {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            color: var(--v4-text);
+            border: 1px solid transparent;
+            border-radius: 12px;
+            padding: 14px 32px;
+            font-size: 14px; font-weight: 500;
+            cursor: pointer;
+            transition: all 0.35s var(--v4-ease-out);
+            text-decoration: none;
+            letter-spacing: 0.01em;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow);
+            font-family: var(--font-sans, inherit);
+        }
+        .btn-secondary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover);
+            border-color: rgba(0,0,0,0.08);
+        }
+        .theme-dark .btn-secondary:hover { border-color: rgba(255,255,255,0.08); }
+        .btn-secondary:active { transform: translateY(0); }
+        .btn-secondary:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+
+        /* ═══ CAROUSEL ═══ */
+        .hero-carousel {
+            width: 100%;
+            height: 300px;
+            border-radius: 16px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid transparent;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
+        }
+        .carousel-slide {
+            position: absolute; inset: 0;
+            opacity: 0;
+            transition: opacity 0.6s var(--v4-ease-out);
+            display: flex; align-items: flex-end;
+        }
+        .carousel-slide.active { opacity: 1; }
+        .carousel-slide-img {
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            background: linear-gradient(135deg, rgba(120,120,120,0.12) 0%, rgba(180,180,180,0.06) 100%);
+            transition: opacity 0.6s var(--v4-ease-out);
+        }
+        .carousel-slide-img.loading { opacity: 0; }
+        .carousel-slide-img.loaded { opacity: 1; }
+        .carousel-slide-img.error {
+            background: linear-gradient(135deg, rgba(150,150,150,0.15) 0%, rgba(200,200,200,0.08) 100%);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .carousel-slide-img.error::after {
+            content: '✕';
+            color: rgba(255,255,255,0.6);
+            font-size: 24px;
+            font-family: var(--font-sans, sans-serif);
+        }
+        .carousel-slide-gradient {
+            position: absolute; inset: 0;
+            background: linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.55) 100%);
+        }
+        .carousel-caption {
+            position: relative;
+            width: 100%;
+            margin: 0;
+            padding: 16px 20px;
+            background: rgba(255,255,255,0.22);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            color: #fff;
+            box-shadow: 0 -1px 2px rgba(0,0,0,0.04);
+            border-top: 1px solid rgba(255,255,255,0.14);
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 16px;
+        }
+        .theme-dark .carousel-caption {
+            background: rgba(0,0,0,0.35);
+            border-top-color: rgba(255,255,255,0.08);
+        }
+        .carousel-caption-title {
+            font-size: 14px; font-weight: 600;
+            letter-spacing: 0.01em;
+            margin-bottom: 2px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        .carousel-caption-sub {
+            font-size: 11px; font-weight: 400;
+            opacity: 0.8;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.15);
+        }
+        .carousel-caption-tag {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; border-radius: 6px;
+            background: rgba(255,255,255,0.15);
+            font-size: 10px; font-weight: 600;
+            letter-spacing: 0.02em;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.15);
+            white-space: nowrap;
+        }
+        .theme-dark .carousel-caption-tag { background: rgba(255,255,255,0.08); }
+        .carousel-dots {
+            position: absolute; bottom: 74px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 8px;
+        }
+        .carousel-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: rgba(255,255,255,0.4); cursor: pointer;
+            transition: all 0.3s var(--v4-ease-out);
+        }
+        .carousel-dot.active { background: #fff; width: 24px; border-radius: 4px; }
+
+        /* ═══ SECTION HEADER ═══ */
+        .section-header {
+            display: flex; align-items: center; justify-content: space-between;
+            animation: fadeUp 0.7s var(--v4-ease-out) 0.14s both;
+        }
+        .section-label {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--v4-muted);
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            padding-left: 4px;
+        }
+        .btn-new-project {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: var(--v4-btn-bg);
+            color: var(--v4-btn-text);
+            border: none;
+            border-radius: 12px;
+            padding: 10px 22px;
+            font-size: 13px; font-weight: 500;
+            cursor: pointer;
+            transition: all 0.35s var(--v4-ease-out);
+            letter-spacing: 0.01em;
+            font-family: var(--font-sans, inherit);
+        }
+        .btn-new-project:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
+        .btn-new-project:active { transform: scale(0.97); }
+        .btn-new-project:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+
+        /* ═══ CARDS GRID ═══ */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+            animation: fadeUp 0.7s var(--v4-ease-out) 0.2s both;
+        }
+        .project-card {
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid transparent;
+            border-radius: 16px;
+            overflow: hidden;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
+            transition: transform 0.18s var(--v4-ease-out), box-shadow 0.18s var(--v4-ease-out), border-color 0.18s var(--v4-ease-out), background 0.18s var(--v4-ease-out);
+            text-decoration: none;
+            color: inherit;
+            display: flex;
+            flex-direction: column;
+        }
+        .project-card:hover {
+            transform: translateY(-2px);
+            background: rgba(0, 0, 0, 0.03);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover);
+        }
+        .theme-dark .project-card:hover { background: rgba(255, 255, 255, 0.06); box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover); }
+        .project-card:active { transform: translateY(0) scale(0.98); }
+        .project-card:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 2px; }
+
+        /* 四宫格预览 */
+        .card-preview {
+            width: 100%; height: 140px;
+            position: relative;
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 2px;
+            background: var(--v4-bg);
+        }
+        .card-preview-empty {
+            grid-column: 1 / -1;
+            grid-row: 1 / -1;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--v4-bg);
+            color: rgba(128,128,128,0.25);
+            z-index: 0;
+        }
+        .card-preview-empty svg { width: 28px; height: 28px; opacity: 0.35; }
+        .card-preview-thumb {
+            width: 100%; height: 100%;
+            object-fit: cover;
+            display: block;
+            position: relative;
+            z-index: 1;
+            background: var(--v4-bg);
+        }
+        .card-preview-count {
+            position: absolute; bottom: 10px; right: 10px;
+            padding: 3px 10px; border-radius: 6px;
+            font-size: 10px; font-weight: 600;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(150%);
+            -webkit-backdrop-filter: blur(20px) saturate(150%);
+            color: var(--v4-muted);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            z-index: 1;
+        }
+        .card-more-btn {
+            position: absolute;
+            top: 8px; right: 8px;
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(150%);
+            -webkit-backdrop-filter: blur(20px) saturate(150%);
+            color: var(--v4-muted);
+            border: 1px solid transparent;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            opacity: 0;
+            transform: translateY(-2px);
+            transition: opacity 0.25s var(--v4-ease-out), transform 0.25s var(--v4-ease-out), color 0.2s var(--v4-ease-hover), background 0.2s var(--v4-ease-hover);
+            z-index: 2;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .project-card:hover .card-more-btn {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .card-more-btn:hover {
+            color: var(--v4-text);
+            background: rgba(255,255,255,0.95);
+        }
+        .card-more-btn svg { width: 14px; height: 14px; }
+
+        /* 菜单挂在 .project-card 直下（不放 .card-preview 内）：preview 区 overflow:hidden 会把菜单底部裁掉。
+           卡片的 backdrop-filter 使绝对定位仍以卡片为包含块，top/right 锚点不变；z-index 压过预览图/badge/正文。 */
+        .card-more-menu {
+            position: absolute;
+            top: 36px; right: 8px;
+            min-width: 130px;
+            padding: 6px;
+            border-radius: 12px;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid transparent;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover);
+            opacity: 0;
+            transform: translateY(-6px) scale(0.96);
+            pointer-events: none;
+            transition: opacity 0.2s var(--v4-ease-out), transform 0.2s var(--v4-ease-out);
+            z-index: 60;
+        }
+        .card-more-menu.active {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+        .card-more-menu-item {
+            display: flex; align-items: center; gap: 8px;
+            width: 100%; padding: 8px 10px;
+            border-radius: 8px;
+            border: none; background: transparent;
+            font-size: 12px; font-weight: 500;
+            color: var(--v4-text);
+            cursor: pointer;
+            text-align: left;
+            transition: background 0.15s var(--v4-ease-out), color 0.15s var(--v4-ease-out);
+            font-family: var(--font-sans, inherit);
+        }
+        .card-more-menu-item:hover { background: var(--v4-bg); }
+        .card-more-menu-item.delete:hover { color: #ef4444; background: rgba(239,68,68,0.08); }
+        .card-more-menu-item svg { width: 14px; height: 14px; color: var(--v4-muted); flex-shrink: 0; }
+        .card-more-menu-item.delete svg { color: #ef4444; }
+
+        .card-body {
+            padding: 14px 16px;
+            display: flex; flex-direction: column; gap: 4px;
+        }
+        .card-title {
+            font-size: 14px; font-weight: 600;
+            letter-spacing: 0.01em;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .card-arrow {
+            width: 14px; height: 14px;
+            opacity: 0;
+            transform: translateX(-4px);
+            transition: opacity 0.25s var(--v4-ease-out), transform 0.25s var(--v4-ease-out);
+            color: var(--v4-muted);
+            flex-shrink: 0;
+        }
+        .project-card:hover .card-arrow {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .card-meta {
+            font-size: 11px; color: var(--v4-muted);
+            font-weight: 400;
+        }
+
+        /* ═══ EMPTY STATE ═══ */
+        .cards-empty {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--v4-muted);
+        }
+        .cards-empty-icon {
+            width: 24px; height: 24px; margin: 0 auto 16px;
+            display: flex; align-items: center; justify-content: center;
+            color: rgba(128,128,128,0.35);
+        }
+        .cards-empty-icon svg { width: 24px; height: 24px; }
+        .cards-empty-title { font-size: 15px; font-weight: 600; color: var(--v4-text); margin-bottom: 4px; }
+        .cards-empty-sub { font-size: 13px; }
+
+        /* ═══ TRASH FAB ═══ */
+        .trash-fab {
+            position: fixed; bottom: 32px; right: 32px;
+            width: 48px; height: 48px;
+            border-radius: 50%;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
+            color: var(--v4-muted);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out), color 0.2s var(--v4-ease-hover), border-color 0.35s var(--v4-ease-out);
+            text-decoration: none;
+            z-index: 50;
+        }
+        .trash-fab:hover {
+            color: var(--v4-text);
+            transform: scale(1.05);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover);
+            border-color: rgba(0,0,0,0.08);
+        }
+        .theme-dark .trash-fab:hover { border-color: rgba(255,255,255,0.08); }
+        .trash-fab:active { transform: scale(0.95); }
+        .trash-fab:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .trash-fab svg { width: 20px; height: 20px; }
+        .trash-badge {
+            position: absolute; top: -4px; right: -4px;
+            min-width: 18px; height: 18px; border-radius: 9px;
+            background: #ef4444; color: #fff;
+            font-size: 10px; font-weight: 700;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 5px;
+        }
+
+        /* ═══ VIEW MORE ═══ */
+        .view-more-section {
+            text-align: center;
+            animation: fadeUp 0.7s var(--v4-ease-out) 0.26s both;
+            padding-top: 8px;
+        }
+        .view-more-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            color: var(--v4-text);
+            border: 1px solid transparent;
+            border-radius: 12px;
+            padding: 12px 28px;
+            font-size: 13px; font-weight: 500;
+            cursor: pointer;
+            transition: all 0.35s var(--v4-ease-out);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow);
+            font-family: var(--font-sans, inherit);
+        }
+        .view-more-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover);
+            border-color: rgba(0,0,0,0.08);
+        }
+        .theme-dark .view-more-btn:hover { border-color: rgba(255,255,255,0.08); }
+        .view-more-btn:active { transform: translateY(0); }
+        .view-more-btn:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .view-more-btn svg { width: 14px; height: 14px; }
+
+        /* ═══ CANVAS PICKER ═══ */
+        .picker-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.2);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 100;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.25s var(--v4-ease-out);
+        }
+        .picker-overlay.active { opacity: 1; pointer-events: auto; }
+        .picker-panel {
+            width: 380px; max-width: calc(100vw - 48px);
+            padding: 24px;
+            border-radius: 20px;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid transparent;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--v4-card-shadow-hover);
+            transform: translateY(8px) scale(0.97);
+            transition: transform 0.3s var(--v4-ease-out);
+        }
+        .picker-overlay.active .picker-panel { transform: translateY(0) scale(1); }
+        .picker-header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .picker-title { font-size: 17px; font-weight: 600; letter-spacing: 0.01em; }
+        .picker-close {
+            width: 28px; height: 28px; border-radius: 50%;
+            border: none; background: transparent;
+            color: var(--v4-muted); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: color 0.2s var(--v4-ease-hover), background 0.2s var(--v4-ease-hover);
+        }
+        .picker-close:hover { color: var(--v4-text); background: var(--v4-bg); }
+        .picker-options { display: flex; flex-direction: column; gap: 8px; }
+        .picker-option {
+            display: flex; align-items: center; gap: 14px;
+            width: 100%; padding: 14px 16px;
+            border-radius: 14px;
+            border: 1px solid transparent;
+            background: var(--v4-bg);
+            color: var(--v4-text);
+            cursor: pointer;
+            text-align: left;
+            transition: transform 0.3s var(--v4-ease-out), box-shadow 0.3s var(--v4-ease-out), border-color 0.3s var(--v4-ease-out);
+            font-family: var(--font-sans, inherit);
+        }
+        .picker-option:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover);
+            border-color: rgba(0,0,0,0.08);
+        }
+        .theme-dark .picker-option:hover { border-color: rgba(255,255,255,0.08); }
+        .picker-option:active { transform: translateY(0) scale(0.98); }
+        .picker-option:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 2px; }
+        .picker-option-icon {
+            width: 42px; height: 42px; border-radius: 12px;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(150%);
+            -webkit-backdrop-filter: blur(20px) saturate(150%);
+            display: flex; align-items: center; justify-content: center;
+            color: var(--v4-muted); flex-shrink: 0;
+        }
+        .picker-option-icon svg { width: 20px; height: 20px; }
+        .picker-option-text { flex: 1; min-width: 0; }
+        .picker-option-name { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; margin-bottom: 2px; }
+        .picker-option-desc { font-size: 12px; color: var(--v4-muted); line-height: 1.4; }
+        .picker-option-arrow {
+            width: 16px; height: 16px; color: var(--v4-muted); flex-shrink: 0;
+            opacity: 0; transform: translateX(-4px);
+            transition: opacity 0.25s var(--v4-ease-out), transform 0.25s var(--v4-ease-out);
+        }
+        .picker-option:hover .picker-option-arrow {
+            opacity: 1; transform: translateX(0);
+        }
+
+        /* ═══ TRASH PANEL (slide-over) ═══ */
+        .trash-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.2);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 100;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.25s var(--v4-ease-out);
+        }
+        .trash-overlay.active { opacity: 1; pointer-events: auto; }
+        .trash-panel-v4 {
+            width: 420px; max-width: calc(100vw - 48px); max-height: 80vh;
+            border-radius: 20px;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid transparent;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--v4-card-shadow-hover);
+            transform: translateY(8px) scale(0.97);
+            transition: transform 0.3s var(--v4-ease-out);
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        .trash-overlay.active .trash-panel-v4 { transform: translateY(0) scale(1); }
+        .trash-panel-head {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 20px 20px 12px;
+            flex-shrink: 0;
+        }
+        .trash-panel-head-title {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 16px; font-weight: 600;
+        }
+        .trash-panel-close {
+            width: 28px; height: 28px; border-radius: 50%;
+            border: none; background: transparent;
+            color: var(--v4-muted); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: color 0.2s var(--v4-ease-hover), background 0.2s var(--v4-ease-hover);
+        }
+        .trash-panel-close:hover { color: var(--v4-text); background: var(--v4-bg); }
+        .trash-note {
+            padding: 0 20px 12px;
+            font-size: 12px; color: var(--v4-muted);
+            display: flex; align-items: center; gap: 6px;
+            flex-shrink: 0;
+        }
+        .trash-list {
+            overflow-y: auto; flex: 1;
+            padding: 0 12px 16px;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .trash-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 12px; border-radius: 10px;
+            background: var(--v4-bg);
+            font-size: 13px;
+            transition: background 0.15s var(--v4-ease-hover);
+        }
+        .trash-item:hover { background: var(--v4-card-bg); }
+        .trash-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+        .trash-item-meta { font-size: 11px; color: var(--v4-muted); flex-shrink: 0; }
+        .trash-item-restore {
+            padding: 4px 10px; border-radius: 6px;
+            border: none; background: var(--v4-btn-bg); color: var(--v4-btn-text);
+            font-size: 11px; font-weight: 500; cursor: pointer;
+            transition: all 0.2s var(--v4-ease-hover);
+            font-family: var(--font-sans, inherit);
+        }
+        .trash-item-restore:hover { opacity: 0.85; }
+        .trash-item-purge {
+            padding: 4px 10px; border-radius: 6px;
+            border: none; background: transparent; color: #FF4D4F;
+            font-size: 11px; font-weight: 500; cursor: pointer;
+            transition: all 0.2s var(--v4-ease-hover);
+            font-family: var(--font-sans, inherit);
+        }
+        .trash-item-purge:hover { background: rgba(255, 77, 79, 0.12); }
+        .trash-empty {
+            text-align: center; padding: 32px 20px; color: var(--v4-muted); font-size: 13px;
+        }
+        .trash-panel-head-actions { display: flex; align-items: center; gap: 8px; }
+        .trash-clear-btn {
+            padding: 4px 10px; border-radius: 6px;
+            border: none; background: transparent; color: #FF4D4F;
+            font-size: 12px; font-weight: 500; cursor: pointer;
+            transition: all 0.2s var(--v4-ease-hover);
+            font-family: var(--font-sans, inherit);
+        }
+        .trash-clear-btn:hover { background: rgba(255, 77, 79, 0.12); }
+        .trash-clear-btn:disabled { opacity: 0.35; cursor: default; background: transparent; }
+
+        /* ═══ PURGE CONFIRM DIALOG ═══ */
+        .purge-confirm-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.2);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 110;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.25s var(--v4-ease-out);
+        }
+        .purge-confirm-overlay.active { opacity: 1; pointer-events: auto; }
+        .purge-confirm-panel {
+            width: 340px; max-width: calc(100vw - 48px);
+            border-radius: 20px;
+            background: var(--v4-card-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid transparent;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--v4-card-shadow-hover);
+            transform: translateY(8px) scale(0.97);
+            transition: transform 0.3s var(--v4-ease-out);
+            padding: 20px;
+        }
+        .purge-confirm-overlay.active .purge-confirm-panel { transform: translateY(0) scale(1); }
+        .purge-confirm-title { font-size: 15px; font-weight: 600; line-height: 1.4; }
+        .purge-confirm-desc { font-size: 12px; color: var(--v4-muted); margin-top: 6px; line-height: 1.5; word-break: break-all; }
+        .purge-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+        .purge-confirm-no {
+            padding: 6px 14px; border-radius: 8px; border: none;
+            background: var(--v4-bg); color: var(--v4-text);
+            font-size: 13px; font-weight: 500; cursor: pointer;
+            transition: opacity 0.2s var(--v4-ease-hover);
+            font-family: var(--font-sans, inherit);
+        }
+        .purge-confirm-no:hover { opacity: 0.8; }
+        .purge-confirm-yes {
+            padding: 6px 14px; border-radius: 8px; border: none;
+            background: #FF4D4F; color: #ffffff;
+            font-size: 13px; font-weight: 500; cursor: pointer;
+            transition: opacity 0.2s var(--v4-ease-hover);
+            font-family: var(--font-sans, inherit);
+        }
+        .purge-confirm-yes:hover { opacity: 0.85; }
+
+        /* ═══ RESPONSIVE ═══ */
+        @media (max-width: 760px) {
+            .page { padding: 48px 0 64px; gap: 32px; }
+            .hero { flex-direction: column; gap: 28px; min-height: auto; }
+            .hero-title { font-size: 40px; }
+            .hero-desc { max-width: 100%; }
+            .cards-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+            .hero-actions { flex-direction: column; }
+            .btn-primary, .btn-secondary { justify-content: center; }
+            .hero-carousel { height: 220px; }
+        }
+        @media (max-width: 500px) {
+            .page { padding: 36px 0 56px; gap: 28px; }
+            .hero { flex-direction: column; gap: 24px; min-height: auto; }
+            .hero-title { font-size: 34px; }
+            .hero-desc { font-size: 14px; max-width: 100%; }
+            .cards-grid { grid-template-columns: 1fr; }
+            .hero-carousel { height: 200px; }
+            .trash-fab { bottom: 20px; right: 20px; }
+            .btn-primary, .btn-secondary { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page" id="v4page">
+        <!-- ═══ HERO ═══ -->
+        <section class="hero">
+            <div class="hero-left">
+                <h1 class="hero-title">无限画布</h1>
+                <p class="hero-desc">
+                    自由布局的 AI 创作空间。在无限画布上串联图像、视频、对话节点，构建你的创意工作流。
+                </p>
+                <div class="hero-actions">
+                    <button class="btn-primary" id="btnStartCreate">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                        开始创作
+                    </button>
+                    <button class="btn-secondary" id="btnContinueLast">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        继续上次
+                    </button>
+                </div>
+            </div>
+            <div class="hero-right">
+                <div class="hero-carousel" id="heroCarousel">
+                    <div class="carousel-slide active">
+                        <img class="carousel-slide-img loading" src="/static/images/concept/carousel-image-generation.jpg" alt="图像生成" fetchpriority="high" loading="eager" onload="this.classList.add('loaded'); this.classList.remove('loading');" onerror="this.classList.add('error'); this.classList.remove('loading'); this.alt='图片加载失败';">
+                        <div class="carousel-slide-gradient" style="background: linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.55) 100%), radial-gradient(circle at 70% 20%, rgba(168,85,247,0.25), transparent 60%);"></div>
+                        <div class="carousel-caption">
+                            <div>
+                                <div class="carousel-caption-title">文生图创作</div>
+                                <div class="carousel-caption-sub">输入提示词，快速生成高质量概念图</div>
+                            </div>
+                            <span class="carousel-caption-tag">图像生成</span>
+                        </div>
+                    </div>
+                    <div class="carousel-slide">
+                        <video class="carousel-slide-img" src="/static/images/concept/pinterest_carousel.mp4" muted loop playsinline autoplay preload="auto" onerror="this.classList.add('error')"></video>
+                        <div class="carousel-slide-gradient" style="background: linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.55) 100%), radial-gradient(circle at 30% 25%, rgba(165,165,165,0.25), transparent 60%);"></div>
+                        <div class="carousel-caption">
+                            <div>
+                                <div class="carousel-caption-title">AI 视频生成</div>
+                                <div class="carousel-caption-sub">静图转动态，一键生成流畅视频片段</div>
+                            </div>
+                            <span class="carousel-caption-tag">视频生成</span>
+                        </div>
+                    </div>
+                    <div class="carousel-slide">
+                        <img class="carousel-slide-img loading" src="/static/images/concept/carousel-node-workflow.jpg" alt="节点工作流" loading="lazy" onload="this.classList.add('loaded'); this.classList.remove('loading');" onerror="this.classList.add('error'); this.classList.remove('loading'); this.alt='图片加载失败';">
+                        <div class="carousel-slide-gradient" style="background: linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.55) 100%), radial-gradient(circle at 60% 30%, rgba(16,185,129,0.25), transparent 60%);"></div>
+                        <div class="carousel-caption">
+                            <div>
+                                <div class="carousel-caption-title">节点工作流</div>
+                                <div class="carousel-caption-sub">自由串联图像、视频、LLM 节点</div>
+                            </div>
+                            <span class="carousel-caption-tag">节点画布</span>
+                        </div>
+                    </div>
+                    <div class="carousel-dots">
+                        <div class="carousel-dot active" data-index="0"></div>
+                        <div class="carousel-dot" data-index="1"></div>
+                        <div class="carousel-dot" data-index="2"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══ SECTION HEADER ═══ -->
+        <div class="section-header">
+            <span class="section-label" id="sectionLabel">所有画布</span>
+            <button class="btn-new-project" id="btnNewProject">
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                新建画布
+            </button>
+        </div>
+
+        <!-- ═══ CARDS GRID ═══ -->
+        <div class="cards-grid" id="cardsGrid">
+            <div class="cards-empty" id="cardsEmpty">
+                <div class="cards-empty-icon">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                </div>
+                <div class="cards-empty-title">暂无画布</div>
+                <div class="cards-empty-sub">点击「新建画布」开始你的第一个创作</div>
+            </div>
+        </div>
+
+        <!-- ═══ VIEW MORE ═══ -->
+        <section class="view-more-section" id="viewMoreSection" style="display:none;">
+            <button class="view-more-btn" id="btnViewMore">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                查看更多
+            </button>
+        </section>
+    </div>
+
+    <!-- ═══ CANVAS PICKER OVERLAY ═══ -->
+    <div class="picker-overlay" id="canvasPickerOverlay">
+        <div class="picker-panel" onclick="event.stopPropagation()">
+            <div class="picker-header">
+                <span class="picker-title">新建画布</span>
+                <button class="picker-close" id="pickerCloseBtn" aria-label="关闭">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="picker-options">
+                <button class="picker-option" id="pickerNormal">
+                    <div class="picker-option-icon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                            <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                        </svg>
+                    </div>
+                    <div class="picker-option-text">
+                        <div class="picker-option-name">普通画布</div>
+                        <div class="picker-option-desc">经典无限画布，自由拖拽布局图像与节点</div>
+                    </div>
+                    <svg class="picker-option-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+                <button class="picker-option" id="pickerSmart">
+                    <div class="picker-option-icon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                        </svg>
+                    </div>
+                    <div class="picker-option-text">
+                        <div class="picker-option-name">智能画布</div>
+                        <div class="picker-option-desc">AI 驱动的智能工作流，自动编排生成管线</div>
+                    </div>
+                    <svg class="picker-option-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ TRASH OVERLAY ═══ -->
+    <div class="trash-overlay" id="trashOverlay">
+        <div class="trash-panel-v4" onclick="event.stopPropagation()">
+            <div class="trash-panel-head">
+                <div class="trash-panel-head-title">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    <span>回收站</span>
+                </div>
+                <div class="trash-panel-head-actions">
+                    <button class="trash-clear-btn" id="trashClearBtn" type="button" disabled>清空回收站</button>
+                    <button class="trash-panel-close" id="trashOverlayClose" aria-label="关闭">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="trash-note">
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <span>回收站中的画布会在 30 天后自动清理。</span>
+            </div>
+            <div class="trash-list" id="trashListV4">
+                <div class="trash-empty">回收站为空</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ PURGE CONFIRM OVERLAY ═══ -->
+    <div class="purge-confirm-overlay" id="purgeConfirmOverlay">
+        <div class="purge-confirm-panel" onclick="event.stopPropagation()">
+            <div class="purge-confirm-title" id="purgeConfirmTitle">彻底删除后无法恢复，确定删除？</div>
+            <div class="purge-confirm-desc" id="purgeConfirmDesc"></div>
+            <div class="purge-confirm-actions">
+                <button class="purge-confirm-no" id="purgeConfirmCancel" type="button">取消</button>
+                <button class="purge-confirm-yes" id="purgeConfirmOk" type="button">彻底删除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ TRASH FAB ═══ -->
+    <button class="trash-fab" id="trashFab" title="回收站" aria-label="回收站">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            <line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+        </svg>
+        <span class="trash-badge" id="trashBadgeV4" style="display:none">0</span>
+    </button>
+
+    <script defer src="/static/js/canvas-list.js?v=1.0.115.1789114960"></script>
+    <script>
+        /* ═══ V4 集成层 — 与 canvas-list.js 数据桥接 ═══ */
+        (function() {
+            'use strict';
+
+            // ═══ DOM refs ═══
+            const cardsGrid = document.getElementById('cardsGrid');
+            const cardsEmpty = document.getElementById('cardsEmpty');
+            const viewMoreSection = document.getElementById('viewMoreSection');
+            const trashBadgeV4 = document.getElementById('trashBadgeV4');
+            const trashListV4 = document.getElementById('trashListV4');
+            const sectionLabel = document.getElementById('sectionLabel');
+
+            // ═══ CAROUSEL ═══
+            let carouselCurrent = 0;
+            const carouselTotal = 3;
+            let carouselTimer = null;
+
+            function switchCarousel(index) {
+                const slides = document.querySelectorAll('#heroCarousel .carousel-slide');
+                const dots = document.querySelectorAll('#heroCarousel .carousel-dot');
+                if (!slides.length) return;
+                const oldVideo = slides[carouselCurrent].querySelector('video');
+                if (oldVideo) oldVideo.pause();
+                slides[carouselCurrent].classList.remove('active');
+                dots[carouselCurrent].classList.remove('active');
+                carouselCurrent = index;
+                slides[carouselCurrent].classList.add('active');
+                dots[carouselCurrent].classList.add('active');
+                const newImg = slides[carouselCurrent].querySelector('img.loading');
+                if (newImg && newImg.complete) { newImg.classList.add('loaded'); newImg.classList.remove('loading'); }
+                const newVideo = slides[carouselCurrent].querySelector('video');
+                if (newVideo) { newVideo.currentTime = 0; newVideo.play().catch(()=>{}); }
+                resetCarouselTimer();
+            }
+
+            function nextCarousel() {
+                switchCarousel((carouselCurrent + 1) % carouselTotal);
+            }
+
+            function resetCarouselTimer() {
+                if (carouselTimer) clearInterval(carouselTimer);
+                carouselTimer = setInterval(nextCarousel, 5000);
+            }
+
+            // 启动轮播 + 视频自动播放
+            if (document.getElementById('heroCarousel')) {
+                resetCarouselTimer();
+                const initialVideo = document.querySelector('#heroCarousel .carousel-slide.active video');
+                if (initialVideo) { initialVideo.currentTime = 0; initialVideo.play().catch(()=>{}); }
+                // 预加载所有非 active 媒体，避免切播时白屏
+                document.querySelectorAll('#heroCarousel .carousel-slide img.loading').forEach(img => {
+                    img.addEventListener('load', () => { img.classList.add('loaded'); img.classList.remove('loading'); }, { once: true });
+                    img.addEventListener('error', () => { img.classList.add('error'); img.classList.remove('loading'); }, { once: true });
+                });
+                document.querySelectorAll('#heroCarousel .carousel-slide video').forEach(v => {
+                    v.addEventListener('error', () => { v.classList.add('error'); });
+                    v.preload = 'auto';
+                });
+            }
+
+            // dot 点击
+            document.querySelectorAll('#heroCarousel .carousel-dot').forEach(dot => {
+                dot.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    switchCarousel(parseInt(this.dataset.index));
+                });
+            });
+
+            // ═══ CANVAS PICKER ═══
+            const pickerOverlay = document.getElementById('canvasPickerOverlay');
+
+            function openCanvasPicker() {
+                if (pickerOverlay) pickerOverlay.classList.add('active');
+            }
+            function closeCanvasPicker() {
+                if (pickerOverlay) pickerOverlay.classList.remove('active');
+            }
+
+            document.getElementById('btnStartCreate').addEventListener('click', openCanvasPicker);
+            document.getElementById('btnNewProject').addEventListener('click', openCanvasPicker);
+
+            pickerOverlay.addEventListener('click', function(e) {
+                if (e.target === pickerOverlay) closeCanvasPicker();
+            });
+            document.getElementById('pickerCloseBtn').addEventListener('click', closeCanvasPicker);
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') { closeCanvasPicker(); closeTrashOverlay(); closePurgeConfirm(); closeAllCardMenus(); }
+            });
+
+            // ═══ TRASH OVERLAY ═══
+            const trashOverlay = document.getElementById('trashOverlay');
+            function openTrashOverlay() {
+                if (trashOverlay) trashOverlay.classList.add('active');
+            }
+            function closeTrashOverlay() {
+                if (trashOverlay) trashOverlay.classList.remove('active');
+            }
+
+            trashOverlay.addEventListener('click', function(e) {
+                if (e.target === trashOverlay) closeTrashOverlay();
+            });
+            document.getElementById('trashOverlayClose').addEventListener('click', closeTrashOverlay);
+            document.getElementById('trashFab').addEventListener('click', function(e) {
+                e.preventDefault();
+                openTrashOverlay();
+            });
+
+            // ═══ CARD MENU LOGIC ═══
+            function closeAllCardMenus() {
+                document.querySelectorAll('.card-more-menu.active').forEach(m => m.classList.remove('active'));
+            }
+
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('.card-more-btn') && !e.target.closest('.card-more-menu')) {
+                    closeAllCardMenus();
+                }
+            });
+
+            // ═══ FORMAT TIME ═══
+            function formatTime(value) {
+                if (!value) return '--';
+                const raw = Number(value);
+                const time = raw < 10000000000 ? raw * 1000 : raw;
+                const date = new Date(time);
+                if (Number.isNaN(date.getTime())) return '--';
+                return date.toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+            }
+
+            function escapeHtml(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            // ═══ DATA BRIDGE — 从 canvas-list.js 读取数据 ═══
+            // canvas-list.js 是一个 IIFE，内部变量 projects/canvases/deletedCanvases 是私有的。
+            // 我们通过劫持 fetch 来拦截 API 响应，或者直接发请求获取数据。
+            // 最佳方案：canvas-list.js 的 loadAll() 调用后，我们通过 DOM 事件通知来获取数据。
+            // 这里我们使用一个更简洁的方案：重写部分行为，让 canvas-list.js 的 API 响应同时更新 V4 UI。
+
+            let v4Projects = [];
+            let v4Canvases = [];
+            let v4DeletedCanvases = [];
+            let v4CurrentProjectId = 'default';
+
+            // 拦截 fetch 以获取 canvas-list.js 加载的数据
+            const origFetch = window.fetch;
+            window.fetch = function(url, ...args) {
+                return origFetch.apply(this, arguments).then(async res => {
+                    const cloned = res.clone();
+                    try {
+                        const data = await cloned.json();
+                        // 捕获画布列表（保留项目列表捕获以兼容旧逻辑）
+                        if (typeof url === 'string' && url.includes('/api/projects') && !url.includes('/api/projects/') && args.length === 0) {
+                            v4Projects = (data.projects || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+                            if (!v4Projects.length) v4Projects = [{ id: 'default', name: '默认画布', order: 0, canvas_count: 0 }];
+                            renderV4Cards();
+                        }
+                        // 捕获画布列表
+                        if (typeof url === 'string' && url === '/api/canvases' && args.length === 0) {
+                            v4Canvases = data.canvases || [];
+                            renderV4Cards();
+                        }
+                        // 捕获删除的画布
+                        if (typeof url === 'string' && url.includes('/api/canvases/trash')) {
+                            v4DeletedCanvases = data.canvases || [];
+                            renderTrashList();
+                            updateTrashBadge();
+                        }
+                        // 创建画布后刷新
+                        if (typeof url === 'string' && url === '/api/canvases' && (args[0] || {}).method === 'POST') {
+                            if (data.canvas) {
+                                v4Canvases.push(data.canvas);
+                                renderV4Cards();
+                            }
+                        }
+                    } catch(e) { /* not JSON */ }
+                    return res;
+                });
+            };
+
+            // ═══ RENDER V4 CARDS ═══ (项目=画布：直接显示画布卡片)
+            function getProjectCanvases(pid) {
+                return v4Canvases.filter(c => (c.project || 'default') === pid);
+            }
+
+            function renderV4Cards() {
+                const existingCards = cardsGrid.querySelectorAll('.project-card');
+                existingCards.forEach(c => c.remove());
+                if (cardsEmpty) cardsEmpty.style.display = 'none';
+
+                if (!v4Canvases.length) {
+                    if (cardsEmpty) cardsEmpty.style.display = '';
+                    viewMoreSection.style.display = 'none';
+                    return;
+                }
+
+                // 按更新时间降序排列画布
+                const sortedCanvases = v4Canvases.slice().sort((a, b) => {
+                    const ta = a.updated_at || a.created_at || 0;
+                    const tb = b.updated_at || b.created_at || 0;
+                    return tb - ta;
+                });
+
+                sectionLabel.textContent = `所有画布 · ${sortedCanvases.length} 个`;
+
+                sortedCanvases.forEach((c, idx) => {
+                    const card = buildV4Card(c, idx);
+                    cardsGrid.appendChild(card);
+                });
+
+                viewMoreSection.style.display = sortedCanvases.length > 6 ? '' : 'none';
+            }
+
+            function buildV4Card(c, idx) {
+                const card = document.createElement('div');
+                card.className = 'project-card';
+                card.style.animationDelay = (0.2 + idx * 0.05) + 's';
+                card.setAttribute('data-canvas-id', c.id);
+
+                const updatedAt = formatTime(c.updated_at || c.created_at);
+                const isSmart = c.kind === 'smart';
+
+                // 预览区：最多 4 张图片 2x2 网格
+                const thumbs = (c.thumbnails || []).slice(0, 4);
+                let previewHTML = '';
+                if (thumbs.length) {
+                    previewHTML = thumbs.map(url => `<img class="card-preview-thumb" src="${escapeHtml(url)}" alt="" loading="lazy">`).join('');
+                } else {
+                    previewHTML = `<div class="card-preview-empty"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="width:32px;height:32px;opacity:.4"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div>`;
+                }
+
+                const kindBadge = isSmart ? `<span class="card-preview-count" style="background:var(--accent);color:#fff">智能</span>` : `<span class="card-preview-count">画布</span>`;
+
+                card.innerHTML = `
+                    <div class="card-preview" style="aspect-ratio:16/10">
+                        ${previewHTML}
+                        ${kindBadge}
+                        <button class="card-more-btn" aria-label="更多操作">
+                            <svg fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></svg>
+                        </button>
+                    </div>
+                    <div class="card-more-menu">
+                        <button class="card-more-menu-item" data-action="rename">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            重命名
+                        </button>
+                        <button class="card-more-menu-item" data-action="duplicate">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            复制画布
+                        </button>
+                        <button class="card-more-menu-item delete" data-action="delete">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            删除
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="card-title">
+                            ${escapeHtml(c.title || '未命名画布')}
+                            <svg class="card-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                        </div>
+                        <div class="card-meta">更新于 ${updatedAt}</div>
+                    </div>`;
+
+                // 事件绑定
+                card.addEventListener('click', function(e) {
+                    if (e.target.closest('.card-more-btn') || e.target.closest('.card-more-menu')) return;
+                    // 点击卡片：直接打开画布
+                    openCanvas(c);
+                });
+
+                const moreBtn = card.querySelector('.card-more-btn');
+                const moreMenu = card.querySelector('.card-more-menu');
+                moreBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const isActive = moreMenu.classList.contains('active');
+                    closeAllCardMenus();
+                    if (!isActive) moreMenu.classList.add('active');
+                });
+
+                card.querySelectorAll('.card-more-menu-item').forEach(item => {
+                    item.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const action = this.dataset.action;
+                        closeAllCardMenus();
+                        handleCardAction(action, c);
+                    });
+                });
+
+                return card;
+            }
+
+            function openCanvas(c) {
+                const enc = encodeURIComponent(c.id);
+                const project = encodeURIComponent(c.project || 'default');
+                window.location.href = (c.kind === 'smart')
+                    ? `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`
+                    : `/static/canvas.html?id=${enc}&project=${project}&t=1786289367`;
+            }
+
+            function handleCardAction(action, c) {
+                console.log('[v4 card action]', action, c.title);
+                if (action === 'rename') {
+                    const newName = prompt('重命名画布', c.title);
+                    if (newName && newName.trim() !== '' && newName.trim() !== c.title) {
+                        renameCanvasAPI(c.id, newName.trim());
+                    }
+                } else if (action === 'duplicate') {
+                    if (confirm(`确定要复制画布「${c.title}」吗？`)) {
+                        duplicateCanvasAPI(c);
+                    }
+                } else if (action === 'delete') {
+                    if (confirm(`确定要删除画布「${c.title}」吗？此操作可在回收站撤销。`)) {
+                        deleteCanvasAPI(c.id);
+                    }
+                }
+            }
+
+            // ═══ API 调用（画布级） ═══
+            async function renameCanvasAPI(cid, name) {
+                try {
+                    const res = await fetch(`/api/canvases/${encodeURIComponent(cid)}/meta`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title: name })
+                    });
+                    if (!res.ok) throw new Error('rename failed');
+                    const c = v4Canvases.find(x => x.id === cid);
+                    if (c) c.title = name;
+                    renderV4Cards();
+                } catch(e) { console.error(e); alert('重命名失败'); refreshAll(); }
+            }
+
+            async function duplicateCanvasAPI(srcCanvas) {
+                try {
+                    const title = (srcCanvas.title || '画布') + ' 副本';
+                    const res = await fetch('/api/canvases', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title,
+                            icon: srcCanvas.icon || '🧩',
+                            kind: srcCanvas.kind || 'classic',
+                            project: srcCanvas.project || 'default',
+                            board_x: 40,
+                            board_y: 40
+                        })
+                    });
+                    if (!res.ok) throw new Error('duplicate failed');
+                    const data = await res.json();
+                    if (data.canvas) {
+                        v4Canvases.push(data.canvas);
+                        renderV4Cards();
+                    }
+                } catch(e) { console.error(e); alert('复制失败'); }
+            }
+
+            async function deleteCanvasAPI(cid) {
+                try {
+                    const res = await fetch(`/api/canvases/${encodeURIComponent(cid)}`, { method: 'DELETE' });
+                    if (!res.ok) throw new Error('delete failed');
+                    v4Canvases = v4Canvases.filter(c => c.id !== cid);
+                    renderV4Cards();
+                    loadTrash();   // 软删后同步回收站角标与列表
+                } catch(e) { console.error(e); alert('删除失败'); refreshAll(); }
+            }
+
+            async function createCanvasFromPicker(kind) {
+                closeCanvasPicker();
+                const isSmart = kind === 'smart';
+                const baseName = isSmart ? '智能画布' : '画布';
+                const name = `${baseName} ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
+
+                try {
+                    const res = await fetch('/api/canvases', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: name,
+                            icon: isSmart ? 'sparkles' : '🧩',
+                            kind: isSmart ? 'smart' : 'classic',
+                            project: 'default',
+                            board_x: 40,
+                            board_y: 40
+                        })
+                    });
+                    if (!res.ok) throw new Error('create canvas failed');
+                    const data = await res.json();
+                    const nc = data.canvas;
+                    if (nc) {
+                        if (nc.project == null) nc.project = 'default';
+                        v4Canvases.push(nc);
+                        renderV4Cards();
+                        // 直接跳转到新画布
+                        const enc = encodeURIComponent(nc.id);
+                        const project = encodeURIComponent(nc.project || 'default');
+                        window.location.href = (nc.kind === 'smart')
+                            ? `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`
+                            : `/static/canvas.html?id=${enc}&project=${project}&t=1786289367`;
+                    }
+                } catch(e) { console.error(e); alert('创建失败'); }
+            }
+
+            document.getElementById('pickerNormal').addEventListener('click', () => createCanvasFromPicker('classic'));
+            document.getElementById('pickerSmart').addEventListener('click', () => createCanvasFromPicker('smart'));
+
+            // ═══ 继续上次 ═══
+            document.getElementById('btnContinueLast').addEventListener('click', function() {
+                // 找到最近更新的画布
+                const sorted = v4Canvases.slice().sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0));
+                if (sorted.length > 0) {
+                    const latest = sorted[0];
+                    const enc = encodeURIComponent(latest.id);
+                    const project = encodeURIComponent(latest.project || 'default');
+                    window.location.href = (latest.kind === 'smart')
+                        ? `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`
+                        : `/static/canvas.html?id=${enc}&project=${project}&t=1786289367`;
+                } else {
+                    openCanvasPicker();
+                }
+            });
+
+            // ═══ 查看更多 ═══
+            document.getElementById('btnViewMore').addEventListener('click', function() {
+                console.log('[view more] 加载更多画布');
+                // 目前显示全部，后续可加分页
+                refreshAll();
+            });
+
+            // ═══ 回收站 ═══
+            const trashClearBtn = document.getElementById('trashClearBtn');
+
+            function updateTrashBadge() {
+                const count = v4DeletedCanvases.length;
+                trashBadgeV4.textContent = count;
+                trashBadgeV4.style.display = count > 0 ? '' : 'none';
+            }
+
+            // ═══ 彻底删除二次确认 ═══
+            const purgeConfirmOverlay = document.getElementById('purgeConfirmOverlay');
+            const purgeConfirmTitle = document.getElementById('purgeConfirmTitle');
+            const purgeConfirmDesc = document.getElementById('purgeConfirmDesc');
+            let purgeConfirmAction = null;
+
+            function openPurgeConfirm(title, desc, action) {
+                purgeConfirmTitle.textContent = title;
+                purgeConfirmDesc.textContent = desc || '';
+                purgeConfirmDesc.style.display = desc ? '' : 'none';
+                purgeConfirmAction = action;
+                purgeConfirmOverlay.classList.add('active');
+            }
+            function closePurgeConfirm() {
+                purgeConfirmOverlay.classList.remove('active');
+                purgeConfirmAction = null;
+            }
+            purgeConfirmOverlay.addEventListener('click', function(e) {
+                if (e.target === purgeConfirmOverlay) closePurgeConfirm();
+            });
+            document.getElementById('purgeConfirmCancel').addEventListener('click', closePurgeConfirm);
+            document.getElementById('purgeConfirmOk').addEventListener('click', function() {
+                const action = purgeConfirmAction;
+                if (action) action();
+            });
+
+            async function purgeCanvasAPI(cid) {
+                try {
+                    const res = await fetch(`/api/canvases/${encodeURIComponent(cid)}/purge`, { method: 'DELETE' });
+                    if (!res.ok) throw new Error('purge failed');
+                    v4DeletedCanvases = v4DeletedCanvases.filter(c => c.id !== cid);
+                    closePurgeConfirm();
+                    renderTrashList();
+                    updateTrashBadge();
+                } catch(e) { console.error(e); closePurgeConfirm(); alert('彻底删除失败'); }
+            }
+
+            async function purgeAllCanvasesAPI() {
+                const ids = v4DeletedCanvases.map(c => c.id);
+                try {
+                    const results = await Promise.all(ids.map(id =>
+                        fetch(`/api/canvases/${encodeURIComponent(id)}/purge`, { method: 'DELETE' })
+                    ));
+                    if (results.some(r => !r.ok)) throw new Error('purge failed');
+                    v4DeletedCanvases = [];
+                    closePurgeConfirm();
+                    renderTrashList();
+                    updateTrashBadge();
+                } catch(e) { console.error(e); closePurgeConfirm(); alert('清空回收站失败'); }
+            }
+
+            trashClearBtn.addEventListener('click', function() {
+                const n = v4DeletedCanvases.length;
+                if (!n) return;
+                openPurgeConfirm(
+                    '清空回收站后无法恢复，确定清空？',
+                    `共 ${n} 个画布将被永久删除。`,
+                    purgeAllCanvasesAPI
+                );
+            });
+
+            function renderTrashList() {
+                if (!trashListV4) return;
+                trashClearBtn.disabled = !v4DeletedCanvases.length;
+                if (!v4DeletedCanvases.length) {
+                    trashListV4.innerHTML = '<div class="trash-empty">回收站为空</div>';
+                    return;
+                }
+                trashListV4.innerHTML = v4DeletedCanvases.map(c => `
+                    <div class="trash-item">
+                        <span class="trash-item-name">${escapeHtml(c.title || '未命名')}</span>
+                        <span class="trash-item-meta">${formatTime(c.deleted_at || c.updated_at)}</span>
+                        <button class="trash-item-purge" data-canvas-id="${escapeHtml(c.id)}">彻底删除</button>
+                        <button class="trash-item-restore" data-canvas-id="${escapeHtml(c.id)}">恢复</button>
+                    </div>
+                `).join('');
+
+                trashListV4.querySelectorAll('.trash-item-restore').forEach(btn => {
+                    btn.addEventListener('click', async function(e) {
+                        e.stopPropagation();
+                        const cid = this.dataset.canvasId;
+                        try {
+                            const res = await fetch(`/api/canvases/${encodeURIComponent(cid)}/restore`, { method: 'POST' });
+                            if (!res.ok) throw new Error('restore failed');
+                            v4DeletedCanvases = v4DeletedCanvases.filter(c => c.id !== cid);
+                            renderTrashList();
+                            updateTrashBadge();
+                            refreshAll();
+                        } catch(e) { console.error(e); alert('恢复失败'); }
+                    });
+                });
+
+                trashListV4.querySelectorAll('.trash-item-purge').forEach(btn => {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const cid = this.dataset.canvasId;
+                        const item = v4DeletedCanvases.find(c => c.id === cid);
+                        openPurgeConfirm(
+                            '彻底删除后无法恢复，确定删除？',
+                            item ? `「${item.title || '未命名'}」将被永久删除。` : '',
+                            () => purgeCanvasAPI(cid)
+                        );
+                    });
+                });
+            }
+
+            async function loadTrash() {
+                try {
+                    const res = await fetch('/api/canvases/trash');
+                    if (res.ok) {
+                        const data = await res.json();
+                        v4DeletedCanvases = data.canvases || [];
+                        renderTrashList();
+                        updateTrashBadge();
+                    }
+                } catch(e) { console.error('load trash failed', e); }
+            }
+
+            // ═══ 初始加载 ═══
+            async function refreshAll() {
+                try {
+                    const [pRes, cRes] = await Promise.all([
+                        fetch('/api/projects'),
+                        fetch('/api/canvases')
+                    ]);
+                    const pData = pRes.ok ? await pRes.json() : { projects: [] };
+                    const cData = cRes.ok ? await cRes.json() : { canvases: [] };
+                    v4Projects = (pData.projects || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+                    if (!v4Projects.length) v4Projects = [{ id: 'default', name: '默认画布', order: 0, canvas_count: 0 }];
+                    v4Canvases = cData.canvases || [];
+                    renderV4Cards();
+                } catch(e) { console.error(e); }
+            }
+
+            // 页面加载时主动获取数据（canvas-list.js 也会加载，但我们不依赖它）
+            refreshAll();
+            loadTrash();
+
+            // ═══ 首页导入图片：自动打开待导入画布 ═══
+            window.addEventListener('message', function(event) {
+                if (event.origin && event.origin !== location.origin) return;
+                if (!event.data || event.data.type !== 'open-canvas') return;
+                var pending = null;
+                try { pending = JSON.parse(localStorage.getItem('hp_pending_import') || 'null'); } catch(e) {}
+                if (!pending || !pending.canvasId) return;
+                fetch('/api/canvases/' + encodeURIComponent(pending.canvasId))
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(data) {
+                        if (data && data.canvas) openCanvas(data.canvas);
+                    })
+                    .catch(function(err) { console.error('[canvas-list] open pending import failed:', err); });
+            });
+
+            // ═══ DARK MODE TOGGLE ═══
+            console.log('💡 Press Cmd+D to toggle dark mode');
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'd' && e.metaKey) {
+                    e.preventDefault();
+                    var isDark = document.documentElement.classList.toggle('theme-dark');
+                    document.documentElement.classList.toggle('studio-theme-dark', isDark);
+                    localStorage.setItem('studio_theme', isDark ? 'dark' : 'light');
+                }
+            });
+
+            // 屏蔽 gesture 事件
+            document.addEventListener('gesturestart', e => { e.preventDefault(); }, { capture: true });
+            document.addEventListener('gesturechange', e => { e.preventDefault(); }, { capture: true });
+            document.addEventListener('gestureend', e => { e.preventDefault(); }, { capture: true });
+        })();
+    </script>
+</body>
+</html>

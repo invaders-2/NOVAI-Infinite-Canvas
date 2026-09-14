@@ -1,0 +1,104 @@
+{
+  "name": "novai-desktop",
+  "version": "1.0.115",
+  "description": "NOVAI 无限画布 AI 创作平台 — 桌面客户端 (Electron)",
+  "main": "main.js",
+  "homepage": "https://github.com/invaders-2/NOVAI",
+  "author": {
+    "name": "NOVAI",
+    "email": "271007236+invaders-2@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
+    "dist:publish": "electron-builder --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "build": {
+    "appId": "com.novai.desktop",
+    "productName": "NOVAI",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../main.py",
+        "to": "backend/main.py"
+      },
+      {
+        "from": "../requirements.txt",
+        "to": "backend/requirements.txt"
+      },
+      {
+        "from": "../static",
+        "to": "backend/static"
+      },
+      {
+        "from": "../workflows",
+        "to": "backend/workflows"
+      },
+      {
+        "from": ".version",
+        "to": "backend/VERSION"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "invaders-2",
+        "repo": "NOVAI-Infinite-Canvas",
+        "releaseType": "release"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "icon": "icons/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "icons/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "NOVAI"
+    },
+    "linux": {
+      "icon": "icons/icon.png",
+      "category": "Graphics",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "^24.13.3"
+  }
+}

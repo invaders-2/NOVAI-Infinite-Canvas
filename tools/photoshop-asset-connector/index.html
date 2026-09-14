@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>大雄画布工具</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="app-head">
+      <div class="brand-block">
+        <div class="brand-mark">DX</div>
+        <div class="brand-copy">
+          <div class="brand-title">大雄画布工具</div>
+          <div class="brand-sub">PS 资产桥接</div>
+        </div>
+      </div>
+      <div class="conn-pill" title="连接状态">
+        <span id="dot" class="dot off" title="未连接"></span>
+        <span>连接</span>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="工具视图切换">
+      <button class="tab active" type="button" data-tab="assets">资产</button>
+      <button class="tab" type="button" data-tab="generate">生成</button>
+      <button class="tab" type="button" data-tab="agent">Agent</button>
+      <button class="tab" type="button" data-tab="settings">设置</button>
+    </nav>
+
+    <div class="views">
+      <!-- ===== 资产 ===== -->
+      <section class="view active" data-view="assets">
+        <div class="panel assets-panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <strong>素材库</strong>
+              <span id="count">未连接</span>
+            </div>
+            <button id="refreshBtn" class="refresh-btn" type="button" title="刷新">刷新</button>
+          </div>
+
+          <div class="panel-body assets-body">
+            <div class="sources">
+              <button class="seg active" type="button" data-source="assets">图片资产</button>
+              <button class="seg" type="button" data-source="canvas">画布资产</button>
+              <button class="seg last" type="button" data-source="local">本地素材</button>
+            </div>
+
+            <div class="selectors">
+              <sp-picker id="selectA" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+              <sp-picker id="selectB" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+            </div>
+
+            <div class="filters">
+              <input id="search" type="search" placeholder="搜索名称、标签或描述">
+            </div>
+
+            <div id="grid" class="grid empty">
+              <div class="empty-state">
+                <div class="empty-mark">⌁</div>
+                <div>连接后在这里浏览素材。</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-foot">
+            <div class="bottom">
+              <button id="placeBtn" class="primary" type="button" disabled>下载到图层</button>
+              <button id="exportBtn" class="btn" type="button" disabled>上传当前画面</button>
+            </div>
+            <div id="pushMsg" class="push-msg"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 生成 ===== -->
+      <section class="view" data-view="generate">
+        <div class="panel generate-panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <strong>生成</strong>
+              <span>API / MS / RH / ComfyUI</span>
+            </div>
+          </div>
+
+          <div class="panel-body gen-scroll">
+            <div id="genModes" class="sources compact">
+              <button class="seg active" type="button" data-mode="api">API</button>
+              <button class="seg" type="button" data-mode="ms">MS</button>
+              <button class="seg" type="button" data-mode="rh">RH</button>
+              <button class="seg last" type="button" data-mode="comfy">ComfyUI</button>
+            </div>
+
+            <div id="genApiBar" class="gen-row2">
+              <sp-picker id="genProvider" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+              <sp-picker id="genModel" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+            </div>
+
+            <div id="genRhBar" class="hidden workflow-box">
+              <div class="gen-label">RunningHub 工作流</div>
+              <sp-picker id="genRhWorkflow" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+              <label class="gen-check"><input id="genRhWallet" type="checkbox"> 使用钱包扣费</label>
+            </div>
+
+            <div id="genComfyBar" class="hidden workflow-box">
+              <div class="gen-label">ComfyUI 工作流</div>
+              <sp-picker id="genComfyWorkflow" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+            </div>
+
+            <textarea id="genPrompt" class="gen-prompt" rows="3" placeholder="描述你想生成的画面…"></textarea>
+
+            <div id="genParams" class="gen-params"></div>
+
+            <div id="genRefsSection" class="thumb-section">
+              <div class="gen-label">参考图</div>
+              <div id="genRefs" class="gen-thumbs"></div>
+            </div>
+
+            <div class="thumb-section">
+              <div class="gen-label">生成结果</div>
+              <div id="genResults" class="gen-thumbs"></div>
+            </div>
+          </div>
+
+          <div class="panel-foot">
+            <div class="gen-bottom">
+              <button id="genRun" class="primary" type="button" disabled>生成</button>
+            </div>
+            <div id="genMsg" class="push-msg"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Agent ===== -->
+      <section class="view" data-view="agent">
+        <div class="panel agent-panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <strong>Agent</strong>
+              <span>对话生成和图像编辑</span>
+            </div>
+            <button id="agToggleModels" class="icon-btn" type="button" title="模型设置">设置</button>
+          </div>
+
+          <div class="agent-bar">
+            <button id="agNew" class="btn" type="button">＋ 新对话</button>
+            <sp-picker id="agHistory" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+            <button id="agDelete" class="btn danger" type="button" disabled>删除</button>
+          </div>
+
+          <div id="agModels" class="agent-models">
+            <div class="gen-row2">
+              <sp-picker id="agLlmProvider" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+              <sp-picker id="agLlmModel" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+            </div>
+            <div class="gen-row2">
+              <sp-picker id="agImgProvider" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+              <sp-picker id="agImgModel" size="s"><sp-menu slot="options"></sp-menu></sp-picker>
+            </div>
+          </div>
+
+          <div id="agMessages" class="agent-msgs">
+            <div class="empty-state">
+              <div class="empty-mark">✦</div>
+              <div>选好模型，直接说想画/想改的内容。</div>
+            </div>
+          </div>
+          <div id="agAttach" class="agent-attach"></div>
+
+          <div class="panel-foot agent-foot">
+            <div class="agent-tools">
+              <button id="agRegionBtn" class="mode-btn" type="button" title="只改选区：先用矩形选框框住要改的地方，再发送">▣ 选区</button>
+              <button id="agRetryBtn" class="mode-btn" type="button" title="用上一次的内容重新发送">↻ 重试</button>
+            </div>
+            <div class="agent-input">
+              <button id="agAttachBtn" class="icon-btn" type="button" title="上传当前画面用于编辑">＋</button>
+              <textarea id="agInput" rows="2" placeholder="例如：把当前图层改成夜景（回车发送，Shift+回车换行）"></textarea>
+              <button id="agSend" class="primary" type="button" disabled>发送</button>
+            </div>
+            <div id="agStatus" class="push-msg"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 设置 ===== -->
+      <section class="view" data-view="settings">
+        <div class="panel settings-panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <strong>连接设置</strong>
+              <span>连接同一局域网内的后端服务</span>
+            </div>
+          </div>
+
+          <div class="panel-body settings-body">
+            <div class="field">
+              <label>服务地址</label>
+              <div class="row">
+                <input id="server" class="server" type="text" spellcheck="false"
+                       placeholder="例：192.168.1.10:3000">
+                <button id="connectBtn" class="primary-sm" type="button">连接</button>
+              </div>
+            </div>
+
+            <div id="connMsg" class="conn-msg">同一局域网填运行后端那台电脑的 IP:端口。</div>
+
+            <label class="live" title="资产库/画布变化时自动刷新">
+              <input id="liveToggle" type="checkbox" checked> 实时同步
+            </label>
+
+            <div class="settings-card">
+              <div class="settings-card-title">上传范围</div>
+              <label class="live" title="按当前选中图层大小导出，而不是整张画布">
+                <input id="exportLayerToggle" type="checkbox"> 按选中图层大小上传
+              </label>
+            </div>
+
+            <button id="githubBtn" class="btn wide settings-link" type="button">打开 GitHub 项目</button>
+
+            <div class="about">大雄画布工具 · v0.3.0</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="js/state.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/sources.js"></script>
+  <script src="js/ps.js"></script>
+  <script src="js/socket.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/generate.js"></script>
+  <script src="js/agent.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

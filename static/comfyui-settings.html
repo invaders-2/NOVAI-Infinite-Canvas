@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工作流设置</title>
+    <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
+    <script>
+        // 检测是否在设置弹窗内嵌展示
+        (function(){
+            if (location.search.indexOf('embed=1') !== -1) {
+                document.documentElement.classList.add('settings-embed');
+            }
+        })();
+    </script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.115.1789114960"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/theme.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/i18n.js?v=1.0.115.1789114960"></script>
+    <link rel="stylesheet" href="/static/css/comfyui-settings.css?v=1.0.115.1789114960">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789114960">
+
+<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.115.1789114960">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
+<style>
+/* --- 页面特定 Marvis 覆盖 --- */
+body { background: transparent !important; color: var(--text) !important; }
+/* --- Marvis 增强覆盖 (comfyui-settings.html) --- */
+header { background: var(--sidebar-bg) !important; backdrop-filter: blur(28px) !important; }
+.card { background: var(--stage-bg) !important; border-radius: var(--radius-lg) !important; }
+.side-card { background: transparent !important; border-radius: var(--radius-lg) !important; }
+.graph-card { background: transparent !important; border-radius: var(--radius-lg) !important; }
+button.primary { background: var(--text) !important; color: var(--bg) !important; border-radius: var(--radius-md) !important; }
+input, select { background: var(--stage-bg) !important; border-radius: var(--radius-sm) !important; color: var(--text) !important; }
+/* 设置弹窗内嵌模式 — 与通用/外观/关于面板风格统一 */
+html.settings-embed body { background: transparent !important; font-family: var(--font-sans) !important; }
+html.settings-embed,
+html.settings-embed * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+html.settings-embed::-webkit-scrollbar,
+html.settings-embed *::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+}
+html.settings-embed .page { padding: 0; min-height: auto; background: transparent !important; }
+html.settings-embed .wrap { max-width: none; }
+html.settings-embed .page-head { display: none; }
+html.settings-embed .layout { grid-template-columns: 260px minmax(0,1fr); gap: 10px; align-items: stretch; }
+html.settings-embed .sidebar { position: static; max-height: none; width: 260px; min-width: 260px; flex-shrink: 0; overflow-y: auto; }
+html.settings-embed .side-card {
+    background: var(--stage-bg) !important;
+    border-radius: 20px !important;
+}
+html.settings-embed .graph-card,
+html.settings-embed .content-head {
+    background: var(--stage-bg) !important;
+    border-radius: 20px !important;
+}
+html.settings-embed .field-frame,
+html.settings-embed input,
+html.settings-embed select { border-radius: 10px !important; }
+html.settings-embed .action-btn { border-radius: 10px !important; }
+html.settings-embed .graph-svg-wrap { border-radius: 10px !important; }
+@media (max-width: 720px) {
+    html.settings-embed .layout { grid-template-columns: 1fr; grid-auto-rows: auto; overflow-y: auto; }
+    html.settings-embed .sidebar { position: relative; max-height: none; overflow-y: visible; }
+    html.settings-embed .graph-svg-wrap { height: 420px; }
+}
+/* ═══ Modal embed: fill iframe height, content scrolls ═══ */
+html.settings-embed,
+html.settings-embed body { height: 100%; overflow: hidden; }
+html.settings-embed .wrap,
+html.settings-embed .page { height: 100%; overflow: hidden; }
+html.settings-embed .layout { height: 100%; overflow: hidden; grid-auto-rows: 100%; }
+html.settings-embed .content { overflow-y: auto; }
+html.settings-embed .sidebar { overflow-y: auto; }
+/* Close button */
+.settings-close-btn, .modal-close-btn { transition: transform 0.2s ease-out; }
+.settings-close-btn:hover, .modal-close-btn:hover { transform: rotate(90deg) scale(1.1); }
+/* Switch animation */
+input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
+.ios-slider, .toggle-track { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
+/* ═══ R5 表单布局重塑：右侧内容列限宽居中，左右视觉平衡 ═══ */
+.content > * { max-width: 760px; width: 100%; margin-left: auto; margin-right: auto; }
+html.settings-embed .layout { grid-template-columns: 300px minmax(0,1fr); }
+html.settings-embed .sidebar { width: 300px; min-width: 300px; }
+@media (max-width: 720px) {
+    html.settings-embed .sidebar { width: auto; min-width: 0; }
+}
+/* 触控目标：主操作按钮 ≥44px，输入控件加高 */
+.upload-btn { min-height: 44px; }
+.action-btn { min-height: 44px; padding: 0 18px; }
+.run-btn { min-height: 44px; }
+.workflow-card { min-height: 44px; }
+.nodes-toggle { min-height: 44px; }
+.workspace-mode-tabs button { min-height: 36px; }
+.pfield-input, .pfield-select { min-height: 40px; }
+.small-input, .small-select { min-height: 36px; }
+/* Hover 微弱反馈补强 + 键盘 focus 可见环 */
+.upload-btn:hover { border-color: var(--muted); transform: translateY(-1px); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+/* 异步操作中的按钮 loading 态 */
+.action-btn.is-loading, .upload-btn.is-loading { opacity: .55; pointer-events: none; }
+/* 校验失败的输入高亮（错误就近） */
+.wf-invalid { outline: 2px solid var(--danger) !important; outline-offset: 1px; }
+/* ═══ R5 轻量 Toast 反馈（自动消失） ═══ */
+.wf-toast-host { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 140; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.wf-toast { display: flex; align-items: center; gap: 8px; max-width: min(460px, calc(100vw - 48px)); padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 12.5px; font-weight: 700; line-height: 1.45; box-shadow: 0 12px 32px rgba(0,0,0,.18); opacity: 0; transform: translateY(12px); transition: opacity .2s ease-out, transform .2s ease-out; pointer-events: auto; cursor: pointer; }
+.wf-toast.show { opacity: 1; transform: translateY(0); }
+.wf-toast.error { background: var(--danger); color: #fff; }
+.wf-toast-icon { display: flex; flex: 0 0 auto; }
+.wf-spin { animation: wf-spin 1s linear infinite; }
+@keyframes wf-spin { to { transform: rotate(360deg); } }
+/* ═══ R5 二次确认弹窗 ═══ */
+.wf-confirm-backdrop { position: fixed; inset: 0; z-index: 130; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(28,28,28,.42); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); opacity: 0; transition: opacity .18s ease-out; }
+body.studio-theme-dark .wf-confirm-backdrop { background: rgba(0,0,0,.55); }
+.wf-confirm-backdrop.show { opacity: 1; }
+.wf-confirm-panel { width: min(400px, 100%); background: var(--panel); border-radius: 20px; padding: 22px; box-shadow: 0 24px 60px var(--shadow-color-lg, rgba(0,0,0,.16)); transform: scale(.96) translateY(8px); transition: transform .18s ease-out; }
+.wf-confirm-backdrop.show .wf-confirm-panel { transform: none; }
+.wf-confirm-title { font-size: 15px; font-weight: 850; color: var(--text); letter-spacing: -.01em; }
+.wf-confirm-desc { margin-top: 8px; font-size: 12.5px; font-weight: 600; line-height: 1.6; color: var(--muted); }
+.wf-confirm-actions { margin-top: 18px; display: flex; justify-content: flex-end; gap: 8px; }
+.wf-confirm-btn { min-height: 44px; padding: 0 18px; border-radius: 12px; font-size: 12.5px; font-weight: 800; background: var(--soft); color: var(--text); transition: all .15s ease; }
+.wf-confirm-btn:hover { background: var(--line); }
+.wf-confirm-btn.danger { background: var(--danger); color: #fff; }
+.wf-confirm-btn.danger:hover { background: var(--danger); filter: brightness(1.1); }
+</style>
+</head>
+<body>
+    <div class="page">
+        <div class="wrap">
+            <header class="page-head">
+                <div>
+                    <div class="title" data-i18n="comfy.title">工作流设置</div>
+                    <div class="sub" data-i18n="comfy.subtitle">选择本地 ComfyUI 工作流，配置可暴露到画布的输入参数。</div>
+                </div>
+                <div id="status" class="status"></div>
+            </header>
+
+            <div class="layout">
+                <aside class="sidebar">
+                    <div class="side-card workflow-panel workflow-panel-comfy">
+                        <div class="side-title">ComfyUI 后端地址</div>
+                        <div id="comfyInstancesList" style="display:flex;flex-direction:column;gap:6px"></div>
+                        <button class="upload-btn" type="button" onclick="addComfyInstance()">
+                            <i data-lucide="plus" class="w-3.5 h-3.5"></i><span>添加后端</span>
+                        </button>
+                        <div style="display:flex;gap:6px">
+                            <button class="upload-btn" id="comfySaveBtn" type="button" onclick="saveComfyInstances()" style="flex:1;background:var(--panel);color:var(--text)">
+                                <i data-lucide="save" class="w-3.5 h-3.5"></i><span>保存</span>
+                            </button>
+                        </div>
+                        <div style="font-size:10.5px;color:var(--faint);line-height:1.55;font-weight:600">格式：<span style="font-family:var(--font-mono)">host:port</span>（如 <span style="font-family:var(--font-mono)">127.0.0.1:8188</span>）</div>
+                    </div>
+
+                    <div class="side-card workflow-panel workflow-panel-comfy">
+                        <div class="side-title" data-i18n="comfy.workflowList">工作流列表</div>
+                        <div id="workflowList" class="workflow-list"></div>
+                        <button class="upload-btn" id="uploadBtn" type="button" onclick="document.getElementById('uploadInput').click()">
+                            <i data-lucide="upload" class="w-3.5 h-3.5"></i><span data-i18n="comfy.uploadWorkflow">上传工作流</span>
+                        </button>
+                        <input id="uploadInput" type="file" accept="application/json" style="display:none" onchange="onUpload(event)">
+                    </div>
+
+                    <div class="side-card" id="previewCard">
+                        <div class="preview-title-row">
+                            <i data-lucide="eye" class="w-4 h-4" style="color:var(--muted)"></i>
+                            <div class="preview-title" data-i18n="comfy.nodePreview">画布节点预览</div>
+                            <div class="preview-pill" data-i18n="comfy.live">实时</div>
+                        </div>
+                        <div class="preview-desc" data-i18n="comfy.previewDesc">这个工作流在画布 Comfy 节点上将显示出的控件，可直接填写并点击「运行测试」。</div>
+                        <div id="previewContent">
+                            <div class="preview-empty" data-i18n="comfy.previewEmpty">勾选节点输入字段后<br>预览将出现在这里</div>
+                        </div>
+                    </div>
+                </aside>
+
+                <main class="content">
+                    <div id="graphCard" class="graph-card" style="display:none">
+                        <div class="graph-head">
+                            <div class="graph-title-row">
+                                <div style="min-width:0;flex:1">
+                                    <div class="title-edit-row">
+                                        <input id="workflowTitleInput" class="workflow-title-input" type="text" placeholder="工作流名称" aria-label="工作流名称" data-i18n-placeholder="comfy.workflowName" oninput="updateWorkflowTitle(this.value)">
+                                    </div>
+                                    <div id="editorSub" class="editor-sub" data-i18n="comfy.editorSubDefault">从左侧列表选择，或上传新的 API 工作流</div>
+                                </div>
+                                <div class="content-actions">
+                                    <button id="deleteBtn" class="action-btn danger-btn" type="button" onclick="onDelete()" style="display:none">
+                                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span data-i18n="common.delete">删除</span>
+                                    </button>
+                                    <button id="saveBtn" class="action-btn save-btn" type="button" onclick="onSave()" style="display:none">
+                                        <i data-lucide="save" class="w-3.5 h-3.5"></i><span data-i18n="comfy.saveConfig">保存配置</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="workspace-mode-tabs">
+                                <button id="workspaceGraphTab" type="button" class="active" onclick="setWorkspaceMode('graph')" data-i18n="comfy.workflow">工作流</button>
+                                <button id="workspaceCanvasTab" type="button" onclick="setWorkspaceMode('canvas')" data-i18n="comfy.testCanvas">测试画布</button>
+                            </div>
+                        </div>
+                        <div class="graph-svg-wrap" style="position:relative">
+                            <svg id="graphSvg" class="graph-svg"></svg>
+                            <div class="graph-controls">
+                                <div class="graph-ctrl-btn" role="button" tabindex="0" onclick="graphZoom(-1)" title="缩小" aria-label="缩小" data-i18n-title="canvas.decrease"><i data-lucide="zoom-out" class="w-4 h-4"></i></div>
+                                <div id="zoomPill" class="graph-zoom-pill">100%</div>
+                                <div class="graph-ctrl-btn" role="button" tabindex="0" onclick="graphZoom(1)" title="放大" aria-label="放大" data-i18n-title="canvas.increase"><i data-lucide="zoom-in" class="w-4 h-4"></i></div>
+                                <div class="graph-ctrl-btn" role="button" tabindex="0" onclick="graphFit()" title="适应窗口" aria-label="适应窗口"><i data-lucide="maximize" class="w-4 h-4"></i></div>
+                            </div>
+                            <div id="popupBackdrop" class="popup-backdrop" style="display:none" onclick="closeNodePopup()"></div>
+                            <div id="nodePopup" class="popup-panel" style="display:none"></div>
+                        </div>
+                        <div id="miniCanvasHost" style="display:none"></div>
+                    </div>
+                    <div id="nodesToggle" class="nodes-toggle" style="display:none" role="button" tabindex="0" onclick="toggleNodeList()">
+                        <i data-lucide="list" class="w-3.5 h-3.5"></i>
+                        <span id="nodesToggleText" data-i18n="comfy.showNodeList">显示完整节点列表</span>
+                    </div>
+                    <div id="nodeList" class="node-list hidden"></div>
+                </main>
+
+            </div>
+        </div>
+    </div>
+    <div id="imageLightbox" class="image-lightbox" onclick="closeImagePreview()">
+        <img id="imageLightboxImg" src="" alt="preview" onclick="event.stopPropagation()">
+    </div>
+
+    <script defer src="/static/js/comfyui-settings.js?v=1.0.115.1789114960"></script>
+    <script>
+    /* ═══ R5 交互反馈：轻量 Toast + 二次确认 + 保存/上传/删除反馈包装 ═══ */
+    (function(){
+        'use strict';
+        var TOAST_MS = 3500;
+        function pick(zh, en){
+            try { if(window.StudioI18n && StudioI18n.lang && StudioI18n.lang() === 'en') return en; } catch(e){}
+            return zh;
+        }
+        function tr(key, def){
+            try {
+                var v = window.NovaUtils ? NovaUtils.tr(key) : (window.StudioI18n ? StudioI18n.t(key) : '');
+                return (v && v !== key) ? v : def;
+            } catch(e){ return def; }
+        }
+        function trf(key, vars, def){
+            try {
+                if(window.NovaUtils && NovaUtils.trf) return NovaUtils.trf(key, vars);
+            } catch(e){}
+            var s = tr(key, def || key);
+            Object.keys(vars || {}).forEach(function(k){ s = s.replaceAll('{' + k + '}', vars[k]); });
+            return s;
+        }
+        var ICONS = {
+            success: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+            error: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>',
+            info: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+            loading: '<svg class="wf-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>'
+        };
+        function toastHost(){
+            var host = document.querySelector('.wf-toast-host');
+            if(!host){
+                host = document.createElement('div');
+                host.className = 'wf-toast-host';
+                host.setAttribute('aria-live', 'polite');
+                document.body.appendChild(host);
+            }
+            return host;
+        }
+        function wfToast(msg, type, opts){
+            opts = opts || {};
+            type = type || 'info';
+            var el = document.createElement('div');
+            el.className = 'wf-toast ' + type;
+            if(type === 'error') el.setAttribute('role', 'alert');
+            el.innerHTML = '<span class="wf-toast-icon">' + (ICONS[type] || ICONS.info) + '</span><span class="wf-toast-msg"></span>';
+            el.querySelector('.wf-toast-msg').textContent = msg;
+            toastHost().appendChild(el);
+            requestAnimationFrame(function(){ el.classList.add('show'); });
+            var timer = null;
+            function close(){
+                if(timer) { clearTimeout(timer); timer = null; }
+                el.classList.remove('show');
+                setTimeout(function(){ el.remove(); }, 220);
+            }
+            el.addEventListener('click', close);
+            if(!opts.sticky) timer = setTimeout(close, TOAST_MS);
+            return { close: close };
+        }
+        /* —— 二次确认弹窗（Promise 风格，页面同款毛玻璃） —— */
+        function wfConfirm(opts){
+            opts = opts || {};
+            return new Promise(function(resolve){
+                var backdrop = document.createElement('div');
+                backdrop.className = 'wf-confirm-backdrop';
+                backdrop.innerHTML =
+                    '<div class="wf-confirm-panel" role="alertdialog" aria-modal="true" aria-labelledby="wfConfirmTitle" aria-describedby="wfConfirmDesc">' +
+                        '<div class="wf-confirm-title" id="wfConfirmTitle"></div>' +
+                        '<div class="wf-confirm-desc" id="wfConfirmDesc"></div>' +
+                        '<div class="wf-confirm-actions">' +
+                            '<button type="button" class="wf-confirm-btn cancel"></button>' +
+                            '<button type="button" class="wf-confirm-btn danger"></button>' +
+                        '</div>' +
+                    '</div>';
+                var descEl = backdrop.querySelector('.wf-confirm-desc');
+                var cancelBtn = backdrop.querySelector('.cancel');
+                var okBtn = backdrop.querySelector('.danger');
+                backdrop.querySelector('.wf-confirm-title').textContent = opts.title || pick('确认操作', 'Confirm');
+                descEl.textContent = opts.desc || '';
+                if(!opts.desc) descEl.style.display = 'none';
+                cancelBtn.textContent = tr('common.cancel', pick('取消', 'Cancel'));
+                okBtn.textContent = opts.confirmText || tr('common.delete', pick('删除', 'Delete'));
+                document.body.appendChild(backdrop);
+                requestAnimationFrame(function(){ backdrop.classList.add('show'); });
+                function done(val){
+                    document.removeEventListener('keydown', onKey, true);
+                    backdrop.classList.remove('show');
+                    setTimeout(function(){ backdrop.remove(); }, 200);
+                    resolve(val);
+                }
+                function onKey(e){
+                    if(e.key === 'Escape'){ e.stopPropagation(); done(false); }
+                }
+                document.addEventListener('keydown', onKey, true);
+                cancelBtn.addEventListener('click', function(){ done(false); });
+                okBtn.addEventListener('click', function(){ done(true); });
+                backdrop.addEventListener('mousedown', function(e){ if(e.target === backdrop) done(false); });
+                cancelBtn.focus();
+            });
+        }
+        /* —— alert 接管：失败提示就近化为错误 toast —— */
+        var alertFired = false;
+        window.alert = function(msg){ alertFired = true; wfToast(String(msg), 'error'); };
+        /* —— 包装原页面函数：loading 态 + 成功/失败 toast + 可选二次确认 —— */
+        function wrapMutation(name, options){
+            var orig = window[name];
+            if(typeof orig !== 'function') return;
+            window[name] = async function(){
+                var args = arguments;
+                var btn = options.btn ? document.querySelector(options.btn) : null;
+                if(btn && btn.classList.contains('is-loading')) return;
+                if(options.prevalidate && !options.prevalidate()) return;
+                if(options.confirm){
+                    var conf = typeof options.confirm === 'function' ? options.confirm() : options.confirm;
+                    if(!(await wfConfirm(conf))) return;
+                }
+                alertFired = false;
+                var restore = options.before ? options.before() : null;
+                if(btn) btn.classList.add('is-loading');
+                try { await orig.apply(null, args); }
+                catch(e){
+                    alertFired = true;
+                    wfToast((e && e.message) ? String(e.message) : pick('操作失败', 'Operation failed'), 'error');
+                }
+                finally {
+                    if(restore) restore();
+                    if(btn) btn.classList.remove('is-loading');
+                }
+                var cancelled = options.wasCancelled ? options.wasCancelled() : false;
+                if(!alertFired && !cancelled && options.okText) wfToast(options.okText, 'success');
+            };
+        }
+        /* —— role="button" 的 div 支持 Enter/Space 触发 —— */
+        document.addEventListener('keydown', function(e){
+            if((e.key === 'Enter' || e.key === ' ') && e.target && e.target.matches && e.target.matches('[role="button"]')){
+                e.preventDefault();
+                e.target.click();
+            }
+        });
+        document.addEventListener('input', function(e){
+            if(e.target && e.target.classList) e.target.classList.remove('wf-invalid');
+        });
+        document.addEventListener('DOMContentLoaded', function(){
+            wrapMutation('onSave', {
+                btn: '#saveBtn',
+                okText: tr('comfy.saved', pick('配置已保存', 'Config saved'))
+            });
+            wrapMutation('saveComfyInstances', {
+                btn: '#comfySaveBtn',
+                prevalidate: function(){
+                    var inputs = document.querySelectorAll('#comfyInstancesList input');
+                    var hasValue = Array.prototype.some.call(inputs, function(i){ return i.value.trim(); });
+                    if(hasValue) return true;
+                    if(inputs[0]){ inputs[0].classList.add('wf-invalid'); inputs[0].focus(); }
+                    wfToast(pick('请至少填一个 ComfyUI 后端地址', 'Add at least one ComfyUI backend address'), 'error');
+                    return false;
+                },
+                okText: pick('ComfyUI 后端地址已保存', 'ComfyUI backends saved')
+            });
+            wrapMutation('onDelete', {
+                btn: '#deleteBtn',
+                confirm: function(){
+                    var name = (document.getElementById('workflowTitleInput') || {}).value || '';
+                    return {
+                        title: tr('common.delete', pick('删除', 'Delete')) + pick('工作流', ' workflow'),
+                        desc: trf('comfy.deleteConfirm', { name: name }, pick('确认删除该工作流？此操作不可恢复。', 'Delete this workflow? This cannot be undone.')),
+                        confirmText: tr('common.delete', pick('删除', 'Delete'))
+                    };
+                },
+                before: function(){
+                    var c = window.confirm;
+                    window.confirm = function(){ return true; };
+                    return function(){ window.confirm = c; };
+                },
+                okText: pick('工作流已删除', 'Workflow deleted')
+            });
+            wrapMutation('removeComfyInstance', {
+                confirm: {
+                    title: pick('删除后端地址', 'Delete backend'),
+                    desc: pick('确定从列表删除该 ComfyUI 后端地址吗？删除后需点击「保存」生效。', 'Remove this ComfyUI backend from the list? Click Save to apply.'),
+                    confirmText: tr('common.delete', pick('删除', 'Delete'))
+                },
+                okText: pick('已从列表移除，保存后生效', 'Removed — save to apply')
+            });
+            var promptCancelled = false;
+            var origPrompt = window.prompt;
+            wrapMutation('onUpload', {
+                btn: '#uploadBtn',
+                before: function(){
+                    promptCancelled = false;
+                    window.prompt = function(){
+                        var v = origPrompt.apply(window, arguments);
+                        if(v === null || v === '') promptCancelled = true;
+                        return v;
+                    };
+                    return function(){ window.prompt = origPrompt; };
+                },
+                wasCancelled: function(){ return promptCancelled; },
+                okText: pick('工作流已上传', 'Workflow uploaded')
+            });
+        });
+    })();
+    </script>
+</body>
+</html>

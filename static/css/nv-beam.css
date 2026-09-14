@@ -1,0 +1,78 @@
+/* ═══════════════════════════════════════════════════════════
+   nv-beam · 动态光束边框（border-beam 风格，纯 CSS 零 JS）
+   来源：NOVAI static/online.html 方向 E，提取为可复用片段
+   用法：
+     1) 引入本文件
+     2) 给目标元素加 class="nv-beam"（普通元素可直接加；
+        textarea/input 等 replaced element 需外包
+        <div class="nv-beam-wrap">...</div>）
+     3) 可选：用内联 style 或独立选择器覆盖 --beam-core /
+        --beam-mid / --beam-glow 调整配色
+   ═══════════════════════════════════════════════════════════ */
+
+@property --beam-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+
+.nv-beam, .nv-beam-wrap {
+    position: relative;
+    isolation: isolate;
+    /* 浅色主题默认：柔和柠檬绿（core 亮核心 / mid 拖尾 / glow 光晕） */
+    --beam-core: rgba(180,255,60,.8);
+    --beam-mid: rgba(180,255,60,.35);
+    --beam-glow: rgba(180,255,60,.4);
+}
+
+/* 主光带：2px 环，亮核心 + 柔和拖尾 */
+.nv-beam::before, .nv-beam-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 2px;
+    background: conic-gradient(from var(--beam-angle), transparent 0deg, var(--beam-core) 28deg, var(--beam-mid) 70deg, transparent 115deg);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 2;
+    animation: nv-beam-spin 3.2s linear infinite;
+}
+
+/* 光晕层：同角度泛光，blur 扩散，提升发光质感 */
+.nv-beam::after, .nv-beam-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 5px;
+    background: conic-gradient(from var(--beam-angle), transparent 0deg, var(--beam-glow) 45deg, transparent 120deg);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    filter: blur(8px);
+    opacity: .4;
+    pointer-events: none;
+    z-index: 1;
+    animation: nv-beam-spin 3.2s linear infinite;
+}
+
+@keyframes nv-beam-spin { to { --beam-angle: 360deg; } }
+
+/* replaced element（textarea/input）无伪元素，外包 wrap 时对齐 */
+.nv-beam-wrap { border-radius: var(--radius-lg, 18px); }
+.nv-beam-wrap textarea,
+.nv-beam-wrap input { display: block; }
+
+/* 深色主题默认：白光带 / 白拖尾 / 白光晕（反白系） */
+html.theme-dark .nv-beam, html.studio-theme-dark .nv-beam,
+html.theme-dark .nv-beam-wrap, html.studio-theme-dark .nv-beam-wrap {
+    --beam-core: rgba(255,255,255,.6);
+    --beam-mid: rgba(255,255,255,.26);
+    --beam-glow: rgba(255,255,255,.4);
+}
+
+/* 深色按钮（白色玻璃）专用：柠檬绿光带保证可见 */
+html.theme-dark #genBtn.nv-beam, html.studio-theme-dark #genBtn.nv-beam {
+    --beam-core: rgba(180,255,60,.85); --beam-mid: rgba(180,255,60,.4); --beam-glow: rgba(180,255,60,.45);
+}

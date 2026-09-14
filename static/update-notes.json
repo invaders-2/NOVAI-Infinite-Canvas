@@ -1,0 +1,328 @@
+{
+  "version": "1.0.115",
+  "updated_at": "2026-09-10T18:21:08+08:00",
+  "items": [
+    {
+      "type": "feature",
+      "text": "图片节点新增「专业调色」：glfx(WebGL) 实时滤镜，光线／颜色／曲线／细节／效果 5 组参数 + RGB 曲线可拖点，拖拽分割线对比原图；应用后生成新图片节点，原图保留"
+    },
+    {
+      "type": "feature",
+      "text": "分组排版重做：按组内原图比例铺满网格（横向铺满、上下留空），拖动分组框实时重排内容；分组支持自定义名称（回车提交 / Esc 撤销）"
+    },
+    {
+      "type": "feature",
+      "text": "分组一键运行：传统画布「运行群组」、智能画布「一键运行」，按组内顺序级联执行"
+    },
+    {
+      "type": "feature",
+      "text": "画布助手改版：换成 Spectrum「AI Chat Card」形态 —— 空状态逐字打出示例指令（点一下即接管为输入）、下沉式输入区、圆形附件/发送按钮、一键重置对话"
+    },
+    {
+      "type": "feature",
+      "text": "节点连接端口重做为白描边「加号 + 圆圈」：悬停/选中加粗放大；智能画布端口跟随节点拖动实时重排"
+    },
+    {
+      "type": "fix",
+      "text": "修复暗色主题下节点连接端口完全不可见（主题变量自引用使整条继承链失效）"
+    },
+    {
+      "type": "fix",
+      "text": "修复鼠标移到连接端口上端口反而消失（显示规则缺 hover 态，与 pointer-events:none 形成死锁）"
+    },
+    {
+      "type": "fix",
+      "text": "修复智能画布 #world 定位为 relative 导致的坐标换算偏移（节点跑到别处或不显示）"
+    },
+    {
+      "type": "fix",
+      "text": "修复 Windows 升级后历史素材不显示：素材目录解析被安装包自带的内置素材误判，老用户被静默切到安装目录，数据目录里的历史图片全部 404；现改为老用户一律沿用原数据目录，并给 /assets 增加双目录兜底，切换前后两处的素材都能正常显示"
+    },
+    {
+      "type": "fix",
+      "text": "修复智能画布图片预览缺少「对比原图」入口：按钮被前置逻辑置为 display:none 后无人恢复，导致对比按钮始终不可见；现由预览面板统一管理显隐（视频/360全景不显示、普通图片显示，无可对比上游则置灰）"
+    }
+  ],
+  "history": [
+    {
+      "version": "1.0.113",
+      "updated_at": "2026-09-03T18:30:00+08:00",
+      "items": [
+        {
+          "type": "fix",
+          "text": "修复安装包无法启动：云端打包缺失 server 后端模块导致启动报 No module named 'server'；server 路由模块已纳入仓库并重新构建，素材库/本地素材/提示词库等接口恢复正常"
+        }
+      ]
+    },
+    {
+      "version": "1.0.112",
+      "updated_at": "2026-09-03T17:00:00+08:00",
+      "items": [
+        {
+          "type": "feature",
+          "text": "前端视觉统一升级：11 个功能页设计 token 收敛（marvis-shared/theme 样式体系），配色、间距、圆角、字体全局统一"
+        },
+        {
+          "type": "feature",
+          "text": "GPT 聊天顶栏/输入框/空态/模型选择弹窗 V17-V19 重构，交互与视觉全面焕新"
+        },
+        {
+          "type": "feature",
+          "text": "思考强度能力配置化：后端能力下发，前端直读生效"
+        },
+        {
+          "type": "fix",
+          "text": "显式尺寸选择不再被提示词关键词覆盖（gpt-image-2 分辨率稳定）；gemini 偏红误修回滚等后端修复"
+        },
+        {
+          "type": "improvement",
+          "text": "beam 灯光视觉特效、前端图标集中管理（shared/icons.js）；新增 jsonschema 后端依赖"
+        }
+      ]
+    },
+    {
+      "version": "1.0.112-beta.2",
+      "updated_at": "2026-08-18T17:46:55+08:00",
+      "items": [
+        {
+          "type": "feature",
+          "text": "素材默认存储位置跟随安装目录——Windows 安装到可写目录（如 D 盘）时默认写入「安装目录\\assets」，安装到 Program Files 等只读位置时自动回落系统数据目录；Mac/Linux 因 app 包只读同样回落；老用户已有素材则保持原路径不迁移；设置页显示与实际写入路径统一"
+        }
+      ]
+    },
+    {
+      "version": "1.0.112-beta.1",
+      "updated_at": "2026-08-18T11:15:17+08:00",
+      "items": [
+        {
+          "type": "feature",
+          "text": "【测试版】Electron 桌面客户端：自带 Chromium 内核，跨平台行为一致；与正式版共用 3000 端口和同一份数据目录（画布/配置/对话完全互通，无需重新下载）；支持窗口托盘、原生对话框"
+        },
+        {
+          "type": "feature",
+          "text": "一键更新实时进度条：下载/校验/备份/替换各阶段百分比 + 当前文件名实时可见，更新结果 Toast 轻提示"
+        },
+        {
+          "type": "feature",
+          "text": "桌面端自动更新三仓库通道：GitHub Releases 为主，国内用户检查失败自动切换 ModelScope 镜像，Gitee Release 提供人工下载兜底"
+        },
+        {
+          "type": "fix",
+          "text": "桌面端侧边栏闪烁修复：Chromium 下 hover 展开不再反复开关（禁用 drag 区域冲突 + 实色背景替代毛玻璃）"
+        }
+      ]
+    },
+    {
+      "version": "1.0.111",
+      "updated_at": "2026-08-17T09:28:05+08:00",
+      "items": [
+        {
+          "type": "feature",
+          "text": "本地高质量抠图：图片节点新增「高质量抠图」——首次使用引导下载 RMBG-2.0 本地模型（349MB，仅一次），下载后离线免费抠图；边缘精修（alpha拉伸+腐蚀羽化+去背景色边）；本地失败可一键降级为在线抠图，旧链路不受影响"
+        },
+        {
+          "type": "fix",
+          "text": "Windows 桌面端标题栏拖动修复：无边框窗口顶部标题栏恢复可拖动移动窗口（此前 WebView2 吞掉命中导致拖不动）"
+        },
+        {
+          "type": "fix",
+          "text": "旧版 RMBG-1.4 模型自动清理：升级后自动删除残留的 44MB 旧模型文件，释放磁盘空间"
+        }
+      ]
+    },
+    {
+      "version": "1.0.110",
+      "updated_at": "2026-08-13T11:44:17+08:00",
+      "items": [
+        {
+          "type": "feature",
+          "text": "Agent 动作迁移：一句话「让照片里的人做视频里的动作」→ 自动识别画布角色图+参考视频 → motion_transfer 工作流（参考视频=动作骨架、参考图=外观，其余保持）→ 真实视频生成落画布；计划步骤引用解析增强"
+        },
+        {
+          "type": "feature",
+          "text": "Prompt Intelligence：LLM 节点新增「反推」开关(OFF/ON)——Universal Intent 理解 + 四层锁定(Intent/Editable/Preserve/Reference) + 定向分析/完整反推(图片+视频关键帧) + Prompt 优化与漂移审计 + Nano Banana Pro / Seedance 2.0 / Seedance 2.5 独立 Compiler；失败自动降级原流程，旧工作流零影响"
+        },
+        {
+          "type": "fix",
+          "text": "人脸检测模型入仓并加入在线更新白名单，/api/video/blur-faces 首次使用不再报模型缺失"
+        },
+        {
+          "type": "fix",
+          "text": "assets/models/ 加入在线更新白名单，后续模型文件可通过客户端自动更新下发"
+        },
+        {
+          "type": "fix",
+          "text": "智能画布视频节点交互彻底修复：点击视频画面选中节点并打开编辑器、播放预览后编辑器同步显示、节点拖动排除播放器区域"
+        },
+        {
+          "type": "fix",
+          "text": "视频控制条交互修复：mousedown去掉preventDefault确保手势激活、全屏超时自动CSS降级并挂body铺满视口"
+        },
+        {
+          "type": "feature",
+          "text": "新增人脸模糊接口 /api/video/blur-faces：自动检测视频人脸并高斯模糊，规避平台真人审核拦截"
+        },
+        {
+          "type": "feature",
+          "text": "生成接口返回canvas_meta自动落位元数据：视频/图片生成完成后自动带节点参数，方便前端一键摆放"
+        },
+        {
+          "type": "fix",
+          "text": "修复视频播放：播放按钮mousedown不再拦截手势、全屏350ms超时自动CSS降级并挂body铺满视口、传统画布同步"
+        },
+        {
+          "type": "fix",
+          "text": "修复视频全屏(无原生全屏时CSS降级铺满视口)+播放后节点编辑器保持显示"
+        },
+        {
+          "type": "fix",
+          "text": "修复视频控制条点击无效(WebKit实测)：mousedown拦截手势致play被拒、控制条常显可点、点击视频本体可播放暂停"
+        },
+        {
+          "type": "fix",
+          "text": "修复视频控制条点击无反应：控制条常显可点+播放失败自动静音降级+事件双绑定(桌面端WKWebView)"
+        },
+        {
+          "type": "fix",
+          "text": "修复视频节点黑屏：封面生成失败时直接渲染视频首帧；播放后显示完整控制条（暂停/进度/全屏）"
+        },
+        {
+          "type": "fix",
+          "text": "修复桌面端视频节点黑屏/无控制条：静态资源强制 no-cache，更新后不再吃到旧缓存"
+        },
+        {
+          "type": "feature",
+          "text": "API设置保存成功toast反馈 + 模型选择器改窗口弹窗（可点遮罩关闭）"
+        },
+        {
+          "type": "feature",
+          "text": "视频播放自绘控制条（播放/暂停/进度/全屏），普通画布与智能画布统一"
+        },
+        {
+          "type": "feature",
+          "text": "视频播放新增自绘控制条（播放/暂停/进度/全屏）——修复桌面端视频无法暂停、无全屏按钮的问题"
+        },
+        {
+          "type": "fix",
+          "text": "修复视频节点封面显示为黑——封面图改回填满节点框(cover)，播放仍按视频比例完整显示"
+        },
+        {
+          "type": "feature",
+          "text": "火山 Seedance 局部替换修复：编辑任务参考图全部保留提交，参考视频自动截取≤15.2s、带音轨自动静音规避版权拦截"
+        },
+        {
+          "type": "feature",
+          "text": "智能画布视频节点按视频比例完整显示（不再裁剪放大），拖动缩放保持视频宽高比"
+        },
+        {
+          "type": "feature",
+          "text": "Jimeng 5.0Pro/4.7 图生视频模型支持，分辨率自适应策略重构(1k/2k/4k)"
+        },
+        {
+          "type": "feature",
+          "text": "Jimeng seedance2.0mini/seedance1.5pro 视频模型支持，CLI 分辨率参数规范化"
+        },
+        {
+          "type": "feature",
+          "text": "Gitee 更新链路正式接入：支持一键从 Gitee 源检查/下载更新，三源兜底 gitee→modelscope→github"
+        },
+        {
+          "type": "feature",
+          "text": "即梦（Jimeng）CLI 面板集成：画布即梦节点支持 CLI 安装按钮与状态追踪"
+        },
+        {
+          "type": "feature",
+          "text": "多视频模型扩展：Lingjing/土豆/Grok/Agnes/玉璃 等多视频生成供应商接入"
+        },
+        {
+          "type": "feature",
+          "text": "HuggingFace/ModelScope 模型源支持，hf-mirror.com 国内镜像路由"
+        },
+        {
+          "type": "fix",
+          "text": "SSL 绕过修复：60+ 处 httpx.AsyncClient 补全 http2=False / verify=_SSL_CONTEXT / trust_env=_TRUST_ENV"
+        },
+        {
+          "type": "fix",
+          "text": "Jimeng 视频生成分辨率修复（seedance2.0 原先强制变 2K 问题）"
+        },
+        {
+          "type": "fix",
+          "text": "Windows 下载/保存弹窗兼容性修复，NovaUtils.downloadBlob 三层降级方案"
+        },
+        {
+          "type": "improvement",
+          "text": "FHL provider 识别接入，扩展 API 源兼容性"
+        },
+        {
+          "type": "improvement",
+          "text": "Windows 下载弹窗 SAVE_DIALOG 兼容性修复（launcher.py 双层 fallback）"
+        }
+      ]
+    },
+    {
+      "version": "1.0.88",
+      "updated_at": "2026-07-25T23:59:00+08:00",
+      "items": [
+        {
+          "type": "fix",
+          "text": "手势缩放修复：NovaViewport 依赖内联化（safeScale/viewportTransform/screenToWorld），新增 canvasWheelZoomFactor 函数，修复触摸板/触屏捏合缩放异常"
+        }
+      ]
+    },
+    {
+      "version": "1.0.83",
+      "updated_at": "2026-07-17T16:50:00+08:00",
+      "items": [
+        {
+          "type": "improvement",
+          "text": "前端六轮性能优化：Lucide图标子集化（体积减少90%）、共享模块提取（NovaUtils/NovaMedia）、Marvis风格CSS去重、定时器泄漏修复、rAF暂停机制、touch-mouse布局缓存"
+        },
+        {
+          "type": "feature",
+          "text": "GPT聊天模型选择弹窗重构：左右两栏布局，悬停联动切换供应商，动态高度自适应屏幕空间"
+        },
+        {
+          "type": "fix",
+          "text": "修复GPT聊天功能完全无法使用（TDZ错误导致模型选择空白）"
+        },
+        {
+          "type": "fix",
+          "text": "修复素材库状态栏显示Lucide英文错误信息"
+        },
+        {
+          "type": "fix",
+          "text": "修复Lucide图标在API设置、工作流设置等多个页面不显示"
+        },
+        {
+          "type": "improvement",
+          "text": "API设置与工作流设置页面设计同步为Marvis风格，修复CSS语法错误"
+        },
+        {
+          "type": "fix",
+          "text": "修复canvasMetaPollTimer定时器泄漏，页面关闭时正确清理"
+        },
+        {
+          "type": "fix",
+          "text": "修复node.running过早清零导致按钮2秒后误重启用"
+        },
+        {
+          "type": "improvement",
+          "text": "轮询机制改为setTimeout递归模式，防止请求竞态重叠"
+        },
+        {
+          "type": "improvement",
+          "text": "新增7个后端API端点（存储管理、图片检测、分类Prompt、模型规范化、RH钱包状态）"
+        },
+        {
+          "type": "fix",
+          "text": "修复sendChatMessage防重入保护，防止连续发送消息竞态"
+        },
+        {
+          "type": "improvement",
+          "text": "关键渲染路径优化：CSS优先加载、fonts.css从@import改为link标签、主脚本加defer"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 设置</title>
+    <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
+    <script>
+        // 检测是否在设置弹窗内嵌展示
+        (function(){
+            if (location.search.indexOf('embed=1') !== -1) {
+                document.documentElement.classList.add('settings-embed');
+            }
+        })();
+    </script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.115.1789114960"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/theme.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/i18n.js?v=1.0.115.1789114960"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789114960">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=1.0.115.1789114960">
+
+<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.115.1789114960">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
+<style>
+/* --- 页面特定 Marvis 覆盖 --- */
+body { background: transparent !important; color: var(--text) !important; }
+/* --- Marvis 增强覆盖 (api-settings.html) --- */
+.page { background: var(--bg) !important; padding: 20px !important; }
+.page-head { border-bottom-color: var(--divider) !important; }
+.sidebar { background: var(--stage-bg) !important; border-color: var(--border) !important; border-radius: var(--radius-xl) !important; }
+.block { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-sm) !important; }
+.field-frame { background: var(--bg) !important; border-color: var(--border) !important; border-radius: var(--radius-sm) !important; }
+.field-frame input, .field-frame select { color: var(--text) !important; }
+.field-frame input:focus, .field-frame select:focus { border-color: var(--text) !important; }
+.action-btn { border-radius: var(--radius-sm) !important; }
+.save-btn { background: var(--text) !important; color: var(--bg) !important; }
+.provider-list .provider-item { color: var(--muted) !important; border-radius: var(--radius-sm) !important; }
+.provider-list .provider-item.active { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+.model-list .model-item { background: var(--bg) !important; border-color: var(--border) !important; border-radius: var(--radius-sm) !important; }
+.picker-modal { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-xl) !important; }
+.picker-search { background: var(--bg) !important; border-color: var(--border) !important; border-radius: var(--radius-lg) !important; color: var(--text) !important; }
+/* 设置弹窗内嵌模式 — 与通用/外观/关于面板风格统一 */
+html.settings-embed body { background: transparent !important; font-family: var(--font-sans) !important; }
+html.settings-embed,
+html.settings-embed * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+html.settings-embed::-webkit-scrollbar,
+html.settings-embed *::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+}
+html.settings-embed .page { padding: 0; min-height: auto; background: transparent !important; }
+html.settings-embed .wrap { max-width: none; }
+html.settings-embed .page-head { display: none; }
+html.settings-embed .layout { grid-template-columns: 260px minmax(0,1fr); gap: 10px; align-items: start; }
+html.settings-embed .sidebar {
+    position: static;
+    max-height: none;
+    width: 260px;
+    min-width: 260px;
+    flex-shrink: 0;
+    background: var(--bg) !important;
+    border: 1px solid var(--divider) !important;
+    border-radius: 20px !important;
+    padding: 14px;
+}
+html.settings-embed .block {
+    background: var(--stage-bg) !important;
+    border: 1px solid var(--divider) !important;
+    border-radius: 20px !important;
+    box-shadow: none !important;
+    padding: 18px 20px !important;
+}
+html.settings-embed .content-head {
+    border-radius: 20px !important;
+    border: 1px solid var(--divider) !important;
+    background: var(--stage-bg) !important;
+}
+html.settings-embed .field-frame {
+    background: var(--bg) !important;
+    border-radius: 10px !important;
+}
+html.settings-embed .provider-list .provider-item { border-radius: 10px !important; }
+html.settings-embed .model-list .model-item { border-radius: 10px !important; }
+html.settings-embed .action-btn { border-radius: 10px !important; }
+/* 顶部保存按钮：深浅色模式下都保证高对比，文字始终可见 */
+.action-btn.save-btn.api-page-save-btn,
+.action-btn.save-btn.api-page-save-btn:hover,
+body.studio-theme-dark .action-btn.save-btn.api-page-save-btn,
+html.studio-theme-dark body .action-btn.save-btn.api-page-save-btn,
+body.theme-dark .action-btn.save-btn.api-page-save-btn,
+body.studio-theme-dark .action-btn.save-btn.api-page-save-btn:hover,
+html.studio-theme-dark body .action-btn.save-btn.api-page-save-btn:hover,
+body.theme-dark .action-btn.save-btn.api-page-save-btn:hover {
+    background: var(--text) !important;
+    color: var(--text-on-accent) !important;
+    border-color: transparent !important;
+}
+@media (max-width: 700px) {
+    html.settings-embed .layout { grid-template-columns: 1fr; }
+    html.settings-embed .sidebar { position: static; max-height: none; }
+}
+/* ═══ Modal embed: fill iframe height, content scrolls ═══ */
+html.settings-embed .wrap,
+html.settings-embed .page { height: 100%; overflow: hidden; }
+html.settings-embed .layout { height: 100%; overflow: hidden; }
+html.settings-embed .content { overflow-y: auto; }
+html.settings-embed .sidebar { overflow-y: auto; }
+html.settings-embed .content-head { position: sticky; top: 0; z-index: 5; }
+/* Close button */
+.settings-close-btn, .modal-close-btn { transition: transform 0.2s ease-out; }
+.settings-close-btn:hover, .modal-close-btn:hover { transform: rotate(90deg) scale(1.1); }
+/* Switch animation */
+input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
+.ios-slider, .toggle-track { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
+</style>
+</head>
+<body>
+    <div class="page">
+        <div class="wrap">
+            <header class="page-head">
+                <div>
+                    <div class="title" data-i18n="api.title">API 设置</div>
+                    <div class="sub" data-i18n="api.subtitle">管理平台地址、模型列表和 Key。Key 写入后端 env，页面不会回显完整内容。</div>
+                </div>
+                <div id="status" class="status"></div>
+            </header>
+
+            <div class="layout">
+                <aside class="sidebar">
+                    <div class="side-section-title" data-i18n="api.providersTitle">平台列表</div>
+                    <div id="providerList" class="provider-list"></div>
+                    <button class="add-btn" type="button" onclick="addProvider()"><i data-lucide="plus" class="w-4 h-4"></i><span data-i18n="api.addProvider">新增平台</span></button>
+                    <button class="api-link-btn" type="button" onclick="openRecommendApi()"><i data-lucide="sparkles" class="w-4 h-4"></i><span data-i18n="api.recommendApi">推荐API</span></button>
+                    <div class="cli-quick-group">
+                        <div class="side-section-title" data-i18n="api.cliSettings">CLI 设置</div>
+                        <div class="cli-quick-list">
+                            <button class="cli-quick-btn" type="button" onclick="addCliProvider('jimeng')"><i data-lucide="image" class="w-3.5 h-3.5"></i><span>即梦 CLI</span></button>
+                            <button class="cli-quick-btn" type="button" onclick="addCliProvider('codex')"><i data-lucide="terminal" class="w-3.5 h-3.5"></i><span>GPT CLI</span></button>
+                            <button class="cli-quick-btn" type="button" onclick="addCliProvider('gemini-cli')"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i><span>Antigravity CLI</span></button>
+                            <div class="cli-quick-note">需要先安装 CLI文件夹中的依赖。</div>
+                        </div>
+                    </div>
+                    <div class="cli-quick-group" style="margin-top:16px;">
+                        <div class="side-section-title">存储设置</div>
+                        <div class="cli-quick-list">
+                            <button id="sidebarStorageBtn" class="cli-quick-btn active" type="button" onclick="showStorageSettings()"><i data-lucide="folder-open" class="w-3.5 h-3.5"></i><span>输出目录</span></button>
+                        </div>
+                    </div>
+                </aside>
+
+                <main id="settingsContent" class="content">
+                    <div class="content-head">
+                        <div>
+                            <div id="editorTitle" class="editor-title" data-i18n="api.provider">平台</div>
+                            <div class="editor-sub" data-i18n="api.editorSub">配置基础信息、API Key 和可用模型</div>
+                        </div>
+                        <div class="content-actions">
+                            <button id="deleteBtn" class="action-btn danger-btn api-page-delete-btn" type="button" onclick="deleteProvider()"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span data-i18n="api.delete">删除</span></button>
+                            <button class="action-btn save-btn api-page-save-btn" type="button" onclick="saveProviders()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span data-i18n="api.save">保存</span></button>
+                        </div>
+                    </div>
+
+                    <section id="providerOnboardingCard" class="provider-onboarding-card" hidden></section>
+
+                    <section class="block">
+                        <div class="block-head">
+                            <div>
+                                <div class="block-title" data-i18n="api.basicInfo">基本信息</div>
+                                <div class="block-desc" data-i18n="api.basicHint">平台显示名、唯一 ID 和请求地址</div>
+                            </div>
+                        </div>
+                        <div class="form">
+                            <label class="field full">
+                                <span class="label" data-i18n="api.platformName">平台名称</span>
+                                <div class="field-frame"><input id="nameInput" type="text" placeholder="Comfly"></div>
+                                <span class="hint"><span data-i18n="api.platformIdShown">平台 ID</span>: <span id="idPreview" style="font-family: var(--font-mono);color:var(--text)">—</span></span>
+                                <input id="idInput" type="hidden">
+                            </label>
+                            <label class="field full api-base-url-field">
+                                <span class="label" data-i18n="api.baseUrl">请求地址</span>
+                                <div class="field-frame"><input id="baseInput" type="text" placeholder="https://api.example.com/v1"></div>
+                                <div class="ms-hint">
+                                    <span class="ms-line"><span data-i18n="api.msChinaEndpoint">国内默认请求地址：</span><span class="inline-code">https://api-inference.modelscope.cn/v1</span></span>
+                                    <span class="ms-line"><span data-i18n="api.msGlobalEndpoint">国外使用请求地址：</span><span class="inline-code">https://api-inference.modelscope.ai/v1</span></span>
+                                </div>
+                                <div class="runninghub-hint">
+                                    <span class="ms-line">国外地址：<span class="inline-code">https://www.runninghub.ai</span></span>
+                                </div>
+                                <div class="apimart-hint">
+                                    <span class="ms-line">国内请求地址：<span class="inline-code">https://apib.ai</span></span>
+                                </div>
+                            </label>
+                            <label class="field full api-key-field">
+                                <span class="label api-key-label">API Key</span>
+                                <div class="key-panel api-standard-key-row">
+                                    <div class="key-input-line">
+                                        <div class="field-frame"><input id="keyInput" type="password"></div>
+                                        <div class="key-actions">
+                                            <button class="key-btn" type="button" onclick="saveKeyOnly()" title="保存 Key" data-i18n-title="api.saveKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
+                                            <button class="key-btn key-clear" type="button" onclick="clearKeyOnly()" title="清除 Key" data-i18n-title="api.clearKeyTitle"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <span id="keyHint" class="hint"></span>
+                                <div class="rh-key-stack">
+                                    <div class="rh-key-item">
+                                        <div class="rh-key-head">
+                                            <div>
+                                                <div class="rh-key-title" data-i18n="api.rhCoinApiKeyRequired">RH币 API Key · 必填</div>
+                                                <div class="rh-key-desc" data-i18n="api.rhCoinKeyDesc">使用 RH币 接口时填写</div>
+                                            </div>
+                                            <div class="rh-key-links">
+                                                <span data-i18n="api.get">获取</span>
+                                                <a href="https://www.runninghub.cn/enterprise-api/consumerApi?inviteCode=rh-v1331" target="_blank" rel="noopener"><i data-lucide="external-link" class="w-3 h-3"></i><span data-i18n="api.cnKey">国内 Key</span></a>
+                                                <a href="https://www.runninghub.ai/enterprise-api/consumerApi?inviteCode=rh-v1331" target="_blank" rel="noopener"><i data-lucide="external-link" class="w-3 h-3"></i><span data-i18n="api.globalKey">国外 Key</span></a>
+                                            </div>
+                                        </div>
+                                        <div class="key-input-line">
+                                            <div class="field-frame"><input id="rhFreeKeyInput" type="password"></div>
+                                            <div class="key-actions">
+                                                <button class="key-btn" type="button" onclick="saveRhKeyOnly('free')" title="保存 RH币 Key" data-i18n-title="api.saveRhCoinKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
+                                                <button class="key-btn key-clear" type="button" onclick="clearRhKeyOnly('free')" title="清除 RH币 Key" data-i18n-title="api.clearRhCoinKeyTitle"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                            </div>
+                                        </div>
+                                        <span id="rhFreeKeyHint" class="hint"></span>
+                                    </div>
+                                    <div class="rh-key-item">
+                                        <div class="rh-key-head">
+                                            <div>
+                                                <div class="rh-key-title" data-i18n="api.rhWalletApiKeyOptional">账户余额 API Key · 可选</div>
+                                                <div class="rh-key-desc" data-i18n="api.rhWalletKeyDesc">使用账户余额接口时填写</div>
+                                            </div>
+                                            <div class="rh-key-links">
+                                                <span data-i18n="api.get">获取</span>
+                                                <a href="https://www.runninghub.cn/enterprise-api/sharedApi?inviteCode=rh-v1331" target="_blank" rel="noopener"><i data-lucide="external-link" class="w-3 h-3"></i><span data-i18n="api.cnKey">国内 Key</span></a>
+                                                <a href="https://www.runninghub.ai/enterprise-api/sharedApi?inviteCode=rh-v1331" target="_blank" rel="noopener"><i data-lucide="external-link" class="w-3 h-3"></i><span data-i18n="api.globalKey">国外 Key</span></a>
+                                            </div>
+                                        </div>
+                                        <div class="key-input-line">
+                                            <div class="field-frame"><input id="rhWalletKeyInput" type="password"></div>
+                                            <div class="key-actions">
+                                                <button class="key-btn" type="button" onclick="saveRhKeyOnly('wallet')" title="保存账户余额 Key" data-i18n-title="api.saveRhWalletKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
+                                                <button class="key-btn key-clear" type="button" onclick="clearRhKeyOnly('wallet')" title="清除账户余额 Key" data-i18n-title="api.clearRhWalletKeyTitle"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                            </div>
+                                        </div>
+                                        <span id="rhWalletKeyHint" class="hint"></span>
+                                    </div>
+                                </div>
+                                <div class="ms-hint">
+                                    <span class="ms-line"><span data-i18n="api.msTokenCn">获取 Token · 国内：</span><a href="https://www.modelscope.cn/my/access/token" target="_blank">https://www.modelscope.cn/my/access/token</a></span>
+                                    <span class="ms-line"><span data-i18n="api.msTokenGlobal">获取 Token · 国外：</span><a href="https://www.modelscope.ai/my/access/token" target="_blank">https://www.modelscope.ai/my/access/token</a></span>
+                                </div>
+                                <div class="runninghub-hint">
+                                </div>
+                            </label>
+                            <div id="jimengCliPanel" class="jimeng-cli-panel" hidden>
+                                <div class="jimeng-cli-head">
+                                    <div>
+                                        <div class="rh-key-title">即梦 CLI 账户</div>
+                                        <div class="rh-key-desc">使用本机 dreamina 登录态，无需 API Key。</div>
+                                    </div>
+                                    <div id="jimengCliStatus" class="jimeng-status-pill">未检测</div>
+                                </div>
+                                <div class="jimeng-actions">
+                                    <button class="action-btn primary-btn" type="button" onclick="startJimengLogin()"><i data-lucide="qr-code" class="w-3.5 h-3.5"></i><span>扫码登录</span></button>
+                                    <button class="action-btn" type="button" onclick="refreshJimengCredit()"><i data-lucide="wallet-cards" class="w-3.5 h-3.5"></i><span>查询积分</span></button>
+                                    <button class="action-btn" type="button" onclick="openJimengHelp()"><i data-lucide="terminal" class="w-3.5 h-3.5"></i><span>帮助</span></button>
+                                    <button class="action-btn danger-btn" type="button" onclick="logoutJimeng()"><i data-lucide="log-out" class="w-3.5 h-3.5"></i><span>退出登录</span></button>
+                                </div>
+                                <label class="rh-api-switch" style="margin-top:8px;display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <span style="font-size:13px;color:var(--text-secondary);">WSL 模式（Windows CLI 异常时启用）</span>
+                                    <input type="checkbox" id="jimengWslMode" onchange="toggleJimengWsl(this.checked)" style="accent-color:var(--accent);">
+                                </label>
+                                <div id="jimengCredit" class="jimeng-credit"></div>
+                                <div id="jimengLoginBox" class="jimeng-output" hidden></div>
+                            </div>
+                            <div id="codexCliPanel" class="jimeng-cli-panel" hidden>
+                                <div class="jimeng-cli-head">
+                                    <div>
+                                        <div class="rh-key-title">OpenAI CLI 账户</div>
+                                        <div class="rh-key-desc">使用本机 codex 登录态，无需在本项目保存 API Key。</div>
+                                    </div>
+                                    <div id="codexCliStatus" class="jimeng-status-pill">未检测</div>
+                                </div>
+                                <div class="jimeng-actions">
+                                    <button class="action-btn primary-btn" type="button" onclick="refreshCodexStatus()"><i data-lucide="radar" class="w-3.5 h-3.5"></i><span>检测 CLI</span></button>
+                                    <button class="action-btn" type="button" onclick="openCodexHelp()"><i data-lucide="terminal" class="w-3.5 h-3.5"></i><span>帮助</span></button>
+                                </div>
+                                <div id="codexCliInfo" class="jimeng-credit"></div>
+                            </div>
+                            <div id="geminiCliPanel" class="jimeng-cli-panel" hidden>
+                                <div class="jimeng-cli-head">
+                                    <div>
+                                        <div class="rh-key-title">Antigravity CLI 账户</div>
+                                        <div class="rh-key-desc">使用本机 agy 登录态，无需在本项目保存 API Key。</div>
+                                        <div class="jimeng-credit">需要先安装 CLI 文件夹中的依赖。</div>
+                                    </div>
+                                    <div id="geminiCliStatus" class="jimeng-status-pill">未检测</div>
+                                </div>
+                                <div class="jimeng-actions">
+                                    <button class="action-btn primary-btn" type="button" onclick="refreshGeminiCliStatus()"><i data-lucide="radar" class="w-3.5 h-3.5"></i><span>检测 CLI</span></button>
+                                    <button class="action-btn" type="button" onclick="openGeminiCliHelp()"><i data-lucide="terminal" class="w-3.5 h-3.5"></i><span>帮助</span></button>
+                                </div>
+                                <div id="geminiCliInfo" class="jimeng-credit"></div>
+                            </div>
+                            <!-- 验证操作行 -->
+                            <div class="verify-action-row">
+                                <button id="testUrlBtn" class="action-btn" type="button" onclick="testConnection()">
+                                    <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span data-i18n="api.testUrl">验证地址</span>
+                                </button>
+                                <button id="probeAsyncBtn" class="action-btn" type="button" onclick="probeAsync()">
+                                    <i data-lucide="radar" class="w-3.5 h-3.5"></i><span>验证协议</span>
+                                </button>
+                                <div class="field-frame protocol-selector-wrap">
+                                    <select id="protocolInput">
+                                        <option value="openai" data-i18n="api.protocolOpenAI">OpenAI 直连</option>
+                                        <option value="apimart" data-i18n="api.protocolApimart">异步协议</option>
+                                        <option value="gemini" data-i18n="api.protocolGemini">Gemini 协议</option>
+                                        <option value="volcengine">方舟/Ark 任务协议</option>
+                                        <option value="runninghub">RunningHub OpenAPI</option>
+                                        <option value="jimeng">即梦 CLI</option>
+                                        <option value="codex">OpenAI Codex CLI</option>
+                                        <option value="gemini-cli">Antigravity CLI</option>
+                                    </select>
+                                </div>
+                                <div class="field-frame image-request-mode-wrap">
+                                    <select id="imageRequestModeInput" title="图片接口">
+                                        <option value="openai">图片：OpenAI 标准</option>
+                                        <option value="openai-json">图片：OpenAI JSON</option>
+                                        <option value="openai-video-proxy">图片：OpenAI 中转</option>
+                                        <option value="openai-responses">图片：OpenAI RS</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="verifyResult" style="display:none;padding:2px 0;grid-column:1/-1"></div>
+                        </div>
+                    </section>
+
+                    <section id="runninghubConfigBlock" class="block runninghub-config-block" hidden>
+                        <div class="block-head">
+                            <div>
+                                <div class="block-title">应用与工作流</div>
+                                <div class="block-desc">粘贴运行路径后，点击右侧创建卡片。</div>
+                            </div>
+                        </div>
+                        <div class="rh-paste-row">
+                            <input id="rhPasteInput" class="rh-paste-input" type="text" placeholder="/run/ai-app/... 或 /run/workflow/...">
+                            <button class="action-btn" type="button" onclick="createRhEntryFromPaste()"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span>创建</span></button>
+                        </div>
+                        <div class="rh-card-columns">
+                            <div class="rh-card-group">
+                                <div class="rh-group-head">
+                                    <div class="rh-group-title">AI 应用</div>
+                                    <div id="rhAppsCount" class="rh-group-count">0</div>
+                                </div>
+                                <div id="rhAppsList" class="rh-card-list"></div>
+                            </div>
+                            <div class="rh-card-group">
+                                <div class="rh-group-head">
+                                    <div class="rh-group-title">工作流</div>
+                                    <div id="rhWorkflowsCount" class="rh-group-count">0</div>
+                                </div>
+                                <div id="rhWorkflowsList" class="rh-card-list"></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <div id="modelsHead" class="block models-toolbar">
+                        <div class="models-toolbar-main">
+                            <div>
+                                <div class="block-title" data-i18n="api.modelsTitle">模型列表</div>
+                                <div class="block-desc" data-i18n="api.modelsDesc">从上游 API 自动拉取所有可用模型并按类型分类（image / chat / video）</div>
+                            </div>
+                            <div class="models-toolbar-actions">
+                                <button id="fetchModelsBtn" class="action-btn primary-btn" type="button" onclick="fetchModels()">
+                                    <i data-lucide="download-cloud" class="w-3.5 h-3.5"></i><span data-i18n="api.fetchModels">拉取模型</span>
+                                </button>
+                                <button id="openPickerBtn" class="action-btn" type="button" onclick="openModelPicker()" disabled style="opacity:.5">
+                                    <i data-lucide="list-checks" class="w-3.5 h-3.5"></i><span data-i18n="api.selectModels">选择模型</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="modelsFetchHint" class="models-fetch-hint" hidden></div>
+                        <div class="model-cat-tabs" id="modelCatTabs" role="tablist" aria-label="模型分类">
+                            <button class="model-cat-tab active" data-cat="all" role="tab" aria-selected="true" type="button" onclick="selectModelGroup('all')">全部 <span class="cat-count" id="catCountAll">0</span></button>
+                            <button class="model-cat-tab" data-cat="image" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('image')">图像 <span class="cat-count" id="catCountImage">0</span></button>
+                            <button class="model-cat-tab" data-cat="chat" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('chat')">对话 <span class="cat-count" id="catCountChat">0</span></button>
+                            <button class="model-cat-tab" data-cat="video" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('video')">视频 <span class="cat-count" id="catCountVideo">0</span></button>
+                        </div>
+                    </div>
+                    <div class="model-grid" id="modelGrid">
+                        <section class="block" id="imageModelBlock">
+                            <div class="block-head">
+                                <div>
+                                    <div class="block-title" data-i18n="api.imageModels">生图模型</div>
+                                    <div class="block-desc" data-i18n="api.imageHint">在线生图和无限画布 API 生成使用</div>
+                                    <div class="ms-hint">
+                                        <span class="ms-line"><span data-i18n="api.msModelExample">模型名称示意：</span><span class="inline-code">Tongyi-MAI/Z-Image-Turbo</span></span>
+                                    </div>
+                                </div>
+                                <button class="ghost-btn" type="button" onclick="addModel('image')"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span data-i18n="api.model">模型</span></button>
+                            </div>
+                            <div id="imageModelList" class="model-list"></div>
+                        </section>
+
+                        <section class="block" id="chatModelBlock">
+                            <div class="block-head">
+                                <div>
+                                    <div class="block-title" data-i18n="api.chatModels">聊天模型</div>
+                                    <div class="block-desc" data-i18n="api.chatHint">GPT 对话和 LLM 节点使用</div>
+                                </div>
+                                <button class="ghost-btn" type="button" onclick="addModel('chat')"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span data-i18n="api.model">模型</span></button>
+                        </div>
+                        <div id="chatModelList" class="model-list"></div>
+                    </section>
+
+                        <section class="block" id="videoModelBlock">
+                            <div class="block-head">
+                                <div>
+                                    <div class="block-title" data-i18n="api.videoModels">视频模型</div>
+                                    <div class="block-desc" data-i18n="api.videoHint">无限画布视频生成节点使用</div>
+                                </div>
+                                <button class="ghost-btn" type="button" onclick="addModel('video')"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span data-i18n="api.model">模型</span></button>
+                            </div>
+                            <div id="videoModelList" class="model-list"></div>
+                        </section>
+
+                        <section id="msLoraBlock" class="block ms-lora-block">
+                            <div class="block-head">
+                                <div>
+                                    <div class="block-title" data-i18n="api.loraManager">LoRA 管理</div>
+                                    <div class="block-desc" data-i18n="api.loraManagerDesc">为 ModelScope 生图模型绑定可用 LoRA。无限画布 MS 节点会按当前模型自动筛选。</div>
+                                    <div class="ms-hint">
+                                        <span class="ms-line"><span data-i18n="api.msCnModels">中文模型库：</span><a href="https://www.modelscope.cn/aigc/models" target="_blank">https://www.modelscope.cn/aigc/models</a></span>
+                                        <span class="ms-line"><span data-i18n="api.msEnModels">英文模型库：</span><a href="https://www.modelscope.ai/civision/models" target="_blank">https://www.modelscope.ai/civision/models</a></span>
+                                    </div>
+                                </div>
+                                <button class="ghost-btn" type="button" onclick="addMsLora()"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span>LoRA</span></button>
+                            </div>
+                            <div id="msLoraList" class="lora-list"></div>
+                        </section>
+                </div>
+
+                <!-- 存储设置 - 自定义输出目录 -->
+                <div id="storageSettingsBlock" class="settings-hidden">
+                    <div class="content-head">
+                        <div>
+                            <div class="editor-title">输出目录</div>
+                            <div class="editor-sub">自定义生成的图片、视频保存位置（不影响 API 配置和画布数据）</div>
+                        </div>
+                        <div class="content-actions">
+                            <button class="action-btn save-btn api-page-save-btn" type="button" onclick="saveOutputDir()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span>保存</span></button>
+                        </div>
+                    </div>
+                    <section class="block">
+                        <div class="block-head">
+                            <div>
+                                <div class="block-title">生成文件存放路径</div>
+                                <div class="block-desc">修改后需重启应用生效。留空恢复默认路径（%APPDATA%\NOVAI\output）</div>
+                            </div>
+                        </div>
+                        <div class="form">
+                            <label class="field full">
+                                <span class="label">自定义目录</span>
+                                <div class="field-frame" style="display:flex;gap:8px;">
+                                    <input id="outputDirInput" type="text" placeholder="例如 D:\NOVAI\图片输出" style="flex:1;">
+                                    <button class="action-btn" type="button" onclick="browseOutputDir()" style="white-space:nowrap;">
+                                        <i data-lucide="folder-search" class="w-3.5 h-3.5"></i><span>浏览</span>
+                                    </button>
+                                    <button class="action-btn" type="button" onclick="resetOutputDir()" style="white-space:nowrap;">
+                                        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i><span>默认</span>
+                                    </button>
+                                </div>
+                            </label>
+                            <div id="outputDirStatus" class="field-hint" style="margin-top:8px;font-size:12px;color:var(--muted);"></div>
+                        </div>
+                    </section>
+                </div>
+
+            </main>
+                <main id="recommendContent" class="content recommend-content" hidden>
+                    <div class="content-head">
+                        <div>
+                            <div class="editor-title" data-i18n="api.recommendPanelTitle">推荐平台</div>
+                            <div class="editor-sub" data-i18n="api.recommendPanelSub">获取 Key 后保存，右侧会切换到刚保存的平台配置。</div>
+                        </div>
+                    </div>
+                    <section id="recommendPanel" class="provider-onboarding-card recommend-inline-card"></section>
+                </main>
+        </div>
+        </div>
+    </div>
+
+    <!-- 模型选择浮层 -->
+    <div id="recommendApiOverlay" class="picker-overlay">
+        <div class="picker-modal">
+            <div class="picker-head">
+                <div>
+                    <div class="picker-title" data-i18n="api.recommendApi">推荐API</div>
+                    <div class="picker-count" data-i18n="api.recommendApiDesc">选择平台后可以一键填写请求地址和协议。</div>
+                </div>
+                <div class="picker-close" onclick="closeRecommendApi()"><i data-lucide="x" class="w-4 h-4"></i></div>
+            </div>
+            <div id="recommendApiList" class="recommend-api-body"></div>
+            <div class="recommend-note" data-i18n="api.recommendApiNote">提示：账户内需要至少 0.05 元余额，才能验证地址并拉取模型。</div>
+        </div>
+    </div>
+
+    <div id="modelPickerOverlay" class="picker-overlay">
+        <div class="picker-modal">
+            <div class="picker-head">
+                <div>
+                    <div class="picker-title">从上游拉取的模型清单</div>
+                    <div id="pickerCount" class="picker-count">—</div>
+                </div>
+                <div class="picker-close" onclick="closeModelPicker()"><i data-lucide="x" class="w-4 h-4"></i></div>
+            </div>
+            <div class="picker-toolbar">
+                <input id="pickerFilter" class="picker-search" type="text" placeholder="按名称搜索模型…" oninput="renderModelPicker()">
+                <div class="picker-cat-tabs">
+                    <button class="picker-cat-tab active" data-cat="all" onclick="selectPickerCat('all')">全部 <span class="cat-count">0</span></button>
+                    <button class="picker-cat-tab" data-cat="image" onclick="selectPickerCat('image')">生图 <span class="cat-count">0</span></button>
+                    <button class="picker-cat-tab" data-cat="chat" onclick="selectPickerCat('chat')">LLM <span class="cat-count">0</span></button>
+                    <button class="picker-cat-tab" data-cat="video" onclick="selectPickerCat('video')">视频 <span class="cat-count">0</span></button>
+                </div>
+            </div>
+            <div id="pickerList" class="picker-body"></div>
+            <div id="pickerSummary" class="picker-summary">
+                <span class="picker-summary-title">将应用：</span>
+                <span id="sumImage" class="picker-sum-chip picker-sum-chip-empty">生图 0</span>
+                <span id="sumChat" class="picker-sum-chip picker-sum-chip-empty">聊天 0</span>
+                <span id="sumVideo" class="picker-sum-chip picker-sum-chip-empty">视频 0</span>
+                <span id="sumUnsel" style="margin-left:auto;color:var(--faint)">未选 0</span>
+            </div>
+            <div class="picker-foot">
+                <button class="action-btn" type="button" onclick="closeModelPicker()">取消</button>
+                <button class="action-btn save-btn" type="button" onclick="applyModelPicker()">应用到模型列表</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="jimengHelpOverlay" class="picker-overlay">
+        <div class="picker-modal jimeng-help-modal">
+            <div class="picker-head">
+                <div>
+                    <div class="picker-title">即梦 CLI 帮助</div>
+                    <div class="picker-count">查看 dreamina 官方命令帮助输出</div>
+                </div>
+                <div class="picker-close" onclick="closeJimengHelp()"><i data-lucide="x" class="w-4 h-4"></i></div>
+            </div>
+            <div class="jimeng-help-toolbar">
+                <select id="jimengHelpCommand">
+                    <option value="">dreamina</option>
+                    <option value="login">login</option>
+                    <option value="logout">logout</option>
+                    <option value="user_credit">user_credit</option>
+                    <option value="text2image">text2image</option>
+                    <option value="image2image">image2image</option>
+                    <option value="image_upscale">image_upscale</option>
+                    <option value="text2video">text2video</option>
+                    <option value="image2video">image2video</option>
+                    <option value="multimodal2video">multimodal2video</option>
+                    <option value="frames2video">frames2video</option>
+                    <option value="multiframe2video">multiframe2video</option>
+                    <option value="list_task">list_task</option>
+                    <option value="query_result">query_result</option>
+                </select>
+                <button class="action-btn primary-btn" type="button" onclick="loadJimengHelp()"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>刷新</span></button>
+            </div>
+            <pre id="jimengHelpOutput" class="jimeng-help-output"></pre>
+        </div>
+    </div>
+
+    <div id="codexHelpOverlay" class="picker-overlay">
+        <div class="picker-modal jimeng-help-modal">
+            <div class="picker-head">
+                <div>
+                    <div class="picker-title">OpenAI Codex CLI 帮助</div>
+                    <div class="picker-count">查看 codex 官方命令帮助输出</div>
+                </div>
+                <div class="picker-close" onclick="closeCodexHelp()"><i data-lucide="x" class="w-4 h-4"></i></div>
+            </div>
+            <div class="jimeng-help-toolbar">
+                <select id="codexHelpCommand">
+                    <option value="">codex</option>
+                    <option value="exec">exec</option>
+                    <option value="login">login</option>
+                    <option value="logout">logout</option>
+                    <option value="doctor">doctor</option>
+                    <option value="mcp">mcp</option>
+                    <option value="app">app</option>
+                    <option value="update">update</option>
+                </select>
+                <button class="action-btn primary-btn" type="button" onclick="loadCodexHelp()"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>刷新</span></button>
+            </div>
+            <pre id="codexHelpOutput" class="jimeng-help-output"></pre>
+        </div>
+    </div>
+
+    <div id="geminiCliHelpOverlay" class="picker-overlay">
+        <div class="picker-modal jimeng-help-modal">
+            <div class="picker-head">
+                <div>
+                    <div class="picker-title">Antigravity CLI 帮助</div>
+                    <div class="picker-count">查看 gemini 官方命令帮助输出</div>
+                </div>
+                <div class="picker-close" onclick="closeGeminiCliHelp()"><i data-lucide="x" class="w-4 h-4"></i></div>
+            </div>
+            <div class="jimeng-help-toolbar">
+                <select id="geminiCliHelpCommand">
+                    <option value="">gemini</option>
+                    <option value="help">help</option>
+                    <option value="mcp">mcp</option>
+                    <option value="extensions">extensions</option>
+                </select>
+                <button class="action-btn primary-btn" type="button" onclick="loadGeminiCliHelp()"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>刷新</span></button>
+            </div>
+            <pre id="geminiCliHelpOutput" class="jimeng-help-output"></pre>
+        </div>
+    </div>
+
+    <div id="rhWorkflowEditorOverlay" class="rh-workflow-editor-overlay">
+        <div class="rh-workflow-editor-modal">
+            <div class="rh-workflow-editor-head">
+                <div class="rh-workflow-editor-title-wrap">
+                    <div id="rhWorkflowEditorTitle" class="rh-workflow-editor-title">RunningHub 工作流</div>
+                    <div id="rhWorkflowEditorSub" class="rh-workflow-editor-sub">选择要暴露到画布的输入参数</div>
+                </div>
+                <div class="rh-workflow-editor-actions">
+                    <button class="action-btn" type="button" onclick="fetchRhWorkflowEditor(true)"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>重新拉取</span></button>
+                    <button id="rhWorkflowSaveBtn" class="action-btn save-btn" type="button" onclick="saveRhWorkflowEditor()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span>保存</span></button>
+                    <button class="rh-workflow-editor-close" type="button" onclick="closeRhWorkflowEditor()"><i data-lucide="x" class="w-4 h-4"></i></button>
+                </div>
+            </div>
+            <div class="rh-workflow-editor-body">
+                <aside class="rh-workflow-editor-side">
+                    <label class="rh-editor-field">
+                        <span>名称</span>
+                        <input id="rhWorkflowEditName" type="text" oninput="updateRhWorkflowEditorMeta('title', this.value)">
+                    </label>
+                    <label class="rh-editor-field">
+                        <span>备注</span>
+                        <textarea id="rhWorkflowEditNote" oninput="updateRhWorkflowEditorMeta('description', this.value)"></textarea>
+                    </label>
+                    <div id="rhWorkflowEditorSummary" class="rh-editor-summary"></div>
+                    <div id="rhWorkflowEditorNodeList" class="rh-editor-node-list"></div>
+                </aside>
+                <section class="rh-workflow-editor-canvas">
+                    <div id="rhWorkflowEditorGraphWrap" class="rh-editor-graph-wrap">
+                        <svg id="rhWorkflowEditorGraphSvg" class="rh-editor-graph-svg"></svg>
+                        <div class="rh-editor-graph-controls">
+                            <button type="button" onclick="rhEditorGraphZoom(-1)" title="缩小"><i data-lucide="zoom-out" class="w-4 h-4"></i></button>
+                            <span id="rhWorkflowEditorZoom">100%</span>
+                            <button type="button" onclick="rhEditorGraphZoom(1)" title="放大"><i data-lucide="zoom-in" class="w-4 h-4"></i></button>
+                            <button type="button" onclick="rhEditorGraphFit()" title="适应窗口"><i data-lucide="maximize" class="w-4 h-4"></i></button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/api-settings.js?v=1.0.115.1789114960"></script>
+</body>
+</html>

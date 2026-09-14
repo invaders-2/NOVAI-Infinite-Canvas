@@ -1,0 +1,1493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <title>在线生图</title>
+    <script>(function(){try{var u=new URLSearchParams(location.search).get('theme');var t=u||localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.115.1789114960"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/theme.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/i18n.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/image-preview.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/history-bulk-manager.js?v=1.0.115.1789114960"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.115.1789114960">
+    <style>
+        :root { --accent: #1c1c1e; --bg: #f9fafb; --card: #fff; --easing:cubic-bezier(0.4,0,0.2,1); }
+        /* body 被 UI 缩放 transform 后底部可能露出 html 根区域，显式铺背景避免露出黑色底框 */
+        html { background: var(--bg); }
+        body { 
+            background:var(--bg); font-family: var(--font-sans); color:var(--accent); -webkit-font-smoothing:antialiased;
+            overflow-x: hidden;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        body::-webkit-scrollbar { width: 6px; }
+        body::-webkit-scrollbar-track { background: transparent; }
+        body::-webkit-scrollbar-thumb { background: transparent; border-radius:var(--radius-sm); }
+        body:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); }
+        .theme-dark body::-webkit-scrollbar-thumb { background: transparent; }
+        .theme-dark body:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); }
+        /* 隐藏所有内部滚动条 */
+        * { scrollbar-width: none; -ms-overflow-style: none; }
+        *::-webkit-scrollbar { width: 0; height: 0; display: none; }
+        .container-box { max-width:1280px; margin:0 auto; padding:0 40px; margin-top:50px; }
+        .nano-input { background:var(--card); border:0px solid transparent; transition:all .3s var(--easing); }
+        .nano-input:focus { box-shadow:0 0 0 1px rgba(0,0,0,0.15); }
+        .upload-item { background:var(--card); border:0px solid transparent; transition:all .4s var(--easing); position:relative; overflow:hidden; }
+        .upload-item:hover,.upload-item.drag-over { background:#f0f0f2; transform:translateY(-2px); }
+        .preview-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; animation:fadeIn .5s var(--easing); }
+        .glass-btn { background:var(--text); transition:all .3s var(--easing); }
+        .glass-btn:hover { background:#000; transform:translateY(-1px); box-shadow:0 12px 24px rgba(0,0,0,.1); }
+        .result-frame { background:#fff; border-radius:var(--radius-xl); box-shadow:0 2px 15px rgba(0,0,0,.02); }
+        .tool-panel { background:#fff; border-radius:var(--radius-xl); padding:12px; display:flex; flex-direction:column; gap:10px; }
+        .model-pill { background:var(--bg); border-radius:var(--radius-full); padding:3px; display:grid; grid-template-columns:1fr 1fr; gap:2px; }
+        .model-option { border-radius:var(--radius-full); height:34px; display:flex; align-items:center; justify-content:center; gap:6px; color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.02em; transition:all .25s var(--easing); }
+        .model-option.active { background:#fff; color:var(--text); box-shadow:0 1px 3px rgba(28,28,28,.08); }
+        .control-panel { background:#fff; border-radius:var(--radius-xl); padding:12px; display:flex; flex-direction:column; gap:10px; }
+        .control-label { display:flex; align-items:center; gap:6px; color:var(--text-3); font-size:10px; font-weight:600; letter-spacing:.04em; }
+        .size-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; align-items:start; }
+        .size-field { min-width:0; display:flex; flex-direction:column; gap:6px; }
+        .size-select,.size-custom { width:100%; min-width:0; max-width:100%; height:34px; border:0px solid transparent; border-radius:var(--radius-md); background:var(--bg); color:var(--text); outline:none; padding:0 10px; font-size:11px; font-weight:700; }
+        .size-select { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .size-select:disabled { opacity:.55; cursor:not-allowed; }
+        .size-custom { display:none; background:#fff; }
+        .size-field.custom .size-custom { display:block; }
+        .size-pair { display:none; grid-template-columns:1fr 1fr; gap:6px; }
+        .size-field.custom .size-pair { display:grid; }
+        .size-pair .size-custom { display:block; }
+        .size-pair.with-fit { grid-template-columns:1fr 1fr auto; align-items:center; }
+        .size-fit-btn { height:34px; border:0px solid transparent; border-radius:var(--radius-md); background:#fff; color:var(--text); padding:0 10px; font-size:10px; font-weight:800; white-space:nowrap; }
+        .size-fit-btn:disabled { opacity:.45; cursor:not-allowed; }
+        .mode-badge { font-size:9px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:var(--text); background:#f5f5f5; padding:2px 8px; border-radius:var(--radius-full); }
+        /* 深色主题：badge 背景写死浅色 #f5f5f5 会与白色文字叠成白底白字看不清，改为深底浅字 */
+        html.theme-dark .mode-badge, html.studio-theme-dark .mode-badge {
+            background: var(--soft) !important;
+            color: var(--text-2) !important;
+        }
+        .masonry-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:20px; }
+        @media (min-width:768px){ .masonry-grid{ grid-template-columns:repeat(4,1fr); } }
+        @media (max-width:640px){ .size-row{ grid-template-columns:1fr; } }
+        .masonry-item { aspect-ratio:1/1; border-radius:var(--radius-xl); overflow:hidden; background:#fff; border:0px solid transparent; transition:all .5s var(--easing); }
+        .masonry-item:hover { transform:translateY(-6px); box-shadow:0 20px 40px rgba(0,0,0,.08); }
+        .gallery-lightbox { background:rgba(255,255,255,.99); backdrop-filter:blur(33px) saturate(1.05); }
+        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+    </style>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789114960">
+    <style>
+        html:not(.studio-theme-dark) body:not(.studio-theme-dark) #lightbox.gallery-lightbox {
+            background: rgba(255,255,255,.99) !important;
+            backdrop-filter: blur(33px) saturate(1.05) !important;
+            -webkit-backdrop-filter: blur(33px) saturate(1.05) !important;
+        }
+    </style>
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
+<style>
+/* --- 页面特定 Marvis 覆盖 --- */
+        body { background: var(--bg) !important; color: var(--text) !important; }
+/* --- Marvis 增强覆盖 (online.html) --- */
+.nano-input { background: var(--stage-bg) !important; color: var(--text) !important; border: 0 !important; border-radius: var(--radius-lg) !important; }
+.nano-input::placeholder { color: var(--faint) !important; }
+.upload-item { background: var(--stage-bg) !important; border: 1px dashed var(--border) !important; border-radius: var(--radius-lg) !important; }
+.upload-item:hover, .upload-item.drag-over { background: var(--soft) !important; }
+.tool-panel, .control-panel { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-lg) !important; }
+.size-select, .size-custom { background: var(--soft) !important; color: var(--text) !important; border: 0 !important; border-radius: var(--radius-md) !important; }
+.glass-btn { background: var(--text) !important; color: var(--bg) !important; border-radius: var(--radius-lg) !important; }
+.glass-btn:hover { opacity: 0.88 !important; }
+.result-frame { background: var(--stage-bg) !important; border-radius: var(--radius-lg) !important; }
+.masonry-item { background: var(--stage-bg) !important; border-radius: var(--radius-lg) !important; }
+/* --- 左右双栏 Split Layout：左栏固定宽自滚动，右栏填满剩余空间 --- */
+/* 100vh 需除以全局 UI 缩放系数（theme.js autoScale），否则缩放窗口下填不满视口高度 */
+.split-root { display: flex; height: calc(100vh / var(--studio-ui-scale, 1)); overflow: hidden; }
+.split-left { width: clamp(300px, 30vw, 360px); flex-shrink: 0; height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; padding: 32px 24px; border-right: none; }
+.split-right { flex: 1; min-width: 0; height: 100%; overflow-y: auto; }
+.split-right-inner { max-width: 1080px; margin: 0 auto; padding: 32px 40px 72px; display: flex; flex-direction: column; gap: 56px; }
+#resultBox { height: clamp(420px, 58vh, 720px); }
+@media (max-width: 768px) {
+    .split-root { flex-direction: column; height: auto; overflow: visible; }
+    .split-left { width: 100% !important; height: auto; max-height: none; overflow-y: visible; border-right: none; border-bottom: 1px solid var(--border); padding: 16px; }
+    .split-right { height: auto; overflow-y: visible; }
+    .split-right-inner { padding: 16px 16px 48px; gap: 40px; }
+    #resultBox { height: auto; min-height: 320px; }
+    #genBtn { position: static !important; }
+}
+
+/* ═══ 方向 E · 分组卡片面板 ═══ */
+.split-left { gap: 12px; }
+/* 背景装饰：纯色背景（移除光晕装饰，避免右侧出现椭圆暗影被误认为背景框） */
+.split-root {
+    background: var(--bg);
+}
+.nv-card {
+    background: color-mix(in srgb, var(--elevated) 55%, transparent);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
+    border-radius: var(--radius-lg);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent), var(--shadow-md);
+    overflow: visible;
+}
+html.theme-dark .nv-card, html.studio-theme-dark .nv-card {
+    border-color: color-mix(in srgb, var(--text) 14%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent);
+}
+.nv-card.lifted { position: relative; z-index: 5; }
+.nv-card > .nv-card-head {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    transition: background var(--duration-fast) var(--ease-apple);
+}
+.nv-card > .nv-card-head::-webkit-details-marker { display: none; }
+.nv-card > .nv-card-head:hover { background: var(--soft); }
+.nv-card-head .nv-card-ic { width: 15px; height: 15px; color: var(--text-3); flex-shrink: 0; }
+.nv-card-head .nv-card-title {
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: var(--tracking-xs);
+    text-transform: uppercase;
+    color: var(--text-2);
+}
+.nv-card-chev {
+    width: 13px;
+    height: 13px;
+    color: var(--text-3);
+    margin-left: auto;
+    transition: transform var(--duration-normal) var(--ease-apple);
+}
+.nv-card[open] > .nv-card-head .nv-card-chev { transform: rotate(180deg); }
+.nv-card-body { padding: 0 16px 16px; }
+.nv-card .nv-card-body > * { width: 100%; }
+.nv-card .nv-card-body .nano-input { margin: 0; }
+/* 卡片内 tool-panel 去盒化 */
+.nv-card .tool-panel {
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+}
+.nv-card .tool-panel .control-label { margin-bottom: 8px; }
+/* 卡片内参考图标题由 summary 承载，grid 留白收窄 */
+.nv-card .grid.grid-cols-3.gap-4 { gap: 10px; }
+
+/* ═══ 方向 E · 自定义下拉浮层（nv-select） ═══ */
+.nv-select-wrap { position: relative; width: 100%; }
+.nv-select-trigger {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    width: 100%;
+    padding: 0 10px;
+    border-radius: var(--radius-md);
+    background: var(--soft);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: var(--tracking-xs);
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: border-color var(--duration-fast) var(--ease-apple), background var(--duration-fast) var(--ease-apple);
+}
+.nv-select-trigger:hover { border-color: var(--border-2); }
+.nv-select-trigger:focus-visible { outline: 2px solid var(--accent-subtle); outline-offset: 1px; }
+.nv-select-trigger .nv-select-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+.nv-select-trigger .nv-select-chev {
+    margin-left: auto;
+    flex-shrink: 0;
+    width: 12px;
+    height: 12px;
+    color: var(--text-3);
+    transition: transform var(--duration-fast) var(--ease-apple);
+}
+.nv-select-wrap.open .nv-select-trigger .nv-select-chev { transform: rotate(180deg); }
+.nv-select-wrap.disabled { opacity: .55; pointer-events: none; }
+.nv-select-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    background: color-mix(in srgb, var(--elevated) 68%, transparent);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+    border-radius: var(--radius-md);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent), var(--shadow-lg);
+    padding: 5px;
+    max-height: 300px;
+    overflow-y: auto;
+    display: none;
+}
+.nv-select-wrap.open .nv-select-menu { display: block; animation: nvFade .16s var(--ease-apple); }
+/* 空间不足时向上展开，避免被滚动容器裁剪 */
+.nv-select-menu.up { top: auto; bottom: calc(100% + 4px); }
+/* 注意：禁用 fixed 定位方案——菜单所在 .nv-card 的 backdrop-filter 与 body 的 transform(scale) 会劫持 fixed 包含块，导致整体偏移。
+   保持 absolute 相对 .nv-select-wrap 定位，打开期间由 JS 临时放宽裁剪祖先的 overflow，关闭时恢复 */
+@keyframes nvFade { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.nv-select-opt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    color: var(--text-2);
+    cursor: pointer;
+    overflow: hidden;
+    transition: background var(--duration-fast) var(--ease-apple);
+}
+.nv-select-opt-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+/* 比例下拉图标（形状即比例） */
+.nv-ratio-ic {
+    width: 12px;
+    height: 12px;
+    border: 1.5px solid currentColor;
+    border-radius: 2px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    opacity: .8;
+}
+.nv-select-opt .nv-ratio-ic { opacity: .65; }
+.nv-select-opt.sel .nv-ratio-ic { opacity: 1; }
+.nv-ratio-ic.r-square { aspect-ratio: 1/1; }
+.nv-ratio-ic.r-portrait { aspect-ratio: 2/3; }
+.nv-ratio-ic.r-landscape { aspect-ratio: 3/2; }
+.nv-ratio-ic.r-portrait43 { aspect-ratio: 3/4; }
+.nv-ratio-ic.r-landscape43 { aspect-ratio: 4/3; }
+.nv-ratio-ic.r-story { aspect-ratio: 9/16; }
+.nv-ratio-ic.r-wide { aspect-ratio: 16/9; }
+.nv-ratio-ic.r-custom, .nv-ratio-ic.r-empty { border-style: dashed; opacity: .55; }
+
+/* ═══ 方向 E · 动态光束边框（border-beam 风格，纯 CSS 零 JS） ═══ */
+@property --beam-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+.nv-beam, .nv-beam-wrap {
+    position: relative;
+    isolation: isolate;
+    /* 浅色主题：柔和暖彩光束（琥珀核心 + 玫瑰拖尾 + 暖橙光晕） */
+    --beam-core: rgba(180,255,60,.95);
+    --beam-mid: rgba(180,255,60,.45);
+    --beam-glow: rgba(180,255,60,.55);
+}
+/* 主光带：2px 环，亮核心 + 柔和拖尾 */
+.nv-beam::before, .nv-beam-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 2px;
+    background: conic-gradient(from var(--beam-angle), transparent 0deg, var(--beam-core) 28deg, var(--beam-mid) 70deg, transparent 115deg);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 2;
+    animation: nv-beam-spin 2.6s linear infinite;
+}
+/* 光晕层：同角度泛光，blur 扩散，提升发光质感 */
+.nv-beam::after, .nv-beam-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 5px;
+    background: conic-gradient(from var(--beam-angle), transparent 0deg, var(--beam-glow) 45deg, transparent 120deg);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    filter: blur(8px);
+    opacity: .4;
+    pointer-events: none;
+    z-index: 1;
+    animation: nv-beam-spin 2.6s linear infinite;
+}
+@keyframes nv-beam-spin { to { --beam-angle: 360deg; } }
+/* 对准修复：textarea 转 block 消除基线空隙，圆角对齐 18px */
+.nv-beam-wrap { border-radius: var(--radius-lg); }
+.nv-beam-wrap textarea { display: block; }
+html.theme-dark .nv-beam, html.studio-theme-dark .nv-beam,
+html.theme-dark .nv-beam-wrap, html.studio-theme-dark .nv-beam-wrap {
+    --beam-core: rgba(255,255,255,.6);
+    --beam-mid: rgba(255,255,255,.26);
+    --beam-glow: rgba(255,255,255,.4);
+}
+/* 深色主题：生成按钮保持深底（与浅色主题按钮同色） */
+html.theme-dark #genBtn, html.studio-theme-dark #genBtn {
+    background: #1d1d1f !important;
+    color: #fff !important;
+}
+/* 生成按钮专属：光束固定为柠檬绿（覆盖深色主题通用白色光束变量） */
+#genBtn.nv-beam,
+html.theme-dark #genBtn.nv-beam,
+html.studio-theme-dark #genBtn.nv-beam {
+    --beam-core: rgba(180,255,60,.95);
+    --beam-mid: rgba(180,255,60,.45);
+    --beam-glow: rgba(180,255,60,.55);
+}
+.nv-select-opt:hover { background: var(--accent-subtle); }
+.nv-select-opt.sel { color: var(--text); font-weight: 600; }
+.nv-select-opt.sel::after {
+    content: '';
+    margin-left: auto;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--text-3);
+}
+.nv-select-opt.disabled { opacity: .4; pointer-events: none; }
+.nv-select-sep { height: 1px; background: var(--divider); margin: 4px 0 3px; }
+
+/* ═══ 方向 E · 暗色残留修复 ═══ */
+html.theme-dark #del1, html.theme-dark #del2, html.theme-dark #del3,
+html.studio-theme-dark #del1, html.studio-theme-dark #del2, html.studio-theme-dark #del3 {
+    background: var(--elevated) !important;
+    color: var(--text) !important;
+}
+html.theme-dark #downloadBtn, html.studio-theme-dark #downloadBtn {
+    background: var(--elevated) !important;
+    color: var(--text) !important;
+    box-shadow: var(--shadow-md) !important;
+}
+html.theme-dark #downloadBtn:hover, html.studio-theme-dark #downloadBtn:hover {
+    background: var(--text) !important;
+    color: var(--bg) !important;
+}
+html.theme-dark #lightbox.gallery-lightbox, html.studio-theme-dark #lightbox.gallery-lightbox {
+    background: rgba(13, 13, 13, 0.96) !important;
+    backdrop-filter: blur(33px) saturate(1.05) !important;
+}
+html.theme-dark #lightboxCard, html.studio-theme-dark #lightboxCard {
+    background: var(--stage-bg) !important;
+    border: 1px solid var(--border) !important;
+}
+html.theme-dark #sameStyleBtn, html.studio-theme-dark #sameStyleBtn {
+    background: var(--text) !important;
+    color: var(--bg) !important;
+}
+html.theme-dark #lightboxPrompt, html.studio-theme-dark #lightboxPrompt { color: var(--text-2) !important; }
+html.theme-dark .upload-item .text-gray-400, html.theme-dark .upload-item .text-gray-300,
+html.studio-theme-dark .upload-item .text-gray-400, html.studio-theme-dark .upload-item .text-gray-300 { color: var(--text-3) !important; }
+html.theme-dark .upload-item:hover .text-gray-300, html.studio-theme-dark .upload-item:hover .text-gray-300 { color: var(--text) !important; }
+html.theme-dark #loadMoreTrigger, html.studio-theme-dark #loadMoreTrigger { color: var(--text-3) !important; }
+html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:hover { color: var(--text) !important; }
+</style>
+
+</head>
+<body>
+    <div class="split-root">
+        <aside class="split-left">
+            <details class="nv-card" open>
+                <summary class="nv-card-head">
+                    <i data-lucide="type" class="nv-card-ic"></i>
+                    <span class="nv-card-title" data-i18n="online.promptLabel">提示词</span>
+                    <i data-lucide="chevron-down" class="nv-card-chev"></i>
+                </summary>
+                <div class="nv-card-body">
+                    <textarea id="promptInput" rows="3" class="nano-input w-full p-4 rounded-3xl text-sm outline-none resize-none placeholder-gray-300" placeholder="输入想生成或编辑的画面..." data-i18n-placeholder="online.promptPlaceholder" style="min-height: 80px; transition: height 0.15s ease-out;"></textarea>
+                </div>
+            </details>
+
+                <details class="nv-card" open>
+                    <summary class="nv-card-head">
+                        <i data-lucide="images" class="nv-card-ic"></i>
+                        <span class="nv-card-title" data-i18n="online.referenceImages">参考图片</span>
+                        <i data-lucide="chevron-down" class="nv-card-chev"></i>
+                    </summary>
+                    <div class="nv-card-body">
+                    <div class="grid grid-cols-3 gap-4">
+                        <div id="drop-zone-1" onclick="document.getElementById('file1').click()" class="upload-item group aspect-square rounded-3xl flex flex-col items-center justify-center cursor-pointer">
+                            <input type="file" id="file1" accept="image/*" class="hidden" onchange="handleFile(this.files[0],1)">
+                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i><span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Main</span>
+                            <img id="prev1" class="preview-img hidden"><button id="del1" onclick="clearSlot(1,event)" class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10">×</button>
+                        </div>
+                        <div id="drop-zone-2" onclick="document.getElementById('file2').click()" class="upload-item group aspect-square rounded-3xl flex flex-col items-center justify-center cursor-pointer">
+                            <input type="file" id="file2" accept="image/*" class="hidden" onchange="handleFile(this.files[0],2)">
+                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i><span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Aux A</span>
+                            <img id="prev2" class="preview-img hidden"><button id="del2" onclick="clearSlot(2,event)" class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10">×</button>
+                        </div>
+                        <div id="drop-zone-3" onclick="document.getElementById('file3').click()" class="upload-item group aspect-square rounded-3xl flex flex-col items-center justify-center cursor-pointer">
+                            <input type="file" id="file3" accept="image/*" class="hidden" onchange="handleFile(this.files[0],3)">
+                            <i data-lucide="plus" class="w-5 h-5 text-gray-300 group-hover:text-black"></i><span class="text-[9px] mt-2 font-bold text-gray-400 uppercase">Aux B</span>
+                            <img id="prev3" class="preview-img hidden"><button id="del3" onclick="clearSlot(3,event)" class="hidden absolute top-2 right-2 w-6 h-6 bg-white/90 rounded-full shadow-sm z-10">×</button>
+                        </div>
+                    </div>
+                    </div>
+                </details>
+
+                <details class="nv-card" open>
+                    <summary class="nv-card-head">
+                        <i data-lucide="sliders-horizontal" class="nv-card-ic"></i>
+                        <span class="nv-card-title" data-i18n="online.model">模型</span>
+                        <i data-lucide="chevron-down" class="nv-card-chev"></i>
+                    </summary>
+                    <div class="nv-card-body">
+                <div class="tool-panel">
+                    <div class="control-label">
+                        <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i>
+                        <span data-i18n="online.model">Model</span>
+                        <span id="providerModeBadge" class="mode-badge" style="margin-left:auto;display:none;"></span>
+                    </div>
+                    <div class="size-row">
+                        <label class="size-field">
+                            <select id="providerSelect" class="size-select" onchange="setProvider(this.value)"></select>
+                        </label>
+                        <label class="size-field">
+                            <select id="modelSelect" class="size-select" onchange="setModel(this.value)"></select>
+                        </label>
+                    </div>
+                    <div id="adaptiveExtras" class="size-row" style="margin-top:2px;">
+                        <label id="qualityField" class="size-field">
+                            <select id="qualitySelect" class="size-select" onchange="setQuality(this.value)" title="Quality">
+                                <option value="auto" data-i18n="online.qualityAuto">自动</option>
+                                <option value="low" data-i18n="online.qualityLow">低</option>
+                                <option value="medium" data-i18n="online.qualityMedium">中</option>
+                                <option value="high" data-i18n="online.qualityHigh">高</option>
+                            </select>
+                        </label>
+                        <label id="countField" class="size-field">
+                            <select id="countSelect" class="size-select" onchange="setCount(this.value)" title="Count">
+                                <option value="1" selected>×1</option>
+                                <option value="2">×2</option>
+                                <option value="3">×3</option>
+                                <option value="4">×4</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="control-label mt-1">
+                        <i data-lucide="ruler" class="w-3.5 h-3.5"></i>
+                        <span data-i18n="online.size">Size</span>
+                    </div>
+                    <div class="size-row">
+                        <label id="resolutionField" class="size-field">
+                            <select id="resolutionSelect" class="size-select" onchange="setResolution(this.value)">
+                                <option value="1k" selected>1K</option>
+                                <option value="2k">2K</option>
+                                <option value="4k">4K</option>
+                                <option value="custom" data-i18n="online.customSize">自定义尺寸</option>
+                            </select>
+                            <span class="size-pair with-fit">
+                                <input id="sizeCustomWidth" class="size-custom" type="number" min="64" step="64" placeholder="宽度" data-i18n-placeholder="online.width" oninput="setCustomSize()">
+                                <input id="sizeCustomHeight" class="size-custom" type="number" min="64" step="64" placeholder="高度" data-i18n-placeholder="online.height" oninput="setCustomSize()">
+                                <button id="fitImageSizeBtn" class="size-fit-btn" type="button" onclick="fitCustomSizeToImage(event)">适配图片</button>
+                            </span>
+                        </label>
+                        <label id="ratioField" class="size-field">
+                            <select id="ratioSelect" class="size-select" onchange="setRatio(this.value)">
+                                <option value="" data-i18n="online.emptyRatio">比例为空</option>
+                                <option value="square" selected data-i18n="online.square">1:1 方图</option>
+                                <option value="portrait" data-i18n="online.portrait">2:3 竖图</option>
+                                <option value="landscape" data-i18n="online.landscape">3:2 横图</option>
+                                <option value="portrait43">3:4 竖图</option>
+                                <option value="landscape43">4:3 横图</option>
+                                <option value="story" data-i18n="online.story">9:16 竖屏</option>
+                                <option value="wide" data-i18n="online.wide">16:9 宽屏</option>
+                                <option value="custom" data-i18n="online.customRatio">自定义比例</option>
+                            </select>
+                            <span class="size-pair">
+                                <input id="ratioCustomWidth" class="size-custom" type="number" min="1" step="1" placeholder="宽" data-i18n-placeholder="online.ratioWidth" oninput="setCustomRatio()">
+                                <input id="ratioCustomHeight" class="size-custom" type="number" min="1" step="1" placeholder="高" data-i18n-placeholder="online.ratioHeight" oninput="setCustomRatio()">
+                            </span>
+                        </label>
+                    </div>
+                </div>
+                    </div>
+                </details>
+
+                <button id="genBtn" onclick="submitImage()" class="nv-beam glass-btn w-full py-5 text-white rounded-3xl font-bold flex items-center justify-center gap-3 shadow-lg" style="position: sticky; bottom: 12px; margin-top: auto;">
+                    <i data-lucide="bolt" class="w-4 h-4"></i>
+                    <span class="tracking-[0.3em] text-[14px] uppercase" data-i18n="online.generate">Generate</span>
+                </button>
+        </aside>
+
+        <main class="split-right">
+            <div class="split-right-inner">
+                <div id="resultBox" class="result-frame flex items-center justify-center relative overflow-hidden">
+                    <div id="placeholder" class="text-center space-y-4 opacity-20"><i data-lucide="layout" class="w-12 h-12 mx-auto stroke-[1px]"></i><p class="text-[10px] font-black tracking-[0.5em] uppercase" data-i18n="online.canvasReady">Canvas Ready</p></div>
+                    <div id="loader" class="hidden text-center space-y-4"><div class="w-8 h-8 border-2 border-black border-t-transparent rounded-full animate-spin mx-auto"></div><p class="text-[10px] font-black tracking-[0.5em] uppercase" data-i18n="online.generating">Generating</p></div>
+                    <img id="outputImg" class="hidden w-full h-full object-contain p-8 cursor-zoom-in" onclick="zoomImage()">
+                    <button id="downloadBtn" onclick="downloadGeneratedImage(event)" class="hidden absolute top-8 right-8 w-12 h-12 bg-white/90 shadow-2xl rounded-2xl flex items-center justify-center hover:bg-black hover:text-white"><i data-lucide="download" class="w-4 h-4"></i></button>
+                </div>
+
+                <section>
+                    <div class="flex items-center gap-6 mb-12"><div class="h-px flex-1 bg-gray-100"></div></div>
+                    <div id="masonry" class="masonry-grid"></div>
+                    <div id="loadMoreTrigger" class="py-20 text-center text-gray-300 text-[10px] font-bold uppercase tracking-widest cursor-pointer hover:text-black">Load More Archive</div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div id="lightbox" onclick="handleOutsideClick(event)" class="hidden fixed inset-0 z-50 gallery-lightbox flex flex-col items-center justify-center p-8">
+        <button onclick="closeLightbox()" class="absolute top-10 right-10 text-gray-400 hover:text-black"><i data-lucide="x" class="w-8 h-8"></i></button>
+        <div class="w-full flex flex-col items-center pointer-events-none" style="max-width:min(1280px, 92vw)">
+            <div id="lightboxFrame" class="studio-preview-frame pointer-events-auto">
+                <img id="lightboxImg" class="studio-preview-img" alt="preview">
+                <div data-no-pan class="absolute top-6 left-6 bg-black/50 backdrop-blur-md text-white px-3 py-1.5 rounded-xl text-[10px] font-black tracking-widest shadow-2xl pointer-events-auto z-10">
+                    <span id="lightboxRes">0x0</span>
+                </div>
+                <button id="lightboxDownload" onclick="downloadLightboxImage(event)" data-no-pan class="absolute top-6 right-6 bg-black text-white w-12 h-12 rounded-2xl flex items-center justify-center shadow-2xl hover:scale-105 transition-transform pointer-events-auto z-10">
+                    <i data-lucide="download" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div id="lightboxCard" class="w-full mt-16 pointer-events-auto bg-white rounded-[2rem] p-8 shadow-sm flex justify-between items-center gap-8">
+                <div class="flex-1">
+                    <span class="text-[9px] font-black text-gray-300 uppercase tracking-widest block mb-2">Prompt</span>
+                    <p id="lightboxPrompt" class="text-gray-700 text-sm leading-relaxed max-h-32 overflow-y-auto pr-2"></p>
+                </div>
+                <button id="sameStyleBtn" onclick="applySameStyle()" class="bg-black text-white px-8 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2"><i data-lucide="copy" class="w-4 h-4"></i><span data-i18n="online.reuse">Reuse</span></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+        function tr(key){ return window.StudioI18n ? StudioI18n.t(key) : key; }
+        function applyLanguage(lang){
+            if(lang && window.StudioI18n) StudioI18n.set(lang);
+            document.title = tr('online.title');
+            const loader = document.getElementById('loadMoreTrigger');
+            if(loader && !isLoading) loader.innerText = tr('online.loadMore');
+        }
+        window.addEventListener('message', event => {
+            if(event.data?.type === 'studio-lang') applyLanguage(event.data.lang);
+            // API 设置页通过 postMessage 通知平台/模型变更（iframe 内嵌场景）
+            if(event.data?.type === 'providers-changed' || event.data?.type === 'workflows-changed') scheduleProviderRefresh();
+        });
+        window.addEventListener('studio-lang-change', () => {
+            document.title = tr('online.title');
+            updateAdaptivePanel();
+        });
+        let refs = {1:null,2:null,3:null};
+        let refDims = {1:null,2:null,3:null};
+        let provider = 'comfly';
+        let selectedModel = 'gpt-image-2';
+        let apiProviders = [];
+        let ratio = 'square';
+        let resolution = '1k';
+        let customRatioWidth = '';
+        let customRatioHeight = '';
+        let customWidth = '';
+        let customHeight = '';
+        let quality = 'auto';
+        let outputCount = 1;
+        let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
+        let allHistory = [], currentIndex = 0, currentResult = null, currentLightboxData = null, isLoading = false;
+        const PAGE_SIZE = 24;
+        const SIZE_OPTIONS = {
+            square: [
+                ['1024x1024', '1k'],
+                ['2048x2048', '2k'],
+                ['3840x2160', '4k']
+            ],
+            portrait: [
+                ['1024x1536', '1k'],
+                ['1360x2048', '2k'],
+                ['2352x3520', '4k']
+            ],
+            portrait43: [
+                ['1008x1344', '1k'],
+                ['1536x2048', '2k'],
+                ['2448x3264', '4k']
+            ],
+            landscape43: [
+                ['1344x1008', '1k'],
+                ['2048x1536', '2k'],
+                ['3264x2448', '4k']
+            ],
+            landscape: [
+                ['1536x1024', '1k'],
+                ['2048x1360', '2k'],
+                ['3520x2352', '4k']
+            ],
+            story: [
+                ['720x1280', '1k'],
+                ['1152x2048', '2k'],
+                ['2160x3840', '4k']
+            ],
+            wide: [
+                ['1280x720', '1k'],
+                ['2048x1152', '2k'],
+                ['3840x2160', '4k']
+            ]
+        };
+
+        // 模型专用尺寸映射：根据模型自动匹配其 API 支持的尺寸
+        // 键名按匹配优先级排列，model name 包含键名即命中
+        const MODEL_SIZE_PRESETS = {
+            // ── OpenAI ──
+            'gpt-image-2': {
+                square: [['1024x1024','1k'], ['2048x2048','2k']],
+                portrait: [['1024x1536','1k']],
+                landscape: [['1536x1024','1k']]
+            },
+            'gpt-image-1': {
+                square: [['1024x1024','1k']],
+                portrait: [['1024x1536','1k']],
+                landscape: [['1536x1024','1k']]
+            },
+            'dall-e-3': {
+                square: [['1024x1024','1k']],
+                portrait: [['1024x1792','1k']],
+                landscape: [['1792x1024','1k']]
+            },
+            'dall-e-2': {
+                square: [['1024x1024','1k'], ['512x512','small'], ['256x256','tiny']],
+                portrait: [['512x768','1k']],
+                landscape: [['768x512','1k']]
+            },
+
+            // ── Nano Banana (Gemini 出图) ──
+            'nano-banana': {
+                square: [['1024x1024','1k'], ['2048x2048','2k'], ['4096x4096','4k']],
+                portrait: [['1024x1536','1k'], ['2048x3072','2k'], ['4096x6144','4k']],
+                portrait43: [['1024x1365','1k'], ['2048x2730','2k'], ['3072x4096','4k']],
+                landscape43: [['1365x1024','1k'], ['2730x2048','2k'], ['4096x3072','4k']],
+                landscape: [['1536x1024','1k'], ['3072x2048','2k'], ['6144x4096','4k']],
+                story: [['720x1280','1k'], ['1080x1920','2k'], ['2160x3840','4k']],
+                wide: [['1280x720','1k'], ['1920x1080','2k'], ['3840x2160','4k']]
+            },
+            'nano-banana-2': {
+                square: [['1024x1024','1k'], ['2048x2048','2k'], ['4096x4096','4k']],
+                portrait: [['1024x1536','1k'], ['2048x3072','2k'], ['4096x6144','4k']],
+                portrait43: [['1024x1365','1k'], ['2048x2730','2k'], ['3072x4096','4k']],
+                landscape43: [['1365x1024','1k'], ['2730x2048','2k'], ['4096x3072','4k']],
+                landscape: [['1536x1024','1k'], ['3072x2048','2k'], ['6144x4096','4k']],
+                story: [['720x1280','1k'], ['1080x1920','2k'], ['2160x3840','4k']],
+                wide: [['1280x720','1k'], ['1920x1080','2k'], ['3840x2160','4k']]
+            },
+            'nano-banana-pro': {
+                square: [['1024x1024','1k'], ['2048x2048','2k'], ['4096x4096','4k']],
+                portrait: [['1024x1536','1k'], ['2048x3072','2k'], ['4096x6144','4k']],
+                portrait43: [['1024x1365','1k'], ['2048x2730','2k'], ['3072x4096','4k']],
+                landscape43: [['1365x1024','1k'], ['2730x2048','2k'], ['4096x3072','4k']],
+                landscape: [['1536x1024','1k'], ['3072x2048','2k'], ['6144x4096','4k']],
+                story: [['720x1280','1k'], ['1080x1920','2k'], ['2160x3840','4k']],
+                wide: [['1280x720','1k'], ['1920x1080','2k'], ['3840x2160','4k']]
+            },
+
+            // ── Seedream (火山引擎) ──
+            'seedream-5.0': {
+                square: [['2048x2048','2k'], ['3072x3072','3k']],
+                portrait: [['1536x2048','2k'], ['2304x3072','3k']],
+                portrait43: [['1536x2048','2k'], ['2304x3072','3k']],
+                landscape43: [['2048x1536','2k'], ['3072x2304','3k']],
+                landscape: [['2048x1536','2k'], ['3072x2304','3k']],
+                story: [['1152x2048','2k'], ['1728x3072','3k']],
+                wide: [['2048x1152','2k'], ['3072x1728','3k']]
+            },
+            'seedream-4.5': {
+                square: [['2048x2048','2k'], ['4096x4096','4k']],
+                portrait: [['1536x2048','2k'], ['3072x4096','4k']],
+                portrait43: [['1536x2048','2k'], ['3072x4096','4k']],
+                landscape43: [['2048x1536','2k'], ['4096x3072','4k']],
+                landscape: [['2048x1536','2k'], ['4096x3072','4k']],
+                story: [['1152x2048','2k'], ['2304x4096','4k']],
+                wide: [['2048x1152','2k'], ['4096x2304','4k']]
+            },
+            'seedream-4.0': {
+                square: [['1024x1024','1k'], ['2048x2048','2k']],
+                portrait: [['832x1216','1k'], ['1664x2432','2k']],
+                portrait43: [['928x1216','1k'], ['1856x2432','2k']],
+                landscape43: [['1216x928','1k'], ['2432x1856','2k']],
+                landscape: [['1216x832','1k'], ['2432x1664','2k']],
+                story: [['768x1216','1k'], ['1536x2432','2k']],
+                wide: [['1216x768','1k'], ['2432x1536','2k']]
+            },
+            'seedream-3.0': {
+                square: [['1024x1024','1k'], ['2048x2048','2k']],
+                portrait: [['832x1216','1k'], ['1664x2432','2k']],
+                portrait43: [['928x1216','1k'], ['1856x2432','2k']],
+                landscape43: [['1216x928','1k'], ['2432x1856','2k']],
+                landscape: [['1216x832','1k'], ['2432x1664','2k']],
+                story: [['768x1216','1k'], ['1536x2432','2k']],
+                wide: [['1216x768','1k'], ['2432x1536','2k']]
+            },
+
+            // ── Flux ──
+            'flux': {
+                square: [['1024x1024','1k'], ['1536x1536','2k']],
+                portrait: [['832x1216','1k'], ['1024x1536','2k']],
+                portrait43: [['896x1216','1k'], ['1152x1536','2k']],
+                landscape43: [['1216x896','1k'], ['1536x1152','2k']],
+                landscape: [['1216x832','1k'], ['1536x1024','2k']],
+                story: [['768x1344','1k'], ['1024x1792','2k']],
+                wide: [['1344x768','1k'], ['1792x1024','2k']]
+            },
+
+            // ── SDXL ──
+            'sdxl': {
+                square: [['1024x1024','1k']],
+                portrait: [['896x1152','1k']],
+                portrait43: [['896x1152','1k']],
+                landscape43: [['1152x896','1k']],
+                landscape: [['1152x896','1k']],
+                story: [['768x1344','1k']],
+                wide: [['1344x768','1k']]
+            },
+            'stable-diffusion-xl': {
+                square: [['1024x1024','1k']],
+                portrait: [['896x1152','1k']],
+                landscape: [['1152x896','1k']],
+                story: [['768x1344','1k']],
+                wide: [['1344x768','1k']]
+            },
+
+            // ── SD 1.5 / 2.1 ──
+            'stable-diffusion-2': {
+                square: [['768x768','1k']],
+                portrait: [['768x1152','1k']],
+                landscape: [['1152x768','1k']]
+            },
+            'stable-diffusion': {
+                square: [['512x512','1k']],
+                portrait: [['512x768','1k']],
+                landscape: [['768x512','1k']]
+            },
+
+            // ── Midjourney ──
+            'midjourney': {
+                square: [['1024x1024','1k']],
+                portrait: [['832x1216','1k']],
+                portrait43: [['896x1216','1k']],
+                landscape43: [['1216x896','1k']],
+                landscape: [['1216x832','1k']],
+                story: [['768x1344','1k']],
+                wide: [['1344x768','1k']]
+            },
+
+            // ── Ideogram ──
+            'ideogram': {
+                square: [['1024x1024','1k']],
+                portrait: [['896x1152','1k']],
+                portrait43: [['896x1216','1k']],
+                landscape43: [['1216x896','1k']],
+                landscape: [['1152x896','1k']],
+                story: [['768x1344','1k']],
+                wide: [['1344x768','1k']]
+            },
+
+            // ── Kolors ──
+            'kolors': {
+                square: [['1024x1024','1k'], ['2048x2048','2k']],
+                portrait: [['768x1024','1k'], ['1536x2048','2k']],
+                landscape: [['1024x768','1k'], ['2048x1536','2k']]
+            },
+
+            // ── Hunyuan ──
+            'hunyuan': {
+                square: [['1024x1024','1k']],
+                portrait: [['768x1024','1k']],
+                landscape: [['1024x768','1k']]
+            },
+
+            // ── Recraft ──
+            'recraft': {
+                square: [['1024x1024','1k']],
+                portrait: [['1024x1536','1k']],
+                landscape: [['1536x1024','1k']]
+            },
+
+            // ── Playground ──
+            'playground': {
+                square: [['1024x1024','1k']],
+                portrait: [['832x1216','1k']],
+                landscape: [['1216x832','1k']]
+            }
+        };
+
+        function getSizeOptionsForModel(model) {
+            const m = String(model || '').toLowerCase();
+            for (const [key, sizes] of Object.entries(MODEL_SIZE_PRESETS)) {
+                if (m.includes(key)) return sizes;
+            }
+            return SIZE_OPTIONS;
+        }
+
+        function currentSizeOptions() {
+            return getSizeOptionsForModel(selectedModel);
+        }
+        const RES_LONG_SIDE = { '1k': 1536, '2k': 2048, '4k': 3840 };
+        const RES_PIXEL_LIMIT = { '1k': 1572864, '2k': 4194304, '4k': 8294400 };
+
+        function uniqueModels(list){
+            const seen = new Set();
+            return (list || []).map(item => String(item || '').trim()).filter(item => item && !seen.has(item) && seen.add(item));
+        }
+        function imageProviders(){
+            const list = (apiProviders || []).filter(p => p.enabled !== false && (
+                (p.image_models || []).length || (p.rh_apps || []).length || (p.rh_workflows || []).length
+            ));
+            return list.length ? list : [{id:'comfly', name:'Comfly', image_models:[models.gpt, models.nano]}];
+        }
+        function providerById(id){
+            return imageProviders().find(p => p.id === id) || imageProviders()[0];
+        }
+        function providerModels(id){
+            return uniqueModels(providerById(id)?.image_models || [models.gpt]);
+        }
+        /* ---- RunningHub：同一平台下同步模型 API / 工作流 / AI 应用。
+         * 模型 API 直接提交原始模型名；value=app:ID / workflow:ID 走 RH 应用/工作流路径。 */
+        function runningHubEntryId(entry, kind){
+            if(!entry || typeof entry !== 'object') return '';
+            const raw = kind === 'model' ? (entry.model || entry.id || entry.name)
+                : kind === 'workflow' ? (entry.workflowId || entry.id)
+                : (entry.appId || entry.webappId || entry.id);
+            return String(raw || '').trim();
+        }
+        function runningHubEntries(id){
+            const p = providerById(id) || {};
+            const collect = (list, kind) => (list || [])
+                .filter(e => e && e.enabled !== false && e.hidden !== true)
+                .map(e => ({ kind, id: runningHubEntryId(e, kind), title: String(e.title || e.note || '').trim() }))
+                .filter(e => e.id);
+            const models = uniqueModels(p.image_models || []).map(model => ({kind:'model', id:model, title:model}));
+            return [...models, ...collect(p.rh_workflows, 'workflow'), ...collect(p.rh_apps, 'app')];
+        }
+        function isRunningHubProvider(id){ return providerProtocol(id) === 'runninghub'; }
+        function renderProviderControls(){
+            const providerSelect = document.getElementById('providerSelect');
+            const modelSelect = document.getElementById('modelSelect');
+            const providers = imageProviders();
+            if(!providers.some(p => p.id === provider)) provider = providers[0]?.id || 'comfly';
+            providerSelect.innerHTML = providers.map(p => `<option value="${escapeHtml(p.id)}" ${p.id === provider ? 'selected' : ''}>${escapeHtml(p.name || p.id)}</option>`).join('');
+            if(isRunningHubProvider(provider)){
+                const entries = runningHubEntries(provider);
+                const keys = entries.map(e => e.kind === 'model' ? e.id : `${e.kind}:${e.id}`);
+                if(!keys.includes(selectedModel)) selectedModel = keys[0] || '';
+                modelSelect.innerHTML = entries.length
+                    ? entries.map(e => {
+                        const key = e.kind === 'model' ? e.id : `${e.kind}:${e.id}`;
+                        const tag = e.kind === 'model' ? '模型 API' : e.kind === 'workflow' ? tr('online.rhWorkflow') : tr('online.rhApp');
+                        const label = e.title || e.id;
+                        return `<option value="${escapeHtml(key)}" ${key === selectedModel ? 'selected' : ''}>${escapeHtml(`[${tag}] ${label}`)}</option>`;
+                    }).join('')
+                    : `<option value="">${escapeHtml(tr('online.rhNoEntries'))}</option>`;
+            } else {
+                const modelsForProvider = providerModels(provider);
+                if(!modelsForProvider.includes(selectedModel)) selectedModel = modelsForProvider[0] || models.gpt;
+                modelSelect.innerHTML = modelsForProvider.map(m => `<option value="${escapeHtml(m)}" ${m === selectedModel ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('');
+            }
+            updateAdaptivePanel();
+        }
+
+        /* ---- 协议自适应：根据所选 provider 的 protocol 调整参数栏 ----
+         * 后端 /api/online-image → generate_ai_image 已按协议分发，前端只需让
+         * 与协议无关的控件随之显隐：质量仅 OpenAI 系（gpt-image）生效，其余协议忽略。 */
+        function providerProtocol(id){
+            const p = providerById(id) || {};
+            const proto = String(p.protocol || '').toLowerCase();
+            const pid = String(p.id || '').toLowerCase();
+            const base = String(p.base_url || '').toLowerCase();
+            if(proto === 'modelscope' || pid === 'modelscope') return 'modelscope';
+            if(proto === 'runninghub' || pid === 'runninghub') return 'runninghub';
+            if(proto === 'jimeng' || pid === 'jimeng') return 'jimeng';
+            if(proto === 'volcengine' || pid === 'volcengine') return 'volcengine';
+            if(proto === 'gemini') return 'gemini';
+            if(proto === 'apimart' || base.includes('apimart.ai')) return 'apimart';
+            return 'api';
+        }
+        const PROTOCOL_BADGE = {
+            api:'online.modeApi', apimart:'online.modeApi', modelscope:'online.modeModelscope',
+            runninghub:'online.modeRunningHub', jimeng:'online.modeJimeng',
+            volcengine:'online.modeVolcengine', gemini:'online.modeGemini'
+        };
+        // 仅 OpenAI / APIMart（gpt-image 系）后端会消费 quality；其它协议忽略，隐藏以免误导。
+        const QUALITY_PROTOCOLS = new Set(['api','apimart']);
+        function updateAdaptivePanel(){
+            const proto = providerProtocol(provider);
+            const badge = document.getElementById('providerModeBadge');
+            if(badge){
+                badge.textContent = tr(PROTOCOL_BADGE[proto] || 'online.modeApi');
+                badge.style.display = '';
+            }
+            const qf = document.getElementById('qualityField');
+            if(qf) qf.style.display = QUALITY_PROTOCOLS.has(proto) ? '' : 'none';
+            const qs = document.getElementById('qualitySelect');
+            if(qs) qs.value = quality;
+            // RunningHub 每次出图都是一次完整工作流运行，隐藏数量并固定为 1，避免误触发多次昂贵任务。
+            if(proto === 'runninghub') outputCount = 1;
+            const cf = document.getElementById('countField');
+            if(cf) cf.style.display = (proto === 'runninghub') ? 'none' : '';
+            const cs = document.getElementById('countSelect');
+            if(cs) cs.value = String(outputCount);
+        }
+        function setQuality(next){ quality = next || 'auto'; }
+        function setCount(next){ outputCount = Math.max(1, Math.min(4, parseInt(next, 10) || 1)); }
+
+        async function initModels(){
+            try {
+                const cfg = await fetch('/api/config').then(r=>r.json());
+                const imageModels = cfg.image_models || [];
+                models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
+                models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
+                apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
+                selectedModel = providerModels(provider)[0] || models.gpt;
+            } catch(e) {}
+            renderProviderControls();
+        }
+        // API 设置页保存后会广播 studio-api 事件；这里重新拉取 /api/config，
+        // 尽量保留当前已选的平台/模型，renderProviderControls 会在其不存在时自动回退。
+        async function refreshProvidersFromApiSettings(){
+            try {
+                const cfg = await fetch('/api/config').then(r=>r.json());
+                const imageModels = cfg.image_models || [];
+                models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
+                models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
+                apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
+            } catch(e) { return; }
+            renderProviderControls();
+        }
+        let apiSyncTimer = null;
+        function scheduleProviderRefresh(){
+            clearTimeout(apiSyncTimer);
+            apiSyncTimer = setTimeout(refreshProvidersFromApiSettings, 150);
+        }
+        try {
+            const studioApiChannel = new BroadcastChannel('studio-api');
+            studioApiChannel.addEventListener('message', () => scheduleProviderRefresh());
+        } catch(e) {}
+        // 页面重新可见时也兜底刷新一次（切回标签页 / iframe 重新展示）
+        document.addEventListener('visibilitychange', () => { if(!document.hidden) scheduleProviderRefresh(); });
+
+        function setProvider(next){
+            provider = next;
+            selectedModel = providerModels(provider)[0] || selectedModel;
+            renderProviderControls();
+            updateSizeUI();
+        }
+        function setModel(next){
+            selectedModel = next;
+            updateSizeUI();
+        }
+        function escapeHtml(str){ return String(str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
+
+        function parseSizeValue(value){
+            const match = String(value || '').trim().match(/^(\d+)\s*[xX*]\s*(\d+)$/);
+            return match ? {width:match[1], height:match[2]} : null;
+        }
+        function customRatioValue(){
+            const w = Number(customRatioWidth);
+            const h = Number(customRatioHeight);
+            return w > 0 && h > 0 ? w / h : null;
+        }
+        function customSizeValue(){
+            const w = Number(customWidth);
+            const h = Number(customHeight);
+            return w > 0 && h > 0 ? `${Math.round(w)}x${Math.round(h)}` : '';
+        }
+        function getImageDimensions(src){
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve({width:img.naturalWidth, height:img.naturalHeight});
+                img.onerror = reject;
+                img.src = src;
+            });
+        }
+        function firstReferenceDimension(){
+            return [1,2,3].map(id => refDims[id]).find(dim => dim?.width && dim?.height) || null;
+        }
+
+        function setRatio(next, preferredSize = ''){
+            ratio = next;
+            if (preferredSize) {
+                const match = currentSizeOptions()[next]?.find(([value]) => value === preferredSize);
+                if (match) resolution = match[1];
+            }
+            if(next !== 'custom') {
+                customRatioWidth = '';
+                customRatioHeight = '';
+            }
+            updateSizeUI();
+        }
+
+        function setCustomRatio(){
+            customRatioWidth = document.getElementById('ratioCustomWidth').value;
+            customRatioHeight = document.getElementById('ratioCustomHeight').value;
+            ratio = 'custom';
+            updateSizeUI();
+        }
+
+        function setCustomSize(){
+            customWidth = document.getElementById('sizeCustomWidth').value;
+            customHeight = document.getElementById('sizeCustomHeight').value;
+            resolution = 'custom';
+            ratio = '';
+            updateSizeUI();
+        }
+
+        function setResolution(next){
+            resolution = next;
+            if(next === 'custom'){
+                ratio = '';
+            } else {
+                customWidth = '';
+                customHeight = '';
+                if(ratio === '') ratio = 'square';
+            }
+            updateSizeUI();
+        }
+
+        function updateSizeUI(){
+            const ratioSelect = document.getElementById('ratioSelect');
+            const ratioField = document.getElementById('ratioField');
+            const ratioCustomWidthInput = document.getElementById('ratioCustomWidth');
+            const ratioCustomHeightInput = document.getElementById('ratioCustomHeight');
+            const resolutionSelect = document.getElementById('resolutionSelect');
+            const resolutionField = document.getElementById('resolutionField');
+            const sizeCustomWidthInput = document.getElementById('sizeCustomWidth');
+            const sizeCustomHeightInput = document.getElementById('sizeCustomHeight');
+            const fitImageSizeBtn = document.getElementById('fitImageSizeBtn');
+            // Hide unsupported ratio options for current model
+            const opts = currentSizeOptions();
+            Array.from(ratioSelect.options).forEach(opt => {
+                if (opt.value && opt.value !== 'custom') {
+                    opt.hidden = !opts[opt.value];
+                }
+            });
+            if (!opts[ratio]) {
+                ratio = Object.keys(opts)[0] || 'square';
+            }
+            ratioSelect.value = ratio;
+            ratioSelect.disabled = resolution === 'custom';
+            ratioField.classList.toggle('custom', ratio === 'custom');
+            ratioCustomWidthInput.value = customRatioWidth;
+            ratioCustomHeightInput.value = customRatioHeight;
+            resolutionSelect.value = resolution;
+            resolutionField.classList.toggle('custom', resolution === 'custom');
+            sizeCustomWidthInput.value = customWidth;
+            sizeCustomHeightInput.value = customHeight;
+            if(fitImageSizeBtn) fitImageSizeBtn.disabled = !firstReferenceDimension();
+            updateResolutionUI();
+        }
+
+        function updateResolutionUI(){}
+        function fitCustomSizeToImage(event){
+            if(event) event.preventDefault();
+            const dim = firstReferenceDimension();
+            if(!dim) return;
+            resolution = 'custom';
+            ratio = '';
+            customWidth = dim.width;
+            customHeight = dim.height;
+            updateSizeUI();
+        }
+
+        function currentSize(){
+            if(resolution === 'custom') return customSizeValue();
+            const opts = currentSizeOptions();
+            const options = opts[ratio] || opts.square;
+            if(ratio === 'custom'){
+                const parsed = customRatioValue();
+                const longSide = RES_LONG_SIDE[resolution] || 1024;
+                if(parsed){
+                    const pixelLimit = RES_PIXEL_LIMIT[resolution] || (longSide * longSide);
+                    const rawWidth = parsed >= 1 ? longSide : Math.min(longSide * parsed, Math.sqrt(pixelLimit * parsed));
+                    const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;
+                    const width = Math.floor(rawWidth / 16) * 16;
+                    const height = Math.floor(rawHeight / 16) * 16;
+                    return `${Math.max(64, width)}x${Math.max(64, height)}`;
+                }
+            }
+            const match = options.find(([, label]) => label === resolution) || opts.square.find(([, label]) => label === resolution) || opts.square[0];
+            return match[0];
+        }
+
+        [1,2,3].forEach(id => {
+            const zone = document.getElementById(`drop-zone-${id}`);
+            zone.ondragover = e => { e.preventDefault(); zone.classList.add('drag-over'); };
+            zone.ondragleave = () => zone.classList.remove('drag-over');
+            zone.ondrop = e => { e.preventDefault(); zone.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0], id); };
+        });
+        window.addEventListener('paste', e => {
+            const item = [...(e.clipboardData?.items || [])].find(x => x.kind === 'file' && x.type.startsWith('image/'));
+            if (item) handleFile(item.getAsFile(), firstEmptySlot());
+        });
+        function firstEmptySlot(){ return [1,2,3].find(id => !refs[id]) || 1; }
+
+        async function handleFile(file, index){
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                const prev = document.getElementById(`prev${index}`);
+                prev.src = e.target.result; prev.classList.remove('hidden');
+                document.getElementById(`del${index}`).classList.remove('hidden');
+                getImageDimensions(e.target.result).then(dim => {
+                    refDims[index] = dim;
+                    updateSizeUI();
+                }).catch(() => {});
+            };
+            reader.readAsDataURL(file);
+            const form = new FormData();
+            form.append('files', file);
+            const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+            refs[index] = data.files[0];
+        }
+        function clearSlot(index, ev){
+            if(ev) ev.stopPropagation();
+            refs[index] = null;
+            refDims[index] = null;
+            document.getElementById(`prev${index}`).src = '';
+            document.getElementById(`prev${index}`).classList.add('hidden');
+            document.getElementById(`del${index}`).classList.add('hidden');
+        }
+
+        async function submitImage(){
+            const prompt = document.getElementById('promptInput').value.trim();
+            if(!prompt){ alert(tr('online.promptRequired')); return; }
+            const btn = document.getElementById('genBtn'), loader = document.getElementById('loader'), placeholder = document.getElementById('placeholder'), out = document.getElementById('outputImg'), dl = document.getElementById('downloadBtn');
+            btn.disabled = true; placeholder.classList.add('hidden'); out.classList.add('hidden'); dl.classList.add('hidden'); loader.classList.remove('hidden');
+            try {
+                const reqBody = { prompt, provider_id:provider, model:selectedModel, size:currentSize(), n:outputCount, reference_images:Object.values(refs).filter(Boolean) };
+                if(QUALITY_PROTOCOLS.has(providerProtocol(provider))) reqBody.quality = quality;
+                const result = await fetch('/api/online-image', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify(reqBody)
+                }).then(async r => { if(!r.ok) throw new Error((await r.json()).detail || '生成失败'); return r.json(); });
+                currentResult = result; out.src = result.images[0]; out.classList.remove('hidden'); dl.classList.remove('hidden'); renderImageCard(result, true);
+            } catch(err) {
+                alert(err.message || 'Generation failed'); placeholder.classList.remove('hidden');
+            } finally {
+                loader.classList.add('hidden'); btn.disabled = false;
+            }
+        }
+
+        // ═══ PAGE-SPECIFIC: renderImageCard / loadHistory ═══
+        // NOTE: Similar functions exist in online.html, enhance.html, zimage.html, klein.html, angle.html
+        // Each has page-specific card templates and API parameters.
+        // Consider NovaUtils.loadHistoryWithPagination + NovaUtils.renderImageCardHtml for future refactoring.
+        function renderImageCard(data, isNew=false){
+            if(!data.images?.[0] || document.getElementById(`history-${data.timestamp}`)) return;
+            const card = document.createElement('div');
+            card.id = `history-${data.timestamp}`;
+            card.dataset.historyTs = data.timestamp;
+            card.className = 'masonry-item group relative cursor-zoom-in';
+            card.onclick = () => { if(document.body.classList.contains('history-bulk-selecting')) return; openLightbox(data); };
+            const multi = Array.isArray(data.images) && data.images.length > 1
+                ? `<div class="absolute top-3 right-3 bg-black/60 text-white text-[10px] font-black px-2 py-0.5 rounded-full pointer-events-none">×${data.images.length}</div>` : '';
+            card.innerHTML = `<img src="${data.images[0]}" class="w-full h-full object-cover block group-hover:scale-105 transition-transform duration-1000" loading="lazy">${multi}
+                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 p-6 flex flex-col justify-end"><p class="text-white text-[10px] font-medium line-clamp-2 uppercase tracking-wider">${data.prompt || tr('online.onlineImageFallback')}</p></div>`;
+            isNew ? document.getElementById('masonry').prepend(card) : document.getElementById('masonry').appendChild(card);
+            lucide.createIcons();
+        }
+        // ═══ PAGE-SPECIFIC: renderImageCard / loadHistory ═══
+        // NOTE: See comment above renderImageCard for cross-file refactoring notes.
+        async function loadHistory(page=0){
+            if(isLoading) return; isLoading = true;
+            const loader = document.getElementById('loadMoreTrigger');
+            if(page === 0){ loader.innerText = tr('online.loadingArchives'); allHistory = await fetch('/api/history?type=online').then(r=>r.json()); document.getElementById('masonry').innerHTML=''; currentIndex=0; }
+            const next = allHistory.slice(currentIndex, currentIndex + PAGE_SIZE);
+            next.forEach(item => renderImageCard(item)); currentIndex += next.length;
+            loader.classList.toggle('hidden', currentIndex >= allHistory.length);
+            loader.innerText = tr('online.loadMore'); isLoading = false;
+        }
+        var lightbox = StudioImagePreview.getLightbox({
+            onOpen: function(data, el) {
+                var promptEl = el.querySelector('#lightboxPrompt');
+                var resEl = el.querySelector('#lightboxRes');
+                if (promptEl && data.prompt) promptEl.textContent = data.prompt;
+                if (resEl) {
+                    resEl.textContent = '...';
+                    var img = el.querySelector('#lightboxImg');
+                    if (img) {
+                        img.onload = function() {
+                            resEl.textContent = img.naturalWidth && img.naturalHeight ? img.naturalWidth + ' x ' + img.naturalHeight : (data.params?.size || '--');
+                        };
+                    }
+                }
+            }
+        });
+        function openLightbox(data) { currentLightboxData = data; lightbox.open(data.images[0]); }
+        function closeLightbox() { lightbox.close(); }
+        function handleOutsideClick(e) { lightbox.handleOutside(e); }
+        async function downloadLightboxImage(e){
+            if(e){ e.stopPropagation(); e.preventDefault(); }
+            const url = currentLightboxData?.images?.[0];
+            if(!url) return;
+            const res = await fetch(url);
+            if(!res.ok) return alert('下载失败');
+            const blob = await res.blob();
+            const clean = url.split('?')[0];
+            const ext = clean.includes('.') ? clean.split('.').pop() : 'png';
+            await NovaUtils.downloadBlob(blob, `online-image-${Date.now()}.${ext || 'png'}`);
+        }
+        async function downloadGeneratedImage(e){
+            if(e){ e.stopPropagation(); e.preventDefault(); }
+            const url = currentResult?.images?.[0];
+            if(!url) return;
+            try {
+                const res = await fetch(url);
+                if(!res.ok) throw new Error('fetch failed');
+                const blob = await res.blob();
+                const clean = url.split('?')[0];
+                const ext = clean.includes('.') ? clean.split('.').pop() : 'png';
+                await NovaUtils.downloadBlob(blob, `online-image-${Date.now()}.${ext || 'png'}`);
+            } catch(err) {
+                alert('保存失败：' + (err.message || '无法下载图片'));
+            }
+        }
+        function zoomImage(){ if(currentResult) openLightbox(currentResult); }
+        function applySameStyle(){
+            if(!currentLightboxData) return;
+            document.getElementById('promptInput').value = currentLightboxData.prompt || '';
+            [1,2,3].forEach(id => clearSlot(id));
+            (currentLightboxData.params?.reference_images || []).slice(0,3).forEach((ref,i) => {
+                refs[i+1] = ref; const prev = document.getElementById(`prev${i+1}`);
+                prev.src = ref.url; prev.classList.remove('hidden'); document.getElementById(`del${i+1}`).classList.remove('hidden');
+                getImageDimensions(ref.url).then(dim => {
+                    refDims[i+1] = dim;
+                    updateSizeUI();
+                }).catch(() => {});
+            });
+            const size = currentLightboxData.params?.size || '1024x1024';
+            const opts = currentSizeOptions();
+            const matchedRatio = Object.keys(opts).find(key => opts[key].some(([value]) => value === size)) || 'square';
+            const matchedRes = opts[matchedRatio]?.find(([value]) => value === size)?.[1];
+            if(matchedRes) {
+                setRatio(matchedRatio, size);
+                setResolution(matchedRes);
+            } else {
+                setResolution('custom');
+                const parsed = parseSizeValue(size);
+                customWidth = parsed?.width || '';
+                customHeight = parsed?.height || '';
+                updateSizeUI();
+            }
+            closeLightbox(); window.scrollTo({top:0, behavior:'smooth'});
+            document.querySelector('.split-left')?.scrollTo({top:0, behavior:'smooth'});
+        }
+        async function deleteHistoryItem(ts, ev){
+            ev.stopPropagation();
+            if(!confirm(tr('online.deleteConfirm'))) return;
+            const res = await fetch('/api/history/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({timestamp:ts})}).then(r=>r.json());
+            if(res.success) document.getElementById(`history-${ts}`)?.remove();
+        }
+        const observer = new IntersectionObserver(entries => { if(entries[0].isIntersecting && currentIndex < allHistory.length) loadHistory(1); }, {threshold:.1});
+        window.onload = async () => { applyLanguage(); setRatio('square'); setResolution('1k'); await initModels(); await loadHistory(0); window.HistoryBulkManager?.attach({masonry:'#masonry'}); observer.observe(document.getElementById('loadMoreTrigger')); document.getElementById('loadMoreTrigger').onclick = () => loadHistory(1);
+            // Prompt auto-height
+            const promptEl = document.getElementById('promptInput');
+            if(promptEl){ const autoResize=()=>{ promptEl.style.height='auto'; promptEl.style.height=Math.max(80,Math.min(promptEl.scrollHeight,300))+'px'; }; promptEl.addEventListener('input',autoResize); autoResize(); }
+        };
+    </script>
+
+    <script>
+    /* ═══ 方向 E · 自定义下拉浮层（增量增强，不改动现有逻辑） ═══ */
+    (function () {
+        'use strict';
+        var RATIO_ICONS = {
+            square: 'r-square',
+            portrait: 'r-portrait',
+            landscape: 'r-landscape',
+            portrait43: 'r-portrait43',
+            landscape43: 'r-landscape43',
+            story: 'r-story',
+            wide: 'r-wide',
+            custom: 'r-custom'
+        };
+        /* 全局共享被放宽的裁剪祖先：跨下拉切换时由各 wrap 共用同一集合，避免 A 放宽 B 无法恢复 */
+        var freed = [];
+        function enhanceSelect(sel) {
+            if (!sel || sel.dataset.nvEnhanced) return;
+            sel.dataset.nvEnhanced = '1';
+            sel.style.display = 'none';
+
+            var wrap = document.createElement('div');
+            wrap.className = 'nv-select-wrap';
+            sel.parentNode.insertBefore(wrap, sel);
+            wrap.appendChild(sel);
+
+            var trig = document.createElement('button');
+            trig.type = 'button';
+            trig.className = 'nv-select-trigger';
+            trig.innerHTML = '<span class="nv-select-trigger-ic"></span><span class="nv-select-label"></span><i data-lucide="chevron-down" class="nv-select-chev"></i>';
+            wrap.appendChild(trig);
+
+            var menu = document.createElement('div');
+            menu.className = 'nv-select-menu';
+            wrap.appendChild(menu);
+
+            function syncLabel() {
+                var t = trig.querySelector('.nv-select-label');
+                if (t && sel.options && sel.options[sel.selectedIndex]) {
+                    t.textContent = sel.options[sel.selectedIndex].textContent;
+                }
+                var ic = trig.querySelector('.nv-select-trigger-ic');
+                if (ic) {
+                    var cls = RATIO_ICONS[sel.value];
+                    if (cls) { ic.className = 'nv-ratio-ic ' + cls; ic.style.display = ''; }
+                    else { ic.style.display = 'none'; }
+                }
+            }
+            function renderMenu() {
+                menu.innerHTML = '';
+                var normal = [], extra = [];
+                var isRatio = sel.id === 'ratioSelect';
+                Array.prototype.forEach.call(sel.options, function (opt) {
+                    if (opt.hidden) return;
+                    (opt.value === 'custom' ? extra : normal).push(opt);
+                });
+                function addOpt(opt) {
+                    var d = document.createElement('div');
+                    d.className = 'nv-select-opt' + (opt.selected ? ' sel' : '') + (opt.disabled ? ' disabled' : '');
+                    if (isRatio) {
+                        var ico = document.createElement('span');
+                        ico.className = 'nv-ratio-ic ' + (RATIO_ICONS[opt.value] || 'r-empty');
+                        d.appendChild(ico);
+                    }
+                    var span = document.createElement('span');
+                    span.className = 'nv-select-opt-text';
+                    span.textContent = opt.textContent;
+                    d.appendChild(span);
+                    d.addEventListener('click', function () {
+                        if (opt.disabled) return;
+                        sel.value = opt.value;
+                        sel.dispatchEvent(new Event('change', { bubbles: true }));
+                        closeMenu();
+                    });
+                    menu.appendChild(d);
+                }
+                normal.forEach(addOpt);
+                if (extra.length) {
+                    var sep = document.createElement('div');
+                    sep.className = 'nv-select-sep';
+                    menu.appendChild(sep);
+                    extra.forEach(addOpt);
+                }
+                if (window.lucide && typeof lucide.createIcons === 'function') lucide.createIcons();
+            }
+            function relaxOverflow() {
+                var el = menu.parentElement;
+                while (el && el !== document.body) {
+                    var s = getComputedStyle(el);
+                    var sx = s.overflowX, sy = s.overflowY;
+                    /* 跳过滚动容器（.split-left / .split-right 等）：它们是 #genBtn sticky 的定位基准，
+                       放宽后 sticky 失去滚动容器会导致生成按钮跳动。菜单展开方向已由 openMenu 按视口判断，
+                       滚动容器不会把 absolute 菜单裁到不可见 */
+                    var isScrollContainer = sx === 'auto' || sx === 'scroll' || sy === 'auto' || sy === 'scroll';
+                    if (!isScrollContainer && (sx !== 'visible' || sy !== 'visible')) {
+                        if (freed.indexOf(el) === -1) freed.push(el);
+                        /* 用 important 压过 theme.css 深色规则 .tool-panel{overflow:hidden!important} 的裁剪 */
+                        el.style.setProperty('overflow-x', 'visible', 'important');
+                        el.style.setProperty('overflow-y', 'visible', 'important');
+                    }
+                    el = el.parentElement;
+                }
+            }
+            function restoreOverflow() {
+                for (var i = 0; i < freed.length; i++) {
+                    freed[i].style.removeProperty('overflow-x');
+                    freed[i].style.removeProperty('overflow-y');
+                }
+                freed = [];
+            }
+            function openMenu() {
+                wrap.classList.add('open');
+                renderMenu();
+                var c = wrap.closest('.nv-card');
+                if (c) c.classList.add('lifted');
+                var sc = wrap.closest('.split-left') || wrap.closest('.split-right');
+                if (sc) sc.addEventListener('scroll', onViewportChange, { passive: true });
+                window.addEventListener('scroll', onViewportChange, { passive: true });
+                window.addEventListener('resize', onViewportChange);
+                /* 防裁剪：保持 absolute 相对 trigger 定位（fixed 会被 .nv-card backdrop-filter / body transform 劫持包含块导致偏移），
+                   打开期间临时放宽裁剪祖先的 overflow，关闭时恢复 */
+                relaxOverflow();
+                requestAnimationFrame(function () {
+                    var tr = trig.getBoundingClientRect();
+                    var mh = menu.offsetHeight, gap = 4, edge = 4;
+                    menu.style.maxHeight = '';
+                    if (tr.bottom + gap + mh <= window.innerHeight - edge) {
+                        menu.classList.remove('up');
+                    } else if (tr.top - gap - mh >= edge) {
+                        menu.classList.add('up');
+                    } else {
+                        menu.classList.remove('up');
+                        menu.style.maxHeight = Math.max(80, window.innerHeight - tr.bottom - gap - edge) + 'px';
+                    }
+                });
+            }
+            function onViewportChange() {
+                if (wrap.classList.contains('open')) closeMenu();
+            }
+            function closeMenu() {
+                wrap.classList.remove('open');
+                menu.classList.remove('up', 'portal');
+                menu.style.left = menu.style.top = menu.style.bottom = menu.style.width = menu.style.maxHeight = '';
+                /* 其他菜单仍打开时保留 overflow 放宽，防止新打开菜单被旧菜单关闭流程恢复裁剪 */
+                if (!document.querySelector('.nv-select-wrap.open')) restoreOverflow();
+                var sc = wrap.closest('.split-left') || wrap.closest('.split-right');
+                if (sc) sc.removeEventListener('scroll', onViewportChange);
+                window.removeEventListener('scroll', onViewportChange);
+                window.removeEventListener('resize', onViewportChange);
+                var c = wrap.closest('.nv-card');
+                if (c && !c.querySelector('.nv-select-wrap.open')) c.classList.remove('lifted');
+            }
+
+            function refreshDisabled() {
+                if (sel.disabled) wrap.classList.add('disabled');
+                else wrap.classList.remove('disabled');
+            }
+
+            trig.addEventListener('click', function (e) {
+                e.preventDefault();
+                if (wrap.classList.contains('open')) closeMenu(); else openMenu();
+            });
+            trig.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (wrap.classList.contains('open')) closeMenu(); else openMenu();
+                }
+            });
+            document.addEventListener('click', function (e) {
+                if (wrap.classList.contains('open') && !wrap.contains(e.target)) closeMenu();
+            });
+            sel.addEventListener('change', syncLabel);
+            refreshDisabled();
+            if (window.MutationObserver) {
+                new MutationObserver(function () {
+                    refreshDisabled();
+                    if (wrap.classList.contains('open')) renderMenu(); else syncLabel();
+                }).observe(sel, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'disabled', 'selected'] });
+            }
+            syncLabel();
+        }
+        function init() {
+            document.querySelectorAll('select.size-select').forEach(enhanceSelect);
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+        else init();
+        window.addEventListener('studio-lang-change', function () {
+            document.querySelectorAll('select.size-select').forEach(function (sel) {
+                if (sel.dataset.nvEnhanced) {
+                    var t = sel.parentNode.querySelector('.nv-select-label');
+                    if (t && sel.options && sel.options[sel.selectedIndex]) t.textContent = sel.options[sel.selectedIndex].textContent;
+                }
+            });
+        });
+    })();
+    </script>
+</body>
+</html>
