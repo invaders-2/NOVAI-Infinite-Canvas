@@ -250,6 +250,11 @@ async def startup_event():
         storyboard_load_all()
     except Exception as exc:
         print(f"Storyboard 启动失败: {exc}")
+    # Run / RowRun（表格批量运行）：载入持久化 Run
+    try:
+        _runs_load_all()
+    except Exception as exc:
+        print(f"Runs 启动失败: {exc}")
     sync_static_html_versions()
     # 启动时整理资产库：给所有图片分组（含默认角色/场景）建好文件夹，并把根目录里的旧素材归整进去。
     try:
@@ -21549,6 +21554,465 @@ async def delete_matrix(matrix_id: str):
         MATRIX_STORE.pop(matrix_id, None)
         matrix_save_store()
     return {"success": True, "matrix_id": matrix_id}
+
+
+# ============================================================================
+# Run / RowRun 执行引擎（表格批量运行后端）
+# 契约来源：前端 static/js/canvas.js:13745-13824（createBackendRun / executeBackendRun /
+#           pollRunUntilSettled）与 static/js/shared/workflow-utils.js:145（Snapshot DTO）。
+# 说明：
+#   * 一次 Run = 表格节点的一次批量执行；Run 下的每一行是一个 RowRun。
+#   * 状态唯一真值源仍是 Task Engine：RowRun.status 由关联 Task 状态实时推导，
+#     不另造状态机、不写假状态（与 Matrix / Storyboard 同一约定）。
+#   * 调度惰性推进（_run_advance）：在 GET /api/runs/{id} 与 execute 时按
+#     「依赖 DAG + 并发上限」派发就绪行，不常驻后台协程，规避事件循环生命周期问题。
+#       - 依赖未满足 → 保持 draft，blocked.reason 记录等待对象
+#       - 活跃数 < concurrency → 就绪行 task_create + task_enqueue（真实进队）
+#       - 仍有 draft 但无活跃且无可派发（环形依赖）→ 判 blocked，Run 收敛
+#   * 防重复扣费：派发前先查 RowRun.task_id；已有未结束任务则跳过，不重复创建。
+#   * 持久化：data/runs/runs.json（单文件 + 进程内锁，原子写）。
+# ============================================================================
+
+RUNS_DIR = os.path.join(DATA_DIR, "runs")
+RUNS_STORE_PATH = os.path.join(RUNS_DIR, "runs.json")
+RUNS_STORE: Dict[str, Any] = {}
+RUNS_LOCK = Lock()
+RUNS_MAX_ROWS = 2000
+RUNS_TERMINAL = ("done", "failed", "blocked", "stopped")
+RUNS_ROW_TERMINAL = ("done", "failed", "blocked", "stopped")
+RUNS_ROW_ACTIVE = ("queued", "running", "canceling")
+
+# Task 状态 → RowRun 状态（唯一映射入口，与 matrix 的 _MATRIX_CELL_STATUS_MAP 同源语义）
+RUN_ROW_STATUS_MAP = {
+    "queued": "queued",
+    "retry": "queued",
+    "running": "running",
+    "provider_processing": "running",
+    "downloading": "running",
+    "saving": "running",
+    "jimeng_pending": "running",
+    "cancel_requested": "canceling",
+    "succeeded": "done",
+    "failed": "failed",
+    "cancelled": "stopped",
+}
+
+
+class RunRowSnapshot(BaseModel):
+    """一行的执行快照（workflow-utils.js buildExecutionSnapshotDTO 的镜像）。"""
+    snapshot_version: int = 1
+    row_id: str = ""
+    row_revision: int = 1
+    type: str = "image"
+    prompt: str = ""
+    references: List[AIReference] = []
+    dependencies: List[str] = []
+    target_node_id: str = ""
+    target_node_type: str = ""
+    model: str = ""
+    provider_id: str = ""
+    params: Dict[str, Any] = {}
+    mapping: Dict[str, Any] = {}
+
+
+class RunCreateRequest(BaseModel):
+    canvas_id: str = ""
+    table_node_id: str = ""
+    mode: str = "batch"
+    concurrency: int = 2
+    selected_row_ids: List[str] = []
+    row_snapshots: List[RunRowSnapshot] = []
+
+
+def _runs_load_all():
+    """启动时把持久化 Run 载入内存（RUNS_STORE）。"""
+    global RUNS_STORE
+    with RUNS_LOCK:
+        loaded: Dict[str, Any] = {}
+        try:
+            if os.path.isfile(RUNS_STORE_PATH):
+                with open(RUNS_STORE_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                loaded = (data.get("runs") or {}) if isinstance(data, dict) else {}
+        except Exception as exc:
+            print(f"[Runs] 载入 Run 存储失败: {exc}")
+        RUNS_STORE = loaded
+        print(f"[Runs] 已载入 {len(loaded)} 个 Run")
+
+
+def _runs_save():
+    """把 RUNS_STORE 原子写回磁盘（调用方需持有 RUNS_LOCK）。"""
+    try:
+        os.makedirs(RUNS_DIR, exist_ok=True)
+        tmp = RUNS_STORE_PATH + f".tmp{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"version": 1, "runs": RUNS_STORE}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, RUNS_STORE_PATH)
+    except Exception as exc:
+        print(f"[Runs] 保存 Run 存储失败: {exc}")
+
+
+def _run_get(run_id: str) -> Optional[dict]:
+    with RUNS_LOCK:
+        run = RUNS_STORE.get(run_id)
+    return json.loads(json.dumps(run, ensure_ascii=False, default=str)) if run else None
+
+
+def _run_public(run: dict) -> dict:
+    """对外响应：只透出前端契约字段（Run + RowRun）。"""
+    return {
+        "run_id": run.get("run_id"),
+        "canvas_id": run.get("canvas_id") or "",
+        "table_node_id": run.get("table_node_id") or "",
+        "mode": run.get("mode") or "batch",
+        "concurrency": int(run.get("concurrency") or 2),
+        "status": run.get("status") or "draft",
+        "created_at": run.get("created_at"),
+        "started_at": run.get("started_at"),
+        "updated_at": run.get("updated_at"),
+        "finished_at": run.get("finished_at"),
+        "row_runs": [
+            {
+                "row_id": rr.get("row_id") or "",
+                "row_run_id": rr.get("row_run_id") or "",
+                "status": rr.get("status") or "draft",
+                "row_revision": int(rr.get("row_revision") or 1),
+                "task_id": rr.get("task_id") or "",
+                "blocked": rr.get("blocked") or {},
+                "stop_reason": rr.get("stop_reason") or "",
+                "result_refs": rr.get("result_refs") or [],
+                "error": rr.get("error") or "",
+                "started_at": rr.get("started_at"),
+                "finished_at": rr.get("finished_at"),
+            }
+            for rr in (run.get("row_runs") or [])
+        ],
+    }
+
+
+def _run_row_payload(snapshot: dict):
+    """行快照 → Task Engine payload。返回 (kind, runner_name, payload_model)。
+
+    图片类型走 OnlineImageRequest + run_canvas_image_task；
+    视频类型走 CanvasVideoRequest + run_canvas_video_task。
+    两者都是既有、已在跑的 runner，不新增执行路径。
+    """
+    row_type = str(snapshot.get("type") or "image").lower()
+    params = snapshot.get("params") if isinstance(snapshot.get("params"), dict) else {}
+    prompt = str(snapshot.get("prompt") or "").strip()
+    if not prompt:
+        raise ValueError("缺少提示词")
+    raw_refs = snapshot.get("references") or []
+    refs: List[AIReference] = []
+    for item in raw_refs:
+        if isinstance(item, dict):
+            url = str(item.get("url") or item.get("value") or "").strip()
+            if not url:
+                continue
+            refs.append(AIReference(
+                url=url,
+                name=str(item.get("name") or ""),
+                role=str(item.get("role") or item.get("purpose") or ""),
+                kind=str(item.get("kind") or "image"),
+                mime=str(item.get("mime") or ""),
+            ))
+        elif isinstance(item, str) and item.strip():
+            refs.append(AIReference(url=item.strip(), kind="image"))
+    provider_id = str(snapshot.get("provider_id") or params.get("provider_id") or "comfly")
+    model = str(snapshot.get("model") or params.get("model") or "")
+    if row_type == "video":
+        return "video", "run_canvas_video_task", CanvasVideoRequest(
+            prompt=prompt,
+            provider_id=provider_id,
+            model=model or "veo3-fast",
+            duration=max(1, min(15, int(params.get("duration") or 5))),
+            aspect_ratio=str(params.get("aspect_ratio") or params.get("ratio") or "16:9"),
+            resolution=str(params.get("resolution") or ""),
+            size=str(params.get("size") or ""),
+            images=refs,
+            enhance_prompt=bool(params.get("enhancePrompt") or params.get("enhance_prompt") or False),
+            watermark=bool(params.get("watermark") or False),
+            multimodal=bool(params.get("multimodal") or False),
+        )
+    return "online-image", "run_canvas_image_task", OnlineImageRequest(
+        prompt=prompt,
+        provider_id=provider_id,
+        model=model,
+        size=str(params.get("size") or "1024x1024"),
+        quality=str(params.get("quality") or "auto"),
+        n=max(1, min(4, int(params.get("n") or params.get("count") or 1))),
+        reference_images=refs,
+    )
+
+
+async def _run_launch_row(run: dict, row_run: dict):
+    """把一个 draft 行派发成真实 Task（进 Task Engine 队列）。失败则就地判 blocked。"""
+    snapshot = row_run.get("snapshot") or {}
+    try:
+        kind, runner_name, payload = _run_row_payload(snapshot)
+    except Exception as exc:
+        row_run["status"] = "blocked"
+        row_run["blocked"] = {"reason": f"行参数无效：{exc}"}
+        row_run["finished_at"] = time.time()
+        return False
+    task = task_create(
+        kind=kind,
+        payload=payload,
+        runner_name=runner_name,
+        provider_id=str(snapshot.get("provider_id") or ""),
+        model_id=str(snapshot.get("model") or ""),
+        extra={
+            "canvas_id": run.get("canvas_id") or "",
+            "node_id": run.get("table_node_id") or "",
+            "run_id": run.get("run_id") or "",
+            "row_run_id": row_run.get("row_run_id") or "",
+            "row_id": row_run.get("row_id") or "",
+        },
+    )
+    row_run["task_id"] = task["id"]
+    row_run["status"] = "queued"
+    row_run["started_at"] = time.time()
+    row_run.pop("blocked", None)
+    await task_enqueue(task["id"])
+    return True
+
+
+def _run_sync_row(row_run: dict) -> bool:
+    """把 RowRun 状态与结果从 Task Engine 同步回来。返回是否有变化。"""
+    changed = False
+    task_id = row_run.get("task_id") or ""
+    if not task_id:
+        return False
+    task = task_get(task_id)
+    if not task:
+        return False
+    new_status = RUN_ROW_STATUS_MAP.get(task.get("status") or "", row_run.get("status") or "queued")
+    if new_status != row_run.get("status"):
+        row_run["status"] = new_status
+        changed = True
+    if new_status in RUNS_ROW_TERMINAL and not row_run.get("finished_at"):
+        row_run["finished_at"] = time.time()
+        changed = True
+    error_text = str(task.get("error") or "")[:500]
+    if error_text and error_text != (row_run.get("error") or ""):
+        row_run["error"] = error_text
+        changed = True
+    if new_status == "done":
+        row_type = str((row_run.get("snapshot") or {}).get("type") or "image").lower()
+        result = task.get("result")
+        urls = _agent_result_video_urls(result) if row_type == "video" else _agent_result_media_urls(result)
+        refs = [{"url": u, "kind": "video" if row_type == "video" else "image"} for u in urls]
+        if refs != (row_run.get("result_refs") or []):
+            row_run["result_refs"] = refs
+            changed = True
+    return changed
+
+
+async def _run_advance(run: dict) -> bool:
+    """按依赖 DAG + 并发上限推进 Run（惰性调度）。返回是否有变化。"""
+    if run.get("status") in RUNS_TERMINAL:
+        return False
+    if run.get("status") == "draft":
+        return False  # 未 execute，不派发
+    changed = False
+    rows = run.get("row_runs") or []
+    if not rows:
+        return False
+
+    for row_run in rows:
+        if _run_sync_row(row_run):
+            changed = True
+
+    concurrency = max(1, min(8, int(run.get("concurrency") or 2)))
+    by_row_id = {str(rr.get("row_id")): rr for rr in rows}
+    while True:
+        active = [rr for rr in rows if rr.get("status") in RUNS_ROW_ACTIVE]
+        if len(active) >= concurrency:
+            break
+        ready = None
+        for row_run in rows:
+            if row_run.get("status") != "draft":
+                continue
+            deps = [str(d) for d in ((row_run.get("snapshot") or {}).get("dependencies") or [])]
+            unmet = [d for d in deps if (by_row_id.get(d) or {}).get("status") != "done"]
+            if unmet:
+                reason = "等待依赖步骤 " + "、".join(unmet)
+                if (row_run.get("blocked") or {}).get("reason") != reason:
+                    row_run["blocked"] = {"reason": reason}
+                    changed = True
+                continue
+            ready = row_run
+            break
+        if ready is None:
+            break
+        if await _run_launch_row(run, ready):
+            changed = True
+
+    # 死锁收敛：仍有 draft，但既无活跃行、也无就绪行（环形依赖）
+    if any(rr.get("status") == "draft" for rr in rows) and not any(rr.get("status") in RUNS_ROW_ACTIVE for rr in rows):
+        for row_run in rows:
+            if row_run.get("status") == "draft":
+                row_run["status"] = "blocked"
+                row_run["blocked"] = row_run.get("blocked") or {"reason": "依赖无法满足（可能存在循环依赖）"}
+                row_run["finished_at"] = time.time()
+                changed = True
+
+    statuses = [rr.get("status") for rr in rows]
+    if all(s in RUNS_ROW_TERMINAL for s in statuses):
+        if any(s == "stopped" for s in statuses):
+            new_status = "stopped"
+        elif all(s == "done" for s in statuses):
+            new_status = "done"
+        elif all(s == "blocked" for s in statuses):
+            new_status = "blocked"
+        elif any(s == "done" for s in statuses):
+            new_status = "partial"
+        else:
+            new_status = "failed"
+    else:
+        new_status = "running"
+    if new_status != run.get("status"):
+        run["status"] = new_status
+        changed = True
+    if new_status in RUNS_TERMINAL and not run.get("finished_at"):
+        run["finished_at"] = time.time()
+        changed = True
+    return changed
+
+
+@app.post("/api/runs")
+async def create_run(req: RunCreateRequest):
+    """创建 Run：把行快照落成 RowRun（全部 draft，不立即执行）。"""
+    snapshots = [s for s in (req.row_snapshots or []) if str(s.row_id or "").strip()][:RUNS_MAX_ROWS]
+    if not snapshots:
+        raise HTTPException(status_code=400, detail="Run 需要至少一行选中步骤（row_snapshots 为空）")
+    now = time.time()
+    run_id = f"run_{uuid.uuid4().hex}"
+    row_runs = []
+    for snap in snapshots:
+        row_runs.append({
+            "row_run_id": f"rr_{uuid.uuid4().hex}",
+            "row_id": str(snap.row_id),
+            "row_revision": int(snap.row_revision or 1),
+            "status": "draft",
+            "task_id": "",
+            "blocked": {},
+            "stop_reason": "",
+            "result_refs": [],
+            "error": "",
+            "snapshot": json.loads(snap.model_dump_json()),
+            "created_at": now,
+            "started_at": None,
+            "finished_at": None,
+        })
+    run = {
+        "run_id": run_id,
+        "canvas_id": str(req.canvas_id or ""),
+        "table_node_id": str(req.table_node_id or ""),
+        "mode": "continuous" if str(req.mode) == "continuous" else "batch",
+        "concurrency": max(1, min(8, int(req.concurrency or 2))),
+        "selected_row_ids": [str(x) for x in (req.selected_row_ids or [])],
+        "status": "draft",
+        "row_runs": row_runs,
+        "created_at": now,
+        "started_at": None,
+        "updated_at": now,
+        "finished_at": None,
+    }
+    with RUNS_LOCK:
+        RUNS_STORE[run_id] = run
+        _runs_save()
+    return _run_public(run)
+
+
+@app.get("/api/runs")
+async def list_runs(canvas_id: str = "", table_node_id: str = "", active: int = 0, limit: int = 50):
+    """列出 Run（供刷新后恢复：active=1 只看未结束的）。"""
+    with RUNS_LOCK:
+        items = list(RUNS_STORE.values())
+    out = []
+    for run in items:
+        if canvas_id and str(run.get("canvas_id") or "") != str(canvas_id):
+            continue
+        if table_node_id and str(run.get("table_node_id") or "") != str(table_node_id):
+            continue
+        if active and run.get("status") in RUNS_TERMINAL:
+            continue
+        out.append(run)
+    out.sort(
+        key=lambda r: (r.get("started_at") or 0, r.get("created_at") or 0, str(r.get("run_id") or "")),
+        reverse=True,
+    )
+    return {"items": [_run_public(r) for r in out[: max(1, min(200, int(limit or 50)))]]}
+
+
+@app.get("/api/runs/{run_id}")
+async def get_run(run_id: str):
+    """读取 Run 并推进调度（前端轮询入口）。"""
+    run = _run_get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run 不存在")
+    await _run_advance(run)
+    run["updated_at"] = time.time()
+    with RUNS_LOCK:
+        if run_id in RUNS_STORE:
+            RUNS_STORE[run_id] = run
+            _runs_save()
+    return _run_public(run)
+
+
+@app.post("/api/runs/{run_id}/execute")
+async def execute_run(run_id: str):
+    """启动 Run：按依赖 DAG + 并发派发就绪行为真实 Task。"""
+    run = _run_get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run 不存在")
+    if run.get("status") not in RUNS_TERMINAL:
+        run["status"] = "running"
+        run["started_at"] = run.get("started_at") or time.time()
+        await _run_advance(run)
+    run["updated_at"] = time.time()
+    with RUNS_LOCK:
+        if run_id in RUNS_STORE:
+            RUNS_STORE[run_id] = run
+            _runs_save()
+    return _run_public(run)
+
+
+@app.post("/api/runs/{run_id}/cancel")
+async def cancel_run(run_id: str):
+    """取消 Run：取消所有未结束 RowRun 对应的真实 Task（尽力而为 + 状态立即收敛）。"""
+    run = _run_get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run 不存在")
+    cancelled: List[str] = []
+    already: List[str] = []
+    for row_run in run.get("row_runs") or []:
+        if row_run.get("status") in RUNS_ROW_TERMINAL:
+            already.append(str(row_run.get("row_id") or ""))
+            continue
+        task_id = row_run.get("task_id") or ""
+        if task_id:
+            try:
+                await task_cancel(task_id)
+            except Exception as exc:
+                print(f"[Runs] 取消任务失败 {task_id}: {exc}")
+        row_run["status"] = "stopped"
+        row_run["stop_reason"] = "用户取消"
+        row_run["finished_at"] = time.time()
+        cancelled.append(str(row_run.get("row_id") or ""))
+    run["status"] = "stopped"
+    run["finished_at"] = time.time()
+    run["updated_at"] = run["finished_at"]
+    with RUNS_LOCK:
+        if run_id in RUNS_STORE:
+            RUNS_STORE[run_id] = run
+            _runs_save()
+    payload = _run_public(run)
+    payload["cancelled"] = cancelled
+    payload["already_ended"] = already
+    return payload
+
 
 # ============================================================================
 # Storyboard 视频分镜生产系统（V2 Phase 3）
