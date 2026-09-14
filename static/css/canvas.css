@@ -1914,6 +1914,10 @@ body.canvas-node-resize .node .llm-chat-log { pointer-events:none !important; }
 .matrix-view-bar { display:inline-flex; gap:2px; padding:2px; align-self:flex-start; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2); }
 .matrix-view-bar button { height:22px; padding:0 10px; border:0; background:transparent; color:var(--text-2); box-shadow:none; }
 .matrix-view-bar button.active { background:var(--surface); color:var(--text); box-shadow:var(--shadow-sm); }
+/* CSV 导入：<label> 包隐藏 file input，外观需与视图栏其余控件一致 */
+.matrix-file-btn { display:inline-flex; align-items:center; justify-content:center; height:22px; padding:0 10px; border-radius:var(--radius-sm); color:var(--text-2); font-size:11px; font-weight:600; line-height:1; cursor:pointer; transition:background .15s ease, color .15s ease; }
+.matrix-file-btn:hover { background:var(--surface); color:var(--text); }
+.matrix-file-btn input[type="file"] { display:none; }
 
 /* ── 结果视图 ───────────────────────────────────────────────────────────── */
 .matrix-result-view { flex:0 0 auto; }
