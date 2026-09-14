@@ -1924,6 +1924,33 @@ body.canvas-node-resize .node .llm-chat-log { pointer-events:none !important; }
 .dtable-empty { flex:1 1 auto; display:flex; align-items:center; justify-content:center; padding:16px; border:1px dashed var(--border-2); border-radius:var(--radius-sm); color:var(--text-3); font-size:11.5px; }
 .dtable-hint { flex:0 0 auto; font-size:10px; color:var(--text-3); }
 
+/* ============================================================================
+   表格逐行扇出控件（生成节点侧）
+   仅当生成节点上游连着 data-table 时渲染。视觉语言与 .node-run-status 同源：
+   状态用 info / success / danger / warning 四组语义色，不新造配色。
+   ============================================================================ */
+
+.fanout-panel { margin-top:8px; padding:8px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2); display:flex; flex-direction:column; gap:6px; }
+.fanout-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.fanout-title { font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--text-3); }
+.fanout-meta { font-size:10px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fanout-actions { display:flex; align-items:center; gap:8px; }
+.fanout-actions button { display:inline-flex; align-items:center; justify-content:center; height:26px; padding:0 10px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); color:var(--text); font-family:inherit; font-size:11px; font-weight:600; line-height:1; cursor:pointer; transition:background .15s ease, border-color .15s ease; }
+.fanout-actions button:hover:not(:disabled) { background:var(--surface-2); border-color:var(--border-strong); }
+.fanout-actions button:disabled { opacity:.5; cursor:not-allowed; }
+.fanout-status { font-size:10.5px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fanout-rows { display:flex; flex-direction:column; gap:2px; max-height:132px; overflow:auto; }
+.fanout-row { display:flex; align-items:center; gap:6px; padding:2px 6px; border-left:3px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--surface); }
+.fanout-row.queued { border-left-color:var(--border-strong); }
+.fanout-row.running, .fanout-row.provider_processing { border-left-color:var(--info); }
+.fanout-row.succeeded { border-left-color:var(--success); }
+.fanout-row.failed { border-left-color:var(--danger); }
+.fanout-row.blocked { border-left-color:var(--warning); }
+.fanout-row-index { flex:0 0 18px; text-align:right; font-size:10px; font-weight:800; color:var(--text-3); font-variant-numeric:tabular-nums; }
+.fanout-row-state { flex:1 1 auto; min-width:0; font-size:10.5px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fanout-row.blocked .fanout-row-state { color:var(--warning-text); }
+.fanout-row.failed .fanout-row-state { color:var(--danger-text); }
+
 /* ── 提示与校验 ─────────────────────────────────────────────────────────── */
 .matrix-token-help { font-size:10px; line-height:1.5; color:var(--text-3); }
 .matrix-validation-errors { display:flex; flex-direction:column; gap:3px; padding:6px 8px; border:1px solid var(--danger-border); border-radius:var(--radius-sm); background:var(--danger-bg); color:var(--danger-text); font-size:11px; }

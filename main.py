@@ -255,6 +255,11 @@ async def startup_event():
         _runs_load_all()
     except Exception as exc:
         print(f"Runs 启动失败: {exc}")
+    # 表格逐行扇出记录（request_id 幂等）
+    try:
+        _table_fanout_load_all()
+    except Exception as exc:
+        print(f"TableFanout 启动失败: {exc}")
     sync_static_html_versions()
     # 启动时整理资产库：给所有图片分组（含默认角色/场景）建好文件夹，并把根目录里的旧素材归整进去。
     try:
@@ -22039,6 +22044,206 @@ async def cancel_run(run_id: str):
     payload = _run_public(run)
     payload["cancelled"] = cancelled
     payload["already_ended"] = already
+    return payload
+
+
+# ============================================================================
+# 表格逐行扇出（POST /api/table/fanout）
+# 契约来源：DX OS 的 llm-table-batch 工作流 ——「表格逐行驱动生成节点，
+#           画布按行产生多个结果组」。表格自身不执行，扇出由生成节点发起。
+#
+# 本端点只做一件事：把「一张表的 N 行」变成「N 个真实 Task」。
+#   * 提示词模板用 {列名} 占位，逐行用该行单元格值替换（复用 Matrix 的替换实现，
+#     与 _matrix_render_value 同一语义，不另造一套）。
+#   * 每个可执行行 → task_create + task_enqueue，复用既有图片 runner，不新增执行路径。
+#   * 行不可执行（渲染后提示词为空 / 握手不可用）→ 判 blocked 并保留原因，**不创建任务**。
+#   * request_id 幂等：同一 request_id 重复提交直接返回首次结果，不重复建任务（防重复扣费）。
+#   * 持久化 data/table_fanout.json（同 request_id 跨重启仍幂等）。
+# ============================================================================
+
+TABLE_FANOUT_DIR = os.path.join(DATA_DIR, "table-fanout")
+TABLE_FANOUT_PATH = os.path.join(TABLE_FANOUT_DIR, "fanout.json")
+TABLE_FANOUT_STORE: Dict[str, Any] = {}
+TABLE_FANOUT_LOCK = Lock()
+TABLE_FANOUT_MAX_ROWS = 500
+# 提示词模板里的占位符形态 {列名}。替换后若仍残留，说明列名对不上，必须拦下。
+_FANOUT_TOKEN = re.compile(r"\{([^{}]{1,40})\}")
+
+
+class TableFanoutRow(BaseModel):
+    row_index: int = 0
+    values: Dict[str, str] = {}
+
+
+class TableFanoutRequest(BaseModel):
+    canvas_id: str = ""
+    table_node_id: str = ""
+    generator_node_id: str = ""
+    prompt_template: str = ""
+    provider_id: str = "comfly"
+    model: str = ""
+    size: str = "1024x1024"
+    quality: str = "auto"
+    reference_images: List[AIReference] = []
+    rows: List[TableFanoutRow] = []
+    request_id: str = ""
+
+
+def _table_fanout_load_all():
+    global TABLE_FANOUT_STORE
+    with TABLE_FANOUT_LOCK:
+        loaded: Dict[str, Any] = {}
+        try:
+            if os.path.isfile(TABLE_FANOUT_PATH):
+                with open(TABLE_FANOUT_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                loaded = (data.get("requests") or {}) if isinstance(data, dict) else {}
+        except Exception as exc:
+            print(f"[TableFanout] 载入失败: {exc}")
+        TABLE_FANOUT_STORE = loaded
+        print(f"[TableFanout] 已载入 {len(loaded)} 条扇出记录")
+
+
+def _table_fanout_save():
+    try:
+        os.makedirs(TABLE_FANOUT_DIR, exist_ok=True)
+        tmp = TABLE_FANOUT_PATH + f".tmp{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"version": 1, "requests": TABLE_FANOUT_STORE}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, TABLE_FANOUT_PATH)
+    except Exception as exc:
+        print(f"[TableFanout] 保存失败: {exc}")
+
+
+@app.post("/api/table/fanout")
+async def table_fanout(req: TableFanoutRequest):
+    """把表格的每一行扇出成一个真实生成任务。表格不执行，扇出由生成节点发起。"""
+    template = str(req.prompt_template or "")
+    if not template.strip():
+        raise HTTPException(status_code=400, detail="缺少提示词模板（template 不能为空，用 {列名} 引用单元格）")
+    rows = list(req.rows or [])
+    if not rows:
+        raise HTTPException(status_code=400, detail="表格没有可执行的行")
+    if len(rows) > TABLE_FANOUT_MAX_ROWS:
+        rows = rows[:TABLE_FANOUT_MAX_ROWS]
+
+    request_id = str(req.request_id or "").strip()
+    if request_id:
+        with TABLE_FANOUT_LOCK:
+            cached = TABLE_FANOUT_STORE.get(request_id)
+        if cached:
+            payload = dict(cached)
+            payload["replayed"] = True
+            return payload
+
+    # 同一 request 共享 provider/model，握手一次即可；不可用则整批 blocked，不创建任何任务
+    items: List[Dict[str, Any]] = []
+    launched: List[str] = []
+    try:
+        provider = get_api_provider_exact(str(req.provider_id or ""))
+        descriptor = build_model_descriptor(provider, str(req.model or ""), "image.generate")
+    except HTTPException as exc:
+        detail = str(getattr(exc, "detail", None) or exc)
+        return {
+            "request_id": request_id, "replayed": False, "total": len(rows),
+            "launched": 0, "skipped": len(rows),
+            "items": [{"row_index": r.row_index, "status": "blocked", "task_id": "", "prompt": "", "reason": detail} for r in rows],
+        }
+    if not descriptor.get("execution", {}).get("available"):
+        reason = "；".join(str(x) for x in (descriptor.get("execution", {}).get("reasons") or ["target 不可用"]))
+        return {
+            "request_id": request_id, "replayed": False, "total": len(rows),
+            "launched": 0, "skipped": len(rows),
+            "items": [{"row_index": r.row_index, "status": "blocked", "task_id": "", "prompt": "", "reason": reason} for r in rows],
+        }
+
+    for row in rows:
+        combo = {str(k): str(v) for k, v in (row.values or {}).items()}
+        rendered = str(_matrix_render_value(template, combo) or "").strip()
+        if not rendered:
+            items.append({"row_index": row.row_index, "status": "blocked", "task_id": "", "prompt": "",
+                          "reason": "渲染后的提示词为空（检查 {列名} 是否与表头一致）"})
+            continue
+        # 未解析的占位符必须拦下：否则 {商品} 会被原样送进提示词，静默污染生成结果
+        unresolved = [token for token in _FANOUT_TOKEN.findall(rendered)]
+        if unresolved:
+            available = "、".join(sorted(combo.keys())) or "（本行无任何列值）"
+            items.append({"row_index": row.row_index, "status": "blocked", "task_id": "", "prompt": rendered[:400],
+                          "reason": "占位符 " + "、".join("{" + t + "}" for t in dict.fromkeys(unresolved))
+                                    + " 未匹配到任何列；本行可用列：" + available})
+            continue
+        try:
+            task = task_create(
+                kind="online-image",
+                payload=OnlineImageRequest(
+                    prompt=rendered[:ONLINE_IMAGE_PROMPT_MAX_LENGTH],
+                    provider_id=str(req.provider_id or ""),
+                    model=str(req.model or ""),
+                    size=str(req.size or "1024x1024"),
+                    quality=str(req.quality or "auto"),
+                    n=1,
+                    reference_images=list(req.reference_images or []),
+                ),
+                runner_name="run_canvas_image_task",
+                provider_id=str(req.provider_id or ""),
+                model_id=str(req.model or ""),
+                extra={
+                    "canvas_id": str(req.canvas_id or ""),
+                    "node_id": str(req.generator_node_id or ""),
+                    "table_node_id": str(req.table_node_id or ""),
+                    "table_row_index": row.row_index,
+                    "fanout_request_id": request_id,
+                },
+            )
+        except Exception as exc:
+            items.append({"row_index": row.row_index, "status": "blocked", "task_id": "", "prompt": rendered,
+                          "reason": f"创建任务失败：{exc}"})
+            continue
+        await task_enqueue(task["id"])
+        launched.append(task["id"])
+        items.append({"row_index": row.row_index, "status": "queued", "task_id": task["id"],
+                      "prompt": rendered[:400], "reason": ""})
+
+    payload = {
+        "request_id": request_id,
+        "replayed": False,
+        "total": len(rows),
+        "launched": len(launched),
+        "skipped": len(rows) - len(launched),
+        "table_node_id": str(req.table_node_id or ""),
+        "generator_node_id": str(req.generator_node_id or ""),
+        "items": items,
+    }
+    if request_id:
+        with TABLE_FANOUT_LOCK:
+            TABLE_FANOUT_STORE[request_id] = payload
+            if len(TABLE_FANOUT_STORE) > 500:
+                for key in list(TABLE_FANOUT_STORE.keys())[:-500]:
+                    TABLE_FANOUT_STORE.pop(key, None)
+            _table_fanout_save()
+    return payload
+
+
+@app.get("/api/table/fanout/{request_id}")
+async def table_fanout_status(request_id: str):
+    """读取某次扇出的结果，并把每个任务的实时状态同步回来。"""
+    with TABLE_FANOUT_LOCK:
+        stored = TABLE_FANOUT_STORE.get(str(request_id or ""))
+    if not stored:
+        raise HTTPException(status_code=404, detail="扇出记录不存在")
+    payload = json.loads(json.dumps(stored, ensure_ascii=False))
+    for item in payload.get("items") or []:
+        task_id = item.get("task_id") or ""
+        if not task_id:
+            continue
+        task = task_get(task_id)
+        if not task:
+            continue
+        item["task_status"] = _task_legacy_status(task)
+        if task.get("status") == "succeeded":
+            item["result_urls"] = _agent_result_media_urls(task.get("result"))
+        elif task.get("status") == "failed":
+            item["reason"] = str(task.get("error") or "")[:300]
     return payload
 
 

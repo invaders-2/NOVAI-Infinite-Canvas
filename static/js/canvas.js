@@ -7031,7 +7031,11 @@ function renderNode(node){
         body.innerHTML = `<div class="text-[11px] text-gray-400">${promptNodes.length} ${tr('canvas.promptCount')} ${tr('canvas.grouped')}</div>`;
     }
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
-    if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
+    if(node.type === 'generator'){
+        body.appendChild(renderGeneratorBody(node));
+        const fanoutPanel = renderTableFanoutControl(node);
+        if(fanoutPanel) body.appendChild(fanoutPanel);
+    }
     if(node.type === 'midjourney') body.appendChild(renderMidjourneyBody(node));
     if(node.type === 'minimax') body.appendChild(renderMiniMaxBody(node));
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
@@ -9130,6 +9134,128 @@ function llmInputVideos(node){
     });
     return urls;
 }
+// ---- 表格逐行扇出（生成节点侧）-----------------------------------------------
+// DX OS 的 llm-table-batch 语义：「表格逐行驱动生成节点，画布按行产生多个结果组」。
+// 因此触发点在**生成节点**上，表格只提供数据、自身不执行。
+// 仅当上游连着一张 data-table 时控件才出现 —— 不影响任何既有生成路径。
+function upstreamDataTable(node){
+    for(const link of connections.filter(item => item.to === node.id)){
+        const source = nodes.find(candidate => candidate.id === link.from);
+        if(source && NovaNodeRegistry.isTypeOf(source, 'data-table')) return source;
+    }
+    return null;
+}
+
+// 生成节点的共享参考图（所有行共用同一份）。逐行各自的参考图来自表格输入列，
+// 属于后续增量；这里只取上游媒体节点，复用既有收集函数，不自造。
+function fanoutSharedReferences(node){
+    try {
+        const sources = (typeof generatorSources === 'function' ? generatorSources(node) : []) || [];
+        const refs = sources.filter(Boolean).flatMap(source => source.refs || []);
+        return imageRefsOnly(refs);
+    } catch(error){
+        console.warn('[Fanout] 收集参考图失败（忽略）', error);
+        return [];
+    }
+}
+
+function fanoutRowsFromTable(tableNode){
+    const table = NovaTableGrid.normalizeTable(tableNode.table).table;
+    return table.rows.map((cells, rowIndex) => {
+        const values = {};
+        table.columns.forEach((title, ci) => { values[title] = cells[ci] || ''; });
+        return {row_index: rowIndex, values};
+    });
+}
+
+function renderTableFanoutControl(node){
+    const tableNode = upstreamDataTable(node);
+    if(!tableNode || typeof NovaTableGrid === 'undefined') return null;
+    const table = NovaTableGrid.normalizeTable(tableNode.table).table;
+    const wrap = document.createElement('div');
+    wrap.className = 'fanout-panel';
+    wrap.innerHTML = '<div class="fanout-head"><span class="fanout-title">逐行生成</span>'
+        + '<span class="fanout-meta">来自「' + escapeHtml(tableNode.title || '多维表格') + '」· '
+        + table.rows.length + ' 行 × ' + table.columns.length + ' 列</span></div>'
+        + '<div class="fanout-actions"><button type="button" data-fanout-run' + (node.running ? ' disabled' : '') + '>逐行生成（' + table.rows.length + ' 行）</button>'
+        + '<span class="fanout-status" data-fanout-status></span></div>'
+        + '<div class="fanout-rows" data-fanout-rows></div>';
+    wrap.querySelector('[data-fanout-run]').onclick = () => runTableFanout(node, tableNode);
+    return wrap;
+}
+
+async function runTableFanout(node, tableNode){
+    const rows = fanoutRowsFromTable(tableNode);
+    if(!rows.length){ alert('表格没有数据行'); return; }
+    const template = String(node.prompt || '').trim();
+    if(!template){ alert('请先在生成节点里填写提示词；用 {列名} 引用表格单元格，例如「{商品} 的产品图」'); return; }
+    const panel = document.querySelector('.fanout-panel');
+    const statusEl = panel ? panel.querySelector('[data-fanout-status]') : null;
+    const rowsEl = panel ? panel.querySelector('[data-fanout-rows]') : null;
+    const button = panel ? panel.querySelector('[data-fanout-run]') : null;
+    const setStatus = text => { if(statusEl) statusEl.textContent = text; };
+    if(button) button.disabled = true;
+    if(rowsEl) rowsEl.innerHTML = '';
+    // 每次点击视为一次新的批量（新 requestId）；幂等键用于「同一次提交重试」，
+    // 而不是阻止用户主动重跑 —— 与 DX OS 的重跑语义一致。
+    const requestId = uid('fanout');
+    setStatus('提交中…');
+    try {
+        const res = await fetch('/api/table/fanout', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                canvas_id:(typeof canvas !== 'undefined' && canvas ? canvas.id : '') || '',
+                table_node_id:tableNode.id,
+                generator_node_id:node.id,
+                prompt_template:template,
+                provider_id:node.apiProvider || node.provider_id || 'comfly',
+                model:node.model || '',
+                size:node.size || '1024x1024',
+                quality:node.quality || 'auto',
+                reference_images:fanoutSharedReferences(node),
+                rows,
+                request_id:requestId,
+            }),
+        });
+        if(!res.ok){ const body = await res.json().catch(() => ({})); throw new Error(body.detail || ('HTTP ' + res.status)); }
+        let payload = await res.json();
+        setStatus('已派发 ' + payload.launched + ' 个任务' + (payload.skipped ? '，跳过 ' + payload.skipped + ' 行' : ''));
+        renderFanoutRows(rowsEl, payload);
+        // 轮询直到所有任务收敛（复用既有 /api/table/fanout/{id} 状态同步）
+        for(let i = 0; i < 600; i += 1){
+            const pending = (payload.items || []).filter(item => item.task_id && !['succeeded','failed','cancelled'].includes(item.task_status));
+            if(!pending.length) break;
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            const poll = await fetch('/api/table/fanout/' + encodeURIComponent(requestId));
+            if(!poll.ok) break;
+            payload = await poll.json();
+            renderFanoutRows(rowsEl, payload);
+            setStatus('进行中…');
+        }
+        const urls = (payload.items || []).flatMap(item => item.result_urls || []);
+        if(urls.length){
+            node.images = urls.map((url, index) => ({url, name:'fanout-' + (index + 1) + '.png', kind:'image'}));
+        }
+        const done = (payload.items || []).filter(item => item.task_status === 'succeeded').length;
+        const blocked = (payload.items || []).filter(item => item.status === 'blocked').length;
+        setStatus('完成 ' + done + ' 行' + (blocked ? '，拦截 ' + blocked + ' 行' : ''));
+        render(); scheduleSave();
+    } catch(error){
+        setStatus('失败：' + (error?.message || error));
+        if(button) button.disabled = false;
+    }
+}
+
+function renderFanoutRows(container, payload){
+    if(!container) return;
+    container.innerHTML = (payload.items || []).map(item => {
+        const state = item.task_status || item.status;
+        const detail = item.status === 'blocked' ? (item.reason || '不可执行') : (state || '');
+        return '<div class="fanout-row ' + escapeAttr(state || '') + '"><span class="fanout-row-index">' + (item.row_index + 1) + '</span>'
+            + '<span class="fanout-row-state">' + escapeHtml(String(detail).slice(0, 160)) + '</span></div>';
+    }).join('');
+}
+
 function renderGeneratorBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'generator-body';
