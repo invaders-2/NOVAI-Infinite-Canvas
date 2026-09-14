@@ -21745,6 +21745,15 @@ def _run_row_payload(snapshot: dict):
     )
 
 
+def _run_row_intent(snapshot: dict) -> str:
+    """行快照 → 握手 intent（有参考素材时走编辑/图生视频，否则走生成）。"""
+    refs = snapshot.get("references") or []
+    has_refs = bool(refs)
+    if str(snapshot.get("type") or "image").lower() == "video":
+        return "video.image_to_video" if has_refs else "video.generate"
+    return "image.edit" if has_refs else "image.generate"
+
+
 async def _run_launch_row(run: dict, row_run: dict):
     """把一个 draft 行派发成真实 Task（进 Task Engine 队列）。失败则就地判 blocked。"""
     snapshot = row_run.get("snapshot") or {}
@@ -21755,6 +21764,25 @@ async def _run_launch_row(run: dict, row_run: dict):
         row_run["blocked"] = {"reason": f"行参数无效：{exc}"}
         row_run["finished_at"] = time.time()
         return False
+    # 提交前握手：target 不可用就不创建任务（避免无效提交与额度浪费）。
+    # 预检失败一律判 blocked 并保留原因，绝不静默放过。
+    try:
+        provider = get_api_provider_exact(str(snapshot.get("provider_id") or ""))
+        descriptor = build_model_descriptor(provider, str(snapshot.get("model") or ""), _run_row_intent(snapshot))
+        if not descriptor.get("execution", {}).get("available"):
+            reasons = descriptor.get("execution", {}).get("reasons") or ["target 不可用"]
+            row_run["status"] = "blocked"
+            row_run["blocked"] = {"reason": "；".join(str(item) for item in reasons)}
+            row_run["finished_at"] = time.time()
+            return False
+    except HTTPException as exc:
+        row_run["status"] = "blocked"
+        row_run["blocked"] = {"reason": str(getattr(exc, "detail", None) or exc)}
+        row_run["finished_at"] = time.time()
+        return False
+    except Exception as exc:
+        print(f"[Runs] 握手预检异常（放行）：{exc}")
+
     task = task_create(
         kind=kind,
         payload=payload,
@@ -22012,6 +22040,176 @@ async def cancel_run(run_id: str):
     payload["cancelled"] = cancelled
     payload["already_ended"] = already
     return payload
+
+
+# ============================================================================
+# 模型能力握手（/api/ai/descriptor）
+# 契约：novai-model-descriptor/v1（字段划分对齐 DX OS 的 dx-model-descriptor/v1）
+# 作用：让调用方在**提交任务之前**知道某个 target 能不能跑、吃什么素材、有哪些参数。
+#   —— 这是表格批量运行最需要的：N 个单元格先握手，把不可用的直接标 blocked，
+#      而不是全部提交后逐个失败。
+# 真值源复用既有实现，不新造：
+#   * 供应商与模型列表 → load_api_providers / get_api_provider_exact
+#   * 图片参数字段     → build_image_param_fields（与 /api/image-params 同源）
+#   * 能力与素材规则   → server/protocols 协议元数据表
+# execution.mode 目前一律 native：NOVAI 的执行仍是命令式 Python，
+# declarative 留给未来接入声明式协议的平台。
+# 缓存 TTL 300s，?refresh=1 强制刷新。
+# ============================================================================
+
+import server.protocols.registry as nova_protocols  # noqa: E402
+
+DESCRIPTOR_CACHE: Dict[str, Any] = {}
+DESCRIPTOR_CACHE_LOCK = Lock()
+DESCRIPTOR_CACHE_TTL = 300
+
+_EMPTY_INPUT_RULE = {"min": 0, "max": 0, "roles": [], "maxBytes": 0, "mimeTypes": []}
+
+
+def _descriptor_engine(provider: dict) -> str:
+    """与 /api/image-params 的 engine 判定保持一致（同一真值源）。"""
+    if is_runninghub_provider(provider):
+        return "runninghub"
+    if str(provider.get("id") or "").strip().lower() == "modelscope":
+        return "modelscope"
+    if is_volcengine_provider(provider):
+        return "volcengine"
+    return "api"
+
+
+def _descriptor_capabilities(provider: dict, model: str, protocol_entry: Optional[dict]) -> List[str]:
+    """模型实际能做什么 = 协议声明的能力 ∩ 该模型在供应商里被登记的分类。
+
+    供应商若一个模型列表都没声明（如 RunningHub 走工作流），则跳过成员校验。
+    """
+    declared = list((protocol_entry or {}).get("capabilities") or [])
+    if not declared:
+        declared = nova_protocols.capabilities_for(provider)
+    image_models = provider.get("image_models") or []
+    chat_models = provider.get("chat_models") or []
+    video_models = provider.get("video_models") or []
+    name = str(model or "")
+    prefixes: List[str] = []
+    if name and name in image_models:
+        prefixes.append("image.")
+    if name and name in chat_models:
+        prefixes.append("llm.")
+    if name and name in video_models:
+        prefixes.append("video.")
+    if not prefixes:
+        if image_models or chat_models or video_models:
+            return []          # 供应商标了模型列表，但这个模型不在其中
+        return declared        # 供应商没标列表 → 不限制分类
+    return [item for item in declared if any(item.startswith(prefix) for prefix in prefixes)]
+
+
+def build_model_descriptor(provider: dict, model: str = "", intent: str = "image.generate") -> dict:
+    """组装 novai-model-descriptor/v1。纯函数，供路由与批处理预检复用。"""
+    provider_id = str(provider.get("id") or "")
+    entry, reasons = nova_protocols.resolve_model_protocol(provider, intent, model)
+    provider_entry = nova_protocols.provider_protocol(provider.get("protocol"))
+    capabilities = _descriptor_capabilities(provider, model, entry)
+    enabled = bool(provider.get("enabled", True))
+    has_key = bool(provider_env_key_value(provider_id))
+
+    parameters = None
+    if str(intent or "").startswith("image."):
+        fields = build_image_param_fields(_descriptor_engine(provider), provider, model)
+        if fields:
+            parameters = {
+                "schema_id": provider_id + ":" + (model or "*"),
+                "source": "param_schema",
+                "fields": fields,
+                "defaults": dict((entry or {}).get("defaults") or {}),
+                "limits": dict((entry or {}).get("limits") or {}),
+            }
+
+    execution_reasons: List[str] = []
+    if not enabled:
+        execution_reasons.append("供应商已停用")
+    if not has_key:
+        execution_reasons.append("未配置 API Key")
+    if not provider_entry:
+        execution_reasons.append("供应商协议「" + str(provider.get("protocol") or "未声明") + "」不在协议表中")
+    if not entry:
+        # 注册表给的是「供应商级」可用意图，会把对话类也列进来；
+        # 这里换成该模型真正可用的意图，避免前端误导。
+        execution_reasons.extend([item for item in reasons if not item.startswith("当前可用意图")])
+        model_capabilities = _descriptor_capabilities(provider, model, None)
+        if model_capabilities:
+            execution_reasons.append("该模型可用意图：" + "、".join(model_capabilities[:12]))
+    if not capabilities:
+        execution_reasons.append("模型「" + (model or "(未指定)") + "」未在供应商的模型列表中登记")
+    available = enabled and has_key and bool(entry) and bool(capabilities)
+
+    inputs = dict((entry or {}).get("inputs") or {})
+    for key in ("images", "videos", "audios", "files"):
+        inputs.setdefault(key, dict(_EMPTY_INPUT_RULE))
+
+    return {
+        "format": "novai-model-descriptor/v1",
+        "provider": {
+            "id": provider_id,
+            "name": str(provider.get("name") or provider_id),
+            "protocol_id": str((provider_entry or {}).get("id") or provider.get("protocol") or ""),
+            "source": "cli" if (provider_entry or {}).get("categories", []) and "cli" in ((provider_entry or {}).get("categories") or []) else "api",
+            "enabled": enabled,
+        },
+        "model": {
+            "id": str(model or ""),
+            "name": str(model or ""),
+            "protocol_id": str((entry or {}).get("id") or ""),
+            "profile_id": str((entry or {}).get("id") or ""),
+            "profile_label": str((entry or {}).get("label") or ""),
+        },
+        "intent": str(intent or ""),
+        "capabilities": capabilities,
+        "parameters": parameters,
+        "limits": dict((entry or {}).get("limits") or {}),
+        "inputs": inputs,
+        "execution": {
+            "available": available,
+            "mode": "native" if available else "unavailable",
+            "reasons": execution_reasons,
+        },
+    }
+
+
+@app.get("/api/ai/descriptor")
+async def ai_model_descriptor(provider_id: str = "", model: str = "", intent: str = "image.generate", refresh: int = 0):
+    """模型能力握手：提交前查询 target 是否可用、素材规则与参数 Schema。"""
+    pid = str(provider_id or "").strip().lower()
+    if pid:
+        # get_api_provider_exact 在平台不存在/已停用时自身抛 400（既有约定），此处不重复判空
+        provider = get_api_provider_exact(pid)
+    else:
+        provider = next((item for item in load_api_providers() if item.get("enabled")), None)
+        if not provider:
+            raise HTTPException(status_code=404, detail="没有可用的供应商")
+        pid = str(provider.get("id") or "")
+    key = pid + "|" + str(model or "") + "|" + str(intent or "")
+    now = time.time()
+    if not refresh:
+        with DESCRIPTOR_CACHE_LOCK:
+            cached = DESCRIPTOR_CACHE.get(key)
+        if cached and now - cached[0] < DESCRIPTOR_CACHE_TTL:
+            return cached[1]
+    descriptor = build_model_descriptor(provider, model, intent)
+    with DESCRIPTOR_CACHE_LOCK:
+        DESCRIPTOR_CACHE[key] = (now, descriptor)
+        if len(DESCRIPTOR_CACHE) > 512:
+            DESCRIPTOR_CACHE.clear()
+            DESCRIPTOR_CACHE[key] = (now, descriptor)
+    return descriptor
+
+
+@app.get("/api/ai/protocols")
+async def ai_protocols(kind: str = ""):
+    """协议表只读视图（供应商协议 / 模型协议）与清单。"""
+    return {
+        "manifest": nova_protocols.manifest(),
+        "protocols": nova_protocols.list_protocols(kind),
+    }
 
 
 # ============================================================================

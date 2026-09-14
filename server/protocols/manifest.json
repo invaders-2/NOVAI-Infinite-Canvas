@@ -1,0 +1,86 @@
+{
+  "format": "novai-protocol-manifest/v1",
+  "generated_at": 0,
+  "protocols": [
+    {
+      "id": "openai",
+      "kind": "provider",
+      "version": 1
+    },
+    {
+      "id": "apimart",
+      "kind": "provider",
+      "version": 1
+    },
+    {
+      "id": "runninghub",
+      "kind": "provider",
+      "version": 1
+    },
+    {
+      "id": "volcengine",
+      "kind": "provider",
+      "version": 1
+    },
+    {
+      "id": "codex",
+      "kind": "provider",
+      "version": 1
+    },
+    {
+      "id": "gemini-cli",
+      "kind": "provider",
+      "version": 1
+    },
+    {
+      "id": "openai-image",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "openai-chat",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "modelscope-image",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "modelscope-chat",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "apimart-image",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "apimart-video",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "volcengine-image",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "volcengine-video",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "runninghub-workflow",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "cli-image",
+      "kind": "model",
+      "version": 1
+    }
+  ]
+}

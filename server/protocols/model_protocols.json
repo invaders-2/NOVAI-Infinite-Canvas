@@ -1,0 +1,664 @@
+{
+  "format": "novai-model-protocols/v1",
+  "protocols": [
+    {
+      "id": "openai-image",
+      "label": "OpenAI 兼容图片",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "provider_protocols": [
+          "openai"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "size": "1024x1024",
+        "quality": "auto",
+        "n": 1
+      },
+      "limits": {
+        "n": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "openai-chat",
+      "label": "OpenAI 兼容对话",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "llm.chat",
+        "llm.chat.vision",
+        "llm.tools",
+        "llm.structured_output"
+      ],
+      "match": {
+        "provider_protocols": [
+          "openai"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {},
+      "limits": {},
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "modelscope-image",
+      "label": "ModelScope 图片",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "provider_ids": [
+          "modelscope"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "size": "1024x1024",
+        "quality": "auto",
+        "n": 1
+      },
+      "limits": {
+        "n": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "param_engine": "modelscope",
+      "docs": []
+    },
+    {
+      "id": "modelscope-chat",
+      "label": "ModelScope 对话",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "llm.chat",
+        "llm.chat.vision",
+        "llm.structured_output"
+      ],
+      "match": {
+        "provider_ids": [
+          "modelscope"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {},
+      "limits": {},
+      "param_engine": "modelscope",
+      "docs": []
+    },
+    {
+      "id": "apimart-image",
+      "label": "APIMart 图片",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "provider_protocols": [
+          "apimart"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "size": "1024x1024",
+        "quality": "auto",
+        "n": 1
+      },
+      "limits": {
+        "n": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "apimart-video",
+      "label": "APIMart 视频",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "video.generate",
+        "video.text_to_video",
+        "video.image_to_video",
+        "video.first_last_frame",
+        "video.multi_reference"
+      ],
+      "match": {
+        "provider_protocols": [
+          "apimart"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 4,
+          "roles": [
+            "first_frame",
+            "last_frame",
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 3,
+          "roles": [
+            "reference_video",
+            "edit_target"
+          ],
+          "maxBytes": 104857600,
+          "mimeTypes": [
+            "video/mp4"
+          ]
+        },
+        "audios": {
+          "min": 0,
+          "max": 1,
+          "roles": [
+            "reference_audio"
+          ],
+          "maxBytes": 52428800,
+          "mimeTypes": [
+            "audio/mpeg",
+            "audio/wav"
+          ]
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "duration": 5,
+        "aspect_ratio": "16:9"
+      },
+      "limits": {
+        "duration": {
+          "min": 1,
+          "max": 15
+        }
+      },
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "volcengine-image",
+      "label": "火山方舟图片",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "provider_protocols": [
+          "volcengine"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "size": "1024x1024",
+        "quality": "auto",
+        "n": 1
+      },
+      "limits": {
+        "n": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "param_engine": "volcengine",
+      "docs": []
+    },
+    {
+      "id": "volcengine-video",
+      "label": "火山方舟视频",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "video.generate",
+        "video.text_to_video",
+        "video.image_to_video",
+        "video.first_last_frame",
+        "video.multi_reference"
+      ],
+      "match": {
+        "provider_protocols": [
+          "volcengine"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 4,
+          "roles": [
+            "first_frame",
+            "last_frame",
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 3,
+          "roles": [
+            "reference_video",
+            "edit_target"
+          ],
+          "maxBytes": 104857600,
+          "mimeTypes": [
+            "video/mp4"
+          ]
+        },
+        "audios": {
+          "min": 0,
+          "max": 1,
+          "roles": [
+            "reference_audio"
+          ],
+          "maxBytes": 52428800,
+          "mimeTypes": [
+            "audio/mpeg",
+            "audio/wav"
+          ]
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "duration": 5,
+        "aspect_ratio": "16:9"
+      },
+      "limits": {
+        "duration": {
+          "min": 1,
+          "max": 15
+        }
+      },
+      "param_engine": "volcengine",
+      "docs": []
+    },
+    {
+      "id": "runninghub-workflow",
+      "label": "RunningHub 工作流",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit",
+        "video.generate",
+        "video.image_to_video"
+      ],
+      "match": {
+        "provider_protocols": [
+          "runninghub"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 4,
+          "roles": [
+            "first_frame",
+            "last_frame",
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 3,
+          "roles": [
+            "reference_video",
+            "edit_target"
+          ],
+          "maxBytes": 104857600,
+          "mimeTypes": [
+            "video/mp4"
+          ]
+        },
+        "audios": {
+          "min": 0,
+          "max": 1,
+          "roles": [
+            "reference_audio"
+          ],
+          "maxBytes": 52428800,
+          "mimeTypes": [
+            "audio/mpeg",
+            "audio/wav"
+          ]
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {},
+      "limits": {},
+      "param_engine": "runninghub",
+      "docs": []
+    },
+    {
+      "id": "cli-image",
+      "label": "CLI 图片生成",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit",
+        "image.upscale"
+      ],
+      "match": {
+        "provider_protocols": [
+          "codex",
+          "gemini-cli"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "limits": {
+        "n": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "param_engine": "api",
+      "docs": []
+    }
+  ]
+}

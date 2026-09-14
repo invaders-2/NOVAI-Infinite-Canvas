@@ -1,0 +1,110 @@
+{
+  "format": "novai-provider-protocols/v1",
+  "protocols": [
+    {
+      "id": "openai",
+      "label": "OpenAI 兼容",
+      "version": 1,
+      "kind": "provider",
+      "summary": "标准 OpenAI 兼容 HTTP 接口（ModelScope / OpenAI / Agnes / xAI / 自建中转等）。",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      },
+      "models_endpoint": "/v1/models",
+      "categories": [
+        "llm",
+        "image",
+        "video"
+      ],
+      "docs": []
+    },
+    {
+      "id": "apimart",
+      "label": "APIMart",
+      "version": 1,
+      "kind": "provider",
+      "summary": "APIMart 异步任务协议（提交后轮询取结果）。",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      },
+      "models_endpoint": "/v1/models",
+      "categories": [
+        "image",
+        "video"
+      ],
+      "docs": []
+    },
+    {
+      "id": "runninghub",
+      "label": "RunningHub",
+      "version": 1,
+      "kind": "provider",
+      "summary": "RunningHub 工作流平台，参数由所选工作流动态决定。",
+      "auth": {
+        "type": "api_key_header",
+        "header": "apiKey"
+      },
+      "models_endpoint": "",
+      "categories": [
+        "workflow",
+        "image",
+        "video"
+      ],
+      "docs": []
+    },
+    {
+      "id": "volcengine",
+      "label": "火山引擎方舟",
+      "version": 1,
+      "kind": "provider",
+      "summary": "火山引擎 Ark 图片 / 视频生成。",
+      "auth": {
+        "type": "bearer",
+        "header": "Authorization",
+        "prefix": "Bearer "
+      },
+      "models_endpoint": "/models",
+      "categories": [
+        "image",
+        "video"
+      ],
+      "docs": []
+    },
+    {
+      "id": "codex",
+      "label": "OpenAI Codex CLI",
+      "version": 1,
+      "kind": "provider",
+      "summary": "本机 codex CLI，图片生成走 CLI 子进程，无 HTTP 协议。",
+      "auth": {
+        "type": "none"
+      },
+      "models_endpoint": "",
+      "categories": [
+        "cli",
+        "image"
+      ],
+      "docs": []
+    },
+    {
+      "id": "gemini-cli",
+      "label": "Gemini CLI",
+      "version": 1,
+      "kind": "provider",
+      "summary": "本机 gemini CLI，图片生成走 CLI 子进程，无 HTTP 协议。",
+      "auth": {
+        "type": "none"
+      },
+      "models_endpoint": "",
+      "categories": [
+        "cli",
+        "image"
+      ],
+      "docs": []
+    }
+  ]
+}
