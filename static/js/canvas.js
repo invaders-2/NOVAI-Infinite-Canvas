@@ -6589,6 +6589,11 @@ function renderMatrixBody(node){
             <input data-matrix-global="outline" value="${escapeAttr(node.globalContext.outline)}" placeholder="内容大纲 / 版式规范">
             <input data-matrix-global="commonWidth" type="number" min="256" max="4096" value="${Number(node.globalContext.commonWidth) || 1024}" title="统一宽度">
         </div>
+        <div class="matrix-columns-bar">
+            <span class="matrix-columns-label">数据列</span>
+            ${((node.tableSchema && node.tableSchema.columns) || []).map(function(column){ return '<span class="matrix-column-chip"><input data-matrix-column-title="' + escapeAttr(column.key) + '" value="' + escapeAttr(column.title) + '" aria-label="数据列名称"><button type="button" data-matrix-column-remove="' + escapeAttr(column.key) + '" title="删除数据列"><i data-lucide="x"></i></button></span>'; }).join('')}
+            <button type="button" data-matrix-column-add><i data-lucide="plus"></i>新增列</button>
+        </div>
         <div class="matrix-token-help">连续模式可用 {{上一行文字}}、{{上一行图片}}、{{上一行视频}}；共享字段可用 {{商品参考}}、{{配色}}、{{字体}}、{{内容大纲}}</div>
         ${(node.validationErrors || []).length ? `<div class="matrix-validation-errors">${node.validationErrors.map(error => `<div data-error-row="${escapeAttr(error.rowId || '')}">${escapeHtml(error.message)}</div>`).join('')}</div>` : ''}
         <div class="matrix-rows">${node.rows.map((row, index) => `
@@ -6598,6 +6603,7 @@ function renderMatrixBody(node){
                 <span class="matrix-row-index">${index + 1}</span>
                 <input data-matrix-field="name" value="${escapeAttr(row.name)}" placeholder="步骤名">
                 <textarea data-matrix-field="prompt" placeholder="任务 / 提示词">${escapeHtml(row.prompt || row.task || '')}</textarea>
+                ${((node.tableSchema && node.tableSchema.columns) || []).map(function(column){ return '<input class="matrix-cell-input" data-matrix-cell="' + escapeAttr(column.key) + '" value="' + escapeAttr((row.extra || {})[column.key] || '') + '" placeholder="' + escapeAttr(column.title) + '" title="' + escapeAttr(column.title) + '" style="--matrix-cell-w:' + (Number(column.width) || 96) + 'px">'; }).join('')}
                 <div class="matrix-row-refs">${matrixRowReferences(node, row).map(ref => `<span title="${escapeAttr(ref.name || ref.url)}">${matrixRefThumb(ref)}</span>`).join('') || '<em>连接参考</em>'}</div>
                 <select multiple data-matrix-dependencies title="依赖步骤">${matrixDependencyOptions(node, row)}</select>
                 <select data-matrix-field="type"><option value="image" ${row.type === 'image' ? 'selected' : ''}>图片</option><option value="video" ${row.type === 'video' ? 'selected' : ''}>视频</option></select>
@@ -6668,10 +6674,34 @@ function renderMatrixBody(node){
             updateMatrixRowField(node, index, 'overlay', NovaWorkflowUtils.normalizeOverlay(overlay));
         });
         rowEl.querySelector('[data-matrix-run-row]').onclick = () => runMatrixRows(node.id, [rowId]);
+        rowEl.querySelectorAll('[data-matrix-cell]').forEach(input => input.oninput = event => {
+            try {
+                node.rows = NovaWorkflowUtils.setTableColumnValue(node.tableSchema, node.rows, index, { key: input.dataset.matrixCell }, event.target.value);
+                scheduleSave();
+            } catch(error){ setStatus(error.message); }
+        });
         rowEl.querySelector('[data-matrix-remove]').onclick = () => {
             if(node.rows.length <= 1) return;
             removeMatrixRow(node, rowId); render(); scheduleSave();
         };
+    });
+    wrap.querySelector('[data-matrix-column-add]').onclick = () => {
+        try {
+            const out = NovaWorkflowUtils.addTableColumn(node.tableSchema, node.rows, '新列');
+            node.tableSchema = out.schema; node.rows = out.rows; render(); scheduleSave();
+        } catch(error){ setStatus(error.message); }
+    };
+    wrap.querySelectorAll('[data-matrix-column-remove]').forEach(button => button.onclick = () => {
+        try {
+            const out = NovaWorkflowUtils.deleteTableColumn(node.tableSchema, node.rows, { key: button.dataset.matrixColumnRemove });
+            node.tableSchema = out.schema; node.rows = out.rows; render(); scheduleSave();
+        } catch(error){ setStatus(error.message); }
+    });
+    wrap.querySelectorAll('[data-matrix-column-title]').forEach(input => input.onchange = () => {
+        try {
+            node.tableSchema = NovaWorkflowUtils.renameTableColumn(node.tableSchema, { key: input.dataset.matrixColumnTitle }, input.value);
+            render(); scheduleSave();
+        } catch(error){ setStatus(error.message); }
     });
     return wrap;
 }

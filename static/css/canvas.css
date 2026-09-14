@@ -1858,6 +1858,19 @@ body.canvas-node-resize .node .llm-chat-log { pointer-events:none !important; }
 .matrix-global-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
 .matrix-global-grid input { height:24px; padding:0 7px; font-size:11px; }
 
+/* ── 数据列编辑条 ───────────────────────────────────────────────────────── */
+.matrix-columns-bar { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.matrix-columns-label { flex:0 0 auto; font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--text-3); }
+.matrix-column-chip { display:inline-flex; align-items:center; gap:2px; padding:1px 2px 1px 6px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2); transition:border-color .15s ease, background .15s ease; }
+.matrix-column-chip:focus-within { border-color:var(--border-strong); background:var(--surface); }
+.matrix-column-chip input { width:78px; height:20px; padding:0; border:0; background:transparent; color:var(--text); font-size:11px; font-weight:600; }
+.matrix-column-chip input:focus { outline:none; background:transparent; border-color:transparent; }
+.matrix-column-chip button { width:18px; height:18px; padding:0; border:0; background:transparent; color:var(--text-3); }
+.matrix-column-chip button:hover:not(:disabled) { background:var(--danger-bg); color:var(--danger); border-color:transparent; }
+
+/* 行内数据列单元格（宽度由列定义经 --matrix-cell-w 驱动，不是硬编码尺寸） */
+.matrix-cell-input { flex:0 0 auto; width:var(--matrix-cell-w, 96px); height:24px; padding:0 6px; }
+
 /* ── 提示与校验 ─────────────────────────────────────────────────────────── */
 .matrix-token-help { font-size:10px; line-height:1.5; color:var(--text-3); }
 .matrix-validation-errors { display:flex; flex-direction:column; gap:3px; padding:6px 8px; border:1px solid var(--danger-border); border-radius:var(--radius-sm); background:var(--danger-bg); color:var(--danger-text); font-size:11px; }
