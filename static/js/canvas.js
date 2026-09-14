@@ -13934,18 +13934,70 @@ function trackMatrixTask(matrixNodeId, taskId){
 }
 function clearMatrixTasks(matrixNodeId){ matrixActiveTaskIds.delete(matrixNodeId); }
 function matrixTaskIdsFor(matrixNodeId){ return [...(matrixActiveTaskIds.get(matrixNodeId) || [])]; }
-function checkMatrixInputs(nodeId, announce=false){
+// 行快照 → 握手 intent：判定下沉到 NovaWorkflowUtils.rowIntent（共享层可单测，
+// 并与后端 _run_row_intent 跨语言对拍，见 tests/test_row_intent_parity.py）。
+function rowIntentFromSnapshot(snapshot){ return NovaWorkflowUtils.rowIntent(snapshot); }
+// 后端握手预检：让用户在点「运行」之前就看到哪些步骤的 target 不可用。
+// 注意这不是唯一防线——后端 _run_launch_row 会独立再校验一次（防前端绕过）。
+// 同一 (provider, model, intent) 只握手一次，避免 N 行打 N 次请求。
+async function preflightMatrixRows(node, rowIds=null){
+    const wanted = rowIds ? new Set(rowIds.map(String)) : null;
+    const rows = (node.rows || []).filter(row => row.selected !== false && (!wanted || wanted.has(String(row.rowId))));
+    if(!rows.length) return {errors:[], checked:0};
+    const groups = new Map();
+    rows.forEach(row => {
+        const snapshot = NovaWorkflowUtils.buildExecutionSnapshotDTO(node, row, {nodes, connections});
+        const intent = rowIntentFromSnapshot(snapshot);
+        const key = [snapshot.provider_id || '', snapshot.model || '', intent].join('|');
+        if(!groups.has(key)) groups.set(key, {snapshot, intent, rows:[]});
+        groups.get(key).rows.push(row);
+    });
+    const errors = [];
+    let checked = 0;
+    for(const entry of groups.values()){
+        const query = new URLSearchParams({
+            provider_id: entry.snapshot.provider_id || '',
+            model: entry.snapshot.model || '',
+            intent: entry.intent,
+        });
+        let descriptor = null, failure = '';
+        try {
+            const res = await fetch('/api/ai/descriptor?' + query.toString());
+            if(res.ok) descriptor = await res.json();
+            else { const body = await res.json().catch(() => ({})); failure = body.detail || ('握手失败 HTTP ' + res.status); }
+        } catch(error){ failure = error?.message || String(error); }
+        checked += 1;
+        const execution = descriptor?.execution || null;
+        if(!failure && execution?.available) continue;
+        const reason = failure || (execution?.reasons || []).join('；') || 'target 不可用';
+        entry.rows.forEach(row => errors.push({
+            code:'preflight.unavailable', rowId:row.rowId, field:'provider',
+            message:`${row.name || row.rowId}：${reason}`,
+        }));
+    }
+    return {errors, checked};
+}
+async function checkMatrixInputs(nodeId, announce=false){
     const node = nodes.find(candidate => candidate.id === nodeId && NovaNodeRegistry.isTaskTableNode(candidate));
     if(!node) return {valid:false, errors:[]};
     ensureMatrixState(node);
     const validation = NovaWorkflowUtils.validateMatrix(node, {targets:matrixTargetDescriptors(node)});
-    node.validationErrors = validation.errors;
+    let errors = (validation.errors || []).slice();
+    // 本地校验先过，再做后端握手（省掉必然失败的请求）；预检本身失败不阻断本地结论。
+    let preflight = {errors:[], checked:0};
+    if(!errors.length){
+        try { preflight = await preflightMatrixRows(node); }
+        catch(error){ console.warn('[Preflight] 握手预检失败（忽略）', error); }
+        errors = errors.concat(preflight.errors);
+    }
+    node.validationErrors = errors;
+    const result = {...validation, errors, valid:Boolean(validation.valid) && !preflight.errors.length, preflight};
     if(announce){
         render();
-        if(validation.valid) setStatus(`输入检查通过，共 ${validation.rows.length} 步`);
-        else setStatus(`发现 ${validation.errors.length} 个问题`);
+        if(result.valid) setStatus(`检查通过：${validation.rows.length} 步，已握手 ${preflight.checked} 个 target`);
+        else setStatus(`发现 ${errors.length} 个问题`);
     }
-    return validation;
+    return result;
 }
 async function cancelMatrixBackendTasks(nodeId){
     const ids = matrixTaskIdsFor(nodeId);
@@ -14098,7 +14150,7 @@ async function runMatrixRows(nodeId, rowIds=null, options={}){
         node.range = {startRowId:selected[0].rowId, endRowId:selected[selected.length - 1].rowId};
         node.rows = node.rows.map(row => ({...row, selected:ids.has(row.rowId)}));
     }
-    const validation = checkMatrixInputs(node.id, false);
+    const validation = await checkMatrixInputs(node.id, false);
     if(!validation.valid){
         render(); scheduleSave();
         const message = validation.errors[0]?.message || '表格输入检查失败';

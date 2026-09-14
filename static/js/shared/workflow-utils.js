@@ -386,6 +386,15 @@
         return next;
     }
 
+    // 行快照 → 握手 intent。与后端 main.py 的 _run_row_intent 必须逐字一致：
+    // 两边不一致会出现「前端预检通过、后端提交时 blocked」。改动请同步两处并跑
+    // tests/test_row_intent_parity.py 做跨语言对拍。
+    function rowIntent(snapshot){
+        const hasRefs = Array.isArray(snapshot?.references) && snapshot.references.length > 0;
+        if(String(snapshot?.type || 'image').toLowerCase() === 'video') return hasRefs ? 'video.image_to_video' : 'video.generate';
+        return hasRefs ? 'image.edit' : 'image.generate';
+    }
+
     function setTableColumnValue(schema, rows, rowIndex, selector, value){
         const index = Number(rowIndex);
         if(!Number.isInteger(index) || index < 0 || index >= (rows || []).length) throw new Error('行序号必须是 1–' + ((rows || []).length));
@@ -876,5 +885,5 @@
         if(line && lines.length < maxLines) lines.push(line); return lines;
     }
 
-    return {MATRIX_VERSION, MATRIX_TYPES, MATRIX_STATUSES, MATRIX_NODE_TYPE, LEGACY_MATRIX_NODE_TYPES, EXECUTION_INPUT_KEYS, isExecutionField, computeRowExecutionSignature, markRowChangedIfExecutionInputsDiffer, buildRowExecutionContext, buildExecutionSnapshotDTO, extractModelParams, extractExecutionModelParams, extractGlobalReferences, rowsConsumingTarget, captureRowExecutionSignatures, markRowsChangedSince, markRowsAndDependentsStale, rowIsStale, isMatrixNode, migrateMatrixNode, createMatrixTargetLock, matrixTaskId, matrixOwnedRefs, matrixRowId, normalizeRef, normalizeOverlay, normalizeMatrixRow, normalizeMatrixNode, normalizeConnectionMapping, rowResult, patchRow, patchRowById, dependentRowIds, markDependentsStale, markFollowingRowsStale, patchRowAndMarkDependents, mergeRowsWithoutOverwrite, routeTargets, rangeRows, validateMatrix, executionPlan, uniqueRefs, mappedUpstreamRefs, rowTargetMappings, buildRowPayload, createMockRunner, executeMatrix, topologicalLayers, resolveContinuousTokens, continuousSnapshot, flattenRelayConnections, parseCsvRows, verticalStitchLayout, overlayTextLines, TABLE_SCHEMA_VERSION, TABLE_MAX_COLUMNS, TABLE_MAX_CELL_CHARS, TABLE_UNNAMED_COLUMN, normalizeTableColumns, normalizeTableSchema, normalizeRowExtra, resolveTableColumnIndex, tableCellToString, addTableColumn, deleteTableColumn, renameTableColumn, setTableColumnValue};
+    return {MATRIX_VERSION, MATRIX_TYPES, MATRIX_STATUSES, MATRIX_NODE_TYPE, LEGACY_MATRIX_NODE_TYPES, EXECUTION_INPUT_KEYS, isExecutionField, computeRowExecutionSignature, markRowChangedIfExecutionInputsDiffer, buildRowExecutionContext, buildExecutionSnapshotDTO, extractModelParams, extractExecutionModelParams, extractGlobalReferences, rowsConsumingTarget, captureRowExecutionSignatures, markRowsChangedSince, markRowsAndDependentsStale, rowIsStale, isMatrixNode, migrateMatrixNode, createMatrixTargetLock, matrixTaskId, matrixOwnedRefs, matrixRowId, normalizeRef, normalizeOverlay, normalizeMatrixRow, normalizeMatrixNode, normalizeConnectionMapping, rowResult, patchRow, patchRowById, dependentRowIds, markDependentsStale, markFollowingRowsStale, patchRowAndMarkDependents, mergeRowsWithoutOverwrite, routeTargets, rangeRows, validateMatrix, executionPlan, uniqueRefs, mappedUpstreamRefs, rowTargetMappings, buildRowPayload, createMockRunner, executeMatrix, topologicalLayers, resolveContinuousTokens, continuousSnapshot, flattenRelayConnections, parseCsvRows, verticalStitchLayout, overlayTextLines, TABLE_SCHEMA_VERSION, TABLE_MAX_COLUMNS, TABLE_MAX_CELL_CHARS, TABLE_UNNAMED_COLUMN, normalizeTableColumns, normalizeTableSchema, normalizeRowExtra, resolveTableColumnIndex, tableCellToString, addTableColumn, deleteTableColumn, renameTableColumn, setTableColumnValue, rowIntent};
 });
