@@ -311,6 +311,155 @@
         ].filter(Boolean).join('\n');
     }
 
+    /* ── 批量执行（DX OS §4 执行器 / §5 journal）─────────────────── */
+    // failed 也在这里：不然失败行既标不上、续跑时也认不出来该重试
+    const BATCH_ROW_STATUS = ['completed', 'running', 'pending', 'deferred', 'failed'];
+    const DEFAULT_BATCH_CONCURRENCY = 3;
+    const MAX_BATCH_CONCURRENCY = 8;
+
+    function batchFailurePolicy(raw){ return raw === 'stop' ? 'stop' : 'continue'; }
+
+    function batchStartRow(raw, rowCount){
+        const max = Math.max(1, Number(rowCount) || 0);
+        const value = Math.floor(Number(raw));
+        if(!Number.isFinite(value) || value < 1) return 1;
+        return Math.min(value, max);
+    }
+
+    // 并发 clamp 1..8
+    function batchConcurrency(raw){
+        const value = Math.floor(Number(raw));
+        if(!Number.isFinite(value) || value < 1) return DEFAULT_BATCH_CONCURRENCY;
+        return Math.min(MAX_BATCH_CONCURRENCY, value);
+    }
+
+    /* bl(t)：批量执行实际要跑的行。
+       手动模式只取已选行；批量模式取起始行之后的全部。
+       两种模式都跳过既没有媒体也没有文本的空行。 */
+    function batchRowsToRun(rows, options={}){
+        const list = Array.isArray(rows) ? rows : [];
+        const selected = new Set((Array.isArray(options.selectedRows) ? options.selectedRows : []).map(Number));
+        const manual = Boolean(options.manual);
+        const startRow = batchStartRow(options.startRow, list.length);
+        return list.filter(row => {
+            if(!row) return false;
+            const hasContent = (Array.isArray(row.media) && row.media.length) || String(row.text || '').trim();
+            if(!hasContent) return false;
+            if(manual) return selected.has(Number(row.rowNumber) - 1);
+            return Number(row.rowNumber) >= startRow;
+        });
+    }
+
+    function emptyJournal(runId, rows, failurePolicy){
+        return {
+            runId: String(runId || ''),
+            failurePolicy: batchFailurePolicy(failurePolicy),
+            rows: (Array.isArray(rows) ? rows : []).map(row => ({
+                rowNumber: Number(row?.rowNumber) || 0,
+                text: cellText(row?.text),
+                mediaNodeIds: (Array.isArray(row?.media) ? row.media : []).map(item => String(item?.nodeId || '')).filter(Boolean),
+                status: 'pending',
+                requestId: ''
+            }))
+        };
+    }
+
+    function normalizeJournal(raw){
+        const source = raw && typeof raw === 'object' ? raw : {};
+        return {
+            runId: String(source.runId || ''),
+            failurePolicy: batchFailurePolicy(source.failurePolicy),
+            rows: (Array.isArray(source.rows) ? source.rows : []).map(row => {
+                const item = row && typeof row === 'object' ? row : {};
+                return {
+                    rowNumber: Number(item.rowNumber) || 0,
+                    text: cellText(item.text),
+                    mediaNodeIds: (Array.isArray(item.mediaNodeIds) ? item.mediaNodeIds : []).map(String).filter(Boolean),
+                    status: BATCH_ROW_STATUS.includes(item.status) ? item.status : 'pending',
+                    requestId: String(item.requestId || '')
+                };
+            })
+        };
+    }
+
+    // 断点续跑匹配：runId 对不上就新建；对得上则按 rowNumber 对齐
+    function matchBatchJournal(existing, runId, rows, failurePolicy){
+        const wanted = String(runId || '');
+        if(!wanted) return emptyJournal('', rows, failurePolicy);
+        const journal = normalizeJournal(existing);
+        if(journal.runId !== wanted) return emptyJournal(wanted, rows, failurePolicy);
+        const byNumber = new Map(journal.rows.map(row => [row.rowNumber, row]));
+        const merged = emptyJournal(wanted, rows, failurePolicy);
+        merged.rows = merged.rows.map(row => {
+            const prior = byNumber.get(row.rowNumber);
+            const sameText = prior && prior.text === row.text;
+            const sameMedia = prior && prior.mediaNodeIds.join(',') === row.mediaNodeIds.join(',');
+            /* 只沿用「已完成」和「仍在后台」的状态：completed 的行被跳过，
+               running/deferred 的行不重复派发；failed 重置为 pending 以便重试。
+               行内容被改过的一律重置。 */
+            if(prior && prior.status !== 'pending' && prior.status !== 'failed' && sameText && sameMedia){
+                return {...row, status: prior.status, requestId: prior.requestId};
+            }
+            return row;
+        });
+        return merged;
+    }
+
+    // 命中返回那一行，落空返回 null（之前命中返行、落空返 journal，返回类型不一致）
+    function journalMarkRow(journal, rowNumber, status, requestId){
+        const target = journal.rows.find(row => row.rowNumber === Number(rowNumber));
+        if(!target) return null;
+        if(BATCH_ROW_STATUS.includes(status)) target.status = status;
+        if(requestId !== undefined) target.requestId = String(requestId || '');
+        return target;
+    }
+
+    function journalPendingRows(journal){ return journal.rows.filter(row => row.status === 'pending'); }
+    // 「仍在后台」的行：不能重复派发（DX OS §5 后台恢复检测）
+    function journalInflightRows(journal){ return journal.rows.filter(row => row.status === 'running' || row.status === 'deferred'); }
+    function journalCompletedRows(journal){ return journal.rows.filter(row => row.status === 'completed'); }
+    function journalFailedRows(journal){ return journal.rows.filter(row => row.status === 'failed'); }
+
+    // 素材有效性：把缺文件/失效的行挑出来，别发出去再失败
+    function batchMissingMaterials(rows){
+        const missing = [];
+        (Array.isArray(rows) ? rows : []).forEach(row => {
+            (Array.isArray(row?.media) ? row.media : []).forEach(item => {
+                if(item && item.invalid) missing.push({rowNumber: Number(row?.rowNumber) || 0, nodeId: String(item.nodeId || ''), reason: String(item.invalid)});
+            });
+        });
+        return missing;
+    }
+
+    /* 共享游标 + N 个 worker（DX OS §4 的并发模型）。
+       stopOnError 对应 tableBatchFailurePolicy === "stop"：出错后不再派发新行，
+       已经在跑的行自然跑完。 */
+    async function runWithSharedCursor(items, concurrency, worker, options={}){
+        const list = Array.isArray(items) ? items : [];
+        if(!list.length) return [];
+        const limit = Math.min(Math.max(1, Number(concurrency) || 1), list.length);
+        const stopOnError = Boolean(options.stopOnError);
+        const results = new Array(list.length);
+        let cursor = 0;
+        let failed = false;
+        const run = async () => {
+            while(true){
+                if(stopOnError && failed) return;
+                const index = cursor;
+                cursor += 1;
+                if(index >= list.length) return;
+                try {
+                    results[index] = {ok:true, value: await worker(list[index], index)};
+                } catch(error){
+                    results[index] = {ok:false, error};
+                    failed = true;
+                }
+            }
+        };
+        await Promise.all(Array.from({length:limit}, run));
+        return results;
+    }
+
     function describeOperation(operationId){
         const op = TABLE_OPERATIONS[String(operationId || '')];
         return op ? JSON.parse(JSON.stringify(op)) : null;
@@ -333,6 +482,11 @@
         UNNAMED_COLUMN, TABLE_OPERATIONS, OPERATION_IDS,
         channelIdAt, channelIndexFromId, channelModeFor, channelLabel, normalizeChannels, inputItemAt,
         rowHeightForRow, mentionLabel, mentionTokenAt, mentionsIn, danglingMentions, buildRowPrompt,
+        BATCH_ROW_STATUS, DEFAULT_BATCH_CONCURRENCY, MAX_BATCH_CONCURRENCY,
+        batchFailurePolicy, batchStartRow, batchConcurrency, batchRowsToRun,
+        emptyJournal, normalizeJournal, matchBatchJournal, journalMarkRow,
+        journalPendingRows, journalInflightRows, journalCompletedRows, journalFailedRows,
+        batchMissingMaterials, runWithSharedCursor,
         emptyTable, cellText, normalizeColumns, normalizeTable, cloneTable,
         toIndex, columnIndex, rowIndex, applyOperation,
         rowHeight, nodeSize, describeOperation, requiresConfirmation,

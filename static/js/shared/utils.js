@@ -455,7 +455,7 @@
         uid, nowMs, formatRunDuration,
         sleep, urlToBase64,
         apiErrorMessage, responseErrorMessage,
-        downloadBlob, applyTheme, setStatusToElement,
+        downloadBlob, applyTheme, setStatusToElement, showToast,
         // API adapters
         fetchStorageSettings, saveStorageSettings, applyStorageSettings,
         detectImageMediaUrl, looksLikeImageMediaUrl,

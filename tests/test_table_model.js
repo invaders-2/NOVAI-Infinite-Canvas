@@ -164,6 +164,132 @@ eq(M.danglingMentions('@图片1', []).length, 1, '没有参考时引用悬空');
   eq(M.applyOperation(t, 'delete_row', {row:3}).selectedRows, [0, 1], '删末行：只剩两个选中');
 }
 
-console.log('通过 ' + pass + '/' + (pass + fails.length));
-if(fails.length){ console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
-console.log('全部通过');
+
+// ═══ 批量执行（DX OS §4 执行器 / §5 journal） ═══
+eq(M.batchFailurePolicy('stop'), 'stop', 'failurePolicy stop');
+eq(M.batchFailurePolicy(undefined), 'continue', 'failurePolicy 默认 continue');
+eq(M.batchFailurePolicy('乱写'), 'continue', 'failurePolicy 非法值归一到 continue');
+
+eq(M.batchStartRow(1, 10), 1, '起始行 1');
+eq(M.batchStartRow(7, 10), 7, '起始行 7');
+eq(M.batchStartRow(99, 10), 10, '起始行夹到行数');
+eq(M.batchStartRow(0, 10), 1, '起始行 <1 → 1');
+eq(M.batchStartRow('x', 10), 1, '起始行非法 → 1');
+
+eq(M.batchConcurrency(1), 1, '并发 1');
+eq(M.batchConcurrency(8), 8, '并发 8');
+eq(M.batchConcurrency(99), 8, '并发夹到 8');
+eq(M.batchConcurrency(0), 3, '并发 0 → 默认 3');
+eq(M.batchConcurrency(undefined), 3, '并发未设 → 默认 3');
+
+{
+  const rows = [
+    {rowNumber:1, text:'a', media:[]},
+    {rowNumber:2, text:'', media:[]},          // 空行
+    {rowNumber:3, text:'', media:[{nodeId:'x'}]},
+    {rowNumber:4, text:'d', media:[]},
+  ];
+  eq(M.batchRowsToRun(rows, {startRow:1}).map(r => r.rowNumber), [1,3,4], 'bl 跳过空行');
+  eq(M.batchRowsToRun(rows, {startRow:3}).map(r => r.rowNumber), [3,4], 'bl 起始行之后');
+  eq(M.batchRowsToRun(rows, {manual:true, selectedRows:[0,2]}).map(r => r.rowNumber), [1,3], 'bl 手动模式只取已选行（下标 0-based）');
+  eq(M.batchRowsToRun(rows, {manual:true, selectedRows:[1]}), [], 'bl 手动模式选中的是空行 → 仍然跳过');
+  eq(M.batchRowsToRun(rows, {manual:true, selectedRows:[]}), [], 'bl 手动模式未选 → 空');
+  eq(M.batchRowsToRun(null, {}), [], 'bl 非法输入 → 空');
+}
+
+{
+  const rows = [
+    {rowNumber:1, text:'一行', media:[{nodeId:'img1'}]},
+    {rowNumber:2, text:'二行', media:[{nodeId:'img2'}]},
+  ];
+  const j = M.emptyJournal('run1', rows, 'stop');
+  eq(j.runId, 'run1', 'journal runId');
+  eq(j.failurePolicy, 'stop', 'journal 策略');
+  eq(j.rows.map(r => r.status), ['pending','pending'], '新建 journal 全 pending');
+  eq(j.rows[0].mediaNodeIds, ['img1'], 'journal 记录媒体节点');
+
+  M.journalMarkRow(j, 1, 'completed');
+  eq(M.journalCompletedRows(j).length, 1, '标记 completed');
+  eq(M.journalPendingRows(j).map(r => r.rowNumber), [2], 'pending 只剩第 2 行');
+
+  M.journalMarkRow(j, 2, 'running', 'req-9');
+  eq(M.journalInflightRows(j).map(r => r.rowNumber), [2], 'running 算「仍在后台」');
+  eq(j.rows[1].requestId, 'req-9', 'requestId 被记录');
+  M.journalMarkRow(j, 2, 'deferred');
+  eq(M.journalInflightRows(j).length, 1, 'deferred 也算「仍在后台」');
+
+  M.journalMarkRow(j, 2, 'failed');
+  eq(M.journalFailedRows(j).length, 1, 'failed 可标记');
+  eq(M.journalMarkRow(j, 99, 'completed'), null, '不存在的行号返回 null、不炸');
+  eq(M.journalMarkRow(j, 2, '乱写').status, 'failed', '非法状态被忽略');
+
+  // 续跑：runId 一致 → completed 沿用；failed 重置以便重试；文本改了 → 重置
+  const same = M.matchBatchJournal(j, 'run1', rows, 'stop');
+  eq(same.rows[0].status, 'completed', '续跑沿用 completed（跳过已完成行）');
+  eq(same.rows[1].status, 'pending', '续跑把 failed 重置为 pending 以重试');
+  const edited = M.matchBatchJournal(j, 'run1', [{rowNumber:1, text:'改过了', media:[{nodeId:'img1'}]}, rows[1]], 'stop');
+  eq(edited.rows[0].status, 'pending', '行内容改了 → 重置为 pending');
+  const otherRun = M.matchBatchJournal(j, 'run2', rows, 'stop');
+  eq(otherRun.rows.map(r => r.status), ['pending','pending'], 'runId 不同 → 全新 journal');
+  const noRunId = M.matchBatchJournal(j, '', rows, 'stop');
+  eq(noRunId.runId, '', '空 runId → 新 journal');
+  eq(M.normalizeJournal(null).rows, [], 'normalizeJournal 非法输入');
+  eq(M.normalizeJournal({rows:[{status:'乱写'}]}).rows[0].status, 'pending', '非法状态归一');
+}
+
+eq(M.batchMissingMaterials([{rowNumber:1, media:[{nodeId:'a', invalid:'missing'}, {nodeId:'b'}]}]).map(i => i.nodeId), ['a'], '素材校验挑出缺失');
+eq(M.batchMissingMaterials([{rowNumber:1, media:[{nodeId:'a'}]}]), [], '素材齐全 → 空');
+eq(M.batchMissingMaterials(null), [], '素材校验非法输入');
+
+// runWithSharedCursor 是异步的，放到最后
+(async () => {
+  {
+    let inFlight = 0, maxInFlight = 0;
+    const results = await M.runWithSharedCursor([1,2,3,4,5,6], 3, async n => {
+      inFlight += 1; maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise(done => setTimeout(done, 5));
+      inFlight -= 1;
+      return n * 2;
+    });
+    eq(maxInFlight, 3, '共享游标：并发上限被遵守');
+    eq(results.map(r => r.value), [2,4,6,8,10,12], '结果按输入顺序回填');
+    ok(results.every(r => r.ok), '全部成功');
+  }
+  {
+    let inFlight = 0, maxInFlight = 0;
+    await M.runWithSharedCursor([1,2], 8, async () => {
+      inFlight += 1; maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise(done => setTimeout(done, 3));
+      inFlight -= 1;
+    });
+    eq(maxInFlight, 2, '并发收敛到行数');
+  }
+  {
+    // continue：某行失败不打断其余行
+    const results = await M.runWithSharedCursor([1,2,3,4], 2, async n => {
+      if(n === 2) throw new Error('boom');
+      return n;
+    });
+    eq(results.filter(r => r.ok).length, 3, 'continue 策略：失败不打断其余行');
+    eq(results[1].ok, false, '失败行被标记');
+    eq(results[1].error.message, 'boom', '错误对象被保留');
+  }
+  {
+    // stop：出错后不再派发新行
+    let started = 0;
+    const results = await M.runWithSharedCursor([1,2,3,4,5,6], 1, async n => {
+      started += 1;
+      if(n === 2) throw new Error('boom');
+      return n;
+    }, {stopOnError: true});
+    eq(started, 2, 'stop 策略：出错后不再派发新行');
+    eq(results[2], undefined, '未派发的行没有结果');
+    eq(results[0].ok, true, '已完成的行结果保留');
+  }
+  eq(await M.runWithSharedCursor([], 3, async () => 1), [], '空列表直接返回');
+
+  console.log('通过 ' + pass + '/' + (pass + fails.length));
+  if(fails.length){ console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
+  console.log('全部通过');
+})();
+

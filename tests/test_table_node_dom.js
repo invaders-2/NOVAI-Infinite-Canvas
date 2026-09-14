@@ -52,6 +52,7 @@ const block = canvasSrc.slice(start, end);
 const connections = [];
 const nodes = [];
 const added = [];
+const missingUrls = new Set();
 const api = new Function(
     'document', 'requestAnimationFrame', 'defaultPoint', 'addNode', 'scheduleSave', 'uid',
     'connections', 'nodes', 'pushUndo', 'mediaKindForNode', 'isMissingAssetUrl',
@@ -59,10 +60,12 @@ const api = new Function(
     block + '\nreturn {renderTableBody, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
-    ' addTableInputChannel, tableNodeSignature, connectNodes, tableDropPortFor};'
+    ' addTableInputChannel, tableNodeSignature, connectNodes, tableDropPortFor,' +
+    ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues};'
 )(
-    global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); return n; }, () => {}, p => p + '_1',
-    connections, nodes, () => {}, n => (n && n.mediaKind) || 'image', () => false,
+    // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
+    global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_1',
+    connections, nodes, () => {}, n => (n && n.mediaKind) || 'image', url => missingUrls.has(url),
     (url) => '<img src="' + url + '">', (url) => '<video src="' + url + '"></video>'
 );
 
@@ -199,6 +202,76 @@ eq(model.mentionTokenAt('video', 2), '@视频2', 'mention 文案');
 eq(model.channelModeFor([]), 'shared', '0 个 → 共享');
 eq(model.channelModeFor([1, 2]), 'sequence', '>1 个 → 逐行');
 eq(model.normalizeChannels('bad'), [], '非法通道输入 → 空');
+
+
+// ═══ J. 批量面板（DX OS §10：挂在生成节点上） ═══
+const genNode = {id:'gen1', type:'generator'};
+nodes.push(genNode);
+eq(api.renderTableBatchPanel(genNode), null, '无上游表格 → 不渲染批量面板');
+
+connections.push({id:'c_tbl_gen', from:node.id, to:genNode.id});
+eq(api.generatorUpstreamTables(genNode.id).map(t => t.id), [node.id], '认得上游表格');
+
+const panel = api.renderTableBatchPanel(genNode);
+ok(panel && panel.classList.contains('table-batch-panel'), '上游有表格 → 渲染批量面板');
+eq(one(panel, 'table-batch-title').textContent, '多维表格批量', '面板标题');
+const rowData2 = api.tableRowInputs(node);
+const metaText = one(panel, 'table-batch-meta').textContent;
+ok(metaText.indexOf(rowData2.length + ' 行') === 0, '面板显示行数：' + metaText);
+ok(metaText.indexOf('可执行 1') >= 0, '面板显示可执行行数：' + metaText);
+
+const startInput = one(panel, 'table-batch-input');
+eq(startInput.value, '1', '起始行默认 1');
+const selects = byTag(panel, 'select');
+eq(selects.length, 2, '两个下拉（并发 / 出错策略）');
+eq(selects[0].children.length, model.MAX_BATCH_CONCURRENCY, '并发选项 1..8');
+eq(selects[0].value, String(model.DEFAULT_BATCH_CONCURRENCY), '并发默认 3');
+eq(selects[1].value, 'continue', '出错策略默认「继续跑完」');
+ok(Boolean(one(panel, 'table-checkbox')), '有独立运行勾选框');
+
+const runButton = one(panel, 'table-batch-run');
+eq(runButton.textContent, '批量生成', '按钮文案');
+eq(runButton.disabled, false, '有可执行行 → 按钮可用');
+eq(byClass(panel, 'table-node-action')[0].disabled, true, '没有 journal 时「恢复上次」禁用');
+
+// 控件改动落到表格节点
+startInput.value = '2'; startInput.onchange();
+eq(node.tableBatchStartRow, 1, '起始行被夹到行数范围内（当前共 1 行）');
+selects[0].value = '5'; selects[0].onchange();
+eq(node.tableBatchConcurrency, 5, '并发写入表格节点');
+selects[1].value = 'stop'; selects[1].onchange();
+eq(node.tableBatchFailurePolicy, 'stop', '出错策略写入表格节点');
+one(panel, 'table-checkbox').checked = true; one(panel, 'table-checkbox').onchange();
+eq(node.tableBatchManualSelection, true, '独立运行开关写入表格节点');
+
+// 手动模式下没勾选行 → 不可执行
+const panel2 = api.renderTableBatchPanel(genNode);
+ok(one(panel2, 'table-batch-meta').textContent.indexOf('可执行 0') >= 0, '手动模式未勾选 → 可执行 0');
+eq(one(panel2, 'table-batch-run').disabled, true, '→ 按钮禁用');
+api.toggleTableRow(node, 0, true);
+const panel3 = api.renderTableBatchPanel(genNode);
+ok(one(panel3, 'table-batch-meta').textContent.indexOf('可执行 1') >= 0, '勾选该行后恢复可执行 1');
+eq(one(panel3, 'table-batch-run').disabled, false, '按钮恢复可用');
+
+// 运行中的按钮文案
+node.tableBatchRunning = true;
+eq(one(api.renderTableBatchPanel(genNode), 'table-batch-run').textContent, '批量生成中…', '运行中按钮文案');
+eq(one(api.renderTableBatchPanel(genNode), 'table-batch-run').disabled, true, '运行中按钮禁用');
+node.tableBatchRunning = false;
+
+// 行参考图与素材校验
+const refs = api.tableRowRefs(rowData2[0]);
+eq(refs.length, rowData2[0].media.length, '参考图数量与行媒体一致');
+eq(refs[0].url, '/a.png', '首个参考图 url');
+eq(refs[0].kind, 'image', '参考图类型');
+ok(Boolean(refs[0].name), '参考图有名字');
+eq(api.tableRowMaterialIssues(rowData2[0]), [], '素材齐全 → 无问题');
+missingUrls.add('/gone.png');
+const brokenRow = {rowNumber:9, media:[{url:'/gone.png', nodeId:'g', kind:'image'}]};
+eq(api.tableRowMaterialIssues(brokenRow).length, 1, '缺文件的素材被挑出');
+eq(api.tableRowMaterialIssues(brokenRow)[0].reason, 'missing', '缺失原因');
+eq(api.tableRowMaterialIssues(brokenRow)[0].rowNumber, 9, '缺文件的行号');
+missingUrls.delete('/gone.png');
 
 console.log('通过 ' + pass + '/' + (pass + fails.length));
 if(fails.length){ console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

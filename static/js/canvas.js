@@ -6604,7 +6604,12 @@ function renderNode(node){
     }
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
     if(node.type === 'table') body.appendChild(renderTableBody(node));
-    if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
+    if(node.type === 'generator') {
+        body.appendChild(renderGeneratorBody(node));
+        // 上游有表格时挂批量面板（DX OS §10：面板在生成节点上）
+        const tableBatchPanel = renderTableBatchPanel(node);
+        if(tableBatchPanel) body.appendChild(tableBatchPanel);
+    }
     if(node.type === 'midjourney') body.appendChild(renderMidjourneyBody(node));
     if(node.type === 'minimax') body.appendChild(renderMiniMaxBody(node));
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
@@ -7167,6 +7172,314 @@ function fillTableMediaCell(cell, entry){
     else if(entry.kind === 'audio') thumb.textContent = '音频';
     else thumb.innerHTML = canvasPreviewImgHtml(entry.url, 256, 'draggable="false"');
     cell.appendChild(thumb);
+}
+
+/* ────────────────── 表格批量执行（DX OS §4/§5）────────────────── */
+
+// 生成节点的上游表格（DX OS: lb(t)）
+function generatorUpstreamTables(genId){
+    return (connections || [])
+        .filter(conn => conn && conn.to === genId)
+        .map(conn => (nodes || []).find(item => item.id === conn.from))
+        .filter(source => source && source.type === 'table');
+}
+
+// 表格某行的媒体 → 生成器要的 refs
+function tableRowRefs(row){
+    return (Array.isArray(row && row.media) ? row.media : []).map(entry => ({
+        url: entry.url,
+        name: (entry.node && (entry.node.name || entry.node.text)) || entry.kind || 'ref',
+        kind: entry.kind || 'image',
+        nodeId: entry.nodeId || ''
+    })).filter(ref => ref.url);
+}
+
+// 素材校验：本地缺文件的挑出来，别发出去再失败
+function tableRowMaterialIssues(row){
+    return (Array.isArray(row && row.media) ? row.media : [])
+        .filter(entry => entry && entry.url && isMissingAssetUrl(entry.url))
+        .map(entry => ({rowNumber: row.rowNumber, nodeId: entry.nodeId || '', reason: 'missing'}));
+}
+
+// 批量执行里绝不能用 alert/showErrorModal：阻塞式弹窗会把并发直接退化成串行
+function notifyCanvas(text){
+    if(window.NovaUtils && typeof NovaUtils.showToast === 'function') NovaUtils.showToast(text);
+    else console.log('[table] ' + text);
+}
+
+function repaintBatchPanel(gen){
+    const host = nodesEl ? nodesEl.querySelector('.node[data-id="' + gen.id + '"]') : null;
+    const panel = host ? host.querySelector('[data-table-batch-panel]') : null;
+    if(panel) paintTableBatchPanel(panel, gen);
+}
+
+/* 手动模式的选中行直接用表格当前的勾选状态。
+   不另存 tableBatchSelectedRows 快照——快照会和用户在表格里改的勾选脱节。 */
+function tableBatchSelection(table){
+    const manual = Boolean(table.tableBatchManualSelection);
+    const rows = table.table && Array.isArray(table.table.selectedRows) ? table.table.selectedRows : [];
+    return {manual, selectedRows: rows};
+}
+
+/* 批量面板（DX OS §10：面板挂在生成节点上，读它的上游表格） */
+function renderTableBatchPanel(gen){
+    if(!novaTableModel()) return null;
+    if(!generatorUpstreamTables(gen.id).length) return null;
+    const panel = document.createElement('div');
+    panel.className = 'table-batch-panel';
+    panel.dataset.tableBatchPanel = '1';
+    paintTableBatchPanel(panel, gen);
+    return panel;
+}
+
+function paintTableBatchPanel(panel, gen){
+    const model = novaTableModel();
+    const tables = generatorUpstreamTables(gen.id);
+    if(!model || !tables.length){ panel.textContent = ''; return; }
+    const table = tables[0];
+    const rows = tableRowInputs(table);
+    const selection = tableBatchSelection(table);
+    const startRow = model.batchStartRow(table.tableBatchStartRow, rows.length);
+    const concurrency = model.batchConcurrency(table.tableBatchConcurrency);
+    const failurePolicy = model.batchFailurePolicy(table.tableBatchFailurePolicy);
+    const runnable = model.batchRowsToRun(rows, {manual: selection.manual, startRow, selectedRows: selection.selectedRows});
+    const journal = model.normalizeJournal(table.generationBatchJournal);
+    const completed = model.journalCompletedRows(journal).length;
+    const failed = model.journalFailedRows(journal).length;
+    const inflight = model.journalInflightRows(journal).length;
+    const running = Boolean(table.tableBatchRunning);
+
+    panel.textContent = '';
+
+    const head = document.createElement('div');
+    head.className = 'table-batch-head';
+    const title = document.createElement('span');
+    title.className = 'table-batch-title';
+    title.textContent = '多维表格批量';
+    head.appendChild(title);
+    const meta = document.createElement('span');
+    meta.className = 'table-batch-meta';
+    meta.textContent = rows.length + ' 行 · 可执行 ' + runnable.length
+        + (completed ? ' · 已完成 ' + completed : '')
+        + (failed ? ' · 失败 ' + failed : '')
+        + (inflight ? ' · 后台 ' + inflight : '');
+    head.appendChild(meta);
+    panel.appendChild(head);
+
+    const controls = document.createElement('div');
+    controls.className = 'table-batch-controls';
+
+    const startField = document.createElement('label');
+    startField.className = 'table-batch-field';
+    const startText = document.createElement('span');
+    startText.textContent = '起始行';
+    startField.appendChild(startText);
+    const startInput = document.createElement('input');
+    startInput.type = 'number';
+    startInput.min = '1';
+    startInput.max = String(Math.max(1, rows.length));
+    startInput.value = String(startRow);
+    startInput.className = 'table-batch-input';
+    startInput.onchange = () => {
+        table.tableBatchStartRow = model.batchStartRow(startInput.value, rows.length);
+        scheduleSave();
+        paintTableBatchPanel(panel, gen);
+    };
+    startField.appendChild(startInput);
+    controls.appendChild(startField);
+
+    const concurrencyField = document.createElement('label');
+    concurrencyField.className = 'table-batch-field';
+    const concurrencyText = document.createElement('span');
+    concurrencyText.textContent = '并发';
+    concurrencyField.appendChild(concurrencyText);
+    const concurrencySelect = document.createElement('select');
+    concurrencySelect.className = 'table-batch-input';
+    for(let value = 1; value <= model.MAX_BATCH_CONCURRENCY; value += 1){
+        const option = document.createElement('option');
+        option.value = String(value);
+        option.textContent = String(value);
+        concurrencySelect.appendChild(option);
+    }
+    concurrencySelect.value = String(concurrency);
+    concurrencySelect.onchange = () => {
+        table.tableBatchConcurrency = model.batchConcurrency(concurrencySelect.value);
+        scheduleSave();
+    };
+    concurrencyField.appendChild(concurrencySelect);
+    controls.appendChild(concurrencyField);
+
+    const policyField = document.createElement('label');
+    policyField.className = 'table-batch-field';
+    const policyText = document.createElement('span');
+    policyText.textContent = '出错';
+    policyField.appendChild(policyText);
+    const policySelect = document.createElement('select');
+    policySelect.className = 'table-batch-input';
+    [['continue', '继续跑完'], ['stop', '立即停止']].forEach(pair => {
+        const option = document.createElement('option');
+        option.value = pair[0];
+        option.textContent = pair[1];
+        policySelect.appendChild(option);
+    });
+    policySelect.value = failurePolicy;
+    policySelect.onchange = () => {
+        table.tableBatchFailurePolicy = model.batchFailurePolicy(policySelect.value);
+        scheduleSave();
+    };
+    policyField.appendChild(policySelect);
+    controls.appendChild(policyField);
+    panel.appendChild(controls);
+
+    const manualRow = document.createElement('label');
+    manualRow.className = 'table-batch-manual';
+    const manualBox = document.createElement('input');
+    manualBox.type = 'checkbox';
+    manualBox.className = 'table-checkbox';
+    manualBox.checked = selection.manual;
+    manualBox.onchange = () => {
+        table.tableBatchManualSelection = manualBox.checked;
+        scheduleSave();
+        paintTableBatchPanel(panel, gen);
+    };
+    manualRow.appendChild(manualBox);
+    const manualText = document.createElement('span');
+    manualText.textContent = '独立运行（只跑已勾选的行）';
+    manualRow.appendChild(manualText);
+    panel.appendChild(manualRow);
+
+    const actions = document.createElement('div');
+    actions.className = 'table-batch-actions';
+    const runButton = document.createElement('button');
+    runButton.type = 'button';
+    runButton.className = 'table-batch-run';
+    runButton.textContent = running ? '批量生成中…' : '批量生成';
+    runButton.disabled = running || !runnable.length;
+    runButton.onclick = () => { runTableBatch(gen.id, {}); };
+    actions.appendChild(runButton);
+
+    const resumeButton = document.createElement('button');
+    resumeButton.type = 'button';
+    resumeButton.className = 'table-node-action';
+    resumeButton.textContent = '恢复上次';
+    resumeButton.disabled = running || !journal.runId;
+    resumeButton.onclick = () => { runTableBatch(gen.id, {resumeRunId: journal.runId}); };
+    actions.appendChild(resumeButton);
+    panel.appendChild(actions);
+
+    if(gen._batchLastMessage){
+        const note = document.createElement('div');
+        note.className = 'table-batch-note';
+        note.textContent = gen._batchLastMessage;
+        panel.appendChild(note);
+    }
+}
+
+/* 表格批量执行（DX OS §4 执行器）。
+   上游表格逐行驱动这个生成节点：一行 = 一次生成，提示词与参考图按行覆盖。 */
+async function runTableBatch(genId, options={}){
+    const model = novaTableModel();
+    const gen = (nodes || []).find(item => item.id === genId);
+    if(!gen || !model) return;
+    if(gen._batchRunning){ notifyCanvas('批量生成正在进行中。'); return; }
+    const tables = generatorUpstreamTables(genId);
+    if(!tables.length){ notifyCanvas('多维表格无法连接到生成节点。'); return; }
+    const table = tables[0];
+
+    const say = text => { gen._batchLastMessage = text; notifyCanvas(text); repaintBatchPanel(gen); };
+
+    const rows = tableRowInputs(table);
+    const selection = tableBatchSelection(table);
+    const startRow = model.batchStartRow(table.tableBatchStartRow, rows.length);
+    const failurePolicy = model.batchFailurePolicy(table.tableBatchFailurePolicy);
+    const concurrency = model.batchConcurrency(table.tableBatchConcurrency);
+
+    const runnable = model.batchRowsToRun(rows, {manual: selection.manual, startRow, selectedRows: selection.selectedRows});
+    if(!runnable.length){
+        if(selection.manual) say('请先点击上方行，选择至少一行独立运行');
+        else if(startRow > rows.length) say('起始行超出表格范围，当前共 ' + rows.length + ' 行');
+        else say('起始行之后没有可生成的内容');
+        return;
+    }
+
+    // 素材校验：缺文件的别发出去
+    const issues = [];
+    runnable.forEach(row => { tableRowMaterialIssues(row).forEach(issue => issues.push(issue)); });
+    if(issues.length){
+        const rowNumbers = Array.from(new Set(issues.map(issue => issue.rowNumber)));
+        say('有 ' + issues.length + ' 个素材文件缺失（第 ' + rowNumbers.join('、') + ' 行），请先补齐再运行。');
+        return;
+    }
+
+    const resumeRunId = String(options.resumeRunId || '');
+    const runId = resumeRunId || uid('batch');
+    const journal = model.matchBatchJournal(table.generationBatchJournal, runId, rows, failurePolicy);
+    table.generationBatchJournal = journal;
+
+    // 已在后台的行不重复派发（DX OS §5 后台恢复检测）
+    const inflight = model.journalInflightRows(journal);
+    if(inflight.length){
+        say('批量生成仍有 ' + inflight.length + ' 行正在后台恢复，请等待完成后再次恢复 Graph。');
+        return;
+    }
+
+    const runnableNumbers = new Set(runnable.map(row => row.rowNumber));
+    const pending = model.journalPendingRows(journal).filter(entry => runnableNumbers.has(entry.rowNumber));
+    if(!pending.length){
+        say('没有需要执行的行（已完成 ' + model.journalCompletedRows(journal).length + ' 行）。');
+        return;
+    }
+
+    const workers = Math.min(concurrency, pending.length);
+    say('已开始批量生成：' + pending.length + ' 行，并发 ' + workers);
+
+    gen._batchRunning = true;
+    table.tableBatchRunning = true;
+    gen._batchProgress = {total:pending.length, done:0, failed:0};
+    scheduleSave();
+    paintTableBatchPanelFromNode(gen, table);
+    repaintTable(table);
+
+    const rowByNumber = new Map(rows.map(row => [row.rowNumber, row]));
+    const results = await model.runWithSharedCursor(pending, workers, async entry => {
+        const row = rowByNumber.get(entry.rowNumber);
+        if(!row) throw new Error('第 ' + entry.rowNumber + ' 行已不存在');
+        model.journalMarkRow(journal, entry.rowNumber, 'running', entry.requestId || '');
+        scheduleSave();
+        // 一行一次生成：提示词与参考图都按这一行覆盖
+        await runGenerator(genId, {
+            batch: true,
+            rowOverride: {prompt: row.prompt, refs: tableRowRefs(row)},
+            runContext: {tableId: table.id, rowNumber: entry.rowNumber, batchRunId: runId}
+        });
+        model.journalMarkRow(journal, entry.rowNumber, 'completed');
+        gen._batchProgress.done += 1;
+        scheduleSave();
+        repaintBatchPanel(gen);
+        return entry.rowNumber;
+    }, {stopOnError: failurePolicy === 'stop'});
+
+    results.forEach((result, index) => {
+        if(result && result.ok) return;
+        const entry = pending[index];
+        model.journalMarkRow(journal, entry.rowNumber, 'failed');
+        gen._batchProgress.failed += 1;
+    });
+
+    gen._batchRunning = false;
+    table.tableBatchRunning = false;
+    scheduleSave();
+    await saveCanvas();
+    repaintBatchPanel(gen);
+    repaintTable(table);
+
+    const completed = model.journalCompletedRows(journal).length;
+    const failed = model.journalFailedRows(journal).length;
+    say('批量生成结束：完成 ' + completed + ' 行' + (failed ? '，失败 ' + failed + ' 行' : '') + '。');
+}
+
+function paintTableBatchPanelFromNode(gen, table){
+    repaintBatchPanel(gen);
 }
 
 function renderTableBody(node){
@@ -12297,13 +12610,20 @@ function refreshGeneratorInputViews(){
 }
 async function runGenerator(genId, opts={}){
     const gen = nodes.find(n => n.id === genId);
-    if(!gen || (gen.running && !opts.cascade)) return;
+    if(!gen || (gen.running && !opts.cascade && !opts.batch)) return;
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
     const sources = orderedSources(gen, generatorSources(gen));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
-    const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
-    if(!prompt && !refs.length){ alert(tr('canvas.needPromptOrImage')); return; }
-    const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
+    // 表格批量执行按行覆盖提示词与参考图；单行出了什么就是什么，不再从图上推导
+    const rowOverride = opts.rowOverride || null;
+    const prompt = rowOverride ? String(rowOverride.prompt || '') : sources.map(s => s.prompt).filter(Boolean).join('\n\n');
+    const refs = rowOverride ? (rowOverride.refs || []) : imageRefsOnly(sources.flatMap(s => s.refs || []));
+    if(!prompt && !refs.length){
+        // 批量执行里绝不能弹阻塞式对话框，否则并发直接退化成串行
+        if(opts.batch) throw new Error(tr('canvas.needPromptOrImage'));
+        alert(tr('canvas.needPromptOrImage'));
+        return;
+    }
+    const count = rowOverride ? Math.max(1, Math.min(8, Number(opts.countOverride || 1))) : Math.max(1, Math.min(8, Number(gen.count || 1)));
     let out = outputForNode(gen, 460);
     const run = runSnapshot(gen, prompt || 'Edit the reference images.', refs);
     const payload = {
@@ -12317,7 +12637,7 @@ async function runGenerator(genId, opts={}){
     if(quality) payload.quality = quality;
     let pendingIds = [];
     const startedAt = nowMs();
-    if(!opts.cascade){
+    if(!opts.cascade && !opts.batch){
         gen.running = true;
         refreshRunNodes(gen, out);
         // API 支持并发：2s 后即可再次点击，任务仍由 pending 卡片继续追踪
@@ -12380,7 +12700,7 @@ async function runGenerator(genId, opts={}){
         refreshRunNodes(gen, out);
         scheduleSave();
         if(remainingPending.some(p => p.failed && p.recoverTaskId) && !removableIds.length) return;
-        if(opts.cascade) throw err;
+        if(opts.cascade || opts.batch) throw err;
         showErrorModal(err.message || tr('canvas.generationFailed'), tr('canvas.apiFailed'));
     }
 }
@@ -16581,7 +16901,8 @@ function canConnect(fromId, toId){
     // 表格吃上游素材/文本当输入列（DX OS: t.inputs → 输入通道）
     if(to.type === 'table') return ['image','prompt','loop','promptGroup','llm','group','output'].includes(from.type);
     if(from.type === 'llm') return CANVAS_GENERATOR_TYPES.includes(to.type);
-    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm'].includes(from.type);
+    // 表格也能驱动生成节点：批量按行出图（generatorSources 会忽略表格，不会污染输入预览）
+    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','table'].includes(from.type);
 }
 function sanitizeConnections(){
     connections = (connections || []).filter(c => canConnect(c.from, c.to));
