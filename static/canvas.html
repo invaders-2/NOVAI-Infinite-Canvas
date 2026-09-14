@@ -7,7 +7,7 @@
     <title>无限画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.115.1789401355">
+    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.115.1789402945">
     <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789114960">
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.115.1789114960">
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
@@ -19,7 +19,8 @@
     <script src="/static/js/shared/media.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/shared/viewport.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/shared/workflow-utils.js?v=1.0.115.1789401904"></script>
-    <script src="/static/js/shared/node-registry.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/shared/table-grid.js?v=1.0.115.1789400119"></script>
+    <script src="/static/js/shared/node-registry.js?v=1.0.115.1789402904"></script>
     <script src="/static/js/shared/matrix-run.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/js/touch-mouse.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/i18n.js?v=1.0.115.1789114960"></script>
@@ -232,7 +233,8 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                 <button class="menu-btn" onclick="menuAdd('image')"><i data-lucide="image-plus" class="w-4 h-4"></i><span data-i18n="canvas.imageCard">上传节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('prompt')"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
                 <button class="menu-btn" onclick="menuAdd('loop')"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loopNode">循环节点</span></button>
-                <button class="menu-btn" onclick="menuAdd('matrix')"><i data-lucide="table-2" class="w-4 h-4"></i><span data-i18n="canvas.matrixNode">多维表格</span></button>
+                <button class="menu-btn" onclick="menuAdd('data-table')"><i data-lucide="table-2" class="w-4 h-4"></i><span data-i18n="canvas.matrixNode">多维表格</span></button>
+                <button class="menu-btn" onclick="menuAdd('matrix')"><i data-lucide="table-properties" class="w-4 h-4"></i><span data-i18n="canvas.matrixBatchNode">批量生成表</span></button>
                 <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('msgen')"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.modelscopeGenerate">Modelscope生成</span></button>
@@ -528,6 +530,6 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
     <script defer src="/static/js/ltx-director-timeline.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/vendor/js/glfx.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/js/image-adjust-editor.js?v=1.0.115.1789114960"></script>
-    <script defer src="/static/js/canvas.js?v=1.0.115.1789401904"></script>
+    <script defer src="/static/js/canvas.js?v=1.0.115.1789402934"></script>
 </body>
 </html>

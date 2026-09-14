@@ -32,6 +32,16 @@
             supportsImage:true, supportsVideo:true, supportsText:true,
             migrate:node => NovaWorkflowUtils ? NovaWorkflowUtils.migrateMatrixNode(node) : node
         }),
+        // 纯数据网格「多维表格」——对齐 DX OS 的 builtin.table 模型。
+        // 关键差异：它**不执行**（runnable:false）。表格只承载数据，
+        // 真正的生成由连到它的生成节点逐行扇出。
+        // 数据模型唯一真值源是 shared/table-grid.js（columns + rows: string[][]）。
+        spec('data-table', {
+            label:'多维表格', runnable:false,
+            capabilities:['data', 'table-ops'],
+            inputTypes:['image', 'video', 'text'],
+            outputTypes:['json', 'table'],
+        }),
         spec('image', {label:'图片', inputTypes:['image'], outputTypes:['image'], supportsImage:true}),
         spec('prompt', {label:'提示词', outputTypes:['text'], supportsText:true}),
         spec('promptGroup', {label:'提示词组', outputTypes:['text'], supportsText:true}),

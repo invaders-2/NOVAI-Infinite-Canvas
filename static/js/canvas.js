@@ -2816,6 +2816,23 @@ function addMatrixNode(point){
     node.rows[1].dependencies = [];
     return addNode(node);
 }
+// 纯数据网格「多维表格」（对齐 DX OS builtin.table）。它不执行、不持有 task_id，
+// 数据模型唯一真值源是 shared/table-grid.js。默认 3 列 3 行，与 DX OS 新建表格一致。
+function addDataTableNode(point){
+    const p = point || defaultPoint(40, 0);
+    const node = {
+        id:uid('dtable'),
+        type:'data-table',
+        x:p.x, y:p.y, w:600, h:380,
+        title:'多维表格',
+        table:NovaTableGrid.normalizeTable({
+            columns:['字段 1', '字段 2', '字段 3'],
+            rows:[['', '', ''], ['', '', ''], ['', '', '']],
+        }).table,
+        tableExpanded:true,
+    };
+    return addNode(node);
+}
 function pickMediaForNode(nodeId){
     const input = document.createElement('input');
     input.type = 'file';
@@ -3894,6 +3911,7 @@ function createNodeByType(type, point){
     if(type === 'prompt') return addPromptNode(point);
     if(type === 'loop') return addLoopNode(point);
     if(type === 'group') return addGroupNode(point);
+    if(type === 'data-table') return addDataTableNode(point);
     if(NovaNodeRegistry.isTaskTableType(type)) return addMatrixNode(point);
     if(type === 'llm') return addLLMNode(point);
     if(type === 'generator') return addGeneratorNode(point);
@@ -3912,6 +3930,7 @@ function menuAdd(type){
     if(type === 'image') addImageNode(menuPoint);
     if(type === 'prompt') addPromptNode(menuPoint);
     if(type === 'loop') addLoopNode(menuPoint);
+    if(type === 'data-table') addDataTableNode(menuPoint);
     if(NovaNodeRegistry.isTaskTableType(type)) addMatrixNode(menuPoint);
     if(type === 'llm') addLLMNode(menuPoint);
     if(type === 'generator') addGeneratorNode(menuPoint);
@@ -6555,6 +6574,114 @@ function renderMatrixResults(node){
     }
     return `<div class="matrix-gallery">${completed.flatMap(row => (row.output?.refs || row.resultRefs || []).map(ref => `<div class="matrix-gallery-item">${matrixRefThumb(ref)}<strong>${escapeHtml(row.name)}</strong><span>${(ref.kind || mediaKindForRef(ref.url)) === 'video' ? '视频片段' : '图片结果'}</span></div>`)).join('')}</div>`;
 }
+// ---- 纯数据网格「多维表格」渲染 ---------------------------------------------
+// 数据模型唯一真值源：shared/table-grid.js（normalizeTable / applyOperation / planTableOperation）。
+// 本函数只负责把数据画出来并绑定编辑事件；列名去重、行列上限、单元格截断都在数据层。
+// 单元格编辑走 O(1) 直接赋值（ri/ci 来自已渲染数据、value 必为字符串），
+// 结构性操作才走数据层 applyOperation —— 否则每次按键都要全表归一化。
+const DTABLE_RENDER_ROW_LIMIT = 100;
+
+function ensureDataTableState(node){
+    // NovaTableGrid 未加载时保持原状，绝不抛错打断整个画布渲染
+    if(typeof NovaTableGrid === 'undefined') return node.table || null;
+    node.table = NovaTableGrid.normalizeTable(node.table).table;
+    return node.table;
+}
+
+function renderDataTableBody(node){
+    const table = ensureDataTableState(node);
+    const wrap = document.createElement('div');
+    wrap.className = 'dtable-node-card';
+    if(!table){
+        wrap.innerHTML = '<div class="dtable-empty">数据网格模块未加载</div>';
+        return wrap;
+    }
+    const columns = table.columns || [];
+    const rows = table.rows || [];
+    const selected = new Set(table.selectedRows || []);
+    const shown = rows.slice(0, DTABLE_RENDER_ROW_LIMIT);
+    const gutter = '<th class="dtable-gutter"></th>';
+    const headCells = columns.map((title, ci) =>
+        '<th><div class="dtable-col-head"><input data-dtable-col-title="' + ci + '" value="' + escapeAttr(title) + '" aria-label="列名">'
+        + '<button type="button" data-dtable-col-del="' + ci + '" title="删除列"><i data-lucide="x"></i></button></div></th>'
+    ).join('');
+    const bodyRows = shown.map((row, ri) => {
+        const cells = columns.map((_, ci) =>
+            '<td><input class="dtable-cell" data-dtable-cell="' + ri + ':' + ci + '" value="' + escapeAttr(row[ci] || '') + '"></td>'
+        ).join('');
+        return '<tr class="' + (selected.has(ri) ? 'is-selected' : '') + '">'
+            + '<th class="dtable-gutter"><input type="checkbox" data-dtable-row-sel="' + ri + '"' + (selected.has(ri) ? ' checked' : '') + ' aria-label="选择行">'
+            + '<span class="dtable-rownum">' + (ri + 1) + '</span>'
+            + '<button type="button" data-dtable-row-del="' + ri + '" title="删除行"><i data-lucide="x"></i></button></th>'
+            + cells + '</tr>';
+    }).join('');
+    const emptyGrid = (!columns.length || !rows.length)
+        ? '<div class="dtable-empty">' + (columns.length ? '暂无行，点「行」新增' : '暂无列，点「列」新增') + '</div>'
+        : '';
+    wrap.innerHTML = [
+        '<div class="dtable-toolbar">',
+            '<input class="dtable-title-input" data-dtable-title value="' + escapeAttr(node.title || '多维表格') + '" aria-label="表格名称">',
+            '<button type="button" data-dtable-add-row><i data-lucide="plus"></i>行</button>',
+            '<button type="button" data-dtable-add-col><i data-lucide="plus"></i>列</button>',
+            '<span class="dtable-count">' + rows.length + ' 行 × ' + columns.length + ' 列</span>',
+        '</div>',
+        emptyGrid,
+        (!emptyGrid && shown.length)
+            ? '<div class="dtable-scroll"><table class="dtable-grid"><thead><tr>' + gutter + headCells + '</tr></thead><tbody>' + bodyRows + '</tbody></table></div>'
+            : '',
+        (rows.length > shown.length)
+            ? '<div class="dtable-hint">仅显示前 ' + DTABLE_RENDER_ROW_LIMIT + ' 行（共 ' + rows.length + ' 行），数据完整保留</div>'
+            : '',
+    ].join('');
+
+    const redraw = () => { render(); scheduleSave(); };
+    wrap.querySelector('[data-dtable-title]').oninput = event => { node.title = event.target.value; scheduleSave(); };
+    wrap.querySelector('[data-dtable-add-row]').onclick = () => {
+        if(rows.length >= NovaTableGrid.MAX_ROWS){ setStatus('表格最多允许 ' + NovaTableGrid.MAX_ROWS + ' 行'); return; }
+        node.table = NovaTableGrid.applyOperation(node.table, 'append_row', { values: [] });
+        redraw();
+    };
+    wrap.querySelector('[data-dtable-add-col]').onclick = () => {
+        try { node.table = NovaTableGrid.applyOperation(node.table, 'add_column', { title: '字段 ' + (columns.length + 1) }); redraw(); }
+        catch(error){ setStatus(error.message); }
+    };
+    wrap.querySelectorAll('[data-dtable-col-del]').forEach(button => button.onclick = () => {
+        try { node.table = NovaTableGrid.applyOperation(node.table, 'delete_column', { column: Number(button.dataset.dtableColDel) + 1 }); redraw(); }
+        catch(error){ setStatus(error.message); }
+    });
+    wrap.querySelectorAll('[data-dtable-col-title]').forEach(input => input.onchange = () => {
+        // 表头重名由数据层追加 (2)/(3) 去重，与 DX OS 归一行为一致
+        const index = Number(input.dataset.dtableColTitle);
+        const next = NovaTableGrid.cloneTable(node.table);
+        const titles = next.columns.slice();
+        titles[index] = input.value;
+        next.columns = titles;
+        node.table = NovaTableGrid.normalizeTable(next).table;
+        redraw();
+    });
+    wrap.querySelectorAll('[data-dtable-row-del]').forEach(button => button.onclick = () => {
+        try { node.table = NovaTableGrid.applyOperation(node.table, 'delete_row', { row: Number(button.dataset.dtableRowDel) + 1 }); redraw(); }
+        catch(error){ setStatus(error.message); }
+    });
+    wrap.querySelectorAll('[data-dtable-row-sel]').forEach(box => box.onchange = () => {
+        const index = Number(box.dataset.dtableRowSel);
+        const set = new Set(node.table.selectedRows || []);
+        if(box.checked) set.add(index); else set.delete(index);
+        node.table.selectedRows = [...set].sort((a, b) => a - b);
+        scheduleSave();
+    });
+    wrap.querySelectorAll('[data-dtable-cell]').forEach(input => input.oninput = event => {
+        const parts = String(input.dataset.dtableCell).split(':');
+        const ri = Number(parts[0]), ci = Number(parts[1]);
+        const row = node.table.rows[ri];
+        if(!row || ci >= row.length) return;
+        const value = String(event.target.value);
+        row[ci] = value.length > NovaTableGrid.MAX_CELL_CHARS ? value.slice(0, NovaTableGrid.MAX_CELL_CHARS) : value;
+        scheduleSave();
+    });
+    return wrap;
+}
+
 function renderMatrixBody(node){
     ensureMatrixState(node);
     const wrap = document.createElement('div');
@@ -6897,6 +7024,7 @@ function renderNode(node){
             body.ondblclick = openGroupPreview;
         }
     }
+    if(NovaNodeRegistry.isTypeOf(node, 'data-table')) body.appendChild(renderDataTableBody(node));
     if(NovaNodeRegistry.isTaskTableNode(node)) body.appendChild(renderMatrixBody(node));
     if(node.type === 'promptGroup') {
         const promptNodes = (node.items || []).map(id => nodes.find(n => n.id === id)).filter(Boolean);
