@@ -53,20 +53,22 @@ const connections = [];
 const nodes = [];
 const added = [];
 const missingUrls = new Set();
+let uidSeq = 0;
 const api = new Function(
     'document', 'requestAnimationFrame', 'defaultPoint', 'addNode', 'scheduleSave', 'uid',
     'connections', 'nodes', 'pushUndo', 'mediaKindForNode', 'isMissingAssetUrl',
-    'canvasPreviewImgHtml', 'canvasVideoPreviewHtml',
+    'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs',
     block + '\nreturn {renderTableBody, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
     ' addTableInputChannel, tableNodeSignature, connectNodes, tableDropPortFor,' +
-    ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues};'
+    ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues,' +
+    ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
-    global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_1',
+    global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
     connections, nodes, () => {}, n => (n && n.mediaKind) || 'image', url => missingUrls.has(url),
-    (url) => '<img src="' + url + '">', (url) => '<video src="' + url + '"></video>'
+    (url) => '<img src="' + url + '">', (url) => '<video src="' + url + '"></video>', () => 1700000000000
 );
 
 const keydown = key => ({ key, shiftKey:false, preventDefault(){}, stopPropagation(){} });
@@ -272,6 +274,65 @@ eq(api.tableRowMaterialIssues(brokenRow).length, 1, '缺文件的素材被挑出
 eq(api.tableRowMaterialIssues(brokenRow)[0].reason, 'missing', '缺失原因');
 eq(api.tableRowMaterialIssues(brokenRow)[0].rowNumber, 9, '缺文件的行号');
 missingUrls.delete('/gone.png');
+
+
+// ═══ K. LLM → 表格（list 模式：媒体组 / 物化 / 按钮文案） ═══
+{
+    const llm = {id:'llm1', type:'llm', x:1000, y:100, w:420, llmOutputMode:'list'};
+    const imgA = {id:'imgA', type:'image', url:'/a.png', name:'A'};
+    const grp = {id:'grp1', type:'group', items:['imgB','imgC']};
+    const imgB = {id:'imgB', type:'image', url:'/b.png'};
+    const imgC = {id:'imgC', type:'image', url:'/c.png'};
+    const promptNode = {id:'p9', type:'prompt', text:'拆解脚本'};
+    nodes.push(llm, imgA, grp, imgB, imgC, promptNode);
+    connections.push({id:'x1', from:'imgA', to:'llm1'});
+    connections.push({id:'x2', from:'grp1', to:'llm1'});
+    connections.push({id:'x3', from:'p9', to:'llm1'});
+
+    eq(api.tableSourceItems(promptNode), [], '文本节点不是素材');
+    eq(api.tableSourceItems(grp).map(i => i.nodeId), ['imgB','imgC'], 'group 展开成成员素材');
+    eq(api.tableSourceItems(null), [], '空来源 → 无素材');
+
+    const groups = api.llmMediaGroups(llm);
+    eq(groups.length, 2, '两组素材（group 算一组、文本节点不计）');
+    eq(groups[0].sourceId, 'imgA', '第一组来源是单图');
+    eq(groups[1].sourceId, 'grp1', '第二组来源是 group');
+    eq(groups[1].entries.map(e => e.nodeId), ['imgB','imgC'], 'group 组内成员');
+    eq(api.llmListInputs(llm).map(e => e.nodeId), ['imgA','imgB','imgC'], '输入清单顺序');
+    eq(api.llmListInputs(llm).map(e => e.kind), ['image','image','image'], '输入类型');
+
+    // 物化：PR()
+    const parsed = model.parseTableOutput(JSON.stringify({kind:'table', version:1, columns:['提示词'], rows:[['一行'],['二行']]}));
+    const created = api.materializeLlmTable(llm, parsed, groups);
+    ok(created && created.type === 'table', '物化出表格节点');
+    eq(created.table.rows.length, 2, '表格数据带过去');
+    eq(created.llmGeneratedOutput, true, '标记为 LLM 生成');
+    eq(created.llmSourceId, 'llm1', '溯源到 LLM');
+    eq(created.x, 1000 + 420 + 170, '落在源右侧 170px');
+    eq(created.y, 100, '没有下游时 y 与源对齐');
+    eq(created.h, 320, '高度：38+2*88 被 320 下限托住');
+    eq(created.tableInputChannelCount, 2, '通道数与媒体组数一致');
+
+    const intoCreated = connections.filter(c => c.to === created.id);
+    eq(intoCreated.length, 3, '入边 = 两个素材列 + LLM flow');
+    eq(intoCreated.map(c => c.toPort || '').filter(Boolean).sort(), ['input-1','input-2'], '素材连线带 toPort');
+    ok(intoCreated.some(c => c.from === 'llm1' && !c.toPort), 'LLM → 表格 不带 toPort');
+
+    const channels = api.ensureTableChannels(created);
+    eq(channels.length, 2, '推导出两个输入通道');
+    eq(channels[0].items.map(i => i.nodeId), ['imgA'], '第 1 通道是单图');
+    eq(channels[0].mode, 'shared', '单图 → 共享');
+    eq(channels[1].items.map(i => i.nodeId), ['imgB','imgC'], '第 2 通道是 group 成员');
+    eq(channels[1].mode, 'sequence', '两张 → 逐行对应');
+    eq(api.tableUpstreamTexts(created), [], 'LLM 节点不进上游文本');
+
+    // 按钮文案
+    eq(api.llmRunButtonLabel({running:false, llmOutputMode:'list'}), '生成', 'list 未运行');
+    eq(api.llmRunButtonLabel({running:true, llmOutputMode:'list', llmRunStage:'planning'}), '规划中', 'list 规划中');
+    eq(api.llmRunButtonLabel({running:true, llmOutputMode:'list', llmRunStage:'repairing'}), '校验中', 'list 校验中');
+    eq(api.llmRunButtonLabel({running:true, llmOutputMode:'list', llmRunStage:'generating'}), '生成中', 'list 生成中');
+    eq(api.llmRunButtonLabel({running:false, llmOutputMode:'text'}), 'Run LLM', 'text 模式按钮不变');
+}
 
 console.log('通过 ' + pass + '/' + (pass + fails.length));
 if(fails.length){ console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

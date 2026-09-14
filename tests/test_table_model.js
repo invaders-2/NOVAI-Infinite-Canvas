@@ -241,6 +241,97 @@ eq(M.batchMissingMaterials([{rowNumber:1, media:[{nodeId:'a', invalid:'missing'}
 eq(M.batchMissingMaterials([{rowNumber:1, media:[{nodeId:'a'}]}]), [], '素材齐全 → 空');
 eq(M.batchMissingMaterials(null), [], '素材校验非法输入');
 
+
+// ═══ LLM → 表格（DX OS §6：FS / BS / a6 / CR） ═══
+const FENCE = String.fromCharCode(96,96,96);
+
+// extractJsonObject：剥代码块 → 取首尾大括号
+eq(M.extractJsonObject(FENCE + 'json\n{"a":1}\n' + FENCE), {a:1}, '剥 json 代码块');
+eq(M.extractJsonObject(FENCE + '\n{"a":1}\n' + FENCE), {a:1}, '无语言标记的代码块');
+eq(M.extractJsonObject('说明文字 {"a":1} 收尾'), {a:1}, '夹在散文里也能取出来');
+eq(M.extractJsonObject('{"a":1}'), {a:1}, '裸 JSON');
+eq(M.extractJsonObject('完全不是 JSON'), null, '没有大括号 → null');
+eq(M.extractJsonObject('{不是合法 JSON}'), null, 'JSON 非法 → null');
+eq(M.extractJsonObject(''), null, '空串 → null');
+eq(M.extractJsonObject(null), null, 'null → null');
+
+// parseTableOutput：a6 校验
+{
+  const good = JSON.stringify({kind:'table', version:1, columns:['提示词','品牌'], rows:[['一只猫','Nike']]});
+  eq(M.parseTableOutput(good).columns, ['提示词','品牌'], '合法表格：列名');
+  eq(M.parseTableOutput(good).rows, [['一只猫','Nike']], '合法表格：行');
+  eq(M.parseTableOutput(good).kind, 'table', '合法表格：kind');
+  eq(M.parseTableOutput(FENCE + 'json\n' + good + '\n' + FENCE).rows, [['一只猫','Nike']], '代码块包裹也能解析');
+}
+{
+  // 行按列数补齐 + 非字符串 stringify + 截断
+  const t = M.parseTableOutput(JSON.stringify({kind:'table', version:1, columns:['a','b','c'], rows:[[1, {x:2}]]}));
+  eq(t.rows[0], ['1', '{"x":2}', ''], '行补齐列数 + 非字符串 stringify');
+  const long = M.parseTableOutput(JSON.stringify({kind:'table', version:1, columns:['a'], rows:[['x'.repeat(25000)]]}));
+  eq(long.rows[0][0].length, 20000, '单元格截断到 20000');
+}
+const rejects = (text, message, label) => {
+  let got = '';
+  try { M.parseTableOutput(text); } catch(error){ got = error.message; }
+  eq(got, message, label);
+};
+rejects('不是 JSON', M.TABLE_PARSE_ERRORS.format, '解析失败 → 格式错误文案');
+rejects(JSON.stringify({kind:'nope', version:1, columns:['a'], rows:[]}), M.TABLE_PARSE_ERRORS.format, 'kind 不对 → 格式错误文案');
+rejects(JSON.stringify({kind:'table', version:2, columns:['a'], rows:[]}), M.TABLE_PARSE_ERRORS.format, 'version 不对 → 格式错误文案');
+rejects(JSON.stringify({kind:'table', version:1, columns:[], rows:[]}), M.TABLE_PARSE_ERRORS.columns, '没有列 → 列名不完整文案');
+rejects(JSON.stringify({kind:'table', version:1, columns:['a'], rows:'x'}), M.TABLE_PARSE_ERRORS.format, 'rows 不是数组 → 格式错误文案');
+rejects(JSON.stringify({kind:'table', version:1, columns:['   '], rows:[]}), M.TABLE_PARSE_ERRORS.columns, '列名全空白 → 列名不完整文案');
+{
+  const manyCols = []; for(let i = 0; i < M.LLM_MAX_COLUMNS + 1; i += 1) manyCols.push('c' + i);
+  rejects(JSON.stringify({kind:'table', version:1, columns:manyCols, rows:[]}), M.TABLE_PARSE_ERRORS.format, '超过 LLM 列上限 → 格式错误');
+  const manyRows = []; for(let i = 0; i < M.LLM_MAX_ROWS + 1; i += 1) manyRows.push(['x']);
+  rejects(JSON.stringify({kind:'table', version:1, columns:['a'], rows:manyRows}), M.TABLE_PARSE_ERRORS.format, '超过 LLM 行上限 → 格式错误');
+  eq(M.normalizeTable({columns:manyCols, rows:[]}).table.columns.length, M.LLM_MAX_COLUMNS + 1, '手工上限更大（归一化接受同样宽度）');
+}
+eq(M.TABLE_PARSE_ERRORS.format, '模型没有返回统一的多维表格格式', '格式错误文案与规范一致');
+eq(M.TABLE_PARSE_ERRORS.columns, '模型返回的表格列名不完整', '列名错误文案与规范一致');
+eq(M.LLM_REPAIR_MAX_TOKENS, 8192, '修复重试的 max_tokens');
+
+// CR：修复提示词
+ok(M.buildRepairPrompt('坏结果').indexOf(M.TABLE_REPAIR_INSTRUCTION) === 0, '修复提示词以指令开头');
+ok(M.buildRepairPrompt('坏结果').indexOf('坏结果') > 0, '修复提示词带上原结果');
+
+// FS / BS
+eq(M.inputListText([{kind:'image', label:'猫'}, {kind:'video'}]), '1. 图片（@图片1） — 猫\n2. 视频（@视频2）', '输入清单带序号与 mention');
+eq(M.inputListText(null), '', '空输入清单');
+ok(M.buildListPlanPrompt('拆解脚本', [{kind:'image'}]).indexOf('只做规划，不要输出最终 rows') > 0, 'FS 明确不输出 rows');
+ok(M.buildListPlanPrompt('拆解脚本', []).indexOf('拆解脚本') > 0, 'FS 带上用户要求');
+{
+  const bs = M.buildListGeneratePrompt('拆解脚本', [{kind:'image'}], {task:'x', rowCount:3});
+  const musts = [
+    '可逐行执行的生成任务',
+    '严格遵守用户指定的数量',
+    '图片组通常逐张映射到各行',
+    '显式写清它们的关系',
+    '不要只写「使用图1」「参考图2」这类占位说明',
+    '请根据任务自行设计最合适的列结构，不套固定模板',
+    '通常不需要额外创建只用于计数的序号列',
+    '不要在 JSON 中创建图片、参考图或生成输入列',
+    '只返回一个 JSON 对象',
+    '"kind":"table","version":1'
+  ];
+  const missing = musts.filter(text => bs.indexOf(text) < 0);
+  eq(missing, [], 'BS 含全部规范约束' + (missing.length ? ' 缺: ' + missing.join(' | ') : ''));
+  ok(bs.indexOf('\"rowCount\": 3') > 0, 'BS 带上规划 JSON');
+}
+ok(M.buildListGeneratePrompt('r', [], null).indexOf('（无规划，按用户要求自行判断）') > 0, '没有规划时的兜底文案');
+
+// 输出模式与按钮文案
+eq(M.llmOutputMode('list'), 'list', 'list 模式');
+eq(M.llmOutputMode('text'), 'text', 'text 模式');
+eq(M.llmOutputMode(undefined), 'text', '未设置 → text');
+eq(M.llmOutputMode('乱写'), 'text', '非法值 → text');
+eq(M.llmRunStageLabel(false, 'planning'), '生成', '未运行时按钮 = 生成');
+eq(M.llmRunStageLabel(true, 'planning'), '规划中', '规划中');
+eq(M.llmRunStageLabel(true, 'repairing'), '校验中', '校验中');
+eq(M.llmRunStageLabel(true, 'generating'), '生成中', '生成中');
+eq(M.llmRunStageLabel(true, undefined), '生成中', '阶段缺失 → 生成中');
+
 // runWithSharedCursor 是异步的，放到最后
 (async () => {
   {

@@ -460,6 +460,123 @@
         return results;
     }
 
+    /* ── LLM → 表格（DX OS §6：FS 规划 / BS 生成 / a6 校验 / CR 修复）─── */
+    const TABLE_PARSE_ERRORS = {
+        format: '模型没有返回统一的多维表格格式',
+        columns: '模型返回的表格列名不完整',
+        missing: '缺少多维表格输出'
+    };
+    const TABLE_REPAIR_INSTRUCTION = '请把下面未通过校验的结果修复为合法的多维表格 JSON。不要删减原有信息，不要输出解释或 Markdown。';
+    const LLM_REPAIR_MAX_TOKENS = 8192;
+
+    // 剥 ```json 代码块 → 取首尾大括号 → JSON.parse
+    function extractJsonObject(text){
+        let source = String(text || '').trim();
+        const fenced = /^```(?:json)?\s*([\s\S]*?)```$/i.exec(source);
+        if(fenced) source = fenced[1].trim();
+        else {
+            const inline = /```(?:json)?\s*([\s\S]*?)```/i.exec(source);
+            if(inline) source = inline[1].trim();
+        }
+        const first = source.indexOf('{');
+        const last = source.lastIndexOf('}');
+        if(first < 0 || last <= first) return null;
+        try { return JSON.parse(source.slice(first, last + 1)); }
+        catch(error){ return null; }
+    }
+
+    /* a6(t)：校验模型返回的表格。
+       LLM 侧上限比手工小得多（40 列 / 200 行），超了直接判格式不合规。
+       返回合法表格，不合法抛错（文案照搬规范）。 */
+    function parseTableOutput(text){
+        const parsed = extractJsonObject(text);
+        if(!parsed || typeof parsed !== 'object') throw new Error(TABLE_PARSE_ERRORS.format);
+        if(parsed.kind !== TABLE_KIND || Number(parsed.version) !== TABLE_VERSION) throw new Error(TABLE_PARSE_ERRORS.format);
+        if(!Array.isArray(parsed.columns) || !Array.isArray(parsed.rows)) throw new Error(TABLE_PARSE_ERRORS.format);
+        if(parsed.columns.length > LLM_MAX_COLUMNS || parsed.rows.length > LLM_MAX_ROWS) throw new Error(TABLE_PARSE_ERRORS.format);
+        if(!parsed.columns.length) throw new Error(TABLE_PARSE_ERRORS.columns);
+        /* 先按原始列名校验：模型给了空白列名属于格式不合规，要报出来让修复遍处理。
+           手工建列时空列名会被兜底成「未命名列」，那是友好的；这里不能沿用那个兜底。 */
+        const rawColumns = parsed.columns.map(name => cellText(name));
+        if(rawColumns.some(name => !String(name).trim())) throw new Error(TABLE_PARSE_ERRORS.columns);
+        const columns = normalizeColumns(rawColumns);
+        const rows = parsed.rows.slice(0, LLM_MAX_ROWS).map(row => {
+            const list = Array.isArray(row) ? row : [];
+            // 行按列数补齐
+            return columns.map((name, index) => cellText(list[index]));
+        });
+        return {kind:TABLE_KIND, version:TABLE_VERSION, columns, rows, selectedRows:[], mergedGroups:[]};
+    }
+
+    function buildRepairPrompt(badText){
+        return TABLE_REPAIR_INSTRUCTION + '\n\n' + String(badText || '');
+    }
+
+    // 输入清单文案：有序号，和 @图片N 的序号一一对应
+    function inputListText(inputs){
+        return (Array.isArray(inputs) ? inputs : []).map((item, index) => {
+            const ordinal = index + 1;
+            const kind = mentionLabel(item && item.kind);
+            const label = item && item.label ? ' — ' + item.label : '';
+            return ordinal + '. ' + kind + '（' + mentionTokenAt(item && item.kind, ordinal) + '）' + label;
+        }).join('\n');
+    }
+
+    /* FS(t)：规划遍提示词。只做规划，不要输出最终 rows。 */
+    function buildListPlanPrompt(requirement, inputs){
+        return [
+            '你在为一个「多维表格批量生成」工作流做任务规划。',
+            '',
+            '用户要求：',
+            String(requirement || '').trim(),
+            '',
+            '可用输入：',
+            inputListText(inputs) || '（无）',
+            '',
+            '只做规划，不要输出最终 rows。',
+            '请只返回一个 JSON 对象，结构如下：',
+            '{"task":"任务目标","rowCount":行数,"targetInputs":["目标主体输入"],"referenceInputs":["风格/版式参考输入"],"inputRoles":[{"input":"输入","role":"角色","mapping":"如何映射到行","transfer":"需要迁移的","doNotTransfer":"不要迁移的"}],"columns":["列名1","列名2"],"rowRules":["每行怎么定"],"qualityChecks":["怎么算合格"]}',
+            '不要 Markdown 代码块，不要解释。'
+        ].join('\n');
+    }
+
+    /* BS(t, plan)：生成遍提示词。约束逐条照搬规范。 */
+    function buildListGeneratePrompt(requirement, inputs, plan){
+        let planText = '';
+        if(plan && typeof plan === 'object'){ try { planText = JSON.stringify(plan, null, 2); } catch(error){ planText = ''; } }
+        return [
+            '请把结果整理为可逐行执行的生成任务：每一行必须是一条完整、独立、可直接用于后续图像生成的内容。',
+            '',
+            '已确认的规划：',
+            planText || '（无规划，按用户要求自行判断）',
+            '',
+            '用户要求：',
+            String(requirement || '').trim(),
+            '',
+            '可用输入：',
+            inputListText(inputs) || '（无）',
+            '',
+            '严格遵守用户指定的数量；未指定时根据逐项输入数量和任务目标合理决定。图片组通常逐张映射到各行，单图参考通常应用到所有相关行。',
+            '如果任务区分了「目标主体」和「风格/版式参考」，每行生成提示词都必须显式写清它们的关系。',
+            '不要只写「使用图1」「参考图2」这类占位说明。每个文字单元格应提供与普通文本输出相当的信息密度。',
+            '请根据任务自行设计最合适的列结构，不套固定模板。',
+            '行的先后顺序已经可以表达执行顺序，因此通常不需要额外创建只用于计数的序号列。',
+            '不要在 JSON 中创建图片、参考图或生成输入列，系统会在独立的输入区域按规划映射素材，不会覆盖文字列。',
+            '只返回一个 JSON 对象，不要 Markdown 代码块，不要解释。',
+            '{"kind":"table","version":1,"columns":["列名1","列名2"],"rows":[["单元格1","单元格2"]]}'
+        ].join('\n');
+    }
+
+    // 输出模式与按钮文案（DX OS: _u / US）
+    function llmOutputMode(raw){ return raw === 'list' ? 'list' : 'text'; }
+
+    function llmRunStageLabel(running, stage){
+        if(!running) return '生成';
+        if(stage === 'planning') return '规划中';
+        if(stage === 'repairing') return '校验中';
+        return '生成中';
+    }
+
     function describeOperation(operationId){
         const op = TABLE_OPERATIONS[String(operationId || '')];
         return op ? JSON.parse(JSON.stringify(op)) : null;
@@ -487,6 +604,9 @@
         emptyJournal, normalizeJournal, matchBatchJournal, journalMarkRow,
         journalPendingRows, journalInflightRows, journalCompletedRows, journalFailedRows,
         batchMissingMaterials, runWithSharedCursor,
+        TABLE_PARSE_ERRORS, TABLE_REPAIR_INSTRUCTION, LLM_REPAIR_MAX_TOKENS,
+        extractJsonObject, parseTableOutput, buildRepairPrompt, inputListText,
+        buildListPlanPrompt, buildListGeneratePrompt, llmOutputMode, llmRunStageLabel,
         emptyTable, cellText, normalizeColumns, normalizeTable, cloneTable,
         toIndex, columnIndex, rowIndex, applyOperation,
         rowHeight, nodeSize, describeOperation, requiresConfirmation,

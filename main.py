@@ -3636,6 +3636,7 @@ class CanvasLLMRequest(BaseModel):
     ms_model: str = ""
     images: List[str] = []   # 可以是 /output/*.png、/assets/*.png 本地路径 或 http(s) URL 或 data URL
     videos: List[str] = []   # 可以是 /output/*.mp4、/assets/*.mp4 本地路径 或 http(s) URL 或 data URL
+    max_tokens: int = 0      # 0 = 不限制；LLM 多维表格的修复遍会传 8192
     # —— Prompt Intelligence（v1）：默认关闭，旧 Workflow 无此字段自动 false ——
     reverse: bool = False    # 反推开关：OFF 仅允许必要定向分析；ON 允许完整 Reverse Analysis
     target_type: str = ""    # 下游生成类型：image / video / ""（未知）
@@ -16748,6 +16749,8 @@ async def canvas_llm(payload: CanvasLLMRequest):
     try:
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=AI_REQUEST_TIMEOUT) as client:
             req_body = {"model": model, "messages": upstream_messages}
+            if int(payload.max_tokens or 0) > 0:
+                req_body["max_tokens"] = int(payload.max_tokens)
             if _is_apimart:
                 req_body["stream"] = False   # APIMart 默认流式，强制关闭
             response = await client.post(

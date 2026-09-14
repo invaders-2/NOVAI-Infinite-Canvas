@@ -6993,16 +6993,23 @@ function tableIncomingConnections(node){
     return (connections || []).filter(conn => conn && conn.to === node.id);
 }
 
-/* 上游来源是不是「素材」。DX OS 里输入列只放 media（XS 一律 type:"media"），
-   文本节点走 Ip(t) 参与提示词 —— 两者不能重复计入。
-   用节点注册表判定，它是节点类型的单一事实来源。 */
-function tableSourceIsMedia(source){
-    const registry = (typeof NovaNodeRegistry !== 'undefined' && NovaNodeRegistry) ? NovaNodeRegistry : null;
-    if(registry && typeof registry.supports === 'function'){
-        return Boolean(registry.supports(source, 'image') || registry.supports(source, 'video'));
+/* 把上游来源展开成输入项。
+   - group 展开成它的成员素材（一个 group = 一个通道，多张 → sequence）
+   - 单个素材节点就是一列一项
+   - 纯文本节点（prompt / llm）返回空 → 走 Ip(t) 参与提示词，两者不重复计入 */
+function tableSourceItems(source){
+    if(!source) return [];
+    if(source.type === 'group'){
+        return (source.items || [])
+            .map(id => (nodes || []).find(item => item.id === id))
+            .filter(item => item && item.url)
+            .map(item => ({type:'media', nodeId:item.id}));
     }
-    return Boolean(source && source.url);
+    if(source.url) return [{type:'media', nodeId:source.id}];
+    return [];
 }
+
+function tableSourceIsMedia(source){ return tableSourceItems(source).length > 0; }
 
 // 上游连来的纯文本（DX OS: Ip(t)）
 function tableUpstreamTexts(node){
@@ -7037,11 +7044,14 @@ function ensureTableChannels(node){
     const buckets = new Map();
     tableIncomingConnections(node).forEach(conn => {
         const source = (nodes || []).find(item => item.id === conn.from);
-        if(!tableSourceIsMedia(source)) return;   // 文本节点不进输入列
+        const entries = tableSourceItems(source);
+        if(!entries.length) return;   // 文本节点不进输入列
         const index = model.channelIndexFromId(conn.toPort);
         const key = index >= 0 ? index : 0;
         if(!buckets.has(key)) buckets.set(key, []);
-        if(!buckets.get(key).includes(conn.from)) buckets.get(key).push(conn.from);
+        entries.forEach(entry => {
+            if(!buckets.get(key).some(item => item.nodeId === entry.nodeId)) buckets.get(key).push(entry);
+        });
     });
     const declared = Math.max(0, Number(node.tableInputChannelCount) || 0);
     const highest = buckets.size ? Math.max.apply(null, Array.from(buckets.keys())) + 1 : 0;
@@ -7050,7 +7060,7 @@ function ensureTableChannels(node){
     const channels = [];
     for(let index = 0; index < count; index += 1){
         const id = model.channelIdAt(index);
-        const items = (buckets.get(index) || []).map(nodeId => ({type:'media', nodeId}));
+        const items = (buckets.get(index) || []).map(entry => ({type:'media', nodeId:entry.nodeId}));
         const manual = manualModes[id];
         channels.push({
             id,
@@ -7480,6 +7490,74 @@ async function runTableBatch(genId, options={}){
 
 function paintTableBatchPanelFromNode(gen, table){
     repaintBatchPanel(gen);
+}
+
+/* ─────────────── LLM 多维表格（DX OS §6：FS/BS/a6/CR/PR）─────────────── */
+
+// LLM 的素材输入按来源切成媒体组；group 展开成成员（一个 group = 一个通道）
+function llmMediaGroups(node){
+    const groups = [];
+    (connections || []).filter(conn => conn.to === node.id).forEach(conn => {
+        const source = (nodes || []).find(item => item.id === conn.from);
+        const entries = tableSourceItems(source);
+        if(!entries.length) return;
+        groups.push({
+            sourceId: source.id,
+            entries: entries.map(entry => {
+                const item = (nodes || []).find(n => n.id === entry.nodeId);
+                return {kind: mediaKindForNode(item || {}), nodeId: entry.nodeId, label: (item && item.name) || ''};
+            })
+        });
+    });
+    return groups;
+}
+
+function llmListInputs(node){ return llmMediaGroups(node).flatMap(group => group.entries); }
+
+function llmRunButtonLabel(node){
+    const model = novaTableModel();
+    if(model && model.llmOutputMode(node.llmOutputMode) === 'list'){
+        return model.llmRunStageLabel(Boolean(node.running), node.llmRunStage);
+    }
+    return node.running ? tr('canvas.running') : 'Run LLM';
+}
+
+/* PR()：物化 —— LLM 的 list 输出变成一个真正的表格节点。
+   素材 --ref(toPort: input-N)--> 表格；LLM --flow--> 表格。
+   落点按 DX OS l6：源右侧 170px，y 取已有下游的最大值 + 42 避让。 */
+function materializeLlmTable(llmNode, table, groups){
+    const model = novaTableModel();
+    if(!model) return null;
+    const height = Math.max(320, Math.min(model.MAX_NODE_HEIGHT, 38 + table.rows.length * 88));
+    let y = llmNode.y || 0;
+    (connections || []).filter(conn => conn.from === llmNode.id).forEach(conn => {
+        const target = (nodes || []).find(item => item.id === conn.to);
+        if(target) y = Math.max(y, (target.y || 0) + (target.h || 320) + 42);
+    });
+
+    const created = addNode({
+        id: uid('tbl'),
+        type: 'table',
+        x: (llmNode.x || 0) + (llmNode.w || 420) + 170,
+        y,
+        w: 520,
+        h: height,
+        table,
+        tableInputColumn: true,
+        tableInputColumnsDetached: true,
+        tableInputsConnectionDriven: true,
+        tableInputChannelCount: Math.max(1, groups.length),
+        llmGeneratedOutput: true,
+        llmSourceId: llmNode.id,
+        llmRunAt: nowMs()
+    });
+
+    // 每个媒体组连一列；toPort 定位通道，mode 由 ensureTableChannels 按条目数推导
+    groups.forEach((group, index) => {
+        connectNodes(group.sourceId, created.id, model.channelIdAt(index));
+    });
+    connectNodes(llmNode.id, created.id);
+    return created;
 }
 
 function renderTableBody(node){
@@ -9324,7 +9402,11 @@ function renderLLMNodePane(container, node){
             <div class="llm-output llm-result-output">${escapeHtml(node.outputText || tr('canvas.llmOutputEmpty'))}</div>
         </div>
         <div class="gen-run-row mt-2">
-            <button class="llm-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="play" class="w-4 h-4"></i>${node.running ? tr('canvas.running') : 'Run LLM'}</button>
+            <select class="select-lite llm-output-mode" title="LLM 的输出形式">
+                <option value="text">文本输出</option>
+                <option value="list">多维表格</option>
+            </select>
+            <button class="llm-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="play" class="w-4 h-4"></i>${llmRunButtonLabel(node)}</button>
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -9337,6 +9419,19 @@ function renderLLMNodePane(container, node){
     bindScrollableText(container.querySelector('.llm-result-output'));
     container.querySelector('.llm-pane-resizer').onmousedown = e => startLLMPaneResize(e, node);
     container.querySelector('.llm-run').onclick = e => { e.stopPropagation(); runLLMNode(node.id); };
+    const outputModeSelect = container.querySelector('.llm-output-mode');
+    if(outputModeSelect){
+        const listModel = novaTableModel();
+        outputModeSelect.value = listModel ? listModel.llmOutputMode(node.llmOutputMode) : 'text';
+        outputModeSelect.onmousedown = e => e.stopPropagation();
+        outputModeSelect.onclick = e => e.stopPropagation();
+        outputModeSelect.onchange = e => {
+            e.stopPropagation();
+            node.llmOutputMode = e.target.value === 'list' ? 'list' : 'text';
+            scheduleSave();
+            render();
+        };
+    }
     bindCascadeButtons(container, node.id);
     const copyBtn = container.querySelector('.llm-output-copy');
     if(copyBtn){
@@ -14074,25 +14169,30 @@ async function runComfyNode(nodeId, opts={}){
 async function callCanvasLLM(node, message, messages=[], options={}){
     const llmProv = resolveChatProviderId(node.llmProvider || 'comfly');
     const model = resolveChatModel(node.model || node.llmMsModel, llmProv);
-    const images = llmInputImages(node);
-    const videos = llmInputVideos(node);
-    const target = llmDownstreamTarget(node);
+    /* noMedia：多维表格的规划/生成/修复遍必须屏蔽素材。
+       后端 Prompt Intelligence 只要收到 images/videos/reverse 就会**改写 message**，
+       那会把结构化 JSON 提示词毁掉，模型就再也返回不了合法表格。 */
+    const images = options.noMedia ? [] : llmInputImages(node);
+    const videos = options.noMedia ? [] : llmInputVideos(node);
+    const target = options.noMedia ? {target_type:'', target_model:''} : llmDownstreamTarget(node);
+    const body = {
+        message,
+        model,
+        ms_model: llmProv === 'modelscope' ? model : '',
+        provider: llmProv,
+        system_prompt:node.systemPrompt || 'You are a helpful assistant.',
+        messages,
+        images,
+        videos,
+        reverse:options.noMedia ? false : Boolean(node.reverse),
+        target_type:target.target_type,
+        target_model:target.target_model,
+    };
+    if(options.maxTokens) body.max_tokens = Math.max(0, Math.floor(Number(options.maxTokens) || 0));
     const result = await cascadeFetch('/api/canvas-llm', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-            message,
-            model,
-            ms_model: llmProv === 'modelscope' ? model : '',
-            provider: llmProv,
-            system_prompt:node.systemPrompt || 'You are a helpful assistant.',
-            messages,
-            images,
-            videos,
-            reverse:Boolean(node.reverse),
-            target_type:target.target_type,
-            target_model:target.target_model,
-        })
+        body:JSON.stringify(body)
     }, options).then(async r => {
         if(!r.ok){
             throw new Error(await responseErrorMessage(r, 'LLM 运行失败'));
@@ -14122,9 +14222,88 @@ function llmDownstreamTarget(node){
     }
     return {target_type:'', target_model:''};
 }
+/* LLM list 模式：规划 → 生成 → 校验 → 修复重试 → 物化 */
+async function runLLMListMode(node, opts={}){
+    const model = novaTableModel();
+    if(!model) return;
+    const cascadeTargetId = cascadeTargetIdFromOptions(opts);
+    const requirement = llmInputText(node) || node.userInput || '';
+    if(!requirement){
+        if(opts.cascade) throw new Error('LLM 缺少提示词输入');
+        alert(tr('canvas.needPromptToLLM'));
+        return;
+    }
+    const groups = llmMediaGroups(node);
+    const inputs = groups.flatMap(group => group.entries);
+
+    node.running = true;
+    node.runStatus = 'running';
+    node.runError = '';
+    node.llmRunStage = 'planning';
+    refreshNodes([node.id]);
+
+    try {
+        // ① 规划遍：只做规划，不要输出最终 rows。规划失败不致命，直接进生成遍
+        let plan = null;
+        try {
+            const planText = await callCanvasLLM(node, model.buildListPlanPrompt(requirement, inputs), [], {cascadeTargetId, noMedia:true});
+            plan = model.extractJsonObject(planText);
+        } catch(error){
+            plan = null;
+        }
+        node.llmListPlan = plan;
+        scheduleSave();
+
+        // ② 生成遍
+        node.llmRunStage = 'generating';
+        refreshNodes([node.id]);
+        let answer = await callCanvasLLM(node, model.buildListGeneratePrompt(requirement, inputs, plan), [], {cascadeTargetId, noMedia:true});
+
+        // ③ 解析校验 a6；不过就 ④ 带 8192 token 修复重试一次
+        let table = null;
+        try {
+            table = model.parseTableOutput(answer);
+        } catch(error){
+            node.llmRunStage = 'repairing';
+            refreshNodes([node.id]);
+            answer = await callCanvasLLM(node, model.buildRepairPrompt(answer), [], {
+                cascadeTargetId,
+                noMedia: true,
+                maxTokens: model.LLM_REPAIR_MAX_TOKENS
+            });
+            table = model.parseTableOutput(answer);
+        }
+
+        // ⑤ 物化
+        const created = materializeLlmTable(node, table, groups);
+        node.outputText = answer;
+        node.llmRunStage = '';
+        node.running = false;
+        node.runStatus = 'done';
+        refreshNodes([node.id]);
+        if(created) refreshNodes([created.id]);
+        scheduleSave();
+        notifyCanvas('已生成多维表格：' + table.rows.length + ' 行 × ' + table.columns.length + ' 列');
+    } catch(error){
+        node.running = false;
+        node.llmRunStage = '';
+        node.runStatus = 'failed';
+        node.runError = error.message || String(error);
+        refreshNodes([node.id]);
+        scheduleSave();
+        if(opts.cascade) throw error;
+        showErrorModal(node.runError, '多维表格生成失败');
+    }
+}
+
 async function runLLMNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || (node.running && !opts.cascade)) return;
+    // 多维表格输出模式走完全不同的链路（规划 → 生成 → 校验 → 修复 → 物化）
+    const listModel = novaTableModel();
+    if(listModel && listModel.llmOutputMode(node.llmOutputMode) === 'list'){
+        return runLLMListMode(node, opts);
+    }
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
     const input = llmInputText(node) || node.userInput || '';
     if(!input){
