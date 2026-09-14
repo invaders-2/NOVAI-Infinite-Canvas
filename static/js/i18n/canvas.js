@@ -92,6 +92,7 @@
         "canvas.imageCard": { zh: "上传节点", en: "Upload Node" },
         "canvas.imageCardHint": { zh: "支持图片/音频/视频/批量上传", en: "Images, audio, video, batch upload" },
         "canvas.llmNode": { zh: "LLM 节点", en: "LLM Node" },
+        "canvas.tableNode": { zh: "多维表格", en: "Table" },
         "canvas.modelscopeGenerate": { zh: "Modelscope生成", en: "Modelscope Generate" },
         "canvas.comfyGenerate": { zh: "ComfyUI 生成", en: "ComfyUI Generate" },
         "canvas.videoGenerateNode": { zh: "视频生成", en: "Video Generate" },

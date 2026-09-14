@@ -3864,6 +3864,7 @@ function createNodeByType(type, point){
     if(type === 'group') return addGroupNode(point);
 
     if(type === 'llm') return addLLMNode(point);
+    if(type === 'table') return addTableNode(point);
     if(type === 'generator') return addGeneratorNode(point);
     if(type === 'midjourney') return addMidjourneyNode(point);
     if(type === 'minimax') return addMiniMaxNode(point);
@@ -3882,6 +3883,7 @@ function menuAdd(type){
     if(type === 'loop') addLoopNode(menuPoint);
 
     if(type === 'llm') addLLMNode(menuPoint);
+    if(type === 'table') addTableNode(menuPoint);
     if(type === 'generator') addGeneratorNode(menuPoint);
     if(type === 'midjourney') addMidjourneyNode(menuPoint);
     if(type === 'minimax') addMiniMaxNode(menuPoint);
@@ -6436,7 +6438,7 @@ function renderNode(node){
         if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'midjourney' ? 'Midjourney' : node.type === 'minimax' ? 'MiniMax H3' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'table' ? tr('canvas.tableNode') : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'midjourney' ? 'Midjourney' : node.type === 'minimax' ? 'MiniMax H3' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : (node.type === 'group' ? (node.title || title) : title);
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
     const showStatus = ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax','group'].includes(node.type) && node.runStatus
@@ -6601,6 +6603,7 @@ function renderNode(node){
         body.innerHTML = `<div class="text-[11px] text-gray-400">${promptNodes.length} ${tr('canvas.promptCount')} ${tr('canvas.grouped')}</div>`;
     }
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
+    if(node.type === 'table') body.appendChild(renderTableBody(node));
     if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
     if(node.type === 'midjourney') body.appendChild(renderMidjourneyBody(node));
     if(node.type === 'minimax') body.appendChild(renderMiniMaxBody(node));
@@ -6628,8 +6631,8 @@ function renderNode(node){
         if(e.button !== 0 || !isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','midjourney','comfy','ltxDirector','output','llm','msgen','video','rh','minimax'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','midjourney','comfy','ltxDirector','llm','msgen','video','rh','minimax','output'].includes(node.type);
+    const canInput = ['generator','midjourney','comfy','ltxDirector','output','llm','msgen','video','rh','minimax','table'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','midjourney','comfy','ltxDirector','llm','msgen','video','rh','minimax','output','table'].includes(node.type);
     // 端口 = 44px 不可见命中区 + 里面的 .port-dot（24px 外圈 + 加号）。
     // 外圈和加号分别用真实的 border-color / background-color 画，改色才能平滑过渡
     //（之前加号是两条渐变画的，渐变改色是瞬变的，鼠标一碰上就“啪”地变黑）。
@@ -6832,12 +6835,355 @@ function refreshOutputNodeContent(node){
     refreshOutputTimer();
     return true;
 }
+/* ─────────────────────────── 多维表格节点 ───────────────────────────
+   数据模型、尺寸常量与交互模型照搬 DX OS builtin.table（规范见 docs/v2/DXOS_TABLE_SPEC.md），
+   视觉一律使用 marvis-shared.css 的设计令牌。 */
+
+function novaTableModel(){
+    return (typeof NovaTableModel !== 'undefined' && NovaTableModel) ? NovaTableModel : null;
+}
+
+function ensureTableState(node){
+    const model = novaTableModel();
+    if(!model) return null;
+    node.table = model.normalizeTable(node.table || {}).table;
+    return node.table;
+}
+
+function addTableNode(point){
+    const p = point || defaultPoint(0, 0);
+    const model = novaTableModel();
+    return addNode({
+        id: uid('tbl'),
+        type: 'table',
+        x: p.x,
+        y: p.y,
+        table: model ? model.emptyTable() : {kind:'table', version:1, columns:[], rows:[], selectedRows:[], mergedGroups:[]}
+    });
+}
+
+// DX OS 的 nodeSize 只算表格本体，node-body 另有左右各 12px 内边距，这里补回。
+function syncTableNodeWidth(node){
+    const model = novaTableModel();
+    if(!model) return;
+    const state = ensureTableState(node);
+    if(!state) return;
+    const inputColumns = Array.isArray(node.tableInputChannels) ? node.tableInputChannels.length : 0;
+    node.w = model.nodeSize(state, inputColumns).width + 24;
+    const host = document.querySelector('.node[data-id="' + node.id + '"]');
+    if(host) host.style.width = node.w + 'px';
+}
+
+function repaintTable(node){
+    if(typeof node._tablePaint === 'function') node._tablePaint();
+}
+
+function addTableRow(node){
+    const state = ensureTableState(node);
+    if(!state || !state.columns.length) return;
+    node.table = novaTableModel().applyOperation(state, 'append_row', {values: state.columns.map(() => '')});
+    scheduleSave();
+    repaintTable(node);
+}
+
+function addTableColumn(node){
+    const state = ensureTableState(node);
+    if(!state) return;
+    node.table = novaTableModel().applyOperation(state, 'add_column', {title:''});
+    scheduleSave();
+    repaintTable(node);
+}
+
+function deleteTableRow(node, row){
+    const state = ensureTableState(node);
+    if(!state) return;
+    node.table = novaTableModel().applyOperation(state, 'delete_row', {row: row + 1});
+    scheduleSave();
+    repaintTable(node);
+}
+
+function toggleTableRow(node, row, on){
+    const state = ensureTableState(node);
+    if(!state) return;
+    const picked = new Set(state.selectedRows);
+    if(on) picked.add(row); else picked.delete(row);
+    state.selectedRows = Array.from(picked).sort((a, b) => a - b);
+    scheduleSave();
+    repaintTable(node);
+}
+
+function toggleAllTableRows(node, on){
+    const state = ensureTableState(node);
+    if(!state) return;
+    state.selectedRows = on ? state.rows.map((row, index) => index) : [];
+    scheduleSave();
+    repaintTable(node);
+}
+
+// 编辑态挂在 node._tableEdit 上：DOM 原地重绘后自动恢复到编辑中的单元格。
+function beginTableEdit(node, editing){
+    node._tableEdit = editing;
+    repaintTable(node);
+}
+
+function endTableEdit(node){
+    if(!node._tableEdit) return;
+    node._tableEdit = null;
+    repaintTable(node);
+}
+
+function bindTableCellEditor(node, editor, row, column){
+    let settled = false;
+    const finish = commit => {
+        if(settled) return;
+        settled = true;
+        if(commit){
+            const state = ensureTableState(node);
+            if(state && state.rows[row]) state.rows[row][column] = novaTableModel().cellText(editor.value);
+            scheduleSave();
+        }
+        endTableEdit(node);
+    };
+    editor.onblur = () => finish(true);
+    editor.onkeydown = event => {
+        event.stopPropagation();
+        if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
+        else if(event.key === 'Enter' && !event.shiftKey){ event.preventDefault(); finish(true); }
+    };
+    editor.onmousedown = event => event.stopPropagation();
+    editor.onclick = event => event.stopPropagation();
+    editor.ondblclick = event => event.stopPropagation();
+}
+
+function bindTableHeadEditor(node, input, column){
+    let settled = false;
+    const finish = commit => {
+        if(settled) return;
+        settled = true;
+        if(commit){
+            const state = ensureTableState(node);
+            if(state){
+                const model = novaTableModel();
+                const names = state.columns.map((name, index) => index === column ? String(input.value || '') : name);
+                state.columns = model.normalizeColumns(names);
+            }
+            scheduleSave();
+        }
+        endTableEdit(node);
+    };
+    input.onblur = () => finish(true);
+    input.onkeydown = event => {
+        event.stopPropagation();
+        if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
+        else if(event.key === 'Enter'){ event.preventDefault(); finish(true); }
+    };
+    input.onmousedown = event => event.stopPropagation();
+    input.onclick = event => event.stopPropagation();
+    input.ondblclick = event => event.stopPropagation();
+}
+
+function renderTableBody(node){
+    const model = novaTableModel();
+    if(!model){
+        const missing = document.createElement('div');
+        missing.className = 'table-node-missing';
+        missing.textContent = '多维表格模型未加载';
+        return missing;
+    }
+    // 同一节点的表格 DOM 只构建一次，之后靠 node._tablePaint 原地重绘。
+    // 这样双击编辑期间任何触发 render() 的操作都不会重建 DOM、不会丢焦点。
+    if(node._tableEl && node._tablePaint) return node._tableEl;
+
+    const root = document.createElement('div');
+    root.className = 'table-node';
+    // 表格内部不启动节点拖拽（拖拽走标题栏），滚轮滚表格而不是缩放画布。
+    root.addEventListener('mousedown', event => event.stopPropagation(), true);
+    root.addEventListener('wheel', event => event.stopPropagation(), {passive:true});
+
+    const meta = document.createElement('div');
+    meta.className = 'table-node-meta';
+    root.appendChild(meta);
+
+    const grid = document.createElement('div');
+    grid.className = 'table-node-grid';
+    grid.style.maxHeight = (model.MAX_NODE_HEIGHT - 66) + 'px';
+    root.appendChild(grid);
+
+    const table = document.createElement('table');
+    table.className = 'table-node-table';
+    grid.appendChild(table);
+
+    function tableButton(label, title, className){
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = className;
+        button.textContent = label;
+        if(title) button.title = title;
+        return button;
+    }
+
+    function paint(){
+        const state = ensureTableState(node);
+        if(!state) return;
+        const picked = new Set(state.selectedRows);
+        const editing = node._tableEdit || null;
+
+        meta.textContent = '';
+        const counter = document.createElement('span');
+        counter.className = 'table-node-count';
+        counter.textContent = state.columns.length + ' 列 · ' + state.rows.length + ' 行';
+        meta.appendChild(counter);
+        if(picked.size){
+            const chip = document.createElement('span');
+            chip.className = 'table-node-picked';
+            chip.textContent = '已选 ' + picked.size + ' 行';
+            meta.appendChild(chip);
+        }
+        const spacer = document.createElement('span');
+        spacer.className = 'table-node-spacer';
+        meta.appendChild(spacer);
+        const addColumn = tableButton('新增列', '在末尾新增一列', 'table-node-action');
+        addColumn.onclick = () => addTableColumn(node);
+        meta.appendChild(addColumn);
+        const addRow = tableButton('新增行', '在末尾新增一行', 'table-node-action');
+        addRow.onclick = () => addTableRow(node);
+        meta.appendChild(addRow);
+
+        table.textContent = '';
+
+        const colgroup = document.createElement('colgroup');
+        const headColumn = document.createElement('col');
+        headColumn.className = 'table-actions-column';
+        colgroup.appendChild(headColumn);
+        state.columns.forEach(() => {
+            const column = document.createElement('col');
+            column.className = 'table-data-column';
+            colgroup.appendChild(column);
+        });
+        const tailColumn = document.createElement('col');
+        tailColumn.className = 'table-actions-column';
+        colgroup.appendChild(tailColumn);
+        table.appendChild(colgroup);
+
+        const thead = document.createElement('thead');
+        const headRow = document.createElement('tr');
+        const selectCell = document.createElement('th');
+        selectCell.className = 'table-cell table-head-cell table-actions-cell';
+        const selectAll = document.createElement('input');
+        selectAll.type = 'checkbox';
+        selectAll.className = 'table-checkbox';
+        selectAll.title = '全选';
+        selectAll.checked = state.rows.length > 0 && picked.size === state.rows.length;
+        selectAll.onchange = () => toggleAllTableRows(node, selectAll.checked);
+        selectCell.appendChild(selectAll);
+        headRow.appendChild(selectCell);
+
+        state.columns.forEach((name, index) => {
+            const editingHere = Boolean(editing) && editing.kind === 'column' && editing.column === index;
+            const cell = document.createElement('th');
+            cell.className = 'table-cell table-head-cell';
+            cell.title = name;
+            if(editingHere) cell.classList.add('is-editing');
+            const label = document.createElement('span');
+            label.className = 'table-head-label';
+            label.textContent = name;
+            cell.appendChild(label);
+            cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'column', column:index}); };
+            if(editingHere){
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'table-head-editor';
+                input.value = name;
+                cell.appendChild(input);
+                requestAnimationFrame(() => { input.focus(); input.select(); });
+                bindTableHeadEditor(node, input, index);
+            }
+            headRow.appendChild(cell);
+        });
+
+        const tailCell = document.createElement('th');
+        tailCell.className = 'table-cell table-head-cell table-actions-cell';
+        headRow.appendChild(tailCell);
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        if(!state.rows.length){
+            const emptyRow = document.createElement('tr');
+            const emptyCell = document.createElement('td');
+            emptyCell.className = 'table-cell table-empty-cell';
+            emptyCell.colSpan = state.columns.length + 2;
+            emptyCell.textContent = state.columns.length ? '暂无数据，点「新增行」开始填写' : '点「新增列」开始建表';
+            emptyRow.appendChild(emptyCell);
+            tbody.appendChild(emptyRow);
+        }
+
+        state.rows.forEach((row, rowIndex) => {
+            const tr = document.createElement('tr');
+            tr.dataset.row = String(rowIndex);
+            tr.style.height = model.rowHeight(row, {hasMedia:false}) + 'px';
+            if(picked.has(rowIndex)) tr.classList.add('is-selected');
+
+            const pickCell = document.createElement('td');
+            pickCell.className = 'table-cell table-actions-cell';
+            const pick = document.createElement('input');
+            pick.type = 'checkbox';
+            pick.className = 'table-checkbox';
+            pick.checked = picked.has(rowIndex);
+            pick.onchange = () => toggleTableRow(node, rowIndex, pick.checked);
+            pickCell.appendChild(pick);
+            tr.appendChild(pickCell);
+
+            state.columns.forEach((name, columnIndex) => {
+                const cell = document.createElement('td');
+                cell.className = 'table-cell';
+                const value = model.cellText(row[columnIndex]);
+                const view = document.createElement('div');
+                view.className = 'table-cell-view';
+                view.textContent = value;
+                if(!value) view.classList.add('is-empty');
+                cell.appendChild(view);
+                cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'cell', row:rowIndex, column:columnIndex}); };
+                if(editing && editing.kind === 'cell' && editing.row === rowIndex && editing.column === columnIndex){
+                    cell.classList.add('is-editing');
+                    const editor = document.createElement('textarea');
+                    editor.className = 'table-cell-editor';
+                    editor.value = value;
+                    cell.appendChild(editor);
+                    requestAnimationFrame(() => { editor.focus(); editor.select(); });
+                    bindTableCellEditor(node, editor, rowIndex, columnIndex);
+                }
+                tr.appendChild(cell);
+            });
+
+            const actionCell = document.createElement('td');
+            actionCell.className = 'table-cell table-actions-cell';
+            const removeRow = tableButton('\u00d7', '删除这一行', 'table-row-delete');
+            removeRow.onclick = event => { event.stopPropagation(); deleteTableRow(node, rowIndex); };
+            actionCell.appendChild(removeRow);
+            tr.appendChild(actionCell);
+
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+
+        if(typeof requestAnimationFrame === 'function') requestAnimationFrame(() => syncTableNodeWidth(node));
+        else syncTableNodeWidth(node);
+    }
+
+    node._tableEl = root;
+    node._tablePaint = paint;
+    paint();
+    return root;
+}
+
 function defaultNodeSize(type){
     if(type === 'image') return {w:260, h:336};
     if(type === 'prompt') return {w:310, h:0};
     if(type === 'loop') return {w:336, h:0};
 
     if(type === 'llm') return {w:420, h:590};
+    if(type === 'table') return {w:310, h:0};
     if(type === 'generator') return {w:380, h:0};
     if(type === 'midjourney') return {w:380, h:0};
     if(type === 'minimax') return {w:980, h:720};

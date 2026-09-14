@@ -11,15 +11,17 @@
     <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789114960">
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.115.1789114960">
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
+    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.115.1789405172">
     <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.115.1789114960"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.115.1789114960"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.115.1789405284"></script>
     <script src="/static/js/theme.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/shared/utils.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/shared/media.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/shared/viewport.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/shared/workflow-utils.js?v=1.0.115.1789404714"></script>
-    <script src="/static/js/shared/node-registry.js?v=1.0.115.1789404691"></script>
+    <script src="/static/js/shared/node-registry.js?v=1.0.115.1789405153"></script>
+    <script src="/static/js/shared/table-model.js?v=1.0.115.1789404981"></script>
     <script defer src="/static/js/touch-mouse.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/i18n.js?v=1.0.115.1789114960"></script>
 <style>
@@ -232,6 +234,7 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                 <button class="menu-btn" onclick="menuAdd('prompt')"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
                 <button class="menu-btn" onclick="menuAdd('loop')"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loopNode">循环节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
+                <button class="menu-btn" onclick="menuAdd('table')"><i data-icon="table" class="w-4 h-4"></i><span data-i18n="canvas.tableNode">多维表格</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('msgen')"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.modelscopeGenerate">Modelscope生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
@@ -526,6 +529,6 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
     <script defer src="/static/js/ltx-director-timeline.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/vendor/js/glfx.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/js/image-adjust-editor.js?v=1.0.115.1789114960"></script>
-    <script defer src="/static/js/canvas.js?v=1.0.115.1789404680"></script>
+    <script defer src="/static/js/canvas.js?v=1.0.115.1789405165"></script>
 </body>
 </html>
