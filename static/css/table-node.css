@@ -227,3 +227,97 @@
     text-align: center;
     vertical-align: middle;
 }
+
+/* ═══ 输入列（DX OS §3：.table-input-column 112px / .table-media-cell）═══ */
+
+.table-node-table col.table-input-column { width: 112px; }
+
+.table-input-head {
+    padding: 0 6px;
+    color: var(--text-2);
+    white-space: nowrap;
+}
+
+.table-input-label {
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.table-input-mode {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-3);
+    font-family: inherit;
+    font-size: 9px;
+    line-height: 14px;
+    vertical-align: middle;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+}
+
+.table-input-mode:hover {
+    background: var(--nav-hover-bg);
+    color: var(--text);
+}
+
+.table-input-count {
+    margin-left: 3px;
+    color: var(--text-3);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 空输入格淡一档，让「这里可以接素材」看得出来 */
+.table-node-table td.table-media-cell.is-empty { background: var(--surface-2); }
+
+.table-node-table td.table-media-cell {
+    padding: 3px;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.table-media-thumb {
+    width: 100%;
+    max-height: 60px;
+    overflow: hidden;
+    border-radius: 5px;
+    background: var(--surface-2);
+}
+
+.table-media-thumb img,
+.table-media-thumb video {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 60px;
+    object-fit: cover;
+}
+
+.table-media-text {
+    display: block;
+    padding: 3px 4px;
+    color: var(--text-2);
+    font-size: 10px;
+    line-height: 13px;
+    text-align: left;
+    word-break: break-word;
+}
+
+.table-media-missing {
+    color: var(--danger);
+    font-size: 10px;
+}
+
+/* 操作列：选择 + 删行，得挤进 44px */
+.table-node-table th.table-actions-cell,
+.table-node-table td.table-actions-cell { padding: 0 3px; }
+
+.table-node-inputs { color: var(--text-3); }
+
+/* 选择框和删行按钮必须待在同一行 */
+.table-row-actions { white-space: nowrap; }
+

@@ -176,7 +176,7 @@
             const c = columnIndex(next, args);
             next.columns.splice(c, 1);
             next.rows.forEach(row => row.splice(c, 1));
-            next.selectedRows = next.selectedRows.filter(i => i < next.columns.length);
+            // 删列不改变行数，行选中状态原样保留
             return next;
         }
         throw new Error('表格节点不支持操作：' + opId);
@@ -212,6 +212,105 @@
         };
     }
 
+    /* ── 输入列（DX OS §3：XS / Co / ab）────────────────────────────
+       通道 = 一整列，表头「输入 N」，单元格是上游素材缩略图。
+       items 里的 mode 决定逐行怎么取：
+         sequence → items[row]                （逐行对应，超出为 null）
+         其他     → items[min(row, len-1)]    （按行取，超出后沿用最后一个） */
+    const INPUT_CHANNEL_PREFIX = 'input-';
+    const MENTION_LABELS = {image:'图片', video:'视频', audio:'音频', file:'文件'};
+
+    function channelIdAt(index){ return INPUT_CHANNEL_PREFIX + (Math.max(0, Number(index) || 0) + 1); }
+
+    function channelIndexFromId(channelId){
+        const matched = /^input-(\d+)$/.exec(String(channelId || ''));
+        if(!matched) return -1;
+        const ordinal = Number(matched[1]);
+        return Number.isInteger(ordinal) && ordinal >= 1 ? ordinal - 1 : -1;
+    }
+
+    // DX OS: refs.length > 1 ? "sequence" : "shared"
+    function channelModeFor(refs){
+        return (Array.isArray(refs) ? refs.length : 0) > 1 ? 'sequence' : 'shared';
+    }
+
+    function channelLabel(index){ return '输入 ' + (Math.max(0, Number(index) || 0) + 1); }
+
+    function normalizeChannels(raw){
+        const list = Array.isArray(raw) ? raw : [];
+        return list.slice(0, MAX_COLUMNS).map((channel, index) => {
+            const source = channel && typeof channel === 'object' ? channel : {};
+            const items = (Array.isArray(source.items) ? source.items : []).slice(0, MAX_ROWS).map(entry => {
+                const item = entry && typeof entry === 'object' ? entry : {};
+                return {
+                    type: item.type === 'text' ? 'text' : 'media',
+                    nodeId: item.nodeId ? String(item.nodeId) : '',
+                    text: cellText(item.text)
+                };
+            }).filter(item => item.nodeId || item.text.trim());
+            return {
+                id: String(source.id || channelIdAt(index)),
+                mode: source.mode === 'sequence' ? 'sequence' : 'shared',
+                items
+            };
+        });
+    }
+
+    // ab(t, ch, row)
+    function inputItemAt(channel, row){
+        const items = Array.isArray(channel?.items) ? channel.items : [];
+        if(!items.length) return null;
+        const index = Math.max(0, Number(row) || 0);
+        if(channel.mode === 'sequence') return items[index] || null;
+        return items[Math.min(index, items.length - 1)] || null;
+    }
+
+    // Xw(t, row, i)：行高要把输入列的文本值一起算进去，有媒体时下限抬到 144
+    function rowHeightForRow(dataValues, inputTexts, hasMedia){
+        return rowHeight([...(dataValues || []), ...(inputTexts || [])], {
+            hasMedia: Boolean(hasMedia),
+            mediaMinHeight: 144,
+            maxHeight: 160
+        });
+    }
+
+    /* ── 提示词（DX OS §4：L7 / jf）─────────────────────────────────
+       引用不是 {列名} 占位符，而是 @图片1 / @视频2 / @音频3 / @文件4
+       这种 mention（序号是全部引用里的全局序号）。表格行的值是**追加**
+       进去的，不是替换。 */
+    const MENTION_RE = /@(图片|视频|音频|文件)(\d+)/g;
+
+    function mentionLabel(kind){ return MENTION_LABELS[String(kind || '')] || MENTION_LABELS.file; }
+
+    function mentionTokenAt(kind, ordinal){ return '@' + mentionLabel(kind) + Math.max(1, Number(ordinal) || 1); }
+
+    function mentionsIn(prompt){
+        const out = [];
+        String(prompt || '').replace(MENTION_RE, (token, label, digits) => {
+            out.push({token, label, ordinal: Number(digits), index: Number(digits) - 1});
+            return token;
+        });
+        return out;
+    }
+
+    // 引用了不存在、或类型对不上的输入时要报出来，不能静默发出去
+    function danglingMentions(prompt, references){
+        const refs = Array.isArray(references) ? references : [];
+        return mentionsIn(prompt).filter(mention => {
+            const ref = refs[mention.index];
+            return !ref || mentionLabel(ref.kind) !== mention.label;
+        });
+    }
+
+    // jf(t, inputs, rowText) = 上游文本节点 + 节点自己的提示词 + 该行文本，\n 连接
+    function buildRowPrompt(upstreamTexts, nodePrompt, rowText){
+        return [
+            ...(Array.isArray(upstreamTexts) ? upstreamTexts : []).map(text => String(text || '').trim()),
+            String(nodePrompt || '').trim(),
+            String(rowText || '').trim()
+        ].filter(Boolean).join('\n');
+    }
+
     function describeOperation(operationId){
         const op = TABLE_OPERATIONS[String(operationId || '')];
         return op ? JSON.parse(JSON.stringify(op)) : null;
@@ -230,7 +329,10 @@
         TABLE_KIND, TABLE_VERSION,
         MAX_COLUMNS, MAX_ROWS, MAX_CELL_CHARS, LLM_MAX_COLUMNS, LLM_MAX_ROWS,
         COLUMN_WIDTH, RESERVED_WIDTH, HEADER_HEIGHT, MAX_NODE_HEIGHT, EMPTY_MIN_HEIGHT, INPUT_COLUMN_WIDTH,
+        INPUT_CHANNEL_PREFIX, MENTION_LABELS, MENTION_RE,
         UNNAMED_COLUMN, TABLE_OPERATIONS, OPERATION_IDS,
+        channelIdAt, channelIndexFromId, channelModeFor, channelLabel, normalizeChannels, inputItemAt,
+        rowHeightForRow, mentionLabel, mentionTokenAt, mentionsIn, danglingMentions, buildRowPrompt,
         emptyTable, cellText, normalizeColumns, normalizeTable, cloneTable,
         toIndex, columnIndex, rowIndex, applyOperation,
         rowHeight, nodeSize, describeOperation, requiresConfirmation,

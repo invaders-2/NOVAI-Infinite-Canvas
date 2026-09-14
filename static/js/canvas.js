@@ -6982,6 +6982,193 @@ function bindTableHeadEditor(node, input, column){
     input.ondblclick = event => event.stopPropagation();
 }
 
+/* ───────────────────── 表格输入列（DX OS §3/§4）───────────────────── */
+
+function tableIncomingConnections(node){
+    return (connections || []).filter(conn => conn && conn.to === node.id);
+}
+
+/* 上游来源是不是「素材」。DX OS 里输入列只放 media（XS 一律 type:"media"），
+   文本节点走 Ip(t) 参与提示词 —— 两者不能重复计入。
+   用节点注册表判定，它是节点类型的单一事实来源。 */
+function tableSourceIsMedia(source){
+    const registry = (typeof NovaNodeRegistry !== 'undefined' && NovaNodeRegistry) ? NovaNodeRegistry : null;
+    if(registry && typeof registry.supports === 'function'){
+        return Boolean(registry.supports(source, 'image') || registry.supports(source, 'video'));
+    }
+    return Boolean(source && source.url);
+}
+
+// 上游连来的纯文本（DX OS: Ip(t)）
+function tableUpstreamTexts(node){
+    return tableIncomingConnections(node)
+        .map(conn => (nodes || []).find(item => item.id === conn.from))
+        .filter(source => source && !tableSourceIsMedia(source) && typeof source.text === 'string')
+        .map(source => source.text.trim())
+        .filter(Boolean);
+}
+
+// 该通道该行落到哪个素材上（DX OS: wl / Od）
+function tableInputEntryAt(node, channel, row, nodeById){
+    const model = novaTableModel();
+    if(!model) return null;
+    const item = model.inputItemAt(channel, row);
+    if(!item) return null;
+    if(item.type === 'text') return item.text ? {kind:'text', text:item.text, nodeId:''} : null;
+    const source = item.nodeId
+        ? (nodeById ? nodeById.get(item.nodeId) : (nodes || []).find(entry => entry.id === item.nodeId))
+        : null;
+    if(!source) return null;
+    if(source.url) return {kind: mediaKindForNode(source), url: source.url, nodeId: source.id, node: source};
+    if(source.text) return {kind:'text', text: source.text, nodeId: source.id, node: source};
+    return null;
+}
+
+/* Co(t)：通道从入边推导（连线用 toPort 定位通道，没有 toPort 的落到第一通道）。
+   tableInputChannelCount 让用户手动多开几列当放置目标。 */
+function ensureTableChannels(node){
+    const model = novaTableModel();
+    if(!model) return [];
+    const buckets = new Map();
+    tableIncomingConnections(node).forEach(conn => {
+        const source = (nodes || []).find(item => item.id === conn.from);
+        if(!tableSourceIsMedia(source)) return;   // 文本节点不进输入列
+        const index = model.channelIndexFromId(conn.toPort);
+        const key = index >= 0 ? index : 0;
+        if(!buckets.has(key)) buckets.set(key, []);
+        if(!buckets.get(key).includes(conn.from)) buckets.get(key).push(conn.from);
+    });
+    const declared = Math.max(0, Number(node.tableInputChannelCount) || 0);
+    const highest = buckets.size ? Math.max.apply(null, Array.from(buckets.keys())) + 1 : 0;
+    const count = Math.max(1, declared, highest);
+    const manualModes = node.tableInputChannelModes && typeof node.tableInputChannelModes === 'object' ? node.tableInputChannelModes : {};
+    const channels = [];
+    for(let index = 0; index < count; index += 1){
+        const id = model.channelIdAt(index);
+        const items = (buckets.get(index) || []).map(nodeId => ({type:'media', nodeId}));
+        const manual = manualModes[id];
+        channels.push({
+            id,
+            mode: manual === 'sequence' || manual === 'shared' ? manual : model.channelModeFor(items),
+            items
+        });
+    }
+    node.tableInputChannels = channels;
+    return channels;
+}
+
+/* Pu(t)：逐行汇总。一次算完该行的输入媒体/文本 + 数据列值 + 组装后的提示词，
+   就是批量执行直接要吃的形态。entries[i] 对应第 i 个输入通道。 */
+function tableRowInputs(node, options={}){
+    const model = novaTableModel();
+    const state = ensureTableState(node);
+    if(!model || !state) return [];
+    const nodeById = options.nodeById || new Map((nodes || []).map(item => [item.id, item]));
+    const channels = ensureTableChannels(node);
+    const upstreamTexts = tableUpstreamTexts(node);
+    return state.rows.map((row, rowIndex) => {
+        const entries = channels.map(channel => tableInputEntryAt(node, channel, rowIndex, nodeById));
+        const media = [];
+        const texts = [];
+        const references = [];
+        entries.forEach(entry => {
+            if(!entry) return;
+            if(entry.kind === 'text'){
+                if(String(entry.text || '').trim()) texts.push(String(entry.text).trim());
+                return;
+            }
+            media.push(entry);
+            references.push({kind: entry.kind, nodeId: entry.nodeId});
+        });
+        const rowText = model.buildRowPrompt(texts, '', state.columns
+            .map((name, columnIndex) => model.cellText(row[columnIndex]))
+            .filter(value => value.trim()).join('\n'));
+        return {
+            rowNumber: rowIndex + 1,
+            entries,
+            media,
+            text: rowText,
+            references,
+            prompt: model.buildRowPrompt(upstreamTexts, node.tablePrompt || '', rowText)
+        };
+    });
+}
+
+function tableChannelModeLabel(mode){ return mode === 'sequence' ? '逐行' : '共享'; }
+
+function toggleTableChannelMode(node, channelIndex){
+    const channels = ensureTableChannels(node);
+    const channel = channels[channelIndex];
+    if(!channel) return;
+    const modes = node.tableInputChannelModes && typeof node.tableInputChannelModes === 'object' ? node.tableInputChannelModes : {};
+    modes[channel.id] = channel.mode === 'sequence' ? 'shared' : 'sequence';
+    node.tableInputChannelModes = modes;
+    scheduleSave();
+    repaintTable(node);
+}
+
+function addTableInputChannel(node){
+    node.tableInputChannelCount = ensureTableChannels(node).length + 1;
+    scheduleSave();
+    repaintTable(node);
+}
+
+// 落在表格某个输入列上松手 → 把这条连线绑到那一列（DX OS 的 toPort）
+function tableDropPortFor(hitEl, targetId){
+    const target = (nodes || []).find(item => item.id === targetId);
+    if(!target || target.type !== 'table') return '';
+    const cell = hitEl && hitEl.closest ? hitEl.closest('.table-media-cell') : null;
+    return cell && cell.dataset.channel ? cell.dataset.channel : '';
+}
+
+function connectNodes(fromId, toId, toPort){
+    const port = toPort || '';
+    if((connections || []).some(conn => conn.from === fromId && conn.to === toId && String(conn.toPort || '') === port)) return false;
+    pushUndo();
+    const conn = {id:uid('c'), from:fromId, to:toId};
+    if(port) conn.toPort = port;
+    connections.push(conn);
+    return true;
+}
+
+// 重绘签名：入边 / 通道数 / 行列数变了才重建表格内容
+function tableNodeSignature(node){
+    const state = ensureTableState(node);
+    if(!state) return '';
+    const incoming = tableIncomingConnections(node)
+        .map(conn => conn.from + '>' + String(conn.toPort || ''))
+        .sort().join(',');
+    return [incoming, ensureTableChannels(node).length, state.columns.length, state.rows.length].join('|');
+}
+
+// 输入列单元格（DX OS: .table-media-cell）
+function fillTableMediaCell(cell, entry){
+    if(!entry){
+        cell.classList.add('is-empty');
+        return;
+    }
+    if(entry.kind === 'text'){
+        const text = document.createElement('span');
+        text.className = 'table-media-text';
+        text.textContent = entry.text;
+        cell.appendChild(text);
+        return;
+    }
+    if(isMissingAssetUrl(entry.url)){
+        const missing = document.createElement('span');
+        missing.className = 'table-media-missing';
+        missing.textContent = '文件缺失';
+        cell.appendChild(missing);
+        return;
+    }
+    const thumb = document.createElement('div');
+    thumb.className = 'table-media-thumb';
+    if(entry.kind === 'video') thumb.innerHTML = canvasVideoPreviewHtml(entry.url, 256, 'draggable="false"');
+    else if(entry.kind === 'audio') thumb.textContent = '音频';
+    else thumb.innerHTML = canvasPreviewImgHtml(entry.url, 256, 'draggable="false"');
+    cell.appendChild(thumb);
+}
+
 function renderTableBody(node){
     const model = novaTableModel();
     if(!model){
@@ -6990,9 +7177,12 @@ function renderTableBody(node){
         missing.textContent = '多维表格模型未加载';
         return missing;
     }
-    // 同一节点的表格 DOM 只构建一次，之后靠 node._tablePaint 原地重绘。
+    // 同一节点的表格 DOM 只构建一次，之后原地重绘。
     // 这样双击编辑期间任何触发 render() 的操作都不会重建 DOM、不会丢焦点。
-    if(node._tableEl && node._tablePaint) return node._tableEl;
+    if(node._tableEl && node._tablePaint){
+        if(tableNodeSignature(node) !== node._tableSignature) node._tablePaint();
+        return node._tableEl;
+    }
 
     const root = document.createElement('div');
     root.className = 'table-node';
@@ -7025,14 +7215,22 @@ function renderTableBody(node){
     function paint(){
         const state = ensureTableState(node);
         if(!state) return;
+        const nodeById = new Map((nodes || []).map(item => [item.id, item]));
+        const channels = ensureTableChannels(node);
+        const rowData = tableRowInputs(node, {nodeById});
         const picked = new Set(state.selectedRows);
         const editing = node._tableEdit || null;
 
+        // ── 信息条 ──
         meta.textContent = '';
         const counter = document.createElement('span');
         counter.className = 'table-node-count';
         counter.textContent = state.columns.length + ' 列 · ' + state.rows.length + ' 行';
         meta.appendChild(counter);
+        const inputs = document.createElement('span');
+        inputs.className = 'table-node-inputs';
+        inputs.textContent = channels.length + ' 个输入';
+        meta.appendChild(inputs);
         if(picked.size){
             const chip = document.createElement('span');
             chip.className = 'table-node-picked';
@@ -7042,6 +7240,9 @@ function renderTableBody(node){
         const spacer = document.createElement('span');
         spacer.className = 'table-node-spacer';
         meta.appendChild(spacer);
+        const addInput = tableButton('+ 输入列', '多开一列输入，可把连线拖到那一列上', 'table-node-action');
+        addInput.onclick = () => addTableInputChannel(node);
+        meta.appendChild(addInput);
         const addColumn = tableButton('新增列', '在末尾新增一列', 'table-node-action');
         addColumn.onclick = () => addTableColumn(node);
         meta.appendChild(addColumn);
@@ -7051,32 +7252,50 @@ function renderTableBody(node){
 
         table.textContent = '';
 
+        // ── colgroup：输入列(112) → 数据列(132) → 操作列(44) ──
         const colgroup = document.createElement('colgroup');
-        const headColumn = document.createElement('col');
-        headColumn.className = 'table-actions-column';
-        colgroup.appendChild(headColumn);
+        channels.forEach(() => {
+            const column = document.createElement('col');
+            column.className = 'table-input-column';
+            colgroup.appendChild(column);
+        });
         state.columns.forEach(() => {
             const column = document.createElement('col');
             column.className = 'table-data-column';
             colgroup.appendChild(column);
         });
-        const tailColumn = document.createElement('col');
-        tailColumn.className = 'table-actions-column';
-        colgroup.appendChild(tailColumn);
+        const actionColumn = document.createElement('col');
+        actionColumn.className = 'table-actions-column';
+        colgroup.appendChild(actionColumn);
         table.appendChild(colgroup);
 
+        // ── 表头 ──
         const thead = document.createElement('thead');
         const headRow = document.createElement('tr');
-        const selectCell = document.createElement('th');
-        selectCell.className = 'table-cell table-head-cell table-actions-cell';
-        const selectAll = document.createElement('input');
-        selectAll.type = 'checkbox';
-        selectAll.className = 'table-checkbox';
-        selectAll.title = '全选';
-        selectAll.checked = state.rows.length > 0 && picked.size === state.rows.length;
-        selectAll.onchange = () => toggleAllTableRows(node, selectAll.checked);
-        selectCell.appendChild(selectAll);
-        headRow.appendChild(selectCell);
+
+        channels.forEach((channel, index) => {
+            const cell = document.createElement('th');
+            cell.className = 'table-cell table-head-cell table-input-head';
+            cell.dataset.channel = channel.id;
+            cell.title = channel.mode === 'sequence'
+                ? '逐行对应：第 N 行取第 N 个输入，超出为空'
+                : '按行取，超出后沿用最后一个输入';
+            const label = document.createElement('span');
+            label.className = 'table-input-label';
+            label.textContent = model.channelLabel(index);
+            cell.appendChild(label);
+            const mode = document.createElement('button');
+            mode.type = 'button';
+            mode.className = 'table-input-mode';
+            mode.textContent = tableChannelModeLabel(channel.mode);
+            mode.onclick = event => { event.stopPropagation(); toggleTableChannelMode(node, index); };
+            cell.appendChild(mode);
+            const count = document.createElement('small');
+            count.className = 'table-input-count';
+            count.textContent = String(channel.items.length);
+            cell.appendChild(count);
+            headRow.appendChild(cell);
+        });
 
         state.columns.forEach((name, index) => {
             const editingHere = Boolean(editing) && editing.kind === 'column' && editing.column === index;
@@ -7101,63 +7320,86 @@ function renderTableBody(node){
             headRow.appendChild(cell);
         });
 
-        const tailCell = document.createElement('th');
-        tailCell.className = 'table-cell table-head-cell table-actions-cell';
-        headRow.appendChild(tailCell);
+        const actionHead = document.createElement('th');
+        actionHead.className = 'table-cell table-head-cell table-actions-cell';
+        const selectAll = document.createElement('input');
+        selectAll.type = 'checkbox';
+        selectAll.className = 'table-checkbox';
+        selectAll.title = '全选';
+        selectAll.checked = state.rows.length > 0 && picked.size === state.rows.length;
+        selectAll.onchange = () => toggleAllTableRows(node, selectAll.checked);
+        actionHead.appendChild(selectAll);
+        headRow.appendChild(actionHead);
+
         thead.appendChild(headRow);
         table.appendChild(thead);
 
+        // ── 表体 ──
         const tbody = document.createElement('tbody');
         if(!state.rows.length){
             const emptyRow = document.createElement('tr');
             const emptyCell = document.createElement('td');
             emptyCell.className = 'table-cell table-empty-cell';
-            emptyCell.colSpan = state.columns.length + 2;
+            emptyCell.colSpan = channels.length + state.columns.length + 1;
             emptyCell.textContent = state.columns.length ? '暂无数据，点「新增行」开始填写' : '点「新增列」开始建表';
             emptyRow.appendChild(emptyCell);
             tbody.appendChild(emptyRow);
         }
 
         state.rows.forEach((row, rowIndex) => {
+            const data = rowData[rowIndex] || {entries:[], media:[], text:'', prompt:''};
+            const entries = data.entries || [];
             const tr = document.createElement('tr');
             tr.dataset.row = String(rowIndex);
-            tr.style.height = model.rowHeight(row, {hasMedia:false}) + 'px';
             if(picked.has(rowIndex)) tr.classList.add('is-selected');
+            // 该行组装后真正会发出去的提示词，挂在 title 上方便核对
+            if(data.prompt) tr.title = data.prompt;
+            const dataValues = state.columns.map((name, index) => model.cellText(row[index]));
+            const inputTexts = entries.filter(entry => entry && entry.kind === 'text').map(entry => entry.text);
+            const hasMedia = entries.some(entry => entry && entry.kind && entry.kind !== 'text');
+            tr.style.height = model.rowHeightForRow(dataValues, inputTexts, hasMedia) + 'px';
 
-            const pickCell = document.createElement('td');
-            pickCell.className = 'table-cell table-actions-cell';
-            const pick = document.createElement('input');
-            pick.type = 'checkbox';
-            pick.className = 'table-checkbox';
-            pick.checked = picked.has(rowIndex);
-            pick.onchange = () => toggleTableRow(node, rowIndex, pick.checked);
-            pickCell.appendChild(pick);
-            tr.appendChild(pickCell);
+            // 输入列单元格：这一列就是连线的放置目标（data-channel 供 toPort 落点识别）
+            channels.forEach((channel, index) => {
+                const cell = document.createElement('td');
+                cell.className = 'table-cell table-media-cell';
+                cell.dataset.channel = channel.id;
+                fillTableMediaCell(cell, entries[index] || null);
+                tr.appendChild(cell);
+            });
 
-            state.columns.forEach((name, columnIndex) => {
+            // 数据列单元格
+            state.columns.forEach((name, index) => {
                 const cell = document.createElement('td');
                 cell.className = 'table-cell';
-                const value = model.cellText(row[columnIndex]);
+                const value = model.cellText(row[index]);
                 const view = document.createElement('div');
                 view.className = 'table-cell-view';
                 view.textContent = value;
                 if(!value) view.classList.add('is-empty');
                 cell.appendChild(view);
-                cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'cell', row:rowIndex, column:columnIndex}); };
-                if(editing && editing.kind === 'cell' && editing.row === rowIndex && editing.column === columnIndex){
+                cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'cell', row:rowIndex, column:index}); };
+                if(editing && editing.kind === 'cell' && editing.row === rowIndex && editing.column === index){
                     cell.classList.add('is-editing');
                     const editor = document.createElement('textarea');
                     editor.className = 'table-cell-editor';
                     editor.value = value;
                     cell.appendChild(editor);
                     requestAnimationFrame(() => { editor.focus(); editor.select(); });
-                    bindTableCellEditor(node, editor, rowIndex, columnIndex);
+                    bindTableCellEditor(node, editor, rowIndex, index);
                 }
                 tr.appendChild(cell);
             });
 
+            // 操作列：选择 + 删行
             const actionCell = document.createElement('td');
-            actionCell.className = 'table-cell table-actions-cell';
+            actionCell.className = 'table-cell table-actions-cell table-row-actions';
+            const pick = document.createElement('input');
+            pick.type = 'checkbox';
+            pick.className = 'table-checkbox';
+            pick.checked = picked.has(rowIndex);
+            pick.onchange = () => toggleTableRow(node, rowIndex, pick.checked);
+            actionCell.appendChild(pick);
             const removeRow = tableButton('\u00d7', '删除这一行', 'table-row-delete');
             removeRow.onclick = event => { event.stopPropagation(); deleteTableRow(node, rowIndex); };
             actionCell.appendChild(removeRow);
@@ -7167,6 +7409,7 @@ function renderTableBody(node){
         });
         table.appendChild(tbody);
 
+        node._tableSignature = tableNodeSignature(node);
         if(typeof requestAnimationFrame === 'function') requestAnimationFrame(() => syncTableNodeWidth(node));
         else syncTableNodeWidth(node);
     }
@@ -7176,7 +7419,6 @@ function renderTableBody(node){
     paint();
     return root;
 }
-
 function defaultNodeSize(type){
     if(type === 'image') return {w:260, h:336};
     if(type === 'prompt') return {w:310, h:0};
@@ -16232,7 +16474,7 @@ function startLink(e, originId, originKind){
             const fromId = originKind === 'out' ? originId : targetId;
             const toId = originKind === 'out' ? targetId : originId;
             if(canConnect(fromId, toId)){
-                if(!connections.some(c => c.from === fromId && c.to === toId)){ pushUndo(); connections.push({id:uid('c'), from:fromId, to:toId}); syncLatestGeneratedOutputToConnection(fromId, toId); }
+                if(connectNodes(fromId, toId, tableDropPortFor(hitEl, toId))) syncLatestGeneratedOutputToConnection(fromId, toId);
                 syncGeneratorInputs();
                 scheduleSave();
                 render();
@@ -16245,7 +16487,7 @@ function startLink(e, originId, originKind){
                 const fromId = originKind === 'out' ? originId : bodyNode.dataset.id;
                 const toId = originKind === 'out' ? bodyNode.dataset.id : originId;
                 if(canConnect(fromId, toId) && bodyNode.querySelector(`> .port.${targetKind}`)){
-                    if(!connections.some(c => c.from === fromId && c.to === toId)){ pushUndo(); connections.push({id:uid('c'), from:fromId, to:toId}); syncLatestGeneratedOutputToConnection(fromId, toId); }
+                    if(connectNodes(fromId, toId, tableDropPortFor(hitEl, toId))) syncLatestGeneratedOutputToConnection(fromId, toId);
                     syncGeneratorInputs();
                     scheduleSave();
                     render();
@@ -16336,6 +16578,8 @@ function canConnect(fromId, toId){
     }
 
     if(to.type === 'llm') return ['prompt','loop','promptGroup','llm','image','group','output'].includes(from.type);
+    // 表格吃上游素材/文本当输入列（DX OS: t.inputs → 输入通道）
+    if(to.type === 'table') return ['image','prompt','loop','promptGroup','llm','group','output'].includes(from.type);
     if(from.type === 'llm') return CANVAS_GENERATOR_TYPES.includes(to.type);
     return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm'].includes(from.type);
 }

@@ -98,6 +98,72 @@ eq(M.nodeSize(M.normalizeTable({columns:['a','b'],rows:[]}).table,0).width, 310,
 eq(M.nodeSize(M.normalizeTable({columns:['a'],rows:[]}).table,2).width, 442, '输入列计入宽度 (1+2)*132+44+2');
 eq(M.nodeSize(M.emptyTable(),0).height, 38+44+2, '空表高 = 38+44+2');
 
+
+// ═══ 输入列（DX OS §3：Co / ab / 通道） ═══
+eq(M.channelIdAt(0), 'input-1', '通道 id 从 1 开始');
+eq(M.channelIdAt(2), 'input-3', '通道 id');
+eq(M.channelIndexFromId('input-3'), 2, 'id → 序号');
+eq(M.channelIndexFromId('input-0'), -1, 'input-0 非法');
+eq(M.channelIndexFromId('nope'), -1, '非法 id');
+eq(M.channelLabel(0), '输入 1', '通道表头文案');
+eq(M.channelModeFor([]), 'shared', '0 个引用 → 共享');
+eq(M.channelModeFor([1]), 'shared', '1 个引用 → 共享');
+eq(M.channelModeFor([1, 2]), 'sequence', '>1 个引用 → 逐行（DX OS: refs.length > 1）');
+
+eq(M.normalizeChannels(null), [], '非数组 → 空');
+eq(M.normalizeChannels([{items:[{type:'media', nodeId:'a'}, {nodeId:''}, {type:'text', text:'  '}]}]),
+   [{id:'input-1', mode:'shared', items:[{type:'media', nodeId:'a', text:''}]}], '过滤空 item + 默认值');
+eq(M.normalizeChannels([{id:'x', mode:'逐行', items:[]}])[0], {id:'x', mode:'shared', items:[]}, '非法 mode 归一到 shared');
+
+{
+  const seq = {id:'input-1', mode:'sequence', items:[{nodeId:'a'},{nodeId:'b'},{nodeId:'c'}]};
+  eq(M.inputItemAt(seq, 0).nodeId, 'a', 'ab sequence 第 0 行');
+  eq(M.inputItemAt(seq, 2).nodeId, 'c', 'ab sequence 第 2 行');
+  eq(M.inputItemAt(seq, 9), null, 'ab sequence 越界 → null');
+  const shared = {id:'input-1', mode:'shared', items:[{nodeId:'a'},{nodeId:'b'}]};
+  eq(M.inputItemAt(shared, 0).nodeId, 'a', 'ab shared 第 0 行 → 第 1 个');
+  eq(M.inputItemAt(shared, 1).nodeId, 'b', 'ab shared 第 1 行 → 第 2 个');
+  eq(M.inputItemAt(shared, 99).nodeId, 'b', 'ab shared 超出后沿用最后一个');
+  eq(M.inputItemAt({mode:'sequence', items:[]}, 0), null, 'ab 空 items → null');
+}
+
+// Xw：有媒体时下限抬到 144
+eq(M.rowHeightForRow(['短'], [], false), 44, '无媒体 → textMin 44');
+eq(M.rowHeightForRow(['短'], [], true), 144, '有媒体 → mediaMin 144');
+eq(M.rowHeightForRow(['x'.repeat(40)], [], true), 144, '有媒体时下限恒为 144');
+eq(M.rowHeightForRow(['x'.repeat(40)], [], false), 24 + 3 * 15, '无媒体时取文本高');
+eq(M.rowHeightForRow(['x'.repeat(200)], ['y'.repeat(200)], false), 160, '超长 → 夹到 maxHeight 160');
+
+// ═══ 提示词（DX OS §4：L7 / jf） ═══
+eq(M.buildRowPrompt(['  上游  ', ''], '节点提示', ' 行文本 '), '上游\n节点提示\n行文本', 'jf 三段拼接并 trim');
+eq(M.buildRowPrompt([], '', ''), '', 'jf 全空 → 空串');
+eq(M.buildRowPrompt([], '', '只有行文本'), '只有行文本', 'jf 只有行文本');
+eq(M.mentionTokenAt('image', 1), '@图片1', 'mention 图片');
+eq(M.mentionTokenAt('video', 2), '@视频2', 'mention 视频');
+eq(M.mentionTokenAt('audio', 3), '@音频3', 'mention 音频');
+eq(M.mentionTokenAt('file', 4), '@文件4', 'mention 文件');
+eq(M.mentionTokenAt('unknown', 1), '@文件1', '未知类型 → 文件');
+eq(M.mentionsIn('@图片1 和 @视频2').map(m => m.index), [0, 1], '解析 mention 序号');
+eq(M.mentionsIn('没有引用'), [], '无 mention');
+eq(M.danglingMentions('@图片1', [{kind:'image'}]).length, 0, '引用对得上');
+eq(M.danglingMentions('@图片5', [{kind:'image'}]).length, 1, '越界引用');
+eq(M.danglingMentions('@视频1', [{kind:'image'}]).length, 1, '类型不符');
+eq(M.danglingMentions('@图片1', []).length, 1, '没有参考时引用悬空');
+
+// 回归：删列不该动行选中（曾按列数过滤行号）
+{
+  const t = M.normalizeTable({columns:['a'], rows:[['1'],['2'],['3']]}).table;
+  t.selectedRows = [0, 1, 2];
+  eq(M.applyOperation(t, 'delete_column', {column:1}).selectedRows, [0, 1, 2], '删列保留行选中');
+}
+// 删行时选中顺位
+{
+  const t = M.normalizeTable({columns:['a'], rows:[['1'],['2'],['3']]}).table;
+  t.selectedRows = [0, 1, 2];
+  eq(M.applyOperation(t, 'delete_row', {row:2}).selectedRows, [0, 1], '删中间行：前后各留一个，后面顺移');
+  eq(M.applyOperation(t, 'delete_row', {row:3}).selectedRows, [0, 1], '删末行：只剩两个选中');
+}
+
 console.log('通过 ' + pass + '/' + (pass + fails.length));
 if(fails.length){ console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
 console.log('全部通过');
