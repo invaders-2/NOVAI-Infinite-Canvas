@@ -1241,9 +1241,7 @@ function isSmartImageNode(node){
 function isSmartGroupNode(node){
     return Boolean(node && node.type === 'smart-group');
 }
-function isSmartMatrixNode(node){
-    return Boolean(NovaWorkflowUtils?.isMatrixNode?.(node));
-}
+
 function isSmartRunnableNode(node){
     return Boolean(isSmartImageNode(node) || isSmartGroupNode(node));
 }
@@ -1291,9 +1289,7 @@ function normalizeLegacySmartNode(node){
     if(!node.type) node.type = 'smart-image';
     if(node.type === 'smart-image') delete node.imageMode;
     if(node.type === 'smart-image' && node.historyFor) node.isHistoryGroup = true;
-    // 多维表格统一走共享迁移：legacy smart-matrix(v0) / matrix(v1) -> 统一 matrix(v2)
-    // 之前这里调用未定义的 ensureSmartMatrixState，加载含表格的画布会抛 ReferenceError 白屏
-    if(NovaWorkflowUtils?.isMatrixNode?.(node)) return NovaWorkflowUtils.migrateMatrixNode(node);
+
     return node;
 }
 function validOutpaintSize(node){
@@ -1603,10 +1599,10 @@ function smartGroupMembers(node){
     });
 }
 function smartGroupCompactMembers(node){
-    return smartGroupMembers(node).filter(member => member?.type === 'smart-prompt' || member?.type === 'smart-loop' || NovaWorkflowUtils?.isMatrixNode?.(member));
+    return smartGroupMembers(node).filter(member => member?.type === 'smart-prompt' || member?.type === 'smart-loop');
 }
 function isSmartGroupCompactMember(node){
-    return Boolean(node && (['smart-prompt','smart-loop'].includes(node.type) || NovaWorkflowUtils?.isMatrixNode?.(node)) && smartGroupContainingNode(node.id));
+    return Boolean(node && (['smart-prompt','smart-loop'].includes(node.type)) && smartGroupContainingNode(node.id));
 }
 // 分组当前缩放比例（1=原始）。分组就像“画布中的画布”：缩放分组时组内所有成员（含提示词）整体等比缩放+
 // 重排。缩放过程用每次手势开始时的快照实时计算（见 resize 处理），不存持久基准，避免移动成员后再缩放位置回退。
@@ -2258,7 +2254,6 @@ function smartGroupImageGridLayout(node){
     return {cols, rows, visibleRows, width, height, thumb:baseThumb};
 }
 function imageLayout(images, scale=1, node=null){
-    if(NovaWorkflowUtils?.isMatrixNode?.(node)) return {cols:1, rows:1, width:Math.max(620, Number(node.w) || 680), height:Math.max(360, Number(node.h) || 440), thumb:96, single:true};
     if(node?.type === 'smart-group'){
         const groupThumbLayout = smartGroupThumbLayout(node);
         if(groupThumbLayout) return groupThumbLayout;
@@ -5430,7 +5425,7 @@ async function sendChatMessage(){
 var AGENT_TOOL_ICONS = {
     'create_node': 'plus', 'delete_node': 'trash-2', 'connect_nodes': 'link',
     'update_node': 'pencil', 'run_generation': 'play', 'generate_image': 'image-plus',
-    'generate_video': 'clapperboard', 'check_task': 'check-circle-2', 'create_matrix': 'grid-3x3',
+    'generate_video': 'clapperboard', 'check_task': 'check-circle-2',
     'list_canvases': 'list', 'get_canvas': 'scan', 'use_asset': 'image-plus'
 };
 function agentToolIcon(tool){ return AGENT_TOOL_ICONS[tool] || 'zap'; }
@@ -8074,22 +8069,6 @@ function createSmartGroupNode(x, y, options={}){
     scheduleSave();
     return node;
 }
-function newSmartMatrixRow(index=0){
-    return {id:uid('row'), task:'', overlay:'', status:'idle', error:'', resultRefs:[], dependsOnPrevious:index > 0, userEdited:false};
-}
-function createSmartMatrixNode(x, y, options={}){
-    if(!options.skipUndo) pushUndo();
-    const node = {
-        id:uid('matrix'), type:(NovaWorkflowUtils?.MATRIX_NODE_TYPE || 'matrix'), x, y, w:680, h:440, title:'多维表格', mode:'batch',
-        rows:[newSmartMatrixRow(0), newSmartMatrixRow(1)],
-        globalContext:{productReference:'', palette:'', font:'', outline:'', commonWidth:1024},
-        previousOutputs:{text:'', image:'', video:''}, created_at:Date.now()
-    };
-    nodes.push(node);
-    if(options.select !== false) selectedId = node.id;
-    render(); scheduleSave();
-    return node;
-}
 function cloneSmartNode(node, dx=0, dy=0){
     const copy = JSON.parse(JSON.stringify(node));
     copy.id = uid(
@@ -8099,8 +8078,6 @@ function cloneSmartNode(node, dx=0, dy=0){
             ? 'loop'
             : node.type === 'smart-group'
             ? 'group'
-            : NovaWorkflowUtils?.isMatrixNode?.(node)
-            ? 'matrix'
             : 'smart'
     );
     copy.x = (Number(node.x) || 0) + dx;
@@ -18510,7 +18487,6 @@ function createNodeFromMenu(type){
     if(type === 'group') created = createSmartGroupNode(p.x - 170, p.y - 110);
     else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
     else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
-    else if(type === 'matrix') created = createSmartMatrixNode(p.x - 340, p.y - 220);
     else created = createImageNodeAt(p);
     if(!created) return created;
     if(type !== 'group'){
