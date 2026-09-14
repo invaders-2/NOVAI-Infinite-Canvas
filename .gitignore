@@ -34,6 +34,7 @@ data/canvas_versions/
 data/agent_sessions/
 data/runs/
 data/tasks/
+data/table-fanout/
 data/assets_registry.json
 data/memory_library.json
 data/persona_library.json
