@@ -73,7 +73,8 @@ const sliceFn = name => {
 };
 const videoBody = sliceFn('renderVideoBody');
 ok(videoBody.includes('tableBatchRunButtonHtml(node)'), '视频节点主按钮位有「批量生成」');
-ok(videoBody.includes('tableBatchSingleLabel(node)'), '视频节点主按钮文案可切换成「单段生成」');
+ok(videoBody.includes('tableBatchSingleButtonHtml(node)'), '视频节点主按钮走 tableBatchSingleButtonHtml（接表格时整个不渲染）');
+ok(/function tableBatchSingleButtonHtml[\s\S]{0,200}tableBatchSingleLabel\(node\)/.test(canvas), '主按钮文案仍走 tableBatchSingleLabel（单段生成 / 生成视频）');
 ok((videoBody.match(/tableDrivenHidden\(node\)/g) || []).length === 2, '表格驱动时视频节点 Media 头部与列表都隐藏');
 ok(canvas.includes('const tableBatchPanel = renderTableBatchPanel(node);'), 'video body 分支挂上批量面板');
 ok(canvas.includes('if(tableBatchPanel) body.appendChild(tableBatchPanel);'), '批量面板先于节点主体插入');
@@ -157,6 +158,35 @@ ok(canvas.includes("const REMOVED_NODE_TYPES = ['loop', 'ltxDirector', 'minimax'
 ok(canvas.includes("REMOVED_NODE_TYPES.includes(n.type)"), 'sanitizeConnections 里真的执行丢弃');
 ok(!canvas.includes("p.id !== 'modelscope' && p.enabled !== false && (p.image_models || []).length"), '生成节点的平台下拉不再排除 ModelScope');
 ok(canvas.includes("String(providerId || '').toLowerCase() === 'modelscope'"), 'ModelScope 模型列表有内置兜底');
+
+console.log('[10] 生成节点运行按钮：不会被内容顶出可视区 / 接表格后不再重复');
+{
+  // 内容区包进 .gen-scroll，运行栏留在外面 —— 否则节点被改过大小后内容一超高，
+  // 按钮就被顶到可视区外（画布还藏着滚动条），看起来就是「生成按钮消失了」。
+  const scopes = canvas.split('<div class="gen-scroll">').slice(1);
+  ok(scopes.length === 2, '生成节点与视频节点各有一个 .gen-scroll 内容区（实际 ' + scopes.length + '）');
+  scopes.forEach((part, index) => {
+    const cut = part.indexOf('<div class="gen-run-row">');
+    ok(cut > 0, '第 ' + (index + 1) + ' 个 .gen-scroll 在运行栏之前');
+    const inner = cut > 0 ? part.slice(0, cut) : '';
+    // 切片从 <div class="gen-scroll"> 之后开始：开标签不计入，但它自己的闭标签在片尾，所以闭 = 开 + 1
+    const opened = (inner.match(/<div\b/g) || []).length;
+    const closed = (inner.match(/<\/div>/g) || []).length;
+    ok(closed === opened + 1, '第 ' + (index + 1) + ' 个 .gen-scroll 在运行栏之前正确闭合（' + opened + ' 开 / ' + closed + ' 闭）');
+  });
+  ok(canvasCss.includes('.node.sized.generator-node .gen-scroll') && canvasCss.includes('.node.sized.video-node .gen-scroll'),
+    'CSS：两类节点的内容区都能自己滚');
+  ok(/\.node\.sized\.generator-node \.node-body,[\s\S]{0,60}\.node\.sized\.video-node \.node-body \{ overflow:hidden; \}/.test(canvasCss),
+    'CSS：body 不再整体滚动（整体滚 = 按钮会滚出可视区）');
+  ok(/\.node\.sized\.generator-node \.gen-run-row,[\s\S]{0,60}\.node\.sized\.video-node \.gen-run-row \{ flex:0 0 auto; \}/.test(canvasCss),
+    'CSS：运行栏不参与收缩，永远占着底部');
+  ['renderGeneratorBody', 'renderVideoBody'].forEach(name => {
+    ok(sliceFn(name).includes('tableBatchSingleButtonHtml(node)'), name + ' 的主按钮走 tableBatchSingleButtonHtml');
+    ok(!sliceFn(name).includes("querySelector('.gen-btn').onclick"), name + ' 的 .gen-btn 绑定不能裸调（接表格时按钮不存在）');
+  });
+  ok(/function tableBatchSingleButtonHtml[\s\S]{0,220}if\(generatorUpstreamTables\(node\.id\)\.length\) return '';/.test(canvas),
+    '接多维表格时「单张/单段生成」直接不渲染');
+}
 
 console.log(fail ? ('\n失败 ' + fail + ' 项') : '\n全部通过');
 process.exit(fail ? 1 : 0);

@@ -261,11 +261,21 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .video-input-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
 .video-input-head .tool-btn { height:28px; min-width:0; padding:0 10px; font-size:10px; white-space:nowrap; }
 .video-input-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
-.node.sized.video-node .generator-body { height:100%; display:flex; flex-direction:column; }
+.node.sized.video-node .generator-body { height:100%; flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
 .node.sized.video-node .input-list { flex:1; min-height:64px; max-height:none; }
 .node.sized.video-node .gen-run-row,
 .node.sized.video-node .gen-btn { margin-top:auto; }
 .node.sized.generator-node .gen-run-row, .node.sized.comfy-node .gen-run-row, .node.sized.rh-node .gen-run-row{ margin-top:auto; }
+/* 生成节点：中间内容自己滚，运行栏 / 重试栏永远钉在节点底部。
+   节点被手动改过大小后（.node.sized）body 是固定高度 + overflow:auto，内容一超高
+   （例如把尺寸/比例切到「自定义」，多出一行输入）主按钮就被顶到可视区外面；
+   画布又把滚动条藏了，看起来就是「生成按钮消失了」。 */
+.node.sized.generator-node .node-body,
+.node.sized.video-node .node-body { overflow:hidden; }
+.node.sized.generator-node .gen-scroll,
+.node.sized.video-node .gen-scroll { flex:1 1 auto; min-width:0; min-height:0; overflow:auto; display:flex; flex-direction:column; }
+.node.sized.generator-node .gen-run-row,
+.node.sized.video-node .gen-run-row { flex:0 0 auto; }
 /* LLM 节点不再 margin-top:auto：输出区已经 flex:1 吃掉了剩余高度，
    auto 拿不到空余 → 等于 0，按钮会贴死输出框。这里用 .gen-run-row 自带的 8px。 */
 .gen-cascade-btn { height:40px; width:100%; flex:0 0 40px; border-radius:var(--radius-lg); background:transparent; border:1.5px solid var(--strong); color:var(--strong); display:flex; align-items:center; justify-content:center; gap:8px; font-size:11px; font-weight:800; letter-spacing:.12em; transition:all .15s ease; }
@@ -531,7 +541,7 @@ body.svc-fullscreen-active { overflow:hidden; }
 .rh-node { width:430px; }
 .comfy-node { width:420px; height:460px; }
 .generator-body { min-height:0; }
-.node.sized.generator-node .generator-body { height:100%; display:flex; flex-direction:column; }
+.node.sized.generator-node .generator-body { height:100%; flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
 .node.sized.rh-node .node-body { overflow:auto; }
 .rh-body { min-height:0; display:flex; flex-direction:column; gap:8px; }
 .rh-mode-tabs { flex:0 0 auto; }

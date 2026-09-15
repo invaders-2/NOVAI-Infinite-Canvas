@@ -6825,6 +6825,17 @@ function tableBatchSingleLabel(node){
     return node.type === 'video' ? '单段生成' : '单张生成';
 }
 
+/* 主运行按钮（单张/单段）。接了多维表格时**整个去掉**：
+   表格驱动只有「批量生成」这一条路，这个按钮不读表格，留着只会误点
+   （点下去只会撞上「请先连接提示词」）。绑定处也要跟着判空。 */
+function tableBatchSingleButtonHtml(node){
+    if(generatorUpstreamTables(node.id).length) return '';
+    const video = node.type === 'video';
+    const label = node.running ? tr('canvas.generating') : tableBatchSingleLabel(node);
+    return '<button class="gen-btn' + (node.running ? ' running' : '') + '"' + (node.running ? ' disabled' : '') + '>'
+        + '<i data-lucide="' + (video ? 'clapperboard' : 'zap') + '" class="w-4 h-4"></i>' + label + '</button>';
+}
+
 /* 表格批量执行的生效并发。
    视频又慢又贵，未显式设置时默认串行（1），图像沿用 3。
    面板显示和真正执行都走这里，避免「显示 3、实际跑 1」。 */
@@ -9159,6 +9170,7 @@ function renderGeneratorBody(node){
     sanitizeImageNodeProviderModel(node);
     normalizeApiNodeSizeChoice(node);
     wrap.innerHTML = `
+        <div class="gen-scroll">
         <div class="prompt-list mb-3"></div>
         <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2"${tableDrivenHidden(node)}>${tr('canvas.images')}</div>
         <div class="input-list"${tableDrivenHidden(node)}></div>
@@ -9224,8 +9236,9 @@ function renderGeneratorBody(node){
                 <button class="secondary-btn fit-size-btn" type="button" style="height:32px;align-self:flex-end;padding:0 10px;font-size:11px">${tr('canvas.fitImageSize')}</button>
             </div>
         </div>
+        </div>
         <div class="gen-run-row">
-            ${tableBatchRunButtonHtml(node)}<button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tableBatchSingleLabel(node)}</button>
+            ${tableBatchRunButtonHtml(node)}${tableBatchSingleButtonHtml(node)}
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -9462,7 +9475,9 @@ function renderGeneratorBody(node){
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
     const tableBatchRunBtn = wrap.querySelector('.table-batch-run-btn');
     if(tableBatchRunBtn) tableBatchRunBtn.onclick = e => { e.stopPropagation(); runTableBatch(node.id, {}); };
-    wrap.querySelector('.gen-btn').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
+    // 接了多维表格时主按钮不存在（只有「批量生成」），必须判空
+    const singleBtn = wrap.querySelector('.gen-btn');
+    if(singleBtn) singleBtn.onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     return wrap;
 }
@@ -9570,6 +9585,7 @@ function renderVideoBody(node){
     sanitizeVideoNodeProviderModel(node);
     node.model = node.model || 'veo3-fast';
     wrap.innerHTML = `
+        <div class="gen-scroll">
         <div class="prompt-list mb-3"></div>
         <div class="video-input-head"${tableDrivenHidden(node)}>
             <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Media</div>
@@ -9632,8 +9648,9 @@ function renderVideoBody(node){
                 <button type="button" class="setting-check ${node.useFrameRoles ? 'active' : ''}" data-video-toggle="useFrameRoles"><span class="check-dot"></span>${tr('canvas.videoFirstLastFrames')}</button>
             </div>
         </div>
+        </div>
         <div class="gen-run-row">
-            ${tableBatchRunButtonHtml(node)}<button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tableBatchSingleLabel(node)}</button>
+            ${tableBatchRunButtonHtml(node)}${tableBatchSingleButtonHtml(node)}
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -9729,7 +9746,9 @@ function renderVideoBody(node){
     // 用户会转而去点「单段生成」，然后就撞上「请先连接提示词」。
     const videoBatchRunBtn = wrap.querySelector('.table-batch-run-btn');
     if(videoBatchRunBtn) videoBatchRunBtn.onclick = e => { e.stopPropagation(); runTableBatch(node.id, {}); };
-    wrap.querySelector('.gen-btn').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
+    // 接了多维表格时主按钮不存在（只有「批量生成」），必须判空
+    const videoSingleBtn = wrap.querySelector('.gen-btn');
+    if(videoSingleBtn) videoSingleBtn.onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     return wrap;
 }

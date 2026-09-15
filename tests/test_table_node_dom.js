@@ -89,7 +89,7 @@ const api = new Function(
     ' addTableInputChannel, tableNodeSignature, connectNodes, tableDropPortFor,' +
     ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues,' +
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
-    ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel,' +
+    ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableBatchSingleButtonHtml, tableDrivenHidden, paintTableBatchPanel,' +
     ' normalizeTableNodeHeight, tableNaturalSize,' +
     ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
     ' generatorNeedsPromptMessage, friendlyBatchError,' +
@@ -747,6 +747,35 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     outNode.images.push({url:'/static/out/4.png'});
     ok(api.tableNodeSignature(tbl) !== sigBefore, '输出节点新增产出 → 签名变化（否则表格不重绘）');
     eq(api.ensureTableChannels(tbl)[0].items.length, 4, '重算后是 4 张');
+}
+
+// ═══ N. 主运行按钮：接了多维表格就整个不渲染 ═══
+{
+    const gen = {id:'genBtn1', type:'generator', model:'x'};
+    nodes.push(gen);
+    const plain = api.tableBatchSingleButtonHtml(gen);
+    ok(plain.indexOf('class="gen-btn"') >= 0, '没接表格 → 渲染主按钮');
+    ok(plain.indexOf('data-lucide="zap"') >= 0, '生成节点用 zap 图标');
+    ok(plain.indexOf('API生成') >= 0, '没接表格 → 文案是「API生成」');
+    ok(plain.indexOf('disabled') < 0, '没在运行 → 不禁用');
+
+    const tbl = api.addTableNode();
+    connections.push({id:'c_btn_tbl', from:tbl.id, to:gen.id});
+    eq(api.tableBatchSingleButtonHtml(gen), '', '接了表格 → 主按钮不渲染（只留「批量生成」）');
+
+    const vid = {id:'vidBtn1', type:'video', model:'x'};
+    nodes.push(vid);
+    const videoPlain = api.tableBatchSingleButtonHtml(vid);
+    ok(videoPlain.indexOf('data-lucide="clapperboard"') >= 0, '视频节点用 clapperboard 图标');
+    ok(videoPlain.indexOf('生成视频') >= 0, '视频节点未接表格 → 文案是「生成视频」');
+    connections.push({id:'c_btn_tbl2', from:tbl.id, to:vid.id});
+    eq(api.tableBatchSingleButtonHtml(vid), '', '视频节点接了表格也不渲染主按钮');
+
+    const running = {id:'genBtn2', type:'generator', model:'x', running:true};
+    nodes.push(running);
+    const busy = api.tableBatchSingleButtonHtml(running);
+    ok(busy.indexOf('gen-btn running') >= 0 && busy.indexOf('disabled') >= 0, '运行中仍带 running / disabled');
+    ok(busy.indexOf('生成中') >= 0, '运行中文案不变');
 }
 
     console.log('通过 ' + pass + '/' + (pass + fails.length));
