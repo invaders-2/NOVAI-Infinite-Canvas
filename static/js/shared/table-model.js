@@ -222,18 +222,6 @@
          sequence → [items[row]]              （逐行对应，一行一张，超出为空）
          all      → items 全部                （每行都用整列，一行多张）
          shared   → [items[min(row, len-1)]]  （按行取，超出后沿用最后一个） */
-    /* 表格整体缩放：用户可以随意放大缩小节点，内容等比跟着变。
-       只存一个比例，列宽/字号/图片/行高全都由它推导。 */
-    const DEFAULT_TABLE_SCALE = 1;
-    const TABLE_SCALE_MIN = 0.5;
-    const TABLE_SCALE_MAX = 2.5;
-
-    function clampTableScale(raw){
-        const value = Number(raw);
-        if(!Number.isFinite(value) || value <= 0) return DEFAULT_TABLE_SCALE;
-        return Math.min(TABLE_SCALE_MAX, Math.max(TABLE_SCALE_MIN, Math.round(value * 100) / 100));
-    }
-
     const INPUT_CHANNEL_PREFIX = 'input-';
     const MENTION_LABELS = {image:'图片', video:'视频', audio:'音频', file:'文件'};
     const CHANNEL_MODES = ['sequence', 'all', 'shared'];
@@ -701,7 +689,6 @@
         COLUMN_WIDTH, RESERVED_WIDTH, HEADER_HEIGHT, MAX_NODE_HEIGHT, EMPTY_MIN_HEIGHT, INPUT_COLUMN_WIDTH,
         INPUT_CHANNEL_PREFIX, MENTION_LABELS, MENTION_RE,
         UNNAMED_COLUMN, TABLE_OPERATIONS, OPERATION_IDS,
-        DEFAULT_TABLE_SCALE, TABLE_SCALE_MIN, TABLE_SCALE_MAX, clampTableScale,
         CHANNEL_MODES, CHANNEL_MODE_LABELS,
         channelIdAt, channelIndexFromId, channelModeFor, channelLabel, channelModeLabel,
         normalizeChannels, inputItemAt, inputItemsForRow, rewriteMentions,

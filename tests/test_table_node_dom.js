@@ -76,7 +76,7 @@ const api = new Function(
     ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues,' +
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel,' +
-    ' normalizeTableNodeHeight, tableScaleOf, tableNaturalSize, applyTableScale};'
+    ' normalizeTableNodeHeight, tableNaturalSize};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
@@ -388,35 +388,27 @@ eq(node.table.selectedRows, [1], '隐藏第 1 行后，点列表第一项勾的�
 node.table.selectedRows = node.table.rows.map((row, index) => index);
 node.tableBatchStartRow = 1;
 
-// 整体等比缩放：拖拽宽度 → 缩放比 → 内容等比放大缩小
+// 尺寸语义：默认随内容；字号不缩放；表格区不设高度上限；手动拉过不被覆盖
 {
-    const scaled = api.addTableNode();
-    api.ensureTableState(scaled);
-    api.addTableColumn(scaled);
-    api.addTableRow(scaled);
-    const scaledRoot = api.renderTableBody(scaled);
-    const natural = model.nodeSize(scaled.table, 1).width;
-    api.syncTableNodeWidth(scaled);
-    eq(scaled.w, natural + 24, '默认缩放 1 → 宽度按原尺寸');
-    eq(scaledRoot.style.zoom, '', '默认缩放不写 zoom');
-    scaled.tableScale = 1.5;
-    api.syncTableNodeWidth(scaled);
-    eq(scaled.w, Math.round(natural * 1.5) + 24, '缩放 1.5 → 节点宽度同比放大');
-    api.renderTableBody(scaled);
-    eq(scaledRoot.style.zoom, '1.5', 'zoom 落到表格根（布局级缩放，字号/列宽/图片一起变）');
-    const cappedMax = Number(String(one(scaledRoot, 'table-node-grid').style.maxHeight).replace('px', ''));
-    ok(cappedMax < model.MAX_NODE_HEIGHT - 66, '表格区高度上限按缩放换算：' + cappedMax);
-    scaled.tableScale = 2;
-    api.renderTableBody(scaled);
-    eq(String(one(scaledRoot, 'table-node-grid').style.maxHeight), Math.round((model.MAX_NODE_HEIGHT - 66) / 2) + 'px', '缩放 2 → 上限减半');
-    eq(api.tableScaleOf({tableScale:99}), model.TABLE_SCALE_MAX, '上限钳制 ' + model.TABLE_SCALE_MAX);
-    eq(api.tableScaleOf({tableScale:0.01}), model.TABLE_SCALE_MIN, '下限钳制 ' + model.TABLE_SCALE_MIN);
-    eq(api.tableScaleOf({tableScale:0}), 1, '非法缩放回落 1');
-    eq(api.tableScaleOf({}), 1, '未设缩放 → 1');
-    eq(api.tableScaleOf(null), 1, '空节点 → 1');
-    scaled.tableScale = 1;
-    api.renderTableBody(scaled);
-    eq(scaledRoot.style.zoom, '', '回到 1 → 清掉 zoom');
+    const sized = api.addTableNode();
+    api.ensureTableState(sized);
+    api.addTableColumn(sized);
+    api.addTableRow(sized);
+    const sizedRoot = api.renderTableBody(sized);
+    const natural = model.nodeSize(sized.table, 1).width;
+    api.syncTableNodeWidth(sized);
+    eq(sized.w, natural + 24, '默认宽度 = 表格本体宽 + 内边距');
+    eq(sizedRoot.style.zoom, undefined, '不做整体缩放（字号不该跟着变）');
+    eq(sizedRoot.style.fontSize, undefined, '不覆写字号');
+    eq(one(sizedRoot, 'table-node-grid').style.maxHeight, undefined, '表格区不设高度上限 → 行数自然全显示');
+    // 用户手动拉宽后，重绘不再把它覆盖回去
+    sized.tableWidthUserSet = true;
+    sized.w = 999;
+    api.syncTableNodeWidth(sized);
+    eq(sized.w, 999, '手动拉过宽度 → 重绘不覆盖');
+    sized.tableWidthUserSet = false;
+    api.syncTableNodeWidth(sized);
+    eq(sized.w, natural + 24, '没手动拉过 → 仍按本体宽同步');
 }
 
 // 历史固定高度清理（行少时底部留白的根因）
@@ -424,9 +416,9 @@ node.tableBatchStartRow = 1;
     const legacy = {type:'table', h:720};
     eq(api.normalizeTableNodeHeight(legacy), true, '历史固定高度被清掉');
     eq(legacy.h, undefined, 'h 已删除 → 改为随内容高度');
-    const resized = {type:'table', h:500};
-    eq(api.normalizeTableNodeHeight(resized), true, '表格一律不给固定高度（含手动调过的）');
-    eq(resized.h, undefined, 'h 被清掉');
+    const resized = {type:'table', h:500, tableHeightUserSet:true};
+    eq(api.normalizeTableNodeHeight(resized), false, '用户手动拉过高度的 → 保留');
+    eq(resized.h, 500, '手动设的高度不被清掉');
     eq(api.normalizeTableNodeHeight({type:'table'}), false, '没有 h → 不动');
     const other = {type:'image', h:300};
     eq(api.normalizeTableNodeHeight(other), false, '非表格节点不动');

@@ -6409,10 +6409,10 @@ function renderNode(node){
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
     normalizeTableNodeHeight(node);
-    /* 表格节点永远由内容决定高度：不套用 node.h，也不带 sized。
-       sized 会让 .node-body 变成 flex:1，把表格区撑开、下方留一片空白。
-       这一条与历史数据、手动拖拽都无关，从渲染层直接断掉。 */
-    const tableAutoHeight = node.type === 'table';
+    /* 表格节点默认由内容决定高度（这样不会留白）；
+       用户手动拉过高度（tableHeightUserSet）才套用 node.h —— 那时表格区填满节点，
+       多出来的高度用来多显示几行，而不是靠内部滚动硬顶。 */
+    const tableAutoHeight = node.type === 'table' && !node.tableHeightUserSet;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = !tableAutoHeight && Boolean(node.h || size.h);
@@ -6882,12 +6882,7 @@ function addTableNode(point){
     });
 }
 
-function tableScaleOf(node){
-    const model = novaTableModel();
-    return model ? model.clampTableScale(node && node.tableScale) : 1;
-}
-
-// 表格未缩放时的本体尺寸（DX OS 的 Yw）
+// 表格本体尺寸（DX OS 的 Yw）
 function tableNaturalSize(node){
     const model = novaTableModel();
     const state = ensureTableState(node);
@@ -6896,19 +6891,14 @@ function tableNaturalSize(node){
     return model.nodeSize(state, inputColumns);
 }
 
-// 节点宽度 = 表格本体宽 × 缩放比 + node-body 左右内边距（内边距不参与缩放）
+/* 节点宽度 = 表格本体宽 + node-body 左右内边距。
+   用户手动拉宽过（tableWidthUserSet）就不再自动覆盖，否则一重绘就跳回原宽。 */
 function syncTableNodeWidth(node){
+    if(node.tableWidthUserSet) return;
     const size = tableNaturalSize(node);
-    node.w = Math.round(size.width * tableScaleOf(node)) + 24;
+    node.w = size.width + 24;
     const host = document.querySelector('.node[data-id="' + node.id + '"]');
     if(host) host.style.width = node.w + 'px';
-}
-
-// 把缩放比落到 DOM：zoom 作用于布局，字号/列宽/图片/行高会一起等比缩放
-function applyTableScale(node, root){
-    if(!root) return;
-    const scale = tableScaleOf(node);
-    root.style.zoom = scale === 1 ? '' : String(scale);
 }
 
 function repaintTable(node){
@@ -7233,8 +7223,7 @@ function tableNodeSignature(node){
     const incoming = tableIncomingConnections(node)
         .map(conn => conn.from + '>' + String(conn.toPort || ''))
         .sort().join(',');
-    // 缩放比也要进签名：改了缩放必须触发重绘，否则 zoom / 高度上限是旧的
-    return [incoming, ensureTableChannels(node).length, state.columns.length, state.rows.length, tableScaleOf(node)].join('|');
+    return [incoming, ensureTableChannels(node).length, state.columns.length, state.rows.length].join('|');
 }
 
 // 输入列单元格（DX OS: .table-media-cell）
@@ -7310,12 +7299,13 @@ function notifyCanvas(text){
     else console.log('[table] ' + text);
 }
 
-/* 表格节点不用固定高度，一律由内容决定（行少时不留白、行多时表格区自己滚动）。
-   清掉存进画布的历史高度（早期物化时按 DX OS 规范设过 max(320, ...+行数*88)），
+/* 清掉存进画布的历史固定高度（早期物化时按 DX OS 规范设过 max(320, ...+行数*88)），
+   表格默认随内容高度，不会留白。
+   用户手动拉过高度的（tableHeightUserSet）保留 —— 那是他要的尺寸。
    和 renderNode 里 rh 节点清理旧默认高度是同一个套路。 */
 function normalizeTableNodeHeight(node){
     if(!node || node.type !== 'table') return false;
-    if(node.h){
+    if(node.h && !node.tableHeightUserSet){
         delete node.h;
         return true;
     }
@@ -7852,11 +7842,9 @@ function renderTableBody(node){
     function paint(){
         const state = ensureTableState(node);
         if(!state) return;
-        // 整体缩放：zoom 作用于布局，字号/列宽/图片/行高一起等比变
-        const scale = tableScaleOf(node);
-        applyTableScale(node, root);
-        // 表格区高度上限按缩放换算，保证视觉上限稳定
-        grid.style.maxHeight = Math.round((model.MAX_NODE_HEIGHT - 66) / scale) + 'px';
+        /* 字号一律不缩放，只让图片随列宽变化。
+           表格区不再设高度上限：行数全部自然显示，节点多高就显示多少，
+           由「填满节点可用高度」来决定，而不是硬顶一个固定行数。 */
         const nodeById = new Map((nodes || []).map(item => [item.id, item]));
         const channels = ensureTableChannels(node);
         const rowData = tableRowInputs(node, {nodeById});
@@ -17163,22 +17151,12 @@ function onNodeResize(e){
     const min = defaultNodeSize(resizeNode.node.type);
     const nextW = Math.max(Math.min(min.w, 220), resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
     const nextH = Math.max(96, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
-    /* 表格节点：不设固定高度，而是把拖拽宽度换算成「整体缩放比」——
-       列宽、字号、图片、行高一起等比变，高度由缩放后的内容决定，所以不会留白。 */
+    /* 表格节点也走普通 w/h 缩放，但要打「用户手动设过」的标记：
+       否则 syncTableNodeWidth 下一次重绘就把宽度覆盖回去了。
+       拉宽 → 列宽分摊、图片跟着变大；拉高 → 表格区填满、多显示几行。 */
     if(resizeNode.node.type === 'table'){
-        const model = novaTableModel();
-        const natural = tableNaturalSize(resizeNode.node);
-        resizeNode.node.tableScale = model ? model.clampTableScale(nextW / natural.width) : 1;
-        syncTableNodeWidth(resizeNode.node);
-        const tableEl = nodesEl.querySelector('.node[data-id="' + resizeNode.node.id + '"]');
-        if(tableEl){
-            applyTableScale(resizeNode.node, tableEl.querySelector('.table-node'));
-            tableEl.style.width = resizeNode.node.w + 'px';
-        }
-        scheduleLinksRender();
-        renderSelectionHub();
-        scheduleMinimapRender();
-        return;
+        resizeNode.node.tableWidthUserSet = true;
+        resizeNode.node.tableHeightUserSet = true;
     }
     resizeNode.node.w = Math.round(nextW);
     resizeNode.node.h = Math.round(nextH);
