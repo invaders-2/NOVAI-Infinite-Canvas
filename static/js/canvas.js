@@ -6464,9 +6464,61 @@ function bindTableCellEditor(node, editor, row, column){
         }
         endTableEdit(node);
     };
+    /* 打一个 @ 就列出**同一行**的素材，点一下插入 @图片N。
+       没有这个选择器用户只能靠猜序号（实际就有人打成了 @是是是@）。 */
+    const picker = document.createElement('div');
+    picker.className = 'table-cell-mention-picker';
+    const closePicker = () => { picker.classList.remove('is-open'); picker.textContent = ''; };
+    const insertMention = item => {
+        const model = novaTableModel();
+        const caret = typeof editor.selectionStart === 'number' ? editor.selectionStart : editor.value.length;
+        const before = editor.value.slice(0, caret);
+        const match = /@(?:图片|视频|音频|文件)?d*$/.exec(before);
+        if(!model || !match) return closePicker();
+        const start = caret - match[0].length;
+        const token = model.mentionTokenAt(item.kind, item.ordinal);
+        editor.value = editor.value.slice(0, start) + token + editor.value.slice(caret);
+        const at = start + token.length;
+        if(typeof editor.setSelectionRange === 'function') editor.setSelectionRange(at, at);
+        closePicker();
+        if(typeof editor.focus === 'function') editor.focus();
+    };
+    const openPicker = () => {
+        const model = novaTableModel();
+        const rows = tableRowInputs(node);
+        const media = (rows[row] && rows[row].media ? rows[row].media : []).filter(item => item && item.url);
+        if(!model || !media.length) return closePicker();
+        picker.textContent = '';
+        media.forEach(item => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'table-cell-mention-item';
+            button.title = model.mentionTokenAt(item.kind, item.ordinal);
+            const thumb = document.createElement('span');
+            thumb.className = 'table-media-thumb';
+            thumb.innerHTML = item.kind === 'video'
+                ? canvasVideoPreviewHtml(item.url)
+                : canvasPreviewImgHtml(item.url, 32);
+            button.appendChild(thumb);
+            const label = document.createElement('span');
+            label.textContent = model.mentionTokenAt(item.kind, item.ordinal);
+            button.appendChild(label);
+            button.onmousedown = event => event.stopPropagation();
+            button.onclick = event => { event.preventDefault(); event.stopPropagation(); insertMention(item); };
+            picker.appendChild(button);
+        });
+        picker.classList.add('is-open');
+    };
+    editor.oninput = () => {
+        const caret = typeof editor.selectionStart === 'number' ? editor.selectionStart : editor.value.length;
+        if(/@(?:图片|视频|音频|文件)?d*$/.test(editor.value.slice(0, caret))) openPicker();
+        else closePicker();
+    };
+    if(editor.parentNode) editor.parentNode.appendChild(picker);
     editor.onblur = () => finish(true);
     editor.onkeydown = event => {
         event.stopPropagation();
+        if(event.key === 'Escape' && picker.classList.contains('is-open')){ event.preventDefault(); closePicker(); return; }
         if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
         else if(event.key === 'Enter' && !event.shiftKey){ event.preventDefault(); finish(true); }
     };
@@ -7895,6 +7947,13 @@ function renderTableBody(node){
                     if(!value) view.classList.add('is-empty');
                     // 文本里的 @图片N 指向同一行上传的素材时直接显示缩略图（自建表才做，LLM 表的提示词保持纯文本）
                     renderTableCellText(view, value, llmTable ? null : data.media);
+                    // 空着的时候给一句说明：这里写文字，@ 能引用本行素材
+                    if(!value && !llmTable && !data.media.length){
+                        const hint = document.createElement('span');
+                        hint.className = 'table-cell-hint';
+                        hint.textContent = '文字；@ 可引用本行素材';
+                        view.appendChild(hint);
+                    }
                     cell.appendChild(view);
                     // 提示词格：双击改文字（两种表格都一样）
                     cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'cell', row:rowIndex, column:index}); };

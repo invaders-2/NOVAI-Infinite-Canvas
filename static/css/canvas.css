@@ -276,12 +276,12 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
    （body 又是 overflow:hidden），按钮就彻底没了。 */
 .node.sized.generator-node .node-body,
 .node.sized.video-node .node-body { display:flex; flex-direction:column; justify-content:flex-end; overflow:hidden; }
-/* 面板先让位（shrink 8），生成体兜底 min-height（= 运行栏 + 生成链路按钮的高度）：
-   节点被拉到很小时宁可把面板挤掉，也不能把按钮挤没。 */
+/* 自定义过窗口大小时：面板铺满剩下的高度（行不够就让行自己拉高，见 table-node.css
+   的 .table-batch-list grid-auto-rows），生成体只占自己需要的高度。 */
 .node.sized.generator-node .node-body > .table-batch-panel,
-.node.sized.video-node .node-body > .table-batch-panel { flex:0 8 auto; min-height:0; max-height:50%; overflow:auto; }
+.node.sized.video-node .node-body > .table-batch-panel { flex:1 1 auto; min-height:0; overflow:hidden; }
 .node.sized.generator-node .generator-body,
-.node.sized.video-node .generator-body { flex:1 1 auto; min-height:104px; }
+.node.sized.video-node .generator-body { flex:0 1 auto; min-height:104px; }
 /* 内容区只占自己需要的高度（flex:0 1 auto），不要抢剩余空间 ——
    抢了会把运行栏推到节点最底下，设置区和按钮之间空出一大截。
    内容超高时才由它收缩并自己滚，运行栏照样跟在设置后面。 */

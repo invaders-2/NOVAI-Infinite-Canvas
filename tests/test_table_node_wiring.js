@@ -178,12 +178,15 @@ console.log('[10] 生成节点运行按钮：不会被内容顶出可视区 / �
     'CSS：两类节点的内容区都能自己滚');
   ok(/\.node\.sized\.generator-node \.node-body,[\s\S]{0,90}\.node\.sized\.video-node \.node-body \{ display:flex; flex-direction:column;[^}]*overflow:hidden; \}/.test(canvasCss),
     'CSS：body 竖排且不整体滚动');
-  ok(/\.node\.sized\.generator-node \.generator-body,[\s\S]{0,90}\.node\.sized\.video-node \.generator-body \{ flex:1 1 auto; min-height:104px; \}/.test(canvasCss),
-    'CSS：生成体有兜底 min-height（节点拉很小时按钮也不会被挤掉）');
+  ok(/\.node\.sized\.generator-node \.generator-body,[\s\S]{0,90}\.node\.sized\.video-node \.generator-body \{ flex:0 1 auto; min-height:104px; \}/.test(canvasCss),
+    'CSS：生成体不抢剩余高度但保底 min-height（按钮不会被挤掉）');
   // node-body 里除了生成体，接表格时上面还有一个批量面板（兄弟节点）。
   // 面板不封顶的话，生成体的剩余高度会被挤没，运行栏被推到 body 外面（overflow:hidden 直接看不见）。
-  ok(/\.node\.sized\.generator-node \.node-body > \.table-batch-panel,[\s\S]{0,160}max-height:50%/.test(canvasCss),
-    'CSS：批量面板自己滚且不超过一半高度');
+  // 自定义窗口时面板要铺满（行不够就拉大行高），不是封顶一半
+  ok(/\.node\.sized\.generator-node \.node-body > \.table-batch-panel,[\s\S]{0,160}\{ flex:1 1 auto; min-height:0; overflow:hidden; \}/.test(canvasCss),
+    'CSS：批量面板铺满剩余高度');
+  ok(/\.node\.sized\.generator-node \.table-batch-list,[\s\S]{0,160}grid-auto-rows:minmax\(54px, 1fr\)/.test(css),
+    'CSS：行数不够时表格行自己拉高铺满');
   ok(!/\.node\.sized\.generator-node \.generator-body \{[^}]*height:100%/.test(canvasCss)
     && !/\.node\.sized\.video-node \.generator-body \{[^}]*height:100%/.test(canvasCss),
     'CSS：生成体不再写死 height:100%（会和上面的批量面板叠起来把按钮顶出去）');

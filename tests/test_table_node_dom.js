@@ -14,7 +14,7 @@ function makeEl(tag){
     const el = {
         tagName: String(tag).toUpperCase(), children: [], className: '', _text: '', innerHTML: '',
         style: {}, dataset: {}, parentElement: null, _listeners: {},
-        appendChild(child){ child.parentElement = el; el.children.push(child); return child; },
+        appendChild(child){ child.parentElement = el; child.parentNode = el; el.children.push(child); return child; },
         addEventListener(type, fn){ (el._listeners[type] = el._listeners[type] || []).push(fn); },
         querySelector(){ return null; },
         closest(){ return null; },
@@ -866,6 +866,35 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
         eq(byClass(cellOf(), 'table-media-thumb').length, 1, 'chip 里有一个缩略图');
         eq(cellOf().textContent, '把  换成红色的', '引用位置留空、其余文字保留');
         eq(byClass(cellOf(), 'table-cell-view')[0].children.length, 3, '文本 + chip + 文本 三段');
+
+        // 空格子（本行没素材）有说明文字
+        const blankT = api.addTableNode();
+        api.addTableColumn(blankT);
+        api.addTableRow(blankT);
+        const bRoot = api.renderTableBody(blankT);
+        eq(byClass(rowAt(bRoot, 0).children[1], 'table-cell-hint').map(h => h.textContent), ['文字；@ 可引用本行素材'], '空数据格有说明');
+
+        // 编辑器里打 @ → 弹出本行素材选择条，点一下插入 @图片N
+        api.beginTableEdit(t, {kind:'cell', row:0, column:0});
+        api.repaintTable(t);
+        const editor = byClass(cellOf(), 'table-cell-editor')[0];
+        ok(Boolean(editor), '双击后出现编辑器');
+        editor.value = '把 @';
+        if(typeof editor.selectionStart !== 'number') { editor.selectionStart = editor.value.length; editor.selectionEnd = editor.value.length; }
+        editor.oninput();
+        const picker = byClass(cellOf(), 'table-cell-mention-picker')[0];
+        ok(picker && picker.classList.contains('is-open'), '打 @ 弹出选择条');
+        const item = byClass(picker, 'table-cell-mention-item')[0];
+        ok(Boolean(item), '选择条里有本行素材');
+        eq(item.title, '@图片1', '选择条目带 token 说明');
+        editor.selectionStart = editor.value.length;
+        editor.selectionEnd = editor.value.length;
+        item.onclick({preventDefault(){}, stopPropagation(){}});
+        eq(editor.value, '把 @图片1', '点一下插入 @图片1');
+        ok(!picker.classList.contains('is-open'), '选完收起');
+        editor.onkeydown({key:'Enter', shiftKey:false, preventDefault(){}, stopPropagation(){}});
+        api.repaintTable(t);
+        ok(Boolean(byClass(cellOf(), 'table-cell-mention')[0]), '提交后 @图片1 渲染成缩略图');
 
         // 对不上的引用原样留着
         t.table.rows[0][0] = '看 @图片9';

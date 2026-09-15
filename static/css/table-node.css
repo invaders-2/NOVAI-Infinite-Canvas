@@ -423,6 +423,56 @@
 .table-media-stack .table-media-text,
 .table-media-stack .table-media-missing { flex: 1 1 100%; }
 
+/* 空数据格里的说明：告诉用户这里写文字、@ 能引用本行素材 */
+.table-cell-hint {
+    display: block;
+    color: var(--text-3);
+    opacity: .75;
+    font-size: 10px;
+    line-height: 13px;
+}
+
+/* 编辑器里打 @ 弹出的本行素材选择条（点一下插入 @图片N） */
+.table-cell-mention-picker {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    bottom: 2px;
+    z-index: 5;
+    display: none;
+    gap: 4px;
+    padding: 3px;
+    overflow-x: auto;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    box-shadow: var(--shadow-md);
+}
+
+.table-cell-mention-picker.is-open { display: flex; }
+
+.table-cell-mention-item {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 2px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-3);
+    font-family: inherit;
+    font-size: 9px;
+    line-height: 11px;
+    cursor: pointer;
+}
+
+.table-cell-mention-item:hover { border-color: var(--line-2); background: var(--nav-hover-bg); color: var(--text); }
+.table-cell-mention-item .table-media-thumb { width: 26px; height: 26px; border-radius: 4px; }
+.table-cell-mention-item .table-media-thumb img,
+.table-cell-mention-item .table-media-thumb video { width: 100%; height: 100%; max-width: 26px; max-height: 26px; object-fit: cover; }
+
 /* 单元格文本里指向本行素材的 @图片N：换成一个小缩略图 */
 .table-cell-mention {
     display: inline-flex;
@@ -607,6 +657,13 @@ input.table-batch-input { width: 48px; }
     overflow: auto;
     padding-right: 2px;
 }
+
+/* 自定义过窗口大小时：列表吃掉面板的剩余高度，行数不够就让每行自己拉高 ——
+   这样窗口是铺满的，不会底部空一大片。 */
+.node.sized.generator-node .table-batch-list,
+.node.sized.video-node .table-batch-list { flex:1 1 auto; min-height:0; max-height:none; grid-auto-rows:minmax(54px, 1fr); }
+.node.sized.generator-node .table-batch-panel,
+.node.sized.video-node .table-batch-panel { min-height:0; }
 
 .table-batch-row {
     display: grid;
