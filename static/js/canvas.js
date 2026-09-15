@@ -310,6 +310,8 @@ const minimapContent = document.getElementById('minimapContent');
 const canvasArrangeBtn = document.getElementById('canvasArrangeBtn');
 let minimapViewport = document.getElementById('minimapViewport');
 const linksEl = document.getElementById('links');
+// 连线命中层（与可见层分离，见 canvas.html 里的说明）
+const linkHitsEl = document.getElementById('linkHits');
 const linkControlsEl = document.getElementById('linkControls');
 const dropOverlay = document.getElementById('dropOverlay');
 const createMenu = document.getElementById('createMenu');
@@ -17749,6 +17751,7 @@ function canResolvePort(id){
 }
 function renderLinks(){
     linksEl.innerHTML = '';
+    if(linkHitsEl) linkHitsEl.innerHTML = '';
     linkControlsEl.innerHTML = '';
     // 先批量读取所有端点坐标（portPoint 里有 getBoundingClientRect），再统一写入 DOM。
     // 否则“读一条 rect → append 一条线”交错进行，每次 append 都让布局失效，下一次读 rect 就触发一次
@@ -17767,7 +17770,7 @@ function renderLinks(){
         p.dataset.to = c.to;
         linksEl.appendChild(p);
         linkControlsEl.appendChild(linkDeleteButton(c, a, b));
-        linksEl.appendChild(linkHitEl(a.x, a.y, b.x, b.y, c.id));
+        (linkHitsEl || linksEl).appendChild(linkHitEl(a.x, a.y, b.x, b.y, c.id));
     });
     if(tempLink){
         linksEl.appendChild(pathEl(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2, 'link temp'));

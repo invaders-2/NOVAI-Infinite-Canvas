@@ -7,7 +7,7 @@
     <title>无限画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.115.1789482815">
+    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.115.1789483028">
     <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789114960">
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.115.1789114960">
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
@@ -250,6 +250,13 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
             <div id="imageNodeMenu" class="create-menu"></div>
             <div id="world" class="world">
                 <svg id="links" class="links"></svg>
+    <!-- 连线命中层：只放透明的 18px 宽命中路径。
+         单独一层且层级低于 #nodes，是为了把「命中权」让给群组的端口 ——
+         群组是 z-index:0，整棵子树都在 .links(z-index:1) 之下，
+         而所有出线都锚在群组右缘中点（端口圆点所在处），N 条线的命中带
+         叠在端口上把加号压住，于是「抓不到端口拉线」。
+         可见的线仍留在 .links，视觉完全不变。 -->
+    <svg id="linkHits" class="link-hits"></svg>
                 <div id="linkControls" class="link-controls"></div>
                 <div id="nodes"></div>
             </div>
@@ -529,6 +536,6 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
     <script defer src="/static/js/ltx-director-timeline.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/vendor/js/glfx.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/js/image-adjust-editor.js?v=1.0.115.1789114960"></script>
-    <script defer src="/static/js/canvas.js?v=1.0.115.1789482824"></script>
+    <script defer src="/static/js/canvas.js?v=1.0.115.1789483028"></script>
 </body>
 </html>

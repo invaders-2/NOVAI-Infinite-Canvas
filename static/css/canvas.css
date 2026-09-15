@@ -211,6 +211,9 @@ body.theme-dark .link.link-flow { stroke:#9ca3af; opacity:.75; filter:drop-shado
 .link.temp { stroke:var(--strong); stroke-dasharray:6 6; }
 .link.knife-trail { stroke:var(--danger); stroke-width:2.4; stroke-dasharray:7 6; opacity:.88; filter:drop-shadow(0 0 6px rgba(239,68,68,.35)); }
 .link-hit { stroke:transparent; stroke-width:18; fill:none; pointer-events:stroke; }
+/* 命中层：层级放到群组之下（.links 是 1、群组是 0，命中层要 ≤ 群组，
+   靠 #nodes 在 DOM 中更靠后来赢得命中），可见的线不受影响 */
+.link-hits { position:absolute; inset:0; width:6000px; height:4000px; overflow:visible; pointer-events:none; z-index:0; }
 .link-controls { position:absolute; inset:0; width:6000px; height:4000px; pointer-events:none; z-index:3; }
 .link-delete { position:absolute; width:22px; height:22px; border-radius:var(--radius-full); display:flex; align-items:center; justify-content:center; transform:translate(-50%,-50%); color:var(--text-2); background:rgba(255,255,255,.94); border:1px solid transparent; box-shadow:var(--shadow-md); opacity:0; pointer-events:none; transition:opacity .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease), background .14s var(--ease); }
 .link-delete.visible,.link-delete.hover { opacity:1; pointer-events:auto; }
