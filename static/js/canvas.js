@@ -6408,6 +6408,7 @@ function isNodeDragSurface(target){
 function renderNode(node){
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
+    normalizeTableNodeHeight(node);
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
@@ -7285,6 +7286,19 @@ function tableRowMaterialIssues(row){
 function notifyCanvas(text){
     if(window.NovaUtils && typeof NovaUtils.showToast === 'function') NovaUtils.showToast(text);
     else console.log('[table] ' + text);
+}
+
+/* 早期物化表格时按 DX OS 规范设了固定高度 max(320, ...+行数*88)。
+   行少时节点被撑高（.node.sized .node-body 是 flex:1），表格下方留一片空白。
+   用户没手动调过高度就清掉，改由内容决定；手动调过的（tableHeightUserSet）保留。
+   和 renderNode 里 rh 节点清理旧默认高度是同一个套路。 */
+function normalizeTableNodeHeight(node){
+    if(!node || node.type !== 'table') return false;
+    if(node.h && !node.tableHeightUserSet){
+        delete node.h;
+        return true;
+    }
+    return false;
 }
 
 /* 生成节点接了多维表格时，主按钮位拆成两个：
@@ -17105,6 +17119,8 @@ function onNodeDrag(e){
 function startNodeResize(e, node){
     e.preventDefault();
     e.stopPropagation();
+    // 用户手动调过表格高度之后就不再自动清除（见 normalizeTableNodeHeight）
+    if(node.type === 'table') node.tableHeightUserSet = true;
     const el = nodesEl.querySelector(`.node[data-id="${node.id}"]`);
     const rect = el?.getBoundingClientRect();
     resizeNode = {

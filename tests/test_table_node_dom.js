@@ -75,7 +75,8 @@ const api = new Function(
     ' addTableInputChannel, tableNodeSignature, connectNodes, tableDropPortFor,' +
     ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues,' +
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
-    ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel};'
+    ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel,' +
+    ' normalizeTableNodeHeight};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
@@ -386,6 +387,21 @@ byClass(panelPick, 'table-batch-row')[0].onclick({ stopPropagation(){} });
 eq(node.table.selectedRows, [1], '隐藏第 1 行后，点列表第一项勾的是第 2 行（下标 1）');
 node.table.selectedRows = node.table.rows.map((row, index) => index);
 node.tableBatchStartRow = 1;
+
+// 历史固定高度清理（行少时底部留白的根因）
+{
+    const legacy = {type:'table', h:720};
+    eq(api.normalizeTableNodeHeight(legacy), true, '历史固定高度被清掉');
+    eq(legacy.h, undefined, 'h 已删除 → 改为随内容高度');
+    const resized = {type:'table', h:500, tableHeightUserSet:true};
+    eq(api.normalizeTableNodeHeight(resized), false, '用户手动调过 → 不动');
+    eq(resized.h, 500, '手动调的高度保留');
+    eq(api.normalizeTableNodeHeight({type:'table'}), false, '没有 h → 不动');
+    const other = {type:'image', h:300};
+    eq(api.normalizeTableNodeHeight(other), false, '非表格节点不动');
+    eq(other.h, 300, '其他节点高度不受影响');
+    eq(api.normalizeTableNodeHeight(null), false, '空节点不炸');
+}
 
 // 行参考图与素材校验
 const refs = api.tableRowRefs(rowData2[0]);
