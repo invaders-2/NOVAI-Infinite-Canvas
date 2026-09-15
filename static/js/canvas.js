@@ -6620,7 +6620,12 @@ function renderNode(node){
     if(node.type === 'midjourney') body.appendChild(renderMidjourneyBody(node));
     if(node.type === 'minimax') body.appendChild(renderMiniMaxBody(node));
     if(node.type === 'msgen') body.appendChild(renderMsGenBody(node));
-    if(node.type === 'video') body.appendChild(renderVideoBody(node));
+    if(node.type === 'video') {
+        // 视频节点同样由上游多维表格驱动（DX OS §10：面板排在节点最上面）
+        const tableBatchPanel = renderTableBatchPanel(node);
+        if(tableBatchPanel) body.appendChild(tableBatchPanel);
+        body.appendChild(renderVideoBody(node));
+    }
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'comfy') body.appendChild(renderComfyBody(node));
     if(node.type === 'ltxDirector') body.appendChild(renderLTXDirectorBody(node));
@@ -6937,7 +6942,7 @@ function repaintTable(node){
    所以两个地方都要重绘 —— 只重绘表格会让面板显示过期的勾选。 */
 function repaintTableSelectionViews(tableNode){
     repaintTable(tableNode);
-    (nodes || []).filter(item => item.type === 'generator').forEach(gen => {
+    (nodes || []).filter(item => item.type === 'generator' || item.type === 'video').forEach(gen => {
         if(generatorUpstreamTables(gen.id).some(item => item.id === tableNode.id)) repaintBatchPanel(gen);
     });
 }
@@ -7349,7 +7354,22 @@ function tableBatchRunButtonHtml(node){
 }
 
 function tableBatchSingleLabel(node){
-    return generatorUpstreamTables(node.id).length ? '单张生成' : tr('canvas.apiGenerate');
+    if(!generatorUpstreamTables(node.id).length) return node.type === 'video' ? tr('canvas.videoGenerate') : tr('canvas.apiGenerate');
+    return node.type === 'video' ? '单段生成' : '单张生成';
+}
+
+/* 表格批量执行的生效并发。
+   视频又慢又贵，未显式设置时默认串行（1），图像沿用 3。
+   面板显示和真正执行都走这里，避免「显示 3、实际跑 1」。 */
+function tableBatchConcurrencyFor(gen, table){
+    const model = novaTableModel();
+    const fallback = gen && gen.type === 'video' ? 1 : model.DEFAULT_BATCH_CONCURRENCY;
+    return model.batchConcurrency(table && table.tableBatchConcurrency, fallback);
+}
+
+/* 表格批量执行调哪个运行器：图像走 runGenerator，视频走 runVideoNode。 */
+function tableBatchRunner(node){
+    return node && node.type === 'video' ? runVideoNode : runGenerator;
 }
 
 /* 生成节点由多维表格驱动时，节点自己的 IMAGES 区块没有意义 ——
@@ -7392,7 +7412,7 @@ function paintTableBatchPanel(panel, gen){
     const rows = tableRowInputs(table);
     const selection = tableBatchSelection(table);
     const startRow = model.batchStartRow(table.tableBatchStartRow, rows.length);
-    const concurrency = model.batchConcurrency(table.tableBatchConcurrency);
+    const concurrency = tableBatchConcurrencyFor(gen, table);
     const failurePolicy = model.batchFailurePolicy(table.tableBatchFailurePolicy);
     const runnable = model.batchRowsToRun(rows, {manual: selection.manual, startRow, selectedRows: selection.selectedRows});
     const journal = model.normalizeJournal(table.generationBatchJournal);
@@ -7559,6 +7579,7 @@ function paintTableBatchPanel(panel, gen){
     concurrencySelect.onchange = () => {
         table.tableBatchConcurrency = model.batchConcurrency(concurrencySelect.value);
         scheduleSave();
+        paintTableBatchPanel(panel, gen);
     };
     concurrencyField.appendChild(concurrencySelect);
     controls.appendChild(concurrencyField);
@@ -7639,7 +7660,7 @@ async function runTableBatch(genId, options={}){
     const selection = tableBatchSelection(table);
     const startRow = model.batchStartRow(table.tableBatchStartRow, rows.length);
     const failurePolicy = model.batchFailurePolicy(table.tableBatchFailurePolicy);
-    const concurrency = model.batchConcurrency(table.tableBatchConcurrency);
+    const concurrency = tableBatchConcurrencyFor(gen, table);
 
     const runnable = model.batchRowsToRun(rows, {manual: selection.manual, startRow, selectedRows: selection.selectedRows});
     if(!runnable.length){
@@ -7711,8 +7732,9 @@ async function runTableBatch(genId, options={}){
         if(!row) throw new Error('第 ' + entry.rowNumber + ' 行已不存在');
         model.journalMarkRow(journal, entry.rowNumber, 'running', entry.requestId || '');
         scheduleSave();
-        // 一行一次生成：提示词与参考图都按这一行覆盖
-        await runGenerator(genId, {
+        // 一行一次生成：提示词与参考图都按这一行覆盖。
+        // 视频节点走 runVideoNode，图像节点走 runGenerator，其余设置（模型/时长/比例）沿用节点自身。
+        await tableBatchRunner(gen)(genId, {
             batch: true,
             rowOverride: {prompt: row.prompt, refs: tableRowRefs(row)},
             runContext: {tableId: table.id, rowNumber: entry.rowNumber, batchRunId: runId}
@@ -9673,6 +9695,7 @@ function renderLLMNodePane(container, node){
             <select class="select-lite llm-output-mode" title="LLM 的输出形式">
                 <option value="text">文本输出</option>
                 <option value="list">多维表格</option>
+                <option value="list-video">视频分镜表</option>
             </select>
             <button class="llm-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="play" class="w-4 h-4"></i>${llmRunButtonLabel(node)}</button>
             ${cascadeBtnHtml(node)}
@@ -9690,12 +9713,13 @@ function renderLLMNodePane(container, node){
     const outputModeSelect = container.querySelector('.llm-output-mode');
     if(outputModeSelect){
         const listModel = novaTableModel();
-        outputModeSelect.value = listModel ? listModel.llmOutputMode(node.llmOutputMode) : 'text';
+        outputModeSelect.value = listModel ? listModel.llmOutputModeChoice(node.llmOutputMode) : 'text';
+        outputModeSelect.title = 'LLM 的输出形式（视频分镜表 = 每一行一个分镜，供视频节点逐段生成）';
         outputModeSelect.onmousedown = e => e.stopPropagation();
         outputModeSelect.onclick = e => e.stopPropagation();
         outputModeSelect.onchange = e => {
             e.stopPropagation();
-            node.llmOutputMode = e.target.value === 'list' ? 'list' : 'text';
+            node.llmOutputMode = listModel ? listModel.llmOutputModeChoice(e.target.value) : (e.target.value === 'list' ? 'list' : 'text');
             scheduleSave();
             render();
         };
@@ -10382,14 +10406,14 @@ function renderVideoBody(node){
     node.model = node.model || 'veo3-fast';
     wrap.innerHTML = `
         <div class="prompt-list mb-3"></div>
-        <div class="video-input-head">
+        <div class="video-input-head"${tableDrivenHidden(node)}>
             <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Media</div>
             <div class="video-input-actions">
                 <button type="button" class="tool-btn" data-video-manual-url title="手动输入视频 URL"><i data-lucide="link" class="w-4 h-4"></i><span>输入网址</span></button>
                 <button type="button" class="tool-btn" data-video-temp-sh ${node.tempShUploading ? 'disabled' : ''} title="上传当前输入视频到云端直链"><i data-lucide="upload-cloud" class="w-4 h-4"></i><span>${node.tempShUploading ? '上传中...' : '上传云端'}</span></button>
             </div>
         </div>
-        <div class="input-list video-img-list"></div>
+        <div class="input-list video-img-list"${tableDrivenHidden(node)}></div>
         <div class="gen-settings">
             <div class="gen-settings-row">
                 <select class="select-lite video-provider" style="flex:1">${videoProviderOptions(node.apiProvider)}</select>
@@ -10444,7 +10468,7 @@ function renderVideoBody(node){
             </div>
         </div>
         <div class="gen-run-row">
-            <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.videoGenerate')}</button>
+            ${tableBatchRunButtonHtml(node)}<button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tableBatchSingleLabel(node)}</button>
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -13283,23 +13307,39 @@ async function runGeneratorLegacy(genId, opts={}){
 }
 async function runVideoNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (node.running && !opts.cascade)) return;
+    if(!node || (node.running && !opts.cascade && !opts.batch)) return;
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
-    const sources = orderedSources(node, generatorSources(node));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
-    const allRefs = sources.flatMap(s => s.refs || []);
-    const mediaRefs = applyUploadedUrlToRefs((allRefs || []).filter(ref => ['image','video','audio'].includes(mediaKindForRef(ref))), node);
+    /* 表格批量执行按行覆盖提示词与参考素材（DX OS §4）：
+       视频一行 = 一段，这一行给了什么就发什么，不再从上游图上推导。 */
+    const rowOverride = opts.rowOverride || null;
+    let prompt = '';
+    let mediaRefs = [];
+    if(rowOverride){
+        prompt = String(rowOverride.prompt || '');
+        mediaRefs = applyUploadedUrlToRefs(
+            (rowOverride.refs || []).filter(ref => ['image','video','audio'].includes(mediaKindForRef(ref))), node);
+    } else {
+        const sources = orderedSources(node, generatorSources(node));
+        prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
+        const allRefs = sources.flatMap(s => s.refs || []);
+        mediaRefs = applyUploadedUrlToRefs(
+            (allRefs || []).filter(ref => ['image','video','audio'].includes(mediaKindForRef(ref))), node);
+    }
     const refs = imageRefsOnly(mediaRefs);
     const videoRefs = videoRefsOnly(mediaRefs);
     const audioRefs = audioRefsOnly(mediaRefs);
     if(node.useFrameRoles && refs[0]) refs[0] = {...refs[0], role:'first_frame'};
     if(node.useFrameRoles && refs[1]) refs[1] = {...refs[1], role:'last_frame'};
-    if(!prompt){ alert(tr('canvas.videoNeedsPrompt')); return; }
+    if(!prompt){
+        // 批量执行里绝不能弹阻塞式对话框，否则并发直接退化成串行
+        if(opts.batch) throw new Error(tr('canvas.videoNeedsPrompt'));
+        alert(tr('canvas.videoNeedsPrompt')); return;
+    }
     let out = outputForNode(node, 460);
     const pendingId = uid('p');
     const run = runSnapshot(node, prompt, refs);
     if(out) out._pending = [...(out._pending || []), makePendingForRun(pendingId, run, node, {refs, cascadeTargetId})];
-    if(!opts.cascade){ node.running = true; refreshRunNodes(node, out); }
+    if(!opts.cascade && !opts.batch){ node.running = true; refreshRunNodes(node, out); }
     else refreshRunNodes(node, out);
     try {
         const body = {
@@ -13310,7 +13350,8 @@ async function runVideoNode(nodeId, opts={}){
             aspect_ratio:node.aspectRatio || '16:9',
             resolution:node.resolution || '',
             images:refs,
-            videos:manualVideoUrlForNode(node)
+            // 手动输入的网址是一段固定视频，按行批量时没有意义，会被本行素材覆盖
+            videos:(!rowOverride && manualVideoUrlForNode(node))
                 ? [manualVideoUrlForNode(node)]
                 : videoRefs.map(ref => tempShUploadedUrlForNode(node, ref.url)),
             audios:audioRefs.map(ref => ref.url).filter(Boolean),
@@ -13363,7 +13404,7 @@ async function runVideoNode(nodeId, opts={}){
         }
         node.runStatus = 'failed'; node.runError = err.message || String(err);
         refreshRunNodes(node, out);
-        if(opts.cascade) throw err;
+        if(opts.cascade || opts.batch) throw err;
         alert(err.message || tr('canvas.videoFailed'));
     } finally {
         node.running = false;
@@ -14487,7 +14528,8 @@ function llmDownstreamTarget(node){
             if(target.type === 'video') return {target_type:'video', target_model:target.model || ''};
             if(target.type === 'msgen') return {target_type:'image', target_model:target.msgenModel || ''};
             if(target.type === 'comfy') return {target_type:'image', target_model:'comfy'};
-            if(target.type === 'output'){ queue.push(target.id); }
+            // 多维表格是 LLM 的输出载体：LLM → 表格 → 视频/图像，目标类型要穿过表格才看得到
+            if(target.type === 'output' || target.type === 'table'){ queue.push(target.id); }
         }
     }
     return {target_type:'', target_model:''};
@@ -14505,6 +14547,12 @@ async function runLLMListMode(node, opts={}){
     }
     const groups = llmMediaGroups(node);
     const inputs = groups.flatMap(group => group.entries);
+    /* 下游接的是视频节点就出「分镜」，接图像节点就出「单图生成内容」。
+       LLM → 表格 → 视频 也算数（llmDownstreamTarget 会穿过表格）。 */
+    const listTarget = llmDownstreamTarget(node);
+    // 显式选了「视频分镜表」就以它为准；否则看下游探测到的节点类型（能穿过表格）
+    const targetKind = model.llmModeTargetKind(node.llmOutputMode) || model.llmTargetKind(listTarget.target_type);
+    node.llmListTargetKind = targetKind;
 
     node.running = true;
     node.runStatus = 'running';
@@ -14516,7 +14564,7 @@ async function runLLMListMode(node, opts={}){
         // ① 规划遍：只做规划，不要输出最终 rows。规划失败不致命，直接进生成遍
         let plan = null;
         try {
-            const planText = await callCanvasLLM(node, model.buildListPlanPrompt(requirement, inputs, groups), [], {cascadeTargetId, noMedia:true});
+            const planText = await callCanvasLLM(node, model.buildListPlanPrompt(requirement, inputs, groups, {targetKind}), [], {cascadeTargetId, noMedia:true});
             plan = model.extractJsonObject(planText);
         } catch(error){
             plan = null;
@@ -14527,7 +14575,7 @@ async function runLLMListMode(node, opts={}){
         // ② 生成遍
         node.llmRunStage = 'generating';
         refreshNodes([node.id]);
-        let answer = await callCanvasLLM(node, model.buildListGeneratePrompt(requirement, inputs, groups, plan), [], {cascadeTargetId, noMedia:true});
+        let answer = await callCanvasLLM(node, model.buildListGeneratePrompt(requirement, inputs, groups, plan, {targetKind}), [], {cascadeTargetId, noMedia:true});
 
         // ③ 解析校验 a6；不过就 ④ 带 8192 token 修复重试一次
         let table = null;
@@ -14553,7 +14601,8 @@ async function runLLMListMode(node, opts={}){
         refreshNodes([node.id]);
         if(created) refreshNodes([created.id]);
         scheduleSave();
-        notifyCanvas('已生成多维表格：' + table.rows.length + ' 行 × ' + table.columns.length + ' 列');
+        notifyCanvas((targetKind === 'video' ? '已生成分镜表格：' : '已生成多维表格：')
+            + table.rows.length + ' 行 × ' + table.columns.length + ' 列');
     } catch(error){
         node.running = false;
         node.llmRunStage = '';

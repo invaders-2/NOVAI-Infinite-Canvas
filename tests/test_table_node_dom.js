@@ -69,6 +69,7 @@ const api = new Function(
     'document', 'requestAnimationFrame', 'defaultPoint', 'addNode', 'scheduleSave', 'uid',
     'connections', 'nodes', 'pushUndo', 'mediaKindForNode', 'isMissingAssetUrl',
     'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs', 'tr', 'nodesEl',
+    'runVideoNode', 'runGenerator',
     block + '\nreturn {renderTableBody, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
@@ -76,14 +77,16 @@ const api = new Function(
     ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues,' +
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel,' +
-    ' normalizeTableNodeHeight, tableNaturalSize};'
+    ' normalizeTableNodeHeight, tableNaturalSize,' +
+    ' tableBatchConcurrencyFor, tableBatchRunner};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
     connections, nodes, () => {}, n => (n && n.mediaKind) || 'image', url => missingUrls.has(url),
     (url) => '<img src="' + url + '">', (url) => '<video src="' + url + '"></video>', () => 1700000000000,
-    key => ({'canvas.apiGenerate':'API生成', 'canvas.generating':'生成中'})[key] || key,
-    nodesEl
+    key => ({'canvas.apiGenerate':'API生成', 'canvas.generating':'生成中', 'canvas.videoGenerate':'生成视频'})[key] || key,
+    nodesEl,
+    () => 'via-runVideoNode', () => 'via-runGenerator'
 );
 
 const keydown = key => ({ key, shiftKey:false, preventDefault(){}, stopPropagation(){} });
@@ -497,6 +500,48 @@ missingUrls.delete('/gone.png');
     eq(api.llmRunButtonLabel({running:true, llmOutputMode:'list', llmRunStage:'repairing'}), '校验中', 'list 校验中');
     eq(api.llmRunButtonLabel({running:true, llmOutputMode:'list', llmRunStage:'generating'}), '生成中', 'list 生成中');
     eq(api.llmRunButtonLabel({running:false, llmOutputMode:'text'}), 'Run LLM', 'text 模式按钮不变');
+}
+
+// ═══ L. 视频节点的表格批量（分镜逐段生成） ═══
+{
+    const vid = {id:'vid1', type:'video', duration:5, aspectRatio:'16:9'};
+    nodes.push(vid);
+    eq(api.renderTableBatchPanel(vid), null, '视频节点无上游表格 → 不渲染批量面板');
+    eq(api.tableBatchSingleLabel(vid), '生成视频', '视频节点未接表格 → 保持「生成视频」按钮');
+    eq(api.tableDrivenHidden(vid), '', '视频节点未接表格 → 不隐藏 Media 区块');
+
+    connections.push({id:'c_tbl_vid', from:node.id, to:vid.id});
+    eq(api.generatorUpstreamTables(vid.id).map(t => t.id), [node.id], '视频节点也认得上游表格');
+
+    const vidPanel = api.renderTableBatchPanel(vid);
+    ok(vidPanel && vidPanel.classList.contains('table-batch-panel'), '视频节点接表格 → 渲染批量面板');
+    eq(api.tableBatchSingleLabel(vid), '单段生成', '视频节点接表格 → 主按钮改成「单段生成」');
+    ok(api.tableBatchRunButtonHtml(vid).indexOf('批量生成') > 0, '视频节点主按钮位加「批量生成」');
+    eq(api.tableDrivenHidden(vid), ' style="display:none"', '视频节点接表格 → 隐藏 Media 区块');
+
+    // 视频又慢又贵：未设置并发时逐段串行，不能像图像一样一次发 3 段
+    // （J 段为了验证写入把并发改成了 5，这里先还原成未设置）
+    const savedConcurrency = node.tableBatchConcurrency;
+    delete node.tableBatchConcurrency;
+    eq(api.tableBatchConcurrencyFor(vid, node), 1, '视频未设置并发 → 默认 1');
+    eq(api.tableBatchConcurrencyFor(genNode, node), 3, '图像未设置并发 → 默认 3');
+    node.tableBatchConcurrency = 4;
+    eq(api.tableBatchConcurrencyFor(vid, node), 4, '视频尊重显式设置');
+    eq(api.tableBatchConcurrencyFor(genNode, node), 4, '图像同样尊重显式设置');
+    delete node.tableBatchConcurrency;
+
+    const vidPanelRerun = api.renderTableBatchPanel(vid);
+    const statusVid = one(vidPanelRerun, 'table-batch-status').textContent;
+    ok(statusVid.indexOf('首批 1') >= 0, '视频面板首批并发显示 1：' + statusVid);
+    eq(byClass(vidPanelRerun, 'table-batch-row').length, api.tableRowInputs(node).length, '视频面板行数 = 表格当前行数');
+    eq(api.tableBatchRunner(vid)(), 'via-runVideoNode', '视频节点派发到 runVideoNode');
+    eq(api.tableBatchRunner(genNode)(), 'via-runGenerator', '图像节点派发到 runGenerator');
+
+    // 行里连的是视频，参考素材就要原样带 kind=video 过去（否则会被当成参考图）
+    const vidRow = {rowNumber:1, media:[{url:'/clip.mp4', nodeId:'mv1', kind:'video', node:{name:'参考片段'}}]};
+    eq(api.tableRowRefs(vidRow), [{url:'/clip.mp4', name:'参考片段', kind:'video', nodeId:'mv1'}], '视频参考素材带 kind=video');
+
+    node.tableBatchConcurrency = savedConcurrency;
 }
 
 console.log('通过 ' + pass + '/' + (pass + fails.length));

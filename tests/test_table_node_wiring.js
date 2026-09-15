@@ -42,5 +42,43 @@ console.log('[5] 分发接线');
 ok(/'minimax','table'\]\.includes\(node\.type\)/.test(canvas) || canvas.includes("'minimax','table']"), 'table 有输入端口');
 ok(canvas.includes("'output','table']"), 'table 有输出端口');
 
+
+console.log('[6] 视频节点由多维表格驱动（分镜逐段生成）');
+const sliceFn = name => {
+  const i = canvas.indexOf('function ' + name + '(');
+  if(i < 0) return '';
+  const rest = canvas.slice(i + 1);
+  const j = rest.indexOf('\nfunction ');
+  return j < 0 ? rest : rest.slice(0, j);
+};
+const videoBody = sliceFn('renderVideoBody');
+ok(videoBody.includes('tableBatchRunButtonHtml(node)'), '视频节点主按钮位有「批量生成」');
+ok(videoBody.includes('tableBatchSingleLabel(node)'), '视频节点主按钮文案可切换成「单段生成」');
+ok((videoBody.match(/tableDrivenHidden\(node\)/g) || []).length === 2, '表格驱动时视频节点 Media 头部与列表都隐藏');
+ok(canvas.includes('const tableBatchPanel = renderTableBatchPanel(node);'), 'video body 分支挂上批量面板');
+ok(canvas.includes('if(tableBatchPanel) body.appendChild(tableBatchPanel);'), '批量面板先于节点主体插入');
+
+const runVideo = sliceFn('runVideoNode');
+ok(runVideo.includes('opts.rowOverride'), 'runVideoNode 支持按行覆盖提示词与素材');
+ok(runVideo.includes('opts.batch'), 'runVideoNode 支持批量模式');
+ok(runVideo.includes('!opts.cascade && !opts.batch'), '批量模式不占用节点 running 状态');
+ok(runVideo.includes('if(opts.cascade || opts.batch) throw err;'), '批量模式抛错代替 alert（否则并发退化成串行）');
+ok(runVideo.includes('!rowOverride && manualVideoUrlForNode(node)'), '按行批量时手动视频网址不覆盖本行素材');
+
+const runBatch = sliceFn('runTableBatch');
+ok(runBatch.includes('tableBatchRunner(gen)(genId'), '批量执行按节点类型派发运行器');
+ok(runBatch.includes('tableBatchConcurrencyFor(gen, table)'), '批量执行用生效并发');
+ok(canvas.includes("return node && node.type === 'video' ? runVideoNode : runGenerator;"), '视频走 runVideoNode、图像走 runGenerator');
+ok(canvas.includes("const fallback = gen && gen.type === 'video' ? 1 : model.DEFAULT_BATCH_CONCURRENCY;"), '视频默认并发 1');
+ok(canvas.includes("item.type === 'generator' || item.type === 'video'"), '勾选同步覆盖视频节点');
+ok(canvas.includes("if(target.type === 'output' || target.type === 'table'){ queue.push(target.id); }"), '下游目标探测穿过表格');
+ok(canvas.includes('model.buildListPlanPrompt(requirement, inputs, groups, {targetKind})'), 'LLM 规划遍按目标类型出分镜');
+ok(canvas.includes('model.buildListGeneratePrompt(requirement, inputs, groups, plan, {targetKind})'), 'LLM 生成遍按目标类型出分镜');
+ok(model.includes('function llmTargetKind('), 'table-model 提供 llmTargetKind');
+ok(model.includes('VIDEO_PLAN_BLOCK') && model.includes('VIDEO_GENERATE_BLOCK'), 'table-model 提供视频分镜提示词块');
+ok(model.includes('function batchConcurrency(raw, fallback)'), '可按目标类型指定默认并发');
+ok(canvas.includes('<option value="list-video">视频分镜表</option>'), 'LLM 输出模式下拉有「视频分镜表」');
+ok(canvas.includes("model.llmModeTargetKind(node.llmOutputMode) || model.llmTargetKind(listTarget.target_type)"), '显式分镜表优先、否则按下游探测');
+
 console.log(fail ? ('\n失败 ' + fail + ' 项') : '\n全部通过');
 process.exit(fail ? 1 : 0);

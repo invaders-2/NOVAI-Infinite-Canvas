@@ -400,11 +400,57 @@ eq(M.llmOutputMode('list'), 'list', 'list 模式');
 eq(M.llmOutputMode('text'), 'text', 'text 模式');
 eq(M.llmOutputMode(undefined), 'text', '未设置 → text');
 eq(M.llmOutputMode('乱写'), 'text', '非法值 → text');
+eq(M.LLM_OUTPUT_MODES, ['text', 'list', 'list-video'], '三种输出模式');
+eq(M.llmOutputMode('list-video'), 'list', '视频分镜表也是「出表」');
+eq(M.llmOutputModeChoice('list-video'), 'list-video', '分镜表模式原样保留');
+eq(M.llmOutputModeChoice('list'), 'list', '多维表格模式保留');
+eq(M.llmOutputModeChoice('乱写'), 'text', '非法模式回落文本');
+eq(M.llmModeTargetKind('list-video'), 'video', '显式选了分镜表 → 视频目标');
+eq(M.llmModeTargetKind('list'), '', '普通多维表格不强制目标');
 eq(M.llmRunStageLabel(false, 'planning'), '生成', '未运行时按钮 = 生成');
 eq(M.llmRunStageLabel(true, 'planning'), '规划中', '规划中');
 eq(M.llmRunStageLabel(true, 'repairing'), '校验中', '校验中');
 eq(M.llmRunStageLabel(true, 'generating'), '生成中', '生成中');
 eq(M.llmRunStageLabel(true, undefined), '生成中', '阶段缺失 → 生成中');
+
+// ═══ 视频分镜：目标类型决定提示词怎么组织 ═══
+eq(M.llmTargetKind('video'), 'video', '下游是视频节点 → 分镜');
+eq(M.llmTargetKind('image'), 'image', '下游是图像节点 → 单图');
+eq(M.llmTargetKind(undefined), 'image', '探测不到下游 → 单图');
+eq(M.llmTargetKind('乱写'), 'image', '非法目标值 → 单图');
+{
+  const imagePlan = M.buildListPlanPrompt('拆一段广告', [], [], {targetKind:'image'});
+  const videoPlan = M.buildListPlanPrompt('拆一段广告', [], [], {targetKind:'video'});
+  ok(imagePlan.indexOf('分镜') < 0, '图像目标的规划提示词不出现分镜约束');
+  ok(videoPlan.indexOf('每一行 = 一个分镜') > 0, '视频 FS 说明「一行 = 一个分镜」');
+  ok(videoPlan.indexOf('4–6 个镜头') > 0, '视频 FS 给出未指定时的镜头数');
+  ok(videoPlan.indexOf('不要因为没有素材就拒绝出表') > 0, '视频 FS 允许无参考时出表');
+  ok(videoPlan.indexOf('（无）') > 0, '无参考时输入清单走「（无）」兜底');
+  ok(videoPlan.indexOf('只做规划，不要输出最终 rows') > 0, '视频 FS 仍然只做规划');
+
+  const imageBs = M.buildListGeneratePrompt('拆一段广告', [], null, null, {targetKind:'image'});
+  const videoBs = M.buildListGeneratePrompt('拆一段广告', [], null, null, {targetKind:'video'});
+  ok(imageBs.indexOf('可直接用于后续图像生成的内容') > 0, '图像 BS 文案不变');
+  ok(videoBs.indexOf('分镜提示词') > 0, '视频 BS 要的是分镜提示词');
+  ok(videoBs.indexOf('景别与机位') > 0, '视频 BS 要求写景别/机位');
+  ok(videoBs.indexOf('「运镜」') > 0, '视频 BS 要求写运镜');
+  ok(videoBs.indexOf('时长') > 0, '视频 BS 要求写时长');
+  ok(videoBs.indexOf('列结构至少要有这 3 列，缺一不可') > 0, '视频 BS 要求多维表格不是单列大文本');
+  ok(videoBs.indexOf('不要把全部内容塞进单一一列') > 0, '视频 BS 明令禁止塞进单列');
+  ok(videoBs.indexOf('不要创建「负向提示词」「禁止项」这类列') > 0, '视频 BS 禁止负向词列（会被拼进正向提示词）');
+  ok(videoBs.indexOf('同一段内容不要重复写在两列里') > 0, '视频 BS 禁止跨列重复');
+  ok(videoBs.indexOf('没有参考素材时同样要出表') > 0, '视频 BS 允许无参考时出表');
+  ok(videoBs.indexOf('不要把多个镜头塞进同一行') > 0, '视频 BS 明确一行一个镜头');
+  ok(videoBs.indexOf('"kind":"table","version":1') > 0, '视频 BS 仍然要求标准表格 JSON');
+  ok(videoBs.indexOf('不要在 JSON 中创建图片、参考图或生成输入列') > 0, '视频 BS 保留输入列约束');
+}
+eq(M.inputListText([{kind:'video', label:'参考片段'}]), '1. 视频（@视频1） — 参考片段', '视频素材的 mention 是 @视频1');
+
+// 并发默认值：视频又慢又贵，未显式设置时逐段串行
+eq(M.batchConcurrency(undefined, 1), 1, '视频未设置并发 → 默认 1');
+eq(M.batchConcurrency(0, 1), 1, '非法并发值回落 fallback');
+eq(M.batchConcurrency(4, 1), 4, '用户显式设置优先于 fallback');
+eq(M.batchConcurrency(99, 1), 8, '带 fallback 时仍然夹到 8');
 
 // runWithSharedCursor 是异步的，放到最后
 (async () => {

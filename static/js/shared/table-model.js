@@ -367,10 +367,16 @@
         return Math.min(value, max);
     }
 
-    // 并发 clamp 1..8
-    function batchConcurrency(raw){
+    /* 并发 clamp 1..8。
+       fallback 给不同目标类型用不同默认值：视频生成又慢又贵，
+       未设置时默认 1（逐段串行），图像仍走 3。 */
+    function batchConcurrency(raw, fallback){
+        const fallbackValue = Math.floor(Number(fallback));
+        const base = Number.isFinite(fallbackValue) && fallbackValue >= 1
+            ? Math.min(MAX_BATCH_CONCURRENCY, fallbackValue)
+            : DEFAULT_BATCH_CONCURRENCY;
         const value = Math.floor(Number(raw));
-        if(!Number.isFinite(value) || value < 1) return DEFAULT_BATCH_CONCURRENCY;
+        if(!Number.isFinite(value) || value < 1) return base;
         return Math.min(MAX_BATCH_CONCURRENCY, value);
     }
 
@@ -607,10 +613,47 @@
         return out;
     }
 
-    /* FS(t)：规划遍提示词。只做规划，不要输出最终 rows。 */
-    function buildListPlanPrompt(requirement, inputs, groups){
+    /* ── LLM 目标类型（分镜 / 单图）────────────────────────────────
+       LLM 的多维表格下游接的是视频节点还是图像节点，决定提示词怎么组织：
+       视频 → 分镜（一行一个镜头，画面/景别/运镜/时长写清楚）；
+       图像 → 一行一张图的完整生成内容。 */
+    function llmTargetKind(raw){ return raw === 'video' ? 'video' : 'image'; }
+
+    // 视频分镜：规划遍附加约束
+    const VIDEO_PLAN_BLOCK = [
+        '',
+        '【本次产出直接接到「视频生成」节点，所以每一行 = 一个分镜（一段视频）。】',
+        '规划时必须按分镜组织：把用户要求拆成若干个镜头，逐个镜头写清画面内容、主体动作、景别与机位、运镜方式、光线氛围、时长。',
+        '镜头数量：用户明确指定就按用户说的数量；没有指定时按叙事节奏拆成 4–6 个镜头。',
+        '没有参考图/参考视频时（可用输入为「（无）」），完全依据用户提示词构思分镜，不要因为没有素材就拒绝出表。',
+        '有参考素材时，参考决定主体外观、场景与风格的一致性，要在 mapping 里写清哪些镜头共用同一份参考。',
+        '相邻镜头不要重复同一个动作，整段连起来要能讲完用户要的事。'
+    ].join('\n');
+
+    // 视频分镜：生成遍附加约束
+    const VIDEO_GENERATE_BLOCK = [
+        '',
+        '【本次产出直接接到「视频生成」节点：每一行 = 一个分镜（一段视频）。】',
+        '每一行必须是一条完整、独立、可直接送进视频模型的分镜。',
+        '列结构至少要有这 3 列，缺一不可：「时长(秒)」「运镜」「画面描述」。',
+        '「画面描述」是这一行的主体：写清主体与动作、场景与环境、景别与机位、光线与氛围；这一列必须信息完整，不能只写一句概括。',
+        '「时长(秒)」写纯数字（如 1.5），「运镜」写几个词（如「缓慢推近」）——这两列写短值，不要把整段描述重复进每一列。',
+        '除这 3 列外可以按任务增补（景别、机位、光线、台词/音效、衔接要求等），但绝不允许多个分镜共用一行，也不要把全部内容塞进单一一列。',
+        '每一列的内容都会按顺序拼进这一行的正向提示词：不要创建「负向提示词」「禁止项」这类列，负面词汇会被当成画面描述。要排除的东西用正向句写进「画面描述」（例如「画面干净、无文字」）。',
+        '同一段内容不要重复写在两列里。',
+        '不要创建只用于计数的序号列——行的先后顺序已经表达了镜头顺序。',
+        '不要把多个镜头塞进同一行，也不要让相邻镜头重复同一动作；行与行连起来应是一段连贯的镜头序列。',
+        '没有参考素材时同样要出表：直接依据用户提示词拆分镜，行数就是镜头数量。'
+    ].join('\n');
+
+    /* FS(t)：规划遍提示词。只做规划，不要输出最终 rows。
+       options.targetKind = 'video' 时按分镜组织。 */
+    function buildListPlanPrompt(requirement, inputs, groups, options={}){
+        const video = llmTargetKind(options.targetKind) === 'video';
         return [
-            '你在为一个「多维表格批量生成」工作流做任务规划。',
+            video
+                ? '你在为一个「多维表格 → 视频分镜批量生成」工作流做任务规划。'
+                : '你在为一个「多维表格批量生成」工作流做任务规划。',
             '',
             '用户要求：',
             String(requirement || '').trim(),
@@ -622,6 +665,7 @@
             '- "per-row"：这一组是**行驱动**，第 N 行用第 N 张。多张参考图 → 多行。',
             '- "every-row"：这一组**每一行都要用上全部**。例如多张可替换的素材 → 每行都带整组。',
             '行的数量由 per-row 的组决定；every-row 的组只增加每行带的素材数，不增加行数。',
+            video ? VIDEO_PLAN_BLOCK : '',
             '',
             '只做规划，不要输出最终 rows。',
             '请只返回一个 JSON 对象，结构如下：',
@@ -630,13 +674,17 @@
         ].join('\n');
     }
 
-    /* BS(t, plan)：生成遍提示词。约束逐条照搬规范。 */
-    function buildListGeneratePrompt(requirement, inputs, groups, plan){
+    /* BS(t, plan)：生成遍提示词。约束逐条照搬规范。
+       options.targetKind = 'video' 时按分镜组织。 */
+    function buildListGeneratePrompt(requirement, inputs, groups, plan, options={}){
         let planText = '';
         if(plan && typeof plan === 'object'){ try { planText = JSON.stringify(plan, null, 2); } catch(error){ planText = ''; } }
         const modes = planGroupModes(plan, Array.isArray(groups) ? groups.length : 0);
+        const video = llmTargetKind(options.targetKind) === 'video';
         return [
-            '请把结果整理为可逐行执行的生成任务：每一行必须是一条完整、独立、可直接用于后续图像生成的内容。',
+            video
+                ? '请把结果整理为可逐行执行的视频分镜任务：每一行必须是一条完整、独立、可直接用于后续视频生成的分镜提示词。'
+                : '请把结果整理为可逐行执行的生成任务：每一行必须是一条完整、独立、可直接用于后续图像生成的内容。',
             '',
             '已确认的规划：',
             planText || '（无规划，按用户要求自行判断）',
@@ -649,6 +697,7 @@
             '',
             '行数按「逐行」的组确定；「全部」的组每一行都带整组，不增加行数。',
             '严格遵守用户指定的数量；未指定时根据逐项输入数量和任务目标合理决定。图片组通常逐张映射到各行，单图参考通常应用到所有相关行。',
+            video ? VIDEO_GENERATE_BLOCK : '',
             '如果任务区分了「目标主体」和「风格/版式参考」，每行生成提示词都必须显式写清它们的关系。',
             '不要只写「使用图1」「参考图2」这类占位说明。每个文字单元格应提供与普通文本输出相当的信息密度。',
             '请根据任务自行设计最合适的列结构，不套固定模板。',
@@ -659,8 +708,14 @@
         ].join('\n');
     }
 
-    // 输出模式与按钮文案（DX OS: _u / US）
-    function llmOutputMode(raw){ return raw === 'list' ? 'list' : 'text'; }
+    /* 输出模式与按钮文案（DX OS: _u / US）。
+       'list'       = 多维表格（下游是图像节点，或者链路还没接好）
+       'list-video' = 视频分镜表（下游是视频节点）—— 显式选，链路没接好时也能出分镜
+       llmOutputMode 只回答「是不是出表」；llmOutputModeChoice 回答「具体存哪一种」。 */
+    const LLM_OUTPUT_MODES = ['text', 'list', 'list-video'];
+    function llmOutputMode(raw){ return raw === 'list' || raw === 'list-video' ? 'list' : 'text'; }
+    function llmOutputModeChoice(raw){ return LLM_OUTPUT_MODES.includes(raw) ? raw : 'text'; }
+    function llmModeTargetKind(raw){ return raw === 'list-video' ? 'video' : ''; }
 
     function llmRunStageLabel(running, stage){
         if(!running) return '生成';
@@ -701,6 +756,8 @@
         TABLE_PARSE_ERRORS, TABLE_REPAIR_INSTRUCTION, LLM_REPAIR_MAX_TOKENS,
         extractJsonObject, parseTableOutput, buildRepairPrompt, inputListText,
         buildListPlanPrompt, buildListGeneratePrompt, planGroupModes, llmOutputMode, llmRunStageLabel,
+        LLM_OUTPUT_MODES, llmOutputModeChoice, llmModeTargetKind,
+        llmTargetKind, VIDEO_PLAN_BLOCK, VIDEO_GENERATE_BLOCK,
         emptyTable, cellText, normalizeColumns, normalizeTable, cloneTable,
         toIndex, columnIndex, rowIndex, applyOperation,
         rowHeight, nodeSize, describeOperation, requiresConfirmation,
