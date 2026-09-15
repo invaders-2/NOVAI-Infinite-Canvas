@@ -140,8 +140,38 @@
 
 .table-head-cell.is-editing { background: var(--surface); }
 
+/* 表头右侧的删除列按钮：和删行按钮同一套（图标 + 悬停变红），默认淡、不藏。 */
+.table-head-cell { position: relative; }
+
+.table-head-delete {
+    position: absolute;
+    top: 50%;
+    right: 2px;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-3);
+    opacity: .5;
+    line-height: 1;
+    cursor: pointer;
+    transition: opacity .15s ease, background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.table-head-cell:hover .table-head-delete,
+.table-head-cell:focus-within .table-head-delete { opacity: 1; }
+.table-head-delete:hover { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-text); }
+.table-head-delete svg { width: 12px !important; height: 12px !important; }
+
 .table-head-label {
     display: block;
+    padding-right: 20px;   /* 给右上角的删除列按钮让位 */
     overflow: hidden;
     text-overflow: ellipsis;
 }
@@ -304,7 +334,7 @@
 .table-node-table col.table-input-column { width: 112px; }
 
 .table-input-head {
-    padding: 0 6px;
+    padding: 0 22px 0 6px;   /* 右侧给删除列按钮让位 */
     color: var(--text-2);
     white-space: nowrap;
 }

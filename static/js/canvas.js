@@ -6373,6 +6373,54 @@ function deleteTableRow(node, row){
     repaintTable(node);
 }
 
+/* 删数据列（DX OS: delete_column）。行原样保留，行选中状态也不动。 */
+function deleteTableColumn(node, column){
+    const model = novaTableModel();
+    const state = ensureTableState(node);
+    if(!model || !state || !state.columns.length) return;
+    node.table = model.applyOperation(state, 'delete_column', {column: column + 1});
+    scheduleSave();
+    repaintTable(node);
+}
+
+/* 删输入列（DX OS §3 的 QS）：连到这一列的连线一起删，后面的列号整体前移。
+   输入列是连线推出来的（ensureTableChannels 每次重绘都重建），不删连线的话删了也会自己长回来。 */
+function removeTableInputChannel(node, index){
+    const model = novaTableModel();
+    if(!model) return;
+    const channels = ensureTableChannels(node);
+    if(channels.length <= 1) return;   // 至少留一列
+    const kept = [];
+    (connections || []).forEach(conn => {
+        if(!conn || conn.to !== node.id){ kept.push(conn); return; }
+        const at = model.channelIndexFromId(conn.toPort);
+        const place = at < 0 ? 0 : at;          // 没写 toPort 的连线落在第一列
+        if(place === index) return;             // 这一列的连线：跟着列一起删
+        if(place > index) kept.push({...conn, toPort: model.channelIdAt(place - 1)});
+        else kept.push(conn);
+    });
+    connections.length = 0;
+    kept.forEach(conn => connections.push(conn));
+    // 表头手动值 / 手动上传的素材都是按 input-N 存的，列号前移要跟着搬
+    const rekey = store => {
+        if(!store || typeof store !== 'object') return null;
+        const next = {};
+        Object.keys(store).forEach(key => {
+            const at = model.channelIndexFromId(key);
+            if(at < 0 || at === index) return;
+            next[model.channelIdAt(at > index ? at - 1 : at)] = store[key];
+        });
+        return Object.keys(next).length ? next : null;
+    };
+    const modes = rekey(node.tableInputChannelModes);
+    if(modes) node.tableInputChannelModes = modes; else delete node.tableInputChannelModes;
+    const manual = rekey(node.tableManualInputItems);
+    if(manual) node.tableManualInputItems = manual; else delete node.tableManualInputItems;
+    node.tableInputChannelCount = Math.max(1, channels.length - 1);
+    scheduleSave();
+    repaintTable(node);
+}
+
 function toggleTableRow(node, row, on){
     const state = ensureTableState(node);
     if(!state) return;
@@ -7574,6 +7622,22 @@ function renderTableBody(node){
         return button;
     }
 
+    // 表头右侧的删除列按钮（Lucide trash-2，和删行按钮同一套）
+    function tableHeadDeleteButton(title, handler){
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'table-head-delete';
+        button.title = title;
+        const glyph = document.createElement('i');
+        glyph.dataset.lucide = 'trash-2';
+        button.appendChild(glyph);
+        ['mousedown','click','dblclick'].forEach(type => {
+            button.addEventListener(type, event => event.stopPropagation());
+        });
+        button.onclick = event => { event.stopPropagation(); handler(); };
+        return button;
+    }
+
     function paint(){
         const state = ensureTableState(node);
         if(!state) return;
@@ -7667,6 +7731,11 @@ function renderTableBody(node){
             count.className = 'table-input-count';
             count.textContent = String(channel.items.length);
             cell.appendChild(count);
+            // 只剩一列时不给删（ensureTableChannels 至少会留一列，删了也白删）
+            if(channels.length > 1){
+                const drop = tableHeadDeleteButton('删除这列输入（连到这一列的连线一起删）', () => removeTableInputChannel(node, index));
+                cell.appendChild(drop);
+            }
             headRow.appendChild(cell);
         });
 
@@ -7681,6 +7750,7 @@ function renderTableBody(node){
             label.className = 'table-head-label';
             label.textContent = name;
             cell.appendChild(label);
+            cell.appendChild(tableHeadDeleteButton('删除这一列', () => deleteTableColumn(node, index)));
             cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'column', column:index}); };
             if(editingHere){
                 const input = document.createElement('input');

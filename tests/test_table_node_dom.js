@@ -86,7 +86,7 @@ const api = new Function(
     block + '\nreturn {renderTableBody, repaintTable, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
-    ' addTableInputChannel, tableNodeSignature, connectNodes, tableDropPortFor,' +
+    ' addTableInputChannel, removeTableInputChannel, deleteTableColumn, tableNodeSignature, connectNodes, tableDropPortFor,' +
     ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues,' +
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableBatchSingleButtonHtml, tableDrivenHidden, paintTableBatchPanel,' +
@@ -832,6 +832,49 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     eq(byClass(llmMedia, 'table-cell-more').length, 0, 'LLM 表：媒体格也不放「···」');
     eq(byClass(llmMedia, 'table-cell-add').length, 0, 'LLM 表：媒体格也不放「+」');
     ok(typeof llmMedia.ondblclick === 'function', 'LLM 表：媒体格双击可查看');
+    // ── 删列 ──
+    {
+        const t = api.addTableNode();
+        api.addTableColumn(t);
+        api.addTableColumn(t);
+        api.addTableRow(t);
+        t.table.rows[0][0] = 'A';
+        t.table.rows[0][1] = 'B';
+        api.repaintTable(t);
+        const root2 = api.renderTableBody(t);
+        eq(byClass(root2, 'table-head-delete').length, 2, '两个数据列各一个删除按钮');
+        eq(byClass(root2, 'table-head-cell').length, 5, '表头 5 格：输入 + 2 数据 + 选择 + 删除行');
+        // 只有一列输入时不给删（删了也会自己长回来，ensureTableChannels 至少留一列）
+        eq(byClass(root2, 'table-head-delete').length, 2, '单列输入没有删除按钮');
+        api.deleteTableColumn(t, 0);
+        eq(t.table.columns.length, 1, '删掉一列');
+        eq(t.table.rows[0], ['B'], '同一行里被删掉的格子也去掉');
+        eq(t.table.rows[0][0], 'B', '剩下那列的值没串位');
+        api.deleteTableColumn(t, 0);
+        eq(t.table.columns.length, 0, '删空');
+        eq(t.table.rows[0], [], '删空后行也空了');
+        api.deleteTableColumn(t, 0);
+        eq(t.table.columns.length, 0, '空表再删不报错');
+
+        // 输入列：删掉列 = 连到这一列的连线一起删，后面的列号前移
+        const t2 = api.addTableNode();
+        nodes.push({id:'imgDelA', type:'image', url:'/static/a.png'});
+        nodes.push({id:'imgDelB', type:'image', url:'/static/b.png'});
+        connections.push({id:'c_del_a', from:'imgDelA', to:t2.id, toPort:'input-1'});
+        connections.push({id:'c_del_b', from:'imgDelB', to:t2.id, toPort:'input-2'});
+        api.addTableColumn(t2);
+        api.addTableRow(t2);
+        eq(api.ensureTableChannels(t2).length, 2, '两条连线 → 两列');
+        const root3 = api.renderTableBody(t2);
+        eq(byClass(root3, 'table-head-delete').length, 3, '两列输入各一个删除按钮 + 一个数据列');
+        api.removeTableInputChannel(t2, 0);
+        eq(api.ensureTableChannels(t2).length, 1, '删掉第一列输入');
+        eq(api.ensureTableChannels(t2)[0].items.map(i => i.nodeId), ['imgDelB'], '第二列的连线前移到第一列');
+        eq(connections.filter(c => c.to === t2.id).map(c => c.toPort), ['input-1'], 'toPort 跟着前移');
+        api.removeTableInputChannel(t2, 0);
+        eq(api.ensureTableChannels(t2).length, 1, '只剩一列时不给删');
+    }
+
     // LLM 表的参考栏同样不放图标
     nodes.push({id:'imgLlmCell', type:'image', url:'/static/up2.png'});
     connections.push({id:'c_llm_cell', from:'imgLlmCell', to:llmTable.id});
