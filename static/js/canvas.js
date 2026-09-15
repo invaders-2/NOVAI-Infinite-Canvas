@@ -7828,6 +7828,24 @@ function llmMediaGroups(node){
 
 function llmListInputs(node){ return llmMediaGroups(node).flatMap(group => group.entries); }
 
+/* 输出形式的药丸按钮（和上面「节点 / 对话」那组药丸同一套 .llm-mode 样式）。
+   value 就是存进 node.llmOutputMode 的原始值，文案是可选值 → 中文名的唯一映射。 */
+const LLM_OUTPUT_MODE_BUTTONS = [
+    {value:'text', label:'文本输出', title:'纯文本输出'},
+    {value:'list', label:'多维表格', title:'多维表格：每一行一条生成内容，接图像生成节点'},
+    {value:'list-video', label:'视频分镜表', title:'视频分镜表：每一行一个分镜，接视频生成节点逐段生成'}
+];
+
+function llmOutputModeButtonsHtml(node){
+    const model = novaTableModel();
+    const current = model ? model.llmOutputModeChoice(node && node.llmOutputMode) : 'text';
+    return LLM_OUTPUT_MODE_BUTTONS.map(item => {
+        const active = item.value === current ? ' active' : '';
+        return '<button type="button" class="llm-output-mode-btn' + active + '" data-output-mode="' + item.value
+            + '" title="' + item.title + '">' + item.label + '</button>';
+    }).join('');
+}
+
 function llmRunButtonLabel(node){
     const model = novaTableModel();
     if(model && model.llmOutputMode(node.llmOutputMode) === 'list'){
@@ -9729,12 +9747,10 @@ function renderLLMNodePane(container, node){
             <div class="llm-output llm-result-output">${escapeHtml(node.outputText || tr('canvas.llmOutputEmpty'))}</div>
         </div>
         <div class="gen-run-row mt-2">
-            <select class="select-lite llm-output-mode" title="LLM 的输出形式">
-                <option value="text">文本输出</option>
-                <option value="list">多维表格</option>
-                <option value="list-video">视频分镜表</option>
-            </select>
-            <button class="llm-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="play" class="w-4 h-4"></i>${llmRunButtonLabel(node)}</button>
+            <div class="llm-run-row">
+                <div class="llm-mode llm-output-mode" role="group" aria-label="LLM 输出形式">${llmOutputModeButtonsHtml(node)}</div>
+                <button class="llm-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="play" class="w-4 h-4"></i>${llmRunButtonLabel(node)}</button>
+            </div>
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -9747,19 +9763,21 @@ function renderLLMNodePane(container, node){
     bindScrollableText(container.querySelector('.llm-result-output'));
     container.querySelector('.llm-pane-resizer').onmousedown = e => startLLMPaneResize(e, node);
     container.querySelector('.llm-run').onclick = e => { e.stopPropagation(); runLLMNode(node.id); };
-    const outputModeSelect = container.querySelector('.llm-output-mode');
-    if(outputModeSelect){
+    const outputModeGroup = container.querySelector('.llm-output-mode');
+    if(outputModeGroup){
         const listModel = novaTableModel();
-        outputModeSelect.value = listModel ? listModel.llmOutputModeChoice(node.llmOutputMode) : 'text';
-        outputModeSelect.title = 'LLM 的输出形式（视频分镜表 = 每一行一个分镜，供视频节点逐段生成）';
-        outputModeSelect.onmousedown = e => e.stopPropagation();
-        outputModeSelect.onclick = e => e.stopPropagation();
-        outputModeSelect.onchange = e => {
-            e.stopPropagation();
-            node.llmOutputMode = listModel ? listModel.llmOutputModeChoice(e.target.value) : (e.target.value === 'list' ? 'list' : 'text');
-            scheduleSave();
-            render();
-        };
+        outputModeGroup.querySelectorAll('[data-output-mode]').forEach(btn => {
+            btn.onmousedown = e => e.stopPropagation();
+            btn.onclick = e => {
+                e.stopPropagation();
+                if(btn.classList.contains('active')) return;
+                node.llmOutputMode = listModel
+                    ? listModel.llmOutputModeChoice(btn.dataset.outputMode)
+                    : (btn.dataset.outputMode === 'list' || btn.dataset.outputMode === 'list-video' ? btn.dataset.outputMode : 'text');
+                scheduleSave();
+                render();
+            };
+        });
     }
     bindCascadeButtons(container, node.id);
     const copyBtn = container.querySelector('.llm-output-copy');

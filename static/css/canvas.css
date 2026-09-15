@@ -766,6 +766,12 @@ body.canvas-port-linking .port { opacity:1; pointer-events:auto; }
 .node.sized.llm-node .llm-run { margin-top:auto; flex-shrink:0; }
 .llm-run { height:36px; width:100%; border-radius:var(--radius-md); background:var(--accent); color:var(--text-on-accent); display:flex; align-items:center; justify-content:center; gap:8px; font-size:11px; font-weight:800; letter-spacing:.08em; }
 .llm-run:disabled { background:var(--surface-2); color:var(--text-3); cursor:not-allowed; }
+/* 输出形式药丸（左）+ 生成按钮（右）同一行；窄节点放不下时按钮自动换到下一行 */
+.llm-run-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.llm-run-row .llm-mode { flex:0 0 auto; }
+.llm-run-row .llm-mode button { padding:0 8px; white-space:nowrap; }
+.llm-run-row .llm-run,
+.node.sized.llm-node .llm-run-row .llm-run { flex:1 1 auto; width:auto; min-width:96px; margin-top:0; }
 .llm-sys-toggle { flex:0 0 auto; height:28px; border-radius:var(--radius-full); padding:0 10px; border:1px solid transparent; background:var(--surface-2); color:var(--text-3); font-size:10px; font-weight:500; white-space:nowrap; transition:background .14s,color .14s,border-color .14s; }
 .llm-sys-toggle.active { background:var(--accent); color:var(--text-on-accent); border-color:var(--text); }
 .theme-dark .llm-sys-toggle { background:var(--soft); border-color:var(--line); color:var(--faint); }

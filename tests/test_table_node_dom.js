@@ -90,7 +90,8 @@ const api = new Function(
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel,' +
     ' normalizeTableNodeHeight, tableNaturalSize,' +
     ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
-    ' generatorNeedsPromptMessage, friendlyBatchError};'
+    ' generatorNeedsPromptMessage, friendlyBatchError,' +
+    ' llmOutputModeButtonsHtml, LLM_OUTPUT_MODE_BUTTONS};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
@@ -561,6 +562,23 @@ missingUrls.delete('/gone.png');
     eq(api.tableRowRefs(vidRow), [{url:'/clip.mp4', name:'参考片段', kind:'video', nodeId:'mv1'}], '视频参考素材带 kind=video');
 
     node.tableBatchConcurrency = savedConcurrency;
+}
+
+// ═══ L1. 输出形式药丸按钮 ═══
+{
+    eq(api.LLM_OUTPUT_MODE_BUTTONS.map(b => b.value), ['text', 'list', 'list-video'], '三颗药丸：文本 / 多维表格 / 视频分镜表');
+    eq(api.LLM_OUTPUT_MODE_BUTTONS.map(b => b.label), ['文本输出', '多维表格', '视频分镜表'], '药丸文案');
+    const pillHtml = api.llmOutputModeButtonsHtml({llmOutputMode:'list-video'});
+    eq((pillHtml.match(/data-output-mode=/g) || []).length, 3, '渲染出 3 颗药丸');
+    ok(pillHtml.indexOf('data-output-mode="list-video" title="视频分镜表：每一行一个分镜，接视频生成节点逐段生成"') > 0, '药丸带 title 说明用途');
+    eq((pillHtml.match(/ active/g) || []).length, 1, '只有一颗是选中态');
+    ok(/data-output-mode="list-video"[^>]*class|class="[^"]*llm-output-mode-btn active"[^>]*data-output-mode="list-video"/.test(pillHtml)
+        || pillHtml.indexOf('llm-output-mode-btn active" data-output-mode="list-video"') > 0, '选中的是视频分镜表');
+    ok(api.llmOutputModeButtonsHtml({llmOutputMode:'list'}).indexOf('data-output-mode="list" title="多维表格') > 0, 'list 用药丸');
+    ok(api.llmOutputModeButtonsHtml({llmOutputMode:'list'}).indexOf('llm-output-mode-btn active" data-output-mode="list"') > 0, 'list 时选中的是多维表格');
+    ok(api.llmOutputModeButtonsHtml({}).indexOf('llm-output-mode-btn active" data-output-mode="text"') > 0, '没设置时选中的是文本输出');
+    ok(api.llmOutputModeButtonsHtml({llmOutputMode:'乱写'}).indexOf('active" data-output-mode="text"') > 0, '非法值回落文本输出');
+    ok(api.llmOutputModeButtonsHtml({llmOutputMode:'list-video'}).indexOf('llm-output-mode-btn active" data-output-mode="list"') < 0, 'list-video 不会同时点亮 list');
 }
 
 // ═══ L2. 供应商错误体的可读化 ═══

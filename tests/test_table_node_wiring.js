@@ -2,6 +2,7 @@
 const fs = require('fs');
 const canvas = fs.readFileSync('static/js/canvas.js', 'utf8');
 const css = fs.readFileSync('static/css/table-node.css', 'utf8');
+const canvasCss = fs.readFileSync('static/css/canvas.css', 'utf8');
 const html = fs.readFileSync('static/canvas.html', 'utf8');
 const model = fs.readFileSync('static/js/shared/table-model.js', 'utf8');
 let fail = 0;
@@ -77,7 +78,14 @@ ok(canvas.includes('model.buildListGeneratePrompt(requirement, inputs, groups, p
 ok(model.includes('function llmTargetKind('), 'table-model 提供 llmTargetKind');
 ok(model.includes('VIDEO_PLAN_BLOCK') && model.includes('VIDEO_GENERATE_BLOCK'), 'table-model 提供视频分镜提示词块');
 ok(model.includes('function batchConcurrency(raw, fallback)'), '可按目标类型指定默认并发');
-ok(canvas.includes('<option value="list-video">视频分镜表</option>'), 'LLM 输出模式下拉有「视频分镜表」');
+ok(canvas.includes('llmOutputModeButtonsHtml(node)'), 'LLM 输出形式用函数生成');
+ok(canvas.includes('class="llm-mode llm-output-mode"'), '输出形式复用节点里那套 .llm-mode 药丸样式');
+ok(canvas.includes("data-output-mode="), '药丸按钮带 data-output-mode');
+ok(!canvas.includes('select-lite llm-output-mode'), '不再用下拉框（select）');
+ok(canvas.includes('class="llm-run-row"'), '药丸与生成按钮同一行');
+ok(canvasCss.includes('.llm-run-row {'), '新行有样式（左药丸右按钮）');
+ok(canvasCss.includes('.llm-run-row .llm-run,'), '行内生成按钮占满剩余宽度');
+ok(canvasCss.includes('.node.sized.llm-node .llm-run-row .llm-run'), '覆盖 .node.sized.llm-node .llm-run 的 margin-top:auto/flex-shrink:0');
 ok(canvas.includes("model.llmModeTargetKind(node.llmOutputMode) || model.llmTargetKind(listTarget.target_type)"), '显式分镜表优先、否则按下游探测');
 
 console.log('[7] 「批量生成」按钮必须真的绑上（只渲染不绑定 = 点了没反应）');
@@ -86,13 +94,15 @@ console.log('[7] 「批量生成」按钮必须真的绑上（只渲染不绑定
   ok(body.includes('tableBatchRunButtonHtml(node)'), name + ' 渲染「批量生成」按钮');
   ok(body.includes('.table-batch-run-btn'), name + ' 绑定「批量生成」按钮的 onclick');
 });
-console.log('[8] 改了脚本就必须同步 canvas.html 的 ?v=（否则浏览器拿缓存的旧 JS）');
+console.log('[8] 改了 canvas.js / table-model.js / canvas.css，就必须同步 canvas.html 的 ?v=');
+const VERSIONED_ASSETS = ['static/js/canvas.js', 'static/js/shared/table-model.js', 'static/css/canvas.css', 'static/css/table-node.css'];
 try {
   const dirty = require('child_process')
-    .execSync('git status --porcelain static/js/canvas.js static/js/shared/table-model.js static/canvas.html', {encoding: 'utf8'})
+    .execSync('git status --porcelain ' + VERSIONED_ASSETS.join(' ') + ' static/canvas.html', {encoding: 'utf8'})
     .split('\n').map(line => line.slice(3).trim()).filter(Boolean);
-  const dirtyJs = dirty.some(f => f === 'static/js/canvas.js' || f === 'static/js/shared/table-model.js');
-  ok(!dirtyJs || dirty.includes('static/canvas.html'), '改了 canvas.js / table-model.js 就必须同时改 static/canvas.html 的 ?v=');
+  const dirtyAsset = dirty.filter(f => VERSIONED_ASSETS.includes(f));
+  ok(dirtyAsset.length === 0 || dirty.includes('static/canvas.html'),
+    '改了 ' + (dirtyAsset.join('、') || 'canvas.js') + ' 就必须同时改 static/canvas.html 的 ?v=');
 } catch(error) {
   ok(true, '跳过（不在 git 工作区）');
 }
