@@ -6475,7 +6475,7 @@ function bindTableCellEditor(node, editor, row, column){
         const model = novaTableModel();
         const caret = typeof editor.selectionStart === 'number' ? editor.selectionStart : editor.value.length;
         const before = editor.value.slice(0, caret);
-        const match = /@(?:图片|视频|音频|文件)?d*$/.exec(before);
+        const match = /@[^ @]{0,6}$/.exec(before);
         if(!model || !match) return closePicker();
         const start = caret - match[0].length;
         const token = model.mentionTokenAt(item.kind, item.ordinal);
@@ -6485,12 +6485,26 @@ function bindTableCellEditor(node, editor, row, column){
         closePicker();
         if(typeof editor.focus === 'function') editor.focus();
     };
+    let activeIndex = 0;
+    const pickerItems = () => Array.prototype.slice.call(picker.children || [])
+        .filter(child => child.classList && child.classList.contains('table-cell-mention-item'));
+    const paintActive = () => pickerItems().forEach((el, i) => el.classList.toggle('is-active', i === activeIndex));
     const openPicker = () => {
         const model = novaTableModel();
         const rows = tableRowInputs(node);
         const media = (rows[row] && rows[row].media ? rows[row].media : []).filter(item => item && item.url);
-        if(!model || !media.length) return closePicker();
+        if(!model) return closePicker();
         picker.textContent = '';
+        if(!media.length){
+            // 打 @ 却没反应最容易被当成坏了：这一行没素材时就说清楚
+            const tip = document.createElement('span');
+            tip.className = 'table-cell-mention-tip';
+            tip.textContent = '本行还没有素材，先在上面的输入列上传';
+            picker.appendChild(tip);
+            picker.classList.add('is-open');
+            return;
+        }
+        activeIndex = 0;
         media.forEach(item => {
             const button = document.createElement('button');
             button.type = 'button';
@@ -6511,18 +6525,38 @@ function bindTableCellEditor(node, editor, row, column){
             button.onclick = event => { event.preventDefault(); event.stopPropagation(); insertMention(item); };
             picker.appendChild(button);
         });
+        activeIndex = 0;
         picker.classList.add('is-open');
+        paintActive();
     };
     editor.oninput = () => {
         const caret = typeof editor.selectionStart === 'number' ? editor.selectionStart : editor.value.length;
-        if(/@(?:图片|视频|音频|文件)?d*$/.test(editor.value.slice(0, caret))) openPicker();
+        // 触发放宽到「最近 6 个字符里有个 @」：打 @ / @图 / @1 都算，打错了也不会闪没
+        if(/@[^ @]{0,6}$/.test(editor.value.slice(0, caret))) openPicker();
         else closePicker();
     };
     if(editor.parentNode) editor.parentNode.appendChild(picker);
     editor.onblur = () => finish(true);
     editor.onkeydown = event => {
         event.stopPropagation();
-        if(event.key === 'Escape' && picker.classList.contains('is-open')){ event.preventDefault(); closePicker(); return; }
+        const pickerOpen = picker.classList.contains('is-open');
+        // 选择条开着：方向键换一张、Enter 选它、Esc 先收选择条
+        if(pickerOpen && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')){
+            event.preventDefault();
+            const list = pickerItems();
+            if(list.length){
+                activeIndex = (activeIndex + (event.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length;
+                paintActive();
+            }
+            return;
+        }
+        if(pickerOpen && event.key === 'Enter'){
+            event.preventDefault();
+            const list = pickerItems();
+            const picked = list[activeIndex] || list[0];
+            if(picked && typeof picked.onclick === 'function'){ picked.onclick({preventDefault(){}, stopPropagation(){}}); return; }
+        }
+        if(event.key === 'Escape' && pickerOpen){ event.preventDefault(); closePicker(); return; }
         if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
         else if(event.key === 'Enter' && !event.shiftKey){ event.preventDefault(); finish(true); }
     };
