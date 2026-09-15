@@ -6758,6 +6758,7 @@ function tableCellMoreButton(cell, actions){
         const label = document.createElement('span');
         label.textContent = action.label;
         item.appendChild(label);
+        if(action.token) item.title = action.token;
         item.onclick = event => { event.stopPropagation(); menu.classList.remove('is-open'); action.onClick(); };
         menu.appendChild(item);
     });
@@ -8024,7 +8025,9 @@ function renderTableBody(node){
                         if(manualList.length > 1){
                             // 格子有多张：一张一张替换，不是把整格换掉
                             showMedia.forEach((entry, itemIndex) => actions.push({
-                                label: '替换 ' + model.mentionTokenAt(entry.kind, entry.ordinal),
+                                // 菜单里靠缩略图分辨是哪一张，不再显示 @图片N 这种序号
+                                label: '替换',
+                                token: model.mentionTokenAt(entry.kind, entry.ordinal),
                                 thumb: entry.url,
                                 mediaType: entry.kind,
                                 onClick: () => pickTableCellFile(picked => {

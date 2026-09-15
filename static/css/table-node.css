@@ -494,7 +494,7 @@
 }
 
 .table-cell-mention-item:hover { border-color: var(--line-2); background: var(--nav-hover-bg); color: var(--text); }
-.table-cell-mention-item .table-media-thumb { width: 26px; height: 26px; border-radius: 4px; }
+.table-cell-mention-item .table-media-thumb { width: 34px; height: 34px; border-radius: 5px; }
 .table-cell-mention-item .table-media-thumb img,
 .table-cell-mention-item .table-media-thumb video { width: 100%; height: 100%; max-width: 26px; max-height: 26px; object-fit: cover; }
 
