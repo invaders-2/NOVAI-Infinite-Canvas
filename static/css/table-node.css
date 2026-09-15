@@ -312,7 +312,12 @@
 }
 
 .table-cell-menu.is-open { display: block; }
-.table-cell-menu .menu-btn { height: 26px; font-size: 10.5px; }
+.table-cell-menu { min-width: 124px; }
+.table-cell-menu .menu-btn { height: 30px; font-size: 10.5px; gap: 7px; white-space: nowrap; }
+.table-cell-menu .menu-btn span { white-space: nowrap; }
+.table-cell-menu .table-media-thumb { width: 22px; height: 22px; flex: 0 0 22px; border-radius: 4px; }
+.table-cell-menu .table-media-thumb img,
+.table-cell-menu .table-media-thumb video { width: 100%; height: 100%; max-width: 22px; max-height: 22px; object-fit: cover; }
 
 .table-cell-more {
     min-width: 22px;

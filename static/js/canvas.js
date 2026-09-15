@@ -6746,7 +6746,18 @@ function tableCellMoreButton(cell, actions){
         const item = stopCellEvent(document.createElement('button'));
         item.type = 'button';
         item.className = 'menu-btn';
-        item.textContent = action.label;
+        // 带缩略图（替换哪一张要看得见）
+        if(action.thumb){
+            const thumb = document.createElement('span');
+            thumb.className = 'table-media-thumb';
+            thumb.innerHTML = action.mediaType === 'video'
+                ? canvasVideoPreviewHtml(action.thumb)
+                : canvasPreviewImgHtml(action.thumb, 24);
+            item.appendChild(thumb);
+        }
+        const label = document.createElement('span');
+        label.textContent = action.label;
+        item.appendChild(label);
         item.onclick = event => { event.stopPropagation(); menu.classList.remove('is-open'); action.onClick(); };
         menu.appendChild(item);
     });
@@ -8014,6 +8025,8 @@ function renderTableBody(node){
                             // 格子有多张：一张一张替换，不是把整格换掉
                             showMedia.forEach((entry, itemIndex) => actions.push({
                                 label: '替换 ' + model.mentionTokenAt(entry.kind, entry.ordinal),
+                                thumb: entry.url,
+                                mediaType: entry.kind,
                                 onClick: () => pickTableCellFile(picked => {
                                     replaceTableManualInputItem(node, channel.id, rowIndex, itemIndex, picked);
                                     repaintTable(node);
