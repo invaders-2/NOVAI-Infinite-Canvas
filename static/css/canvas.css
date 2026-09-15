@@ -788,14 +788,20 @@ body.canvas-port-linking .port { opacity:1; pointer-events:auto; }
 .seg button { height:30px; min-width:48px; border-radius:var(--radius-full); padding:0 10px; color:var(--muted); border:1px solid transparent; font-size:10px; font-weight:700; }
 .seg button.active { background:var(--strong); color:var(--strong-text); border-color:var(--strong); box-shadow:0 1px 4px var(--shadow); }
 .select-lite { height:34px; border:1px solid var(--line-2); border-radius:var(--radius-full); background:var(--card-solid); padding:0 10px; outline:none; color:var(--text); font-size:11px; font-weight:700; box-shadow:0 1px 0 rgba(255,255,255,.48); max-width:100%; min-width:0; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* 原生下拉三角紧贴 radius-full 的圆角边，看着挤。改成自绘 chevron
-   （画法沿用智能画布里的 select），并整体向右缩进 5px。 */
+/* 原生下拉三角是实心的、还紧贴 radius-full 的圆角边。
+   换成线性图标：直接用 Lucide chevron-down 的 stroke path 做背景图
+   （和智能画布 pill 上那个 data-lucide="chevron-down" 是同一个图形），
+   线宽/圆头沿用 Lucide 默认值，并向右缩进避开圆角。
+   背景图里不能用 currentColor，所以深浅色各一条。 */
 .select-lite { appearance:none; -webkit-appearance:none; padding-right:24px;
-    background-image:linear-gradient(45deg, transparent 50%, currentColor 50%),
-                     linear-gradient(135deg, currentColor 50%, transparent 50%);
-    background-position:calc(100% - 18px) 50%, calc(100% - 13px) 50%;
-    background-size:5px 5px, 5px 5px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230a0a0a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position:calc(100% - 12px) 50%;
+    background-size:12px 12px;
     background-repeat:no-repeat; }
+html.theme-dark body .select-lite,
+body.theme-dark .select-lite,
+html.studio-theme-dark body .select-lite,
+body.studio-theme-dark .select-lite { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fafafa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); }
 .select-lite option:disabled { background:var(--surface-2); color:var(--text); font-weight:800; }
 .select-lite:has(option:checked:disabled) { color:var(--text-2); }
 .select-lite:disabled { opacity:.55; cursor:not-allowed; }

@@ -85,8 +85,13 @@ ok(canvas.includes("data-output-mode="), '药丸按钮带 data-output-mode');
 ok(/.llm-mode button.active \{ background:var\(--strong\); color:var\(--strong-text\);/.test(canvasCss),
   '药丸选中态 = --strong 底 + --strong-text 字（浅色下黑底白字）');
 ok(canvasCss.includes('.select-lite { appearance:none; -webkit-appearance:none; padding-right:24px;'), '下拉三角改自绘并缩进');
-ok(canvasCss.includes('background-position:calc(100% - 18px) 50%, calc(100% - 13px) 50%'), '三角位置缩进 5px');
-ok(themeCss.includes('background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50% !important'), 'studio-dark 里补回自绘三角');
+ok(canvasCss.includes("stroke-linecap='round'"), '三角是线性图标（Lucide stroke，圆头圆角）');
+ok(canvasCss.includes("path d='m6 9 6 6 6-6'"), '用的就是 Lucide chevron-down 的 path');
+ok(canvasCss.includes('background-position:calc(100% - 12px) 50%'), '图标位置固定');
+ok(canvasCss.includes('background-size:12px 12px'), '图标尺寸固定');
+ok(!canvasCss.includes('linear-gradient(45deg, transparent 50%'), '不再用渐变拼三角');
+ok(canvasCss.includes("stroke='%23fafafa'"), '深色主题有对应的浅色描边版本');
+ok(themeCss.includes("stroke-linecap='round'") && themeCss.includes('!important'), 'studio-dark 里补回线性三角');
 ok(canvas.includes("return model.llmRunStageLabel(Boolean(node.running), stage);"), '生成按钮文案统一走 llmRunStageLabel');
 ok(!canvas.includes("'Run LLM'"), '不再出现英文 Run LLM');
 ok(!canvas.includes('select-lite llm-output-mode'), '不再用下拉框（select）');

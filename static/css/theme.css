@@ -605,14 +605,14 @@ body.studio-theme-dark .shell .mode-tabs {
     color: var(--text-3) !important;
 }
 
-/* 上面那条 background 简写会把 canvas.css 给 .select-lite 画的自绘 chevron 清掉，这里补回来 */
+/* 上面那条 background 简写会把 canvas.css 给 .select-lite 加的线性 chevron 清掉，这里补回来 */
 html.studio-theme-dark body .shell .select-lite,
 body.studio-theme-dark .shell .select-lite,
 html.studio-theme-dark body .shell .select-lite:hover,
 body.studio-theme-dark .shell .select-lite:hover {
-    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%) !important;
-    background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50% !important;
-    background-size: 5px 5px, 5px 5px !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fafafa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+    background-position: calc(100% - 12px) 50% !important;
+    background-size: 12px 12px !important;
     background-repeat: no-repeat !important;
 }
 
