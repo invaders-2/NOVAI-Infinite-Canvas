@@ -423,6 +423,30 @@
 .table-media-stack .table-media-text,
 .table-media-stack .table-media-missing { flex: 1 1 100%; }
 
+/* 单元格文本里指向本行素材的 @图片N：换成一个小缩略图 */
+.table-cell-mention {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    margin: 0 2px;
+}
+
+.table-cell-mention .table-media-thumb {
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    border-radius: 4px;
+}
+
+.table-cell-mention .table-media-thumb img,
+.table-cell-mention .table-media-thumb video {
+    width: 100%;
+    height: 100%;
+    max-width: 18px;
+    max-height: 18px;
+    object-fit: cover;
+}
+
 .table-media-text {
     display: block;
     padding: 3px 4px;

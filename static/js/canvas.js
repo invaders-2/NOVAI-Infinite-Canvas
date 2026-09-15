@@ -5806,6 +5806,7 @@ function renderNode(node){
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
     normalizeTableNodeHeight(node);
+    normalizeContentHeightNode(node);
     /* 表格节点默认由内容决定高度（这样不会留白）；
        用户手动拉过高度（tableHeightUserSet）才套用 node.h —— 那时表格区填满节点，
        多出来的高度用来多显示几行，而不是靠内部滚动硬顶。 */
@@ -6649,6 +6650,35 @@ function tableCellMoreButton(cell, onReplace){
     cell.appendChild(button);
 }
 
+/* 单元格文本里的 @图片N / @视频N：指向**同一行**的素材时直接渲染成缩略图，
+   对不上的引用原样留着（和提示词重写一个原则：绝不静默吞掉）。 */
+function renderTableCellText(view, text, mediaList){
+    const model = novaTableModel();
+    const source = String(text || '');
+    const byOrdinal = new Map();
+    (mediaList || []).forEach(item => {
+        if(item && item.url && Number.isFinite(Number(item.ordinal))) byOrdinal.set(Number(item.ordinal), item);
+    });
+    if(!model || !byOrdinal.size){ view.textContent = source; return; }
+    let cursor = 0;
+    source.replace(model.MENTION_RE, (token, label, digits, offset) => {
+        const hit = byOrdinal.get(Number(digits));
+        if(!hit || model.mentionLabel(hit.kind) !== label) return token;
+        if(offset > cursor) view.appendChild(document.createTextNode(source.slice(cursor, offset)));
+        const chip = document.createElement('span');
+        chip.className = 'table-cell-mention';
+        chip.title = token;
+        const thumb = document.createElement('span');
+        thumb.className = 'table-media-thumb';
+        thumb.innerHTML = hit.kind === 'video' ? canvasVideoPreviewHtml(hit.url) : canvasPreviewImgHtml(hit.url, 36);
+        chip.appendChild(thumb);
+        view.appendChild(chip);
+        cursor = offset + token.length;
+        return token;
+    });
+    if(cursor < source.length) view.appendChild(document.createTextNode(source.slice(cursor)));
+}
+
 // 双击媒体格看大图
 function bindTableCellMediaView(cell, url, mediaType){
     if(!url) return;
@@ -7001,6 +7031,19 @@ function notifyCanvas(text){
    和 renderNode 里 rh 节点清理旧默认高度是同一个套路。 */
 function normalizeTableNodeHeight(node){
     if(!node || node.type !== 'table') return false;
+    if(node.h && !node.tableHeightUserSet){
+        delete node.h;
+        return true;
+    }
+    return false;
+}
+
+/* 生成 / 视频节点同理：默认由内容决定高度，底部不留一大片空白。
+   存进画布的老固定高度（早期默认值）直接清掉；
+   用户自己拉过的（tableHeightUserSet，拖 resize 手柄时任何节点都会置位）保留 —— 那是他要的尺寸。 */
+function normalizeContentHeightNode(node){
+    if(!node) return false;
+    if(node.type !== 'generator' && node.type !== 'video') return false;
     if(node.h && !node.tableHeightUserSet){
         delete node.h;
         return true;
@@ -7849,13 +7892,12 @@ function renderTableBody(node){
                 } else {
                     const view = document.createElement('div');
                     view.className = 'table-cell-view';
-                    view.textContent = value;
                     if(!value) view.classList.add('is-empty');
+                    // 文本里的 @图片N 指向同一行上传的素材时直接显示缩略图（自建表才做，LLM 表的提示词保持纯文本）
+                    renderTableCellText(view, value, llmTable ? null : data.media);
                     cell.appendChild(view);
                     // 提示词格：双击改文字（两种表格都一样）
                     cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'cell', row:rowIndex, column:index}); };
-                    // 空白表里空着的格子正中给一个「+」；写了字就没了
-                    if(!llmTable && !value) tableCellAddButton(cell, () => pickTableCellFile(picked => setTableCellMedia(node, rowIndex, index, picked)));
                 }
                 if(editing && editing.kind === 'cell' && editing.row === rowIndex && editing.column === index){
                     cell.classList.add('is-editing');

@@ -36,7 +36,15 @@ const byTag = (el, t) => all(el).filter(e => e.tagName === t.toUpperCase());
 const one = (el, c) => byClass(el, c)[0];
 const rowAt = (root, i) => byTag(root, 'tbody')[0].children[i];
 
-global.document = { createElement: makeEl, querySelector: () => null };
+global.document = {
+    createElement: makeEl,
+    querySelector: () => null,
+    // 文本节点：只要有 textContent / children 就够 shim 用
+    createTextNode: text => ({
+        nodeType: 3, textContent: String(text), children: [], parentNode: null,
+        classList: {contains: () => false, add(){}, remove(){}, toggle(){ return false; }},
+    }),
+};
 global.window = {};
 global.requestAnimationFrame = fn => fn();
 const model = require('../static/js/shared/table-model.js');
@@ -91,7 +99,7 @@ const api = new Function(
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableBatchSingleButtonHtml, tableDrivenHidden, paintTableBatchPanel,' +
     ' normalizeTableNodeHeight, tableNaturalSize,' +
-    ' setTableCellMedia, tableManualInputItem, setTableManualInputItem,' +
+    ' setTableCellMedia, tableManualInputItem, setTableManualInputItem, renderTableCellText, normalizeContentHeightNode,' +
     ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
     ' generatorNeedsPromptMessage, friendlyBatchError,' +
     ' llmOutputModeButtonsHtml, LLM_OUTPUT_MODE_BUTTONS, TABLE_DELETE_COLUMN_WIDTH};'
@@ -791,31 +799,38 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     const root = api.renderTableBody(tbl);
     const dataCell = () => rowAt(root, 0).children[1];
 
-    const add = () => byClass(dataCell(), 'table-cell-add')[0];
-    ok(Boolean(add()), '空白表格子正中一个「+」');
+    const inputCell = () => rowAt(root, 0).children[0];
+
+    // 数据列只支持文本：没有「+」也没有「···」
+    eq(byClass(dataCell(), 'table-cell-add').length, 0, '数据列不放「+」（只支持文本）');
+    eq(byClass(dataCell(), 'table-cell-more').length, 0, '数据列不放「···」');
+
+    // 输入列：空格子正中一个「+」
+    const add = () => byClass(inputCell(), 'table-cell-add')[0];
+    ok(Boolean(add()), '输入列空格子正中一个「+」');
     eq(add().title, '上传图片/视频', '「+」的说明');
-    eq(byClass(dataCell(), 'table-cell-add').length, 1, '只有一个「+」');
-    eq(byClass(dataCell(), 'table-cell-more').length, 0, '空格子没有「···」');
+    eq(byClass(inputCell(), 'table-cell-add').length, 1, '只有一个「+」');
+    eq(byClass(inputCell(), 'table-cell-more').length, 0, '空格子没有「···」');
 
-    // 写入文字 → 「+」消失，双击回到改文字
-    api.setTableCellMedia(tbl, 0, 0, null);
+    // 数据列写文字 → 双击可编辑
     tbl.table.rows[0][0] = '一只猫';
-    api.repaintTable(tbl);   // 改格子内容不改变签名，得显式重绘（编辑提交走的就是这条路）
-    eq(byClass(dataCell(), 'table-cell-add').length, 0, '写了提示词 → 「+」消失');
+    api.repaintTable(tbl);
     ok(typeof dataCell().ondblclick === 'function', '文字格双击可编辑');
+    eq(byClass(dataCell(), 'table-cell-add').length, 0, '文字格没有「+」');
 
-    // 换成媒体 → 右上角「···」，双击看大图
-    api.setTableCellMedia(tbl, 0, 0, {url:'/static/m.png', mediaType:'image', name:'m.png'});
-    const mediaCell = dataCell();
-    ok(mediaCell.classList.contains('is-media-cell'), '媒体格打上标记');
-    eq(byClass(mediaCell, 'table-media-thumb').length, 1, '渲染成缩略图');
-    const more = () => byClass(dataCell(), 'table-cell-more')[0];
-    ok(Boolean(more()), '媒体格右上角「···」');
+    // 输入列上传 → 「+」变「···」，双击看大图
+    api.setTableManualInputItem(tbl, 'input-1', 0, {url:'/static/m.png', mediaType:'image', name:'m.png'});
+    api.repaintTable(tbl);
+    const mediaCell = inputCell();
+    eq(byClass(mediaCell, 'table-media-thumb').length, 1, '输入列渲染成缩略图');
+    const more = () => byClass(inputCell(), 'table-cell-more')[0];
+    ok(Boolean(more()), '有素材后右上角「···」');
     eq(more().textContent, '···', '就是三个点');
-    eq(byClass(dataCell(), 'table-cell-add').length, 0, '有图就不再显示「+」');
+    eq(byClass(inputCell(), 'table-cell-add').length, 0, '有图就不再显示「+」');
     ok(typeof mediaCell.ondblclick === 'function', '媒体格双击可查看');
-    eq(tbl.table.rows[0][0], {kind:'media', url:'/static/m.png', mediaType:'image', name:'m.png'}, 'rows 里存的是媒体对象');
-    eq(api.tableRowInputs(tbl)[0].text, '', '媒体格不进这一行的文字');
+    eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/m.png'], '输入列的素材进了这一行');
+    api.setTableManualInputItem(tbl, 'input-1', 0, null);
+    api.repaintTable(tbl);
 
     // ── LLM 生成的多维表格：一个格子图标都不放 ──
     const llmTable = api.addTableNode();
@@ -832,6 +847,56 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     eq(byClass(llmMedia, 'table-cell-more').length, 0, 'LLM 表：媒体格也不放「···」');
     eq(byClass(llmMedia, 'table-cell-add').length, 0, 'LLM 表：媒体格也不放「+」');
     ok(typeof llmMedia.ondblclick === 'function', 'LLM 表：媒体格双击可查看');
+    // ── 数据列只支持文本 + @本行素材显示缩略图 ──
+    {
+        const t = api.addTableNode();
+        api.addTableColumn(t);
+        api.addTableRow(t);
+        const rootT = api.renderTableBody(t);
+        const cellOf = () => rowAt(rootT, 0).children[1];
+        eq(byClass(cellOf(), 'table-cell-add').length, 0, '自建表的数据列不放「+」（只支持文本）');
+        eq(byClass(cellOf(), 'table-cell-more').length, 0, '自建表的数据列不放「···」');
+
+        // 参考栏上传一张，再把 @图片1 写进同一行的文本格
+        api.setTableManualInputItem(t, 'input-1', 0, {url:'/static/row.png', mediaType:'image', name:'row.png'});
+        t.table.rows[0][0] = '把 @图片1 换成红色的';
+        api.repaintTable(t);
+        const chip = byClass(cellOf(), 'table-cell-mention')[0];
+        ok(Boolean(chip), '@图片1 变成缩略图 chip');
+        eq(byClass(cellOf(), 'table-media-thumb').length, 1, 'chip 里有一个缩略图');
+        eq(cellOf().textContent, '把  换成红色的', '引用位置留空、其余文字保留');
+        eq(byClass(cellOf(), 'table-cell-view')[0].children.length, 3, '文本 + chip + 文本 三段');
+
+        // 对不上的引用原样留着
+        t.table.rows[0][0] = '看 @图片9';
+        api.repaintTable(t);
+        eq(byClass(cellOf(), 'table-cell-mention').length, 0, '对不上的 @图片9 不渲染缩略图');
+        eq(cellOf().textContent, '看 @图片9', '对不上的引用原样保留');
+
+        // LLM 表：提示词保持纯文本（不插缩略图，免得行高爆炸）
+        const lt = api.addTableNode();
+        lt.llmGeneratedOutput = true;
+        api.addTableColumn(lt);
+        api.addTableRow(lt);
+        api.setTableManualInputItem(lt, 'input-1', 0, {url:'/static/llm2.png', mediaType:'image', name:'llm2.png'});
+        lt.table.rows[0][0] = '参考 @图片1';
+        const lroot = api.renderTableBody(lt);
+        api.repaintTable(lt);
+        eq(byClass(rowAt(lroot, 0).children[1], 'table-cell-mention').length, 0, 'LLM 表提示词不插缩略图');
+        eq(rowAt(lroot, 0).children[1].textContent, '参考 @图片1', 'LLM 表原样显示文本');
+    }
+
+    // ── 生成 / 视频节点默认随内容高度（不留白），用户拉过的才保留 ──
+    {
+        eq(api.normalizeContentHeightNode({type:'generator', h:900}), true, '生成节点的旧固定高度被清掉');
+        eq(api.normalizeContentHeightNode({type:'video', h:800}), true, '视频节点同理');
+        const kept = {type:'generator', h:900, tableHeightUserSet:true};
+        eq(api.normalizeContentHeightNode(kept), false, '用户拉过的高度保留');
+        eq(kept.h, 900, 'h 没被删');
+        eq(api.normalizeContentHeightNode({type:'table', h:700}), false, '表格节点不走这条');
+        eq(api.normalizeContentHeightNode({type:'generator'}), false, '没有 h 就不动');
+    }
+
     // ── 删列 ──
     {
         const t = api.addTableNode();
