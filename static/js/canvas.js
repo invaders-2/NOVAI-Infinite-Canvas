@@ -6914,13 +6914,19 @@ function addTableNode(point){
     });
 }
 
+/* 删除列：表格右侧独立的一列「删除行」。
+   DX OS 的 Yw 只算 输入列 + 数据列 + 预留(44)，不含这一列，所以自然宽度要单独补上。
+   数值必须和 .table-delete-column 的 CSS 宽度一致（wiring 测试会比对）。 */
+const TABLE_DELETE_COLUMN_WIDTH = 60;
+
 // 表格本体尺寸（DX OS 的 Yw）
 function tableNaturalSize(node){
     const model = novaTableModel();
     const state = ensureTableState(node);
     if(!model || !state) return {width:280, height:0};
     const inputColumns = Array.isArray(node.tableInputChannels) ? node.tableInputChannels.length : 0;
-    return model.nodeSize(state, inputColumns);
+    const size = model.nodeSize(state, inputColumns);
+    return {width:size.width + TABLE_DELETE_COLUMN_WIDTH, height:size.height};
 }
 
 /* 节点宽度 = 表格本体宽 + node-body 左右内边距。
@@ -7988,7 +7994,7 @@ function renderTableBody(node){
 
         table.textContent = '';
 
-        // ── colgroup：输入列(112) → 数据列(132) → 操作列(44) ──
+        // ── colgroup：输入列(112) → 数据列(132) → 选择列(44) → 删除列(60) ──
         const colgroup = document.createElement('colgroup');
         channels.forEach(() => {
             const column = document.createElement('col');
@@ -8003,6 +8009,9 @@ function renderTableBody(node){
         const actionColumn = document.createElement('col');
         actionColumn.className = 'table-actions-column';
         colgroup.appendChild(actionColumn);
+        const deleteColumn = document.createElement('col');
+        deleteColumn.className = 'table-delete-column';
+        colgroup.appendChild(deleteColumn);
         table.appendChild(colgroup);
 
         // ── 表头 ──
@@ -8067,6 +8076,11 @@ function renderTableBody(node){
         actionHead.appendChild(selectAll);
         headRow.appendChild(actionHead);
 
+        const deleteHead = document.createElement('th');
+        deleteHead.className = 'table-cell table-head-cell table-actions-cell table-delete-cell';
+        deleteHead.textContent = '删除行';
+        headRow.appendChild(deleteHead);
+
         thead.appendChild(headRow);
         table.appendChild(thead);
 
@@ -8076,7 +8090,7 @@ function renderTableBody(node){
             const emptyRow = document.createElement('tr');
             const emptyCell = document.createElement('td');
             emptyCell.className = 'table-cell table-empty-cell';
-            emptyCell.colSpan = channels.length + state.columns.length + 1;
+            emptyCell.colSpan = channels.length + state.columns.length + 2;
             emptyCell.textContent = state.columns.length ? '暂无数据，点「新增行」开始填写' : '点「新增列」开始建表';
             emptyRow.appendChild(emptyCell);
             tbody.appendChild(emptyRow);
@@ -8128,7 +8142,7 @@ function renderTableBody(node){
                 tr.appendChild(cell);
             });
 
-            // 操作列：选择 + 删行
+            // 选择列：只放勾选框
             const actionCell = document.createElement('td');
             actionCell.className = 'table-cell table-actions-cell table-row-actions';
             const pick = document.createElement('input');
@@ -8137,10 +8151,15 @@ function renderTableBody(node){
             pick.checked = picked.has(rowIndex);
             pick.onchange = () => toggleTableRow(node, rowIndex, pick.checked);
             actionCell.appendChild(pick);
-            const removeRow = tableButton('\u00d7', '删除这一行', 'table-row-delete');
-            removeRow.onclick = event => { event.stopPropagation(); deleteTableRow(node, rowIndex); };
-            actionCell.appendChild(removeRow);
             tr.appendChild(actionCell);
+
+            // 删除列：独立一列，单元格里就是「删除行」
+            const deleteCell = document.createElement('td');
+            deleteCell.className = 'table-cell table-actions-cell table-delete-cell';
+            const removeRow = tableButton('删除行', '删除这一行', 'table-row-delete');
+            removeRow.onclick = event => { event.stopPropagation(); deleteTableRow(node, rowIndex); };
+            deleteCell.appendChild(removeRow);
+            tr.appendChild(deleteCell);
 
             tbody.appendChild(tr);
         });

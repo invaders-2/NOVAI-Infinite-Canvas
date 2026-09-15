@@ -91,7 +91,7 @@ const api = new Function(
     ' normalizeTableNodeHeight, tableNaturalSize,' +
     ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
     ' generatorNeedsPromptMessage, friendlyBatchError,' +
-    ' llmOutputModeButtonsHtml, LLM_OUTPUT_MODE_BUTTONS};'
+    ' llmOutputModeButtonsHtml, LLM_OUTPUT_MODE_BUTTONS, TABLE_DELETE_COLUMN_WIDTH};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
@@ -118,7 +118,8 @@ eq(one(root, 'table-node-inputs').textContent, '1 个输入', '输入列计数�
 eq(byClass(root, 'table-node-action').map(b => b.textContent), ['+ 输入列', '新增列', '新增行'], '信息条按钮');
 eq(one(root, 'table-empty-cell').textContent, '点「新增列」开始建表', '空表引导');
 // 列序：输入列 → 数据列 → 操作列
-eq(byTag(root, 'th').length, 2, '表头：输入列 + 操作列（空表尚无数据列）');
+eq(byTag(root, 'th').length, 3, '表头：输入列 + 选择列 + 删除列（空表尚无数据列）');
+eq(byClass(root, 'table-delete-cell').filter(e => e.tagName === 'TH')[0].textContent, '删除行', '删除列表头文案');
 
 // ═══ B. 素材连线进来 → 输入列 ═══
 nodes.push({id:'img1', type:'image', url:'/a.png'});
@@ -134,9 +135,13 @@ api.addTableColumn(node);
 api.addTableRow(node);
 api.addTableRow(node);
 eq(byTag(root, 'tbody')[0].children.length, 2, '两行');
-eq(byTag(root, 'tbody')[0].children[0].children.length, 3, '每行 = 1 输入列 + 1 数据列 + 1 操作列');
+eq(byTag(root, 'tbody')[0].children[0].children.length, 4, '每行 = 输入列 + 数据列 + 选择列 + 删除列');
 ok(rowAt(root, 0).children[0].classList.contains('table-media-cell'), '第 1 格是输入列');
-ok(rowAt(root, 0).children[2].classList.contains('table-row-actions'), '最后一格是操作列');
+ok(rowAt(root, 0).children[2].classList.contains('table-row-actions'), '倒数第二格是选择列');
+ok(rowAt(root, 0).children[3].classList.contains('table-delete-cell'), '最后一格是删除列');
+eq(one(rowAt(root, 0).children[2], 'table-row-delete'), undefined, '选择列里没有删行按钮了');
+eq(one(rowAt(root, 0).children[3], 'table-row-delete').textContent, '删除行', '删除列的单元格就是「删除行」');
+eq(byClass(rowAt(root, 0).children[3], 'table-checkbox').length, 0, '删除列里没有勾选框');
 eq(byClass(one(rowAt(root, 0), 'table-media-cell'), 'table-media-thumb')[0].innerHTML, '<img src="/a.png">', '第 1 行取第 1 个素材');
 eq(byClass(one(rowAt(root, 1), 'table-media-cell'), 'table-media-thumb')[0].innerHTML, '<img src="/b.png">', '第 2 行取第 2 个素材');
 eq(one(rowAt(root, 0), 'table-media-cell').dataset.channel, 'input-1', '输入格带 data-channel（toPort 落点用）');
@@ -241,7 +246,7 @@ const probe = model.normalizeTable({columns:['a'], rows:[['1'],['2'],['3']]}).ta
 probe.selectedRows = [0, 1, 2];
 eq(model.applyOperation(probe, 'delete_column', {column:1}).selectedRows, [0, 1, 2], '删列后行选中不变');
 api.syncTableNodeWidth(node);
-eq(node.w, model.nodeSize(node.table, 2).width + 24, '节点宽按表格宽 + 内边距（含输入列）');
+eq(node.w, model.nodeSize(node.table, 2).width + api.TABLE_DELETE_COLUMN_WIDTH + 24, '节点宽 = 输入列 + 数据列 + 选择列 + 删除列 + 内边距');
 
 // ═══ I. 提示词组装与悬空引用 ═══
 eq(model.buildRowPrompt(['上游'], '节点提示', '行文本'), '上游\n节点提示\n行文本', 'jf 三段拼接');
@@ -411,9 +416,9 @@ node.tableBatchStartRow = 1;
     api.addTableColumn(sized);
     api.addTableRow(sized);
     const sizedRoot = api.renderTableBody(sized);
-    const natural = model.nodeSize(sized.table, 1).width;
+    const natural = model.nodeSize(sized.table, 1).width + api.TABLE_DELETE_COLUMN_WIDTH;
     api.syncTableNodeWidth(sized);
-    eq(sized.w, natural + 24, '默认宽度 = 表格本体宽 + 内边距');
+    eq(sized.w, natural + 24, '默认宽度 = 表格本体宽（含删除列）+ 内边距');
     eq(sizedRoot.style.zoom, undefined, '不做整体缩放（字号不该跟着变）');
     eq(sizedRoot.style.fontSize, undefined, '不覆写字号');
     eq(one(sizedRoot, 'table-node-grid').style.maxHeight, undefined, '表格区不设高度上限 → 行数自然全显示');
@@ -424,7 +429,7 @@ node.tableBatchStartRow = 1;
     eq(sized.w, 999, '手动拉过宽度 → 重绘不覆盖');
     sized.tableWidthUserSet = false;
     api.syncTableNodeWidth(sized);
-    eq(sized.w, natural + 24, '没手动拉过 → 仍按本体宽同步');
+    eq(sized.w, natural + 24, '没手动拉过 → 仍按本体宽（含删除列）同步');
 }
 
 // 历史固定高度清理（行少时底部留白的根因）

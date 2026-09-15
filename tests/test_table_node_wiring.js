@@ -33,10 +33,16 @@ const used = new Set();
 (canvas.match(/table-[a-z-]+/g) || []).forEach(c => used.add(c));
 const missing = [...used].filter(c => !css.includes('.' + c));
 ok(missing.length === 0, 'JS 用到的 table-* 类全部有样式' + (missing.length ? ' 缺: ' + missing.join(', ') : ''));
-ok(/\.table-row-delete \{[^}]*background: var\(--danger-bg\)/.test(css), '删除行按钮有底色和边框（不再是裸 ×）');
 ok(!/\.table-row-delete \{[^}]*opacity: 0/.test(css), '删除行按钮默认可见，不靠悬停');
-ok(!/tbody tr:hover \.table-row-delete/.test(css), '删掉「悬停整行才显示删除按钮」那条');
-ok(/\.table-row-delete:hover \{[^}]*background: var\(--danger\)/.test(css), '删除行按钮悬停变实心红');
+ok(!/tbody tr:hover \.table-row-delete/.test(css), '没有「悬停整行才显示删除按钮」那条规则');
+ok(/\.table-row-delete:hover \{[^}]*background: var\(--danger-bg\)/.test(css), '删除行按钮悬停变红');
+ok(css.includes('.table-delete-column { width: 60px; }'), '删除列有固定宽度');
+// JS 里的列宽常量和 CSS 必须一致，否则自然宽度算出来的节点会比表格窄
+const deleteColWidth = Number((/\.table-delete-column \{ width: (\d+)px; \}/.exec(css) || [])[1] || 0);
+const deleteColConst = Number((/const TABLE_DELETE_COLUMN_WIDTH = (\d+);/.exec(canvas) || [])[1] || -1);
+ok(deleteColWidth > 0 && deleteColWidth === deleteColConst, '删除列宽 CSS(' + deleteColWidth + ') 与 JS 常量(' + deleteColConst + ') 一致');
+ok(canvas.includes("removeRow = tableButton('删除行'"), '删行按钮文案是「删除行」');
+ok(canvas.includes('colSpan = channels.length + state.columns.length + 2'), '空表提示行跨了新增的删除列');
 
 console.log('[5] 分发接线');
 ['createNodeByType 分支','menuAdd 分支','defaultNodeSize 分支','标题三元','body 分支'].forEach((label, i) => {

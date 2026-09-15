@@ -209,33 +209,30 @@
     cursor: pointer;
 }
 
-/* 删除行：原来默认 opacity:0（不把鼠标移到那一行上根本看不见），
-   而且只是个裸 × 字符、没有边框和底色，完全不像按钮。
-   改成常显的红色小按钮，用仓库已有的语义色（--danger-bg/-border/-text）。 */
+/* 「删除行」文字按钮：常显，悬停时整颗变红。
+   之前是个裸 × 字符 + opacity:0（不悬停整行根本看不见），没有任何按钮的样子。 */
 .table-row-delete {
-    width: 22px;
-    height: 22px;
-    padding: 0;
+    height: 20px;
+    padding: 0 7px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     vertical-align: middle;
-    border: 1px solid var(--danger-border);
+    border: 1px solid transparent;
     border-radius: 6px;
-    background: var(--danger-bg);
-    color: var(--danger-text);
+    background: transparent;
+    color: var(--text-2);
     font-family: inherit;
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 11px;
     line-height: 1;
     cursor: pointer;
     transition: background .15s ease, color .15s ease, border-color .15s ease;
 }
 
 .table-row-delete:hover {
-    background: var(--danger);
-    border-color: var(--danger);
-    color: var(--text-on-accent);
+    background: var(--danger-bg);
+    border-color: var(--danger-border);
+    color: var(--danger-text);
 }
 
 /* ── 空表提示 ── */
@@ -356,13 +353,19 @@
     font-size: 10px;
 }
 
-/* 操作列：选择 + 删行，得挤进 44px */
+/* 选择列：只放勾选框，挤进 44px */
 .table-node-table th.table-actions-cell,
 .table-node-table td.table-actions-cell { padding: 0 3px; }
 
+/* 删除列：独立一列，单元格里就是一个「删除行」文字按钮。
+   宽度必须和 JS 里的 TABLE_DELETE_COLUMN_WIDTH 一致。 */
+.table-delete-column { width: 60px; }
+
+.table-node-table th.table-delete-cell,
+.table-node-table td.table-delete-cell { padding: 0 4px; white-space: nowrap; }
+
 .table-node-inputs { color: var(--text-3); }
 
-/* 选择框和删行按钮必须待在同一行 */
 .table-row-actions { white-space: nowrap; }
 
 /* ═══ 批量生成面板（挂在生成节点上，DX OS §10）═══ */
