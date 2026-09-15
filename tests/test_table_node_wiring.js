@@ -41,7 +41,14 @@ ok(css.includes('.table-delete-column { width: 60px; }'), '删除列有固定宽
 const deleteColWidth = Number((/\.table-delete-column \{ width: (\d+)px; \}/.exec(css) || [])[1] || 0);
 const deleteColConst = Number((/const TABLE_DELETE_COLUMN_WIDTH = (\d+);/.exec(canvas) || [])[1] || -1);
 ok(deleteColWidth > 0 && deleteColWidth === deleteColConst, '删除列宽 CSS(' + deleteColWidth + ') 与 JS 常量(' + deleteColConst + ') 一致');
-ok(canvas.includes("removeRow = tableButton('删除行'"), '删行按钮文案是「删除行」');
+ok(canvas.includes("tableButton('', '删除这一行', 'table-row-delete')"), '删行按钮改成纯图标（无文字）');
+ok(canvas.includes("removeIcon.dataset.lucide = 'trash-2'"), '图标用 Lucide trash-2');
+ok(/refreshIcons\(\);\s*node\._tableSignature/.test(canvas), 'paint 结束刷新图标（repaintTable 不走 render()）');
+ok(canvas.includes('const TABLE_TEXT_COLUMN_CHARS = 18;'), '长文本列阈值有常量');
+ok(canvas.includes('if(textColumns[index]) cell.classList.add(\'is-text-column\')'), '数据列按长文本打 is-text-column');
+ok(/\.table-node-table th,[\s\S]*?text-align: center;/.test(css), '表格默认居中');
+ok(/\.table-node-table th\.is-text-column,[\s\S]*?td\.is-text-column \{ text-align: left; \}/.test(css), '长文本列左对齐');
+ok(css.includes('.table-row-delete svg { width: 14px; height: 14px; }'), '图标尺寸固定');
 ok(canvas.includes('colSpan = channels.length + state.columns.length + 2'), '空表提示行跨了新增的删除列');
 
 console.log('[5] 分发接线');

@@ -67,6 +67,7 @@ const nodesEl = {
     }
 };
 // 运行器垫片：记录批量执行到底把哪一行、哪份覆盖传给了谁
+let iconRefreshes = 0;
 const batchCalls = [];
 let videoShimMode = 'ok';
 const runVideoShim = (id, opts) => {
@@ -80,7 +81,7 @@ const api = new Function(
     'document', 'requestAnimationFrame', 'defaultPoint', 'addNode', 'scheduleSave', 'uid',
     'connections', 'nodes', 'pushUndo', 'mediaKindForNode', 'isMissingAssetUrl',
     'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs', 'tr', 'nodesEl',
-    'runVideoNode', 'runGenerator', 'window', 'saveCanvas',
+    'runVideoNode', 'runGenerator', 'window', 'saveCanvas', 'refreshIcons',
     block + '\nreturn {renderTableBody, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
@@ -99,7 +100,8 @@ const api = new Function(
     (url) => '<img src="' + url + '">', (url) => '<video src="' + url + '"></video>', () => 1700000000000,
     key => ({'canvas.apiGenerate':'API生成', 'canvas.generating':'生成中', 'canvas.videoGenerate':'生成视频'})[key] || key,
     nodesEl,
-    runVideoShim, runGeneratorShim, global.window, () => {}
+    runVideoShim, runGeneratorShim, global.window, () => {},
+    () => { iconRefreshes += 1; }
 );
 
 const keydown = key => ({ key, shiftKey:false, preventDefault(){}, stopPropagation(){} });
@@ -140,7 +142,12 @@ ok(rowAt(root, 0).children[0].classList.contains('table-media-cell'), '第 1 格
 ok(rowAt(root, 0).children[2].classList.contains('table-row-actions'), '倒数第二格是选择列');
 ok(rowAt(root, 0).children[3].classList.contains('table-delete-cell'), '最后一格是删除列');
 eq(one(rowAt(root, 0).children[2], 'table-row-delete'), undefined, '选择列里没有删行按钮了');
-eq(one(rowAt(root, 0).children[3], 'table-row-delete').textContent, '删除行', '删除列的单元格就是「删除行」');
+const delBtn = one(rowAt(root, 0).children[3], 'table-row-delete');
+eq(delBtn.textContent, '', '删除列里是图标按钮，没有文字');
+eq(delBtn.children.length, 1, '图标按钮里只有一个元素');
+eq(delBtn.children[0].tagName, 'I', '图标是 lucide 的 <i data-lucide>');
+eq(delBtn.children[0].dataset.lucide, 'trash-2', '用的是垃圾桶图标');
+eq(delBtn.title, '删除这一行', '图标按钮带 title 说明');
 eq(byClass(rowAt(root, 0).children[3], 'table-checkbox').length, 0, '删除列里没有勾选框');
 eq(byClass(one(rowAt(root, 0), 'table-media-cell'), 'table-media-thumb')[0].innerHTML, '<img src="/a.png">', '第 1 行取第 1 个素材');
 eq(byClass(one(rowAt(root, 1), 'table-media-cell'), 'table-media-thumb')[0].innerHTML, '<img src="/b.png">', '第 2 行取第 2 个素材');
@@ -568,6 +575,26 @@ missingUrls.delete('/gone.png');
     eq(api.tableRowRefs(vidRow), [{url:'/clip.mp4', name:'参考片段', kind:'video', nodeId:'mv1'}], '视频参考素材带 kind=video');
 
     node.tableBatchConcurrency = savedConcurrency;
+}
+
+// ═══ K2. 对齐：只有长文本列左对齐，其余居中 ═══
+{
+    const alignNode = api.addTableNode();
+    api.ensureTableState(alignNode);
+    alignNode.table = model.normalizeTable({
+        columns: ['时长(秒)', '运镜', '画面描述'],
+        rows: [['1.5', '缓慢推近', '雨后城市街头，湿沥青地面有薄水膜，白色运动鞋鞋底特写，冷色漫反射光，浅景深']]
+    }).table;
+    alignNode.table.selectedRows = [0];
+    const alignRoot = api.renderTableBody(alignNode);
+    const ths = byTag(alignRoot, 'thead')[0].children[0].children;
+    eq(ths.slice(1, 4).map(th => th.classList.contains('is-text-column')), [false, false, true],
+        '表头：只有画面描述（长文本）列标记 is-text-column');
+    const tds = byTag(alignRoot, 'tbody')[0].children[0].children;
+    eq(tds.slice(1, 4).map(td => td.classList.contains('is-text-column')), [false, false, true],
+        '单元格：同样只有长文本列左对齐');
+    ok(ths[ths.length - 2].classList.contains('table-actions-cell'), '倒数第二列表头是选择列');
+    eq(ths[ths.length - 1].textContent, '删除行', '最后一列表头是删除行');
 }
 
 // ═══ L1. 输出形式药丸按钮 ═══

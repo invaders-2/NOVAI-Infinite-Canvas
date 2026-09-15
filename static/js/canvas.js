@@ -6919,6 +6919,11 @@ function addTableNode(point){
    数值必须和 .table-delete-column 的 CSS 宽度一致（wiring 测试会比对）。 */
 const TABLE_DELETE_COLUMN_WIDTH = 60;
 
+/* 表格对齐：整列都是短值（时长/运镜/景别/机位…）就居中；
+   出现长文本（提示词/画面描述/台词）的那一列保持左对齐 —— 长句居中读不了。
+   阈值就是下面这个字符数，调它即可。 */
+const TABLE_TEXT_COLUMN_CHARS = 18;
+
 // 表格本体尺寸（DX OS 的 Yw）
 function tableNaturalSize(node){
     const model = novaTableModel();
@@ -7961,6 +7966,8 @@ function renderTableBody(node){
         const rowData = tableRowInputs(node, {nodeById});
         const picked = new Set(state.selectedRows);
         const editing = node._tableEdit || null;
+        const textColumns = state.columns.map((_, index) => state.rows.some(row =>
+            Array.from(String(row[index] === null || row[index] === undefined ? '' : row[index])).length > TABLE_TEXT_COLUMN_CHARS));
 
         // ── 信息条 ──
         meta.textContent = '';
@@ -8047,6 +8054,7 @@ function renderTableBody(node){
             const cell = document.createElement('th');
             cell.className = 'table-cell table-head-cell';
             cell.title = name;
+            if(textColumns[index]) cell.classList.add('is-text-column');
             if(editingHere) cell.classList.add('is-editing');
             const label = document.createElement('span');
             label.className = 'table-head-label';
@@ -8123,6 +8131,7 @@ function renderTableBody(node){
             state.columns.forEach((name, index) => {
                 const cell = document.createElement('td');
                 cell.className = 'table-cell';
+                if(textColumns[index]) cell.classList.add('is-text-column');
                 const value = model.cellText(row[index]);
                 const view = document.createElement('div');
                 view.className = 'table-cell-view';
@@ -8156,7 +8165,10 @@ function renderTableBody(node){
             // 删除列：独立一列，单元格里就是「删除行」
             const deleteCell = document.createElement('td');
             deleteCell.className = 'table-cell table-actions-cell table-delete-cell';
-            const removeRow = tableButton('删除行', '删除这一行', 'table-row-delete');
+            const removeRow = tableButton('', '删除这一行', 'table-row-delete');
+            const removeIcon = document.createElement('i');
+            removeIcon.dataset.lucide = 'trash-2';
+            removeRow.appendChild(removeIcon);
             removeRow.onclick = event => { event.stopPropagation(); deleteTableRow(node, rowIndex); };
             deleteCell.appendChild(removeRow);
             tr.appendChild(deleteCell);
@@ -8164,6 +8176,9 @@ function renderTableBody(node){
             tbody.appendChild(tr);
         });
         table.appendChild(tbody);
+        // repaintTable() 不经过 render()，这里得自己刷新一次图标，
+        // 否则重建出来的 <i data-lucide> 永远是空的。
+        refreshIcons();
 
         node._tableSignature = tableNodeSignature(node);
         if(typeof requestAnimationFrame === 'function') requestAnimationFrame(() => syncTableNodeWidth(node));

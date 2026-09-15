@@ -98,6 +98,7 @@
 .table-node-table col.table-actions-column { width: 44px; }
 .table-node-table col.table-data-column { width: 132px; }
 
+/* 默认全部居中；只有长文本列（提示词/画面描述）左对齐，长句居中没法读。 */
 .table-node-table th,
 .table-node-table td {
     position: relative;
@@ -105,9 +106,12 @@
     border-right: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
     overflow: hidden;
-    text-align: left;
+    text-align: center;
     vertical-align: top;
 }
+
+.table-node-table th.is-text-column,
+.table-node-table td.is-text-column { text-align: left; }
 
 .table-node-table th:last-child,
 .table-node-table td:last-child { border-right: none; }
@@ -209,11 +213,12 @@
     cursor: pointer;
 }
 
-/* 「删除行」文字按钮：常显，悬停时整颗变红。
-   之前是个裸 × 字符 + opacity:0（不悬停整行根本看不见），没有任何按钮的样子。 */
+/* 删行图标按钮：常显的垃圾桶（Lucide trash-2），悬停变红。
+   之前是个裸 × 字符 + opacity:0（不悬停整行根本看不见）。 */
 .table-row-delete {
-    height: 20px;
-    padding: 0 7px;
+    width: 26px;
+    height: 26px;
+    padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -221,9 +226,7 @@
     border: 1px solid transparent;
     border-radius: 6px;
     background: transparent;
-    color: var(--text-2);
-    font-family: inherit;
-    font-size: 11px;
+    color: var(--text-3);
     line-height: 1;
     cursor: pointer;
     transition: background .15s ease, color .15s ease, border-color .15s ease;
@@ -234,6 +237,8 @@
     border-color: var(--danger-border);
     color: var(--danger-text);
 }
+
+.table-row-delete svg { width: 14px; height: 14px; }
 
 /* ── 空表提示 ── */
 .table-node-table td.table-empty-cell {
