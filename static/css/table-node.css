@@ -456,6 +456,28 @@
 }
 
 /* 编辑器里打 @ 弹出的本行素材选择条（点一下插入 @图片N） */
+/* 编辑器右上角的「引用素材」按钮（不用打 @ 也能弹选择条） */
+.table-cell-mention-trigger {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    z-index: 6;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid var(--line-2);
+    border-radius: 50%;
+    background: var(--surface);
+    color: var(--text-3);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.table-cell-mention-trigger:hover { color: var(--text); border-color: var(--accent); }
+
 .table-cell-mention-picker {
     position: absolute;
     left: 2px;

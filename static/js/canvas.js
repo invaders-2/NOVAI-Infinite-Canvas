@@ -6336,8 +6336,13 @@ function syncTableNodeWidth(node){
     if(host) host.style.width = node.w + 'px';
 }
 
+/* 表格重绘 —— 顺带刷新**下游**生成 / 视频节点的批量面板。
+   面板读的就是这张表，所以改格子 / 加删行列 / 传替换素材都必须即时反映过去。 */
 function repaintTable(node){
     if(typeof node._tablePaint === 'function') node._tablePaint();
+    (nodes || []).filter(item => item.type === 'generator' || item.type === 'video').forEach(gen => {
+        if(generatorUpstreamTables(gen.id).some(item => item.id === node.id)) repaintBatchPanel(gen);
+    });
 }
 
 /* 勾选状态是表格和生成面板共用的：
@@ -6535,7 +6540,17 @@ function bindTableCellEditor(node, editor, row, column){
         if(/@[^ @]{0,6}$/.test(editor.value.slice(0, caret))) openPicker();
         else closePicker();
     };
-    if(editor.parentNode) editor.parentNode.appendChild(picker);
+    // 不依赖打 @：编辑器右上角一个「引用」按钮，点它就弹选择条
+    const mentionTrigger = stopCellEvent(document.createElement('button'));
+    mentionTrigger.type = 'button';
+    mentionTrigger.className = 'table-cell-mention-trigger';
+    mentionTrigger.textContent = '@';
+    mentionTrigger.title = '引用本行素材';
+    mentionTrigger.onclick = event => { event.preventDefault(); event.stopPropagation(); openPicker(); };
+    if(editor.parentNode){
+        editor.parentNode.appendChild(picker);
+        editor.parentNode.appendChild(mentionTrigger);
+    }
     editor.onblur = () => finish(true);
     editor.onkeydown = event => {
         event.stopPropagation();
