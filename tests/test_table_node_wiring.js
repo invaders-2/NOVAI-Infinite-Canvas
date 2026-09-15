@@ -87,6 +87,7 @@ ok(canvasCss.includes('.llm-run-row {'), '新行有样式（左药丸右按钮�
 ok(canvasCss.includes('.llm-run-row .llm-run,'), '行内生成按钮有独立规则');
 ok(canvasCss.includes('margin-left:auto; padding:0 18px;'), '生成按钮按内容定宽、靠右，不强行拉满');
 ok(canvasCss.includes('.node.sized.llm-node .llm-run-row .llm-run'), '覆盖 .node.sized.llm-node .llm-run 的 column 布局遗留');
+ok(!canvasCss.includes('.node.sized.llm-node .gen-run-row'), 'LLM 行不再被 margin-top:auto 钉死（否则会贴住输出框）');
 ok(canvasCss.includes('.node.sized.llm-node .llm-output-wrap { flex:1 1 var(--llm-output-h, 150px);'), '有固定高度的节点：输出区吃掉剩余高度');
 ok(canvas.includes('style="--llm-output-h:${outputHeight}px;"'), '输出区高度走 CSS 变量，不再写死行内 flex');
 ok(!canvas.includes('class="llm-output-wrap" style="height:'), '输出区行内不再有 height/flex');

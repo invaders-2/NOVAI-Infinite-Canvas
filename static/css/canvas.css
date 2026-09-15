@@ -268,8 +268,9 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .node.sized.generator-node .gen-run-row,
 .node.sized.comfy-node .gen-run-row,
 .node.sized.ltxDirector-node .gen-run-row,
-.node.sized.rh-node .gen-run-row,
-.node.sized.llm-node .gen-run-row { margin-top:auto; }
+.node.sized.rh-node .gen-run-row { margin-top:auto; }
+/* LLM 节点不再 margin-top:auto：输出区已经 flex:1 吃掉了剩余高度，
+   auto 拿不到空余 → 等于 0，按钮会贴死输出框。这里用 .gen-run-row 自带的 8px。 */
 .gen-cascade-btn { height:40px; width:100%; flex:0 0 40px; border-radius:var(--radius-lg); background:transparent; border:1.5px solid var(--strong); color:var(--strong); display:flex; align-items:center; justify-content:center; gap:8px; font-size:11px; font-weight:800; letter-spacing:.12em; transition:all .15s ease; }
 .gen-cascade-btn:hover { background:var(--strong); color:var(--strong-text); }
 .gen-cascade-btn:disabled { opacity:.4; cursor:not-allowed; }
