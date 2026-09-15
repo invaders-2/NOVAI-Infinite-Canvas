@@ -132,7 +132,7 @@ console.log('[7] 「批量生成」按钮必须真的绑上（只渲染不绑定
   ok(body.includes('.table-batch-run-btn'), name + ' 绑定「批量生成」按钮的 onclick');
 });
 console.log('[8] 改了 canvas.js / table-model.js / canvas.css，就必须同步 canvas.html 的 ?v=');
-const VERSIONED_ASSETS = ['static/js/canvas.js', 'static/js/shared/table-model.js', 'static/js/shared/node-registry.js', 'static/css/canvas.css', 'static/css/table-node.css', 'static/css/theme.css'];
+const VERSIONED_ASSETS = ['static/js/canvas.js', 'static/js/shared/table-model.js', 'static/js/shared/node-registry.js', 'static/js/shared/dropdown.js', 'static/css/canvas.css', 'static/css/table-node.css', 'static/css/theme.css'];
 try {
   const dirty = require('child_process')
     .execSync('git status --porcelain ' + VERSIONED_ASSETS.join(' ') + ' static/canvas.html', {encoding: 'utf8'})

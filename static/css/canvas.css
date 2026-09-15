@@ -773,6 +773,20 @@ body.studio-theme-dark .select-lite { background-image:url("data:image/svg+xml,%
 .select-lite option:disabled { background:var(--surface-2); color:var(--text); font-weight:800; }
 .select-lite:has(option:checked:disabled) { color:var(--text-2); }
 .select-lite:disabled { opacity:.55; cursor:not-allowed; }
+
+/* ── 自绘下拉弹层（shared/dropdown.js）─────────────────────────────────
+   原生 select 的弹层由浏览器绘制：圆角、字号、内外边距、深浅色全都不可控，
+   深色下 option 白底白字就是这么来的。收起状态仍然是 .select-lite 本身，
+   只有展开时换成这一套 —— 弹层语言沿用画布上已有的 .canvas-meta-pop + .menu-btn。 */
+.nd-menu { position:fixed; left:0; top:0; z-index:130; max-height:320px; overflow:auto; padding:6px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--surface); box-shadow:var(--shadow-xl); }
+.nd-menu .menu-btn { justify-content:space-between; gap:10px; }
+.nd-option-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nd-option .nd-check { opacity:0; }
+.nd-option.active { background:var(--strong); color:var(--strong-text); }
+.nd-option.active .nd-check { opacity:1; }
+.nd-option.is-active:not(.active) { background:var(--surface-2); color:var(--text); }
+.nd-option:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
+
 .model-select { min-width:150px; max-width:100%; }
 .compact-select { min-width:58px; }
 .input-list { display:flex; align-items:flex-start; gap:8px; min-height:78px; overflow:auto; padding-bottom:2px; }

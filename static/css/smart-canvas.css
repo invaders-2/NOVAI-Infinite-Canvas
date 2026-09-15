@@ -2039,6 +2039,19 @@ html.studio-theme-dark .chat-modal { border-color: var(--border-2); }
 .menu-btn span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .menu-btn:hover { background:var(--surface-2); color:var(--text); }
 
+/* ── 自绘下拉弹层（shared/dropdown.js）─────────────────────────────────
+   原生 select 的弹层由浏览器绘制：圆角、字号、内外边距、深浅色全都不可控。
+   收起状态仍然是原来的 select，只有展开时换成这一套 —— 弹层语言沿用画布上
+   已有的 .menu-btn（传统画布同款，见 canvas.css）。 */
+.nd-menu { position:fixed; left:0; top:0; z-index:130; max-height:320px; overflow:auto; padding:6px; border-radius:var(--radius-md); border:1px solid var(--line); background:var(--surface); box-shadow:var(--shadow-xl); }
+.nd-menu .menu-btn { justify-content:space-between; gap:10px; }
+.nd-option-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nd-option .nd-check { opacity:0; }
+.nd-option.active { background:var(--strong); color:var(--strong-text); }
+.nd-option.active .nd-check { opacity:1; }
+.nd-option.is-active:not(.active) { background:var(--surface-2); color:var(--text); }
+.nd-option:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
+
 /* 图片编辑区拖动平移光标 */
 .image-edit-stage.panning { cursor:grabbing; }
 .image-edit-stage.panning * { cursor:grabbing !important; }
