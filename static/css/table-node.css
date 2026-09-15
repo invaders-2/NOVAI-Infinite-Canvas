@@ -231,6 +231,9 @@
     resize: none;
 }
 
+/* 自建表格的格子双击编辑：不要那圈线框 */
+.table-cell-editor.is-plain { border-color: transparent; }
+
 .table-node-table tbody tr:hover td,
 .table-node-table tbody tr.is-selected td { background: var(--nav-hover-bg); }
 
@@ -292,12 +295,26 @@
 .table-cell-add:hover { color: var(--text); background: var(--nav-hover-bg); }
 .table-cell-add svg { width: 15px !important; height: 15px !important; }
 
-/* 右上角的「···」：点一下换一张，双击看大图 */
-.table-cell-more {
+/* 右上角的「···」：点开小菜单（替换 / 新增），双击看大图 */
+.table-cell-more-wrap { position: absolute; top: 2px; right: 2px; z-index: 4; }
+
+.table-cell-menu {
+    display: none;
     position: absolute;
-    top: 2px;
-    right: 2px;
-    z-index: 2;
+    top: calc(100% + 2px);
+    right: 0;
+    min-width: 84px;
+    padding: 4px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+}
+
+.table-cell-menu.is-open { display: block; }
+.table-cell-menu .menu-btn { height: 26px; font-size: 10.5px; }
+
+.table-cell-more {
     min-width: 22px;
     height: 18px;
     padding: 0 5px;

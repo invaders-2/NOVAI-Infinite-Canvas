@@ -6453,6 +6453,8 @@ function endTableEdit(node){
 }
 
 function bindTableCellEditor(node, editor, row, column){
+    // 自建表格双击编辑不要那圈线框（格子自己要有个干净的编辑态）
+    if(!node.llmGeneratedOutput) editor.classList.add('is-plain');
     let settled = false;
     const finish = commit => {
         if(settled) return;
@@ -6692,14 +6694,51 @@ function tableCellAddButton(cell, onPick){
     cell.appendChild(button);
 }
 
-function tableCellMoreButton(cell, onReplace){
+/* 右上角「···」：点开一个小菜单（替换 / 新增），不是直接换图。
+   用画布上已有的 .menu-btn 语言，位置跟着格子。 */
+function tableCellMoreButton(cell, actions){
+    const wrap = document.createElement('div');
+    wrap.className = 'table-cell-more-wrap';
     const button = stopCellEvent(document.createElement('button'));
     button.type = 'button';
     button.className = 'table-cell-more';
     button.textContent = '···';
-    button.title = '点击替换图片/视频（双击查看）';
-    button.onclick = event => { event.stopPropagation(); onReplace(); };
-    cell.appendChild(button);
+    button.title = '替换 / 新增';
+    const menu = document.createElement('div');
+    menu.className = 'table-cell-menu';
+    (actions || []).forEach(action => {
+        const item = stopCellEvent(document.createElement('button'));
+        item.type = 'button';
+        item.className = 'menu-btn';
+        item.textContent = action.label;
+        item.onclick = event => { event.stopPropagation(); menu.classList.remove('is-open'); action.onClick(); };
+        menu.appendChild(item);
+    });
+    button.onclick = event => { event.stopPropagation(); menu.classList.toggle('is-open'); };
+    wrap.appendChild(button);
+    wrap.appendChild(menu);
+    cell.appendChild(wrap);
+}
+
+/* 手动素材：一格可以放多张（点「新增」就往后追加）。
+   老画布里存的是单个对象，按 1 张处理。 */
+function tableManualInputList(node, channelId, row){
+    const store = tableManualInputStore(node, false);
+    const byRow = store ? store[String(channelId)] : null;
+    const value = byRow ? byRow[String(row)] : null;
+    if(!value) return [];
+    return (Array.isArray(value) ? value : [value]).filter(item => item && item.url);
+}
+
+function addTableManualInputItem(node, channelId, row, value){
+    if(!value || !value.url) return;
+    const list = tableManualInputList(node, channelId, row);
+    setTableManualInputItem(node, channelId, row, null);
+    const store = tableManualInputStore(node, true);
+    const key = String(channelId);
+    const byRow = store[key] && typeof store[key] === 'object' ? store[key] : (store[key] = {});
+    byRow[String(row)] = list.concat([{url:value.url, mediaType:value.mediaType || 'image', name:value.name || ''}]);
+    scheduleSave();
 }
 
 /* 单元格文本里的 @图片N / @视频N：指向**同一行**的素材时直接渲染成缩略图，
@@ -6869,17 +6908,17 @@ function tableRowInputs(node, options={}){
     return state.rows.map((row, rowIndex) => {
         const channelItems = channels.map((channel, channelIndex) => {
             /* 手动上传的那一格优先：它就是这一行这一列的参考图。 */
-            const manual = tableManualInputItem(node, channel.id, rowIndex);
-            if(manual){
-                return [{
+            const manual = tableManualInputList(node, channel.id, rowIndex);
+            if(manual.length){
+                return manual.map((item, offset) => ({
                     // 认上传时记下的类型：素材地址不一定带后缀
-                    kind: mediaKindForRef({url:manual.url, kind:manual.mediaType}),
-                    url: manual.url,
+                    kind: mediaKindForRef({url:item.url, kind:item.mediaType}),
+                    url: item.url,
                     nodeId: '',
                     node: null,
                     outputIndex: -1,
-                    ordinal: ordinalBase[channelIndex] + 1
-                }];
+                    ordinal: ordinalBase[channelIndex] + 1 + offset
+                }));
             }
             return model
                 .inputItemsForRow(channel, rowIndex)
@@ -7915,10 +7954,16 @@ function renderTableBody(node){
                 const first = entries.filter(entry => entry && entry.url)[0] || null;
                 if(first){
                     bindTableCellMediaView(cell, first.url, first.kind);
-                    if(!llmTable) tableCellMoreButton(cell, () => pickTableCellFile(picked => {
-                        setTableManualInputItem(node, channel.id, rowIndex, picked);
-                        repaintTable(node);
-                    }));
+                    if(!llmTable) tableCellMoreButton(cell, [
+                        {label:'替换', onClick: () => pickTableCellFile(picked => {
+                            setTableManualInputItem(node, channel.id, rowIndex, picked);
+                            repaintTable(node);
+                        })},
+                        {label:'新增', onClick: () => pickTableCellFile(picked => {
+                            addTableManualInputItem(node, channel.id, rowIndex, picked);
+                            repaintTable(node);
+                        })},
+                    ]);
                 } else if(!llmTable){
                     tableCellAddButton(cell, () => pickTableCellFile(picked => {
                         setTableManualInputItem(node, channel.id, rowIndex, picked);

@@ -27,6 +27,11 @@ function makeEl(tag){
         add(...cs){ const s = new Set(el.className.split(/\s+/).filter(Boolean)); cs.forEach(c => s.add(c)); el.className = [...s].join(' '); },
         remove(...cs){ const s = new Set(el.className.split(/\s+/).filter(Boolean)); cs.forEach(c => s.delete(c)); el.className = [...s].join(' '); },
         contains(c){ return el.className.split(/\s+/).includes(c); },
+        toggle(c, force){
+            const on = force === undefined ? !el.classList.contains(c) : Boolean(force);
+            on ? el.classList.add(c) : el.classList.remove(c);
+            return on;
+        },
     };
     return el;
 }
@@ -99,7 +104,7 @@ const api = new Function(
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableBatchSingleButtonHtml, tableDrivenHidden, paintTableBatchPanel,' +
     ' normalizeTableNodeHeight, tableNaturalSize,' +
-    ' setTableCellMedia, tableManualInputItem, setTableManualInputItem, renderTableCellText, normalizeContentHeightNode,' +
+    ' setTableCellMedia, tableManualInputItem, setTableManualInputItem, addTableManualInputItem, renderTableCellText, normalizeContentHeightNode,' +
     ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
     ' generatorNeedsPromptMessage, friendlyBatchError,' +
     ' llmOutputModeButtonsHtml, LLM_OUTPUT_MODE_BUTTONS, TABLE_DELETE_COLUMN_WIDTH};'
@@ -826,6 +831,25 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     const more = () => byClass(inputCell(), 'table-cell-more')[0];
     ok(Boolean(more()), '有素材后右上角「···」');
     eq(more().textContent, '···', '就是三个点');
+    const moreMenu = byClass(inputCell(), 'table-cell-menu')[0];
+    ok(Boolean(moreMenu), '「···」带着菜单');
+    eq(byClass(moreMenu, 'menu-btn').map(b => b.textContent), ['替换','新增'], '菜单两项：替换 / 新增');
+    more().onclick({stopPropagation(){}});
+    ok(moreMenu.classList.contains('is-open'), '点「···」展开菜单');
+
+    // 「新增」= 追加到同一行（一行可以有多张）
+    api.addTableManualInputItem(tbl, 'input-1', 0, {url:'/static/m2.png', mediaType:'image', name:'m2.png'});
+    api.repaintTable(tbl);
+    eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/m.png','/static/m2.png'], '新增后这一行有两张');
+    eq(api.tableRowInputs(tbl)[0].media.map(m => m.ordinal), [1,2], '第二张序号顺延');
+    api.setTableManualInputItem(tbl, 'input-1', 0, {url:'/static/m.png', mediaType:'image', name:'m.png'});
+    api.repaintTable(tbl);
+
+    // 自建表格双击编辑不要线框
+    api.beginTableEdit(tbl, {kind:'cell', row:0, column:0});
+    api.repaintTable(tbl);
+    eq(byClass(dataCell(), 'table-cell-editor').map(x => x.classList.contains('is-plain')), [true], '自建表格编辑器加 is-plain（无线框）');
+    api.endTableEdit(tbl);
     eq(byClass(inputCell(), 'table-cell-add').length, 0, '有图就不再显示「+」');
     ok(typeof mediaCell.ondblclick === 'function', '媒体格双击可查看');
     eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/m.png'], '输入列的素材进了这一行');
