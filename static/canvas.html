@@ -7,7 +7,7 @@
     <title>无限画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.115.1789523600">
+    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.115.1789529800">
     <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789523600">
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.115.1789114960">
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960">
@@ -20,10 +20,10 @@
     <script src="/static/js/shared/media.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/shared/viewport.js?v=1.0.115.1789114960"></script>
     <script src="/static/js/shared/workflow-utils.js?v=1.0.115.1789404714"></script>
-    <script src="/static/js/shared/node-registry.js?v=1.0.115.1789405153"></script>
+    <script src="/static/js/shared/node-registry.js?v=1.0.115.1789529800"></script>
     <script src="/static/js/shared/table-model.js?v=1.0.115.1789513100"></script>
     <script defer src="/static/js/touch-mouse.js?v=1.0.115.1789114960"></script>
-    <script src="/static/js/i18n.js?v=1.0.115.1789114960"></script>
+    <script src="/static/js/i18n.js?v=1.0.115.1789529800"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -204,14 +204,11 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                 <div class="toolbar-items">
                     <button class="tool-btn" onclick="addImageNode()" title="图片" aria-label="图片" data-i18n-title="canvas.image"><i data-lucide="image-plus" class="w-4 h-4"></i><span data-i18n="canvas.image">图片</span></button>
                     <button class="tool-btn" onclick="addPromptNode()" title="提示词" aria-label="提示词" data-i18n-title="canvas.prompt"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
-                    <button class="tool-btn" onclick="addLoopNode()" title="循环" aria-label="循环" data-i18n-title="canvas.loop"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loop">循环</span></button>
                     <button class="tool-btn" onclick="addLLMNode()" title="LLM" aria-label="LLM"><i data-lucide="message-square-text" class="w-4 h-4"></i><span>LLM</span></button>
                     <button class="tool-btn" onclick="addGeneratorNode()" title="API生成" aria-label="API生成" data-i18n-title="canvas.apiGenerate"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
-                    <button class="tool-btn" onclick="addMsGenNode()" title="MS生成" aria-label="MS生成" data-i18n-title="canvas.msGenerate"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.msGenerate">MS生成</span></button>
                     <button class="tool-btn" onclick="addVideoNode()" title="视频生成" aria-label="视频生成" data-i18n-title="canvas.videoGenerate"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
                     <button class="tool-btn" onclick="addRhNode()" title="RH生成" aria-label="RH生成" data-i18n-title="canvas.rhGenerate"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
                     <button class="tool-btn" onclick="addComfyNode()" title="ComfyUI" aria-label="ComfyUI"><i data-lucide="workflow" class="w-4 h-4"></i><span>ComfyUI</span></button>
-                    <button class="tool-btn" onclick="addLTXDirectorNode()" title="LTX Director" aria-label="LTX Director" data-i18n-title="canvas.ltxDirector"><i data-lucide="film" class="w-4 h-4"></i><span data-i18n="canvas.ltxDirector">LTX Director</span></button>
                     <button class="tool-btn" onclick="addOutputNode()" title="Output" aria-label="Output"><i data-lucide="circle-dot" class="w-4 h-4"></i><span>Output</span></button>
                     <button class="tool-btn" onclick="groupSelectedImages()" title="分组" aria-label="分组" data-i18n-title="canvas.group"><i data-lucide="group" class="w-4 h-4"></i><span data-i18n="canvas.group">分组</span></button>
                 </div>
@@ -232,16 +229,12 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
             <div id="createMenu" class="create-menu">
                 <button class="menu-btn" onclick="menuAdd('image')"><i data-lucide="image-plus" class="w-4 h-4"></i><span data-i18n="canvas.imageCard">上传节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('prompt')"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
-                <button class="menu-btn" onclick="menuAdd('loop')"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loopNode">循环节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('table')"><i data-icon="table" class="w-4 h-4"></i><span data-i18n="canvas.tableNode">多维表格</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
-                <button class="menu-btn" onclick="menuAdd('msgen')"><i data-lucide="cloud-lightning" class="w-4 h-4"></i><span data-i18n="canvas.modelscopeGenerate">Modelscope生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('rh')"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.rhGenerate">RH生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('comfy')"><i data-lucide="workflow" class="w-4 h-4"></i><span data-i18n="canvas.comfyGenerate">ComfyUI 生成</span></button>
-                <button class="menu-btn" onclick="menuAdd('ltxDirector')"><i data-lucide="film" class="w-4 h-4"></i><span data-i18n="canvas.ltxDirector">LTX Director</span></button>
-                <button class="menu-btn" onclick="menuAdd('minimax')"><i data-lucide="sparkles" class="w-4 h-4"></i><span data-i18n="canvas.minimaxGenerate">MiniMax H3</span></button>
                 <button class="menu-btn" onclick="menuAdd('output')"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
             </div>
             <div id="linkCreateMenu" class="create-menu"></div>
@@ -533,9 +526,8 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         </div>
     </div>
 
-    <script defer src="/static/js/ltx-director-timeline.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/vendor/js/glfx.js?v=1.0.115.1789114960"></script>
     <script defer src="/static/js/image-adjust-editor.js?v=1.0.115.1789114960"></script>
-    <script defer src="/static/js/canvas.js?v=1.0.115.1789527400"></script>
+    <script defer src="/static/js/canvas.js?v=1.0.115.1789529800"></script>
 </body>
 </html>

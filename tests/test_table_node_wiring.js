@@ -6,6 +6,7 @@ const canvasCss = fs.readFileSync('static/css/canvas.css', 'utf8');
 const themeCss = fs.readFileSync('static/css/theme.css', 'utf8');
 const html = fs.readFileSync('static/canvas.html', 'utf8');
 const model = fs.readFileSync('static/js/shared/table-model.js', 'utf8');
+const registry = fs.readFileSync('static/js/shared/node-registry.js', 'utf8');
 let fail = 0;
 const ok = (c, m) => { if(!c){ console.log('  ✗ ' + m); fail++; } else console.log('  ✓ ' + m); };
 
@@ -58,7 +59,7 @@ console.log('[5] 分发接线');
     "if(node.type === 'table') body.appendChild(renderTableBody(node));"];
   ok(canvas.includes(needles[i]), label);
 });
-ok(/'minimax','table'\]\.includes\(node\.type\)/.test(canvas) || canvas.includes("'minimax','table']"), 'table 有输入端口');
+ok(canvas.includes("['generator','midjourney','comfy','output','llm','video','rh','table']"), 'table 有输入端口');
 ok(canvas.includes("'output','table']"), 'table 有输出端口');
 
 
@@ -131,7 +132,7 @@ console.log('[7] 「批量生成」按钮必须真的绑上（只渲染不绑定
   ok(body.includes('.table-batch-run-btn'), name + ' 绑定「批量生成」按钮的 onclick');
 });
 console.log('[8] 改了 canvas.js / table-model.js / canvas.css，就必须同步 canvas.html 的 ?v=');
-const VERSIONED_ASSETS = ['static/js/canvas.js', 'static/js/shared/table-model.js', 'static/css/canvas.css', 'static/css/table-node.css', 'static/css/theme.css'];
+const VERSIONED_ASSETS = ['static/js/canvas.js', 'static/js/shared/table-model.js', 'static/js/shared/node-registry.js', 'static/css/canvas.css', 'static/css/table-node.css', 'static/css/theme.css'];
 try {
   const dirty = require('child_process')
     .execSync('git status --porcelain ' + VERSIONED_ASSETS.join(' ') + ' static/canvas.html', {encoding: 'utf8'})
@@ -142,6 +143,20 @@ try {
 } catch(error) {
   ok(true, '跳过（不在 git 工作区）');
 }
+
+console.log('[9] 已下线的四种节点（循环 / LTX Director / MiniMax H3 / Modelscope生成）');
+['loop', 'ltxDirector', 'minimax', 'msgen'].forEach(type => {
+  ok(!html.includes("menuAdd('" + type + "')"), '菜单里没有 ' + type);
+  ok(!new RegExp("spec\\('" + type + "'").test(registry), 'node-registry 里没有 ' + type);
+});
+ok(!canvas.includes('addLoopNode') && !canvas.includes('renderLoopBody'), '循环节点代码已删干净');
+ok(!canvas.includes('miniMax') && !canvas.includes('renderMiniMaxBody'), 'MiniMax 代码已删干净');
+ok(!canvas.includes('LTXDirector') && !canvas.includes('ltxDirectorSyncSeconds'), 'LTX 代码已删干净');
+ok(!canvas.includes('MsGen') && !canvas.includes('runMsGenNode'), 'Modelscope生成节点代码已删干净');
+ok(canvas.includes("const REMOVED_NODE_TYPES = ['loop', 'ltxDirector', 'minimax', 'msgen'];"), '老画布加载时丢弃这几类节点');
+ok(canvas.includes("REMOVED_NODE_TYPES.includes(n.type)"), 'sanitizeConnections 里真的执行丢弃');
+ok(!canvas.includes("p.id !== 'modelscope' && p.enabled !== false && (p.image_models || []).length"), '生成节点的平台下拉不再排除 ModelScope');
+ok(canvas.includes("String(providerId || '').toLowerCase() === 'modelscope'"), 'ModelScope 模型列表有内置兜底');
 
 console.log(fail ? ('\n失败 ' + fail + ' 项') : '\n全部通过');
 process.exit(fail ? 1 : 0);

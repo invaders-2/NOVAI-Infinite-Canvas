@@ -5,8 +5,8 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function(){
 
     const MEDIA = {
-        image:['image', 'generator', 'midjourney', 'msgen', 'comfy'],
-        video:['video', 'ltxDirector', 'rh', 'minimax'],
+        image:['image', 'generator', 'midjourney', 'comfy'],
+        video:['video', 'rh'],
         text:['prompt', 'promptGroup', 'llm']
     };
 
@@ -27,16 +27,12 @@
         spec('promptGroup', {label:'提示词组', outputTypes:['text'], supportsText:true}),
         spec('llm', {label:'LLM', runnable:true, inputTypes:['text', 'image'], outputTypes:['text'], supportsText:true, capabilities:['llm', 'plan']}),
         spec('table', {label:'多维表格', inputTypes:['image', 'text'], outputTypes:['text'], capabilities:['data', 'table-ops']}),
-        spec('loop', {label:'循环', runnable:true, inputTypes:['image', 'text'], outputTypes:['image', 'text']}),
         spec('group', {label:'分组', runnable:true, capabilities:['container', 'dag'], inputTypes:['image', 'text'], outputTypes:['image', 'text']}),
         spec('generator', {label:'生图', runnable:true, inputTypes:['text', 'image'], outputTypes:['image'], supportsImage:true, capabilities:['generate']}),
         spec('midjourney', {label:'Midjourney', runnable:true, inputTypes:['text', 'image'], outputTypes:['image'], supportsImage:true, capabilities:['generate']}),
-        spec('msgen', {label:'ModelScope', runnable:true, inputTypes:['text', 'image'], outputTypes:['image'], supportsImage:true, capabilities:['generate']}),
         spec('comfy', {label:'ComfyUI', runnable:true, inputTypes:['text', 'image'], outputTypes:['image'], supportsImage:true, capabilities:['generate']}),
         spec('video', {label:'视频', runnable:true, inputTypes:['text', 'image', 'video'], outputTypes:['video'], supportsVideo:true, capabilities:['generate']}),
-        spec('ltxDirector', {label:'LTX 导演', runnable:true, inputTypes:['text', 'image', 'video'], outputTypes:['video'], supportsVideo:true, capabilities:['generate']}),
         spec('rh', {label:'RunningHub', runnable:true, inputTypes:['text', 'image'], outputTypes:['image', 'video'], supportsImage:true, supportsVideo:true, capabilities:['generate']}),
-        spec('minimax', {label:'MiniMax', runnable:true, inputTypes:['text', 'image'], outputTypes:['video'], supportsVideo:true, capabilities:['generate']}),
         spec('output', {label:'输出', inputTypes:['image', 'video', 'text'], outputTypes:['image', 'video', 'text'], supportsImage:true, supportsVideo:true, supportsText:true})
     ];
 
