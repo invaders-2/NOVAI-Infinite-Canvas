@@ -2047,9 +2047,11 @@ html.studio-theme-dark .chat-modal { border-color: var(--border-2); }
 .nd-menu .menu-btn { justify-content:space-between; gap:10px; }
 .nd-option-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .nd-option .nd-check { opacity:0; }
-.nd-option.active { background:var(--strong); color:var(--strong-text); }
-.nd-option.active .nd-check { opacity:1; }
-.nd-option.is-active:not(.active) { background:var(--surface-2); color:var(--text); }
+/* 选中项：.nd-menu 前缀用来压过后面的 .theme-dark .menu-btn（同权重按顺序会赢）——
+   否则深色下选中项是 --muted 灰字配 --strong 白底，等于看不见。 */
+.nd-menu .nd-option.active { background:var(--strong); color:var(--strong-text); }
+.nd-menu .nd-option.active .nd-check { opacity:1; }
+.nd-menu .nd-option.is-active:not(.active) { background:var(--surface-2); color:var(--text); }
 .nd-option:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
 
 /* 图片编辑区拖动平移光标 */

@@ -261,17 +261,27 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .video-input-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
 .video-input-head .tool-btn { height:28px; min-width:0; padding:0 10px; font-size:10px; white-space:nowrap; }
 .video-input-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
-.node.sized.video-node .generator-body { height:100%; flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+.node.sized.video-node .generator-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
 .node.sized.video-node .input-list { flex:1; min-height:64px; max-height:none; }
 .node.sized.video-node .gen-run-row,
 .node.sized.video-node .gen-btn { margin-top:auto; }
 .node.sized.generator-node .gen-run-row, .node.sized.comfy-node .gen-run-row, .node.sized.rh-node .gen-run-row{ margin-top:auto; }
 /* 生成节点：中间内容自己滚，运行栏 / 重试栏永远钉在节点底部。
-   节点被手动改过大小后（.node.sized）body 是固定高度 + overflow:auto，内容一超高
-   （例如把尺寸/比例切到「自定义」，多出一行输入）主按钮就被顶到可视区外面；
-   画布又把滚动条藏了，看起来就是「生成按钮消失了」。 */
+   节点被手动改过大小后（.node.sized）body 是固定高度，内容一超高
+   （比如尺寸/比例切到「自定义」多出一行输入）主按钮就被顶到可视区外面，
+   画布又把滚动条藏了，看起来就是「生成按钮消失了」。
+   ⚠ node-body 里除了生成体，**接了表格时上面还挂着一个批量面板**，
+   所以这里必须整体竖排：面板自己滚、生成体吃剩余高度。
+   否则 .generator-body 的 height:100% 会和面板叠起来，运行栏被推到 body 外面
+   （body 又是 overflow:hidden），按钮就彻底没了。 */
 .node.sized.generator-node .node-body,
-.node.sized.video-node .node-body { overflow:hidden; }
+.node.sized.video-node .node-body { display:flex; flex-direction:column; justify-content:flex-end; overflow:hidden; }
+/* 面板先让位（shrink 8），生成体兜底 min-height（= 运行栏 + 生成链路按钮的高度）：
+   节点被拉到很小时宁可把面板挤掉，也不能把按钮挤没。 */
+.node.sized.generator-node .node-body > .table-batch-panel,
+.node.sized.video-node .node-body > .table-batch-panel { flex:0 8 auto; min-height:0; max-height:50%; overflow:auto; }
+.node.sized.generator-node .generator-body,
+.node.sized.video-node .generator-body { flex:1 1 auto; min-height:104px; }
 .node.sized.generator-node .gen-scroll,
 .node.sized.video-node .gen-scroll { flex:1 1 auto; min-width:0; min-height:0; overflow:auto; display:flex; flex-direction:column; }
 .node.sized.generator-node .gen-run-row,
@@ -541,7 +551,7 @@ body.svc-fullscreen-active { overflow:hidden; }
 .rh-node { width:430px; }
 .comfy-node { width:420px; height:460px; }
 .generator-body { min-height:0; }
-.node.sized.generator-node .generator-body { height:100%; flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+.node.sized.generator-node .generator-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
 .node.sized.rh-node .node-body { overflow:auto; }
 .rh-body { min-height:0; display:flex; flex-direction:column; gap:8px; }
 .rh-mode-tabs { flex:0 0 auto; }
@@ -792,9 +802,11 @@ body.studio-theme-dark .select-lite { background-image:url("data:image/svg+xml,%
 .nd-menu .menu-btn { justify-content:space-between; gap:10px; }
 .nd-option-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .nd-option .nd-check { opacity:0; }
-.nd-option.active { background:var(--strong); color:var(--strong-text); }
-.nd-option.active .nd-check { opacity:1; }
-.nd-option.is-active:not(.active) { background:var(--surface-2); color:var(--text); }
+/* 选中项：.nd-menu 前缀是为了压过 canvas.css 后面的 .theme-dark .menu-btn（同权重时按顺序会赢）——
+   否则深色下选中项是 --muted 灰字配 --strong 白底，等于看不见。 */
+.nd-menu .nd-option.active { background:var(--strong); color:var(--strong-text); }
+.nd-menu .nd-option.active .nd-check { opacity:1; }
+.nd-menu .nd-option.is-active:not(.active) { background:var(--surface-2); color:var(--text); }
 .nd-option:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
 
 .model-select { min-width:150px; max-width:100%; }

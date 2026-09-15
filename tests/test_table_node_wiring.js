@@ -176,8 +176,19 @@ console.log('[10] 生成节点运行按钮：不会被内容顶出可视区 / �
   });
   ok(canvasCss.includes('.node.sized.generator-node .gen-scroll') && canvasCss.includes('.node.sized.video-node .gen-scroll'),
     'CSS：两类节点的内容区都能自己滚');
-  ok(/\.node\.sized\.generator-node \.node-body,[\s\S]{0,60}\.node\.sized\.video-node \.node-body \{ overflow:hidden; \}/.test(canvasCss),
-    'CSS：body 不再整体滚动（整体滚 = 按钮会滚出可视区）');
+  ok(/\.node\.sized\.generator-node \.node-body,[\s\S]{0,90}\.node\.sized\.video-node \.node-body \{ display:flex; flex-direction:column;[^}]*overflow:hidden; \}/.test(canvasCss),
+    'CSS：body 竖排且不整体滚动');
+  ok(/\.node\.sized\.generator-node \.generator-body,[\s\S]{0,90}\.node\.sized\.video-node \.generator-body \{ flex:1 1 auto; min-height:104px; \}/.test(canvasCss),
+    'CSS：生成体有兜底 min-height（节点拉很小时按钮也不会被挤掉）');
+  // node-body 里除了生成体，接表格时上面还有一个批量面板（兄弟节点）。
+  // 面板不封顶的话，生成体的剩余高度会被挤没，运行栏被推到 body 外面（overflow:hidden 直接看不见）。
+  ok(/\.node\.sized\.generator-node \.node-body > \.table-batch-panel,[\s\S]{0,160}max-height:50%/.test(canvasCss),
+    'CSS：批量面板自己滚且不超过一半高度');
+  ok(!/\.node\.sized\.generator-node \.generator-body \{[^}]*height:100%/.test(canvasCss)
+    && !/\.node\.sized\.video-node \.generator-body \{[^}]*height:100%/.test(canvasCss),
+    'CSS：生成体不再写死 height:100%（会和上面的批量面板叠起来把按钮顶出去）');
+  ok(canvas.indexOf('if(tableBatchPanel) body.appendChild(tableBatchPanel);') < canvas.indexOf('body.appendChild(renderGeneratorBody(node));'),
+    '批量面板排在生成体之前（兄弟关系，靠 flex 分配高度）');
   ok(/\.node\.sized\.generator-node \.gen-run-row,[\s\S]{0,60}\.node\.sized\.video-node \.gen-run-row \{ flex:0 0 auto; \}/.test(canvasCss),
     'CSS：运行栏不参与收缩，永远占着底部');
   ['renderGeneratorBody', 'renderVideoBody'].forEach(name => {
