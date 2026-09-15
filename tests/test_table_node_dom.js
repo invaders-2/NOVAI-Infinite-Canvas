@@ -68,7 +68,12 @@ const nodesEl = {
 };
 // 运行器垫片：记录批量执行到底把哪一行、哪份覆盖传给了谁
 const batchCalls = [];
-const runVideoShim = (id, opts) => { batchCalls.push({id, opts}); return 'via-runVideoNode'; };
+let videoShimMode = 'ok';
+const runVideoShim = (id, opts) => {
+    batchCalls.push({id, opts});
+    if(videoShimMode === 'fail') throw new Error('{"error":{"message":"Agnes rate limit: free users"}}');
+    return 'via-runVideoNode';
+};
 const runGeneratorShim = (id, opts) => { batchCalls.push({id, opts}); return 'via-runGenerator'; };
 
 const api = new Function(
@@ -85,7 +90,7 @@ const api = new Function(
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel,' +
     ' normalizeTableNodeHeight, tableNaturalSize,' +
     ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
-    ' generatorNeedsPromptMessage};'
+    ' generatorNeedsPromptMessage, friendlyBatchError};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
@@ -558,6 +563,17 @@ missingUrls.delete('/gone.png');
     node.tableBatchConcurrency = savedConcurrency;
 }
 
+// ═══ L2. 供应商错误体的可读化 ═══
+eq(api.friendlyBatchError('{"error":{"message":"You have reached the API rate limit for free users. (request id: 20260915151137290479961DSm9pxEj)"}}'),
+   'You have reached the API rate limit for free users. (request id: 20260915151137290479961DSm9pxEj)',
+   '嵌套 JSON 错误体抽出 message（Agnes rate_limit_exceeded 原始体）');
+eq(api.friendlyBatchError('{"detail":"Agnes 未配置 Base URL"}'), 'Agnes 未配置 Base URL', 'FastAPI detail 抽出');
+eq(api.friendlyBatchError('{"error":"plain string"}'), 'plain string', 'error 是字符串也能抽');
+eq(api.friendlyBatchError('网络错误'), '网络错误', '普通文本原样返回');
+eq(api.friendlyBatchError(''), '', '空值返回空串');
+eq(api.friendlyBatchError('{不是 JSON}'), '{不是 JSON}', '不是 JSON 时原样返回，不吞信息');
+eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
+
 // ═══ M. 批量执行端到端（异步：runTableBatch → 运行器 → 逐行覆盖） ═══
 (async () => {
     batchCalls.length = 0;
@@ -588,6 +604,16 @@ missingUrls.delete('/gone.png');
     eq(batchCalls.length, 1, '取消勾选的行不参与批量执行');
     ok(batchCalls[0].opts.rowOverride.prompt.indexOf('镜头A') >= 0, '只跑了留下的那一行');
     api.toggleTableRow(node, 1, true);
+
+    // 失败时必须把「为什么」带出来：批量模式不能弹窗，只报「失败 N 行」等于没说
+    videoShimMode = 'fail';
+    batchCalls.length = 0;
+    await api.runTableBatch(vidE2E.id, {});
+    const batchMsg = String(vidE2E._batchLastMessage || '');
+    ok(batchMsg.indexOf('失败 2 行') > 0, '摘要报出失败行数：' + batchMsg);
+    ok(batchMsg.indexOf('Agnes rate limit: free users') > 0, '摘要带出首个失败原因：' + batchMsg);
+    ok(batchMsg.indexOf('{"error"') < 0, '摘要里不出现原始 JSON');
+    videoShimMode = 'ok';
 
     console.log('通过 ' + pass + '/' + (pass + fails.length));
     if(fails.length){ console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

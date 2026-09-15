@@ -7372,6 +7372,21 @@ function tableBatchRunner(node){
     return node && node.type === 'video' ? runVideoNode : runGenerator;
 }
 
+/* 供应商错误体有时是整段原始 JSON（例如 Agnes 的 {"error":{"message":"..."}}）。
+   把原始 JSON 塞进批量摘要没人看得懂，能抽就抽出可读的那一句。 */
+function friendlyBatchError(message){
+    const text = String(message === undefined || message === null ? '' : message).trim();
+    if(!text || (text.charAt(0) !== '{' && text.charAt(0) !== '[')) return text;
+    try {
+        const parsed = JSON.parse(text);
+        const inner = (parsed && parsed.error && (parsed.error.message || parsed.error.msg))
+            || (parsed && typeof parsed.error === 'string' ? parsed.error : '')
+            || (parsed && (parsed.detail || parsed.message)) || '';
+        if(inner) return String(inner);
+    } catch(error){ /* 不是 JSON，原样返回 */ }
+    return text;
+}
+
 /* 接了多维表格、却走了「单张/单段生成」这条路时的提示。
    这条路**不看表格**，直接报「请先连接提示词」会让用户不知道该点哪儿，
    所以表格在的时候要说清该点「批量生成」。 */
@@ -7757,11 +7772,14 @@ async function runTableBatch(genId, options={}){
         return entry.rowNumber;
     }, {stopOnError: failurePolicy === 'stop'});
 
+    const failures = [];
     results.forEach((result, index) => {
         if(result && result.ok) return;
         const entry = pending[index];
         model.journalMarkRow(journal, entry.rowNumber, 'failed');
         gen._batchProgress.failed += 1;
+        failures.push({rowNumber: entry.rowNumber,
+            reason: friendlyBatchError(result && result.error && (result.error.message || String(result.error)))});
     });
 
     gen._batchRunning = false;
@@ -7773,7 +7791,15 @@ async function runTableBatch(genId, options={}){
 
     const completed = model.journalCompletedRows(journal).length;
     const failed = model.journalFailedRows(journal).length;
-    say('批量生成结束：完成 ' + completed + ' 行' + (failed ? '，失败 ' + failed + ' 行' : '') + '。');
+    let summary = '批量生成结束：完成 ' + completed + ' 行' + (failed ? '，失败 ' + failed + ' 行' : '') + '。';
+    /* 批量模式不能弹窗，但只说「失败 N 行」等于没说。
+       把首个失败原因带出来，面板上的 note 会一直留着，用户能照着排查。 */
+    if(failures.length){
+        const reasons = Array.from(new Set(failures.map(item => item.reason).filter(Boolean)));
+        summary += '第 ' + failures[0].rowNumber + ' 行失败原因：' + String(reasons[0] || '未知错误').slice(0, 200)
+            + (reasons.length > 1 ? '（共 ' + reasons.length + ' 种原因）' : '');
+    }
+    say(summary);
 }
 
 function paintTableBatchPanelFromNode(gen, table){
@@ -13417,10 +13443,10 @@ async function runVideoNode(nodeId, opts={}){
             if(opts.cascade) throw err;
             return;
         }
-        node.runStatus = 'failed'; node.runError = err.message || String(err);
+        node.runStatus = 'failed'; node.runError = friendlyBatchError(err.message || String(err));
         refreshRunNodes(node, out);
         if(opts.cascade || opts.batch) throw err;
-        alert(err.message || tr('canvas.videoFailed'));
+        alert(node.runError || tr('canvas.videoFailed'));
     } finally {
         node.running = false;
         refreshRunNodes(node, out);
