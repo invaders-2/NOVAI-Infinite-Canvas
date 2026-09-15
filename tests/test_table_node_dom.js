@@ -845,7 +845,8 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     api.repaintTable(tbl);
     eq(byClass(inputCell(), 'table-cell-menu')[0]
         ? byClass(inputCell(), 'table-cell-menu')[0].children.map(b => b.textContent) : [],
-        ['替换 @图片1','替换 @图片2','新增'], '多张时菜单按张替换');
+        ['替换','替换','新增'], '多张时菜单按张替换（靠缩略图区分，不显示序号）');
+    eq(byClass(byClass(inputCell(), 'table-cell-menu')[0], 'menu-btn').map(b => b.title), ['@图片1','@图片2',null], 'token 放在 title 上');
 
     // 单张替换只动那一张
     api.replaceTableManualInputItem(tbl, 'input-1', 0, 1, {url:'/static/m3.png', mediaType:'image', name:'m3.png'});
