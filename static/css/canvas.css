@@ -723,6 +723,26 @@ body.canvas-port-linking .port { opacity:1; pointer-events:auto; }
 .ltxDirector-node > .port,
 .ltx-director-node > .port { top:50%; }
 .group-node,.promptGroup-node { min-width:260px; background:rgba(255,255,255,.96); border:1px solid transparent; box-shadow:0 16px 42px rgba(0,0,0,.08); z-index:0; }
+
+/* 群组的端口：成员是独立的兄弟节点、层级比群组高（z-index 2 > 0），
+   群组卡片又被成员盖住 —— 靠 .node:hover 浮现的话，鼠标停在成员上时触发的
+   是成员的 hover，群组端口基本出不来。所以对群组常显端口。
+
+   同时把端口外移：成员端口占 [right-4, right+40]，群组端口留 -40 会和「最右侧成员
+   的端口」重叠；重叠发生在离开成员后那 300ms 的 port-linger 期内，那时成员端口
+   仍然可命中且层级更高，于是鼠标明明对着群组的加号，抓到的却是成员的。
+   外移到 -88 后群组端口占 [right+44, right+88]，与成员端口完全不重叠。
+
+   注意不能改用「提高群组 z-index」来解决：群组背景是不透明的卡片，
+   提到成员之上会把成员整个盖住。 */
+.group-node > .port,
+.promptGroup-node > .port { opacity:1; pointer-events:auto; }
+
+.group-node > .port.in,
+.promptGroup-node > .port.in { left:-88px; }
+
+.group-node > .port.out,
+.promptGroup-node > .port.out { right:-88px; }
 .group-node .node-head,.promptGroup-node .node-head { background:var(--surface); border-bottom:1px solid var(--border-strong); }
 .llm-node { width:420px; }
 .llm-body { display:flex; flex-direction:column; gap:10px; min-height:0; }
