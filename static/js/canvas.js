@@ -8031,6 +8031,13 @@ function renderTableBody(node){
                 const entries = channelItems[index] || [];
                 fillTableMediaCell(cell, entries);
                 const first = entries.filter(entry => entry && entry.url)[0] || null;
+                // 这一格的引用写法直接标在角上：用户照着打 @图片N 就行，不用猜序号
+                if(first && !llmTable){
+                    const token = document.createElement('span');
+                    token.className = 'table-cell-ref-token';
+                    token.textContent = model.mentionTokenAt(first.kind, first.ordinal);
+                    cell.appendChild(token);
+                }
                 if(first){
                     bindTableCellMediaView(cell, first.url, first.kind);
                     if(!llmTable){

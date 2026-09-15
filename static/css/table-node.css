@@ -521,6 +521,22 @@
 .table-cell-mention-item .table-media-thumb img,
 .table-cell-mention-item .table-media-thumb video { width: 100%; height: 100%; max-width: 26px; max-height: 26px; object-fit: cover; }
 
+/* 输入列格子角上的引用写法（@图片1）：让用户知道在提示词里怎么写 */
+.table-cell-ref-token {
+    position: absolute;
+    left: 3px;
+    bottom: 2px;
+    z-index: 3;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text-3);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 14px;
+    pointer-events: none;
+}
+
 /* 单元格文本里指向本行素材的 @图片N：换成一个小缩略图 */
 .table-cell-mention {
     display: inline-flex;
