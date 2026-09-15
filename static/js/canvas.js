@@ -6691,9 +6691,33 @@ function renderNode(node){
     });
     // 手柄停留增强：移出节点后短暂保持端口可命中，避免鼠标刚离开节点边缘手柄就消失
     const lingerTimerKey = '_portLingerTimer';
+    /* 群组的端口很难抓：群组是 z-index:0、成员是 z-index:2 的**兄弟节点**，
+       群组卡片被成员盖住。鼠标停在成员上时触发的是成员的 :hover，群组的 .node:hover
+       为 false，端口根本不浮现 —— 看得见才能抓，所以先让它浮现。
+       鼠标落在成员上就把所属群组一起点亮；离开成员后再留 300ms，
+       给鼠标时间移到群组的加号上（到点后由 .port:hover 接管）。 */
+    const groupLinger = on => {
+        const owner = (nodes || []).find(item =>
+            (item.type === 'group' || item.type === 'promptGroup')
+            && Array.isArray(item.items) && item.items.includes(node.id));
+        if(!owner) return;
+        const groupEl = nodesEl.querySelector('.node[data-id="' + CSS.escape(owner.id) + '"]');
+        if(!groupEl) return;
+        if(on){
+            if(groupEl[lingerTimerKey]){ clearTimeout(groupEl[lingerTimerKey]); groupEl[lingerTimerKey] = null; }
+            groupEl.classList.add('port-linger');
+            return;
+        }
+        if(groupEl[lingerTimerKey]) return;
+        groupEl[lingerTimerKey] = setTimeout(() => {
+            groupEl.classList.remove('port-linger');
+            groupEl[lingerTimerKey] = null;
+        }, 300);
+    };
     el.addEventListener('mouseenter', () => {
         if(el[lingerTimerKey]){ clearTimeout(el[lingerTimerKey]); el[lingerTimerKey] = null; }
         el.classList.remove('port-linger');
+        groupLinger(true);
     });
     el.addEventListener('mouseleave', () => {
         if(el[lingerTimerKey]) return;
@@ -6702,6 +6726,7 @@ function renderNode(node){
             el.classList.remove('port-linger');
             el[lingerTimerKey] = null;
         }, 300);
+        groupLinger(false);
     });
     return el;
 }
