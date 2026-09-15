@@ -33,6 +33,10 @@ const used = new Set();
 (canvas.match(/table-[a-z-]+/g) || []).forEach(c => used.add(c));
 const missing = [...used].filter(c => !css.includes('.' + c));
 ok(missing.length === 0, 'JS 用到的 table-* 类全部有样式' + (missing.length ? ' 缺: ' + missing.join(', ') : ''));
+ok(/\.table-row-delete \{[^}]*background: var\(--danger-bg\)/.test(css), '删除行按钮有底色和边框（不再是裸 ×）');
+ok(!/\.table-row-delete \{[^}]*opacity: 0/.test(css), '删除行按钮默认可见，不靠悬停');
+ok(!/tbody tr:hover \.table-row-delete/.test(css), '删掉「悬停整行才显示删除按钮」那条');
+ok(/\.table-row-delete:hover \{[^}]*background: var\(--danger\)/.test(css), '删除行按钮悬停变实心红');
 
 console.log('[5] 分发接线');
 ['createNodeByType 分支','menuAdd 分支','defaultNodeSize 分支','标题三元','body 分支'].forEach((label, i) => {

@@ -209,27 +209,33 @@
     cursor: pointer;
 }
 
+/* 删除行：原来默认 opacity:0（不把鼠标移到那一行上根本看不见），
+   而且只是个裸 × 字符、没有边框和底色，完全不像按钮。
+   改成常显的红色小按钮，用仓库已有的语义色（--danger-bg/-border/-text）。 */
 .table-row-delete {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     padding: 0;
-    border: none;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--text-3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    border: 1px solid var(--danger-border);
+    border-radius: 6px;
+    background: var(--danger-bg);
+    color: var(--danger-text);
     font-family: inherit;
-    font-size: 14px;
+    font-size: 13px;
+    font-weight: 700;
     line-height: 1;
     cursor: pointer;
-    opacity: 0;
-    transition: opacity .15s ease, background .15s ease, color .15s ease;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
 }
-
-.table-node-table tbody tr:hover .table-row-delete { opacity: 1; }
 
 .table-row-delete:hover {
     background: var(--danger);
-    color: var(--surface);
+    border-color: var(--danger);
+    color: var(--text-on-accent);
 }
 
 /* ── 空表提示 ── */
