@@ -402,6 +402,12 @@ input.table-batch-input { width: 48px; }
     font-size: 10px;
 }
 
+/* 独立运行开关：在 flex 行里别被压缩 */
+.table-batch-manual-box {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
 .table-batch-actions {
     display: flex;
     gap: 6px;
@@ -464,7 +470,7 @@ input.table-batch-input { width: 48px; }
 
 .table-batch-row {
     display: grid;
-    grid-template-columns: 20px minmax(58px, 30%) minmax(0, 1fr);
+    grid-template-columns: 16px 20px minmax(58px, 28%) minmax(0, 1fr);
     align-items: center;
     gap: 7px;
     min-height: 54px;

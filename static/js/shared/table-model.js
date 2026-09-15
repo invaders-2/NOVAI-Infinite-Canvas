@@ -157,6 +157,10 @@
             const named = Boolean(values) && !Array.isArray(values) && typeof values === 'object';
             const list = Array.isArray(values) ? values : [];
             next.rows.push(next.columns.map((title, i) => cellText(named ? values[title] : list[i])));
+            // 勾选语义＝默认全选，新增的行自动勾上
+            next.selectedRows = Array.from(new Set(next.selectedRows.concat([next.rows.length - 1])))
+                .filter(index => index >= 0 && index < next.rows.length)
+                .sort((a, b) => a - b);
             return next;
         }
         if(opId === 'delete_row'){
@@ -375,14 +379,19 @@
        两种模式都跳过既没有媒体也没有文本的空行。 */
     function batchRowsToRun(rows, options={}){
         const list = Array.isArray(rows) ? rows : [];
-        const selected = new Set((Array.isArray(options.selectedRows) ? options.selectedRows : []).map(Number));
         const manual = Boolean(options.manual);
         const startRow = batchStartRow(options.startRow, list.length);
+        // 不传 selectedRows 就不按勾选过滤（兼容旧调用）；传了就是权威
+        const selectedSet = Array.isArray(options.selectedRows)
+            ? new Set(options.selectedRows.map(Number))
+            : null;
         return list.filter(row => {
             if(!row) return false;
             const hasContent = (Array.isArray(row.media) && row.media.length) || String(row.text || '').trim();
             if(!hasContent) return false;
-            if(manual) return selected.has(Number(row.rowNumber) - 1);
+            // 取消勾选的行一律不跑，批量与独立运行都适用
+            if(selectedSet && !selectedSet.has(Number(row.rowNumber) - 1)) return false;
+            if(manual) return true;
             return Number(row.rowNumber) >= startRow;
         });
     }

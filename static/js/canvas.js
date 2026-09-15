@@ -6852,6 +6852,16 @@ function ensureTableState(node){
     const model = novaTableModel();
     if(!model) return null;
     node.table = model.normalizeTable(node.table || {}).table;
+    /* 勾选语义＝「默认全选、取消则不跑」。
+       老画布里的表格 selectedRows 是空的（那时表示「没选」），现在必须当成全选，
+       否则一打开就是一行都不跑。只在第一次补齐 ——
+       之后用户自己取消到空也要尊重，不能每次重绘都给他填回来。 */
+    if(!node.tableSelectionInitialized){
+        node.tableSelectionInitialized = true;
+        if(node.table.rows.length && !node.table.selectedRows.length){
+            node.table.selectedRows = node.table.rows.map((row, index) => index);
+        }
+    }
     return node.table;
 }
 
@@ -7362,11 +7372,10 @@ function paintTableBatchPanel(panel, gen){
         startHint.textContent = '已从第 ' + startRow + ' 行起';
         status.appendChild(startHint);
     }
-    if(selection.manual){
-        const manualText = document.createElement('span');
-        manualText.textContent = '独立运行 · 已选 ' + selection.selectedRows.length + '/' + rows.length;
-        status.appendChild(manualText);
-    }
+    const pickedText = document.createElement('span');
+    pickedText.textContent = (selection.manual ? '独立运行 · ' : '')
+        + '已勾选 ' + selection.selectedRows.length + '/' + rows.length;
+    status.appendChild(pickedText);
     const mediaTotal = rows.reduce((total, row) => total + (row.media || []).length, 0);
     if(mediaTotal){
         const mediaText = document.createElement('span');
@@ -7398,6 +7407,20 @@ function paintTableBatchPanel(panel, gen){
         article.className = 'table-batch-row';
         if(selectedSet.has(rowIndex)) article.classList.add('is-selected');
         article.title = '点击切换这一行的勾选';
+
+        // 勾选＝执行这一行，取消＝跳过（两种模式都适用）
+        const pick = document.createElement('input');
+        pick.type = 'checkbox';
+        pick.className = 'table-checkbox';
+        pick.checked = selectedSet.has(rowIndex);
+        pick.title = '勾选＝执行这一行，取消＝跳过';
+        pick.onclick = event => event.stopPropagation();
+        pick.onchange = event => {
+            event.stopPropagation();
+            toggleTableRow(table, rowIndex, pick.checked);
+            paintTableBatchPanel(panel, gen);
+        };
+        article.appendChild(pick);
 
         const badge = document.createElement('b');
         badge.className = 'table-batch-row-num';
@@ -7504,7 +7527,7 @@ function paintTableBatchPanel(panel, gen){
     manualRow.className = 'table-batch-manual';
     const manualBox = document.createElement('input');
     manualBox.type = 'checkbox';
-    manualBox.className = 'table-checkbox';
+    manualBox.className = 'table-checkbox table-batch-manual-box';
     manualBox.checked = selection.manual;
     manualBox.onchange = () => {
         table.tableBatchManualSelection = manualBox.checked;
@@ -7558,9 +7581,15 @@ async function runTableBatch(genId, options={}){
 
     const runnable = model.batchRowsToRun(rows, {manual: selection.manual, startRow, selectedRows: selection.selectedRows});
     if(!runnable.length){
-        if(selection.manual) say('请先点击上方行，选择至少一行独立运行');
+        if(selection.manual) say('请先勾选至少一行再独立运行');
         else if(startRow > rows.length) say('起始行超出表格范围，当前共 ' + rows.length + ' 行');
-        else say('起始行之后没有可生成的内容');
+        else {
+            const inRange = rows.filter(row => row.rowNumber >= startRow
+                && ((Array.isArray(row.media) && row.media.length) || String(row.text || '').trim()));
+            say(inRange.length
+                ? '起始行之后的执行行都被取消勾选了，请至少勾选一行。'
+                : '起始行之后没有可生成的内容');
+        }
         return;
     }
 
@@ -7795,10 +7824,11 @@ function renderTableBody(node){
         inputs.className = 'table-node-inputs';
         inputs.textContent = channels.length + ' 个输入';
         meta.appendChild(inputs);
-        if(picked.size){
+        // 默认全选时这个提示是废话，只在取消掉一部分之后才显示
+        if(picked.size && picked.size < state.rows.length){
             const chip = document.createElement('span');
             chip.className = 'table-node-picked';
-            chip.textContent = '已选 ' + picked.size + ' 行';
+            chip.textContent = '已勾选 ' + picked.size + '/' + state.rows.length;
             meta.appendChild(chip);
         }
         const spacer = document.createElement('span');

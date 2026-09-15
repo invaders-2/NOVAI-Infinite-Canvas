@@ -192,17 +192,19 @@ headEditor.value = '提示词';
 headEditor.onkeydown(keydown('Enter'));
 eq(node.table.columns, ['提示词'], '列名提交');
 
-// ═══ H. 选择 / 删行 / 宽度 ═══
-api.toggleTableRow(node, 0, true);
-eq(node.table.selectedRows, [0], '选中第 1 行');
-eq(one(root, 'table-node-picked').textContent, '已选 1 行', '已选提示');
+// ═══ H. 勾选 / 删行 / 宽度（勾选语义＝默认全选） ═══
+eq(node.table.selectedRows, [0, 1], '新增行默认全选');
+eq(one(root, 'table-node-picked'), undefined, '全选时不显示勾选提示（默认状态没信息量）');
+api.toggleTableRow(node, 0, false);
+eq(node.table.selectedRows, [1], '取消第 1 行');
+eq(one(root, 'table-node-picked').textContent, '已勾选 1/2', '取消一部分后才显示');
 api.toggleAllTableRows(node, true);
 eq(node.table.selectedRows, [0, 1], '全选');
 api.deleteTableRow(node, 0);
 eq(node.table.rows.length, 1, '删行');
 // 删掉第 1 行后，原来的第 2 行顺位变成第 0 行并继承选中
 eq(node.table.selectedRows, [0], '删行后选中顺位');
-eq(one(root, 'table-node-picked').textContent, '已选 1 行', '剩余行仍保持选中');
+eq(one(root, 'table-node-picked'), undefined, '只剩 1 行且已勾选 → 不显示提示');
 api.toggleTableRow(node, 0, false);
 eq(one(root, 'table-node-picked'), undefined, '取消选择后不再显示已选');
 // 删列不影响行选中（回归：曾按列数过滤行号）
@@ -254,7 +256,23 @@ const rowArticles = byClass(panel, 'table-batch-row');
 eq(rowArticles.length, rowData2.length, '行列表条数 = 表格行数');
 eq(one(rowArticles[0], 'table-batch-row-num').textContent, '1', '行号徽标');
 eq(one(rowArticles[0], 'table-batch-row-media').children.length, rowData2[0].media.length, '缩略图数 = 该行参考图数');
-eq(rowArticles[0].children[2].textContent, rowData2[0].prompt, '提示词预览 = 该行真正会发出去的提示词');
+eq(rowArticles[0].children[3].textContent, rowData2[0].prompt, '提示词预览 = 该行真正会发出去的提示词');
+// 默认全选：每行前面都有勾选框且默认勾上
+api.toggleAllTableRows(node, true);
+const rowArticles2 = byClass(api.renderTableBatchPanel(genNode), 'table-batch-row');
+eq(byClass(rowArticles2[0], 'table-checkbox').length, 1, '每行一个勾选框');
+eq(one(rowArticles2[0], 'table-checkbox').checked, true, '行勾选框默认勾上（默认全选）');
+eq(rowArticles2.every(a => one(a, 'table-checkbox').checked), true, '所有行都默认勾上');
+eq(node.table.selectedRows, [0], '数据模型里也是全选');
+// 取消一行 → 该行不参与执行
+one(rowArticles2[0], 'table-checkbox').checked = false;
+one(rowArticles2[0], 'table-checkbox').onchange({ stopPropagation(){} });
+eq(node.table.selectedRows, [], '取消勾选写回数据模型');
+eq(model.batchRowsToRun(rowData2, {startRow:1, selectedRows:node.table.selectedRows}).length, 0, '取消勾选的行不参与执行');
+ok(one(api.renderTableBatchPanel(genNode), 'table-batch-status').textContent.indexOf('已勾选 0/1') >= 0, '状态行显示已勾选 0/1');
+// 勾回来
+api.toggleTableRow(node, 0, true);
+eq(model.batchRowsToRun(api.tableRowInputs(node), {startRow:1, selectedRows:node.table.selectedRows}).length, 1, '勾回来后又参与执行');
 
 /* @图片N 重编号验证。
    此刻全局清单：ch0=[img1,img2,img3,img5]（序号 1-4，逐行模式）、ch1=[img4]（序号 5，共享模式）。
@@ -273,6 +291,7 @@ eq(danglingRow.danglingMentions[0].reason, 'missing', '悬空原因');
 node.table.rows[0][0] = '一只狗';
 
 // 点整行 = 切换该行勾选
+node.table.selectedRows = [];
 const articlesNow = byClass(api.renderTableBatchPanel(genNode), 'table-batch-row');
 eq(node.table.selectedRows, [], '点之前未勾选');
 articlesNow[0].onclick({ stopPropagation(){} });
@@ -289,7 +308,7 @@ eq(selects.length, 2, '两个下拉（并发 / 出错策略）');
 eq(selects[0].children.length, model.MAX_BATCH_CONCURRENCY, '并发选项 1..8');
 eq(selects[0].value, String(model.DEFAULT_BATCH_CONCURRENCY), '并发默认 3');
 eq(selects[1].value, 'continue', '出错策略默认「继续跑完」');
-ok(Boolean(one(panel, 'table-checkbox')), '有独立运行勾选框');
+ok(Boolean(one(panel, 'table-batch-manual-box')), '有独立运行勾选框');
 
 // 「批量生成」已上移到主按钮位，面板里只剩「恢复上次」
 eq(byClass(panel, 'table-node-action').length, 1, '面板操作区只剩一个按钮');
@@ -303,15 +322,16 @@ selects[0].value = '5'; selects[0].onchange();
 eq(node.tableBatchConcurrency, 5, '并发写入表格节点');
 selects[1].value = 'stop'; selects[1].onchange();
 eq(node.tableBatchFailurePolicy, 'stop', '出错策略写入表格节点');
-one(panel, 'table-checkbox').checked = true; one(panel, 'table-checkbox').onchange();
+one(panel, 'table-batch-manual-box').checked = true; one(panel, 'table-batch-manual-box').onchange();
 eq(node.tableBatchManualSelection, true, '独立运行开关写入表格节点');
 
 // 独立运行模式下状态行显示已选数量
+node.table.selectedRows = [];
 const panel2 = api.renderTableBatchPanel(genNode);
-ok(one(panel2, 'table-batch-status').textContent.indexOf('独立运行 · 已选 0/1') >= 0, '独立运行显示已选 0/1：' + one(panel2, 'table-batch-status').textContent);
+ok(one(panel2, 'table-batch-status').textContent.indexOf('独立运行 · 已勾选 0/1') >= 0, '独立运行显示已勾选 0/1：' + one(panel2, 'table-batch-status').textContent);
 api.toggleTableRow(node, 0, true);
 const panel3 = api.renderTableBatchPanel(genNode);
-ok(one(panel3, 'table-batch-status').textContent.indexOf('独立运行 · 已选 1/1') >= 0, '勾选后显示已选 1/1');
+ok(one(panel3, 'table-batch-status').textContent.indexOf('独立运行 · 已勾选 1/1') >= 0, '勾选后显示已勾选 1/1');
 api.toggleTableRow(node, 0, false);
 
 // 起始行：改成 2 之后，行列表只显示第 2 行起
@@ -336,10 +356,11 @@ node.tableBatchStartRow = 1;
 eq(byClass(api.renderTableBatchPanel(genNode), 'table-batch-row-num').map(b => b.textContent), ['1','2','3'], '起始行 1 → 全部显示');
 // 勾选仍按原始行下标，不会因为隐藏而错位
 node.tableBatchStartRow = 2;
+node.table.selectedRows = [];
 const panelPick = api.renderTableBatchPanel(genNode);
 byClass(panelPick, 'table-batch-row')[0].onclick({ stopPropagation(){} });
 eq(node.table.selectedRows, [1], '隐藏第 1 行后，点列表第一项勾的是第 2 行（下标 1）');
-api.toggleTableRow(node, 1, false);
+node.table.selectedRows = node.table.rows.map((row, index) => index);
 node.tableBatchStartRow = 1;
 
 // 行参考图与素材校验
