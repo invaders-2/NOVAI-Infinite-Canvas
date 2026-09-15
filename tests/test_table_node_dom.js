@@ -83,7 +83,7 @@ const api = new Function(
     'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs', 'tr', 'nodesEl',
     'runVideoNode', 'runGenerator', 'window', 'saveCanvas', 'refreshIcons',
     'outputUrlValue', 'mediaKindForRef',
-    block + '\nreturn {renderTableBody, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
+    block + '\nreturn {renderTableBody, repaintTable, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
     ' addTableInputChannel, tableNodeSignature, connectNodes, tableDropPortFor,' +
@@ -782,41 +782,70 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     ok(busy.indexOf('生成中') >= 0, '运行中文案不变');
 }
 
-// ═══ O. 格子里能放媒体：上传 / 替换 / 删除（空白表也一样）═══
+// ═══ O. 格子交互：LLM 表不放图标 / 空白表才有「+」和「···」 ═══
 {
+    // ── 用户新建的空白表 ──
     const tbl = api.addTableNode();
     api.addTableColumn(tbl);
     api.addTableRow(tbl);
     const root = api.renderTableBody(tbl);
     const dataCell = () => rowAt(root, 0).children[1];
 
-    // 空白数据格：只有一个「上传」
-    let actions = byClass(dataCell(), 'table-cell-action');
-    eq(actions.length, 1, '空格子只有「上传」按钮');
-    eq(actions[0].title, '上传图片/视频', '上传按钮文案');
-    ok(byClass(dataCell(), 'table-cell-editor').length === 0, '空格子没有编辑器');
+    const add = () => byClass(dataCell(), 'table-cell-add')[0];
+    ok(Boolean(add()), '空白表格子正中一个「+」');
+    eq(add().title, '上传图片/视频', '「+」的说明');
+    eq(byClass(dataCell(), 'table-cell-add').length, 1, '只有一个「+」');
+    eq(byClass(dataCell(), 'table-cell-more').length, 0, '空格子没有「···」');
 
-    // 写入媒体格 → 缩略图 + 预览/替换/删除
+    // 写入文字 → 「+」消失，双击回到改文字
+    api.setTableCellMedia(tbl, 0, 0, null);
+    tbl.table.rows[0][0] = '一只猫';
+    api.repaintTable(tbl);   // 改格子内容不改变签名，得显式重绘（编辑提交走的就是这条路）
+    eq(byClass(dataCell(), 'table-cell-add').length, 0, '写了提示词 → 「+」消失');
+    ok(typeof dataCell().ondblclick === 'function', '文字格双击可编辑');
+
+    // 换成媒体 → 右上角「···」，双击看大图
     api.setTableCellMedia(tbl, 0, 0, {url:'/static/m.png', mediaType:'image', name:'m.png'});
     const mediaCell = dataCell();
     ok(mediaCell.classList.contains('is-media-cell'), '媒体格打上标记');
     eq(byClass(mediaCell, 'table-media-thumb').length, 1, '渲染成缩略图');
-    eq(byClass(mediaCell, 'table-cell-action').map(a => a.title), ['预览','替换图片/视频','删除'], '媒体格三个动作');
-    eq(mediaCell.ondblclick, undefined, '媒体格双击不再是编辑文字');
-    eq(tbl.table.rows[0][0], {kind:'media', url:'/static/m.png', mediaType:'image', name:'m.png'}, 'rows 里存的是媒体对象（不是 JSON 串）');
+    const more = () => byClass(dataCell(), 'table-cell-more')[0];
+    ok(Boolean(more()), '媒体格右上角「···」');
+    eq(more().textContent, '···', '就是三个点');
+    eq(byClass(dataCell(), 'table-cell-add').length, 0, '有图就不再显示「+」');
+    ok(typeof mediaCell.ondblclick === 'function', '媒体格双击可查看');
+    eq(tbl.table.rows[0][0], {kind:'media', url:'/static/m.png', mediaType:'image', name:'m.png'}, 'rows 里存的是媒体对象');
     eq(api.tableRowInputs(tbl)[0].text, '', '媒体格不进这一行的文字');
 
-    // 删除 → 回到空文字
-    api.setTableCellMedia(tbl, 0, 0, null);
-    eq(tbl.table.rows[0][0], '', '删掉媒体 → rows 回到空串');
-    eq(byClass(dataCell(), 'table-cell-action').length, 1, '删掉后只剩「上传」');
-    ok(typeof dataCell().ondblclick === 'function', '回到文字格 → 双击又能编辑');
+    // ── LLM 生成的多维表格：一个格子图标都不放 ──
+    const llmTable = api.addTableNode();
+    llmTable.llmGeneratedOutput = true;
+    api.addTableColumn(llmTable);
+    api.addTableRow(llmTable);
+    const llmRoot = api.renderTableBody(llmTable);
+    const llmDataCell = () => rowAt(llmRoot, 0).children[1];
+    eq(byClass(llmDataCell(), 'table-cell-add').length, 0, 'LLM 表：空格子不放「+」');
+    eq(byClass(llmDataCell(), 'table-cell-more').length, 0, 'LLM 表：空格子不放「···」');
+    api.setTableCellMedia(llmTable, 0, 0, {url:'/static/llm.png', mediaType:'image', name:'llm.png'});
+    const llmMedia = llmDataCell();
+    eq(byClass(llmMedia, 'table-media-thumb').length, 1, 'LLM 表：媒体格照样出缩略图');
+    eq(byClass(llmMedia, 'table-cell-more').length, 0, 'LLM 表：媒体格也不放「···」');
+    eq(byClass(llmMedia, 'table-cell-add').length, 0, 'LLM 表：媒体格也不放「+」');
+    ok(typeof llmMedia.ondblclick === 'function', 'LLM 表：媒体格双击可查看');
+    // LLM 表的参考栏同样不放图标
+    nodes.push({id:'imgLlmCell', type:'image', url:'/static/up2.png'});
+    connections.push({id:'c_llm_cell', from:'imgLlmCell', to:llmTable.id});
+    api.renderTableBody(llmTable);
+    const llmInputCell = rowAt(llmRoot, 0).children[0];
+    eq(byClass(llmInputCell, 'table-media-thumb').length, 1, 'LLM 表：参考栏照样出缩略图');
+    eq(byClass(llmInputCell, 'table-cell-more').length + byClass(llmInputCell, 'table-cell-add').length, 0, 'LLM 表：参考栏也不放图标');
 
-    // ══ 参考栏：手动上传覆盖这一行，删掉回到连线推出来的那张 ══
+    // ── 参考栏：手动上传覆盖这一行 ══
     nodes.push({id:'imgCell', type:'image', url:'/static/up.png'});
     connections.push({id:'c_cell', from:'imgCell', to:tbl.id});
     api.renderTableBody(tbl);
     eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/up.png'], '连线推出来的参考图');
+    ok(Boolean(byClass(rowAt(root, 0).children[0], 'table-cell-more')[0]), '有参考图 → 右上角「···」');
 
     api.setTableManualInputItem(tbl, 'input-1', 0, {url:'/static/manual.png', mediaType:'image', name:'manual.png'});
     api.renderTableBody(tbl);
@@ -824,12 +853,10 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     eq(rows[0].media.map(m => m.url), ['/static/manual.png'], '手动上传覆盖这一行');
     eq(rows[0].references[0].nodeId, '', '手动素材没有来源节点');
     eq(api.tableManualInputItem(tbl, 'input-1', 0).url, '/static/manual.png', '手动项存下来了');
-    eq(byClass(rowAt(root, 0).children[0], 'table-cell-action').map(a => a.title), ['预览','替换图片/视频','移出参考栏'], '参考栏按钮（有手动项才多一个移出）');
 
     api.setTableManualInputItem(tbl, 'input-1', 0, null);
     api.renderTableBody(tbl);
     eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/up.png'], '移出手动项 → 回到连线推出来的那张');
-    eq(byClass(rowAt(root, 0).children[0], 'table-cell-action').map(a => a.title), ['预览','替换图片/视频'], '没有手动项就没有「移出参考栏」');
 
     // 第二行不受手动项影响（一行一张）
     api.addTableRow(tbl);
@@ -843,13 +870,14 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     const blank = api.addTableNode();
     api.addTableColumn(blank);
     api.addTableRow(blank);
-    api.renderTableBody(blank);
-    eq(byClass(rowAt(api.renderTableBody(blank), 0).children[0], 'table-cell-action').length, 1, '空白表的参考格也能上传');
+    const blankRoot = api.renderTableBody(blank);
+    ok(Boolean(byClass(rowAt(blankRoot, 0).children[0], 'table-cell-add')[0]), '空白表的参考格也有「+」');
     api.setTableManualInputItem(blank, 'input-1', 0, {url:'/static/solo.mp4', mediaType:'video', name:'solo.mp4'});
     api.renderTableBody(blank);
     const solo = api.tableRowInputs(blank)[0].media;
     eq(solo.map(m => m.url), ['/static/solo.mp4'], '空白表：手动上传的就是这一行的参考');
     eq(solo[0].kind, 'video', '视频按后缀认出是 video');
+    ok(Boolean(byClass(rowAt(blankRoot, 0).children[0], 'table-cell-more')[0]), '上传后参考格变「···」');
     // 地址不带后缀时按上传时记下的类型判（素材地址不保证有扩展名）
     api.setTableManualInputItem(blank, 'input-1', 0, {url:'/api/asset/9f2', mediaType:'video', name:'clip'});
     api.renderTableBody(blank);

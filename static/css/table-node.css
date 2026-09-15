@@ -241,52 +241,54 @@
 
 .table-row-delete svg { width: 14px; height: 14px; }
 
-/* ── 格子里的上传 / 替换 / 删除（参考栏与数据列通用）─────────────────
-   和删行按钮同一套：默认就看得见（淡），悬停才变深。
-   当初删行按钮「悬停整行才出现」被骂过，这里不重复那个坑。 */
-.table-cell-actions {
+/* ── 格子的上传 / 替换（只给用户自己新建的空白表用）───────────────
+   LLM 生成的多维表格一个图标都不放：有图/视频双击看大图，提示词格双击改文字。 */
+.table-cell-add {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+    transition: color .15s ease, background .15s ease;
+}
+
+.table-cell-add:hover { color: var(--text); background: var(--nav-hover-bg); }
+.table-cell-add svg { width: 15px !important; height: 15px !important; }
+
+/* 右上角的「···」：点一下换一张，双击看大图 */
+.table-cell-more {
     position: absolute;
     top: 2px;
     right: 2px;
     z-index: 2;
-    display: flex;
-    gap: 1px;
-    opacity: .5;
-    transition: opacity .15s ease;
-}
-
-.table-cell:hover .table-cell-actions,
-.table-cell:focus-within .table-cell-actions { opacity: 1; }
-
-.table-cell-action {
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    min-width: 22px;
+    height: 18px;
+    padding: 0 5px;
     border: 1px solid transparent;
-    border-radius: 5px;
+    border-radius: 9px;
     background: var(--surface);
     color: var(--text-3);
-    line-height: 1;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 16px;
+    letter-spacing: .5px;
     cursor: pointer;
     transition: background .15s ease, color .15s ease, border-color .15s ease;
 }
 
-.table-cell-action:hover {
+.table-cell-more:hover {
     background: var(--nav-hover-bg);
     border-color: var(--line-2);
     color: var(--text);
 }
-
-.table-cell-action.is-danger:hover {
-    background: var(--danger-bg);
-    border-color: var(--danger-border);
-    color: var(--danger-text);
-}
-
-.table-cell-action svg { width: 12px !important; height: 12px !important; }
 
 /* ── 空表提示 ── */
 .table-node-table td.table-empty-cell {

@@ -6567,28 +6567,44 @@ function openTableCellMedia(url, mediaType){
     window.open(url, '_blank');
 }
 
-function tableCellActionButton(icon, title, handler, danger){
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'table-cell-action' + (danger ? ' is-danger' : '');
-    button.title = title;
-    const glyph = document.createElement('i');
-    glyph.dataset.lucide = icon;
-    button.appendChild(glyph);
+/* ── 格子里的交互 ────────────────────────────────────────────────
+   两种表格两套规则：
+   - **LLM 生成的多维表格不放任何图标**（表格是模型产出的，每格挂按钮太吵）：
+     有图/视频双击看大图，提示词格双击改文字。
+   - **用户自己新建的空白表**：空格子正中一个「+」（点击上传）；写了文字「+」就消失；
+     有图/视频时右上角一个「···」（点击替换），双击看大图。 */
+function stopCellEvent(button){
     button.onmousedown = event => event.stopPropagation();
-    button.onclick = event => { event.stopPropagation(); handler(); };
+    button.ondblclick = event => event.stopPropagation();
     return button;
 }
 
-/* 格子右上角的操作条：上传/替换 永远在，预览和删除按有没有内容出现。
-   常显（淡）而不是悬停才显 —— 删行按钮当初就是「悬停才显示」被人骂过。 */
-function appendTableCellActions(cell, options){
-    const bar = document.createElement('div');
-    bar.className = 'table-cell-actions';
-    if(options.onOpen) bar.appendChild(tableCellActionButton('expand', '预览', options.onOpen));
-    bar.appendChild(tableCellActionButton('image-plus', options.hasMedia ? '替换图片/视频' : '上传图片/视频', options.onUpload));
-    if(options.onDelete) bar.appendChild(tableCellActionButton('trash-2', options.deleteTitle || '删除', options.onDelete, true));
-    cell.appendChild(bar);
+function tableCellAddButton(cell, onPick){
+    const button = stopCellEvent(document.createElement('button'));
+    button.type = 'button';
+    button.className = 'table-cell-add';
+    button.title = '上传图片/视频';
+    const glyph = document.createElement('i');
+    glyph.dataset.lucide = 'plus';
+    button.appendChild(glyph);
+    button.onclick = event => { event.stopPropagation(); onPick(); };
+    cell.appendChild(button);
+}
+
+function tableCellMoreButton(cell, onReplace){
+    const button = stopCellEvent(document.createElement('button'));
+    button.type = 'button';
+    button.className = 'table-cell-more';
+    button.textContent = '···';
+    button.title = '点击替换图片/视频（双击查看）';
+    button.onclick = event => { event.stopPropagation(); onReplace(); };
+    cell.appendChild(button);
+}
+
+// 双击媒体格看大图
+function bindTableCellMediaView(cell, url, mediaType){
+    if(!url) return;
+    cell.ondblclick = event => { event.stopPropagation(); openTableCellMedia(url, mediaType); };
 }
 
 /* 数据列里的媒体格：直接存进 rows（走模型的 set_cell，模型认得媒体对象，不会被 JSON 化）。
@@ -7569,6 +7585,8 @@ function renderTableBody(node){
         const rowData = tableRowInputs(node, {nodeById});
         const picked = new Set(state.selectedRows);
         const editing = node._tableEdit || null;
+        /* LLM 产出的表格不放格子图标（见 tableCellAddButton 上面那段说明） */
+        const llmTable = Boolean(node.llmGeneratedOutput);
         const textColumns = state.columns.map((_, index) => state.rows.some(row =>
             Array.from(String(row[index] === null || row[index] === undefined ? '' : row[index])).length > TABLE_TEXT_COLUMN_CHARS));
 
@@ -7730,21 +7748,18 @@ function renderTableBody(node){
                 const entries = channelItems[index] || [];
                 fillTableMediaCell(cell, entries);
                 const first = entries.filter(entry => entry && entry.url)[0] || null;
-                const manual = tableManualInputItem(node, channel.id, rowIndex);
-                appendTableCellActions(cell, {
-                    hasMedia: Boolean(first),
-                    onOpen: first ? () => openTableCellMedia(first.url, first.kind) : null,
-                    onUpload: () => pickTableCellFile(picked => {
+                if(first){
+                    bindTableCellMediaView(cell, first.url, first.kind);
+                    if(!llmTable) tableCellMoreButton(cell, () => pickTableCellFile(picked => {
                         setTableManualInputItem(node, channel.id, rowIndex, picked);
                         repaintTable(node);
-                    }),
-                    // 只有手动放进去的那份才谈得上删除：删掉就回到连线推出来的那张
-                    onDelete: manual ? () => {
-                        setTableManualInputItem(node, channel.id, rowIndex, null);
+                    }));
+                } else if(!llmTable){
+                    tableCellAddButton(cell, () => pickTableCellFile(picked => {
+                        setTableManualInputItem(node, channel.id, rowIndex, picked);
                         repaintTable(node);
-                    } : null,
-                    deleteTitle: '移出参考栏'
-                });
+                    }));
+                }
                 tr.appendChild(cell);
             });
 
@@ -7759,21 +7774,19 @@ function renderTableBody(node){
                 if(media){
                     cell.classList.add('table-media-cell', 'is-media-cell');
                     fillTableMediaCell(cell, [{kind:media.mediaType, url:media.url, text:''}]);
+                    bindTableCellMediaView(cell, media.url, media.mediaType);
+                    if(!llmTable) tableCellMoreButton(cell, () => pickTableCellFile(picked => setTableCellMedia(node, rowIndex, index, picked)));
                 } else {
                     const view = document.createElement('div');
                     view.className = 'table-cell-view';
                     view.textContent = value;
                     if(!value) view.classList.add('is-empty');
                     cell.appendChild(view);
+                    // 提示词格：双击改文字（两种表格都一样）
+                    cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'cell', row:rowIndex, column:index}); };
+                    // 空白表里空着的格子正中给一个「+」；写了字就没了
+                    if(!llmTable && !value) tableCellAddButton(cell, () => pickTableCellFile(picked => setTableCellMedia(node, rowIndex, index, picked)));
                 }
-                appendTableCellActions(cell, {
-                    hasMedia: Boolean(media),
-                    onOpen: media ? () => openTableCellMedia(media.url, media.mediaType) : null,
-                    onUpload: () => pickTableCellFile(picked => setTableCellMedia(node, rowIndex, index, picked)),
-                    onDelete: media ? () => setTableCellMedia(node, rowIndex, index, null) : null
-                });
-                // 媒体格双击是「替换」，文字格还是编辑文字
-                if(!media) cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'cell', row:rowIndex, column:index}); };
                 if(editing && editing.kind === 'cell' && editing.row === rowIndex && editing.column === index){
                     cell.classList.add('is-editing');
                     const editor = document.createElement('textarea');
