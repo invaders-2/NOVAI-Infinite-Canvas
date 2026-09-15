@@ -3,6 +3,7 @@ const fs = require('fs');
 const canvas = fs.readFileSync('static/js/canvas.js', 'utf8');
 const css = fs.readFileSync('static/css/table-node.css', 'utf8');
 const canvasCss = fs.readFileSync('static/css/canvas.css', 'utf8');
+const themeCss = fs.readFileSync('static/css/theme.css', 'utf8');
 const html = fs.readFileSync('static/canvas.html', 'utf8');
 const model = fs.readFileSync('static/js/shared/table-model.js', 'utf8');
 let fail = 0;
@@ -81,6 +82,13 @@ ok(model.includes('function batchConcurrency(raw, fallback)'), '可按目标类�
 ok(canvas.includes('llmOutputModeButtonsHtml(node)'), 'LLM 输出形式用函数生成');
 ok(canvas.includes('class="llm-mode llm-output-mode"'), '输出形式复用节点里那套 .llm-mode 药丸样式');
 ok(canvas.includes("data-output-mode="), '药丸按钮带 data-output-mode');
+ok(/.llm-mode button.active \{ background:var\(--strong\); color:var\(--strong-text\);/.test(canvasCss),
+  '药丸选中态 = --strong 底 + --strong-text 字（浅色下黑底白字）');
+ok(canvasCss.includes('.select-lite { appearance:none; -webkit-appearance:none; padding-right:24px;'), '下拉三角改自绘并缩进');
+ok(canvasCss.includes('background-position:calc(100% - 18px) 50%, calc(100% - 13px) 50%'), '三角位置缩进 5px');
+ok(themeCss.includes('background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50% !important'), 'studio-dark 里补回自绘三角');
+ok(canvas.includes("return model.llmRunStageLabel(Boolean(node.running), stage);"), '生成按钮文案统一走 llmRunStageLabel');
+ok(!canvas.includes("'Run LLM'"), '不再出现英文 Run LLM');
 ok(!canvas.includes('select-lite llm-output-mode'), '不再用下拉框（select）');
 ok(canvas.includes('class="llm-run-row"'), '药丸与生成按钮同一行');
 ok(canvasCss.includes('.llm-run-row {'), '新行有样式（左药丸右按钮）');
@@ -101,7 +109,7 @@ console.log('[7] 「批量生成」按钮必须真的绑上（只渲染不绑定
   ok(body.includes('.table-batch-run-btn'), name + ' 绑定「批量生成」按钮的 onclick');
 });
 console.log('[8] 改了 canvas.js / table-model.js / canvas.css，就必须同步 canvas.html 的 ?v=');
-const VERSIONED_ASSETS = ['static/js/canvas.js', 'static/js/shared/table-model.js', 'static/css/canvas.css', 'static/css/table-node.css'];
+const VERSIONED_ASSETS = ['static/js/canvas.js', 'static/js/shared/table-model.js', 'static/css/canvas.css', 'static/css/table-node.css', 'static/css/theme.css'];
 try {
   const dirty = require('child_process')
     .execSync('git status --porcelain ' + VERSIONED_ASSETS.join(' ') + ' static/canvas.html', {encoding: 'utf8'})

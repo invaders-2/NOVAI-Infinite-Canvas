@@ -512,7 +512,8 @@ missingUrls.delete('/gone.png');
     eq(api.llmRunButtonLabel({running:true, llmOutputMode:'list', llmRunStage:'planning'}), '规划中', 'list 规划中');
     eq(api.llmRunButtonLabel({running:true, llmOutputMode:'list', llmRunStage:'repairing'}), '校验中', 'list 校验中');
     eq(api.llmRunButtonLabel({running:true, llmOutputMode:'list', llmRunStage:'generating'}), '生成中', 'list 生成中');
-    eq(api.llmRunButtonLabel({running:false, llmOutputMode:'text'}), 'Run LLM', 'text 模式按钮不变');
+    eq(api.llmRunButtonLabel({running:false, llmOutputMode:'text'}), '生成', 'text 模式按钮也是「生成」');
+    eq(api.llmRunButtonLabel({running:true, llmOutputMode:'text'}), '生成中', 'text 模式运行中');
 }
 
 // ═══ L. 视频节点的表格批量（分镜逐段生成） ═══

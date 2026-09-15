@@ -7846,12 +7846,13 @@ function llmOutputModeButtonsHtml(node){
     }).join('');
 }
 
+/* 按钮文案统一走模型的 llmRunStageLabel：文本模式也是「生成 / 生成中」，
+   和出表模式同一套说法（原来文本模式写死 "Run LLM"，旁边全是中文，很割裂）。 */
 function llmRunButtonLabel(node){
     const model = novaTableModel();
-    if(model && model.llmOutputMode(node.llmOutputMode) === 'list'){
-        return model.llmRunStageLabel(Boolean(node.running), node.llmRunStage);
-    }
-    return node.running ? tr('canvas.running') : 'Run LLM';
+    if(!model) return node.running ? tr('canvas.running') : '生成';
+    const stage = model.llmOutputMode(node.llmOutputMode) === 'list' ? node.llmRunStage : '';
+    return model.llmRunStageLabel(Boolean(node.running), stage);
 }
 
 /* PR()：物化 —— LLM 的 list 输出变成一个真正的表格节点。

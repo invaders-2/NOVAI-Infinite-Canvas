@@ -605,6 +605,17 @@ body.studio-theme-dark .shell .mode-tabs {
     color: var(--text-3) !important;
 }
 
+/* 上面那条 background 简写会把 canvas.css 给 .select-lite 画的自绘 chevron 清掉，这里补回来 */
+html.studio-theme-dark body .shell .select-lite,
+body.studio-theme-dark .shell .select-lite,
+html.studio-theme-dark body .shell .select-lite:hover,
+body.studio-theme-dark .shell .select-lite:hover {
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%) !important;
+    background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50% !important;
+    background-size: 5px 5px, 5px 5px !important;
+    background-repeat: no-repeat !important;
+}
+
 html.studio-theme-dark body .shell .gen-settings,
 html.studio-theme-dark body .shell .setting-row,
 html.studio-theme-dark body .shell .comfy-settings,
