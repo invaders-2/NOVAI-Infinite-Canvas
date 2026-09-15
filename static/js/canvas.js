@@ -7280,6 +7280,13 @@ function tableBatchSingleLabel(node){
     return generatorUpstreamTables(node.id).length ? '单张生成' : tr('canvas.apiGenerate');
 }
 
+/* 生成节点由多维表格驱动时，节点自己的 IMAGES 区块没有意义 ——
+   表格的素材不走这里，批量生成用的是每一行自己的参考图。
+   注意 .input-list 是 display:flex，hidden 属性会被作者样式覆盖，所以用内联样式。 */
+function tableDrivenHidden(node){
+    return generatorUpstreamTables(node.id).length ? ' style="display:none"' : '';
+}
+
 function repaintBatchPanel(gen){
     const host = nodesEl ? nodesEl.querySelector('.node[data-id="' + gen.id + '"]') : null;
     const panel = host ? host.querySelector('[data-table-batch-panel]') : null;
@@ -9856,8 +9863,8 @@ function renderGeneratorBody(node){
     normalizeApiNodeSizeChoice(node);
     wrap.innerHTML = `
         <div class="prompt-list mb-3"></div>
-        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">${tr('canvas.images')}</div>
-        <div class="input-list"></div>
+        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2"${tableDrivenHidden(node)}>${tr('canvas.images')}</div>
+        <div class="input-list"${tableDrivenHidden(node)}></div>
         <div class="gen-settings">
             <div class="gen-settings-row">
                 <select class="select-lite provider-select">${providerOptions(node.apiProvider)}</select>

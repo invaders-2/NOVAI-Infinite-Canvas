@@ -64,7 +64,7 @@ const api = new Function(
     ' addTableInputChannel, tableNodeSignature, connectNodes, tableDropPortFor,' +
     ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues,' +
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
-    ' tableBatchRunButtonHtml, tableBatchSingleLabel, paintTableBatchPanel};'
+    ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
@@ -230,6 +230,7 @@ nodes.push(genNode);
 eq(api.renderTableBatchPanel(genNode), null, '无上游表格 → 不渲染批量面板');
 eq(api.tableBatchRunButtonHtml(genNode), '', '无上游表格 → 主按钮位不加批量按钮');
 eq(api.tableBatchSingleLabel(genNode), 'API生成', '无上游表格 → 主按钮文案不变');
+eq(api.tableDrivenHidden(genNode), '', '无上游表格 → 不隐藏 IMAGES 区块');
 
 connections.push({id:'c_tbl_gen', from:node.id, to:genNode.id});
 eq(api.generatorUpstreamTables(genNode.id).map(t => t.id), [node.id], '认得上游表格');
@@ -238,6 +239,8 @@ const panel = api.renderTableBatchPanel(genNode);
 ok(panel && panel.classList.contains('table-batch-panel'), '上游有表格 → 渲染批量面板');
 eq(api.tableBatchSingleLabel(genNode), '单张生成', '有上游表格 → 主按钮改成「单张生成」');
 ok(api.tableBatchRunButtonHtml(genNode).indexOf('批量生成') > 0, '有上游表格 → 主按钮位加「批量生成」');
+// IMAGES 区块：表格驱动时隐藏（.input-list 是 display:flex，只能用内联样式压）
+eq(api.tableDrivenHidden(genNode), ' style="display:none"', '有上游表格 → 隐藏节点自己的 IMAGES 区块');
 
 eq(one(panel, 'table-batch-title').textContent, '生成输入', '面板标题按规范叫「生成输入」');
 const rowData2 = api.tableRowInputs(node);
