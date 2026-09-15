@@ -104,7 +104,7 @@ const api = new Function(
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableBatchSingleButtonHtml, tableDrivenHidden, paintTableBatchPanel,' +
     ' normalizeTableNodeHeight, tableNaturalSize,' +
-    ' setTableCellMedia, tableManualInputItem, setTableManualInputItem, addTableManualInputItem, renderTableCellText, normalizeContentHeightNode,' +
+    ' setTableCellMedia, tableManualInputItem, setTableManualInputItem, addTableManualInputItem, replaceTableManualInputItem, renderTableCellText, normalizeContentHeightNode,' +
     ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
     ' generatorNeedsPromptMessage, friendlyBatchError,' +
     ' llmOutputModeButtonsHtml, LLM_OUTPUT_MODE_BUTTONS, TABLE_DELETE_COLUMN_WIDTH};'
@@ -842,6 +842,15 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     api.repaintTable(tbl);
     eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/m.png','/static/m2.png'], '新增后这一行有两张');
     eq(api.tableRowInputs(tbl)[0].media.map(m => m.ordinal), [1,2], '第二张序号顺延');
+    api.repaintTable(tbl);
+    eq(byClass(inputCell(), 'table-cell-menu')[0]
+        ? byClass(inputCell(), 'table-cell-menu')[0].children.map(b => b.textContent) : [],
+        ['替换 @图片1','替换 @图片2','新增'], '多张时菜单按张替换');
+
+    // 单张替换只动那一张
+    api.replaceTableManualInputItem(tbl, 'input-1', 0, 1, {url:'/static/m3.png', mediaType:'image', name:'m3.png'});
+    api.repaintTable(tbl);
+    eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/m.png','/static/m3.png'], '只换了第二张，第一张没动');
     api.setTableManualInputItem(tbl, 'input-1', 0, {url:'/static/m.png', mediaType:'image', name:'m.png'});
     api.repaintTable(tbl);
 
@@ -911,6 +920,9 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
         const item = byClass(picker, 'table-cell-mention-item')[0];
         ok(Boolean(item), '选择条里有本行素材');
         eq(item.title, '@图片1', '选择条目带 token 说明');
+        let downPrevented = false;
+        item.onmousedown({preventDefault(){ downPrevented = true; }, stopPropagation(){}});
+        ok(downPrevented, '选择条目的 mousedown 必须 preventDefault（否则失焦先提交，插入落空）');
         editor.selectionStart = editor.value.length;
         editor.selectionEnd = editor.value.length;
         item.onclick({preventDefault(){}, stopPropagation(){}});

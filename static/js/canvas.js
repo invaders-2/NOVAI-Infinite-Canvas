@@ -6505,7 +6505,9 @@ function bindTableCellEditor(node, editor, row, column){
             const label = document.createElement('span');
             label.textContent = model.mentionTokenAt(item.kind, item.ordinal);
             button.appendChild(label);
-            button.onmousedown = event => event.stopPropagation();
+            // preventDefault 很关键：不拦的话点按钮会让 textarea 失焦 → onblur 先提交并销毁编辑器，
+            // 这次点击就落空了（表现就是「选完图不能用了」）。
+            button.onmousedown = event => { event.preventDefault(); event.stopPropagation(); };
             button.onclick = event => { event.preventDefault(); event.stopPropagation(); insertMention(item); };
             picker.appendChild(button);
         });
@@ -6728,6 +6730,22 @@ function tableManualInputList(node, channelId, row){
     const value = byRow ? byRow[String(row)] : null;
     if(!value) return [];
     return (Array.isArray(value) ? value : [value]).filter(item => item && item.url);
+}
+
+/* 只换这一格里的第 index 张（「替换」是单张替换，不是整格替换）。
+   没有手动列表（素材来自连线）时退回整格替换。 */
+function replaceTableManualInputItem(node, channelId, row, index, value){
+    if(!value || !value.url) return;
+    const list = tableManualInputList(node, channelId, row);
+    if(!(index >= 0 && index < list.length)) return setTableManualInputItem(node, channelId, row, value);
+    const next = list.slice();
+    next[index] = {url:value.url, mediaType:value.mediaType || 'image', name:value.name || ''};
+    setTableManualInputItem(node, channelId, row, null);
+    const store = tableManualInputStore(node, true);
+    const key = String(channelId);
+    const byRow = store[key] && typeof store[key] === 'object' ? store[key] : (store[key] = {});
+    byRow[String(row)] = next;
+    scheduleSave();
 }
 
 function addTableManualInputItem(node, channelId, row, value){
@@ -7954,16 +7972,31 @@ function renderTableBody(node){
                 const first = entries.filter(entry => entry && entry.url)[0] || null;
                 if(first){
                     bindTableCellMediaView(cell, first.url, first.kind);
-                    if(!llmTable) tableCellMoreButton(cell, [
-                        {label:'替换', onClick: () => pickTableCellFile(picked => {
-                            setTableManualInputItem(node, channel.id, rowIndex, picked);
-                            repaintTable(node);
-                        })},
-                        {label:'新增', onClick: () => pickTableCellFile(picked => {
+                    if(!llmTable){
+                        const manualList = tableManualInputList(node, channel.id, rowIndex);
+                        const showMedia = entries.filter(entry => entry && entry.url);
+                        const actions = [];
+                        if(manualList.length > 1){
+                            // 格子有多张：一张一张替换，不是把整格换掉
+                            showMedia.forEach((entry, itemIndex) => actions.push({
+                                label: '替换 ' + model.mentionTokenAt(entry.kind, entry.ordinal),
+                                onClick: () => pickTableCellFile(picked => {
+                                    replaceTableManualInputItem(node, channel.id, rowIndex, itemIndex, picked);
+                                    repaintTable(node);
+                                })
+                            }));
+                        } else {
+                            actions.push({label:'替换', onClick: () => pickTableCellFile(picked => {
+                                setTableManualInputItem(node, channel.id, rowIndex, picked);
+                                repaintTable(node);
+                            })});
+                        }
+                        actions.push({label:'新增', onClick: () => pickTableCellFile(picked => {
                             addTableManualInputItem(node, channel.id, rowIndex, picked);
                             repaintTable(node);
-                        })},
-                    ]);
+                        })});
+                        tableCellMoreButton(cell, actions);
+                    }
                 } else if(!llmTable){
                     tableCellAddButton(cell, () => pickTableCellFile(picked => {
                         setTableManualInputItem(node, channel.id, rowIndex, picked);
