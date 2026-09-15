@@ -7345,11 +7345,23 @@ function paintTableBatchPanel(panel, gen){
     panel.appendChild(head);
 
     // 状态行：批量 N 行 · 首批 X ｜ 独立运行 · 已选 A/B ｜ 图片 N
+    /* 行列表按模式决定显示范围：
+       批量模式只看「起始行」之后的（前面的行不会执行，显示出来只会干扰）；
+       独立运行要靠列表勾选，所以全部显示 —— 藏掉前面的行就没法选了。 */
+    const visibleRows = rows
+        .map((row, rowIndex) => ({row, rowIndex}))
+        .filter(item => selection.manual || item.row.rowNumber >= startRow);
+
     const status = document.createElement('div');
     status.className = 'table-batch-status';
     const batchText = document.createElement('span');
-    batchText.textContent = '批量 ' + rows.length + ' 行 · 首批 ' + Math.min(runnable.length, concurrency);
+    batchText.textContent = '批量 ' + visibleRows.length + ' 行 · 首批 ' + Math.min(runnable.length, concurrency);
     status.appendChild(batchText);
+    if(!selection.manual && visibleRows.length < rows.length){
+        const startHint = document.createElement('span');
+        startHint.textContent = '已从第 ' + startRow + ' 行起';
+        status.appendChild(startHint);
+    }
     if(selection.manual){
         const manualText = document.createElement('span');
         manualText.textContent = '独立运行 · 已选 ' + selection.selectedRows.length + '/' + rows.length;
@@ -7379,7 +7391,9 @@ function paintTableBatchPanel(panel, gen){
     const rowList = document.createElement('div');
     rowList.className = 'table-batch-list';
     const selectedSet = new Set(selection.selectedRows.map(Number));
-    rows.forEach((row, rowIndex) => {
+    visibleRows.forEach(item => {
+        const row = item.row;
+        const rowIndex = item.rowIndex;
         const article = document.createElement('article');
         article.className = 'table-batch-row';
         if(selectedSet.has(rowIndex)) article.classList.add('is-selected');

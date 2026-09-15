@@ -314,6 +314,34 @@ const panel3 = api.renderTableBatchPanel(genNode);
 ok(one(panel3, 'table-batch-status').textContent.indexOf('独立运行 · 已选 1/1') >= 0, '勾选后显示已选 1/1');
 api.toggleTableRow(node, 0, false);
 
+// 起始行：改成 2 之后，行列表只显示第 2 行起
+api.addTableRow(node);
+api.addTableRow(node);
+eq(node.table.rows.length, 3, '补到 3 行');
+node.tableBatchManualSelection = false;
+node.tableBatchStartRow = 2;
+const panelStart = api.renderTableBatchPanel(genNode);
+eq(byClass(panelStart, 'table-batch-row-num').map(b => b.textContent), ['2', '3'], '起始行 2 → 隐藏第 1 行');
+const startStatus = one(panelStart, 'table-batch-status').textContent;
+ok(startStatus.indexOf('批量 2 行') >= 0, '状态行按可见行数：' + startStatus);
+ok(startStatus.indexOf('已从第 2 行起') >= 0, '状态行提示从第几行起：' + startStatus);
+// 独立运行要靠列表勾选，必须能看到全部行
+node.tableBatchManualSelection = true;
+const panelManual = api.renderTableBatchPanel(genNode);
+eq(byClass(panelManual, 'table-batch-row-num').map(b => b.textContent), ['1', '2', '3'], '独立运行 → 显示全部行供勾选');
+ok(one(panelManual, 'table-batch-status').textContent.indexOf('已从第') < 0, '独立运行不显示起始行提示');
+// 起始行回到 1 → 全部显示
+node.tableBatchManualSelection = false;
+node.tableBatchStartRow = 1;
+eq(byClass(api.renderTableBatchPanel(genNode), 'table-batch-row-num').map(b => b.textContent), ['1','2','3'], '起始行 1 → 全部显示');
+// 勾选仍按原始行下标，不会因为隐藏而错位
+node.tableBatchStartRow = 2;
+const panelPick = api.renderTableBatchPanel(genNode);
+byClass(panelPick, 'table-batch-row')[0].onclick({ stopPropagation(){} });
+eq(node.table.selectedRows, [1], '隐藏第 1 行后，点列表第一项勾的是第 2 行（下标 1）');
+api.toggleTableRow(node, 1, false);
+node.tableBatchStartRow = 1;
+
 // 行参考图与素材校验
 const refs = api.tableRowRefs(rowData2[0]);
 eq(refs.length, rowData2[0].media.length, '参考图数量与行媒体一致');
