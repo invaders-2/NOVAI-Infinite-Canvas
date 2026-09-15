@@ -6893,6 +6893,16 @@ function repaintTable(node){
     if(typeof node._tablePaint === 'function') node._tablePaint();
 }
 
+/* 勾选状态是表格和生成面板共用的：
+   在表格里取消勾选，生成那边的候选行也要立刻跟着变，
+   所以两个地方都要重绘 —— 只重绘表格会让面板显示过期的勾选。 */
+function repaintTableSelectionViews(tableNode){
+    repaintTable(tableNode);
+    (nodes || []).filter(item => item.type === 'generator').forEach(gen => {
+        if(generatorUpstreamTables(gen.id).some(item => item.id === tableNode.id)) repaintBatchPanel(gen);
+    });
+}
+
 function addTableRow(node){
     const state = ensureTableState(node);
     if(!state || !state.columns.length) return;
@@ -6924,7 +6934,7 @@ function toggleTableRow(node, row, on){
     if(on) picked.add(row); else picked.delete(row);
     state.selectedRows = Array.from(picked).sort((a, b) => a - b);
     scheduleSave();
-    repaintTable(node);
+    repaintTableSelectionViews(node);
 }
 
 function toggleAllTableRows(node, on){
@@ -6932,7 +6942,7 @@ function toggleAllTableRows(node, on){
     if(!state) return;
     state.selectedRows = on ? state.rows.map((row, index) => index) : [];
     scheduleSave();
-    repaintTable(node);
+    repaintTableSelectionViews(node);
 }
 
 // 编辑态挂在 node._tableEdit 上：DOM 原地重绘后自动恢复到编辑中的单元格。
@@ -7408,20 +7418,6 @@ function paintTableBatchPanel(panel, gen){
         if(selectedSet.has(rowIndex)) article.classList.add('is-selected');
         article.title = '点击切换这一行的勾选';
 
-        // 勾选＝执行这一行，取消＝跳过（两种模式都适用）
-        const pick = document.createElement('input');
-        pick.type = 'checkbox';
-        pick.className = 'table-checkbox';
-        pick.checked = selectedSet.has(rowIndex);
-        pick.title = '勾选＝执行这一行，取消＝跳过';
-        pick.onclick = event => event.stopPropagation();
-        pick.onchange = event => {
-            event.stopPropagation();
-            toggleTableRow(table, rowIndex, pick.checked);
-            paintTableBatchPanel(panel, gen);
-        };
-        article.appendChild(pick);
-
         const badge = document.createElement('b');
         badge.className = 'table-batch-row-num';
         badge.textContent = String(row.rowNumber);
@@ -7447,6 +7443,20 @@ function paintTableBatchPanel(panel, gen){
         const preview = document.createElement('p');
         preview.textContent = String(row.prompt || '').trim() || '仅媒体输入';
         article.appendChild(preview);
+
+        // 勾选＝执行这一行，取消＝跳过（两种模式都适用）。放在最右，和表格里的勾选框一致
+        const pick = document.createElement('input');
+        pick.type = 'checkbox';
+        pick.className = 'table-checkbox';
+        pick.checked = selectedSet.has(rowIndex);
+        pick.title = '勾选＝执行这一行，取消＝跳过';
+        pick.onclick = event => event.stopPropagation();
+        pick.onchange = event => {
+            event.stopPropagation();
+            toggleTableRow(table, rowIndex, pick.checked);
+            paintTableBatchPanel(panel, gen);
+        };
+        article.appendChild(pick);
 
         article.onclick = event => {
             event.stopPropagation();

@@ -54,10 +54,21 @@ const nodes = [];
 const added = [];
 const missingUrls = new Set();
 let uidSeq = 0;
+// 极简 nodesEl：让 repaintBatchPanel 能找到生成节点的面板，用于验证跨节点重绘
+const panelHosts = new Map();
+const nodesEl = {
+    querySelector(selector){
+        const matched = /\.node\[data-id="([^"]+)"\]/.exec(selector);
+        if(!matched) return null;
+        const panel = panelHosts.get(matched[1]);
+        if(!panel) return null;
+        return { querySelector(inner){ return inner === '[data-table-batch-panel]' ? panel : null; } };
+    }
+};
 const api = new Function(
     'document', 'requestAnimationFrame', 'defaultPoint', 'addNode', 'scheduleSave', 'uid',
     'connections', 'nodes', 'pushUndo', 'mediaKindForNode', 'isMissingAssetUrl',
-    'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs', 'tr',
+    'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs', 'tr', 'nodesEl',
     block + '\nreturn {renderTableBody, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
@@ -70,7 +81,8 @@ const api = new Function(
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
     connections, nodes, () => {}, n => (n && n.mediaKind) || 'image', url => missingUrls.has(url),
     (url) => '<img src="' + url + '">', (url) => '<video src="' + url + '"></video>', () => 1700000000000,
-    key => ({'canvas.apiGenerate':'API生成', 'canvas.generating':'生成中'})[key] || key
+    key => ({'canvas.apiGenerate':'API生成', 'canvas.generating':'生成中'})[key] || key,
+    nodesEl
 );
 
 const keydown = key => ({ key, shiftKey:false, preventDefault(){}, stopPropagation(){} });
@@ -256,7 +268,8 @@ const rowArticles = byClass(panel, 'table-batch-row');
 eq(rowArticles.length, rowData2.length, '行列表条数 = 表格行数');
 eq(one(rowArticles[0], 'table-batch-row-num').textContent, '1', '行号徽标');
 eq(one(rowArticles[0], 'table-batch-row-media').children.length, rowData2[0].media.length, '缩略图数 = 该行参考图数');
-eq(rowArticles[0].children[3].textContent, rowData2[0].prompt, '提示词预览 = 该行真正会发出去的提示词');
+eq(rowArticles[0].children[2].textContent, rowData2[0].prompt, '提示词预览 = 该行真正会发出去的提示词');
+eq(rowArticles[0].children[3].type, 'checkbox', '勾选框在最右（与表格里一致）');
 // 默认全选：每行前面都有勾选框且默认勾上
 api.toggleAllTableRows(node, true);
 const rowArticles2 = byClass(api.renderTableBatchPanel(genNode), 'table-batch-row');
@@ -289,6 +302,17 @@ const danglingRow = api.tableRowInputs(node)[0];
 eq(danglingRow.danglingMentions.map(d => d.token), ['@图片4'], '引用本行拿不到的素材 → 报悬空');
 eq(danglingRow.danglingMentions[0].reason, 'missing', '悬空原因');
 node.table.rows[0][0] = '一只狗';
+
+// 跨节点同步：在表格里取消勾选，生成面板的候选行要跟着变（只重绘表格会显示过期勾选）
+api.toggleAllTableRows(node, true);
+const panelSync = api.renderTableBatchPanel(genNode);
+panelHosts.set('gen1', panelSync);
+eq(one(byClass(panelSync, 'table-batch-row')[0], 'table-checkbox').checked, true, '同步前：面板行已勾选');
+api.toggleTableRow(node, 0, false);
+eq(node.table.selectedRows.indexOf(0), -1, '表格里取消了下标 0');
+eq(one(byClass(panelSync, 'table-batch-row')[0], 'table-checkbox').checked, false, '生成面板同步取消候选');
+api.toggleTableRow(node, 0, true);
+eq(one(byClass(panelSync, 'table-batch-row')[0], 'table-checkbox').checked, true, '再勾上 → 面板同步恢复');
 
 // 点整行 = 切换该行勾选
 node.table.selectedRows = [];

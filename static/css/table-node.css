@@ -470,7 +470,7 @@ input.table-batch-input { width: 48px; }
 
 .table-batch-row {
     display: grid;
-    grid-template-columns: 16px 20px minmax(58px, 28%) minmax(0, 1fr);
+    grid-template-columns: 20px minmax(58px, 28%) minmax(0, 1fr) 16px;
     align-items: center;
     gap: 7px;
     min-height: 54px;
