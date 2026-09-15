@@ -6605,10 +6605,10 @@ function renderNode(node){
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
     if(node.type === 'table') body.appendChild(renderTableBody(node));
     if(node.type === 'generator') {
-        body.appendChild(renderGeneratorBody(node));
-        // 上游有表格时挂批量面板（DX OS §10：面板在生成节点上）
+        // 上游接了多维表格时，面板排在节点最上面（DX OS §10：生成输入行列表）
         const tableBatchPanel = renderTableBatchPanel(node);
         if(tableBatchPanel) body.appendChild(tableBatchPanel);
+        body.appendChild(renderGeneratorBody(node));
     }
     if(node.type === 'midjourney') body.appendChild(renderMidjourneyBody(node));
     if(node.type === 'minimax') body.appendChild(renderMiniMaxBody(node));
@@ -7267,6 +7267,19 @@ function notifyCanvas(text){
     else console.log('[table] ' + text);
 }
 
+/* 生成节点接了多维表格时，主按钮位拆成两个：
+   「批量生成」走表格逐行，「单张生成」沿用原来的单次生成逻辑（不看表格）。
+   没接表格就一个按钮都不变。 */
+function tableBatchRunButtonHtml(node){
+    if(!generatorUpstreamTables(node.id).length) return '';
+    return '<button class="table-batch-run-btn" type="button" title="按多维表格逐行批量生成">'
+        + '<i data-lucide="table" class="w-4 h-4"></i>批量生成</button>';
+}
+
+function tableBatchSingleLabel(node){
+    return generatorUpstreamTables(node.id).length ? '单张生成' : tr('canvas.apiGenerate');
+}
+
 function repaintBatchPanel(gen){
     const host = nodesEl ? nodesEl.querySelector('.node[data-id="' + gen.id + '"]') : null;
     const panel = host ? host.querySelector('[data-table-batch-panel]') : null;
@@ -7311,20 +7324,95 @@ function paintTableBatchPanel(panel, gen){
 
     panel.textContent = '';
 
+    // 头：生成输入 + 源表格名（DX OS §10）
     const head = document.createElement('div');
     head.className = 'table-batch-head';
     const title = document.createElement('span');
     title.className = 'table-batch-title';
-    title.textContent = '多维表格批量';
+    title.textContent = '生成输入';
     head.appendChild(title);
-    const meta = document.createElement('span');
-    meta.className = 'table-batch-meta';
-    meta.textContent = rows.length + ' 行 · 可执行 ' + runnable.length
-        + (completed ? ' · 已完成 ' + completed : '')
-        + (failed ? ' · 失败 ' + failed : '')
-        + (inflight ? ' · 后台 ' + inflight : '');
-    head.appendChild(meta);
+    const source = document.createElement('span');
+    source.className = 'table-batch-source';
+    source.textContent = table.title || '多维表格';
+    head.appendChild(source);
     panel.appendChild(head);
+
+    // 状态行：批量 N 行 · 首批 X ｜ 独立运行 · 已选 A/B ｜ 图片 N
+    const status = document.createElement('div');
+    status.className = 'table-batch-status';
+    const batchText = document.createElement('span');
+    batchText.textContent = '批量 ' + rows.length + ' 行 · 首批 ' + Math.min(runnable.length, concurrency);
+    status.appendChild(batchText);
+    if(selection.manual){
+        const manualText = document.createElement('span');
+        manualText.textContent = '独立运行 · 已选 ' + selection.selectedRows.length + '/' + rows.length;
+        status.appendChild(manualText);
+    }
+    const mediaTotal = rows.reduce((total, row) => total + (row.media || []).length, 0);
+    if(mediaTotal){
+        const mediaText = document.createElement('span');
+        mediaText.textContent = '图片 ' + mediaTotal;
+        status.appendChild(mediaText);
+    }
+    const progressText = [
+        completed ? '已完成 ' + completed : '',
+        failed ? '失败 ' + failed : '',
+        inflight ? '后台 ' + inflight : ''
+    ].filter(Boolean).join(' · ');
+    if(progressText){
+        const progress = document.createElement('span');
+        progress.className = 'table-batch-status-progress';
+        progress.textContent = progressText;
+        status.appendChild(progress);
+    }
+    panel.appendChild(status);
+
+    /* 行列表：行号 + 该行参考图 + 该行真正会发出去的提示词。
+       点整行＝切换这一行在表格里的勾选（与「独立运行」配合）。 */
+    const rowList = document.createElement('div');
+    rowList.className = 'table-batch-list';
+    const selectedSet = new Set(selection.selectedRows.map(Number));
+    rows.forEach((row, rowIndex) => {
+        const article = document.createElement('article');
+        article.className = 'table-batch-row';
+        if(selectedSet.has(rowIndex)) article.classList.add('is-selected');
+        article.title = '点击切换这一行的勾选';
+
+        const badge = document.createElement('b');
+        badge.className = 'table-batch-row-num';
+        badge.textContent = String(row.rowNumber);
+        article.appendChild(badge);
+
+        const thumbs = document.createElement('div');
+        thumbs.className = 'table-batch-row-media';
+        const mediaList = (row.media || []).filter(entry => entry && entry.kind !== 'text');
+        if(mediaList.length){
+            mediaList.forEach(entry => {
+                const box = document.createElement('span');
+                box.appendChild(tableMediaThumb(entry));
+                thumbs.appendChild(box);
+            });
+        } else {
+            const empty = document.createElement('span');
+            empty.className = 'is-empty';
+            empty.textContent = '无素材';
+            thumbs.appendChild(empty);
+        }
+        article.appendChild(thumbs);
+
+        const preview = document.createElement('p');
+        preview.textContent = String(row.prompt || '').trim() || '仅媒体输入';
+        article.appendChild(preview);
+
+        article.onclick = event => {
+            event.stopPropagation();
+            const nowPicked = !selectedSet.has(rowIndex);
+            toggleTableRow(table, rowIndex, nowPicked);
+            paintTableBatchPanel(panel, gen);
+        };
+        rowList.appendChild(article);
+    });
+    panel.appendChild(rowList);
 
     const controls = document.createElement('div');
     controls.className = 'table-batch-controls';
@@ -7410,19 +7498,12 @@ function paintTableBatchPanel(panel, gen){
 
     const actions = document.createElement('div');
     actions.className = 'table-batch-actions';
-    const runButton = document.createElement('button');
-    runButton.type = 'button';
-    runButton.className = 'table-batch-run';
-    runButton.textContent = running ? '批量生成中…' : '批量生成';
-    runButton.disabled = running || !runnable.length;
-    runButton.onclick = () => { runTableBatch(gen.id, {}); };
-    actions.appendChild(runButton);
-
+    // 「批量生成」已上移到生成节点的主按钮位，这里只留恢复
     const resumeButton = document.createElement('button');
     resumeButton.type = 'button';
     resumeButton.className = 'table-node-action';
     resumeButton.textContent = '恢复上次';
-    resumeButton.disabled = running || !journal.runId;
+    resumeButton.disabled = running || !runnable.length || !journal.runId;
     resumeButton.onclick = () => { runTableBatch(gen.id, {resumeRunId: journal.runId}); };
     actions.appendChild(resumeButton);
     panel.appendChild(actions);
@@ -9840,7 +9921,7 @@ function renderGeneratorBody(node){
             </div>
         </div>
         <div class="gen-run-row">
-            <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.apiGenerate')}</button>
+            ${tableBatchRunButtonHtml(node)}<button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tableBatchSingleLabel(node)}</button>
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -10075,6 +10156,8 @@ function renderGeneratorBody(node){
     const list = wrap.querySelector('.input-list');
     renderImageInputList(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
+    const tableBatchRunBtn = wrap.querySelector('.table-batch-run-btn');
+    if(tableBatchRunBtn) tableBatchRunBtn.onclick = e => { e.stopPropagation(); runTableBatch(node.id, {}); };
     wrap.querySelector('.gen-btn').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     return wrap;

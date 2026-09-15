@@ -364,12 +364,6 @@
     font-weight: 600;
 }
 
-.table-batch-meta {
-    color: var(--text-3);
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
-}
-
 .table-batch-controls {
     display: flex;
     flex-wrap: wrap;
@@ -413,22 +407,133 @@ input.table-batch-input { width: 48px; }
     gap: 6px;
 }
 
-.table-batch-run {
-    height: 24px;
-    padding: 0 10px;
-    border: 1px solid var(--accent);
-    border-radius: 6px;
+/* 主按钮位：接了多维表格时拆成「批量生成」+「单张生成」两个并排（列方向堆叠） */
+.table-batch-run-btn {
+    flex: 0 0 40px;
+    width: 100%;
+    height: 40px;
+    margin-top: 0;
+    border: none;
+    border-radius: var(--radius-lg);
     background: var(--accent);
-    color: var(--surface);
+    color: var(--text-on-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     font-family: inherit;
     font-size: 11px;
-    line-height: 1;
+    font-weight: 800;
     cursor: pointer;
     transition: opacity .15s ease;
 }
 
-.table-batch-run:hover { opacity: .88; }
-.table-batch-run:disabled { opacity: .45; cursor: default; }
+.table-batch-run-btn:hover { opacity: .88; }
+.table-batch-run-btn:disabled { background: var(--surface-2); color: var(--text-3); cursor: not-allowed; }
+
+/* 单张生成＝次级按钮。table-node.css 在 canvas.css 之后加载，同权重下这条生效 */
+.gen-btn-secondary {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+
+.gen-btn-secondary:hover { background: var(--nav-hover-bg); }
+
+/* ── 生成输入的行列表（DX OS §10：行号 / 参考图 / 提示词）── */
+.table-batch-source { color: var(--text-3); font-size: 10px; }
+
+.table-batch-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: var(--text-3);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.table-batch-status-progress { color: var(--text-2); }
+
+.table-batch-list {
+    display: grid;
+    gap: 6px;
+    max-height: 300px;
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.table-batch-row {
+    display: grid;
+    grid-template-columns: 20px minmax(58px, 30%) minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    min-height: 54px;
+    padding: 6px;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-2);
+    cursor: pointer;
+    transition: border-color .14s ease, background .14s ease;
+}
+
+.table-batch-row:hover { background: var(--nav-hover-bg); }
+.table-batch-row.is-selected { border-color: var(--accent); background: var(--nav-hover-bg); }
+
+.table-batch-row-num {
+    display: grid;
+    width: 18px;
+    height: 18px;
+    place-items: center;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--surface);
+    font-size: 8px;
+    line-height: 1;
+}
+
+.table-batch-row-media {
+    display: flex;
+    gap: 3px;
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.table-batch-row-media > span {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--surface);
+}
+
+.table-batch-row-media > span.is-empty {
+    width: auto;
+    flex: 1 1 auto;
+    color: var(--text-3);
+    font-size: 9px;
+}
+
+.table-batch-row-media img,
+.table-batch-row-media video { width: 100%; height: 100%; object-fit: cover; }
+
+.table-batch-row > p {
+    min-width: 0;
+    max-height: 48px;
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-2);
+    font-size: 9px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
 
 .table-batch-note {
     color: var(--text-3);

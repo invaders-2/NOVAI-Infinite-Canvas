@@ -57,18 +57,20 @@ let uidSeq = 0;
 const api = new Function(
     'document', 'requestAnimationFrame', 'defaultPoint', 'addNode', 'scheduleSave', 'uid',
     'connections', 'nodes', 'pushUndo', 'mediaKindForNode', 'isMissingAssetUrl',
-    'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs',
+    'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs', 'tr',
     block + '\nreturn {renderTableBody, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
     ' addTableInputChannel, tableNodeSignature, connectNodes, tableDropPortFor,' +
     ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues,' +
-    ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems};'
+    ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
+    ' tableBatchRunButtonHtml, tableBatchSingleLabel, paintTableBatchPanel};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
     connections, nodes, () => {}, n => (n && n.mediaKind) || 'image', url => missingUrls.has(url),
-    (url) => '<img src="' + url + '">', (url) => '<video src="' + url + '"></video>', () => 1700000000000
+    (url) => '<img src="' + url + '">', (url) => '<video src="' + url + '"></video>', () => 1700000000000,
+    key => ({'canvas.apiGenerate':'API生成', 'canvas.generating':'生成中'})[key] || key
 );
 
 const keydown = key => ({ key, shiftKey:false, preventDefault(){}, stopPropagation(){} });
@@ -226,17 +228,56 @@ eq(model.normalizeChannels('bad'), [], '非法通道输入 → 空');
 const genNode = {id:'gen1', type:'generator'};
 nodes.push(genNode);
 eq(api.renderTableBatchPanel(genNode), null, '无上游表格 → 不渲染批量面板');
+eq(api.tableBatchRunButtonHtml(genNode), '', '无上游表格 → 主按钮位不加批量按钮');
+eq(api.tableBatchSingleLabel(genNode), 'API生成', '无上游表格 → 主按钮文案不变');
 
 connections.push({id:'c_tbl_gen', from:node.id, to:genNode.id});
 eq(api.generatorUpstreamTables(genNode.id).map(t => t.id), [node.id], '认得上游表格');
 
 const panel = api.renderTableBatchPanel(genNode);
 ok(panel && panel.classList.contains('table-batch-panel'), '上游有表格 → 渲染批量面板');
-eq(one(panel, 'table-batch-title').textContent, '多维表格批量', '面板标题');
+eq(api.tableBatchSingleLabel(genNode), '单张生成', '有上游表格 → 主按钮改成「单张生成」');
+ok(api.tableBatchRunButtonHtml(genNode).indexOf('批量生成') > 0, '有上游表格 → 主按钮位加「批量生成」');
+
+eq(one(panel, 'table-batch-title').textContent, '生成输入', '面板标题按规范叫「生成输入」');
 const rowData2 = api.tableRowInputs(node);
-const metaText = one(panel, 'table-batch-meta').textContent;
-ok(metaText.indexOf(rowData2.length + ' 行') === 0, '面板显示行数：' + metaText);
-ok(metaText.indexOf('可执行 1') >= 0, '面板显示可执行行数：' + metaText);
+const statusText = one(panel, 'table-batch-status').textContent;
+ok(statusText.indexOf('批量 ' + rowData2.length + ' 行') >= 0, '状态行显示总行数：' + statusText);
+ok(statusText.indexOf('首批 ') >= 0, '状态行显示首批并发数：' + statusText);
+ok(statusText.indexOf('图片 ') >= 0, '状态行显示素材张数：' + statusText);
+
+// 行列表：行号 + 参考图 + 该行真正会发出去的提示词
+const rowArticles = byClass(panel, 'table-batch-row');
+eq(rowArticles.length, rowData2.length, '行列表条数 = 表格行数');
+eq(one(rowArticles[0], 'table-batch-row-num').textContent, '1', '行号徽标');
+eq(one(rowArticles[0], 'table-batch-row-media').children.length, rowData2[0].media.length, '缩略图数 = 该行参考图数');
+eq(rowArticles[0].children[2].textContent, rowData2[0].prompt, '提示词预览 = 该行真正会发出去的提示词');
+
+/* @图片N 重编号验证。
+   此刻全局清单：ch0=[img1,img2,img3,img5]（序号 1-4，逐行模式）、ch1=[img4]（序号 5，共享模式）。
+   第 0 行实际拿到 [img1, img4] → 行内序号 1 和 2。 */
+node.table.rows[0][0] = '把 @图片5 换成新的';
+const rewritten = api.tableRowInputs(node)[0];
+eq(rewritten.media.map(e => e.nodeId), ['img1', 'img4'], '第 0 行实际参考图');
+ok(rewritten.prompt.indexOf('@图片2') > 0, '全局序号 @图片5 → 行内 @图片2：' + rewritten.prompt);
+ok(rewritten.prompt.indexOf('@图片5') < 0, '不再残留全局序号');
+eq(rewritten.danglingMentions, [], '没有悬空引用');
+// @图片4 是 img5，本行逐行模式不含它 —— 必须被报成悬空，不能静默发出去
+node.table.rows[0][0] = '把 @图片4 换掉';
+const danglingRow = api.tableRowInputs(node)[0];
+eq(danglingRow.danglingMentions.map(d => d.token), ['@图片4'], '引用本行拿不到的素材 → 报悬空');
+eq(danglingRow.danglingMentions[0].reason, 'missing', '悬空原因');
+node.table.rows[0][0] = '一只狗';
+
+// 点整行 = 切换该行勾选
+const articlesNow = byClass(api.renderTableBatchPanel(genNode), 'table-batch-row');
+eq(node.table.selectedRows, [], '点之前未勾选');
+articlesNow[0].onclick({ stopPropagation(){} });
+eq(node.table.selectedRows, [0], '点整行 → 勾选该行');
+const panelPicked = api.renderTableBatchPanel(genNode);
+eq(byClass(panelPicked, 'table-batch-row')[0].classList.contains('is-selected'), true, '选中行带 is-selected');
+byClass(panelPicked, 'table-batch-row')[0].onclick({ stopPropagation(){} });
+eq(node.table.selectedRows, [], '再点一下 → 取消勾选');
 
 const startInput = one(panel, 'table-batch-input');
 eq(startInput.value, '1', '起始行默认 1');
@@ -247,9 +288,9 @@ eq(selects[0].value, String(model.DEFAULT_BATCH_CONCURRENCY), '并发默认 3');
 eq(selects[1].value, 'continue', '出错策略默认「继续跑完」');
 ok(Boolean(one(panel, 'table-checkbox')), '有独立运行勾选框');
 
-const runButton = one(panel, 'table-batch-run');
-eq(runButton.textContent, '批量生成', '按钮文案');
-eq(runButton.disabled, false, '有可执行行 → 按钮可用');
+// 「批量生成」已上移到主按钮位，面板里只剩「恢复上次」
+eq(byClass(panel, 'table-node-action').length, 1, '面板操作区只剩一个按钮');
+eq(byClass(panel, 'table-node-action')[0].textContent, '恢复上次', '剩下的是「恢复上次」');
 eq(byClass(panel, 'table-node-action')[0].disabled, true, '没有 journal 时「恢复上次」禁用');
 
 // 控件改动落到表格节点
@@ -262,20 +303,13 @@ eq(node.tableBatchFailurePolicy, 'stop', '出错策略写入表格节点');
 one(panel, 'table-checkbox').checked = true; one(panel, 'table-checkbox').onchange();
 eq(node.tableBatchManualSelection, true, '独立运行开关写入表格节点');
 
-// 手动模式下没勾选行 → 不可执行
+// 独立运行模式下状态行显示已选数量
 const panel2 = api.renderTableBatchPanel(genNode);
-ok(one(panel2, 'table-batch-meta').textContent.indexOf('可执行 0') >= 0, '手动模式未勾选 → 可执行 0');
-eq(one(panel2, 'table-batch-run').disabled, true, '→ 按钮禁用');
+ok(one(panel2, 'table-batch-status').textContent.indexOf('独立运行 · 已选 0/1') >= 0, '独立运行显示已选 0/1：' + one(panel2, 'table-batch-status').textContent);
 api.toggleTableRow(node, 0, true);
 const panel3 = api.renderTableBatchPanel(genNode);
-ok(one(panel3, 'table-batch-meta').textContent.indexOf('可执行 1') >= 0, '勾选该行后恢复可执行 1');
-eq(one(panel3, 'table-batch-run').disabled, false, '按钮恢复可用');
-
-// 运行中的按钮文案
-node.tableBatchRunning = true;
-eq(one(api.renderTableBatchPanel(genNode), 'table-batch-run').textContent, '批量生成中…', '运行中按钮文案');
-eq(one(api.renderTableBatchPanel(genNode), 'table-batch-run').disabled, true, '运行中按钮禁用');
-node.tableBatchRunning = false;
+ok(one(panel3, 'table-batch-status').textContent.indexOf('独立运行 · 已选 1/1') >= 0, '勾选后显示已选 1/1');
+api.toggleTableRow(node, 0, false);
 
 // 行参考图与素材校验
 const refs = api.tableRowRefs(rowData2[0]);
