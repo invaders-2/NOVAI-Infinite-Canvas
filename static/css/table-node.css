@@ -293,6 +293,13 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* 整列素材比行数多、当前模式又只能一行取一张时，多出来的素材永远不会进入任何行。
+   数字标红并挂提示，别让人以为「整列都在用」。 */
+.table-input-count.is-lossy {
+    color: var(--danger);
+    font-weight: 600;
+}
+
 /* 空输入格淡一档，让「这里可以接素材」看得出来 */
 .table-node-table td.table-media-cell.is-empty { background: var(--surface-2); }
 

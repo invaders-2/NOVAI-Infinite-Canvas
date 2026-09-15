@@ -136,6 +136,10 @@ eq(one(root, 'table-input-mode').textContent, '逐行', '3 个引用 → 自动�
 api.addTableColumn(node);
 api.addTableRow(node);
 api.addTableRow(node);
+/* 3 张素材 / 2 行时自动推导是「整组共用」（逐行会丢第 3 张）；
+   这一节要验的是「逐行」的 1:1 落格，所以显式切过去，E 节开头再切回来验自动推导。 */
+node.tableInputChannelModes = {'input-1': 'sequence'};
+api.renderTableBody(node);
 eq(byTag(root, 'tbody')[0].children.length, 2, '两行');
 eq(byTag(root, 'tbody')[0].children[0].children.length, 4, '每行 = 输入列 + 数据列 + 选择列 + 删除列');
 ok(rowAt(root, 0).children[0].classList.contains('table-media-cell'), '第 1 格是输入列');
@@ -182,7 +186,14 @@ eq(model.inputItemAt(ch2, 0).nodeId, 'img4', 'shared 第 0 行 → 最后/唯一
 eq(model.inputItemAt(ch2, 99).nodeId, 'img4', 'shared 任何行都取最后一个');
 
 // ═══ E. 模式切换（逐行 → 全部 → 沿用 → 逐行） ═══
-eq(api.ensureTableChannels(node)[0].mode, 'sequence', '4 个引用 → 自动逐行');
+/* 自动推导带上行数：3 张素材 / 2 行时不能推成「逐行」，
+   否则第 3 张永远进不了任何行（表头写着 3，行里只会出现 2 张）。 */
+delete node.tableInputChannelModes['input-1'];
+eq(api.ensureTableChannels(node)[0].mode, 'all', '素材数(3) > 行数(2) → 自动整组共用');
+// 手动值优先于自动推导，切换循环也只走手动值
+node.tableInputChannelModes = node.tableInputChannelModes || {};
+node.tableInputChannelModes['input-1'] = 'sequence';
+eq(api.ensureTableChannels(node)[0].mode, 'sequence', '手动「逐行」优先');
 api.toggleTableChannelMode(node, 0);
 eq(api.ensureTableChannels(node)[0].mode, 'all', '切到「全部」（每行整组）');
 api.toggleTableChannelMode(node, 0);
@@ -215,6 +226,40 @@ ok(byTag(root, 'colgroup')[0] !== colBefore, '连线变化时重绘');
 eq(one(root, 'table-input-count').textContent, '4', '重绘后输入数更新');
 const sameEl = api.renderTableBody(node);
 ok(sameEl === root, '始终复用同一个 DOM 根');
+
+// ═══ F2. 输入列「内容」变了也要重绘（素材晚到才有 url / 分组增删素材）═══
+/* 这是「图片数量对不上」的根因：入边、行列数都没变，只有条目变了。
+   只比连线的话签名不变 → 表格永远不重绘，表头写 4 张、格子里只有 2 张。 */
+{
+  const colBefore2 = byTag(root, 'colgroup')[0];
+  const img1 = nodes.find(n => n.id === 'img1');
+  const savedUrl = img1.url;
+  img1.url = '';                       // 模拟这张图还没跑完 / 拿不到 url
+  api.renderTableBody(node);
+  ok(byTag(root, 'colgroup')[0] !== colBefore2, '输入列条目变化时必须重绘（不能只比连线）');
+  eq(one(root, 'table-input-count').textContent, '3', '少一张时表头数字跟着变');
+  img1.url = savedUrl;
+  api.renderTableBody(node);
+  eq(one(root, 'table-input-count').textContent, '4', '素材回来后数字恢复');
+}
+/* 整列 4 张、模式是「逐行」、表里只有 2 行 → 多出的 2 张永远进不了任何行，
+   必须标出来；只写一个总数会让人以为「4 张都在用」。 */
+{
+  const savedMode = node.tableInputChannelModes['input-1'];
+  node.tableInputChannelModes['input-1'] = 'sequence';
+  api.renderTableBody(node);
+  const headCell = byClass(root, 'table-input-head')[0];
+  const badge = one(headCell, 'table-input-count');
+  eq(badge.textContent, '4', '表头数字仍是整列总数');
+  ok(badge.classList.contains('is-lossy'), '有素材被丢 → 表头标红');
+  ok(String(badge.title || '').indexOf('不会进入任何行') >= 0, '提示说明多出来的素材去哪了');
+  node.tableInputChannelModes['input-1'] = 'all';
+  api.renderTableBody(node);
+  const allBadge = one(byClass(root, 'table-input-head')[0], 'table-input-count');
+  ok(!allBadge.classList.contains('is-lossy'), '整组共用时不提示（没有素材被丢）');
+  node.tableInputChannelModes['input-1'] = savedMode;
+  api.renderTableBody(node);
+}
 
 // ═══ G. 数据格编辑在重构后仍然可用 ═══
 api.beginTableEdit(node, {kind:'cell', row:0, column:0});

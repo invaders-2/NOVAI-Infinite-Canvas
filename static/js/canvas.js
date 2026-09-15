@@ -6522,6 +6522,10 @@ function ensureTableChannels(node){
     const declared = Math.max(0, Number(node.tableInputChannelCount) || 0);
     const highest = buckets.size ? Math.max.apply(null, Array.from(buckets.keys())) + 1 : 0;
     const count = Math.max(1, declared, highest);
+    /* 自动推导要带上行数：素材比行多时「逐行」会静默丢掉多出来的素材。
+       手动值（用户点表头 / 规划写入）永远优先，不受影响。 */
+    const tableState = ensureTableState(node);
+    const rowCount = tableState ? tableState.rows.length : 0;
     const manualModes = node.tableInputChannelModes && typeof node.tableInputChannelModes === 'object' ? node.tableInputChannelModes : {};
     const channels = [];
     for(let index = 0; index < count; index += 1){
@@ -6530,8 +6534,8 @@ function ensureTableChannels(node){
         const manual = manualModes[id];
         channels.push({
             id,
-            // 手动值优先（表头可切换，物化时也会按规划写入），否则按条目数推导
-            mode: model.CHANNEL_MODES.includes(manual) ? manual : model.channelModeFor(items),
+            // 手动值优先（表头可切换，物化时也会按规划写入），否则按条目数 + 行数推导
+            mode: model.CHANNEL_MODES.includes(manual) ? manual : model.channelModeFor(items, {rowCount}),
             items
         });
     }
@@ -6650,14 +6654,25 @@ function connectNodes(fromId, toId, toPort){
     return true;
 }
 
-// 重绘签名：入边 / 通道数 / 行列数变了才重建表格内容
+/* 重绘签名：入边 / 通道数 / 输入列内容与模式 / 行列数。
+   输入列的**条目**也要进签名 —— 分组里增删了素材、或者某张图跑完才拿到 url 时，
+   入边和行列数都没变；只比连线的话表格永远不会重绘，表现就是「图片数量对不上」：
+   表头写着 4 张，单元格里只有 2 张（第一次绘制时它们还没有 url）。
+   模式同理：落在签名里，外部改完模式不显式 repaintTable 也不会留下过期画面。 */
 function tableNodeSignature(node){
     const state = ensureTableState(node);
     if(!state) return '';
     const incoming = tableIncomingConnections(node)
         .map(conn => conn.from + '>' + String(conn.toPort || ''))
         .sort().join(',');
-    return [incoming, ensureTableChannels(node).length, state.columns.length, state.rows.length].join('|');
+    const byId = new Map((nodes || []).map(item => [item.id, item]));
+    const channels = ensureTableChannels(node);
+    const items = channels.map(channel => (channel.items || []).map(item => {
+        const source = item.nodeId ? byId.get(item.nodeId) : null;
+        return item.nodeId + ':' + String((source && source.url) || '');
+    }).join('+')).join('|');
+    const modes = channels.map(channel => channel.id + '=' + channel.mode).join(',');
+    return [incoming, channels.length, items, modes, state.columns.length, state.rows.length].join('|');
 }
 
 // 输入列单元格（DX OS: .table-media-cell）
@@ -7436,6 +7451,16 @@ function renderTableBody(node){
             const count = document.createElement('small');
             count.className = 'table-input-count';
             count.textContent = String(channel.items.length);
+            /* 逐行/沿用 一行只取一张：整列素材比行数多的时候，多出来的那几张
+               永远不会进入任何行（模型按整列写的 @图片N 也跟着悬空）。
+               表头只写一个总数会让人以为「4 张都在用」，这里必须说出来。 */
+            const droppedItems = channel.items.length - state.rows.length;
+            if(channel.mode !== 'all' && droppedItems > 0){
+                count.classList.add('is-lossy');
+                count.title = '本列共 ' + channel.items.length + ' 张，当前模式一行只取 1 张，表格只有 '
+                    + state.rows.length + ' 行，多出的 ' + droppedItems + ' 张不会进入任何行。'
+                    + '切到「全部」可让每一行都带上整列素材。';
+            }
             cell.appendChild(count);
             headRow.appendChild(cell);
         });

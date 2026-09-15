@@ -109,6 +109,25 @@ eq(M.channelLabel(0), '输入 1', '通道表头文案');
 eq(M.channelModeFor([]), 'shared', '0 个引用 → 共享');
 eq(M.channelModeFor([1]), 'shared', '1 个引用 → 共享');
 eq(M.channelModeFor([1, 2]), 'sequence', '>1 个引用 → 逐行（DX OS: refs.length > 1）');
+/* 自动推导带上行数：逐行 = 一行取一张，素材比行数多时多出来的永远进不了任何行
+   （表头写 4 张、每行只有 1 张），这时必须落「全部」。 */
+eq(M.channelModeFor([1,2,3,4], {rowCount:2}), 'all', '素材多于行数 → 整组共用，不丢素材');
+eq(M.channelModeFor([1,2,3,4], {rowCount:4}), 'sequence', '素材数 = 行数 → 逐行 1:1');
+eq(M.channelModeFor([1,2,3,4], {rowCount:9}), 'sequence', '素材少于行数 → 仍是逐行（超出为空，DX OS 原样）');
+eq(M.channelModeFor([1,2,3,4], {rowCount:0}), 'sequence', '行数未知 → 保持 DX OS 原样');
+eq(M.channelModeFor([1], {rowCount:9}), 'shared', '1 个素材 → 沿用');
+// 丢素材到底丢在哪：逐行 + 2 行只取得到前 2 张
+{
+  const items = ['a','b','c','d'].map(nodeId => ({type:'media', nodeId, text:''}));
+  const seqPicked = [];
+  const allPicked = [];
+  for(let row = 0; row < 2; row += 1){
+    seqPicked.push(...M.inputItemsForRow({mode:'sequence', items}, row).map(i => i.nodeId));
+    allPicked.push(...M.inputItemsForRow({mode:'all', items}, row).map(i => i.nodeId));
+  }
+  eq(seqPicked, ['a','b'], '逐行 + 2 行只用得到前 2 张（所以不能自动推成逐行）');
+  eq(allPicked, ['a','b','c','d','a','b','c','d'], '整组共用一张都不落下');
+}
 
 eq(M.normalizeChannels(null), [], '非数组 → 空');
 eq(M.normalizeChannels([{items:[{type:'media', nodeId:'a'}, {nodeId:''}, {type:'text', text:'  '}]}]),

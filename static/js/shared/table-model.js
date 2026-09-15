@@ -236,9 +236,17 @@
         return Number.isInteger(ordinal) && ordinal >= 1 ? ordinal - 1 : -1;
     }
 
-    // DX OS: refs.length > 1 ? "sequence" : "shared"
-    function channelModeFor(refs){
-        return (Array.isArray(refs) ? refs.length : 0) > 1 ? 'sequence' : 'shared';
+    /* DX OS: refs.length > 1 ? "sequence" : "shared"
+       但「逐行」是一行只取一张：整列素材比行数还多的时候，多出来的那几张
+       永远不会进入任何行，模型按整列写的 @图片N 也跟着悬空 ——
+       这种情况下「整组共用」才是唯一不丢素材的默认值。
+       rowCount 未知（0）时保持 DX OS 原样。 */
+    function channelModeFor(refs, options){
+        const count = Array.isArray(refs) ? refs.length : 0;
+        if(count <= 1) return 'shared';
+        const rowCount = Math.max(0, Number(options && options.rowCount) || 0);
+        if(rowCount > 0 && count > rowCount) return 'all';
+        return 'sequence';
     }
 
     function channelLabel(index){ return '输入 ' + (Math.max(0, Number(index) || 0) + 1); }
