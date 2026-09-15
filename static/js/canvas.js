@@ -6459,18 +6459,51 @@ function tableIncomingConnections(node){
     return (connections || []).filter(conn => conn && conn.to === node.id);
 }
 
+/* 输出节点的媒体 → 表格输入项（DX OS 只有「节点 / 分组」两种来源，这条是 NOVAI 的补充）。
+   输出节点自己没有 url，媒体全在 images 里，而且一个节点可能有好几张。
+   nodeId 仍然写输出节点自己的 id，下游 nodes.find(n => n.id === ref.nodeId) 才能反查到；
+   同一节点的多张图靠 url + outputIndex 区分（别用 nodeId 去重，会把它们并成一张）。 */
+function outputSourceItems(source){
+    return (source.images || [])
+        .map((item, index) => ({url: outputUrlValue(item), index}))
+        .filter(entry => entry.url && mediaKindForRef({url:entry.url}) !== 'text')
+        .map(entry => ({type:'media', nodeId:source.id, url:entry.url, outputIndex:entry.index}));
+}
+
+/* 输入项的唯一键。同一个输出节点会连来好几张图，只比 nodeId 会把它们当成同一项。 */
+function tableItemKey(item){
+    if(!item) return '';
+    const index = Number(item.outputIndex);
+    return String(item.nodeId || '') + '#' + String(item.url || '') + '#'
+        + (Number.isFinite(index) && index >= 0 ? index : '');
+}
+
+/* 条目 → 通道里的输入项（保留 url / outputIndex，输出节点要多带这两个字段） */
+function tableChannelItem(entry){
+    const item = {type:'media', nodeId:entry.nodeId};
+    if(entry.url) item.url = entry.url;
+    const index = Number(entry.outputIndex);
+    if(Number.isFinite(index) && index >= 0) item.outputIndex = index;
+    return item;
+}
+
 /* 把上游来源展开成输入项。
-   - group 展开成它的成员素材（一个 group = 一个通道，多张 → sequence）
+   - group 展开成它的成员素材（一个 group = 一个通道，多张）
+   - output 展开成它产出的每一张（一个 output = 一个通道，多张）
    - 单个素材节点就是一列一项
    - 纯文本节点（prompt / llm）返回空 → 走 Ip(t) 参与提示词，两者不重复计入 */
 function tableSourceItems(source){
     if(!source) return [];
     if(source.type === 'group'){
+        // 组里也可能放进一个输出节点：同样要展开成它产出的每一张
         return (source.items || [])
             .map(id => (nodes || []).find(item => item.id === id))
-            .filter(item => item && item.url)
-            .map(item => ({type:'media', nodeId:item.id}));
+            .filter(Boolean)
+            .flatMap(item => item.type === 'output'
+                ? outputSourceItems(item)
+                : (item.url ? [{type:'media', nodeId:item.id}] : []));
     }
+    if(source.type === 'output') return outputSourceItems(source);
     if(source.url) return [{type:'media', nodeId:source.id}];
     return [];
 }
@@ -6496,6 +6529,19 @@ function tableInputEntryAt(node, channel, row, nodeById){
     const source = item.nodeId
         ? (nodeById ? nodeById.get(item.nodeId) : (nodes || []).find(entry => entry.id === item.nodeId))
         : null;
+    /* 输出节点来的条目自己带 url（一个输出节点可以连来好几张），类型看 url。
+       这条必须排在 source.url 前面 —— 输出节点压根没有 url。 */
+    const itemUrl = String(item.url || '');
+    if(itemUrl){
+        const index = Number(item.outputIndex);
+        return {
+            kind: mediaKindForRef({url:itemUrl}),
+            url: itemUrl,
+            nodeId: source ? source.id : String(item.nodeId || ''),
+            node: source || null,
+            outputIndex: Number.isFinite(index) && index >= 0 ? index : -1
+        };
+    }
     if(!source) return null;
     if(source.url) return {kind: mediaKindForNode(source), url: source.url, nodeId: source.id, node: source};
     if(source.text) return {kind:'text', text: source.text, nodeId: source.id, node: source};
@@ -6516,7 +6562,7 @@ function ensureTableChannels(node){
         const key = index >= 0 ? index : 0;
         if(!buckets.has(key)) buckets.set(key, []);
         entries.forEach(entry => {
-            if(!buckets.get(key).some(item => item.nodeId === entry.nodeId)) buckets.get(key).push(entry);
+            if(!buckets.get(key).some(item => tableItemKey(item) === tableItemKey(entry))) buckets.get(key).push(entry);
         });
     });
     const declared = Math.max(0, Number(node.tableInputChannelCount) || 0);
@@ -6526,7 +6572,7 @@ function ensureTableChannels(node){
     const channels = [];
     for(let index = 0; index < count; index += 1){
         const id = model.channelIdAt(index);
-        const items = (buckets.get(index) || []).map(entry => ({type:'media', nodeId:entry.nodeId}));
+        const items = (buckets.get(index) || []).map(entry => tableChannelItem(entry));
         const manual = manualModes[id];
         channels.push({
             id,
@@ -6564,8 +6610,9 @@ function tableRowInputs(node, options={}){
             .map(item => {
                 const entry = tableInputEntryAt(node, {items:[item]}, 0, nodeById);
                 if(!entry) return null;
+                // 输出节点连来的多张图 nodeId 相同，只能按 nodeId + url + outputIndex 认人
                 const position = (channel.items || []).findIndex(candidate =>
-                    candidate === item || (candidate.nodeId && candidate.nodeId === item.nodeId));
+                    candidate === item || tableItemKey(candidate) === tableItemKey(item));
                 return {...entry, ordinal: ordinalBase[channelIndex] + Math.max(0, position) + 1};
             })
             .filter(Boolean));
@@ -6665,7 +6712,8 @@ function tableNodeSignature(node){
     const channels = ensureTableChannels(node);
     const items = channels.map(channel => (channel.items || []).map(item => {
         const source = item.nodeId ? byId.get(item.nodeId) : null;
-        return item.nodeId + ':' + String((source && source.url) || '');
+        // 输出节点的条目自带 url（节点本身没有），优先用条目上的
+        return item.nodeId + ':' + String(item.url || (source && source.url) || '');
     }).join('+')).join('|');
     const modes = channels.map(channel => channel.id + '=' + channel.mode).join(',');
     return [incoming, channels.length, items, modes, state.columns.length, state.rows.length].join('|');
@@ -6723,12 +6771,18 @@ function generatorUpstreamTables(genId){
 
 // 表格某行的媒体 → 生成器要的 refs
 function tableRowRefs(row){
-    return (Array.isArray(row && row.media) ? row.media : []).map(entry => ({
-        url: entry.url,
-        name: (entry.node && (entry.node.name || entry.node.text)) || entry.kind || 'ref',
-        kind: entry.kind || 'image',
-        nodeId: entry.nodeId || ''
-    })).filter(ref => ref.url);
+    return (Array.isArray(row && row.media) ? row.media : []).map(entry => {
+        const ref = {
+            url: entry.url,
+            name: (entry.node && (entry.node.name || entry.node.text)) || entry.kind || 'ref',
+            kind: entry.kind || 'image',
+            nodeId: entry.nodeId || ''
+        };
+        // 输出节点来的素材带 outputIndex：临时图床上传后要按这个下标回写原图
+        const index = Number(entry.outputIndex);
+        if(Number.isFinite(index) && index >= 0) ref.outputIndex = index;
+        return ref;
+    }).filter(ref => ref.url);
 }
 
 // 素材校验：本地缺文件的挑出来，别发出去再失败
@@ -7232,7 +7286,10 @@ function llmMediaGroups(node){
             sourceId: source.id,
             entries: entries.map(entry => {
                 const item = (nodes || []).find(n => n.id === entry.nodeId);
-                return {kind: mediaKindForNode(item || {}), nodeId: entry.nodeId, label: (item && item.name) || ''};
+                /* 输出节点的条目自带 url，类型要看 url（节点本身没有 url，
+                   而且一个输出节点里可能混着图/视频）。 */
+                const kind = entry.url ? mediaKindForRef({url:entry.url}) : mediaKindForNode(item || {});
+                return {kind, nodeId: entry.nodeId, label: (item && item.name) || '', url: entry.url || ''};
             })
         });
     });
@@ -9061,9 +9118,13 @@ function llmInputImages(node){
     const urls = [];
     connections.filter(c => c.to === node.id).map(c => nodes.find(n => n.id === c.from)).filter(Boolean).forEach(n => {
         if(n.type === 'image' && n.url && mediaKindForNode(n) === 'image') urls.push(n.url);
-        if(n.type === 'output' && (n.images||[]).length){
-            const last = [...n.images].reverse().map(outputUrlValue).find(url => url && !isVideoUrl(url) && !isAudioUrl(url));
-            if(last) urls.push(last);
+        /* 输出节点里的每一张图都算上：以前只取最后一张，
+           「已连接 N 张图片」和真正发出去的素材都会少。 */
+        if(n.type === 'output'){
+            (n.images || []).forEach(item => {
+                const url = outputUrlValue(item);
+                if(url && !isVideoUrl(url) && !isAudioUrl(url)) urls.push(url);
+            });
         }
         if(n.type === 'group'){
             (n.items || []).map(id => nodes.find(x => x.id === id)).filter(x => x?.type === 'image' && x?.url && mediaKindForNode(x) === 'image').forEach(img => urls.push(img.url));
@@ -9075,9 +9136,12 @@ function llmInputVideos(node){
     const urls = [];
     connections.filter(c => c.to === node.id).map(c => nodes.find(n => n.id === c.from)).filter(Boolean).forEach(n => {
         if(n.type === 'image' && n.url && mediaKindForNode(n) === 'video') urls.push(n.url);
-        if(n.type === 'output' && (n.images||[]).length){
-            const last = [...n.images].reverse().map(outputUrlValue).find(url => url && isVideoUrl(url));
-            if(last) urls.push(last);
+        /* 同上：输出节点里的每一个视频都算上，不再只取最后一个。 */
+        if(n.type === 'output'){
+            (n.images || []).forEach(item => {
+                const url = outputUrlValue(item);
+                if(url && isVideoUrl(url)) urls.push(url);
+            });
         }
         if(n.type === 'group'){
             (n.items || []).map(id => nodes.find(x => x.id === id)).filter(x => x?.type === 'image' && x?.url && mediaKindForNode(x) === 'video').forEach(video => urls.push(video.url));

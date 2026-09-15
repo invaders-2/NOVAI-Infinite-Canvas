@@ -82,6 +82,7 @@ const api = new Function(
     'connections', 'nodes', 'pushUndo', 'mediaKindForNode', 'isMissingAssetUrl',
     'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs', 'tr', 'nodesEl',
     'runVideoNode', 'runGenerator', 'window', 'saveCanvas', 'refreshIcons',
+    'outputUrlValue', 'mediaKindForRef',
     block + '\nreturn {renderTableBody, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
@@ -101,7 +102,16 @@ const api = new Function(
     key => ({'canvas.apiGenerate':'API生成', 'canvas.generating':'生成中', 'canvas.videoGenerate':'生成视频'})[key] || key,
     nodesEl,
     runVideoShim, runGeneratorShim, global.window, () => {},
-    () => { iconRefreshes += 1; }
+    () => { iconRefreshes += 1; },
+    // 输出节点的媒体在 images 里，url 要从条目上取；类型看 url
+    item => (typeof item === 'string' ? item : (item && item.url) || ''),
+    ref => {
+        const url = String((ref && ref.url) || ref || '');
+        if(/\.(mp4|webm|mov|m4v)$/i.test(url)) return 'video';
+        if(/\.(mp3|wav|m4a)$/i.test(url)) return 'audio';
+        if(/\.(txt|json|csv|md)$/i.test(url)) return 'text';
+        return 'image';
+    }
 );
 
 const keydown = key => ({ key, shiftKey:false, preventDefault(){}, stopPropagation(){} });
@@ -704,6 +714,40 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     ok(batchMsg.indexOf('Agnes rate limit: free users') > 0, '摘要带出首个失败原因：' + batchMsg);
     ok(batchMsg.indexOf('{"error"') < 0, '摘要里不出现原始 JSON');
     videoShimMode = 'ok';
+
+// ═══ M. 输出(Output)节点作为参考来源 ═══
+{
+    const outNode = {id:'outRef', type:'output', images:[{url:'/static/out/1.png'},{url:'/static/out/2.png'},{url:'/static/out/3.png'}]};
+    nodes.push(outNode);
+    eq(api.tableSourceItems(outNode).map(i => i.url), ['/static/out/1.png','/static/out/2.png','/static/out/3.png'], '输出节点展开成它产出的每一张');
+    eq(api.tableSourceItems(outNode).map(i => i.outputIndex), [0,1,2], '每项带 outputIndex');
+    eq(api.tableSourceItems(outNode).map(i => i.nodeId), ['outRef','outRef','outRef'], 'nodeId 仍是输出节点自己的 id（下游能反查）');
+    const outGroup = {id:'grpOut', type:'group', items:['outRef','extraImage']};
+    nodes.push(outGroup, {id:'extraImage', type:'image', url:'/static/out/extra.png'});
+    eq(api.tableSourceItems(outGroup).map(i => i.nodeId), ['outRef','outRef','outRef','extraImage'], '组里的输出节点逐张展开、普通素材仍是一项');
+
+    const tbl = api.addTableNode();
+    connections.push({id:'c_out_ref', from:'outRef', to:tbl.id});
+    const outChannels = api.ensureTableChannels(tbl);
+    eq(outChannels[0].items.length, 3, '同一节点的 3 张不会被去重并成 1 张');
+    eq(outChannels[0].items.map(i => i.url), ['/static/out/1.png','/static/out/2.png','/static/out/3.png'], '通道里保留每张的 url');
+    eq(outChannels[0].mode, 'shared', '参考栏默认沿用');
+
+    api.addTableColumn(tbl);
+    api.addTableRow(tbl);
+    api.addTableRow(tbl);
+    const outRows = api.tableRowInputs(tbl);
+    eq(outRows.length, 2, '两行');
+    eq(outRows.map(r => r.channelItems[0].map(e => e.url)), [['/static/out/1.png'],['/static/out/2.png']], '沿用：一行取一张');
+    eq(outRows[0].references[0].nodeId, 'outRef', '引用记的是输出节点 id');
+    eq(outRows[0].media[0].outputIndex, 0, '素材带 outputIndex（临时图床回写要用）');
+    eq(api.tableRowRefs(outRows[0])[0].outputIndex, 0, 'tableRowRefs 把 outputIndex 传给生成');
+
+    const sigBefore = api.tableNodeSignature(tbl);
+    outNode.images.push({url:'/static/out/4.png'});
+    ok(api.tableNodeSignature(tbl) !== sigBefore, '输出节点新增产出 → 签名变化（否则表格不重绘）');
+    eq(api.ensureTableChannels(tbl)[0].items.length, 4, '重算后是 4 张');
+}
 
     console.log('通过 ' + pass + '/' + (pass + fails.length));
     if(fails.length){ console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
