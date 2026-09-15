@@ -80,7 +80,7 @@ ok(root.classList.contains('table-node'), '根 class = table-node');
 eq(node.table.columns, [], '新节点无数据列');
 eq(byClass(root, 'table-input-column').length, 1, '默认 1 个输入列');
 eq(one(root, 'table-input-label').textContent, '输入 1', '输入列表头文案');
-eq(one(root, 'table-input-mode').textContent, '共享', '空通道默认共享');
+eq(one(root, 'table-input-mode').textContent, '沿用', '空通道默认沿用');
 eq(one(root, 'table-input-count').textContent, '0', '输入数为 0');
 eq(one(root, 'table-node-count').textContent, '0 列 · 0 行', '计数文案');
 eq(one(root, 'table-node-inputs').textContent, '1 个输入', '输入列计数文案');
@@ -138,12 +138,28 @@ const ch2 = api.ensureTableChannels(node)[1];
 eq(model.inputItemAt(ch2, 0).nodeId, 'img4', 'shared 第 0 行 → 最后/唯一一个');
 eq(model.inputItemAt(ch2, 99).nodeId, 'img4', 'shared 任何行都取最后一个');
 
-// ═══ E. 模式切换 ═══
+// ═══ E. 模式切换（逐行 → 全部 → 沿用 → 逐行） ═══
+eq(api.ensureTableChannels(node)[0].mode, 'sequence', '4 个引用 → 自动逐行');
 api.toggleTableChannelMode(node, 0);
-eq(api.ensureTableChannels(node)[0].mode, 'shared', '手动切到共享');
+eq(api.ensureTableChannels(node)[0].mode, 'all', '切到「全部」（每行整组）');
 api.toggleTableChannelMode(node, 0);
-eq(api.ensureTableChannels(node)[0].mode, 'sequence', '再切回逐行');
+eq(api.ensureTableChannels(node)[0].mode, 'shared', '切到「沿用」');
+api.toggleTableChannelMode(node, 0);
+eq(api.ensureTableChannels(node)[0].mode, 'sequence', '循环回逐行');
 eq(node.tableInputChannelModes['input-1'], 'sequence', '手动值被记住');
+// 全部模式：每一行都拿到整列
+{
+  const nodes2 = api.ensureTableChannels(node)[0];
+  const before = nodes2.mode;
+  node.tableInputChannelModes['input-1'] = 'all';
+  const items0 = api.tableRowInputs(node)[0].channelItems[0].map(e => e.nodeId);
+  eq(items0.length, 3, '「全部」模式下第 1 行拿到整列（此刻连了 3 张）');
+  eq(items0, ['img1','img2','img3'], '整列内容与顺序');
+  node.tableBatchStartRow = 1;
+  const allMedia = api.tableRowInputs(node)[0].media.map(e => e.nodeId);
+  ok(allMedia.length >= 3, '「全部」模式下该行 media 至少含整列：' + JSON.stringify(allMedia));
+  node.tableInputChannelModes['input-1'] = before;
+}
 
 // ═══ F. 签名驱动重绘 ═══
 const colBefore = byTag(root, 'colgroup')[0];

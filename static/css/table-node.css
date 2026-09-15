@@ -297,6 +297,22 @@
     object-fit: cover;
 }
 
+/* 「全部」模式的通道一行会有多张，换行排开 */
+.table-media-stack {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    align-items: flex-start;
+}
+
+.table-media-stack .table-media-thumb {
+    flex: 1 1 44%;
+    min-width: 40px;
+}
+
+.table-media-stack .table-media-text,
+.table-media-stack .table-media-missing { flex: 1 1 100%; }
+
 .table-media-text {
     display: block;
     padding: 3px 4px;

@@ -215,10 +215,13 @@
     /* ── 输入列（DX OS §3：XS / Co / ab）────────────────────────────
        通道 = 一整列，表头「输入 N」，单元格是上游素材缩略图。
        items 里的 mode 决定逐行怎么取：
-         sequence → items[row]                （逐行对应，超出为 null）
-         其他     → items[min(row, len-1)]    （按行取，超出后沿用最后一个） */
+         sequence → [items[row]]              （逐行对应，一行一张，超出为空）
+         all      → items 全部                （每行都用整列，一行多张）
+         shared   → [items[min(row, len-1)]]  （按行取，超出后沿用最后一个） */
     const INPUT_CHANNEL_PREFIX = 'input-';
     const MENTION_LABELS = {image:'图片', video:'视频', audio:'音频', file:'文件'};
+    const CHANNEL_MODES = ['sequence', 'all', 'shared'];
+    const CHANNEL_MODE_LABELS = {sequence:'逐行', shared:'沿用', all:'全部'};
 
     function channelIdAt(index){ return INPUT_CHANNEL_PREFIX + (Math.max(0, Number(index) || 0) + 1); }
 
@@ -250,20 +253,31 @@
             }).filter(item => item.nodeId || item.text.trim());
             return {
                 id: String(source.id || channelIdAt(index)),
-                mode: source.mode === 'sequence' ? 'sequence' : 'shared',
+                mode: CHANNEL_MODES.includes(source.mode) ? source.mode : 'shared',
                 items
             };
         });
     }
 
-    // ab(t, ch, row)
-    function inputItemAt(channel, row){
+    /* ab(t, ch, row)：这一行该通道取到哪些条目。
+       all 模式会返回整列，所以一律返回数组 —— 一行可以有多个参考图。 */
+    function inputItemsForRow(channel, row){
         const items = Array.isArray(channel?.items) ? channel.items : [];
-        if(!items.length) return null;
+        if(!items.length) return [];
         const index = Math.max(0, Number(row) || 0);
-        if(channel.mode === 'sequence') return items[index] || null;
-        return items[Math.min(index, items.length - 1)] || null;
+        const mode = CHANNEL_MODES.includes(channel.mode) ? channel.mode : 'shared';
+        if(mode === 'all') return items.slice();
+        if(mode === 'sequence') return items[index] ? [items[index]] : [];
+        return items[Math.min(index, items.length - 1)] ? [items[Math.min(index, items.length - 1)]] : [];
     }
+
+    // 单条版本（取该行第一条），保留给只关心「有没有」的调用方
+    function inputItemAt(channel, row){
+        const list = inputItemsForRow(channel, row);
+        return list.length ? list[0] : null;
+    }
+
+    function channelModeLabel(mode){ return CHANNEL_MODE_LABELS[mode] || CHANNEL_MODE_LABELS.shared; }
 
     // Xw(t, row, i)：行高要把输入列的文本值一起算进去，有媒体时下限抬到 144
     function rowHeightForRow(dataValues, inputTexts, hasMedia){
@@ -291,6 +305,29 @@
             return token;
         });
         return out;
+    }
+
+    /* 把提示词里的 @图片N 从「全局输入序号」改写成「该行参考图内的序号」。
+       模型是照着全局输入清单写的序号，但每一行只拿到自己那份素材，
+       不重编号的话 @图片4 这类引用在生成时全是悬空的。
+       ordinalMap: 全局序号(1-based) → {position(该行内的 1-based 序号), kind}。
+       对不上的引用保留原文并报出来 —— 绝不静默改写语义。 */
+    function rewriteMentions(prompt, ordinalMap){
+        const dangling = [];
+        const text = String(prompt || '').replace(MENTION_RE, (token, label, digits) => {
+            const ordinal = Number(digits);
+            const target = ordinalMap instanceof Map ? ordinalMap.get(ordinal) : (ordinalMap || {})[ordinal];
+            if(!target){
+                dangling.push({token, label, ordinal, index: ordinal - 1, reason: 'missing'});
+                return token;
+            }
+            if(mentionLabel(target.kind) !== label){
+                dangling.push({token, label, ordinal, index: ordinal - 1, reason: 'kind'});
+                return token;
+            }
+            return '@' + label + target.position;
+        });
+        return {text, dangling};
     }
 
     // 引用了不存在、或类型对不上的输入时要报出来，不能静默发出去
@@ -464,6 +501,7 @@
     const TABLE_PARSE_ERRORS = {
         format: '模型没有返回统一的多维表格格式',
         columns: '模型返回的表格列名不完整',
+        empty: '模型返回的多维表格没有任何内容',
         missing: '缺少多维表格输出'
     };
     const TABLE_REPAIR_INSTRUCTION = '请把下面未通过校验的结果修复为合法的多维表格 JSON。不要删减原有信息，不要输出解释或 Markdown。';
@@ -505,6 +543,11 @@
             // 行按列数补齐
             return columns.map((name, index) => cellText(list[index]));
         });
+        /* 结构合法但整张表一个字都没有：实测模型偶发返回 [""] 这种空表，
+           放过去的话批量执行会拿着空提示词去生成。判格式不合规，交给修复遍。 */
+        if(!rows.length || rows.every(row => row.every(cell => !String(cell || '').trim()))){
+            throw new Error(TABLE_PARSE_ERRORS.empty);
+        }
         return {kind:TABLE_KIND, version:TABLE_VERSION, columns, rows, selectedRows:[], mergedGroups:[]};
     }
 
@@ -512,38 +555,77 @@
         return TABLE_REPAIR_INSTRUCTION + '\n\n' + String(badText || '');
     }
 
-    // 输入清单文案：有序号，和 @图片N 的序号一一对应
-    function inputListText(inputs){
-        return (Array.isArray(inputs) ? inputs : []).map((item, index) => {
-            const ordinal = index + 1;
-            const kind = mentionLabel(item && item.kind);
-            const label = item && item.label ? ' — ' + item.label : '';
-            return ordinal + '. ' + kind + '（' + mentionTokenAt(item && item.kind, ordinal) + '）' + label;
-        }).join('\n');
+    function inputLine(item, ordinal){
+        const kind = mentionLabel(item && item.kind);
+        const label = item && item.label ? ' — ' + item.label : '';
+        return ordinal + '. ' + kind + '（' + mentionTokenAt(item && item.kind, ordinal) + '）' + label;
+    }
+
+    /* 输入清单文案。序号是**跨组的全局序号**，和 @图片N 一一对应。
+       给了分组就按组渲染：模型必须知道哪些图是一组、这一组是「逐行对应」
+       还是「每行都用」，否则只能靠文件名猜，行数和 @图片N 的映射都会错。 */
+    function inputListText(inputs, groups, groupModes){
+        const list = Array.isArray(inputs) ? inputs : [];
+        const grouped = Array.isArray(groups) && groups.length ? groups : null;
+        if(!grouped) return list.map((item, index) => inputLine(item, index + 1)).join('\n');
+
+        const lines = [];
+        let ordinal = 0;
+        grouped.forEach((group, groupIndex) => {
+            const entries = Array.isArray(group && group.entries) ? group.entries : [];
+            const known = Array.isArray(groupModes) ? groupModes[groupIndex] : '';
+            lines.push('第 ' + (groupIndex + 1) + ' 组：' + entries.length + ' 张'
+                + (known ? '，' + channelModeLabel(known) : ''));
+            entries.forEach(entry => {
+                ordinal += 1;
+                lines.push('  ' + inputLine(entry, ordinal));
+            });
+        });
+        return lines.join('\n');
+    }
+
+    /* 从规划里取出每一组的执行方式：per-row → sequence，every-row → all。
+       没指定的留空，调用方回落到自动推导。 */
+    function planGroupModes(plan, groupCount){
+        const out = new Array(Math.max(0, Number(groupCount) || 0)).fill('');
+        const groups = plan && Array.isArray(plan.inputGroups) ? plan.inputGroups : [];
+        groups.forEach(item => {
+            const index = Number(item && item.group) - 1;
+            if(index < 0 || index >= out.length) return;
+            if(item.rowMode === 'per-row') out[index] = 'sequence';
+            else if(item.rowMode === 'every-row') out[index] = 'all';
+        });
+        return out;
     }
 
     /* FS(t)：规划遍提示词。只做规划，不要输出最终 rows。 */
-    function buildListPlanPrompt(requirement, inputs){
+    function buildListPlanPrompt(requirement, inputs, groups){
         return [
             '你在为一个「多维表格批量生成」工作流做任务规划。',
             '',
             '用户要求：',
             String(requirement || '').trim(),
             '',
-            '可用输入：',
-            inputListText(inputs) || '（无）',
+            '可用输入（按画布连线分组，序号是全局序号，与 @图片N 一一对应）：',
+            inputListText(inputs, groups) || '（无）',
+            '',
+            '必须为每一个输入组指定它在逐行执行里的用法 rowMode：',
+            '- "per-row"：这一组是**行驱动**，第 N 行用第 N 张。多张参考图 → 多行。',
+            '- "every-row"：这一组**每一行都要用上全部**。例如多张可替换的素材 → 每行都带整组。',
+            '行的数量由 per-row 的组决定；every-row 的组只增加每行带的素材数，不增加行数。',
             '',
             '只做规划，不要输出最终 rows。',
             '请只返回一个 JSON 对象，结构如下：',
-            '{"task":"任务目标","rowCount":行数,"targetInputs":["目标主体输入"],"referenceInputs":["风格/版式参考输入"],"inputRoles":[{"input":"输入","role":"角色","mapping":"如何映射到行","transfer":"需要迁移的","doNotTransfer":"不要迁移的"}],"columns":["列名1","列名2"],"rowRules":["每行怎么定"],"qualityChecks":["怎么算合格"]}',
+            '{"task":"任务目标","rowCount":行数,"targetInputs":["目标主体输入"],"referenceInputs":["参考输入"],"inputGroups":[{"group":1,"role":"这一组是什么","rowMode":"per-row 或 every-row","mapping":"如何映射到行","transfer":"需要迁移的","doNotTransfer":"不要迁移的"}],"columns":["列名1","列名2"],"rowRules":["每行怎么定"],"qualityChecks":["怎么算合格"]}',
             '不要 Markdown 代码块，不要解释。'
         ].join('\n');
     }
 
     /* BS(t, plan)：生成遍提示词。约束逐条照搬规范。 */
-    function buildListGeneratePrompt(requirement, inputs, plan){
+    function buildListGeneratePrompt(requirement, inputs, groups, plan){
         let planText = '';
         if(plan && typeof plan === 'object'){ try { planText = JSON.stringify(plan, null, 2); } catch(error){ planText = ''; } }
+        const modes = planGroupModes(plan, Array.isArray(groups) ? groups.length : 0);
         return [
             '请把结果整理为可逐行执行的生成任务：每一行必须是一条完整、独立、可直接用于后续图像生成的内容。',
             '',
@@ -553,9 +635,10 @@
             '用户要求：',
             String(requirement || '').trim(),
             '',
-            '可用输入：',
-            inputListText(inputs) || '（无）',
+            '可用输入（按画布连线分组，序号是全局序号，与 @图片N 一一对应）：',
+            inputListText(inputs, groups, modes) || '（无）',
             '',
+            '行数按「逐行」的组确定；「全部」的组每一行都带整组，不增加行数。',
             '严格遵守用户指定的数量；未指定时根据逐项输入数量和任务目标合理决定。图片组通常逐张映射到各行，单图参考通常应用到所有相关行。',
             '如果任务区分了「目标主体」和「风格/版式参考」，每行生成提示词都必须显式写清它们的关系。',
             '不要只写「使用图1」「参考图2」这类占位说明。每个文字单元格应提供与普通文本输出相当的信息密度。',
@@ -597,7 +680,9 @@
         COLUMN_WIDTH, RESERVED_WIDTH, HEADER_HEIGHT, MAX_NODE_HEIGHT, EMPTY_MIN_HEIGHT, INPUT_COLUMN_WIDTH,
         INPUT_CHANNEL_PREFIX, MENTION_LABELS, MENTION_RE,
         UNNAMED_COLUMN, TABLE_OPERATIONS, OPERATION_IDS,
-        channelIdAt, channelIndexFromId, channelModeFor, channelLabel, normalizeChannels, inputItemAt,
+        CHANNEL_MODES, CHANNEL_MODE_LABELS,
+        channelIdAt, channelIndexFromId, channelModeFor, channelLabel, channelModeLabel,
+        normalizeChannels, inputItemAt, inputItemsForRow, rewriteMentions,
         rowHeightForRow, mentionLabel, mentionTokenAt, mentionsIn, danglingMentions, buildRowPrompt,
         BATCH_ROW_STATUS, DEFAULT_BATCH_CONCURRENCY, MAX_BATCH_CONCURRENCY,
         batchFailurePolicy, batchStartRow, batchConcurrency, batchRowsToRun,
@@ -606,7 +691,7 @@
         batchMissingMaterials, runWithSharedCursor,
         TABLE_PARSE_ERRORS, TABLE_REPAIR_INSTRUCTION, LLM_REPAIR_MAX_TOKENS,
         extractJsonObject, parseTableOutput, buildRepairPrompt, inputListText,
-        buildListPlanPrompt, buildListGeneratePrompt, llmOutputMode, llmRunStageLabel,
+        buildListPlanPrompt, buildListGeneratePrompt, planGroupModes, llmOutputMode, llmRunStageLabel,
         emptyTable, cellText, normalizeColumns, normalizeTable, cloneTable,
         toIndex, columnIndex, rowIndex, applyOperation,
         rowHeight, nodeSize, describeOperation, requiresConfirmation,

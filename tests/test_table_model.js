@@ -281,6 +281,9 @@ rejects(JSON.stringify({kind:'table', version:2, columns:['a'], rows:[]}), M.TAB
 rejects(JSON.stringify({kind:'table', version:1, columns:[], rows:[]}), M.TABLE_PARSE_ERRORS.columns, '没有列 → 列名不完整文案');
 rejects(JSON.stringify({kind:'table', version:1, columns:['a'], rows:'x'}), M.TABLE_PARSE_ERRORS.format, 'rows 不是数组 → 格式错误文案');
 rejects(JSON.stringify({kind:'table', version:1, columns:['   '], rows:[]}), M.TABLE_PARSE_ERRORS.columns, '列名全空白 → 列名不完整文案');
+rejects(JSON.stringify({kind:'table', version:1, columns:['a'], rows:[]}), M.TABLE_PARSE_ERRORS.empty, '没有行 → 空表文案');
+rejects(JSON.stringify({kind:'table', version:1, columns:['a','b'], rows:[['','   ']]}), M.TABLE_PARSE_ERRORS.empty, '整张表单元格全空 → 空表文案（实测模型会这么返回）');
+ok(M.parseTableOutput(JSON.stringify({kind:'table', version:1, columns:['a','b'], rows:[['','有内容']]})), '只要有一个单元格有内容就接受');
 {
   const manyCols = []; for(let i = 0; i < M.LLM_MAX_COLUMNS + 1; i += 1) manyCols.push('c' + i);
   rejects(JSON.stringify({kind:'table', version:1, columns:manyCols, rows:[]}), M.TABLE_PARSE_ERRORS.format, '超过 LLM 列上限 → 格式错误');
@@ -302,7 +305,7 @@ eq(M.inputListText(null), '', '空输入清单');
 ok(M.buildListPlanPrompt('拆解脚本', [{kind:'image'}]).indexOf('只做规划，不要输出最终 rows') > 0, 'FS 明确不输出 rows');
 ok(M.buildListPlanPrompt('拆解脚本', []).indexOf('拆解脚本') > 0, 'FS 带上用户要求');
 {
-  const bs = M.buildListGeneratePrompt('拆解脚本', [{kind:'image'}], {task:'x', rowCount:3});
+  const bs = M.buildListGeneratePrompt('拆解脚本', [{kind:'image'}], null, {task:'x', rowCount:3});
   const musts = [
     '可逐行执行的生成任务',
     '严格遵守用户指定的数量',
@@ -319,7 +322,78 @@ ok(M.buildListPlanPrompt('拆解脚本', []).indexOf('拆解脚本') > 0, 'FS �
   eq(missing, [], 'BS 含全部规范约束' + (missing.length ? ' 缺: ' + missing.join(' | ') : ''));
   ok(bs.indexOf('\"rowCount\": 3') > 0, 'BS 带上规划 JSON');
 }
-ok(M.buildListGeneratePrompt('r', [], null).indexOf('（无规划，按用户要求自行判断）') > 0, '没有规划时的兜底文案');
+ok(M.buildListGeneratePrompt('r', [], null, null).indexOf('（无规划，按用户要求自行判断）') > 0, '没有规划时的兜底文案');
+
+// ═══ 参考图分组：一行一张 / 一行整组 ═══
+eq(M.CHANNEL_MODES, ['sequence', 'all', 'shared'], '模式顺序（表头按此循环）');
+eq(M.channelModeLabel('all'), '全部', 'all 的中文文案');
+eq(M.channelModeLabel('sequence'), '逐行', 'sequence 的中文文案');
+eq(M.channelModeLabel('shared'), '沿用', 'shared 的中文文案');
+eq(M.channelModeLabel('乱写'), '沿用', '非法模式文案回落');
+
+{
+  const items = [{nodeId:'a'}, {nodeId:'b'}, {nodeId:'c'}];
+  eq(M.inputItemsForRow({mode:'sequence', items}, 0).map(i=>i.nodeId), ['a'], 'sequence 一行一张');
+  eq(M.inputItemsForRow({mode:'sequence', items}, 3), [], 'sequence 超出为空');
+  eq(M.inputItemsForRow({mode:'all', items}, 0).map(i=>i.nodeId), ['a','b','c'], 'all 每行整组');
+  eq(M.inputItemsForRow({mode:'all', items}, 7).map(i=>i.nodeId), ['a','b','c'], 'all 任意行都是整组');
+  eq(M.inputItemsForRow({mode:'shared', items}, 1).map(i=>i.nodeId), ['b'], 'shared 按行取');
+  eq(M.inputItemsForRow({mode:'shared', items}, 9).map(i=>i.nodeId), ['c'], 'shared 超出沿用最后一个');
+  eq(M.inputItemsForRow({mode:'all', items:[]}, 0), [], '空通道 → 空数组');
+  eq(M.inputItemsForRow(null, 0), [], '空通道对象 → 空数组');
+  eq(M.inputItemAt({mode:'all', items}, 0).nodeId, 'a', 'inputItemAt 取该行第一条');
+}
+eq(M.normalizeChannels([{mode:'all', items:[{nodeId:'a'}]}])[0].mode, 'all', 'normalizeChannels 保留 all');
+
+// mention 重编号：全局序号 → 行内序号
+{
+  const map = new Map([[1,{position:1,kind:'image'}], [4,{position:2,kind:'image'}]]);
+  const out = M.rewriteMentions('把 @图片1 的产品换成 @图片4 的', map);
+  eq(out.text, '把 @图片1 的产品换成 @图片2 的', '全局序号改写成行内序号');
+  eq(out.dangling, [], '都能对上 → 无悬空');
+  const miss = M.rewriteMentions('用 @图片1 和 @图片6', map);
+  eq(miss.dangling.map(d=>d.token), ['@图片6'], '行里没有的引用被报出');
+  eq(miss.dangling[0].reason, 'missing', '悬空原因 missing');
+  eq(miss.text, '用 @图片1 和 @图片6', '悬空的引用保留原文，不静默改写');
+  const kind = M.rewriteMentions('@图片1', new Map([[1,{position:1,kind:'video'}]]));
+  eq(kind.dangling[0].reason, 'kind', '类型不符被报出');
+  eq(M.rewriteMentions('没有引用', map), {text:'没有引用', dangling:[]}, '没有引用时原样返回');
+  eq(M.rewriteMentions('', map), {text:'', dangling:[]}, '空提示词');
+}
+
+// 规划里的每组用法
+{
+  const plan = {inputGroups:[{group:1, rowMode:'per-row'}, {group:2, rowMode:'every-row'}]};
+  eq(M.planGroupModes(plan, 2), ['sequence', 'all'], 'per-row → 逐行、every-row → 全部');
+  eq(M.planGroupModes(plan, 3), ['sequence', 'all', ''], '没提到的组留空');
+  eq(M.planGroupModes({inputGroups:[{group:9, rowMode:'per-row'}]}, 2), ['', ''], '越界的组被忽略');
+  eq(M.planGroupModes(null, 2), ['', ''], '没有规划时全空');
+  eq(M.planGroupModes({inputGroups:[{group:1, rowMode:'乱写'}]}, 1), [''], '非法 rowMode 留空');
+}
+
+// 分组清单：模型必须看到组边界和每组用法
+{
+  const groups = [
+    {sourceId:'gs', entries:[{kind:'image', nodeId:'s1', label:'静物1'}, {kind:'image', nodeId:'s2', label:'静物2'}]},
+    {sourceId:'gp', entries:[{kind:'image', nodeId:'p1', label:'白底1'}]}
+  ];
+  const flat = groups.flatMap(g => g.entries);
+  const text = M.inputListText(flat, groups, ['sequence', 'all']);
+  ok(text.indexOf('第 1 组：2 张，逐行') >= 0, '第 1 组带张数与用法（首行，下标 0）');
+  ok(text.indexOf('第 2 组：1 张，全部') > 0, '第 2 组带张数与用法');
+  ok(text.indexOf('静物1') > 0 && text.indexOf('白底1') > 0, '组内条目带标签');
+  ok(text.indexOf('3. 图片（@图片3）') > 0, '序号跨组连续（这是 @图片N 的依据）');
+  eq(M.inputListText(flat, null, null).split('\n').length, 3, '没有分组时回落成平铺清单');
+  const plan5 = M.buildListPlanPrompt('把静物里的产品换成白底产品', flat, groups);
+  ok(plan5.indexOf('rowMode') > 0, 'FS 要求规划指定 rowMode');
+  ok(plan5.indexOf('per-row') > 0 && plan5.indexOf('every-row') > 0, 'FS 说明两种 rowMode 的含义');
+  ok(plan5.indexOf('第 1 组') > 0, 'FS 带上分组');
+  const bs5 = M.buildListGeneratePrompt('把静物里的产品换成白底产品', flat, groups, {inputGroups:[{group:1,rowMode:'per-row'},{group:2,rowMode:'every-row'}]});
+  ok(bs5.indexOf('第 1 组：2 张，逐行') > 0, 'BS 带上已确认的每组用法');
+  ok(bs5.indexOf('可用输入（按画布连线分组') > 0, 'BS 说明序号是全局序号');
+  ok(bs5.indexOf('第 2 组：1 张，全部') > 0, 'BS 上第 2 组用法');
+  ok(bs5.indexOf('行数按「逐行」的组确定') > 0, 'BS 明确行数由逐行的组决定');
+}
 
 // 输出模式与按钮文案
 eq(M.llmOutputMode('list'), 'list', 'list 模式');

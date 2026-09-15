@@ -7064,7 +7064,8 @@ function ensureTableChannels(node){
         const manual = manualModes[id];
         channels.push({
             id,
-            mode: manual === 'sequence' || manual === 'shared' ? manual : model.channelModeFor(items),
+            // 手动值优先（表头可切换，物化时也会按规划写入），否则按条目数推导
+            mode: model.CHANNEL_MODES.includes(manual) ? manual : model.channelModeFor(items),
             items
         });
     }
@@ -7072,8 +7073,10 @@ function ensureTableChannels(node){
     return channels;
 }
 
-/* Pu(t)：逐行汇总。一次算完该行的输入媒体/文本 + 数据列值 + 组装后的提示词，
-   就是批量执行直接要吃的形态。entries[i] 对应第 i 个输入通道。 */
+/* Pu(t)：逐行汇总。一次算完该行的输入媒体/文本 + 数据列值 + 组装后的提示词。
+   「全部」模式的通道整列都上，所以 channelItems[i]（第 i 个通道的这一行）是**数组**。
+   提示词里的 @图片N 在这里从「全局输入序号」重写成「该行参考图内的序号」：
+   模型是照着全局清单写的序号，不重写的话 @图片4 这类引用在生成时全是悬空的。 */
 function tableRowInputs(node, options={}){
     const model = novaTableModel();
     const state = ensureTableState(node);
@@ -7081,42 +7084,77 @@ function tableRowInputs(node, options={}){
     const nodeById = options.nodeById || new Map((nodes || []).map(item => [item.id, item]));
     const channels = ensureTableChannels(node);
     const upstreamTexts = tableUpstreamTexts(node);
+    // 每个通道的条目在全局输入清单里的起始序号
+    const ordinalBase = [];
+    let running = 0;
+    channels.forEach(channel => {
+        ordinalBase.push(running);
+        running += (channel.items || []).length;
+    });
+
     return state.rows.map((row, rowIndex) => {
-        const entries = channels.map(channel => tableInputEntryAt(node, channel, rowIndex, nodeById));
+        const channelItems = channels.map((channel, channelIndex) => model
+            .inputItemsForRow(channel, rowIndex)
+            .map(item => {
+                const entry = tableInputEntryAt(node, {items:[item]}, 0, nodeById);
+                if(!entry) return null;
+                const position = (channel.items || []).findIndex(candidate =>
+                    candidate === item || (candidate.nodeId && candidate.nodeId === item.nodeId));
+                return {...entry, ordinal: ordinalBase[channelIndex] + Math.max(0, position) + 1};
+            })
+            .filter(Boolean));
+
         const media = [];
         const texts = [];
         const references = [];
-        entries.forEach(entry => {
-            if(!entry) return;
-            if(entry.kind === 'text'){
-                if(String(entry.text || '').trim()) texts.push(String(entry.text).trim());
-                return;
-            }
-            media.push(entry);
-            references.push({kind: entry.kind, nodeId: entry.nodeId});
+        const ordinalMap = new Map();
+        channelItems.forEach(list => {
+            list.forEach(entry => {
+                if(entry.kind === 'text'){
+                    if(String(entry.text || '').trim()) texts.push(String(entry.text).trim());
+                    return;
+                }
+                // 该行内的 1-based 参考图序号，就是重写后的 @图片N
+                ordinalMap.set(entry.ordinal, {position: media.length + 1, kind: entry.kind});
+                media.push(entry);
+                references.push({kind: entry.kind, nodeId: entry.nodeId, ordinal: entry.ordinal});
+            });
         });
+
         const rowText = model.buildRowPrompt(texts, '', state.columns
             .map((name, columnIndex) => model.cellText(row[columnIndex]))
             .filter(value => value.trim()).join('\n'));
+        const rawPrompt = model.buildRowPrompt(upstreamTexts, node.tablePrompt || '', rowText);
+        const rewritten = model.rewriteMentions(rawPrompt, ordinalMap);
         return {
             rowNumber: rowIndex + 1,
-            entries,
+            channelItems,
+            entries: channelItems.map(list => list[0] || null),
             media,
             text: rowText,
             references,
-            prompt: model.buildRowPrompt(upstreamTexts, node.tablePrompt || '', rowText)
+            prompt: rewritten.text,
+            rawPrompt,
+            // 该行引用了它拿不到的素材：批量执行前必须拦下来，不能静默发出去
+            danglingMentions: rewritten.dangling
         };
     });
 }
 
-function tableChannelModeLabel(mode){ return mode === 'sequence' ? '逐行' : '共享'; }
+function tableChannelModeLabel(mode){
+    const model = novaTableModel();
+    return model ? model.channelModeLabel(mode) : mode;
+}
 
+// 表头点一下循环：逐行 → 全部 → 沿用 → 逐行（顺序取模型的 CHANNEL_MODES）
 function toggleTableChannelMode(node, channelIndex){
+    const model = novaTableModel();
     const channels = ensureTableChannels(node);
     const channel = channels[channelIndex];
-    if(!channel) return;
+    if(!model || !channel) return;
+    const cycle = model.CHANNEL_MODES;
     const modes = node.tableInputChannelModes && typeof node.tableInputChannelModes === 'object' ? node.tableInputChannelModes : {};
-    modes[channel.id] = channel.mode === 'sequence' ? 'shared' : 'sequence';
+    modes[channel.id] = cycle[(Math.max(0, cycle.indexOf(channel.mode)) + 1) % cycle.length];
     node.tableInputChannelModes = modes;
     scheduleSave();
     repaintTable(node);
@@ -7157,31 +7195,43 @@ function tableNodeSignature(node){
 }
 
 // 输入列单元格（DX OS: .table-media-cell）
-function fillTableMediaCell(cell, entry){
-    if(!entry){
-        cell.classList.add('is-empty');
-        return;
-    }
+function tableMediaThumb(entry){
     if(entry.kind === 'text'){
         const text = document.createElement('span');
         text.className = 'table-media-text';
         text.textContent = entry.text;
-        cell.appendChild(text);
-        return;
+        return text;
     }
     if(isMissingAssetUrl(entry.url)){
         const missing = document.createElement('span');
         missing.className = 'table-media-missing';
         missing.textContent = '文件缺失';
-        cell.appendChild(missing);
-        return;
+        return missing;
     }
     const thumb = document.createElement('div');
     thumb.className = 'table-media-thumb';
     if(entry.kind === 'video') thumb.innerHTML = canvasVideoPreviewHtml(entry.url, 256, 'draggable="false"');
     else if(entry.kind === 'audio') thumb.textContent = '音频';
     else thumb.innerHTML = canvasPreviewImgHtml(entry.url, 256, 'draggable="false"');
-    cell.appendChild(thumb);
+    return thumb;
+}
+
+/* 「全部」模式的通道一行会有多张，所以这里收数组。
+   一张时直接放，多张时套一层 stack 让它换行排开。 */
+function fillTableMediaCell(cell, entries){
+    const list = (Array.isArray(entries) ? entries : [entries]).filter(Boolean);
+    if(!list.length){
+        cell.classList.add('is-empty');
+        return;
+    }
+    if(list.length === 1){
+        cell.appendChild(tableMediaThumb(list[0]));
+        return;
+    }
+    const stack = document.createElement('div');
+    stack.className = 'table-media-stack';
+    list.forEach(entry => stack.appendChild(tableMediaThumb(entry)));
+    cell.appendChild(stack);
 }
 
 /* ────────────────── 表格批量执行（DX OS §4/§5）────────────────── */
@@ -7412,6 +7462,18 @@ async function runTableBatch(genId, options={}){
         return;
     }
 
+    /* 悬空引用必须先拦下来：模型写的是全局输入序号，如果这一行拿不到那张图，
+       发出去就是一条引用不存在素材的提示词，结果必然不对，而且是静默的。 */
+    const danglingRows = runnable.filter(row => Array.isArray(row.danglingMentions) && row.danglingMentions.length);
+    if(danglingRows.length){
+        const detail = danglingRows.slice(0, 3).map(row =>
+            '第 ' + row.rowNumber + ' 行（' + row.danglingMentions.map(item => item.token).join('、') + '）'
+        ).join('；');
+        say('有 ' + danglingRows.length + ' 行的提示词引用了本行没有的素材：' + detail
+            + (danglingRows.length > 3 ? ' 等' : '') + '。请检查参考图分组或行数，改好再运行。');
+        return;
+    }
+
     // 素材校验：缺文件的别发出去
     const issues = [];
     runnable.forEach(row => { tableRowMaterialIssues(row).forEach(issue => issues.push(issue)); });
@@ -7525,9 +7587,17 @@ function llmRunButtonLabel(node){
 /* PR()：物化 —— LLM 的 list 输出变成一个真正的表格节点。
    素材 --ref(toPort: input-N)--> 表格；LLM --flow--> 表格。
    落点按 DX OS l6：源右侧 170px，y 取已有下游的最大值 + 42 避让。 */
-function materializeLlmTable(llmNode, table, groups){
+function materializeLlmTable(llmNode, table, groups, plan){
     const model = novaTableModel();
     if(!model) return null;
+    /* 规划里为每一组指定了用法：per-row → 逐行（行驱动），every-row → 全部（每行都带整组）。
+       这样「多张参考图 → 多行」和「多张白底图 → 每行都带」是自动落下来的，
+       用户不切模式也能对；表头仍可手动覆盖。 */
+    const planModes = model.planGroupModes(plan, groups.length);
+    const channelModes = {};
+    groups.forEach((group, index) => {
+        if(model.CHANNEL_MODES.includes(planModes[index])) channelModes[model.channelIdAt(index)] = planModes[index];
+    });
     const height = Math.max(320, Math.min(model.MAX_NODE_HEIGHT, 38 + table.rows.length * 88));
     let y = llmNode.y || 0;
     (connections || []).filter(conn => conn.from === llmNode.id).forEach(conn => {
@@ -7547,6 +7617,7 @@ function materializeLlmTable(llmNode, table, groups){
         tableInputColumnsDetached: true,
         tableInputsConnectionDriven: true,
         tableInputChannelCount: Math.max(1, groups.length),
+        tableInputChannelModes: channelModes,
         llmGeneratedOutput: true,
         llmSourceId: llmNode.id,
         llmRunAt: nowMs()
@@ -7738,16 +7809,17 @@ function renderTableBody(node){
         }
 
         state.rows.forEach((row, rowIndex) => {
-            const data = rowData[rowIndex] || {entries:[], media:[], text:'', prompt:''};
-            const entries = data.entries || [];
+            const data = rowData[rowIndex] || {channelItems:[], entries:[], media:[], text:'', prompt:''};
+            const channelItems = data.channelItems || [];
+            const flatEntries = channelItems.reduce((all, list) => all.concat(list || []), []);
             const tr = document.createElement('tr');
             tr.dataset.row = String(rowIndex);
             if(picked.has(rowIndex)) tr.classList.add('is-selected');
-            // 该行组装后真正会发出去的提示词，挂在 title 上方便核对
+            // 该行组装后真正会发出去的提示词（@图片N 已重编号），挂在 title 上方便核对
             if(data.prompt) tr.title = data.prompt;
             const dataValues = state.columns.map((name, index) => model.cellText(row[index]));
-            const inputTexts = entries.filter(entry => entry && entry.kind === 'text').map(entry => entry.text);
-            const hasMedia = entries.some(entry => entry && entry.kind && entry.kind !== 'text');
+            const inputTexts = flatEntries.filter(entry => entry && entry.kind === 'text').map(entry => entry.text);
+            const hasMedia = flatEntries.some(entry => entry && entry.kind && entry.kind !== 'text');
             tr.style.height = model.rowHeightForRow(dataValues, inputTexts, hasMedia) + 'px';
 
             // 输入列单元格：这一列就是连线的放置目标（data-channel 供 toPort 落点识别）
@@ -7755,7 +7827,7 @@ function renderTableBody(node){
                 const cell = document.createElement('td');
                 cell.className = 'table-cell table-media-cell';
                 cell.dataset.channel = channel.id;
-                fillTableMediaCell(cell, entries[index] || null);
+                fillTableMediaCell(cell, channelItems[index] || []);
                 tr.appendChild(cell);
             });
 
@@ -14246,7 +14318,7 @@ async function runLLMListMode(node, opts={}){
         // ① 规划遍：只做规划，不要输出最终 rows。规划失败不致命，直接进生成遍
         let plan = null;
         try {
-            const planText = await callCanvasLLM(node, model.buildListPlanPrompt(requirement, inputs), [], {cascadeTargetId, noMedia:true});
+            const planText = await callCanvasLLM(node, model.buildListPlanPrompt(requirement, inputs, groups), [], {cascadeTargetId, noMedia:true});
             plan = model.extractJsonObject(planText);
         } catch(error){
             plan = null;
@@ -14257,7 +14329,7 @@ async function runLLMListMode(node, opts={}){
         // ② 生成遍
         node.llmRunStage = 'generating';
         refreshNodes([node.id]);
-        let answer = await callCanvasLLM(node, model.buildListGeneratePrompt(requirement, inputs, plan), [], {cascadeTargetId, noMedia:true});
+        let answer = await callCanvasLLM(node, model.buildListGeneratePrompt(requirement, inputs, groups, plan), [], {cascadeTargetId, noMedia:true});
 
         // ③ 解析校验 a6；不过就 ④ 带 8192 token 修复重试一次
         let table = null;
@@ -14275,7 +14347,7 @@ async function runLLMListMode(node, opts={}){
         }
 
         // ⑤ 物化
-        const created = materializeLlmTable(node, table, groups);
+        const created = materializeLlmTable(node, table, groups, plan);
         node.outputText = answer;
         node.llmRunStage = '';
         node.running = false;
