@@ -98,7 +98,8 @@
 .table-node-table col.table-actions-column { width: 44px; }
 .table-node-table col.table-data-column { width: 132px; }
 
-/* 默认全部居中；只有长文本列（提示词/画面描述）左对齐，长句居中没法读。 */
+/* 默认全部居中；只有长文本列（提示词/画面描述）左对齐，长句居中没法读。
+   纵向也居中：行高被同行的图片撑高时，短值（时长/运镜）不会贴在格子顶上。 */
 .table-node-table th,
 .table-node-table td {
     position: relative;
@@ -107,7 +108,7 @@
     border-bottom: 1px solid var(--border);
     overflow: hidden;
     text-align: center;
-    vertical-align: top;
+    vertical-align: middle;
 }
 
 .table-node-table th.is-text-column,

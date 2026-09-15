@@ -46,7 +46,7 @@ ok(canvas.includes("removeIcon.dataset.lucide = 'trash-2'"), '图标用 Lucide t
 ok(/refreshIcons\(\);\s*node\._tableSignature/.test(canvas), 'paint 结束刷新图标（repaintTable 不走 render()）');
 ok(canvas.includes('const TABLE_TEXT_COLUMN_CHARS = 18;'), '长文本列阈值有常量');
 ok(canvas.includes('if(textColumns[index]) cell.classList.add(\'is-text-column\')'), '数据列按长文本打 is-text-column');
-ok(/\.table-node-table th,[\s\S]*?text-align: center;/.test(css), '表格默认居中');
+ok(/\.table-node-table th,[\s\S]*?text-align: center;\s*vertical-align: middle;/.test(css), '表格内容水平+纵向都居中');
 ok(/\.table-node-table th\.is-text-column,[\s\S]*?td\.is-text-column \{ text-align: left; \}/.test(css), '长文本列左对齐');
 ok(css.includes('.table-row-delete svg { width: 14px; height: 14px; }'), '图标尺寸固定');
 ok(canvas.includes('colSpan = channels.length + state.columns.length + 2'), '空表提示行跨了新增的删除列');
