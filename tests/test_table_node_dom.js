@@ -76,7 +76,7 @@ const api = new Function(
     ' generatorUpstreamTables, renderTableBatchPanel, paintTableBatchPanel, tableRowRefs, tableRowMaterialIssues,' +
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel,' +
-    ' normalizeTableNodeHeight};'
+    ' normalizeTableNodeHeight, tableScaleOf, tableNaturalSize, applyTableScale};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
@@ -387,6 +387,37 @@ byClass(panelPick, 'table-batch-row')[0].onclick({ stopPropagation(){} });
 eq(node.table.selectedRows, [1], '隐藏第 1 行后，点列表第一项勾的是第 2 行（下标 1）');
 node.table.selectedRows = node.table.rows.map((row, index) => index);
 node.tableBatchStartRow = 1;
+
+// 整体等比缩放：拖拽宽度 → 缩放比 → 内容等比放大缩小
+{
+    const scaled = api.addTableNode();
+    api.ensureTableState(scaled);
+    api.addTableColumn(scaled);
+    api.addTableRow(scaled);
+    const scaledRoot = api.renderTableBody(scaled);
+    const natural = model.nodeSize(scaled.table, 1).width;
+    api.syncTableNodeWidth(scaled);
+    eq(scaled.w, natural + 24, '默认缩放 1 → 宽度按原尺寸');
+    eq(scaledRoot.style.zoom, '', '默认缩放不写 zoom');
+    scaled.tableScale = 1.5;
+    api.syncTableNodeWidth(scaled);
+    eq(scaled.w, Math.round(natural * 1.5) + 24, '缩放 1.5 → 节点宽度同比放大');
+    api.renderTableBody(scaled);
+    eq(scaledRoot.style.zoom, '1.5', 'zoom 落到表格根（布局级缩放，字号/列宽/图片一起变）');
+    const cappedMax = Number(String(one(scaledRoot, 'table-node-grid').style.maxHeight).replace('px', ''));
+    ok(cappedMax < model.MAX_NODE_HEIGHT - 66, '表格区高度上限按缩放换算：' + cappedMax);
+    scaled.tableScale = 2;
+    api.renderTableBody(scaled);
+    eq(String(one(scaledRoot, 'table-node-grid').style.maxHeight), Math.round((model.MAX_NODE_HEIGHT - 66) / 2) + 'px', '缩放 2 → 上限减半');
+    eq(api.tableScaleOf({tableScale:99}), model.TABLE_SCALE_MAX, '上限钳制 ' + model.TABLE_SCALE_MAX);
+    eq(api.tableScaleOf({tableScale:0.01}), model.TABLE_SCALE_MIN, '下限钳制 ' + model.TABLE_SCALE_MIN);
+    eq(api.tableScaleOf({tableScale:0}), 1, '非法缩放回落 1');
+    eq(api.tableScaleOf({}), 1, '未设缩放 → 1');
+    eq(api.tableScaleOf(null), 1, '空节点 → 1');
+    scaled.tableScale = 1;
+    api.renderTableBody(scaled);
+    eq(scaledRoot.style.zoom, '', '回到 1 → 清掉 zoom');
+}
 
 // 历史固定高度清理（行少时底部留白的根因）
 {

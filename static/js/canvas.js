@@ -6882,16 +6882,33 @@ function addTableNode(point){
     });
 }
 
-// DX OS 的 nodeSize 只算表格本体，node-body 另有左右各 12px 内边距，这里补回。
-function syncTableNodeWidth(node){
+function tableScaleOf(node){
     const model = novaTableModel();
-    if(!model) return;
+    return model ? model.clampTableScale(node && node.tableScale) : 1;
+}
+
+// 表格未缩放时的本体尺寸（DX OS 的 Yw）
+function tableNaturalSize(node){
+    const model = novaTableModel();
     const state = ensureTableState(node);
-    if(!state) return;
+    if(!model || !state) return {width:280, height:0};
     const inputColumns = Array.isArray(node.tableInputChannels) ? node.tableInputChannels.length : 0;
-    node.w = model.nodeSize(state, inputColumns).width + 24;
+    return model.nodeSize(state, inputColumns);
+}
+
+// 节点宽度 = 表格本体宽 × 缩放比 + node-body 左右内边距（内边距不参与缩放）
+function syncTableNodeWidth(node){
+    const size = tableNaturalSize(node);
+    node.w = Math.round(size.width * tableScaleOf(node)) + 24;
     const host = document.querySelector('.node[data-id="' + node.id + '"]');
     if(host) host.style.width = node.w + 'px';
+}
+
+// 把缩放比落到 DOM：zoom 作用于布局，字号/列宽/图片/行高会一起等比缩放
+function applyTableScale(node, root){
+    if(!root) return;
+    const scale = tableScaleOf(node);
+    root.style.zoom = scale === 1 ? '' : String(scale);
 }
 
 function repaintTable(node){
@@ -7216,7 +7233,8 @@ function tableNodeSignature(node){
     const incoming = tableIncomingConnections(node)
         .map(conn => conn.from + '>' + String(conn.toPort || ''))
         .sort().join(',');
-    return [incoming, ensureTableChannels(node).length, state.columns.length, state.rows.length].join('|');
+    // 缩放比也要进签名：改了缩放必须触发重绘，否则 zoom / 高度上限是旧的
+    return [incoming, ensureTableChannels(node).length, state.columns.length, state.rows.length, tableScaleOf(node)].join('|');
 }
 
 // 输入列单元格（DX OS: .table-media-cell）
@@ -7816,7 +7834,6 @@ function renderTableBody(node){
 
     const grid = document.createElement('div');
     grid.className = 'table-node-grid';
-    grid.style.maxHeight = (model.MAX_NODE_HEIGHT - 66) + 'px';
     root.appendChild(grid);
 
     const table = document.createElement('table');
@@ -7835,6 +7852,11 @@ function renderTableBody(node){
     function paint(){
         const state = ensureTableState(node);
         if(!state) return;
+        // 整体缩放：zoom 作用于布局，字号/列宽/图片/行高一起等比变
+        const scale = tableScaleOf(node);
+        applyTableScale(node, root);
+        // 表格区高度上限按缩放换算，保证视觉上限稳定
+        grid.style.maxHeight = Math.round((model.MAX_NODE_HEIGHT - 66) / scale) + 'px';
         const nodeById = new Map((nodes || []).map(item => [item.id, item]));
         const channels = ensureTableChannels(node);
         const rowData = tableRowInputs(node, {nodeById});
@@ -17141,6 +17163,23 @@ function onNodeResize(e){
     const min = defaultNodeSize(resizeNode.node.type);
     const nextW = Math.max(Math.min(min.w, 220), resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
     const nextH = Math.max(96, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
+    /* 表格节点：不设固定高度，而是把拖拽宽度换算成「整体缩放比」——
+       列宽、字号、图片、行高一起等比变，高度由缩放后的内容决定，所以不会留白。 */
+    if(resizeNode.node.type === 'table'){
+        const model = novaTableModel();
+        const natural = tableNaturalSize(resizeNode.node);
+        resizeNode.node.tableScale = model ? model.clampTableScale(nextW / natural.width) : 1;
+        syncTableNodeWidth(resizeNode.node);
+        const tableEl = nodesEl.querySelector('.node[data-id="' + resizeNode.node.id + '"]');
+        if(tableEl){
+            applyTableScale(resizeNode.node, tableEl.querySelector('.table-node'));
+            tableEl.style.width = resizeNode.node.w + 'px';
+        }
+        scheduleLinksRender();
+        renderSelectionHub();
+        scheduleMinimapRender();
+        return;
+    }
     resizeNode.node.w = Math.round(nextW);
     resizeNode.node.h = Math.round(nextH);
     const el = nodesEl.querySelector(`.node[data-id="${resizeNode.node.id}"]`);
