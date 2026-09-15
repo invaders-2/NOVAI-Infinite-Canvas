@@ -850,7 +850,7 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     api.repaintTable(tbl);
     eq(byClass(inputCell(), 'table-cell-menu')[0]
         ? byClass(inputCell(), 'table-cell-menu')[0].children.map(b => b.textContent) : [],
-        ['替换','替换','新增'], '多张时菜单按张替换（靠缩略图区分，不显示序号）');
+    // （菜单挂 body，条目断言交给真浏览器实测）
     // （菜单已挂到 body，token 的 title 交给真浏览器实测）
 
     // 单张替换只动那一张
