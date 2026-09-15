@@ -742,7 +742,7 @@ body.canvas-port-linking .port { opacity:1; pointer-events:auto; }
 .llm-bubble { max-width:86%; border-radius:var(--radius-md); padding:7px 9px; font-size:12px; line-height:1.45; white-space:pre-wrap; user-select:text; cursor:text; }
 .llm-bubble.user { align-self:flex-end; background:var(--accent); color:var(--text-on-accent); }
 .llm-bubble.assistant { align-self:flex-start; background:var(--surface); color:var(--text); border:1px solid transparent; }
-.llm-output-wrap { position:relative; min-height:70px; flex:0 0 auto; }
+.llm-output-wrap { position:relative; min-height:70px; height:var(--llm-output-h, 150px); flex:0 0 var(--llm-output-h, 150px); }
 .llm-output { width:100%; height:100%; overflow:auto; border:1px solid transparent; border-radius:var(--radius-md); background:var(--surface-2); padding:30px 10px 10px; font-size:12px; line-height:1.5; color:var(--text); white-space:pre-wrap; user-select:text; cursor:text; }
 .llm-pane-label { flex:0 0 auto; color:var(--text-3); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
 .llm-pane-label-row { display:flex; align-items:center; justify-content:space-between; flex:0 0 auto; }
@@ -758,7 +758,9 @@ body.canvas-port-linking .port { opacity:1; pointer-events:auto; }
 .llm-pane-resizer { height:12px; flex:0 0 12px; display:flex; align-items:center; justify-content:center; cursor:row-resize; touch-action:none; position:relative; }
 .llm-pane-resizer::before { content:""; width:40px; height:2px; border-radius:var(--radius-full); background:rgba(0,0,0,.15); opacity:1; transition:all .18s var(--ease); }
 .llm-pane-resizer:hover::before { width:56px; background:rgba(0,0,0,.25); }
-.node.sized.llm-node .llm-output-wrap { flex:1; min-height:0; }
+/* 有固定高度的节点：输出区吃掉剩余高度。
+   否则剩余高度会被 .gen-run-row 的 margin-top:auto 推成「按钮上方一段空白」。 */
+.node.sized.llm-node .llm-output-wrap { flex:1 1 var(--llm-output-h, 150px); height:auto; min-height:70px; }
 .theme-dark .llm-pane-resizer::before { background:rgba(255,255,255,.15); }
 .theme-dark .llm-pane-resizer:hover::before { background:rgba(255,255,255,.25); }
 .node.sized.llm-node .llm-node-pane,
@@ -771,7 +773,7 @@ body.canvas-port-linking .port { opacity:1; pointer-events:auto; }
 .llm-run-row .llm-mode { flex:0 0 auto; }
 .llm-run-row .llm-mode button { padding:0 8px; white-space:nowrap; }
 .llm-run-row .llm-run,
-.node.sized.llm-node .llm-run-row .llm-run { flex:1 1 auto; width:auto; min-width:96px; margin-top:0; }
+.node.sized.llm-node .llm-run-row .llm-run { flex:0 0 auto; width:auto; min-width:0; margin-top:0; margin-left:auto; padding:0 18px; }
 .llm-sys-toggle { flex:0 0 auto; height:28px; border-radius:var(--radius-full); padding:0 10px; border:1px solid transparent; background:var(--surface-2); color:var(--text-3); font-size:10px; font-weight:500; white-space:nowrap; transition:background .14s,color .14s,border-color .14s; }
 .llm-sys-toggle.active { background:var(--accent); color:var(--text-on-accent); border-color:var(--text); }
 .theme-dark .llm-sys-toggle { background:var(--soft); border-color:var(--line); color:var(--faint); }

@@ -9742,11 +9742,11 @@ function renderLLMNodePane(container, node){
         <textarea class="llm-input-area llm-input-output" style="height:${inputHeight}px; flex:0 0 ${inputHeight}px;" ${isReadonly ? 'readonly' : ''} placeholder="${inputPlaceholder}">${escapeHtml(inputValue)}</textarea>
         <div class="llm-pane-resizer" title="${tr('canvas.resizePanes')}"></div>
         <div class="llm-pane-label">Output</div>
-        <div class="llm-output-wrap" style="height:${outputHeight}px; flex:0 0 ${outputHeight}px;">
+        <div class="llm-output-wrap" style="--llm-output-h:${outputHeight}px;">
             <button class="llm-copy-btn llm-output-copy" type="button" title="复制"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
             <div class="llm-output llm-result-output">${escapeHtml(node.outputText || tr('canvas.llmOutputEmpty'))}</div>
         </div>
-        <div class="gen-run-row mt-2">
+        <div class="gen-run-row">
             <div class="llm-run-row">
                 <div class="llm-mode llm-output-mode" role="group" aria-label="LLM 输出形式">${llmOutputModeButtonsHtml(node)}</div>
                 <button class="llm-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="play" class="w-4 h-4"></i>${llmRunButtonLabel(node)}</button>
@@ -9990,15 +9990,14 @@ function onLLMPaneResize(e){
     const el = nodesEl.querySelector(`.node[data-id="${llmPaneDrag.node.id}"]`);
     if(el){
         const inputEl = el.querySelector('.llm-input-output');
-        const outputEl = el.querySelector('.llm-result-output');
+        const outputWrap = el.querySelector('.llm-output-wrap');
         if(inputEl){
             inputEl.style.height = `${llmPaneDrag.node.llmInputHeight}px`;
             inputEl.style.flexBasis = `${llmPaneDrag.node.llmInputHeight}px`;
         }
-        if(outputEl){
-            outputEl.style.height = `${llmPaneDrag.node.llmOutputHeight}px`;
-            outputEl.style.flexBasis = `${llmPaneDrag.node.llmOutputHeight}px`;
-        }
+        /* 输出高度只改 CSS 变量：节点有固定高度时它是 flex:1（吃掉剩余高度、不给按钮上方留空），
+           自动高度时才按拖出来的值固定。把高度写死到内层元素会把这两种情况一起压死。 */
+        if(outputWrap) outputWrap.style.setProperty('--llm-output-h', `${llmPaneDrag.node.llmOutputHeight}px`);
     }
 }
 function llmInputText(node){
