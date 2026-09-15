@@ -6409,14 +6409,18 @@ function renderNode(node){
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
     normalizeTableNodeHeight(node);
+    /* 表格节点永远由内容决定高度：不套用 node.h，也不带 sized。
+       sized 会让 .node-body 变成 flex:1，把表格区撑开、下方留一片空白。
+       这一条与历史数据、手动拖拽都无关，从渲染层直接断掉。 */
+    const tableAutoHeight = node.type === 'table';
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
-    const hasFixedSize = Boolean(node.h || size.h);
+    const hasFixedSize = !tableAutoHeight && Boolean(node.h || size.h);
     el.className = `node ${node.type}-node ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${canvasGroupMemberIndex.has(node.id) ? 'canvas-group-member' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
     el.style.width = `${node.w || size.w}px`;
-    if(node.h || size.h) el.style.height = `${node.h || size.h}px`;
+    if(!tableAutoHeight && (node.h || size.h)) el.style.height = `${node.h || size.h}px`;
     el.dataset.id = node.id;
     el.onclick = (e) => {
         e.stopPropagation();
@@ -7288,13 +7292,12 @@ function notifyCanvas(text){
     else console.log('[table] ' + text);
 }
 
-/* 早期物化表格时按 DX OS 规范设了固定高度 max(320, ...+行数*88)。
-   行少时节点被撑高（.node.sized .node-body 是 flex:1），表格下方留一片空白。
-   用户没手动调过高度就清掉，改由内容决定；手动调过的（tableHeightUserSet）保留。
+/* 表格节点不用固定高度，一律由内容决定（行少时不留白、行多时表格区自己滚动）。
+   清掉存进画布的历史高度（早期物化时按 DX OS 规范设过 max(320, ...+行数*88)），
    和 renderNode 里 rh 节点清理旧默认高度是同一个套路。 */
 function normalizeTableNodeHeight(node){
     if(!node || node.type !== 'table') return false;
-    if(node.h && !node.tableHeightUserSet){
+    if(node.h){
         delete node.h;
         return true;
     }
@@ -17119,8 +17122,7 @@ function onNodeDrag(e){
 function startNodeResize(e, node){
     e.preventDefault();
     e.stopPropagation();
-    // 用户手动调过表格高度之后就不再自动清除（见 normalizeTableNodeHeight）
-    if(node.type === 'table') node.tableHeightUserSet = true;
+
     const el = nodesEl.querySelector(`.node[data-id="${node.id}"]`);
     const rect = el?.getBoundingClientRect();
     resizeNode = {

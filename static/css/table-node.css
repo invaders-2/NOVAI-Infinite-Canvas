@@ -4,6 +4,16 @@
    规范来源：docs/v2/DXOS_TABLE_SPEC.md
    ═══════════════════════════════════════════════════════════════════════ */
 
+/* 表格节点永远由内容决定高度。
+   canvas.css 里 .node.sized { display:flex } + .node.sized .node-body { flex:1 }
+   会在节点带 sized（设过高度）时把 body 撑满，表格下方就留一片空白。
+   这里用更高特异性压掉 —— 不论 node.h 是什么状态、历史数据还是手动拖过，
+   表格都紧贴内容。 */
+.node.table-node .node-body {
+    flex: 0 0 auto;
+    overflow: visible;
+}
+
 .table-node {
     display: flex;
     flex-direction: column;
@@ -66,7 +76,9 @@
 
 /* ── 表格容器：固定列宽 + 超高时内部滚动 ── */
 .table-node-grid {
-    flex: 1 1 auto;
+    /* 不伸展：高度由内容决定，超高由 max-height + overflow:auto 兜住。
+       flex:1 会把表格区拉满节点，行少时下方留一片空白。 */
+    flex: 0 0 auto;
     min-height: 0;
     overflow: auto;
     border: 1px solid var(--border);
