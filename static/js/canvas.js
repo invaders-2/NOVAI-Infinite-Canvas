@@ -6764,6 +6764,7 @@ function tableCellMoreButton(cell, actions){
     });
     button.onclick = event => { event.stopPropagation(); menu.classList.toggle('is-open'); };
     wrap.appendChild(button);
+    wrap.appendChild(menu);
     cell.appendChild(wrap);
 }
 
