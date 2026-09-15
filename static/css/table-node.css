@@ -280,9 +280,13 @@
     vertical-align: middle;
 }
 
+/* 缩略图保持原始比例：只给上下限，宽高都 auto，浏览器等比缩放。
+   之前是 width:100% + object-fit:cover + max-height:60px —— 竖图会被裁掉上下。 */
 .table-media-thumb {
     width: 100%;
-    max-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     overflow: hidden;
     border-radius: 5px;
     background: var(--surface-2);
@@ -291,10 +295,11 @@
 .table-media-thumb img,
 .table-media-thumb video {
     display: block;
-    width: 100%;
+    width: auto;
     height: auto;
-    max-height: 60px;
-    object-fit: cover;
+    max-width: 100%;
+    max-height: 120px;
+    object-fit: contain;
 }
 
 /* 「全部」模式的通道一行会有多张，换行排开 */
@@ -309,6 +314,10 @@
     flex: 1 1 44%;
     min-width: 40px;
 }
+
+/* 一行多张时每张更小，上限收紧一点免得整格太高 */
+.table-media-stack .table-media-thumb img,
+.table-media-stack .table-media-thumb video { max-height: 64px; }
 
 .table-media-stack .table-media-text,
 .table-media-stack .table-media-missing { flex: 1 1 100%; }

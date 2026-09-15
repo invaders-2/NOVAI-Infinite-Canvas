@@ -7739,7 +7739,8 @@ function materializeLlmTable(llmNode, table, groups, plan){
     groups.forEach((group, index) => {
         if(model.CHANNEL_MODES.includes(planModes[index])) channelModes[model.channelIdAt(index)] = planModes[index];
     });
-    const height = Math.max(320, Math.min(model.MAX_NODE_HEIGHT, 38 + table.rows.length * 88));
+    /* 不设固定高度：行少的时候固定高会把表格区撑开、底部留一大片空白。
+       改成让内容决定高度，表格区自身有 max-height + 滚动，长表也不会无限长。 */
     let y = llmNode.y || 0;
     (connections || []).filter(conn => conn.from === llmNode.id).forEach(conn => {
         const target = (nodes || []).find(item => item.id === conn.to);
@@ -7752,7 +7753,6 @@ function materializeLlmTable(llmNode, table, groups, plan){
         x: (llmNode.x || 0) + (llmNode.w || 420) + 170,
         y,
         w: 520,
-        h: height,
         table,
         tableInputColumn: true,
         tableInputColumnsDetached: true,

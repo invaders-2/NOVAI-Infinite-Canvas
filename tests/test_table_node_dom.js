@@ -436,7 +436,7 @@ missingUrls.delete('/gone.png');
     eq(created.llmSourceId, 'llm1', '溯源到 LLM');
     eq(created.x, 1000 + 420 + 170, '落在源右侧 170px');
     eq(created.y, 100, '没有下游时 y 与源对齐');
-    eq(created.h, 320, '高度：38+2*88 被 320 下限托住');
+    eq(created.h, undefined, '不设固定高度（行少时不会在底部留白）');
     eq(created.tableInputChannelCount, 2, '通道数与媒体组数一致');
 
     const intoCreated = connections.filter(c => c.to === created.id);
