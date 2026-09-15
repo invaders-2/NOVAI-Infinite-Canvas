@@ -108,25 +108,21 @@ eq(M.channelIndexFromId('nope'), -1, '非法 id');
 eq(M.channelLabel(0), '输入 1', '通道表头文案');
 eq(M.channelModeFor([]), 'shared', '0 个引用 → 共享');
 eq(M.channelModeFor([1]), 'shared', '1 个引用 → 共享');
-eq(M.channelModeFor([1, 2]), 'sequence', '>1 个引用 → 逐行（DX OS: refs.length > 1）');
-/* 自动推导带上行数：逐行 = 一行取一张，素材比行数多时多出来的永远进不了任何行
-   （表头写 4 张、每行只有 1 张），这时必须落「全部」。 */
-eq(M.channelModeFor([1,2,3,4], {rowCount:2}), 'all', '素材多于行数 → 整组共用，不丢素材');
-eq(M.channelModeFor([1,2,3,4], {rowCount:4}), 'sequence', '素材数 = 行数 → 逐行 1:1');
-eq(M.channelModeFor([1,2,3,4], {rowCount:9}), 'sequence', '素材少于行数 → 仍是逐行（超出为空，DX OS 原样）');
-eq(M.channelModeFor([1,2,3,4], {rowCount:0}), 'sequence', '行数未知 → 保持 DX OS 原样');
-eq(M.channelModeFor([1], {rowCount:9}), 'shared', '1 个素材 → 沿用');
-// 丢素材到底丢在哪：逐行 + 2 行只取得到前 2 张
+/* 参考栏（输入列）一律默认「沿用」：一行一张，行数超出后沿用最后一张。
+   不再按 refs.length 摊成「逐行」，也不再自动切「全部」。 */
+eq(M.channelModeFor([1, 2]), 'shared', '>1 个引用也是沿用（不再自动逐行）');
+eq(M.channelModeFor([1,2,3,4], {rowCount:2}), 'shared', '素材多于行数同样是沿用');
+eq(M.channelModeFor([1,2,3,4], {rowCount:9}), 'shared', '素材少于行数同样是沿用');
+// 「沿用」的落格：一行一张，行数超出后沿用最后一个
 {
   const items = ['a','b','c','d'].map(nodeId => ({type:'media', nodeId, text:''}));
-  const seqPicked = [];
-  const allPicked = [];
-  for(let row = 0; row < 2; row += 1){
-    seqPicked.push(...M.inputItemsForRow({mode:'sequence', items}, row).map(i => i.nodeId));
-    allPicked.push(...M.inputItemsForRow({mode:'all', items}, row).map(i => i.nodeId));
+  const picked = [];
+  for(let row = 0; row < 5; row += 1){
+    picked.push(M.inputItemsForRow({mode:'shared', items}, row).map(i => i.nodeId).join(''));
   }
-  eq(seqPicked, ['a','b'], '逐行 + 2 行只用得到前 2 张（所以不能自动推成逐行）');
-  eq(allPicked, ['a','b','c','d','a','b','c','d'], '整组共用一张都不落下');
+  eq(picked, ['a','b','c','d','d'], '沿用：1-4 行各取一张，第 5 行沿用第 4 张');
+  // 「全部」仍然可显式指定（分镜表规划的 every-row 会写它），只是不再自动推导
+  eq(M.inputItemsForRow({mode:'all', items}, 0).map(i => i.nodeId), ['a','b','c','d'], '「全部」= 每行整组（显式指定时）');
 }
 
 eq(M.normalizeChannels(null), [], '非数组 → 空');

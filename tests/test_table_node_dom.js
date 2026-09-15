@@ -131,13 +131,12 @@ nodes.push({id:'img3', type:'image', url:'/c.png'});
 api.renderTableBody(node);
 eq(byClass(root, 'table-input-column').length, 1, '仍然 1 个输入列');
 eq(one(root, 'table-input-count').textContent, '3', '输入数 3');
-eq(one(root, 'table-input-mode').textContent, '逐行', '3 个引用 → 自动逐行对应');
+eq(one(root, 'table-input-mode').textContent, '沿用', '参考栏默认沿用（一行一张）');
 
 api.addTableColumn(node);
 api.addTableRow(node);
 api.addTableRow(node);
-/* 3 张素材 / 2 行时自动推导是「整组共用」（逐行会丢第 3 张）；
-   这一节要验的是「逐行」的 1:1 落格，所以显式切过去，E 节开头再切回来验自动推导。 */
+/* 参考栏默认「沿用」（一行一张）；这一节要验的是「逐行」的 1:1 落格，显式切过去。 */
 node.tableInputChannelModes = {'input-1': 'sequence'};
 api.renderTableBody(node);
 eq(byTag(root, 'tbody')[0].children.length, 2, '两行');
@@ -186,10 +185,9 @@ eq(model.inputItemAt(ch2, 0).nodeId, 'img4', 'shared 第 0 行 → 最后/唯一
 eq(model.inputItemAt(ch2, 99).nodeId, 'img4', 'shared 任何行都取最后一个');
 
 // ═══ E. 模式切换（逐行 → 全部 → 沿用 → 逐行） ═══
-/* 自动推导带上行数：3 张素材 / 2 行时不能推成「逐行」，
-   否则第 3 张永远进不了任何行（表头写着 3，行里只会出现 2 张）。 */
+/* 参考栏默认「沿用」：一行一张，素材多出来时不再自动切「全部」。 */
 delete node.tableInputChannelModes['input-1'];
-eq(api.ensureTableChannels(node)[0].mode, 'all', '素材数(3) > 行数(2) → 自动整组共用');
+eq(api.ensureTableChannels(node)[0].mode, 'shared', '参考栏默认沿用');
 // 手动值优先于自动推导，切换循环也只走手动值
 node.tableInputChannelModes = node.tableInputChannelModes || {};
 node.tableInputChannelModes['input-1'] = 'sequence';
@@ -242,21 +240,17 @@ ok(sameEl === root, '始终复用同一个 DOM 根');
   api.renderTableBody(node);
   eq(one(root, 'table-input-count').textContent, '4', '素材回来后数字恢复');
 }
-/* 整列 4 张、模式是「逐行」、表里只有 2 行 → 多出的 2 张永远进不了任何行，
-   必须标出来；只写一个总数会让人以为「4 张都在用」。 */
+/* 参考栏默认沿用 → 一行一张；表头数字仍是整列张数（不代表每行都用得上）。
+   模式变了也必须自己重绘（签名里带模式），不能靠调用方显式 repaintTable。 */
 {
   const savedMode = node.tableInputChannelModes['input-1'];
-  node.tableInputChannelModes['input-1'] = 'sequence';
-  api.renderTableBody(node);
-  const headCell = byClass(root, 'table-input-head')[0];
-  const badge = one(headCell, 'table-input-count');
-  eq(badge.textContent, '4', '表头数字仍是整列总数');
-  ok(badge.classList.contains('is-lossy'), '有素材被丢 → 表头标红');
-  ok(String(badge.title || '').indexOf('不会进入任何行') >= 0, '提示说明多出来的素材去哪了');
   node.tableInputChannelModes['input-1'] = 'all';
   api.renderTableBody(node);
-  const allBadge = one(byClass(root, 'table-input-head')[0], 'table-input-count');
-  ok(!allBadge.classList.contains('is-lossy'), '整组共用时不提示（没有素材被丢）');
+  eq(one(byClass(root, 'table-input-head')[0], 'table-input-mode').textContent, '全部', '模式变化触发重绘（表头文案更新）');
+  eq(one(root, 'table-input-count').textContent, '4', '表头数字是整列张数');
+  node.tableInputChannelModes['input-1'] = 'shared';
+  api.renderTableBody(node);
+  eq(one(byClass(root, 'table-input-head')[0], 'table-input-mode').textContent, '沿用', '切回沿用同样立刻生效');
   node.tableInputChannelModes['input-1'] = savedMode;
   api.renderTableBody(node);
 }
@@ -308,7 +302,7 @@ eq(model.danglingMentions('@图片5', [{kind:'image'}]).length, 1, '越界引用
 eq(model.danglingMentions('@视频1', [{kind:'image'}]).length, 1, '类型不符报出');
 eq(model.mentionTokenAt('video', 2), '@视频2', 'mention 文案');
 eq(model.channelModeFor([]), 'shared', '0 个 → 共享');
-eq(model.channelModeFor([1, 2]), 'sequence', '>1 个 → 逐行');
+eq(model.channelModeFor([1, 2]), 'shared', '>1 个 → 沿用（参考栏默认一行一张）');
 eq(model.normalizeChannels('bad'), [], '非法通道输入 → 空');
 
 
@@ -561,7 +555,7 @@ missingUrls.delete('/gone.png');
     eq(channels[0].items.map(i => i.nodeId), ['imgA'], '第 1 通道是单图');
     eq(channels[0].mode, 'shared', '单图 → 共享');
     eq(channels[1].items.map(i => i.nodeId), ['imgB','imgC'], '第 2 通道是 group 成员');
-    eq(channels[1].mode, 'sequence', '两张 → 逐行对应');
+    eq(channels[1].mode, 'shared', '两张 → 沿用（参考栏默认一行一张）');
     eq(api.tableUpstreamTexts(created), [], 'LLM 节点不进上游文本');
 
     // 按钮文案

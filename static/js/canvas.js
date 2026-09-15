@@ -6522,10 +6522,6 @@ function ensureTableChannels(node){
     const declared = Math.max(0, Number(node.tableInputChannelCount) || 0);
     const highest = buckets.size ? Math.max.apply(null, Array.from(buckets.keys())) + 1 : 0;
     const count = Math.max(1, declared, highest);
-    /* 自动推导要带上行数：素材比行多时「逐行」会静默丢掉多出来的素材。
-       手动值（用户点表头 / 规划写入）永远优先，不受影响。 */
-    const tableState = ensureTableState(node);
-    const rowCount = tableState ? tableState.rows.length : 0;
     const manualModes = node.tableInputChannelModes && typeof node.tableInputChannelModes === 'object' ? node.tableInputChannelModes : {};
     const channels = [];
     for(let index = 0; index < count; index += 1){
@@ -6534,8 +6530,8 @@ function ensureTableChannels(node){
         const manual = manualModes[id];
         channels.push({
             id,
-            // 手动值优先（表头可切换，物化时也会按规划写入），否则按条目数 + 行数推导
-            mode: model.CHANNEL_MODES.includes(manual) ? manual : model.channelModeFor(items, {rowCount}),
+            // 手动值优先（表头可切换，物化时也会按规划写入），否则默认「沿用」
+            mode: model.CHANNEL_MODES.includes(manual) ? manual : model.channelModeFor(items),
             items
         });
     }
@@ -7451,16 +7447,6 @@ function renderTableBody(node){
             const count = document.createElement('small');
             count.className = 'table-input-count';
             count.textContent = String(channel.items.length);
-            /* 逐行/沿用 一行只取一张：整列素材比行数多的时候，多出来的那几张
-               永远不会进入任何行（模型按整列写的 @图片N 也跟着悬空）。
-               表头只写一个总数会让人以为「4 张都在用」，这里必须说出来。 */
-            const droppedItems = channel.items.length - state.rows.length;
-            if(channel.mode !== 'all' && droppedItems > 0){
-                count.classList.add('is-lossy');
-                count.title = '本列共 ' + channel.items.length + ' 张，当前模式一行只取 1 张，表格只有 '
-                    + state.rows.length + ' 行，多出的 ' + droppedItems + ' 张不会进入任何行。'
-                    + '切到「全部」可让每一行都带上整列素材。';
-            }
             cell.appendChild(count);
             headRow.appendChild(cell);
         });

@@ -236,17 +236,14 @@
         return Number.isInteger(ordinal) && ordinal >= 1 ? ordinal - 1 : -1;
     }
 
-    /* DX OS: refs.length > 1 ? "sequence" : "shared"
-       但「逐行」是一行只取一张：整列素材比行数还多的时候，多出来的那几张
-       永远不会进入任何行，模型按整列写的 @图片N 也跟着悬空 ——
-       这种情况下「整组共用」才是唯一不丢素材的默认值。
-       rowCount 未知（0）时保持 DX OS 原样。 */
-    function channelModeFor(refs, options){
-        const count = Array.isArray(refs) ? refs.length : 0;
-        if(count <= 1) return 'shared';
-        const rowCount = Math.max(0, Number(options && options.rowCount) || 0);
-        if(rowCount > 0 && count > rowCount) return 'all';
-        return 'sequence';
+    /* 参考栏（输入列）默认「沿用」：一行取一张，行数超出后沿用最后一张。
+       这里原来照搬 DX OS 的 refs.length > 1 ? "sequence" : "shared" ——
+       >1 张就自动「逐行」，等于把参考栏拆成一列一张；实际用起来参考栏
+       「一行一张、多的沿用最后一张」就够，不需要自动摊开。
+       「逐行 / 全部」仍是显式可选项；分镜表规划里的 every-row 会明确写「全部」
+       （每个镜头都要带上整组角色参考，不能掉成一张），所以模式本身不能删。 */
+    function channelModeFor(){
+        return 'shared';
     }
 
     function channelLabel(index){ return '输入 ' + (Math.max(0, Number(index) || 0) + 1); }
