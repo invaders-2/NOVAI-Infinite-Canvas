@@ -300,9 +300,9 @@
 
 .table-cell-menu {
     display: none;
-    position: absolute;
-    top: calc(100% + 2px);
-    right: 0;
+    position: fixed;
+    left: 0;
+    top: 0;
     z-index: 40;
     min-width: 84px;
     padding: 4px;
@@ -313,6 +313,25 @@
 }
 
 .table-cell-menu.is-open { display: block; }
+
+.table-cell-menu-del {
+    margin-left: auto;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-3);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.table-cell-menu-del:hover { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-text); }
 .table-cell-menu { min-width: 124px; }
 .table-cell-menu .menu-btn { height: 30px; font-size: 10.5px; gap: 7px; white-space: nowrap; }
 .table-cell-menu .menu-btn span { white-space: nowrap; }

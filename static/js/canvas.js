@@ -6774,12 +6774,47 @@ function tableCellMoreButton(cell, actions){
         label.textContent = action.label;
         item.appendChild(label);
         if(action.token) item.title = action.token;
-        item.onclick = event => { event.stopPropagation(); menu.classList.remove('is-open'); action.onClick(); };
+        item.onclick = event => { event.stopPropagation(); closeMenu(); action.onClick(); };
+        if(action.onDelete){
+            const del = stopCellEvent(document.createElement('button'));
+            del.type = 'button';
+            del.className = 'table-cell-menu-del';
+            del.textContent = '✕';
+            del.title = '删除' + (action.token || '这张');
+            del.onclick = event => { event.stopPropagation(); closeMenu(); action.onDelete(); };
+            item.appendChild(del);
+        }
         menu.appendChild(item);
     });
-    button.onclick = event => { event.stopPropagation(); menu.classList.toggle('is-open'); };
+    /* 菜单挂到 body 上做 fixed 定位：留在格子里会被表格滚动区裁掉 ——
+       素材一多，最后那项「新增」就看不见了。 */
+    const closeMenu = () => {
+        menu.classList.remove('is-open');
+        if(menu.parentNode) menu.parentNode.removeChild(menu);
+        document.removeEventListener('mousedown', onOutside, true);
+        document.removeEventListener('keydown', onKey, true);
+    };
+    const onOutside = event => { if(!menu.contains(event.target) && event.target !== button) closeMenu(); };
+    const onKey = event => { if(event.key === 'Escape') closeMenu(); };
+    button.onclick = event => {
+        event.stopPropagation();
+        if(menu.classList.contains('is-open')){ closeMenu(); return; }
+        document.body.appendChild(menu);
+        menu.classList.add('is-open');
+        const box = button.getBoundingClientRect();
+        const width = menu.offsetWidth || 124;
+        const height = menu.offsetHeight || 0;
+        const vw = (window && window.innerWidth) || 0;
+        const vh = (window && window.innerHeight) || 0;
+        const left = Math.min(Math.max(box.right - width, 8), Math.max(8, vw - width - 8));
+        let top = box.bottom + 2;
+        if(height && top + height > vh - 8) top = Math.max(8, box.top - height - 2);
+        menu.style.left = Math.round(left) + 'px';
+        menu.style.top = Math.round(top) + 'px';
+        document.addEventListener('mousedown', onOutside, true);
+        document.addEventListener('keydown', onKey, true);
+    };
     wrap.appendChild(button);
-    wrap.appendChild(menu);
     cell.appendChild(wrap);
 }
 
@@ -6806,6 +6841,22 @@ function replaceTableManualInputItem(node, channelId, row, index, value){
     const key = String(channelId);
     const byRow = store[key] && typeof store[key] === 'object' ? store[key] : (store[key] = {});
     byRow[String(row)] = next;
+    scheduleSave();
+}
+
+/* 删掉这一格里的第 index 张（不动别的） */
+function removeTableManualInputItem(node, channelId, row, index){
+    const list = tableManualInputList(node, channelId, row);
+    if(!(index >= 0 && index < list.length)) return;
+    const next = list.slice();
+    next.splice(index, 1);
+    setTableManualInputItem(node, channelId, row, null);
+    if(next.length){
+        const store = tableManualInputStore(node, true);
+        const key = String(channelId);
+        const byRow = store[key] && typeof store[key] === 'object' ? store[key] : (store[key] = {});
+        byRow[String(row)] = next;
+    }
     scheduleSave();
 }
 
@@ -8055,7 +8106,11 @@ function renderTableBody(node){
                                 onClick: () => pickTableCellFile(picked => {
                                     replaceTableManualInputItem(node, channel.id, rowIndex, itemIndex, picked);
                                     repaintTable(node);
-                                })
+                                }),
+                                onDelete: () => {
+                                    removeTableManualInputItem(node, channel.id, rowIndex, itemIndex);
+                                    repaintTable(node);
+                                }
                             }));
                         } else {
                             actions.push({label:'替换', onClick: () => pickTableCellFile(picked => {

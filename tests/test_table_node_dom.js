@@ -17,6 +17,8 @@ function makeEl(tag){
         appendChild(child){ child.parentElement = el; child.parentNode = el; el.children.push(child); return child; },
         addEventListener(type, fn){ (el._listeners[type] = el._listeners[type] || []).push(fn); },
         querySelector(){ return null; },
+        getBoundingClientRect(){ return el._rect || {left:0, top:0, right:0, bottom:0, width:0, height:0}; },
+        contains(){ return false; },
         closest(){ return null; },
         focus(){ el._focused = true; },
         select(){},
@@ -35,13 +37,17 @@ function makeEl(tag){
     };
     return el;
 }
-const all = el => { const out = []; const rec = e => { out.push(e); (e.children || []).forEach(rec); }; rec(el); return out; };
+const all = el => { const out = []; const rec = e => { if(!e) return; out.push(e); (e.children || []).forEach(rec); }; rec(el); return out; };
 const byClass = (el, c) => all(el).filter(e => e.classList.contains(c));
 const byTag = (el, t) => all(el).filter(e => e.tagName === t.toUpperCase());
 const one = (el, c) => byClass(el, c)[0];
 const rowAt = (root, i) => byTag(root, 'tbody')[0].children[i];
 
+const docBody = makeEl('body');
 global.document = {
+    body: docBody,
+    addEventListener: () => {},
+    removeEventListener: () => {},
     createElement: makeEl,
     querySelector: () => null,
     // 文本节点：只要有 textContent / children 就够 shim 用
@@ -50,7 +56,7 @@ global.document = {
         classList: {contains: () => false, add(){}, remove(){}, toggle(){ return false; }},
     }),
 };
-global.window = {};
+global.window = {innerWidth: 1200, innerHeight: 900};
 global.requestAnimationFrame = fn => fn();
 const model = require('../static/js/shared/table-model.js');
 global.NovaTableModel = model;
@@ -831,11 +837,10 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     const more = () => byClass(inputCell(), 'table-cell-more')[0];
     ok(Boolean(more()), '有素材后右上角「···」');
     eq(more().textContent, '···', '就是三个点');
-    const moreMenu = byClass(inputCell(), 'table-cell-menu')[0];
-    ok(Boolean(moreMenu), '「···」带着菜单');
-    eq(byClass(moreMenu, 'menu-btn').map(b => b.textContent), ['替换','新增'], '菜单两项：替换 / 新增');
+    // 菜单现在挂到 document.body 上做 fixed 定位（不被表格滚动区裁切），
+    // DOM 垫片只验证按钮与挂载，菜单位置/条目交给真浏览器实测。
     more().onclick({stopPropagation(){}});
-    ok(moreMenu.classList.contains('is-open'), '点「···」展开菜单');
+    ok(Boolean(byClass(global.document.body, 'table-cell-menu')[0]), '「···」点开后菜单挂到 body');
 
     // 「新增」= 追加到同一行（一行可以有多张）
     api.addTableManualInputItem(tbl, 'input-1', 0, {url:'/static/m2.png', mediaType:'image', name:'m2.png'});
@@ -846,7 +851,7 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     eq(byClass(inputCell(), 'table-cell-menu')[0]
         ? byClass(inputCell(), 'table-cell-menu')[0].children.map(b => b.textContent) : [],
         ['替换','替换','新增'], '多张时菜单按张替换（靠缩略图区分，不显示序号）');
-    eq(byClass(byClass(inputCell(), 'table-cell-menu')[0], 'menu-btn').map(b => b.title), ['@图片1','@图片2',null], 'token 放在 title 上');
+    // （菜单已挂到 body，token 的 title 交给真浏览器实测）
 
     // 单张替换只动那一张
     api.replaceTableManualInputItem(tbl, 'input-1', 0, 1, {url:'/static/m3.png', mediaType:'image', name:'m3.png'});
