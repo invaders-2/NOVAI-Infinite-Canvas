@@ -80,5 +80,16 @@ ok(model.includes('function batchConcurrency(raw, fallback)'), '可按目标类�
 ok(canvas.includes('<option value="list-video">视频分镜表</option>'), 'LLM 输出模式下拉有「视频分镜表」');
 ok(canvas.includes("model.llmModeTargetKind(node.llmOutputMode) || model.llmTargetKind(listTarget.target_type)"), '显式分镜表优先、否则按下游探测');
 
+console.log('[7] 静态资源版本号（改完 canvas.js / table-model.js 必须同步 +1）');
+const versionOf = src => {
+  const m = new RegExp(src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\?v=([\\d.]+)').exec(html);
+  return m ? Number(m[1].split('.').pop()) : 0;
+};
+[['/static/js/canvas.js', 'static/js/canvas.js'], ['/static/js/shared/table-model.js', 'static/js/shared/table-model.js']].forEach(pair => {
+  const stamp = versionOf(pair[0]);
+  const mtime = Math.floor(require('fs').statSync(pair[1]).mtimeMs / 1000);
+  ok(stamp >= mtime, pair[0] + ' 的 ?v= 不能落后于文件修改时间（v=' + stamp + ' mtime=' + mtime + '）');
+});
+
 console.log(fail ? ('\n失败 ' + fail + ' 项') : '\n全部通过');
 process.exit(fail ? 1 : 0);
