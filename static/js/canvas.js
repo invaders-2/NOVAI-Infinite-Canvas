@@ -6487,6 +6487,122 @@ function tableChannelItem(entry){
     return item;
 }
 
+/* ── 手动塞进参考栏的素材 ────────────────────────────────────────────
+   输入列的内容本来是连线推出来的（ensureTableChannels 每次重绘都重建），
+   所以手动上传的那一份**不能**写进 tableInputChannels，必须单独存：
+     node.tableManualInputItems = { 'input-1': { '0': {url, mediaType, name} } }
+   同一个格子以手动为准 —— 参考栏本来就是「一行一张、沿用」，
+   手动替换的正是这一行的那一张。删掉手动项就回到连线推出来的那张。 */
+function tableManualInputStore(node, create){
+    if(!node.tableManualInputItems || typeof node.tableManualInputItems !== 'object'){
+        if(!create) return null;
+        node.tableManualInputItems = {};
+    }
+    return node.tableManualInputItems;
+}
+
+function tableManualInputItem(node, channelId, row){
+    const store = tableManualInputStore(node, false);
+    const byRow = store ? store[String(channelId)] : null;
+    const item = byRow ? byRow[String(row)] : null;
+    return item && item.url ? item : null;
+}
+
+function setTableManualInputItem(node, channelId, row, value){
+    const store = tableManualInputStore(node, true);
+    const key = String(channelId);
+    const byRow = store[key] && typeof store[key] === 'object' ? store[key] : (store[key] = {});
+    if(value && value.url){
+        byRow[String(row)] = {url:value.url, mediaType:value.mediaType || 'image', name:value.name || ''};
+    } else {
+        delete byRow[String(row)];
+    }
+    if(!Object.keys(byRow).length) delete store[key];
+    if(!Object.keys(store).length) delete node.tableManualInputItems;
+    scheduleSave();
+}
+
+/* 往格子里上传图片/视频：走画布同一套 /api/ai/upload（落到 assets），不另开后端。 */
+async function uploadTableCellFile(file){
+    const form = new FormData();
+    form.append('files', file, file.name || ('cell_' + Date.now()));
+    const response = await fetch('/api/ai/upload', {method:'POST', body:form});
+    if(!response.ok) throw new Error(await responseErrorMessage(response, '上传失败'));
+    const data = await response.json();
+    const first = (data.files || [])[0] || {};
+    if(!first.url) throw new Error('上传失败：服务端没有返回地址');
+    return {
+        url: first.url,
+        mediaType: first.kind || mediaKindForUpload(file),
+        name: first.name || file.name || ''
+    };
+}
+
+function pickTableCellFile(onPicked){
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,video/*';
+    input.style.display = 'none';
+    input.onchange = async () => {
+        const file = input.files && input.files[0];
+        if(input.parentNode) input.parentNode.removeChild(input);
+        if(!file) return;
+        try {
+            const uploaded = await uploadTableCellFile(file);
+            if(uploaded) onPicked(uploaded);
+        } catch(error){
+            alert(error && error.message ? error.message : '上传失败');
+        }
+    };
+    document.body.appendChild(input);
+    input.click();
+}
+
+/* 预览格子里的素材：沿用画布的输出大图查看器（视频也能放）。 */
+function openTableCellMedia(url, mediaType){
+    if(!url) return;
+    if(typeof openOutputLightbox === 'function'){
+        try { openOutputLightbox(url, {id:'', images:[], type:''}); return; } catch(error){ /* 退回新窗口 */ }
+    }
+    window.open(url, '_blank');
+}
+
+function tableCellActionButton(icon, title, handler, danger){
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'table-cell-action' + (danger ? ' is-danger' : '');
+    button.title = title;
+    const glyph = document.createElement('i');
+    glyph.dataset.lucide = icon;
+    button.appendChild(glyph);
+    button.onmousedown = event => event.stopPropagation();
+    button.onclick = event => { event.stopPropagation(); handler(); };
+    return button;
+}
+
+/* 格子右上角的操作条：上传/替换 永远在，预览和删除按有没有内容出现。
+   常显（淡）而不是悬停才显 —— 删行按钮当初就是「悬停才显示」被人骂过。 */
+function appendTableCellActions(cell, options){
+    const bar = document.createElement('div');
+    bar.className = 'table-cell-actions';
+    if(options.onOpen) bar.appendChild(tableCellActionButton('expand', '预览', options.onOpen));
+    bar.appendChild(tableCellActionButton('image-plus', options.hasMedia ? '替换图片/视频' : '上传图片/视频', options.onUpload));
+    if(options.onDelete) bar.appendChild(tableCellActionButton('trash-2', options.deleteTitle || '删除', options.onDelete, true));
+    cell.appendChild(bar);
+}
+
+/* 数据列里的媒体格：直接存进 rows（走模型的 set_cell，模型认得媒体对象，不会被 JSON 化）。
+   value 传 null 就是删除，格子回到空文字。 */
+function setTableCellMedia(node, row, column, value){
+    const model = novaTableModel();
+    const state = ensureTableState(node);
+    if(!model || !state) return;
+    const next = value ? model.mediaCell(value.url, value.mediaType, value.name) : '';
+    node.table = model.applyOperation(state, 'set_cell', {row: row + 1, column: column + 1, value: next});
+    scheduleSave();
+    repaintTable(node);
+}
+
 /* 把上游来源展开成输入项。
    - group 展开成它的成员素材（一个 group = 一个通道，多张）
    - output 展开成它产出的每一张（一个 output = 一个通道，多张）
@@ -6605,17 +6721,32 @@ function tableRowInputs(node, options={}){
     });
 
     return state.rows.map((row, rowIndex) => {
-        const channelItems = channels.map((channel, channelIndex) => model
-            .inputItemsForRow(channel, rowIndex)
-            .map(item => {
-                const entry = tableInputEntryAt(node, {items:[item]}, 0, nodeById);
-                if(!entry) return null;
-                // 输出节点连来的多张图 nodeId 相同，只能按 nodeId + url + outputIndex 认人
-                const position = (channel.items || []).findIndex(candidate =>
-                    candidate === item || tableItemKey(candidate) === tableItemKey(item));
-                return {...entry, ordinal: ordinalBase[channelIndex] + Math.max(0, position) + 1};
-            })
-            .filter(Boolean));
+        const channelItems = channels.map((channel, channelIndex) => {
+            /* 手动上传的那一格优先：它就是这一行这一列的参考图。 */
+            const manual = tableManualInputItem(node, channel.id, rowIndex);
+            if(manual){
+                return [{
+                    // 认上传时记下的类型：素材地址不一定带后缀
+                    kind: mediaKindForRef({url:manual.url, kind:manual.mediaType}),
+                    url: manual.url,
+                    nodeId: '',
+                    node: null,
+                    outputIndex: -1,
+                    ordinal: ordinalBase[channelIndex] + 1
+                }];
+            }
+            return model
+                .inputItemsForRow(channel, rowIndex)
+                .map(item => {
+                    const entry = tableInputEntryAt(node, {items:[item]}, 0, nodeById);
+                    if(!entry) return null;
+                    // 输出节点连来的多张图 nodeId 相同，只能按 nodeId + url + outputIndex 认人
+                    const position = (channel.items || []).findIndex(candidate =>
+                        candidate === item || tableItemKey(candidate) === tableItemKey(item));
+                    return {...entry, ordinal: ordinalBase[channelIndex] + Math.max(0, position) + 1};
+                })
+                .filter(Boolean);
+        });
 
         const media = [];
         const texts = [];
@@ -6716,7 +6847,9 @@ function tableNodeSignature(node){
         return item.nodeId + ':' + String(item.url || (source && source.url) || '');
     }).join('+')).join('|');
     const modes = channels.map(channel => channel.id + '=' + channel.mode).join(',');
-    return [incoming, channels.length, items, modes, state.columns.length, state.rows.length].join('|');
+    // 手动上传进格子的素材也在签名里：改完不用显式 repaintTable 也不会留旧画面
+    const manual = JSON.stringify(node.tableManualInputItems || {});
+    return [incoming, channels.length, items, modes, manual, state.columns.length, state.rows.length].join('|');
 }
 
 // 输入列单元格（DX OS: .table-media-cell）
@@ -7588,27 +7721,59 @@ function renderTableBody(node){
             const hasMedia = flatEntries.some(entry => entry && entry.kind && entry.kind !== 'text');
             tr.style.height = model.rowHeightForRow(dataValues, inputTexts, hasMedia) + 'px';
 
-            // 输入列单元格：这一列就是连线的放置目标（data-channel 供 toPort 落点识别）
+            // 输入列单元格：既是连线的放置目标（data-channel 供 toPort 落点识别），
+            // 也能直接手动上传 / 替换这一格的参考素材。
             channels.forEach((channel, index) => {
                 const cell = document.createElement('td');
                 cell.className = 'table-cell table-media-cell';
                 cell.dataset.channel = channel.id;
-                fillTableMediaCell(cell, channelItems[index] || []);
+                const entries = channelItems[index] || [];
+                fillTableMediaCell(cell, entries);
+                const first = entries.filter(entry => entry && entry.url)[0] || null;
+                const manual = tableManualInputItem(node, channel.id, rowIndex);
+                appendTableCellActions(cell, {
+                    hasMedia: Boolean(first),
+                    onOpen: first ? () => openTableCellMedia(first.url, first.kind) : null,
+                    onUpload: () => pickTableCellFile(picked => {
+                        setTableManualInputItem(node, channel.id, rowIndex, picked);
+                        repaintTable(node);
+                    }),
+                    // 只有手动放进去的那份才谈得上删除：删掉就回到连线推出来的那张
+                    onDelete: manual ? () => {
+                        setTableManualInputItem(node, channel.id, rowIndex, null);
+                        repaintTable(node);
+                    } : null,
+                    deleteTitle: '移出参考栏'
+                });
                 tr.appendChild(cell);
             });
 
-            // 数据列单元格
+            // 数据列单元格：文字（双击编辑）或媒体（上传/替换/删除）
             state.columns.forEach((name, index) => {
                 const cell = document.createElement('td');
                 cell.className = 'table-cell';
                 if(textColumns[index]) cell.classList.add('is-text-column');
-                const value = model.cellText(row[index]);
-                const view = document.createElement('div');
-                view.className = 'table-cell-view';
-                view.textContent = value;
-                if(!value) view.classList.add('is-empty');
-                cell.appendChild(view);
-                cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'cell', row:rowIndex, column:index}); };
+                const raw = row[index];
+                const media = model.isMediaCell(raw) ? raw : null;
+                const value = model.cellText(raw);
+                if(media){
+                    cell.classList.add('table-media-cell', 'is-media-cell');
+                    fillTableMediaCell(cell, [{kind:media.mediaType, url:media.url, text:''}]);
+                } else {
+                    const view = document.createElement('div');
+                    view.className = 'table-cell-view';
+                    view.textContent = value;
+                    if(!value) view.classList.add('is-empty');
+                    cell.appendChild(view);
+                }
+                appendTableCellActions(cell, {
+                    hasMedia: Boolean(media),
+                    onOpen: media ? () => openTableCellMedia(media.url, media.mediaType) : null,
+                    onUpload: () => pickTableCellFile(picked => setTableCellMedia(node, rowIndex, index, picked)),
+                    onDelete: media ? () => setTableCellMedia(node, rowIndex, index, null) : null
+                });
+                // 媒体格双击是「替换」，文字格还是编辑文字
+                if(!media) cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'cell', row:rowIndex, column:index}); };
                 if(editing && editing.kind === 'cell' && editing.row === rowIndex && editing.column === index){
                     cell.classList.add('is-editing');
                     const editor = document.createElement('textarea');

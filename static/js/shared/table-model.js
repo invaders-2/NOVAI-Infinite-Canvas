@@ -55,9 +55,30 @@
         return {kind:TABLE_KIND, version:TABLE_VERSION, columns:[], rows:[], selectedRows:[], mergedGroups:[]};
     }
 
-    // 单元格一律字符串化并截断（DX OS: 非字符串走 JSON.stringify）
+    /* 单元格可以是文字，也可以是**媒体**（用户自己往格子里上传/替换的图片、视频）。
+       媒体格存成对象，不能走 cellText 的 JSON.stringify —— 否则一存一读就变成一串 JSON。 */
+    const MEDIA_CELL_KIND = 'media';
+
+    function mediaCell(url, mediaType, name){
+        const clean = String(url === null || url === undefined ? '' : url).trim();
+        if(!clean) return '';
+        const kind = String(mediaType || '').toLowerCase();
+        return {
+            kind: MEDIA_CELL_KIND,
+            url: clean,
+            mediaType: kind === 'video' ? 'video' : (kind === 'audio' ? 'audio' : 'image'),
+            name: String(name || ''),
+        };
+    }
+
+    function isMediaCell(value){
+        return Boolean(value && typeof value === 'object' && value.kind === MEDIA_CELL_KIND && value.url);
+    }
+
+    // 单元格一律字符串化并截断（DX OS: 非字符串走 JSON.stringify）；媒体格不进文字流
     function cellText(value){
         if(value === null || value === undefined) return '';
+        if(isMediaCell(value)) return '';
         let text;
         if(typeof value === 'string') text = value;
         else if(typeof value === 'object'){ try { text = JSON.stringify(value); } catch(e){ text = String(value); } }
@@ -85,7 +106,7 @@
         if(raw.columns.length > MAX_COLUMNS || raw.rows.length > MAX_ROWS) return false;
         if(raw.columns.some(c => typeof c !== 'string' || !c.trim())) return false;
         return raw.rows.every(row => Array.isArray(row) && row.length === raw.columns.length
-            && row.every(cell => typeof cell === 'string'));
+            && row.every(cell => typeof cell === 'string' || isMediaCell(cell)));
     }
 
     /** 归一化任意输入为合法表格；永不抛错，越界静默修复。 */
@@ -95,7 +116,11 @@
         const columns = normalizeColumns(source.columns);
         const rawRows = Array.isArray(source.rows) ? source.rows : [];
         const rows = rawRows.filter(Array.isArray).slice(0, MAX_ROWS)
-            .map(row => columns.map((_, i) => cellText(row[i])));
+            .map(row => columns.map((_, i) => {
+                const cell = row[i];
+                // 媒体格原样保留（重新构造一份，避免和源对象共享引用）
+                return isMediaCell(cell) ? mediaCell(cell.url, cell.mediaType, cell.name) : cellText(cell);
+            }));
         const selectedRows = (Array.isArray(source.selectedRows) ? source.selectedRows : [])
             .map(Number).filter(v => Number.isInteger(v) && v >= 0 && v < rows.length);
         const mergedGroups = (Array.isArray(source.mergedGroups) ? source.mergedGroups : [])
@@ -148,7 +173,7 @@
         if(opId === 'set_cell'){
             const r = rowIndex(next, args.row);
             const c = columnIndex(next, args);
-            next.rows[r][c] = cellText(args.value);
+            next.rows[r][c] = isMediaCell(args.value) ? mediaCell(args.value.url, args.value.mediaType, args.value.name) : cellText(args.value);
             return next;
         }
         if(opId === 'append_row'){
@@ -198,7 +223,8 @@
         const mediaMin = Math.max(1, options.mediaMinHeight ?? 84);
         const maxHeight = Math.max(mediaMin, options.maxHeight ?? 160);
         const lines = Math.max(1, ...(items || []).map(text =>
-            String(text ?? '').split('\n').reduce((sum, line) =>
+            // 媒体格不参与行高计算（它按缩略图算，走 hasMedia 那条下限）
+            (isMediaCell(text) ? '' : String(text ?? '')).split('\n').reduce((sum, line) =>
                 sum + Math.max(1, Math.ceil(Array.from(line).length / perLine)), 0)));
         return Math.min(maxHeight, Math.max(options.hasMedia ? mediaMin : textMin, padding + lines * lineHeight));
     }
@@ -764,6 +790,7 @@
         LLM_OUTPUT_MODES, llmOutputModeChoice, llmModeTargetKind,
         llmTargetKind, VIDEO_PLAN_BLOCK, VIDEO_GENERATE_BLOCK,
         emptyTable, cellText, normalizeColumns, normalizeTable, cloneTable,
+        MEDIA_CELL_KIND, mediaCell, isMediaCell,
         toIndex, columnIndex, rowIndex, applyOperation,
         rowHeight, nodeSize, describeOperation, requiresConfirmation,
     };

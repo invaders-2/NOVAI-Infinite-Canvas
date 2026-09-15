@@ -91,6 +91,7 @@ const api = new Function(
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableBatchSingleButtonHtml, tableDrivenHidden, paintTableBatchPanel,' +
     ' normalizeTableNodeHeight, tableNaturalSize,' +
+    ' setTableCellMedia, tableManualInputItem, setTableManualInputItem,' +
     ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
     ' generatorNeedsPromptMessage, friendlyBatchError,' +
     ' llmOutputModeButtonsHtml, LLM_OUTPUT_MODE_BUTTONS, TABLE_DELETE_COLUMN_WIDTH};'
@@ -106,6 +107,9 @@ const api = new Function(
     // 输出节点的媒体在 images 里，url 要从条目上取；类型看 url
     item => (typeof item === 'string' ? item : (item && item.url) || ''),
     ref => {
+        // 和真实现一致：显式 kind 优先，没有才看后缀
+        const declared = String((ref && ref.kind) || '').toLowerCase();
+        if(['video','audio','image','text','file'].includes(declared)) return declared;
         const url = String((ref && ref.url) || ref || '');
         if(/\.(mp4|webm|mov|m4v)$/i.test(url)) return 'video';
         if(/\.(mp3|wav|m4a)$/i.test(url)) return 'audio';
@@ -776,6 +780,80 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     const busy = api.tableBatchSingleButtonHtml(running);
     ok(busy.indexOf('gen-btn running') >= 0 && busy.indexOf('disabled') >= 0, '运行中仍带 running / disabled');
     ok(busy.indexOf('生成中') >= 0, '运行中文案不变');
+}
+
+// ═══ O. 格子里能放媒体：上传 / 替换 / 删除（空白表也一样）═══
+{
+    const tbl = api.addTableNode();
+    api.addTableColumn(tbl);
+    api.addTableRow(tbl);
+    const root = api.renderTableBody(tbl);
+    const dataCell = () => rowAt(root, 0).children[1];
+
+    // 空白数据格：只有一个「上传」
+    let actions = byClass(dataCell(), 'table-cell-action');
+    eq(actions.length, 1, '空格子只有「上传」按钮');
+    eq(actions[0].title, '上传图片/视频', '上传按钮文案');
+    ok(byClass(dataCell(), 'table-cell-editor').length === 0, '空格子没有编辑器');
+
+    // 写入媒体格 → 缩略图 + 预览/替换/删除
+    api.setTableCellMedia(tbl, 0, 0, {url:'/static/m.png', mediaType:'image', name:'m.png'});
+    const mediaCell = dataCell();
+    ok(mediaCell.classList.contains('is-media-cell'), '媒体格打上标记');
+    eq(byClass(mediaCell, 'table-media-thumb').length, 1, '渲染成缩略图');
+    eq(byClass(mediaCell, 'table-cell-action').map(a => a.title), ['预览','替换图片/视频','删除'], '媒体格三个动作');
+    eq(mediaCell.ondblclick, undefined, '媒体格双击不再是编辑文字');
+    eq(tbl.table.rows[0][0], {kind:'media', url:'/static/m.png', mediaType:'image', name:'m.png'}, 'rows 里存的是媒体对象（不是 JSON 串）');
+    eq(api.tableRowInputs(tbl)[0].text, '', '媒体格不进这一行的文字');
+
+    // 删除 → 回到空文字
+    api.setTableCellMedia(tbl, 0, 0, null);
+    eq(tbl.table.rows[0][0], '', '删掉媒体 → rows 回到空串');
+    eq(byClass(dataCell(), 'table-cell-action').length, 1, '删掉后只剩「上传」');
+    ok(typeof dataCell().ondblclick === 'function', '回到文字格 → 双击又能编辑');
+
+    // ══ 参考栏：手动上传覆盖这一行，删掉回到连线推出来的那张 ══
+    nodes.push({id:'imgCell', type:'image', url:'/static/up.png'});
+    connections.push({id:'c_cell', from:'imgCell', to:tbl.id});
+    api.renderTableBody(tbl);
+    eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/up.png'], '连线推出来的参考图');
+
+    api.setTableManualInputItem(tbl, 'input-1', 0, {url:'/static/manual.png', mediaType:'image', name:'manual.png'});
+    api.renderTableBody(tbl);
+    const rows = api.tableRowInputs(tbl);
+    eq(rows[0].media.map(m => m.url), ['/static/manual.png'], '手动上传覆盖这一行');
+    eq(rows[0].references[0].nodeId, '', '手动素材没有来源节点');
+    eq(api.tableManualInputItem(tbl, 'input-1', 0).url, '/static/manual.png', '手动项存下来了');
+    eq(byClass(rowAt(root, 0).children[0], 'table-cell-action').map(a => a.title), ['预览','替换图片/视频','移出参考栏'], '参考栏按钮（有手动项才多一个移出）');
+
+    api.setTableManualInputItem(tbl, 'input-1', 0, null);
+    api.renderTableBody(tbl);
+    eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/up.png'], '移出手动项 → 回到连线推出来的那张');
+    eq(byClass(rowAt(root, 0).children[0], 'table-cell-action').map(a => a.title), ['预览','替换图片/视频'], '没有手动项就没有「移出参考栏」');
+
+    // 第二行不受手动项影响（一行一张）
+    api.addTableRow(tbl);
+    api.setTableManualInputItem(tbl, 'input-1', 0, {url:'/static/manual.png', mediaType:'image', name:'manual.png'});
+    api.renderTableBody(tbl);
+    const twoRows = api.tableRowInputs(tbl);
+    eq(twoRows[0].media.map(m => m.url), ['/static/manual.png'], '第 1 行用手动那张');
+    eq(twoRows[1].media.map(m => m.url), ['/static/up.png'], '第 2 行仍是连线的');
+
+    // 空白表（没有任何连线）也能上传：只有手动项时它就是这一行的参考
+    const blank = api.addTableNode();
+    api.addTableColumn(blank);
+    api.addTableRow(blank);
+    api.renderTableBody(blank);
+    eq(byClass(rowAt(api.renderTableBody(blank), 0).children[0], 'table-cell-action').length, 1, '空白表的参考格也能上传');
+    api.setTableManualInputItem(blank, 'input-1', 0, {url:'/static/solo.mp4', mediaType:'video', name:'solo.mp4'});
+    api.renderTableBody(blank);
+    const solo = api.tableRowInputs(blank)[0].media;
+    eq(solo.map(m => m.url), ['/static/solo.mp4'], '空白表：手动上传的就是这一行的参考');
+    eq(solo[0].kind, 'video', '视频按后缀认出是 video');
+    // 地址不带后缀时按上传时记下的类型判（素材地址不保证有扩展名）
+    api.setTableManualInputItem(blank, 'input-1', 0, {url:'/api/asset/9f2', mediaType:'video', name:'clip'});
+    api.renderTableBody(blank);
+    eq(api.tableRowInputs(blank)[0].media[0].kind, 'video', '无后缀地址按上传时的类型判');
 }
 
     console.log('通过 ' + pass + '/' + (pass + fails.length));

@@ -467,6 +467,42 @@ eq(M.batchConcurrency(0, 1), 1, '非法并发值回落 fallback');
 eq(M.batchConcurrency(4, 1), 4, '用户显式设置优先于 fallback');
 eq(M.batchConcurrency(99, 1), 8, '带 fallback 时仍然夹到 8');
 
+// ── 媒体单元格：用户自己往格子里上传的图片/视频 ──
+{
+  const media = M.mediaCell('/assets/input/a.png', 'image', 'a.png');
+  eq(media, {kind:'media', url:'/assets/input/a.png', mediaType:'image', name:'a.png'}, 'mediaCell 结构');
+  eq(M.mediaCell('/x.mp4', 'video'), {kind:'media', url:'/x.mp4', mediaType:'video', name:''}, '视频格');
+  eq(M.mediaCell('/x.mp3', 'audio').mediaType, 'audio', '音频格');
+  eq(M.mediaCell('', 'image'), '', '空 url → 空串（不是媒体格）');
+  eq(M.mediaCell(null), '', 'null url → 空串');
+  eq(M.isMediaCell(media), true, 'isMediaCell 认媒体格');
+  eq(M.isMediaCell('文字'), false, '字符串不是媒体格');
+  eq(M.isMediaCell({url:'/a.png'}), false, '缺 kind 的对象不是媒体格');
+  eq(M.isMediaCell(null), false, 'null 不是媒体格');
+  eq(M.cellText(media), '', '媒体格不进文字流（提示词里不会冒出 JSON）');
+
+  // normalizeTable / cloneTable / set_cell 都要原样保住媒体对象
+  const raw = {columns:['参考','描述'], rows:[[M.mediaCell('/a.png','image','a.png'), '一只猫']]};
+  const norm = M.normalizeTable(raw).table;
+  eq(norm.rows[0][0], {kind:'media', url:'/a.png', mediaType:'image', name:'a.png'}, 'normalizeTable 保住媒体格');
+  eq(norm.rows[0][1], '一只猫', '同一行的文字不受影响');
+  eq(M.normalizeTable({columns:['c'], rows:[[M.mediaCell('/a.png')]]}).repaired, false, '含媒体格的表算合法（不被当成脏数据）');
+
+  const set = M.applyOperation(norm, 'set_cell', {row:1, column:1, value:M.mediaCell('/b.mp4','video','b.mp4')});
+  eq(set.rows[0][0], {kind:'media', url:'/b.mp4', mediaType:'video', name:'b.mp4'}, "set_cell 也能写入媒体格");
+  eq(set.rows[0][1], '一只猫', '其它格不受影响');
+  const cleared = M.applyOperation(set, 'set_cell', {row:1, column:1, value:''});
+  eq(cleared.rows[0][0], '', 'set_cell 传空串 → 清空');
+
+  const cloned = M.cloneTable(norm);
+  cloned.rows[0][0].url = '/changed.png';
+  eq(norm.rows[0][0].url, '/a.png', 'cloneTable 深拷贝：改克隆体不影响原表');
+
+  // 行高：媒体格按「有媒体」的下限算，不能被 String(object) 撑高
+  const h = M.rowHeight([M.mediaCell('/a.png'), '短'], {hasMedia:true, mediaMinHeight:144, maxHeight:160});
+  eq(h, 144, '媒体格不参与文字行数（不会变成 [object Object] 那种长串）');
+}
+
 // runWithSharedCursor 是异步的，放到最后
 (async () => {
   {
