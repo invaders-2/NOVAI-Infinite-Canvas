@@ -282,10 +282,16 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .node.sized.video-node .node-body > .table-batch-panel { flex:0 8 auto; min-height:0; max-height:50%; overflow:auto; }
 .node.sized.generator-node .generator-body,
 .node.sized.video-node .generator-body { flex:1 1 auto; min-height:104px; }
+/* 内容区只占自己需要的高度（flex:0 1 auto），不要抢剩余空间 ——
+   抢了会把运行栏推到节点最底下，设置区和按钮之间空出一大截。
+   内容超高时才由它收缩并自己滚，运行栏照样跟在设置后面。 */
 .node.sized.generator-node .gen-scroll,
-.node.sized.video-node .gen-scroll { flex:1 1 auto; min-width:0; min-height:0; overflow:auto; display:flex; flex-direction:column; }
+.node.sized.video-node .gen-scroll { flex:0 1 auto; min-width:0; min-height:0; overflow:auto; display:flex; flex-direction:column; }
+/* 运行栏紧跟在设置下面，不再 margin-top:auto 钉到底部 */
 .node.sized.generator-node .gen-run-row,
-.node.sized.video-node .gen-run-row { flex:0 0 auto; }
+.node.sized.video-node .gen-run-row,
+.node.sized.generator-node .gen-btn,
+.node.sized.video-node .gen-btn { flex:0 0 auto; margin-top:8px; }
 /* LLM 节点不再 margin-top:auto：输出区已经 flex:1 吃掉了剩余高度，
    auto 拿不到空余 → 等于 0，按钮会贴死输出框。这里用 .gen-run-row 自带的 8px。 */
 .gen-cascade-btn { height:40px; width:100%; flex:0 0 40px; border-radius:var(--radius-lg); background:transparent; border:1.5px solid var(--strong); color:var(--strong); display:flex; align-items:center; justify-content:center; gap:8px; font-size:11px; font-weight:800; letter-spacing:.12em; transition:all .15s ease; }

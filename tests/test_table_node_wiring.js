@@ -189,8 +189,11 @@ console.log('[10] 生成节点运行按钮：不会被内容顶出可视区 / �
     'CSS：生成体不再写死 height:100%（会和上面的批量面板叠起来把按钮顶出去）');
   ok(canvas.indexOf('if(tableBatchPanel) body.appendChild(tableBatchPanel);') < canvas.indexOf('body.appendChild(renderGeneratorBody(node));'),
     '批量面板排在生成体之前（兄弟关系，靠 flex 分配高度）');
-  ok(/\.node\.sized\.generator-node \.gen-run-row,[\s\S]{0,60}\.node\.sized\.video-node \.gen-run-row \{ flex:0 0 auto; \}/.test(canvasCss),
-    'CSS：运行栏不参与收缩，永远占着底部');
+  ok(/\.node\.sized\.generator-node \.gen-run-row,[\s\S]{0,220}\{ flex:0 0 auto; margin-top:8px; \}/.test(canvasCss),
+    'CSS：运行栏不参与收缩，且紧跟在设置下面（不能 margin-top:auto 钉到节点底部）');
+  // 内容区不能 flex-grow：抢剩余空间会把运行栏顶到最底下，设置区和按钮之间空出一大截
+  ok(/\.node\.sized\.generator-node \.gen-scroll,[\s\S]{0,120}\.node\.sized\.video-node \.gen-scroll \{ flex:0 1 auto;/.test(canvasCss),
+    'CSS：内容区只占需要的高度（flex:0 1 auto），不抢剩余空间');
   ['renderGeneratorBody', 'renderVideoBody'].forEach(name => {
     ok(sliceFn(name).includes('tableBatchSingleButtonHtml(node)'), name + ' 的主按钮走 tableBatchSingleButtonHtml');
     ok(!sliceFn(name).includes("querySelector('.gen-btn').onclick"), name + ' 的 .gen-btn 绑定不能裸调（接表格时按钮不存在）');
