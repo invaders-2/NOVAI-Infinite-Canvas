@@ -303,6 +303,7 @@
     position: absolute;
     top: calc(100% + 2px);
     right: 0;
+    z-index: 40;
     min-width: 84px;
     padding: 4px;
     border-radius: var(--radius-md);

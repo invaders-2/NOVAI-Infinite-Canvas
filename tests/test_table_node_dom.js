@@ -42,6 +42,7 @@ const one = (el, c) => byClass(el, c)[0];
 const rowAt = (root, i) => byTag(root, 'tbody')[0].children[i];
 
 global.document = {
+    body: makeEl('body'),
     createElement: makeEl,
     querySelector: () => null,
     // 文本节点：只要有 textContent / children 就够 shim 用
@@ -50,7 +51,8 @@ global.document = {
         classList: {contains: () => false, add(){}, remove(){}, toggle(){ return false; }},
     }),
 };
-global.window = {};
+global.window = {innerWidth: 1200, innerHeight: 900};
+global.document.body = makeEl('body');
 global.requestAnimationFrame = fn => fn();
 const model = require('../static/js/shared/table-model.js');
 global.NovaTableModel = model;
