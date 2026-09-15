@@ -37,6 +37,7 @@ const one = (el, c) => byClass(el, c)[0];
 const rowAt = (root, i) => byTag(root, 'tbody')[0].children[i];
 
 global.document = { createElement: makeEl, querySelector: () => null };
+global.window = {};
 global.requestAnimationFrame = fn => fn();
 const model = require('../static/js/shared/table-model.js');
 global.NovaTableModel = model;
@@ -65,11 +66,16 @@ const nodesEl = {
         return { querySelector(inner){ return inner === '[data-table-batch-panel]' ? panel : null; } };
     }
 };
+// 运行器垫片：记录批量执行到底把哪一行、哪份覆盖传给了谁
+const batchCalls = [];
+const runVideoShim = (id, opts) => { batchCalls.push({id, opts}); return 'via-runVideoNode'; };
+const runGeneratorShim = (id, opts) => { batchCalls.push({id, opts}); return 'via-runGenerator'; };
+
 const api = new Function(
     'document', 'requestAnimationFrame', 'defaultPoint', 'addNode', 'scheduleSave', 'uid',
     'connections', 'nodes', 'pushUndo', 'mediaKindForNode', 'isMissingAssetUrl',
     'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs', 'tr', 'nodesEl',
-    'runVideoNode', 'runGenerator',
+    'runVideoNode', 'runGenerator', 'window', 'saveCanvas',
     block + '\nreturn {renderTableBody, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
@@ -78,7 +84,8 @@ const api = new Function(
     ' llmMediaGroups, llmListInputs, llmRunButtonLabel, materializeLlmTable, tableSourceItems,' +
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableDrivenHidden, paintTableBatchPanel,' +
     ' normalizeTableNodeHeight, tableNaturalSize,' +
-    ' tableBatchConcurrencyFor, tableBatchRunner};'
+    ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
+    ' generatorNeedsPromptMessage};'
 )(
     // addNode 必须把节点放进 nodes：真实实现如此，generatorUpstreamTables 要从 nodes 反查表格
     global.document, global.requestAnimationFrame, () => ({x:0, y:0}), n => { added.push(n); nodes.push(n); return n; }, () => {}, p => p + '_' + (uidSeq += 1),
@@ -86,7 +93,7 @@ const api = new Function(
     (url) => '<img src="' + url + '">', (url) => '<video src="' + url + '"></video>', () => 1700000000000,
     key => ({'canvas.apiGenerate':'API生成', 'canvas.generating':'生成中', 'canvas.videoGenerate':'生成视频'})[key] || key,
     nodesEl,
-    () => 'via-runVideoNode', () => 'via-runGenerator'
+    runVideoShim, runGeneratorShim, global.window, () => {}
 );
 
 const keydown = key => ({ key, shiftKey:false, preventDefault(){}, stopPropagation(){} });
@@ -537,6 +544,13 @@ missingUrls.delete('/gone.png');
     eq(api.tableBatchRunner(vid)(), 'via-runVideoNode', '视频节点派发到 runVideoNode');
     eq(api.tableBatchRunner(genNode)(), 'via-runGenerator', '图像节点派发到 runGenerator');
 
+    // 接了表格还去点「单段生成」时，提示必须说清该点哪儿
+    ok(api.generatorNeedsPromptMessage(vid).indexOf('批量生成') > 0, '接了表格的单段提示指向「批量生成」：' + api.generatorNeedsPromptMessage(vid));
+    ok(api.generatorNeedsPromptMessage(vid).indexOf('单段生成') > 0, '接了表格的单段提示点名「单段生成」');
+    ok(api.generatorNeedsPromptMessage(genNode).indexOf('单张生成') > 0, '图像侧同理（genNode 已接表格）：' + api.generatorNeedsPromptMessage(genNode));
+    eq(api.generatorNeedsPromptMessage({id:'genNoTable', type:'generator'}), 'canvas.needPromptOrImage', '没接表格时保留原文案（图像）');
+    eq(api.generatorNeedsPromptMessage({id:'vidNoTable', type:'video'}), 'canvas.videoNeedsPrompt', '没接表格时保留原文案（视频）');
+
     // 行里连的是视频，参考素材就要原样带 kind=video 过去（否则会被当成参考图）
     const vidRow = {rowNumber:1, media:[{url:'/clip.mp4', nodeId:'mv1', kind:'video', node:{name:'参考片段'}}]};
     eq(api.tableRowRefs(vidRow), [{url:'/clip.mp4', name:'参考片段', kind:'video', nodeId:'mv1'}], '视频参考素材带 kind=video');
@@ -544,6 +558,38 @@ missingUrls.delete('/gone.png');
     node.tableBatchConcurrency = savedConcurrency;
 }
 
-console.log('通过 ' + pass + '/' + (pass + fails.length));
-if(fails.length){ console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
-console.log('全部通过');
+// ═══ M. 批量执行端到端（异步：runTableBatch → 运行器 → 逐行覆盖） ═══
+(async () => {
+    batchCalls.length = 0;
+    const vidE2E = nodes.find(n => n.id === 'vid1');
+    // 表格里放两行真实分镜内容，清掉前面用例留下的执行参数
+    const fresh = model.normalizeTable({columns:['画面描述'], rows:[['镜头A：推近'], ['镜头B：拉远']]}).table;
+    fresh.selectedRows = [0, 1];   // 勾选语义＝默认全选
+    node.table = fresh;
+    delete node.tableBatchStartRow;
+    delete node.tableBatchManualSelection;
+    delete node.tableBatchFailurePolicy;
+    node.tableBatchConcurrency = 1;
+
+    await api.runTableBatch(vidE2E.id, {});
+    eq(batchCalls.length, 2, '批量执行逐行派发 2 次');
+    eq(batchCalls.map(c => c.id), [vidE2E.id, vidE2E.id], '两次都派发给同一个视频节点');
+    eq(batchCalls.map(c => c.opts.batch), [true, true], '都带批量模式标记');
+    ok(batchCalls[0].opts.rowOverride.prompt.indexOf('镜头A') >= 0, '第 1 行提示词按行覆盖：' + batchCalls[0].opts.rowOverride.prompt);
+    ok(batchCalls[1].opts.rowOverride.prompt.indexOf('镜头B') >= 0, '第 2 行提示词按行覆盖：' + batchCalls[1].opts.rowOverride.prompt);
+    eq(batchCalls[0].opts.runContext.rowNumber, 1, '第 1 行带行号归属');
+    eq(batchCalls[1].opts.runContext.rowNumber, 2, '第 2 行带行号归属');
+    ok(batchCalls[0].opts.rowOverride.refs.length >= 1, '按行带上了这一行的参考素材');
+
+    // 取消勾选第 2 行 → 只跑第 1 行（勾选语义两种模式都适用）
+    api.toggleTableRow(node, 1, false);
+    batchCalls.length = 0;
+    await api.runTableBatch(vidE2E.id, {});
+    eq(batchCalls.length, 1, '取消勾选的行不参与批量执行');
+    ok(batchCalls[0].opts.rowOverride.prompt.indexOf('镜头A') >= 0, '只跑了留下的那一行');
+    api.toggleTableRow(node, 1, true);
+
+    console.log('通过 ' + pass + '/' + (pass + fails.length));
+    if(fails.length){ console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
+    console.log('全部通过');
+})();

@@ -7372,6 +7372,17 @@ function tableBatchRunner(node){
     return node && node.type === 'video' ? runVideoNode : runGenerator;
 }
 
+/* 接了多维表格、却走了「单张/单段生成」这条路时的提示。
+   这条路**不看表格**，直接报「请先连接提示词」会让用户不知道该点哪儿，
+   所以表格在的时候要说清该点「批量生成」。 */
+function generatorNeedsPromptMessage(node){
+    if(generatorUpstreamTables(node.id).length){
+        const single = node && node.type === 'video' ? '单段生成' : '单张生成';
+        return '已连接多维表格：请点「批量生成」按表格逐行生成；「' + single + '」不看表格，需要单独连一个提示词节点。';
+    }
+    return node && node.type === 'video' ? tr('canvas.videoNeedsPrompt') : tr('canvas.needPromptOrImage');
+}
+
 /* 生成节点由多维表格驱动时，节点自己的 IMAGES 区块没有意义 ——
    表格的素材不走这里，批量生成用的是每一行自己的参考图。
    注意 .input-list 是 display:flex，hidden 属性会被作者样式覆盖，所以用内联样式。 */
@@ -10560,6 +10571,10 @@ function renderVideoBody(node){
     const list = wrap.querySelector('.video-img-list');
     renderVideoImageInputs(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
+    // 批量生成按钮必须真的绑上：只渲染不绑定的话点下去没反应，
+    // 用户会转而去点「单段生成」，然后就撞上「请先连接提示词」。
+    const videoBatchRunBtn = wrap.querySelector('.table-batch-run-btn');
+    if(videoBatchRunBtn) videoBatchRunBtn.onclick = e => { e.stopPropagation(); runTableBatch(node.id, {}); };
     wrap.querySelector('.gen-btn').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     return wrap;
@@ -13009,7 +13024,7 @@ async function runGenerator(genId, opts={}){
     if(!prompt && !refs.length){
         // 批量执行里绝不能弹阻塞式对话框，否则并发直接退化成串行
         if(opts.batch) throw new Error(tr('canvas.needPromptOrImage'));
-        alert(tr('canvas.needPromptOrImage'));
+        alert(generatorNeedsPromptMessage(gen));
         return;
     }
     const count = rowOverride ? Math.max(1, Math.min(8, Number(opts.countOverride || 1))) : Math.max(1, Math.min(8, Number(gen.count || 1)));
@@ -13333,7 +13348,7 @@ async function runVideoNode(nodeId, opts={}){
     if(!prompt){
         // 批量执行里绝不能弹阻塞式对话框，否则并发直接退化成串行
         if(opts.batch) throw new Error(tr('canvas.videoNeedsPrompt'));
-        alert(tr('canvas.videoNeedsPrompt')); return;
+        alert(generatorNeedsPromptMessage(node)); return;
     }
     let out = outputForNode(node, 460);
     const pendingId = uid('p');

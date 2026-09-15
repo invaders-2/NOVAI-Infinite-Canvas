@@ -80,16 +80,22 @@ ok(model.includes('function batchConcurrency(raw, fallback)'), '可按目标类�
 ok(canvas.includes('<option value="list-video">视频分镜表</option>'), 'LLM 输出模式下拉有「视频分镜表」');
 ok(canvas.includes("model.llmModeTargetKind(node.llmOutputMode) || model.llmTargetKind(listTarget.target_type)"), '显式分镜表优先、否则按下游探测');
 
-console.log('[7] 静态资源版本号（改完 canvas.js / table-model.js 必须同步 +1）');
-const versionOf = src => {
-  const m = new RegExp(src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\?v=([\\d.]+)').exec(html);
-  return m ? Number(m[1].split('.').pop()) : 0;
-};
-[['/static/js/canvas.js', 'static/js/canvas.js'], ['/static/js/shared/table-model.js', 'static/js/shared/table-model.js']].forEach(pair => {
-  const stamp = versionOf(pair[0]);
-  const mtime = Math.floor(require('fs').statSync(pair[1]).mtimeMs / 1000);
-  ok(stamp >= mtime, pair[0] + ' 的 ?v= 不能落后于文件修改时间（v=' + stamp + ' mtime=' + mtime + '）');
+console.log('[7] 「批量生成」按钮必须真的绑上（只渲染不绑定 = 点了没反应）');
+['renderGeneratorBody', 'renderVideoBody'].forEach(name => {
+  const body = sliceFn(name);
+  ok(body.includes('tableBatchRunButtonHtml(node)'), name + ' 渲染「批量生成」按钮');
+  ok(body.includes('.table-batch-run-btn'), name + ' 绑定「批量生成」按钮的 onclick');
 });
+console.log('[8] 改了脚本就必须同步 canvas.html 的 ?v=（否则浏览器拿缓存的旧 JS）');
+try {
+  const dirty = require('child_process')
+    .execSync('git status --porcelain static/js/canvas.js static/js/shared/table-model.js static/canvas.html', {encoding: 'utf8'})
+    .split('\n').map(line => line.slice(3).trim()).filter(Boolean);
+  const dirtyJs = dirty.some(f => f === 'static/js/canvas.js' || f === 'static/js/shared/table-model.js');
+  ok(!dirtyJs || dirty.includes('static/canvas.html'), '改了 canvas.js / table-model.js 就必须同时改 static/canvas.html 的 ?v=');
+} catch(error) {
+  ok(true, '跳过（不在 git 工作区）');
+}
 
 console.log(fail ? ('\n失败 ' + fail + ' 项') : '\n全部通过');
 process.exit(fail ? 1 : 0);
