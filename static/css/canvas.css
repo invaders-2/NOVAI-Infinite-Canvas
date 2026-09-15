@@ -99,7 +99,7 @@ html[data-studio-scale="off"].studio-scale-managed .asset-manager-panel {
 html.theme-dark .canvas-meta-pop,
 body.theme-dark .canvas-meta-pop,
 html.studio-theme-dark .canvas-meta-pop,
-body.studio-theme-dark .canvas-meta-pop { background:var(--accent); color:var(--text); border-color:var(--border-strong); box-shadow:var(--shadow-xl); }
+body.studio-theme-dark .canvas-meta-pop { background:var(--surface-2); color:var(--text); border-color:var(--border-strong); box-shadow:var(--shadow-xl); }
 html.theme-dark .canvas-meta-label,
 body.theme-dark .canvas-meta-label,
 html.studio-theme-dark .canvas-meta-label,
@@ -107,11 +107,11 @@ body.studio-theme-dark .canvas-meta-label { color:var(--text-3); }
 html.theme-dark .canvas-owner-input,
 body.theme-dark .canvas-owner-input,
 html.studio-theme-dark .canvas-owner-input,
-body.studio-theme-dark .canvas-owner-input { background:var(--text); color:var(--text); border-color:var(--border-strong); }
+body.studio-theme-dark .canvas-owner-input { background:var(--surface-2); color:var(--text); border-color:var(--border-strong); }
 html.theme-dark .canvas-owner-input:focus,
 body.theme-dark .canvas-owner-input:focus,
 html.studio-theme-dark .canvas-owner-input:focus,
-body.studio-theme-dark .canvas-owner-input:focus { background:var(--accent); border-color:#585858; }
+body.studio-theme-dark .canvas-owner-input:focus { background:var(--elevated); border-color:#585858; }
 html.theme-dark .canvas-color-swatch.cc-none,
 body.theme-dark .canvas-color-swatch.cc-none,
 html.studio-theme-dark .canvas-color-swatch.cc-none,
@@ -1107,7 +1107,7 @@ body.theme-dark .error-title { color:var(--danger-text); }
 .theme-dark .llm-system,
 .theme-dark .llm-chat-input,
 .theme-dark .llm-input-area,
-.theme-dark .model-input { background:var(--text); color:var(--text); border-color:var(--line); }
+.theme-dark .model-input { background:var(--surface-2); color:var(--text); border-color:var(--line); }
 .theme-dark .llm-input-area[readonly] { background:var(--surface-2); }
 .theme-dark .blank-image,
 .theme-dark .input-item,
@@ -1126,7 +1126,7 @@ body.theme-dark .error-title { color:var(--danger-text); }
 .theme-dark .gate-panel { background:var(--card); border-color:var(--line); }
 .theme-dark .provider-editor { background:var(--soft); border-color:var(--line); }
 .theme-dark .provider-field input,
-.theme-dark .provider-field select { background:var(--text); color:var(--text); border-color:var(--line); }
+.theme-dark .provider-field select { background:var(--surface-2); color:var(--text); border-color:var(--line); }
 .theme-dark .model-panel-title,
 .theme-dark .image-edit-title,
 .theme-dark .gate-title,
@@ -1149,16 +1149,16 @@ body.theme-dark #cropImage { background:var(--bg) !important; border-color:var(-
 .theme-dark .image-edit-tools label { color:var(--muted); }
 .theme-dark .image-edit-tools input[type="number"],
 .theme-dark .image-edit-tools input[type="text"],
-.theme-dark .image-edit-tools input[type="color"] { background:var(--text); color:var(--text); border-color:var(--line); }
+.theme-dark .image-edit-tools input[type="color"] { background:var(--surface-2); color:var(--text); border-color:var(--line); }
 .theme-dark .image-edit-tools input[type="range"] { background:transparent; }
 .theme-dark .image-edit-tools input[type="range"]::-webkit-slider-runnable-track { background:var(--surface-2); box-shadow:inset 0 0 0 1px var(--border-2); }
 .theme-dark .image-edit-tools input[type="range"]::-webkit-slider-thumb { background:var(--surface-2); border-color:var(--text); box-shadow:0 1px 5px rgba(0,0,0,.38); }
 .theme-dark .image-edit-tools input[type="range"]::-moz-range-track { background:var(--surface-2); box-shadow:inset 0 0 0 1px var(--border-2); }
 .theme-dark .image-edit-tools input[type="range"]::-moz-range-thumb { background:var(--surface-2); border-color:var(--text); box-shadow:0 1px 5px rgba(0,0,0,.38); }
 .theme-dark .grid-gap-value { background:var(--surface-2); color:var(--text); }
-.theme-dark .grid-preset-btn { background:var(--text); border-color:var(--border-strong); color:var(--text); }
+.theme-dark .grid-preset-btn { background:var(--surface-2); border-color:var(--border-strong); color:var(--text-2); }
 .theme-dark .grid-preset-btn:hover { background:var(--surface-2); border-color:transparent; color:var(--text); }
-.theme-dark .crop-ratio-btn { background:var(--text); border-color:var(--border-strong); color:var(--text); }
+.theme-dark .crop-ratio-btn { background:var(--surface-2); border-color:var(--border-strong); color:var(--text-2); }
 .theme-dark .crop-ratio-btn:hover,.theme-dark .crop-ratio-btn.active { background:var(--surface-2); border-color:transparent; color:var(--text); }
 .theme-dark .edit-text-inline { background:rgba(28, 28, 28, .86); border-color:rgba(208, 208, 208, .5); box-shadow:0 8px 24px rgba(0,0,0,.34); }
 .theme-dark .image-edit-mode button.active { background:var(--surface-2); color:var(--text); }
@@ -1174,9 +1174,11 @@ body.theme-dark .log-modal { background:rgba(6,6,6,.72); }
 .theme-dark .preview-text-btn.secondary { background:var(--soft); color:var(--text); border-color:var(--line); }
 .theme-dark .output-grid img,
 .theme-dark .output-img-wrap.loading-wrap,
-body.theme-dark .output-img-wrap.loading-wrap { background:var(--text); border-color:var(--line); color:var(--text); }
+body.theme-dark .output-img-wrap.loading-wrap { background:var(--surface-2); border-color:var(--line); color:var(--text); }
 .theme-dark .llm-output-copy { background:rgba(28, 28, 28, .86); border-color:var(--line); }
-.theme-dark .output-spinner { border-color:var(--border-strong); border-top-color:var(--border-strong); }
+/* 转圈靠的是「顶边一段亮色」跟底圈的对比：两边同色就只剩一个静止的圆环，
+   深色下看起来就是「旋转动效没了」。底圈留淡、亮段用 --text。 */
+.theme-dark .output-spinner { border-color:var(--border-2); border-top-color:var(--text); }
 .theme-dark .log-item.failed { background:rgba(127,29,29,.18); border-color:rgba(239,68,68,.42); }
 .theme-dark .log-error { color:var(--danger-text); }
 .theme-dark .image-edit-panel { background:var(--card-solid); border-color:var(--line); }
@@ -1221,9 +1223,12 @@ body.studio-theme-dark .comfy-random-btn.active,
 .theme-dark .model-btn.secondary:hover { background:var(--surface-2); color:var(--text-on-accent); border-color:#848484; }
 .theme-dark .model-btn.secondary.danger { background:rgba(127,29,29,.78); color:var(--danger-text); border-color:var(--danger); box-shadow:0 8px 20px rgba(127,29,29,.24); }
 .theme-dark .model-btn.secondary.danger:hover { background:#991b1b; color:var(--text-on-accent); border-color:#f87171; }
-.theme-dark .api-key-link { background:var(--text); color:var(--info-border); border-color:#848484; }
+.theme-dark .api-key-link { background:var(--surface-2); color:var(--info-text); border-color:#848484; }
 .theme-dark .api-key-link:hover { background:var(--info); color:var(--text-on-accent); border-color:#a5a5a5; }
-.theme-dark .select-lite option { background:var(--accent); color:var(--text); }
+/* 深色下 --accent 是 #fafafa：背景写成 var(--accent) 就变成白底 + 白字（--text 也是 #fafafa），
+   弹出列表整个看不见。option 必须用深色表面；color-scheme 让原生弹层/滚动条也走深色。 */
+.theme-dark .select-lite { color-scheme:dark; }
+.theme-dark .select-lite option { background:var(--surface-2); color:var(--text); }
 .theme-dark .select-lite option:disabled { background:var(--surface-2); color:var(--text); }
 .theme-dark .select-lite:has(option:checked:disabled) { color:var(--text); }
 .gate-panel { width:min(680px, 100%); padding:28px; border-radius:var(--radius-xl); background:rgba(255,255,255,.96); border:1px solid transparent; box-shadow:var(--shadow-xl); backdrop-filter:blur(20px) saturate(180%); text-align:left; }
