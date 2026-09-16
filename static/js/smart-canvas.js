@@ -9128,8 +9128,10 @@ function promptNodeBodyHtml(node){
     </div>` : '';
     const llmParams = node.llmEnabled ? `
         <div class="prompt-node-llm">
-            <select class="prompt-node-control prompt-llm-provider">${chatProviderOptions(node.llmProvider)}</select>
-            <select class="prompt-node-control prompt-llm-model">${chatModelOptions(node.llmModel, node.llmProvider)}</select>
+            <div class="prompt-llm-model-row">
+                <select class="prompt-node-control prompt-llm-provider">${chatProviderOptions(node.llmProvider)}</select>
+                <select class="prompt-node-control prompt-llm-model">${chatModelOptions(node.llmModel, node.llmProvider)}</select>
+            </div>
             <div class="llm-pane-label">Input</div>
             <div class="prompt-llm-instruction-wrap">
                 <textarea class="prompt-node-control prompt-llm-instruction" placeholder="${escapeHtml(tr('smart.promptLlmInstructionPlaceholder'))}" style="height:${promptLlmInstructionHeight(node)}px">${escapeHtml(node.llmInstruction || '')}</textarea>

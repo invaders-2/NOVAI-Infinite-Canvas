@@ -591,6 +591,10 @@
     --table-frame-line: rgba(255, 255, 255, .14);
 }
 
+/* 供应商 / 模型一排（照搬经典画布 LLM 节点：放在 Input 分区上方） */
+.prompt-llm-model-row { display: flex; gap: 6px; margin-bottom: 2px; }
+.prompt-llm-model-row select { flex: 1 1 0; min-width: 0; }
+
 /* 智能画布 LLM 节点的 Input / Output 分区（照搬经典画布外观，样式原本只在 canvas.css 里） */
 .llm-pane-label {
     flex: 0 0 auto;
