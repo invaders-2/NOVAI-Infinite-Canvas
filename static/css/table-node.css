@@ -559,6 +559,14 @@
     min-width: 280px;
 }
 
+/* 智能画布 prompt 节点布局：中间一排工具（模板库/分隔符/LLM/启用系统提示词/反推），
+   底下一排左边是输出形式药丸、右边是运行。 */
+.prompt-node-tools { flex-wrap: wrap; }
+.prompt-node-run-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.prompt-node-run-row .llm-output-mode { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; margin-bottom: 0; }
+.prompt-node-run-row .llm-output-mode button { flex: 0 0 auto; white-space: nowrap; }
+.prompt-node-run-row .prompt-node-run { margin-left: auto; flex: 0 0 auto; }
+
 /* 智能画布的拖拽把手 + 批量节点收起态摘要 */
 .table-node-drag-bar {
     display: flex;

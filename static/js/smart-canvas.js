@@ -9135,11 +9135,9 @@ function promptNodeBodyHtml(node){
                 <div class="prompt-llm-instruction-resize prompt-node-control" data-llm-instruction-resize="1" title="拖动调整高度"><span></span></div>
             </div>
             ${upstreamPromptHtml}
-            ${llmOutputModeHtml(node)}
-            <div class="prompt-node-llm-actions">
+            <div class="prompt-node-run-row">
+                ${llmOutputModeHtml(node)}
                 <button class="prompt-node-run prompt-node-control" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'play'}"></i><span>${node.running ? escapeHtml(tr('common.running')) : escapeHtml(tr('common.run'))}</span></button>
-                <button class="prompt-node-pill prompt-node-control prompt-system-toggle ${node.llmSystemEnabled ? 'active' : ''}" type="button"><i data-lucide="${node.llmSystemEnabled ? 'check-circle-2' : 'circle'}"></i><span>${escapeHtml(node.llmSystemEnabled ? tr('smart.promptLlmDisableSystem') : tr('smart.promptLlmEnableSystem'))}</span></button>
-                <button class="prompt-node-pill prompt-node-control prompt-reverse-toggle ${node.reverse ? 'active' : ''}" type="button" title="${escapeHtml(tr('smart.promptReverseTitle'))}"><i data-lucide="scan"></i><span>${escapeHtml(tr('smart.promptReverse'))}</span></button>
             </div>
             ${node.llmSystemEnabled ? `<textarea class="prompt-node-control prompt-llm-system" placeholder="${escapeHtml(tr('smart.promptLlmSystemPlaceholder'))}">${escapeHtml(systemPrompt || 'You are a helpful prompt assistant.')}</textarea>` : ''}
         </div>` : '';
@@ -9149,6 +9147,8 @@ function promptNodeBodyHtml(node){
             <button class="prompt-node-pill prompt-node-control prompt-preset-edit ${templateActive ? 'active' : ''}" type="button"><i data-lucide="library"></i><span>模板库</span></button>
             <button class="prompt-node-pill prompt-node-control prompt-split-toggle ${node.promptSplitEnabled ? 'active' : ''}" type="button"><i data-lucide="split"></i><span>分隔符</span></button>
             <button class="prompt-node-pill prompt-llm-toggle ${node.llmEnabled ? 'active' : ''}" type="button"><i data-lucide="sparkles"></i><span>LLM</span></button>
+            ${node.llmEnabled ? `<button class="prompt-node-pill prompt-node-control prompt-system-toggle ${node.llmSystemEnabled ? 'active' : ''}" type="button"><i data-lucide="${node.llmSystemEnabled ? 'check-circle-2' : 'circle'}"></i><span>${escapeHtml(node.llmSystemEnabled ? tr('smart.promptLlmDisableSystem') : tr('smart.promptLlmEnableSystem'))}</span></button>
+            <button class="prompt-node-pill prompt-node-control prompt-reverse-toggle ${node.reverse ? 'active' : ''}" type="button" title="${escapeHtml(tr('smart.promptReverseTitle'))}"><i data-lucide="scan"></i><span>${escapeHtml(tr('smart.promptReverse'))}</span></button>` : ''}
         </div>
         ${node.promptSplitEnabled ? `<div class="prompt-node-split-row">
             <label class="prompt-node-split-control prompt-node-control"><span>分隔符</span><input class="prompt-node-separator" type="text" value="${escapeHtml(node.promptSeparator)}" maxlength="8" placeholder=";"></label>
