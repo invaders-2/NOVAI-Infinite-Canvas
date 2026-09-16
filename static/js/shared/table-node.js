@@ -77,19 +77,24 @@ function syncTableNodeWidth(node){
 
 /* 表格重绘 —— 顺带刷新**下游**生成 / 视频节点的批量面板。
    面板读的就是这张表，所以改格子 / 加删行列 / 传替换素材都必须即时反映过去。 */
+/* 会挂批量面板的节点类型：经典画布是 generator / video，智能画布是 smart-batch。
+   只认前两种的话，智能画布那边「表格里改勾选 → 批量面板」永远不重绘（用户报的）。 */
+const TABLE_BATCH_NODE_TYPES = ['generator', 'video', 'smart-batch'];
+function tableBatchTypeNode(item){ return Boolean(item) && TABLE_BATCH_NODE_TYPES.includes(item.type); }
+
 function repaintTable(node){
     if(typeof node._tablePaint === 'function') node._tablePaint();
-    (nodes || []).filter(item => item.type === 'generator' || item.type === 'video').forEach(gen => {
+    (nodes || []).filter(tableBatchTypeNode).forEach(gen => {
         if(generatorUpstreamTables(gen.id).some(item => item.id === node.id)) repaintBatchPanel(gen);
     });
 }
 
 /* 勾选状态是表格和生成面板共用的：
-   在表格里取消勾选，生成那边的候选行也要立刻跟着变，
+   在表格里取消勾选，生成那边的候选行也要立刻跟着变（反过来也一样），
    所以两个地方都要重绘 —— 只重绘表格会让面板显示过期的勾选。 */
 function repaintTableSelectionViews(tableNode){
     repaintTable(tableNode);
-    (nodes || []).filter(item => item.type === 'generator' || item.type === 'video').forEach(gen => {
+    (nodes || []).filter(tableBatchTypeNode).forEach(gen => {
         if(generatorUpstreamTables(gen.id).some(item => item.id === tableNode.id)) repaintBatchPanel(gen);
     });
 }

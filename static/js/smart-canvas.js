@@ -2322,7 +2322,12 @@ function imageLayout(images, scale=1, node=null){
             single:true
         };
     }
-    if(count === 1) return singleImageLayout(images[0], node, s);
+    /* 还在生成（pending>0）时，格子数要算上**还没出来的那些**：
+       结果节点先出一张、剩下的还在跑 —— 只按已有图片算的话，第一张一落地
+       节点就被缩略图网格顶掉、进度框消失（用户报的「另外还没生成的看不到进度」）。
+       pending 归零后 count 恢复成真实张数，节点自动收紧。 */
+    const gridCount = count + Math.max(0, Number(node?.pending) || 0);
+    if(gridCount <= 1) return singleImageLayout(images[0], node, s);
     const thumb = Math.round(MEDIA_GROUP_THUMB_BASE * s);
     const cell = thumb + 8;
     const PAD = 32; // group-node has 16px padding on each side
@@ -2341,11 +2346,11 @@ function imageLayout(images, scale=1, node=null){
         }
         return {cols, rows, visibleRows, width:Math.max(Math.round(226*s), cols * cell + PAD), height:visibleRows * cell - 8 + PAD, thumb};
     }
-    const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(count))));
-    const rows = Math.ceil(count / cols);
+    const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(gridCount))));
+    const rows = Math.ceil(gridCount / cols);
     const visibleRows = Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, rows);
     if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
-        return fittedMediaGridLayout(node, count, explicitW, explicitH, thumb, PAD);
+        return fittedMediaGridLayout(node, gridCount, explicitW, explicitH, thumb, PAD);
     }
     const width = Math.max(Math.round(226*s), cols * cell + PAD);
     const height = visibleRows * cell - 8 + PAD;
@@ -9615,17 +9620,26 @@ function nodeBodyHtml(node, layout){
         const rows = Math.ceil(count / cols);
         return `<div class="loading-skeleton" style="grid-template-columns:repeat(${cols}, 1fr);grid-template-rows:repeat(${rows}, 1fr);width:${layout.width}px;height:${layout.height}px;padding:8px;box-sizing:border-box">${Array.from({length:count}).map(() => `<div class="loading-cell"></div>`).join('')}</div>`;
     }
-    if(imgs.length > 1){
-        const visibleRows = Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, Number(layout.visibleRows || layout.rows || 1)));
-        const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
-        return `<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${layout.cols}; --thumb-size:${layout.thumb}px; --thumb-max-height:${maxHeight}px">${imgs.map((img, i) => `<div class="thumb-item has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === i ? 'image-selected' : ''}" data-image-index="${i}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${i}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`).join('')}</div>`;
-    }
+    const pendingSlots = Math.max(0, Number(node.pending) || 0);
+    /* 已有产出、这一批还没跑完：已出的缩略图 + 还没出来的占位格。
+       只渲染图片的话，第一张一落地进度框就被顶掉（用户报的「另外还没生成的看不到进度」）。 */
+    if(imgs.length > 1 || (imgs.length && pendingSlots)) return thumbGridHtml(node, imgs, layout, pendingSlots);
     if(imgs[0]) return `<div class="image-wrap has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === 0 ? 'image-selected' : ''}" data-image-index="0" data-media-signature="${escapeAttr(`${mediaKindForItem(imgs[0])}:${imgs[0]?.url || ''}`)}" style="--node-img-w:${layout.width}px;--node-img-h:${layout.height}px">${singleMediaHtml(imgs[0], layout.width, layout.height)}${imageNameBadgeHtml(imgs[0], {outside:true})}${imageResolutionBadgeHtml(imgs[0])}<button class="mini-x image-delete" type="button" data-image-index="0" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`;
     return `<div class="node-drop" data-upload-action="files">
         <span class="upload-node-main"><i data-lucide="upload-cloud"></i></span>
         <span class="upload-node-title">${escapeHtml(tr('smart.createImportNode'))}</span>
         <span class="upload-node-sub">拖拽 / 粘贴 / 点击上传</span>
     </div>`;
+}
+/* 多图网格：已出的缩略图 + 还没出来的占位格（pendingSlots）。
+   占位格只用 .loading-cell（闪底），**不能加 .thumb-item** —— 那个类会被缩略图预览/拖动处理器认领。 */
+function thumbGridHtml(node, imgs, layout, pendingSlots = 0){
+    const visibleRows = Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, Number(layout.visibleRows || layout.rows || 1)));
+    const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
+    const thumb = Number(layout.thumb || 96);
+    const thumbs = imgs.map((img, i) => `<div class="thumb-item has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === i ? 'image-selected' : ''}" data-image-index="${i}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${i}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`).join('');
+    const slots = Array.from({length:Math.max(0, pendingSlots)}).map(() => `<div class="loading-cell pending-thumb" data-pending-slot="1" title="${escapeHtml(tr('smart.hintPending'))}" style="width:${thumb}px;height:${thumb}px"></div>`).join('');
+    return `<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${layout.cols}; --thumb-size:${thumb}px; --thumb-max-height:${maxHeight}px">${thumbs}${slots}</div>`;
 }
 function jimengPendingBodyHtml(node, layout){
     const jp = node.jimengPending || {};
@@ -9718,6 +9732,14 @@ function runSmartNodeToolbarAction(nodeId, action){
     selectedIds = [];
     selectedImage = {nodeId, index};
     if(action === 'download'){
+        /* 群组（一组图/视频）→ 整组打包下载；单个素材才直接下这一个文件。
+           之前无论几张都只下当前这一张（用户报的「群组上的下载要下整组」）。
+           打包走 /api/canvas-assets/download，图片和视频都能收。 */
+        const mediaList = (node.images || []).filter(entry => entry?.url);
+        if(mediaList.length > 1){
+            zipDownloadImageItems(node.title || tr('smart.createImportNode'), mediaList.map(entry => imageForDisplay(entry)));
+            return;
+        }
         downloadPreviewFile(node.images?.[index] || item);
         return;
     }

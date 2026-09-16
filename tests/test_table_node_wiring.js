@@ -93,7 +93,9 @@ ok(runBatch.includes('tableBatchRunner(gen)(genId'), '批量执行按节点类�
 ok(runBatch.includes('tableBatchConcurrencyFor(gen, table)'), '批量执行用生效并发');
 ok(canvas.includes("return node && node.type === 'video' ? runVideoNode : runGenerator;"), '视频走 runVideoNode、图像走 runGenerator');
 ok(canvas.includes("const fallback = gen && gen.type === 'video' ? 1 : model.DEFAULT_BATCH_CONCURRENCY;"), '视频默认并发 1');
-ok(canvas.includes("item.type === 'generator' || item.type === 'video'"), '勾选同步覆盖视频节点');
+/* 类型表改成常量后，这里改成验「视频节点在重绘名单里」这件事本身。 */
+ok(/TABLE_BATCH_NODE_TYPES\s*=\s*\['generator',\s*'video',\s*'smart-batch'\]/.test(canvas), '勾选同步覆盖视频节点（generator / video / smart-batch）');
+ok(/filter\(tableBatchTypeNode\)/.test(canvas), '重绘面板都按同一份类型表');
 ok(canvas.includes("if(target.type === 'output' || target.type === 'table'){ queue.push(target.id); }"), '下游目标探测穿过表格');
 ok(canvas.includes('model.buildListPlanPrompt(requirement, inputs, groups, {targetKind})'), 'LLM 规划遍按目标类型出分镜');
 ok(canvas.includes('model.buildListGeneratePrompt(requirement, inputs, groups, plan, {targetKind})'), 'LLM 生成遍按目标类型出分镜');

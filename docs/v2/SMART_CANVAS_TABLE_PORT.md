@@ -653,3 +653,33 @@ render 的 class 也改成所有节点都带上（原来只有提示词节点）
 - 其余五套全绿（model 293、dom 371、wiring、select_menu 47、dark_mode 8）；
 - 浏览器实测（合成画布 + stub `/api/canvas-image-tasks`）：四行 size 逐行正确、每张结果各带本行参考图、
   群组删除 icon 两次点击真删掉节点；临时画布已 purge。
+
+
+## 勾选联动 / 群组整组下载 / 生成中的进度占位（2026-09-16 后续轮 13）
+
+### ① 表格与批量面板的勾选要互通
+勾选状态本来就共用 `table.selectedRows`，重绘也走 `repaintTableSelectionViews()`；
+但那份重绘名单写死成 `item.type === 'generator' || item.type === 'video'`（经典画布的两种），
+**漏了智能画布的 `smart-batch`** → 在表格里取消勾选，批量面板那边还是旧的勾选。
+修复：抽 `TABLE_BATCH_NODE_TYPES = ['generator','video','smart-batch']` + `tableBatchTypeNode()`，
+两处 filter 都用它。实测两个方向都同步（表格取消第 2 行 → 面板第 2 行也取消；面板取消第 1 行 → 表格第 1 行也取消）。
+
+### ② 群组上的「下载」要下整组
+`runSmartNodeToolbarAction(node,'download')` 原来只 `downloadPreviewFile(node.images[index])` —— 下一张。
+改成：多张素材时走 `zipDownloadImageItems(node.title, node.images)`（服务端压 zip，图片/视频都收），
+单张时保持直接下这一个文件。实测 4 张的群组节点发出一次 `/api/canvas-assets/download`，带 4 个 url。
+
+### ③ 生成第一张之后，剩下还没生成的进度框不能消失
+`nodeBodyHtml()` 只在 `imgs.length === 0` 时画 loading 骨架；第一张结果一落地就换成缩略图网格，
+**剩下几行的占位/进度整块消失**（用户报的「另外还没生成的看不到进度」）。
+修复：
+- `imageLayout()` 里 `gridCount = 已有张数 + pending`（pending 归零自动收紧）；
+- `nodeBodyHtml()` 把网格渲染抽成 `thumbGridHtml(node, imgs, layout, pendingSlots)`，
+  已出的图 + 未出图的占位格（`.loading-cell.pending-thumb`，不加 `.thumb-item`，免得被缩略图处理器认领）一起排。
+实测一次 4 行批量：跑到一半是 `thumbs:3 + slots:1`（计时胶囊还在），全部跑完 `thumbs:4 + slots:0`。
+
+### 验收
+- `tests/test_smart_canvas_table_wiring.js` 76/76（新增 [9] 节）；
+- `tests/test_table_node_wiring.js` 全过（勾选同步那条改成验类型表）；
+- 其余四套全绿（model 293、dom 371、select_menu 47、dark_mode 8）；
+- 浏览器实测三点（临时画布已 purge）。
