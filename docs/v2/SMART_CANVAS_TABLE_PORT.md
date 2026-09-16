@@ -796,3 +796,39 @@ render 的 class 也改成所有节点都带上（原来只有提示词节点）
 ### 验收
 - `tests/test_smart_canvas_table_wiring.js` 106/106（新增 [12] 节）；
 - 其余五套全绿；浏览器实测：占位框与最终节点都等于该行参考比例（见上）。
+
+
+## LLM 端口被裁 / 再次运行开新批次 / 多表格卡顿（2026-09-16 后续轮 17）
+
+### ① LLM 节点的「加号+圆圈」没了
+`table-node.css` 里 `.image-node:has(.prompt-node-llm).size-user-set { overflow: hidden }` ——
+端口是定位在节点框**外** 30px 的兄弟元素，一裁就整个看不见。
+改成 `overflow: visible`（内容溢出自有 `.node-body` 的 `overflow:auto` 兜住）。
+实测：hover 后两个端口 `opacity=1`，`elementFromPoint` 命中的就是端口本身。
+
+### ② 再次点「运行」要开一批新任务
+`runTableBatch()` 开头原来是 `if(gen._batchRunning){ notifyCanvas('批量生成正在进行中'); return; }` ——
+正在跑时点第二次什么都不做。按用户要求改成**每次点击都开新批次**：
+- 去掉那个早退；用 `_batchRunCount` 计数代替布尔（叠加两批时，先结束的那批不能把还在跑的那批标志清掉）；
+- 持久化时剥掉 `_batchRunCount`，加载时 `resetStaleBatchRuns()` 一并归零。
+实测：第一次运行 → 2 个任务；不等它跑完再点一次 → 又发出 2 个（共 4）。
+
+### ③ 画布里 4 个以上多维表格就卡
+CDP Profiler（5 个表格）显示两个大头：
+- `setAttribute` **46%**：全是 lucide 图标转换 —— 每次 render 重建所有节点 DOM → 51 个 `i[data-lucide]` × 2 次 `createIcons` → 348 个 svg/path；
+- `syncContentNodeMeasuredSize` **13.7%**：挂载循环里「改一点 → 读 offsetWidth 量一次」，每次都强制同步布局。
+修复：
+- `render()`：这一轮的节点 HTML 与上一轮**一字不差**就原样留着元素（不再重新解析 → 图标/表格/面板 DOM 全部复用）；
+  `__renderHtml` 渲染缓存持久化时剥掉；
+- `mountSmartTableNodes / mountSmartBatchNodes`：连线适配层每次 render 只同步一次；
+  表格 host 不再 `textContent=''` 反复拆装；批量面板元素复用 + 按内容签名重绘（`tableBatchPanelSignature`）；
+- 实测尺寸改成 `flushContentMeasurements()` 在 render 末尾统一回写（所有 DOM 改完、含 lucide 图标替换之后，一次布局量完）。
+
+实测（同样的 1/5/8 表格画布，10 次 render 的中位数）：**1 表 15.7ms（原 24）、5 表 32.2ms（原 92）、8 表 69.3ms（原 108）**。
+
+顺带修掉一个隐患：共享模块的导出表漏了 `paintTableBatchPanel` / `generatorUpstreamTables`（宿主调用会抛错、整段挂载被打断），
+已补上导出；宿主侧也加了 `typeof` 兜底，避免以后漏导出又把挂载打断。
+
+### 验收
+- `tests/test_smart_canvas_table_wiring.js` 116/116（[13] 节覆盖这三点）；其余五套全绿；
+- 浏览器实测：LLM 端口可命中、再次运行真的开新批次、连线/勾选/批量跑通；性能数字如上。

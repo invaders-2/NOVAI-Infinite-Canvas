@@ -10,6 +10,7 @@ const html = read('static/smart-canvas.html');
 const js = read('static/js/smart-canvas.js');
 const moduleSrc = read('static/js/shared/table-node.js');
 const mediaSrc = read('static/js/shared/media.js');
+const tableCss = read('static/css/table-node.css');
 
 let pass = 0;
 const fails = [];
@@ -128,7 +129,9 @@ console.log('[10] 卡住的批量状态 / 视频拖动 / 原图比例');
 ok(js.includes('function resetStaleBatchRuns('), '加载时复位卡住的批量运行（resetStaleBatchRuns）');
 ok(js.includes('const resetBatchRuns = resetStaleBatchRuns();'), 'loadCanvas 里真的调了');
 ok(js.includes('delete node._batchRunning') && js.includes('delete node.tableBatchRunning'), '持久化时剥掉临时批量状态');
-ok(moduleSrc.includes('} finally {') && /gen\._batchRunning = false;\s*\n\s*table\.tableBatchRunning = false;/.test(moduleSrc), '批量执行体 try/finally 里一定会清标志');
+ok(moduleSrc.includes('} finally {') && /gen\._batchRunCount = Math\.max\(0, \(Number\(gen\._batchRunCount\) \|\| 1\) - 1\);/.test(moduleSrc), '批量执行体 try/finally 里一定会把计数还回去');
+ok(!/notifyCanvas\('批量生成正在进行中/.test(moduleSrc), '再次点「运行」不再被「正在进行中」挡回来（要开新任务）');
+ok(moduleSrc.includes('gen._batchRunCount'), '用「在跑批次数」而不是布尔，叠加两批时互不干扰');
 ok(js.includes("row.status === 'running' || row.status === 'deferred'"), '卡在 running/deferred 的行放回 pending');
 // ② 播放中的视频不再把节点钉死
 ok(js.includes("const videoEl = e.target.closest('video');"), '视频区域允许起拖（只有控制条除外）');
@@ -165,6 +168,23 @@ ok(/pendingBoxSize\(expectedCount, \{sourceNode, ratio:options\.ratio/.test(js),
 ok(js.includes('batchResultNodeForRun(runId, node, meta, refs, srcRatio)'), '批量按行算出的比例传进结果节点');
 ok(js.includes('const sourceIsGenerator'), '生成器类节点（批量/表格）不用自己的框当形状');
 ok(js.includes('mediaLayoutSize(live.images[0]).width > 0'), '单张结果按素材自己的比例定框');
+
+console.log('[13] LLM 端口 / 再次运行开新批次 / 多表格卡顿');
+// ① LLM 节点手动尺寸时不能 overflow:hidden（否则框外的「加号+圆圈」被裁掉）
+ok(/\.image-node:has\(\.prompt-node-llm\)\.size-user-set \{ min-height: 340px; overflow: visible; \}/.test(tableCss), 'LLM 手动尺寸节点 overflow:visible（端口不再被裁）');
+// ② 再次点「运行」= 开一批新任务
+ok(moduleSrc.includes('function tableBatchPanelSignature('), '批量面板有重绘签名（内容没变不重建）');
+ok(moduleSrc.includes('if(panel.dataset.batchSignature === signature) return;'), '签名相同直接返回，不重建面板 DOM');
+// ③ 多表格卡顿：mount 里不再逐节点重建 DOM / 逐节点同步连线
+const mountTable = (js.match(/function mountSmartTableNodes\(\)\{[\s\S]*?\n\}/) || [''])[0];
+const mountBatch = (js.match(/function mountSmartBatchNodes\(\)\{[\s\S]*?\n\}/) || [''])[0];
+ok((mountTable.match(/syncTableConnections\(\)/g) || []).length === 1
+    && mountTable.indexOf('syncTableConnections()') < mountTable.indexOf('hosts.forEach'), '表格：连线适配层每次 render 只同步一次（在循环之前）');
+ok(!/hostEl\.textContent = '';/.test(mountTable), '表格：不再清空 host（避免子树反复拆装）');
+ok(/if\(!hostEl\.querySelector\(':scope > \.table-node-drag-bar'\)\)/.test(mountTable), '表格：拖拽条只在缺失时创建');
+ok((mountBatch.match(/syncTableConnections\(\)/g) || []).length === 1
+    && mountBatch.indexOf('syncTableConnections()') < mountBatch.indexOf('hosts.forEach'), '批量：连线同样只同步一次（在循环之前）');
+ok(/api\.paintTableBatchPanel\(existingPanel, node\)/.test(mountBatch), '批量：面板元素复用 + 按签名重绘');
 
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

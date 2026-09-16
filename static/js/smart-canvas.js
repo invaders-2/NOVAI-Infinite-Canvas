@@ -958,7 +958,9 @@ function canvasForStorage(){
            （用户报的「批量生成，无法再次生成」）。持久化时一律剥掉。 */
         delete node._batchRunning;
         delete node._batchProgress;
+        delete node._batchRunCount;
         delete node.tableBatchRunning;
+        delete node.__renderHtml;   // 渲染缓存：只在页面内用，别写进画布
     });
     return clean;
 }
@@ -7962,7 +7964,11 @@ function resetStaleBatchRuns(){
     let changed = false;
     (nodes || []).forEach(node => {
         if(!node) return;
-        if(node.type === 'smart-batch' && node._batchRunning){ node._batchRunning = false; changed = true; }
+        if(node.type === 'smart-batch' && (node._batchRunning || node._batchRunCount)){
+            node._batchRunning = false;
+            node._batchRunCount = 0;
+            changed = true;
+        }
         if(node.type === 'table' && node.tableBatchRunning){ node.tableBatchRunning = false; changed = true; }
         const journal = node.type === 'table' ? node.generationBatchJournal : null;
         if(journal && Array.isArray(journal.rows)){
@@ -9584,6 +9590,20 @@ function tableHostDragBar(label){
    （比如渲染出来 300 高、nodeRect 还是兜底 194）→ 连线的端口锚点、下游结果节点的落点
    都按错的高度算。挂载完内容后把实测尺寸回写 node.w/h（用户手动拉过 sizeUserSet 的不动），
    并刷新一次连线层。 */
+/* 待测量的表格/批量节点：**所有 DOM 改完再统一量**。
+   读 offsetWidth/offsetHeight 会强制同步布局，而挂载过程中是「改一点 → 量一次 → 再改」，
+   每量一次就把整篇文档重新布局一遍 —— profiler 里 syncContentNodeMeasuredSize 占了渲染时间的一半，
+   表格一多（4 个以上）就明显卡（用户报的）。 */
+const pendingContentMeasure = [];
+function flushContentMeasurements(){
+    if(!pendingContentMeasure.length) return;
+    let changed = false;
+    const list = pendingContentMeasure.splice(0, pendingContentMeasure.length);
+    list.forEach(item => {
+        if(item && item.node && item.el && syncContentNodeMeasuredSize(item.node, item.el)) changed = true;
+    });
+    if(changed) scheduleConnectionLayerRefresh();
+}
 function syncContentNodeMeasuredSize(node, el){
     if(!node || !el || node.sizeUserSet) return false;
     const w = Math.round(el.offsetWidth) || 0;
@@ -9600,24 +9620,26 @@ function mountSmartTableNodes(){
     if(!hosts.length) return;
     const api = ensureTableApi();
     if(!api) return;
-    let sizeChanged = false;
+    /* 连线同步一次就够（以前每个表格节点都同步一遍整份适配层：节点多了白跑 N 遍）。 */
+    syncTableConnections();
     hosts.forEach(hostEl => {
         const el = hostEl.closest ? hostEl.closest('.image-node') : null;
         const node = el ? nodes.find(n => n.id === el.dataset.id) : null;
         if(!node || node.type !== 'table') return;
-        syncTableConnections();
-        hostEl.textContent = '';
         ensureNodeResizeHandle(hostEl);
         markNodeSizeUserSet(hostEl, node);
-        hostEl.appendChild(tableHostDragBar('多维表格'));
+        /* 不再每次 render 都 textContent='' 把表格 DOM 拆下来再装回去：
+           表格模块自己按签名决定要不要重绘（renderTableBody 复用 node._tableEl），
+           反复拆装会触发整棵子树的布局，节点一多就很卡。 */
+        if(!hostEl.querySelector(':scope > .table-node-drag-bar')) hostEl.appendChild(tableHostDragBar('多维表格'));
         try {
-            hostEl.appendChild(api.renderTableBody(node));
+            const body = api.renderTableBody(node);
+            if(body && body.parentElement !== hostEl) hostEl.appendChild(body);
         } catch(error){
             hostEl.textContent = '表格渲染失败：' + (error && error.message ? error.message : error);
         }
-        if(syncContentNodeMeasuredSize(node, el)) sizeChanged = true;
+        pendingContentMeasure.push({node, el});
     });
-    if(sizeChanged) scheduleConnectionLayerRefresh();
 }
 
 function nodeBodyHtml(node, layout){
@@ -10207,8 +10229,14 @@ function render(){
     const composerEl = composer;
     const mediaStates = captureMediaPlaybackStates();
     const reusableNodes = new Map();
+    /* 当前 world 里每个节点对应的元素 + 上一轮渲染出来的 HTML：
+       这一轮 HTML 一字不差就**原样留着**，不再「重新解析 → 重建图标/表格/面板」。
+       节点多了以后每次 render 都重建所有节点 DOM（含 lucide 图标）是卡顿主因
+       （profiler：图标转换 + setAttribute 占了渲染时间的一半）。 */
+    const currentEls = new Map();
     world.querySelectorAll('.image-node').forEach(el => {
         const node = nodes.find(n => n.id === el.dataset.id);
+        if(node) currentEls.set(node.id, el);
         if(smartNodeHasLiveMedia(node)) reusableNodes.set(node.id, el);
     });
     const nodeHtmlEntries = nodes
@@ -10249,23 +10277,30 @@ function render(){
             <div class="node-port port-in" data-port="in" title="input"></div>
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
-        return {node, html};
+        const reuseEl = currentEls.get(node.id) || null;
+        const keepEl = (reuseEl && node.__renderHtml === html) ? reuseEl : null;
+        node.__renderHtml = html;
+        return {node, html, keepEl};
     });
+    /* 只解析「变了」的节点 HTML：没变的原样留着（图标/表格/面板 DOM 全部复用）。 */
+    const parseEntries = nodeHtmlEntries.filter(entry => !entry.keepEl);
     const tpl = document.createElement('template');
-    tpl.innerHTML = nodeHtmlEntries.map(entry => entry.html).join('');
+    tpl.innerHTML = parseEntries.map(entry => entry.html).join('');
     const renderedNodeEls = new Map();
-    nodeHtmlEntries.forEach(entry => {
+    parseEntries.forEach(entry => {
         const fresh = tpl.content.querySelector(`.image-node[data-id="${CSS.escape(entry.node.id)}"]`);
         if(fresh) renderedNodeEls.set(entry.node.id, fresh);
     });
     const keepEls = new Set();
     reusableNodes.forEach(el => keepEls.add(el));
+    nodeHtmlEntries.forEach(entry => { if(entry.keepEl) keepEls.add(entry.keepEl); });
     [...world.childNodes].forEach(child => {
         if(!keepEls.has(child)) child.remove();
     });
     // composer 已移出 world（屏幕空间悬浮栏），render 不再动它的 DOM 位置。
     world.insertAdjacentHTML('beforeend', renderConnections());
     nodeHtmlEntries.forEach(entry => {
+        if(entry.keepEl) return;   // 原样留着（也保持原有 DOM 顺序）
         const fresh = renderedNodeEls.get(entry.node.id);
         if(!fresh) return;
         world.appendChild(fresh);
@@ -10286,6 +10321,9 @@ function render(){
     bindSmartPreviewImageFallbacks(world);
     syncSmartSelectedImageResolution(world);
     measureSmartNodeImages();
+    /* 表格/批量节点的实测尺寸统一在这里回写：此时 DOM 已经全部改完（含 lucide 图标替换），
+       一次布局就能量到最终尺寸，不会边改边读反复触发 reflow。 */
+    flushContentMeasurements();
     refreshRunTimerPills();
     sbSyncStarBorderFrames();
     return;
@@ -18895,42 +18933,59 @@ function mountSmartBatchNodes(){
     if(!hosts.length) return;
     const api = ensureTableApi();
     if(!api) return;
-    let sizeChanged = false;
+    /* 连线只同步一次（原来每个批量节点都整份同步一遍）。 */
+    syncTableConnections();
     hosts.forEach(hostEl => {
         const el = hostEl.closest ? hostEl.closest('.image-node') : null;
         const node = el ? nodes.find(n => n.id === el.dataset.id) : null;
         if(!node || node.type !== 'smart-batch') return;
-        syncTableConnections();
-        hostEl.textContent = '';
         ensureNodeResizeHandle(hostEl);
         markNodeSizeUserSet(hostEl, node);
-        const bar = tableHostDragBar('批量生成');
-        bar.title = '拖动这一栏可以移动节点';
-        hostEl.appendChild(bar);
-        const panel = api.renderTableBatchPanel(node);
-        if(panel){
-            /* 只渲染「生成输入」面板：
-               1) 不再挂折叠开关 —— 点标题栏不该把生成列表藏起来（用户要求）；
-               2) 不再挂「批量生成」按钮 —— 底部编辑器里那颗「运行」就是跑整批（用户要求去掉重复入口）；
-               3) 批量产出的素材不再塞在节点里 —— 每行结果自动落到下游图片/视频节点（见 tableRunOneRow）。 */
-            hostEl.appendChild(panel);
+        if(!hostEl.querySelector(':scope > .table-node-drag-bar')){
+            const bar = tableHostDragBar('批量生成');
+            bar.title = '拖动这一栏可以移动节点';
+            hostEl.appendChild(bar);
+        }
+        /* 面板元素复用（paintTableBatchPanel 内部按内容签名决定要不要重建行），
+           不再每次 render 都新建一个面板 + 整份重排。
+           只渲染「生成输入」面板：
+             1) 不再挂折叠开关 —— 点标题栏不该把生成列表藏起来（用户要求）；
+             2) 不再挂「批量生成」按钮 —— 底部编辑器里那颗「运行」就是跑整批（用户要求去掉重复入口）；
+             3) 批量产出的素材不再塞在节点里 —— 每行结果自动落到下游图片/视频节点（见 tableRunOneRow）。 */
+        const existingPanel = hostEl.querySelector('[data-table-batch-panel]');
+        const canRepaint = typeof api.paintTableBatchPanel === 'function';
+        const hasUpstreamTable = typeof api.generatorUpstreamTables === 'function'
+            ? api.generatorUpstreamTables(node.id).length > 0
+            : Boolean(api.renderTableBatchPanel(node));
+        if(hasUpstreamTable){
+            hostEl.querySelector('.table-batch-panel.is-empty')?.remove();
+            if(existingPanel && canRepaint){
+                api.paintTableBatchPanel(existingPanel, node);
+            } else {
+                if(existingPanel) existingPanel.remove();
+                const fresh = api.renderTableBatchPanel(node);
+                if(fresh) hostEl.appendChild(fresh);
+            }
         } else {
-            /* 空状态：给一个和生成列表同款的外框（不显示行数），提示请连接多维表格；
-               点这个框就把编辑器展开出来。 */
-            const empty = document.createElement('div');
-            empty.className = 'table-batch-panel is-empty';
-            empty.title = '点击打开编辑器';
-            const tip = document.createElement('div');
-            tip.className = 'table-batch-empty-tip';
-            /* 面板为空只有两种可能：没接表格，或者方向接反了（把本节点拖到了表格上）。
-               直接把话说清楚，别让用户对着一个空框猜。 */
-            const reversed = (Array.isArray(canvas?.connections) ? canvas.connections : []).some(conn => conn && conn.from === node.id
-                && (nodes || []).some(item => item.id === conn.to && item.type === 'table'));
-            tip.textContent = reversed
-                ? '连接方向反了：要从「多维表格」右侧的输出口，拖到本节点左侧的输入口'
-                : '还没有接入多维表格：把「多维表格」右侧的输出口拖到本节点左侧的输入口';
-            empty.appendChild(tip);
-            hostEl.appendChild(empty);
+            if(existingPanel) existingPanel.remove();
+            if(!hostEl.querySelector('.table-batch-panel.is-empty')){
+                /* 空状态：给一个和生成列表同款的外框（不显示行数），提示请连接多维表格；
+                   点这个框就把编辑器展开出来。 */
+                const empty = document.createElement('div');
+                empty.className = 'table-batch-panel is-empty';
+                empty.title = '点击打开编辑器';
+                const tip = document.createElement('div');
+                tip.className = 'table-batch-empty-tip';
+                /* 面板为空只有两种可能：没接表格，或者方向接反了（把本节点拖到了表格上）。
+                   直接把话说清楚，别让用户对着一个空框猜。 */
+                const reversed = (Array.isArray(canvas?.connections) ? canvas.connections : []).some(conn => conn && conn.from === node.id
+                    && (nodes || []).some(item => item.id === conn.to && item.type === 'table'));
+                tip.textContent = reversed
+                    ? '连接方向反了：要从「多维表格」右侧的输出口，拖到本节点左侧的输入口'
+                    : '还没有接入多维表格：把「多维表格」右侧的输出口拖到本节点左侧的输入口';
+                empty.appendChild(tip);
+                hostEl.appendChild(empty);
+            }
         }
         /* 兜底：这一批已经结束（_batchRunning=false）但结果节点还挂着 pending，
            把它收尾，别在画布上留一张永远转圈的卡片（比如中途停止/整批异常）。 */
@@ -18939,9 +18994,8 @@ function mountSmartBatchNodes(){
                 && (canvas?.connections || []).some(conn => conn.from === node.id && conn.to === item.id))
                 .forEach(item => { item.pending = 0; markSmartNodeComplete(item, null); });
         }
-        if(syncContentNodeMeasuredSize(node, el)) sizeChanged = true;
+        pendingContentMeasure.push({node, el});
     });
-    if(sizeChanged) scheduleConnectionLayerRefresh();
 }
 function createSmartTableNode(x, y){
     const model = window.NovaTableModel;

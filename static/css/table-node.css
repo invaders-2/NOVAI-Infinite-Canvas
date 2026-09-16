@@ -676,7 +676,9 @@
 }
 /* 拖过右下角把手（node.sizeUserSet）才听手动宽高；高度由画布内联样式写进来，
    内容区改成 flex 自适应：输入框/输出框按比例吃掉多余高度，装不下时内部滚动而不是裁掉运行按钮。 */
-.image-node:has(.prompt-node-llm).size-user-set { min-height: 340px; overflow: hidden; }
+/* 不能 overflow:hidden：左右两个「加号+圆圈」端口是定位在节点框**外** 30px 的兄弟元素，
+   一裁就整个看不见（用户报的「LLM 节点的加号+圆圈没了」）。内容溢出自有 .node-body 的 overflow:auto 兜住。 */
+.image-node:has(.prompt-node-llm).size-user-set { min-height: 340px; overflow: visible; }
 .image-node:has(.prompt-node-llm).size-user-set .node-body { height: 100% !important; overflow: auto; }
 .image-node:has(.prompt-node-llm).size-user-set .prompt-node-card { height: 100%; display: flex; flex-direction: column; }
 .image-node:has(.prompt-node-llm).size-user-set .prompt-llm-instruction-wrap { flex: 1 1 45%; min-height: 90px; }

@@ -1148,11 +1148,36 @@ function renderTableBatchPanel(gen){
     return panel;
 }
 
+/* 批量面板的重绘签名：内容没变就不重建 DOM。
+   面板每行 5–6 个元素（还带缩略图），节点一多每次 render 都重建会明显卡
+   （用户报的「画布出现 4 个以上多维表格就开始卡顿」）。 */
+function tableBatchPanelSignature(gen, table){
+    const rows = tableRowInputs(table);
+    const selection = tableBatchSelection(table);
+    return [
+        tableNodeSignature(table),
+        table.title || '',
+        gen._batchRunning ? '1' : '0',
+        JSON.stringify(gen._batchProgress || null),
+        String(gen._batchLastMessage || ''),
+        String(table.tableBatchStartRow || ''),
+        String(table.tableBatchConcurrency || ''),
+        String(table.tableBatchFailurePolicy || ''),
+        selection.manual ? 'm' : '',
+        selection.selectedRows.join(','),
+        rows.map(row => row.rowNumber + ':' + String(row.prompt || '') + ':' + (row.media || []).map(item => item.url).join(';')).join('|'),
+        JSON.stringify((table.generationBatchJournal || {}).rows || [])
+    ].join('~');
+}
+
 function paintTableBatchPanel(panel, gen){
     const model = novaTableModel();
     const tables = generatorUpstreamTables(gen.id);
-    if(!model || !tables.length){ panel.textContent = ''; return; }
+    if(!model || !tables.length){ panel.textContent = ''; panel.dataset.batchSignature = ''; return; }
     const table = tables[0];
+    const signature = tableBatchPanelSignature(gen, table);
+    if(panel.dataset.batchSignature === signature) return;
+    panel.dataset.batchSignature = signature;
     const rows = tableRowInputs(table);
     const selection = tableBatchSelection(table);
     const startRow = model.batchStartRow(table.tableBatchStartRow, rows.length);
@@ -1393,7 +1418,9 @@ async function runTableBatch(genId, options={}){
     const model = novaTableModel();
     const gen = (nodes || []).find(item => item.id === genId);
     if(!gen || !model) return;
-    if(gen._batchRunning){ notifyCanvas('批量生成正在进行中。'); return; }
+    /* 用户要求：再点一次「运行」就是要**开一批新的生成任务** —— 不管上一批还在跑、
+       还是已经出好结果，都不能被挡回来（以前这里直接 `if(gen._batchRunning){ '批量生成正在进行中'; return; }`）。
+       用「在跑批次数」而不是布尔：两批叠在一起时，先结束的那一批不能把还在跑的那一批的标志清掉。 */
     const tables = generatorUpstreamTables(genId);
     if(!tables.length){ notifyCanvas('多维表格无法连接到生成节点。'); return; }
     const table = tables[0];
@@ -1466,6 +1493,7 @@ async function runTableBatch(genId, options={}){
     /* 整个执行体包 try/finally：中途任何异常（面板重绘、保存、轮询）都不能把
        _batchRunning / tableBatchRunning 留在 true —— 那会让这个节点**再也跑不动**
        （用户报的「批量生成，无法再次生成」），而且标志还会被存进画布。 */
+    gen._batchRunCount = Math.max(0, Number(gen._batchRunCount) || 0) + 1;
     gen._batchRunning = true;
     table.tableBatchRunning = true;
     gen._batchProgress = {total:pending.length, done:0, failed:0};
@@ -1521,10 +1549,11 @@ async function runTableBatch(genId, options={}){
         }
         say(summary);
     } finally {
-        /* 无论正常结束还是异常，都要把「正在批量生成」清掉：
-           否则运行键被 runTableBatch 开头的 if(gen._batchRunning) 永久挡死。 */
-        gen._batchRunning = false;
-        table.tableBatchRunning = false;
+        /* 无论正常结束还是异常，都要把这一批的计数还回去；计数归零才算「没在跑」。
+           （以前是布尔 = false，叠加两批时先结束的那批会把标志提前清掉。） */
+        gen._batchRunCount = Math.max(0, (Number(gen._batchRunCount) || 1) - 1);
+        gen._batchRunning = gen._batchRunCount > 0;
+        table.tableBatchRunning = gen._batchRunning;
         scheduleSave();
         repaintBatchPanel(gen);
         repaintTable(table);
@@ -2009,7 +2038,8 @@ function renderTableBody(node){
             novaTableModel, addTableNode, syncTableNodeWidth, tableDropPortFor, connectNodes,
             notifyCanvas, normalizeTableNodeHeight, normalizeContentHeightNode,
             tableBatchRunButtonHtml, tableBatchSingleButtonHtml, friendlyBatchError,
-            generatorNeedsPromptMessage, tableDrivenHidden, renderTableBatchPanel,
+            generatorNeedsPromptMessage, tableDrivenHidden, renderTableBatchPanel, paintTableBatchPanel,
+            generatorUpstreamTables, repaintBatchPanel,
             llmMediaGroups, llmOutputModeButtonsHtml, llmRunButtonLabel, materializeLlmTable,
             renderTableBody, runTableBatch,
         };
