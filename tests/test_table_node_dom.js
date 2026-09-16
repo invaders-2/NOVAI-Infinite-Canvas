@@ -63,11 +63,11 @@ global.NovaTableModel = model;
 global.NovaNodeRegistry = require('../static/js/shared/node-registry.js');
 
 // ── 从 canvas.js 抽出表格节点代码求值 ──
-const canvasSrc = fs.readFileSync(path.join(__dirname, '../static/js/canvas.js'), 'utf8');
-const start = canvasSrc.indexOf('function novaTableModel(){');
-const end = canvasSrc.indexOf('function defaultNodeSize(type){');
+const tableSrc = fs.readFileSync(path.join(__dirname, '../static/js/shared/table-node.js'), 'utf8');
+const start = tableSrc.indexOf('function novaTableModel(){');
+const end = tableSrc.lastIndexOf(String.fromCharCode(10) + '        return {');
 ok(start > 0 && end > start, '能定位表格节点代码段');
-const block = canvasSrc.slice(start, end);
+const block = tableSrc.slice(start, end);
 
 const connections = [];
 const nodes = [];

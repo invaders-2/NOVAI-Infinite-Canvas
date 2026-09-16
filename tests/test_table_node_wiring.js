@@ -1,6 +1,8 @@
 
 const fs = require('fs');
-const canvas = fs.readFileSync('static/js/canvas.js', 'utf8');
+const canvasJsSrc = fs.readFileSync('static/js/canvas.js', 'utf8');
+const tableModuleSrc = fs.readFileSync('static/js/shared/table-node.js', 'utf8');
+const canvas = canvasJsSrc + String.fromCharCode(10) + tableModuleSrc;
 const css = fs.readFileSync('static/css/table-node.css', 'utf8');
 const canvasCss = fs.readFileSync('static/css/canvas.css', 'utf8');
 const themeCss = fs.readFileSync('static/css/theme.css', 'utf8');
