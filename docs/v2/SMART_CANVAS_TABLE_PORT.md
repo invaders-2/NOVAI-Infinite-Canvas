@@ -182,6 +182,30 @@ function connectInputNode(fromId, toId){
 注意：表格代码会**原地改** `connections` 数组（删输入列重排），所以适配器要让这个数组可写回
 （渲染前换算、改动后同步回 canvas.connections / inputNodeIds）。
 
+
+## ⚠️ 事故与教训（2026-09-16 目标轮 2）
+
+**我干了什么**：为了验证"智能画布能渲染表格节点"，我直接 `PUT /api/canvases/<id>` 往用户画布里注入一个
+表格节点。我猜的请求体形状是 `{canvas: {...}}`，**猜错了**——前端真正 PUT 的是**扁平体**：
+
+```js
+// smart-canvas.js saveCanvas()
+body: JSON.stringify({ title, icon, nodes, connections, viewport, ... })   // ← 扁平，不是 {canvas:{}}
+```
+
+结果服务端拿到 `nodes: undefined` → 存成 `[]` → **把用户智能画布的 2 个节点清空了**（连我的"还原"也用了同样错的形状，又清了一次）。
+
+**怎么恢复的**：服务端有按画布分目录的版本历史 `data/canvas_versions/<canvasId>/vNN.json`，
+形状是 `{version, saved_at, canvas_snapshot: {…}}`。取被我改动前的最后一版（v32）里的
+`canvas_snapshot`，用**正确的扁平体**PUT 回去 → 2 个节点（smart-prompt + smart-image）恢复 ✓
+并已在浏览器确认页面重新渲染出这两个节点、零报错。
+
+**规则（写死在这里）**：
+1. **不要再 PUT 用户的画布**。要验证智能画布里的新节点，走**应用自己的路径**（节点菜单 / 拖拽），
+   用完再从 UI 里删掉；
+2. 真要写画布，只允许用扁平体 `{title, icon, nodes, connections, viewport}`；
+3. 动任何用户数据前，先把 `data/canvas_versions/<id>/` 里最新一版记下来（这是恢复的唯一来源）。
+
 ## 教训（写在这里免得再犯）
 - 改这类大件：**先补测试垫片/测试，再动生产代码**；
 - 每步改完**先在真浏览器点一遍**再提交；

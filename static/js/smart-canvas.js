@@ -9360,7 +9360,31 @@ function smartGroupBodyHtml(node){
         ${members.length ? '' : `<div class="smart-group-empty"><i data-lucide="plus"></i><span>拖入图片自动收进分组</span></div>`}
     </div>`;
 }
+/* 多维表格节点：把表格模块真实生成的 DOM 塞进节点 body 的壳里。
+   表格模块返回元素而不是 HTML 串，所以渲染完节点后再挂一次。 */
+function mountSmartTableNodes(){
+    if(!world) return;
+    const hosts = world.querySelectorAll('.node-body .table-node-host');
+    if(!hosts.length) return;
+    const api = ensureTableApi();
+    if(!api) return;
+    hosts.forEach(hostEl => {
+        const el = hostEl.closest ? hostEl.closest('.image-node') : null;
+        const node = el ? nodes.find(n => n.id === el.dataset.id) : null;
+        if(!node || node.type !== 'table') return;
+        syncTableConnectionsFromCanvas();
+        hostEl.textContent = '';
+        try {
+            hostEl.appendChild(api.renderTableBody(node));
+        } catch(error){
+            hostEl.textContent = '表格渲染失败：' + (error && error.message ? error.message : error);
+        }
+    });
+}
+
 function nodeBodyHtml(node, layout){
+    // 多维表格：表格模块返回的是 DOM 元素（不是 HTML 串），这里留个壳，挂载后再塞进去
+    if(node.type === 'table') return '<div class="table-node-host" data-table-host="1"></div>';
     if(node.type === 'smart-group') return smartGroupBodyHtml(node);
     if(node.type === 'smart-prompt') return promptNodeBodyHtml(node);
     if(node.type === 'smart-loop') return smartLoopBodyHtml(node);
@@ -9940,7 +9964,7 @@ function render(){
         .map(node => {
         const imgs = node.images || [];
         // 分组名是用户输入，直接进 innerHTML 会变成注入点（node-head 平时 display:none，但 DOM 已经建出来了）。
-        const title = node.type === 'smart-group' ? escapeHtml(smartGroupDisplayTitle(node)) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.type === 'table' ? '多维表格' : node.type === 'smart-group' ? escapeHtml(smartGroupDisplayTitle(node)) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -9995,6 +10019,7 @@ function render(){
             if(reusable !== fresh) reusable.remove();
         }
     });
+    mountSmartTableNodes();
     restoreMediaPlaybackStates(mediaStates);
     bindNodeEvents();
     bindConnectionEvents();
