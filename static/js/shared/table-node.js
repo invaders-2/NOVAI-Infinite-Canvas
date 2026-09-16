@@ -1960,7 +1960,7 @@ function renderTableBody(node){
             tableBatchRunButtonHtml, tableBatchSingleButtonHtml, friendlyBatchError,
             generatorNeedsPromptMessage, tableDrivenHidden, renderTableBatchPanel,
             llmMediaGroups, llmOutputModeButtonsHtml, llmRunButtonLabel, materializeLlmTable,
-            renderTableBody,
+            renderTableBody, runTableBatch,
         };
     };
 })(typeof window !== 'undefined' ? window : globalThis);

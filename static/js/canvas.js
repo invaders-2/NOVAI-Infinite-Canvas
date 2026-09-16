@@ -6275,8 +6275,26 @@ function refreshOutputNodeContent(node){
 
 /* ── 多维表格节点：实现在 shared/table-node.js（工厂 + 宿主注入），两个画布共用一份。
    这里只把画布侧的钩子交出去，再把 canvas.js 别处还要用的那几个接回来。 */
+/* nodes / connections 在 canvas.js 里会被整体重新赋值（载入、清空、删节点），
+   而工厂只拿到一次引用 → 抽模块后模块看到的是旧数组，生成节点的批量面板/按钮会凭空消失。
+   用 Proxy 转发到"当前那个数组"，模块里 nodes.push / connections.length=0 这些都照旧生效。 */
+const liveArray = getter => new Proxy([], {
+    get(target, prop){
+        const live = getter() || [];
+        const value = live[prop];
+        return typeof value === 'function' ? value.bind(live) : value;
+    },
+    set(target, prop, value){ getter()[prop] = value; return true; },
+    has(target, prop){ return prop in (getter() || []); },
+    ownKeys(){ return Reflect.ownKeys(getter() || []); },
+    getOwnPropertyDescriptor(target, prop){ return Reflect.getOwnPropertyDescriptor(getter() || [], prop); },
+});
+const liveNodes = liveArray(() => nodes);
+const liveConnections = liveArray(() => connections);
+
 const tableNodeApi = window.NovaTableNode({
-    tr, nodes, connections, nodesEl, selected, addNode, render, scheduleSave, saveCanvas, uid,
+    tr, nodes: liveNodes, connections: liveConnections, nodesEl, selected, addNode, render,
+    scheduleSave, saveCanvas, uid,
     pushUndo, defaultPoint, mediaKindForNode, mediaKindForRef, mediaKindForUpload,
     outputUrlValue, isMissingAssetUrl, canvasPreviewImgHtml, canvasVideoPreviewHtml,
     nowMs, responseErrorMessage, refreshIcons, renderNode, runGenerator, runVideoNode,
@@ -6287,8 +6305,15 @@ const {
     notifyCanvas, normalizeTableNodeHeight, normalizeContentHeightNode, tableBatchRunButtonHtml,
     tableBatchSingleButtonHtml, friendlyBatchError, generatorNeedsPromptMessage, tableDrivenHidden,
     renderTableBatchPanel, llmMediaGroups, llmOutputModeButtonsHtml, llmRunButtonLabel,
-    materializeLlmTable, renderTableBody,
+    materializeLlmTable, renderTableBody, runTableBatch,
 } = tableNodeApi;
+/* 抽模块时踩过的坑：漏导出的函数解构出来是 undefined（静默），直到用户点按钮才报 ReferenceError。
+   这里加载时就把它喊出来，浏览器控制台一眼能看到。 */
+{
+    const required = ['renderTableBody', 'addTableNode', 'renderTableBatchPanel', 'materializeLlmTable', 'runTableBatch'];
+    const missing = required.filter(name => typeof tableNodeApi[name] !== 'function');
+    if(missing.length) console.error('[canvas] 表格模块缺少导出：' + missing.join(', '));
+}
 function defaultNodeSize(type){
     if(type === 'image') return {w:260, h:336};
     if(type === 'prompt') return {w:310, h:0};

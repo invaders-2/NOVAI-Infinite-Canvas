@@ -207,5 +207,22 @@ console.log('[10] 生成节点运行按钮：不会被内容顶出可视区 / �
     '接多维表格时「单张/单段生成」直接不渲染');
 }
 
+console.log('[11] 表格模块导出完备性（抽模块踩过的坑：async function 漏导出 → 线上 ReferenceError）');
+{
+  const moduleFnNames = [];
+  (tableModuleSrc.match(/^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm) || []).forEach(m => {
+    moduleFnNames.push(m.replace(/^\s*(?:async\s+)?function\s+/, '').trim());
+  });
+  // 取工厂最后那个 return {…}（模块内还有很多别人的 return {）
+  const exportStart = tableModuleSrc.lastIndexOf('        return {');
+  const exportBlock = exportStart >= 0 ? tableModuleSrc.slice(exportStart) : '';
+  const destructureBlock = (canvasJsSrc.match(/const \{([\s\S]*?)\} = tableNodeApi;/) || [])[1] || '';
+  const usedOutside = moduleFnNames.filter(name => new RegExp('\\b' + name + '\\b').test(canvasJsSrc));
+  ok(usedOutside.length > 10, 'canvas.js 用到的表格函数数量合理（' + usedOutside.length + '）');
+  const notExported = usedOutside.filter(name => !new RegExp('\\b' + name + '\\b').test(exportBlock));
+  ok(notExported.length === 0, 'canvas.js 用到的表格函数都在模块导出里' + (notExported.length ? '：缺 ' + notExported.join(', ') : ''));
+  const notBound = usedOutside.filter(name => !new RegExp('\\b' + name + '\\b').test(destructureBlock));
+  ok(notBound.length === 0, '这些函数在 canvas.js 里都解构了' + (notBound.length ? '：缺 ' + notBound.join(', ') : ''));
+}
 console.log(fail ? ('\n失败 ' + fail + ' 项') : '\n全部通过');
 process.exit(fail ? 1 : 0);
