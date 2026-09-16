@@ -624,13 +624,12 @@
 /* 智能画布 LLM 模式的提示词节点：内容多了（tabs 排 / 分栏 / 输出区 / 底部药丸+运行），
    而节点尺寸还是画布按老公式算的 → 底下那排被挤到卡片外面。让卡片跟着内容走。 */
 /* 没拖过才自适应；拖过之后听画布写进来的尺寸（否则缩放图/连线都变了、只有卡片被按在原地） */
-.image-node:has(.prompt-node-llm):not(.size-user-set) {
+/* LLM 节点**永远**跟着内容自适应：不接手动尺寸。
+   （之前加了 size-user-set 闸门，结果用户点一下缩放把手就跳到旧的大 h，节点突然变得很长。） */
+.image-node:has(.prompt-node-llm) {
     height: auto !important;
     min-height: 300px;
     overflow: visible;
-}
-.image-node:has(.prompt-node-llm).size-user-set {
-    min-height: 160px;
 }
 .image-node:has(.prompt-node-llm) .node-body {
     height: auto !important;
@@ -748,16 +747,6 @@
 .image-node:has(.prompt-node-llm) .prompt-llm-instruction-wrap { min-height: 132px; }
 .image-node:has(.prompt-node-llm) .prompt-llm-instruction { min-height: 128px; }
 
-/* LLM 节点：用户拖过缩放把手之后（.size-user-set），内部跟着高度伸缩 ——
-   拉长就拉长，Input / Output 两个分区平分多出来的空间，提示词看得更全。 */
-.image-node:has(.prompt-node-llm).size-user-set { overflow: hidden; }
-.image-node:has(.prompt-node-llm).size-user-set .node-body { height: 100% !important; overflow: hidden; }
-.image-node:has(.prompt-node-llm).size-user-set .prompt-node-card { height: 100%; display: flex; flex-direction: column; }
-.image-node:has(.prompt-node-llm).size-user-set .prompt-node-llm { flex: 1 1 auto; min-height: 0; }
-.image-node:has(.prompt-node-llm).size-user-set .prompt-llm-instruction-wrap { flex: 1 1 45%; min-height: 70px; }
-.image-node:has(.prompt-node-llm).size-user-set .prompt-llm-instruction { height: 100% !important; }
-.image-node:has(.prompt-node-llm).size-user-set .llm-output-wrap { flex: 1 1 45%; min-height: 70px; }
-.image-node:has(.prompt-node-llm).size-user-set .llm-output { height: 100%; max-height: none; }
 
 /* 表格 / 批量节点的缩放把手（画布只给图片/提示词节点渲染，这里自己补一个，样式照画布那个） */
 .image-node:has(> .node-body > .table-node-host) .node-resize-handle,
