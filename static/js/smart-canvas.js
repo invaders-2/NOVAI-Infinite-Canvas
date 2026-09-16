@@ -961,6 +961,7 @@ function canvasForStorage(){
         delete node._batchRunCount;
         delete node.tableBatchRunning;
         delete node.__renderHtml;   // 渲染缓存：只在页面内用，别写进画布
+        delete node.__renderKey;
     });
     return clean;
 }
@@ -9606,6 +9607,10 @@ function flushContentMeasurements(){
 }
 function syncContentNodeMeasuredSize(node, el){
     if(!node || !el || node.sizeUserSet) return false;
+    /* 拖动/缩放这个节点时不回写尺寸：刚重建过的子树（缩略图/面板还在排）量出来会飘，
+       写回 node.h 就会表现得「拖着拖着节点忽大忽小」。 */
+    if(dragState && (dragState.id === node.id || (dragState.group || []).some(item => item.id === node.id))) return false;
+    if(resizeState && resizeState.id === node.id) return false;
     const w = Math.round(el.offsetWidth) || 0;
     const h = Math.round(el.offsetHeight) || 0;
     let changed = false;
@@ -10265,7 +10270,11 @@ function render(){
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
-        const html = `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.sizeUserSet ? 'size-user-set' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        /* 根节点自身的 class（选中/拖动这些**临时态**都在这里）：单独拿出来，
+           比较「要不要重建」时把它排除，这样拖动/选中不会把整棵子树（图标、表格、面板）重建一遍 ——
+           重建既慢、又会让实测尺寸在拖动过程中变化（用户报的「拖动时节点忽大忽小」）。 */
+        const rootClass = `image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.sizeUserSet ? 'size-user-set' : ''}`;
+        const html = `<div class="${rootClass}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
@@ -10278,8 +10287,18 @@ function render(){
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
         const reuseEl = currentEls.get(node.id) || null;
-        const keepEl = (reuseEl && node.__renderHtml === html) ? reuseEl : null;
-        node.__renderHtml = html;
+        /* 比对时把根 class 换成固定的占位符：selected / dragging 这些临时态变化不该触发重建。 */
+        const renderKey = html.replace(rootClass, 'ROOT-CLASS');
+        const keepEl = (reuseEl && node.__renderKey === renderKey) ? reuseEl : null;
+        node.__renderKey = renderKey;
+        if(keepEl){
+            // 复用的元素：临时态、位置、尺寸直接写在 DOM 上（不重建子树）
+            keepEl.className = rootClass;
+            keepEl.style.left = `${node.x || 0}px`;
+            keepEl.style.top = `${node.y || 0}px`;
+            keepEl.style.width = `${layout.width}px`;
+            keepEl.style.height = `${layout.height}px`;
+        }
         return {node, html, keepEl};
     });
     /* 只解析「变了」的节点 HTML：没变的原样留着（图标/表格/面板 DOM 全部复用）。 */
@@ -19688,7 +19707,12 @@ window.onmouseup = e => {
                原来这条只在按住 Ctrl 时才走，用户直接拖过来什么都不发生
                （用户报的「新的图片无法直接拉入群组」）。判据是拖拽节点的中心落在目标框内
                （rectOverlapNode），和分组磁吸一样，不会因为擦边就误并。 */
+            /* 只有「图片节点 → 多图群组节点」才合并。
+               不限类型的话，批量节点/表格（它们自己也会攒产出图）被拖到别的节点上就会被
+               merge 掉、节点直接消失（实测拖批量节点时元素被删掉）。 */
             groupTarget &&
+            isSmartImageNode(draggedNode) &&
+            isSmartImageNode(groupTarget) &&
             (groupTarget.images || []).length > 1 &&
             mergeImageNodesIntoGroup(draggedNode.id, groupTarget.id)
         ){

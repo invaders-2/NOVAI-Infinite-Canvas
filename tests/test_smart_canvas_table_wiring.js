@@ -186,6 +186,16 @@ ok((mountBatch.match(/syncTableConnections\(\)/g) || []).length === 1
     && mountBatch.indexOf('syncTableConnections()') < mountBatch.indexOf('hosts.forEach'), '批量：连线同样只同步一次（在循环之前）');
 ok(/api\.paintTableBatchPanel\(existingPanel, node\)/.test(mountBatch), '批量：面板元素复用 + 按签名重绘');
 
+console.log('[14] 依次生成 / 拖动不再忽大忽小');
+ok(moduleSrc.includes("sequentialButton.textContent = '依次生成'"), '批量面板有「依次生成」按钮');
+ok(moduleSrc.includes('runTableBatch(gen.id, {sequential: true})'), '点它走 sequential 路径');
+ok(moduleSrc.includes('options.sequential ? 1 : tableBatchConcurrencyFor(gen, table)'), 'sequential 强制并发 1（一行跑完才开下一行）');
+ok(/options\.sequential\s*\n?\s*\? '依次生成：共 '/.test(moduleSrc), '面板提示文案区分依次生成');
+ok(/isSmartImageNode\(draggedNode\) &&\s*\n\s*isSmartImageNode\(groupTarget\)/.test(js), '只有图片节点之间才合并（批量/表格被拖过别的节点不会被 merge 掉）');
+ok(js.includes('const renderKey = html.replace(rootClass,'), '拖动/选中这类临时态不触发节点子树重建');
+ok(js.includes('if(dragState && (dragState.id === node.id'), '拖动中不回写实测尺寸（避免忽大忽小）');
+ok(js.includes('delete node.__renderKey;'), '渲染缓存持久化时剥掉');
+
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
 console.log('通过 ' + pass + '/' + pass);

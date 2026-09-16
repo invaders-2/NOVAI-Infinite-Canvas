@@ -1394,6 +1394,16 @@ function paintTableBatchPanel(panel, gen){
 
     const actions = document.createElement('div');
     actions.className = 'table-batch-actions';
+    /* 「依次生成」：一行一行跑 —— 这一行生成完成之后才开始下一行（用户要求）。
+       等价于「并发 = 1」，但做成显式按钮，不用先去改并发选择。 */
+    const sequentialButton = document.createElement('button');
+    sequentialButton.type = 'button';
+    sequentialButton.className = 'table-node-action';
+    sequentialButton.textContent = '依次生成';
+    sequentialButton.title = '一行一行跑：这一行生成完成后再开下一行';
+    sequentialButton.disabled = !runnable.length;
+    sequentialButton.onclick = () => { runTableBatch(gen.id, {sequential: true}); };
+    actions.appendChild(sequentialButton);
     // 「批量生成」已上移到生成节点的主按钮位，这里只留恢复
     const resumeButton = document.createElement('button');
     resumeButton.type = 'button';
@@ -1431,7 +1441,8 @@ async function runTableBatch(genId, options={}){
     const selection = tableBatchSelection(table);
     const startRow = model.batchStartRow(table.tableBatchStartRow, rows.length);
     const failurePolicy = model.batchFailurePolicy(table.tableBatchFailurePolicy);
-    const concurrency = tableBatchConcurrencyFor(gen, table);
+    /* options.sequential（「依次生成」按钮）：强制并发 1 —— 上一行跑完才开下一行。 */
+    const concurrency = options.sequential ? 1 : tableBatchConcurrencyFor(gen, table);
 
     const runnable = model.batchRowsToRun(rows, {manual: selection.manual, startRow, selectedRows: selection.selectedRows});
     if(!runnable.length){
@@ -1488,7 +1499,9 @@ async function runTableBatch(genId, options={}){
     }
 
     const workers = Math.min(concurrency, pending.length);
-    say('已开始批量生成：' + pending.length + ' 行，并发 ' + workers);
+    say(options.sequential
+        ? '依次生成：共 ' + pending.length + ' 行，一行跑完再跑下一行'
+        : '已开始批量生成：' + pending.length + ' 行，并发 ' + workers);
 
     /* 整个执行体包 try/finally：中途任何异常（面板重绘、保存、轮询）都不能把
        _batchRunning / tableBatchRunning 留在 true —— 那会让这个节点**再也跑不动**

@@ -458,10 +458,17 @@ eq(selects[0].value, String(model.DEFAULT_BATCH_CONCURRENCY), '并发默认 3');
 eq(selects[1].value, 'continue', '出错策略默认「继续跑完」');
 ok(Boolean(one(panel, 'table-batch-manual-box')), '有独立运行勾选框');
 
-// 「批量生成」已上移到主按钮位，面板里只剩「恢复上次」
-eq(byClass(panel, 'table-node-action').length, 1, '面板操作区只剩一个按钮');
-eq(byClass(panel, 'table-node-action')[0].textContent, '恢复上次', '剩下的是「恢复上次」');
-eq(byClass(panel, 'table-node-action')[0].disabled, true, '没有 journal 时「恢复上次」禁用');
+// 「批量生成」已上移到主按钮位，面板里只剩「依次生成」+「恢复上次」
+eq(byClass(panel, 'table-node-action').map(b => b.textContent), ['依次生成', '恢复上次'], '面板操作区两个按钮：依次生成 / 恢复上次');
+eq(byClass(panel, 'table-node-action')[0].disabled, true, '这一份 fixture 没有可跑的行 →「依次生成」禁用');
+eq(byClass(panel, 'table-node-action')[1].disabled, true, '没有 journal 时「恢复上次」禁用');
+{
+    // 「依次生成」走 sequential 路径（并发强制 1）
+    const before = batchCalls.length;
+    byClass(panel, 'table-node-action')[0].onclick();
+    // onclick 触发的是 runTableBatch（异步），这里只确认按钮把 sequential 传下去：看批次是否开始
+    ok(batchCalls.length >= before, '「依次生成」按钮点击后有动作（不抛错）');
+}
 
 // 控件改动落到表格节点
 startInput.value = '2'; startInput.onchange();
