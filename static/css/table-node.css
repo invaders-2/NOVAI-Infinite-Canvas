@@ -591,6 +591,48 @@
     --table-frame-line: rgba(255, 255, 255, .14);
 }
 
+/* 智能画布 LLM 节点的 Input / Output 分区（照搬经典画布外观，样式原本只在 canvas.css 里） */
+.llm-pane-label {
+    flex: 0 0 auto;
+    margin: 6px 0 3px;
+    color: var(--text-3);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+}
+.llm-output-wrap { position: relative; min-height: 70px; flex: 0 0 auto; }
+.llm-output {
+    width: 100%;
+    min-height: 70px;
+    max-height: 170px;
+    overflow: auto;
+    padding: 7px 9px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 11.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.llm-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 22px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-3);
+    cursor: pointer;
+}
+.llm-copy-btn:hover { color: var(--text); background: var(--surface-2); }
+.llm-output-copy { position: absolute; top: 4px; right: 5px; z-index: 2; }
+.llm-copy-btn svg { width: 13px; height: 13px; }
+
 /* 空状态批量节点：和生成列表同款外框，只放一句提示 */
 .table-batch-panel.is-empty {
     min-height: 96px;

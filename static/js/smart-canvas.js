@@ -9130,11 +9130,17 @@ function promptNodeBodyHtml(node){
         <div class="prompt-node-llm">
             <select class="prompt-node-control prompt-llm-provider">${chatProviderOptions(node.llmProvider)}</select>
             <select class="prompt-node-control prompt-llm-model">${chatModelOptions(node.llmModel, node.llmProvider)}</select>
+            <div class="llm-pane-label">Input</div>
             <div class="prompt-llm-instruction-wrap">
                 <textarea class="prompt-node-control prompt-llm-instruction" placeholder="${escapeHtml(tr('smart.promptLlmInstructionPlaceholder'))}" style="height:${promptLlmInstructionHeight(node)}px">${escapeHtml(node.llmInstruction || '')}</textarea>
                 <div class="prompt-llm-instruction-resize prompt-node-control" data-llm-instruction-resize="1" title="拖动调整高度"><span></span></div>
             </div>
             ${upstreamPromptHtml}
+            <div class="llm-pane-label">Output</div>
+            <div class="llm-output-wrap">
+                <button class="llm-copy-btn llm-output-copy" type="button" title="复制输出"><i data-lucide="copy"></i></button>
+                <div class="llm-output prompt-llm-output">${escapeHtml(node.outputText || node.text || '运行后会输出文本，可连到生成卡片')}</div>
+            </div>
             <div class="prompt-node-run-row">
                 ${llmOutputModeHtml(node)}
                 <button class="prompt-node-run prompt-node-control" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'play'}"></i><span>${node.running ? escapeHtml(tr('common.running')) : escapeHtml(tr('common.run'))}</span></button>
