@@ -157,6 +157,31 @@ runGenerator, runVideoNode, saveCanvas, scheduleSave, selected, showErrorModal, 
 另：`table-node.css` **没有**全局 `.menu-btn` / `.node` 规则（只有 `.table-cell-menu .menu-btn` 这种带前缀的），
 引入智能画布不会串味 ✓
 
+
+## 关键发现：智能画布**有**边表（connectInputNode @14899）
+
+```js
+function connectInputNode(fromId, toId){
+    ...
+    to.inputNodeIds = Array.from(new Set([...(to.inputNodeIds || []), from.id]));
+    addConnection(from.id, to.id, 'input');   // ← 真正的建连线
+    return true;
+}
+// 读连线：canvas?.connections.forEach(conn => { if(conn.to === node.id && allowed.has(conn.kind || 'flow')) ... })
+// 另有 canvasUsesConnections 兼容模式：连线只存在 node.inputNodeIds 里
+```
+
+所以适配器映射是（比预想简单）：
+
+| 适配器成员 | 智能画布侧 |
+|---|---|
+| `connections` | 由 `canvas.connections`（+ `inputNodeIds` 兜底）换算出的数组；`toPort` 由适配层 Map 记 |
+| `connectNodes(from,to,port)` | `connectInputNode(from,to)` + 适配层记 port |
+| 删连线（表格删输入列时 `connections.length = 0; push(...)`） | **待查**：`addConnection` 的反操作（`removeConnection` / `disconnectInputNode` 之类），下一轮定位 |
+
+注意：表格代码会**原地改** `connections` 数组（删输入列重排），所以适配器要让这个数组可写回
+（渲染前换算、改动后同步回 canvas.connections / inputNodeIds）。
+
 ## 教训（写在这里免得再犯）
 - 改这类大件：**先补测试垫片/测试，再动生产代码**；
 - 每步改完**先在真浏览器点一遍**再提交；
