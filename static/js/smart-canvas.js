@@ -18617,10 +18617,22 @@ function mountSmartBatchNodes(){
                 hostEl.appendChild(grid);
             }
         } else {
+            /* 空状态：给一个和生成列表同款的外框（不显示行数），提示请连接多维表格；
+               点这个框就把编辑器展开出来。 */
+            const empty = document.createElement('div');
+            empty.className = 'table-batch-panel is-empty';
+            empty.title = '点击打开编辑器';
             const tip = document.createElement('div');
             tip.className = 'table-batch-empty-tip';
-            tip.textContent = '把多维表格连到本节点左侧，这里就会出现生成列表';
-            hostEl.appendChild(tip);
+            tip.textContent = '请连接多维表格节点';
+            empty.appendChild(tip);
+            empty.onclick = event => {
+                event.stopPropagation();
+                node.batchEditorOpen = true;
+                render();
+                scheduleSave();
+            };
+            hostEl.appendChild(empty);
         }
     });
 }

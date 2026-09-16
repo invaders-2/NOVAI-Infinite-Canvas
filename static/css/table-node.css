@@ -591,6 +591,20 @@
     --table-frame-line: rgba(255, 255, 255, .14);
 }
 
+/* 空状态批量节点：和生成列表同款外框，只放一句提示 */
+.table-batch-panel.is-empty {
+    min-height: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-style: dashed;
+}
+.table-batch-panel.is-empty .table-batch-empty-tip {
+    padding: 0;
+    text-align: center;
+}
+
 /* 智能画布的拖拽把手 + 批量节点收起态摘要 */
 .table-node-drag-bar {
     display: flex;
