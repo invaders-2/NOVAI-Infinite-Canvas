@@ -9138,6 +9138,7 @@ function promptNodeBodyHtml(node){
                 <div class="prompt-llm-instruction-resize prompt-node-control" data-llm-instruction-resize="1" title="拖动调整高度"><span></span></div>
             </div>
             ${upstreamPromptHtml}
+            <div class="llm-pane-resizer" data-llm-pane-resize="1" title="拖动调整上下高度"></div>
             <div class="llm-pane-label">Output</div>
             <div class="llm-output-wrap">
                 <button class="llm-copy-btn llm-output-copy" type="button" title="复制输出"><i data-lucide="copy"></i></button>
@@ -10353,6 +10354,33 @@ function bindPromptNodeControls(el, node){
         document.body.classList.add('smart-node-resize', 'smart-prompt-split-resize');
         capturePendingUndo();
     });
+    // 上下分栏把手（照搬经典画布）：拖它调输入框高度，存进 node.llmInputHeight
+    const paneResizer = el.querySelector('[data-llm-pane-resize]');
+    if(paneResizer){
+        paneResizer.addEventListener('mousedown', event => {
+            if(event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const area = el.querySelector('.prompt-llm-instruction');
+            if(!area) return;
+            const startY = event.clientY;
+            const startH = area.getBoundingClientRect().height;
+            const onMove = moveEvent => {
+                const next = Math.max(70, Math.min(420, Math.round(startH + (moveEvent.clientY - startY))));
+                area.style.height = next + 'px';
+                node.llmInputHeight = next;
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove, true);
+                document.removeEventListener('mouseup', onUp, true);
+                document.body.classList.remove('smart-node-resize');
+                scheduleSave();
+            };
+            document.body.classList.add('smart-node-resize');
+            document.addEventListener('mousemove', onMove, true);
+            document.addEventListener('mouseup', onUp, true);
+        });
+    }
     // LLM 输出形式药丸：文本输出 / 多维表格 / 视频分镜表
     el.querySelectorAll('.llm-output-mode-btn').forEach(btn => {
         btn.onclick = e => {

@@ -277,6 +277,21 @@ Output                        [复制]
 **绑定逻辑（bindPromptNodeControls）保持类名不变**，避免又一次"改完渲染不出来"。改完必须真浏览器验证：
 渲染无报错、缩略图在、三药丸能点、输入框能打字、运行按钮能触发。
 
+
+## 照搬经典 LLM 节点：字段映射（两套画布字段名不同，必须转义）
+
+| 经典画布 | 智能画布 | 说明 |
+|---|---|---|
+| `node.userInput` | `node.llmInstruction` | INPUT 输入框内容 |
+| `node.outputText` | `node.text`（并新增写 `outputText`） | OUTPUT 面板内容 |
+| `node.llmInputHeight` / `llmOutputHeight` | **本轮采纳 `llmInputHeight`**（`llmOutputHeight` 未用） | 上下分栏高度 |
+| `llmInputText(node)` | `promptNodeLLMInputText(node)` | 上游提示词并入输入 |
+| `runLLMNode(node.id)` | `runPromptLLMNode` / `runSmartLLMListMode` 分流 | 运行入口 |
+| `cascadeBtnHtml` / `retryBarHtml` | 无 | 智能画布没有级联/重试那套，**不搬** |
+
+样式同理：`.llm-pane-label` / `.llm-output-wrap` / `.llm-output` / `.llm-copy-btn` / `.llm-pane-resizer` 原本只在 `canvas.css`，
+已按原样抄进 `table-node.css`（智能画布只加载后者）。类名与经典画布保持一致，方便以后同步。
+
 ## 教训（写在这里免得再犯）
 - 改这类大件：**先补测试垫片/测试，再动生产代码**；
 - 每步改完**先在真浏览器点一遍**再提交；

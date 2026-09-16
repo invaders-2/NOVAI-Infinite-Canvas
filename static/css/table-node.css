@@ -612,6 +612,27 @@
 }
 .llm-pane-label { display: block; }
 
+/* 上下分栏把手（照搬经典画布的 llm-pane-resizer） */
+.llm-pane-resizer {
+    position: relative;
+    height: 12px;
+    margin: 2px 0 0;
+    cursor: row-resize;
+    flex: 0 0 12px;
+}
+.llm-pane-resizer::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 5px;
+    transform: translateX(-50%);
+    width: 34px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--line-2, rgba(0,0,0,.14));
+}
+.llm-pane-resizer:hover::after { background: var(--accent); }
+
 /* 供应商 / 模型一排（照搬经典画布 LLM 节点：放在 Input 分区上方） */
 .prompt-llm-model-row { display: flex; gap: 6px; margin-bottom: 2px; }
 .prompt-llm-model-row select { flex: 1 1 0; min-width: 0; }
