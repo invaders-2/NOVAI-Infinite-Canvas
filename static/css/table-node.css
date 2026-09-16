@@ -623,10 +623,14 @@
 
 /* 智能画布 LLM 模式的提示词节点：内容多了（tabs 排 / 分栏 / 输出区 / 底部药丸+运行），
    而节点尺寸还是画布按老公式算的 → 底下那排被挤到卡片外面。让卡片跟着内容走。 */
-.image-node:has(.prompt-node-llm) {
+/* 没拖过才自适应；拖过之后听画布写进来的尺寸（否则缩放图/连线都变了、只有卡片被按在原地） */
+.image-node:has(.prompt-node-llm):not(.size-user-set) {
     height: auto !important;
     min-height: 300px;
     overflow: visible;
+}
+.image-node:has(.prompt-node-llm).size-user-set {
+    min-height: 160px;
 }
 .image-node:has(.prompt-node-llm) .node-body {
     height: auto !important;

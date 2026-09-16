@@ -9376,6 +9376,20 @@ function smartGroupBodyHtml(node){
 }
 /* 多维表格节点：把表格模块真实生成的 DOM 塞进节点 body 的壳里。
    表格模块返回元素而不是 HTML 串，所以渲染完节点后再挂一次。 */
+/* 任何节点（含提示词节点）一旦开始拖缩放把手，就立刻把 size-user-set 打上：
+   否则自适应那条 height:auto !important 会把画布写进来的高度按住 ——
+   表现是"缩放图和连线都变长了，只有卡片还是老大小"。 */
+document.addEventListener('mousedown', event => {
+    const target = event.target;
+    const handle = target && target.closest ? target.closest('.node-resize-handle') : null;
+    if(!handle) return;
+    const el = handle.closest('.image-node');
+    if(!el) return;
+    el.classList.add('size-user-set');
+    const node = (nodes || []).find(item => item.id === el.dataset.id);
+    if(node) node.sizeUserSet = true;
+}, true);
+
 /* 表格 / 批量节点没有画布自带的缩放把手（那是按图片/提示词节点渲染的），
    而画布的 resize 绑定在 bindNodeEvents() 里找 .node-resize-handle —— 我们必须在它之前补上，
    否则这两种节点根本没有可拖的把手（量到 hasHandle:false）。 */
