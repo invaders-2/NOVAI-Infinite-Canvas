@@ -20774,4 +20774,118 @@ window.imageAdjust = {
     },
     finish: function () { closeImageEditor(); render(); scheduleSave(); }
 };
+/* ══════════════════════════════════════════════════════════════════════════
+   多维表格宿主（shared/table-node.js 的适配层）
+
+   表格节点那 1966 行实现在 shared/table-node.js 里，靠工厂 + 宿主注入拿画布能力。
+   这里把智能画布自己那套喂给它；经典画布另有一份 host（在 canvas.js 里）。
+
+   连线差异：智能画布的连线是 canvas.connections（{from,to,kind}）+ 节点上的 inputNodeIds 镜像，
+   没有经典画布的 toPort（"第几列输入"）。所以端口由本适配层自己记（tablePortByLink），
+   表格改完（它自己会调 scheduleSave）再同步回 canvas.connections / inputNodeIds。
+   ══════════════════════════════════════════════════════════════════════════ */
+const tablePortByLink = new Map();
+const tableConnections = [];
+
+function tableLinkKey(fromId, toId){ return String(fromId || '') + '>' + String(toId || ''); }
+
+function syncTableConnectionsFromCanvas(){
+    tableConnections.length = 0;
+    (Array.isArray(canvas?.connections) ? canvas.connections : []).forEach(conn => {
+        if(!conn || !conn.from || !conn.to) return;
+        const kind = conn.kind || 'flow';
+        if(kind !== 'input' && kind !== 'flow') return;
+        const item = {id: conn.id || tableLinkKey(conn.from, conn.to), from: conn.from, to: conn.to};
+        const port = tablePortByLink.get(tableLinkKey(conn.from, conn.to));
+        if(port) item.toPort = port;
+        tableConnections.push(item);
+    });
+    if(!canvasUsesConnections){
+        nodes.forEach(node => (node.inputNodeIds || []).forEach(fromId => {
+            if(tableConnections.some(c => c.from === fromId && c.to === node.id)) return;
+            const item = {id: tableLinkKey(fromId, node.id), from: fromId, to: node.id};
+            const port = tablePortByLink.get(tableLinkKey(fromId, node.id));
+            if(port) item.toPort = port;
+            tableConnections.push(item);
+        }));
+    }
+}
+
+function syncTableConnectionsToCanvas(){
+    const want = new Set(tableConnections.map(c => tableLinkKey(c.from, c.to)));
+    tableConnections.forEach(item => {
+        if(item.toPort) tablePortByLink.set(tableLinkKey(item.from, item.to), item.toPort);
+        const exists = (canvas?.connections || []).some(c => c.from === item.from && c.to === item.to);
+        if(!exists){ try { connectInputNode(item.from, item.to); } catch(e){} }
+    });
+    const raw = Array.isArray(canvas?.connections) ? canvas.connections : [];
+    for(let i = raw.length - 1; i >= 0; i -= 1){
+        const conn = raw[i];
+        if(!conn) continue;
+        const target = nodes.find(n => n.id === conn.to);
+        if(!target || target.type !== 'table') continue;
+        if(want.has(tableLinkKey(conn.from, conn.to))) continue;
+        try { disconnectConnection(i); } catch(e){}
+    }
+}
+
+function tableMediaKindForUrl(url){
+    const u = String(url || '').toLowerCase();
+    if(/\.(mp4|webm|mov|m4v|avi|mkv)(\?|$)/.test(u)) return 'video';
+    if(/\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(u)) return 'audio';
+    return 'image';
+}
+function tableEscapeUrl(url){ return String(url || '').replace(/"/g, '&quot;'); }
+
+const tableNodesEl = {
+    querySelector(sel){
+        const m = /\[data-id="([^"]+)"\]/.exec(String(sel || ''));
+        if(!m) return null;
+        return document.querySelector('.image-node[data-id="' + m[1] + '"]') || null;
+    },
+};
+
+const tableSelected = {
+    has: id => Array.isArray(selectedIds) && selectedIds.includes(id),
+    add(id){ if(Array.isArray(selectedIds) && !selectedIds.includes(id)) selectedIds.push(id); },
+    delete(id){ if(Array.isArray(selectedIds)){ const i = selectedIds.indexOf(id); if(i >= 0) selectedIds.splice(i, 1); } },
+    forEach(fn){ (Array.isArray(selectedIds) ? selectedIds.slice() : []).forEach(fn); },
+    get size(){ return Array.isArray(selectedIds) ? selectedIds.length : 0; },
+};
+
+async function tableRunGenerator(){ throw new Error('智能画布批量生成尚未接线'); }
+async function tableRunVideo(){ throw new Error('智能画布批量生成尚未接线'); }
+
+let tableApi = null;
+function ensureTableApi(){
+    if(tableApi) return tableApi;
+    if(typeof window.NovaTableNode !== 'function') return null;
+    syncTableConnectionsFromCanvas();
+    tableApi = window.NovaTableNode({
+        tr, uid, nodes, connections: tableConnections, selected: tableSelected, nodesEl: tableNodesEl,
+        addNode(node){ nodes.push(node); render(); return node; },
+        render, renderNode(){ render(); }, refreshIcons, nowMs,
+        scheduleSave(){ syncTableConnectionsToCanvas(); scheduleSave(); },
+        saveCanvas,
+        pushUndo, defaultPoint: (x, y) => ({x: Number(x) || 0, y: Number(y) || 0}),
+        connectNodes(fromId, toId, toPort){
+            const linked = connectInputNode(fromId, toId);
+            if(toPort) tablePortByLink.set(tableLinkKey(fromId, toId), toPort);
+            return linked;
+        },
+        mediaKindForNode: node => (node && node.mediaKind) || tableMediaKindForUrl(node && node.url),
+        mediaKindForRef: ref => (ref && ref.kind) || tableMediaKindForUrl(ref && ref.url),
+        mediaKindForUpload: file => tableMediaKindForUrl(file && file.name),
+        outputUrlValue: item => (typeof item === 'string' ? item : (item && item.url) || ''),
+        isMissingAssetUrl: () => false,
+        canvasPreviewImgHtml: (url, size) => '<img src="' + tableEscapeUrl(url) + '"' + (size ? ' style="max-width:' + Number(size) + 'px"' : '') + '>',
+        canvasVideoPreviewHtml: url => '<video src="' + tableEscapeUrl(url) + '" muted playsinline></video>',
+        responseErrorMessage,
+        showErrorModal: text => toast(String(text || '出错了'), '!'),
+        runGenerator: tableRunGenerator,
+        runVideoNode: tableRunVideo,
+    });
+    return tableApi;
+}
+
 })();
