@@ -18555,6 +18555,24 @@ function mountSmartBatchNodes(){
             hostEl.appendChild(runRow);
             const btn = runRow.querySelector('.table-batch-run-btn');
             if(btn) btn.onclick = event => { event.stopPropagation(); api.runTableBatch(node.id, {}); };
+            /* 这一节点不是图片节点，render() 不会画 node.images —— 批量产出的素材在这里自己显示 */
+            const produced = (Array.isArray(node.images) ? node.images : []).filter(item => item && (item.url || typeof item === 'string'));
+            if(produced.length){
+                const grid = document.createElement('div');
+                grid.className = 'table-batch-results';
+                produced.forEach(item => {
+                    const url = (item && (item.url || item)) || '';
+                    if(!url) return;
+                    const cell = document.createElement('div');
+                    cell.className = 'table-batch-result';
+                    if(item && item.name) cell.title = item.name;
+                    cell.innerHTML = tableMediaKindForUrl(url) === 'video'
+                        ? '<video src="' + tableEscapeUrl(url) + '" muted playsinline></video>'
+                        : '<img src="' + tableEscapeUrl(url) + '" alt="">';
+                    grid.appendChild(cell);
+                });
+                hostEl.appendChild(grid);
+            }
         } else {
             const tip = document.createElement('div');
             tip.className = 'table-batch-empty-tip';
