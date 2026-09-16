@@ -718,3 +718,42 @@ render 的 class 也改成所有节点都带上（原来只有提示词节点）
 - `tests/test_smart_canvas_table_wiring.js` 89/89（新增 [10] 节）；
 - 其余五套全绿（model 293、dom 371、classic wiring、select_menu 47、dark_mode 8）；
 - 浏览器实测三点（带残留标志的画布、视频拖动、视频比例），临时画布已 purge。
+
+
+## 图片拖入结果群组 / 删线不回弹 / 出表新建 / 视频可拖（2026-09-16 后续轮 15）
+
+### ① 新的图片拖不进「群组」
+用户的「群组」= 批量结果那种 `type: smart-image` + 多图 + 标题 Group 的**结果群组节点**（不是 分组 smart-group）。
+合并逻辑 `mergeImageNodesIntoGroup()` 一直在，但只挂在**按住 Ctrl** 的那条分支里
+（`groupTarget && dragState.ctrlGroup`），直接拖过去什么都不发生。
+改成：拖拽节点的中心落进多图群组节点的框内（`rectOverlapNode` 判据，和分组磁吸一致）就合并。
+实测：2 图的结果群组 + 1 张新生成的图 → 拖过去后群组 3 张、源节点消失、`src→新图` 自动转成 `src→群组`。
+
+### ② 删掉的连线又被自动接回来（LLM 节点、多维表格都中）
+`syncTableConnectionsToCanvas()` 的判据是「适配层里有、画布上没有 → 当成表格模块新加的边补回画布」，
+而适配层副本 `tableConnections` 是把**画布上所有 input/flow 边**都抄了一份（LLM 节点的入边也在里面），
+于是用户删掉任何一条 input/flow 线，下一次 render 就被补回来 —— 表现就是「连接线删了又自动接上」。
+修复：新增 `tableSyncedKeys` 记录「这次从画布同步过来的边」，回写时跳过它们；
+只有表格模块自己（它的 `connectNodes` 遮蔽了宿主钩子，直接 push 进数组）新加的边才回写。
+实测：删掉 分组→LLM 那条线，再触发一次 render，画布里依然没有它。
+
+### ③ 再次出表要新建一张表
+`reuseOrCreateLlmTableNode()`（同一个 LLM 节点已有自己生成的表 → 就地更新）换成
+`materializeLlmTableNode()`（每次新建）：就地更新会把用户在原表上改过的列名/勾选/提示词一起冲掉。
+「点一次只出一张表」由 `runSmartLLMListMode()` 的 `node.running` 并发保护负责。
+实测：连点两次「生成」→ 两张表、两个批量节点（各接各的表）。
+
+### ④ 播放中 / 暂停的视频节点拖不动
+`shared/media.js` 里给 `video` 挂了 `mousedown → stopPropagation`（当年为了「点视频别拖节点」）。
+视频铺满整个节点，一旦播过（播放器常驻）画布就再也收不到按下事件 → 节点拖不动；
+暂停时播放器还在，同样拖不动。修复：
+- 去掉那个 stopPropagation（注释写明为什么不能再拦）；
+- 画布里对视频**不调用 preventDefault**（否则会取消用户手势激活、`video.play()` 被浏览器拒），
+  仍然只把底部那一条原生控制条留给播放控件（按视频高度 16%、28–56px 夹取）；
+- 真拖过节点之后的 180ms 内，落在视频/播放器上的 click 也吞掉 —— 不然「拖一下视频」会顺带播放/暂停。
+实测（真实视频节点，先点播放）：0.3 / 0.6 处拖都能移动节点，0.9（控制条）不动，拖完视频仍在播放。
+
+### 验收
+- `tests/test_smart_canvas_table_wiring.js` 101/101（新增 [11] 节）；
+- 其余五套全绿（model 293、dom 371、classic wiring、select_menu 47、dark_mode 8）；
+- 浏览器实测四点，临时画布已 purge。

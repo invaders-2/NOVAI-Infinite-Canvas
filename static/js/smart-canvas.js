@@ -11038,6 +11038,13 @@ function bindNodeEvents(){
             };
             bindSmartGroupTitleInput(el, nodeForControls);
         }
+        /* 真正拖过节点（stateChanged）之后的 180ms 内：
+           落在视频/播放器上的 click 也要吞掉 —— 否则「拖一下视频节点」会顺带把视频播放/暂停掉。 */
+        el.addEventListener('click', e => {
+            if(Date.now() >= suppressNodeClickUntil) return;
+            if(!e.target.closest('video,audio,.smart-video-player,.media-video-card')) return;
+            e.stopPropagation();
+        }, true);
         el.onclick = e => {
             e.stopPropagation();
             if(Date.now() < suppressNodeClickUntil && !e.target.closest('video,audio,.smart-video-player')) return;
@@ -11341,8 +11348,11 @@ function bindNodeEvents(){
                 const videoRect = videoEl.getBoundingClientRect();
                 const nativeBar = Math.min(56, Math.max(28, videoRect.height * 0.16));
                 if(videoRect.height > 0 && (e.clientY - videoRect.top) >= videoRect.height - nativeBar) return;
+                /* 视频上**不能 preventDefault**：会取消用户手势激活，video.play() 会被浏览器拒绝。 */
+                e.stopPropagation();
+            } else {
+                e.preventDefault(); e.stopPropagation();
             }
-            e.preventDefault(); e.stopPropagation();
             window.getSelection?.()?.removeAllRanges?.();
             if(document.activeElement?.blur) document.activeElement.blur();
             let node = nodes.find(n => n.id === id);
@@ -19611,8 +19621,11 @@ window.onmouseup = e => {
             stateChanged = true;
             render();
         } else if(
+            /* 图片拖到「多图群组节点」（结果群组那种 title=Group 的 smart-image）上就并进去。
+               原来这条只在按住 Ctrl 时才走，用户直接拖过来什么都不发生
+               （用户报的「新的图片无法直接拉入群组」）。判据是拖拽节点的中心落在目标框内
+               （rectOverlapNode），和分组磁吸一样，不会因为擦边就误并。 */
             groupTarget &&
-            dragState.ctrlGroup &&
             (groupTarget.images || []).length > 1 &&
             mergeImageNodesIntoGroup(draggedNode.id, groupTarget.id)
         ){
@@ -21270,6 +21283,11 @@ function tableLinkKey(fromId, toId){ return String(fromId || '') + '>' + String(
    指向表格的已存连线（分组/参考图 → 表格、LLM → 表格）会被一次性删光 —— 表现就是
    刷新后表格读不到上传的图片/视频、也连不回分组节点（用户报的 bug 1）。 */
 let tableConnectionsReady = false;
+/* 上一次从画布同步过来的边（key 集合）：用来分辨「表格模块自己新加的边」。
+   以前是「适配层里有、画布上没有 → 就当是模块新加的、补回画布」，
+   结果用户删掉的连线（分组→LLM 节点、分组→表格……凡是 input/flow 的）都会被自动接回去
+   （用户报的「连接线删了又自动连上」）。现在只补模块真正新加的那些。 */
+const tableSyncedKeys = new Set();
 function syncTableConnections(){
     if(!tableConnectionsReady){
         tableConnectionsReady = true;
@@ -21296,6 +21314,7 @@ function tablePortsFromCanvas(){
 
 function syncTableConnectionsFromCanvas(){
     tableConnections.length = 0;
+    tableSyncedKeys.clear();
     tablePortsFromCanvas();
     (Array.isArray(canvas?.connections) ? canvas.connections : []).forEach(conn => {
         if(!conn || !conn.from || !conn.to) return;
@@ -21305,6 +21324,7 @@ function syncTableConnectionsFromCanvas(){
         const port = tablePortByLink.get(tableLinkKey(conn.from, conn.to));
         if(port) item.toPort = port;
         tableConnections.push(item);
+        tableSyncedKeys.add(tableLinkKey(conn.from, conn.to));
     });
     if(!canvasUsesConnections){
         nodes.forEach(node => (node.inputNodeIds || []).forEach(fromId => {
@@ -21313,6 +21333,7 @@ function syncTableConnectionsFromCanvas(){
             const port = tablePortByLink.get(tableLinkKey(fromId, node.id));
             if(port) item.toPort = port;
             tableConnections.push(item);
+            tableSyncedKeys.add(tableLinkKey(fromId, node.id));
         }));
     }
 }
@@ -21320,9 +21341,14 @@ function syncTableConnectionsFromCanvas(){
 function syncTableConnectionsToCanvas(){
     const want = new Set(tableConnections.map(c => tableLinkKey(c.from, c.to)));
     tableConnections.forEach(item => {
-        if(item.toPort) tablePortByLink.set(tableLinkKey(item.from, item.to), item.toPort);
+        const key = tableLinkKey(item.from, item.to);
+        if(item.toPort) tablePortByLink.set(key, item.toPort);
+        /* 从画布同步来的边：一律不回写（用户在画布上删了就是删了）。
+           只有表格模块自己新加的边（它的 connectNodes 遮蔽了宿主钩子，直接 push 进这个数组）才回写。 */
+        if(tableSyncedKeys.has(key)) return;
         const exists = (canvas?.connections || []).some(c => c.from === item.from && c.to === item.to);
         if(!exists){ try { connectInputNode(item.from, item.to); } catch(e){} }
+        tableSyncedKeys.add(key);
     });
     const raw = Array.isArray(canvas?.connections) ? canvas.connections : [];
     for(let i = raw.length - 1; i >= 0; i -= 1){
@@ -21689,9 +21715,8 @@ async function runSmartLLMListMode(node){
             try { table = model.parseTableOutput(answer); } catch(error){ table = null; }
         }
         if(!table) throw new Error('模型没有返回可用的表格');
-        /* 物化 / 复用表格节点。跳过规划遍 → 没有 plan，materializeLlmTable 传 null，
-           和经典画布「规划失败」时同一条路。 */
-        const created = reuseOrCreateLlmTableNode(node, table, groups, api);
+        /* 物化表格节点：每次新建一张（用户的表里可能已经改过列名/勾选/提示词，不能再被覆盖）。 */
+        const created = materializeLlmTableNode(node, table, groups, api);
         if(created) connectSmartBatchAfter(created);
         toast('已生成多维表格');
     } catch(error){
@@ -21725,38 +21750,15 @@ function connectSmartBatchAfter(tableNode){
     return batch;
 }
 
-/* 物化表格节点：同一个 LLM 节点已经有「自己生成的表格」时**就地更新**，不再新建。
-   materializeLlmTable 每次都 new 一个 table 节点 —— 用户重复点「生成」就会堆出一排一模一样的
-   多维表格（还各自连到同一个批量节点），这就是"生成一次多出好几张表"的根因。 */
-function reuseOrCreateLlmTableNode(llmNode, table, groups, api){
-    /* 生成遍顺带回的「每组怎么用」回执：结构跟经典画布规划遍的 plan 一致，
-       所以物化时不区分来源。没有单独规划遍（智能画布只发一次请求）时，
-       多图组就靠它拿到「全部」；否则一律落到「沿用」→ 一行只带一张白底图。 */
+/* 物化表格节点：**每次都新建一张**。
+   之前是「同一个 LLM 节点已经有自己生成的表 → 就地更新」：虽然能避免堆表，
+   但把用户在原表上改过的列名/勾选/提示词一起冲掉了 —— 用户要求「再次生成要新建一张表，
+   不要在原来的表上更新」。点一次只出一张表由 runSmartLLMListMode 的 node.running 并发保护负责，
+   不靠复用。 */
+function materializeLlmTableNode(llmNode, table, groups, api){
+    /* 生成遍顺带回的「每组怎么用」回执：结构跟经典画布规划遍的 plan 一致，所以物化时不区分来源。 */
     const plan = table && Array.isArray(table.inputGroups) ? {inputGroups: table.inputGroups} : null;
-    const model = window.NovaTableModel;
-    const existing = nodes.find(n => n.type === 'table' && n.llmGeneratedOutput === true && n.llmSourceId === llmNode.id);
-    if(!existing) return api.materializeLlmTable(llmNode, table, groups, plan);
-    existing.table = table;
-    existing.selectedRows = [];
-    existing.llmRunAt = nowMs();
-    if(model && plan){
-        const planModes = model.planGroupModes(plan, groups.length);
-        const channelModes = {};
-        groups.forEach((group, index) => {
-            if(model.CHANNEL_MODES.includes(planModes[index])) channelModes[model.channelIdAt(index)] = planModes[index];
-        });
-        if(Object.keys(channelModes).length) existing.tableInputChannelModes = channelModes;
-    }
-    /* 连线复用第一次那批；万一缺了补上（connectInputNode 内部会按 from/to/kind 去重） */
-    groups.forEach((group, index) => {
-        if(!group || !group.sourceId) return;
-        try { connectInputNode(group.sourceId, existing.id); } catch(error){ /* 连不上就算了 */ }
-        if(model) tablePortByLink.set(tableLinkKey(group.sourceId, existing.id), model.channelIdAt(index));
-    });
-    syncTableConnectionsToCanvas();
-    render();
-    scheduleSave();
-    return existing;
+    return api.materializeLlmTable(llmNode, table, groups, plan);
 }
 
 function ensureTableApi(){

@@ -9,6 +9,7 @@ const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 const html = read('static/smart-canvas.html');
 const js = read('static/js/smart-canvas.js');
 const moduleSrc = read('static/js/shared/table-node.js');
+const mediaSrc = read('static/js/shared/media.js');
 
 let pass = 0;
 const fails = [];
@@ -78,7 +79,7 @@ ok(moduleSrc.includes('function withRowReferenceList('), '行提示词补「参�
 ok(/prompt = withRowReferenceList\(/.test(moduleSrc), 'tableRowInputs 的 prompt 走 withRowReferenceList');
 ok(modelSrc.includes("'inputGroups'") || modelSrc.includes('inputGroups'), '生成遍回执带 inputGroups（一次请求就能定每组用法）');
 ok(/table\.inputGroups = parsed\.inputGroups/.test(modelSrc), 'parseTableOutput 保留 inputGroups');
-ok(/Array\.isArray\(table\.inputGroups\)/.test(js) && js.includes('planGroupModes(plan, groups.length)'), '物化/复用表格时按回执设通道模式（多图组才会是「全部」）');
+ok(/Array\.isArray\(table\.inputGroups\)/.test(js) && js.includes('materializeLlmTable(llmNode, table, groups, plan)'), '物化表格时按回执设通道模式（多图组才会是「全部」）');
 ok(/每一行的提示词必须用 @图片N/.test(modelSrc), '生成遍要求 every-row 组的每一张都被 @ 出来');
 // ② 一张表配一个批量生成节点，不再借用别人的
 ok(js.includes('linkedToTable'), 'connectSmartBatchAfter 只复用连在这张表后面的批量节点');
@@ -139,6 +140,24 @@ ok(js.includes('VIDEO_ASPECT_SUPPORTED'), '有受支持视频比例表');
 ok(js.includes('function applySourceRatioToVideoAspect('), 'keep_ratio 解析成一个函数统一处理');
 ok(/videoAspect === 'keep_ratio'/.test(js) && js.split("videoAspect === 'keep_ratio'").length >= 3, '批量每行 + 单节点视频请求都会解析');
 ok(js.includes('function refSourceEntry('), 'refSourceEntry 抽出来给单节点路径复用');
+
+console.log('[11] 拖图入群组 / 删线不回弹 / 出表新建 / 视频可拖');
+// ① 图片拖到「多图群组节点」上要并进去（原来只在按住 Ctrl 时才行）
+ok(js.includes('mergeImageNodesIntoGroup(draggedNode.id, groupTarget.id)'), '拖到多图群组节点上会合并');
+ok(!/groupTarget &&\s*\n\s*dragState\.ctrlGroup &&/.test(js), '合并不再要求按住 Ctrl');
+// ② 删掉的连线不能被表格适配层自动接回去
+ok(js.includes('const tableSyncedKeys = new Set();'), '区分「画布同步来的边」与「模块新加的边」');
+ok(js.includes('if(tableSyncedKeys.has(key)) return;'), '从画布同步来的边一律不回写（删了就是删了）');
+ok(/tableSyncedKeys\.add\(tableLinkKey\(conn\.from, conn\.to\)\)/.test(js), '同步时记录画布边的 key');
+// ③ 出表每次新建一张表，不再就地更新
+ok(js.includes('function materializeLlmTableNode('), '物化函数改名（不再「复用或更新」）');
+ok(!js.includes('function reuseOrCreateLlmTableNode('), '旧的「就地更新」实现已移除');
+ok(js.includes('materializeLlmTable(llmNode, table, groups, plan)'), '每次调用 materializeLlmTable 新建表格节点');
+// ④ 播放中/暂停的视频节点都要能拖
+ok(!/video\.addEventListener\('mousedown'/.test(mediaSrc), '视频本体不再拦 mousedown（拦了节点就永远拖不动）');
+ok(js.includes("const videoEl = e.target.closest('video');"), '画布自己判断视频区域能不能起拖');
+ok(/nativeBar[\s\S]{0,200}else \{\s*\n\s*e\.preventDefault\(\);/.test(js), '视频上不 preventDefault（保住 play() 的用户手势），其它区域照旧');
+ok(/addEventListener\('click', e => \{\s*\n\s*if\(Date\.now\(\) >= suppressNodeClickUntil\) return;/.test(js), '拖完落在视频上的 click 被吞掉（不会顺带播放/暂停）');
 
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

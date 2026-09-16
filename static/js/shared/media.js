@@ -239,10 +239,11 @@
             video.addEventListener('ended', () => { refreshIcon(); syncPlayingClass(); });
             // video 本体点击也切换播放/暂停（WKWebView 下原生点击无反应，需自处理）
             let lastVideoTap = 0;
-            video.addEventListener('mousedown', e => {
-                // 只拦冒泡防节点拖动；不能 preventDefault（会取消用户手势激活，play() 被拒）
-                e.stopPropagation();
-            });
+            /* 这里**不能**再 stopPropagation：视频铺满整个节点，把 mousedown 拦掉之后
+               画布就永远收不到按下事件 —— 播过一次（播放器常驻）的视频节点从此拖不动
+               （用户报的「播放中/暂停的视频节点拖不动」）。
+               节点拖动交给画布判断（画布只排除视频底部那一条原生控制条，并且对视频
+               **不调用 preventDefault**，用户手势激活不受影响，play() 照常能播）。 */
             video.addEventListener('click', e => {
                 e.preventDefault(); e.stopPropagation();
                 const now = Date.now();
