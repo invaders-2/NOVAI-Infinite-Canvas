@@ -9135,6 +9135,7 @@ function promptNodeBodyHtml(node){
                 <div class="prompt-llm-instruction-resize prompt-node-control" data-llm-instruction-resize="1" title="拖动调整高度"><span></span></div>
             </div>
             ${upstreamPromptHtml}
+            ${llmOutputModeHtml(node)}
             <div class="prompt-node-llm-actions">
                 <button class="prompt-node-run prompt-node-control" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'play'}"></i><span>${node.running ? escapeHtml(tr('common.running')) : escapeHtml(tr('common.run'))}</span></button>
                 <button class="prompt-node-pill prompt-node-control prompt-system-toggle ${node.llmSystemEnabled ? 'active' : ''}" type="button"><i data-lucide="${node.llmSystemEnabled ? 'check-circle-2' : 'circle'}"></i><span>${escapeHtml(node.llmSystemEnabled ? tr('smart.promptLlmDisableSystem') : tr('smart.promptLlmEnableSystem'))}</span></button>
@@ -10320,8 +10321,25 @@ function bindPromptNodeControls(el, node){
         document.body.classList.add('smart-node-resize', 'smart-prompt-split-resize');
         capturePendingUndo();
     });
+    // LLM 输出形式药丸：文本输出 / 多维表格 / 视频分镜表
+    el.querySelectorAll('.llm-output-mode-btn').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            node.llmOutputMode = btn.dataset.outputMode;
+            render();
+            scheduleSave();
+        };
+    });
     const runEl = el.querySelector('.prompt-node-run');
-    if(runEl) runEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runPromptLLMNode(node.id); };
+    if(runEl) runEl.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const tableModel = window.NovaTableModel;
+        const mode = tableModel ? tableModel.llmOutputModeChoice(node.llmOutputMode) : 'text';
+        if(mode === 'list' || mode === 'list-video') runSmartLLMListMode(node);
+        else runPromptLLMNode(node.id);
+    };
 }
 function bindLoopNodeControls(el, node){
     el.querySelectorAll('.loop-smart-control').forEach(control => {
@@ -20973,6 +20991,97 @@ const liveSmartNodes = new Proxy([], {
     set(target, prop, value){ nodes[prop] = value; return true; },
 });
 let tableApi = null;
+/* ── LLM 三选一（文本输出 / 多维表格 / 视频分镜表）+ 出表物化 ──
+   药丸、"规划 → 生成 → 解析 → 物化"整条链路都复用 shared 模块里的实现：
+   llmOutputModeButtonsHtml / buildListPlanPrompt / buildListGeneratePrompt / parseTableOutput / materializeLlmTable。 */
+function llmOutputModeHtml(node){
+    const api = ensureTableApi();
+    if(!api) return '';
+    return '<div class="llm-mode llm-output-mode" role="group" aria-label="LLM 输出形式">'
+        + api.llmOutputModeButtonsHtml(node) + '</div>';
+}
+
+/* 智能画布的 LLM 纯文本调用（和 runPromptLLMNode 走同一个 /api/canvas-llm） */
+async function callSmartLLMText(node, message){
+    const provider = resolveChatProviderId(node.llmProvider || '');
+    const model = resolveChatModel(node.llmModel || '', provider);
+    const target = smartLLMTarget();
+    const mediaRefs = promptNodeInputMediaForLLM(node);
+    const images = imageRefsOnly(mediaRefs).map(img => img.url).filter(Boolean);
+    const videos = videoRefsOnly(mediaRefs).map(video => video.url).filter(Boolean);
+    const res = await fetch('/api/canvas-llm', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            message,
+            messages:[],
+            images,
+            videos,
+            model,
+            provider,
+            ms_model: provider === 'modelscope' ? model : '',
+            system_prompt:'',
+            reverse:false,
+            target_type:target.target_type,
+            target_model:target.target_model,
+        })
+    });
+    if(!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    return String(data.text || '');
+}
+
+/* LLM 出表：规划 → 生成 → 解析（不过就再要一次）→ 物化表格 → 自动接到批量生成节点 */
+async function runSmartLLMListMode(node){
+    const api = ensureTableApi();
+    const model = window.NovaTableModel;
+    if(!api || !model){ toast('多维表格模块未加载'); return; }
+    const requirement = (promptNodeLLMInputText(node) || '').trim();
+    if(!requirement){ toast(tr('smart.promptLlmNeedText')); return; }
+    const groups = api.llmMediaGroups(node);
+    const inputs = groups.flatMap(group => group.entries);
+    const targetKind = model.llmModeTargetKind(node.llmOutputMode) || 'image';
+    node.running = true;
+    render();
+    try {
+        let plan = null;
+        try {
+            const planText = await callSmartLLMText(node, model.buildListPlanPrompt(requirement, inputs, groups, {targetKind}));
+            plan = model.extractJsonObject(planText);
+        } catch(error){ plan = null; }
+        node.llmListPlan = plan;
+        let table = null;
+        for(let attempt = 0; attempt < 2 && !table; attempt += 1){
+            const answer = await callSmartLLMText(node, model.buildListGeneratePrompt(requirement, inputs, groups, plan, {targetKind}));
+            try { table = model.parseTableOutput(answer); } catch(error){ table = null; }
+        }
+        if(!table) throw new Error('模型没有返回可用的表格');
+        const created = api.materializeLlmTable(node, table, groups, plan);
+        if(created) connectSmartBatchAfter(created);
+        toast('已生成多维表格');
+    } catch(error){
+        toast(String((error && error.message) || '出表失败').slice(0, 160), '!');
+    } finally {
+        node.running = false;
+        render();
+        scheduleSave();
+    }
+}
+
+/* 出表后自动接批量生成节点：优先"LLM 后面已经连着的那个"，否则画布上现成的，再否则新建一个 */
+function connectSmartBatchAfter(tableNode){
+    const llmNode = nodes.find(n => n.id === tableNode.llmSourceId);
+    const downstream = nodes.filter(n => n.type === 'smart-batch' && Array.isArray(n.inputNodeIds)
+        && llmNode && n.inputNodeIds.includes(llmNode.id));
+    let batch = downstream[0] || nodes.find(n => n.type === 'smart-batch');
+    if(!batch) batch = createSmartBatchNode((tableNode.x || 0) + (tableNode.w || 520) + 130, tableNode.y || 0);
+    if(!batch) return null;
+    try { connectInputNode(tableNode.id, batch.id); } catch(error){ /* 连不上就算了，用户手动连 */ }
+    render();
+    scheduleSave();
+    return batch;
+}
+
 function ensureTableApi(){
     if(tableApi) return tableApi;
     if(typeof window.NovaTableNode !== 'function') return null;
