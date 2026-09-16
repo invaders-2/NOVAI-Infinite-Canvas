@@ -562,9 +562,11 @@
 /* 智能画布 prompt 节点布局：中间一排工具（模板库/分隔符/LLM/启用系统提示词/反推），
    底下一排左边是输出形式药丸、右边是运行。 */
 .prompt-node-tools { flex-wrap: wrap; }
-.prompt-node-run-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.prompt-node-run-row .llm-output-mode { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; margin-bottom: 0; }
-.prompt-node-run-row .llm-output-mode button { flex: 0 0 auto; white-space: nowrap; }
+/* 底部这排：左边三药丸、右边运行。容器窄的时候**允许换行**，
+   之前设 nowrap 导致药丸被压在一起互相重叠（用户截图）。 */
+.prompt-node-run-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.prompt-node-run-row .llm-output-mode { flex: 1 1 auto; min-width: 0; flex-wrap: wrap; margin-bottom: 0; padding: 2px; }
+.prompt-node-run-row .llm-output-mode button { flex: 0 0 auto; white-space: nowrap; height: 26px; padding: 0 9px; }
 .prompt-node-run-row .prompt-node-run { margin-left: auto; flex: 0 0 auto; }
 
 /* 智能画布：表格 / 批量生成节点的磨砂玻璃外框（含空表格、空批量节点）。
