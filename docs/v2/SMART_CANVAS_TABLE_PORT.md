@@ -615,3 +615,41 @@ render 的 class 也改成所有节点都带上（原来只有提示词节点）
 - `tests/test_smart_canvas_table_wiring.js`：55/55（新增 [7] 节，覆盖四点修复的关键行）；
 - 其余四套（model / wiring / select_menu / dark_mode）全绿；
 - 浏览器实测：克隆用户画布 + 合成画布（stub `/api/canvas-llm` 返回带 `inputGroups` 的表）全过，临时画布已 purge。
+
+
+## 按行比例（真根因）/ 对比原图按行 / 群组删除 icon（2026-09-16 后续轮 12）
+
+用户报的三点：①生成比例要按每一行的参考图、用「适配比例」；②「对比原图」要按每一行的参考比；③群组加删除 icon。
+
+### ① 适配比例没按每行的参考图比例
+先看了用户批量节点的存盘：`runSettings.ratio = "source"`，但里面还留着一份**过期的** `customRatio:"2:3"`。
+`rowSourceRatio()` 只读素材上已经记好的尺寸（`natural_w/h`），而上传进来的图、被吸收进分组的图
+经常**没量过**（`measureSmartNodeImages()` 只在缩略图渲染出来那一刻才补）→ 返回 null →
+退回那份过期的 2:3，四行全长一个比例、看起来"完全没按参考图"。
+修复：
+- `rowSourceRatio()` 改成 async：本地没尺寸就 `loadSmartOriginalImageDimensions(ref.url)` **现量一次**，
+  量到回写素材（同一张图后面的行/下次批量不用再量）；
+- `applyRowSourceRatioToSettings(runSettings, ratio)`：智能画布有两套尺寸选择 —— API 的
+  `ratio/customRatio`、ModelScope 的 `msRatio/msCustomRatio`，哪套选了「适配比例」就写哪套；
+  **算不出来就把 customRatio 清空**（退回正方形也比拿上一次的 2:3 强）。
+实测（用真实素材，尺寸分别是 658×987 / 658×877 / 658×939 / 658×876，2K）：
+四行实际发出的 size = `1360x2048 / 1536x2048 / 1424x2048 / 1536x2048`，逐行等于该行参考图的比例。
+
+### ② 「对比原图」要按每一行
+`previewCompareSources()` 用的是**节点级** `node.runInputRefs`，而批量下一个结果节点收多行产出、
+节点级那份只有最后一行 → 所有图都拿去和最后一行的原图比。
+修复：批量时每张产出都带上自己的 `runInputRefs`（= 这一行的参考图），对比面板优先用当前这张图自己的。
+实测 3 行产出各自带 `[scene_i, white1..white3]`。
+
+### ③ 群组加删除 icon
+`isGroup`（多图结果群组）在两个地方都被排除掉了：标题栏里的删除、以及悬停的浮动删除按钮；
+而 CSS ` .image-node:not(.empty-node) .node-head{display:none}` 让标题栏那个本来也看不见 ——
+于是群组节点**根本没有删除入口**（只能键盘 Delete）。
+修复：浮动删除按钮不再排除 `isGroup`。实测真鼠标点浮动删除 → 先清空素材（节点变回空节点、标题栏出现删除）
+→ 再点一次删掉节点（和单图节点同一套两步逻辑：先清素材再删节点）。
+
+### 验收
+- `tests/test_smart_canvas_table_wiring.js` 新增 [8] 节（按行比例 / 对比原图 / 群组删除），65/65；
+- 其余五套全绿（model 293、dom 371、wiring、select_menu 47、dark_mode 8）；
+- 浏览器实测（合成画布 + stub `/api/canvas-image-tasks`）：四行 size 逐行正确、每张结果各带本行参考图、
+  群组删除 icon 两次点击真删掉节点；临时画布已 purge。

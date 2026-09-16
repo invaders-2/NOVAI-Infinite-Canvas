@@ -91,6 +91,21 @@ ok(/manual \? 100000 : maxThumb/.test(js), '手动尺寸解除缩略图放大上
 ok(js.includes('manualSizable') && /manualSizable && !node\.sizeUserSet/.test(js), '真拖动之后才标记手动尺寸（单击把手不锁死）');
 ok(/\$\{node\.sizeUserSet \? 'size-user-set' : ''\}/.test(js), '手动尺寸类重新渲染后仍保留');
 
+console.log('[8] 按行比例 / 对比原图 / 群组删除 icon');
+// ① 「适配比例」按每一行的参考图算（素材没量过尺寸就现量）
+ok(js.includes('async function rowSourceRatio('), 'rowSourceRatio 支持异步现量尺寸');
+ok(js.includes('loadSmartOriginalImageDimensions(ref.url)'), '素材没记尺寸时现量（上传/分组里的图常常没量过）');
+ok(js.includes('function applyRowSourceRatioToSettings('), '按行比例写回设置走 applyRowSourceRatioToSettings');
+ok(js.includes("['', 'ratio'], ['ms', 'msRatio']"), 'API 与 ModelScope 两套尺寸都照顾到');
+ok(/ratio === 'source' \|\| runSettings\.msRatio === 'source'/.test(js), '两套「适配比例」都会触发按行计算');
+ok(/runSettings\[customKey\] = rw && rh \?/.test(js), '算不出比例时清掉过期 customRatio（不能拿上一次的 2:3 去生成）');
+// ② 「对比原图」按每一行/每一张自己的参考图
+ok(js.includes('rowCompareRefs'), '批量产出带上这一行的参考图');
+ok(js.includes('const ownRefs = Array.isArray(editing.image?.runInputRefs)'), '对比原图优先用当前这张图自己的参考图');
+// ③ 群组（多图结果节点）也有删除 icon
+ok(/\$\{!isEmpty \? `<div class="floating-node-actions">/.test(js), '群组不再被排除在浮动删除按钮之外');
+ok(!/!isEmpty && !isGroup \?/.test(js), '没有残留「群组不显示删除按钮」的写法');
+
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
 console.log('通过 ' + pass + '/' + pass);

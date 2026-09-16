@@ -10192,7 +10192,7 @@ function render(){
         const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
         const html = `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.sizeUserSet ? 'size-user-set' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
-            ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
+            ${!isEmpty ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
             ${runTimePillHtml(node)}
             <div class="node-body">${body}</div>
@@ -10261,7 +10261,7 @@ function render(){
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         return `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
-            ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
+            ${!isEmpty ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}
             ${runTimePillHtml(node)}
             <div class="node-body">${body}</div>
@@ -12452,7 +12452,12 @@ function previewCompareSources(){
     const editing = currentEditImage();
     const node = editing.node;
     if(!node) return [];
-    const savedRefs = Array.isArray(node.runInputRefs) ? node.runInputRefs.filter(ref => ref?.url) : [];
+    /* 优先用**当前这张图自己的**参考图：批量生成的结果群组里每张图来自不同的行，
+       而节点级 runInputRefs 只有最后一行那一份 —— 否则所有都拿去和最后一行的原图比。 */
+    const ownRefs = Array.isArray(editing.image?.runInputRefs) ? editing.image.runInputRefs.filter(ref => ref?.url) : [];
+    const savedRefs = ownRefs.length
+        ? ownRefs
+        : (Array.isArray(node.runInputRefs) ? node.runInputRefs.filter(ref => ref?.url) : []);
     const upstream = savedRefs.length ? savedRefs : inputImagesFor(node);
     const dedup = [];
     const seen = new Set();
@@ -21293,21 +21298,50 @@ const tableSelected = {
 /* 批量「跑一行」：提示词 + 参考图交给智能画布已有的生成链路（提交 → 轮询 → 收素材），
    然后把这一行产出的素材追加到批量生成节点上（按行标注）。 */
 /* 这一行的参考素材比例：先看 ref 自己带的尺寸，再看来源节点 images[outputIndex] 的尺寸
-   （分组里量过的 natural_w/h / layout_w/h 都在 item 上）。视频同理。 */
-function rowSourceRatio(refs){
+   （分组里量过的 natural_w/h / layout_w/h 都在 item 上）。
+   两个地方都没记尺寸时**现量一次**：上传进来的图、被吸收进分组的图经常没量过
+   （measureSmartNodeImages 只在缩略图渲染出来时才补），
+   之前这里直接返回 null → 比例算不出来、退回节点上那份过期的 customRatio（用户报的
+   「适配比例没按每行参考图的比例」就是这个：存盘里 customRatio 还留着上次的 2:3）。 */
+async function rowSourceRatio(refs){
     for(const ref of (refs || [])){
         if(!ref || isAudioMediaItem(ref)) continue;
         const direct = imageSizeForRatio(ref);
         if(direct) return direct;
         const src = nodes.find(n => n.id === ref.nodeId);
         const index = Number(ref.outputIndex);
-        if(src && Number.isFinite(index) && index >= 0){
-            const item = (src.images || [])[index];
-            const size = imageSizeForRatio(item);
-            if(size) return size;
+        const item = (src && Number.isFinite(index) && index >= 0) ? (src.images || [])[index] : null;
+        const itemSize = imageSizeForRatio(item);
+        if(itemSize) return itemSize;
+        if(!ref.url || mediaKindForItem(ref) !== 'image') continue;
+        const measured = await Promise.resolve(loadSmartOriginalImageDimensions(ref.url)).catch(() => null);
+        if(measured && measured.w > 0 && measured.h > 0){
+            // 量到了就记回素材上：同一张图后面的行 / 下次批量不用再量
+            if(item){ item.natural_w = measured.w; item.natural_h = measured.h; }
+            return {w:measured.w, h:measured.h};
         }
     }
     return null;
+}
+/* 把「这一行算出来的比例」写进这次运行用的设置。
+   智能画布有两套尺寸选择：API 用 ratio / customRatio，ModelScope 用 msRatio / msCustomRatio，
+   哪一套选了「适配比例」就写哪一套；两边都没算出来时**清掉过期值**（退回正方形，
+   总比拿上一次的 2:3 去生成强）。 */
+function applyRowSourceRatioToSettings(runSettings, ratio){
+    const d = ratio ? (gcdInt(ratio.w, ratio.h) || 1) : 1;
+    const rw = ratio ? Math.max(1, Math.round(ratio.w / d)) : 0;
+    const rh = ratio ? Math.max(1, Math.round(ratio.h / d)) : 0;
+    [['', 'ratio'], ['ms', 'msRatio']].forEach(pair => {
+        const prefix = pair[0];
+        const ratioKey = pair[1];
+        if(runSettings[ratioKey] !== 'source') return;
+        const customKey = prefix ? prefix + 'CustomRatio' : 'customRatio';
+        const wKey = prefix ? prefix + 'CustomRatioWidth' : 'customRatioWidth';
+        const hKey = prefix ? prefix + 'CustomRatioHeight' : 'customRatioHeight';
+        runSettings[customKey] = rw && rh ? (rw + ':' + rh) : '';
+        runSettings[wKey] = rw || '';
+        runSettings[hKey] = rh || '';
+    });
 }
 /* 一次批量运行（batchRunId）对应一个下游结果节点：首个跑到的行创建它，后面的行并进去。 */
 const batchRunResultNodes = new Map();
@@ -21373,19 +21407,13 @@ async function tableRunOneRow(nodeId, options, forceVideo){
         .filter(ref => ref.url);
     let runSettings = Object.assign({}, settings, smartSettingsForNode(node) || {});
     if(forceVideo) runSettings = Object.assign({}, runSettings, {apiKind: 'video'});
-    /* 「适配比例」（ratio=source）必须按**这一行**的参考图/视频算：
+    /* 「适配比例」（ratio / msRatio = source）必须按**这一行**的参考图算：
        composer 里的 applySourceRatioToSettings() 读的是节点自己的 images，批量节点没有 images，
-       所以之前永远算不出比例、退回 1:1（用户报的「选了适配尺寸也没按参考图比例生成」）。 */
-    if(runSettings.ratio === 'source'){
-        const srcRatio = rowSourceRatio(refs);
-        if(srcRatio){
-            const d = gcdInt(srcRatio.w, srcRatio.h) || 1;
-            const rw = Math.max(1, Math.round(srcRatio.w / d));
-            const rh = Math.max(1, Math.round(srcRatio.h / d));
-            runSettings.customRatio = rw + ':' + rh;
-            runSettings.customRatioWidth = rw;
-            runSettings.customRatioHeight = rh;
-        }
+       所以之前根本算不出比例、退回节点上那份过期的 customRatio
+       （用户报的「选了适配比例也没按每行参考图的比例生成」）。
+       素材没量过尺寸时 rowSourceRatio() 会现量一次（异步）。 */
+    if(runSettings.ratio === 'source' || runSettings.msRatio === 'source'){
+        applyRowSourceRatioToSettings(runSettings, await rowSourceRatio(refs));
     }
     const rowNumber = (options.runContext || {}).rowNumber || 0;
     if(!prompt && !refs.length) throw new Error('第 ' + (rowNumber || '?') + ' 行既没有提示词也没有素材');
@@ -21394,10 +21422,17 @@ async function tableRunOneRow(nodeId, options, forceVideo){
     const runId = String((options.runContext || {}).batchRunId || '') || node.id;
     /* out.urls 的元素可能是字符串，也可能是 {url, kind}（resultMediaUrls 两种都返回过），
        统一取出 url 字符串，别把对象当成 url 塞进节点（会出现 url.url 这种坏数据）。 */
+    /* 每张产出都记住**这一行**的参考图：预览里的「对比原图」会优先用它。
+       批量下一张结果节点收多行产出，节点级的 runInputRefs 只有最后一行那份，
+       不带上自己那一行的参考，所有图都会被拿去和最后一行的原图比（用户报的）。 */
+    const rowCompareRefs = refs
+        .filter(ref => ref && ref.url)
+        .map(ref => ({url:ref.url, name:ref.name || '', kind:ref.kind || 'image', nodeId:ref.nodeId || ''}));
     const rowUrls = () => urls.map((item, index) => ({
         url: (typeof item === 'string') ? item : ((item && item.url) || ''),
         name: rowNumber ? ('第' + rowNumber + '行' + (urls.length > 1 ? '-' + (index + 1) : '')) : '',
-        kind: (item && item.kind) || kind
+        kind: (item && item.kind) || kind,
+        runInputRefs: rowCompareRefs.map(ref => ({...ref}))
     })).filter(item => item.url);
     /* 一次批量运行只落**一个**下游结果节点，多行的结果都并进它 —— 和单节点生成完全一致：
        跑的时候就有这张卡片，跑完每行 append 进去，>1 张时标题自动变 Group / Videos（自动成组）。
