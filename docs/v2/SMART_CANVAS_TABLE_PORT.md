@@ -96,6 +96,37 @@ runGenerator, runVideoNode, saveCanvas, scheduleSave, selected, showErrorModal, 
 
 （其余是 JS 内建、对象属性名或块内局部变量，不需要宿主提供。）
 
+
+## 决策更新（用户 2026-09-16 明确）
+
+**不改造现有的上传节点（smart-image），而是新增一个"批量生成节点"。**
+
+用户原话：「采用跟 api 生成节点一样的逻辑，再添加一个输入节点，点击后下方出现编辑器，
+点击进行批量生成按钮」。
+
+落地方式：
+
+1. **新节点类型**（暂命名 `smart-batch`，标题「批量生成」），视觉与交互对齐经典画布的
+   生成节点接了多维表格之后的样子：
+   - **输入端口**：接收多维表格（接表格节点的输出）；
+   - **节点主体**：上方「生成输入」批量面板（批量 N 行 / 每行素材缩略图 + 提示词预览 /
+     起始行 / 并发 / 出错策略 / 独立运行 / 恢复上次），下方一颗 **「批量生成」** 按钮；
+   - 点击节点 → 下方出现编辑器（面板展开），点「批量生成」按行跑。
+2. **模型/参数**：与经典画布 API 生成节点同一套设置（平台 / 模型 / 比例 / 分辨率 / 数量 /
+   时长），直接复用智能画布已有的设置面板。
+3. **每行怎么跑**：复用智能画布**已有的直接生成函数**，不走助手工具链（见上一节）：
+   ```
+   runRow(行) → runSettings = smartSettingsForNode(批量生成节点)
+                kind === 'video' ? runApiVideoGeneration(prompt, refs, runSettings)
+                                  : 按 engine 分发 runApiGeneration / runRunningHubGeneration
+                                    / runModelscopeGeneration / runComfyGeneration
+                轮询：agentPollGenerateTask + GET /api/canvas-image-tasks/{taskId}
+   ```
+4. **产物落点**：每行产物追加到该节点的历史，并标上行号（一张表跑 4 行 = 4 条历史，可对上是第几行）。
+   若之后要"每行平铺一个图片节点"，只改这一处。
+
+这样第二步就不依赖"改造上传节点"，也不动现有 `smart-image` 的任何行为——**新增节点，风险隔离**。
+
 ## 教训（写在这里免得再犯）
 - 改这类大件：**先补测试垫片/测试，再动生产代码**；
 - 每步改完**先在真浏览器点一遍**再提交；
