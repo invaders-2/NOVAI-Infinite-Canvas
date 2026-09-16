@@ -9385,8 +9385,13 @@ function markNodeSizeUserSet(hostEl, node){
     const handle = el.querySelector('.node-resize-handle');
     if(handle && !handle.dataset.sizeHooked){
         handle.dataset.sizeHooked = '1';
-        handle.addEventListener('mouseup', () => {
+        /* 必须在**按下**那一刻就交权：之前挂在 mouseup，拖动过程中自适应那条
+           height/width: auto !important 还在生效 → 往下一拉就被按回去（"固定死了"）。 */
+        handle.addEventListener('mousedown', () => {
             node.sizeUserSet = true;
+            el.classList.add('size-user-set');
+        }, true);
+        handle.addEventListener('mouseup', () => {
             el.classList.add('size-user-set');
             scheduleSave();
         }, true);
