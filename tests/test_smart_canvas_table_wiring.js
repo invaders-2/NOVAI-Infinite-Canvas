@@ -71,6 +71,26 @@ ok(/TABLE_OUTPUT_LIKE_TYPES\s*=\s*\['output',\s*'smart-image'\]/.test(moduleSrc)
 ok(/source\.type === 'group' \|\| source\.type === 'smart-group'/.test(moduleSrc), 'tableSourceItems 认识智能画布的 smart-group');
 ok(moduleSrc.includes('const fromGroupImages'), '分组自己的 images（吸收进来的素材）也展开');
 
+console.log('[7] 这一轮的四项修复');
+const modelSrc = read('static/js/shared/table-model.js');
+// ① 整组素材（例如一整组白底图）在每一行的提示词里全部出现
+ok(moduleSrc.includes('function withRowReferenceList('), '行提示词补「参考图」清单：整组素材全部写出来');
+ok(/prompt = withRowReferenceList\(/.test(moduleSrc), 'tableRowInputs 的 prompt 走 withRowReferenceList');
+ok(modelSrc.includes("'inputGroups'") || modelSrc.includes('inputGroups'), '生成遍回执带 inputGroups（一次请求就能定每组用法）');
+ok(/table\.inputGroups = parsed\.inputGroups/.test(modelSrc), 'parseTableOutput 保留 inputGroups');
+ok(/Array\.isArray\(table\.inputGroups\)/.test(js) && js.includes('planGroupModes(plan, groups.length)'), '物化/复用表格时按回执设通道模式（多图组才会是「全部」）');
+ok(/每一行的提示词必须用 @图片N/.test(modelSrc), '生成遍要求 every-row 组的每一张都被 @ 出来');
+// ② 一张表配一个批量生成节点，不再借用别人的
+ok(js.includes('linkedToTable'), 'connectSmartBatchAfter 只复用连在这张表后面的批量节点');
+ok(!/downstream\[0\] \|\| nodes\.find\(n => n\.type === 'smart-batch'\)/.test(js), '不再抓画布上任意一个批量节点');
+// ③ 批量生成节点能自定义往下拉
+ok(/node\?\.type === 'table' \|\| node\?\.type === 'smart-batch'/.test(js), '表格/批量节点布局直接听 node.w/h（不再被自身的产出图网格算死）');
+// ④ 生成结果群组能自定义往下拉
+ok(js.includes('function fittedMediaGridLayout('), '多图节点手动尺寸走 fittedMediaGridLayout');
+ok(/manual \? 100000 : maxThumb/.test(js), '手动尺寸解除缩略图放大上限（往下拉会真的变大）');
+ok(js.includes('manualSizable') && /manualSizable && !node\.sizeUserSet/.test(js), '真拖动之后才标记手动尺寸（单击把手不锁死）');
+ok(/\$\{node\.sizeUserSet \? 'size-user-set' : ''\}/.test(js), '手动尺寸类重新渲染后仍保留');
+
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
 console.log('通过 ' + pass + '/' + pass);

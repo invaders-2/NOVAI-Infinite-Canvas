@@ -561,3 +561,57 @@ render 就会有 loading/计时胶囊（和单节点生成一样）；每行跑�
 `pending` 减 1，减到 0 才 `markSmartNodeComplete`。失败的那一行也减 1；
 再在 `mountSmartBatchNodes` 加了兜底：`_batchRunning === false` 时把还挂着 pending 的结果节点收尾，
 不会留永远转圈的卡片。实测生成中结果节点带计时胶囊（"2s"），结束后 `pending=0`、3 张图。
+
+
+## 多图组读取 / 批量节点新建 / 两处「往下拉不动」（2026-09-16 后续轮 11）
+
+用户报的四点：①多维表格生成那边多张白底图只读取一张（提示词显示也一样）；②生成其他多维表格会接到之前的
+批量生成节点，要新建；③批量生成节点不能自定义往下拉；④生成结果群组不能自定义往下拉。
+
+### ① 多图组（白底图）在提示词里只出现一张
+先量了真实数据（用户画布 `91872876b9d64ee78ec1ca69a8013be6` 的克隆）：
+表格 `输入2` 是「全部」、每行确实带 5 张（1 张静物 + 整组 4 张白底），生成请求里也发的是 5 张；
+**只有提示词里只 @ 了其中一张** —— 用户看到的就是「只读取一张」。
+根因有两层：
+1. 智能画布为了省一次 LLM 往返去掉了**规划遍**，而「这一组是逐行还是每行都用整组」原本是规划遍决定的 →
+   模式一律落到「沿用」，一行只带一张白底图。提示词也是照着这个语义写的。
+2. 就算把表头切到「全部」，模型写的提示词里也只 @ 了一张。
+
+修复：
+- `buildListGeneratePrompt()` 现在顺带回执 `inputGroups[{group,rowMode}]`（结构同规划遍的 plan），
+  并要求「`every-row` 的那一组，每行的提示词必须用 @图片N 把**每一张**都点出来」；
+- `parseTableOutput()` 保留 `inputGroups`；`reuseOrCreateLlmTableNode()` 把它当 plan 传给
+  `materializeLlmTable()`（复用同一张表时也按回执更新 `tableInputChannelModes`）；
+- `tableRowInputs()` 末尾补一行显式清单（`withRowReferenceList`）：**只在该行有 ≥2 张素材、
+  提示词里提到了其中一部分、又漏了别的** 时才补，形如
+  `参考图：@图片1、@图片2、@图片3、@图片4、@图片5`。单图行、一张都没提到的行保持原样。
+
+实测（克隆用户画布）：4 行 × 每行 5 张缩略图；行提示词末尾都带整组清单；
+出表回执 `[{group:1,per-row},{group:2,every-row}]` → 表格模式 `input-1=逐行 / input-2=全部`。
+
+### ② 出表接到「别人的」批量生成节点
+`connectSmartBatchAfter()` 原来是 `downstream[0] || nodes.find(n => n.type === 'smart-batch')`——
+找不到就直接抓画布上**任意一个**批量节点，所以第二张表也接到第一张表的下游，两张表抢同一个节点。
+改成只复用**连在这张表后面**的那一个（`linkedToTable`），没有就新建。
+实测：出第 1 张表 → 新建批量节点 A（另外预置的无关批量节点没被借用）；同一张表重复出表 → 表复用、不新增节点；
+换一个 LLM 出第 2 张表 → 再新建批量节点 B，连接 `表→自己的批量节点`。
+
+### ③ 批量生成节点往下拉不动
+`imageLayout()` 对 `smart-batch` 走的是**图片网格**分支：批量节点会把每行的产出也记进 `node.images`
+（历史行为），于是高度被网格算死（4 张 → 488px），往下拉时 `node.h` 涨了、框纹丝不动。
+修复：`table` / `smart-batch` 在 `imageLayout()` 里直接按 `node.w/h` 出布局（忽略 `images`）。
+实测（克隆用户画布）批量节点 807 → 1107（拖 300），`sizeUserSet` 落盘。
+
+### ④ 生成结果群组往下拉不动
+多图节点的显式尺寸分支里 `height` 是按「缩略图上限 × 可见行数」算的（4 张图固定 488px），
+用户拖出来的高度被丢掉。修复：`fittedMediaGridLayout()`——手动拖过（`node.sizeUserSet`）就
+**高度完全听用户的**、并解除缩略图放大上限（100000，和 `smart-group` 同一套做法）；
+另外在 resize 的 mousemove 里给 `smart-image` 补 `node.sizeUserSet`（真的拖动 >2px 才打），
+render 的 class 也改成所有节点都带上（原来只有提示词节点）。
+实测：结果群组 398 → 598（拖 200），缩略图跟着变大、无溢出（拟合高度正好等于框高）。
+
+### 这一轮的验收
+- `tests/test_table_node_dom.js`：371/371（新增整组清单 / rawPrompt 不受影响 / 无提及时不补）；
+- `tests/test_smart_canvas_table_wiring.js`：55/55（新增 [7] 节，覆盖四点修复的关键行）；
+- 其余四套（model / wiring / select_menu / dark_mode）全绿；
+- 浏览器实测：克隆用户画布 + 合成画布（stub `/api/canvas-llm` 返回带 `inputGroups` 的表）全过，临时画布已 purge。

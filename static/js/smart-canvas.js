@@ -2289,6 +2289,22 @@ function imageLayout(images, scale=1, node=null){
         }
         return {cols:1, rows:1, width:Math.round(Number(node.w) || smartLoopWidth(node)), height:Math.round(Math.max(Number(node.h) || 0, smartLoopHeight(node))), thumb:96, single:true};
     }
+    /* 表格 / 批量生成节点：主体是面板，不是图片网格 —— 尺寸必须完全听 node.w/h。
+       批量生成节点会把每行产出的素材也记进 node.images（历史行为），
+       走下面的图片网格分支时高度会被缩略图网格算死（4 张 → 488px），
+       用户往下拉把手时 node.h 涨了、框却纹丝不动（用户报的「不能自定义往下拉」）。 */
+    if(node?.type === 'table' || node?.type === 'smart-batch'){
+        const explicitW = Number(node.w);
+        const explicitH = Number(node.h);
+        return {
+            cols:1,
+            rows:1,
+            width:Math.round(Number.isFinite(explicitW) && explicitW > 24 ? explicitW : (node.type === 'table' ? 520 : 420)),
+            height:Math.round(Number.isFinite(explicitH) && explicitH > 24 ? explicitH : EMPTY_UPLOAD_NODE_HEIGHT),
+            thumb:96,
+            single:true
+        };
+    }
     const count = (images || []).length;
     const s = node?.type === 'smart-image' || !node?.type ? mediaNodeDefaultScale(node) : (Number.isFinite(scale) && scale > 0 ? scale : 1);
     if(count === 0){
@@ -2318,8 +2334,10 @@ function imageLayout(images, scale=1, node=null){
         const rows = Math.max(1, Number(grid.rows || 1));
         const visibleRows = Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, rows);
         if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
+            const manual = Boolean(node?.sizeUserSet);
             const fittedThumb = Math.max(28, Math.floor(Math.min((explicitW - PAD - (cols - 1) * 8) / cols, (explicitH - PAD - (visibleRows - 1) * 8) / visibleRows)));
-            return {cols, rows, visibleRows, width:Math.round(explicitW), height:visibleRows * (fittedThumb + 8) - 8 + PAD, thumb:fittedThumb};
+            return {cols, rows, visibleRows, width:Math.round(explicitW),
+                height:manual ? Math.round(explicitH) : visibleRows * (fittedThumb + 8) - 8 + PAD, thumb:fittedThumb};
         }
         return {cols, rows, visibleRows, width:Math.max(Math.round(226*s), cols * cell + PAD), height:visibleRows * cell - 8 + PAD, thumb};
     }
@@ -2327,12 +2345,28 @@ function imageLayout(images, scale=1, node=null){
     const rows = Math.ceil(count / cols);
     const visibleRows = Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, rows);
     if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
-        const fitted = groupImageGridLayout(count, explicitW, explicitH, thumb, PAD, 8);
-        return {cols:fitted.cols, rows:fitted.rows, visibleRows:fitted.visibleRows, width:Math.round(explicitW), height:fitted.visibleRows * (fitted.thumb + 8) - 8 + PAD, thumb:fitted.thumb};
+        return fittedMediaGridLayout(node, count, explicitW, explicitH, thumb, PAD);
     }
     const width = Math.max(Math.round(226*s), cols * cell + PAD);
     const height = visibleRows * cell - 8 + PAD;
     return {cols, rows, visibleRows, width, height, thumb};
+}
+/* 多图节点给定显式尺寸时的拟合：
+   - 没手动拖过（node.sizeUserSet 假）：按内容收紧，缩略图放大不超过 thumb（原来的行为）。
+   - 手动拖过：框完全听用户的 —— 高度就是他拖的高度、缩略图解除放大上限。
+     原来无论拖多高，高度都被「缩略图上限 × 可见行数」卡死（4 张图固定 488px），
+     表现就是「结果群组往下拉不动」（用户报的）。 */
+function fittedMediaGridLayout(node, count, explicitW, explicitH, maxThumb, PAD){
+    const manual = Boolean(node && node.sizeUserSet);
+    const fitted = groupImageGridLayout(count, explicitW, explicitH, manual ? 100000 : maxThumb, PAD, 8);
+    return {
+        cols:fitted.cols,
+        rows:fitted.rows,
+        visibleRows:fitted.visibleRows,
+        width:Math.round(explicitW),
+        height:manual ? Math.round(explicitH) : fitted.visibleRows * (fitted.thumb + 8) - 8 + PAD,
+        thumb:fitted.thumb
+    };
 }
 function smartLoopCount(node){
     return Math.max(1, Math.min(100, Number(node?.count || 1) || 1));
@@ -10156,7 +10190,7 @@ function render(){
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
-        const html = `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${isPrompt && node.sizeUserSet ? 'size-user-set' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        const html = `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.sizeUserSet ? 'size-user-set' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
@@ -19156,7 +19190,13 @@ window.onmousemove = e => {
         const dy = (e.clientY - resizeState.startY) / viewport.scale;
         /* 真的拖出去了才把 LLM 提示词节点切成「手动尺寸」：
            不切的话 CSS 的 height:auto !important 会在拖动过程中把写进去的高度一直按回去（拖了没反应）。 */
-        if(resizeState.manualPrompt && !node.sizeUserSet && (Math.abs(dx) > 2 || Math.abs(dy) > 2)){
+        /* 真的拖出去了才算「手动尺寸」：
+           - 提示词 LLM 节点靠它解锁 CSS 的 height:auto !important；
+           - 图片 / 结果群组靠它让布局完全按用户拖的尺寸算（多图节点解除缩略图放大上限、
+             高度听用户的，否则会被网格算死 → 「往下拉不动」）。
+           单击把手不触发（避免只是点一下就锁死自适应）。 */
+        const manualSizable = resizeState.manualPrompt || isSmartImageNode(node) || !node.type;
+        if(manualSizable && !node.sizeUserSet && (Math.abs(dx) > 2 || Math.abs(dy) > 2)){
             node.sizeUserSet = true;
             world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`)?.classList.add('size-user-set');
         }
@@ -21516,12 +21556,16 @@ async function runSmartLLMListMode(node){
     }
 }
 
-/* 出表后自动接批量生成节点：优先"LLM 后面已经连着的那个"，否则画布上现成的，再否则新建一个 */
+/* 出表后自动接批量生成节点：**一张表一个**。
+   已经连在这张表后面的批量节点复用（同一张表重复点「生成」不会越堆越多）；
+   别的表格的批量节点绝不借用 —— 之前是「找不到就抓画布上任意一个 smart-batch」，
+   于是第二张表也被接到第一张表的批量节点上，两张表抢同一个下游（用户报的 bug）。 */
 function connectSmartBatchAfter(tableNode){
     const llmNode = nodes.find(n => n.id === tableNode.llmSourceId);
-    const downstream = nodes.filter(n => n.type === 'smart-batch' && Array.isArray(n.inputNodeIds)
-        && llmNode && n.inputNodeIds.includes(llmNode.id));
-    let batch = downstream[0] || nodes.find(n => n.type === 'smart-batch');
+    const canvasConns = Array.isArray(canvas?.connections) ? canvas.connections : [];
+    const linkedToTable = n => Array.isArray(n.inputNodeIds) && n.inputNodeIds.includes(tableNode.id)
+        || canvasConns.some(conn => conn && conn.from === tableNode.id && conn.to === n.id);
+    let batch = nodes.find(n => n.type === 'smart-batch' && linkedToTable(n));
     if(!batch) batch = createSmartBatchNode((tableNode.x || 0) + (tableNode.w || 520) + 130, tableNode.y || 0);
     if(!batch) return null;
     // 视频分镜表 → 这个批量节点按视频跑（tableRunGenerator 会读这个标记分流）
@@ -21538,13 +21582,25 @@ function connectSmartBatchAfter(tableNode){
    materializeLlmTable 每次都 new 一个 table 节点 —— 用户重复点「生成」就会堆出一排一模一样的
    多维表格（还各自连到同一个批量节点），这就是"生成一次多出好几张表"的根因。 */
 function reuseOrCreateLlmTableNode(llmNode, table, groups, api){
+    /* 生成遍顺带回的「每组怎么用」回执：结构跟经典画布规划遍的 plan 一致，
+       所以物化时不区分来源。没有单独规划遍（智能画布只发一次请求）时，
+       多图组就靠它拿到「全部」；否则一律落到「沿用」→ 一行只带一张白底图。 */
+    const plan = table && Array.isArray(table.inputGroups) ? {inputGroups: table.inputGroups} : null;
+    const model = window.NovaTableModel;
     const existing = nodes.find(n => n.type === 'table' && n.llmGeneratedOutput === true && n.llmSourceId === llmNode.id);
-    if(!existing) return api.materializeLlmTable(llmNode, table, groups, null);
+    if(!existing) return api.materializeLlmTable(llmNode, table, groups, plan);
     existing.table = table;
     existing.selectedRows = [];
     existing.llmRunAt = nowMs();
+    if(model && plan){
+        const planModes = model.planGroupModes(plan, groups.length);
+        const channelModes = {};
+        groups.forEach((group, index) => {
+            if(model.CHANNEL_MODES.includes(planModes[index])) channelModes[model.channelIdAt(index)] = planModes[index];
+        });
+        if(Object.keys(channelModes).length) existing.tableInputChannelModes = channelModes;
+    }
     /* 连线复用第一次那批；万一缺了补上（connectInputNode 内部会按 from/to/kind 去重） */
-    const model = window.NovaTableModel;
     groups.forEach((group, index) => {
         if(!group || !group.sourceId) return;
         try { connectInputNode(group.sourceId, existing.id); } catch(error){ /* 连不上就算了 */ }

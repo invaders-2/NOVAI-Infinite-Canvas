@@ -772,6 +772,24 @@ function ensureTableChannels(node){
    「全部」模式的通道整列都上，所以 channelItems[i]（第 i 个通道的这一行）是**数组**。
    提示词里的 @图片N 在这里从「全局输入序号」重写成「该行参考图内的序号」：
    模型是照着全局清单写的序号，不重写的话 @图片4 这类引用在生成时全是悬空的。 */
+/* 提示词里没被提到的参考素材，在末尾补一行清单：参考图：@图片1、@图片2、@图片3。
+   只在该行有两张以上素材、且确实有没被提到的时候才补 —— 单图行保持原样，不啰嗦。
+   提示词里的 @图片N 这时已经重编号成「该行内的序号」，所以清单也用同一套序号。 */
+function withRowReferenceList(model, text, media){
+    const list = Array.isArray(media) ? media : [];
+    if(!model || list.length < 2) return text;
+    const mentioned = new Set(model.mentionsIn(text).map(mention => Number(mention.index) + 1));
+    // 提示词里一张都没提到：那是用户/模型的写法，不硬塞清单（只补「提到了但漏了几张」的情况）
+    if(!mentioned.size) return text;
+    const tokens = list.map((entry, index) => ({
+        token: model.mentionTokenAt(entry && entry.kind, index + 1),
+        mentioned: mentioned.has(index + 1)
+    }));
+    if(tokens.every(item => item.mentioned)) return text;
+    const line = '参考图：' + tokens.map(item => item.token).join('、');
+    return String(text || '').trim() ? String(text).trim() + '\n' + line : line;
+}
+
 function tableRowInputs(node, options={}){
     const model = novaTableModel();
     const state = ensureTableState(node);
@@ -837,6 +855,10 @@ function tableRowInputs(node, options={}){
             .filter(value => value.trim()).join('\n'));
         const rawPrompt = model.buildRowPrompt(upstreamTexts, node.tablePrompt || '', rowText);
         const rewritten = model.rewriteMentions(rawPrompt, ordinalMap);
+        /* 这一行真正会发出去的素材清单：模型写的提示词常常只 @ 了其中一张
+           （「全部」的组一行带整组，提示词里却只出现一张）→ 用户以为「只读取了一张」。
+           末尾补一行显式清单，提示词、批量面板、结果节点上都能看到整组。 */
+        const prompt = withRowReferenceList(model, rewritten.text, media);
         return {
             rowNumber: rowIndex + 1,
             channelItems,
@@ -844,7 +866,7 @@ function tableRowInputs(node, options={}){
             media,
             text: rowText,
             references,
-            prompt: rewritten.text,
+            prompt,
             rawPrompt,
             // 该行引用了它拿不到的素材：批量执行前必须拦下来，不能静默发出去
             danglingMentions: rewritten.dangling

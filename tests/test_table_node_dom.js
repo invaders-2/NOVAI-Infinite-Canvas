@@ -298,6 +298,29 @@ eq(node.table.rows[0][0], '一只狗', 'Enter 提交');
 eq(byClass(root, 'table-cell-editor').length, 0, '提交后编辑器移除');
 eq(api.tableRowInputs(node)[0].prompt, '一只猫\n一只狗', '行文本追加在提示词末尾');
 
+/* 「全部」模式的整组素材必须在提示词里全部出现：
+   模型写的提示词常常只 @ 这一组的第一张，其余几张在提示词里完全不出现，
+   用户看到的就是「多张白底图只读取一张」。这里验末尾会补一行参考图清单。 */
+{
+  const savedMode = node.tableInputChannelModes ? node.tableInputChannelModes['input-1'] : undefined;
+  const savedCell = node.table.rows[0][0];
+  node.tableInputChannelModes = {'input-1': 'all'};
+  node.table.rows[0][0] = '只替换 @图片1 里的鞋';
+  const row = api.tableRowInputs(node)[0];
+  const tokens = row.media.map((entry, index) => '@图片' + (index + 1)).join('、');
+  eq(row.media.length, row.channelItems.reduce((total, list) => total + list.length, 0), '全部模式：一行带整列全部素材');
+  ok(row.media.length > 1, '这一行确实带了多张');
+  ok(row.prompt.endsWith('\n参考图：' + tokens), '提示词补上整组参考图清单：' + row.prompt);
+  ok(row.prompt.indexOf('只替换 @图片1 里的鞋') >= 0, '原来的提示词不动，只在末尾补清单');
+  eq(row.rawPrompt.indexOf('参考图：'), -1, 'rawPrompt 不受清单影响');
+  // 一张都没提到时不硬塞清单（用户/模型本来就没引用这些素材）
+  node.table.rows[0][0] = '把两张图合成一张';
+  ok(api.tableRowInputs(node)[0].prompt.indexOf('参考图：') === -1, '没有 @ 提及时不补清单');
+  node.table.rows[0][0] = savedCell;
+  node.tableInputChannelModes = savedMode === undefined ? {} : {'input-1': savedMode};
+  api.renderTableBody(node);
+}
+
 // 列重命名
 api.beginTableEdit(node, {kind:'column', column:0});
 const headEditor = byClass(root, 'table-head-editor')[0];

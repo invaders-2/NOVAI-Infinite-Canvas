@@ -594,7 +594,13 @@
         if(!rows.length || rows.every(row => row.every(cell => !String(cell || '').trim()))){
             throw new Error(TABLE_PARSE_ERRORS.empty);
         }
-        return {kind:TABLE_KIND, version:TABLE_VERSION, columns, rows, selectedRows:[], mergedGroups:[]};
+        const table = {kind:TABLE_KIND, version:TABLE_VERSION, columns, rows, selectedRows:[], mergedGroups:[]};
+        /* 生成遍可以顺带回一份「每一组怎么用」的回执（inputGroups）。
+           经典画布走 规划→生成 两遍，模式来自规划；智能画布只发一次请求，
+           没有规划遍 —— 模式就靠这份回执，否则多图组会一律落到「沿用」，
+           表现就是「一行只读一张白底图」（用户报的）。 */
+        if(Array.isArray(parsed.inputGroups)) table.inputGroups = parsed.inputGroups;
+        return table;
     }
 
     function buildRepairPrompt(badText){
@@ -728,6 +734,11 @@
             '',
             '行数按「逐行」的组确定；「全部」的组每一行都带整组，不增加行数。',
             '严格遵守用户指定的数量；未指定时根据逐项输入数量和任务目标合理决定。图片组通常逐张映射到各行，单图参考通常应用到所有相关行。',
+            /* 「全部」的组每行都带整组素材，但模型常常只在提示词里 @ 这一组的第一张，
+               其余几张在提示词里完全不出现 —— 用户看到的就是「多张白底图只读取一张」。
+               强制要求逐张点出来，提示词、批量面板、结果节点上才能看到整组。 */
+            '「全部」的组：每一行的提示词必须用 @图片N 把这一组的**每一张**都点出来（例如「参考 @图片5、@图片6 的白底图」），不能只写其中一张。',
+            '同时回报每一组的用法 inputGroups：{"group":组号,"rowMode":"per-row"或"every-row"}。per-row = 这一组是行驱动（第 N 行用第 N 张）；every-row = 每一行都要用上整组。',
             video ? VIDEO_GENERATE_BLOCK : '',
             '如果任务区分了「目标主体」和「风格/版式参考」，每行生成提示词都必须显式写清它们的关系。',
             '不要只写「使用图1」「参考图2」这类占位说明。每个文字单元格应提供与普通文本输出相当的信息密度。',
@@ -735,7 +746,7 @@
             '行的先后顺序已经可以表达执行顺序，因此通常不需要额外创建只用于计数的序号列。',
             '不要在 JSON 中创建图片、参考图或生成输入列，系统会在独立的输入区域按规划映射素材，不会覆盖文字列。',
             '只返回一个 JSON 对象，不要 Markdown 代码块，不要解释。',
-            '{"kind":"table","version":1,"columns":["列名1","列名2"],"rows":[["单元格1","单元格2"]]}'
+            '{"kind":"table","version":1,"inputGroups":[{"group":1,"rowMode":"per-row 或 every-row"}],"columns":["列名1","列名2"],"rows":[["单元格1","单元格2"]]}'
         ].join('\n');
     }
 
