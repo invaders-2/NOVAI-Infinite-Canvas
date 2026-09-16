@@ -1001,6 +1001,25 @@ input.table-batch-input { width: 48px; }
     gap: 6px;
 }
 
+/* 「依次生成」是模式开关：选中态给个明显底色，和一次性点跑的按钮区分开 */
+.table-batch-actions .table-node-action.is-active {
+    background: var(--strong, #111);
+    color: var(--strong-text, #fff);
+    border-color: transparent;
+}
+.table-batch-actions .table-node-action.is-active:hover {
+    background: var(--strong, #111);
+    color: var(--strong-text, #fff);
+}
+/* 状态行上的「依次生成」标注 */
+.table-batch-status-seq {
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--soft);
+    color: var(--text);
+    font-weight: 800;
+}
+
 /* 主按钮位：接了多维表格时拆成「批量生成」+「单张生成」两个并排（列方向堆叠） */
 .table-batch-run-btn {
     flex: 0 0 40px;

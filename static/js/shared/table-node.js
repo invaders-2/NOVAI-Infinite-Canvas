@@ -1163,6 +1163,7 @@ function tableBatchPanelSignature(gen, table){
         String(table.tableBatchStartRow || ''),
         String(table.tableBatchConcurrency || ''),
         String(table.tableBatchFailurePolicy || ''),
+        table.tableBatchSequential ? '1' : '0',
         selection.manual ? 'm' : '',
         selection.selectedRows.join(','),
         rows.map(row => row.rowNumber + ':' + String(row.prompt || '') + ':' + (row.media || []).map(item => item.url).join(';')).join('|'),
@@ -1227,6 +1228,12 @@ function paintTableBatchPanel(panel, gen){
     pickedText.textContent = (selection.manual ? '独立运行 · ' : '')
         + '已勾选 ' + selection.selectedRows.length + '/' + rows.length;
     status.appendChild(pickedText);
+    if(table.tableBatchSequential){
+        const seqText = document.createElement('span');
+        seqText.className = 'table-batch-status-seq';
+        seqText.textContent = '依次生成';
+        status.appendChild(seqText);
+    }
     const mediaTotal = rows.reduce((total, row) => total + (row.media || []).length, 0);
     if(mediaTotal){
         const mediaText = document.createElement('span');
@@ -1350,6 +1357,11 @@ function paintTableBatchPanel(panel, gen){
         scheduleSave();
         paintTableBatchPanel(panel, gen);
     };
+    /* 「依次生成」模式下并发固定 1（这一行的设置先留着，取消模式后恢复） */
+    if(table.tableBatchSequential){
+        concurrencySelect.disabled = true;
+        concurrencyField.title = '「依次生成」模式下固定一行一行跑';
+    }
     concurrencyField.appendChild(concurrencySelect);
     controls.appendChild(concurrencyField);
 
@@ -1394,15 +1406,25 @@ function paintTableBatchPanel(panel, gen){
 
     const actions = document.createElement('div');
     actions.className = 'table-batch-actions';
-    /* 「依次生成」：一行一行跑 —— 这一行生成完成之后才开始下一行（用户要求）。
-       等价于「并发 = 1」，但做成显式按钮，不用先去改并发选择。 */
+    /* 「依次生成」是个**模式开关**（不是「点一下就开跑」）：
+       点它选中这个模式，然后再点底部「运行」才按「一行一行」跑（用户明确要求这样）。
+       开关状态存在表格节点上（tableBatchSequential），所以「运行」也能读到。 */
+    const sequentialOn = Boolean(table.tableBatchSequential);
     const sequentialButton = document.createElement('button');
     sequentialButton.type = 'button';
-    sequentialButton.className = 'table-node-action';
+    sequentialButton.className = 'table-node-action' + (sequentialOn ? ' is-active' : '');
     sequentialButton.textContent = '依次生成';
-    sequentialButton.title = '一行一行跑：这一行生成完成后再开下一行';
-    sequentialButton.disabled = !runnable.length;
-    sequentialButton.onclick = () => { runTableBatch(gen.id, {sequential: true}); };
+    sequentialButton.title = sequentialOn
+        ? '已选「依次生成」：点底部「运行」会一行一行跑（再点一下取消）'
+        : '点一下选中：之后点底部「运行」会一行一行跑，这一行出图后才开下一行';
+    if(typeof sequentialButton.setAttribute === 'function'){
+        sequentialButton.setAttribute('aria-pressed', sequentialOn ? 'true' : 'false');
+    }
+    sequentialButton.onclick = () => {
+        table.tableBatchSequential = !Boolean(table.tableBatchSequential);
+        scheduleSave();
+        paintTableBatchPanel(panel, gen);
+    };
     actions.appendChild(sequentialButton);
     // 「批量生成」已上移到生成节点的主按钮位，这里只留恢复
     const resumeButton = document.createElement('button');
@@ -1441,8 +1463,10 @@ async function runTableBatch(genId, options={}){
     const selection = tableBatchSelection(table);
     const startRow = model.batchStartRow(table.tableBatchStartRow, rows.length);
     const failurePolicy = model.batchFailurePolicy(table.tableBatchFailurePolicy);
-    /* options.sequential（「依次生成」按钮）：强制并发 1 —— 上一行跑完才开下一行。 */
-    const concurrency = options.sequential ? 1 : tableBatchConcurrencyFor(gen, table);
+    /* 「依次生成」：面板上的开关（tableBatchSequential）或调用方显式要求（options.sequential）→ 并发 1。
+       上一行跑完才开下一行。 */
+    const sequential = Boolean(options.sequential) || Boolean(table.tableBatchSequential);
+    const concurrency = sequential ? 1 : tableBatchConcurrencyFor(gen, table);
 
     const runnable = model.batchRowsToRun(rows, {manual: selection.manual, startRow, selectedRows: selection.selectedRows});
     if(!runnable.length){
@@ -1499,7 +1523,7 @@ async function runTableBatch(genId, options={}){
     }
 
     const workers = Math.min(concurrency, pending.length);
-    say(options.sequential
+    say(sequential
         ? '依次生成：共 ' + pending.length + ' 行，一行跑完再跑下一行'
         : '已开始批量生成：' + pending.length + ' 行，并发 ' + workers);
 

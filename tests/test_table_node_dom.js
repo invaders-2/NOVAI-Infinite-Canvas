@@ -460,14 +460,24 @@ ok(Boolean(one(panel, 'table-batch-manual-box')), '有独立运行勾选框');
 
 // 「批量生成」已上移到主按钮位，面板里只剩「依次生成」+「恢复上次」
 eq(byClass(panel, 'table-node-action').map(b => b.textContent), ['依次生成', '恢复上次'], '面板操作区两个按钮：依次生成 / 恢复上次');
-eq(byClass(panel, 'table-node-action')[0].disabled, true, '这一份 fixture 没有可跑的行 →「依次生成」禁用');
 eq(byClass(panel, 'table-node-action')[1].disabled, true, '没有 journal 时「恢复上次」禁用');
 {
-    // 「依次生成」走 sequential 路径（并发强制 1）
+    /* 「依次生成」是**模式开关**：点一下只选中模式（写到表格节点上、按钮变选中态），
+       真正开跑的是底部「运行」（runTableBatch 读这个开关）。 */
+    const seqBtn = byClass(panel, 'table-node-action')[0];
+    eq(Boolean(seqBtn.classList.contains('is-active')), false, '「依次生成」初始未选中');
     const before = batchCalls.length;
-    byClass(panel, 'table-node-action')[0].onclick();
-    // onclick 触发的是 runTableBatch（异步），这里只确认按钮把 sequential 传下去：看批次是否开始
-    ok(batchCalls.length >= before, '「依次生成」按钮点击后有动作（不抛错）');
+    seqBtn.onclick();
+    eq(node.tableBatchSequential, true, '点「依次生成」= 选中这个模式');
+    eq(batchCalls.length, before, '点它**不会**直接开跑（要再点底部「运行」）');
+    // 重绘后面板上的按钮应为选中态、并发选择器被禁用
+    const panel2 = api.renderTableBatchPanel(genNode);
+    const seqBtn2 = byClass(panel2, 'table-node-action')[0];
+    eq(Boolean(seqBtn2.classList.contains('is-active')), true, '重绘后按钮保持选中态');
+    eq(byClass(panel2, 'table-batch-input').length > 0, true, '面板仍有并发选择器');
+    // 再点一下取消
+    seqBtn2.onclick();
+    eq(Boolean(node.tableBatchSequential), false, '再点一下取消模式');
 }
 
 // 控件改动落到表格节点

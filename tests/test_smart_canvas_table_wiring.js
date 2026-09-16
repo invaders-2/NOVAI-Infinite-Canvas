@@ -189,9 +189,9 @@ ok(/api\.paintTableBatchPanel\(existingPanel, node\)/.test(mountBatch), '批量�
 
 console.log('[14] 依次生成 / 拖动不再忽大忽小');
 ok(moduleSrc.includes("sequentialButton.textContent = '依次生成'"), '批量面板有「依次生成」按钮');
-ok(moduleSrc.includes('runTableBatch(gen.id, {sequential: true})'), '点它走 sequential 路径');
-ok(moduleSrc.includes('options.sequential ? 1 : tableBatchConcurrencyFor(gen, table)'), 'sequential 强制并发 1（一行跑完才开下一行）');
-ok(/options\.sequential\s*\n?\s*\? '依次生成：共 '/.test(moduleSrc), '面板提示文案区分依次生成');
+ok(moduleSrc.includes('table.tableBatchSequential = !Boolean(table.tableBatchSequential)'), '点「依次生成」只切模式开关（见 [16] 节）');
+ok(/const sequential = Boolean\(options\.sequential\) \|\| Boolean\(table\.tableBatchSequential\)/.test(moduleSrc), '开关决定并发（1 = 一行跑完才开下一行）');
+ok(/sequential\s*\n?\s*\? '依次生成：共 '/.test(moduleSrc), '面板提示文案区分依次生成');
 ok(/isSmartImageNode\(draggedNode\) &&\s*\n\s*isSmartImageNode\(groupTarget\)/.test(js), '只有图片节点之间才合并（批量/表格被拖过别的节点不会被 merge 掉）');
 ok(js.includes('const renderKey = html.replace(rootClass,'), '拖动/选中这类临时态不触发节点子树重建');
 ok(js.includes('if(dragState && (dragState.id === node.id'), '拖动中不回写实测尺寸（避免忽大忽小）');
@@ -208,6 +208,15 @@ ok(js.includes('live.batchRunFailed ='), '失败行累加「已失败」');
 ok(js.includes('item.batchRunExpected = 0'), '整批结束后清掉这些计数（不留幽灵格）');
 ok(canvasCss.includes('.pending-thumb.is-failed'), '失败占位的样式在');
 ok(!/const gridCount = count \+ Math\.max\(0, Number\(node\?\.pending\)/.test(js), '占位格不再只看 pending');
+
+console.log('[16] 「依次生成」是模式开关：选中后点「运行」才按它跑');
+ok(moduleSrc.includes('table.tableBatchSequential'), '开关存在表格节点上（可持久化，「运行」也能读到）');
+ok(/sequentialButton\.onclick = \(\) => \{\s*\n\s*table\.tableBatchSequential = /.test(moduleSrc), '点按钮只切开关，不直接开跑');
+ok(moduleSrc.includes("(sequentialOn ? ' is-active' : '')"), '选中态给按钮加 is-active');
+ok(moduleSrc.includes('concurrencySelect.disabled = true'), '依次模式下并发选择器禁用');
+ok(/const sequential = Boolean\(options\.sequential\) \|\| Boolean\(table\.tableBatchSequential\)/.test(moduleSrc), 'runTableBatch 读开关 → 并发 1');
+ok(moduleSrc.includes("table.tableBatchSequential ? '1' : '0'"), '开关进面板签名（切换后重绘）');
+ok(tableCss.includes('.table-node-action.is-active'), '选中态有样式');
 
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

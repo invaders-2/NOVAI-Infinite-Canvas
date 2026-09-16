@@ -883,3 +883,26 @@ CDP Profiler（5 个表格）显示两个大头：
 
 ### 验收
 - `tests/test_smart_canvas_table_wiring.js` 134/134（新增 [15] 节）；其余五套全绿。
+
+
+## 「依次生成」改成模式开关（2026-09-16 后续轮 20）
+
+上一轮把「依次生成」做成「点一下立刻按并发 1 跑」的按钮。用户反馈：点了之后还是一次性全部开始（叠加在正在跑的批次上更明显），
+要的是「点按钮 = **选中这个模式**，再点底部『运行』才按依次生成跑」。
+
+改法：
+- 开关存在表格节点上（`table.tableBatchSequential`，可持久化）：点「依次生成」只切换它 →
+  按钮变选中态（`.is-active`）、并发选择器禁用（固定 1）、状态行出现「依次生成」标注，**不会开跑**；
+- `runTableBatch()` 现在读这个开关（`Boolean(options.sequential) || Boolean(table.tableBatchSequential)`）→ 并发 1，
+  所以底部「运行」/「一键运行」这些入口都自动走依次模式；
+- 开关进 `tableBatchPanelSignature`，切换后立刻重绘。
+
+实测：
+- 点「依次生成」→ 按钮选中、`tableBatchSequential=true` 落盘、**一个任务都没发出**；
+- 再点底部「运行」→ `POST 第1行 → 查询完成 → POST 第2行 → 查询完成 → POST 第3行`（严格串行，
+  面板提示「依次生成：共 3 行，一行跑完再跑下一行」）；
+- 取消模式后再点「运行」→ 前 1.2 秒内连发 3 个 POST（并发 3，恢复原行为）。
+
+### 验收
+- `tests/test_smart_canvas_table_wiring.js` 141/141（新增 [16] 节）；
+- `tests/test_table_node_dom.js` 376/376（改成验「点按钮只切开关、不开跑、重绘后保持选中」）；其余四套全绿。
