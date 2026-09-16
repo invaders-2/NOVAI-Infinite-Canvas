@@ -21242,6 +21242,28 @@ const tableSelected = {
    注意：这里只负责**派发任务**；结果落盘/轮询是下一步（智能画布自己那套 agentPollGenerateTask）。 */
 /* 批量「跑一行」：提示词 + 参考图交给智能画布已有的生成链路（提交 → 轮询 → 收素材），
    然后把这一行产出的素材追加到批量生成节点上（按行标注）。 */
+/* 一次批量运行（batchRunId）对应一个下游结果节点：首个跑到的行创建它，后面的行并进去。 */
+const batchRunResultNodes = new Map();
+function batchResultNodeForRun(runId, sourceNode, meta, refs){
+    if(batchRunResultNodes.size > 50) batchRunResultNodes.clear();
+    let output = runId ? batchRunResultNodes.get(runId) : null;
+    if(output && !nodes.some(n => n.id === output.id)) output = null;
+    if(output) return output;
+    undoSuppressed = true;
+    try {
+        output = createPendingOutputFromSource(sourceNode, 1, meta, {connectSource:false, selectOutput:false, refs});
+        output.pending = 0;
+        output.images = [];
+        output.title = 'Image';
+        if(runId) batchRunResultNodes.set(runId, output);
+    } catch(error) {
+        console.error('[smart-batch] 待生成节点创建失败', error);
+        output = null;
+    } finally {
+        undoSuppressed = false;
+    }
+    return output;
+}
 async function tableRunOneRow(nodeId, options, forceVideo){
     const node = nodes.find(n => n.id === nodeId);
     if(!node) throw new Error('批量生成节点不存在');
@@ -21260,43 +21282,43 @@ async function tableRunOneRow(nodeId, options, forceVideo){
     if(!prompt && !refs.length) throw new Error('第 ' + (rowNumber || '?') + ' 行既没有提示词也没有素材');
     const kind = forceVideo || runSettings.apiKind === 'video' ? 'video' : 'image';
     const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
-    /* 开跑前就先落一个**待生成**结果节点（batch → 结果节点），和单节点生成一样：
-       生成过程中画布上能直接看到一张 loading 卡片，跑完就地填成图片/视频节点，
-       失败则把这个待生成节点撤掉。结果节点就是普通图片/视频节点，可继续往下接生成节点。 */
-    let output = null;
-    try {
-        undoSuppressed = true;
-        output = createPendingOutputFromSource(node, Math.max(1, Number(runSettings.count) || 1), meta, {connectSource:false, selectOutput:false, refs});
-    } catch(error) {
-        console.error('[smart-batch] 待生成节点创建失败', error);
-    } finally {
-        undoSuppressed = false;
-    }
+    const runId = String((options.runContext || {}).batchRunId || '') || node.id;
+    /* out.urls 的元素可能是字符串，也可能是 {url, kind}（resultMediaUrls 两种都返回过），
+       统一取出 url 字符串，别把对象当成 url 塞进节点（会出现 url.url 这种坏数据）。 */
+    const rowUrls = () => urls.map((item, index) => ({
+        url: (typeof item === 'string') ? item : ((item && item.url) || ''),
+        name: rowNumber ? ('第' + rowNumber + '行' + (urls.length > 1 ? '-' + (index + 1) : '')) : '',
+        kind: (item && item.kind) || kind
+    })).filter(item => item.url);
+    /* 一次批量运行只落**一个**下游结果节点，多行的结果都并进它 —— 和单节点生成完全一致：
+       跑的时候就有这张卡片，跑完每行 append 进去，>1 张时标题自动变 Group / Videos（自动成组）。
+       结果节点就是普通图片/视频节点，可继续往下接生成节点。 */
+    let output = batchResultNodeForRun(runId, node, meta, refs);
     render();
     scheduleSave();
+    let urls = [];
     try {
         const out = await generateUrlsForCurrentSettings(node, prompt, refs, runSettings);
-        const urls = Array.isArray(out && out.urls) ? out.urls : [];
+        urls = Array.isArray(out && out.urls) ? out.urls : [];
         if(!urls.length) throw new Error('这一行没有产出素材');
-        urls.forEach((url, index) => {
-            node.images.push({
-                url,
-                name: rowNumber ? ('第' + rowNumber + '行' + (urls.length > 1 ? '-' + (index + 1) : '')) : '',
-                role: 'batch',
-            });
-        });
+        const additions = rowUrls();
+        additions.forEach(item => node.images.push({...item, role:'batch'}));
         if(output){
             const live = liveSmartNode(output);
-            if(live) finalizePendingNode(live, urls, meta, kind);
+            if(live) finalizePendingNode(live, [...(live.images || []), ...additions], meta, kind);
         }
         render();
         scheduleSave();
         return urls;
     } catch(error) {
-        /* 这一行失败：撤掉待生成节点，别在画布上留一张永远转圈的卡片 */
+        /* 这一行失败：如果结果节点里还一张都没有，就把这张空卡片撤掉；已经有别行结果就留着。 */
         if(output){
-            nodes = nodes.filter(n => n.id !== output.id);
-            if(canvas) canvas.connections = (canvas.connections || []).filter(conn => conn.from !== output.id && conn.to !== output.id);
+            const live = liveSmartNode(output);
+            if(live && !(live.images || []).length){
+                nodes = nodes.filter(n => n.id !== live.id);
+                if(canvas) canvas.connections = (canvas.connections || []).filter(conn => conn.from !== live.id && conn.to !== live.id);
+                if(batchRunResultNodes.get(runId) === live) batchRunResultNodes.delete(runId);
+            }
         }
         render();
         scheduleSave();

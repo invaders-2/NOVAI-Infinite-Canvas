@@ -62,6 +62,7 @@ ok(!js.includes('api.tableBatchRunButtonHtml('), '批量节点不再挂重复的
 ok(js.includes('api.runTableBatch('), '点批量生成走 runTableBatch');
 ok(js.includes('runApiGeneration') || js.includes('generateUrlsForCurrentSettings'), '按行跑复用画布已有生成链路');
 ok(js.includes('createPendingOutputFromSource(node') && js.includes('finalizePendingNode('), '批量每行结果自动落成下游素材节点');
+ok(js.includes('batchResultNodeForRun') && js.includes('batchRunResultNodes'), '一次批量运行只落一个结果节点（多行结果并进去，自动成组）');
 
 console.log('[6] 共享模块为智能画布做的让步');
 ok(/TABLE_OUTPUT_LIKE_TYPES\s*=\s*\['output',\s*'smart-image'\]/.test(moduleSrc), 'tableSourceItems 把 smart-image 当输出节点展开');
