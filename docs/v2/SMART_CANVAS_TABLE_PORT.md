@@ -127,6 +127,36 @@ runGenerator, runVideoNode, saveCanvas, scheduleSave, selected, showErrorModal, 
 
 这样第二步就不依赖"改造上传节点"，也不动现有 `smart-image` 的任何行为——**新增节点，风险隔离**。
 
+
+## 第二步侦察结果（宿主映射表）
+
+在 `smart-canvas.js` 里逐个核对，26 个宿主名字的现状：
+
+**已有，直接给（9 个）**：`tr` `:5`、`trf` `:6`、`uid` `:7`、`nodes` `:87`、
+`pushUndo` `:224`、`refreshIcons` `:474`、`scheduleSave` `:7945`、`nowMs` `:9872`、`render` `:9923`
+
+**有对应物，改个名字接上（8 个）**：
+
+| 宿主名 | 智能画布的实现 |
+|---|---|
+| `addNode` | `createNode` `:8012` |
+| `saveCanvas` | `saveCanvas` `:7949`（同名） |
+| `connections` | `links` `:3998`（待确认就是连线集合） |
+| `selected` | `selectedIds` `:89` / `selectedNode()` `:828` |
+| `responseErrorMessage` | `responseErrorMessage` `:981` / `smartResponseErrorMessage` `:14456` |
+| `showErrorModal` | `toast` `:1451`（用户可见报错） |
+| `runGenerator` | `runApiGeneration` `:17610`（按 engine 分发） |
+| `runVideoNode` | `runApiVideoGeneration` `:17661` |
+
+**还没有，要写（小工具，适配器里直接补）**：
+`defaultPoint`、`outputUrlValue`、`isMissingAssetUrl`、`mediaKindForNode/ForRef/ForUpload`
+
+**还没找到，下一步要定位**：`nodesEl`（节点 DOM 容器）、`renderNode`（按节点重绘；智能画布是整体 `render()`，
+所以这个多半要写成"局部刷新或 no-op"）、`canvasPreviewImgHtml` / `canvasVideoPreviewHtml`（智能画布自己的图片/视频预览 HTML）、`connectNodes`（建连线；找它的 `addLink` 之类）
+
+另：`table-node.css` **没有**全局 `.menu-btn` / `.node` 规则（只有 `.table-cell-menu .menu-btn` 这种带前缀的），
+引入智能画布不会串味 ✓
+
 ## 教训（写在这里免得再犯）
 - 改这类大件：**先补测试垫片/测试，再动生产代码**；
 - 每步改完**先在真浏览器点一遍**再提交；
