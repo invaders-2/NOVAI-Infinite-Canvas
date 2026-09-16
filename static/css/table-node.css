@@ -540,6 +540,14 @@
 .table-cell-mention-item .table-media-thumb img,
 .table-cell-mention-item .table-media-thumb video { width: 100%; height: 100%; max-width: 26px; max-height: 26px; object-fit: cover; }
 
+/* ── LLM 三选一药丸（文本输出 / 多维表格 / 视频分镜表）──
+   经典画布这边在 canvas.css 里就有；智能画布只加载 table-node.css，
+   所以这里用 .llm-output-mode 作用域再写一份，不影响经典画布。 */
+.llm-output-mode { background:var(--surface-2); border:1px solid transparent; border-radius:var(--radius-full); padding:3px; display:flex; gap:2px; margin-bottom:6px; }
+.llm-output-mode button { height:28px; border-radius:var(--radius-full); padding:0 10px; color:var(--text-2); border:1px solid transparent; background:transparent; font-size:10px; font-weight:700; font-family:inherit; cursor:pointer; }
+.llm-output-mode button:hover { color:var(--text); }
+.llm-output-mode button.active { background:var(--strong); color:var(--strong-text); border-color:transparent; box-shadow:var(--shadow-sm); }
+
 /* 输入列格子角上的引用写法（@图片1）：让用户知道在提示词里怎么写 */
 .table-cell-ref-token {
     position: absolute;
