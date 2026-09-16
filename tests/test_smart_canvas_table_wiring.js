@@ -94,7 +94,7 @@ ok(/\$\{node\.sizeUserSet \? 'size-user-set' : ''\}/.test(js), '手动尺寸类�
 console.log('[8] 按行比例 / 对比原图 / 群组删除 icon');
 // ① 「适配比例」按每一行的参考图算（素材没量过尺寸就现量）
 ok(js.includes('async function rowSourceRatio('), 'rowSourceRatio 支持异步现量尺寸');
-ok(js.includes('loadSmartOriginalImageDimensions(ref.url)'), '素材没记尺寸时现量（上传/分组里的图常常没量过）');
+ok(js.includes('loadSmartOriginalImageDimensions(entry.url)'), '素材没记尺寸时现量（上传/分组里的图常常没量过）');
 ok(js.includes('function applyRowSourceRatioToSettings('), '按行比例写回设置走 applyRowSourceRatioToSettings');
 ok(js.includes("['', 'ratio'], ['ms', 'msRatio']"), 'API 与 ModelScope 两套尺寸都照顾到');
 ok(/ratio === 'source' \|\| runSettings\.msRatio === 'source'/.test(js), '两套「适配比例」都会触发按行计算');
@@ -121,6 +121,24 @@ ok(/if\(gridCount <= 1\) return singleImageLayout/.test(js), '只有 1 格时才
 ok(js.includes('function thumbGridHtml('), '网格渲染抽成 thumbGridHtml');
 ok(js.includes('data-pending-slot'), '未出图的位置画占位格');
 ok(/thumbGridHtml\(node, imgs, layout, pendingSlots\)/.test(js), 'nodeBodyHtml 把 pendingSlots 传给网格');
+
+console.log('[10] 卡住的批量状态 / 视频拖动 / 原图比例');
+// ① 批量「正在生成」不能把节点永久锁死
+ok(js.includes('function resetStaleBatchRuns('), '加载时复位卡住的批量运行（resetStaleBatchRuns）');
+ok(js.includes('const resetBatchRuns = resetStaleBatchRuns();'), 'loadCanvas 里真的调了');
+ok(js.includes('delete node._batchRunning') && js.includes('delete node.tableBatchRunning'), '持久化时剥掉临时批量状态');
+ok(moduleSrc.includes('} finally {') && /gen\._batchRunning = false;\s*\n\s*table\.tableBatchRunning = false;/.test(moduleSrc), '批量执行体 try/finally 里一定会清标志');
+ok(js.includes("row.status === 'running' || row.status === 'deferred'"), '卡在 running/deferred 的行放回 pending');
+// ② 播放中的视频不再把节点钉死
+ok(js.includes("const videoEl = e.target.closest('video');"), '视频区域允许起拖（只有控制条除外）');
+ok(js.includes('nativeBar'), '底部原生控制条位置留给控件');
+ok(/\.smart-node-floating-menu, \.node-resize-handle, \.thumb-item, \.node-port, \.prompt-node-control, select, input, textarea, button, \.smart-video-controls'/.test(js), '拖拽排除名单里换成了 .smart-video-controls');
+// ③ 视频「原图比例」要解析成参考素材的真实比例
+ok(js.includes('function nearestVideoAspectForSize('), '按参考素材比例找最接近的受支持比例');
+ok(js.includes('VIDEO_ASPECT_SUPPORTED'), '有受支持视频比例表');
+ok(js.includes('function applySourceRatioToVideoAspect('), 'keep_ratio 解析成一个函数统一处理');
+ok(/videoAspect === 'keep_ratio'/.test(js) && js.split("videoAspect === 'keep_ratio'").length >= 3, '批量每行 + 单节点视频请求都会解析');
+ok(js.includes('function refSourceEntry('), 'refSourceEntry 抽出来给单节点路径复用');
 
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

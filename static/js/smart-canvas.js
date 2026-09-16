@@ -953,6 +953,12 @@ function canvasForStorage(){
     (clean.nodes || []).forEach(node => {
         if(Array.isArray(node.images)) node.images = node.images.map(mediaItemForStorage);
         if(node.runSettings) node.runSettings = settingsForStorage(node.runSettings);
+        /* 批量「正在生成」是页面内的临时状态，跑完会自己清掉 —— 中途刷新/关页面要是被存下来，
+           下次打开时标志还是 true，runTableBatch 开头的 if(gen._batchRunning) 会把「运行」永久挡掉
+           （用户报的「批量生成，无法再次生成」）。持久化时一律剥掉。 */
+        delete node._batchRunning;
+        delete node._batchProgress;
+        delete node.tableBatchRunning;
     });
     return clean;
 }
@@ -7949,6 +7955,24 @@ function migrateSmartGroupImageMembers(){
     });
     return changed;
 }
+/* 复位「卡住的批量运行」：老画布可能存着 _batchRunning / tableBatchRunning = true，
+   以及卡在 running/deferred 的 journal 行 —— 这会让「运行」被直接挡掉、再也不出图。
+   加载时统一复位，卡住的行放回 pending（「恢复上次」和重新运行都能重新派发）。 */
+function resetStaleBatchRuns(){
+    let changed = false;
+    (nodes || []).forEach(node => {
+        if(!node) return;
+        if(node.type === 'smart-batch' && node._batchRunning){ node._batchRunning = false; changed = true; }
+        if(node.type === 'table' && node.tableBatchRunning){ node.tableBatchRunning = false; changed = true; }
+        const journal = node.type === 'table' ? node.generationBatchJournal : null;
+        if(journal && Array.isArray(journal.rows)){
+            journal.rows.forEach(row => {
+                if(row && (row.status === 'running' || row.status === 'deferred')){ row.status = 'pending'; changed = true; }
+            });
+        }
+    });
+    return changed;
+}
 async function loadCanvas(){
     if(!canvasId) return;
     try {
@@ -7977,6 +8001,7 @@ async function loadCanvas(){
             }
         });
         const cleanedCompletedState = clearCompletedNodeBusyStates();
+        const resetBatchRuns = resetStaleBatchRuns();
         const recoveredLoopOutputs = recoverStuckLoopOutputsFromLogs();
         const hiddenCompletedTimers = hideCompletedRunTimers();
         const cleanedDetachedInputs = cleanupDetachedRunInputRefs();
@@ -7996,7 +8021,7 @@ async function loadCanvas(){
         if(nodes.length && viewport.scale < 0.1) fitAllNodesViewport();
         else applyViewport();
         render();
-        if(cleanedDetachedInputs || cleanedCompletedState || recoveredLoopOutputs || hiddenCompletedTimers) scheduleSave();
+        if(cleanedDetachedInputs || cleanedCompletedState || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers) scheduleSave();
         resumeSmartPendingTasks();
         resumeJimengPendingNodes();
         startCanvasMetaPoll();
@@ -11306,8 +11331,17 @@ function bindNodeEvents(){
             capturePendingUndo();
         });
         const beginNodeDrag = e => {
-            if(e.button !== 0 || e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button, .smart-video-player')) return;
+            if(e.button !== 0 || e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button, .smart-video-controls')) return;
             if(e.target.closest('.prompt-node-pill, textarea:not(.prompt-node-text)')) return;
+            /* 视频节点：原来整块 .smart-video-player 都不给拖 —— 一点播放，播放器就铺满节点，
+               节点再也抓不住（用户报的「点击视频播放时，节点无法移动」）。
+               现在只把底部的原生控制条让给视频控件，其余区域照常拖动节点。 */
+            const videoEl = e.target.closest('video');
+            if(videoEl){
+                const videoRect = videoEl.getBoundingClientRect();
+                const nativeBar = Math.min(56, Math.max(28, videoRect.height * 0.16));
+                if(videoRect.height > 0 && (e.clientY - videoRect.top) >= videoRect.height - nativeBar) return;
+            }
             e.preventDefault(); e.stopPropagation();
             window.getSelection?.()?.removeAllRanges?.();
             if(document.activeElement?.blur) document.activeElement.blur();
@@ -17997,6 +18031,16 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings){
 }
 async function runApiVideoGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.videoModel) throw new Error(tr('smart.errNoVideoModel'));
+    /* 「原图比例」在这里解析成参考素材的实际比例（单节点这条路径：refs 是节点自己的参考，
+       多数已经量过尺寸）。批量那条路径在 tableRunOneRow 里已经解析过，这里再兜一次底。 */
+    if(runSettings.videoAspect === 'keep_ratio'){
+        let sourceSize = null;
+        for(const ref of (refs || [])){
+            const entry = refSourceEntry(ref);
+            if(entry && entry.size){ sourceSize = entry.size; break; }
+        }
+        applySourceRatioToVideoAspect(runSettings, sourceSize);
+    }
     try {
         const uploadedRefs = applyUploadedUrlsToSmartRefs(refs, runSettings);
         const trustedMode = Boolean(runSettings.videoTrustedAsset);
@@ -21325,25 +21369,68 @@ const tableSelected = {
    （measureSmartNodeImages 只在缩略图渲染出来时才补），
    之前这里直接返回 null → 比例算不出来、退回节点上那份过期的 customRatio（用户报的
    「适配比例没按每行参考图的比例」就是这个：存盘里 customRatio 还留着上次的 2:3）。 */
+function refSourceEntry(ref){
+    if(!ref || isAudioMediaItem(ref)) return null;
+    const direct = imageSizeForRatio(ref);
+    if(direct) return {size:direct, item:null, url:ref.url || ''};
+    const src = nodes.find(n => n.id === ref.nodeId);
+    const index = Number(ref.outputIndex);
+    const item = (src && Number.isFinite(index) && index >= 0) ? (src.images || [])[index] : null;
+    return {size:imageSizeForRatio(item), item, url:ref.url || ''};
+}
 async function rowSourceRatio(refs){
     for(const ref of (refs || [])){
-        if(!ref || isAudioMediaItem(ref)) continue;
-        const direct = imageSizeForRatio(ref);
-        if(direct) return direct;
-        const src = nodes.find(n => n.id === ref.nodeId);
-        const index = Number(ref.outputIndex);
-        const item = (src && Number.isFinite(index) && index >= 0) ? (src.images || [])[index] : null;
-        const itemSize = imageSizeForRatio(item);
-        if(itemSize) return itemSize;
-        if(!ref.url || mediaKindForItem(ref) !== 'image') continue;
-        const measured = await Promise.resolve(loadSmartOriginalImageDimensions(ref.url)).catch(() => null);
+        const entry = refSourceEntry(ref);
+        if(!entry) continue;
+        if(entry.size) return entry.size;
+        if(!entry.url) continue;
+        const kind = mediaKindForItem(ref);
+        if(kind !== 'image' && kind !== 'video') continue;
+        const measured = kind === 'video'
+            ? await Promise.resolve(_probeVideoDimensions(entry.url)).catch(() => null)
+            : await Promise.resolve(loadSmartOriginalImageDimensions(entry.url)).catch(() => null);
         if(measured && measured.w > 0 && measured.h > 0){
-            // 量到了就记回素材上：同一张图后面的行 / 下次批量不用再量
-            if(item){ item.natural_w = measured.w; item.natural_h = measured.h; }
+            // 量到了就记回素材上：同一张图/视频后面的行、下次批量都不用再量
+            if(entry.item){ entry.item.natural_w = measured.w; entry.item.natural_h = measured.h; }
             return {w:measured.w, h:measured.h};
         }
     }
     return null;
+}
+/* 上游支持（或至少认）的视频比例。用户选「原图比例」时从这里挑最接近参考素材的那个。 */
+const VIDEO_ASPECT_SUPPORTED = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', '9:21'];
+function videoAspectNumber(key){
+    const matched = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(String(key || ''));
+    const w = matched ? Number(matched[1]) : 0;
+    const h = matched ? Number(matched[2]) : 0;
+    return w > 0 && h > 0 ? w / h : 0;
+}
+/* 参考素材比例 → 最接近的受支持视频比例。用对数距离：2:3 到底更像 3:4 还是 9:16 才判得准。 */
+function nearestVideoAspectForSize(size){
+    const w = Number(size && size.w) || 0;
+    const h = Number(size && size.h) || 0;
+    if(w <= 0 || h <= 0) return '';
+    const target = w / h;
+    let best = '';
+    let bestDiff = Infinity;
+    VIDEO_ASPECT_SUPPORTED.forEach(key => {
+        const aspect = videoAspectNumber(key);
+        if(!aspect) return;
+        const diff = Math.abs(Math.log(target / aspect));
+        if(diff < bestDiff){ bestDiff = diff; best = key; }
+    });
+    return best;
+}
+/* 视频的「原图比例」（videoAspect = keep_ratio）：
+   后端只是把它原样转发（apimart 转成 adaptive、灵境直接透传），上游多数不认，
+   于是落到各自的默认 16:9 / 固定尺寸 —— 用户看到的就是「选了原图比例却不一样」。
+   发请求前按**参考素材的真实比例**解析成具体比例，单节点与批量每行都适用。 */
+function applySourceRatioToVideoAspect(runSettings, size){
+    if(!runSettings || runSettings.videoAspect !== 'keep_ratio') return false;
+    const aspect = nearestVideoAspectForSize(size);
+    if(!aspect) return false;
+    runSettings.videoAspect = aspect;
+    return true;
 }
 /* 把「这一行算出来的比例」写进这次运行用的设置。
    智能画布有两套尺寸选择：API 用 ratio / customRatio，ModelScope 用 msRatio / msCustomRatio，
@@ -21434,8 +21521,11 @@ async function tableRunOneRow(nodeId, options, forceVideo){
        所以之前根本算不出比例、退回节点上那份过期的 customRatio
        （用户报的「选了适配比例也没按每行参考图的比例生成」）。
        素材没量过尺寸时 rowSourceRatio() 会现量一次（异步）。 */
-    if(runSettings.ratio === 'source' || runSettings.msRatio === 'source'){
-        applyRowSourceRatioToSettings(runSettings, await rowSourceRatio(refs));
+    if(runSettings.ratio === 'source' || runSettings.msRatio === 'source' || runSettings.videoAspect === 'keep_ratio'){
+        const srcRatio = await rowSourceRatio(refs);
+        if(runSettings.ratio === 'source' || runSettings.msRatio === 'source') applyRowSourceRatioToSettings(runSettings, srcRatio);
+        // 视频的「原图比例」也按**这一行**的参考素材解析（批量视频分镜每行参考可能不同）
+        applySourceRatioToVideoAspect(runSettings, srcRatio);
     }
     const rowNumber = (options.runContext || {}).rowNumber || 0;
     if(!prompt && !refs.length) throw new Error('第 ' + (rowNumber || '?') + ' 行既没有提示词也没有素材');

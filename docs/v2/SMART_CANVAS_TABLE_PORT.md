@@ -683,3 +683,38 @@ render 的 class 也改成所有节点都带上（原来只有提示词节点）
 - `tests/test_table_node_wiring.js` 全过（勾选同步那条改成验类型表）；
 - 其余四套全绿（model 293、dom 371、select_menu 47、dark_mode 8）；
 - 浏览器实测三点（临时画布已 purge）。
+
+
+## 批量跑不动 / 视频拖不动 / 视频「原图比例」不准（2026-09-16 后续轮 14）
+
+### ① 「批量生成，无法再次生成」
+用户那张画布里：表 `tableBatchRunning:true`、`generationBatchJournal.rows = [1:running,2:running,3:running,4:pending]`，
+批量节点 `_batchRunning:true` —— 而 `runTableBatch()` 第一行就是 `if(gen._batchRunning){ notifyCanvas('批量生成正在进行中。'); return; }`。
+**这两个标志都是页面内的临时状态**（跑完自己清），但中途刷新/关页面会被存进画布，下次打开时还是 true →
+「运行」被永久挡死（只弹一句 toast，面板文案还是上次的「批量生成结束：完成 1 行。」）。
+修复三层：
+- `canvasForStorage()` 持久化时剥掉 `_batchRunning / _batchProgress / tableBatchRunning`；
+- `loadCanvas()` 新增 `resetStaleBatchRuns()`：老画布里残留的标志一并复位，卡在 `running/deferred` 的 journal 行放回 `pending`
+  （「恢复上次」与重新运行都能重新派发）；
+- `runTableBatch()` 的执行体包 **try/finally**：任何异常都不再把标志留在 true。
+实测：带残留标志的画布打开后标志被清掉、journal 变 pending；连点两次运行 → 两次请求都真的发出去了。
+
+### ② 「点击视频播放时，节点无法移动」
+`beginNodeDrag` 的排除名单里有整块 `.smart-video-player` —— 一点播放，播放器就铺满节点，
+节点再没有能抓的地方。改成只把**底部原生控制条**让给视频控件（按视频高度的 16%、28–56px 夹取），
+其余区域照常拖动节点。实测：从视频中部拖 = 节点跟着走（+58px），从底部控制条拖 = 节点不动。
+
+### ③ 「视频选了原图比例，有的时候跟原图比例不一样」
+'原图比例' = `videoAspect: 'keep_ratio'`，前端**原样**发给后端；后端只是转发
+（`apimart_video_size` 转成 `adaptive`、`lingjing_video_aspect` 直接透传），上游多数不认这个值 →
+落到各自的默认 16:9；agnes 那条更明显：`agnes_video_dimensions('adaptive')` 走 `.get()` 兜底成固定 1152×768。
+修复：发请求前把 `keep_ratio` 解析成**参考素材的真实比例**（`nearestVideoAspectForSize`，对数距离取最接近的
+受支持比例 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9 / 9:21）：
+- 批量：`tableRunOneRow` 里和图片的 `ratio=source` 共用一次现量（`rowSourceRatio` 现在也能量视频：`_probeVideoDimensions`）；
+- 单节点：`runApiVideoGeneration` 里用节点自己的参考图尺寸兜底（`refSourceEntry` 抽出来复用）。
+实测：768×1024（3:4）的参考视频 → 请求里 `aspect_ratio: "3:4"`（原来是 `keep_ratio`）。
+
+### 验收
+- `tests/test_smart_canvas_table_wiring.js` 89/89（新增 [10] 节）；
+- 其余五套全绿（model 293、dom 371、classic wiring、select_menu 47、dark_mode 8）；
+- 浏览器实测三点（带残留标志的画布、视频拖动、视频比例），临时画布已 purge。

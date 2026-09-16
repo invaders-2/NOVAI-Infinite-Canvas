@@ -1463,61 +1463,72 @@ async function runTableBatch(genId, options={}){
     const workers = Math.min(concurrency, pending.length);
     say('已开始批量生成：' + pending.length + ' 行，并发 ' + workers);
 
+    /* 整个执行体包 try/finally：中途任何异常（面板重绘、保存、轮询）都不能把
+       _batchRunning / tableBatchRunning 留在 true —— 那会让这个节点**再也跑不动**
+       （用户报的「批量生成，无法再次生成」），而且标志还会被存进画布。 */
     gen._batchRunning = true;
     table.tableBatchRunning = true;
     gen._batchProgress = {total:pending.length, done:0, failed:0};
     scheduleSave();
-    paintTableBatchPanelFromNode(gen, table);
-    repaintTable(table);
+    try {
+        paintTableBatchPanelFromNode(gen, table);
+        repaintTable(table);
 
-    const rowByNumber = new Map(rows.map(row => [row.rowNumber, row]));
-    const results = await model.runWithSharedCursor(pending, workers, async entry => {
-        const row = rowByNumber.get(entry.rowNumber);
-        if(!row) throw new Error('第 ' + entry.rowNumber + ' 行已不存在');
-        model.journalMarkRow(journal, entry.rowNumber, 'running', entry.requestId || '');
-        scheduleSave();
-        // 一行一次生成：提示词与参考图都按这一行覆盖。
-        // 视频节点走 runVideoNode，图像节点走 runGenerator，其余设置（模型/时长/比例）沿用节点自身。
-        await tableBatchRunner(gen)(genId, {
-            batch: true,
-            rowOverride: {prompt: row.prompt, refs: tableRowRefs(row)},
-            runContext: {tableId: table.id, rowNumber: entry.rowNumber, batchRunId: runId}
+        const rowByNumber = new Map(rows.map(row => [row.rowNumber, row]));
+        const results = await model.runWithSharedCursor(pending, workers, async entry => {
+            const row = rowByNumber.get(entry.rowNumber);
+            if(!row) throw new Error('第 ' + entry.rowNumber + ' 行已不存在');
+            model.journalMarkRow(journal, entry.rowNumber, 'running', entry.requestId || '');
+            scheduleSave();
+            // 一行一次生成：提示词与参考图都按这一行覆盖。
+            // 视频节点走 runVideoNode，图像节点走 runGenerator，其余设置（模型/时长/比例）沿用节点自身。
+            await tableBatchRunner(gen)(genId, {
+                batch: true,
+                rowOverride: {prompt: row.prompt, refs: tableRowRefs(row)},
+                runContext: {tableId: table.id, rowNumber: entry.rowNumber, batchRunId: runId}
+            });
+            model.journalMarkRow(journal, entry.rowNumber, 'completed');
+            gen._batchProgress.done += 1;
+            scheduleSave();
+            repaintBatchPanel(gen);
+            return entry.rowNumber;
+        }, {stopOnError: failurePolicy === 'stop'});
+
+        const failures = [];
+        results.forEach((result, index) => {
+            if(result && result.ok) return;
+            const entry = pending[index];
+            model.journalMarkRow(journal, entry.rowNumber, 'failed');
+            gen._batchProgress.failed += 1;
+            failures.push({rowNumber: entry.rowNumber,
+                reason: friendlyBatchError(result && result.error && (result.error.message || String(result.error)))});
         });
-        model.journalMarkRow(journal, entry.rowNumber, 'completed');
-        gen._batchProgress.done += 1;
+
+        scheduleSave();
+        await saveCanvas();
+        repaintBatchPanel(gen);
+        repaintTable(table);
+
+        const completed = model.journalCompletedRows(journal).length;
+        const failed = model.journalFailedRows(journal).length;
+        let summary = '批量生成结束：完成 ' + completed + ' 行' + (failed ? '，失败 ' + failed + ' 行' : '') + '。';
+        /* 批量模式不能弹窗，但只说「失败 N 行」等于没说。
+           把首个失败原因带出来，面板上的 note 会一直留着，用户能照着排查。 */
+        if(failures.length){
+            const reasons = Array.from(new Set(failures.map(item => item.reason).filter(Boolean)));
+            summary += '第 ' + failures[0].rowNumber + ' 行失败原因：' + String(reasons[0] || '未知错误').slice(0, 200)
+                + (reasons.length > 1 ? '（共 ' + reasons.length + ' 种原因）' : '');
+        }
+        say(summary);
+    } finally {
+        /* 无论正常结束还是异常，都要把「正在批量生成」清掉：
+           否则运行键被 runTableBatch 开头的 if(gen._batchRunning) 永久挡死。 */
+        gen._batchRunning = false;
+        table.tableBatchRunning = false;
         scheduleSave();
         repaintBatchPanel(gen);
-        return entry.rowNumber;
-    }, {stopOnError: failurePolicy === 'stop'});
-
-    const failures = [];
-    results.forEach((result, index) => {
-        if(result && result.ok) return;
-        const entry = pending[index];
-        model.journalMarkRow(journal, entry.rowNumber, 'failed');
-        gen._batchProgress.failed += 1;
-        failures.push({rowNumber: entry.rowNumber,
-            reason: friendlyBatchError(result && result.error && (result.error.message || String(result.error)))});
-    });
-
-    gen._batchRunning = false;
-    table.tableBatchRunning = false;
-    scheduleSave();
-    await saveCanvas();
-    repaintBatchPanel(gen);
-    repaintTable(table);
-
-    const completed = model.journalCompletedRows(journal).length;
-    const failed = model.journalFailedRows(journal).length;
-    let summary = '批量生成结束：完成 ' + completed + ' 行' + (failed ? '，失败 ' + failed + ' 行' : '') + '。';
-    /* 批量模式不能弹窗，但只说「失败 N 行」等于没说。
-       把首个失败原因带出来，面板上的 note 会一直留着，用户能照着排查。 */
-    if(failures.length){
-        const reasons = Array.from(new Set(failures.map(item => item.reason).filter(Boolean)));
-        summary += '第 ' + failures[0].rowNumber + ' 行失败原因：' + String(reasons[0] || '未知错误').slice(0, 200)
-            + (reasons.length > 1 ? '（共 ' + reasons.length + ' 种原因）' : '');
+        repaintTable(table);
     }
-    say(summary);
 }
 
 function paintTableBatchPanelFromNode(gen, table){
