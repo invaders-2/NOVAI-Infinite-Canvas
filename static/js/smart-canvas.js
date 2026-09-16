@@ -20966,6 +20966,13 @@ async function tableRunOneRow(nodeId, options, forceVideo){
 async function tableRunGenerator(nodeId, options = {}){ return await tableRunOneRow(nodeId, options, false); }
 async function tableRunVideo(nodeId, options = {}){ return await tableRunOneRow(nodeId, options, true); }
 
+/* nodes 在 smart-canvas 里会被整体重新赋值（载入/清空），所以给表格模块一个转发代理，
+   而不是快照引用。 */
+const liveSmartNodes = new Proxy([], {
+    get(target, prop){ const live = nodes || []; const value = live[prop]; return typeof value === 'function' ? value.bind(live) : value; },
+    set(target, prop, value){ nodes[prop] = value; return true; },
+});
+let tableApi = null;
 function ensureTableApi(){
     if(tableApi) return tableApi;
     if(typeof window.NovaTableNode !== 'function') return null;
