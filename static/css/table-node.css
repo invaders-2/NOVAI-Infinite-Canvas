@@ -591,6 +591,27 @@
     --table-frame-line: rgba(255, 255, 255, .14);
 }
 
+/* 智能画布 prompt 节点的 LLM 区：本来是个 flex 行容器（工具排 + 缩略图会横排），
+   我新加的 Input/Output 分区标签、输出框、供应商/模型行被当成行内项 → 布局全乱。
+   这里强制成竖排：每一块独占一行、占满宽度。 */
+.prompt-node-llm {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+.prompt-node-llm > .llm-pane-label,
+.prompt-node-llm > .llm-output-wrap,
+.prompt-node-llm > .prompt-llm-model-row,
+.prompt-node-llm > .prompt-llm-instruction-wrap,
+.prompt-node-llm > .prompt-node-run-row,
+.prompt-node-llm > .prompt-node-upstream-list,
+.prompt-node-llm > textarea,
+.prompt-node-llm > .prompt-node-input-thumbs {
+    width: 100%;
+    flex: 0 0 auto;
+}
+.llm-pane-label { display: block; }
+
 /* 供应商 / 模型一排（照搬经典画布 LLM 节点：放在 Input 分区上方） */
 .prompt-llm-model-row { display: flex; gap: 6px; margin-bottom: 2px; }
 .prompt-llm-model-row select { flex: 1 1 0; min-width: 0; }
