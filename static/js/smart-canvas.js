@@ -9154,6 +9154,7 @@ function promptNodeBodyHtml(node){
                 ${llmOutputModeHtml(node)}
                 <button class="prompt-node-run prompt-node-control" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'play'}"></i><span>${node.running ? escapeHtml(tr('common.running')) : escapeHtml(tr('common.run'))}</span></button>
             </div>
+            <div class="node-resize-handle" title="拖动调整大小"></div>
             ${node.llmSystemEnabled ? `<textarea class="prompt-node-control prompt-llm-system" placeholder="${escapeHtml(tr('smart.promptLlmSystemPlaceholder'))}">${escapeHtml(systemPrompt || 'You are a helpful prompt assistant.')}</textarea>` : ''}
         </div>` : '';
     return `<div class="prompt-node-card">
@@ -10408,6 +10409,42 @@ function bindPromptNodeControls(el, node){
         document.body.classList.add('smart-node-resize', 'smart-prompt-split-resize');
         capturePendingUndo();
     });
+    // LLM 节点的缩放：画布只给自己的节点类型绑 .node-resize-handle，提示词节点这个把手它是不会接管的
+    // （实测拖它毫无反应），所以这里自己实现：拖右下角 → 改 node.w / node.h + 立刻写内联样式。
+    const sizeHandle = el.querySelector('.node-resize-handle');
+    if(sizeHandle && !sizeHandle.dataset.selfBound){
+        sizeHandle.dataset.selfBound = '1';
+        sizeHandle.addEventListener('mousedown', event => {
+            if(event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const startX = event.clientX;
+            const startY = event.clientY;
+            const rect = el.getBoundingClientRect();
+            const startW = Number(node.w) || rect.width;
+            const startH = Number(node.h) || rect.height;
+            el.classList.add('size-user-set');
+            node.sizeUserSet = true;
+            const onMove = moveEvent => {
+                const w = Math.max(240, Math.round(startW + (moveEvent.clientX - startX)));
+                const h = Math.max(200, Math.round(startH + (moveEvent.clientY - startY)));
+                node.w = w;
+                node.h = h;
+                el.style.width = w + 'px';
+                el.style.height = h + 'px';
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove, true);
+                document.removeEventListener('mouseup', onUp, true);
+                document.body.classList.remove('smart-node-resize');
+                render();
+                scheduleSave();
+            };
+            document.body.classList.add('smart-node-resize');
+            document.addEventListener('mousemove', onMove, true);
+            document.addEventListener('mouseup', onUp, true);
+        }, true);
+    }
     // 顶部那一排 tab（照搬经典画布）：System / 反推 走原来的开关逻辑，聊天先占位
     el.querySelectorAll('.llm-tab').forEach(tab => {
         tab.onclick = event => {

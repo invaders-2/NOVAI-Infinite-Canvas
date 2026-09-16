@@ -743,6 +743,22 @@
     text-align: center;
 }
 
+/* LLM 节点的缩放我接不上（画布不给提示词节点绑 resize，我自己挂的 mousedown 也没触发），
+   所以按用户给的兜底方案：把提示词输入框**默认拉高**，让提示词看得更清楚。 */
+.image-node:has(.prompt-node-llm) .prompt-llm-instruction-wrap { min-height: 132px; }
+.image-node:has(.prompt-node-llm) .prompt-llm-instruction { min-height: 128px; }
+
+/* LLM 节点：用户拖过缩放把手之后（.size-user-set），内部跟着高度伸缩 ——
+   拉长就拉长，Input / Output 两个分区平分多出来的空间，提示词看得更全。 */
+.image-node:has(.prompt-node-llm).size-user-set { overflow: hidden; }
+.image-node:has(.prompt-node-llm).size-user-set .node-body { height: 100% !important; overflow: hidden; }
+.image-node:has(.prompt-node-llm).size-user-set .prompt-node-card { height: 100%; display: flex; flex-direction: column; }
+.image-node:has(.prompt-node-llm).size-user-set .prompt-node-llm { flex: 1 1 auto; min-height: 0; }
+.image-node:has(.prompt-node-llm).size-user-set .prompt-llm-instruction-wrap { flex: 1 1 45%; min-height: 70px; }
+.image-node:has(.prompt-node-llm).size-user-set .prompt-llm-instruction { height: 100% !important; }
+.image-node:has(.prompt-node-llm).size-user-set .llm-output-wrap { flex: 1 1 45%; min-height: 70px; }
+.image-node:has(.prompt-node-llm).size-user-set .llm-output { height: 100%; max-height: none; }
+
 /* 表格 / 批量节点的缩放把手（画布只给图片/提示词节点渲染，这里自己补一个，样式照画布那个） */
 .image-node:has(> .node-body > .table-node-host) .node-resize-handle,
 .image-node:has(> .node-body > .table-batch-host) .node-resize-handle {
