@@ -226,6 +226,19 @@ body: JSON.stringify({ title, icon, nodes, connections, viewport, ... })   // �
 **踩坑记录（都在提交信息里）**：tr 漏注入 / runTableBatch 漏导出（async 漏扫）/ nodes 引用失效（画布会整体重新赋值）/
 tableApi 声明被 splice 删掉 / smart-batch 不显示产物 / 视频模式被当图像跑。
 
+
+## 收尾状态（目标轮 11：全部实测通过）
+
+| 能力 | 验证方式 | 结果 |
+|---|---|---|
+| 参考图 / 白底图 → 提示词节点 → 出表带 @图片N | 临时智能画布（2 素材 + 2 连线）+ LLM 打桩 | 请求体出现 **@图片1 / @图片2** ✓ |
+
+修的关键一处：共享模块 `tableSourceItems()` 原先只认「输出节点」和带顶层 `url` 的节点，
+而智能画布的素材节点（`smart-image`）素材存在 `images` 数组里 → 参考图整组被忽略。
+现在 `smart-image` 和 `output` 一样走 `outputSourceItems()`（读 images），经典画布行为不变。
+
+**临时画布用完即删**（POST 建 → 测 → DELETE + purge），没有碰用户的画布。
+
 ## 教训（写在这里免得再犯）
 - 改这类大件：**先补测试垫片/测试，再动生产代码**；
 - 每步改完**先在真浏览器点一遍**再提交；

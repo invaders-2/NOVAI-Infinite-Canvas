@@ -673,7 +673,9 @@ function tableSourceItems(source){
                 ? outputSourceItems(item)
                 : (item.url ? [{type:'media', nodeId:item.id}] : []));
     }
-    if(source.type === 'output') return outputSourceItems(source);
+    /* 智能画布的素材节点（smart-image）不叫 output，但素材同样存在 images 数组里，
+       形状和输出节点一样 → 一起展开。否则「参考图 / 白底图 接到提示词节点」会被整组忽略。 */
+    if(source.type === 'output' || source.type === 'smart-image') return outputSourceItems(source);
     if(source.url) return [{type:'media', nodeId:source.id}];
     return [];
 }
