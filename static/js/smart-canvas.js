@@ -9385,6 +9385,7 @@ function mountSmartTableNodes(){
 function nodeBodyHtml(node, layout){
     // 多维表格：表格模块返回的是 DOM 元素（不是 HTML 串），这里留个壳，挂载后再塞进去
     if(node.type === 'table') return '<div class="table-node-host" data-table-host="1"></div>';
+    if(node.type === 'smart-batch') return '<div class="table-batch-host" data-table-batch-host="1"></div>';
     if(node.type === 'smart-group') return smartGroupBodyHtml(node);
     if(node.type === 'smart-prompt') return promptNodeBodyHtml(node);
     if(node.type === 'smart-loop') return smartLoopBodyHtml(node);
@@ -9964,7 +9965,7 @@ function render(){
         .map(node => {
         const imgs = node.images || [];
         // 分组名是用户输入，直接进 innerHTML 会变成注入点（node-head 平时 display:none，但 DOM 已经建出来了）。
-        const title = node.type === 'table' ? '多维表格' : node.type === 'smart-group' ? escapeHtml(smartGroupDisplayTitle(node)) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.type === 'table' ? '多维表格' : node.type === 'smart-batch' ? '批量生成' : node.type === 'smart-group' ? escapeHtml(smartGroupDisplayTitle(node)) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -10020,6 +10021,7 @@ function render(){
         }
     });
     mountSmartTableNodes();
+    mountSmartBatchNodes();
     restoreMediaPlaybackStates(mediaStates);
     bindNodeEvents();
     bindConnectionEvents();
@@ -18504,6 +18506,45 @@ function addCreatedNodeToMenuGroup(node){
     }
 }
 /* 多维表格节点：数据层用共享的 table-model；渲染由 shared/table-node.js 负责（见 mountSmartTableNodes）。 */
+/* 批量生成节点：输入口收多维表格，主体是批量面板 + 「批量生成」按钮。
+   面板与按钮都复用 shared/table-node.js 里那套（和经典画布同一个实现）。 */
+function createSmartBatchNode(x, y){
+    pushUndo();
+    const node = {id: uid('batch'), type: 'smart-batch', x, y, w: 420, h: 0, title: '批量生成'};
+    nodes.push(node);
+    render();
+    scheduleSave();
+    return node;
+}
+function mountSmartBatchNodes(){
+    if(!world) return;
+    const hosts = world.querySelectorAll('.node-body .table-batch-host');
+    if(!hosts.length) return;
+    const api = ensureTableApi();
+    if(!api) return;
+    hosts.forEach(hostEl => {
+        const el = hostEl.closest ? hostEl.closest('.image-node') : null;
+        const node = el ? nodes.find(n => n.id === el.dataset.id) : null;
+        if(!node || node.type !== 'smart-batch') return;
+        syncTableConnectionsFromCanvas();
+        hostEl.textContent = '';
+        const panel = api.renderTableBatchPanel(node);
+        const runRow = document.createElement('div');
+        runRow.className = 'gen-run-row';
+        runRow.innerHTML = api.tableBatchRunButtonHtml(node) || '';
+        if(panel){
+            hostEl.appendChild(panel);
+            hostEl.appendChild(runRow);
+            const btn = runRow.querySelector('.table-batch-run-btn');
+            if(btn) btn.onclick = event => { event.stopPropagation(); api.runTableBatch(node.id, {}); };
+        } else {
+            const tip = document.createElement('div');
+            tip.className = 'table-batch-empty-tip';
+            tip.textContent = '把多维表格连到本节点左侧，这里就会出现生成列表';
+            hostEl.appendChild(tip);
+        }
+    });
+}
 function createSmartTableNode(x, y){
     const model = window.NovaTableModel;
     const table = model ? model.emptyTable() : {kind:'table', version:1, columns:[], rows:[], selectedRows:[], mergedGroups:[]};
@@ -18524,6 +18565,7 @@ function createNodeFromMenu(type){
     else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
     else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
     else if(type === 'table') created = createSmartTableNode(p.x - 260, p.y - 60);
+    else if(type === 'batch') created = createSmartBatchNode(p.x - 210, p.y - 60);
     else created = createImageNodeAt(p);
     if(!created) return created;
     if(type !== 'group'){
@@ -20890,16 +20932,43 @@ const tableSelected = {
     get size(){ return Array.isArray(selectedIds) ? selectedIds.length : 0; },
 };
 
-async function tableRunGenerator(){ throw new Error('智能画布批量生成尚未接线'); }
-async function tableRunVideo(){ throw new Error('智能画布批量生成尚未接线'); }
+/* 批量「跑一行」：把这一行的提示词 + 参考图交给智能画布已有的生成链路（按 engine 分发）。
+   注意：这里只负责**派发任务**；结果落盘/轮询是下一步（智能画布自己那套 agentPollGenerateTask）。 */
+async function tableRunGenerator(nodeId, options = {}){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node) throw new Error('批量生成节点不存在');
+    const row = options.rowOverride || {};
+    const prompt = String(row.prompt || '').trim();
+    const refs = (row.refs || []).map(ref => (ref && ref.url) || '').filter(Boolean);
+    const runSettings = Object.assign({}, settings, smartSettingsForNode(node) || {});
+    if(runSettings.engine === 'comfy') return await runComfyGeneration(node, prompt, refs, node, {batch:true});
+    if(runSettings.engine === 'runninghub') return await runRunningHubGeneration(prompt, refs, runSettings);
+    if(runSettings.engine === 'modelscope') return await runModelscopeGeneration(prompt, refs, runSettings);
+    return await runApiGeneration(prompt, refs, runSettings);
+}
+async function tableRunVideo(nodeId, options = {}){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node) throw new Error('批量生成节点不存在');
+    const row = options.rowOverride || {};
+    const prompt = String(row.prompt || '').trim();
+    const refs = (row.refs || []).map(ref => (ref && ref.url) || '').filter(Boolean);
+    const runSettings = Object.assign({}, settings, smartSettingsForNode(node) || {}, {apiKind: 'video'});
+    return await runApiVideoGeneration(prompt, refs, runSettings);
+}
 
+/* nodes 在 smart-canvas 里同样会被整体重新赋值（载入/清空），所以给表格模块一个转发代理，
+   而不是快照引用。 */
+const liveSmartNodes = new Proxy([], {
+    get(target, prop){ const live = nodes || []; const value = live[prop]; return typeof value === 'function' ? value.bind(live) : value; },
+    set(target, prop, value){ nodes[prop] = value; return true; },
+});
 let tableApi = null;
 function ensureTableApi(){
     if(tableApi) return tableApi;
     if(typeof window.NovaTableNode !== 'function') return null;
     syncTableConnectionsFromCanvas();
     tableApi = window.NovaTableNode({
-        tr, uid, nodes, connections: tableConnections, selected: tableSelected, nodesEl: tableNodesEl,
+        tr, uid, nodes: liveSmartNodes, connections: tableConnections, selected: tableSelected, nodesEl: tableNodesEl,
         addNode(node){ nodes.push(node); render(); return node; },
         render, renderNode(){ render(); }, refreshIcons, nowMs,
         scheduleSave(){ syncTableConnectionsToCanvas(); scheduleSave(); },
