@@ -6,14 +6,14 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png" data-page-node-id="d2lTaxgg4dwHWvOR7TLKCK">
     <title>GPT 对话</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.115.1789114960"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.115.1789114960"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.115.1789114960"></script>
-    <script src="/static/js/theme.js?v=1.0.115.1789114960"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.115.1789114960"></script>
-    <script src="/static/js/i18n.js?v=1.0.115.1789114960"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.115.1789114960" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.115.1789114960" data-page-node-id="sBSjKrFOadAKo0d0aaQqPR">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.117.1789114960"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.117.1789114960"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.117.1789405284"></script>
+    <script src="/static/js/theme.js?v=1.0.117.1789114960"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.117.1789406526"></script>
+    <script src="/static/js/i18n.js?v=1.0.117.1789487586"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.117.1789486154" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.117.1789114960" data-page-node-id="sBSjKrFOadAKo0d0aaQqPR">
     <style>
         :root {
             --ease:cubic-bezier(.4,0,.2,1);
@@ -338,10 +338,12 @@
         body.studio-theme-dark .chat-shell,
         html.theme-dark body .chat-shell,
         body.theme-dark .chat-shell { background:var(--chat-bg) !important; color:var(--chat-text) !important; }
+        /* 顶栏：深浅两套主题都用「页面背景同色 + 背景模糊」，不再各自用不同底色
+           （深色旧值 --chat-panel 是更亮的 #1e1e1e@60%，会在深色下显出那一条色块） */
         html.studio-theme-dark body .topbar,
         body.studio-theme-dark .topbar,
         html.theme-dark body .topbar,
-        body.theme-dark .topbar { background:var(--chat-panel) !important; border:0 !important; }
+        body.theme-dark .topbar { background:color-mix(in srgb, var(--bg) 90%, transparent) !important; border:0 !important; }
         html.studio-theme-dark body .composer,
         body.studio-theme-dark .composer,
         html.theme-dark body .composer,
@@ -536,7 +538,7 @@
             background:transparent !important;
         }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.115.1789114960" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.117.1789114960" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         html body,
@@ -545,7 +547,7 @@
         html.theme-dark body,
         body.theme-dark { background: var(--bg) !important; color: var(--text) !important; }
         .chat-shell { background: var(--bg) !important; }
-        .topbar { background: var(--bg) !important; backdrop-filter: blur(28px) !important; border-bottom: 0 !important; }
+        .topbar { background: color-mix(in srgb, var(--bg) 90%, transparent) !important; backdrop-filter: blur(20px) saturate(180%) !important; border-bottom: 0 !important; }
         .composer { background: transparent !important; border: 0 !important; box-shadow: var(--shadow-lg) !important; }
         .composer-body { background: transparent !important; border: 0 !important; }
         .composer-wrap { background: linear-gradient(to top, var(--bg) 82%, transparent) !important; }
@@ -558,7 +560,7 @@
         .send-btn { background: var(--text) !important; color: var(--bg) !important; }
         .thread-item:hover { background: var(--nav-hover-bg) !important; }
         .thread-item.active { background: var(--nav-hover-bg) !important; border: 0 !important; }
-        html.theme-dark .topbar { background: var(--bg) !important; }
+        html.theme-dark .topbar { background: color-mix(in srgb, var(--bg) 90%, transparent) !important; }
         html.theme-dark .composer-wrap { background: linear-gradient(to top, var(--bg) 82%, transparent) !important; }
 </style>
 
@@ -895,8 +897,10 @@ html.studio-theme-dark #sendBtn.nv-beam {
 
     /* 4) 浅色玻璃分层增强（深色主题不动） */
     html:not(.theme-dark):not(.studio-theme-dark) body:not(.theme-dark):not(.studio-theme-dark) .topbar {
-        background: color-mix(in srgb, var(--elevated) 38%, transparent) !important;
-        border-bottom-color: color-mix(in srgb, var(--text) 14%, transparent) !important;
+        /* 顶栏改成与页面背景同色、无边框（原来 --elevated 38% 的浅色板 = 浅色下的那条白条） */
+        background: color-mix(in srgb, var(--bg) 90%, transparent) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        border-bottom: 0 !important;
     }
     html:not(.theme-dark):not(.studio-theme-dark) body:not(.theme-dark):not(.studio-theme-dark) .bubble.assistant {
         background: color-mix(in srgb, var(--elevated) 38%, transparent) !important;
@@ -1021,13 +1025,32 @@ html.studio-theme-dark #sendBtn.nv-beam {
     </style>
     <style>
     /* ═══ V17 顶栏图标化 + 输入框统一（对齐 gpt-chat-v17-preview 变体 E） ═══ */
-    /* —— 顶栏：去玻璃框、图标化、动态标题 —— */
+    /* —— 顶栏：磨砂玻璃浮层（消息从玻璃下方滚过并被模糊） —— */
+    .chat-main {
+        --chat-topbar-h: 58px;
+        /* 顶栏脱离网格成为浮层，网格只剩「消息区 + 输入区」两行 */
+        grid-template-rows: minmax(0, 1fr) auto;
+    }
     .topbar {
-        min-height: 58px !important;
-        background: transparent !important;
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: var(--chat-topbar-h);
+        min-height: var(--chat-topbar-h) !important;
+        /* 与页面背景同色（背景色与自身混合仍等于该颜色）→ 完全看不出「顶栏那一条」，
+           只保留背景模糊：消息从下面滚过时被虚化，不出现任何边框/色块 */
+        background: color-mix(in srgb, var(--bg) 90%, transparent) !important;
+        backdrop-filter: blur(20px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
         border-bottom: 0 !important;
-        backdrop-filter: none !important;
-        -webkit-backdrop-filter: none !important;
+        box-shadow: none !important;
+        /* 刻意保持 z-index:auto：它让顶栏作为“定位元素”盖住常规流里的消息内容，
+           同时不新建层叠上下文，历史抽屉(70)/模型弹窗(9999) 的层级与改动前完全一致 */
+        z-index: auto;
+    }
+    /* 首条消息起点下移到玻璃下方；滚动时内容从玻璃后穿过，形成磨砂效果。
+       上面 V15/V20 块用 padding:24px 0 18px !important 压过静态规则，这里必须同级 !important */
+    .messages {
+        padding: calc(var(--chat-topbar-h) + 24px) 0 18px !important;
     }
     .topbar-inner { gap: 18px !important; }
     .topbar-title {
@@ -1619,7 +1642,8 @@ html.studio-theme-dark #sendBtn.nv-beam {
         let modelPickerHome = null;
         let resolutionPickerHome = null;
         let refs = [];
-        let config = { chat_model: 'gpt-5.5', image_model: 'gpt-image-2', ms_chat_models: [] };
+        /* 不再内建默认模型名：模型一律来自「已配置平台」的模型列表 */
+        let config = { chat_model: '', image_model: '', chat_models: [], image_models: [], ms_chat_models: [], has_api_key: false };
 
         const SIZE_OPTIONS = {
             square: [['1024x1024','1k'], ['1536x1536','2k'], ['2048x2048','4k']],
@@ -2281,18 +2305,32 @@ html.studio-theme-dark #sendBtn.nv-beam {
             const seen = new Set();
             return (list || []).map(item => String(item || '').trim()).filter(item => item && !seen.has(item) && seen.add(item));
         }
+        /* 只展示「已经配置好的」平台：启用 + 已填 Key + 有模型列表。
+           不再注入内置默认模型（原 config.ms_chat_models 兜底）——那些模型用户并未配置，
+           且可能已下线（会直接报 has no provider supported）。未配置的一律不显示。 */
+        function configuredProviders(kind){
+            const key = kind === 'image' ? 'image_models' : 'chat_models';
+            return (apiProviders || []).filter(p => p.enabled !== false && p.has_key !== false && (p[key] || []).length);
+        }
+        function legacyComflyProviders(kind){
+            /* 旧版单 Key 模式（API/.env 里配了 COMFLY_API_KEY）才回落 comfy，
+               模型列表只取用户自己配置过的 config.chat_models / image_models */
+            if(!config.has_api_key) return [];
+            const models = uniqueModels(kind === 'image' ? config.image_models : config.chat_models);
+            if(!models.length) return [];
+            return [{ id:'comfly', name:'API', chat_models: kind === 'chat' ? models : [], image_models: kind === 'image' ? models : [] }];
+        }
         function chatProviders(){
-            const list = (apiProviders || []).filter(p => p.enabled !== false && (p.chat_models || []).length);
-            if(config.ms_chat_models?.length && !list.some(p => p.id === 'modelscope')) list.push({id:'modelscope', name:'ModelScope', chat_models:config.ms_chat_models, image_models:[]});
-            return list.length ? list : [{id:'comfly', name:'API', chat_models:[config.chat_model || 'gpt-4o-mini'], image_models:[config.image_model || 'gpt-image-2']}];
+            const list = configuredProviders('chat');
+            return list.length ? list : legacyComflyProviders('chat');
         }
         function imageProviders(){
-            const list = (apiProviders || []).filter(p => p.enabled !== false && (p.image_models || []).length);
-            return list.length ? list : [{id:'comfly', name:'API', image_models:[config.image_model || 'gpt-image-2'], chat_models:[config.chat_model || 'gpt-4o-mini']}];
+            const list = configuredProviders('image');
+            return list.length ? list : legacyComflyProviders('image');
         }
         function providerById(id, kind='chat'){
             const list = kind === 'image' ? imageProviders() : chatProviders();
-            return list.find(p => p.id === id) || list[0];
+            return list.find(p => p.id === id) || list[0] || null;
         }
         function activePickerKind(){
             return mode === 'image' ? 'image' : (mode === 'agent' ? modelPickerScope : 'chat');
@@ -2302,6 +2340,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
         }
         function modelListForCurrent(kind=activePickerKind()){
             const item = providerById(currentProviderId(kind), kind);
+            if(!item) return [];
             return uniqueModels(kind === 'image' ? item.image_models : item.chat_models);
         }
         function currentModel(kind=activePickerKind()){
@@ -2309,7 +2348,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
         }
         function providerNameById(id, kind=activePickerKind()){
             const item = providerById(id, kind);
-            return item?.name || item?.id || 'API';
+            return item ? (item.name || item.id) : '未配置平台';
         }
         function shortModelName(value){
             return String(value || '').split('/').pop().split(':')[0] || 'Model';
@@ -2319,33 +2358,31 @@ html.studio-theme-dark #sendBtn.nv-beam {
             const providers = kind === 'image' ? imageProviders() : chatProviders();
             const pid = currentProviderId(kind);
             if(!providers.some(p => p.id === pid)) {
-                if(kind === 'image') activeImageProvider = providers[0]?.id || 'comfly';
-                else provider = providers[0]?.id || 'comfly';
+                if(kind === 'image') activeImageProvider = providers[0]?.id || '';
+                else provider = providers[0]?.id || '';
             }
             const models = modelListForCurrent(kind);
-            if(kind === 'image' && !models.includes(activeImageModel)) activeImageModel = models[0] || config.image_model;
-            if(kind !== 'image' && !models.includes(activeChatModel)) activeChatModel = chatProviderModels[provider] && models.includes(chatProviderModels[provider]) ? chatProviderModels[provider] : (models[0] || config.chat_model);
+            if(kind === 'image' && !models.includes(activeImageModel)) activeImageModel = models[0] || '';
+            if(kind !== 'image' && !models.includes(activeChatModel)) activeChatModel = chatProviderModels[provider] && models.includes(chatProviderModels[provider]) ? chatProviderModels[provider] : (models[0] || '');
             if(kind !== 'image' && provider === 'modelscope') msModel = activeChatModel;
             renderModelPicker();
         }
 
         function validateSavedProviderState(){
             const chatProviderList = chatProviders();
-            provider = chatProviderList.some(p => p.id === provider) ? provider : (chatProviderList[0]?.id || 'comfly');
+            provider = chatProviderList.some(p => p.id === provider) ? provider : (chatProviderList[0]?.id || '');
             const chatModels = uniqueModels(providerById(provider, 'chat')?.chat_models || []);
             const rememberedChatModel = chatProviderModels[provider];
             activeChatModel = chatModels.includes(activeChatModel)
                 ? activeChatModel
-                : (chatModels.includes(rememberedChatModel) ? rememberedChatModel : (chatModels[0] || config.chat_model));
+                : (chatModels.includes(rememberedChatModel) ? rememberedChatModel : (chatModels[0] || ''));
             chatProviderModels[provider] = activeChatModel;
             if(provider === 'modelscope') msModel = activeChatModel;
-            if(config.ms_chat_models?.length && msModel && !config.ms_chat_models.includes(msModel)) msModel = config.ms_chat_models[0];
-            if(config.ms_chat_models?.length && provider === 'modelscope') activeChatModel = msModel || config.ms_chat_models[0];
 
             const imageProviderList = imageProviders();
-            activeImageProvider = imageProviderList.some(p => p.id === activeImageProvider) ? activeImageProvider : (imageProviderList[0]?.id || 'comfly');
+            activeImageProvider = imageProviderList.some(p => p.id === activeImageProvider) ? activeImageProvider : (imageProviderList[0]?.id || '');
             const imageModels = uniqueModels(providerById(activeImageProvider, 'image')?.image_models || []);
-            activeImageModel = imageModels.includes(activeImageModel) ? activeImageModel : (imageModels[0] || config.image_model);
+            activeImageModel = imageModels.includes(activeImageModel) ? activeImageModel : (imageModels[0] || '');
             if(mode !== 'agent' && mode !== 'chat' && mode !== 'image') mode = 'chat';
             if(mode === 'chat') modelPickerScope = 'chat';
             if(mode === 'image') modelPickerScope = 'image';
@@ -2355,9 +2392,11 @@ html.studio-theme-dark #sendBtn.nv-beam {
             try {
                 const data = await fetch('/api/config').then(r=>r.json());
                 config = { ...config, ...data };
+                /* 服务端下发的 chat_model / image_model 是历史遗留默认名（gpt-4o-mini / gpt-image-2 等），
+                   聊天页只使用「已配置平台」里的模型，不拿它们做默认或兜底 */
+                delete config.chat_model;
+                delete config.image_model;
                 apiProviders = Array.isArray(config.api_providers) ? config.api_providers : [];
-                config.chat_model = (config.chat_models || []).find(m => m === 'gpt-5.5') || config.chat_model || 'gpt-5.5';
-                config.image_model = config.image_model || ((config.image_models || [])[0]) || 'gpt-image-2';
                 validateSavedProviderState();
                 setMode(mode, false);
                 updateModelLabel();
@@ -2580,7 +2619,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
             providerLabel.textContent = providerNameById(currentPid, kind);
             /* 模型选择 chip 只显示当前作用域的模型本身；agent 模式也要拆成对话/图像两套
                chip 来选，不再拼接成一个「ChatModel + ImageModel」的长串 */
-            modelLabel.textContent = shortModelName(currentMdl);
+            modelLabel.textContent = currentMdl ? shortModelName(currentMdl) : '未配置';
             /* 对话/图像 切换（仅 agent 模式显示） */
             title.textContent = '选择模型';
             scope.innerHTML = mode === 'agent'
@@ -2597,7 +2636,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
                         : '<i data-icon="chevronRight" class="p-arrow"></i>';
                     return `<button class="model-picker-provider-btn ${isActive ? 'active' : ''}" data-pid="${escapeHtml(p.id)}" onmouseenter="hoverProvider('${escapeHtml(p.id)}','${kind}')" onclick="hoverProvider('${escapeHtml(p.id)}','${kind}')"><span class="p-name">${escapeHtml(p.name || p.id)}</span>${tail}</button>`;
                 }).join('')
-                : `<div class="model-picker-empty">暂无平台</div>`;
+                : `<div class="model-picker-empty">未配置任何平台 · 去「API 设置」添加并填写 Key</div>`;
             closeModelSubmenu();
             lucide.createIcons();
         }
@@ -2809,21 +2848,18 @@ html.studio-theme-dark #sendBtn.nv-beam {
         }
 
         function updateModelLabel(){
+            /* 只显示实际选中的（已配置）模型；没有任何可用模型时显示「未配置」，
+               不再回落到内置默认名（gpt-5.5 / gpt-4o-mini / ms 默认列表） */
+            const shortOf = (value) => String(value || '').split('/').pop().split(':')[0];
             let label = '';
             if (mode === 'image') {
-                label = activeImageModel || config.image_model || 'Image';
+                label = activeImageModel ? shortOf(activeImageModel) : '未配置';
             } else if (mode === 'agent') {
-                const chatLabel = provider === 'modelscope'
-                    ? (msModel || (config.ms_chat_models?.[0]) || 'ModelScope').split('/').pop().split(':')[0]
-                    : (activeChatModel || config.chat_model || 'Chat');
-                const imageLabel = (activeImageModel || config.image_model || 'Image').split('/').pop().split(':')[0];
+                const chatLabel = activeChatModel ? shortOf(activeChatModel) : '未配置';
+                const imageLabel = activeImageModel ? shortOf(activeImageModel) : '未配置';
                 label = `Agent · ${chatLabel} + ${imageLabel}`;
-            } else if (provider === 'modelscope') {
-                label = msModel || (config.ms_chat_models?.[0]) || 'ModelScope';
-                // Shorten the display label
-                label = label.split('/').pop().split(':')[0];
             } else {
-                label = activeChatModel || config.chat_model || 'Chat';
+                label = activeChatModel ? shortOf(activeChatModel) : '未配置';
             }
             const labelEl = document.getElementById('modelLabel');
             if(labelEl) labelEl.textContent = label;
@@ -3130,16 +3166,70 @@ html.studio-theme-dark #sendBtn.nv-beam {
             return (opts[key] || opts.square).find(([, label]) => label === targetLabel)?.[0] || fallbackSize;
         }
 
-        function renderMessages(messages){
+        /* ═══ 聊天区滚动跟随 ═══
+           旧实现里每个流式 delta 都会无条件把容器滚到底，且 .messages 带
+           scroll-behavior:smooth，用户往上滚会被立刻拉回底部 —— 表现为
+           「聊几句后无法滚动聊天框查看记录」。
+           现在：只有仍贴底时才跟随最新消息；用户主动上滚即停止跟随，
+           滚回底部自动恢复跟随；未贴底时重建消息列表也不会弹回底部。 */
+        var MESSAGES_PIN_THRESHOLD = 24;
+        var messagesPinned = true;
+        function messagesAtBottom(box, threshold){
+            if(!box) return true;
+            const gap = box.scrollHeight - box.scrollTop - box.clientHeight;
+            return gap <= (threshold == null ? MESSAGES_PIN_THRESHOLD : threshold);
+        }
+        function pinMessages(){ messagesPinned = true; }
+        function setMessagesScrollTop(box, top){
+            /* 绕过 .messages 的 scroll-behavior:smooth：流式输出高频设置 scrollTop 时
+               smooth 动画会被反复打断重启，既追不上内容，也会跟用户滚轮抢位置 */
+            if(!box) return;
+            const previous = box.style.scrollBehavior;
+            box.style.scrollBehavior = 'auto';
+            box.scrollTop = top;
+            box.style.scrollBehavior = previous;
+        }
+        /* 重建消息列表会整段替换 DOM（且随后 V11 装饰层还会重写 innerHTML / 插日期分隔），
+           纯数字 scrollTop 无法恢复阅读位置 —— 改为锚定「当前视口里第一条消息 + 它的偏移」。 */
+        function captureMessagesAnchor(box){
+            if(!box) return null;
+            const rows = box.querySelectorAll('.bubble-row');
+            const boxTop = box.getBoundingClientRect().top;
+            for(let i = 0; i < rows.length; i++){
+                const rect = rows[i].getBoundingClientRect();
+                if(rect.bottom > boxTop + 1) return { index: i, offset: Math.round(rect.top - boxTop) };
+            }
+            return null;
+        }
+        function restoreMessagesAnchor(box, anchor){
+            if(!box || !anchor) return;
+            const row = box.querySelectorAll('.bubble-row')[anchor.index];
+            if(!row) return;
+            const offset = row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+            if(Math.abs(offset - anchor.offset) < 1) return;
+            setMessagesScrollTop(box, box.scrollTop + (offset - anchor.offset));
+        }
+
+        function renderMessages(messages, opts){
             const box = document.getElementById('messages');
+            /* 用户正在翻历史（未贴底）→ 重建后保持原阅读位置，不弹回底部 */
+            const keepPosition = !!(opts && opts.keepPosition) && !messagesPinned;
+            const anchor = keepPosition ? captureMessagesAnchor(box) : null;
             box.innerHTML = '';
             if(!messages.length){
                 box.innerHTML = `<div class="empty-state"><i data-icon="chat"></i><div class="empty-state-text">${tr('chat.ready')}</div></div>`;
                 lucide.createIcons();
+                pinMessages();
                 return;
             }
             messages.forEach(addMessageBubble);
-            scrollBottom();
+            if(keepPosition){
+                /* 立即校正一次；装饰层随后重写气泡 innerHTML 会再改变高度，再补两次 */
+                restoreMessagesAnchor(box, anchor);
+                requestAnimationFrame(() => { restoreMessagesAnchor(box, anchor); requestAnimationFrame(() => restoreMessagesAnchor(box, anchor)); });
+            } else {
+                scrollBottom(true);
+            }
         }
 
         function addMessageBubble(msg){
@@ -3191,6 +3281,16 @@ html.studio-theme-dark #sendBtn.nv-beam {
                 const isMs = msg.model.includes('/') && !msg.model.includes('gpt');
                 badge.style.cssText = `margin-top:8px;font-size:9px;font-weight:700;opacity:.45;letter-spacing:.06em;`;
                 badge.textContent = modelShort;
+                /* 生成图的实际像素：部分上游通道不按请求分辨率出图（例如灵境 gpt-image-2
+                   恒输出约 1.5MP，选 2K/4K 只会按比例降采样）。这里标注真实尺寸，
+                   避免把降采样结果当成 2K/4K。深浅主题都继承徽标本身的弱化样式。 */
+                if(imageUrls.length){
+                    const sizeTag = document.createElement('span');
+                    badge.appendChild(sizeTag);
+                    const probe = new Image();
+                    probe.onload = () => { sizeTag.textContent = ` · ${probe.naturalWidth}×${probe.naturalHeight}`; };
+                    probe.src = imageUrls[0];
+                }
                 bubble.appendChild(badge);
             }
             row.appendChild(bubble);
@@ -3331,7 +3431,8 @@ html.studio-theme-dark #sendBtn.nv-beam {
             const pendingText = mode === 'image' ? tr('chat.generatingImage') : (useStreaming ? '' : (mode === 'agent' ? tr('chat.agentWorking') : ''));
             const assistantBubble = addMessageBubble({role:'assistant', content: pendingText, thinking: mode === 'agent'});
             if(useStreaming) assistantBubble.bubble.classList.add('streaming');
-            scrollBottom();
+            scrollBottom(true);   /* 自己发消息 → 强制跟随到最新 */
+
             try {
                 if(useStreaming) {
                     await streamChatMessage(message, pendingRefs, assistantBubble);
@@ -3345,7 +3446,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
                             system_prompt: currentSystemPrompt(),
                             mode:'chat',
                             size: requestedSize,
-                            model: provider === 'modelscope' ? (msModel || activeChatModel) : (activeChatModel || config.chat_model),
+                            model: provider === 'modelscope' ? (msModel || activeChatModel) : activeChatModel,
                             ms_model: provider === 'modelscope' ? (msModel || activeChatModel) : '',
                             reference_images: pendingRefs,
                             provider,
@@ -3367,9 +3468,9 @@ html.studio-theme-dark #sendBtn.nv-beam {
                             system_prompt: currentSystemPrompt(),
                             mode:'agent',
                             size: requestedSize,
-                            model: provider === 'modelscope' ? (msModel || activeChatModel) : (activeChatModel || config.chat_model),
+                            model: provider === 'modelscope' ? (msModel || activeChatModel) : activeChatModel,
                             ms_model: provider === 'modelscope' ? (msModel || activeChatModel) : '',
-                            image_model: activeImageModel || config.image_model,
+                            image_model: activeImageModel,
                             reference_images: pendingRefs,
                             provider,
                             image_provider: activeImageProvider,
@@ -3391,8 +3492,8 @@ html.studio-theme-dark #sendBtn.nv-beam {
                             system_prompt: currentSystemPrompt(),
                             mode,
                             size: requestedSize,
-                            model: activeChatModel || config.chat_model,
-                            image_model: activeImageModel || config.image_model,
+                            model: activeChatModel,
+                            image_model: activeImageModel,
                             reference_images: pendingRefs,
                             provider: activeImageProvider,
                             think_level: thinkLevel,
@@ -3414,8 +3515,8 @@ html.studio-theme-dark #sendBtn.nv-beam {
 
         async function streamChatMessage(message, pendingRefs, assistantBubble){
             const currentProvider = provider;
-            const currentMsModel = provider === 'modelscope' ? (msModel || activeChatModel || (config.ms_chat_models?.[0] || '')) : '';
-            const currentChatModel = activeChatModel || config.chat_model;
+            const currentMsModel = provider === 'modelscope' ? (msModel || activeChatModel) : '';
+            const currentChatModel = activeChatModel;
 
             const res = await fetch('/api/chat/stream', {
                 method:'POST',
@@ -3466,7 +3567,8 @@ html.studio-theme-dark #sendBtn.nv-beam {
                         currentConversation = event.conversation;
                         rememberConversation(currentConversation.id);
                         setChatTitle(currentConversation.title);
-                        renderMessages(currentConversation.messages || []);
+                        /* keepPosition：用户翻历史时不要被这次重建弹回底部 */
+                        renderMessages(currentConversation.messages || [], { keepPosition: true });
                         await loadConversations();
                     }
                 }
@@ -3474,7 +3576,34 @@ html.studio-theme-dark #sendBtn.nv-beam {
             assistantBubble.bubble.classList.remove('streaming');
         }
 
-        function scrollBottom(){ requestAnimationFrame(() => { const box = document.getElementById('messages'); box.scrollTop = box.scrollHeight; }); }
+        function scrollBottom(force){
+            const box = document.getElementById('messages');
+            if(!box) return;
+            if(force){ messagesPinned = true; }
+            else if(!messagesPinned){ return; }   /* 用户正在翻历史 → 完全不干预滚动位置 */
+            requestAnimationFrame(() => {
+                /* 用户可能在这一帧内上滚：取消这次跟随，避免把滚轮位移吃掉 */
+                if(!force && !messagesPinned) return;
+                setMessagesScrollTop(box, box.scrollHeight);
+            });
+        }
+
+        /* 只在「用户主动上滚」时解除跟随：内容增长 / 浏览器滚动锚定都不会误判成上滚。
+           解除后完全不再动滚动位置，直到用户自己滚回底部（scroll 事件）或强制跟随。 */
+        (function bindMessagesScrollIntent(){
+            const box = document.getElementById('messages');
+            if(!box) return;
+            box.addEventListener('wheel', event => {
+                if(event.deltaY < 0){
+                    /* 只有真的还能往上滚才解除跟随，避免短会话里误判导致不再自动跟随 */
+                    if(box.scrollTop > 0) messagesPinned = false;
+                    return;
+                }
+                requestAnimationFrame(() => { if(messagesAtBottom(box, 8)) pinMessages(); });
+            }, { passive:true });
+            box.addEventListener('touchmove', () => { if(box.scrollTop > 0) messagesPinned = false; }, { passive:true });
+            box.addEventListener('scroll', () => { if(messagesAtBottom(box, 8)) pinMessages(); }, { passive:true });
+        })();
         function escapeHtml(str){ return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 
         window.onload = async () => {
@@ -3685,9 +3814,10 @@ html.studio-theme-dark #sendBtn.nv-beam {
   function forceTopbar(){
     var tb = document.querySelector('.topbar');
     if(!tb) return;
-    tb.style.setProperty('background', 'transparent', 'important');
-    tb.style.setProperty('backdrop-filter', 'none', 'important');
-    tb.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+    /* 顶栏与页面背景同色（无边框、无色块），只保留背景模糊 → 内容从下面滚过时被虚化 */
+    tb.style.setProperty('background', 'color-mix(in srgb, var(--bg) 90%, transparent)', 'important');
+    tb.style.setProperty('backdrop-filter', 'blur(20px) saturate(180%)', 'important');
+    tb.style.setProperty('-webkit-backdrop-filter', 'blur(20px) saturate(180%)', 'important');
     tb.style.setProperty('border-bottom', '0', 'important');
     /* V11 的 inset 0 1px 0 box-shadow 在浅色下会渲染成顶栏底部那条线，一并去掉 */
     tb.style.setProperty('box-shadow', 'none', 'important');

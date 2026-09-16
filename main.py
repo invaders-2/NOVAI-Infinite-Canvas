@@ -143,7 +143,10 @@ class ConnectionManager:
                 await connection.send_text(data)
             except Exception as e:
                 print(f"Broadcast error: {e}")
-                self.active_connections.remove(connection)
+                # 这条连接可能已经在别处（disconnect / 另一个广播协程）被移除了；
+                # 直接 remove 会抛 ValueError，未捕获就把整个进程打死。
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
 
     async def broadcast_new_image(self, image_data: dict):
         data = json.dumps({"type": "new_image", "data": image_data})
@@ -152,7 +155,10 @@ class ConnectionManager:
                 await connection.send_text(data)
             except Exception as e:
                 print(f"Broadcast image error: {e}")
-                self.active_connections.remove(connection)
+                # 这条连接可能已经在别处（disconnect / 另一个广播协程）被移除了；
+                # 直接 remove 会抛 ValueError，未捕获就把整个进程打死。
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
 
     async def broadcast_canvas_updated(self, canvas_id: str, updated_at: int, client_id: str = ""):
         data = json.dumps({
@@ -166,7 +172,10 @@ class ConnectionManager:
                 await connection.send_text(data)
             except Exception as e:
                 print(f"Broadcast canvas error: {e}")
-                self.active_connections.remove(connection)
+                # 这条连接可能已经在别处（disconnect / 另一个广播协程）被移除了；
+                # 直接 remove 会抛 ValueError，未捕获就把整个进程打死。
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
 
     async def broadcast_asset_library_updated(self, updated_at: int = 0):
         data = json.dumps({
@@ -178,7 +187,10 @@ class ConnectionManager:
                 await connection.send_text(data)
             except Exception as e:
                 print(f"Broadcast asset library error: {e}")
-                self.active_connections.remove(connection)
+                # 这条连接可能已经在别处（disconnect / 另一个广播协程）被移除了；
+                # 直接 remove 会抛 ValueError，未捕获就把整个进程打死。
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
 
     async def broadcast_task_status(self, task: dict):
         """Task Engine 任务状态变化推送（V2 Phase 1；兼容现有 {"type": ...} 消息格式）。"""
@@ -199,7 +211,10 @@ class ConnectionManager:
                 await connection.send_text(data)
             except Exception as e:
                 print(f"Broadcast task status error: {e}")
-                self.active_connections.remove(connection)
+                # 这条连接可能已经在别处（disconnect / 另一个广播协程）被移除了；
+                # 直接 remove 会抛 ValueError，未捕获就把整个进程打死。
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
 
     async def send_personal_message(self, message: dict, client_id: str):
         ws = self.user_connections.get(client_id)
@@ -491,7 +506,23 @@ try:
     GEMINI_CLI_DEFAULT_TIMEOUT = max(30, min(3600, int(os.getenv("GEMINI_CLI_TIMEOUT", "900"))))
 except Exception:
     GEMINI_CLI_DEFAULT_TIMEOUT = 900
-AGNES_DEFAULT_VIDEO_MODELS = ["agnes-video-v2.0"]
+AGNES_DEFAULT_VIDEO_MODELS = ["agnes-video-2.5", "agnes-video-2.5-flash", "agnes-video-v2.0"]
+# 灵境 /v1/models 按令牌分组过滤，Gemini 系列经常不返回但可直接调用；
+# 这些是实测可用的默认项，拉取模型时补进清单，避免被覆盖丢失。
+LINGJING_DEFAULT_IMAGE_MODELS = [
+    "gemini-3-pro-image",
+    "gemini-3-pro-image-preview",
+    "gemini-3.1-flash-image",
+    "gemini-3.1-flash-image-preview",
+    "gemini-3.1-flash-lite-image",
+    "gemini-2.5-flash-image",
+]
+LINGJING_DEFAULT_CHAT_MODELS = [
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+]
 JIMENG_LEGACY_IMAGE_MODELS = {
     "jimeng-image-2k",
     "jimeng-image-4k",
@@ -677,15 +708,25 @@ MODELSCOPE_DEFAULT_IMAGE_MODELS = [
     "Qwen/Qwen-Image-Edit-2511",
     "black-forest-labs/FLUX.2-klein-9B",
 ]
-MODELSCOPE_DEFAULT_CHAT_MODELS = [
+# 内置默认聊天模型已停用：它们并不是用户配置的模型，而且会随时间下线
+# （例如 Qwen/Qwen3-235B-A22B 现在直接返回 has no provider supported），
+# 却仍以「已配置」的样子出现在聊天页。现在只认用户自己拉取/填写并保存的模型。
+# 下面这份历史名单只用于把老用户配置里被自动铺进去的默认模型清理一次，不再作为默认值下发。
+_MODELSCOPE_LEGACY_DEFAULT_CHAT_MODELS = [
     "Qwen/Qwen3-235B-A22B",
     "Qwen/Qwen3-VL-235B-A22B-Instruct",
     "MiniMax/MiniMax-M2.7:MiniMax",
 ]
-_MODELSCOPE_CONFIGURED_CHAT_MODELS = [m.strip() for m in os.getenv("MODELSCOPE_CHAT_MODELS", "").split(",") if m.strip()]
-MODELSCOPE_CHAT_MODELS = list(dict.fromkeys([m for m in [*MODELSCOPE_DEFAULT_CHAT_MODELS, *_MODELSCOPE_CONFIGURED_CHAT_MODELS] if m]))
+MODELSCOPE_DEFAULT_CHAT_MODELS: List[str] = []
+# 注意：旧版本保存 ModelScope 平台时会把上面的默认名写进 API/.env，
+# 所以这里连环境变量里的历史默认名一起过滤，避免它们"复活"成默认聊天模型。
+_MODELSCOPE_CONFIGURED_CHAT_MODELS = [
+    m.strip() for m in os.getenv("MODELSCOPE_CHAT_MODELS", "").split(",")
+    if m.strip() and m.strip() not in _MODELSCOPE_LEGACY_DEFAULT_CHAT_MODELS
+]
+MODELSCOPE_CHAT_MODELS = list(dict.fromkeys([*_MODELSCOPE_CONFIGURED_CHAT_MODELS]))
 MODELSCOPE_DEFAULT_IMAGE_MODEL = MODELSCOPE_DEFAULT_IMAGE_MODELS[0]
-MODELSCOPE_DEFAULT_CHAT_MODEL = "Qwen/Qwen3-235B-A22B"
+MODELSCOPE_DEFAULT_CHAT_MODEL = MODELSCOPE_CHAT_MODELS[0] if MODELSCOPE_CHAT_MODELS else ""
 # ── 模型能力：哪些 chat 模型支持思考强度档位（前端 think chip 的真值源） ──
 # 任意子串匹配（不区分大小写），命中即返回 5 档；未命中返回 None。
 # 新增推理模型在这里加一行即可，前端不再依赖正则启发式。
@@ -732,7 +773,7 @@ MODELSCOPE_DEFAULT_LORAS = [
         "note": "",
     },
 ]
-MODELSCOPE_DEFAULTS_VERSION = 3
+MODELSCOPE_DEFAULTS_VERSION = 4
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
 IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-2")
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
@@ -820,8 +861,11 @@ def reload_env_globals():
         "doubao-seedance-1-0-lite-t2v-250428",
         "doubao-seedance-1-0-lite-i2v-250428",
     ])
-    _configured = [m.strip() for m in os.getenv("MODELSCOPE_CHAT_MODELS", "").split(",") if m.strip()]
-    MODELSCOPE_CHAT_MODELS = list(dict.fromkeys([m for m in [*MODELSCOPE_DEFAULT_CHAT_MODELS, *_configured] if m]))
+    _configured = [
+        m.strip() for m in os.getenv("MODELSCOPE_CHAT_MODELS", "").split(",")
+        if m.strip() and m.strip() not in _MODELSCOPE_LEGACY_DEFAULT_CHAT_MODELS
+    ]
+    MODELSCOPE_CHAT_MODELS = list(dict.fromkeys([*_configured]))
 
 CHAT_MODELS = model_list("CHAT_MODELS", CHAT_MODEL, ["gpt-4o-mini", "gemini-3.1-flash-image-preview-2k"])
 IMAGE_MODELS = model_list("IMAGE_MODELS", IMAGE_MODEL, ["nano-banana-pro"])
@@ -999,7 +1043,8 @@ def merge_default_api_providers(providers, inject_missing=True):
             seeded_version = int(current.get("ms_defaults_version") or 0)
             if seeded_version < MODELSCOPE_DEFAULTS_VERSION:
                 image_models = model_list_from_values([*MODELSCOPE_DEFAULT_IMAGE_MODELS, *(current.get("image_models") or [])])
-                chat_models = model_list_from_values([*MODELSCOPE_DEFAULT_CHAT_MODELS, *(current.get("chat_models") or [])])
+                # 不再预置默认聊天模型；顺手清理历史版本自动铺进去的那批（用户并未自己配置）
+                chat_models = model_list_from_values([m for m in (current.get("chat_models") or []) if m not in _MODELSCOPE_LEGACY_DEFAULT_CHAT_MODELS])
                 loras = normalize_ms_loras([*MODELSCOPE_DEFAULT_LORAS, *(current.get("ms_loras") or [])])
                 current["image_models"] = image_models
                 current["chat_models"] = chat_models
@@ -2225,6 +2270,7 @@ def update_allowed_file(path: str) -> bool:
     return (
         path in {"main.py", "VERSION", "安装即梦CLI.bat", "安装即梦CLI.command", "登录即梦CLI.bat", "登录即梦CLI.command", "launcher.py", "novai-desktop.py", "app.py", "build.py", "build-all.py", "build-desktop.py", "build-mac.py", "installer.py"}
         or path.startswith("static/")
+        or path.startswith("server/")   # 协议表 / 模块化后端（server/protocols、server/routes 等）也要能随一键更新下发
         or path.startswith("tools/")
         or path.startswith("assets/models/")
     )
@@ -4731,7 +4777,9 @@ def resolve_chat_provider(provider: str, model: str, ms_model: str):
             raise HTTPException(status_code=400, detail="未配置 ModelScope API Key，请在 API 设置中填写。")
         base = modelscope_api_root()
         hdrs = {"Authorization": bearer_auth_value(clean_token), "Content-Type": "application/json"}
-        mdl = selected_model(ms_model or model, MODELSCOPE_CHAT_MODELS[0] if MODELSCOPE_CHAT_MODELS else "MiniMax/MiniMax-M2.7")
+        if not (ms_model or model) and not MODELSCOPE_CHAT_MODELS:
+            raise HTTPException(status_code=400, detail="ModelScope 未配置聊天模型：请在「API 设置」里拉取模型并保存。")
+        mdl = selected_model(ms_model or model, MODELSCOPE_CHAT_MODELS[0] if MODELSCOPE_CHAT_MODELS else "")
         return base, hdrs, mdl
     api_provider = get_api_provider(provider or "")
     if is_codex_provider(api_provider):
@@ -5402,8 +5450,22 @@ def normalize_model_protocols(value):
                 out[name] = proto
     return out
 
+def looks_like_gemini_image_model(model):
+    """Gemini 图像模型（gemini-3-pro-image / gemini-3.1-flash-image-preview ...）。
+
+    只认「gemini + image」组合：Gemini 文本模型在多数中转站走的是 OpenAI 兼容
+    /v1/chat/completions（chat 兼容格式），不能一起切成 gemini 协议。
+    """
+    name = re.sub(r"[^a-z0-9]+", "-", str(model or "").strip().lower()).strip("-")
+    return name.startswith("gemini") and "image" in name
+
 def effective_protocol(provider, model=""):
-    """返回某模型实际生效的协议：优先单模型覆盖，否则用平台全局协议。"""
+    """返回某模型实际生效的协议（自动，无需手工配置）：
+
+    1) 单模型显式覆盖（API 设置里的协议下拉）优先；
+    2) 平台是 openai 且模型名是 Gemini 图像模型时，自动切到 gemini；
+    3) 其余跟随平台全局协议（文本模型因此保持平台默认，即各站的 OpenAI 兼容 chat 路径）。
+    """
     base = provider_protocol(provider)
     pid = str((provider or {}).get("id") or "").strip().lower()
     if pid in FIXED_PROTOCOL_PROVIDER_IDS:
@@ -5413,6 +5475,8 @@ def effective_protocol(provider, model=""):
         val = str(overrides.get(str(model or "").strip()) or "").strip().lower()
         if val in PER_MODEL_PROTOCOL_OPTIONS:
             return val
+    if base == "openai" and looks_like_gemini_image_model(model):
+        return "gemini"
     return base
 
 def is_apimart_provider(provider):
@@ -10449,6 +10513,40 @@ def is_gpt_image_2_model(model):
         or compact.endswith("gptimage2")
     )
 
+def image_model_rejects_response_format(model):
+    """新版官方图像模型（gpt-image-1 / 1.5 / 1-mini 及日期快照）已移除顶层 response_format，
+    中转到这些上游会直接报 unknown_parameter: 'response_format'。
+    gpt-image-2 的中转普遍仍接受该参数，所以只对 1.x 系列前置去掉，避免影响已经跑通的通道。"""
+    name = re.sub(r"[^a-z0-9]+", "-", str(model or "").strip().lower()).strip("-")
+    return name == "gpt-image-1" or name.startswith("gpt-image-1-")
+
+def openai_image_request_body(model, prompt, size, quality="", extra=None):
+    """OpenAI 兼容 /images/generations 请求体（response_format 按模型能力决定是否携带）。"""
+    body = {"model": model, "prompt": prompt, "size": size, "n": 1}
+    if not image_model_rejects_response_format(model):
+        body["response_format"] = "url"
+    if quality:
+        body["quality"] = quality
+    if extra:
+        body.update(extra)
+    return body
+
+def response_mentions_response_format(response):
+    try:
+        return "response_format" in (response.text or "").lower()
+    except Exception:
+        return False
+
+async def post_openai_image_request(client, url, headers, body):
+    """生图 POST；若上游明确拒绝 response_format（unknown_parameter），去掉该参数重试一次。
+    这样已知的官方 1.x 通道不用白跑一次失败请求，未知中转也能自动兼容。"""
+    response = await client.post(url, headers=headers, json=body)
+    if response.status_code >= 400 and "response_format" in body and response_mentions_response_format(response):
+        retry_body = {k: v for k, v in body.items() if k != "response_format"}
+        print("[image] 上游不接受 response_format，去掉后重试一次")
+        response = await client.post(url, headers=headers, json=retry_body)
+    return response
+
 def normalize_gpt_image_2_size(size):
     width, height = parse_size_pair(size)
     if not width or not height:
@@ -12089,28 +12187,16 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
                     )
                 print(f"/images/edits failed ({edit_failed_status}): {edit_failed_text[:200]} → 回退到 /images/generations + image:[] JSON")
                 image_payload = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
-                body = {
-                    "model": model, "prompt": prompt, "size": size,
-                    "response_format": "url", "n": 1,
-                    "image": image_payload,
-                }
-                if quality:
-                    body["quality"] = quality
-                response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
+                body = openai_image_request_body(model, prompt, size, quality, {"image": image_payload})
+                response = await post_openai_image_request(client, gen_url, api_headers(provider=provider, model=model), body)
                 if response.status_code >= 400 and images_api_unsupported(response):
                     raise HTTPException(
                         status_code=502,
                         detail=f"编辑接口 /images/edits 调用失败，且该平台不支持 /images/generations：{edit_failed_text[:300] or edit_failed_status}"
                     )
         else:
-            body = {"model": model, "prompt": prompt, "size": size, "response_format": "url", "n": 1}
-            if quality:
-                body["quality"] = quality
-            response = await client.post(
-                gen_url,
-                headers=api_headers(provider=provider, model=model),
-                json=body,
-            )
+            body = openai_image_request_body(model, prompt, size, quality)
+            response = await post_openai_image_request(client, gen_url, api_headers(provider=provider, model=model), body)
             if response.status_code >= 400 and images_api_unsupported(response):
                 response = await post_openai_edits()
         response.raise_for_status()
@@ -14416,6 +14502,7 @@ async def probe_openai_models_endpoint(client, base_url: str, api_key: str):
     if response.status_code < 300:
         grouped, ids = parse_upstream_models(raw, "openai") if isinstance(raw, dict) else ({"image": [], "chat": [], "video": []}, [])
         grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
+        grouped, ids = apply_lingjing_model_defaults(base_url, grouped, ids)
         grouped = apply_locked_recommended_model_rules(base_url, grouped)
         return True, {
             "status": response.status_code,
@@ -14499,6 +14586,26 @@ def apply_agnes_model_defaults(base_url, grouped, ids):
             grouped["video"].append(model)
     ids = sorted(set(ids))
     grouped["video"] = sorted(set(grouped.get("video") or []))
+    return grouped, ids
+
+def apply_lingjing_model_defaults(base_url, grouped, ids):
+    """灵境的 /v1/models 是按令牌分组过滤的：Gemini 系列经常不返回，但用同一个 Key
+    可以直接调用（文本走 /v1/chat/completions，图像走 /v1beta:generateContent）。
+    这里把已知可用的 Gemini 模型补进清单，避免「拉取模型」把它们冲掉。"""
+    base = str(base_url or "").strip().lower()
+    if "vectorengine" not in base and "apistudio.vip" not in base:
+        return grouped, ids
+    grouped = {key: list(value or []) for key, value in (grouped or {}).items()}
+    ids = list(ids or [])
+    for key, models in (("image", LINGJING_DEFAULT_IMAGE_MODELS), ("chat", LINGJING_DEFAULT_CHAT_MODELS)):
+        bucket = grouped.setdefault(key, [])
+        for model in models:
+            if model not in ids:
+                ids.append(model)
+            if model not in bucket:
+                bucket.append(model)
+        grouped[key] = sorted(set(bucket))
+    ids = sorted(set(ids))
     return grouped, ids
 
 @app.post("/api/providers/test-connection")
@@ -14587,6 +14694,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
             data = resp.json() if resp.text else {}
             grouped, ids = parse_upstream_models(data, protocol)
             grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
+            grouped, ids = apply_lingjing_model_defaults(base_url, grouped, ids)
             grouped = apply_locked_recommended_model_rules(base_url, grouped)
             if protocol == "volcengine" and not ids:
                 detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
@@ -14869,6 +14977,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
         raise HTTPException(status_code=502, detail=f"请求上游模型列表失败：{e}")
     grouped, ids = parse_upstream_models(raw, protocol)
     grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
+    grouped, ids = apply_lingjing_model_defaults(base_url, grouped, ids)
     grouped = apply_locked_recommended_model_rules(base_url, grouped)
     if protocol == "volcengine" and not ids:
         payload = volcengine_default_model_payload(raw=raw)
@@ -15412,7 +15521,7 @@ def _collect_video_url(value, urls):
             _collect_video_url(item, urls)
         return
     if isinstance(value, dict):
-        for key in ("videos", "outputs", "data", "detail", "result", "content"):
+        for key in ("videos", "outputs", "data", "detail", "result", "content", "metadata", "task_result"):
             if key in value:
                 _collect_video_url(value.get(key), urls)
         for key in VIDEO_URL_KEYS:
@@ -15456,7 +15565,7 @@ def video_output_urls(raw):
     for node in candidates:
         if not isinstance(node, dict):
             continue
-        for key in ("videos", "outputs", "content"):
+        for key in ("videos", "outputs", "content", "metadata", "task_result"):
             value = node.get(key)
             if value:
                 _collect_video_url(value, urls)
@@ -15693,34 +15802,103 @@ async def wait_for_agnes_video_task(client, provider, video_id, model):
         delay = min(delay * 1.35, 12)
     raise HTTPException(status_code=504, detail=f"Agnes 视频生成任务超时：{last_payload or video_id}")
 
-async def generate_agnes_video(client, payload, provider, base_url, requested_model):
-    model = selected_model(requested_model, "agnes-video-v2.0")
-    width, height = agnes_video_dimensions(payload.aspect_ratio, payload.resolution)
-    num_frames, frame_rate = agnes_video_frame_count(payload.duration, 24)
+def agnes_video_uses_openai_protocol(model):
+    """Agnes Video 2.5 系列改用 OpenAI Videos 兼容协议：
+    POST /v1/videos 带 model/prompt/mode/seconds/size/aspect_ratio，再按 video_id 轮询。
+    v2.0 仍走原生协议（width/height/num_frames/frame_rate），两条路径互不影响。
+    """
+    return str(model or "").strip().lower().startswith("agnes-video-2.5")
+
+def agnes_video_size_tier(resolution="", model=""):
+    """2.5 的 size 是档位（720P/1080P/1K/2K）；Flash 固定 720P。"""
+    if str(model or "").strip().lower().startswith("agnes-video-2.5-flash"):
+        return "720P"
+    value = str(resolution or "").strip().lower()
+    if "2k" in value:
+        return "2K"
+    if "1k" in value:
+        return "1K"
+    if "1080" in value:
+        return "1080P"
+    return "720P"
+
+def agnes_video_seconds(duration):
+    """2.5 的 seconds 是字符串且限制在 4–12 秒。"""
+    try:
+        value = int(duration or 5)
+    except Exception:
+        value = 5
+    return str(max(4, min(12, value)))
+
+def build_agnes_openai_video_body(payload, model, image_urls, image_roles):
+    """构造 Agnes 2.5 的 OpenAI Videos 请求体（纯函数，不发网络请求）。"""
     body = {
         "model": model,
         "prompt": str(payload.prompt or ""),
-        "width": width,
-        "height": height,
-        "num_frames": num_frames,
-        "frame_rate": frame_rate,
+        "seconds": agnes_video_seconds(payload.duration),
+        "size": agnes_video_size_tier(payload.resolution, model),
+        "aspect_ratio": str(payload.aspect_ratio or "16:9").strip() or "16:9",
     }
+    urls = [str(url) for url in (image_urls or []) if url]
+    roles = [str(role or "").strip().lower() for role in (image_roles or [])]
+    has_frame_roles = any(role in {"first_frame", "last_frame"} for role in roles)
+    if urls and has_frame_roles:
+        body["mode"] = "keyframe"
+        first = next((url for url, role in zip(urls, roles) if role == "first_frame"), "")
+        last = next((url for url, role in zip(urls, roles) if role == "last_frame"), "")
+        if not first:
+            first = urls[0]
+        if not last and len(urls) > 1:
+            last = urls[1]
+        if first and first != last:
+            body["first_frame"] = first
+        if last and last != first:
+            body["last_frame"] = last
+        if "first_frame" not in body and "last_frame" not in body:
+            body["mode"] = "reference"
+            body["images"] = urls[:5]
+    elif urls:
+        body["mode"] = "reference"
+        body["images"] = urls[:5]
+    else:
+        body["mode"] = "text"
+    if payload.seed is not None:
+        body["seed"] = payload.seed
+    return body
+
+async def generate_agnes_video(client, payload, provider, base_url, requested_model):
+    model = selected_model(requested_model, "agnes-video-v2.0")
+    is_openai_video = agnes_video_uses_openai_protocol(model)
+    # 2.5 reference 模式最多 5 张参考图；v2.0 仍只取前 4 张。
     image_urls = []
     image_roles = []
-    for ref in (payload.images or [])[:4]:
+    for ref in (payload.images or [])[:(5 if is_openai_video else 4)]:
         url = await agnes_video_image_url(ref)
         if url:
             image_urls.append(url)
             image_roles.append(str(getattr(ref, "role", "") or "").strip().lower())
-    if len(image_urls) == 1:
-        body["image"] = image_urls[0]
-    elif len(image_urls) > 1:
-        body["extra_body"] = {"image": image_urls}
-        has_frame_roles = any(role in {"first_frame", "last_frame"} for role in image_roles)
-        if payload.multimodal or has_frame_roles:
-            body["extra_body"]["mode"] = "keyframes"
-    if payload.seed is not None:
-        body["seed"] = payload.seed
+    if is_openai_video:
+        body = build_agnes_openai_video_body(payload, model, image_urls, image_roles)
+    else:
+        width, height = agnes_video_dimensions(payload.aspect_ratio, payload.resolution)
+        num_frames, frame_rate = agnes_video_frame_count(payload.duration, 24)
+        body = {
+            "model": model,
+            "prompt": str(payload.prompt or ""),
+            "width": width,
+            "height": height,
+            "num_frames": num_frames,
+            "frame_rate": frame_rate,
+        }
+        if len(image_urls) == 1:
+            body["image"] = image_urls[0]
+        elif len(image_urls) > 1:
+            body["extra_body"] = {"image": image_urls}
+            has_frame_roles = any(role in {"first_frame", "last_frame"} for role in image_roles)
+            if payload.multimodal or has_frame_roles:
+                body["extra_body"]["mode"] = "keyframes"
+        if payload.seed is not None:
+            body["seed"] = payload.seed
     submit_url = f"{base_url}/v1/videos"
     response = await client.post(submit_url, headers=api_headers(provider=provider, model=model), json=body)
     response.raise_for_status()
@@ -15847,6 +16025,428 @@ async def generate_lingjing_openai_video(client, payload, provider, base_url, re
         raise HTTPException(status_code=502, detail=f"灵境 API 视频生成成功但没有返回视频：{result}")
     local_urls = [await save_remote_video_to_output(url) for url in urls]
     return {"videos": local_urls, "task_id": task_id, "raw": result}
+
+# ============================================================================
+# 灵境 API（向量引擎）视频厂商分发
+# 灵境把不同上游视频模型挂在各自路径下，请求体/查询路径都不同：
+#   unified  /v1/video/create + /v1/video/query?id=     即梦 / sora / veo 统一格式
+#   volc     /volc/v1/contents/generations/tasks        豆包 Seedance（方舟格式）
+#   minimax  /minimax/v1/video_generation               海螺
+#   kling    /kling/v1/videos/{text2video|image2video}  快手可灵
+#   luma     /luma/generations                          Luma
+#   runway   /runwayml/v1/image_to_video                Runway（必须有首帧图）
+#   vidu     /vidu-native/video/generations             Vidu
+# veo* 仍走既有的 OpenAI /v1/videos 路径（支持 seconds 时长）。
+# ============================================================================
+
+LINGJING_VIDEO_FAMILY_PREFIXES = (
+    # 通义万象（阿里百炼）：wan2.x / happyhorse 走 /alibailian/...
+    ("alibailian", ("happyhorse-", "wan2.", "wan-")),
+    ("volc", ("doubao-seedance", "doubao-")),
+    ("minimax", ("minimax-hailuo", "minimax")),
+    ("kling", ("kling",)),
+    ("luma", ("luma", "ray-")),
+    ("runway", ("runway", "gen3a_", "gen4_", "gen3a-turbo", "gen4-turbo")),
+    ("vidu", ("vidu", "tc-vidu")),
+    ("unified", ("jimeng-video", "jimeng-", "sora-", "sora2")),
+)
+LINGJING_VIDEO_OK_STATUSES = {"success", "succeeded", "succeed", "completed", "complete", "finished", "done", "ok", "ready"}
+LINGJING_VIDEO_FAIL_STATUSES = {"failed", "fail", "failure", "error", "canceled", "cancelled", "timeout", "expired"}
+
+
+def lingjing_video_family(model):
+    """按模型名前缀判定灵境视频厂商；veo* 返回空串（继续走 OpenAI /v1/videos）。"""
+    name = str(model or "").strip().lower()
+    for family, prefixes in LINGJING_VIDEO_FAMILY_PREFIXES:
+        if name.startswith(prefixes):
+            return family
+    return ""
+
+
+def lingjing_video_size_tier(resolution="", fallback="720P"):
+    value = str(resolution or "").strip().lower()
+    if "1080" in value:
+        return "1080P"
+    if "480" in value:
+        return "480P"
+    if "2k" in value:
+        return "2K"
+    if "1k" in value:
+        return "1K"
+    return fallback
+
+
+def lingjing_video_aspect(aspect_ratio="", fallback="16:9"):
+    value = str(aspect_ratio or "").strip()
+    return value or fallback
+
+
+def lingjing_video_duration(duration, fallback=5, minimum=1, maximum=12):
+    try:
+        value = int(duration)
+    except Exception:
+        value = fallback
+    return max(minimum, min(maximum, value))
+
+
+def lingjing_video_image_payload(payload, limit=4):
+    """灵境上游普遍接受 http(s) URL / data URL；本地素材优先转 data URL。"""
+    urls = []
+    roles = []
+    for ref in (payload.images or [])[:limit]:
+        url = str(getattr(ref, "url", "") or "").strip()
+        if not url:
+            continue
+        if not url.startswith(("http://", "https://", "data:")):
+            url = reference_to_data_url(ref.dict(), max_size=1536)
+        if not url:
+            continue
+        urls.append(url)
+        roles.append(str(getattr(ref, "role", "") or "").strip().lower())
+    return urls, roles
+
+
+def build_lingjing_unified_video_body(payload, model, images):
+    """灵境「视频统一格式」：POST /v1/video/create（veo / 即梦 / sora）。"""
+    name = str(model or "").strip().lower()
+    body = {"model": model, "prompt": str(payload.prompt or "")}
+    if name.startswith("sora"):
+        body.update({
+            "images": images,
+            "orientation": "portrait" if lingjing_video_aspect(payload.aspect_ratio).startswith("9:") else "landscape",
+            "size": "small",
+            "duration": lingjing_video_duration(payload.duration, 10, 4, 20),
+            "watermark": bool(payload.watermark),
+            "private": False,
+        })
+        return body
+    if name.startswith("jimeng"):
+        body.update({
+            "aspect_ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
+            "size": lingjing_video_size_tier(payload.resolution),
+            "images": images,
+        })
+        return body
+    body.update({
+        "images": images,
+        "enhance_prompt": any(ord(ch) > 127 for ch in str(payload.prompt or "")),
+        "enable_upsample": bool(payload.enable_upsample),
+        "aspect_ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
+    })
+    return body
+
+
+def build_lingjing_volc_video_body(payload, model, images, roles):
+    """豆包 Seedance 走火山方舟格式（灵境加 /volc 前缀）。"""
+    content = [{"type": "text", "text": str(payload.prompt or "")}]
+    for url, role in zip(images, roles):
+        item = {"type": "image_url", "image_url": {"url": url}}
+        role_name = str(role or "").strip().lower()
+        if role_name in {"first_frame", "last_frame", "reference_image"}:
+            item["role"] = role_name
+        content.append(item)
+    body = {
+        "model": model,
+        "content": content,
+        "ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
+        "resolution": lingjing_video_size_tier(payload.resolution),
+        "duration": lingjing_video_duration(payload.duration, 5, 2, 12),
+    }
+    if payload.watermark:
+        body["watermark"] = True
+    if payload.camerafixed:
+        body["camera_fixed"] = True
+    if payload.seed is not None:
+        body["seed"] = payload.seed
+    return body
+
+
+def build_lingjing_minimax_video_body(payload, model, images):
+    """海螺 MiniMax：POST /minimax/v1/video_generation（时长只支持 6 / 10）。"""
+    duration = lingjing_video_duration(payload.duration, 6, 1, 10)
+    body = {
+        "model": model,
+        "prompt": str(payload.prompt or ""),
+        "duration": 10 if duration >= 8 else 6,
+    }
+    if images:
+        body["first_frame_image"] = images[0]
+    if len(images) > 1:
+        body["last_frame_image"] = images[-1]
+    return body
+
+
+# 灵境模型广场用的是「公共名」，可灵上游只认自己的 model_name。
+# 实测：kling-3.0-turbo -> kling-v3；kling-video -> kling-v2-5-turbo。
+LINGJING_KLING_MODEL_ALIASES = {
+    "kling-3.0-turbo": "kling-v3",
+    "kling-video": "kling-v2-5-turbo",
+    "kling-omni-video": "kling-v3-omni",
+    "kling-motion-control": "kling-v2-5-turbo",
+    "kling-video-extend": "kling-v2-5-turbo",
+}
+
+
+def lingjing_kling_model_name(model):
+    name = str(model or "").strip()
+    return LINGJING_KLING_MODEL_ALIASES.get(name.lower(), name)
+
+
+def lingjing_kling_action(model):
+    """可灵的专用子接口（动作控制 / 延长 / omni 与普通文生、图生视频不同）。"""
+    name = str(model or "").strip().lower()
+    if name.endswith("omni-video"):
+        return "omni-video"
+    if name.endswith("motion-control"):
+        return "motion-control"
+    if name.endswith("video-extend"):
+        return "video-extend"
+    return ""
+
+
+def build_lingjing_kling_video_body(payload, model, images):
+    """快手可灵：POST /kling/v1/videos/{text2video|image2video}（duration 是字符串 5/10）。"""
+    body = {
+        "model_name": lingjing_kling_model_name(model),
+        "prompt": str(payload.prompt or ""),
+        "negative_prompt": "",
+        "cfg_scale": 0.5,
+        "mode": "std",
+        "aspect_ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
+        "duration": "10" if lingjing_video_duration(payload.duration, 5, 5, 10) >= 8 else "5",
+    }
+    if images:
+        body["image"] = images[0]
+        if len(images) > 1:
+            body["image_tail"] = images[1]
+    if payload.seed is not None:
+        body["seed"] = payload.seed
+    return body
+
+
+def build_lingjing_luma_video_body(payload, model, images):
+    """Luma：POST /luma/generations（时长只支持 5s）。"""
+    body = {
+        "user_prompt": str(payload.prompt or ""),
+        "model_name": model,
+        "expand_prompt": True,
+        "loop": False,
+        "resolution": "1080p" if "1080" in str(payload.resolution or "").lower() else "720p",
+        "duration": "5s",
+    }
+    if images:
+        body["image_url"] = images[0]
+    if len(images) > 1:
+        body["image_end_url"] = images[1]
+    return body
+
+
+def build_lingjing_runway_video_body(payload, model, images):
+    """Runway：POST /runwayml/v1/image_to_video，必须有首帧图。"""
+    if not images:
+        raise HTTPException(status_code=400, detail="Runway 视频需要一张首帧参考图（promptImage）。")
+    body = {
+        "model": model,
+        "promptImage": images[0],
+        "promptText": str(payload.prompt or ""),
+        "ratio": "1280:768" if lingjing_video_aspect(payload.aspect_ratio).startswith("16:") else "768:1280",
+        "duration": 10 if lingjing_video_duration(payload.duration, 5, 5, 10) >= 8 else 5,
+    }
+    if payload.seed is not None:
+        body["seed"] = payload.seed
+    return body
+
+
+def build_lingjing_vidu_video_body(payload, model, images):
+    """Vidu 官方：POST /ent/v2/{text2video|img2video|start-end2video}。
+    resolution 用小写档位（540p/720p/1080p），duration 按模型不同上限 16。"""
+    body = {
+        "model": model,
+        "prompt": str(payload.prompt or ""),
+        "duration": lingjing_video_duration(payload.duration, 5, 1, 16),
+        "aspect_ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
+        "resolution": lingjing_video_size_tier(payload.resolution, "720p").lower(),
+    }
+    if images:
+        body["images"] = images[:2]
+    if payload.seed is not None:
+        body["seed"] = str(payload.seed)
+    return body
+
+
+def build_lingjing_alibailian_video_body(payload, model, images):
+    """通义万象（阿里百炼）：POST /alibailian/api/v1/services/aigc/video-generation/video-synthesis。"""
+    inputs = {"prompt": str(payload.prompt or "")}
+    if images:
+        inputs["img_url"] = images[0]
+    parameters = {
+        "resolution": lingjing_video_size_tier(payload.resolution),
+        "prompt_extend": True,
+        "watermark": bool(payload.watermark),
+    }
+    duration = lingjing_video_duration(payload.duration, 0, 0, 12)
+    if duration:
+        parameters["duration"] = duration
+    if payload.seed is not None:
+        parameters["seed"] = payload.seed
+    return {"model": model, "input": inputs, "parameters": parameters}
+
+
+def lingjing_video_plan(provider, family, model, payload, images, roles):
+    """返回 (提交地址, 请求体, 查询子类型)。纯函数，便于单测。"""
+    base = video_api_root(provider)
+    if not base:
+        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    if family == "unified":
+        return f"{base}/v1/video/create", build_lingjing_unified_video_body(payload, model, images), ""
+    if family == "volc":
+        return f"{base}/volc/v1/contents/generations/tasks", build_lingjing_volc_video_body(payload, model, images, roles), ""
+    if family == "minimax":
+        return f"{base}/minimax/v1/video_generation", build_lingjing_minimax_video_body(payload, model, images), ""
+    if family == "kling":
+        kind = lingjing_kling_action(model) or ("image2video" if images else "text2video")
+        return f"{base}/kling/v1/videos/{kind}", build_lingjing_kling_video_body(payload, model, images), kind
+    if family == "luma":
+        return f"{base}/luma/generations", build_lingjing_luma_video_body(payload, model, images), ""
+    if family == "runway":
+        return f"{base}/runwayml/v1/image_to_video", build_lingjing_runway_video_body(payload, model, images), ""
+    if family == "vidu":
+        kind = "start-end2video" if len(images) > 1 else ("img2video" if images else "text2video")
+        return f"{base}/ent/v2/{kind}", build_lingjing_vidu_video_body(payload, model, images), kind
+    if family == "alibailian":
+        return f"{base}/alibailian/api/v1/services/aigc/video-generation/video-synthesis", build_lingjing_alibailian_video_body(payload, model, images), ""
+    raise HTTPException(status_code=400, detail=f"未知的灵境视频厂商：{family}")
+
+
+def lingjing_video_query_url(provider, family, task_id, subkind=""):
+    base = video_api_root(provider)
+    quoted = urllib.parse.quote(str(task_id), safe="")
+    if family == "unified":
+        return f"{base}/v1/video/query?{urllib.parse.urlencode({'id': task_id})}"
+    if family == "volc":
+        return f"{base}/volc/v1/contents/generations/tasks/{quoted}"
+    if family == "minimax":
+        return f"{base}/minimax/v1/query/video_generation?{urllib.parse.urlencode({'task_id': task_id})}"
+    if family == "kling":
+        return f"{base}/kling/v1/videos/{subkind or 'text2video'}/{quoted}"
+    if family == "luma":
+        return f"{base}/luma/generations/{quoted}"
+    if family == "runway":
+        return f"{base}/runwayml/v1/tasks/{quoted}"
+    if family == "vidu":
+        # Vidu 官方查询：/ent/v2/tasks/{id}/creations
+        return f"{base}/ent/v2/tasks/{quoted}/creations"
+    if family == "alibailian":
+        return f"{base}/alibailian/api/v1/tasks/{quoted}"
+    return f"{base}/v1/videos/{quoted}"
+
+
+def lingjing_video_status(raw):
+    if not isinstance(raw, dict):
+        return ""
+    nodes = [raw]
+    # data/detail/result：多数厂商；output：通义万象（task_status=RUNNING/SUCCEEDED）；
+    # Response：Vidu 官方（Status=FINISH/FAIL）。
+    for key in ("data", "detail", "result", "output", "Response"):
+        node = raw.get(key)
+        if isinstance(node, dict):
+            nodes.append(node)
+            inner = node.get("data")
+            if isinstance(inner, dict):
+                nodes.append(inner)
+    for node in nodes:
+        for key in ("status", "task_status", "state", "taskStatus"):
+            value = node.get(key)
+            if value:
+                return str(value).strip().lower()
+    return ""
+
+
+def _lingjing_collect_file_urls(node, urls, inside_output=False):
+    """只在 FileInfos / Creations 子树里取 url，避免把请求回显里的输入图当成结果。"""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            now_inside = inside_output or str(key).lower() in {"fileinfos", "creations"}
+            if now_inside and isinstance(value, str) and value.startswith(("http://", "https://")):
+                urls.append(value)
+            elif isinstance(value, (dict, list)):
+                _lingjing_collect_file_urls(value, urls, now_inside)
+    elif isinstance(node, list):
+        for item in node:
+            _lingjing_collect_file_urls(item, urls, inside_output)
+
+
+def lingjing_video_output_urls(raw):
+    """在通用提取之外，补 MiniMax 的 file.download_url 与 Vidu 的 creations[].url / result_url。"""
+    urls = list(video_output_urls(raw))
+    if isinstance(raw, dict):
+        # MiniMax：file.download_url（实际挂在根节点，文档写的是 data.data.file）
+        candidates = [raw, raw.get("data")]
+        data = raw.get("data")
+        if isinstance(data, dict):
+            candidates.append(data.get("data"))
+        for node in candidates:
+            if not isinstance(node, dict):
+                continue
+            file_info = node.get("file")
+            if isinstance(file_info, dict):
+                for key in ("download_url", "backup_download_url"):
+                    value = str(file_info.get(key) or "").strip()
+                    if value.startswith(("http://", "https://")):
+                        urls.append(value)
+        # Vidu：根节点的 creations[].url / result_url；阿里百炼：FileInfos[].FileUrl
+        _lingjing_collect_file_urls(raw, urls)
+    deduped = []
+    for url in urls:
+        if url and url not in deduped:
+            deduped.append(url)
+    return deduped
+
+
+async def wait_for_lingjing_video_task(client, provider, family, task_id, model, subkind=""):
+    url = lingjing_video_query_url(provider, family, task_id, subkind)
+    deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
+    delay = 5.0
+    last_payload = {}
+    while time.monotonic() < deadline:
+        await asyncio.sleep(delay)
+        response = await client.get(url, headers=api_headers(provider=provider, model=model))
+        response.raise_for_status()
+        raw = response.json()
+        last_payload = raw
+        status = lingjing_video_status(raw)
+        urls = lingjing_video_output_urls(raw)
+        if urls and (not status or status in LINGJING_VIDEO_OK_STATUSES):
+            return raw
+        if status in LINGJING_VIDEO_FAIL_STATUSES:
+            raise HTTPException(status_code=502, detail=f"灵境视频任务失败（{status}）：{raw}")
+        delay = min(delay * 1.35, 12)
+    raise HTTPException(status_code=504, detail=f"灵境视频任务超时：{last_payload or task_id}")
+
+
+async def generate_lingjing_vendor_video(client, payload, provider, base_url, requested_model, family):
+    model = selected_model(requested_model, "veo3.1-fast")
+    image_limit = 2 if family in {"kling", "luma", "runway"} else 4
+    images, roles = lingjing_video_image_payload(payload, image_limit)
+    submit_url, body, subkind = lingjing_video_plan(provider, family, model, payload, images, roles)
+    response = await client.post(submit_url, headers=api_headers(provider=provider, model=model), json=body)
+    response.raise_for_status()
+    raw = response.json()
+    task_id = str(raw.get("id") or extract_task_id(raw) or raw.get("task_id") or "").strip()
+    if not task_id:
+        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+        task_id = str(data.get("task_id") or data.get("id") or "").strip()
+    if not task_id:
+        raise HTTPException(status_code=502, detail=f"灵境视频接口没有返回任务 ID：{raw}")
+    result = raw
+    if not lingjing_video_output_urls(raw):
+        result = await wait_for_lingjing_video_task(client, provider, family, task_id, model, subkind)
+    urls = lingjing_video_output_urls(result)
+    if not urls:
+        raise HTTPException(status_code=502, detail=f"灵境视频生成成功但没有返回视频：{result}")
+    local_urls = [await save_remote_video_to_output(url) for url in urls]
+    return {"videos": local_urls, "task_id": task_id, "raw": result}
+
 
 async def generate_yuli_openai_video(client, payload, provider, base_url, requested_model):
     """玉玉API veo3.1 走 OpenAI multipart 格式 /v1/videos，支持 seconds 时长控制。"""
@@ -16102,8 +16702,11 @@ async def canvas_video_run(payload: CanvasVideoRequest):
             log_net_error(f"视频(Agnes) 网络/TLS错误 model={requested_model}", exc)
             raise HTTPException(status_code=502, detail=f"请求 Agnes 视频接口失败：{exc}") from exc
     if is_lingjing:
+        lingjing_family = lingjing_video_family(requested_model)
         try:
             async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=VIDEO_POLL_TIMEOUT) as lingjing_client:
+                if lingjing_family:
+                    return await generate_lingjing_vendor_video(lingjing_client, payload, provider, base_url, requested_model, lingjing_family)
                 return await generate_lingjing_openai_video(lingjing_client, payload, provider, base_url, requested_model)
         except httpx.HTTPStatusError as exc:
             text = exc.response.text

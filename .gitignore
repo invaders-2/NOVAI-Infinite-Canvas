@@ -44,6 +44,7 @@ static/runninghub/api_providers.json
 
 # 日志
 logs/
+_novai_*.log
 
 # 编辑器 / IDE / 工具
 .claude/

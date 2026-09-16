@@ -81,6 +81,36 @@
       "id": "cli-image",
       "kind": "model",
       "version": 1
+    },
+    {
+      "id": "lingjing-image",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "lingjing-chat",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "lingjing-video",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "agnes-ai-image",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "agnes-ai-chat",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "agnes-video",
+      "kind": "model",
+      "version": 1
     }
   ]
 }

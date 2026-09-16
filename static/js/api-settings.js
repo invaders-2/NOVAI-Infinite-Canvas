@@ -240,10 +240,18 @@ const RECOMMENDED_APIS = [
         summaryKey:'api.recommendLingjingSummary',
         advantages:['签到送积分', '六折专属优惠', '图像/视频/LLM 全覆盖'],
         // 添加平台时预填的默认模型列表（含逐模型协议覆盖）
-        image_models:['gpt-image-2', 'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview'],
-        chat_models:['gpt-5.5'],
-        video_models:['veo3.1-fast'],
-        model_protocols:{'gemini-3.1-flash-image-preview':'gemini', 'gemini-3-pro-image-preview':'gemini'}
+        // 图像：OpenAI 兼容走 /v1/images/*；Gemini 系列必须用 gemini 协议（/v1beta）。
+        // 灵境不同「分组」可用模型不同，默认分组通常没有 Gemini 系列；拉取模型后按实际删减即可。
+        image_models:['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'gpt-image-2-c', 'grok-imagine-image', 'qwen-image-2.0-2026-03-03', 'qwen-image-edit-2509', 'z-image-turbo', 'wan2.7-image-pro', 'gemini-3-pro-image', 'gemini-3-pro-image-preview', 'gemini-3.1-flash-image', 'gemini-3.1-flash-image-preview', 'gemini-3.1-flash-lite-image'],
+        // 文本：Gemini 走灵境的 OpenAI 兼容 /v1/chat/completions（chat兼容格式），
+        // 所以不要给它们加 gemini 协议覆盖（gemini 协议只用于 Gemini 图像模型）。
+        chat_models:['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.4', 'claude-sonnet-5', 'claude-opus-4-8', 'grok-4.5', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-3.6-flash'],
+        // 视频：veo 走 OpenAI /v1/videos；其余按模型前缀分发到灵境各自的厂商路径
+        // （通用统一格式 / 豆包 / 海螺 / 可灵 / Vidu / Luma / 通义万象 happyhorse）。
+        video_models:['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-02', 'kling-3.0-turbo', 'kling-video', 'viduq3-pro', 'viduq3-turbo', 'viduq2', 'vidu2.0', 'wan2.6-i2v', 'happyhorse-1.1-t2v', 'happyhorse-1.1-i2v', 'veo3.1-fast', 'veo3.1', 'sora-2', 'sora-2-pro', 'jimeng-video-3.0', 'doubao-seedance-1-5-pro-251215', 'ray-v2'],
+        // 协议自动推断：gemini-*-image* 自动走 gemini，其余跟随平台 openai；
+        // 这里留空即可，用户在设置里手动选择时会写进 model_protocols 作为显式覆盖。
+        model_protocols:{}
     },
     {
         id:'modelscope',
@@ -262,10 +270,12 @@ const RECOMMENDED_APIS = [
         advantages:['免费额度可用', '需要绑定阿里云账号', '适合基础图像与 LLM 测试']
     },
     {
+        id:'agnes-ai',
         name:'Agnes AI',
         category:'free',
         base_url:'https://apihub.agnes-ai.com',
         protocol:'openai',
+        // Agnes 生图走 /v1/images/generations JSON（见 detect_image_request_mode）
         image_request_mode:'openai-json',
         register_url:'https://platform.agnes-ai.com/settings/apiKeys',
         tagKeys:['api.tagImageModels','api.tagVideoModels','api.tagLlmModels'],
@@ -274,9 +284,10 @@ const RECOMMENDED_APIS = [
         perkKey:'api.recommendAgnesFree',
         perkClass:'recommend-free-tag',
         advantages:['免费额度可用', '支持 Agnes 图像与视频接口', 'OpenAI 兼容地址配置简单'],
-        image_models:['agnes-image-2.1-flash', 'agnes-image-2.0-flash'],
-        chat_models:[],
-        video_models:['agnes-video-v2.0']
+        image_models:['agnes-image-2.5-flash', 'agnes-image-2.1-flash', 'agnes-image-2.0-flash'],
+        chat_models:['agnes-3.0-flash', 'agnes-2.5-pro', 'agnes-2.5-pro-beta', 'agnes-2.5-flash', 'agnes-2.0-flash'],
+        video_models:['agnes-video-2.5', 'agnes-video-2.5-flash', 'agnes-video-v2.0'],
+        model_protocols:{}
     }
 ];
 const RECOMMEND_GROUPS = [
@@ -3465,17 +3476,55 @@ async function clearKeyOnly(){
     const ok = await saveProviders();
     if(ok) keyInput.value = '';
 }
-const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'runninghub']);
+// 与后端 FIXED_PROTOCOL_PROVIDER_IDS 对齐：这些平台协议固定，不显示/不接受单模型协议覆盖。
+const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'jimeng', 'runninghub']);
 function providerSupportsModelProtocol(item){
     return Boolean(item) && !FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
 }
+// Gemini 图像模型名（gemini-3-pro-image / gemini-3.1-flash-image-preview ...）。
+// 只认「gemini + image」组合：Gemini 文本模型在各中转站走 OpenAI 兼容 chat 路径，不能一起切。
+function looksLikeGeminiImageModel(model){
+    const name = String(model || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return name.indexOf('gemini') === 0 && name.indexOf('image') >= 0;
+}
+// 该模型实际生效的协议：显式覆盖优先；没有覆盖时按模型名自动推断（只对图像）。
+function inferredModelProtocol(kind, model){
+    if(kind === 'image' && looksLikeGeminiImageModel(model)) return 'gemini';
+    return '';
+}
+// 视频没有协议概念：按模型名前缀自动分发到各厂商接口（与后端 lingjing_video_family 一致）。
+const VIDEO_VENDOR_RULES = [
+    ['通义万象', /^(happyhorse-|wan2\.|wan-)/],
+    ['豆包Seedance', /^(doubao-seedance|doubao-)/],
+    ['海螺', /^(minimax-hailuo|minimax)/],
+    ['可灵', /^kling/],
+    ['Luma', /^(luma|ray-)/],
+    ['Runway', /^(runway|gen3a_|gen4_|gen3a-turbo|gen4-turbo)/],
+    ['Vidu', /^(vidu|tc-vidu)/],
+    ['统一格式', /^(jimeng-video|jimeng-|sora-|sora2)/],
+    ['OpenAI视频', /^veo/]
+];
+function inferVideoVendor(model){
+    const name = String(model || '').trim().toLowerCase();
+    if(!name) return '';
+    const hit = VIDEO_VENDOR_RULES.find(rule => rule[1].test(name));
+    return hit ? hit[0] : '';
+}
+function videoVendorBadgeHtml(model){
+    const vendor = inferVideoVendor(model) || '自动';
+    return '<span class="model-protocol-auto" title="视频按模型名自动分发到对应厂商接口，无需配置协议">' + escapeHtml(vendor) + '</span>';
+}
 function modelProtocolSelectHtml(kind, index, model, item){
-    if(kind === 'video' || !providerSupportsModelProtocol(item)) return '';
+    if(!providerSupportsModelProtocol(item)) return '';
+    if(kind === 'video') return videoVendorBadgeHtml(model);
     const map = (item.model_protocols && typeof item.model_protocols === 'object') ? item.model_protocols : {};
     const current = String(map[String(model || '').trim()] || '').toLowerCase();
+    // 没有显式覆盖时，把「自动推断」的结果写进默认项，用户一眼能看到实际生效的协议。
+    const auto = current ? '' : inferredModelProtocol(kind, model);
+    const defaultLabel = auto ? '自动（' + (auto === 'gemini' ? 'Gemini' : 'OpenAI') + '）' : '默认';
     const opt = (val, label) => `<option value="${val}" ${current === val ? 'selected' : ''}>${label}</option>`;
     return `<select class="model-protocol-select" title="该模型使用的协议，默认跟随平台全局协议" onchange="updateModelProtocol('${kind}', ${index}, this.value)">
-        <option value="" ${current === '' ? 'selected' : ''}>默认</option>
+        <option value="" ${current === '' ? 'selected' : ''}>${defaultLabel}</option>
         ${opt('openai', 'OpenAI')}
         ${opt('gemini', 'Gemini')}
     </select>`;
@@ -3490,7 +3539,7 @@ function renderModels(kind){
         list.innerHTML = `<div class="empty">${tr('api.noModels')}</div>`;
         return;
     }
-    const showProtocol = kind !== 'video' && providerSupportsModelProtocol(item);
+    const showProtocol = providerSupportsModelProtocol(item);
     list.innerHTML = models.map((model, index) => {
         const label = modelDisplayName(model, item);
         return `

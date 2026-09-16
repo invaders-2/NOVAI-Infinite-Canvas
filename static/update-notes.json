@@ -1,7 +1,55 @@
 {
-  "version": "1.0.115",
-  "updated_at": "2026-09-10T18:21:08+08:00",
+  "version": "1.0.117",
+  "updated_at": "2026-09-16T20:10:00+08:00",
   "items": [
+    {
+      "type": "fix",
+      "text": "修复 gpt-image-1 / gpt-image-1.5 在部分中转完全无法出图：请求体携带了顶层 response_format，而新版官方图像接口已移除该参数（上游报 unknown_parameter: 'response_format'）。现在这系列不再发送该参数，其它上游若明确报该参数不支持也会自动去掉重试一次"
+    },
+    {
+      "type": "improvement",
+      "text": "生成图片下方标注真实像素尺寸（如 gpt-image-2 · 1254×1254）：部分上游通道并不按请求分辨率出图（灵境 gpt-image-2 恒约 1.5MP），选 2K/4K 只会按比例降采样，标注真实尺寸可避免误判为 2K/4K"
+    },
+    {
+      "type": "fix",
+      "text": "GPT 聊天模型选择器只显示「已经配置好的」平台：要求平台已启用 + 已填 Key + 有模型列表；未配置的平台、以及内置默认模型（gpt-5.5 / gpt-4o-mini / ModelScope 默认聊天模型）都不再出现在列表里，也不再作为兜底模型发送；没有任何可用模型时显示「未配置」并提示去 API 设置添加"
+    },
+    {
+      "type": "fix",
+      "text": "停用 ModelScope 内置默认聊天模型：Qwen/Qwen3-235B-A22B 等已下线模型不再作为默认值下发（原先会以「已配置」的样子出现并直接报 has no provider supported），并从老用户已保存的配置里清理一次；ModelScope 聊天模型现在只认自己拉取/保存过的"
+    },
+    {
+      "type": "improvement",
+      "text": "GPT 聊天顶部去掉可见边框/色块：顶栏底色与页面背景完全同色（不再有白条与分隔线），只保留背景模糊，消息从上方滚过时被虚化；首条消息自动下移到该层下方，深浅色主题都自适应"
+    },
+    {
+      "type": "fix",
+      "text": "修复 GPT 聊天页聊几轮后无法上滚查看历史：流式输出时每个字都无条件把聊天区拉回底部，用户往上滚会被立刻抢回去；现改为只在仍贴底时跟随最新消息，用户主动上滚即停止跟随（滚回底部自动恢复），翻历史时消息重建也不再弹回底部"
+    },
+    {
+      "type": "feature",
+      "text": "灵境 API：新增视频厂商分发 —— 海螺 MiniMax、可灵 Kling、Vidu、通义万象(happyhorse/wan)、豆包 Seedance、Luma、Runway、通用统一格式，按模型名前缀自动路由（含各厂商的时长/分辨率/查询接口差异）"
+    },
+    {
+      "type": "feature",
+      "text": "灵境 API：模型协议自动推断 —— Gemini 图像模型（gemini-*-image*）自动走 /v1beta 原生协议，其余沿用平台 OpenAI 兼容；文本模型保持 OpenAI 兼容 chat 路径。不再需要手动给每个模型配协议"
+    },
+    {
+      "type": "feature",
+      "text": "灵境 API：拉取模型时自动补齐被令牌分组过滤掉的 Gemini 模型（官方 /v1/models 不返回，但可直接调用）"
+    },
+    {
+      "type": "feature",
+      "text": "Agnes AI：新增 Video 2.5 / 2.5 Flash 视频模型（OpenAI Videos 兼容协议：mode/seconds/size/aspect_ratio + video_id 轮询），兼容原有 v2.0"
+    },
+    {
+      "type": "feature",
+      "text": "协议表：新增灵境 / Agnes 的文本、图像、视频模型生成协议条目，/api/ai/descriptor 现在能认这两个平台的 video 意图"
+    },
+    {
+      "type": "fix",
+      "text": "一键更新白名单补上 server/ 目录 —— 之前协议表等模块化后端代码不会随更新下发，老用户更新后仍是旧协议表"
+    },
     {
       "type": "feature",
       "text": "图片节点新增「专业调色」：glfx(WebGL) 实时滤镜，光线／颜色／曲线／细节／效果 5 组参数 + RGB 曲线可拖点，拖拽分割线对比原图；应用后生成新图片节点，原图保留"

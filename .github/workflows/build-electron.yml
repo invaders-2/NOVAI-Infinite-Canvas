@@ -52,10 +52,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p desktop/resources/backend
+          # server/protocols/*.json 是数据文件，不带 --add-data 的话打不进 PyInstaller 包
+          if [ "$RUNNER_OS" = "Windows" ]; then SEP=";"; else SEP=":"; fi
           pyinstaller --onefile --console -y --name NOVAI \
             --hidden-import=uvicorn.logging \
             --hidden-import=uvicorn.loops.auto \
             --hidden-import=uvicorn.protocols.http.auto \
+            --add-data "server${SEP}server" \
             main.py
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp dist/NOVAI.exe desktop/resources/backend/NOVAI.exe

@@ -120,7 +120,7 @@ def copy_business_files(app_path):
             shutil.copy2(src, os.path.join(macos_dir, f))
 
     # 目录
-    for folder in ["static", "tools", "packages"]:
+    for folder in ["static", "server", "tools", "packages"]:
         src = os.path.join(ROOT, folder)
         dst = os.path.join(macos_dir, folder)
         if os.path.isdir(dst):

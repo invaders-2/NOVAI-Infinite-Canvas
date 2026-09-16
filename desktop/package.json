@@ -47,6 +47,10 @@
         "to": "backend/static"
       },
       {
+        "from": "../server",
+        "to": "backend/server"
+      },
+      {
         "from": "../workflows",
         "to": "backend/workflows"
       },

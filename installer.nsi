@@ -1,4 +1,4 @@
-﻿; NOVAI Windows 安装脚本 (NSIS 3.x)
+; NOVAI Windows 安装脚本 (NSIS 3.x)
 ; 用法: makensis installer.nsi
 
 Unicode true
@@ -78,6 +78,10 @@ Section "Install"
 
   SetOutPath "$INSTDIR\tools"
   File /r /x "*.pyc" /x "__pycache__" /x "test-*.png" /x "tmp_*.png" /x "*.log" /x ".env" "tools\*.*"
+
+  ; 模块化后端（server/protocols 的协议表是 main.py 运行必需的数据文件）
+  SetOutPath "$INSTDIR\server"
+  File /r /x "*.pyc" /x "__pycache__" /x "test-*.png" /x "tmp_*.png" /x "*.log" /x ".env" "server\*.*"
 
   SetOutPath "$INSTDIR"
 

@@ -12,7 +12,7 @@ subprocess.run([sys.executable, '-m', 'pip', 'install', 'pywebview', 'pyinstalle
 
 # 收集数据文件
 add_data = []
-for folder in ['static', 'tools', 'packages']:
+for folder in ['static', 'server', 'tools', 'packages']:
     p = os.path.join(ROOT, folder)
     if os.path.isdir(p):
         add_data.append(f'--add-data="{p}{os.pathsep}{folder}"')

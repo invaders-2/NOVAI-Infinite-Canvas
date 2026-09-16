@@ -659,6 +659,384 @@
       },
       "param_engine": "api",
       "docs": []
+    },
+    {
+      "id": "lingjing-image",
+      "label": "灵境 API 图片",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "provider_ids": [
+          "lingjing"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "size": "1024x1024",
+        "quality": "auto",
+        "n": 1
+      },
+      "limits": {
+        "n": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "lingjing-chat",
+      "label": "灵境 API 对话",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "llm.chat",
+        "llm.chat.vision",
+        "llm.tools",
+        "llm.structured_output"
+      ],
+      "match": {
+        "provider_ids": [
+          "lingjing"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {},
+      "limits": {},
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "lingjing-video",
+      "label": "灵境 API 视频",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "video.generate",
+        "video.text_to_video",
+        "video.image_to_video",
+        "video.first_last_frame",
+        "video.multi_reference"
+      ],
+      "match": {
+        "provider_ids": [
+          "lingjing"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 3,
+          "roles": [
+            "first_frame",
+            "last_frame",
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "duration": 8,
+        "aspect_ratio": "16:9"
+      },
+      "limits": {
+        "duration": {
+          "min": 1,
+          "max": 8
+        }
+      },
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "agnes-ai-image",
+      "label": "Agnes AI 图片",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "provider_ids": [
+          "agnes-ai"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "size": "1024x1024",
+        "quality": "auto",
+        "n": 1
+      },
+      "limits": {
+        "n": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "agnes-ai-chat",
+      "label": "Agnes AI 对话",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "llm.chat",
+        "llm.chat.vision",
+        "llm.tools",
+        "llm.structured_output"
+      ],
+      "match": {
+        "provider_ids": [
+          "agnes-ai"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {},
+      "limits": {},
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "agnes-video",
+      "label": "Agnes AI 视频",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "video.generate",
+        "video.text_to_video",
+        "video.image_to_video",
+        "video.first_last_frame",
+        "video.multi_reference"
+      ],
+      "match": {
+        "provider_ids": [
+          "agnes-ai"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 4,
+          "roles": [
+            "first_frame",
+            "last_frame",
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "duration": 5,
+        "aspect_ratio": "16:9"
+      },
+      "limits": {
+        "duration": {
+          "min": 1,
+          "max": 15
+        }
+      },
+      "param_engine": "api",
+      "docs": []
     }
   ]
 }
