@@ -9381,6 +9381,50 @@ function smartGroupBodyHtml(node){
 /* 表格 / 批量节点没有画布自带的缩放把手（那是按图片/提示词节点渲染的），
    而画布的 resize 绑定在 bindNodeEvents() 里找 .node-resize-handle —— 我们必须在它之前补上，
    否则这两种节点根本没有可拖的把手（量到 hasHandle:false）。 */
+/* 尝试过在 document 的 pointerdown 里接管 LLM 节点缩放 —— 实测也不生效（cls 始终 false），已移除。 */
+/* 下面这段留着是为了记下这条路走不通；真正的实现见后面对表格/批量节点用的 ensureNodeResizeHandle。 */
+if(false) document.addEventListener('pointerdown', event => {
+    if(event.button !== 0) return;
+    const target = event.target;
+    const handle = target && target.closest ? target.closest('.node-resize-handle') : null;
+    if(!handle) return;
+    const el = handle.closest('.image-node');
+    if(!el || !el.querySelector('.prompt-node-llm')) return;
+    const node = (nodes || []).find(item => item.id === el.dataset.id);
+    if(!node) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = el.getBoundingClientRect();
+    const startW = rect.width;
+    const startH = rect.height;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let armed = false;
+    const onMove = moveEvent => {
+        if(!armed){
+            if(Math.abs(moveEvent.clientX - startX) < 3 && Math.abs(moveEvent.clientY - startY) < 3) return;
+            armed = true;
+            el.classList.add('size-user-set');
+            node.sizeUserSet = true;
+            document.body.classList.add('smart-node-resize');
+        }
+        const w = Math.max(240, Math.round(startW + (moveEvent.clientX - startX)));
+        const h = Math.max(200, Math.round(startH + (moveEvent.clientY - startY)));
+        node.w = w;
+        node.h = h;
+        el.style.width = w + 'px';
+        el.style.height = h + 'px';
+    };
+    const onUp = () => {
+        document.removeEventListener('pointermove', onMove, true);
+        document.removeEventListener('pointerup', onUp, true);
+        document.body.classList.remove('smart-node-resize');
+        if(armed){ render(); scheduleSave(); }
+    };
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', onUp, true);
+}, true);
+
 function ensureNodeResizeHandle(hostEl){
     const el = hostEl.closest ? hostEl.closest('.image-node') : null;
     if(!el || el.querySelector('.node-resize-handle')) return;
@@ -10401,15 +10445,17 @@ function bindPromptNodeControls(el, node){
     const sizeHandle = el.querySelector('.node-resize-handle');
     if(sizeHandle && !sizeHandle.dataset.selfBound){
         sizeHandle.dataset.selfBound = '1';
-        sizeHandle.addEventListener('mousedown', event => {
+        sizeHandle.addEventListener('pointerdown', event => {
             if(event.button !== 0) return;
             event.preventDefault();
             event.stopPropagation();
             const startX = event.clientX;
             const startY = event.clientY;
             const rect = el.getBoundingClientRect();
-            const startW = Number(node.w) || rect.width;
-            const startH = Number(node.h) || rect.height;
+            /* 起点一律取**当前渲染出来的尺寸**：绝不能拿旧的 node.h ——
+               那会让'点一下把手'就跳到以前存过的大尺寸（用户遇到过的突然变很长）。 */
+            const startW = rect.width;
+            const startH = rect.height;
             el.classList.add('size-user-set');
             node.sizeUserSet = true;
             const onMove = moveEvent => {
