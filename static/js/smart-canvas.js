@@ -9376,6 +9376,23 @@ function smartGroupBodyHtml(node){
 }
 /* 多维表格节点：把表格模块真实生成的 DOM 塞进节点 body 的壳里。
    表格模块返回元素而不是 HTML 串，所以渲染完节点后再挂一次。 */
+/* 表格 / 批量节点：默认跟着内容自适应；但用户一旦用画布的缩放把手拖过（node.sizeUserSet），
+   就不要再压他的尺寸 —— 否则拖了没反应（用户反馈"不能自适应框大小"就是这个）。 */
+function markNodeSizeUserSet(hostEl, node){
+    const el = hostEl.closest ? hostEl.closest('.image-node') : null;
+    if(!el) return;
+    if(node.sizeUserSet) el.classList.add('size-user-set');
+    const handle = el.querySelector('.node-resize-handle');
+    if(handle && !handle.dataset.sizeHooked){
+        handle.dataset.sizeHooked = '1';
+        handle.addEventListener('mouseup', () => {
+            node.sizeUserSet = true;
+            el.classList.add('size-user-set');
+            scheduleSave();
+        }, true);
+    }
+}
+
 /* 这条细栏是给智能画布拖拽用的把手：表格模块为了保护表内滚动/选格，
    在 .table-node 上用捕获阶段 stopPropagation 掉了 mousedown → 节点收不到拖动事件。
    把把手放在表格 DOM 外面（兄弟节点），事件就能冒泡到节点、正常拖动。 */
@@ -9411,6 +9428,7 @@ function mountSmartTableNodes(){
         if(!node || node.type !== 'table') return;
         syncTableConnections();
         hostEl.textContent = '';
+        markNodeSizeUserSet(hostEl, node);
         hostEl.appendChild(tableHostDragBar('多维表格'));
         try {
             hostEl.appendChild(api.renderTableBody(node));
@@ -18623,6 +18641,7 @@ function mountSmartBatchNodes(){
         if(!node || node.type !== 'smart-batch') return;
         syncTableConnections();
         hostEl.textContent = '';
+        markNodeSizeUserSet(hostEl, node);
         const bar = tableHostDragBar('批量生成');
         bar.classList.add('is-toggle');
         bar.title = '点击展开 / 收起生成列表（拖动这一栏可以移动节点）';

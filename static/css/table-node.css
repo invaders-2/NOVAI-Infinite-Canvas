@@ -552,11 +552,18 @@
    那边的布局是按 node.images 算尺寸的，这两种节点没有图片 → 会算出 133px 高的卡片，
    而表格内容有 390+px → 内容溢出、外框看不见、连标题栏都被盖住点不到（拖不动）。
    经典画布的表格节点是 .node.table-node，不受这条影响。 */
-.image-node:has(> .node-body > .table-node-host),
-.image-node:has(> .node-body > .table-batch-host) {
+.image-node:has(> .node-body > .table-node-host):not(.size-user-set),
+.image-node:has(> .node-body > .table-batch-host):not(.size-user-set) {
     width: auto !important;
     height: auto !important;
     min-width: 280px;
+}
+/* 用户拖过缩放把手后听他的尺寸；宽度始终自适应到至少能装下内容 */
+.image-node.size-user-set:has(> .node-body > .table-node-host),
+.image-node.size-user-set:has(> .node-body > .table-batch-host) {
+    min-width: 220px;
+    min-height: 120px;
+    overflow: hidden;
 }
 
 /* 智能画布 prompt 节点布局：中间一排工具（模板库/分隔符/LLM/启用系统提示词/反推），
