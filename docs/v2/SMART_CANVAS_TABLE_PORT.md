@@ -857,3 +857,29 @@ CDP Profiler（5 个表格）显示两个大头：
 - `tests/test_smart_canvas_table_wiring.js` 124/124（新增 [14] 节）；
 - `tests/test_table_node_dom.js` 372/372（面板操作区改为「依次生成 + 恢复上次」两个按钮）；
 - 其余四套全绿；浏览器实测：克隆用户画布上连拖 3 个批量节点，尺寸全程稳定、节点子树不重建；「依次生成」串行跑通。
+
+
+## 批量进度框不再提前收起 / 失败行有失败占位（2026-09-16 后续轮 19）
+
+现象：多次批量生成时「生成中」的进度框会消失，用户以为生成失败了。
+
+实测复现（克隆画布 + stub 出图）：一次 4 行的批量里只要有某一行**失败**（或某一行产出的 url 与已有重复，
+被 `cleanHistoryImages` 去重掉），`pending` 照样减到 0 → 进度占位格全部消失、节点只剩 2–3 张图，
+看上去就是「生成到一半没了」。行失败时面板 note 虽然写了「失败 N 行」，但节点上已经看不出是哪一行。
+
+修复：
+- 结果节点记三个数：`batchRunExpected`（这一批几行 —— 批量开始时写在批量节点 `_batchRunRows`，建结果节点时带过来）、
+  `batchRunLanded`（成功落地几行）、`batchRunFailed`（失败几行）；
+- 占位格数 = `max(pending, expected - landed - failed)`（`pendingSlotsForNode()`）：
+  只要还有行既没落地也没失败，进度框就不会收起；`imageLayout` 的格子数也走它；
+- 失败的那几格画成**失败占位**（`.pending-thumb.is-failed`：虚线红框 + 斜纹、不闪光），
+  一眼看出是「这一行失败了」而不是还在转；
+- 整批结束时（`mountSmartBatchNodes` 的兜底）把这些计数清零，不留幽灵格；
+  持久化时剥掉 `batchRunExpected/Landed/Failed` 与 `_batchRunRows`。
+
+实测（4 行、其中 2 行模拟失败、点两次让两批重叠）：
+`骨架 → 2 图 + 1 个转圈格 + 1 个失败格 → 2 图 + 2 个失败格`；
+两批各自的结果节点独立推进，全程进度框都在。
+
+### 验收
+- `tests/test_smart_canvas_table_wiring.js` 134/134（新增 [15] 节）；其余五套全绿。

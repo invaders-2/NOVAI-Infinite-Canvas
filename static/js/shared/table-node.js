@@ -1507,6 +1507,8 @@ async function runTableBatch(genId, options={}){
        _batchRunning / tableBatchRunning 留在 true —— 那会让这个节点**再也跑不动**
        （用户报的「批量生成，无法再次生成」），而且标志还会被存进画布。 */
     gen._batchRunCount = Math.max(0, Number(gen._batchRunCount) || 0) + 1;
+    /* 这一批要跑几行：结果节点用它算「还剩几格」，进度框不会因为某一行失败/产出重复就提前收起来。 */
+    gen._batchRunRows = pending.length;
     gen._batchRunning = true;
     table.tableBatchRunning = true;
     gen._batchProgress = {total:pending.length, done:0, failed:0};

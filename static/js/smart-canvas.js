@@ -959,7 +959,12 @@ function canvasForStorage(){
         delete node._batchRunning;
         delete node._batchProgress;
         delete node._batchRunCount;
+        delete node._batchRunRows;
         delete node.tableBatchRunning;
+        /* 结果节点的「这一批还剩几格」也是页面内的临时状态 */
+        delete node.batchRunExpected;
+        delete node.batchRunLanded;
+        delete node.batchRunFailed;
         delete node.__renderHtml;   // 渲染缓存：只在页面内用，别写进画布
         delete node.__renderKey;
     });
@@ -2335,7 +2340,7 @@ function imageLayout(images, scale=1, node=null){
        结果节点先出一张、剩下的还在跑 —— 只按已有图片算的话，第一张一落地
        节点就被缩略图网格顶掉、进度框消失（用户报的「另外还没生成的看不到进度」）。
        pending 归零后 count 恢复成真实张数，节点自动收紧。 */
-    const gridCount = count + Math.max(0, Number(node?.pending) || 0);
+    const gridCount = count + pendingSlotsForNode(node);
     if(gridCount <= 1) return singleImageLayout(images[0], node, s);
     const thumb = Math.round(MEDIA_GROUP_THUMB_BASE * s);
     const cell = thumb + 8;
@@ -9672,10 +9677,11 @@ function nodeBodyHtml(node, layout){
         const rows = Math.ceil(count / cols);
         return `<div class="loading-skeleton" style="grid-template-columns:repeat(${cols}, 1fr);grid-template-rows:repeat(${rows}, 1fr);width:${layout.width}px;height:${layout.height}px;padding:8px;box-sizing:border-box">${Array.from({length:count}).map(() => `<div class="loading-cell"></div>`).join('')}</div>`;
     }
-    const pendingSlots = Math.max(0, Number(node.pending) || 0);
+    const pendingSlots = pendingSlotsForNode(node);
+    const failedSlots = failedSlotsForNode(node);
     /* 已有产出、这一批还没跑完：已出的缩略图 + 还没出来的占位格。
        只渲染图片的话，第一张一落地进度框就被顶掉（用户报的「另外还没生成的看不到进度」）。 */
-    if(imgs.length > 1 || (imgs.length && pendingSlots)) return thumbGridHtml(node, imgs, layout, pendingSlots);
+    if(imgs.length > 1 || (imgs.length && (pendingSlots || failedSlots))) return thumbGridHtml(node, imgs, layout, pendingSlots, failedSlots);
     if(imgs[0]) return `<div class="image-wrap has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === 0 ? 'image-selected' : ''}" data-image-index="0" data-media-signature="${escapeAttr(`${mediaKindForItem(imgs[0])}:${imgs[0]?.url || ''}`)}" style="--node-img-w:${layout.width}px;--node-img-h:${layout.height}px">${singleMediaHtml(imgs[0], layout.width, layout.height)}${imageNameBadgeHtml(imgs[0], {outside:true})}${imageResolutionBadgeHtml(imgs[0])}<button class="mini-x image-delete" type="button" data-image-index="0" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`;
     return `<div class="node-drop" data-upload-action="files">
         <span class="upload-node-main"><i data-lucide="upload-cloud"></i></span>
@@ -9685,12 +9691,13 @@ function nodeBodyHtml(node, layout){
 }
 /* 多图网格：已出的缩略图 + 还没出来的占位格（pendingSlots）。
    占位格只用 .loading-cell（闪底），**不能加 .thumb-item** —— 那个类会被缩略图预览/拖动处理器认领。 */
-function thumbGridHtml(node, imgs, layout, pendingSlots = 0){
+function thumbGridHtml(node, imgs, layout, pendingSlots = 0, failedSlots = 0){
     const visibleRows = Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, Number(layout.visibleRows || layout.rows || 1)));
     const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
     const thumb = Number(layout.thumb || 96);
     const thumbs = imgs.map((img, i) => `<div class="thumb-item has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === i ? 'image-selected' : ''}" data-image-index="${i}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${i}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`).join('');
-    const slots = Array.from({length:Math.max(0, pendingSlots)}).map(() => `<div class="loading-cell pending-thumb" data-pending-slot="1" title="${escapeHtml(tr('smart.hintPending'))}" style="width:${thumb}px;height:${thumb}px"></div>`).join('');
+    const slots = Array.from({length:Math.max(0, pendingSlots)}).map(() => `<div class="loading-cell pending-thumb" data-pending-slot="1" title="${escapeHtml(tr('smart.hintPending'))}" style="width:${thumb}px;height:${thumb}px"></div>`).join('')
+        + Array.from({length:Math.max(0, failedSlots)}).map(() => `<div class="loading-cell pending-thumb is-failed" data-pending-failed="1" title="这一行生成失败" style="width:${thumb}px;height:${thumb}px"></div>`).join('');
     return `<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${layout.cols}; --thumb-size:${thumb}px; --thumb-max-height:${maxHeight}px">${thumbs}${slots}</div>`;
 }
 function jimengPendingBodyHtml(node, layout){
@@ -10266,7 +10273,7 @@ function render(){
         const isEmpty = isImageNode && imgs.length === 0 && !node.pending && !isQueued && !isJimengPending;
         const isHistory = isHistoryGroupNode(node);
         const isGroup = isImageNode && imgs.length > 1;
-        const isPending = ((node.pending || isQueued || isJimengPending) && imgs.length === 0);
+        const isPending = ((pendingSlotsForNode(node) > 0 || isQueued || isJimengPending) && imgs.length === 0);
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
@@ -19011,7 +19018,13 @@ function mountSmartBatchNodes(){
         if(!node._batchRunning){
             nodes.filter(item => isSmartImageNode(item) && Number(item.pending || 0) > 0
                 && (canvas?.connections || []).some(conn => conn.from === node.id && conn.to === item.id))
-                .forEach(item => { item.pending = 0; markSmartNodeComplete(item, null); });
+                .forEach(item => {
+                    item.pending = 0;
+                    item.batchRunExpected = 0;
+                    item.batchRunLanded = 0;
+                    item.batchRunFailed = 0;
+                    markSmartNodeComplete(item, null);
+                });
         }
         pendingContentMeasure.push({node, el});
     });
@@ -21583,6 +21596,11 @@ function batchResultNodeForRun(runId, sourceNode, meta, refs, ratio){
     try {
         output = createPendingOutputFromSource(sourceNode, totalRows, meta, {connectSource:false, selectOutput:false, refs, ratio});
         output.pending = totalRows;
+        /* 这一批「应该出几行 / 已经落了几行 / 失败几行」：进度占位格按这三个数算，
+           某一行失败或产出重复都不会让进度框提前收起来（用户会以为生成失败了）。 */
+        output.batchRunExpected = Math.max(1, Number(sourceNode && sourceNode._batchRunRows) || totalRows);
+        output.batchRunLanded = 0;
+        output.batchRunFailed = 0;
         output.runStartedAt = nowMs();
         output.runTimerHidden = false;
         output.images = [];
@@ -21598,11 +21616,34 @@ function batchResultNodeForRun(runId, sourceNode, meta, refs, ratio){
 }
 /* 把一行的产出并进这张结果节点，并把 pending 减 1（进度）。
    还没跑完就不清 busy 状态，节点继续显示 loading/计时；减到 0 才 markSmartNodeComplete。 */
+/* 结果节点还该显示几个占位格：取「pending」与「预期 - 已落地 - 已失败」的较大值。
+   只信 pending 的话，某一行失败 / 产出 url 重复（被 cleanHistoryImages 去重）时
+   进度框会提前收起来，用户就以为这一批失败了。 */
+function pendingSlotsForNode(node){
+    const pending = Math.max(0, Number(node && node.pending) || 0);
+    const expected = Math.max(0, Number(node && node.batchRunExpected) || 0);
+    if(!expected) return pending;
+    const landed = Math.max(0, Number(node && node.batchRunLanded) || 0);
+    const failed = Math.max(0, Number(node && node.batchRunFailed) || 0);
+    return Math.max(pending, Math.max(0, expected - landed - failed));
+}
+/* 其中「已经失败」的那几格（画成失败占位，而不是继续转圈） */
+function failedSlotsForNode(node){
+    const expected = Math.max(0, Number(node && node.batchRunExpected) || 0);
+    if(!expected) return 0;
+    const landed = Math.max(0, Number(node && node.batchRunLanded) || 0);
+    const failed = Math.max(0, Number(node && node.batchRunFailed) || 0);
+    const missing = Math.max(0, expected - landed - failed);
+    const pending = Math.max(0, Number(node && node.pending) || 0);
+    return failed + Math.max(0, missing - pending);
+}
+
 function appendBatchResultImages(outputNode, additions, meta, kind){
     const live = liveSmartNode(outputNode);
     if(!live) return null;
     live.images = cleanHistoryImages([...(live.images || []), ...additions]);
     live.pending = Math.max(0, Number(live.pending || 0) - 1);
+    live.batchRunLanded = Math.max(0, Number(live.batchRunLanded) || 0) + Math.max(1, (additions || []).length);
     live.outputKind = kind;
     live.title = live.images.length > 1
         ? (kind === 'video' ? 'Videos' : 'Group')
@@ -21692,7 +21733,11 @@ async function tableRunOneRow(nodeId, options, forceVideo){
                 if(canvas) canvas.connections = (canvas.connections || []).filter(conn => conn.from !== live.id && conn.to !== live.id);
                 if(batchRunResultNodes.get(runId) === live) batchRunResultNodes.delete(runId);
             } else if(live){
+                /* 这一行失败了：pending 照减（不能永远转圈），但记一笔失败 ——
+                   进度格子按「预期 - 已落地 - 已失败」算，失败的那一格显示成「失败」占位，
+                   用户不会以为整批莫名其妙没了。 */
                 live.pending = Math.max(0, Number(live.pending || 0) - 1);
+                live.batchRunFailed = Math.max(0, Number(live.batchRunFailed) || 0) + 1;
                 if(live.pending <= 0) markSmartNodeComplete(live, meta);
             }
         }

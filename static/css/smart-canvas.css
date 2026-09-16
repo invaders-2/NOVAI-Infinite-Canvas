@@ -538,6 +538,12 @@ body.svc-fullscreen-active { overflow:hidden; }
 .loading-skeleton { display:grid; gap:8px; }
 .loading-cell { border-radius:var(--radius-md); background:linear-gradient(90deg, var(--soft) 0%, var(--card) 50%, var(--soft) 100%); background-size:200% 100%; animation:shimmer 1.5s infinite linear; border:1px solid var(--line); }
 .loading-cell.single { width:260px; height:180px; }
+/* 批量生成里「这一行失败了」的占位格：不再闪光，改成虚线红框 + 斜纹，一眼能看出是失败不是还在转 */
+.pending-thumb.is-failed {
+    animation:none;
+    background:repeating-linear-gradient(45deg, rgba(217, 83, 79, .16) 0 6px, transparent 6px 12px);
+    border:1px dashed rgba(217, 83, 79, .72);
+}
 @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
 .jimeng-pending-cell { position:relative; display:flex; align-items:center; justify-content:center; }
 .jimeng-pending-overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:14px; box-sizing:border-box; text-align:center; }

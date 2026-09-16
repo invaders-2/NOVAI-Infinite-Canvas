@@ -11,6 +11,7 @@ const js = read('static/js/smart-canvas.js');
 const moduleSrc = read('static/js/shared/table-node.js');
 const mediaSrc = read('static/js/shared/media.js');
 const tableCss = read('static/css/table-node.css');
+const canvasCss = read('static/css/smart-canvas.css');
 
 let pass = 0;
 const fails = [];
@@ -118,11 +119,11 @@ ok(moduleSrc.includes('repaintTableSelectionViews'), '勾选后两边视图一�
 ok(/mediaList\.length > 1[\s\S]{0,220}zipDownloadImageItems\(node\.title/.test(js), '多张素材时下载整组（zip）');
 ok(/canvas-assets\/download/.test(js), '打包下载走 /api/canvas-assets/download（服务端压 zip，图片视频都收）');
 // ③ 生成中：已出图 + 未出图占位一起显示（进度框不被第一张顶掉）
-ok(js.includes('const gridCount = count + Math.max(0, Number(node?.pending) || 0)'), '格子数把 pending 也算上');
+ok(js.includes('const gridCount = count + pendingSlotsForNode(node)'), '格子数把「还没落地的行」也算上（见 [15] 节）');
 ok(/if\(gridCount <= 1\) return singleImageLayout/.test(js), '只有 1 格时才走单图布局');
 ok(js.includes('function thumbGridHtml('), '网格渲染抽成 thumbGridHtml');
 ok(js.includes('data-pending-slot'), '未出图的位置画占位格');
-ok(/thumbGridHtml\(node, imgs, layout, pendingSlots\)/.test(js), 'nodeBodyHtml 把 pendingSlots 传给网格');
+ok(/thumbGridHtml\(node, imgs, layout, pendingSlots, failedSlots\)/.test(js), 'nodeBodyHtml 把 pendingSlots / failedSlots 一起传给网格');
 
 console.log('[10] 卡住的批量状态 / 视频拖动 / 原图比例');
 // ① 批量「正在生成」不能把节点永久锁死
@@ -195,6 +196,18 @@ ok(/isSmartImageNode\(draggedNode\) &&\s*\n\s*isSmartImageNode\(groupTarget\)/.t
 ok(js.includes('const renderKey = html.replace(rootClass,'), '拖动/选中这类临时态不触发节点子树重建');
 ok(js.includes('if(dragState && (dragState.id === node.id'), '拖动中不回写实测尺寸（避免忽大忽小）');
 ok(js.includes('delete node.__renderKey;'), '渲染缓存持久化时剥掉');
+
+console.log('[15] 批量进度框：失败 / 重复产出也不会提前收起');
+ok(js.includes('function pendingSlotsForNode('), '占位格按「预期 - 已落地 - 已失败」算');
+ok(js.includes('function failedSlotsForNode('), '失败的那几格单独统计');
+ok(js.includes('data-pending-failed'), '失败占位有独立标记');
+ok(moduleSrc.includes('gen._batchRunRows = pending.length'), '批量开始时记录这一批几行');
+ok(js.includes('output.batchRunExpected = Math.max(1, Number(sourceNode && sourceNode._batchRunRows) || totalRows)'), '结果节点记住预期行数');
+ok(js.includes('live.batchRunLanded ='), '成功行累加「已落地」');
+ok(js.includes('live.batchRunFailed ='), '失败行累加「已失败」');
+ok(js.includes('item.batchRunExpected = 0'), '整批结束后清掉这些计数（不留幽灵格）');
+ok(canvasCss.includes('.pending-thumb.is-failed'), '失败占位的样式在');
+ok(!/const gridCount = count \+ Math\.max\(0, Number\(node\?\.pending\)/.test(js), '占位格不再只看 pending');
 
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
