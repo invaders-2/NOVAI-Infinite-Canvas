@@ -9128,6 +9128,12 @@ function promptNodeBodyHtml(node){
     </div>` : '';
     const llmParams = node.llmEnabled ? `
         <div class="prompt-node-llm">
+            <div class="llm-tabs">
+                <button class="llm-tab is-active" type="button" data-llm-tab="node">节点</button>
+                <button class="llm-tab" type="button" data-llm-tab="chat" title="智能画布暂不支持对话">聊天</button>
+                <button class="llm-tab ${node.llmSystemEnabled ? 'is-active' : ''}" type="button" data-llm-tab="system"><i data-lucide="${node.llmSystemEnabled ? 'check-circle-2' : 'circle'}"></i><span>System</span></button>
+                <button class="llm-tab ${node.reverse ? 'is-active' : ''}" type="button" data-llm-tab="reverse" title="${escapeHtml(tr('smart.promptReverseTitle'))}"><i data-lucide="scan"></i><span>${escapeHtml(tr('smart.promptReverse'))}</span></button>
+            </div>
             <div class="prompt-llm-model-row">
                 <select class="prompt-node-control prompt-llm-provider">${chatProviderOptions(node.llmProvider)}</select>
                 <select class="prompt-node-control prompt-llm-model">${chatModelOptions(node.llmModel, node.llmProvider)}</select>
@@ -9156,8 +9162,6 @@ function promptNodeBodyHtml(node){
             <button class="prompt-node-pill prompt-node-control prompt-preset-edit ${templateActive ? 'active' : ''}" type="button"><i data-lucide="library"></i><span>模板库</span></button>
             <button class="prompt-node-pill prompt-node-control prompt-split-toggle ${node.promptSplitEnabled ? 'active' : ''}" type="button"><i data-lucide="split"></i><span>分隔符</span></button>
             <button class="prompt-node-pill prompt-llm-toggle ${node.llmEnabled ? 'active' : ''}" type="button"><i data-lucide="sparkles"></i><span>LLM</span></button>
-            ${node.llmEnabled ? `<button class="prompt-node-pill prompt-node-control prompt-system-toggle ${node.llmSystemEnabled ? 'active' : ''}" type="button"><i data-lucide="${node.llmSystemEnabled ? 'check-circle-2' : 'circle'}"></i><span>${escapeHtml(node.llmSystemEnabled ? tr('smart.promptLlmDisableSystem') : tr('smart.promptLlmEnableSystem'))}</span></button>
-            <button class="prompt-node-pill prompt-node-control prompt-reverse-toggle ${node.reverse ? 'active' : ''}" type="button" title="${escapeHtml(tr('smart.promptReverseTitle'))}"><i data-lucide="scan"></i><span>${escapeHtml(tr('smart.promptReverse'))}</span></button>` : ''}
         </div>
         ${node.promptSplitEnabled ? `<div class="prompt-node-split-row">
             <label class="prompt-node-split-control prompt-node-control"><span>分隔符</span><input class="prompt-node-separator" type="text" value="${escapeHtml(node.promptSeparator)}" maxlength="8" placeholder=";"></label>
@@ -10353,6 +10357,17 @@ function bindPromptNodeControls(el, node){
         promptSplitResizeState = {id:node.id, startY:e.clientY, startH:promptNodeSplitPreviewHeight(node), startNodeH:promptNodeLayoutSize(node).height};
         document.body.classList.add('smart-node-resize', 'smart-prompt-split-resize');
         capturePendingUndo();
+    });
+    // 顶部那一排 tab（照搬经典画布）：System / 反推 走原来的开关逻辑，聊天先占位
+    el.querySelectorAll('.llm-tab').forEach(tab => {
+        tab.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const which = tab.dataset.llmTab;
+            if(which === 'system'){ node.llmSystemEnabled = !node.llmSystemEnabled; render(); scheduleSave(); }
+            else if(which === 'reverse'){ node.reverse = !node.reverse; render(); scheduleSave(); }
+            else if(which === 'chat'){ toast('智能画布的 LLM 节点暂不支持对话模式'); }
+        };
     });
     // 上下分栏把手（照搬经典画布）：拖它调输入框高度，存进 node.llmInputHeight
     const paneResizer = el.querySelector('[data-llm-pane-resize]');

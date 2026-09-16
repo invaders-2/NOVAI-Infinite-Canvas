@@ -614,6 +614,27 @@
 }
 .llm-pane-label { display: block; }
 
+/* 照搬经典画布 LLM 节点顶部那一排：节点 / 聊天 / System / 反推 */
+.llm-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.llm-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 28px;
+    padding: 0 11px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-2);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.llm-tab:hover { color: var(--text); border-color: var(--line-2); }
+.llm-tab.is-active { background: var(--strong); color: var(--strong-text); border-color: transparent; }
+.llm-tab svg { width: 13px; height: 13px; }
+
 /* 上下分栏把手（照搬经典画布的 llm-pane-resizer） */
 .llm-pane-resizer {
     position: relative;
