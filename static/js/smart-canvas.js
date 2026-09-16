@@ -20934,35 +20934,38 @@ const tableSelected = {
 
 /* 批量「跑一行」：把这一行的提示词 + 参考图交给智能画布已有的生成链路（按 engine 分发）。
    注意：这里只负责**派发任务**；结果落盘/轮询是下一步（智能画布自己那套 agentPollGenerateTask）。 */
-async function tableRunGenerator(nodeId, options = {}){
+/* 批量「跑一行」：提示词 + 参考图交给智能画布已有的生成链路（提交 → 轮询 → 收素材），
+   然后把这一行产出的素材追加到批量生成节点上（按行标注）。 */
+function tableRowRefUrls(row){
+    return (row.refs || []).map(ref => (ref && typeof ref === 'object' ? ref.url : ref) || '').filter(Boolean);
+}
+async function tableRunOneRow(nodeId, options, forceVideo){
     const node = nodes.find(n => n.id === nodeId);
     if(!node) throw new Error('批量生成节点不存在');
     const row = options.rowOverride || {};
     const prompt = String(row.prompt || '').trim();
-    const refs = (row.refs || []).map(ref => (ref && ref.url) || '').filter(Boolean);
-    const runSettings = Object.assign({}, settings, smartSettingsForNode(node) || {});
-    if(runSettings.engine === 'comfy') return await runComfyGeneration(node, prompt, refs, node, {batch:true});
-    if(runSettings.engine === 'runninghub') return await runRunningHubGeneration(prompt, refs, runSettings);
-    if(runSettings.engine === 'modelscope') return await runModelscopeGeneration(prompt, refs, runSettings);
-    return await runApiGeneration(prompt, refs, runSettings);
+    const refs = tableRowRefUrls(row);
+    let runSettings = Object.assign({}, settings, smartSettingsForNode(node) || {});
+    if(forceVideo) runSettings = Object.assign({}, runSettings, {apiKind: 'video'});
+    const rowNumber = (options.runContext || {}).rowNumber || 0;
+    if(!prompt && !refs.length) throw new Error('第 ' + (rowNumber || '?') + ' 行既没有提示词也没有素材');
+    const out = await generateUrlsForCurrentSettings(node, prompt, refs, runSettings);
+    const urls = Array.isArray(out && out.urls) ? out.urls : [];
+    if(!urls.length) throw new Error('这一行没有产出素材');
+    urls.forEach((url, index) => {
+        node.images.push({
+            url,
+            name: rowNumber ? ('第' + rowNumber + '行' + (urls.length > 1 ? '-' + (index + 1) : '')) : '',
+            role: 'batch',
+        });
+    });
+    render();
+    scheduleSave();
+    return urls;
 }
-async function tableRunVideo(nodeId, options = {}){
-    const node = nodes.find(n => n.id === nodeId);
-    if(!node) throw new Error('批量生成节点不存在');
-    const row = options.rowOverride || {};
-    const prompt = String(row.prompt || '').trim();
-    const refs = (row.refs || []).map(ref => (ref && ref.url) || '').filter(Boolean);
-    const runSettings = Object.assign({}, settings, smartSettingsForNode(node) || {}, {apiKind: 'video'});
-    return await runApiVideoGeneration(prompt, refs, runSettings);
-}
+async function tableRunGenerator(nodeId, options = {}){ return await tableRunOneRow(nodeId, options, false); }
+async function tableRunVideo(nodeId, options = {}){ return await tableRunOneRow(nodeId, options, true); }
 
-/* nodes 在 smart-canvas 里同样会被整体重新赋值（载入/清空），所以给表格模块一个转发代理，
-   而不是快照引用。 */
-const liveSmartNodes = new Proxy([], {
-    get(target, prop){ const live = nodes || []; const value = live[prop]; return typeof value === 'function' ? value.bind(live) : value; },
-    set(target, prop, value){ nodes[prop] = value; return true; },
-});
-let tableApi = null;
 function ensureTableApi(){
     if(tableApi) return tableApi;
     if(typeof window.NovaTableNode !== 'function') return null;
