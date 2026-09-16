@@ -239,6 +239,44 @@ tableApi 声明被 splice 删掉 / smart-batch 不显示产物 / 视频模式被
 
 **临时画布用完即删**（POST 建 → 测 → DELETE + purge），没有碰用户的画布。
 
+
+## LLM 节点改造（用户选 A：照搬经典画布的 LLM 节点）
+
+目标结构（经典画布 `renderLLMNodePane` @canvas.js:7503 那一套）：
+
+```
+[供应商 ▾] [模型 ▾]   (节点) 聊天  System  反推   模板库
+Input  直接输入，或连接提示词节点…          ← 上游有提示词时只读
+┌──────────────────────────────┐
+│ 输入框（可拖高）              │
+└──────────────────────────────┘
+      ═══ 上下分栏拖拽把手 ═══
+Output                        [复制]
+┌──────────────────────────────┐
+│ 输出文本 / 「运行后会输出文本…」│
+└──────────────────────────────┘
+[文本输出][多维表格][视频分镜表]              [生成]
+```
+
+映射（智能画布 → 新结构）：
+| 新部件 | 用什么 |
+|---|---|
+| 供应商 / 模型下拉 | 直接搬现有的 `prompt-llm-provider` / `prompt-llm-model` |
+| 节点 / 聊天 | 节点=现有形态；聊天智能画布没有对话面板 → 先做成占位（点了提示暂不支持），或直接照搬 `renderLLMChatPane` |
+| System | 现有 `prompt-system-toggle` + `prompt-llm-system` 文本域（折进分区） |
+| 反推 | 现有 `prompt-reverse-toggle` |
+| **模板库** | 现有 `.prompt-preset-edit`（就是那一排第一个），挪到这排 |
+| Input 输入框 | 现有 `prompt-llm-instruction` + `promptNodeLLMInputText()`（上游有内容时只读） |
+| 分栏把手 | 新写（经典画布是 `startLLMPaneResize`，存 `node.llmInputHeight` / `llmOutputHeight`） |
+| Output | LLM 返回值：智能画布现在写 `node.text`，改成同时写 `node.outputText` 并显示在这里 + 复制按钮 |
+| 底部三药丸 + 生成 | 现有 `llmOutputModeHtml(node)` + `prompt-node-run`（已经是一排了） |
+
+**保留在节点上方不动**：模板库之外的 分隔符 预览、上游提示词列表、素材缩略图（`inputThumbs`）。
+
+风险与做法：这是一次结构性替换 `promptNodeBodyHtml()`。先加新结构 + 把旧部件挪进去，
+**绑定逻辑（bindPromptNodeControls）保持类名不变**，避免又一次"改完渲染不出来"。改完必须真浏览器验证：
+渲染无报错、缩略图在、三药丸能点、输入框能打字、运行按钮能触发。
+
 ## 教训（写在这里免得再犯）
 - 改这类大件：**先补测试垫片/测试，再动生产代码**；
 - 每步改完**先在真浏览器点一遍**再提交；
