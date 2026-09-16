@@ -15122,7 +15122,9 @@ function pendingSizeFromImageRef(img){
 }
 function pendingSourceBoxSize(options={}){
     const sourceNode = options.sourceNode || null;
-    if(sourceNode && (sourceNode.images || []).length){
+    /* 生成器类节点（批量生成/表格）自己不是素材：即便它攒了产出图，也不能拿它的框当结果节点的形状。 */
+    const sourceIsGenerator = Boolean(sourceNode) && (sourceNode.type === 'smart-batch' || sourceNode.type === 'table');
+    if(!sourceIsGenerator && sourceNode && (sourceNode.images || []).length){
         const rect = nodeRect(sourceNode);
         if(rect.width > 24 && rect.height > 24) return {w:Math.round(rect.width), h:Math.round(rect.height), display:true};
     }
@@ -15147,13 +15149,20 @@ function displayBoxFromNaturalSize(size){
 function pendingBaseBoxSize(options={}){
     const requestSize = explicitRequestOutputSizeForPending();
     if(requestSize) return displayBoxFromNaturalSize(requestSize);
+    /* 显式给的参考比例（批量按行算出来的）优先于任何「源节点自己的框」：
+       批量生成时源节点就是批量节点本身，它自己也会攒产出图，用它的框会得到一个
+       和结果比例毫无关系的占位尺寸（用户报的「视频生成没按参考比例」就是这个）。 */
+    const explicitRatio = options.ratio;
+    if(explicitRatio && Number(explicitRatio.w) > 0 && Number(explicitRatio.h) > 0){
+        return displayBoxFromNaturalSize({w:Number(explicitRatio.w), h:Number(explicitRatio.h)});
+    }
     const sourceSize = pendingSourceBoxSize(options);
     if(sourceSize?.display) return {w:sourceSize.w, h:sourceSize.h};
     if(sourceSize) return displayBoxFromNaturalSize(sourceSize);
     return displayBoxFromNaturalSize(expectedOutputSize());
 }
 function pendingBoxSize(count, options={}){
-    const base = pendingBaseBoxSize(options);
+    const base = pendingBaseBoxSize(options);   // options.ratio 见 pendingBaseBoxSize
     const aspect = base.w / Math.max(1, base.h);
     const c = Math.max(1, Number(count) || 1);
     if(c <= 1){
@@ -16149,7 +16158,7 @@ function nextOutputPositionForSource(sourceNode, pendingBox, options={}){
     return {x, y};
 }
 function createPendingOutputFromSource(sourceNode, expectedCount, meta, options={}){
-    const pendingBox = pendingBoxSize(expectedCount, {sourceNode, refs:options.refs || meta?.promptRefs || []});
+    const pendingBox = pendingBoxSize(expectedCount, {sourceNode, ratio:options.ratio || null, refs:options.refs || meta?.promptRefs || []});
     const pos = nextOutputPositionForSource(sourceNode, pendingBox);
     const output = {
         id:uid('smart'),
@@ -21480,7 +21489,7 @@ function applyRowSourceRatioToSettings(runSettings, ratio){
 }
 /* 一次批量运行（batchRunId）对应一个下游结果节点：首个跑到的行创建它，后面的行并进去。 */
 const batchRunResultNodes = new Map();
-function batchResultNodeForRun(runId, sourceNode, meta, refs){
+function batchResultNodeForRun(runId, sourceNode, meta, refs, ratio){
     if(batchRunResultNodes.size > 50) batchRunResultNodes.clear();
     let output = runId ? batchRunResultNodes.get(runId) : null;
     if(output && !nodes.some(n => n.id === output.id)) output = null;
@@ -21494,7 +21503,7 @@ function batchResultNodeForRun(runId, sourceNode, meta, refs){
     const totalRows = Math.max(1, Number(upstreamTables[0]?.table?.rows?.length) || 1);
     undoSuppressed = true;
     try {
-        output = createPendingOutputFromSource(sourceNode, totalRows, meta, {connectSource:false, selectOutput:false, refs});
+        output = createPendingOutputFromSource(sourceNode, totalRows, meta, {connectSource:false, selectOutput:false, refs, ratio});
         output.pending = totalRows;
         output.runStartedAt = nowMs();
         output.runTimerHidden = false;
@@ -21520,6 +21529,10 @@ function appendBatchResultImages(outputNode, additions, meta, kind){
     live.title = live.images.length > 1
         ? (kind === 'video' ? 'Videos' : 'Group')
         : (kind === 'video' ? 'Video' : 'Image');
+    /* 单张结果也要按**素材自己的比例**定框：上游可能没按参考比例出（比如视频模型只认首帧，
+       没有首帧时按自己的默认比例），占位框的比例和画面就对不上了。清掉显式尺寸后
+       singleImageLayout / measureSmartNodeImages 会按素材真实比例重算。 */
+    if(live.images.length === 1 && mediaLayoutSize(live.images[0]).width > 0) { delete live.w; delete live.h; }
     if(live.images.length > 1){ delete live.w; delete live.h; }
     live.scale = mediaNodeDefaultScale(live);
     if(live.pending <= 0){
@@ -21547,8 +21560,10 @@ async function tableRunOneRow(nodeId, options, forceVideo){
        所以之前根本算不出比例、退回节点上那份过期的 customRatio
        （用户报的「选了适配比例也没按每行参考图的比例生成」）。
        素材没量过尺寸时 rowSourceRatio() 会现量一次（异步）。 */
+    /* 这一行的参考比例：先算出来，后面既用来定尺寸，也用来定**结果节点的占位形状**。 */
+    let srcRatio = null;
     if(runSettings.ratio === 'source' || runSettings.msRatio === 'source' || runSettings.videoAspect === 'keep_ratio'){
-        const srcRatio = await rowSourceRatio(refs);
+        srcRatio = await rowSourceRatio(refs);
         if(runSettings.ratio === 'source' || runSettings.msRatio === 'source') applyRowSourceRatioToSettings(runSettings, srcRatio);
         // 视频的「原图比例」也按**这一行**的参考素材解析（批量视频分镜每行参考可能不同）
         applySourceRatioToVideoAspect(runSettings, srcRatio);
@@ -21575,7 +21590,7 @@ async function tableRunOneRow(nodeId, options, forceVideo){
     /* 一次批量运行只落**一个**下游结果节点，多行的结果都并进它 —— 和单节点生成完全一致：
        跑的时候就有这张卡片，跑完每行 append 进去，>1 张时标题自动变 Group / Videos（自动成组）。
        结果节点就是普通图片/视频节点，可继续往下接生成节点。 */
-    let output = batchResultNodeForRun(runId, node, meta, refs);
+    let output = batchResultNodeForRun(runId, node, meta, refs, srcRatio);
     render();
     scheduleSave();
     let urls = [];

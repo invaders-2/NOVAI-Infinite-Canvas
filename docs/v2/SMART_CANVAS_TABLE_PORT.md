@@ -757,3 +757,42 @@ render 的 class 也改成所有节点都带上（原来只有提示词节点）
 - `tests/test_smart_canvas_table_wiring.js` 101/101（新增 [11] 节）；
 - 其余五套全绿（model 293、dom 371、classic wiring、select_menu 47、dark_mode 8）；
 - 浏览器实测四点，临时画布已 purge。
+
+
+## 批量视频「没按多维表格的参考比例」（2026-09-16 后续轮 16）
+
+### 现象与真因
+用户：批量生成节点跑视频，结果的比例和表格里那一行的参考对不上。查画布数据发现关键细节：
+同一批的三个视频结果节点，尺寸分别是 `365x486`（竖，对）、`351x313`、`351x313`（都不对）——
+而 `351x313` 正好等于**批量节点自己的框**。
+
+链路：
+1. `tableRunOneRow()` 会把每行产出 push 进批量节点的 `images`（历史行为）；
+2. `batchResultNodeForRun()` → `createPendingOutputFromSource()` → `pendingBoxSize()` →
+   `pendingSourceBoxSize()` **优先用「源节点」自己的框**；
+3. 批量节点的「源节点」就是批量节点本身 —— 第一轮它还没图，占位框走了参考素材的比例（所以第一个视频是对的）；
+   第二轮它已经攒了产出图，于是占位框变成批量节点的框（351×313），和画面比例毫无关系；
+4. 单张结果时 `appendBatchResultImages()` 不清 `w/h`，这个错框就一直留着 → 节点形状和视频比例对不上。
+
+### 修复
+- `pendingBaseBoxSize()` 支持**显式参考比例**（`options.ratio`，优先于任何节点框）；
+  `createPendingOutputFromSource()` 透传；`batchResultNodeForRun(runId, source, meta, refs, ratio)` 接收；
+  `tableRunOneRow()` 把这一行算好的 `srcRatio` 传进去（原来它算得比建占位节点还晚）。
+- `pendingSourceBoxSize()`：生成器类节点（`smart-batch` / `table`）**永远不用自己的框**当结果形状。
+- `appendBatchResultImages()`：单张结果也按**素材自己的比例**重定框（素材尺寸已知时清掉显式 `w/h`，
+  交给 `singleImageLayout` / `measureSmartNodeImages`），上游没按参考比例出的时候节点形状也不会骗人。
+
+实测（一行，参考 6000×4000＝3:2，批量节点故意做成 351×313 且自带产出图）：
+结果节点 = **520×347（比例 1.499 ≈ 3:2，即该行参考比例）**；旧代码会得到 351×313。
+
+### 顺带查清的：上游本身能不能听比例
+- 灵境 MiniMax（`build_lingjing_minimax_video_body`）**根本不发比例字段** —— 官方
+  `/v1/video_generation` 只有 `model` / `first_frame_image` / `prompt` / `duration` / `resolution`，
+  视频比例完全由**首帧图**决定（图生视频）。所以「原图比例」对这类模型是通过「把这行的参考图当首帧」生效的；
+  行里没有参考图（纯文字 / 只有参考视频）时它会用自己的默认比例，前端改不了。
+- 因此前端的「原图比例」解析（`applySourceRatioToVideoAspect`，取最接近的受支持比例）对 apimart /
+  灵境通用族 / agnes 这些**会发比例**的通路有效；对 MiniMax 只是不发而已（无害）。
+
+### 验收
+- `tests/test_smart_canvas_table_wiring.js` 106/106（新增 [12] 节）；
+- 其余五套全绿；浏览器实测：占位框与最终节点都等于该行参考比例（见上）。
