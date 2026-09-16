@@ -21204,7 +21204,14 @@ async function callSmartLLMText(node, message){
     const mediaRefs = promptNodeInputMediaForLLM(node);
     const images = imageRefsOnly(mediaRefs).map(img => img.url).filter(Boolean);
     const videos = videoRefsOnly(mediaRefs).map(video => video.url).filter(Boolean);
-    const res = await fetch('/api/canvas-llm', {
+    /* 必须带超时：模型端挂住不返回时，fetch 永远 pending → runSmartLLMListMode 的 finally 不执行
+       → node.running 一直是 true，还被保存进画布，刷新后节点永远显示「运行中」（用户报的"不显示了"）。 */
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90000);
+    let res;
+    try {
+        res = await fetch('/api/canvas-llm', {
+            signal: controller.signal,
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -21221,9 +21228,12 @@ async function callSmartLLMText(node, message){
             target_model:target.target_model,
         })
     });
-    if(!res.ok) throw new Error(await res.text());
-    const data = await res.json();
-    return String(data.text || '');
+        if(!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        return String(data.text || '');
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 /* LLM 出表：规划 → 生成 → 解析（不过就再要一次）→ 物化表格 → 自动接到批量生成节点 */
