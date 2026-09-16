@@ -18572,7 +18572,8 @@ function mountSmartBatchNodes(){
         runRow.className = 'gen-run-row';
         runRow.innerHTML = api.tableBatchRunButtonHtml(node) || '';
         /* 收起状态：只留一行摘要，点上面的标题栏展开编辑器（你要的「点击后下方出现编辑器」） */
-        if(panel && node.batchEditorOpen !== true){
+        /* 默认展开（用户反馈"连上表格看不到编辑器"）：只有显式收起过才折叠。 */
+        if(panel && node.batchEditorOpen === false){
             const closed = document.createElement('div');
             closed.className = 'table-batch-collapsed';
             closed.textContent = (panel.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 96);
@@ -20942,8 +20943,24 @@ function syncTableConnections(){
     syncTableConnectionsFromCanvas();
 }
 
+/* 智能画布的连线不带 toPort，而表格的多列输入就是靠它定位的。
+   刷新页面后 tablePortByLink 是空的 → 所有来源都塌进第 0 列（表现：一颗表格只显示一张参考图）。
+   所以重建时按「同一个目标、来源节点出现顺序」补一个确定性的 input-N（一个来源一列）。 */
+function tablePortsFromCanvas(){
+    const counters = new Map();
+    (Array.isArray(canvas?.connections) ? canvas.connections : []).forEach(conn => {
+        if(!conn || !conn.from || !conn.to) return;
+        const key = tableLinkKey(conn.from, conn.to);
+        if(tablePortByLink.has(key)) return;
+        const index = counters.get(conn.to) || 0;
+        counters.set(conn.to, index + 1);
+        tablePortByLink.set(key, 'input-' + (index + 1));
+    });
+}
+
 function syncTableConnectionsFromCanvas(){
     tableConnections.length = 0;
+    tablePortsFromCanvas();
     (Array.isArray(canvas?.connections) ? canvas.connections : []).forEach(conn => {
         if(!conn || !conn.from || !conn.to) return;
         const kind = conn.kind || 'flow';

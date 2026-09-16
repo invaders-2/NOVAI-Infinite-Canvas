@@ -567,6 +567,30 @@
 .prompt-node-run-row .llm-output-mode button { flex: 0 0 auto; white-space: nowrap; }
 .prompt-node-run-row .prompt-node-run { margin-left: auto; flex: 0 0 auto; }
 
+/* 智能画布：表格 / 批量生成节点的磨砂玻璃外框（含空表格、空批量节点）。
+   边框粗细/圆角/内边距可以用 CSS 变量调：
+     --table-frame-w（边框粗细，默认 1px）、--table-frame-r（圆角，默认 14px）、--table-frame-p（内边距，默认 10px）
+   在 .image-node 上加 style="--table-frame-w:2px" 之类就能自定义。 */
+.image-node:has(> .node-body > .table-node-host),
+.image-node:has(> .node-body > .table-batch-host) {
+    background: var(--table-frame-bg, rgba(255, 255, 255, .72)) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(1.25);
+    backdrop-filter: blur(14px) saturate(1.25);
+    border: var(--table-frame-w, 1px) solid var(--table-frame-line, rgba(0, 0, 0, .12)) !important;
+    border-radius: var(--table-frame-r, 14px) !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .10) !important;
+    padding: var(--table-frame-p, 10px) !important;
+    overflow: hidden;
+}
+
+.theme-dark .image-node:has(> .node-body > .table-node-host),
+.theme-dark .image-node:has(> .node-body > .table-batch-host),
+.studio-theme-dark .image-node:has(> .node-body > .table-node-host),
+.studio-theme-dark .image-node:has(> .node-body > .table-batch-host) {
+    --table-frame-bg: rgba(22, 22, 22, .72);
+    --table-frame-line: rgba(255, 255, 255, .14);
+}
+
 /* 智能画布的拖拽把手 + 批量节点收起态摘要 */
 .table-node-drag-bar {
     display: flex;
