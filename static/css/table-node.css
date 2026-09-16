@@ -559,6 +559,33 @@
     min-width: 280px;
 }
 
+/* 智能画布的拖拽把手 + 批量节点收起态摘要 */
+.table-node-drag-bar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 20px;
+    padding: 0 4px;
+    margin-bottom: 2px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .3px;
+    color: var(--text-3);
+    cursor: move;
+    user-select: none;
+}
+.table-node-drag-bar:hover { color: var(--text); }
+.table-node-drag-grip { font-size: 11px; opacity: .7; }
+.table-node-drag-bar.is-toggle { cursor: pointer; }
+
+.table-batch-collapsed {
+    padding: 6px 4px;
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--text-3);
+    word-break: break-all;
+}
+
 /* 批量生成节点：跑完的素材按行标在面板下面 */
 .table-batch-results { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .table-batch-result { width:56px; height:56px; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--surface); flex:0 0 56px; }

@@ -9363,6 +9363,16 @@ function smartGroupBodyHtml(node){
 }
 /* 多维表格节点：把表格模块真实生成的 DOM 塞进节点 body 的壳里。
    表格模块返回元素而不是 HTML 串，所以渲染完节点后再挂一次。 */
+/* 这条细栏是给智能画布拖拽用的把手：表格模块为了保护表内滚动/选格，
+   在 .table-node 上用捕获阶段 stopPropagation 掉了 mousedown → 节点收不到拖动事件。
+   把把手放在表格 DOM 外面（兄弟节点），事件就能冒泡到节点、正常拖动。 */
+function tableHostDragBar(label){
+    const bar = document.createElement('div');
+    bar.className = 'table-node-drag-bar';
+    bar.innerHTML = '<span class="table-node-drag-grip">⠿</span><span>' + label + '</span>';
+    return bar;
+}
+
 function mountSmartTableNodes(){
     if(!world) return;
     const hosts = world.querySelectorAll('.node-body .table-node-host');
@@ -9375,6 +9385,7 @@ function mountSmartTableNodes(){
         if(!node || node.type !== 'table') return;
         syncTableConnections();
         hostEl.textContent = '';
+        hostEl.appendChild(tableHostDragBar('多维表格'));
         try {
             hostEl.appendChild(api.renderTableBody(node));
         } catch(error){
@@ -18546,10 +18557,28 @@ function mountSmartBatchNodes(){
         if(!node || node.type !== 'smart-batch') return;
         syncTableConnections();
         hostEl.textContent = '';
+        const bar = tableHostDragBar('批量生成');
+        bar.classList.add('is-toggle');
+        bar.title = '点击展开 / 收起生成列表（拖动这一栏可以移动节点）';
+        bar.onclick = event => {
+            event.stopPropagation();
+            node.batchEditorOpen = node.batchEditorOpen !== true;
+            render();
+            scheduleSave();
+        };
+        hostEl.appendChild(bar);
         const panel = api.renderTableBatchPanel(node);
         const runRow = document.createElement('div');
         runRow.className = 'gen-run-row';
         runRow.innerHTML = api.tableBatchRunButtonHtml(node) || '';
+        /* 收起状态：只留一行摘要，点上面的标题栏展开编辑器（你要的「点击后下方出现编辑器」） */
+        if(panel && node.batchEditorOpen !== true){
+            const closed = document.createElement('div');
+            closed.className = 'table-batch-collapsed';
+            closed.textContent = (panel.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 96);
+            hostEl.appendChild(closed);
+            return;
+        }
         if(panel){
             hostEl.appendChild(panel);
             hostEl.appendChild(runRow);
