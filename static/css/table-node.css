@@ -614,6 +614,22 @@
 }
 .llm-pane-label { display: block; }
 
+/* 智能画布 LLM 模式的提示词节点：内容多了（tabs 排 / 分栏 / 输出区 / 底部药丸+运行），
+   而节点尺寸还是画布按老公式算的 → 底下那排被挤到卡片外面。让卡片跟着内容走。 */
+.image-node:has(.prompt-node-llm) {
+    height: auto !important;
+    min-height: 300px;
+    overflow: visible;
+}
+.image-node:has(.prompt-node-llm) .node-body {
+    height: auto !important;
+    overflow: visible;
+}
+.image-node:has(.prompt-node-llm) .prompt-node-llm {
+    width: 100%;
+    min-width: 0;
+}
+
 /* 照搬经典画布 LLM 节点顶部那一排：节点 / 聊天 / System / 反推 */
 .llm-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .llm-tab {
