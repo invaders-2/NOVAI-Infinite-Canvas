@@ -18503,6 +18503,17 @@ function addCreatedNodeToMenuGroup(node){
         scheduleSave();
     }
 }
+/* 多维表格节点：数据层用共享的 table-model；渲染由 shared/table-node.js 负责（见 mountSmartTableNodes）。 */
+function createSmartTableNode(x, y){
+    const model = window.NovaTableModel;
+    const table = model ? model.emptyTable() : {kind:'table', version:1, columns:[], rows:[], selectedRows:[], mergedGroups:[]};
+    pushUndo();
+    const node = {id: uid('tbl'), type: 'table', x, y, w: 520, h: 0, title: '多维表格', table};
+    nodes.push(node);
+    render();
+    scheduleSave();
+    return node;
+}
 function createNodeFromMenu(type){
     const p = createMenuPoint || viewportCenter();
     const groupId = createMenuGroupId;
@@ -18512,6 +18523,7 @@ function createNodeFromMenu(type){
     if(type === 'group') created = createSmartGroupNode(p.x - 170, p.y - 110);
     else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
     else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
+    else if(type === 'table') created = createSmartTableNode(p.x - 260, p.y - 60);
     else created = createImageNodeAt(p);
     if(!created) return created;
     if(type !== 'group'){
