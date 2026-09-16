@@ -20999,7 +20999,13 @@ async function tableRunOneRow(nodeId, options, forceVideo){
     scheduleSave();
     return urls;
 }
-async function tableRunGenerator(nodeId, options = {}){ return await tableRunOneRow(nodeId, options, false); }
+/* 批量节点是 smart-batch（不是经典画布的 video 类型），所以 shared/table-node.js 里
+   tableBatchRunner(node) 永远挑 runGenerator。视频分镜表出表时会给批量节点打 tableBatchVideo 标记，
+   这里再分流到视频链路，否则「视频分镜表」会按图像去跑。 */
+async function tableRunGenerator(nodeId, options = {}){
+    const node = nodes.find(n => n.id === nodeId);
+    return await tableRunOneRow(nodeId, options, Boolean(node && node.tableBatchVideo));
+}
 async function tableRunVideo(nodeId, options = {}){ return await tableRunOneRow(nodeId, options, true); }
 
 /* nodes 在 smart-canvas 里会被整体重新赋值（载入/清空），所以给表格模块一个转发代理，
@@ -21094,6 +21100,10 @@ function connectSmartBatchAfter(tableNode){
     let batch = downstream[0] || nodes.find(n => n.type === 'smart-batch');
     if(!batch) batch = createSmartBatchNode((tableNode.x || 0) + (tableNode.w || 520) + 130, tableNode.y || 0);
     if(!batch) return null;
+    // 视频分镜表 → 这个批量节点按视频跑（tableRunGenerator 会读这个标记分流）
+    const model = window.NovaTableModel;
+    const mode = llmNode && model ? model.llmOutputModeChoice(llmNode.llmOutputMode) : 'text';
+    batch.tableBatchVideo = mode === 'list-video';
     try { connectInputNode(tableNode.id, batch.id); } catch(error){ /* 连不上就算了，用户手动连 */ }
     render();
     scheduleSave();
