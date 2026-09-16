@@ -662,20 +662,31 @@ function setTableCellMedia(node, row, column, value){
    - output 展开成它产出的每一张（一个 output = 一个通道，多张）
    - 单个素材节点就是一列一项
    - 纯文本节点（prompt / llm）返回空 → 走 Ip(t) 参与提示词，两者不重复计入 */
+/* 存媒体的节点类型：经典画布的 output、智能画布的 smart-image 都是把素材放在 images 数组里，
+   形状一致 → 一起按输出节点展开。 */
+const TABLE_OUTPUT_LIKE_TYPES = ['output', 'smart-image'];
+
 function tableSourceItems(source){
     if(!source) return [];
-    if(source.type === 'group'){
-        // 组里也可能放进一个输出节点：同样要展开成它产出的每一张
-        return (source.items || [])
+    /* 分组：经典画布是 group，智能画布是 smart-group（items 字段一样）。
+       成员也必须用同一张类型表展开 —— 智能画布「上传的图先归成一个分组、再把分组接到 LLM 节点」
+       是常见用法，之前只认 type === 'group'，且成员只认 output / 顶层 url，
+       导致整个分组被忽略（用户报的「多维表格读取不到上传的图片/视频」）。 */
+    if(source.type === 'group' || source.type === 'smart-group'){
+        // 组里也可能放进一个输出/素材节点：同样要展开成它产出的每一张
+        const fromMembers = (source.items || [])
             .map(id => (nodes || []).find(item => item.id === id))
             .filter(Boolean)
-            .flatMap(item => item.type === 'output'
+            .flatMap(item => TABLE_OUTPUT_LIKE_TYPES.includes(item.type)
                 ? outputSourceItems(item)
                 : (item.url ? [{type:'media', nodeId:item.id}] : []));
+        /* 智能画布的分组会把拖进去的图片「吸收」进 group.images（成员节点被删掉），
+           所以除了 items 里的成员，还要展开分组自己的 images —— 否则把图片归组后再接 LLM 节点，
+           整组素材读不到（用户报的「多维表格读取不到上传的图片/视频」）。 */
+        const fromGroupImages = source.type === 'smart-group' ? outputSourceItems(source) : [];
+        return [...fromGroupImages, ...fromMembers];
     }
-    /* 智能画布的素材节点（smart-image）不叫 output，但素材同样存在 images 数组里，
-       形状和输出节点一样 → 一起展开。否则「参考图 / 白底图 接到提示词节点」会被整组忽略。 */
-    if(source.type === 'output' || source.type === 'smart-image') return outputSourceItems(source);
+    if(TABLE_OUTPUT_LIKE_TYPES.includes(source.type)) return outputSourceItems(source);
     if(source.url) return [{type:'media', nodeId:source.id}];
     return [];
 }

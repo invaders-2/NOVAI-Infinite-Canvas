@@ -1242,8 +1242,14 @@ function isSmartGroupNode(node){
     return Boolean(node && node.type === 'smart-group');
 }
 
+function isSmartBatchNode(node){
+    return Boolean(node && node.type === 'smart-batch');
+}
+/* 可运行 = 点它会弹出底部生成编辑器（跟上传/图片节点同一套：
+   点节点 → 编辑器出现；点空白处 → 编辑器消失）。
+   批量生成节点也走这套，用户在编辑器里配平台/模型/尺寸/张数，再按节点里的「批量生成」跑。 */
 function isSmartRunnableNode(node){
-    return Boolean(isSmartImageNode(node) || isSmartGroupNode(node));
+    return Boolean(isSmartImageNode(node) || isSmartGroupNode(node) || isSmartBatchNode(node));
 }
 function isHistoryGroupNode(node){
     return Boolean(isSmartImageNode(node) && (node.isHistoryGroup || node.historyFor));
@@ -2207,6 +2213,16 @@ function promptNodeExpandedHeight(node){
     const upstreamExtra = node?.llmEnabled && promptNodeUpstreamPromptItems(node).length ? 74 : 0;
     return (node?.llmSystemEnabled ? 420 : 360) + smartNodeInputThumbsHeight(promptNodeInputImages(node)) + extra + upstreamExtra + promptNodeSplitExtraHeight(node);
 }
+/* LLM 模式的提示词节点支持手动尺寸（拖右下角把手）：真的拖出去（>2px）之后 node.sizeUserSet = true，
+   宽高一律听用户的（CSS 把内容区改成 flex 自适应），不再按内容估算。
+   切换时机放在 mousemove 里：太早（单击按下就打）会把只点了一下把手的节点也锁成手动尺寸。 */
+function promptNodeManualSizeActive(node){
+    return Boolean(node && node.type === 'smart-prompt' && node.llmEnabled && node.sizeUserSet);
+}
+function promptNodeManualMinHeight(node){
+    // tabs 排 / 供应商模型行 / Input、Output 标签 / 药丸+运行 都是固定高度，再加输入输出区的最小高度
+    return node?.llmSystemEnabled ? 380 : 340;
+}
 function promptNodeLayoutSize(node){
     const oldCollapsedH = 230;
     const oldExpandedH = node?.llmSystemEnabled ? 400 : 340;
@@ -2214,6 +2230,11 @@ function promptNodeLayoutSize(node){
     const explicitH = Number(node?.h);
     if(isSmartGroupCompactMember(node) && Number.isFinite(explicitW) && explicitW > 24 && Number.isFinite(explicitH) && explicitH > 24){
         return {width:Math.round(explicitW), height:Math.round(explicitH)};
+    }
+    if(promptNodeManualSizeActive(node)){
+        const width = Number.isFinite(explicitW) && explicitW > 24 ? Math.round(explicitW) : 316;
+        const height = Number.isFinite(explicitH) && explicitH > 24 ? Math.round(explicitH) : promptNodeExpandedHeight(node);
+        return {width:Math.max(width, 260), height:Math.max(height, promptNodeManualMinHeight(node))};
     }
     const width = !Number.isFinite(explicitW) || explicitW === 360 ? 316 : explicitW;
     const fallbackH = promptNodeMinHeight(node);
@@ -9154,7 +9175,6 @@ function promptNodeBodyHtml(node){
                 ${llmOutputModeHtml(node)}
                 <button class="prompt-node-run prompt-node-control" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'play'}"></i><span>${node.running ? escapeHtml(tr('common.running')) : escapeHtml(tr('common.run'))}</span></button>
             </div>
-            <div class="node-resize-handle" title="拖动调整大小"></div>
             ${node.llmSystemEnabled ? `<textarea class="prompt-node-control prompt-llm-system" placeholder="${escapeHtml(tr('smart.promptLlmSystemPlaceholder'))}">${escapeHtml(systemPrompt || 'You are a helpful prompt assistant.')}</textarea>` : ''}
         </div>` : '';
     return `<div class="prompt-node-card">
@@ -9446,6 +9466,21 @@ function markNodeSizeUserSet(hostEl, node){
         /* 必须在**按下**那一刻就交权：之前挂在 mouseup，拖动过程中自适应那条
            height/width: auto !important 还在生效 → 往下一拉就被按回去（"固定死了"）。 */
         handle.addEventListener('mousedown', () => {
+            /* 首次拖之前先把**当前渲染出来的尺寸**记进 node.w/h，再打 size-user-set：
+               否则 CSS 从 height:auto 切到内联高度的一瞬间，节点会先塌回 imageLayout 的兜底高度
+               （表格/批量节点尤其明显：框变了、表格内容却没跟着走）。 */
+            if(!node.sizeUserSet){
+                const w = Math.round(el.offsetWidth) || 0;
+                const h = Math.round(el.offsetHeight) || 0;
+                if(w) node.w = w;
+                if(h) node.h = h;
+                /* 必须立刻把快照写回内联样式：这个监听是捕获阶段、先于画布的 bubble 缩放处理器，
+                   .size-user-set 一加上去，CSS 的 height:auto!important 就失效，
+                   不再写内联的话节点会先按上一次渲染的兜底高（表格/批量是 194）塌一下，
+                   画布随后量到的起点就是 194 —— 拖了半天框还变小。 */
+                if(w) el.style.width = w + 'px';
+                if(h) el.style.height = h + 'px';
+            }
             node.sizeUserSet = true;
             el.classList.add('size-user-set');
         }, true);
@@ -9479,12 +9514,26 @@ function tableHostDragBar(label){
     return bar;
 }
 
+/* 表格/批量节点是 width:auto / height:auto，node.w/h 跟真实渲染尺寸差很多
+   （比如渲染出来 300 高、nodeRect 还是兜底 194）→ 连线的端口锚点、下游结果节点的落点
+   都按错的高度算。挂载完内容后把实测尺寸回写 node.w/h（用户手动拉过 sizeUserSet 的不动），
+   并刷新一次连线层。 */
+function syncContentNodeMeasuredSize(node, el){
+    if(!node || !el || node.sizeUserSet) return false;
+    const w = Math.round(el.offsetWidth) || 0;
+    const h = Math.round(el.offsetHeight) || 0;
+    let changed = false;
+    if(w > 24 && w !== Number(node.w)){ node.w = w; changed = true; }
+    if(h > 24 && h !== Number(node.h)){ node.h = h; changed = true; }
+    return changed;
+}
 function mountSmartTableNodes(){
     if(!world) return;
     const hosts = world.querySelectorAll('.node-body .table-node-host');
     if(!hosts.length) return;
     const api = ensureTableApi();
     if(!api) return;
+    let sizeChanged = false;
     hosts.forEach(hostEl => {
         const el = hostEl.closest ? hostEl.closest('.image-node') : null;
         const node = el ? nodes.find(n => n.id === el.dataset.id) : null;
@@ -9499,7 +9548,9 @@ function mountSmartTableNodes(){
         } catch(error){
             hostEl.textContent = '表格渲染失败：' + (error && error.message ? error.message : error);
         }
+        if(syncContentNodeMeasuredSize(node, el)) sizeChanged = true;
     });
+    if(sizeChanged) scheduleConnectionLayerRefresh();
 }
 
 function nodeBodyHtml(node, layout){
@@ -10102,7 +10153,7 @@ function render(){
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
-        const html = `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        const html = `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${isPrompt && node.sizeUserSet ? 'size-user-set' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
@@ -10440,44 +10491,11 @@ function bindPromptNodeControls(el, node){
         document.body.classList.add('smart-node-resize', 'smart-prompt-split-resize');
         capturePendingUndo();
     });
-    // LLM 节点的缩放：画布只给自己的节点类型绑 .node-resize-handle，提示词节点这个把手它是不会接管的
-    // （实测拖它毫无反应），所以这里自己实现：拖右下角 → 改 node.w / node.h + 立刻写内联样式。
-    const sizeHandle = el.querySelector('.node-resize-handle');
-    if(sizeHandle && !sizeHandle.dataset.selfBound){
-        sizeHandle.dataset.selfBound = '1';
-        sizeHandle.addEventListener('pointerdown', event => {
-            if(event.button !== 0) return;
-            event.preventDefault();
-            event.stopPropagation();
-            const startX = event.clientX;
-            const startY = event.clientY;
-            const rect = el.getBoundingClientRect();
-            /* 起点一律取**当前渲染出来的尺寸**：绝不能拿旧的 node.h ——
-               那会让'点一下把手'就跳到以前存过的大尺寸（用户遇到过的突然变很长）。 */
-            const startW = rect.width;
-            const startH = rect.height;
-            el.classList.add('size-user-set');
-            node.sizeUserSet = true;
-            const onMove = moveEvent => {
-                const w = Math.max(240, Math.round(startW + (moveEvent.clientX - startX)));
-                const h = Math.max(200, Math.round(startH + (moveEvent.clientY - startY)));
-                node.w = w;
-                node.h = h;
-                el.style.width = w + 'px';
-                el.style.height = h + 'px';
-            };
-            const onUp = () => {
-                document.removeEventListener('mousemove', onMove, true);
-                document.removeEventListener('mouseup', onUp, true);
-                document.body.classList.remove('smart-node-resize');
-                render();
-                scheduleSave();
-            };
-            document.body.classList.add('smart-node-resize');
-            document.addEventListener('mousemove', onMove, true);
-            document.addEventListener('mouseup', onUp, true);
-        }, true);
-    }
+    /* LLM 节点的缩放不在这里自己实现：这里曾经用 pointerdown + preventDefault 接管，
+       而 pointerdown 的 preventDefault 会**吞掉后续的兼容鼠标事件**（mousedown/mousemove/mouseup），
+       结果画布自己绑在 .node-resize-handle 上的 resize 永远收不到 mousedown，拖了毫无反应。
+       现在统一交给 bindNodeEvents() 里画布那套缩放（见 resizeState 分支），
+       只需把 LLM 提示词节点标记成手动尺寸（node.sizeUserSet）。 */
     // 顶部那一排 tab（照搬经典画布）：System / 反推 走原来的开关逻辑，聊天先占位
     el.querySelectorAll('.llm-tab').forEach(tab => {
         tab.onclick = event => {
@@ -11194,7 +11212,20 @@ function bindNodeEvents(){
             const node = nodes.find(n => n.id === id);
             if(!node) return;
             const rect = nodeRect(node);
-            resizeState = {id, startX:e.clientX, startY:e.clientY, startW:rect.width, startH:rect.height};
+            let startW = rect.width;
+            let startH = rect.height;
+            /* LLM 模式的提示词节点要支持手动尺寸：起点取**当前渲染出来的尺寸**
+               （offsetWidth/offsetHeight 不受画布缩放影响），绝不能拿 nodeRect 的内容估算值 ——
+               那样一按把手节点就会跳到另一个高度（用户遇到过的"点一下突然变很长"）。
+               这里先不打 sizeUserSet：真的拖出去才算手动，单击把手不会把自适应锁死。 */
+            const manualPrompt = node.type === 'smart-prompt' && Boolean(node.llmEnabled);
+            /* 表格 / 批量节点同理会话：它们没有图片，imageLayout 给的是兜底高（133），
+               起点必须取真实渲染尺寸，否则一按把手就塌高。 */
+            if(manualPrompt || node.type === 'table' || node.type === 'smart-batch'){
+                startW = el.offsetWidth || startW;
+                startH = el.offsetHeight || startH;
+            }
+            resizeState = {id, startX:e.clientX, startY:e.clientY, startW, startH, manualPrompt};
             // 分组缩放：记录本次手势开始时所有成员的位置/尺寸快照与起始缩放，缩放过程按相对快照的比例实时计算，
             // 整体等比缩放+重排。用快照而非持久基准，移动成员后再缩放也不会回退到旧位置。
             if(isSmartGroupNode(node)){
@@ -14303,7 +14334,8 @@ function updateComposer(){
         settings = smartSettingsForNode(subject);
         loadPromptDraft(subject);
     }
-    setPromptInputLocked(false);
+    /* 批量生成节点的提示词来自表格每一行，编辑器里的输入框对它是摆设 → 锁掉，别让人以为要在这里写 */
+    setPromptInputLocked(isSmartBatchNode(node));
     syncCascadeRunButton(node);
     positionComposerForNode(node);
     const ph = Math.max(60, Math.min(380, Number(settings.promptH) || 124));
@@ -14315,6 +14347,15 @@ function updateComposer(){
 }
 function renderInputPromptPreview(node){
     if(!inputPromptPreview) return;
+    /* 批量生成节点：编辑器里不写提示词，提示词来自节点里「生成输入」的每一行。
+       这里把这件事写明白，免得用户以为编辑器跟批量内容是两张皮。 */
+    if(isSmartBatchNode(node)){
+        inputPromptPreview.classList.add('has-text');
+        inputPromptPreview.innerHTML = '<div class="input-prompt-preview-label">批量生成</div>'
+            + '<div class="input-prompt-preview-text">按节点里「生成输入」勾选的行逐行生成：每行用自己的提示词和参考素材。'
+            + '下面选的平台 / 模型 / 尺寸 / 张数作用于整批，跑完每行会在右侧自动落一个结果节点。</div>';
+        return;
+    }
     const groupText = isSmartGroupNode(node) ? textForNode(node).trim() : '';
     const text = node ? [groupText, inputPromptTextFor(node).trim()].filter(Boolean).join('\n\n') : '';
     inputPromptPreview.classList.toggle('has-text', Boolean(text));
@@ -15975,7 +16016,15 @@ function outgoingInputConnectionsFor(node){
 }
 function nextOutputPositionForSource(sourceNode, pendingBox, options={}){
     const sourceRect = nodeRect(sourceNode);
-    const x = (sourceRect.x || 0) + sourceRect.width + 80;
+    /* 用**实际渲染宽度**：表格/批量节点是 width:auto（CSS 里 width:auto!important），
+       node.w 常和真实宽度差很多，直接用 nodeRect().width 会把结果节点摆到很右边、
+       连线中间空一大截（用户报的「下游节点连线位置不对」）。 */
+    const sourceEl = world ? world.querySelector(`.image-node[data-id="${CSS.escape(sourceNode.id)}"]`) : null;
+    const renderedW = sourceEl ? (Number(sourceEl.offsetWidth) || 0) : 0;
+    const sourceW = renderedW > 24
+        ? renderedW
+        : (Number(sourceNode?.w) > 24 ? Number(sourceNode.w) : (sourceRect.width || 260));
+    const x = (sourceRect.x || 0) + sourceW + 80;
     const gap = 28;
     const outputs = outgoingConnectionsFor(sourceNode, ['input','flow'])
         .map(conn => nodes.find(n => n.id === conn.to))
@@ -17609,6 +17658,13 @@ function runSmartCascadeFromLoop(loopId){
 }
 async function runGeneration(){
     const node = selectedNode();
+    /* 批量生成节点：编辑器里那颗「运行」= 跑整批（它自己没有 images，
+       绝不能走下面的单节点图片生成）。 */
+    if(isSmartBatchNode(node)){
+        const api = ensureTableApi();
+        if(api) api.runTableBatch(node.id, {});
+        return;
+    }
     const request = buildPromptRequest(node, null, true, smartLoopContext);
     const prompt = request.prompt.trim();
     if(!node) return;
@@ -17799,42 +17855,17 @@ async function runPromptLLMNode(nodeId){
     if(!node || node.type !== 'smart-prompt') return;
     const message = promptNodeLLMInputText(node).trim();
     if(!message){ toast(tr('smart.promptLlmNeedText')); return; }
-    const systemPrompt = (node.llmSystemPrompt || '').trim();
     node.llmEnabled = true;
     node.running = true;
     render();
     try {
-        const provider = resolveChatProviderId(node.llmProvider || '');
-        const model = resolveChatModel(node.llmModel || '', provider);
-        const mediaRefs = promptNodeInputMediaForLLM(node);
-        const images = imageRefsOnly(mediaRefs).map(img => img.url).filter(Boolean);
-        const videos = videoRefsOnly(mediaRefs).map(video => video.url).filter(Boolean);
-        const target = smartLLMTarget();
-        const result = await fetch('/api/canvas-llm', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                message,
-                messages:[],
-                images,
-                videos,
-                model,
-                provider,
-                ms_model: provider === 'modelscope' ? model : '',
-                system_prompt:node.llmSystemEnabled ? (systemPrompt || 'You are a helpful prompt assistant.') : '',
-                reverse:Boolean(node.reverse),
-                target_type:target.target_type,
-                target_model:target.target_model,
-            })
-        }).then(async r => {
-            if(!r.ok) throw new Error(await r.text());
-            return r.json();
-        });
-        node.text = (result.text || '').trim();
+        /* 请求体统一走 callSmartCanvasLLM：与经典画布 callCanvasLLM 逐字段一致
+           （system_prompt / messages / reverse / target_type / target_model / max_tokens），
+           不再在这里另拼一套。 */
+        const text = await callSmartCanvasLLM(node, message, []);
+        node.text = String(text || '').trim();
         /* 照搬经典画布：LLM 的产出显示在 OUTPUT 区（顶部提示词框在 LLM 模式下已隐藏）。 */
         node.outputText = node.text;
-        node.llmProvider = provider;
-        node.llmModel = model;
         scheduleSave();
     } catch(e) {
         toast((e.message || tr('smart.promptLlmFailed')).slice(0, 160));
@@ -18737,6 +18768,7 @@ function mountSmartBatchNodes(){
     if(!hosts.length) return;
     const api = ensureTableApi();
     if(!api) return;
+    let sizeChanged = false;
     hosts.forEach(hostEl => {
         const el = hostEl.closest ? hostEl.closest('.image-node') : null;
         const node = el ? nodes.find(n => n.id === el.dataset.id) : null;
@@ -18746,51 +18778,15 @@ function mountSmartBatchNodes(){
         ensureNodeResizeHandle(hostEl);
         markNodeSizeUserSet(hostEl, node);
         const bar = tableHostDragBar('批量生成');
-        bar.classList.add('is-toggle');
-        bar.title = '点击展开 / 收起生成列表（拖动这一栏可以移动节点）';
-        bar.onclick = event => {
-            event.stopPropagation();
-            node.batchEditorOpen = node.batchEditorOpen !== true;
-            render();
-            scheduleSave();
-        };
+        bar.title = '拖动这一栏可以移动节点';
         hostEl.appendChild(bar);
         const panel = api.renderTableBatchPanel(node);
-        const runRow = document.createElement('div');
-        runRow.className = 'gen-run-row';
-        runRow.innerHTML = api.tableBatchRunButtonHtml(node) || '';
-        /* 收起状态：只留一行摘要，点上面的标题栏展开编辑器（你要的「点击后下方出现编辑器」） */
-        /* 默认展开（用户反馈"连上表格看不到编辑器"）：只有显式收起过才折叠。 */
-        if(panel && node.batchEditorOpen === false){
-            const closed = document.createElement('div');
-            closed.className = 'table-batch-collapsed';
-            closed.textContent = (panel.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 96);
-            hostEl.appendChild(closed);
-            return;
-        }
         if(panel){
+            /* 只渲染「生成输入」面板：
+               1) 不再挂折叠开关 —— 点标题栏不该把生成列表藏起来（用户要求）；
+               2) 不再挂「批量生成」按钮 —— 底部编辑器里那颗「运行」就是跑整批（用户要求去掉重复入口）；
+               3) 批量产出的素材不再塞在节点里 —— 每行结果自动落到下游图片/视频节点（见 tableRunOneRow）。 */
             hostEl.appendChild(panel);
-            hostEl.appendChild(runRow);
-            const btn = runRow.querySelector('.table-batch-run-btn');
-            if(btn) btn.onclick = event => { event.stopPropagation(); api.runTableBatch(node.id, {}); };
-            /* 这一节点不是图片节点，render() 不会画 node.images —— 批量产出的素材在这里自己显示 */
-            const produced = (Array.isArray(node.images) ? node.images : []).filter(item => item && (item.url || typeof item === 'string'));
-            if(produced.length){
-                const grid = document.createElement('div');
-                grid.className = 'table-batch-results';
-                produced.forEach(item => {
-                    const url = (item && (item.url || item)) || '';
-                    if(!url) return;
-                    const cell = document.createElement('div');
-                    cell.className = 'table-batch-result';
-                    if(item && item.name) cell.title = item.name;
-                    cell.innerHTML = tableMediaKindForUrl(url) === 'video'
-                        ? '<video src="' + tableEscapeUrl(url) + '" muted playsinline></video>'
-                        : '<img src="' + tableEscapeUrl(url) + '" alt="">';
-                    grid.appendChild(cell);
-                });
-                hostEl.appendChild(grid);
-            }
         } else {
             /* 空状态：给一个和生成列表同款的外框（不显示行数），提示请连接多维表格；
                点这个框就把编辑器展开出来。 */
@@ -18799,17 +18795,19 @@ function mountSmartBatchNodes(){
             empty.title = '点击打开编辑器';
             const tip = document.createElement('div');
             tip.className = 'table-batch-empty-tip';
-            tip.textContent = '请连接多维表格节点';
+            /* 面板为空只有两种可能：没接表格，或者方向接反了（把本节点拖到了表格上）。
+               直接把话说清楚，别让用户对着一个空框猜。 */
+            const reversed = (Array.isArray(canvas?.connections) ? canvas.connections : []).some(conn => conn && conn.from === node.id
+                && (nodes || []).some(item => item.id === conn.to && item.type === 'table'));
+            tip.textContent = reversed
+                ? '连接方向反了：要从「多维表格」右侧的输出口，拖到本节点左侧的输入口'
+                : '还没有接入多维表格：把「多维表格」右侧的输出口拖到本节点左侧的输入口';
             empty.appendChild(tip);
-            empty.onclick = event => {
-                event.stopPropagation();
-                node.batchEditorOpen = true;
-                render();
-                scheduleSave();
-            };
             hostEl.appendChild(empty);
         }
+        if(syncContentNodeMeasuredSize(node, el)) sizeChanged = true;
     });
+    if(sizeChanged) scheduleConnectionLayerRefresh();
 }
 function createSmartTableNode(x, y){
     const model = window.NovaTableModel;
@@ -19146,8 +19144,15 @@ window.onmousemove = e => {
         if(!node) return;
         const dx = (e.clientX - resizeState.startX) / viewport.scale;
         const dy = (e.clientY - resizeState.startY) / viewport.scale;
+        /* 真的拖出去了才把 LLM 提示词节点切成「手动尺寸」：
+           不切的话 CSS 的 height:auto !important 会在拖动过程中把写进去的高度一直按回去（拖了没反应）。 */
+        if(resizeState.manualPrompt && !node.sizeUserSet && (Math.abs(dx) > 2 || Math.abs(dy) > 2)){
+            node.sizeUserSet = true;
+            world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`)?.classList.add('size-user-set');
+        }
         const minW = node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
-        const minH = node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
+        // LLM 模式的提示词节点下限要高一些：tabs/供应商行/Input、Output 区/药丸行都是固定高度，太矮会压掉运行按钮
+        const minH = node.type === 'smart-prompt' ? (node.llmEnabled ? promptNodeManualMinHeight(node) : 170) : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
         if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
             // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
             // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。
@@ -21138,7 +21143,17 @@ function tableLinkKey(fromId, toId){ return String(fromId || '') + '>' + String(
    而我们每次渲染表格前都用画布状态重建这个副本 → 刚连的线会被冲掉
    （表现：LLM 出表后 参考图/白底图/Prompt → 表格 的连线全没了，但 表格→批量生成 还在）。
    所以重建之前，先把副本里「画布上还没有」的边写回画布。 */
+/* 适配层是否已经从画布读过一次连线。首次必须**先读后写**：
+   syncTableConnectionsToCanvas() 会把「适配层里没有、画布上有」的指向表格的连线当成
+   「表格模块已删除」而清掉；页面刚加载时 tableConnections 还是空的，于是画布上所有
+   指向表格的已存连线（分组/参考图 → 表格、LLM → 表格）会被一次性删光 —— 表现就是
+   刷新后表格读不到上传的图片/视频、也连不回分组节点（用户报的 bug 1）。 */
+let tableConnectionsReady = false;
 function syncTableConnections(){
+    if(!tableConnectionsReady){
+        tableConnectionsReady = true;
+        syncTableConnectionsFromCanvas();
+    }
     syncTableConnectionsToCanvas();
     syncTableConnectionsFromCanvas();
 }
@@ -21227,32 +21242,66 @@ const tableSelected = {
    注意：这里只负责**派发任务**；结果落盘/轮询是下一步（智能画布自己那套 agentPollGenerateTask）。 */
 /* 批量「跑一行」：提示词 + 参考图交给智能画布已有的生成链路（提交 → 轮询 → 收素材），
    然后把这一行产出的素材追加到批量生成节点上（按行标注）。 */
-function tableRowRefUrls(row){
-    return (row.refs || []).map(ref => (ref && typeof ref === 'object' ? ref.url : ref) || '').filter(Boolean);
-}
 async function tableRunOneRow(nodeId, options, forceVideo){
     const node = nodes.find(n => n.id === nodeId);
     if(!node) throw new Error('批量生成节点不存在');
     const row = options.rowOverride || {};
     const prompt = String(row.prompt || '').trim();
-    const refs = tableRowRefUrls(row);
+    /* 保留表格给的 refs 对象形状（url / kind / nodeId / outputIndex）：
+       generateUrlsForCurrentSettings → imageRefsOnly() 是按 ref.url + ref.kind 过滤的，
+       之前这里 map 成了纯 URL 字符串，结果每行的参考图全被 imageRefsOnly 丢掉 ——
+       表现就是「批量生成读不到多维表格里的参考图」。 */
+    const refs = (Array.isArray(row.refs) ? row.refs : [])
+        .map(ref => (ref && typeof ref === 'object') ? ref : {url:String(ref || ''), kind:'image'})
+        .filter(ref => ref.url);
     let runSettings = Object.assign({}, settings, smartSettingsForNode(node) || {});
     if(forceVideo) runSettings = Object.assign({}, runSettings, {apiKind: 'video'});
     const rowNumber = (options.runContext || {}).rowNumber || 0;
     if(!prompt && !refs.length) throw new Error('第 ' + (rowNumber || '?') + ' 行既没有提示词也没有素材');
-    const out = await generateUrlsForCurrentSettings(node, prompt, refs, runSettings);
-    const urls = Array.isArray(out && out.urls) ? out.urls : [];
-    if(!urls.length) throw new Error('这一行没有产出素材');
-    urls.forEach((url, index) => {
-        node.images.push({
-            url,
-            name: rowNumber ? ('第' + rowNumber + '行' + (urls.length > 1 ? '-' + (index + 1) : '')) : '',
-            role: 'batch',
-        });
-    });
+    const kind = forceVideo || runSettings.apiKind === 'video' ? 'video' : 'image';
+    const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
+    /* 开跑前就先落一个**待生成**结果节点（batch → 结果节点），和单节点生成一样：
+       生成过程中画布上能直接看到一张 loading 卡片，跑完就地填成图片/视频节点，
+       失败则把这个待生成节点撤掉。结果节点就是普通图片/视频节点，可继续往下接生成节点。 */
+    let output = null;
+    try {
+        undoSuppressed = true;
+        output = createPendingOutputFromSource(node, Math.max(1, Number(runSettings.count) || 1), meta, {connectSource:false, selectOutput:false, refs});
+    } catch(error) {
+        console.error('[smart-batch] 待生成节点创建失败', error);
+    } finally {
+        undoSuppressed = false;
+    }
     render();
     scheduleSave();
-    return urls;
+    try {
+        const out = await generateUrlsForCurrentSettings(node, prompt, refs, runSettings);
+        const urls = Array.isArray(out && out.urls) ? out.urls : [];
+        if(!urls.length) throw new Error('这一行没有产出素材');
+        urls.forEach((url, index) => {
+            node.images.push({
+                url,
+                name: rowNumber ? ('第' + rowNumber + '行' + (urls.length > 1 ? '-' + (index + 1) : '')) : '',
+                role: 'batch',
+            });
+        });
+        if(output){
+            const live = liveSmartNode(output);
+            if(live) finalizePendingNode(live, urls, meta, kind);
+        }
+        render();
+        scheduleSave();
+        return urls;
+    } catch(error) {
+        /* 这一行失败：撤掉待生成节点，别在画布上留一张永远转圈的卡片 */
+        if(output){
+            nodes = nodes.filter(n => n.id !== output.id);
+            if(canvas) canvas.connections = (canvas.connections || []).filter(conn => conn.from !== output.id && conn.to !== output.id);
+        }
+        render();
+        scheduleSave();
+        throw error;
+    }
 }
 /* 批量节点是 smart-batch（不是经典画布的 video 类型），所以 shared/table-node.js 里
    tableBatchRunner(node) 永远挑 runGenerator。视频分镜表出表时会给批量节点打 tableBatchVideo 标记，
@@ -21280,38 +21329,47 @@ function llmOutputModeHtml(node){
         + api.llmOutputModeButtonsHtml(node) + '</div>';
 }
 
-/* 智能画布的 LLM 纯文本调用（和 runPromptLLMNode 走同一个 /api/canvas-llm） */
-async function callSmartLLMText(node, message){
-    const provider = resolveChatProviderId(node.llmProvider || '');
+/* 智能画布的 /api/canvas-llm 调用：请求体与经典画布 callCanvasLLM（canvas.js）逐字段一致 ——
+   用户要求「LLM 节点的后端配置照搬传统 LLM 节点」。
+   字段映射：经典 node.model / node.systemPrompt → 智能 llmModel / llmSystemPrompt；
+   上游素材 = promptNodeInputMediaForLLM；下游目标 = smartLLMTarget（经典的对应物是 llmDownstreamTarget）。
+   noMedia：多维表格的规划/生成/修复遍必须屏蔽素材与反推 —— 后端 Prompt Intelligence 只要收到
+   images/videos/reverse 就会改写 message，把结构化 JSON 提示词毁掉（与经典 callCanvasLLM 同一套规则）。 */
+async function callSmartCanvasLLM(node, message, messages=[], options={}){
+    const provider = resolveChatProviderId(node.llmProvider || 'comfly');
     const model = resolveChatModel(node.llmModel || '', provider);
-    const target = smartLLMTarget();
-    const mediaRefs = promptNodeInputMediaForLLM(node);
+    node.llmProvider = provider;
+    node.llmModel = model;
+    const mediaRefs = options.noMedia ? [] : promptNodeInputMediaForLLM(node);
     const images = imageRefsOnly(mediaRefs).map(img => img.url).filter(Boolean);
     const videos = videoRefsOnly(mediaRefs).map(video => video.url).filter(Boolean);
-    /* 必须带超时：模型端挂住不返回时，fetch 永远 pending → runSmartLLMListMode 的 finally 不执行
+    const target = options.noMedia ? {target_type:'', target_model:''} : smartLLMTarget();
+    const body = {
+        message,
+        model,
+        ms_model: provider === 'modelscope' ? model : '',
+        provider,
+        /* 经典画布无论 System 开关是否打开都会把 system_prompt 发给后端（开关只控制文本框显示），这里保持一致 */
+        system_prompt: node.llmSystemPrompt || 'You are a helpful assistant.',
+        messages,
+        images,
+        videos,
+        reverse: options.noMedia ? false : Boolean(node.reverse),
+        target_type: target.target_type,
+        target_model: target.target_model,
+    };
+    if(options.maxTokens) body.max_tokens = Math.max(0, Math.floor(Number(options.maxTokens) || 0));
+    /* 必须带超时：模型端挂住不返回时，fetch 永远 pending → 调用方的 finally 不执行
        → node.running 一直是 true，还被保存进画布，刷新后节点永远显示「运行中」（用户报的"不显示了"）。 */
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 90000);
-    let res;
     try {
-        res = await fetch('/api/canvas-llm', {
+        const res = await fetch('/api/canvas-llm', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
             signal: controller.signal,
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-            message,
-            messages:[],
-            images,
-            videos,
-            model,
-            provider,
-            ms_model: provider === 'modelscope' ? model : '',
-            system_prompt:'',
-            reverse:false,
-            target_type:target.target_type,
-            target_model:target.target_model,
-        })
-    });
+            body: JSON.stringify(body),
+        });
         if(!res.ok) throw new Error(await res.text());
         const data = await res.json();
         return String(data.text || '');
@@ -21319,12 +21377,22 @@ async function callSmartLLMText(node, message){
         clearTimeout(timer);
     }
 }
+/* 出表（多维表格/视频分镜表）走 noMedia：与经典 runLLMListMode 里 callCanvasLLM(..., {noMedia:true}) 一致 */
+async function callSmartLLMText(node, message){
+    return callSmartCanvasLLM(node, message, [], {noMedia:true});
+}
 
 /* LLM 出表：规划 → 生成 → 解析（不过就再要一次）→ 物化表格 → 自动接到批量生成节点 */
 async function runSmartLLMListMode(node){
+    /* 并发保护：按钮虽然是 disabled，但双击/连点可能在 render 前挤进两次，
+       每次都会物化一张表 → 用户看到「生成一次多出好几张表」。 */
+    if(node.running) return;
     const api = ensureTableApi();
     const model = window.NovaTableModel;
     if(!api || !model){ toast('多维表格模块未加载'); return; }
+    /* 出表读的是适配层那份连线副本，它只在有表格/批量节点渲染时同步。
+       这里再同步一次，保证「刚接上参考图就点生成」也能被读到。 */
+    syncTableConnections();
     const requirement = (promptNodeLLMInputText(node) || '').trim();
     if(!requirement){ toast(tr('smart.promptLlmNeedText')); return; }
     const groups = api.llmMediaGroups(node);
@@ -21342,7 +21410,9 @@ async function runSmartLLMListMode(node){
             try { table = model.parseTableOutput(answer); } catch(error){ table = null; }
         }
         if(!table) throw new Error('模型没有返回可用的表格');
-        const created = api.materializeLlmTable(node, table, groups, plan);
+        /* 物化 / 复用表格节点。跳过规划遍 → 没有 plan，materializeLlmTable 传 null，
+           和经典画布「规划失败」时同一条路。 */
+        const created = reuseOrCreateLlmTableNode(node, table, groups, api);
         if(created) connectSmartBatchAfter(created);
         toast('已生成多维表格');
     } catch(error){
@@ -21370,6 +21440,28 @@ function connectSmartBatchAfter(tableNode){
     render();
     scheduleSave();
     return batch;
+}
+
+/* 物化表格节点：同一个 LLM 节点已经有「自己生成的表格」时**就地更新**，不再新建。
+   materializeLlmTable 每次都 new 一个 table 节点 —— 用户重复点「生成」就会堆出一排一模一样的
+   多维表格（还各自连到同一个批量节点），这就是"生成一次多出好几张表"的根因。 */
+function reuseOrCreateLlmTableNode(llmNode, table, groups, api){
+    const existing = nodes.find(n => n.type === 'table' && n.llmGeneratedOutput === true && n.llmSourceId === llmNode.id);
+    if(!existing) return api.materializeLlmTable(llmNode, table, groups, null);
+    existing.table = table;
+    existing.selectedRows = [];
+    existing.llmRunAt = nowMs();
+    /* 连线复用第一次那批；万一缺了补上（connectInputNode 内部会按 from/to/kind 去重） */
+    const model = window.NovaTableModel;
+    groups.forEach((group, index) => {
+        if(!group || !group.sourceId) return;
+        try { connectInputNode(group.sourceId, existing.id); } catch(error){ /* 连不上就算了 */ }
+        if(model) tablePortByLink.set(tableLinkKey(group.sourceId, existing.id), model.channelIdAt(index));
+    });
+    syncTableConnectionsToCanvas();
+    render();
+    scheduleSave();
+    return existing;
 }
 
 function ensureTableApi(){

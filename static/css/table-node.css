@@ -563,7 +563,9 @@
 .image-node.size-user-set:has(> .node-body > .table-batch-host) {
     min-width: 220px;
     min-height: 120px;
-    overflow: hidden;
+    /* 不能 overflow:hidden：左右两侧的连接端口是定位在节点框外 30px 的兄弟元素，
+       一裁就把「加号+圆圈」整个裁掉（用户报的「看不到端口 / 连不上」）。 */
+    overflow: visible;
 }
 
 /* 智能画布 prompt 节点布局：中间一排工具（模板库/分隔符/LLM/启用系统提示词/反推），
@@ -589,7 +591,49 @@
     border-radius: var(--table-frame-r, 14px) !important;
     box-shadow: 0 10px 30px rgba(0, 0, 0, .10) !important;
     padding: var(--table-frame-p, 10px) !important;
+    /* 同上：外框不裁，端口（框外 30px）才看得见、点得到。内容本来就在 padding 以内，不会被圆角切到。 */
+    overflow: visible;
+}
+
+/* 手动拉过尺寸后：表格内容必须跟着框走 —— 撑开的框里真的多显示几行，
+   而不是"只有底框变大、表格纹丝不动"（用户报的）。
+   这一套和经典画布 .node.sized.table-node 完全一致，只是选择器换成智能画布的 .image-node。 */
+.image-node.size-user-set:has(> .node-body > .table-node-host) .node-body {
+    height: 100% !important;
+    min-height: 0;
+    align-items: stretch;
+    justify-content: stretch;
     overflow: hidden;
+}
+.image-node.size-user-set:has(> .node-body > .table-node-host) .table-node-host {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+.image-node.size-user-set:has(> .node-body > .table-node-host) .table-node-host .table-node {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+/* 批量节点同理：手动尺寸下面板铺满，内容多了自己滚 */
+.image-node.size-user-set:has(> .node-body > .table-batch-host) .node-body {
+    height: 100% !important;
+    min-height: 0;
+    align-items: stretch;
+    justify-content: stretch;
+}
+.image-node.size-user-set:has(> .node-body > .table-batch-host) .table-batch-host {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+.image-node.size-user-set:has(> .node-body > .table-batch-host) .table-batch-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
 }
 
 .theme-dark .image-node:has(> .node-body > .table-node-host),
@@ -624,21 +668,23 @@
 /* 智能画布 LLM 模式的提示词节点：内容多了（tabs 排 / 分栏 / 输出区 / 底部药丸+运行），
    而节点尺寸还是画布按老公式算的 → 底下那排被挤到卡片外面。让卡片跟着内容走。 */
 /* 没拖过才自适应；拖过之后听画布写进来的尺寸（否则缩放图/连线都变了、只有卡片被按在原地） */
-/* LLM 节点**永远**跟着内容自适应：不接手动尺寸。
-   （之前加了 size-user-set 闸门，结果用户点一下缩放把手就跳到旧的大 h，节点突然变得很长。） */
+/* 没手动拖过：LLM 节点跟着内容自适应（历史行为，不改）。 */
 .image-node:has(.prompt-node-llm):not(.size-user-set) {
     height: auto !important;
     min-height: 300px;
     overflow: visible;
 }
-/* 真拖动过（>3px 才加类）才听手动尺寸；点一下不会进这个状态 */
-.image-node:has(.prompt-node-llm).size-user-set { min-height: 200px; overflow: hidden; }
-.image-node:has(.prompt-node-llm).size-user-set .node-body { height: 100% !important; overflow: hidden; }
+/* 拖过右下角把手（node.sizeUserSet）才听手动宽高；高度由画布内联样式写进来，
+   内容区改成 flex 自适应：输入框/输出框按比例吃掉多余高度，装不下时内部滚动而不是裁掉运行按钮。 */
+.image-node:has(.prompt-node-llm).size-user-set { min-height: 340px; overflow: hidden; }
+.image-node:has(.prompt-node-llm).size-user-set .node-body { height: 100% !important; overflow: auto; }
 .image-node:has(.prompt-node-llm).size-user-set .prompt-node-card { height: 100%; display: flex; flex-direction: column; }
 .image-node:has(.prompt-node-llm).size-user-set .prompt-llm-instruction-wrap { flex: 1 1 45%; min-height: 90px; }
 .image-node:has(.prompt-node-llm).size-user-set .prompt-llm-instruction { height: 100% !important; }
 .image-node:has(.prompt-node-llm).size-user-set .llm-output-wrap { flex: 1 1 45%; min-height: 70px; }
 .image-node:has(.prompt-node-llm).size-user-set .llm-output { height: 100%; max-height: none; }
+/* 手动尺寸时让 LLM 区撑满卡片：否则节点被拉高后内容还缩在上面，运行按钮下方留一大块空白 */
+.image-node:has(.prompt-node-llm).size-user-set .prompt-node-llm { flex: 1 1 auto; min-height: 0; }
 .image-node:has(.prompt-node-llm) .node-body {
     height: auto !important;
     overflow: visible;

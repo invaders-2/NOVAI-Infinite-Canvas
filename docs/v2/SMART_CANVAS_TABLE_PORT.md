@@ -297,3 +297,220 @@ Output                        [复制]
 - 每步改完**先在真浏览器点一遍**再提交；
 - 中间别用脚本做"回退"式删改（上次回退把 `wrap.appendChild(menu)` 一起删掉，导致菜单点不开、
   还提交了不可用状态）。
+
+## LLM 节点：手动尺寸 + 后端配置照搬经典节点（2026-09-16 后续轮）
+
+用户两条要求：① 智能画布的 LLM 节点支持自定义大小；② LLM 节点发给后端的配置照搬经典 LLM 节点。
+
+### ① 自定义大小（拖右下角把手，尺寸随画布持久化）
+
+之前 6 次尝试都不生效，根因有两个，都已修掉：
+
+1. `bindPromptNodeControls` 里用 `pointerdown + preventDefault` 自己接管缩放。按 Pointer Events 规范，
+   **`pointerdown` 上 `preventDefault()` 会吞掉后续的 mousedown/mousemove/mouseup 兼容事件** →
+   画布自己绑在 `.node-resize-handle` 上的 `mousedown` 永远收不到，拖了毫无反应。已整段删除，
+   统一交给 `bindNodeEvents()` 里画布那套缩放（resizeState 分支）。
+2. 面板里还渲染了第二个 `.node-resize-handle`（在 `.prompt-node-llm` 内），`el.querySelector` 抓到的是它。
+   已删掉，只保留 `render()` 渲染的那一个。
+
+落地：`node.sizeUserSet`（跟画布一起存）+ 元素上的 `.size-user-set`；拖动起点取
+`offsetWidth/offsetHeight`（不受画布缩放影响）而不是 `nodeRect()` 的内容估算值（否则一按就跳高）；
+**真的移动 >2px 才切手动尺寸**（单击把手不会锁死自适应）；`promptNodeLayoutSize()` 在手动模式下直接用
+`node.w/node.h`（下限 `promptNodeManualMinHeight()`，LLM 340 / 开 System 380）；CSS 在 `.size-user-set` 下
+高度听画布、`.prompt-node-llm` 撑满卡片、输入/输出区 flex 自适应、装不下内部滚动；未手动时保持内容自适应。
+
+### ② 后端配置对齐经典 LLM 节点（`callSmartCanvasLLM`）
+
+新增 `callSmartCanvasLLM(node, message, messages, options)`，请求体与经典 `callCanvasLLM` 逐字段一致：
+`message / model / ms_model / provider / system_prompt / messages / images / videos / reverse / target_type / target_model / max_tokens`。
+
+- `system_prompt`：经典无论 System 开关都不留空（开关只控制文本框显示）→ 智能侧同样
+  `node.llmSystemPrompt || 'You are a helpful assistant.'` 恒发；
+- 出表走 `{noMedia:true}`（与经典 `runLLMListMode` 一致）：不带素材、不带 reverse、target 留空 ——
+  后端 Prompt Intelligence 收到素材会改写 message，把表格 JSON 毁掉；
+- `runPromptLLMNode` / `callSmartLLMText` 都改成调它，不再各自拼一套；
+- 顺手修掉 `runSmartLLMListMode` 里 `materializeLlmTable(..., plan)` 的 `plan` 未定义
+  （fc7198a 跳过规划遍后残留，出表必 ReferenceError，被 catch 吞成一句 toast）→ 传 `null`。
+
+实测（Playwright，临时画布，用完即删）：316×461 → 拖到 486×611 且刷新保持；单击把手尺寸不变；
+请求体确认 `system_prompt` 有值、文本模式带 `target_type: image`、出表模式 `target_type` 为空。
+
+## 用户报的三个 bug（2026-09-16 后续轮 2）
+
+### ① 多维表格读不到上传的图片/视频 —— 根因：分组素材
+把上传的图片先归到一个「分组」节点、再把分组接到 LLM 节点，是智能画布的常见用法。
+但共享模块 `tableSourceItems()`（table-node.js）：
+- 只认经典画布的 `type === 'group'`，**不认智能画布的 `smart-group`**；
+- 分组成员只认 `output` 或「顶层带 url」的节点，**不认 `smart-image`**（素材在 `images` 里）；
+- 智能画布的分组还会把拖进去的图片**吸收进 `group.images`**（成员节点被删掉），这一份也没读。
+
+结果整组素材被忽略 → 出表后输入列 items 为空 → 批量面板每行「无素材」。
+修复：抽出 `TABLE_OUTPUT_LIKE_TYPES = ['output','smart-image']`，分组分支同时认 `group / smart-group`，
+成员按这张表展开，并额外展开 `smart-group.images`（吸收进来的素材）。
+
+实测：直接连 smart-image、smart-group（吸收图片）、经典 group(内含 output) 三条路都能让表格读到素材。
+
+### ② 点一次生成会堆出很多重复节点 —— 根因：每次都物化新表格
+`materializeLlmTable()` 每次都 `addNode` 一个新的 table 节点，重复点「生成」就重复建表，
+而且每张表都再 `connectSmartBatchAfter()` 连到同一个批量节点。
+修复：新增 `reuseOrCreateLlmTableNode()` —— 同一个 LLM 节点已经有 `llmGeneratedOutput && llmSourceId === 自己`
+的表格时就**就地更新**（换 `table` 数据、清 `selectedRows`、刷新 `llmRunAt`、补齐素材连线），不再新建；
+并给 `runSmartLLMListMode` 加 `if(node.running) return` 并发保护。实测连点 3 次：表格/批量节点都只有 1 个。
+
+### ③ 点批量生成节点没有出现编辑器 —— 根因：click 被拖拽吃掉
+标题栏（`.table-node-drag-bar`）的 mousedown 会向节点重派发一个 mousedown 启动拖拽；
+拖拽期间 `body.smart-node-drag .node-body { pointer-events:none }`，标题栏收不到 mouseup/click，
+所以挂在标题栏上的 `onclick` 永远不触发（表现为「点了没反应 / 编辑器不出现」）。
+修复：点击判定改到**文档级 mouseup**（新增 `pendingBatchToggle`）——标题栏 mousedown 记下位置，
+`window.onmouseup` 里位移 < 5px 就当成一次点击，切 `node.batchEditorOpen`。
+实测：默认展开 → 点一次仍展开（显式置 true）→ 再点收起（panel 消失）。
+
+（另：第一条那个「读不到素材」也顺手在 `runSmartLLMListMode` 开头补了一次 `syncTableConnections()`，
+保证「刚连上参考图就点生成」时适配层那份连线副本是新的。）
+
+## 用户报的第二批问题（含「加号+圆圈」消失）（2026-09-16 后续轮 3）
+
+### ① 刷新后表格读不到 / 连不上图片、视频分组节点 —— 适配层首次同步把指向表格的连线删光了
+`syncTableConnections()` 原来先 `syncTableConnectionsToCanvas()` 再 `syncTableConnectionsFromCanvas()`。
+`ToCanvas` 会把「适配层 `tableConnections` 里没有、画布上有」的、**指向表格**的连线当成
+「表格模块已删除」而 `disconnect` 掉。页面刚加载时 `tableConnections` 还是空数组 →
+画布上所有「分组 / 参考图 → 表格」「LLM → 表格」的已存连线被一次性清空。
+修复：加 `tableConnectionsReady` 标记，**首次先 FromCanvas 读进适配层、再 ToCanvas**。
+实测：seed 4 条连线（含 g1→table、p1→table），加载后 4 条全保留，表格渲染出 2 个素材格 +
+批量面板「图片 2」。
+
+### ②③ 表格 / 批量生成节点的「加号+圆圈」端口看不到、连不上 —— 外框 overflow:hidden 裁掉了
+智能画布的连接端口（圆圈+加号）定位在节点框外 30px（`left:-30px` / `right:-30px`），
+而表格/批量节点的磨砂外框写了 `overflow:hidden` → 端口整个被裁掉
+（量到 `elementFromPoint` 在端口中心命中的是 `world`，不是端口）。
+修复：外框与 `.size-user-set` 的 `overflow:hidden` → `visible`（内容本来就在 padding 以内，圆角切不到）。
+实测：hover 时端口命中 `.node-port`；从分组 out 拖到批量节点 in → 连线建立成功。
+
+### ④ 批量节点编辑器不显示 —— 是 ②③ 的连带
+端口被裁 → 没法把「多维表格」接到批量节点 → `generatorUpstreamTables()` 为空 →
+面板根本不渲染（只剩标题栏）。端口能连之后，接上表格面板即出现；
+标题栏点击开合（文档级 mouseup 判定）也复测过：默认展开 → 点一次仍展开 → 再点收起。
+
+### 传统画布对照（用户要求「看看传统画布」）
+- 经典画布的表格 / 生成节点**没有** `.node-port` 元素（它的连线用另一套机制），
+  所以 classic 侧不会踩到「外框裁剪端口」这条。
+- 共享的 `table-node.js` 两个画布同一份，批量面板行为一致（经典面板同样会出现
+  「无素材」+ 行内 @图片N 文案，那是对应行没有落素材时的正常提示，不是 bug）。
+- 智能画布是「所有节点都画 `.node-port`」，才同时踩到 `overflow:hidden` 裁剪 +
+  适配层首次同步这两个坑。
+
+## 用户报的第三批问题（表格缩放 / 批量编辑器）（2026-09-16 后续轮 4）
+
+### ① 多维表格「只能改变底框，表格内容不变」—— 手动尺寸下内容没跟着填满
+经典画布靠 `.node.sized.table-node .table-node { height:100% }` + `.table-node-grid { flex:1 1 auto; overflow:auto }`
+让表格跟着节点高度走；智能画布的表格节点是 `.image-node`，不匹配这些选择器，于是只有外框变大。
+另外有个起点坑：缩放把手的 `mousedown` 监听是**捕获阶段**，会先把 `.size-user-set` 打上，
+CSS 的 `height:auto !important` 立刻失效、节点先塌回上次渲染的兜底高（表格/批量是 194），
+画布随后量到的起点就是 194 → 往下拖反而变小。
+
+修复（`table-node.css` + `smart-canvas.js`）：
+- 手动尺寸下 `.node-body` / `.table-node-host` / `.table-batch-host` 铺满节点，`.table-node` / `.table-batch-panel` `flex:1 1 auto`；
+- `markNodeSizeUserSet` 首次拖动前先把 `offsetWidth/Height` 记进 `node.w/h` **并立刻写回内联样式**，避免切换瞬间塌高；
+- 画布缩放处理器对 `table` / `smart-batch` 也改用真实渲染尺寸作起点。
+
+实测：表格 832→1052（表格区 758→978），批量面板 525→705（面板 431→609），尺寸并持久化到 `node.w/h/sizeUserSet`。
+
+### ② 批量生成节点接上表格后没有「生成输入」
+按当前代码复测（UI 建节点→拖线；LLM 自动出表→自动接批量；刷新后）三种路径**都能**渲染出面板。
+唯一会让面板为空的两种情况，已把提示写清楚：
+- 没接表格 → 「还没有接入多维表格：把「多维表格」右侧的输出口拖到本节点左侧的输入口」；
+- 方向接反（把批量节点拖到表格上）→ 「连接方向反了：……」。
+
+（另外前两轮的「首次同步删连线」「端口被 overflow 裁掉」也都会表现成"接不上/看不到编辑器"，已修。）
+
+## 批量生成节点接入底部「生成编辑器」（2026-09-16 后续轮 5）
+
+用户要求：批量节点连上多维表格后节点里显示「生成输入」面板（第一张图）；
+**点这个节点**要弹出底部那套生成设置编辑器（平台/模型/尺寸/张数，第二张图），
+点别处编辑器消失 —— 和智能画布的上传/图片节点同一套机制。
+
+原来 `isSmartRunnableNode()` 只认 `smart-image` / `smart-group`，批量节点不在里面，
+所以 `updateComposer()` 一看到它就 `composer.classList.remove('open')`，点了什么也不出。
+
+改动（`smart-canvas.js`）：
+- 新增 `isSmartBatchNode()`，并把 `smart-batch` 纳入 `isSmartRunnableNode()` →
+  点节点 = 选中 → `render()` → `updateComposer()` 打开编辑器；点空白 = 取消选中 → 编辑器收起；
+- `runGeneration()` 开头分流：选中节点是 `smart-batch` 时，编辑器里那颗「运行」= `api.runTableBatch()` 跑整批
+  （它没有 `images`，绝不能走单节点图片生成）；
+- 编辑器里改的平台/模型/尺寸/张数会经 `persistActiveSmartSettings()` 存到该批量节点的 `runSettings`，
+  批量执行时 `smartSettingsForNode()` 读回来，和图片节点同一套。
+
+实测：点批量节点 → 编辑器 `open:true`、运行按钮可点、节点里「生成输入」面板仍在；
+点图片节点 → 编辑器切到该节点；点空白 → `open:false`、运行按钮禁用；零报错。
+
+## 批量生成节点三处调整（2026-09-16 后续轮 6）
+
+用户要求：① 点节点顶部不要隐藏生成列表；② 去掉节点里的「批量生成」按钮（编辑器里已有运行）；
+③ 每行产出的图片/视频自动落成下游素材节点（跟单节点生成/上传节点一样）。
+
+改动（`smart-canvas.js` 的 `mountSmartBatchNodes` / `tableRunOneRow`）：
+- **不折叠**：删掉标题栏的展开/收起（原来那套 `pendingBatchToggle` + 文档级 mouseup 判定 + `.table-batch-collapsed`），
+  面板恒显；标题栏退化成纯拖拽把手，`.is-toggle` 去掉；
+- **去掉重复按钮**：不再渲染 `tableBatchRunButtonHtml`（节点里的「批量生成」）；
+  跑整批统一走底部编辑器那颗「运行」（`runGeneration` 里 `smart-batch` 分流到 `api.runTableBatch`）；
+- **结果落下游节点**：`tableRunOneRow` 拿到这一行的 urls 后，走单节点生成同一条链路
+  `createPendingOutputFromSource(node, urls.length, meta, {connectSource:false, selectOutput:false, refs})`
+  +`finalizePendingNode(output, urls, meta, kind)`，生成一个 `smart-image` 结果节点并用 `flow` 连过去
+  （batch → 结果节点）；节点内不再渲染原来的 `.table-batch-results` 缩略图。
+  结果节点本身就是普通图片/视频节点，可以继续往下接生成节点。
+
+实测（打桩 `/api/canvas-image-tasks`）：点标题栏后 `panel:true / collapsed:false`、节点高度不变；
+节点里没有 `.table-batch-run-btn`；点节点 → 编辑器打开 → 点「运行」，2 行产出 2 个下游 `smart-image` 节点
+（`b1→n_…` 两条 flow 连线，各自带该行结果 url），零报错。
+
+## 批量生成：编辑器职责说明 + 待生成结果节点（2026-09-16 后续轮 7）
+
+用户的疑问：「编辑器能不能读生成输入里的要求，还是只是摆设？」以及「生成时要自动出现待生成节点。」
+
+**编辑器读什么（先说清楚）**：
+- **提示词 / 参考素材来自节点里「生成输入」的每一行**（`runTableBatch` → `tableRowInputs` → 每行 `prompt`/`refs`），
+  编辑器里的输入框对批量节点**不参与**；
+- 编辑器里选的**平台 / 模型 / 尺寸 / 张数**经 `persistActiveSmartSettings()` 存到该节点 `runSettings`，
+  批量每行跑时 `smartSettingsForNode()` 读回来 —— 这部分是真生效的。
+
+之前输入框还能打字、且没有任何说明，看起来像"摆设"。改动：
+- `renderInputPromptPreview()`：选中批量节点时，预览区改为一句说明
+  「按节点里『生成输入』勾选的行逐行生成：每行用自己的提示词和参考素材。下面选的平台/模型/尺寸/张数作用于整批，
+  跑完每行会在右侧自动落一个结果节点。」
+- `updateComposer()`：批量节点的提示词输入框`setPromptInputLocked(true)` 锁掉。
+
+**待生成结果节点**：`tableRunOneRow` 改成**先建节点再生成** —— 调用生成前就
+`createPendingOutputFromSource()` 落一张 loading 结果节点并连线（batch → 结果节点），
+这一行跑完用 `finalizePendingNode()` 就地填成图片/视频节点；失败则把这张待生成节点连同连线一起撤掉，
+不在画布上留永远转圈的卡片。
+
+实测（打桩）：选中批量节点 → 编辑器打开、预览是上面那段说明、输入框 `promptLocked=1`；
+点运行 → 生成中出现 2 张结果节点（每行一张）→ 结束后各自带该行结果 url；
+失败用例 → 待生成节点被撤掉，下游为 0；零报错。
+
+## 批量生成读不到参考图 + 下游连线错位（2026-09-16 后续轮 8）
+
+### ① 「编辑器读不到多维表格内容」的真因：每行参考图被丢掉
+`tableRunOneRow` 原来把表格给的 `row.refs` 用 `tableRowRefUrls()` map 成了**纯 URL 字符串**，
+而 `generateUrlsForCurrentSettings → imageRefsOnly()` 是按 `ref.url` / `ref.kind` 过滤的：
+字符串没有 `.url`，于是**每一行的参考图全被过滤成 0 张**（实测请求体 `reference_images=0`）。
+提示词是好的（来自表格行文本），所以只有"图不生效"，看起来就像编辑器没读表格。
+
+修复：`tableRunOneRow` 保留 `row.refs` 的对象形状（`url/kind/nodeId/outputIndex`），
+删掉已无用的 `tableRowRefUrls()`。实测每行请求 `reference_images` 从 0 变 2。
+
+### ② 下游结果节点连线位置不对
+两个原因：
+1. `nextOutputPositionForSource()` 用 `nodeRect(source).width` 算落点，而表格/批量节点是
+   `width:auto`（CSS `width:auto!important`），`node.w`（420）和真实渲染宽度（约 298）差很多 →
+   结果节点被摆到很右边，连线中间空一大截；
+2. `renderConnections()` 的端口锚点同样走 `nodeRect`，表格/批量节点的高度一直是兜底值 194
+   （真实约 300）→ 线的起点偏上。
+
+修复：
+- `nextOutputPositionForSource()` 优先用 **DOM 实测宽度**（`el.offsetWidth`）算 x；
+- 新增 `syncContentNodeMeasuredSize()`：表格/批量节点挂载完内容后把实测 `w/h` 回写 `node.w/node.h`
+  （`sizeUserSet` 的除外），并 `scheduleConnectionLayerRefresh()` 重画连线。
+  实测：批量节点 `w` 由 420 校正为 298，四个结果节点 x 从 `1560/1560/1560/1400` 统一到 `1430`。
+
+（这批改动只影响智能画布；经典画布的表格节点是 `.node.table-node`，不匹配这些选择器。）

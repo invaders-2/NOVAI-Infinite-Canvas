@@ -57,12 +57,16 @@ ok(js.includes('api.materializeLlmTable('), '出表走 materializeLlmTable');
 ok(js.includes('connectSmartBatchAfter('), '出表后自动接批量节点');
 ok(js.includes('tableBatchVideo'), '视频分镜表有 tableBatchVideo 标记');
 ok(/tableBatchVideo\)?\s*;?\s*$/m.test(js) || js.includes('options, Boolean(node && node.tableBatchVideo)'), 'tableRunGenerator 读标记分流视频');
-ok(js.includes('api.renderTableBatchPanel(') && js.includes('api.tableBatchRunButtonHtml('), '批量面板/按钮复用共享实现');
+ok(js.includes('api.renderTableBatchPanel('), '批量面板复用共享实现');
+ok(!js.includes('api.tableBatchRunButtonHtml('), '批量节点不再挂重复的「批量生成」按钮（改由底部编辑器运行）');
 ok(js.includes('api.runTableBatch('), '点批量生成走 runTableBatch');
 ok(js.includes('runApiGeneration') || js.includes('generateUrlsForCurrentSettings'), '按行跑复用画布已有生成链路');
+ok(js.includes('createPendingOutputFromSource(node') && js.includes('finalizePendingNode('), '批量每行结果自动落成下游素材节点');
 
 console.log('[6] 共享模块为智能画布做的让步');
-ok(/source\.type === 'output' \|\| source\.type === 'smart-image'/.test(moduleSrc), 'tableSourceItems 认识 smart-image');
+ok(/TABLE_OUTPUT_LIKE_TYPES\s*=\s*\['output',\s*'smart-image'\]/.test(moduleSrc), 'tableSourceItems 把 smart-image 当输出节点展开');
+ok(/source\.type === 'group' \|\| source\.type === 'smart-group'/.test(moduleSrc), 'tableSourceItems 认识智能画布的 smart-group');
+ok(moduleSrc.includes('const fromGroupImages'), '分组自己的 images（吸收进来的素材）也展开');
 
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
