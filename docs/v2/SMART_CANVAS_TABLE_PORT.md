@@ -537,3 +537,27 @@ CSS 的 `height:auto !important` 立刻失效、节点先塌回上次渲染的�
 
 实测：4 行 → 下游 1 个 `group-node`（title=`Group`），images 为 `[{o_4,第1行},{o_5,第2行},{o_6,第3行},{o_8,第4行}]`；
 生成过程中它是一张待生成卡片；零报错。
+
+## 批量生成：卡顿 / 适配比例 / 生成进度（2026-09-16 后续轮 10）
+
+### ① 连接图片会卡
+定位到两个热点：
+- `renderConnections()` 对**每条边**都 `nodes.find()` / `nodes.some()` 一遍（O(边×节点)）→ 改成先建 `nodeById` Map；
+- `syncContentNodeMeasuredSize()` 原来 1px 抖动也算"变了"，会每帧 `scheduleConnectionLayerRefresh()`
+  重画整个连线层（滚动条出现/消失就会抖）→ 改成 **2px 容差**。
+（实测一次连线只重画 2 次连线层：render 一次 + 尺寸校正一次；之前误以为 16 次，其实那 15 次是页面初始加载的 render。）
+
+### ② 「适配尺寸/适配比例」不按参考图比例生成
+`applySourceRatioToSettings()` 读的是**节点自己的 `images`**，而批量节点没有 images →
+比例永远算不出来、`apiImageSize('source', …)` 退回 1:1（方形）。
+修复：`tableRunOneRow` 里当 `runSettings.ratio === 'source'` 时，用**这一行的 refs**算比例
+（`rowSourceRatio()`：先看 ref 自带尺寸，再看来源节点 `images[outputIndex]` 的 natural/layout 尺寸），
+写进该行的 `customRatio`。
+实测（参考图分别 1600×900 / 900×1600 / 1200×1600）：行输出 `2048x1152` / `1152x2048` / `1536x2048` —— 逐行按参考比例。
+
+### ③ 结果节点要有生成进度
+`batchResultNodeForRun()` 现在把结果节点的 `pending` 设成**这批要跑几行**、带 `runStartedAt`，
+render 就会有 loading/计时胶囊（和单节点生成一样）；每行跑完 `appendBatchResultImages()` 把结果并进去、
+`pending` 减 1，减到 0 才 `markSmartNodeComplete`。失败的那一行也减 1；
+再在 `mountSmartBatchNodes` 加了兜底：`_batchRunning === false` 时把还挂着 pending 的结果节点收尾，
+不会留永远转圈的卡片。实测生成中结果节点带计时胶囊（"2s"），结束后 `pending=0`、3 张图。

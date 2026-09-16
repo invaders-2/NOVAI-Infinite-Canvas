@@ -8247,7 +8247,9 @@ function shellPoint(event){
     return {x:event.clientX - rect.left, y:event.clientY - rect.top};
 }
 function renderConnections(){
-    const conns = (canvas?.connections || []).map((conn, index) => ({...conn, index})).filter(c => nodes.some(n => n.id === c.from) && nodes.some(n => n.id === c.to));
+    /* 连接多的时候这里是热点：先把节点建成 Map，别对每条边都 nodes.find/some 一遍（O(边×节点)）。 */
+    const nodeById = new Map((nodes || []).map(n => [n.id, n]));
+    const conns = (canvas?.connections || []).map((conn, index) => ({...conn, index})).filter(c => nodeById.has(c.from) && nodeById.has(c.to));
     const cascadeKeys = cascadeConnectionKeys();
     const activeCascadeCount = (smartCascadeRunPath?.states && Object.values(smartCascadeRunPath.states).filter(state => state && state !== 'done').length) || 0;
     const reduceMotion = activeCascadeCount > 24;
@@ -8275,8 +8277,8 @@ function renderConnections(){
         }
     });
     const paths = items.map(item => {
-        const fromNode = nodes.find(n => n.id === item.from);
-        const toNode = nodes.find(n => n.id === item.toId);
+        const fromNode = nodeById.get(item.from);
+        const toNode = nodeById.get(item.toId);
         if(!fromNode || !toNode) return '';
         const fr = nodeRect(fromNode), tr = nodeRect(toNode);
         const kind = item.kind;
@@ -9523,8 +9525,9 @@ function syncContentNodeMeasuredSize(node, el){
     const w = Math.round(el.offsetWidth) || 0;
     const h = Math.round(el.offsetHeight) || 0;
     let changed = false;
-    if(w > 24 && w !== Number(node.w)){ node.w = w; changed = true; }
-    if(h > 24 && h !== Number(node.h)){ node.h = h; changed = true; }
+    /* 容差 2px：滚动条出现/消失之类的 1px 抖动会让 node.w/h 反复变，进而每帧重画整个连线层。 */
+    if(w > 24 && Math.abs(w - (Number(node.w) || 0)) > 2){ node.w = w; changed = true; }
+    if(h > 24 && Math.abs(h - (Number(node.h) || 0)) > 2){ node.h = h; changed = true; }
     return changed;
 }
 function mountSmartTableNodes(){
@@ -18805,6 +18808,13 @@ function mountSmartBatchNodes(){
             empty.appendChild(tip);
             hostEl.appendChild(empty);
         }
+        /* 兜底：这一批已经结束（_batchRunning=false）但结果节点还挂着 pending，
+           把它收尾，别在画布上留一张永远转圈的卡片（比如中途停止/整批异常）。 */
+        if(!node._batchRunning){
+            nodes.filter(item => isSmartImageNode(item) && Number(item.pending || 0) > 0
+                && (canvas?.connections || []).some(conn => conn.from === node.id && conn.to === item.id))
+                .forEach(item => { item.pending = 0; markSmartNodeComplete(item, null); });
+        }
         if(syncContentNodeMeasuredSize(node, el)) sizeChanged = true;
     });
     if(sizeChanged) scheduleConnectionLayerRefresh();
@@ -21242,6 +21252,23 @@ const tableSelected = {
    注意：这里只负责**派发任务**；结果落盘/轮询是下一步（智能画布自己那套 agentPollGenerateTask）。 */
 /* 批量「跑一行」：提示词 + 参考图交给智能画布已有的生成链路（提交 → 轮询 → 收素材），
    然后把这一行产出的素材追加到批量生成节点上（按行标注）。 */
+/* 这一行的参考素材比例：先看 ref 自己带的尺寸，再看来源节点 images[outputIndex] 的尺寸
+   （分组里量过的 natural_w/h / layout_w/h 都在 item 上）。视频同理。 */
+function rowSourceRatio(refs){
+    for(const ref of (refs || [])){
+        if(!ref || isAudioMediaItem(ref)) continue;
+        const direct = imageSizeForRatio(ref);
+        if(direct) return direct;
+        const src = nodes.find(n => n.id === ref.nodeId);
+        const index = Number(ref.outputIndex);
+        if(src && Number.isFinite(index) && index >= 0){
+            const item = (src.images || [])[index];
+            const size = imageSizeForRatio(item);
+            if(size) return size;
+        }
+    }
+    return null;
+}
 /* 一次批量运行（batchRunId）对应一个下游结果节点：首个跑到的行创建它，后面的行并进去。 */
 const batchRunResultNodes = new Map();
 function batchResultNodeForRun(runId, sourceNode, meta, refs){
@@ -21249,10 +21276,19 @@ function batchResultNodeForRun(runId, sourceNode, meta, refs){
     let output = runId ? batchRunResultNodes.get(runId) : null;
     if(output && !nodes.some(n => n.id === output.id)) output = null;
     if(output) return output;
+    /* 待生成节点的 pending = 这批要跑几行：render() 会按 pending 画 loading 骨架 + 计时胶囊，
+       跟单节点生成一样能看出"在跑第几行"；每行跑完减 1，减到 0 才算完成。 */
+    const upstreamTables = (canvas?.connections || [])
+        .filter(conn => conn && conn.to === sourceNode.id)
+        .map(conn => nodes.find(n => n.id === conn.from))
+        .filter(n => n && n.type === 'table');
+    const totalRows = Math.max(1, Number(upstreamTables[0]?.table?.rows?.length) || 1);
     undoSuppressed = true;
     try {
-        output = createPendingOutputFromSource(sourceNode, 1, meta, {connectSource:false, selectOutput:false, refs});
-        output.pending = 0;
+        output = createPendingOutputFromSource(sourceNode, totalRows, meta, {connectSource:false, selectOutput:false, refs});
+        output.pending = totalRows;
+        output.runStartedAt = nowMs();
+        output.runTimerHidden = false;
         output.images = [];
         output.title = 'Image';
         if(runId) batchRunResultNodes.set(runId, output);
@@ -21263,6 +21299,25 @@ function batchResultNodeForRun(runId, sourceNode, meta, refs){
         undoSuppressed = false;
     }
     return output;
+}
+/* 把一行的产出并进这张结果节点，并把 pending 减 1（进度）。
+   还没跑完就不清 busy 状态，节点继续显示 loading/计时；减到 0 才 markSmartNodeComplete。 */
+function appendBatchResultImages(outputNode, additions, meta, kind){
+    const live = liveSmartNode(outputNode);
+    if(!live) return null;
+    live.images = cleanHistoryImages([...(live.images || []), ...additions]);
+    live.pending = Math.max(0, Number(live.pending || 0) - 1);
+    live.outputKind = kind;
+    live.title = live.images.length > 1
+        ? (kind === 'video' ? 'Videos' : 'Group')
+        : (kind === 'video' ? 'Video' : 'Image');
+    if(live.images.length > 1){ delete live.w; delete live.h; }
+    live.scale = mediaNodeDefaultScale(live);
+    if(live.pending <= 0){
+        markSmartNodeComplete(live, meta);
+        live.images = live.images.map(img => stripImageGenerationMeta(img));
+    }
+    return live;
 }
 async function tableRunOneRow(nodeId, options, forceVideo){
     const node = nodes.find(n => n.id === nodeId);
@@ -21278,6 +21333,20 @@ async function tableRunOneRow(nodeId, options, forceVideo){
         .filter(ref => ref.url);
     let runSettings = Object.assign({}, settings, smartSettingsForNode(node) || {});
     if(forceVideo) runSettings = Object.assign({}, runSettings, {apiKind: 'video'});
+    /* 「适配比例」（ratio=source）必须按**这一行**的参考图/视频算：
+       composer 里的 applySourceRatioToSettings() 读的是节点自己的 images，批量节点没有 images，
+       所以之前永远算不出比例、退回 1:1（用户报的「选了适配尺寸也没按参考图比例生成」）。 */
+    if(runSettings.ratio === 'source'){
+        const srcRatio = rowSourceRatio(refs);
+        if(srcRatio){
+            const d = gcdInt(srcRatio.w, srcRatio.h) || 1;
+            const rw = Math.max(1, Math.round(srcRatio.w / d));
+            const rh = Math.max(1, Math.round(srcRatio.h / d));
+            runSettings.customRatio = rw + ':' + rh;
+            runSettings.customRatioWidth = rw;
+            runSettings.customRatioHeight = rh;
+        }
+    }
     const rowNumber = (options.runContext || {}).rowNumber || 0;
     if(!prompt && !refs.length) throw new Error('第 ' + (rowNumber || '?') + ' 行既没有提示词也没有素材');
     const kind = forceVideo || runSettings.apiKind === 'video' ? 'video' : 'image';
@@ -21303,21 +21372,22 @@ async function tableRunOneRow(nodeId, options, forceVideo){
         if(!urls.length) throw new Error('这一行没有产出素材');
         const additions = rowUrls();
         additions.forEach(item => node.images.push({...item, role:'batch'}));
-        if(output){
-            const live = liveSmartNode(output);
-            if(live) finalizePendingNode(live, [...(live.images || []), ...additions], meta, kind);
-        }
+        if(output) appendBatchResultImages(output, additions, meta, kind);
         render();
         scheduleSave();
         return urls;
     } catch(error) {
-        /* 这一行失败：如果结果节点里还一张都没有，就把这张空卡片撤掉；已经有别行结果就留着。 */
+        /* 这一行失败：pending 也要减 1（这一行算结束），否则结果节点永远停在"生成中"。
+           结果节点里一张都还没有就把这张空卡片撤掉；已经有别行结果就留着。 */
         if(output){
             const live = liveSmartNode(output);
             if(live && !(live.images || []).length){
                 nodes = nodes.filter(n => n.id !== live.id);
                 if(canvas) canvas.connections = (canvas.connections || []).filter(conn => conn.from !== live.id && conn.to !== live.id);
                 if(batchRunResultNodes.get(runId) === live) batchRunResultNodes.delete(runId);
+            } else if(live){
+                live.pending = Math.max(0, Number(live.pending || 0) - 1);
+                if(live.pending <= 0) markSmartNodeComplete(live, meta);
             }
         }
         render();
