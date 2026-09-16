@@ -9370,6 +9370,19 @@ function tableHostDragBar(label){
     const bar = document.createElement('div');
     bar.className = 'table-node-drag-bar';
     bar.innerHTML = '<span class="table-node-drag-grip">⠿</span><span>' + label + '</span>';
+    /* 表格模块用捕获阶段 stopPropagation 掉了 mousedown，画布挂在节点元素上的拖动处理器收不到。
+       这里在把手上重新向节点元素派发一次 mousedown，让它走画布原本的拖动逻辑
+       （后续 mousemove / mouseup 由画布自己在 document 上处理）。 */
+    bar.addEventListener('mousedown', event => {
+        if(event.button !== 0) return;
+        const nodeEl = bar.closest ? bar.closest('.image-node') : null;
+        if(!nodeEl) return;
+        event.stopPropagation();
+        nodeEl.dispatchEvent(new MouseEvent('mousedown', {
+            bubbles: true, cancelable: true, view: window,
+            clientX: event.clientX, clientY: event.clientY, button: 0,
+        }));
+    }, true);
     return bar;
 }
 
