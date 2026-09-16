@@ -21136,15 +21136,12 @@ async function runSmartLLMListMode(node){
     node.running = true;
     render();
     try {
-        let plan = null;
-        try {
-            const planText = await callSmartLLMText(node, model.buildListPlanPrompt(requirement, inputs, groups, {targetKind}));
-            plan = model.extractJsonObject(planText);
-        } catch(error){ plan = null; }
-        node.llmListPlan = plan;
+        /* 只发「生成」这一遍：经典画布是先规划再生成（两次 LLM 往返），用户反馈太慢，
+           而 shared 模块的 buildListGeneratePrompt 本来就支持 plan=null（经典画布规划失败时走的就是这条路），
+           所以这里直接跳过规划遍 —— 正常情况 1 次请求出表，解析失败才再来一次。 */
         let table = null;
         for(let attempt = 0; attempt < 2 && !table; attempt += 1){
-            const answer = await callSmartLLMText(node, model.buildListGeneratePrompt(requirement, inputs, groups, plan, {targetKind}));
+            const answer = await callSmartLLMText(node, model.buildListGeneratePrompt(requirement, inputs, groups, null, {targetKind}));
             try { table = model.parseTableOutput(answer); } catch(error){ table = null; }
         }
         if(!table) throw new Error('模型没有返回可用的表格');
