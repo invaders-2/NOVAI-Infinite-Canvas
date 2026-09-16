@@ -9376,6 +9376,18 @@ function smartGroupBodyHtml(node){
 }
 /* 多维表格节点：把表格模块真实生成的 DOM 塞进节点 body 的壳里。
    表格模块返回元素而不是 HTML 串，所以渲染完节点后再挂一次。 */
+/* 表格 / 批量节点没有画布自带的缩放把手（那是按图片/提示词节点渲染的），
+   而画布的 resize 绑定在 bindNodeEvents() 里找 .node-resize-handle —— 我们必须在它之前补上，
+   否则这两种节点根本没有可拖的把手（量到 hasHandle:false）。 */
+function ensureNodeResizeHandle(hostEl){
+    const el = hostEl.closest ? hostEl.closest('.image-node') : null;
+    if(!el || el.querySelector('.node-resize-handle')) return;
+    const grip = document.createElement('div');
+    grip.className = 'node-resize-handle';
+    grip.title = '拖动调整大小';
+    el.appendChild(grip);
+}
+
 /* 表格 / 批量节点：默认跟着内容自适应；但用户一旦用画布的缩放把手拖过（node.sizeUserSet），
    就不要再压他的尺寸 —— 否则拖了没反应（用户反馈"不能自适应框大小"就是这个）。 */
 function markNodeSizeUserSet(hostEl, node){
@@ -9433,6 +9445,7 @@ function mountSmartTableNodes(){
         if(!node || node.type !== 'table') return;
         syncTableConnections();
         hostEl.textContent = '';
+        ensureNodeResizeHandle(hostEl);
         markNodeSizeUserSet(hostEl, node);
         hostEl.appendChild(tableHostDragBar('多维表格'));
         try {
@@ -18646,6 +18659,7 @@ function mountSmartBatchNodes(){
         if(!node || node.type !== 'smart-batch') return;
         syncTableConnections();
         hostEl.textContent = '';
+        ensureNodeResizeHandle(hostEl);
         markNodeSizeUserSet(hostEl, node);
         const bar = tableHostDragBar('批量生成');
         bar.classList.add('is-toggle');

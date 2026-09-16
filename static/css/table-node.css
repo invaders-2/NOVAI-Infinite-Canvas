@@ -739,6 +739,24 @@
     text-align: center;
 }
 
+/* 表格 / 批量节点的缩放把手（画布只给图片/提示词节点渲染，这里自己补一个，样式照画布那个） */
+.image-node:has(> .node-body > .table-node-host) .node-resize-handle,
+.image-node:has(> .node-body > .table-batch-host) .node-resize-handle {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 14px;
+    height: 14px;
+    z-index: 6;
+    cursor: nwse-resize;
+    border-right: 2px solid var(--text-3);
+    border-bottom: 2px solid var(--text-3);
+    border-radius: 0 0 6px 0;
+    opacity: .55;
+}
+.image-node:has(> .node-body > .table-node-host) .node-resize-handle:hover,
+.image-node:has(> .node-body > .table-batch-host) .node-resize-handle:hover { opacity: 1; }
+
 /* 智能画布的拖拽把手 + 批量节点收起态摘要 */
 .table-node-drag-bar {
     display: flex;
