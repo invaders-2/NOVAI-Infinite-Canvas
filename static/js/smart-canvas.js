@@ -9373,7 +9373,7 @@ function mountSmartTableNodes(){
         const el = hostEl.closest ? hostEl.closest('.image-node') : null;
         const node = el ? nodes.find(n => n.id === el.dataset.id) : null;
         if(!node || node.type !== 'table') return;
-        syncTableConnectionsFromCanvas();
+        syncTableConnections();
         hostEl.textContent = '';
         try {
             hostEl.appendChild(api.renderTableBody(node));
@@ -18544,7 +18544,7 @@ function mountSmartBatchNodes(){
         const el = hostEl.closest ? hostEl.closest('.image-node') : null;
         const node = el ? nodes.find(n => n.id === el.dataset.id) : null;
         if(!node || node.type !== 'smart-batch') return;
-        syncTableConnectionsFromCanvas();
+        syncTableConnections();
         hostEl.textContent = '';
         const panel = api.renderTableBatchPanel(node);
         const runRow = document.createElement('div');
@@ -20904,6 +20904,15 @@ const tableConnections = [];
 
 function tableLinkKey(fromId, toId){ return String(fromId || '') + '>' + String(toId || ''); }
 
+/* 表格模块自己有个 connectNodes()（遮蔽了宿主钩子），它把边直接推进我们给的 tableConnections；
+   而我们每次渲染表格前都用画布状态重建这个副本 → 刚连的线会被冲掉
+   （表现：LLM 出表后 参考图/白底图/Prompt → 表格 的连线全没了，但 表格→批量生成 还在）。
+   所以重建之前，先把副本里「画布上还没有」的边写回画布。 */
+function syncTableConnections(){
+    syncTableConnectionsToCanvas();
+    syncTableConnectionsFromCanvas();
+}
+
 function syncTableConnectionsFromCanvas(){
     tableConnections.length = 0;
     (Array.isArray(canvas?.connections) ? canvas.connections : []).forEach(conn => {
@@ -21113,7 +21122,7 @@ function connectSmartBatchAfter(tableNode){
 function ensureTableApi(){
     if(tableApi) return tableApi;
     if(typeof window.NovaTableNode !== 'function') return null;
-    syncTableConnectionsFromCanvas();
+    syncTableConnections();
     tableApi = window.NovaTableNode({
         tr, uid, nodes: liveSmartNodes, connections: tableConnections, selected: tableSelected, nodesEl: tableNodesEl,
         addNode(node){ nodes.push(node); render(); return node; },
