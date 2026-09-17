@@ -36,6 +36,7 @@ data/agent_sessions/
 data/runs/
 data/tasks/
 data/assets_registry.json
+data/asset_hashes.json
 data/memory_library.json
 data/persona_library.json
 data/stub_jobs.json

@@ -277,6 +277,11 @@ async def startup_event():
         await asyncio.to_thread(migrate_mislabeled_image_extensions)
     except Exception as exc:
         print(f"纠正图片扩展名失败: {exc}")
+    # 预览缓存只增不减会占满磁盘：后台清一次，不阻塞启动、不干扰 --reload
+    try:
+        Thread(target=prune_media_previews, name="prune-media-previews", daemon=True).start()
+    except Exception as exc:
+        print(f"预览缓存清理任务启动失败: {exc}")
 
 @app.websocket("/ws/stats")
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
@@ -572,6 +577,209 @@ JIMENG_LOGIN_SESSION = {
     "started_at": 0.0,
     "device_code": "",
 }
+
+# --- 素材内容去重（SHA-256）---
+# 同一份内容只保留一份物理文件：上传前先算哈希，命中已有索引且文件仍在时优先硬链，
+# 平台不支持硬链则退回复用已有 URL。只登记「用户上传」，生成结果不走这里。
+ASSET_HASH_FILE = os.path.join(DATA_DIR, "asset_hashes.json")
+ASSET_HASH_LOCK = Lock()
+_asset_hash_cache_path = ""
+_asset_hash_cache_data: Optional[Dict[str, Any]] = None
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _load_asset_hash_index() -> Dict[str, Any]:
+    """读取内容索引；文件损坏/不可解析时按空索引自愈，绝不因此让上传失败。"""
+    global _asset_hash_cache_path, _asset_hash_cache_data
+    path = ASSET_HASH_FILE
+    if _asset_hash_cache_data is not None and _asset_hash_cache_path == path:
+        return _asset_hash_cache_data
+    data: Dict[str, Any] = {}
+    try:
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                loaded = json.load(fh)
+            if isinstance(loaded, dict):
+                data = {str(key): value for key, value in loaded.items() if isinstance(value, dict)}
+    except Exception as exc:
+        print(f"[asset-hash] 索引损坏，按空索引重建：{exc}")
+        data = {}
+    _asset_hash_cache_path = path
+    _asset_hash_cache_data = data
+    return data
+
+
+def _save_asset_hash_index(index: Dict[str, Any]) -> None:
+    try:
+        os.makedirs(os.path.dirname(ASSET_HASH_FILE) or ".", exist_ok=True)
+        tmp_path = ASSET_HASH_FILE + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(index, fh, ensure_ascii=False)
+        os.replace(tmp_path, ASSET_HASH_FILE)
+    except Exception as exc:
+        print(f"[asset-hash] 索引写入失败：{exc}")
+
+
+def reset_asset_hash_cache() -> None:
+    """丢掉进程内缓存，下次从磁盘重读（测试 / 维护用）。"""
+    global _asset_hash_cache_path, _asset_hash_cache_data
+    _asset_hash_cache_path = ""
+    _asset_hash_cache_data = None
+
+
+def asset_hash_lookup(digest: str) -> Optional[Dict[str, Any]]:
+    if not digest:
+        return None
+    with ASSET_HASH_LOCK:
+        return _load_asset_hash_index().get(str(digest))
+
+
+def asset_hash_register(digest: str, url: str, path: str, size: int, name: str = "") -> None:
+    if not digest:
+        return
+    with ASSET_HASH_LOCK:
+        index = _load_asset_hash_index()
+        index[str(digest)] = {
+            "url": str(url or ""),
+            "path": os.path.abspath(str(path or "")),
+            "size": int(size or 0),
+            "name": str(name or ""),
+            "updated_at": now_ms(),
+        }
+        _save_asset_hash_index(index)
+
+
+def store_uploaded_bytes(content: bytes, filename: str, category: str = "input", display_name: str = "") -> str:
+    """把上传字节写到 assets/<category>/<filename>，按内容哈希去重，返回调用方该返回的 URL。
+
+    命中已有内容且文件仍在：优先 os.link 硬链到本次文件名（保留调用方期望的文件名）；
+    硬链不可用则直接复用已有 URL。任何分支都不会删除已有文件。
+    「查索引 → 落盘/硬链 → 登记」全程持锁，避免并发上传同一份新内容各写一份。"""
+    target_path = output_path_for(filename, category)
+    target_url = output_url_for(filename, category)
+    digest = sha256_bytes(content)
+    with ASSET_HASH_LOCK:
+        index = _load_asset_hash_index()
+        entry = index.get(digest)
+        existing_path = os.path.abspath(str((entry or {}).get("path") or ""))
+        if entry and existing_path and os.path.isfile(existing_path):
+            if existing_path == os.path.abspath(target_path):
+                return target_url
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            if not os.path.exists(target_path):
+                try:
+                    os.link(existing_path, target_path)
+                except OSError:
+                    pass
+            if os.path.isfile(target_path):
+                return target_url
+            existing_url = str(entry.get("url") or "").strip()
+            if existing_url:
+                return existing_url
+            return output_url_for(os.path.basename(existing_path), category)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        with open(target_path, "wb") as fh:
+            fh.write(content)
+        index[digest] = {
+            "url": target_url,
+            "path": os.path.abspath(target_path),
+            "size": int(len(content)),
+            "name": str(display_name or filename),
+            "updated_at": now_ms(),
+        }
+        _save_asset_hash_index(index)
+        return target_url
+
+
+# --- 预览缓存容量清理 ---
+def preview_cache_limits() -> Tuple[int, int]:
+    """返回 (max_files, max_bytes)；某维度为 0 表示不清理。"""
+    try:
+        max_files = max(0, int(os.getenv("NOVAI_PREVIEW_CACHE_MAX_FILES", "5000") or 0))
+    except (TypeError, ValueError):
+        max_files = 5000
+    try:
+        max_mb = max(0, int(os.getenv("NOVAI_PREVIEW_CACHE_MAX_MB", "1024") or 0))
+    except (TypeError, ValueError):
+        max_mb = 1024
+    return max_files, max_mb * 1024 * 1024
+
+
+def is_within_dir(path: str, root: str) -> bool:
+    """路径规范化（含符号链接）后是否严格位于 root 之内。"""
+    try:
+        real_root = os.path.realpath(root)
+        real_path = os.path.realpath(path)
+    except OSError:
+        return False
+    if real_path == real_root:
+        return False
+    try:
+        return os.path.commonpath([real_root, real_path]) == real_root
+    except ValueError:
+        return False
+
+
+def prune_media_previews(max_files: Optional[int] = None, max_bytes: Optional[int] = None) -> Dict[str, Any]:
+    """按 mtime 从旧到新删除预览缓存，直到文件数 ≤ max_files 且总字节 ≤ max_bytes。
+    0 表示该维度不清理；两个维度都是 0 时整体跳过。
+    只删除严格位于 MEDIA_PREVIEW_DIR 之内的普通文件（不跟随符号链接、不递归）。"""
+    default_files, default_bytes = preview_cache_limits()
+    file_limit = default_files if max_files is None else max(0, int(max_files))
+    byte_limit = default_bytes if max_bytes is None else max(0, int(max_bytes))
+    result = {"removed": 0, "freed_bytes": 0, "remaining_files": 0, "remaining_bytes": 0}
+    if file_limit == 0 and byte_limit == 0:
+        return result
+    root = os.path.abspath(MEDIA_PREVIEW_DIR)
+    if not os.path.isdir(root):
+        return result
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return result
+    candidates = []
+    total_bytes = 0
+    for name in names:
+        full = os.path.join(root, name)
+        if os.path.islink(full) or not os.path.isfile(full):
+            continue
+        if not is_within_dir(full, root):
+            continue
+        try:
+            stat = os.stat(full)
+        except OSError:
+            continue
+        candidates.append((stat.st_mtime, stat.st_size, full))
+        total_bytes += stat.st_size
+    candidates.sort(key=lambda item: item[0])
+    total_files = len(candidates)
+    for _mtime, size, full in candidates:
+        if (file_limit and total_files > file_limit) or (byte_limit and total_bytes > byte_limit):
+            try:
+                os.remove(full)
+            except OSError:
+                continue
+            result["removed"] += 1
+            result["freed_bytes"] += size
+            total_files -= 1
+            total_bytes -= size
+        else:
+            break
+    result["remaining_files"] = total_files
+    result["remaining_bytes"] = total_bytes
+    return result
+
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
 SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex"}
@@ -7667,6 +7875,11 @@ async def image_jpeg(url: str, w: int = 0):
     except Exception as exc:
         raise HTTPException(status_code=415, detail=f"无法转换图片：{exc}") from exc
 
+@app.post("/api/maintenance/prune-previews")
+async def maintenance_prune_previews(max_files: Optional[int] = None, max_bytes: Optional[int] = None):
+    """手动清理预览缓存。默认 5000 个 / 1024MB（可用环境变量覆盖，0 表示不清理该维度）。"""
+    return await asyncio.to_thread(prune_media_previews, max_files, max_bytes)
+
 def local_media_file_by_basename(name: str):
     safe = os.path.basename(urllib.parse.unquote(str(name or "")))
     if not safe:
@@ -7769,12 +7982,13 @@ def import_local_image_file(path):
     except Exception:
         raise HTTPException(status_code=400, detail="文件不是可识别的图片")
     filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
-    dest = output_path_for(filename, "input")
     try:
-        shutil.copyfile(path, dest)
+        with open(path, "rb") as fh:
+            content = fh.read()
     except OSError:
         raise HTTPException(status_code=500, detail="导入本地图片失败")
-    return {"url": output_url_for(filename, "input"), "name": os.path.basename(path) or filename, "kind": "image"}
+    url = store_uploaded_bytes(content, filename, "input", os.path.basename(path) or filename)
+    return {"url": url, "name": os.path.basename(path) or filename, "kind": "image"}
 
 def default_asset_library():
     categories = [
@@ -12794,10 +13008,9 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
             if not ext:
                 ext = ".bin"
         filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
-        path = output_path_for(filename, "input")
-        with open(path, "wb") as f:
-            f.write(content)
-        uploaded.append({"url": output_url_for(filename, "input"), "name": file.filename or filename, "kind": kind, "mime": content_type})
+        # 内容哈希去重：同一张图重复上传只保留一份物理文件（命中优先硬链，否则复用已有 URL）
+        url = store_uploaded_bytes(content, filename, "input", file.filename or filename)
+        uploaded.append({"url": url, "name": file.filename or filename, "kind": kind, "mime": content_type})
     return {"files": uploaded}
 
 class VideoBlurFacesRequest(BaseModel):
@@ -13274,10 +13487,8 @@ async def upload_ai_base64(payload: Base64UploadRequest):
     if kind is None:
         kind, ext = "image", ".png"
     filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
-    path = output_path_for(filename, "input")
-    with open(path, "wb") as f:
-        f.write(content)
-    return {"files": [{"url": output_url_for(filename, "input"), "name": payload.name or filename, "kind": kind}]}
+    url = store_uploaded_bytes(content, filename, "input", payload.name or filename)
+    return {"files": [{"url": url, "name": payload.name or filename, "kind": kind}]}
 
 @app.post("/api/comfyui/upload-base64")
 async def upload_comfyui_base64(payload: Base64UploadRequest):
