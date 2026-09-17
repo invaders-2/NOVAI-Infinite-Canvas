@@ -220,6 +220,28 @@ eq(M.batchSlotKinds(0, 3), {running:0, queued:0}, '没有剩余行：不占位')
 eq(M.batchSlotKinds(4, 0), {running:1, queued:3}, '非法并发按 1 处理');
 eq(M.batchSlotKinds(4, undefined), {running:1, queued:3}, '未设并发按 1 处理');
 
+// 逐行真实状态：初始全 queued；开跑/完成/失败只动这一行；数字从状态统计，不另算一套
+{
+  const plan = M.batchRowPlan([3, 1, 2]);
+  eq(plan.order, [3, 1, 2], '行序按本轮真实派发行号，顺序不变');
+  eq(plan.states, {3:'queued', 1:'queued', 2:'queued'}, '初始全部 queued');
+  const states = plan.states;
+  M.batchRowStateSet(states, 3, 'running');
+  eq(M.batchRowStateSummary(plan.order, states), {total:3, queued:2, running:1, completed:0, failed:0}, '第 1 行开跑：只有它 running');
+  M.batchRowStateSet(states, 3, 'completed');
+  M.batchRowStateSet(states, 1, 'running');
+  eq(M.batchRowStateSummary(plan.order, states), {total:3, queued:1, running:1, completed:1, failed:0}, '第 1 行完成、第 2 行才 running');
+  eq(M.batchRowStatusText(M.batchRowStateSummary(plan.order, states)), '已完成 1 · 失败 0 · 共 3（在跑 1）', '在跑时数字带在跑数');
+  M.batchRowStateSet(states, 1, 'failed');
+  eq(M.batchRowStateSummary(plan.order, states), {total:3, queued:1, running:0, completed:1, failed:1}, '失败行记 failed');
+  eq(M.batchRowStatusText(M.batchRowStateSummary(plan.order, states)), '已完成 1 · 失败 1 · 共 3', '数字文案与状态一致');
+  M.batchRowStateSet(states, 99, 'completed');
+  eq(M.batchRowStateSummary(plan.order, states).total, 3, '不在本批的行号不参与统计');
+  eq(M.batchRowPlan(null), {order:[], states:{}}, '空输入安全');
+  eq(M.batchRowStateSummary(null, null), {total:0, queued:0, running:0, completed:0, failed:0}, '空状态安全');
+  eq(M.batchRowStatusText(null), '', '没有行时不出文案');
+}
+
 {
   const rows = [
     {rowNumber:1, text:'一行', media:[{nodeId:'img1'}]},

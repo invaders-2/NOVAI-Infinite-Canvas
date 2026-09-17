@@ -967,6 +967,9 @@ function canvasForStorage(){
         delete node.batchRunLanded;
         delete node.batchRunFailed;
         delete node.batchRunConcurrency;
+        /* 逐行真实状态（行号顺序 + 每行状态）也是页面内临时状态 */
+        delete node.batchRowOrder;
+        delete node.batchRowStates;
         delete node.__renderHtml;   // 渲染缓存：只在页面内用，别写进画布
         delete node.__renderKey;
     });
@@ -2323,6 +2326,22 @@ function imageLayout(images, scale=1, node=null){
     }
     const count = (images || []).length;
     const s = node?.type === 'smart-image' || !node?.type ? mediaNodeDefaultScale(node) : (Number.isFinite(scale) && scale > 0 ? scale : 1);
+    /* 逐行进度框：结果节点按本轮真实行号建格，格子数就是行数（一张还没出也要占满） */
+    const batchOrderLen = Array.isArray(node?.batchRowOrder) ? node.batchRowOrder.length : 0;
+    if(count === 0 && batchOrderLen > 1){
+        const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(batchOrderLen))));
+        const rows = Math.ceil(batchOrderLen / cols);
+        const visibleRows = Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, rows);
+        const thumb = Math.round(MEDIA_GROUP_THUMB_BASE * s);
+        const cell = thumb + 8;
+        const PAD = 32;
+        const explicitW = Number(node?.w);
+        const explicitH = Number(node?.h);
+        if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
+            return fittedMediaGridLayout(node, batchOrderLen, explicitW, explicitH, thumb, PAD);
+        }
+        return {cols, rows, visibleRows, width:Math.max(Math.round(226*s), cols * cell + PAD), height:visibleRows * cell - 8 + PAD, thumb};
+    }
     if(count === 0){
         const explicitW = Number(node?.w);
         const explicitH = Number(node?.h);
@@ -2342,7 +2361,7 @@ function imageLayout(images, scale=1, node=null){
        结果节点先出一张、剩下的还在跑 —— 只按已有图片算的话，第一张一落地
        节点就被缩略图网格顶掉、进度框消失（用户报的「另外还没生成的看不到进度」）。
        pending 归零后 count 恢复成真实张数，节点自动收紧。 */
-    const gridCount = count + pendingSlotsForNode(node);
+    const gridCount = Math.max(count + pendingSlotsForNode(node), batchOrderLen);
     if(gridCount <= 1) return singleImageLayout(images[0], node, s);
     const thumb = Math.round(MEDIA_GROUP_THUMB_BASE * s);
     const cell = thumb + 8;
@@ -9669,6 +9688,11 @@ function nodeBodyHtml(node, layout){
     if(recoverTask && imgs.length === 0){
         return imageTaskRecoverBodyHtml(node, recoverTask, layout);
     }
+    /* 批量结果节点：有本轮真实行号就按行序逐格渲染，状态来自每行真正的回调 */
+    const batchOrder = Array.isArray(node.batchRowOrder) ? node.batchRowOrder : null;
+    if(batchOrder && batchOrder.length > 1){
+        return batchRowGridHtml(node, imgs, layout, batchOrder);
+    }
     if(node.queued && imgs.length === 0 && !node.pending){
         return `<div class="loading-cell single queued" style="width:${layout.width}px;height:${layout.height}px"></div>`;
     }
@@ -10284,7 +10308,8 @@ function render(){
         const isPending = ((pendingSlotsForNode(node) > 0 || isQueued || isJimengPending) && imgs.length === 0);
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
-        const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
+        const batchStatus = batchRowStatusTextFor(node);
+        const hint = batchStatus || (isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty'))));
         /* 根节点自身的 class（选中/拖动这些**临时态**都在这里）：单独拿出来，
            比较「要不要重建」时把它排除，这样拖动/选中不会把整棵子树（图标、表格、面板）重建一遍 ——
            重建既慢、又会让实测尺寸在拖动过程中变化（用户报的「拖动时节点忽大忽小」）。 */
@@ -21659,6 +21684,79 @@ function batchPendingSlotKinds(node, slots){
     return model.batchSlotKinds(total, raw);
 }
 
+/* ── 真实的逐行进度框（不再按并发猜） ──
+   结果节点有 batchRowOrder（本轮真正要跑的行号，顺序固定）时按行序逐格渲染：
+   这一行已产出 → 缩略图；running → loading；failed → 失败格；queued → 排队格；
+   completed 但图被 cleanHistoryImages 去重丢掉 → 中性格（不卡成转圈）。 */
+function batchRowGridHtml(node, imgs, layout, order){
+    const thumb = Number(layout.thumb) > 0 ? Math.round(Number(layout.thumb)) : 96;
+    const total = order.length;
+    const cols = Number(layout.cols) > 0 ? Number(layout.cols) : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(total))));
+    const visibleRows = Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, Number(layout.visibleRows || layout.rows) || Math.ceil(total / cols)));
+    const maxHeight = visibleRows * thumb + Math.max(0, visibleRows - 1) * 8;
+    const states = node.batchRowStates && typeof node.batchRowStates === 'object' ? node.batchRowStates : {};
+    const byRow = new Map();
+    imgs.forEach((img, index) => {
+        const rowNumber = Number(img && img.rowNumber);
+        if(!rowNumber) return;
+        if(!byRow.has(rowNumber)) byRow.set(rowNumber, []);
+        byRow.get(rowNumber).push({img:img, index:index});
+    });
+    const cells = [];
+    order.forEach(rowNumber => {
+        const produced = byRow.get(Number(rowNumber)) || [];
+        if(produced.length){
+            produced.forEach(entry => cells.push(batchRowThumbHtml(node, entry.img, entry.index)));
+            return;
+        }
+        cells.push(batchRowSlotHtml(states[rowNumber] || 'queued', thumb));
+    });
+    return '<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:' + cols + '; --thumb-size:' + thumb + 'px; --thumb-max-height:' + maxHeight + 'px">' + cells.join('') + '</div>';
+}
+function batchRowThumbHtml(node, img, index){
+    const selected = selectedImage.nodeId === node.id && selectedImage.index === index ? 'image-selected' : '';
+    const signature = escapeAttr(mediaKindForItem(img) + ':' + (img && img.url ? img.url : ''));
+    return '<div class="thumb-item has-outside-image-name ' + selected + '" data-image-index="' + index + '" data-media-signature="' + signature + '">'
+        + thumbMediaHtml(img) + imageNameBadgeHtml(img, {outside:true}) + imageResolutionBadgeHtml(img)
+        + '<button class="mini-x image-delete" type="button" data-image-index="' + index + '" title="' + escapeHtml(tr('smart.deleteImage')) + '"><i data-lucide="trash-2"></i></button></div>';
+}
+function batchRowSlotHtml(state, thumb){
+    const size = 'width:' + thumb + 'px;height:' + thumb + 'px';
+    if(state === 'running'){
+        return '<div class="loading-cell pending-thumb" data-pending-slot="1" title="' + escapeHtml(tr('smart.hintPending')) + '" style="' + size + '"></div>';
+    }
+    if(state === 'failed'){
+        return '<div class="loading-cell pending-thumb is-failed" data-pending-failed="1" title="这一行生成失败" style="' + size + '"></div>';
+    }
+    if(state === 'completed'){
+        return '<div class="loading-cell pending-thumb is-completed" data-pending-completed="1" title="这一行已完成" style="' + size + '"></div>';
+    }
+    return '<div class="loading-cell pending-thumb is-queued" data-pending-queued="1" title="排队中" style="' + size + '"></div>';
+}
+/* 结果节点上显示的真实数字：从 batchRowStates 统计，不另算一套。 */
+function batchRowStatusTextFor(node){
+    const model = window.NovaTableModel;
+    if(!model || typeof model.batchRowStateSummary !== 'function') return '';
+    const order = Array.isArray(node && node.batchRowOrder) ? node.batchRowOrder : null;
+    if(!order || !order.length) return '';
+    return model.batchRowStatusText(model.batchRowStateSummary(order, node.batchRowStates));
+}
+/* 第一次拿到结果节点时按本轮真实行号建逐行状态（初始全部 queued）。 */
+function ensureBatchRowPlan(node, rowNumbers){
+    const model = window.NovaTableModel;
+    if(!node || !model || typeof model.batchRowPlan !== 'function') return;
+    if(Array.isArray(node.batchRowOrder) && node.batchRowOrder.length) return;
+    const plan = model.batchRowPlan(rowNumbers);
+    if(!plan.order.length) return;
+    node.batchRowOrder = plan.order;
+    node.batchRowStates = plan.states;
+}
+function setBatchRowState(node, rowNumber, state){
+    const model = window.NovaTableModel;
+    if(!node || !model || typeof model.batchRowStateSet !== 'function') return;
+    model.batchRowStateSet(node.batchRowStates, rowNumber, state);
+}
+
 function appendBatchResultImages(outputNode, additions, meta, kind){
     const live = liveSmartNode(outputNode);
     if(!live) return null;
@@ -21708,11 +21806,12 @@ async function tableRunOneRow(nodeId, options, forceVideo){
         // 视频的「原图比例」也按**这一行**的参考素材解析（批量视频分镜每行参考可能不同）
         applySourceRatioToVideoAspect(runSettings, srcRatio);
     }
-    const rowNumber = (options.runContext || {}).rowNumber || 0;
+    const runContext = options.runContext || {};
+    const rowNumber = runContext.rowNumber || 0;
     if(!prompt && !refs.length) throw new Error('第 ' + (rowNumber || '?') + ' 行既没有提示词也没有素材');
     const kind = forceVideo || runSettings.apiKind === 'video' ? 'video' : 'image';
     const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
-    const runId = String((options.runContext || {}).batchRunId || '') || node.id;
+    const runId = String(runContext.batchRunId || '') || node.id;
     /* out.urls 的元素可能是字符串，也可能是 {url, kind}（resultMediaUrls 两种都返回过），
        统一取出 url 字符串，别把对象当成 url 塞进节点（会出现 url.url 这种坏数据）。 */
     /* 每张产出都记住**这一行**的参考图：预览里的「对比原图」会优先用它。
@@ -21725,12 +21824,21 @@ async function tableRunOneRow(nodeId, options, forceVideo){
         url: (typeof item === 'string') ? item : ((item && item.url) || ''),
         name: rowNumber ? ('第' + rowNumber + '行' + (urls.length > 1 ? '-' + (index + 1) : '')) : '',
         kind: (item && item.kind) || kind,
+        /* 这一张属于哪一行：进度框按行归位（已被去重的行也不会错位） */
+        rowNumber: rowNumber || 0,
         runInputRefs: rowCompareRefs.map(ref => ({...ref}))
     })).filter(item => item.url);
     /* 一次批量运行只落**一个**下游结果节点，多行的结果都并进它 —— 和单节点生成完全一致：
        跑的时候就有这张卡片，跑完每行 append 进去，>1 张时标题自动变 Group / Videos（自动成组）。
        结果节点就是普通图片/视频节点，可继续往下接生成节点。 */
     let output = batchResultNodeForRun(runId, node, meta, refs, srcRatio);
+    const liveOutput = output ? liveSmartNode(output) : null;
+    if(liveOutput){
+        /* 第一次拿到结果节点：按本轮真实行号建逐行状态（初始全部 queued），
+           再把这一行置 running —— 进度框由真实回调驱动，不再靠并发猜。 */
+        ensureBatchRowPlan(liveOutput, runContext.batchRowNumbers);
+        setBatchRowState(liveOutput, rowNumber, 'running');
+    }
     render();
     scheduleSave();
     let urls = [];
@@ -21740,7 +21848,11 @@ async function tableRunOneRow(nodeId, options, forceVideo){
         if(!urls.length) throw new Error('这一行没有产出素材');
         const additions = rowUrls();
         additions.forEach(item => node.images.push({...item, role:'batch'}));
-        if(output) appendBatchResultImages(output, additions, meta, kind);
+        if(output){
+            appendBatchResultImages(output, additions, meta, kind);
+            const live = liveSmartNode(output);
+            if(live) setBatchRowState(live, rowNumber, 'completed');
+        }
         render();
         scheduleSave();
         return urls;
@@ -21749,6 +21861,7 @@ async function tableRunOneRow(nodeId, options, forceVideo){
            结果节点里一张都还没有就把这张空卡片撤掉；已经有别行结果就留着。 */
         if(output){
             const live = liveSmartNode(output);
+            if(live) setBatchRowState(live, rowNumber, 'failed');
             if(live && !(live.images || []).length){
                 nodes = nodes.filter(n => n.id !== live.id);
                 if(canvas) canvas.connections = (canvas.connections || []).filter(conn => conn.from !== live.id && conn.to !== live.id);

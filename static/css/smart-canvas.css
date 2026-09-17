@@ -551,6 +551,13 @@ body.svc-fullscreen-active { overflow:hidden; }
     border:1px dashed var(--border-2, rgba(127,127,127,.45));
     opacity:.72;
 }
+/* 这一行已完成、但产出被去重丢掉：中性灰格，不能继续转圈 */
+.loading-cell.pending-thumb.is-completed {
+    animation:none;
+    background:transparent;
+    border:1px dashed var(--border-2, rgba(127,127,127,.45));
+    opacity:.45;
+}
 @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
 .jimeng-pending-cell { position:relative; display:flex; align-items:center; justify-content:center; }
 .jimeng-pending-overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:14px; box-sizing:border-box; text-align:center; }

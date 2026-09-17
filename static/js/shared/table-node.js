@@ -1618,7 +1618,10 @@ async function runTableBatch(genId, options={}){
             await tableBatchRunner(gen)(genId, {
                 batch: true,
                 rowOverride: {prompt: row.prompt, refs: tableRowRefs(row)},
-                runContext: {tableId: table.id, rowNumber: entry.rowNumber, batchRunId: runId}
+                /* batchRowNumbers：本轮真正要跑的行号（顺序固定），结果节点按它建
+                   逐行状态，进度框不再拿并发数猜谁在跑。同一批每个 worker 拿到同一份。 */
+                runContext: {tableId: table.id, rowNumber: entry.rowNumber, batchRunId: runId,
+                    batchRowNumbers: pending.map(item => item.rowNumber)}
             });
             model.journalMarkRow(journal, entry.rowNumber, 'completed');
             gen._batchProgress.done += 1;

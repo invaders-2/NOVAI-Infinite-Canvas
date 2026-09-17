@@ -119,7 +119,7 @@ ok(moduleSrc.includes('repaintTableSelectionViews'), '勾选后两边视图一�
 ok(/mediaList\.length > 1[\s\S]{0,220}zipDownloadImageItems\(node\.title/.test(js), '多张素材时下载整组（zip）');
 ok(/canvas-assets\/download/.test(js), '打包下载走 /api/canvas-assets/download（服务端压 zip，图片视频都收）');
 // ③ 生成中：已出图 + 未出图占位一起显示（进度框不被第一张顶掉）
-ok(js.includes('const gridCount = count + pendingSlotsForNode(node)'), '格子数把「还没落地的行」也算上（见 [15] 节）');
+ok(js.includes('const gridCount = Math.max(count + pendingSlotsForNode(node), batchOrderLen)'), '格子数把「还没落地的行」和本轮真实行数都算上（见 [15]/[17] 节）');
 ok(/if\(gridCount <= 1\) return singleImageLayout/.test(js), '只有 1 格时才走单图布局');
 ok(js.includes('function thumbGridHtml('), '网格渲染抽成 thumbGridHtml');
 ok(js.includes('data-pending-slot'), '未出图的位置画占位格');
@@ -223,6 +223,21 @@ ok(moduleSrc.includes('concurrencySelect.disabled = true'), '依次模式下并�
 ok(/const sequential = Boolean\(options\.sequential\) \|\| Boolean\(table\.tableBatchSequential\)/.test(moduleSrc), 'runTableBatch 读开关 → 并发 1');
 ok(moduleSrc.includes("table.tableBatchSequential ? '1' : '0'"), '开关进面板签名（切换后重绘）');
 ok(tableCss.includes('.table-node-action.is-active'), '选中态有样式');
+
+console.log('[17] 批量进度框改用「真实逐行状态」，不再按并发猜');
+ok(moduleSrc.includes('batchRowNumbers: pending.map'), 'runTableBatch 把本轮有序行号放进 runContext');
+ok(js.includes('function ensureBatchRowPlan('), '结果节点按真实行号建逐行状态');
+ok(js.includes('function setBatchRowState('), '每行状态由真实回调改');
+ok(js.includes("setBatchRowState(liveOutput, rowNumber, 'running')"), '这一行真正开跑前置 running');
+ok(js.includes("setBatchRowState(live, rowNumber, 'completed')"), '成功后置 completed');
+ok(js.includes("setBatchRowState(live, rowNumber, 'failed')"), 'catch 里置 failed');
+ok(js.includes('batchRowOrder') && js.includes('batchRowStates'), '结果节点持有真实行序与状态');
+ok(js.includes('function batchRowGridHtml('), '进度框按行序逐格渲染');
+ok(js.includes('data-pending-completed'), '已完成但图被去重 → 中性格，不转圈');
+ok(js.includes('function batchRowStatusTextFor('), '节点显示真实数字（已完成/失败/共/在跑）');
+ok(js.includes('delete node.batchRowOrder') && js.includes('delete node.batchRowStates'), '逐行状态是页面临时字段，不写进画布');
+ok(modelSrc.includes('function batchRowPlan(') && modelSrc.includes('function batchRowStateSummary('), '逐行状态机是共享模块里的纯函数');
+ok(canvasCss.includes('.loading-cell.pending-thumb.is-completed'), '中性格样式在');
 
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

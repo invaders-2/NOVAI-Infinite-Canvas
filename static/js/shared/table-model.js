@@ -792,6 +792,48 @@
         return {running, queued: slots - running};
     }
 
+    /* ── 批量逐行真实状态（结果节点进度框的真值）──
+       行序来自 runTableBatch 本轮真正派发的行号（runContext.batchRowNumbers），
+       每一行的状态只由它自己真正的开跑 / 完成 / 失败来改，不再按并发数猜。
+       纯函数，方便直接测。 */
+    const BATCH_ROW_STATES = ['queued', 'running', 'completed', 'failed'];
+
+    function batchRowPlan(rowNumbers){
+        const order = (Array.isArray(rowNumbers) ? rowNumbers : [])
+            .map(value => Number(value) || 0)
+            .filter(value => value > 0);
+        const states = {};
+        order.forEach(rowNumber => { states[rowNumber] = 'queued'; });
+        return {order, states};
+    }
+
+    function batchRowStateSet(states, rowNumber, state){
+        const target = Number(rowNumber) || 0;
+        const next = BATCH_ROW_STATES.includes(state) ? state : 'queued';
+        if(!states || typeof states !== 'object' || !target) return states;
+        if(!Object.prototype.hasOwnProperty.call(states, target)) return states;
+        states[target] = next;
+        return states;
+    }
+
+    function batchRowStateSummary(order, states){
+        const list = Array.isArray(order) ? order : [];
+        const map = states && typeof states === 'object' ? states : {};
+        const summary = {total:list.length, queued:0, running:0, completed:0, failed:0};
+        list.forEach(rowNumber => {
+            const state = BATCH_ROW_STATES.includes(map[rowNumber]) ? map[rowNumber] : 'queued';
+            summary[state] += 1;
+        });
+        return summary;
+    }
+
+    function batchRowStatusText(summary){
+        if(!summary || !summary.total) return '';
+        return '已完成 ' + summary.completed + ' · 失败 ' + summary.failed
+            + ' · 共 ' + summary.total
+            + (summary.running ? '（在跑 ' + summary.running + '）' : '');
+    }
+
     return {
         TABLE_KIND, TABLE_VERSION,
         MAX_COLUMNS, MAX_ROWS, MAX_CELL_CHARS, LLM_MAX_COLUMNS, LLM_MAX_ROWS,
@@ -804,6 +846,7 @@
         rowHeightForRow, mentionLabel, mentionTokenAt, mentionsIn, danglingMentions, buildRowPrompt,
         BATCH_ROW_STATUS, DEFAULT_BATCH_CONCURRENCY, MAX_BATCH_CONCURRENCY,
         batchFailurePolicy, batchStartRow, batchConcurrency, batchRowsToRun, batchSlotKinds,
+        BATCH_ROW_STATES, batchRowPlan, batchRowStateSet, batchRowStateSummary, batchRowStatusText,
         emptyJournal, normalizeJournal, matchBatchJournal, journalMarkRow,
         journalPendingRows, journalInflightRows, journalCompletedRows, journalFailedRows,
         batchMissingMaterials, runWithSharedCursor,
