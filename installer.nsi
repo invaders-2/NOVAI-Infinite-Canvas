@@ -1,4 +1,4 @@
-; NOVAI Windows 安装脚本 (NSIS 3.x)
+﻿; NOVAI Windows 安装脚本 (NSIS 3.x)
 ; 用法: makensis installer.nsi
 
 Unicode true
