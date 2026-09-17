@@ -290,6 +290,28 @@ ok(canvasCss.includes('.llm-chat-log') && canvasCss.includes('.llm-bubble'), '�
 ok(canvasCss.includes('.llm-bubble-copy') && canvasCss.includes('.llm-chat-send'), '复制/发送样式在');
 ok(!js.includes('runLLMChat('), '没有误引经典画布的 runLLMChat');
 
+console.log('[21] 智能画布「导出为图片」（PNG / SVG）');
+ok(/vendor\/js\/html-to-image\.js\?v=\d/.test(html), '离线 html-to-image 已引入且带版本号');
+ok(fs.existsSync(path.join(root, 'static/vendor/js/html-to-image.js')), 'vendor 文件真实存在（离线）');
+ok(read('static/vendor/js/html-to-image.js').includes('MIT License'), 'vendor 文件头带许可证');
+ok(html.includes('id="smartExportToggle"') && html.includes('class="smart-export-toggle"'), '工具栏有导出按钮');
+ok(/smart-workflow-toggle, \.smart-shortcut-toggle,\n\.smart-export-toggle/.test(html), '导出按钮进了工具栏 fixed 定位名单');
+ok(html.includes('id="smartExportMenu"') && html.includes('data-export-format="png"') && html.includes('data-export-format="svg"'), '导出菜单含 PNG / SVG 两项');
+ok(canvasCss.includes('.smart-export-toggle { right:454px; }'), '导出按钮复用工具栏按钮样式与位置');
+ok(js.includes('const smartExportToggle = document.getElementById(\'smartExportToggle\')'), 'smartExportToggle 常量已取');
+ok(js.includes('function exportSmartCanvasImage('), 'exportSmartCanvasImage 存在');
+ok(js.includes('window.htmlToImage'), '导出走本地 window.htmlToImage');
+ok(js.includes('lib.toBlob(') && js.includes('lib.toSvg('), 'PNG(toBlob) / SVG(toSvg) 两条路径都在');
+ok(js.includes('function smartCanvasExportBounds(') && js.includes("querySelectorAll('.image-node')"), '包围盒基于全部节点（含孤立节点）');
+ok(js.includes('function smartCanvasExportPixelRatio(') && js.includes('SMART_EXPORT_MAX_DIM'), 'pixelRatio 2 + 大画布降级');
+ok(js.includes("transformOrigin: '0 0'") && js.includes('translate(${-bounds.minX + pad}px, ${-bounds.minY + pad}px) scale(1)'), '覆盖 #world 视口 transform（不动真实 DOM）');
+ok(js.includes("world.classList.add('is-exporting')") && js.includes("world.classList.remove('is-exporting')"), '导出临时样式用完恢复');
+ok(js.includes('downloadBlob(blob, smartCanvasExportFilename(ext))'), '按画布标题/时间命名下载');
+ok(js.includes("toast('导出失败：'"), '失败有 toast，不静默');
+ok(js.includes('smartExportMenu.querySelectorAll') && js.includes("'[data-export-format]'"), '菜单两项由 JS 绑定');
+ok(canvasCss.includes('.smart-export-menu') && canvasCss.includes('.smart-export-item'), '导出菜单样式在');
+ok(canvasCss.includes('#world.is-exporting'), '导出态隐藏交互装饰的样式在');
+
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
 console.log('通过 ' + pass + '/' + pass);

@@ -19,6 +19,7 @@ html[data-studio-scale="off"].studio-scale-managed .smart-title,
 html[data-studio-scale="off"].studio-scale-managed .smart-log-toggle,
 html[data-studio-scale="off"].studio-scale-managed .smart-shortcut-toggle,
 html[data-studio-scale="off"].studio-scale-managed .smart-workflow-toggle,
+html[data-studio-scale="off"].studio-scale-managed .smart-export-toggle,
 html[data-studio-scale="off"].studio-scale-managed .asset-toggle,
 /* 注意：.composer 不能加进这份 zoom 列表——它在屏幕空间由 JS 按节点坐标定位（position:fixed + 内联 left/top），
    单独 zoom 会让坐标系错位，离原点越远偏移越大（小屏下直接飞出屏幕外） */
@@ -45,13 +46,30 @@ html[data-studio-scale="off"].studio-scale-managed .preview-modal {
 .smart-back:hover { transform:translateY(-1px); }
 .smart-back i { width:16px; height:16px; }
 .smart-title { position:absolute; left:22px; top:72px; z-index:10; max-width:min(420px, calc(100vw - 44px)); color:var(--muted); font-size:12px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; pointer-events:none; }
-.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle { position:absolute; top:22px; z-index:56; width:96px; height:40px; padding:0 15px; border-radius:var(--radius-full); background:var(--panel); color:var(--text); border:1px solid var(--line); box-shadow:0 14px 34px var(--shadow); backdrop-filter:blur(20px) saturate(180%); display:flex; align-items:center; justify-content:center; gap:8px; font-size:12px; font-weight:750; white-space:nowrap; transition:transform .14s ease, border-color .14s ease; }
+.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.smart-export-toggle { position:absolute; top:22px; z-index:56; width:96px; height:40px; padding:0 15px; border-radius:var(--radius-full); background:var(--panel); color:var(--text); border:1px solid var(--line); box-shadow:0 14px 34px var(--shadow); backdrop-filter:blur(20px) saturate(180%); display:flex; align-items:center; justify-content:center; gap:8px; font-size:12px; font-weight:750; white-space:nowrap; transition:transform .14s ease, border-color .14s ease; }
 .smart-log-toggle { right:130px; }
 .smart-shortcut-toggle { right:238px; }
 .smart-workflow-toggle { right:346px; }
-.smart-log-toggle:hover,.smart-shortcut-toggle:hover,.smart-workflow-toggle:hover { transform:translateY(-1px); border-color:var(--text); }
-.smart-log-toggle.active,.smart-shortcut-toggle.active,.smart-workflow-toggle.active { background:var(--strong); color:var(--strong-text); border-color:var(--strong); box-shadow:0 16px 38px var(--shadow); }
-.smart-log-toggle i,.smart-log-toggle svg,.smart-shortcut-toggle i,.smart-shortcut-toggle svg,.smart-workflow-toggle i,.smart-workflow-toggle svg { width:16px; height:16px; }
+.smart-export-toggle { right:454px; }
+.smart-log-toggle:hover,.smart-shortcut-toggle:hover,.smart-workflow-toggle:hover,.smart-export-toggle:hover { transform:translateY(-1px); border-color:var(--text); }
+.smart-log-toggle.active,.smart-shortcut-toggle.active,.smart-workflow-toggle.active,.smart-export-toggle.active { background:var(--strong); color:var(--strong-text); border-color:var(--strong); box-shadow:0 16px 38px var(--shadow); }
+.smart-log-toggle i,.smart-log-toggle svg,.smart-shortcut-toggle i,.smart-shortcut-toggle svg,.smart-workflow-toggle i,.smart-workflow-toggle svg,.smart-export-toggle i,.smart-export-toggle svg { width:16px; height:16px; }
+/* 「导出为图片」小菜单：复用工具栏按钮的毛玻璃卡片风格 */
+.smart-export-menu { position:fixed; top:70px; right:454px; z-index:57; display:none; flex-direction:column; gap:2px; min-width:158px; padding:6px; border-radius:var(--radius-lg); background:var(--panel); border:1px solid var(--line); box-shadow:0 18px 44px var(--shadow); backdrop-filter:blur(20px) saturate(180%); }
+.smart-export-menu.open { display:flex; }
+.smart-export-item { display:flex; align-items:center; gap:8px; height:34px; padding:0 10px; border-radius:var(--radius-md); background:transparent; color:var(--text); font-size:12px; font-weight:700; text-align:left; white-space:nowrap; }
+.smart-export-item:hover { background:var(--soft, var(--surface-2)); }
+.smart-export-item i,.smart-export-item svg { width:15px; height:15px; }
+.smart-export-toggle.busy { opacity:.6; pointer-events:none; }
+/* 导出瞬间隐藏交互装饰（选中框/端口/删除按钮/连线剪刀），别把编辑态渲染进图片。
+   只在导出期间加在 #world 上，finally 里移除。 */
+#world.is-exporting .floating-node-actions,
+#world.is-exporting .node-resize-handle,
+#world.is-exporting .conn-cut,
+#world.is-exporting .mini-x,
+#world.is-exporting .node-port { display:none !important; }
+#world.is-exporting .image-node.selected,
+#world.is-exporting .image-node.dragging { outline:none !important; box-shadow:none !important; filter:none !important; }
 .image-node { position:absolute; width:260px; min-height:178px; border-radius:var(--radius-md); background:transparent; border:0; box-shadow:none; overflow:visible; user-select:none; cursor:move; transition:box-shadow .18s ease-out, transform .18s ease-out, border-color .18s ease-out; }
 /* macOS 卡片式 hover：拖动/缩放节点时禁用，选中节点保留选中阴影只加 scale */
 body:not(.smart-node-drag):not(.smart-node-resize) .image-node:hover { transform:scale(1.01); }
@@ -1269,7 +1287,9 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
     .smart-log-toggle { right:62px; width:40px; padding:0; }
     .smart-shortcut-toggle { right:110px; width:40px; padding:0; }
     .smart-workflow-toggle { right:158px; width:40px; padding:0; }
-    .smart-log-toggle span,.smart-shortcut-toggle span,.smart-workflow-toggle span,.asset-toggle span { display:none; }
+    .smart-export-toggle { right:206px; width:40px; padding:0; }
+    .smart-export-menu { right:14px; top:118px; }
+    .smart-log-toggle span,.smart-shortcut-toggle span,.smart-workflow-toggle span,.smart-export-toggle span,.asset-toggle span { display:none; }
     .shortcut-modal { right:14px; top:118px; width:calc(100vw - 28px); max-height:calc(100vh - 132px); }
     .workflow-transfer-panel { right:14px; top:118px; width:calc(100vw - 28px); max-height:calc(100vh - 132px); }
 }

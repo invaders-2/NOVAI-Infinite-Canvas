@@ -41,6 +41,8 @@ const snapGuides = document.getElementById('snapGuides');
 const smartLogList = document.getElementById('smartLogList');
 const smartShortcutModal = document.getElementById('smartShortcutModal');
 const smartWorkflowToggle = document.getElementById('smartWorkflowToggle');
+const smartExportToggle = document.getElementById('smartExportToggle');
+const smartExportMenu = document.getElementById('smartExportMenu');
 const smartWorkflowTransferModal = document.getElementById('smartWorkflowTransferModal');
 const smartWorkflowTransferSub = document.getElementById('smartWorkflowTransferSub');
 const smartWorkflowExportMeta = document.getElementById('smartWorkflowExportMeta');
@@ -1028,6 +1030,110 @@ function smartWorkflowFilename(ext='json'){
     const safe = title.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '-').slice(0, 48) || 'smart-canvas';
     const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
     return `${safe}-workflow-${stamp}.${ext}`;
+}
+
+/* ── 导出为图片（PNG / SVG）──────────────────────────────────
+   用本地 vendored 的 html-to-image 把 #world 整棵子树序列化；
+   导出的是全部节点（含孤立节点）的世界坐标包围盒，不受当前视口/缩放影响：
+   通过 options.style 覆盖克隆根节点的 transform（真实 DOM 一动不动），
+   用完即还原（is-exporting 只是临时 class）。 */
+const SMART_EXPORT_PADDING = 40;
+const SMART_EXPORT_MAX_DIM = 8000;
+const SMART_EXPORT_MAX_PIXELS = 64000000;
+function smartCanvasExportTitle(){
+    const title = String(canvas?.title || document.getElementById('smartTitle')?.textContent || 'smart-canvas').trim();
+    return title.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '-').slice(0, 48) || 'smart-canvas';
+}
+function smartCanvasExportFilename(ext){
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+    return `novai-canvas-${smartCanvasExportTitle()}-${stamp}.${ext}`;
+}
+/* 世界坐标包围盒：用渲染后的 .image-node 实测位置（offsetLeft/Top 相对 #world，天然是世界坐标），
+   这样包括孤立节点、分组卡片和手动拉过尺寸的节点，跟屏幕上看到的一致。 */
+function smartCanvasExportBounds(){
+    if(!world) return null;
+    const els = Array.from(world.querySelectorAll('.image-node'));
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    els.forEach(el => {
+        const x = el.offsetLeft, y = el.offsetTop, w = el.offsetWidth, h = el.offsetHeight;
+        if(!Number.isFinite(x) || !Number.isFinite(y) || w <= 0 || h <= 0) return;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + w);
+        maxY = Math.max(maxY, y + h);
+    });
+    if(!Number.isFinite(minX) || !Number.isFinite(minY) || maxX <= minX || maxY <= minY) return null;
+    return {minX, minY, width:maxX - minX, height:maxY - minY};
+}
+/* 大画布降级 pixelRatio：超过 8000px 或像素预算就退回 1，避免 canvas 内存爆掉。 */
+function smartCanvasExportPixelRatio(width, height){
+    if(width <= 0 || height <= 0) return 1;
+    if(width > SMART_EXPORT_MAX_DIM || height > SMART_EXPORT_MAX_DIM) return 1;
+    if(width * height * 4 > SMART_EXPORT_MAX_PIXELS) return 1;
+    return 2;
+}
+function closeSmartExportMenu(){
+    smartExportMenu?.classList.remove('open');
+    smartExportToggle?.classList.remove('active');
+}
+function toggleSmartExportMenu(open){
+    if(!smartExportMenu) return;
+    const next = typeof open === 'boolean' ? open : !smartExportMenu.classList.contains('open');
+    smartExportMenu.classList.toggle('open', next);
+    smartExportToggle?.classList.toggle('active', next);
+}
+async function exportSmartCanvasImage(format){
+    const ext = format === 'svg' ? 'svg' : 'png';
+    const lib = window.htmlToImage;
+    if(!lib || typeof lib.toBlob !== 'function' || typeof lib.toSvg !== 'function'){
+        toast('导出库未加载，请强制刷新页面后重试');
+        return;
+    }
+    if(!world){ toast('画布还没准备好'); return; }
+    const bounds = smartCanvasExportBounds();
+    if(!bounds){ toast('画布上没有可导出的节点'); return; }
+    closeSmartExportMenu();
+    const pad = SMART_EXPORT_PADDING;
+    const width = Math.max(1, Math.ceil(bounds.width + pad * 2));
+    const height = Math.max(1, Math.ceil(bounds.height + pad * 2));
+    const pixelRatio = smartCanvasExportPixelRatio(width, height);
+    let background = '#ffffff';
+    try { background = getComputedStyle(document.body).backgroundColor || background; } catch(_) {}
+    const options = {
+        width,
+        height,
+        pixelRatio,
+        backgroundColor: background,
+        style: {
+            transform: `translate(${-bounds.minX + pad}px, ${-bounds.minY + pad}px) scale(1)`,
+            transformOrigin: '0 0',
+        },
+    };
+    smartExportToggle?.classList.add('busy');
+    toast(ext === 'svg' ? '正在导出 SVG…' : '正在导出 PNG…');
+    world.classList.add('is-exporting');
+    try {
+        let blob;
+        if(ext === 'svg'){
+            let dataUrl;
+            try { dataUrl = await lib.toSvg(world, options); }
+            catch(firstError){ dataUrl = await lib.toSvg(world, {...options, skipFonts: true, fontEmbedCSS: ''}); }
+            if(!dataUrl) throw new Error('SVG 生成为空');
+            blob = await (await fetch(dataUrl)).blob();
+        } else {
+            try { blob = await lib.toBlob(world, options); }
+            catch(firstError){ blob = await lib.toBlob(world, {...options, skipFonts: true, fontEmbedCSS: ''}); }
+            if(!blob || !blob.size) throw new Error('PNG 生成为空');
+        }
+        await downloadBlob(blob, smartCanvasExportFilename(ext));
+        toast(ext === 'svg' ? '已导出 SVG' : '已导出 PNG');
+    } catch(error){
+        console.error('[smart-export] failed', error);
+        toast('导出失败：' + String((error && error.message) || error || '未知错误').slice(0, 120));
+    } finally {
+        world.classList.remove('is-exporting');
+        smartExportToggle?.classList.remove('busy');
+    }
 }
 function clearSmartNodeTransientRunState(node, options={}){
     if(!node) return node;
@@ -20333,9 +20439,30 @@ if(assetCloseBtn) assetCloseBtn.onclick = () => toggleAssetLibrary(false);
 if(smartWorkflowToggle) smartWorkflowToggle.onclick = event => {
     event.preventDefault();
     event.stopPropagation();
+    closeSmartExportMenu();
     if(smartWorkflowTransferModal?.classList.contains('open')) closeSmartWorkflowTransferModal();
     else openSmartWorkflowTransferModal();
 };
+/* 导出菜单：点按钮开合，点里面两项各走 PNG / SVG。 */
+if(smartExportToggle) smartExportToggle.onclick = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeSmartWorkflowTransferModal();
+    toggleSmartExportMenu();
+};
+if(smartExportMenu) smartExportMenu.querySelectorAll('[data-export-format]').forEach(btn => {
+    btn.onclick = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        exportSmartCanvasImage(btn.dataset.exportFormat);
+    };
+});
+document.addEventListener('click', event => {
+    if(!smartExportMenu || !smartExportMenu.classList.contains('open')) return;
+    const target = event.target;
+    if(target && target.closest && (target.closest('#smartExportMenu') || target.closest('#smartExportToggle'))) return;
+    closeSmartExportMenu();
+});
 smartWorkflowImportInput?.addEventListener('change', event => {
     const file = event.target.files?.[0];
     if(file) importSmartWorkflowFile(file);

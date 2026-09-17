@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.117.1789581157267">
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.117.1789114960">
     <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.117.1789114960"></script>
+    <script defer src="/static/vendor/js/html-to-image.js?v=1.0.117.1789114960"></script>
     <script defer src="/static/js/shared/icons.js?v=1.0.117.1789405284"></script>
     <script src="/static/js/theme.js?v=1.0.117.1789114960"></script>
     <script src="/static/js/shared/utils.js?v=1.0.117.1789406526"></script>
@@ -73,7 +74,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
 .asset-panel, .workflow-transfer-panel,
 .smart-back, .smart-title, .smart-minimap,
 .smart-workflow-toggle, .smart-shortcut-toggle,
-.smart-log-toggle, .asset-toggle,
+.smart-export-toggle, .smart-log-toggle, .asset-toggle,
 .minimap-arrange-btn, .chat-toggle {
     position: fixed;
 }
@@ -269,6 +270,11 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
             <button type="button" onclick="zoomBarZoomIn()" title="放大" aria-label="放大"><i data-lucide="plus" class="w-4 h-4"></i></button>
         </div>
         <button id="smartWorkflowToggle" class="smart-workflow-toggle" type="button" title="导入导出工作流" aria-label="导入导出工作流"><i data-lucide="package-open"></i><span>工作流</span></button>
+        <button id="smartExportToggle" class="smart-export-toggle" type="button" title="导出为图片" aria-label="导出为图片"><i data-lucide="image-down"></i><span>导出</span></button>
+        <aside id="smartExportMenu" class="smart-export-menu" role="menu" aria-label="导出为图片">
+            <button class="smart-export-item" type="button" role="menuitem" data-export-format="png"><i data-lucide="image"></i><span>导出为 PNG</span></button>
+            <button class="smart-export-item" type="button" role="menuitem" data-export-format="svg"><i data-lucide="download"></i><span>导出为 SVG</span></button>
+        </aside>
         <button id="smartShortcutToggle" class="smart-shortcut-toggle" type="button" onclick="openSmartCanvasShortcuts()" title="快捷键" aria-label="快捷键" data-i18n-title="smart.shortcuts"><i data-lucide="keyboard"></i><span data-i18n="smart.shortcuts">快捷键</span></button>
         <button id="smartLogToggle" class="smart-log-toggle" type="button" onclick="openSmartCanvasLog()" title="日志" aria-label="日志" data-i18n-title="canvas.logs"><i data-lucide="list-todo"></i><span data-i18n="canvas.logs">日志</span></button>
         <button id="assetToggle" class="asset-toggle" type="button"><i data-lucide="library"></i><span data-i18n="smart.assetLibrary">资产库</span></button>
