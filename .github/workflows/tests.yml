@@ -1,0 +1,60 @@
+# NOVAI 测试流水线：只跑测试，不打包、不发版。
+# 覆盖：关键 JS 语法检查 → node 测试（tests/run-all.js）→ python 单测 → main.py 编译检查。
+#
+# 说明：
+#   - tests/run-all.js 默认跳过 test_video_storyboard_live.js（需要真实服务 + 配好的 provider）。
+#   - tests/test_canvas_log_cleanup.py 是**陈旧测试**：它 import 的
+#     main.delete_canvas_log / collect_local_media_urls / generated_media_path_from_url
+#     在本分支 HEAD 的 main.py 里都不存在，跑起来必然报错，故这里不跑它（文件保留，未删除）。
+#   - 两个 python 单测会 `import main`，需要 main.py 顶层 import 用到的最小依赖
+#     （fastapi / pydantic / requests / httpx / pillow / python-multipart）；
+#     cv2、onnxruntime 等都是函数内惰性导入，不需要装，也不跑打包。
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: node + python
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Syntax check key JS files
+        run: |
+          node --check static/js/canvas.js
+          node --check static/js/smart-canvas.js
+          node --check static/js/shared/table-node.js
+          node --check static/js/shared/table-model.js
+
+      - name: Node tests
+        run: node tests/run-all.js
+
+      - name: Install minimal deps needed to import main.py
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install fastapi pydantic requests httpx pillow python-multipart
+
+      - name: Python unit tests
+        run: python -m unittest tests.test_lan_auth tests.test_asset_dedupe
+
+      - name: Compile main.py
+        run: python -m py_compile main.py
