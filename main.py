@@ -11,6 +11,7 @@ import urllib.error
 import os
 import re
 import random
+import secrets
 import sys
 import subprocess
 import time
@@ -279,6 +280,19 @@ async def startup_event():
 
 @app.websocket("/ws/stats")
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
+    # HTTP 中间件不管 WebSocket，这里单独把关：局域网来源握手时就要带口令。
+    _auth_on = lan_auth_enabled()
+    _ws_allowed = lan_token_ok(
+        websocket.client.host if websocket.client else "",
+        websocket.cookies.get(LAN_COOKIE_NAME, ""),
+        websocket.query_params.get("token", ""),
+        websocket.headers.get("x-novai-token", ""),
+        load_lan_token() if _auth_on else "",
+        _auth_on,
+    )
+    if not _ws_allowed:
+        await websocket.close(code=1008)
+        return
     await manager.connect(websocket, client_id)
     try:
         while True:
@@ -383,6 +397,111 @@ HISTORY_FILE = os.path.join(_DATA_ROOT, "history.json")
 API_ENV_FILE = os.path.join(_DATA_ROOT, "API", ".env")
 DATA_DIR = os.path.join(_DATA_ROOT, "data")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+
+# --- 局域网访问口令（LAN access token）---
+# 本机 loopback（桌面版 / Chrome 扩展 / PS 面板）永远放行；局域网来源必须带口令。
+# 口令存 data/security.json（0600）；可用 NOVAI_LAN_TOKEN 覆盖，NOVAI_LAN_AUTH=0 整体关闭。
+SECURITY_FILE = os.path.join(DATA_DIR, "security.json")
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+_lan_token_cache: Optional[str] = None
+LAN_COOKIE_NAME = "novai_lan_token"
+
+
+def is_loopback_host(host) -> bool:
+    """客户端是否来自本机回环（含 TestClient）。空值按非回环处理。"""
+    value = str(host or "").strip().lower()
+    if not value:
+        return False
+    if value in LOOPBACK_HOSTS:
+        return True
+    return value.startswith("127.")
+
+
+def lan_auth_enabled() -> bool:
+    """NOVAI_LAN_AUTH=0/false/no/off 关闭鉴权，默认开启。"""
+    raw = os.getenv("NOVAI_LAN_AUTH", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def lan_token_ok(client_host, token_from_cookie, token_from_query, token_from_header, expected, auth_enabled=True) -> bool:
+    """纯函数：给定客户端主机与各处带来的口令，判断是否放行。"""
+    if not auth_enabled:
+        return True
+    if is_loopback_host(client_host):
+        return True
+    if not expected:
+        return False
+    for candidate in (token_from_cookie, token_from_query, token_from_header):
+        if candidate and hmac.compare_digest(str(candidate), str(expected)):
+            return True
+    return False
+
+
+LAN_PUBLIC_GET_PREFIXES = ("/static/",)
+
+
+def lan_path_public_for_unauthenticated(path, method="GET") -> bool:
+    """未授权时仍放行的请求：只有静态外壳（页面 / 内置静态资源）。
+    /assets、/output 是用户数据挂载点，/apps 是应用资源，都不算静态页面，不放行。"""
+    if str(method or "").upper() not in ("GET", "HEAD"):
+        return False
+    value = str(path or "")
+    if value in ("/", "/index.html"):
+        return True
+    return any(value.startswith(prefix) for prefix in LAN_PUBLIC_GET_PREFIXES)
+
+
+def load_lan_token() -> str:
+    """取局域网口令：环境变量 > data/security.json > 首次生成并落盘（0600）。"""
+    global _lan_token_cache
+    env_token = os.getenv("NOVAI_LAN_TOKEN", "").strip()
+    if env_token:
+        return env_token
+    if _lan_token_cache:
+        return _lan_token_cache
+    token = ""
+    try:
+        if os.path.isfile(SECURITY_FILE):
+            with open(SECURITY_FILE, "r", encoding="utf-8") as f:
+                token = str((json.load(f) or {}).get("lan_token", "")).strip()
+        if not token:
+            token = secrets.token_urlsafe(24)
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(SECURITY_FILE, "w", encoding="utf-8") as f:
+                json.dump({"lan_token": token}, f)
+            try:
+                os.chmod(SECURITY_FILE, 0o600)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[lan-auth] 口令读写失败，改用本进程临时口令：{e}")
+        if not token:
+            token = secrets.token_urlsafe(24)
+    _lan_token_cache = token
+    return token
+
+
+@app.middleware("http")
+async def lan_access_guard(request: Request, call_next):
+    if not lan_auth_enabled():
+        return await call_next(request)
+    client_host = request.client.host if request.client else ""
+    cookie_token = request.cookies.get(LAN_COOKIE_NAME, "")
+    query_token = request.query_params.get("token", "")
+    header_token = request.headers.get("x-novai-token", "")
+    expected = load_lan_token()
+    if not lan_token_ok(client_host, cookie_token, query_token, header_token, expected):
+        # 只放行「静态外壳」（/ 与 /static/*），让页面能加载并提示需要口令。
+        # /api、/assets、/output、/apps 等数据面一律 401 —— /assets 与 /output 是用户数据挂载点，不是静态页面。
+        if lan_path_public_for_unauthenticated(request.url.path, request.method):
+            return await call_next(request)
+        return JSONResponse(status_code=401, content={"detail": "需要局域网访问口令"})
+    response = await call_next(request)
+    # 用 query 带对口令进来的，种一个 cookie，后续 /api 请求自动带上。
+    if query_token and not cookie_token and hmac.compare_digest(str(query_token), str(expected)):
+        response.set_cookie(LAN_COOKIE_NAME, expected, httponly=True, samesite="lax", path="/")
+    return response
+
 
 # 从持久化设置加载自定义输出目录
 def _load_custom_output_dir():
@@ -12504,13 +12623,20 @@ async def lan_info():
         if lan_ip:
             lan_url = f"http://{lan_ip}:{port}"
     if not lan_url:
-        return {"available": False, "url": None, "ip": None, "port": port, "qr_data_url": None}
-    # 生成二维码 data URL
+        return {"available": False, "url": None, "token": None, "ip": None, "port": port, "qr_data_url": None}
+    # 分享地址带口令：扫码/打开即通过鉴权。本接口本身也走中间件，非本机调用需先有口令，不会把口令漏给未授权方。
+    token = load_lan_token() if lan_auth_enabled() else ""
+    if token:
+        sep = "&" if "?" in lan_url else "?"
+        share_url = f"{lan_url}{sep}token={urllib.parse.quote(token)}"
+    else:
+        share_url = lan_url
+    # 生成二维码 data URL（二维码用带口令的地址）
     qr_data_url = None
     try:
         import qrcode as _qr
         qr = _qr.QRCode(version=1, box_size=6, border=2)
-        qr.add_data(lan_url)
+        qr.add_data(share_url)
         qr.make(fit=True)
         img = qr.make_image(fill_color="black", back_color="white")
         buf = _io.BytesIO()
@@ -12520,7 +12646,8 @@ async def lan_info():
         print(f"[lan-info] qrcode gen failed: {e}")
     return {
         "available": True,
-        "url": lan_url,
+        "url": share_url,
+        "token": token,
         "ip": lan_ip,
         "port": port,
         "qr_data_url": qr_data_url,
