@@ -2264,6 +2264,9 @@ function smartNodeInputThumbsHtml(images, opts={}){
 const PROMPT_LLM_INSTRUCTION_DEFAULT_H = 58;
 const PROMPT_LLM_INSTRUCTION_MIN_H = 40;
 const PROMPT_LLM_INSTRUCTION_MAX_H = 400;
+const PROMPT_CHAT_INPUT_DEFAULT_H = 56;
+const PROMPT_CHAT_INPUT_MIN_H = 40;
+const PROMPT_CHAT_INPUT_MAX_H = 220;
 const PROMPT_SPLIT_PREVIEW_DEFAULT_H = 70;
 const PROMPT_SPLIT_PREVIEW_MIN_H = 40;
 const PROMPT_SPLIT_PREVIEW_MAX_H = 220;
@@ -2272,6 +2275,11 @@ function promptLlmInstructionHeight(node){
     const h = Number(node?.llmInstructionHeight);
     if(!Number.isFinite(h)) return PROMPT_LLM_INSTRUCTION_DEFAULT_H;
     return Math.max(PROMPT_LLM_INSTRUCTION_MIN_H, Math.min(PROMPT_LLM_INSTRUCTION_MAX_H, Math.round(h)));
+}
+function promptChatInputHeight(node){
+    const h = Number(node?.chatInputHeight);
+    if(!Number.isFinite(h)) return PROMPT_CHAT_INPUT_DEFAULT_H;
+    return Math.max(PROMPT_CHAT_INPUT_MIN_H, Math.min(PROMPT_CHAT_INPUT_MAX_H, Math.round(h)));
 }
 function promptNodeSeparator(node){
     const raw = String(node?.promptSeparator ?? ';');
@@ -6940,7 +6948,12 @@ function applyPromptTemplateToNode(mode='positive'){
     }
     const node = nodes.find(n => n.id === promptTemplatePanel?.dataset.nodeId);
     if(!node) return;
-    node.text = promptTemplateText(template, mode);
+    const text = promptTemplateText(template, mode);
+    if(node.llmEnabled === true){
+        node.llmInstruction = text;
+    } else {
+        node.text = text;
+    }
     node.promptPresetId = template.builtin ? '' : template.sourceId || '';
     closePromptTemplatePanel();
     render();
@@ -6950,9 +6963,10 @@ async function saveCurrentPromptAsTemplate(){
     const library = activePromptLibrary();
     // 系统库 readonly=false，也允许新增条目（走后端，与素材库管理同步）。
     if(library.readonly){ toast('请选择可编辑的提示词库'); return; }
+    const templateNode = nodes.find(n => n.id === promptTemplatePanel?.dataset.nodeId);
     const text = promptTemplatePanel?.dataset.target === 'composer'
         ? promptPlainText()
-        : String(nodes.find(n => n.id === promptTemplatePanel?.dataset.nodeId)?.text || '').trim();
+        : String((templateNode?.llmEnabled ? templateNode.llmInstruction : '') || templateNode?.text || '').trim();
     if(!text){ toast(tr('smart.promptPresetEmpty')); return; }
     try {
         const data = await fetch('/api/prompt-libraries/items', {
@@ -9432,7 +9446,8 @@ function promptNodeBodyHtml(node){
             ${node.llmTab === 'chat' ? `
             <div class="llm-chat-pane">
                 <div class="llm-chat-log">${chatMessages.length ? chatMessages.map((msg, mi) => `<div class="llm-bubble ${msg.role === 'user' ? 'user' : 'assistant'}" data-msg-idx="${mi}">${escapeHtml(msg.content || '')}${msg.role === 'assistant' ? `<button class="llm-bubble-copy" type="button" title="复制"><i data-lucide="copy"></i></button>` : ''}</div>`).join('') : `<div class="llm-chat-empty">${escapeHtml(tr('canvas.startChat'))}</div>`}</div>
-                <textarea class="llm-chat-input prompt-node-control" rows="2" placeholder="${escapeHtml(tr('canvas.chatInput'))}">${escapeHtml(node.chatInput || '')}</textarea>
+                <textarea class="llm-chat-input prompt-node-control" rows="2" placeholder="${escapeHtml(tr('canvas.chatInput'))}" style="height:${promptChatInputHeight(node)}px">${escapeHtml(node.chatInput || '')}</textarea>
+                <div class="prompt-llm-instruction-resize prompt-node-control" data-llm-chat-input-resize="1" title="拖动调整高度"><span></span></div>
                 <button class="llm-chat-send prompt-node-control" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'send'}"></i><span>${node.running ? escapeHtml(tr('canvas.sending')) : escapeHtml(tr('chat.send'))}</span></button>
             </div>` : `
             <div class="llm-pane-label">Input</div>
@@ -10932,6 +10947,30 @@ function bindPromptNodeControls(el, node){
             }
         };
     }
+    const chatInputResizeEl = el.querySelector('[data-llm-chat-input-resize]');
+    if(chatInputResizeEl && chatInputEl) chatInputResizeEl.addEventListener('mousedown', e => {
+        if(e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const startY = e.clientY;
+        const startH = promptChatInputHeight(node);
+        const onMove = moveEvent => {
+            const next = Math.max(PROMPT_CHAT_INPUT_MIN_H, Math.min(PROMPT_CHAT_INPUT_MAX_H, Math.round(startH + (moveEvent.clientY - startY) / (viewport.scale || 1))));
+            node.chatInputHeight = next;
+            chatInputEl.style.height = next + 'px';
+        };
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove, true);
+            document.removeEventListener('mouseup', onUp, true);
+            document.body.classList.remove('smart-node-resize', 'smart-chat-input-resize');
+            if(node && promptChatInputHeight(node) !== startH) commitPendingUndo(); else discardPendingUndo();
+            scheduleSave();
+        };
+        // 拖动期间屏蔽文本框/聊天记录的指针与选区，否则上拉时光标滑过去会被抢走（选中/失焦）。
+        document.body.classList.add('smart-node-resize', 'smart-chat-input-resize');
+        document.addEventListener('mousemove', onMove, true);
+        document.addEventListener('mouseup', onUp, true);
+        capturePendingUndo();
+    });
     const chatSendEl = el.querySelector('.llm-chat-send');
     if(chatSendEl){
         chatSendEl.addEventListener('mousedown', e => e.stopPropagation());

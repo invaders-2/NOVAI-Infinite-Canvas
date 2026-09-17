@@ -312,6 +312,95 @@ ok(js.includes('smartExportMenu.querySelectorAll') && js.includes("'[data-export
 ok(canvasCss.includes('.smart-export-menu') && canvasCss.includes('.smart-export-item'), '导出菜单样式在');
 ok(canvasCss.includes('#world.is-exporting'), '导出态隐藏交互装饰的样式在');
 
+console.log('[22] LLM 聊天输入框可拖动自定义高度（高度记进节点并持久化）');
+// 常量 + helper：把源码里的常量和函数抠出来在 node 里实跑，验默认值/上下限/取整
+const chatConstSrc = (js.match(/const PROMPT_CHAT_INPUT_DEFAULT_H = \d+;\s*\nconst PROMPT_CHAT_INPUT_MIN_H = \d+;\s*\nconst PROMPT_CHAT_INPUT_MAX_H = \d+;/) || [])[0] || '';
+const chatHelperSrc = (js.match(/function promptChatInputHeight\(node\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(chatConstSrc) && Boolean(chatHelperSrc), '常量与 promptChatInputHeight 都在');
+let chatH = null;
+try { chatH = new Function(chatConstSrc + '\n' + chatHelperSrc + '\nreturn promptChatInputHeight;')(); } catch(e){ chatH = null; }
+ok(typeof chatH === 'function', 'promptChatInputHeight 可求值');
+if(typeof chatH === 'function'){
+    eq(chatH(undefined), 56, '缺省回落 56');
+    eq(chatH({}), 56, '无字段回落 56');
+    eq(chatH({chatInputHeight: 'abc'}), 56, '非法值回落 56');
+    eq(chatH({chatInputHeight: 10}), 40, '低于下限 clamp 到 40');
+    eq(chatH({chatInputHeight: 9999}), 220, '高于上限 clamp 到 220');
+    eq(chatH({chatInputHeight: 120.6}), 121, '小数四舍五入');
+}
+// 渲染：textarea 内联高度走 helper + textarea 下方有复用指令框样式的拖动把手
+ok(js.includes('style="height:${promptChatInputHeight(node)}px"'), '聊天 textarea 内联高度由 helper 决定');
+ok(js.includes('class="prompt-llm-instruction-resize prompt-node-control"') && js.includes('data-llm-chat-input-resize="1"'), '把手复用指令框样式类且带 prompt-node-control（防被画布当拖节点）');
+ok(!/llm-chat-input[^>]*style="height:56px"/.test(js), '聊天输入框不再写死 56px 内联高度');
+// 绑定：mousedown → 局部 onMove/onUp（document 捕获）→ 清理 + 存节点
+const chatBindStart = js.indexOf("el.querySelector('[data-llm-chat-input-resize]')");
+const chatBind = chatBindStart >= 0 ? js.slice(chatBindStart, chatBindStart + 1500) : '';
+ok(Boolean(chatBind), '找得到聊天把手绑定');
+ok(chatBind.includes("addEventListener('mousedown'"), '把手绑了 mousedown');
+ok(chatBind.includes('promptChatInputHeight(node)'), '起点高度读 helper');
+ok(chatBind.includes('node.chatInputHeight = next'), '拖动写回 node.chatInputHeight（持久化的链源头）');
+ok(chatBind.includes('viewport.scale || 1'), '换算除以 viewport.scale（画布缩放不跑偏）');
+ok(chatBind.includes("removeEventListener('mousemove', onMove, true)") && chatBind.includes("removeEventListener('mouseup', onUp, true)"), 'onUp 移除两个 document 监听（不泄漏）');
+ok(chatBind.includes("classList.add('smart-node-resize', 'smart-chat-input-resize')") && chatBind.includes("classList.remove('smart-node-resize', 'smart-chat-input-resize')"), '拖动期间加/移除 body class');
+ok(chatBind.includes('capturePendingUndo()') && chatBind.includes('scheduleSave()'), '按下取撤销快照、松开落盘');
+// CSS：专用拖动态只在 table-node.css，且原有 size-user-set 的 flex 修复没被动到
+ok(tableCss.includes('body.smart-chat-input-resize') && tableCss.includes('cursor:ns-resize'), '专用拖动态 CSS 在 table-node.css');
+ok(/body\.smart-chat-input-resize[^{]*\{[^}]*pointer-events:none !important/.test(tableCss), '拖动期间文本框/聊天记录不接收指针');
+ok(/\.size-user-set \.llm-chat-log \{ flex: 1 1 auto; max-height: none; \}/.test(tableCss), '上一轮 .llm-chat-log 撑满修复仍在');
+ok(/\.size-user-set \.llm-chat-input,\n[^\n]*\.llm-chat-send \{ flex: 0 0 auto; \}/.test(tableCss), '上一轮输入框/按钮不参与伸缩的修复仍在');
+ok(/\.prompt-node-llm \.llm-chat-input \{ height:56px; resize:none; \}/.test(canvasCss), '基础 56px 规则保留（会被内联高度覆盖，兜底用）');
+
+console.log('[23] 提示词模板「应用」落点：LLM 节点写 llmInstruction，普通节点写 text');
+// 把 applyPromptTemplateToNode 抠出来用 mock 实跑，验真正写哪个字段（不是只看字符串）
+const applySrc = (js.match(/function applyPromptTemplateToNode\(mode='positive'\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(applySrc), '找得到 applyPromptTemplateToNode');
+ok(/if\(node\.llmEnabled === true\)\{/.test(applySrc), '节点分支按 node.llmEnabled 分流');
+ok(applySrc.includes('node.llmInstruction = text;'), 'LLM 分支写 llmInstruction');
+ok(applySrc.includes('node.text = text;'), '非 LLM 分支仍写 text');
+ok(js.includes('class="prompt-node-control prompt-llm-instruction"'), 'INPUT 框存在');
+ok(/escapeHtml\(node\.llmInstruction \|\| ''\)/.test(js), 'INPUT 框 value 渲染自 node.llmInstruction');
+ok(js.includes("instructionEl.oninput = e => { node.llmInstruction = e.target.value;"), 'INPUT 框手动输入也写 llmInstruction');
+
+function buildApplyFn(){
+    const state = { template: {id:'t1', builtin:false, sourceId:'src1'}, nodes: [] };
+    const called = {close:0, render:0, save:0};
+    const apply = new Function(
+        'promptTemplateItems', 'promptTemplateSelectedId', 'promptTemplatePanel', 'promptTemplateText',
+        'nodes', 'closePromptTemplatePanel', 'render', 'scheduleSave',
+        applySrc + '\nreturn applyPromptTemplateToNode;'
+    )(
+        () => [state.template],
+        't1',
+        {dataset:{target:'node', nodeId:'n1'}},
+        (tpl, mode) => (mode === 'positive' ? 'POS' : 'FULL'),
+        state.nodes,
+        () => { called.close += 1; },
+        () => { called.render += 1; },
+        () => { called.save += 1; }
+    );
+    return {apply: apply, state: state, called: called};
+}
+const llmCase = buildApplyFn();
+llmCase.state.nodes.push({id:'n1', llmEnabled:true, text:'OLD'});
+llmCase.apply('positive');
+eq(llmCase.state.nodes[0].llmInstruction, 'POS', 'LLM 节点：模板文字写进 llmInstruction');
+eq(llmCase.state.nodes[0].text, 'OLD', 'LLM 节点：原 node.text 保持不动');
+eq(llmCase.state.nodes[0].promptPresetId, 'src1', 'LLM 节点：promptPresetId 照旧写入');
+eq(llmCase.called, {close:1, render:1, save:1}, 'LLM 节点：close/render/scheduleSave 流程不变');
+const plainCase = buildApplyFn();
+plainCase.state.nodes.push({id:'n1', llmEnabled:false, text:'OLD'});
+plainCase.apply('full');
+eq(plainCase.state.nodes[0].text, 'FULL', '普通节点：模板文字仍写进 text');
+eq(Object.prototype.hasOwnProperty.call(plainCase.state.nodes[0], 'llmInstruction'), false, '普通节点：不产生 llmInstruction');
+const builtinCase = buildApplyFn();
+builtinCase.state.template = {id:'t1', builtin:true, sourceId:'src1'};
+builtinCase.state.nodes.push({id:'n1', llmEnabled:true, text:'OLD'});
+builtinCase.apply('positive');
+eq(builtinCase.state.nodes[0].promptPresetId, '', '内置模板：promptPresetId 清空（逻辑不变）');
+// 保存当前提示词：LLM 节点优先读 llmInstruction（否则 LLM 模式 node.text 为空会存空）
+const saveSrc = (js.match(/async function saveCurrentPromptAsTemplate\(\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(saveSrc.includes('templateNode?.llmEnabled ? templateNode.llmInstruction'), '保存提示词在 LLM 节点优先读 llmInstruction');
+
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
 console.log('通过 ' + pass + '/' + pass);

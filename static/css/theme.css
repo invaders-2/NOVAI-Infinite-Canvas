@@ -961,7 +961,9 @@ body.studio-theme-dark {
 }
 
 body.studio-theme-dark {
-    --bg: var(--bg);
+    /* --bg / --text 不能写成 var(--bg) / var(--text)：自定义属性引用自身会让这几个 token
+       在本作用域（含所有后代）全部失效，于是 color:var(--bg) 退化成继承来的 --text（近白），
+       在近白的 --accent 底上变成「近白底 + 近白字」。值直接继承 html.studio-theme-dark 即可。 */
     --bg-base: var(--bg);
     --page: var(--bg);
     --card: var(--bg);
@@ -969,7 +971,6 @@ body.studio-theme-dark {
     --soft: var(--bg);
     --soft-2: var(--surface);
     --panel: rgba(14, 14, 14, .92);
-    --text: var(--text);
     --text-main: var(--text);
     --line: var(--surface-2);
     --line-2: var(--border-strong);
@@ -1138,7 +1139,7 @@ body.studio-theme-dark {
 }
 
 body.studio-theme-dark {
-    --bg: var(--bg);
+    /* 同上：不要自引用 --bg / --text，会触发 cyclic token 失效 */
     --bg-base: var(--bg);
     --page: var(--bg);
     --card: var(--surface);
@@ -1146,7 +1147,6 @@ body.studio-theme-dark {
     --soft: var(--bg);
     --soft-2: var(--surface-2);
     --panel: rgba(21,21,21,.92);
-    --text: var(--text);
     --text-main: var(--text);
     --line: var(--surface-2);
     --line-2: var(--border-strong);

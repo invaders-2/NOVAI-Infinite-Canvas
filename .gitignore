@@ -74,6 +74,7 @@ static/canvas-entry-redesign-*.html
 static/canvas-list-redesign-*.html
 static/images/concept/*
 !static/images/concept/carousel-*
+!static/images/concept/pinterest_carousel.mp4
 
 # 冗余 vendor 文件（已有子集版本替代）
 static/vendor/js/lucide.js
