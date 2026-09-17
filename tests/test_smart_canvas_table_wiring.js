@@ -266,6 +266,30 @@ ok(/finally\s*\{[\s\S]{0,1500}?onBatchSettled\(\)/.test(moduleSrc), 'onBatchSett
 ok(js.includes('onBatchSettled: () => syncRunButtonState()'), '智能画布把 onBatchSettled 接到 syncRunButtonState');
 ok(js.includes('sbSyncStarBorderFrames();\n    syncRunButtonState();'), 'render() 末尾同步运行按钮状态');
 
+console.log('[20] LLM 节点「聊天」模式（对齐经典画布）');
+ok(!js.includes('智能画布暂不支持对话'), '去掉「暂不支持对话」占位');
+ok(js.includes('data-llm-tab="chat"'), '聊天 tab 存在');
+ok(!/data-llm-tab="chat"[^>]*(disabled|暂不支持)/.test(js), '聊天 tab 不再禁用/占位');
+ok(js.includes("node.llmTab = node.llmTab === 'chat' ? 'chat' : 'node'"), 'llmTab 归一化：默认 node，可切 chat');
+ok(js.includes('llm-chat-pane') && js.includes('llm-chat-log') && js.includes('llm-bubble'), '聊天面板结构（log + bubble）');
+ok(js.includes('data-msg-idx'), '气泡带消息下标（复制用）');
+ok(js.includes('llm-bubble-copy'), 'assistant 气泡复制按钮');
+ok(js.includes('class="llm-chat-input'), '聊天输入框');
+ok(js.includes('class="llm-chat-send'), '发送按钮');
+ok(js.includes("tr('canvas.chatMode')") && js.includes("tr('canvas.startChat')") && js.includes("tr('canvas.chatInput')"), '复用 canvas 的聊天 i18n');
+ok(js.includes("which === 'chat'") && js.includes("node.llmTab = 'chat'"), '点聊天 tab → llmTab=chat');
+ok(js.includes("which === 'node'") && js.includes("node.llmTab = 'node'"), '点节点 tab → llmTab=node');
+ok(js.includes('function runSmartPromptChat('), 'runSmartPromptChat 存在');
+ok(js.includes('callSmartCanvasLLM(node, message, history)'), '聊天带 history 调 callSmartCanvasLLM');
+ok(js.includes("node.chatMessages.push({role:'user', content:message})"), '发送前 push user 消息');
+ok(js.includes("node.chatMessages.push({role:'assistant', content:String(text || '')})"), '成功后 push assistant 回复');
+ok(js.includes("node.outputText = String(text || '')"), '回复写 outputText 供下游取用');
+ok(js.includes("e.key === 'Enter' && !e.shiftKey && !e.isComposing"), 'Enter 发送（不带 Shift、非输入法组合）');
+ok(!js.includes('delete node.chatMessages') && !js.includes('delete node.llmTab') && !js.includes('delete node.chatInput'), '聊天状态随画布保存（不进清理名单）');
+ok(canvasCss.includes('.llm-chat-log') && canvasCss.includes('.llm-bubble'), '聊天 CSS 落在 smart-canvas.css');
+ok(canvasCss.includes('.llm-bubble-copy') && canvasCss.includes('.llm-chat-send'), '复制/发送样式在');
+ok(!js.includes('runLLMChat('), '没有误引经典画布的 runLLMChat');
+
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
 console.log('通过 ' + pass + '/' + pass);

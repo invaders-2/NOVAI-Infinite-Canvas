@@ -9300,6 +9300,8 @@ function promptNodeBodyHtml(node){
     node.promptSeparator = promptNodeSeparator(node);
     const readonly = node.llmEnabled ? 'readonly' : '';
     const systemPrompt = (node.llmSystemPrompt || '').trim();
+    node.llmTab = node.llmTab === 'chat' ? 'chat' : 'node';
+    const chatMessages = Array.isArray(node.chatMessages) ? node.chatMessages : [];
     const inputThumbs = smartNodeInputThumbsHtml(promptNodeInputImages(node));
     const templateActive = activePromptTemplateNodeId() === node.id;
     const promptItems = promptNodePromptItems(node);
@@ -9312,8 +9314,8 @@ function promptNodeBodyHtml(node){
     const llmParams = node.llmEnabled ? `
         <div class="prompt-node-llm">
             <div class="llm-tabs">
-                <button class="llm-tab is-active" type="button" data-llm-tab="node">节点</button>
-                <button class="llm-tab" type="button" data-llm-tab="chat" title="智能画布暂不支持对话">聊天</button>
+                <button class="llm-tab ${node.llmTab === 'node' ? 'is-active' : ''}" type="button" data-llm-tab="node">${escapeHtml(tr('canvas.nodeMode'))}</button>
+                <button class="llm-tab ${node.llmTab === 'chat' ? 'is-active' : ''}" type="button" data-llm-tab="chat">${escapeHtml(tr('canvas.chatMode'))}</button>
                 <button class="llm-tab ${node.llmSystemEnabled ? 'is-active' : ''}" type="button" data-llm-tab="system"><i data-lucide="${node.llmSystemEnabled ? 'check-circle-2' : 'circle'}"></i><span>System</span></button>
                 <button class="llm-tab ${node.reverse ? 'is-active' : ''}" type="button" data-llm-tab="reverse" title="${escapeHtml(tr('smart.promptReverseTitle'))}"><i data-lucide="scan"></i><span>${escapeHtml(tr('smart.promptReverse'))}</span></button>
             </div>
@@ -9321,6 +9323,12 @@ function promptNodeBodyHtml(node){
                 <select class="prompt-node-control prompt-llm-provider">${chatProviderOptions(node.llmProvider)}</select>
                 <select class="prompt-node-control prompt-llm-model">${chatModelOptions(node.llmModel, node.llmProvider)}</select>
             </div>
+            ${node.llmTab === 'chat' ? `
+            <div class="llm-chat-pane">
+                <div class="llm-chat-log">${chatMessages.length ? chatMessages.map((msg, mi) => `<div class="llm-bubble ${msg.role === 'user' ? 'user' : 'assistant'}" data-msg-idx="${mi}">${escapeHtml(msg.content || '')}${msg.role === 'assistant' ? `<button class="llm-bubble-copy" type="button" title="复制"><i data-lucide="copy"></i></button>` : ''}</div>`).join('') : `<div class="llm-chat-empty">${escapeHtml(tr('canvas.startChat'))}</div>`}</div>
+                <textarea class="llm-chat-input prompt-node-control" rows="2" placeholder="${escapeHtml(tr('canvas.chatInput'))}">${escapeHtml(node.chatInput || '')}</textarea>
+                <button class="llm-chat-send prompt-node-control" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'send'}"></i><span>${node.running ? escapeHtml(tr('canvas.sending')) : escapeHtml(tr('chat.send'))}</span></button>
+            </div>` : `
             <div class="llm-pane-label">Input</div>
             <div class="prompt-llm-instruction-wrap">
                 <textarea class="prompt-node-control prompt-llm-instruction" placeholder="${escapeHtml(tr('smart.promptLlmInstructionPlaceholder'))}" style="height:${promptLlmInstructionHeight(node)}px">${escapeHtml(node.llmInstruction || '')}</textarea>
@@ -9337,6 +9345,7 @@ function promptNodeBodyHtml(node){
                 ${llmOutputModeHtml(node)}
                 <button class="prompt-node-run prompt-node-control" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'play'}"></i><span>${node.running ? escapeHtml(tr('common.running')) : escapeHtml(tr('common.run'))}</span></button>
             </div>
+            `}
             ${node.llmSystemEnabled ? `<textarea class="prompt-node-control prompt-llm-system" placeholder="${escapeHtml(tr('smart.promptLlmSystemPlaceholder'))}">${escapeHtml(systemPrompt || 'You are a helpful prompt assistant.')}</textarea>` : ''}
         </div>` : '';
     return `<div class="prompt-node-card">
@@ -10747,9 +10756,10 @@ function bindPromptNodeControls(el, node){
             event.preventDefault();
             event.stopPropagation();
             const which = tab.dataset.llmTab;
-            if(which === 'system'){ node.llmSystemEnabled = !node.llmSystemEnabled; render(); scheduleSave(); }
+            if(which === 'node'){ node.llmTab = 'node'; render(); scheduleSave(); }
+            else if(which === 'chat'){ node.llmTab = 'chat'; render(); scheduleSave(); }
+            else if(which === 'system'){ node.llmSystemEnabled = !node.llmSystemEnabled; render(); scheduleSave(); }
             else if(which === 'reverse'){ node.reverse = !node.reverse; render(); scheduleSave(); }
-            else if(which === 'chat'){ toast('智能画布的 LLM 节点暂不支持对话模式'); }
         };
     });
     // 上下分栏把手（照搬经典画布）：拖它调输入框高度，存进 node.llmInputHeight
@@ -10798,6 +10808,44 @@ function bindPromptNodeControls(el, node){
         if(mode === 'list' || mode === 'list-video') runSmartLLMListMode(node);
         else runPromptLLMNode(node.id);
     };
+    /* 聊天模式（对齐经典画布 renderLLMChatPane）：Enter 发送 / 发送按钮 / assistant 气泡复制。 */
+    const chatLogEl = el.querySelector('.llm-chat-log');
+    if(chatLogEl){
+        bindScrollableText(chatLogEl);
+        chatLogEl.addEventListener('click', e => e.stopPropagation());
+    }
+    const chatInputEl = el.querySelector('.llm-chat-input');
+    if(chatInputEl){
+        bindScrollableText(chatInputEl);
+        chatInputEl.oninput = e => { node.chatInput = e.target.value; scheduleSave(); };
+        chatInputEl.onkeydown = e => {
+            if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
+                e.preventDefault();
+                e.stopPropagation();
+                runSmartPromptChat(node);
+            }
+        };
+    }
+    const chatSendEl = el.querySelector('.llm-chat-send');
+    if(chatSendEl){
+        chatSendEl.addEventListener('mousedown', e => e.stopPropagation());
+        chatSendEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runSmartPromptChat(node); };
+    }
+    el.querySelectorAll('.llm-bubble-copy').forEach(btn => {
+        btn.addEventListener('mousedown', e => e.stopPropagation());
+        btn.onclick = async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const bubble = btn.closest('.llm-bubble');
+            const idx = Number(bubble?.dataset.msgIdx);
+            const msg = (node.chatMessages || [])[idx];
+            if(!msg) return;
+            if(await copyTextToClipboard(msg.content || '')){
+                btn.classList.add('copied');
+                setTimeout(() => btn.classList.remove('copied'), 1500);
+            }
+        };
+    });
 }
 function bindLoopNodeControls(el, node){
     el.querySelectorAll('.loop-smart-control').forEach(control => {
@@ -18178,6 +18226,34 @@ async function runPromptLLMNode(nodeId){
     } finally {
         node.running = false;
         render();
+    }
+}
+/* 聊天模式（对齐经典画布 runLLMChat）：历史 + 本次消息一起交给 callSmartCanvasLLM
+   （参考图 / System / 反推照带），回复 push 回 chatMessages，并写 node.outputText 让下游拿到最后一次回复。 */
+async function runSmartPromptChat(node){
+    if(!node || node.running) return;
+    const message = String(node.chatInput || '').trim();
+    if(!message) return;
+    if(!Array.isArray(node.chatMessages)) node.chatMessages = [];
+    const history = node.chatMessages.slice();
+    node.chatMessages.push({role:'user', content:message});
+    node.chatInput = '';
+    node.running = true;
+    render();
+    try {
+        const text = await callSmartCanvasLLM(node, message, history);
+        node.chatMessages.push({role:'assistant', content:String(text || '')});
+        node.outputText = String(text || '');
+        node.running = false;
+        render();
+        scheduleSave();
+    } catch(e) {
+        node.running = false;
+        render();
+        /* 失败也要落盘：否则 running=true 会跟着 scheduleSave 存进画布，
+           刷新后聊天发送键永远卡在「发送中」。 */
+        scheduleSave();
+        toast((e && e.message) || tr('smart.promptLlmFailed'));
     }
 }
 function comfyFieldKind(field){
