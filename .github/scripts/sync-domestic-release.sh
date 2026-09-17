@@ -24,7 +24,7 @@
 #   - 任何一步失败只 warning，不中断 job（对应 step 已 continue-on-error）。
 #
 # 注意：三个平台矩阵任务都会执行本脚本，各自只上传本平台产物；
-#       ModelScope push 带 rebase 重试以容忍并发。
+#       ModelScope 推送失败时重新克隆最新 HEAD 再推，重试 3 次以容忍多平台并发。
 
 set -u
 cd "${GITHUB_WORKSPACE:-$(pwd)}"
@@ -113,76 +113,78 @@ sync_modelscope() {
     return 0
   fi
 
-  local work=/tmp/novai-ms-releases
-  rm -rf "$work"
-
   local auth_url="https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/${MS_REPO}.git"
-  if with_timeout 120 git clone --depth 1 "$auth_url" "$work" 2>/dev/null; then
-    echo "== ModelScope: 克隆成功 =="
-  else
-    echo "== ModelScope: 克隆失败（仓库可能不存在或网络超时），改为本地 init 后推送（自动建仓）==="
-    mkdir -p "$work"
-    ( cd "$work" && git init -q && git remote add origin "$auth_url" 2>/dev/null ) || true
-  fi
-
-  ( cd "$work" || return 0
-    git config user.email ci@novai.local 2>/dev/null
-    git config user.name novai-ci 2>/dev/null
-    git lfs install 2>/dev/null || true
-    git checkout "$MS_BRANCH" 2>/dev/null || git checkout -B "$MS_BRANCH" 2>/dev/null || true
-
-    git lfs track "electron-release/*.dmg" "electron-release/*.zip" "electron-release/*.exe" \
-                  "electron-release/*.AppImage" "electron-release/*.deb" "electron-release/*.blockmap" 2>/dev/null
-
-    mkdir -p electron-release
-    local f
-    for f in "${ARTIFACTS[@]}" "${YML_FILES[@]}"; do
-      [ -n "$f" ] && cp -f "${GITHUB_WORKSPACE}/$f" electron-release/ 2>/dev/null
-    done
-
-    # 一键更新允许的源码（清单与 main.py 的 update_allowed_file 完全一致），推到仓库根目录
-    if [ ! -f "${GITHUB_WORKSPACE}/main.py" ] || [ ! -f "${GITHUB_WORKSPACE}/VERSION" ]; then
-      echo "::warning::缺少 main.py 或 VERSION，跳过源码同步（electron-release 仍会推送）"
+  # 三平台矩阵会并发推送同一仓库，push 非快进必然失败。
+  # 每次重试都重新克隆最新 HEAD 再推（不在浅克隆上 rebase，避免 add/add 冲突），最多 3 次。
+  local attempt rc
+  for attempt in 1 2 3; do
+    local work="/tmp/novai-ms-releases-${attempt}"
+    rm -rf "$work"
+    if GIT_LFS_SKIP_SMUDGE=1 with_timeout 180 git clone --depth 1 "$auth_url" "$work" 2>/dev/null; then
+      echo "== ModelScope: 克隆成功（第 $attempt 次）=="
     else
-      local src
-      for f in main.py VERSION 安装即梦CLI.bat 安装即梦CLI.command 登录即梦CLI.bat 登录即梦CLI.command launcher.py novai-desktop.py app.py build.py build-all.py build-desktop.py build-mac.py installer.py; do
-        if [ -f "${GITHUB_WORKSPACE}/$f" ]; then
-          cp -f "${GITHUB_WORKSPACE}/$f" ./ 2>/dev/null || echo "::warning::源码文件 $f 复制失败，跳过"
-        else
-          echo "::warning::源码文件 $f 缺失，跳过"
-        fi
-      done
-      for src in static server tools assets/models; do
-        if [ -d "${GITHUB_WORKSPACE}/$src" ]; then
-          mkdir -p "./$src" 2>/dev/null || true
-          cp -R "${GITHUB_WORKSPACE}/$src/." "./$src/" 2>/dev/null || echo "::warning::源码目录 $src 复制失败，跳过"
-        else
-          echo "::warning::源码目录 $src 缺失，跳过"
-        fi
-      done
-      echo "== ModelScope: 允许更新的源码已同步到仓库根目录 =="
+      echo "== ModelScope: 克隆失败（仓库可能不存在或网络超时），改为本地 init 后推送（自动建仓）=="
+      mkdir -p "$work"
+      ( cd "$work" && git init -q && git remote add origin "$auth_url" 2>/dev/null ) || true
     fi
 
-    git add -A 2>/dev/null
-    if git diff --cached --quiet; then
-      echo "== ModelScope: 无变更 =="
+    (
+      cd "$work" || exit 1
+      git config user.email ci@novai.local 2>/dev/null
+      git config user.name novai-ci 2>/dev/null
+      git lfs install 2>/dev/null || true
+      git checkout "$MS_BRANCH" 2>/dev/null || git checkout -B "$MS_BRANCH" 2>/dev/null || true
+
+      git lfs track "electron-release/*.dmg" "electron-release/*.zip" "electron-release/*.exe" \
+                    "electron-release/*.AppImage" "electron-release/*.deb" "electron-release/*.blockmap" 2>/dev/null
+
+      mkdir -p electron-release
+      local f
+      for f in "${ARTIFACTS[@]}" "${YML_FILES[@]}"; do
+        [ -n "$f" ] && cp -f "${GITHUB_WORKSPACE}/$f" electron-release/ 2>/dev/null
+      done
+
+      # 一键更新允许的源码（清单与 main.py 的 update_allowed_file 完全一致），推到仓库根目录
+      if [ ! -f "${GITHUB_WORKSPACE}/main.py" ] || [ ! -f "${GITHUB_WORKSPACE}/VERSION" ]; then
+        echo "::warning::缺少 main.py 或 VERSION，跳过源码同步（electron-release 仍会推送）"
+      else
+        local s
+        for s in main.py VERSION 安装即梦CLI.bat 安装即梦CLI.command 登录即梦CLI.bat 登录即梦CLI.command launcher.py novai-desktop.py app.py build.py build-all.py build-desktop.py build-mac.py installer.py; do
+          if [ -f "${GITHUB_WORKSPACE}/$s" ]; then
+            cp -f "${GITHUB_WORKSPACE}/$s" ./ 2>/dev/null || echo "::warning::源码文件 $s 复制失败，跳过"
+          else
+            echo "::warning::源码文件 $s 缺失，跳过"
+          fi
+        done
+        for s in static server tools assets/models; do
+          if [ -d "${GITHUB_WORKSPACE}/$s" ]; then
+            mkdir -p "./$s" 2>/dev/null || true
+            cp -R "${GITHUB_WORKSPACE}/$s/." "./$s/" 2>/dev/null || echo "::warning::源码目录 $s 复制失败，跳过"
+          else
+            echo "::warning::源码目录 $s 缺失，跳过"
+          fi
+        done
+        echo "== ModelScope: 允许更新的源码已同步到仓库根目录 =="
+      fi
+
+      git add -A 2>/dev/null
+      if git diff --cached --quiet; then
+        echo "== ModelScope: 无变更 =="
+        exit 0
+      fi
+      git commit -q -m "electron-release ${RELEASE_TAG} ($(uname -s))" 2>/dev/null || { echo "::warning::ModelScope commit 失败"; exit 1; }
+      with_timeout 600 git push origin "HEAD:${MS_BRANCH}" || exit 1
+      echo "== ModelScope: 推送成功 =="
+      exit 0
+    )
+    rc=$?
+
+    if [ "$rc" -eq 0 ]; then
       return 0
     fi
-    git commit -q -m "electron-release ${RELEASE_TAG} ($(uname -s))" 2>/dev/null || {
-      echo "::warning::ModelScope commit 失败"; return 0
-    }
-
-    local i
-    for i in 1 2 3; do
-      if with_timeout 600 git push origin "HEAD:${MS_BRANCH}"; then
-        echo "== ModelScope: 推送成功 =="
-        return 0
-      fi
-      echo "== ModelScope: 推送冲突/超时，rebase 重试 ($i/3) =="
-      with_timeout 120 git fetch origin "$MS_BRANCH" 2>/dev/null && git rebase "origin/${MS_BRANCH}" 2>/dev/null || true
-      sleep $((i * 5))
-    done
-  ) || true
+    echo "== ModelScope: 第 $attempt 次推送失败，重新克隆后重试 =="
+    sleep $((attempt * 10))
+  done
 
   echo "::warning::ModelScope 推送未成功（可能网络超时或权限不足），跳过；GitHub 主源仍可用，Gitee 人工下载镜像已就绪"
   return 0
