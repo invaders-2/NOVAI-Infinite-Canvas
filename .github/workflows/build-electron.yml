@@ -139,3 +139,13 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           RUNNER_OS: ${{ runner.os }}
         run: bash .github/scripts/sync-domestic-release.sh
+
+      - name: 同步安装包到 Gitee（自动分卷，tag only）
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'ubuntu-latest'
+        continue-on-error: true
+        timeout-minutes: 40
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: bash .github/scripts/sync-gitee-installers.sh "${{ github.ref_name }}"

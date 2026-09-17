@@ -2018,7 +2018,7 @@
             align-items:center;
             justify-content:center;
             padding:24px;
-            background:rgba(28,28,28,.38);
+            background:var(--scrim);
             backdrop-filter:blur(15px);
         }
 
@@ -2028,11 +2028,11 @@
             display:flex;
             flex-direction:column;
             overflow:hidden;
-            border-radius:8px;
-            border:1px solid transparent;
-            background:#fff;
-            color:#1c1c1e;
-            box-shadow:0 24px 70px rgba(28,28,28,.24);
+            border-radius:var(--radius-lg);
+            border:1px solid var(--border);
+            background:var(--surface);
+            color:var(--text);
+            box-shadow:var(--shadow-xl);
         }
 
         .studio-modal-head {
@@ -2041,14 +2041,14 @@
             justify-content:space-between;
             gap:16px;
             padding:20px 20px 14px;
-            border-bottom:1px solid transparent;
+            border-bottom:1px solid var(--border);
         }
 
         .studio-modal-kicker {
             font-size:11px;
             font-weight:900;
             letter-spacing:.08em;
-            color:#16a34a;
+            color:var(--success-text);
             text-transform:uppercase;
             margin-bottom:6px;
         }
@@ -2064,10 +2064,10 @@
         .studio-modal-close {
             width:32px;
             height:32px;
-            border-radius:8px;
-            border:1px solid transparent;
-            background:#fff;
-            color:#58585a;
+            border-radius:var(--radius-md);
+            border:1px solid var(--border);
+            background:var(--surface);
+            color:var(--text-2);
             display:flex;
             align-items:center;
             justify-content:center;
@@ -2076,9 +2076,9 @@
         }
 
         .studio-modal-close:hover {
-            color:#1c1c1e;
-            border-color:transparent;
-            background:#f5f5f7;
+            color:var(--text);
+            border-color:var(--border-2);
+            background:var(--nav-hover-bg);
         }
 
         .studio-modal-body {
@@ -2088,7 +2088,7 @@
 
         .studio-modal-copy {
             margin:0 0 14px;
-            color:#3a3a3c;
+            color:var(--text-2);
             font-size:13px;
             line-height:1.7;
         }
@@ -2099,17 +2099,17 @@
             gap:10px;
             margin-top:16px;
             padding:12px;
-            border:1px solid transparent;
-            border-radius:8px;
-            background:#f5f5f7;
-            color:#2a2a2a;
+            border:1px solid var(--border);
+            border-radius:var(--radius-md);
+            background:var(--surface-2);
+            color:var(--text-2);
             font-size:12px;
             line-height:1.55;
         }
 
         .update-modal-summary strong {
             display:block;
-            color:#1c1c1e;
+            color:var(--text);
             margin-bottom:2px;
             font-size:12px;
         }
@@ -2118,66 +2118,145 @@
             width:9px;
             height:9px;
             margin-top:4px;
-            border-radius:99px;
-            background:#848488;
+            border-radius:var(--radius-full);
+            background:var(--text-3);
             flex:0 0 auto;
         }
 
-        .update-modal-summary.ok .update-modal-dot { background:#22c55e; }
-        .update-modal-summary.warn .update-modal-dot { background:#f59e0b; }
-        .update-modal-summary.fail .update-modal-dot { background:#ef4444; }
+        .update-modal-summary.ok .update-modal-dot { background:var(--success); }
+        .update-modal-summary.warn .update-modal-dot { background:var(--warning); }
+        .update-modal-summary.fail .update-modal-dot { background:var(--danger); }
 
         /* 更新进度条：复用弹窗卡片样式，进度条走绿色强调色 */
-        .update-progress-box { margin:12px 0 0; padding:12px; border:1px solid #e5e5e5; border-radius:8px; background:#f8f8fa; }
+        .update-progress-box { margin:12px 0 0; padding:12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface-2); }
         .update-progress-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
-        .update-progress-stage { color:#1c1c1e; font-size:12px; font-weight:950; line-height:1.4; }
-        .update-progress-percent { color:#58585a; font-size:12px; font-weight:900; white-space:nowrap; }
-        .update-progress-track { height:6px; border-radius:99px; background:#e5e5e5; overflow:hidden; }
-        .update-progress-bar { height:100%; border-radius:99px; background:#16a34a; transition:width .25s ease; }
-        .update-progress-files { margin-top:8px; color:#848488; font-size:11px; line-height:1.5; word-break:break-all; }
-        .update-progress-box.is-error .update-progress-bar { background:#dc2626; }
+        .update-progress-stage { color:var(--text); font-size:12px; font-weight:950; line-height:1.4; }
+        .update-progress-percent { color:var(--text-2); font-size:12px; font-weight:900; white-space:nowrap; }
+        .update-progress-track { height:6px; border-radius:var(--radius-full); background:var(--border-2); overflow:hidden; }
+        .update-progress-bar { height:100%; border-radius:var(--radius-full); background:var(--success); transition:width .25s ease; }
+        .update-progress-files { margin-top:8px; color:var(--text-3); font-size:11px; line-height:1.5; word-break:break-all; }
+        .update-progress-box.is-error .update-progress-bar { background:var(--danger); }
 
         /* 轻量 Toast 反馈（检查更新结果等），自动消失、可点击触发动作 */
         .update-toast {
             position:fixed; left:50%; bottom:48px; transform:translateX(-50%);
             z-index:99999; max-width:min(480px, calc(100vw - 40px));
-            padding:10px 18px; border-radius:12px;
-            background:rgba(20,20,22,.94); color:#f5f5f7;
+            padding:10px 18px; border-radius:var(--radius-lg);
+            background:var(--text); color:var(--bg);
             font-size:13px; font-weight:700; line-height:1.5; text-align:center;
-            box-shadow:0 12px 32px rgba(0,0,0,.18);
+            box-shadow:var(--shadow-lg);
             opacity:0; transition:opacity .18s ease; cursor:default;
             pointer-events:none;
         }
         .update-toast.show { opacity:1; pointer-events:auto; }
-        .update-toast.ok { background:#16a34a; color:#fff; }
-        .update-toast.fail { background:#dc2626; color:#fff; }
+        .update-toast.ok { background:var(--success); color:var(--text-on-accent); }
+        .update-toast.fail { background:var(--danger); color:var(--text-on-accent); }
         .update-toast.clickable { cursor:pointer; }
+
+        /* 右下角常驻更新提醒：自动检测到新版本时出现，可点关闭忽略 */
+        .update-reminder {
+            position:fixed;
+            right:20px;
+            bottom:20px;
+            z-index:2600;
+            width:min(340px, calc(100vw - 32px));
+            display:flex;
+            align-items:flex-start;
+            gap:12px;
+            padding:14px;
+            border:1px solid var(--border-2);
+            border-radius:var(--radius-xl);
+            background:var(--elevated);
+            color:var(--text);
+            box-shadow:var(--shadow-xl);
+            opacity:0;
+            visibility:hidden;
+            transform:translateY(12px) scale(.98);
+            pointer-events:none;
+            transition:opacity var(--duration-normal) var(--ease-apple),
+                       transform var(--duration-normal) var(--ease-apple),
+                       visibility var(--duration-normal);
+        }
+        .update-reminder.show {
+            opacity:1;
+            visibility:visible;
+            transform:translateY(0) scale(1);
+            pointer-events:auto;
+        }
+        .update-reminder-icon {
+            flex:0 0 auto;
+            width:34px;
+            height:34px;
+            border-radius:var(--radius-pill);
+            background:var(--success-bg);
+            color:var(--success-text);
+            display:flex;
+            align-items:center;
+            justify-content:center;
+        }
+        .update-reminder-icon svg { width:18px; height:18px; }
+        .update-reminder-body { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; gap:3px; padding-right:20px; }
+        .update-reminder-title { font-size:13px; font-weight:700; line-height:1.3; color:var(--text); }
+        .update-reminder-text { font-size:12px; line-height:1.45; color:var(--text-2); }
+        .update-reminder-actions { display:flex; align-items:center; gap:8px; margin-top:6px; }
+        .update-reminder-btn {
+            height:30px;
+            padding:0 12px;
+            border-radius:var(--radius-md);
+            border:1px solid var(--accent);
+            background:var(--accent);
+            color:var(--accent-text);
+            font-size:12px;
+            font-weight:700;
+            cursor:pointer;
+        }
+        .update-reminder-btn:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
+        .update-reminder-close {
+            position:absolute;
+            top:8px;
+            right:8px;
+            width:26px;
+            height:26px;
+            border:none;
+            border-radius:var(--radius-sm);
+            background:transparent;
+            color:var(--text-3);
+            cursor:pointer;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+        }
+        .update-reminder-close:hover { background:var(--nav-hover-bg); color:var(--text); }
+        .update-reminder-close svg { width:14px; height:14px; }
+        @media (max-width:600px) {
+            .update-reminder { right:12px; bottom:12px; left:12px; width:auto; }
+        }
 
         /* 更新弹窗：双卡片需要更宽的面板，避免左右布局被裁剪 */
         #project-update-modal .studio-modal-panel { width:min(880px, 100%); max-height:min(840px, calc(100vh - 48px)); }
-        .update-notes-box { margin:2px 0 14px; padding:12px; border:1px solid #e5e5e5; border-radius:8px; background:#f8f8fa; }
+        .update-notes-box { margin:2px 0 14px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface-2); }
         .update-notes-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
-        .update-notes-head strong { font-size:12px; color:#1c1c1e; font-weight:950; }
-        .update-notes-version { color:#58585a; font-size:11px; font-weight:800; white-space:nowrap; }
-        .update-notes-list { margin:0; padding:0 0 0 16px; display:grid; gap:6px; color:#2a2a2a; font-size:12px; line-height:1.55; }
-        .update-notes-empty { margin:0; color:#848488; font-size:12px; line-height:1.55; }
+        .update-notes-head strong { font-size:12px; color:var(--text); font-weight:950; }
+        .update-notes-version { color:var(--text-2); font-size:11px; font-weight:800; white-space:nowrap; }
+        .update-notes-list { margin:0; padding:0 0 0 16px; display:grid; gap:6px; color:var(--text-2); font-size:12px; line-height:1.55; }
+        .update-notes-empty { margin:0; color:var(--text-3); font-size:12px; line-height:1.55; }
         .update-source-list { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:14px; align-items:stretch; }
         @media (max-width: 900px) { .update-source-list { grid-template-columns:1fr 1fr; } }
         @media (max-width: 600px) { .update-source-list { grid-template-columns:1fr; } }
-        .update-source-card { width:100%; min-width:0; border:1px solid #e5e5e5; border-radius:10px; background:#fff; color:#1c1c1e; text-align:left; padding:12px; display:flex; flex-direction:column; gap:10px; cursor:pointer; transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease; }
-        .update-source-card:hover { transform:translateY(-1px); border-color:transparent; box-shadow:0 12px 28px rgba(28,28,28,.08); }
-        .update-source-card.active { border-color:#16a34a; box-shadow:0 0 0 2px rgba(22,163,74,.20); background:#f0fdf4; }
+        .update-source-card { width:100%; min-width:0; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface); color:var(--text); text-align:left; padding:12px; display:flex; flex-direction:column; gap:10px; cursor:pointer; transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease; }
+        .update-source-card:hover { transform:translateY(-1px); border-color:var(--border-2); box-shadow:var(--shadow-md); }
+        .update-source-card.active { border-color:var(--success); box-shadow:0 0 0 2px var(--success-bg); background:var(--success-bg); }
         .update-source-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
         .update-source-title { min-width:0; display:flex; flex-direction:column; gap:4px; }
-        .update-source-title strong { color:#1c1c1e; font-size:13px; line-height:1.2; font-weight:950; }
-        .update-source-title span { color:#58585a; font-size:11px; line-height:1.35; font-weight:700; }
+        .update-source-title strong { color:var(--text); font-size:13px; line-height:1.2; font-weight:950; }
+        .update-source-title span { color:var(--text-2); font-size:11px; line-height:1.35; font-weight:700; }
         .update-source-head-right { flex:0 0 auto; display:flex; align-items:center; gap:8px; }
-        .update-source-check { display:none; flex:0 0 auto; width:22px; height:22px; border-radius:999px; background:#16a34a; color:#fff; align-items:center; justify-content:center; }
+        .update-source-check { display:none; flex:0 0 auto; width:22px; height:22px; border-radius:var(--radius-full); background:var(--success); color:var(--text-on-accent); align-items:center; justify-content:center; }
         .update-source-check svg { width:14px; height:14px; }
         .update-source-card.active .update-source-check { display:flex; }
-        .update-source-badge { flex:0 0 auto; min-width:56px; height:24px; border-radius:999px; background:#e5e5e5; color:#58585a; display:flex; align-items:center; justify-content:center; padding:0 9px; font-size:10px; font-weight:900; }
-        .update-source-badge.ok { background:#16a34a; color:#fff; }
-        .update-source-badge.bad { background:#dc2626; color:#fff; }
+        .update-source-badge { flex:0 0 auto; min-width:56px; height:24px; border-radius:var(--radius-full); background:var(--nav-hover-bg); color:var(--text-2); display:flex; align-items:center; justify-content:center; padding:0 9px; font-size:10px; font-weight:900; }
+        .update-source-badge.ok { background:var(--success); color:var(--text-on-accent); }
+        .update-source-badge.bad { background:var(--danger); color:var(--text-on-accent); }
         .connectivity-list { display:grid; gap:8px; min-width:0; }
 
         .connectivity-row {
@@ -2187,30 +2266,30 @@
             gap:10px;
             min-height:42px;
             padding:9px 10px;
-            border:1px solid #f0f0f2;
-            border-radius:8px;
-            background:#fff;
+            border:1px solid var(--border);
+            border-radius:var(--radius-md);
+            background:var(--surface);
         }
         .connectivity-row > div { min-width:0; }
 
         .connectivity-indicator {
             width:9px;
             height:9px;
-            border-radius:99px;
-            background:#848488;
+            border-radius:var(--radius-full);
+            background:var(--text-3);
         }
 
-        .connectivity-row.ok .connectivity-indicator { background:#22c55e; }
-        .connectivity-row.fail .connectivity-indicator { background:#ef4444; }
+        .connectivity-row.ok .connectivity-indicator { background:var(--success); }
+        .connectivity-row.fail .connectivity-indicator { background:var(--danger); }
         .connectivity-row.pending .connectivity-indicator {
-            background:#848488;
+            background:var(--text-3);
             animation: studio-pulse 1s ease-in-out infinite;
         }
 
         .connectivity-name {
             font-size:12px;
             font-weight:900;
-            color:#1c1c1e;
+            color:var(--text);
             line-height:1.25;
         }
 
@@ -2221,23 +2300,23 @@
             text-overflow:ellipsis;
             white-space:nowrap;
             font-size:10px;
-            color:#848488;
+            color:var(--text-3);
         }
 
         .connectivity-status {
             justify-self:end;
             font-size:11px;
             font-weight:900;
-            color:#58585a;
+            color:var(--text-2);
             white-space:nowrap;
         }
-        .connectivity-row.ok .connectivity-status { color:#16a34a; }
-        .connectivity-row.fail .connectivity-status { color:#ef4444; }
+        .connectivity-row.ok .connectivity-status { color:var(--success-text); }
+        .connectivity-row.fail .connectivity-status { color:var(--danger-text); }
 
         .connectivity-error {
             grid-column:2 / 4;
             margin-top:-4px;
-            color:#ef4444;
+            color:var(--danger-text);
             font-size:11px;
             line-height:1.45;
             word-break:break-word;
@@ -2248,17 +2327,17 @@
             justify-content:flex-end;
             gap:10px;
             padding:14px 20px 18px;
-            border-top:1px solid #f0f0f2;
-            background:#fff;
+            border-top:1px solid var(--border);
+            background:var(--surface);
         }
 
         .studio-modal-btn {
             min-height:36px;
             padding:0 14px;
-            border-radius:8px;
-            border:1px solid transparent;
-            background:#fff;
-            color:#2a2a2a;
+            border-radius:var(--radius-md);
+            border:1px solid var(--border);
+            background:var(--surface-2);
+            color:var(--text);
             display:inline-flex;
             align-items:center;
             justify-content:center;
@@ -2275,23 +2354,23 @@
         }
 
         .studio-modal-btn:hover {
-            background:#f5f5f7;
-            border-color:transparent;
+            background:var(--nav-hover-bg);
+            border-color:var(--border-2);
         }
 
         #connectivity-test-btn {
-            border-color:rgba(37,99,235,.24);
-            background:#eff6ff;
-            color:#1d4ed8;
+            border-color:var(--info-border);
+            background:var(--info-bg);
+            color:var(--info-text);
             transition:transform .16s ease, background-color .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
         }
 
         #connectivity-test-btn:hover {
             transform:translateY(-1px);
-            border-color:#2563eb;
-            background:#2563eb;
-            color:#fff;
-            box-shadow:0 10px 22px rgba(37,99,235,.20);
+            border-color:var(--info);
+            background:var(--info);
+            color:var(--text-on-accent);
+            box-shadow:var(--shadow-md);
         }
 
         #connectivity-test-btn:hover svg {
@@ -2300,7 +2379,7 @@
 
         #connectivity-test-btn:active {
             transform:translateY(0);
-            box-shadow:0 5px 12px rgba(37,99,235,.16);
+            box-shadow:var(--shadow-sm);
         }
 
         #connectivity-test-btn svg {
@@ -2308,157 +2387,20 @@
         }
 
         .studio-modal-btn.primary {
-            background:#1c1c1e;
-            border-color:#1c1c1e;
-            color:#fff;
+            background:var(--accent);
+            border-color:var(--accent);
+            color:var(--accent-text);
         }
 
         .studio-modal-btn.primary:hover {
-            background:#16a34a;
-            border-color:#16a34a;
+            background:var(--success);
+            border-color:var(--success);
+            color:var(--text-on-accent);
         }
 
         .studio-modal-btn[disabled] {
             opacity:.58;
             cursor:wait;
-        }
-
-        html.theme-dark .studio-modal,
-        body.theme-dark .studio-modal {
-            background:rgba(6,6,6,.56);
-        }
-
-        html.theme-dark .studio-modal-panel,
-        body.theme-dark .studio-modal-panel,
-        html.theme-dark .studio-modal-close,
-        body.theme-dark .studio-modal-close,
-        html.theme-dark .connectivity-row,
-        body.theme-dark .connectivity-row,
-        html.theme-dark .studio-modal-actions,
-        body.theme-dark .studio-modal-actions,
-        html.theme-dark .studio-modal-btn,
-        body.theme-dark .studio-modal-btn {
-            background:#0e0e10;
-            border-color:#222224;
-            color:#e8e8ea;
-        }
-
-        html.theme-dark .update-source-card,
-        body.theme-dark .update-source-card {
-            background:#0e0e10;
-            border-color:#222224;
-            color:#e8e8ea;
-        }
-
-        html.theme-dark .update-source-card.active,
-        body.theme-dark .update-source-card.active {
-            border-color:#22c55e;
-            box-shadow:0 0 0 2px rgba(34,197,94,.35);
-            background:rgba(34,197,94,.12);
-        }
-
-        html.theme-dark .studio-modal-head,
-        body.theme-dark .studio-modal-head,
-        html.theme-dark .studio-modal-actions,
-        body.theme-dark .studio-modal-actions {
-            border-color:#222224;
-        }
-
-        html.theme-dark .studio-modal-copy,
-        body.theme-dark .studio-modal-copy,
-        html.theme-dark .connectivity-status,
-        body.theme-dark .connectivity-status {
-            color:#808082;
-        }
-
-        html.theme-dark .update-modal-summary,
-        body.theme-dark .update-modal-summary {
-            background:#0a0a0c;
-            border-color:#222224;
-            color:#8a8a8c;
-        }
-
-        html.theme-dark .update-notes-box,
-        body.theme-dark .update-notes-box {
-            background:#0a0a0c;
-            border-color:#222224;
-        }
-
-        html.theme-dark .update-progress-box,
-        body.theme-dark .update-progress-box {
-            background:#0a0a0c;
-            border-color:#222224;
-        }
-
-        html.theme-dark .update-progress-stage,
-        body.theme-dark .update-progress-stage {
-            color:#e8e8ea;
-        }
-
-        html.theme-dark .update-progress-percent,
-        body.theme-dark .update-progress-percent,
-        html.theme-dark .update-progress-files,
-        body.theme-dark .update-progress-files {
-            color:#8a8a8c;
-        }
-
-        html.theme-dark .update-progress-track,
-        body.theme-dark .update-progress-track {
-            background:#222224;
-        }
-
-        html.theme-dark .update-modal-summary strong,
-        body.theme-dark .update-modal-summary strong,
-        html.theme-dark .update-notes-head strong,
-        body.theme-dark .update-notes-head strong,
-        html.theme-dark .update-source-title strong,
-        body.theme-dark .update-source-title strong,
-        html.theme-dark .connectivity-name,
-        body.theme-dark .connectivity-name {
-            color:#e8e8ea;
-        }
-
-        html.theme-dark .update-notes-list,
-        body.theme-dark .update-notes-list {
-            color:#d1d1d6;
-        }
-
-        html.theme-dark .update-notes-version,
-        body.theme-dark .update-notes-version,
-        html.theme-dark .update-notes-empty,
-        body.theme-dark .update-notes-empty,
-        html.theme-dark .update-source-title span,
-        body.theme-dark .update-source-title span {
-            color:#808082;
-        }
-
-        html.theme-dark .studio-modal-btn.primary,
-        body.theme-dark .studio-modal-btn.primary {
-            background:#dcdcdc;
-            border-color:#dcdcdc;
-            color:#0e0e10;
-        }
-
-        html.theme-dark #connectivity-test-btn,
-        body.theme-dark #connectivity-test-btn {
-            background:rgba(96,165,250,.12);
-            border-color:rgba(96,165,250,.34);
-            color:#93c5fd;
-        }
-
-        html.theme-dark #connectivity-test-btn:hover,
-        body.theme-dark #connectivity-test-btn:hover {
-            background:#60a5fa;
-            border-color:#60a5fa;
-            color:#0a0a0c;
-            box-shadow:0 10px 24px rgba(96,165,250,.18);
-        }
-
-        html.theme-dark .studio-modal-btn.primary:hover,
-        body.theme-dark .studio-modal-btn.primary:hover {
-            background:#86efac;
-            border-color:#86efac;
-            color:#052e16;
         }
 
         @media (max-width: 640px) {
@@ -3347,6 +3289,31 @@
             <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
 
         </main>
+    </div>
+
+    <div id="update-reminder" class="update-reminder" role="status" aria-live="polite">
+        <span class="update-reminder-icon" aria-hidden="true">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v12"></path>
+                <path d="M7 10l5 5 5-5"></path>
+                <path d="M5 21h14"></path>
+            </svg>
+        </span>
+        <div class="update-reminder-body">
+            <strong class="update-reminder-title" id="update-reminder-title"></strong>
+            <span class="update-reminder-text" id="update-reminder-text"></span>
+            <div class="update-reminder-actions">
+                <button class="update-reminder-btn" id="update-reminder-action" type="button" onclick="openProjectUpdateModal()">
+                    <span id="update-reminder-action-text">立即更新</span>
+                </button>
+            </div>
+        </div>
+        <button class="update-reminder-close" id="update-reminder-close" type="button" onclick="dismissUpdateReminder()" title="忽略此版本" aria-label="忽略此版本">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
     </div>
 
     <div id="project-update-modal" class="studio-modal" hidden role="dialog" aria-modal="true" aria-labelledby="project-update-title">
@@ -4723,6 +4690,43 @@
             updateProjectUpdateTitle();
         }
 
+        const UPDATE_DISMISSED_VERSION_KEY = 'novai.update.dismissedVersion';
+
+        function getDismissedUpdateVersion() {
+            try { return localStorage.getItem(UPDATE_DISMISSED_VERSION_KEY) || ''; } catch(e) { return ''; }
+        }
+
+        function maybeShowUpdateReminder(remoteVersion) {
+            const el = document.getElementById('update-reminder');
+            if(!el || !remoteVersion) return;
+            // 同一版本被忽略后不再自动弹出；出现更高版本时重新提醒
+            const dismissed = getDismissedUpdateVersion();
+            if(dismissed && compareVersions(remoteVersion, dismissed) <= 0) return;
+            const isEn = window.StudioI18n?.lang?.() === 'en';
+            const titleEl = document.getElementById('update-reminder-title');
+            const textEl = document.getElementById('update-reminder-text');
+            const actionText = document.getElementById('update-reminder-action-text');
+            const closeBtn = document.getElementById('update-reminder-close');
+            if(titleEl) titleEl.textContent = isEn ? ('New version ' + versionLabel(remoteVersion)) : ('发现新版本 ' + versionLabel(remoteVersion));
+            if(textEl) textEl.textContent = isEn ? 'An update is ready to install.' : '新版本已就绪，可以立即安装。';
+            if(actionText) actionText.textContent = isEn ? 'Update now' : '立即更新';
+            if(closeBtn) {
+                closeBtn.title = isEn ? 'Ignore this version' : '忽略此版本';
+                closeBtn.setAttribute('aria-label', closeBtn.title);
+            }
+            el.dataset.remoteVersion = remoteVersion;
+            el.classList.add('show');
+        }
+
+        function dismissUpdateReminder() {
+            const el = document.getElementById('update-reminder');
+            const remoteVersion = el?.dataset.remoteVersion || '';
+            if(remoteVersion) {
+                try { localStorage.setItem(UPDATE_DISMISSED_VERSION_KEY, remoteVersion); } catch(e) {}
+            }
+            el?.classList.remove('show');
+        }
+
         function setProjectUpdateNotes(notes) {
             projectUpdateNotes = notes && typeof notes === 'object' ? notes : null;
             renderProjectUpdateNotes();
@@ -4848,9 +4852,9 @@
             const gitee = sources.gitee || {};
             const modelscope = sources.modelscope || {};
             return [
-                { name:'ModelScope 更新列表', url:modelscope.tree_url || 'https://www.modelscope.cn/api/v1/studio/bllack/NOVAI-Canvas/repo?Revision=main&FilePath=/static/update-notes.json', source:'modelscope', required:true },
-                { name:'ModelScope 版本文件', url:modelscope.version_url || 'https://www.modelscope.cn/studios/bllack/NOVAI-Canvas/raw/main/VERSION', source:'modelscope', required:true },
-                { name:'ModelScope 主页', url:'https://modelscope.cn/studios/bllack/NOVAI-Canvas', source:'modelscope' },
+                { name:'ModelScope 更新列表', url:modelscope.tree_url || 'https://modelscope.cn/api/v1/models/bllack/NOVAI-releases/repo?Revision=master&FilePath=static/update-notes.json', source:'modelscope', required:true },
+                { name:'ModelScope 版本文件', url:modelscope.version_url || 'https://modelscope.cn/api/v1/models/bllack/NOVAI-releases/repo?Revision=master&FilePath=VERSION', source:'modelscope', required:true },
+                { name:'ModelScope 主页', url:'https://modelscope.cn/models/bllack/NOVAI-releases', source:'modelscope' },
                 { name:'Gitee 更新列表', url:gitee.tree_url || 'https://gitee.com/api/v5/repos/invaders/novai/git/trees/main?recursive=1', source:'gitee', required:true },
                 { name:'Gitee 版本文件', url:gitee.version_url || 'https://gitee.com/invaders/novai/raw/main/VERSION', source:'gitee', required:true },
                 { name:'Gitee 主页', url:'https://gitee.com/', source:'gitee' },
@@ -5404,7 +5408,7 @@
             const candidates = [
                 {source:'github', url:sources.github?.version_url || appInfo.version_url || ''},
                 {source:'gitee', url:sources.gitee?.version_url || ''},
-                {source:'modelscope', url:sources.modelscope?.version_url || 'https://www.modelscope.cn/studios/bllack/NOVAI-Canvas/raw/main/VERSION'},
+                {source:'modelscope', url:sources.modelscope?.version_url || 'https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/VERSION'},
             ].filter(item => item.url);
             const results = await Promise.all(candidates.map(async item => {
                 try {
@@ -5473,6 +5477,8 @@
                 if(hasUpdate) {
                     setProjectUpdateNotes(best.update_notes || null);
                     showUpdateNotice(current, best.version);
+                    // 仅自动检测（打开软件）时显示右下角常驻提醒；手动检查沿用原 toast + 弹窗
+                    if(!manual) maybeShowUpdateReminder(best.version);
                     // 后端/兜底已发现更新，先标记对应源，再并行校验三个仓库
                     repoUpdateStatus = { github:null, gitee:null, modelscope:null };
                     repoUpdateStatus[best.source] = { version:best.version, hasUpdate:true };
