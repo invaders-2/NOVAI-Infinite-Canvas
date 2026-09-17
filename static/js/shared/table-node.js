@@ -9,7 +9,7 @@
             pushUndo, defaultPoint, mediaKindForNode, mediaKindForRef, mediaKindForUpload,
             outputUrlValue, isMissingAssetUrl, canvasPreviewImgHtml, canvasVideoPreviewHtml,
             nowMs, responseErrorMessage, refreshIcons, renderNode, runGenerator, runVideoNode,
-            showErrorModal,
+            showErrorModal, generationStopRequested, onBatchSettled,
         } = host || {};
 
 function novaTableModel(){
@@ -1252,6 +1252,7 @@ function paintTableBatchPanel(panel, gen){
     const journal = model.normalizeJournal(table.generationBatchJournal);
     const completed = model.journalCompletedRows(journal).length;
     const failed = model.journalFailedRows(journal).length;
+    const cancelled = typeof model.journalCancelledRows === 'function' ? model.journalCancelledRows(journal).length : 0;
     const inflight = model.journalInflightRows(journal).length;
     const running = Boolean(table.tableBatchRunning);
 
@@ -1307,6 +1308,7 @@ function paintTableBatchPanel(panel, gen){
     const progressText = [
         completed ? '已完成 ' + completed : '',
         failed ? '失败 ' + failed : '',
+        cancelled ? '已取消 ' + cancelled : '',
         inflight ? '后台 ' + inflight : ''
     ].filter(Boolean).join(' · ');
     if(progressText){
@@ -1599,9 +1601,15 @@ async function runTableBatch(genId, options={}){
     gen._batchRunRows = pending.length;
     /* 生效并发写到生成节点上：结果节点读它来决定几个占位格在转、几个在排队。 */
     gen._batchRunConcurrency = concurrency;
+    /* 新一轮开跑先清上一批的停止标记。停止判定接两处：智能画布的全局停止
+       （host.generationStopRequested），以及本节点/调用方显式标记（经典画布等）。 */
+    gen._batchStopRequested = false;
+    const shouldStopBatch = () => Boolean(gen._batchStopRequested)
+        || (typeof generationStopRequested === 'function' ? Boolean(generationStopRequested()) : false)
+        || (typeof options.shouldStop === 'function' ? Boolean(options.shouldStop()) : false);
     gen._batchRunning = true;
     table.tableBatchRunning = true;
-    gen._batchProgress = {total:pending.length, done:0, failed:0};
+    gen._batchProgress = {total:pending.length, done:0, failed:0, cancelled:0};
     scheduleSave();
     try {
         paintTableBatchPanelFromNode(gen, table);
@@ -1628,12 +1636,21 @@ async function runTableBatch(genId, options={}){
             scheduleSave();
             repaintBatchPanel(gen);
             return entry.rowNumber;
-        }, {stopOnError: failurePolicy === 'stop'});
+        }, {stopOnError: failurePolicy === 'stop', shouldStop: shouldStopBatch});
 
         const failures = [];
         results.forEach((result, index) => {
             if(result && result.ok) return;
             const entry = pending[index];
+            /* 停止：没派发的行（cancelled 标记）和因停止中断的行都记 cancelled，
+               不算 failed —— 用户点的是「停止」，不是「失败」。 */
+            const stopped = Boolean(result && result.cancelled)
+                || Boolean(result && result.error && result.error.smartGenerationStopped);
+            if(stopped){
+                model.journalMarkRow(journal, entry.rowNumber, 'cancelled');
+                gen._batchProgress.cancelled += 1;
+                return;
+            }
             model.journalMarkRow(journal, entry.rowNumber, 'failed');
             gen._batchProgress.failed += 1;
             failures.push({rowNumber: entry.rowNumber,
@@ -1647,7 +1664,12 @@ async function runTableBatch(genId, options={}){
 
         const completed = model.journalCompletedRows(journal).length;
         const failed = model.journalFailedRows(journal).length;
-        let summary = '批量生成结束：完成 ' + completed + ' 行' + (failed ? '，失败 ' + failed + ' 行' : '') + '。';
+        const cancelled = typeof model.journalCancelledRows === 'function'
+            ? model.journalCancelledRows(journal).length
+            : journal.rows.filter(row => row.status === 'cancelled').length;
+        let summary = cancelled
+            ? '已停止：完成 ' + completed + ' 行，已取消 ' + cancelled + ' 行。'
+            : '批量生成结束：完成 ' + completed + ' 行' + (failed ? '，失败 ' + failed + ' 行' : '') + '。';
         /* 批量模式不能弹窗，但只说「失败 N 行」等于没说。
            把首个失败原因带出来，面板上的 note 会一直留着，用户能照着排查。 */
         if(failures.length){
@@ -1661,10 +1683,13 @@ async function runTableBatch(genId, options={}){
            （以前是布尔 = false，叠加两批时先结束的那批会把标志提前清掉。） */
         gen._batchRunCount = Math.max(0, (Number(gen._batchRunCount) || 1) - 1);
         gen._batchRunning = gen._batchRunCount > 0;
+        if(!gen._batchRunning) gen._batchStopRequested = false;
         table.tableBatchRunning = gen._batchRunning;
         scheduleSave();
         repaintBatchPanel(gen);
         repaintTable(table);
+        /* 批量生命周期的任何收尾（正常/异常/停止）都要让主按钮回到「运行」，不能卡在「停止/停止中…」。 */
+        if(typeof onBatchSettled === 'function') onBatchSettled();
     }
 }
 

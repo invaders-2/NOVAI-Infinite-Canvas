@@ -230,7 +230,7 @@ ok(js.includes('function ensureBatchRowPlan('), '结果节点按真实行号建�
 ok(js.includes('function setBatchRowState('), '每行状态由真实回调改');
 ok(js.includes("setBatchRowState(liveOutput, rowNumber, 'running')"), '这一行真正开跑前置 running');
 ok(js.includes("setBatchRowState(live, rowNumber, 'completed')"), '成功后置 completed');
-ok(js.includes("setBatchRowState(live, rowNumber, 'failed')"), 'catch 里置 failed');
+ok(js.includes("setBatchRowState(live, rowNumber, Boolean(error && error.smartGenerationStopped) ? 'cancelled' : 'failed')"), 'catch 里按停止/失败分别置 cancelled / failed');
 ok(js.includes('batchRowOrder') && js.includes('batchRowStates'), '结果节点持有真实行序与状态');
 ok(js.includes('function batchRowGridHtml('), '进度框按行序逐格渲染');
 ok(js.includes('data-pending-completed'), '已完成但图被去重 → 中性格，不转圈');
@@ -238,6 +238,33 @@ ok(js.includes('function batchRowStatusTextFor('), '节点显示真实数字（�
 ok(js.includes('delete node.batchRowOrder') && js.includes('delete node.batchRowStates'), '逐行状态是页面临时字段，不写进画布');
 ok(modelSrc.includes('function batchRowPlan(') && modelSrc.includes('function batchRowStateSummary('), '逐行状态机是共享模块里的纯函数');
 ok(canvasCss.includes('.loading-cell.pending-thumb.is-completed'), '中性格样式在');
+
+console.log('[18] 停止生成（单张 + 批量，随时可停）');
+ok(js.includes('let smartGenerationStopRequested') && js.includes('const activeSmartGenerationTaskIds'), '全局停止标志 + 在跑任务集合');
+ok(js.includes('function requestSmartGenerationStop('), 'requestSmartGenerationStop 存在');
+ok(js.includes("fetch('/api/tasks/' + encodeURIComponent(taskId) + '/cancel'"), '停止时调 /api/tasks/{id}/cancel');
+ok(js.includes('runBtn.onclick = () => {') && js.includes('requestSmartGenerationStop()'), '底部运行按钮在跑时变成停止');
+ok(js.includes('function smartGenerationStopText('), '停止 / 停止中… 文案');
+ok(js.includes("runBtn.classList.toggle('is-stop', active)"), '停止态用 is-stop');
+ok(js.includes('if(smartGenerationStopRequested) throw smartGenerationStoppedError();'), '轮询每轮检查停止并抛带标记错误');
+ok(js.includes('activeSmartGenerationTaskIds.add(taskId)') && js.includes('activeSmartGenerationTaskIds.delete(taskId)'), '任务登记 / 结算时移除');
+ok(js.includes('throwIfSmartGenerationStopped()'), '其它引擎等待点检查停止');
+ok(js.includes('generationStopRequested: () => smartGenerationStopRequested'), '共享表格模块通过 host 读到停止标志');
+ok(moduleSrc.includes('gen._batchStopRequested') && moduleSrc.includes('shouldStop: shouldStopBatch'), '批量把停止判定接进 runWithSharedCursor');
+ok(moduleSrc.includes("journalMarkRow(journal, entry.rowNumber, 'cancelled')"), '取消行记 cancelled，不记 failed');
+ok(moduleSrc.includes('已停止：完成 '), '停止摘要「已停止：完成 X · 已取消 Y」');
+ok(modelSrc.includes("'cancelled'"), '模型层支持 cancelled 状态');
+ok(modelSrc.includes('shouldStop'), 'runWithSharedCursor 支持 shouldStop');
+ok(js.includes("state === 'cancelled'") && js.includes('data-pending-cancelled'), '取消占位格渲染分支');
+ok(canvasCss.includes('.loading-cell.pending-thumb.is-cancelled'), '取消占位样式在');
+ok(js.includes('delete node._batchStopRequested'), '批量停止标记是页面临时字段');
+
+console.log('[19] 停止/运行按钮生命周期同步（批量任何收尾都回到「运行」）');
+ok(moduleSrc.includes('generationStopRequested, onBatchSettled,'), 'host 解构里加了可选 onBatchSettled');
+ok(/if\(typeof onBatchSettled === 'function'\) onBatchSettled\(\)/.test(moduleSrc), 'runTableBatch 用 typeof 判断后调用 onBatchSettled（经典画布不传也不报错）');
+ok(/finally\s*\{[\s\S]{0,1500}?onBatchSettled\(\)/.test(moduleSrc), 'onBatchSettled 落在 finally —— 正常/异常/停止收尾都会同步');
+ok(js.includes('onBatchSettled: () => syncRunButtonState()'), '智能画布把 onBatchSettled 接到 syncRunButtonState');
+ok(js.includes('sbSyncStarBorderFrames();\n    syncRunButtonState();'), 'render() 末尾同步运行按钮状态');
 
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

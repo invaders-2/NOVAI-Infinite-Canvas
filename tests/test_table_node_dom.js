@@ -89,6 +89,7 @@ const nodesEl = {
 let iconRefreshes = 0;
 const batchCalls = [];
 let videoShimMode = 'ok';
+let batchStopRequested = false;
 const runVideoShim = (id, opts) => {
     batchCalls.push({id, opts});
     if(videoShimMode === 'fail') throw new Error('{"error":{"message":"Agnes rate limit: free users"}}');
@@ -101,7 +102,7 @@ const api = new Function(
     'connections', 'nodes', 'pushUndo', 'mediaKindForNode', 'isMissingAssetUrl',
     'canvasPreviewImgHtml', 'canvasVideoPreviewHtml', 'nowMs', 'tr', 'nodesEl',
     'runVideoNode', 'runGenerator', 'window', 'saveCanvas', 'refreshIcons',
-    'outputUrlValue', 'mediaKindForRef',
+    'outputUrlValue', 'mediaKindForRef', 'generationStopRequested',
     block + '\nreturn {renderTableBody, repaintTable, addTableNode, ensureTableState, addTableColumn, addTableRow,' +
     ' deleteTableRow, toggleTableRow, toggleAllTableRows, beginTableEdit, endTableEdit, syncTableNodeWidth,' +
     ' ensureTableChannels, tableRowInputs, tableInputEntryAt, tableUpstreamTexts, toggleTableChannelMode,' +
@@ -134,7 +135,8 @@ const api = new Function(
         if(/\.(mp3|wav|m4a)$/i.test(url)) return 'audio';
         if(/\.(txt|json|csv|md)$/i.test(url)) return 'text';
         return 'image';
-    }
+    },
+    () => batchStopRequested
 );
 
 const keydown = key => ({ key, shiftKey:false, preventDefault(){}, stopPropagation(){} });
@@ -794,6 +796,17 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     ok(batchMsg.indexOf('Agnes rate limit: free users') > 0, '摘要带出首个失败原因：' + batchMsg);
     ok(batchMsg.indexOf('{"error"') < 0, '摘要里不出现原始 JSON');
     videoShimMode = 'ok';
+
+    // 停止：不再派发新行、记 cancelled 不算 failed、摘要写「已停止」
+    batchStopRequested = true;
+    batchCalls.length = 0;
+    await api.runTableBatch(vidE2E.id, {});
+    eq(batchCalls.length, 0, '停止后不再派发新行');
+    const stopMsg = String(vidE2E._batchLastMessage || '');
+    ok(stopMsg.indexOf('已停止') >= 0, '摘要报「已停止」：' + stopMsg);
+    ok(stopMsg.indexOf('已取消') >= 0, '摘要报「已取消」');
+    ok(batchCalls.length === 0 && String(vidE2E._batchProgress && vidE2E._batchProgress.failed || 0) === '0', '取消不计入失败');
+    batchStopRequested = false;
 
 // ═══ M. 输出(Output)节点作为参考来源 ═══
 {

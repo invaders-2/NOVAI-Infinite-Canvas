@@ -961,6 +961,7 @@ function canvasForStorage(){
         delete node._batchRunCount;
         delete node._batchRunRows;
         delete node._batchRunConcurrency;
+        delete node._batchStopRequested;
         delete node.tableBatchRunning;
         /* 结果节点的「这一批还剩几格」也是页面内的临时状态 */
         delete node.batchRunExpected;
@@ -7336,11 +7337,73 @@ function completeSmartNodeWithImages(node, images){
     if(smartNodeHasDisplayResult(copy)) markSmartNodeComplete(copy);
     return copy;
 }
+/* ── 停止生成（单张 + 批量通用）─────────────────────────────
+   stopRequested 由用户点「停止」置位；activeSmartGenerationTaskIds 是当前在跑、
+   可以调后端取消的任务。轮询/等待循环每轮检查 stopRequested，setTimeout 醒来后立刻退出。 */
+let smartGenerationStopRequested = false;
+let runBtnModeKey = '';
+const activeSmartGenerationTaskIds = new Set();
+
+function smartGenerationStoppedError(){
+    const err = new Error('已停止生成');
+    err.smartGenerationStopped = true;
+    return err;
+}
+function throwIfSmartGenerationStopped(){
+    if(smartGenerationStopRequested) throw smartGenerationStoppedError();
+}
+function smartGenerationStopText(stopping=false){ return stopping ? '停止中…' : '停止'; }
+function cancelSmartTask(taskId){
+    if(!taskId) return Promise.resolve();
+    return fetch('/api/tasks/' + encodeURIComponent(taskId) + '/cancel', {method:'POST'})
+        .then(() => undefined)
+        .catch(() => undefined);
+}
+/* 有没有生成在跑：在途任务 / 单节点 pending+running / 批量在跑。 */
+function smartGenerationIsRunning(){
+    if(activeSmartGenerationTaskIds.size) return true;
+    return (nodes || []).some(node => Boolean(node && (smartNodeInFlight(node) || node._batchRunning)));
+}
+function requestSmartGenerationStop(){
+    if(smartGenerationStopRequested) return;
+    smartGenerationStopRequested = true;
+    /* 已有 taskId 的：调后端取消（排队中真取消，运行中尽力而为）。 */
+    Array.from(activeSmartGenerationTaskIds).forEach(taskId => { cancelSmartTask(taskId); });
+    activeSmartGenerationTaskIds.clear();
+    (nodes || []).forEach(node => {
+        if(!node) return;
+        if(node._batchRunning) node._batchStopRequested = true;
+        /* 批量逐行状态：还没跑完的行直接标「已取消」，已出的图留着。 */
+        if(node.batchRowOrder && node.batchRowStates){
+            Object.keys(node.batchRowStates).forEach(rowNumber => {
+                const state = node.batchRowStates[rowNumber];
+                if(state === 'queued' || state === 'running') node.batchRowStates[rowNumber] = 'cancelled';
+            });
+        }
+    });
+    toast('已请求停止，正在结束当前生成…');
+    syncRunButtonState();
+    render();
+    scheduleSave();
+}
 function syncRunButtonState(node=selectedNode()){
     if(!runBtn) return;
-    // 只在“当前选中节点自己”忙时禁用运行：节点正在生成/排队，或它本身是正在跑的循环。
-    // 不再因为“画布上有任意循环/级联在跑”就全局禁用——跑循环时仍可对其他节点点生成。
-    runBtn.disabled = !isSmartRunnableNode(node) || smartNodeInFlight(node) || smartCascadeIsLoopRunning(node?.id);
+    const running = smartGenerationIsRunning();
+    /* 真的停完了（没有任何生成在跑）→ 收掉停止态，按钮恢复「运行」。 */
+    if(smartGenerationStopRequested && !running) smartGenerationStopRequested = false;
+    const active = smartGenerationStopRequested || running;
+    const mode = !active ? 'run' : (smartGenerationStopRequested ? 'stopping' : 'stop');
+    if(mode !== runBtnModeKey){
+        runBtnModeKey = mode;
+        runBtn.classList.toggle('is-stop', active);
+        runBtn.innerHTML = active
+            ? '<i data-lucide="square"></i><span>' + escapeHtml(smartGenerationStopText(smartGenerationStopRequested)) + '</span>'
+            : '<i data-lucide="sparkles"></i><span data-i18n="smart.run">' + escapeHtml(tr('smart.run')) + '</span>';
+        refreshIcons();
+    }
+    runBtn.disabled = active
+        ? smartGenerationStopRequested
+        : (!isSmartRunnableNode(node) || smartNodeInFlight(node) || smartCascadeIsLoopRunning(node?.id));
 }
 function mergeSmartNode(local, remote){
     const images = mergeSmartImageLists(local.images, remote.images);
@@ -10385,6 +10448,7 @@ function render(){
     flushContentMeasurements();
     refreshRunTimerPills();
     sbSyncStarBorderFrames();
+    syncRunButtonState();
     return;
     world.innerHTML = '';
     if(composerEl) world.appendChild(composerEl);
@@ -17237,6 +17301,7 @@ async function waitSmartComfyTaskResult(taskId){
         if(data.status === 'succeeded') return data.result || {};
         if(data.status === 'failed') throw new Error(data.error || tr('smart.errRunFailed'));
         await sleep(1600);
+        throwIfSmartGenerationStopped();
     }
 }
 async function runQueuedSmartComfyGenerate(payload){
@@ -17876,7 +17941,12 @@ async function runGeneration(){
        绝不能走下面的单节点图片生成）。 */
     if(isSmartBatchNode(node)){
         const api = ensureTableApi();
-        if(api) api.runTableBatch(node.id, {});
+        if(api){
+            const batchRun = api.runTableBatch(node.id, {});
+            syncRunButtonState();
+            await batchRun;
+        }
+        syncRunButtonState();
         return;
     }
     const request = buildPromptRequest(node, null, true, smartLoopContext);
@@ -18028,6 +18098,30 @@ async function runGeneration(){
         scheduleSave();
     } catch(e) {
         settings = previousSettings;
+        if(e && e.smartGenerationStopped){
+            /* 停止：把这一节点从 pending/running 收尾，已出的图保留，不弹失败提示。 */
+            if(branchNode){
+                const live = liveSmartNode(branchNode);
+                if(live && (live.images || []).some(img => img?.url)){
+                    live.pending = 0;
+                    live.running = false;
+                    markSmartNodeComplete(live, pendingMeta);
+                } else {
+                    nodes = nodes.filter(n => n.id !== branchNode.id);
+                    canvas.connections = (canvas.connections || []).filter(c => c.from !== branchNode.id && c.to !== branchNode.id);
+                    selectedId = node.id;
+                }
+            } else {
+                pendingNode.pending = 0;
+                pendingNode.running = false;
+                if(!(pendingNode.images || []).length){ delete pendingNode.w; delete pendingNode.h; }
+            }
+            delete pendingNode._runMetaTargetId;
+            syncRunButtonState();
+            render();
+            scheduleSave();
+            return;
+        }
         if(handleJimengPendingSignal(pendingNode, e)){
             if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
             delete pendingNode._runMetaTargetId;
@@ -18052,10 +18146,8 @@ async function runGeneration(){
         if(!e?.smartGenerationLogged) addSmartGenerationLog({run:runLog, outputs:[], runMs:nowMs() - runLogStart, error:e.message || String(e)});
         toast((e.message || tr('smart.errRunFailed')).slice(0, 160));
     } finally {
-        if(!apiConcurrentRun){
-            clearNodeRunningState(pendingNode);
-            syncRunButtonState();
-        }
+        if(!apiConcurrentRun) clearNodeRunningState(pendingNode);
+        syncRunButtonState();
         render();
     }
 }
@@ -18102,7 +18194,14 @@ async function runApiGeneration(prompt, refs, runSettings=settings){
         if(!r.ok) throw new Error(await r.text());
         return r.json();
     })));
-    return {taskIds:tasks.map(task => task.task_id).filter(Boolean), count, providerId:payload.provider_id, model:payload.model};
+    const taskIds = tasks.map(task => task.task_id).filter(Boolean);
+    /* 停止已请求：任务刚建出来就取消，不再往下跑。 */
+    if(smartGenerationStopRequested){
+        taskIds.forEach(taskId => { cancelSmartTask(taskId); });
+        throw smartGenerationStoppedError();
+    }
+    taskIds.forEach(taskId => activeSmartGenerationTaskIds.add(taskId));
+    return {taskIds, count, providerId:payload.provider_id, model:payload.model};
 }
 async function runRunningHubGeneration(prompt, refs, runSettings=settings){
     const ref = selectedRunningHubRef(runSettings);
@@ -18131,6 +18230,7 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings){
     if(!taskId) throw new Error(tr('smart.rhNoTaskId'));
     for(let i = 0; i < 720; i++){
         await sleep(2500);
+        throwIfSmartGenerationStopped();
         const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(async r => {
             const json = await r.json();
             if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('smart.rhFailed'));
@@ -18209,6 +18309,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             multimodal: Boolean(runSettings.videoMultimodal),
             trusted_asset: useAssetUris
         };
+        throwIfSmartGenerationStopped();
         const result = await fetch('/api/canvas-video', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
@@ -18239,6 +18340,7 @@ async function runModelscopeGeneration(prompt, refs, runSettings=settings){
     }
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
     const submit = async () => {
+        throwIfSmartGenerationStopped();
         let body;
         if(modelKey === 'zimage') body = {prompt, resolution:`${width}x${height}`};
         else if(modelKey === 'qwen_edit') body = {prompt, image_urls:imageUrls, resolution:`${width}x${height}`};
@@ -18608,6 +18710,8 @@ async function pollSmartCanvasTask(taskId){
     const promise = (async () => {
         for(let i = 0; i < 900; i++){
             await new Promise(resolve => setTimeout(resolve, 2000));
+            /* 停止请求：2s 计时器一醒来就退出，不等这一轮请求。 */
+            if(smartGenerationStopRequested) throw smartGenerationStoppedError();
             const task = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`).then(async r => {
                 if(!r.ok) throw new Error(await r.text());
                 return r.json();
@@ -18627,6 +18731,7 @@ async function pollSmartCanvasTask(taskId){
         return await promise;
     } finally {
         activeSmartTaskPolls.delete(taskId);
+        activeSmartGenerationTaskIds.delete(taskId);
     }
 }
 function finalizeSmartPendingTask(node, taskId, images, kind='image'){
@@ -18685,9 +18790,20 @@ async function resumeSmartPendingNode(node, logContext={}){
         try {
             const result = await pollSmartCanvasTask(task.taskId);
             finalizeSmartPendingTask(node, task.taskId, resultMediaUrls(result?.image_items?.length ? result.image_items : (result?.images?.length ? result.images : result)), task.kind || 'image');
+            syncRunButtonState();
             render();
             scheduleSave();
         } catch(e) {
+            if(e && e.smartGenerationStopped){
+                /* 停止：这一任务从 pending 收尾，已出的图保留，不报失败。 */
+                node.pendingTasks = smartPendingTasks(node).filter(item => item.taskId !== task.taskId);
+                node.pending = Math.max(0, Number(node.pending || 0) - 1);
+                if(!node.pending && smartPendingTasks(node).length === 0) node.running = false;
+                syncRunButtonState();
+                render();
+                scheduleSave();
+                return;
+            }
             if(e && e.jimengPending && e.submitId){
                 node.pendingTasks = smartPendingTasks(node).filter(item => item.taskId !== task.taskId);
                 setNodeJimengPending(node, e);
@@ -18727,6 +18843,7 @@ async function resumeSmartPendingNode(node, logContext={}){
             scheduleSave();
         }
     }));
+    if(smartGenerationStopRequested) throw smartGenerationStoppedError();
     if(failures.length && !(node.images || []).length){
         throw failures[0];
     }
@@ -20108,7 +20225,11 @@ if(promptResize){
         };
     });
 }
-runBtn.onclick = runGeneration;
+runBtn.onclick = () => {
+    if(smartGenerationStopRequested) return;
+    if(smartGenerationIsRunning()){ requestSmartGenerationStop(); return; }
+    runGeneration();
+};
 cascadeRunBtn.onclick = () => {
     const node = selectedNode();
     const loopId = resolveSmartCascadeLoop(node?.id)?.node?.id || '';
@@ -21731,6 +21852,9 @@ function batchRowSlotHtml(state, thumb){
     if(state === 'completed'){
         return '<div class="loading-cell pending-thumb is-completed" data-pending-completed="1" title="这一行已完成" style="' + size + '"></div>';
     }
+    if(state === 'cancelled'){
+        return '<div class="loading-cell pending-thumb is-cancelled" data-pending-cancelled="1" title="已取消" style="' + size + '"></div>';
+    }
     return '<div class="loading-cell pending-thumb is-queued" data-pending-queued="1" title="排队中" style="' + size + '"></div>';
 }
 /* 结果节点上显示的真实数字：从 batchRowStates 统计，不另算一套。 */
@@ -21750,6 +21874,10 @@ function ensureBatchRowPlan(node, rowNumbers){
     if(!plan.order.length) return;
     node.batchRowOrder = plan.order;
     node.batchRowStates = plan.states;
+    /* 停止请求发生在结果节点建出来之前：没跑的行直接算「已取消」。 */
+    if(smartGenerationStopRequested){
+        plan.order.forEach(rowNumber => { node.batchRowStates[rowNumber] = 'cancelled'; });
+    }
 }
 function setBatchRowState(node, rowNumber, state){
     const model = window.NovaTableModel;
@@ -21839,6 +21967,7 @@ async function tableRunOneRow(nodeId, options, forceVideo){
         ensureBatchRowPlan(liveOutput, runContext.batchRowNumbers);
         setBatchRowState(liveOutput, rowNumber, 'running');
     }
+    syncRunButtonState();
     render();
     scheduleSave();
     let urls = [];
@@ -21853,6 +21982,7 @@ async function tableRunOneRow(nodeId, options, forceVideo){
             const live = liveSmartNode(output);
             if(live) setBatchRowState(live, rowNumber, 'completed');
         }
+        syncRunButtonState();
         render();
         scheduleSave();
         return urls;
@@ -21861,7 +21991,8 @@ async function tableRunOneRow(nodeId, options, forceVideo){
            结果节点里一张都还没有就把这张空卡片撤掉；已经有别行结果就留着。 */
         if(output){
             const live = liveSmartNode(output);
-            if(live) setBatchRowState(live, rowNumber, 'failed');
+            if(live) setBatchRowState(live, rowNumber, Boolean(error && error.smartGenerationStopped) ? 'cancelled' : 'failed');
+            syncRunButtonState();
             if(live && !(live.images || []).length){
                 nodes = nodes.filter(n => n.id !== live.id);
                 if(canvas) canvas.connections = (canvas.connections || []).filter(conn => conn.from !== live.id && conn.to !== live.id);
@@ -22060,6 +22191,8 @@ function ensureTableApi(){
         showErrorModal: text => toast(String(text || '出错了'), '!'),
         runGenerator: tableRunGenerator,
         runVideoNode: tableRunVideo,
+        generationStopRequested: () => smartGenerationStopRequested,
+        onBatchSettled: () => syncRunButtonState(),
     });
     return tableApi;
 }

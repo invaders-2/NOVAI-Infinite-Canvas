@@ -385,7 +385,7 @@
 
     /* ── 批量执行（DX OS §4 执行器 / §5 journal）─────────────────── */
     // failed 也在这里：不然失败行既标不上、续跑时也认不出来该重试
-    const BATCH_ROW_STATUS = ['completed', 'running', 'pending', 'deferred', 'failed'];
+    const BATCH_ROW_STATUS = ['completed', 'running', 'pending', 'deferred', 'failed', 'cancelled'];
     const DEFAULT_BATCH_CONCURRENCY = 3;
     const MAX_BATCH_CONCURRENCY = 8;
 
@@ -502,6 +502,7 @@
     function journalInflightRows(journal){ return journal.rows.filter(row => row.status === 'running' || row.status === 'deferred'); }
     function journalCompletedRows(journal){ return journal.rows.filter(row => row.status === 'completed'); }
     function journalFailedRows(journal){ return journal.rows.filter(row => row.status === 'failed'); }
+    function journalCancelledRows(journal){ return journal.rows.filter(row => row.status === 'cancelled'); }
 
     // 素材有效性：把缺文件/失效的行挑出来，别发出去再失败
     function batchMissingMaterials(rows){
@@ -522,12 +523,14 @@
         if(!list.length) return [];
         const limit = Math.min(Math.max(1, Number(concurrency) || 1), list.length);
         const stopOnError = Boolean(options.stopOnError);
+        const shouldStop = typeof options.shouldStop === 'function' ? options.shouldStop : null;
         const results = new Array(list.length);
         let cursor = 0;
         let failed = false;
         const run = async () => {
             while(true){
                 if(stopOnError && failed) return;
+                if(shouldStop && shouldStop()) return;
                 const index = cursor;
                 cursor += 1;
                 if(index >= list.length) return;
@@ -540,6 +543,11 @@
             }
         };
         await Promise.all(Array.from({length:limit}, run));
+        /* 停止时没轮到派发的行：显式标成「取消」，调用方据此区分 failed。
+           不留下空洞，否则会跟「没跑」和「失败」混在一起。 */
+        for(let index = 0; index < results.length; index += 1){
+            if(results[index] === undefined) results[index] = {ok:false, cancelled:true};
+        }
         return results;
     }
 
@@ -796,7 +804,7 @@
        行序来自 runTableBatch 本轮真正派发的行号（runContext.batchRowNumbers），
        每一行的状态只由它自己真正的开跑 / 完成 / 失败来改，不再按并发数猜。
        纯函数，方便直接测。 */
-    const BATCH_ROW_STATES = ['queued', 'running', 'completed', 'failed'];
+    const BATCH_ROW_STATES = ['queued', 'running', 'completed', 'failed', 'cancelled'];
 
     function batchRowPlan(rowNumbers){
         const order = (Array.isArray(rowNumbers) ? rowNumbers : [])
@@ -819,7 +827,7 @@
     function batchRowStateSummary(order, states){
         const list = Array.isArray(order) ? order : [];
         const map = states && typeof states === 'object' ? states : {};
-        const summary = {total:list.length, queued:0, running:0, completed:0, failed:0};
+        const summary = {total:list.length, queued:0, running:0, completed:0, failed:0, cancelled:0};
         list.forEach(rowNumber => {
             const state = BATCH_ROW_STATES.includes(map[rowNumber]) ? map[rowNumber] : 'queued';
             summary[state] += 1;
@@ -829,6 +837,9 @@
 
     function batchRowStatusText(summary){
         if(!summary || !summary.total) return '';
+        /* 停止过：报「完成 / 已取消」，取消不算失败。 */
+        if(summary.cancelled) return '已停止：完成 ' + summary.completed + ' · 已取消 ' + summary.cancelled
+            + (summary.running ? '（在跑 ' + summary.running + '）' : '');
         return '已完成 ' + summary.completed + ' · 失败 ' + summary.failed
             + ' · 共 ' + summary.total
             + (summary.running ? '（在跑 ' + summary.running + '）' : '');
@@ -848,7 +859,7 @@
         batchFailurePolicy, batchStartRow, batchConcurrency, batchRowsToRun, batchSlotKinds,
         BATCH_ROW_STATES, batchRowPlan, batchRowStateSet, batchRowStateSummary, batchRowStatusText,
         emptyJournal, normalizeJournal, matchBatchJournal, journalMarkRow,
-        journalPendingRows, journalInflightRows, journalCompletedRows, journalFailedRows,
+        journalPendingRows, journalInflightRows, journalCompletedRows, journalFailedRows, journalCancelledRows,
         batchMissingMaterials, runWithSharedCursor,
         TABLE_PARSE_ERRORS, TABLE_REPAIR_INSTRUCTION, LLM_REPAIR_MAX_TOKENS,
         extractJsonObject, parseTableOutput, buildRepairPrompt, inputListText,

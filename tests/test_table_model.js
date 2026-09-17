@@ -227,19 +227,32 @@ eq(M.batchSlotKinds(4, undefined), {running:1, queued:3}, '未设并发按 1 处
   eq(plan.states, {3:'queued', 1:'queued', 2:'queued'}, '初始全部 queued');
   const states = plan.states;
   M.batchRowStateSet(states, 3, 'running');
-  eq(M.batchRowStateSummary(plan.order, states), {total:3, queued:2, running:1, completed:0, failed:0}, '第 1 行开跑：只有它 running');
+  eq(M.batchRowStateSummary(plan.order, states), {total:3, queued:2, running:1, completed:0, failed:0, cancelled:0}, '第 1 行开跑：只有它 running');
   M.batchRowStateSet(states, 3, 'completed');
   M.batchRowStateSet(states, 1, 'running');
-  eq(M.batchRowStateSummary(plan.order, states), {total:3, queued:1, running:1, completed:1, failed:0}, '第 1 行完成、第 2 行才 running');
+  eq(M.batchRowStateSummary(plan.order, states), {total:3, queued:1, running:1, completed:1, failed:0, cancelled:0}, '第 1 行完成、第 2 行才 running');
   eq(M.batchRowStatusText(M.batchRowStateSummary(plan.order, states)), '已完成 1 · 失败 0 · 共 3（在跑 1）', '在跑时数字带在跑数');
   M.batchRowStateSet(states, 1, 'failed');
-  eq(M.batchRowStateSummary(plan.order, states), {total:3, queued:1, running:0, completed:1, failed:1}, '失败行记 failed');
+  eq(M.batchRowStateSummary(plan.order, states), {total:3, queued:1, running:0, completed:1, failed:1, cancelled:0}, '失败行记 failed');
   eq(M.batchRowStatusText(M.batchRowStateSummary(plan.order, states)), '已完成 1 · 失败 1 · 共 3', '数字文案与状态一致');
   M.batchRowStateSet(states, 99, 'completed');
   eq(M.batchRowStateSummary(plan.order, states).total, 3, '不在本批的行号不参与统计');
   eq(M.batchRowPlan(null), {order:[], states:{}}, '空输入安全');
-  eq(M.batchRowStateSummary(null, null), {total:0, queued:0, running:0, completed:0, failed:0}, '空状态安全');
+  eq(M.batchRowStateSummary(null, null), {total:0, queued:0, running:0, completed:0, failed:0, cancelled:0}, '空状态安全');
   eq(M.batchRowStatusText(null), '', '没有行时不出文案');
+}
+
+// 停止：cancelled 参与统计、不算失败；文案切换成「已停止」
+{
+  const plan = M.batchRowPlan([1,2,3,4]);
+  M.batchRowStateSet(plan.states, 1, 'completed');
+  M.batchRowStateSet(plan.states, 2, 'cancelled');
+  M.batchRowStateSet(plan.states, 3, 'cancelled');
+  const s = M.batchRowStateSummary(plan.order, plan.states);
+  eq(s, {total:4, queued:1, running:0, completed:1, failed:0, cancelled:2}, 'cancelled 参与统计、不计入 failed');
+  eq(M.batchRowStatusText(s), '已停止：完成 1 · 已取消 2', '停止文案');
+  eq(M.BATCH_ROW_STATES.includes('cancelled'), true, 'cancelled 是合法逐行状态');
+  eq(M.batchRowStatusText(M.batchRowStateSummary(M.batchRowPlan([1]).order, {1:'cancelled'})), '已停止：完成 0 · 已取消 1', '全取消也报停止');
 }
 
 {
@@ -583,8 +596,22 @@ eq(M.batchConcurrency(99, 1), 8, '带 fallback 时仍然夹到 8');
       return n;
     }, {stopOnError: true});
     eq(started, 2, 'stop 策略：出错后不再派发新行');
-    eq(results[2], undefined, '未派发的行没有结果');
+    eq(results[2].cancelled, true, '未派发的行标 cancelled，不是空洞');
     eq(results[0].ok, true, '已完成的行结果保留');
+  }
+  {
+    // shouldStop：用户点停止 → 不再派发新行，未派发的行算「取消」而不是「失败」
+    let flag = false;
+    const seen = [];
+    const results = await M.runWithSharedCursor([1,2,3,4], 1, async n => {
+      seen.push(n);
+      if(n === 2) flag = true;
+      return n;
+    }, {shouldStop: () => flag});
+    eq(seen, [1,2], '停止后不再派发新行');
+    eq(results.map(r => Boolean(r && r.ok)), [true,true,false,false], '已跑的有结果，其余是取消');
+    eq(results.slice(2).every(r => r && r.cancelled === true && r.ok === false), true, '未派发的行标 cancelled');
+    eq(results.filter(r => r && r.error).length, 0, '取消不等于失败（没有 error）');
   }
   eq(await M.runWithSharedCursor([], 3, async () => 1), [], '空列表直接返回');
 

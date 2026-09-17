@@ -558,6 +558,13 @@ body.svc-fullscreen-active { overflow:hidden; }
     border:1px dashed var(--border-2, rgba(127,127,127,.45));
     opacity:.45;
 }
+/* 用户点了停止、这一行没跑成：和「排队」「失败」都要一眼分开 */
+.loading-cell.pending-thumb.is-cancelled {
+    animation:none;
+    background:repeating-linear-gradient(45deg, rgba(127,127,127,.18) 0 5px, transparent 5px 10px);
+    border:1px dashed var(--border-2, rgba(127,127,127,.55));
+    opacity:.8;
+}
 @keyframes shimmer { 0% { background-position:200% 0; } 100% { background-position:-200% 0; } }
 .jimeng-pending-cell { position:relative; display:flex; align-items:center; justify-content:center; }
 .jimeng-pending-overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:14px; box-sizing:border-box; text-align:center; }
@@ -881,6 +888,8 @@ body.svc-fullscreen-active { overflow:hidden; }
 .run-btn span { white-space:nowrap; }
 .run-btn i,.run-btn svg { width:var(--ctrl-icon) !important; height:var(--ctrl-icon) !important; stroke-width:2; flex:0 0 auto; }
 .run-btn:disabled { opacity:.55; cursor:wait; }
+/* 有生成在跑时底部「运行」变「停止」：红色危险态，和级联/循环的停止按钮同一套 */
+.run-btn.is-stop { background:var(--danger); color:var(--text-on-accent); }
 .cascade-run-btn { width:76px; background:var(--card); color:var(--text); border:1px solid var(--line); }
 .cascade-run-btn:hover:not(:disabled) { border-color:var(--text); }
 .param-row { grid-area:params; min-width:0; margin-top:0; display:flex; align-items:center; gap:var(--ctrl-gap); overflow:visible; flex-wrap:wrap; row-gap:4px; }
