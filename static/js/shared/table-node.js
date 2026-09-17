@@ -809,6 +809,16 @@ function tableRowInputs(node, options={}){
         ordinalBase.push(running);
         running += (channel.items || []).length;
     });
+    /* @图片N 是整张表的全局序号：先按全局序号解析一份素材，别行引用的才兑现得了，
+       否则本行只拿到切片里的那一张，别的行的素材全被误判成悬空。 */
+    const globalInputs = new Map();
+    channels.forEach((channel, channelIndex) => {
+        (channel.items || []).forEach((item, position) => {
+            const entry = tableInputEntryAt(node, {items:[item]}, 0, nodeById);
+            if(!entry || entry.kind === 'text') return;
+            globalInputs.set(ordinalBase[channelIndex] + position + 1, entry);
+        });
+    });
 
     return state.rows.map((row, rowIndex) => {
         const channelItems = channels.map((channel, channelIndex) => {
@@ -860,10 +870,30 @@ function tableRowInputs(node, options={}){
             .filter(value => value.trim()).join('\n'));
         const rawPrompt = model.buildRowPrompt(upstreamTexts, node.tablePrompt || '', rowText);
         const rewritten = model.rewriteMentions(rawPrompt, ordinalMap);
+        /* 显式引用了全局序号就必须兑现：本行切片没切到的素材按全局序号补进来，
+           再重写一次，token 才会落到本行内的序号。 */
+        rewritten.dangling.forEach(mention => {
+            if(mention.reason !== 'missing' || ordinalMap.has(mention.ordinal)) return;
+            const entry = globalInputs.get(mention.ordinal);
+            if(!entry || model.mentionLabel(entry.kind) !== mention.label) return;
+            const existing = media.findIndex(item => tableItemKey(item) === tableItemKey(entry));
+            const position = existing >= 0 ? existing + 1 : media.length + 1;
+            if(existing < 0) media.push(entry);
+            ordinalMap.set(mention.ordinal, {position, kind: entry.kind});
+            references.push({kind: entry.kind, nodeId: entry.nodeId, ordinal: mention.ordinal});
+        });
+        const resolved = model.rewriteMentions(rawPrompt, ordinalMap);
+        /* 全局存在但类型对不上的引用，仍按「类型不符」报，不能降级成「不存在」。 */
+        const dangling = resolved.dangling.map(mention => {
+            const entry = globalInputs.get(mention.ordinal);
+            return entry && model.mentionLabel(entry.kind) !== mention.label
+                ? {...mention, reason: 'kind'}
+                : mention;
+        });
         /* 这一行真正会发出去的素材清单：模型写的提示词常常只 @ 了其中一张
            （「全部」的组一行带整组，提示词里却只出现一张）→ 用户以为「只读取了一张」。
            末尾补一行显式清单，提示词、批量面板、结果节点上都能看到整组。 */
-        const prompt = withRowReferenceList(model, rewritten.text, media);
+        const prompt = withRowReferenceList(model, resolved.text, media);
         return {
             rowNumber: rowIndex + 1,
             channelItems,
@@ -874,7 +904,7 @@ function tableRowInputs(node, options={}){
             prompt,
             rawPrompt,
             // 该行引用了它拿不到的素材：批量执行前必须拦下来，不能静默发出去
-            danglingMentions: rewritten.dangling
+            danglingMentions: dangling
         };
     });
 }
