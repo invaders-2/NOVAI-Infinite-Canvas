@@ -122,7 +122,8 @@ jobs:
 
       # 国内用户拉不动 GitHub Releases：把更新产物同步到国内镜像。
       # - ModelScope（bllack/NOVAI-releases 模型仓库）：客户端自动更新的国内源，
-      #   Electron 端 GitHub 检查失败时自动切换到这个 generic 更新地址。
+      #   Electron 端 GitHub 检查失败时自动切换到这个 generic 更新地址：
+      #   https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/electron-release
       # - Gitee（invaders/novai Release 附件）：人工下载镜像（网页下载有验证码，
       #   不适合做自动更新源，只兜底手动安装）。
       # 需要在仓库 Settings → Secrets 配置：MODELSCOPE_TOKEN、GITEE_TOKEN（可选）。

@@ -392,10 +392,10 @@ function setupAutoUpdate() {
   autoUpdater.autoDownload = false;
   // 测试版（版本号含 -，如 1.0.112-beta.1）允许接收 prerelease 更新；正式版只看正式 Release。
   autoUpdater.allowPrerelease = app.getVersion().includes('-');
-  // 国内用户访问 GitHub Releases 常被阻断：检查失败时自动切换到
-  // ModelScope 国内镜像（generic provider，构建流水线会把安装包同步到
-  // studio/bllack/NOVAI 的 electron-release/ 目录）。
-  const MIRROR_UPDATE_URL = 'https://modelscope.cn/studios/bllack/NOVAI/resolve/master/electron-release';
+  // 国内用户访问 GitHub Releases 常被阻断：检查失败时自动切换到该
+  // generic 更新地址，产物由 CI 同步到 bllack/NOVAI-releases 模型仓库的
+  // electron-release/ 目录。
+  const MIRROR_UPDATE_URL = 'https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/electron-release';
   let switchedToMirror = false;
   autoUpdater.on('update-available', (info) => {
     const current = app.getVersion();
@@ -414,6 +414,19 @@ function setupAutoUpdate() {
     }).catch(() => {});
   });
   autoUpdater.on('update-downloaded', () => {
+    if (process.platform === 'darwin') {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: '更新已就绪',
+        message: '新版本已下载完成，但 macOS 未签名构建不支持自动安装，请手动下载安装包覆盖安装（数据不会丢失）。',
+        buttons: ['打开发布页', '稍后'],
+        defaultId: 0,
+        cancelId: 1,
+      }).then(({ response }) => {
+        if (response === 0) shell.openExternal('https://gitee.com/invaders/novai/releases');
+      }).catch(() => {});
+      return;
+    }
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: '更新已就绪',

@@ -3,12 +3,12 @@
 #
 # 两个目标：
 #   1) Gitee invaders/novai Release 附件 —— 人工下载镜像（先跑，快且稳）
-#   2) ModelScope 工作室仓库 bllack/NOVAI —— 客户端自动更新的国内源
+#   2) ModelScope 模型仓库 bllack/NOVAI-releases —— 客户端自动更新的国内源
 #      （Electron 端 GitHub 检查失败时自动切换到该 generic 更新地址：
-#        https://modelscope.cn/studios/bllack/NOVAI/resolve/master/electron-release）
-#      注：ModelScope 创空间（studios）的 git 地址必须是
-#      https://oauth2:<token>@www.modelscope.cn/studios/<owner>/<repo>.git
-#      （早先误写成 studio/... 且少了 www，导致 clone/push 全部 repository not found）。
+#        https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/electron-release）
+#      注：ModelScope 模型仓库（models）的 git 地址必须是
+#      https://oauth2:<token>@www.modelscope.cn/models/<owner>/<repo>.git
+#      （早先误用创空间路径 studios/... 且少了 www，导致 clone/push 全部 repository not found）。
 #
 # 所需环境变量：
 #   GITEE_TOKEN       Gitee 私人令牌（缺失则跳过 Gitee 同步）
@@ -30,7 +30,7 @@ set -u
 cd "${GITHUB_WORKSPACE:-$(pwd)}"
 
 RELEASE_DIR="desktop/release"
-MS_REPO="studios/bllack/NOVAI"
+MS_REPO="models/bllack/NOVAI-releases"
 MS_BRANCH="master"
 GITEE_OWNER="invaders"
 GITEE_REPO="novai"
@@ -140,7 +140,30 @@ sync_modelscope() {
       [ -n "$f" ] && cp -f "${GITHUB_WORKSPACE}/$f" electron-release/ 2>/dev/null
     done
 
-    git add .gitattributes electron-release/ 2>/dev/null
+    # 一键更新允许的源码（清单与 main.py 的 update_allowed_file 完全一致），推到仓库根目录
+    if [ ! -f "${GITHUB_WORKSPACE}/main.py" ] || [ ! -f "${GITHUB_WORKSPACE}/VERSION" ]; then
+      echo "::warning::缺少 main.py 或 VERSION，跳过源码同步（electron-release 仍会推送）"
+    else
+      local src
+      for f in main.py VERSION 安装即梦CLI.bat 安装即梦CLI.command 登录即梦CLI.bat 登录即梦CLI.command launcher.py novai-desktop.py app.py build.py build-all.py build-desktop.py build-mac.py installer.py; do
+        if [ -f "${GITHUB_WORKSPACE}/$f" ]; then
+          cp -f "${GITHUB_WORKSPACE}/$f" ./ 2>/dev/null || echo "::warning::源码文件 $f 复制失败，跳过"
+        else
+          echo "::warning::源码文件 $f 缺失，跳过"
+        fi
+      done
+      for src in static server tools assets/models; do
+        if [ -d "${GITHUB_WORKSPACE}/$src" ]; then
+          mkdir -p "./$src" 2>/dev/null || true
+          cp -R "${GITHUB_WORKSPACE}/$src/." "./$src/" 2>/dev/null || echo "::warning::源码目录 $src 复制失败，跳过"
+        else
+          echo "::warning::源码目录 $src 缺失，跳过"
+        fi
+      done
+      echo "== ModelScope: 允许更新的源码已同步到仓库根目录 =="
+    fi
+
+    git add -A 2>/dev/null
     if git diff --cached --quiet; then
       echo "== ModelScope: 无变更 =="
       return 0
