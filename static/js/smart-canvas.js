@@ -960,11 +960,13 @@ function canvasForStorage(){
         delete node._batchProgress;
         delete node._batchRunCount;
         delete node._batchRunRows;
+        delete node._batchRunConcurrency;
         delete node.tableBatchRunning;
         /* 结果节点的「这一批还剩几格」也是页面内的临时状态 */
         delete node.batchRunExpected;
         delete node.batchRunLanded;
         delete node.batchRunFailed;
+        delete node.batchRunConcurrency;
         delete node.__renderHtml;   // 渲染缓存：只在页面内用，别写进画布
         delete node.__renderKey;
     });
@@ -9671,11 +9673,15 @@ function nodeBodyHtml(node, layout){
         return `<div class="loading-cell single queued" style="width:${layout.width}px;height:${layout.height}px"></div>`;
     }
     if(node.pending && imgs.length === 0){
-        const count = Math.max(1, Number(node.pending) || 1);
-        if(count <= 1) return `<div class="loading-cell single" style="width:${layout.width}px;height:${layout.height}px"></div>`;
+        const pendingTotal = Math.max(1, Number(node.pending) || 1);
+        if(pendingTotal <= 1) return `<div class="loading-cell single" style="width:${layout.width}px;height:${layout.height}px"></div>`;
+        const count = Math.max(pendingTotal, pendingSlotsForNode(node));
+        const kinds = batchPendingSlotKinds(node, count);
         const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(count))));
         const rows = Math.ceil(count / cols);
-        return `<div class="loading-skeleton" style="grid-template-columns:repeat(${cols}, 1fr);grid-template-rows:repeat(${rows}, 1fr);width:${layout.width}px;height:${layout.height}px;padding:8px;box-sizing:border-box">${Array.from({length:count}).map(() => `<div class="loading-cell"></div>`).join('')}</div>`;
+        const cells = Array.from({length:kinds.running}).map(() => `<div class="loading-cell"></div>`).join('')
+            + Array.from({length:kinds.queued}).map(() => `<div class="loading-cell is-queued" title="排队中"></div>`).join('');
+        return `<div class="loading-skeleton" style="grid-template-columns:repeat(${cols}, 1fr);grid-template-rows:repeat(${rows}, 1fr);width:${layout.width}px;height:${layout.height}px;padding:8px;box-sizing:border-box">${cells}</div>`;
     }
     const pendingSlots = pendingSlotsForNode(node);
     const failedSlots = failedSlotsForNode(node);
@@ -9696,7 +9702,9 @@ function thumbGridHtml(node, imgs, layout, pendingSlots = 0, failedSlots = 0){
     const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
     const thumb = Number(layout.thumb || 96);
     const thumbs = imgs.map((img, i) => `<div class="thumb-item has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === i ? 'image-selected' : ''}" data-image-index="${i}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${i}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`).join('');
-    const slots = Array.from({length:Math.max(0, pendingSlots)}).map(() => `<div class="loading-cell pending-thumb" data-pending-slot="1" title="${escapeHtml(tr('smart.hintPending'))}" style="width:${thumb}px;height:${thumb}px"></div>`).join('')
+    const kinds = batchPendingSlotKinds(node, pendingSlots);
+    const slots = Array.from({length:kinds.running}).map(() => `<div class="loading-cell pending-thumb" data-pending-slot="1" title="${escapeHtml(tr('smart.hintPending'))}" style="width:${thumb}px;height:${thumb}px"></div>`).join('')
+        + Array.from({length:kinds.queued}).map(() => `<div class="loading-cell pending-thumb is-queued" data-pending-queued="1" title="排队中" style="width:${thumb}px;height:${thumb}px"></div>`).join('')
         + Array.from({length:Math.max(0, failedSlots)}).map(() => `<div class="loading-cell pending-thumb is-failed" data-pending-failed="1" title="这一行生成失败" style="width:${thumb}px;height:${thumb}px"></div>`).join('');
     return `<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${layout.cols}; --thumb-size:${thumb}px; --thumb-max-height:${maxHeight}px">${thumbs}${slots}</div>`;
 }
@@ -21601,6 +21609,8 @@ function batchResultNodeForRun(runId, sourceNode, meta, refs, ratio){
         output.batchRunExpected = Math.max(1, Number(sourceNode && sourceNode._batchRunRows) || totalRows);
         output.batchRunLanded = 0;
         output.batchRunFailed = 0;
+        /* 生效并发：进度占位格按它把「在跑」和「排队」分开。串行就是 1。 */
+        output.batchRunConcurrency = Math.max(1, Number(sourceNode && sourceNode._batchRunConcurrency) || 1);
         output.runStartedAt = nowMs();
         output.runTimerHidden = false;
         output.images = [];
@@ -21636,6 +21646,17 @@ function failedSlotsForNode(node){
     const missing = Math.max(0, expected - landed - failed);
     const pending = Math.max(0, Number(node && node.pending) || 0);
     return failed + Math.max(0, missing - pending);
+}
+/* 占位格里哪几格在跑、哪几格还在排队：正在跑的格数 = 生效并发（串行时最多 1 格转）。
+   没有 batchRunConcurrency（普通单节点生成）时不切分，保持原来的整体 loading。 */
+function batchPendingSlotKinds(node, slots){
+    const total = Math.max(0, Number(slots) || 0);
+    const model = window.NovaTableModel;
+    const raw = Number(node && node.batchRunConcurrency);
+    if(!Number.isFinite(raw) || raw <= 0 || !model || typeof model.batchSlotKinds !== 'function'){
+        return {running: total, queued: 0};
+    }
+    return model.batchSlotKinds(total, raw);
 }
 
 function appendBatchResultImages(outputNode, additions, meta, kind){

@@ -111,7 +111,7 @@ const api = new Function(
     ' tableBatchRunButtonHtml, tableBatchSingleLabel, tableBatchSingleButtonHtml, tableDrivenHidden, paintTableBatchPanel,' +
     ' normalizeTableNodeHeight, tableNaturalSize,' +
     ' setTableCellMedia, tableManualInputItem, setTableManualInputItem, addTableManualInputItem, replaceTableManualInputItem, renderTableCellText, normalizeContentHeightNode,' +
-    ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch,' +
+    ' tableBatchConcurrencyFor, tableBatchRunner, runTableBatch, tableRowInputsStats, resetTableRowInputsStats,' +
     ' generatorNeedsPromptMessage, friendlyBatchError,' +
     ' llmOutputModeButtonsHtml, LLM_OUTPUT_MODE_BUTTONS, TABLE_DELETE_COLUMN_WIDTH};'
 )(
@@ -1118,6 +1118,48 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     api.setTableManualInputItem(blank, 'input-1', 0, {url:'/api/asset/9f2', mediaType:'video', name:'clip'});
     api.renderTableBody(blank);
     eq(api.tableRowInputs(blank)[0].media[0].kind, 'video', '无后缀地址按上传时的类型判');
+}
+
+// ═══ O. tableRowInputs 缓存：内容不变时 render 不重算 ═══
+{
+    const cacheTbl = api.addTableNode();
+    const cacheSrc = {id:'cacheImg', type:'image', url:'/cache/1.png'};
+    nodes.push(cacheSrc);
+    connections.push({id:'c_cache', from:'cacheImg', to:cacheTbl.id});
+    api.addTableColumn(cacheTbl);
+    api.addTableRow(cacheTbl);
+    api.addTableRow(cacheTbl);
+
+    api.resetTableRowInputsStats();
+    const first = api.tableRowInputs(cacheTbl);
+    const second = api.tableRowInputs(cacheTbl);
+    ok(first === second, '内容不变 → 两次拿到同一份 rows（引用相同）');
+    eq(api.tableRowInputsStats().computes, 1, '内容不变只重算一次');
+    eq(api.tableRowInputsStats().hits, 1, '第二次命中缓存');
+    eq(first.map(r => r.prompt), second.map(r => r.prompt), '缓存命中时提示词与首次一致');
+
+    cacheTbl.table.rows[0][0] = '改了单元格';
+    const third = api.tableRowInputs(cacheTbl);
+    ok(third !== first, '单元格变了 → 重新算，不吃陈旧缓存');
+    eq(api.tableRowInputsStats().computes, 2, '单元格变化触发一次重算');
+
+    cacheSrc.url = '/cache/2.png';
+    const fourth = api.tableRowInputs(cacheTbl);
+    ok(fourth !== third, '来源素材 url 变了 → 重新算');
+
+    cacheTbl.tableInputChannelModes = {'input-1': 'all'};
+    const fifth = api.tableRowInputs(cacheTbl);
+    ok(fifth !== fourth, '通道模式变了 → 重新算');
+
+    cacheTbl.tablePrompt = '新提示词';
+    const sixth = api.tableRowInputs(cacheTbl);
+    ok(sixth !== fifth, 'tablePrompt 变了 → 重新算');
+
+    // 入边变化也要失效
+    nodes.push({id:'cacheImg2', type:'image', url:'/cache/3.png'});
+    connections.push({id:'c_cache2', from:'cacheImg2', to:cacheTbl.id});
+    const seventh = api.tableRowInputs(cacheTbl);
+    ok(seventh !== sixth, '入边变了 → 重新算');
 }
 
     console.log('通过 ' + pass + '/' + (pass + fails.length));

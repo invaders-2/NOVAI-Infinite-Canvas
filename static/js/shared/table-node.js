@@ -671,8 +671,9 @@ function setTableCellMedia(node, row, column, value){
    形状一致 → 一起按输出节点展开。 */
 const TABLE_OUTPUT_LIKE_TYPES = ['output', 'smart-image'];
 
-function tableSourceItems(source){
+function tableSourceItems(source, byId){
     if(!source) return [];
+    const lookup = byId ? (id => byId.get(id)) : (id => (nodes || []).find(item => item.id === id));
     /* 分组：经典画布是 group，智能画布是 smart-group（items 字段一样）。
        成员也必须用同一张类型表展开 —— 智能画布「上传的图先归成一个分组、再把分组接到 LLM 节点」
        是常见用法，之前只认 type === 'group'，且成员只认 output / 顶层 url，
@@ -680,7 +681,7 @@ function tableSourceItems(source){
     if(source.type === 'group' || source.type === 'smart-group'){
         // 组里也可能放进一个输出/素材节点：同样要展开成它产出的每一张
         const fromMembers = (source.items || [])
-            .map(id => (nodes || []).find(item => item.id === id))
+            .map(lookup)
             .filter(Boolean)
             .flatMap(item => TABLE_OUTPUT_LIKE_TYPES.includes(item.type)
                 ? outputSourceItems(item)
@@ -696,13 +697,14 @@ function tableSourceItems(source){
     return [];
 }
 
-function tableSourceIsMedia(source){ return tableSourceItems(source).length > 0; }
+function tableSourceIsMedia(source, byId){ return tableSourceItems(source, byId).length > 0; }
 
 // 上游连来的纯文本（DX OS: Ip(t)）
-function tableUpstreamTexts(node){
+function tableUpstreamTexts(node, byId){
+    const lookup = byId || new Map((nodes || []).map(item => [item.id, item]));
     return tableIncomingConnections(node)
-        .map(conn => (nodes || []).find(item => item.id === conn.from))
-        .filter(source => source && !tableSourceIsMedia(source) && typeof source.text === 'string')
+        .map(conn => lookup.get(conn.from))
+        .filter(source => source && !tableSourceIsMedia(source, lookup) && typeof source.text === 'string')
         .map(source => source.text.trim())
         .filter(Boolean);
 }
@@ -738,13 +740,14 @@ function tableInputEntryAt(node, channel, row, nodeById){
 
 /* Co(t)：通道从入边推导（连线用 toPort 定位通道，没有 toPort 的落到第一通道）。
    tableInputChannelCount 让用户手动多开几列当放置目标。 */
-function ensureTableChannels(node){
+function ensureTableChannels(node, byId){
     const model = novaTableModel();
     if(!model) return [];
+    const lookup = byId || new Map((nodes || []).map(item => [item.id, item]));
     const buckets = new Map();
     tableIncomingConnections(node).forEach(conn => {
-        const source = (nodes || []).find(item => item.id === conn.from);
-        const entries = tableSourceItems(source);
+        const source = lookup.get(conn.from);
+        const entries = tableSourceItems(source, lookup);
         if(!entries.length) return;   // 文本节点不进输入列
         const index = model.channelIndexFromId(conn.toPort);
         const key = index >= 0 ? index : 0;
@@ -795,13 +798,74 @@ function withRowReferenceList(model, text, media){
     return String(text || '').trim() ? String(text).trim() + '\n' + line : line;
 }
 
+/* tableRowInputs 的按节点缓存：render() 每帧都会重算批量面板/表格的签名，而
+   tableRowInputs 要逐行解析素材 + 重写 @图片N + 拼提示词（O(行×通道×素材)）。
+   内容没变时这份重活不该再做一遍，所以用一份便宜且完整的签名做 key 命中即返回。
+   key 覆盖入边 / 通道条目与模式 / 手动上传 / 单元格文本 / tablePrompt / 上游文本；
+   nodeById 入参按引用比对，外部传入的映射不会串味。 */
+const rowInputsCache = new WeakMap();
+let rowInputsComputeCount = 0;
+let rowInputsHitCount = 0;
+
+function rowsFingerprint(rows){
+    return (rows || []).map(row => row.rowNumber + ':' + String(row.prompt || '') + ':'
+        + (row.media || []).map(item => item.url).join(';')).join('|');
+}
+
+function tableRowInputsKey(node, state, channels, upstreamTexts, byId, explicitById){
+    const incoming = tableIncomingConnections(node)
+        .map(conn => String(conn.from || '') + '>' + String(conn.toPort || ''))
+        .sort().join(',');
+    const channelKey = (channels || []).map(channel => {
+        const items = (channel.items || []).map(item => {
+            const source = item.nodeId ? byId.get(item.nodeId) : null;
+            return tableItemKey(item) + ':' + String(item.url || (source && source.url) || '')
+                + ':' + String((source && source.text) || '');
+        }).join('+');
+        return channel.id + '=' + channel.mode + '[' + items + ']';
+    }).join('|');
+    return [
+        incoming,
+        (channels || []).length,
+        channelKey,
+        JSON.stringify(node.tableManualInputItems || {}),
+        String(node.tablePrompt || ''),
+        (upstreamTexts || []).join('\u0001'),
+        JSON.stringify(state.columns || []),
+        JSON.stringify(state.rows || []),
+        explicitById ? 'byId' : ''
+    ].join('~');
+}
+
 function tableRowInputs(node, options={}){
     const model = novaTableModel();
     const state = ensureTableState(node);
     if(!model || !state) return [];
-    const nodeById = options.nodeById || new Map((nodes || []).map(item => [item.id, item]));
-    const channels = ensureTableChannels(node);
-    const upstreamTexts = tableUpstreamTexts(node);
+    const explicitById = options.nodeById || null;
+    const byId = explicitById || new Map((nodes || []).map(item => [item.id, item]));
+    const channels = ensureTableChannels(node, byId);
+    const upstreamTexts = tableUpstreamTexts(node, byId);
+    const key = tableRowInputsKey(node, state, channels, upstreamTexts, byId, explicitById);
+    const cached = rowInputsCache.get(node);
+    if(cached && cached.key === key && cached.byId === explicitById){
+        rowInputsHitCount += 1;
+        return cached.rows;
+    }
+    rowInputsComputeCount += 1;
+    const rows = computeTableRowInputs(node, state, model, channels, upstreamTexts, byId);
+    rowInputsCache.set(node, {key, rows, byId: explicitById, fingerprint: rowsFingerprint(rows)});
+    return rows;
+}
+
+/* 缓存命中统计：测试用来证明「内容不变时不重算」。 */
+function tableRowInputsStats(){ return {computes: rowInputsComputeCount, hits: rowInputsHitCount}; }
+function resetTableRowInputsStats(){ rowInputsComputeCount = 0; rowInputsHitCount = 0; }
+function tableRowInputsFingerprint(node){
+    const cached = rowInputsCache.get(node);
+    return cached ? cached.fingerprint : '';
+}
+
+function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId){
     // 每个通道的条目在全局输入清单里的起始序号
     const ordinalBase = [];
     let running = 0;
@@ -828,7 +892,7 @@ function tableRowInputs(node, options={}){
             return model
                 .inputItemsForRow(channel, rowIndex)
                 .map(item => {
-                    const entry = tableInputEntryAt(node, {items:[item]}, 0, nodeById);
+                    const entry = tableInputEntryAt(node, {items:[item]}, 0, byId);
                     if(!entry) return null;
                     // 输出节点连来的多张图 nodeId 相同，只能按 nodeId + url + outputIndex 认人
                     const position = (channel.items || []).findIndex(candidate =>
@@ -1151,8 +1215,8 @@ function renderTableBatchPanel(gen){
 /* 批量面板的重绘签名：内容没变就不重建 DOM。
    面板每行 5–6 个元素（还带缩略图），节点一多每次 render 都重建会明显卡
    （用户报的「画布出现 4 个以上多维表格就开始卡顿」）。 */
-function tableBatchPanelSignature(gen, table){
-    const rows = tableRowInputs(table);
+function tableBatchPanelSignature(gen, table, rows){
+    const resolvedRows = rows || tableRowInputs(table);
     const selection = tableBatchSelection(table);
     return [
         tableNodeSignature(table),
@@ -1166,7 +1230,7 @@ function tableBatchPanelSignature(gen, table){
         table.tableBatchSequential ? '1' : '0',
         selection.manual ? 'm' : '',
         selection.selectedRows.join(','),
-        rows.map(row => row.rowNumber + ':' + String(row.prompt || '') + ':' + (row.media || []).map(item => item.url).join(';')).join('|'),
+        tableRowInputsFingerprint(table) || rowsFingerprint(resolvedRows),
         JSON.stringify((table.generationBatchJournal || {}).rows || [])
     ].join('~');
 }
@@ -1176,10 +1240,10 @@ function paintTableBatchPanel(panel, gen){
     const tables = generatorUpstreamTables(gen.id);
     if(!model || !tables.length){ panel.textContent = ''; panel.dataset.batchSignature = ''; return; }
     const table = tables[0];
-    const signature = tableBatchPanelSignature(gen, table);
+    const rows = tableRowInputs(table);
+    const signature = tableBatchPanelSignature(gen, table, rows);
     if(panel.dataset.batchSignature === signature) return;
     panel.dataset.batchSignature = signature;
-    const rows = tableRowInputs(table);
     const selection = tableBatchSelection(table);
     const startRow = model.batchStartRow(table.tableBatchStartRow, rows.length);
     const concurrency = tableBatchConcurrencyFor(gen, table);
@@ -1533,6 +1597,8 @@ async function runTableBatch(genId, options={}){
     gen._batchRunCount = Math.max(0, Number(gen._batchRunCount) || 0) + 1;
     /* 这一批要跑几行：结果节点用它算「还剩几格」，进度框不会因为某一行失败/产出重复就提前收起来。 */
     gen._batchRunRows = pending.length;
+    /* 生效并发写到生成节点上：结果节点读它来决定几个占位格在转、几个在排队。 */
+    gen._batchRunConcurrency = concurrency;
     gen._batchRunning = true;
     table.tableBatchRunning = true;
     gen._batchProgress = {total:pending.length, done:0, failed:0};
@@ -2081,6 +2147,7 @@ function renderTableBody(node){
             generatorUpstreamTables, repaintBatchPanel,
             llmMediaGroups, llmOutputModeButtonsHtml, llmRunButtonLabel, materializeLlmTable,
             renderTableBody, runTableBatch,
+            tableRowInputs, tableRowInputsStats, resetTableRowInputsStats,
         };
     };
 })(typeof window !== 'undefined' ? window : globalThis);

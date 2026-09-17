@@ -783,6 +783,15 @@
         return false;
     }
 
+    /* 批量结果节点的占位格切分：只有正在跑的几格显示 loading，其余是「排队中」。
+       生效并发决定同时最多几格在转（串行 = 1）。纯函数，方便直接测。 */
+    function batchSlotKinds(pendingSlots, concurrency){
+        const slots = Math.max(0, Math.floor(Number(pendingSlots) || 0));
+        const limit = Math.max(1, Math.floor(Number(concurrency) || 1));
+        const running = Math.min(slots, limit);
+        return {running, queued: slots - running};
+    }
+
     return {
         TABLE_KIND, TABLE_VERSION,
         MAX_COLUMNS, MAX_ROWS, MAX_CELL_CHARS, LLM_MAX_COLUMNS, LLM_MAX_ROWS,
@@ -794,7 +803,7 @@
         normalizeChannels, inputItemAt, inputItemsForRow, rewriteMentions,
         rowHeightForRow, mentionLabel, mentionTokenAt, mentionsIn, danglingMentions, buildRowPrompt,
         BATCH_ROW_STATUS, DEFAULT_BATCH_CONCURRENCY, MAX_BATCH_CONCURRENCY,
-        batchFailurePolicy, batchStartRow, batchConcurrency, batchRowsToRun,
+        batchFailurePolicy, batchStartRow, batchConcurrency, batchRowsToRun, batchSlotKinds,
         emptyJournal, normalizeJournal, matchBatchJournal, journalMarkRow,
         journalPendingRows, journalInflightRows, journalCompletedRows, journalFailedRows,
         batchMissingMaterials, runWithSharedCursor,

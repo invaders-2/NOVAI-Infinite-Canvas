@@ -212,6 +212,14 @@ eq(M.batchConcurrency(undefined), 3, '并发未设 → 默认 3');
   eq(M.batchRowsToRun(null, {}), [], 'bl 非法输入 → 空');
 }
 
+// 批量结果占位格切分：串行只有 1 格在跑，其余排队；并发 3 最多 3 格在跑
+eq(M.batchSlotKinds(5, 1), {running:1, queued:4}, '串行：只有 1 格 loading，其余排队');
+eq(M.batchSlotKinds(5, 3), {running:3, queued:2}, '并发 3：最多 3 格 loading');
+eq(M.batchSlotKinds(2, 3), {running:2, queued:0}, '行数少于并发：全部在跑，无排队');
+eq(M.batchSlotKinds(0, 3), {running:0, queued:0}, '没有剩余行：不占位');
+eq(M.batchSlotKinds(4, 0), {running:1, queued:3}, '非法并发按 1 处理');
+eq(M.batchSlotKinds(4, undefined), {running:1, queued:3}, '未设并发按 1 处理');
+
 {
   const rows = [
     {rowNumber:1, text:'一行', media:[{nodeId:'img1'}]},

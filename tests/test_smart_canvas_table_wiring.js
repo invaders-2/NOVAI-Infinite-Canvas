@@ -208,6 +208,12 @@ ok(js.includes('live.batchRunFailed ='), '失败行累加「已失败」');
 ok(js.includes('item.batchRunExpected = 0'), '整批结束后清掉这些计数（不留幽灵格）');
 ok(canvasCss.includes('.pending-thumb.is-failed'), '失败占位的样式在');
 ok(!/const gridCount = count \+ Math\.max\(0, Number\(node\?\.pending\)/.test(js), '占位格不再只看 pending');
+ok(js.includes('function batchPendingSlotKinds('), '占位格按生效并发区分「在跑」和「排队」');
+ok(js.includes('output.batchRunConcurrency'), '结果节点记下这一批的生效并发');
+ok(js.includes('is-queued'), '排队格有独立标记');
+ok(moduleSrc.includes('gen._batchRunConcurrency = concurrency'), '开跑时把生效并发写回生成节点');
+ok(modelSrc.includes('function batchSlotKinds('), '占位切分是纯函数（可直接测）');
+ok(canvasCss.includes('.loading-cell.is-queued'), '排队格样式在');
 
 console.log('[16] 「依次生成」是模式开关：选中后点「运行」才按它跑');
 ok(moduleSrc.includes('table.tableBatchSequential'), '开关存在表格节点上（可持久化，「运行」也能读到）');
