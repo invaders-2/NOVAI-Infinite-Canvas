@@ -82,7 +82,7 @@ ok(/prompt = withRowReferenceList\(/.test(moduleSrc), 'tableRowInputs 的 prompt
 ok(modelSrc.includes("'inputGroups'") || modelSrc.includes('inputGroups'), '生成遍回执带 inputGroups（一次请求就能定每组用法）');
 ok(/table\.inputGroups = parsed\.inputGroups/.test(modelSrc), 'parseTableOutput 保留 inputGroups');
 ok(/Array\.isArray\(table\.inputGroups\)/.test(js) && js.includes('materializeLlmTable(llmNode, table, groups, plan)'), '物化表格时按回执设通道模式（多图组才会是「全部」）');
-ok(/每一行的提示词必须用 @图片N/.test(modelSrc), '生成遍要求 every-row 组的每一张都被 @ 出来');
+ok(/每一行都必须用 @图片N/.test(modelSrc) && modelSrc.includes('多角度参考'), '生成遍要求 every-row 组整组作为多角度参考逐张 @ 出来');
 // ② 一张表配一个批量生成节点，不再借用别人的
 ok(js.includes('linkedToTable'), 'connectSmartBatchAfter 只复用连在这张表后面的批量节点');
 ok(!/downstream\[0\] \|\| nodes\.find\(n => n\.type === 'smart-batch'\)/.test(js), '不再抓画布上任意一个批量节点');

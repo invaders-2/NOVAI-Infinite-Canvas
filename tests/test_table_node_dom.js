@@ -420,46 +420,29 @@ eq(rewritten.media.map(e => e.nodeId), ['img1', 'img4'], '第 0 行实际参考�
 ok(rewritten.prompt.indexOf('@图片2') > 0, '全局序号 @图片5 → 行内 @图片2：' + rewritten.prompt);
 ok(rewritten.prompt.indexOf('@图片5') < 0, '不再残留全局序号');
 eq(rewritten.danglingMentions, [], '没有悬空引用');
-/* @图片4 是 img5：全局序号存在、类型也对，只是本行逐行切片没切到它。
-   显式引用必须兑现 —— 补进本行参考图、重写成行内序号，不能误报悬空。 */
+// @图片4 是 img5，本行逐行模式不含它 —— 必须被报成悬空，不能静默发出去
 node.table.rows[0][0] = '把 @图片4 换掉';
-const resolvedRow = api.tableRowInputs(node)[0];
-eq(resolvedRow.media.map(e => e.nodeId), ['img1', 'img4', 'img5'], '引用别行的全局素材 → 补进本行参考图');
-eq(resolvedRow.danglingMentions, [], '全局存在的引用不算悬空');
-ok(resolvedRow.prompt.indexOf('@图片3') > 0, '全局序号 @图片4 → 行内 @图片3：' + resolvedRow.prompt);
-ok(resolvedRow.prompt.indexOf('@图片4') < 0, '不再残留全局序号');
-// 全局根本不存在的引用（此刻只有 5 张）仍然拦下来，绝不能静默发出去
-node.table.rows[0][0] = '把 @图片9 换掉';
-const missingRow = api.tableRowInputs(node)[0];
-eq(missingRow.danglingMentions.map(d => d.token), ['@图片9'], '全局不存在的引用 → 报悬空');
-eq(missingRow.danglingMentions[0].reason, 'missing', '悬空原因：全局不存在');
-// 全局序号存在但类型对不上，同样要拦，不能降级成「不存在」
-node.table.rows[0][0] = '把 @视频5 换掉';
-const kindRow = api.tableRowInputs(node)[0];
-eq(kindRow.danglingMentions.map(d => d.token), ['@视频5'], '类型对不上的引用 → 报悬空');
-eq(kindRow.danglingMentions[0].reason, 'kind', '悬空原因：类型不符');
-/* 用户案例：一个 3 张图的组 + 3 行，每行都写 @图片1、@图片2、@图片3。
-   每行只切到一张，但三个引用都是全局序号，必须全部兑现。 */
-{
-    nodes.push({id:'grp3', type:'group', items:['g1', 'g2', 'g3']});
-    nodes.push({id:'g1', type:'image', url:'/g1.png'});
-    nodes.push({id:'g2', type:'image', url:'/g2.png'});
-    nodes.push({id:'g3', type:'image', url:'/g3.png'});
-    const threeTable = api.addTableNode();
-    connections.push({id:'c_grp3', from:'grp3', to:threeTable.id});
-    api.addTableColumn(threeTable);
-    api.addTableRow(threeTable);
-    api.addTableRow(threeTable);
-    api.addTableRow(threeTable);
-    threeTable.table.rows.forEach(row => { row[0] = '@图片1、@图片2、@图片3'; });
-    const threeRows = api.tableRowInputs(threeTable);
-    eq(threeRows.length, 3, '复现：3 行');
-    threeRows.forEach((row, index) => {
-        eq(row.media.length, 3, '第 ' + (index + 1) + ' 行参考图 = 3 张');
-        eq(row.danglingMentions, [], '第 ' + (index + 1) + ' 行没有悬空引用');
-    });
-}
+const danglingRow = api.tableRowInputs(node)[0];
+eq(danglingRow.danglingMentions.map(d => d.token), ['@图片4'], '引用本行拿不到的素材 → 报悬空');
+eq(danglingRow.danglingMentions[0].reason, 'missing', '悬空原因');
 node.table.rows[0][0] = '一只狗';
+
+/* 逐行组 + 全部组混合：ch0 逐行 [img1,img2,img3]、ch1 全部 [imgA]。
+   第 1 行写 @图片1（本行主体）+ @图片4（全部组整组）→ 2 张参考、无悬空。 */
+{
+    const mixed = api.addTableNode();
+    nodes.push({id:'imgA', type:'image', url:'/A.png'});
+    ['img1','img2','img3'].forEach(id => connections.push({id:'c_mx_' + id, from:id, to:mixed.id}));
+    connections.push({id:'c_mx_A', from:'imgA', to:mixed.id, toPort:'input-2'});
+    mixed.tableInputChannelModes = {'input-1':'sequence', 'input-2':'all'};
+    api.addTableColumn(mixed);
+    api.addTableRow(mixed);
+    mixed.table.rows[0][0] = '@图片1、@图片4';
+    const mixedRow = api.tableRowInputs(mixed)[0];
+    eq(mixedRow.media.map(e => e.nodeId), ['img1', 'imgA'], '逐行第 1 行 + 全部组整组 → 2 张参考');
+    ok(mixedRow.prompt.indexOf('@图片1') >= 0 && mixedRow.prompt.indexOf('@图片2') >= 0, '全局序号重写成行内序号：' + mixedRow.prompt);
+    eq(mixedRow.danglingMentions, [], '逐行 + 全部混合能正常解析，无悬空');
+}
 
 // 跨节点同步：在表格里取消勾选，生成面板的候选行要跟着变（只重绘表格会显示过期勾选）
 api.toggleAllTableRows(node, true);
