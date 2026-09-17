@@ -6,8 +6,9 @@
 #   2) ModelScope 工作室仓库 bllack/NOVAI —— 客户端自动更新的国内源
 #      （Electron 端 GitHub 检查失败时自动切换到该 generic 更新地址：
 #        https://modelscope.cn/studios/bllack/NOVAI/resolve/master/electron-release）
-#      注：用户实际拥有的是 studio 仓（models 命名空间的 NOVAI-releases 并不存在），
-#      因此产物推到 studio/bllack/NOVAI 的 electron-release/ 子目录，URL 也用 studios/。
+#      注：ModelScope 创空间（studios）的 git 地址必须是
+#      https://oauth2:<token>@www.modelscope.cn/studios/<owner>/<repo>.git
+#      （早先误写成 studio/... 且少了 www，导致 clone/push 全部 repository not found）。
 #
 # 所需环境变量：
 #   GITEE_TOKEN       Gitee 私人令牌（缺失则跳过 Gitee 同步）
@@ -29,7 +30,7 @@ set -u
 cd "${GITHUB_WORKSPACE:-$(pwd)}"
 
 RELEASE_DIR="desktop/release"
-MS_REPO="studio/bllack/NOVAI"
+MS_REPO="studios/bllack/NOVAI"
 MS_BRANCH="master"
 GITEE_OWNER="invaders"
 GITEE_REPO="novai"
@@ -115,7 +116,7 @@ sync_modelscope() {
   local work=/tmp/novai-ms-releases
   rm -rf "$work"
 
-  local auth_url="https://oauth2:${MODELSCOPE_TOKEN}@modelscope.cn/${MS_REPO}.git"
+  local auth_url="https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/${MS_REPO}.git"
   if with_timeout 120 git clone --depth 1 "$auth_url" "$work" 2>/dev/null; then
     echo "== ModelScope: 克隆成功 =="
   else
@@ -164,7 +165,7 @@ sync_modelscope() {
   return 0
 }
 
-sync_gitee
+if [ "${SYNC_GITEE:-1}" = "1" ]; then sync_gitee; else echo "== 跳过 Gitee 附件同步（SYNC_GITEE=0，安装包由 sync-mirrors 分卷同步）=="; fi
 sync_modelscope
 echo "== 国内镜像同步步骤结束 =="
 exit 0

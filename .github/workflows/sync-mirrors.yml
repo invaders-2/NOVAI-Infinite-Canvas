@@ -16,7 +16,7 @@ on:
       tag:
         description: 'Release tag（例如 v1.0.115）'
         required: true
-        default: 'v1.0.115'
+        default: 'v1.0.116'
 
 permissions:
   contents: read
@@ -35,3 +35,33 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: bash .github/scripts/sync-gitee-installers.sh "${{ github.event.inputs.tag }}"
+
+  electron-mirrors:
+    name: Electron 更新产物同步（ModelScope 自动更新源）
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 下载该 tag 的 Electron 更新产物
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p desktop/release
+          gh release download "${{ github.event.inputs.tag }}" --dir desktop/release \
+            --pattern 'latest*.yml' --pattern '*.blockmap' \
+            --pattern '*.AppImage' --pattern '*.deb' \
+            --pattern 'NOVAI-*-arm64.dmg' --pattern 'NOVAI-*-arm64-mac.zip' \
+            --pattern 'NOVAI.Setup.*.exe'
+          ls -la desktop/release
+
+      - name: 同步到 ModelScope（Gitee 大文件由 gitee-installers 分卷负责）
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
+          SYNC_GITEE: '0'
+        run: bash .github/scripts/sync-domestic-release.sh
