@@ -149,7 +149,7 @@ sync_modelscope() {
         echo "::warning::缺少 main.py 或 VERSION，跳过源码同步（electron-release 仍会推送）"
       else
         local s
-        for s in main.py VERSION 安装即梦CLI.bat 安装即梦CLI.command 登录即梦CLI.bat 登录即梦CLI.command launcher.py novai-desktop.py app.py build.py build-all.py build-desktop.py build-mac.py installer.py; do
+        for s in main.py VERSION prompt_intelligence.py 安装即梦CLI.bat 安装即梦CLI.command 登录即梦CLI.bat 登录即梦CLI.command launcher.py novai-desktop.py app.py build.py build-all.py build-desktop.py build-mac.py installer.py; do
           if [ -f "${GITHUB_WORKSPACE}/$s" ]; then
             cp -f "${GITHUB_WORKSPACE}/$s" ./ 2>/dev/null || echo "::warning::源码文件 $s 复制失败，跳过"
           else

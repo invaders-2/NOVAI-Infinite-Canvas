@@ -58,6 +58,10 @@ jobs:
             --hidden-import=uvicorn.logging \
             --hidden-import=uvicorn.loops.auto \
             --hidden-import=uvicorn.protocols.http.auto \
+            --hidden-import=fastapi --hidden-import=aiofiles --hidden-import=pydantic \
+            --hidden-import=python_multipart --hidden-import=httpx --hidden-import=PIL \
+            --hidden-import=requests --hidden-import=uvicorn.protocols.websockets.auto \
+            --hidden-import=uvicorn.lifespan.on --hidden-import=websockets \
             --add-data "server${SEP}server" \
             main.py
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -80,6 +84,27 @@ jobs:
         working-directory: desktop
         run: |
           node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));const ext=p.build.extraResources||[];if(!ext.some(e=>e.to==='backend' && e.from==='resources/backend')){ext.push({from:'resources/backend',to:'backend'});p.build.extraResources=ext;fs.writeFileSync('package.json',JSON.stringify(p,null,2));}console.log('registered');"
+
+      - name: Smoke-test bundled backend (windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          ./desktop/resources/backend/NOVAI.exe --port 3099 > backend_smoke.log 2>&1 &
+          BE=$!
+          ok=0
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:3099/static/update-notes.json || true)
+            if [ "$code" = "200" ]; then ok=1; break; fi
+            sleep 3
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::bundled backend failed to start (smoke test)"
+            cat backend_smoke.log || true
+            kill $BE 2>/dev/null || true
+            exit 1
+          fi
+          echo "backend smoke test OK"
+          kill $BE 2>/dev/null || true
 
       - name: Build Electron app
         working-directory: desktop

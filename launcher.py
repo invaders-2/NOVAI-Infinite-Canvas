@@ -107,14 +107,12 @@ def _hide_mac_titlebar_chrome(win):
 _native_drag_state = {"monitors": []}
 
 # 红绿灯目标位（窗口坐标 pt，与前端 CSS px 一一对应）：
-# 红灯左缘对齐主壳侧栏【面板本身】左缘（Boss 复核口径："红绿灯左边距 == 侧栏左边距"
-# 指悬浮 sidebar 面板距窗口左缘的 margin，即 .app-shell padding = 15pt；收起/展开态
-# 面板左缘均为 15，与图标列无关。曾误对齐图标列 44，方向反了）。
-# 注意 AppKit convertPoint 坐标系与屏幕/CGWindow 坐标系存在 +1pt 系统偏差（常量 44
-# 时 AX/像素实测 45），故常量设 14.0 抵消，使实测命中 15.0。
-# 中心线与主壳 .stage-actions 按钮同线（top:18 + 半高 18 = 36）。
-_MAC_TL_LEFT_X = 14.0
-_MAC_TL_CENTER_Y = 36.0
+# 这两个值就是 macOS 原生位置——左缘 7pt、中心距窗口顶 14pt（标准 28px 标题栏）。
+# 设成原生值后 applyTrafficLights_ 算出的 dx/dy 为 0，直接 return，红绿灯保持系统原生
+# 位置不动；保留该函数是为了 FullSizeContentView/relayout 场景下重复调用仍幂等，
+# 避免 AppKit relayout 把灯弹走后没人复位。
+_MAC_TL_LEFT_X = 7.0
+_MAC_TL_CENTER_Y = 14.0
 
 
 def _end_native_window_drag():

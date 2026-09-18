@@ -104,13 +104,13 @@
 .split-root { display: flex; height: calc(100vh / var(--studio-ui-scale, 1)); overflow: hidden; }
 .split-left { width: clamp(300px, 30vw, 360px); flex-shrink: 0; height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; padding: 32px 24px; border-right: none; }
 .split-right { flex: 1; min-width: 0; height: 100%; overflow-y: auto; }
-.split-right-inner { max-width: 1080px; margin: 0 auto; padding: 32px 40px 72px; display: flex; flex-direction: column; gap: 56px; }
+.split-right-inner { max-width: 1080px; margin: 0 auto; padding: 32px 24px 72px; display: flex; flex-direction: column; gap: 56px; }
 #resultBox { height: clamp(420px, 58vh, 720px); }
 @media (max-width: 768px) {
     .split-root { flex-direction: column; height: auto; overflow: visible; }
-    .split-left { width: 100% !important; height: auto; max-height: none; overflow-y: visible; border-right: none; border-bottom: 1px solid var(--border); padding: 16px; }
+    .split-left { width: 100% !important; height: auto; max-height: none; overflow-y: visible; border-right: none; border-bottom: 1px solid var(--border); padding: 16px 24px; }
     .split-right { height: auto; overflow-y: visible; }
-    .split-right-inner { padding: 16px 16px 48px; gap: 40px; }
+    .split-right-inner { padding: 16px 24px 48px; gap: 40px; }
     #resultBox { height: auto; min-height: 320px; }
     #genBtn { position: static !important; }
 }

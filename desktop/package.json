@@ -1,6 +1,6 @@
 {
   "name": "novai-desktop",
-  "version": "1.0.119",
+  "version": "1.0.120",
   "description": "NOVAI 无限画布 AI 创作平台 — 桌面客户端 (Electron)",
   "main": "main.js",
   "homepage": "https://github.com/invaders-2/NOVAI",
@@ -37,6 +37,10 @@
       {
         "from": "../main.py",
         "to": "backend/main.py"
+      },
+      {
+        "from": "../prompt_intelligence.py",
+        "to": "backend/prompt_intelligence.py"
       },
       {
         "from": "../requirements.txt",

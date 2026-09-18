@@ -2540,11 +2540,20 @@ def version_tuple(value: str) -> List[int]:
     return [int(x) for x in re.findall(r"\d+", str(value or ""))]
 
 def version_gt(a: str, b: str) -> bool:
-    ta, tb = version_tuple(a), version_tuple(b)
+    ta, tb = version_tuple(str(a or "").split("-", 1)[0]), version_tuple(str(b or "").split("-", 1)[0])
     n = max(len(ta), len(tb))
     ta += [0] * (n - len(ta))
     tb += [0] * (n - len(tb))
-    return ta > tb
+    if ta != tb:
+        return ta > tb
+    a_pre, b_pre = "-" in str(a or ""), "-" in str(b or "")
+    if a_pre != b_pre:
+        return b_pre   # 数字部分相同：正式版高于同号测试版
+    fa, fb = version_tuple(a), version_tuple(b)
+    m = max(len(fa), len(fb))
+    fa += [0] * (m - len(fa))
+    fb += [0] * (m - len(fb))
+    return fa > fb
 
 @app.get("/api/check-update")
 def check_update():
@@ -2595,7 +2604,7 @@ def update_allowed_file(path: str) -> bool:
     if not path or any(part in {"", ".", ".."} for part in path.split("/")):
         return False
     return (
-        path in {"main.py", "VERSION", "安装即梦CLI.bat", "安装即梦CLI.command", "登录即梦CLI.bat", "登录即梦CLI.command", "launcher.py", "novai-desktop.py", "app.py", "build.py", "build-all.py", "build-desktop.py", "build-mac.py", "installer.py"}
+        path in {"main.py", "VERSION", "prompt_intelligence.py", "安装即梦CLI.bat", "安装即梦CLI.command", "登录即梦CLI.bat", "登录即梦CLI.command", "launcher.py", "novai-desktop.py", "app.py", "build.py", "build-all.py", "build-desktop.py", "build-mac.py", "installer.py"}
         or path.startswith("static/")
         or path.startswith("server/")   # 协议表 / 模块化后端（server/protocols、server/routes 等）也要能随一键更新下发
         or path.startswith("tools/")
@@ -2973,16 +2982,16 @@ def staged_update_file_list(staging_root: str) -> Tuple[List[str], List[str], Li
     static_files = sorted(set(static_files))
     return root_files, static_files, root_files + static_files
 
-FALLBACK_SOURCES = ["gitee", "modelscope", "github"]
+FALLBACK_SOURCES = ["modelscope", "github", "gitee"]
 
 UPDATE_SOURCE_LABELS = {"gitee": "Gitee", "github": "GitHub", "modelscope": "ModelScope"}
 
 def normalize_update_source(value: str) -> str:
-    source = str(value or "gitee").strip().lower()
+    source = str(value or "modelscope").strip().lower()
     if source == "ms":
         return "modelscope"
     if source not in {"gitee", "github", "modelscope"}:
-        return "gitee"
+        return "modelscope"
     return source
 
 def stage_update_from_source(source: str, staging_root: str, progress_cb: Optional[Callable[[str, int, int], None]] = None) -> Tuple[List[str], List[str], List[str]]:
@@ -24578,7 +24587,30 @@ app.include_router(_assets_router)
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("NOVAI_PORT", 3000))
+    # 端口来源优先级：命令行（--port N / -p N / --port=N / 位置参数 N）> 环境变量 NOVAI_PORT > 3000。
+    # Electron 桌面壳用 `NOVAI.exe --port 3000` 启动；历史上这里只认位置参数，
+    # 导致 int("--port") 抛 ValueError、后端一启动就崩（表现为"无法加载后端"）。
+    _argv = sys.argv[1:]
+    port = int(os.environ.get("NOVAI_PORT", 3000))
+    _i = 0
+    while _i < len(_argv):
+        _a = _argv[_i]
+        if _a in ("--port", "-p", "-P") and _i + 1 < len(_argv):
+            try:
+                port = int(_argv[_i + 1])
+            except (TypeError, ValueError):
+                pass
+            break
+        if _a.startswith("--port="):
+            try:
+                port = int(_a.split("=", 1)[1])
+            except (TypeError, ValueError):
+                pass
+            break
+        if _a.isdigit():
+            port = int(_a)
+            break
+        _i += 1
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，
     # 默认 20s ping/20s 超时会把这些连接每隔一会儿就踢掉造成"频繁断连"。
     # 客户端有自己的应用层心跳 + 断线重连兜底，这里禁用协议 ping 更稳。

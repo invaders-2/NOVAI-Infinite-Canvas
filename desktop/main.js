@@ -98,7 +98,7 @@ function logBackend(line) {
 }
 
 // ---------- 等待后端就绪 ----------
-function waitForServer(url, timeoutMs = 60000, intervalMs = 400) {
+function waitForServer(url, timeoutMs = 180000, intervalMs = 400) {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const attempt = () => {
@@ -187,7 +187,7 @@ function startBackend(port) {
       backendProc.stderr.on('data', logBackend);
       backendProc.on('exit', (code) => {
         if (app.isPackaged && code !== 0) {
-          dialog.showErrorBox('NOVAI 后端异常退出', '后端进程已退出，请查看日志。');
+          dialog.showErrorBox("NOVAI 后端异常退出", "后端进程已退出（code " + code + "）。日志：" + (logFile || "") + (backendLog.length ? String.fromCharCode(10) + backendLog.slice(-12).join(String.fromCharCode(10)) : ""));
         }
       });
       clog('boot', '启动 bundled 后端: ' + binary + ' port ' + port + ' dataDir ' + backendEnv.NOVAI_DATA_DIR);
@@ -484,7 +484,6 @@ function createWindow(url) {
     autoHideMenuBar: true,
     frame: !useFrameless,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    trafficLightPosition: process.platform === 'darwin' ? { x: 15, y: 18 } : undefined,
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -582,7 +581,15 @@ if (!gotLock) {
       clog('boot', '启动失败: ' + err.message);
       clog('boot', '后端日志: ' + backendLog.join(' | '));
       console.error('启动失败:', err.message, String.fromCharCode(10) + '后端日志:' + String.fromCharCode(10) + backendLog.join(String.fromCharCode(10)));
-      dialog.showErrorBox('NOVAI 启动失败', '无法启动后端服务：' + String.fromCharCode(10) + String.fromCharCode(10) + err.message + String.fromCharCode(10) + String.fromCharCode(10) + '请确认环境已安装 Python 3.10+ 并已安装依赖。');
+      const _bundled = !!resolveBackendBinary();
+      const _hint = _bundled
+        ? ("这是安装包内置的后端，不需要安装 Python。完整日志：" + (logFile || "见 %APPDATA%\\novai-electron.log"))
+        : "请确认已安装 Python 3.10+ 并已安装依赖。";
+      const _tail = backendLog.slice(-12).join(String.fromCharCode(10));
+      dialog.showErrorBox("NOVAI 启动失败",
+        "无法启动后端服务：" + String.fromCharCode(10) + String.fromCharCode(10) + err.message +
+        String.fromCharCode(10) + String.fromCharCode(10) + _hint +
+        (_tail ? String.fromCharCode(10) + String.fromCharCode(10) + "--- 后端日志（末尾） ---" + String.fromCharCode(10) + _tail : ""));
       app.quit();
       return;
     }

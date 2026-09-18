@@ -69,7 +69,7 @@
         }
         button,input,select,textarea { font:inherit; }
         button { border:0; cursor:pointer; }
-        .chat-shell { height:calc(100vh / var(--studio-ui-scale, 1)); min-width:0; display:block; background:var(--chat-bg); }
+        .chat-shell { height:calc(100vh / var(--studio-ui-scale, 1)); min-width:0; display:block; background:var(--chat-bg); padding:0 24px; }
         .chat-rail { position:absolute; top:52px; right:0; width:min(360px,calc(100vw - 36px)); max-height:min(520px,calc(100vh - 92px)); display:none; flex-direction:column; gap:10px; padding:12px; background:var(--chat-panel); border:1px solid transparent; border-radius:16px; color:var(--chat-text); overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); z-index:70; }
         .chat-rail.open { display:flex; animation:popIn .16s var(--ease); }
         .rail-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:2px 2px 4px; }

@@ -29,7 +29,7 @@ python3 - "$WORK/release.json" "$WORK/list.txt" <<'PY'
 import json, sys
 rel = json.load(open(sys.argv[1]))
 assets = [a for a in rel.get("assets", [])
-          if a["name"].startswith("NOVAI-Setup-") and a["name"].endswith((".exe", ".dmg"))]
+          if a["name"].endswith((".exe", ".dmg")) and (a["name"].startswith("NOVAI-Setup-") or a["name"].startswith("NOVAI-Electron-Setup-"))]
 with open(sys.argv[2], "w") as f:
     for a in assets:
         f.write("%s\t%s\t%s\n" % (a["name"], a["id"], a["size"]))

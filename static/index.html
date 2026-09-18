@@ -590,8 +590,8 @@
         body.route-canvas.has-frameless-titlebar .stage { margin-top: 48px; }
         /* 边栏不跟随全屏出血：保持与其他页面一致的 15px 内缩，避免无边框窗口下贴到窗口边缘/压住红绿灯 */
         body.route-canvas .sidebar { margin: 15px 0 15px 15px; }
-        /* macOS 原生标题栏模式下其他页面边栏 = 外壳15 + 标题带48 = 63px，这里补齐同样的顶部偏移 */
-        body.route-canvas.has-native-titlebar .sidebar { margin-top: 63px; }
+        /* macOS 原生标题栏模式下其他页面边栏 = 外壳15 + 标题带28 = 43px，这里补齐同样的顶部偏移 */
+        body.route-canvas.has-native-titlebar .sidebar { margin-top: 43px; }
         /* Windows 无边框同理：48px 标题带 + 15px 内缩 */
         body.route-canvas.has-frameless-titlebar .sidebar { margin-top: 63px; }
 
@@ -604,9 +604,9 @@
             display: flex;
             gap: 8px;
         }
-        /* macOS 原生窗口：48px Header 带，按钮排在 top:18（中心 y=36，与平移后的红绿灯同一条水平线） */
+        /* macOS 原生窗口：28px 顶栏，按钮排在 top:2（中心 y = 2 + 12 = 14，与系统原生红绿灯同一条水平线） */
         body.has-native-titlebar .stage-actions {
-            top: 18px;
+            top: 2px;
             -webkit-app-region: no-drag;
         }
         /* 网页版（无 pywebview）：隐藏右上角主题/设置快捷按钮，侧栏已有设置入口，功能不丢 */
@@ -614,9 +614,9 @@
             display: none;
         }
         .stage-actions button {
-            width: 36px;
-            height: 36px;
-            border-radius: 10px;
+            width: 24px;
+            height: 24px;
+            border-radius: 8px;
             border: none;
             background: transparent;
             display: flex;
@@ -639,11 +639,11 @@
             background: rgba(0,0,0,0.06);
         }
         .stage-actions button svg, .stage-actions button img {
-            width: 18px;
-            height: 18px;
+            width: 16px;
+            height: 16px;
         }
 
-        /* ═══ macOS 原生窗口：顶部 48px Header 带（窗口拖拽区；透明，视觉与页面同一块背景） ═══ */
+        /* ═══ macOS 原生窗口：顶部 28px Header 带（macOS 原生标题栏高度的拖拽区；透明，视觉与页面同一块背景） ═══ */
         .app-header {
             display: none;
         }
@@ -653,7 +653,7 @@
             top: 0;
             left: 0;
             right: 0;
-            height: 48px;
+            height: 28px;
             z-index: 40;
             -webkit-app-region: drag;
             -webkit-user-select: none;
@@ -661,11 +661,11 @@
         }
         /* 侧栏与舞台从 Header 带下方开始，页面内容不钻进标题区 */
         body.has-native-titlebar .sidebar {
-            margin-top: 48px;
-            height: calc(100vh - 30px - 48px);
+            margin-top: 28px;
+            height: calc(100vh - 30px - 28px);
         }
         body.has-native-titlebar .stage {
-            margin-top: 48px;
+            margin-top: 28px;
         }
         /* Windows 无边框：侧栏与舞台同样让出 48px 自定义标题栏高度，否则标题栏压住边栏顶部 */
         body.has-frameless-titlebar .sidebar {
@@ -4558,10 +4558,20 @@
         }
 
         function compareVersions(a, b) {
+            const coreA = versionParts(String(a || '').split('-')[0]);
+            const coreB = versionParts(String(b || '').split('-')[0]);
+            const len = Math.max(coreA.length, coreB.length);
+            for(let i = 0; i < len; i++){
+                const diff = (coreA[i] || 0) - (coreB[i] || 0);
+                if(diff) return diff;
+            }
+            const preA = String(a || '').includes('-');
+            const preB = String(b || '').includes('-');
+            if(preA !== preB) return preB ? 1 : -1;
             const aa = versionParts(a);
             const bb = versionParts(b);
-            const len = Math.max(aa.length, bb.length);
-            for(let i = 0; i < len; i++){
+            const fullLen = Math.max(aa.length, bb.length);
+            for(let i = 0; i < fullLen; i++){
                 const diff = (aa[i] || 0) - (bb[i] || 0);
                 if(diff) return diff;
             }
@@ -4935,8 +4945,8 @@
                 }
             });
             if(copyEl) copyEl.textContent = updateUiText(
-                `将从 ${sourceName} 更新 main.py、VERSION 和 static 文件。更新前会自动备份，更新完成后后端会自动重启。当前 ${versionLabel(localVersion)}，最新 ${versionLabel(remoteVersion || localVersion)}。`,
-                `This updates main.py, VERSION, and static files from ${sourceName}. A backup is created first, then the backend restarts automatically. Current ${versionLabel(localVersion)}, latest ${versionLabel(remoteVersion || localVersion)}.`
+                `将从 ${sourceName} 下载并更新后端代码与页面资源。更新前会自动备份，更新完成后后端会自动重启。当前 ${versionLabel(localVersion)}，最新 ${versionLabel(remoteVersion || localVersion)}。`,
+                `This downloads and updates the backend code and web assets from ${sourceName}. A backup is created first, then the backend restarts automatically. Current ${versionLabel(localVersion)}, latest ${versionLabel(remoteVersion || localVersion)}.`
             );
             if(testText) testText.textContent = updateConnectivityResult ? updateUiText('重新测试', 'Retest') : updateUiText('测试连通性', 'Test connectivity');
             if(cancelText) cancelText.textContent = updateUiText('取消', 'Cancel');
