@@ -169,6 +169,8 @@ function startBackend(port) {
       NOVAI_APP_DIR: app.isPackaged
         ? path.dirname(mainPy || binary || '')
         : path.dirname(mainPy || ''),
+      PYTHONUTF8: "1",
+      PYTHONIOENCODING: "utf-8",
     });
     // Win 安装根目录传给后端：素材默认跟随安装目录（用户安装时选的大容量盘）。
     // 仅 win32 设置——mac 的 .app 包内只读、linux AppImage 挂载只读，

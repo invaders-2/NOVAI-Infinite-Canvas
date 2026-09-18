@@ -43,6 +43,17 @@ from fastapi.responses import FileResponse, Response, StreamingResponse, JSONRes
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
+# Windows 上 stdout/stderr 默认用本地代码页（英文系统为 cp1252），打印中文会抛
+# UnicodeEncodeError——后端启动阶段一行中文日志就能让 FastAPI 启动失败、整个后端起不来。
+# 这里在源头强制 UTF-8 且 errors="replace"，任何环境都不再因为打印而崩。
+try:
+    if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if sys.stderr is not None and hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 # VPN SSL 绕过：Clash 代理做 SSL 中间人检查导致 MAC 校验失败
 _INSECURE_SSL_CONTEXT = ssl.create_default_context()
 _INSECURE_SSL_CONTEXT.check_hostname = False
