@@ -92,8 +92,9 @@ jobs:
           ./desktop/resources/backend/NOVAI.exe --port 3099 > backend_smoke.log 2>&1 &
           BE=$!
           ok=0
+          # 用 /api/changelog 做存活探针（static 在 electron-builder 阶段才就位，此步只有 NOVAI.exe）
           for i in $(seq 1 60); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:3099/static/update-notes.json || true)
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:3099/api/changelog || true)
             if [ "$code" = "200" ]; then ok=1; break; fi
             sleep 3
           done
