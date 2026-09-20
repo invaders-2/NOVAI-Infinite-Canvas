@@ -2,9 +2,9 @@
 
 > 自由地在无限画布上生成图像、视频，用节点串联工作流。内置 ModelScope 免费 API，开箱即用。
 >
-> **[English](README.en.md) · [官网](https://invaders-2.github.io/NOVAI/) · [帮助文档](https://invaders-2.github.io/NOVAI/docs.html)**
+> **[English](README.en.md) · [官网](https://invaders-2.github.io/NOVAI-Infinite-Canvas/) · [帮助文档](https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html)**
 
-NOVAI 是一款面向创作者的全能 AI 工作台。你可以在**无限画布**上拖拽、连线、组合各种 AI 能力——文生图、图生图、AI 视频生成、GPT 多模态对话——所有操作在一个界面中无缝衔接。搭配 **Photoshop 面板**和 **Chrome 扩展**，素材采集与创作流程一气呵成。
+NOVAI 是一款面向创作者的全能 AI 工作台。你可以在**无限画布**上拖拽、连线、组合各种 AI 能力——文生图、图生图、AI 视频生成、GPT 多模态对话——所有操作在一个界面中无缝衔接。画布里的 **AI 助手（Agent）** 听一句话就自己规划并动手：建节点、连线、跑生成、查任务，过程实时可见、结果可整体回滚。搭配 **Photoshop 面板**和 **Chrome 扩展**，素材采集与创作流程一气呵成。
 
 ![首页](static/images/screenshots/home.png)
 
@@ -26,15 +26,17 @@ NOVAI 是一款面向创作者的全能 AI 工作台。你可以在**无限画�
 
 #### Windows
 
-1. 下载 `NOVAI-Setup.exe` 安装包
+1. 到 [Releases](https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases) 下载 `NOVAI-Setup-<版本>.exe`
 2. 双击安装，按引导完成（桌面快捷方式自动创建）
 3. 双击桌面「NOVAI」图标启动，浏览器自动打开 `http://127.0.0.1:3000/`
 
 #### macOS
 
-1. 下载 `NOVAI.dmg` 磁盘镜像
+1. 到 [Releases](https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases) 下载 `NOVAI-Setup-<版本>.dmg`
 2. 打开 DMG，将 `NOVAI.app` 拖入 `Applications` 文件夹
 3. 双击 `NOVAI.app` 启动，浏览器自动打开 `http://127.0.0.1:3000/`
+
+> 想要自带 Chromium 内核、支持一键自动更新的桌面客户端，用 Electron 包：Windows 是 `NOVAI-Electron-Setup-<版本>.exe`，macOS 是 `NOVAI-<版本>-arm64.dmg`。两者与上面的正式版**共用同一份数据目录**，可随时互换，详见下方「桌面客户端」。
 
 > **首次启动提示**：macOS 可能提示「无法打开，因为它来自未识别的开发者」，请前往 **系统设置 → 隐私与安全性 → 点击「仍要打开」** 即可。
 
@@ -46,8 +48,8 @@ NOVAI 是一款面向创作者的全能 AI 工作台。你可以在**无限画�
 
 ```bash
 # 克隆仓库
-git clone https://github.com/invaders-2/NOVAI.git
-cd NOVAI
+git clone https://github.com/invaders-2/NOVAI-Infinite-Canvas.git
+cd NOVAI-Infinite-Canvas
 
 # 安装依赖
 pip install -r requirements.txt
@@ -98,10 +100,28 @@ python main.py
 | 生图 | Qwen-Image-Edit-2511 | 说话就能改图 |
 | 视频 | agnes-video-v2.0 | 免费视频生成 |
 
+除内置免费额度外，「API 设置 → 新增平台」可以接入你自己账号的平台，模型名按平台各自维护、不会互相替换：
+
+| 协议 | 平台 |
+|------|------|
+| OpenAI 兼容 | 各类中转 / 官方兼容接口（gpt-image、Nano Banana 等）；预置推荐：灵境 API、Agnes AI、EXELLOME、FHL、VIP-GPT |
+| 异步协议 | APIMart |
+| Gemini 原生 | Google Gemini（图像走 `/v1beta`） |
+| 方舟 / Ark | 火山引擎（豆包 Seedream 生图、Seedance 视频） |
+| RunningHub | OpenAPI 工作流 |
+| 命令行 | 即梦 CLI、OpenAI Codex CLI、Antigravity CLI |
+| 设计代理 | Lovart（Access Key / Secret Key 签名接入） |
+
+平台下拉只显示**已配置 Key** 的供应商；没配 Key 的平台不会出现在生成节点里，也不会被当成默认平台。
+
 ---
 
 ## 特色功能
 
+- 🧠 **智能画布 AI 助手（真 Agent）** — 一句话说清目标，模型自己多轮规划并动手：建节点、连线、跑生成、查任务；每一步实时可见，画布改动可整体回滚
+- 📊 **多维表格批量生产** — 一张表驱动批量出图 / 出视频：逐行素材与提示词、逐行真实进度、随时停止，一次批量只落一个结果节点
+- 🎭 **Lovart 设计代理** — 填 Access Key / Secret Key 即可接入，支持图片与视频生成、素材上传、结果回传
+- 💬 **聊天式创作** — LLM 节点与 GPT 聊天支持多轮上下文、可选角色（默认「提示词优化」）、思考过程实时展示
 - 🎨 **无限画布** — 自由缩放、拖拽、连线创作
 - ⚡ **节点工作流** — 图像/视频/LLM 节点串联
 - 🤖 **生成自动落画布** — AI 生成结果自动创建节点，无需手动导入
@@ -148,7 +168,7 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 
 | 平台 | 地址 |
 |------|------|
-| GitHub | https://github.com/invaders-2/NOVAI |
+| GitHub | https://github.com/invaders-2/NOVAI-Infinite-Canvas |
 | Gitee | https://gitee.com/invaders/novai |
 | ModelScope | https://modelscope.cn/studios/bllack/NOVAI |
 
@@ -157,7 +177,7 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 > **Gitee 安装包说明**：Gitee 免费版附件有 100MB 单文件限制，安装包已分卷上传（`.part00`/`.part01`），下载后需先合并再安装：
 > - Windows（CMD）：`copy /b NOVAI-Setup-*.exe.part00 + NOVAI-Setup-*.exe.part01 NOVAI-Setup-*.exe`
 > - macOS（终端）：`cat NOVAI-Setup-*.dmg.part00 NOVAI-Setup-*.dmg.part01 > NOVAI-Setup-*.dmg`
-> - 或直接到 [GitHub Releases](https://github.com/invaders-2/NOVAI/releases) 下载免合并的完整安装包
+> - 或直接到 [GitHub Releases](https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases) 下载免合并的完整安装包
 
 ---
 
@@ -171,6 +191,50 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 - **自动更新三仓库通道**：GitHub Releases 为主源；国内网络检查失败时自动切换 ModelScope 镜像（`bllack/NOVAI-releases`）；Gitee Release 提供人工下载兜底。云端构建流水线（push `v*` 标签触发）会自动把安装包同步到三个仓库
 
 ---
+
+### v1.0.122
+
+- **修复**：Lovart 平台在老用户升级后不出现在「API 设置」的平台列表里——之前只有平台列表为空的全新安装才会带上它；现在升级后直接可见，填入 Access Key / Secret Key 保存即可用（没配密钥时不会出现在生成节点的平台下拉里）
+- **改进**：自动补进来的平台不会顶掉你正在用的默认平台——没有配置密钥的平台不再被当成首选供应商
+
+### v1.0.121
+
+- **智能画布 AI 助手升级为「真 Agent」**：一句话指令后由模型自己多轮规划并逐步执行（新建节点、连线、跑生成、查任务），执行过程实时显示，画布改动立刻可见，跑完可整体回滚
+- **新增 Lovart 设计代理供应商**：图片 / 视频生成、素材上传与结果回传，填 Access Key / Secret Key 即可接入
+- **LLM 节点聊天模式**：多轮上下文、可选角色（默认「提示词优化」）、思考过程实时展示（秒表 + 呼吸动效）、输入框高度可拖动并记住
+- **全局动效统一**：下拉菜单 / 选择列表改用滑块高亮（Glide），按钮带状态反馈（MorphButton），深浅色主题自适应；API 设置页与 ComfyUI 工作流设置页按统一设计语言重做
+- **模型选择修复**：画布设置里手动选过的模型不再被清空或换成列表第一个，没配 Key 的供应商不再出现在下拉里；节点上换平台后残留的旧模型按该平台的历史记忆归一，并给出提示
+- **多维表格 / 批量生成修复**：每行只引用本行素材、`@图片N` 按全局序号兑现、一次批量只落一个结果节点、分组互相包含不再卡死、表格与批量面板内滚轮不再误缩放画布
+
+### v1.0.120
+
+- **修复 Electron 桌面端后端无法启动**：桌面壳用 `--port` 传参而后端只认位置参数，后端一启动就崩（表现为「无法加载后端」）；现兼容 `--port` / 位置参数 / 环境变量，首次启动等待放宽到 3 分钟，启动失败时弹窗直接显示后端日志
+- **修复更新链路**：`prompt_intelligence.py` 纳入镜像同步 / 一键更新 / 打包资源；更新兜底顺序改为国内镜像优先、滞后的源置后；Gitee 分卷同步认不出新的 Electron 安装包名
+- **界面**：顶部标题区按 macOS 原生规格重做（红绿灯回到原生位置、顶栏 28px）；9 个内容页的左右内边距统一为 24px
+
+### v1.0.119
+
+- **更新界面改版**：「一键更新」弹窗按项目设计语言重做（浅 / 深色自适应）；检测到新版本时右下角常驻提醒，可「立即更新」或关闭忽略（同一版本不再打扰，出现更高版本会再次提醒）
+- **修复**：更新弹窗里的 ModelScope 连通性检查指向早已废弃的旧地址，统一改为模型仓库 `bllack/NOVAI-releases`
+
+### v1.0.118
+
+- **修复 Windows 自动更新**：安装包命名与 `latest.yml` 记录不一致（下载 404 / 校验失败）——Electron 安装包改用 `NOVAI-Electron-Setup-<版本>.exe`；同时修复国内镜像同步多平台并发互相覆盖、导致部分平台更新文件缺失
+
+### v1.0.117
+
+- **修复桌面客户端国内在线更新**：国内兜底源此前指向魔搭创空间（只返回网页、取不到更新文件），改用魔搭模型仓库镜像，国内可正常检测与下载；macOS 未签名构建不再尝试自动安装，改为提示手动下载覆盖安装
+
+### v1.0.116
+
+- **灵境 API 新增视频厂商分发**：海螺 MiniMax、可灵 Kling、Vidu、通义万象、豆包 Seedance、Luma、Runway、通用统一格式，按模型名前缀自动路由
+- **灵境 API 协议自动推断**：Gemini 图像模型自动走原生 `/v1beta`，其余沿用 OpenAI 兼容，不再逐个模型手配协议；拉取模型时自动补齐被令牌分组过滤掉的 Gemini 模型
+- **Agnes AI 新增 Video 2.5 / 2.5 Flash** 视频模型（OpenAI Videos 兼容协议）
+- **协议表**新增灵境 / Agnes 的文本、图像、视频条目，`/api/ai/descriptor` 能识别这两个平台的 video 意图
+- **修复**：`gpt-image-1 / 1.5` 在部分中转无法出图（请求体带了新版官方接口已移除的 `response_format`，现不再发送，上游明确报错时自动去掉重试一次）
+- **改进**：生成图片下方标注真实像素尺寸（如 `gpt-image-2 · 1254×1254`），避免把上游降采样误判成 2K / 4K
+- **修复**：GPT 聊天模型选择器只显示「已配置好」的平台（平台启用 + 已填 Key + 有模型列表）；停用 ModelScope 内置默认聊天模型并从老配置里清理
+- **修复**：GPT 聊天流式输出时无法上滚查看历史（现只在仍贴底时跟随最新消息）；顶栏去掉可见边框 / 色块
 
 ### v1.0.115
 

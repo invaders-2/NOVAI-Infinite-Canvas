@@ -2,9 +2,9 @@
 
 > Freely generate images and videos on an infinite canvas, connecting workflows with nodes. Built-in free ModelScope API, ready to use out of the box.
 >
-> **[中文](README.md) · [Website](https://invaders-2.github.io/NOVAI/) · [Docs](https://invaders-2.github.io/NOVAI/docs.html)**
+> **[中文](README.md) · [Website](https://invaders-2.github.io/NOVAI-Infinite-Canvas/) · [Docs](https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html)**
 
-NOVAI is an all-in-one AI workbench for creators. On an **infinite canvas** you can drag, connect, and combine various AI capabilities — text-to-image, image-to-image, AI video generation, GPT multimodal chat — all seamlessly in one interface. Paired with **Photoshop panels** and **Chrome extensions**, asset collection and creative workflows flow together.
+NOVAI is an all-in-one AI workbench for creators. On an **infinite canvas** you can drag, connect, and combine various AI capabilities — text-to-image, image-to-image, AI video generation, GPT multimodal chat — all seamlessly in one interface. The canvas **AI assistant is a real Agent**: state a goal in one sentence and it plans and acts on its own — creating nodes, wiring them up, running generations, checking tasks — with every step visible and the whole run rollbackable. Paired with **Photoshop panels** and **Chrome extensions**, asset collection and creative workflows flow together.
 
 ![Home](static/images/screenshots/home.png)
 
@@ -26,15 +26,17 @@ No Python installation or environment configuration needed — download the inst
 
 #### Windows
 
-1. Download the `NOVAI-Setup.exe` installer
+1. Grab `NOVAI-Setup-<version>.exe` from [Releases](https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases)
 2. Double-click to install and follow the wizard (desktop shortcut auto-created)
 3. Launch the "NOVAI" icon on your desktop, browser opens `http://127.0.0.1:3000/` automatically
 
 #### macOS
 
-1. Download the `NOVAI.dmg` disk image
+1. Grab `NOVAI-Setup-<version>.dmg` from [Releases](https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases)
 2. Open the DMG and drag `NOVAI.app` into the `Applications` folder
 3. Double-click `NOVAI.app` to launch, browser opens `http://127.0.0.1:3000/` automatically
+
+> Want the desktop client with a bundled Chromium engine and one-click auto-update? Use the Electron build: `NOVAI-Electron-Setup-<version>.exe` on Windows, `NOVAI-<version>-arm64.dmg` on macOS. Both **share the same data directory** as the build above, so you can switch at any time — see "Desktop Client" below.
 
 > **First launch note**: macOS may warn "cannot be opened because it is from an unidentified developer". Go to **System Settings → Privacy & Security → click "Open Anyway"**.
 
@@ -46,8 +48,8 @@ If you want to run from source or contribute:
 
 ```bash
 # Clone the repository
-git clone https://github.com/invaders-2/NOVAI.git
-cd NOVAI
+git clone https://github.com/invaders-2/NOVAI-Infinite-Canvas.git
+cd NOVAI-Infinite-Canvas
 
 # Install dependencies
 pip install -r requirements.txt
@@ -98,10 +100,28 @@ Built-in **ModelScope** free API, ready out of the box:
 | Image | Qwen-Image-Edit-2511 | Edit images by talking |
 | Video | agnes-video-v2.0 | Free video generation |
 
+Beyond the built-in free quota, "API Settings → Add platform" connects platforms from your own accounts. Model names are kept per platform and never swapped between them:
+
+| Protocol | Platforms |
+|----------|-----------|
+| OpenAI-compatible | Relays / official-compatible endpoints (gpt-image, Nano Banana, …); presets: Lingjing API, Agnes AI, EXELLOME, FHL, VIP-GPT |
+| Async protocol | APIMart |
+| Native Gemini | Google Gemini (images via `/v1beta`) |
+| Ark | Volcengine (Doubao Seedream images, Seedance video) |
+| RunningHub | OpenAPI workflows |
+| CLI | Jimeng CLI, OpenAI Codex CLI, Antigravity CLI |
+| Design agent | Lovart (Access Key / Secret Key signing) |
+
+Provider dropdowns only list platforms **with a configured key**; platforms without one never appear in generation nodes and are never chosen as the default.
+
 ---
 
 ## Key Features
 
+- 🧠 **Smart Canvas AI assistant (real Agent)** — state a goal in one sentence and the model plans and acts over multiple rounds (create nodes, wire them up, run generations, check tasks); every step streams live and the whole run can be rolled back
+- 📊 **Table-driven batch production** — one table drives batch image/video generation: per-row assets and prompts, real per-row progress, stop anytime, and a single result node per batch
+- 🎭 **Lovart design agent** — connect with an Access Key / Secret Key for image and video generation, asset upload and result download
+- 💬 **Chat-style creation** — LLM nodes and GPT chat support multi-turn context, selectable personas (default "Prompt Optimizer") and a live thinking process
 - 🎨 **Infinite Canvas** — free zoom, drag, and connect for creation
 - ⚡ **Node Workflows** — image/video/LLM nodes connected in chains
 - 🤖 **Auto-Place on Canvas** — AI results auto-create nodes, no manual import
@@ -128,7 +148,7 @@ Installers and update sources:
 
 | Platform | URL |
 |----------|-----|
-| GitHub | https://github.com/invaders-2/NOVAI |
+| GitHub | https://github.com/invaders-2/NOVAI-Infinite-Canvas |
 | Gitee | https://gitee.com/invaders/novai |
 | ModelScope | https://modelscope.cn/studios/bllack/NOVAI |
 
@@ -149,6 +169,50 @@ The app checks all three sources for the latest version on startup, pushes updat
 ---
 
 ## Changelog
+
+### v1.0.122
+
+- **Fix**: Lovart was missing from existing installs — the platform list only received it when it was empty (fresh installs). After upgrading it shows up directly in API Settings; fill in an Access Key / Secret Key to use it. A platform without keys never appears in generation node dropdowns
+- **Improvement**: an auto-added platform can no longer take over your default — a provider without configured keys is no longer picked as the primary provider
+
+### v1.0.121
+
+- **The Smart Canvas AI assistant is now a real Agent**: give it one instruction and the model plans and executes multiple rounds by itself (create nodes, wire connections, run generations, check tasks); every step streams live, canvas edits appear immediately, and the whole run can be rolled back
+- **New Lovart design-agent provider**: image / video generation, asset upload and result download, connected with an Access Key / Secret Key
+- **Chat mode on LLM nodes**: multi-turn context, selectable personas (default "Prompt Optimizer"), a live thinking process (stopwatch + breathing animation), and a draggable input height that is remembered
+- **Unified motion**: dropdowns and select lists use a Glide highlight pill, buttons give state feedback (MorphButton), light/dark aware; API Settings and ComfyUI workflow settings rebuilt to one design language
+- **Model selection fixes**: models you picked in canvas settings are no longer cleared or replaced by the first list entry, providers without keys no longer appear in dropdowns; a stale model left on a node after switching platforms is normalized to that platform's remembered model with a visible hint
+- **Table / batch generation fixes**: each row references only its own assets, `@图片N` placeholders resolve against the global index, one batch run produces a single result node, groups containing each other no longer hang, and the mouse wheel inside tables no longer zooms the canvas
+
+### v1.0.120
+
+- **Fix: the Electron desktop backend failed to start** — the shell passed `--port` while the backend only accepted a positional argument, so it crashed on launch ("backend failed to load"); it now accepts `--port` / positional / env var, the first-launch wait is extended to 3 minutes, and a startup failure shows the backend log in a dialog
+- **Update pipeline fixes**: `prompt_intelligence.py` added to mirror sync / one-click update / packaged resources; the fallback source order now prefers the domestic mirror and deprioritizes known-stale sources; Gitee split-volume sync recognizes the new Electron installer name
+- **UI**: the top title area was rebuilt to native macOS specs (traffic lights back in place, 28px bar); side padding unified to 24px across 9 content pages
+
+### v1.0.119
+
+- **Update UI revamp**: the "one-click update" dialog follows the project design language (light/dark aware); when a new version is found a persistent reminder appears in the bottom-right — update now or dismiss it (the same version won't nag again, a newer one will)
+- **Fix**: the ModelScope connectivity check in the update dialog pointed at a long-retired address; it now uses the `bllack/NOVAI-releases` model repo
+
+### v1.0.118
+
+- **Windows auto-update fix**: the installer name didn't match `latest.yml` (404 downloads / checksum failures) — Electron installers are now named `NOVAI-Electron-Setup-<version>.exe`; also fixed mirror sync overwriting each other across platforms, which had left some platform update files missing
+
+### v1.0.117
+
+- **Fix: in-app updates on Chinese networks**: the domestic fallback pointed at a ModelScope studio page that only returns HTML (no update files); it now uses the ModelScope model-repo mirror. Unsigned macOS builds no longer attempt auto-install and instead guide a manual download
+
+### v1.0.116
+
+- **Lingjing API video routing**: Hailuo MiniMax, Kling, Vidu, Tongyi Wanxiang, Doubao Seedance, Luma, Runway and a generic unified format, routed automatically by model-name prefix
+- **Lingjing API protocol inference**: Gemini image models automatically use the native `/v1beta` protocol while the rest stay OpenAI-compatible — no more per-model protocol setup; model fetching also fills in Gemini models hidden by token-group filtering
+- **Agnes AI Video 2.5 / 2.5 Flash** video models (OpenAI Videos compatible protocol)
+- **Protocol tables** gained text/image/video entries for Lingjing and Agnes; `/api/ai/descriptor` now understands the video intent for both
+- **Fix**: `gpt-image-1 / 1.5` failed on some relays (the request carried the removed top-level `response_format`); it is no longer sent, and retried once without it when the upstream rejects it
+- **Improvement**: generated images show their real pixel size (e.g. `gpt-image-2 · 1254×1254`) so downscaled output isn't mistaken for 2K/4K
+- **Fix**: the GPT chat model picker only lists configured platforms (enabled + key + models); built-in ModelScope default chat models are retired and cleaned out of existing configs
+- **Fix**: GPT chat could not be scrolled back while streaming (it now follows only when already at the bottom); the header lost its visible border and block
 
 ### v1.0.115
 
