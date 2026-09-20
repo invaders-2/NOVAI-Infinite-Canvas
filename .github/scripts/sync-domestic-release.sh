@@ -101,7 +101,7 @@ sync_gitee() {
   # 该 Release 可能是按 tag 查到的历史遗留对象，这里按 tag 统一纠正预览标记
   curl -sS --max-time 60 -X PATCH "${api}/releases/${release_id}" \
     -H "Content-Type: application/json" \
-    -d "{\"access_token\":\"${GITEE_TOKEN}\",\"prerelease\":${pre}}" > /dev/null || \
+    -d "{\"access_token\":\"${GITEE_TOKEN}\",\"tag_name\":\"${RELEASE_TAG}\",\"name\":\"NOVAI ${RELEASE_TAG}\",\"body\":\"国内下载镜像（与 GitHub Release 相同内容）。\",\"prerelease\":${pre}}" > /dev/null || \
     echo "::warning::Gitee Release ${release_id} 预览标记更新失败（prerelease=${pre}）"
 
   local f name

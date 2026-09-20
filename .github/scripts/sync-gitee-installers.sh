@@ -72,7 +72,9 @@ echo "   Gitee release id = $RID"
 
 # Release 已存在时创建接口不会生效，这里按 tag 统一纠正预览标记
 curl -sS --max-time 60 -X PATCH "$API/releases/$RID" \
-  -d "access_token=$GITEE_TOKEN" -d "prerelease=$PRE" > /dev/null \
+  -d "access_token=$GITEE_TOKEN" -d "tag_name=$TAG" -d "name=NOVAI $TAG" \
+  -d "body=国内下载镜像（与 GitHub Release 相同内容）。安装包超过 Gitee 单附件 100MB 限制，已按 .part00/.part01 分卷，下载后合并即可。" \
+  -d "prerelease=$PRE" > /dev/null \
   || echo "::warning::Gitee Release $RID 预览标记更新失败（prerelease=$PRE）"
 
 # ---- 3. 下载 → 分卷 → 上传
