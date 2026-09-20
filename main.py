@@ -1558,8 +1558,8 @@ def merge_default_api_providers(providers, inject_missing=True):
     if lovart_default:
         current = next((item for item in merged if item.get("id") == "lovart"), None)
         if not current:
-            if inject_missing:
-                merged.append(lovart_default)
+            # Lovart 与前端固定平台列表一致，必须无条件补上：否则老用户升级后设置页看不到入口
+            merged.append(lovart_default)
         else:
             if not current.get("base_url"):
                 current["base_url"] = lovart_default["base_url"]
@@ -2072,6 +2072,17 @@ def get_primary_provider_id(providers=None):
     primary = next((p for p in providers if p.get("primary") and p.get("enabled", True)), None)
     if primary:
         return primary["id"]
+
+    def has_usable_key(item):
+        if item.get("id") == "lovart" or str(item.get("protocol") or "").strip().lower() == "lovart":
+            return bool(lovart_access_key_value()) and bool(lovart_secret_key_value())
+        return bool(provider_env_key_value(item.get("id") or ""))
+
+    # 自动补进来的平台（如 Lovart）可能还没配密钥，不能让它顶掉用户真正在用的平台
+    keyed = [p for p in providers if p.get("enabled", True) and has_usable_key(p)]
+    keyed_non_ms = next((p for p in keyed if p["id"] != "modelscope"), None) or (keyed[0] if keyed else None)
+    if keyed_non_ms:
+        return keyed_non_ms["id"]
     non_ms = next((p for p in providers if p["id"] != "modelscope" and p.get("enabled", True)), None)
     if non_ms:
         return non_ms["id"]

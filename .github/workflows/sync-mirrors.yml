@@ -16,7 +16,7 @@ on:
       tag:
         description: 'Release tag（例如 v1.0.115）'
         required: true
-        default: 'v1.0.121'
+        default: 'v1.0.122'
 
 permissions:
   contents: read
