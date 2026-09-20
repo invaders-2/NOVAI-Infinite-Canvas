@@ -7,24 +7,27 @@
     <title data-i18n="smart.title">智能画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.117.1789615934">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.117.1789606971">
-    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.117.1789606971">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.117.1789606971">
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/vendor/js/html-to-image.js?v=1.0.117.1789615756"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/media.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/workflow-utils.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/node-registry.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/table-model.js?v=1.0.117.1789612695"></script>
-    <script src="/static/js/shared/table-node.js?v=1.0.117.1789612994"></script>
-    <script src="/static/js/shared/dropdown.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.117.1789606971"></script>
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.120.1789751995">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
+    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.120.1789716971">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
+    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.120.1789742566">
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
+    <script defer src="/static/vendor/js/html-to-image.js?v=1.0.120.1789615756"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
+    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
+    <script src="/static/js/shared/media.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/workflow-utils.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/node-registry.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/table-model.js?v=1.0.120.1789612695"></script>
+    <script src="/static/js/shared/table-node.js?v=1.0.120.1789696438"></script>
+    <script src="/static/js/shared/dropdown.js?v=1.0.120.1789746233"></script>
+    <script src="/static/js/shared/glide.js?v=1.0.120.1789742748"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -160,6 +163,44 @@ html.theme-dark .canvas-zoombar .zoombar-sep,
 html.studio-theme-dark .canvas-zoombar .zoombar-sep,
 body.theme-dark .canvas-zoombar .zoombar-sep,
 body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,255,.12); }
+
+/* ═══ NovaGlide 滑块（shared/glide.js + css/glide.css） ═══
+   glide.css 只压选项自己的 background-color / border-color，压不掉文字颜色：
+   凡是「选中态 = 深底 + 反色文字」的选项，底色一没文字就跟着隐形 —— 在滑块 host 内把颜色拉回来。
+   底色取各弹层自己的 hover 底（--soft）而不是深色 --strong，滑块永远是浅色底。 */
+.slash-menu.nv-glide-host,
+.slash-sub.nv-glide-host,
+.mention-option-grid.nv-glide-host,
+.mention-folder-chips.nv-glide-host,
+.smart-export-menu.nv-glide-host,
+.create-menu.nv-glide-host,
+.size-picker-list.nv-glide-host { --nv-glide-bg: var(--soft); }
+/* 容器自己就是 --soft 底（分段控件）的，滑块再用 --soft 会融成一片，改用它的选中底色 --card */
+.mention-source-tabs.nv-glide-host,
+.size-picker-scope.nv-glide-host,
+.loop-number-grid.nv-glide-host { --nv-glide-bg: var(--card); }
+/* 文件夹 chip 是圆形胶囊，方形滑块压在下面很扎眼 */
+.mention-folder-chips.nv-glide-host .nv-glide-pill { border-radius: var(--radius-full); }
+/* 深底 + 反色文字的选中项：文字回到正常可读色，「当前选的是哪个」交给滑块表达 */
+.mention-folder-chips.nv-glide-host .mention-folder-chip.active,
+.mention-source-tabs.nv-glide-host .mention-source-tab.active,
+.loop-number-grid.nv-glide-host .loop-number-cell.active { color: var(--text); }
+/* @ 提及的缩略图选项悬停会上浮 1px，滑块量到的是上浮前的位置会差 1px；上浮本来就是为了提示悬停，
+   滑块已经在提示了，去掉它顺带让几何对齐。 */
+.mention-option-grid.nv-glide-host .mention-option:hover { transform: none; }
+/* 参数行同族弹层（质量/数量/画幅/时长/平台/模型/视频分辨率）：
+   容器自己就是 --soft 底的分段控件用它的选中底色 --card，否则滑块与容器融成一片；
+   容器透明的用 --soft（这几个的 hover 底色是 --card，浅色下就是白色，压在白色弹层上看不见）。 */
+.seg-row.nv-glide-host,
+.count-grid.nv-glide-host { --nv-glide-bg: var(--card); }
+.ratio-grid.nv-glide-host,
+.duration-grid.nv-glide-host,
+.model-list.nv-glide-host { --nv-glide-bg: var(--soft); }
+/* 深底 + 反色文字的选中项：底色被压掉后文字拉回可读色（比例/时长/平台的 .active 本来就是 --strong 字，不用救） */
+.seg-row.nv-glide-host button.active,
+.count-grid.nv-glide-host .count-cell.active { color: var(--text); }
+/* .direct-option 悬停上浮 1px 会让滑块差 1px（同 @ 提及的缩略图） */
+.model-list.nv-glide-host .direct-option:hover { transform: none; }
 </style>
 </head>
 <body>
@@ -209,10 +250,9 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         <div id="createMenu" class="create-menu">
             <button class="menu-btn" type="button" data-create-type="image"><i data-lucide="upload-cloud" class="w-4 h-4"></i><span>上传</span></button>
             <button class="menu-btn" type="button" data-create-type="group"><i data-lucide="group" class="w-4 h-4"></i><span>分组</span></button>
-            <button class="menu-btn" type="button" data-create-type="prompt"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span>提示词</span></button>
-            <button class="menu-btn" type="button" data-create-type="loop"><i data-lucide="repeat-2" class="w-4 h-4"></i><span>循环</span></button>
+            <button class="menu-btn" type="button" data-create-type="prompt"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span>文本生成</span></button>
             <button class="menu-btn" type="button" data-create-type="table"><i data-lucide="table" class="w-4 h-4"></i><span>多维表格</span></button>
-            <button class="menu-btn" type="button" data-create-type="batch"><i data-lucide="play" class="w-4 h-4"></i><span>批量生成</span></button>
+            <button class="menu-btn" type="button" data-create-type="batch"><i data-lucide="play" class="w-4 h-4"></i><span>生成输入</span></button>
         </div>
         <input id="fileInput" type="file" accept="image/*,video/*,audio/*" multiple hidden>
         <div id="promptPresetPanel" class="prompt-preset-panel">
@@ -632,8 +672,8 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         <div id="smartSuggestBtns" class="smart-suggest-btns"></div>
         <button type="button" class="smart-suggest-close" onclick="closeSmartSuggestions()" title="关闭"><i data-lucide="x"></i></button>
     </div>
-    <script defer src="/static/vendor/js/glfx.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/js/image-adjust-editor.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/js/smart-canvas.js?v=1.0.117.1789615935"></script>
+    <script defer src="/static/vendor/js/glfx.js?v=1.0.120.1789606971"></script>
+    <script defer src="/static/js/image-adjust-editor.js?v=1.0.120.1789606971"></script>
+    <script defer src="/static/js/smart-canvas.js?v=1.0.120.1789858679"></script>
 </body>
 </html>

@@ -413,15 +413,15 @@ ok(one(api.renderTableBatchPanel(genNode), 'table-batch-status').textContent.ind
 api.toggleTableRow(node, 0, true);
 eq(model.batchRowsToRun(api.tableRowInputs(node), {startRow:1, selectedRows:node.table.selectedRows}).length, 1, '勾回来后又参与执行');
 
-/* @图片N 重编号验证。
+/* @图片N 重编号 + 「一行一张主参考图」验证。
    此刻全局清单：ch0=[img1,img2,img3,img5]（序号 1-4，逐行模式）、ch1=[img4]（序号 5，共享模式）。
-   第 0 行实际拿到 [img1, img4] → 行内序号 1 和 2。 */
+   两个通道都是非「全部」：一行只留第 1 张主参考图 img1，共享列的 img4 被裁掉。 */
 node.table.rows[0][0] = '把 @图片5 换成新的';
 const rewritten = api.tableRowInputs(node)[0];
-eq(rewritten.media.map(e => e.nodeId), ['img1', 'img4'], '第 0 行实际参考图');
-ok(rewritten.prompt.indexOf('@图片2') > 0, '全局序号 @图片5 → 行内 @图片2：' + rewritten.prompt);
-ok(rewritten.prompt.indexOf('@图片5') < 0, '不再残留全局序号');
-eq(rewritten.danglingMentions, [], '没有悬空引用');
+eq(rewritten.media.map(e => e.nodeId), ['img1'], '第 0 行只留 1 张主参考图（两个非 all 列也合计只留一张）');
+ok(rewritten.prompt.indexOf('@图片5') < 0, '被裁掉的图对应的 @图片5 从提示词里去掉了');
+eq(rewritten.prompt.indexOf('@图片2'), -1, '不再残留/改写成指向没发出去的图的序号：' + rewritten.prompt);
+eq(rewritten.danglingMentions, [], '被主动裁掉的图不算悬空引用');
 // @图片4 是 img5，本行逐行模式不含它 —— 必须被报成悬空，不能静默发出去
 node.table.rows[0][0] = '把 @图片4 换掉';
 const danglingRow = api.tableRowInputs(node)[0];
@@ -649,6 +649,23 @@ missingUrls.delete('/gone.png');
     eq(channels[1].items.map(i => i.nodeId), ['imgB','imgC'], '第 2 通道是 group 成员');
     eq(channels[1].mode, 'shared', '两张 → 沿用（参考栏默认一行一张）');
     eq(api.tableUpstreamTexts(created), [], 'LLM 节点不进上游文本');
+
+    /* 经典画布的规划遍可能为空（llmListPlan === null），这时生成遍回执 table.inputGroups
+       才是权威：没有它两个通道都会回落到 shared，多角度那组就不会整组带上。 */
+    const parsedWithGroups = model.parseTableOutput(JSON.stringify({
+        kind:'table', version:1,
+        inputGroups:[{group:1, rowMode:'per-row'}, {group:2, rowMode:'every-row'}],
+        columns:['提示词'], rows:[['一行']]
+    }));
+    eq(parsedWithGroups.inputGroups.length, 2, 'parseTableOutput 保留生成遍的 inputGroups 回执');
+    const fromReceipt = api.materializeLlmTable(llm, parsedWithGroups, groups, null);
+    eq(fromReceipt.tableInputChannelModes, {'input-1':'sequence', 'input-2':'all'}, 'plan=null 时用生成遍回执设通道模式');
+    eq(api.ensureTableChannels(fromReceipt).map(c => c.mode), ['sequence', 'all'], '多角度组整组带上（不再回落 shared）');
+    // 两者都存在时以 table.inputGroups 为准（生成遍的最终回执），plan 只作兜底
+    const fromPlanOnly = api.materializeLlmTable(llm, parsed, groups, {inputGroups:[{group:1, rowMode:'every-row'}, {group:2, rowMode:'per-row'}]});
+    eq(fromPlanOnly.tableInputChannelModes, {'input-1':'all', 'input-2':'sequence'}, '没有回执时退回 plan');
+    const receiptWins = api.materializeLlmTable(llm, parsedWithGroups, groups, {inputGroups:[{group:1, rowMode:'every-row'}, {group:2, rowMode:'per-row'}]});
+    eq(receiptWins.tableInputChannelModes, {'input-1':'sequence', 'input-2':'all'}, 'table 与 plan 同时存在时以 table.inputGroups 为准');
 
     // 按钮文案
     eq(api.llmRunButtonLabel({running:false, llmOutputMode:'list'}), '生成', 'list 未运行');
@@ -912,21 +929,23 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     more().onclick({stopPropagation(){}});
     // （··· 菜单已挂到 body；条目/位置由真浏览器实测覆盖）
 
-    // 「新增」= 追加到同一行（一行可以有多张）
+    // 「新增」= 追加到同一行（上传的 UI 一格仍可放多张），生成时只发第 1 张主参考图
     api.addTableManualInputItem(tbl, 'input-1', 0, {url:'/static/m2.png', mediaType:'image', name:'m2.png'});
     api.repaintTable(tbl);
-    eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/m.png','/static/m2.png'], '新增后这一行有两张');
-    eq(api.tableRowInputs(tbl)[0].media.map(m => m.ordinal), [1,2], '第二张序号顺延');
+    eq(api.tableRowInputs(tbl)[0].channelItems[0].map(m => m.url), ['/static/m.png','/static/m2.png'], '上传的 UI 仍保留两张（一格可放多张）');
+    eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/m.png'], '生成时一行只发第 1 张主参考图');
+    eq(api.tableRowInputs(tbl)[0].media.map(m => m.ordinal), [1], '主参考图保持原序号');
     api.repaintTable(tbl);
     // （··· 菜单已挂到 body；条目/位置由真浏览器实测覆盖）
     // （··· 菜单已挂到 body；条目/位置由真浏览器实测覆盖）
     // （菜单挂 body，条目断言交给真浏览器实测）
     // （菜单已挂到 body，token 的 title 交给真浏览器实测）
 
-    // 单张替换只动那一张
+    // 单张替换只动那一张（生成时仍只发第 1 张）
     api.replaceTableManualInputItem(tbl, 'input-1', 0, 1, {url:'/static/m3.png', mediaType:'image', name:'m3.png'});
     api.repaintTable(tbl);
-    eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/m.png','/static/m3.png'], '只换了第二张，第一张没动');
+    eq(api.tableRowInputs(tbl)[0].channelItems[0].map(m => m.url), ['/static/m.png','/static/m3.png'], '只换了第二张，第一张没动');
+    eq(api.tableRowInputs(tbl)[0].media.map(m => m.url), ['/static/m.png'], '生成时仍只发第 1 张主参考图');
     api.setTableManualInputItem(tbl, 'input-1', 0, {url:'/static/m.png', mediaType:'image', name:'m.png'});
     api.repaintTable(tbl);
 
@@ -1173,6 +1192,50 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     connections.push({id:'c_cache2', from:'cacheImg2', to:cacheTbl.id});
     const seventh = api.tableRowInputs(cacheTbl);
     ok(seventh !== sixth, '入边变了 → 重新算');
+}
+
+// ═══ P. 一行只带 1 张主参考图：「全部」多角度整组保留，其余裁到 1 ═══
+{
+    // ① 逐行 3 张 + 全部 2 张 → 一行 = 1 + 2
+    const multi = api.addTableNode();
+    ['mm1','mm2','mm3'].forEach((id, i) => nodes.push({id, type:'image', url:'/p/m' + i + '.png'}));
+    ['ma1','ma2'].forEach((id, i) => nodes.push({id, type:'image', url:'/p/a' + i + '.png'}));
+    ['mm1','mm2','mm3'].forEach(id => connections.push({id:'c_' + id, from:id, to:multi.id}));
+    ['ma1','ma2'].forEach(id => connections.push({id:'c_' + id, from:id, to:multi.id, toPort:'input-2'}));
+    multi.tableInputChannelModes = {'input-1':'sequence', 'input-2':'all'};
+    api.addTableColumn(multi);
+    api.addTableRow(multi);
+    api.addTableRow(multi);
+    const multiRow = api.tableRowInputs(multi)[0];
+    eq(multiRow.media.map(e => e.nodeId), ['mm1','ma1','ma2'], '逐行 3 张 + 全部 2 张 → 这一行 = 1 张主参考图 + 多角度整组 2 张');
+    eq(multiRow.media.length, 3, '一行 media = 1 + 2 张');
+    // 多角度那两张仍然都能被 @ 到（整组保留，重编号照样可用）
+    multi.table.rows[0][0] = '@图片1、@图片4、@图片5';
+    const multiPrompt = api.tableRowInputs(multi)[0];
+    eq(multiPrompt.prompt.indexOf('@图片1'), 0, '主参考图重写成行内 @图片1：' + multiPrompt.prompt);
+    ok(multiPrompt.prompt.indexOf('@图片2') >= 0 && multiPrompt.prompt.indexOf('@图片3') >= 0, '多角度两张重写成行内 @图片2 / @图片3：' + multiPrompt.prompt);
+    eq(multiPrompt.danglingMentions, [], '全部组整组的引用都能对上行内序号');
+
+    // ② 两个非 all 通道各若干张 → 一行仍只有 1 张主参考图
+    const two = api.addTableNode();
+    ['tn1','tn2','tn3'].forEach((id, i) => nodes.push({id, type:'image', url:'/p/n' + i + '.png'}));
+    ['tu1','tu2'].forEach((id, i) => nodes.push({id, type:'image', url:'/p/u' + i + '.png'}));
+    ['tn1','tn2','tn3'].forEach(id => connections.push({id:'c_' + id, from:id, to:two.id}));
+    ['tu1','tu2'].forEach(id => connections.push({id:'c_' + id, from:id, to:two.id, toPort:'input-2'}));
+    two.tableInputChannelModes = {'input-1':'sequence', 'input-2':'shared'};
+    api.addTableColumn(two);
+    api.addTableRow(two);
+    // 第 1 行提示词显式 @ 了被裁掉的 tu1（全局序号 4）→ 从提示词去掉、且不算悬空
+    two.table.rows[0][0] = '用 @图片1 和 @图片4 生成';
+    const twoRow = api.tableRowInputs(two)[0];
+    eq(twoRow.media.map(e => e.nodeId), ['tn1'], '两个非 all 通道合计也只留 1 张主参考图');
+    eq(twoRow.media.length, 1, '一行 media = 1 张');
+    ok(twoRow.prompt.indexOf('@图片1') >= 0, '主参考图的引用保留：' + twoRow.prompt);
+    eq(twoRow.prompt.indexOf('@图片4'), -1, '被裁掉的图对应的 @图片4 从提示词里去掉了');
+    eq(twoRow.danglingMentions, [], '被主动裁掉的图不报悬空（批量不会被整行拦下）');
+    // 真正的悬空引用（本行根本取不到的第 3 张 tn3，全局序号 3）仍然要报出来
+    two.table.rows[0][0] = '用 @图片3 生成';
+    eq(api.tableRowInputs(two)[0].danglingMentions.map(d => d.token), ['@图片3'], '本行取不到的图仍报悬空（没有把 dangling 一律吞掉）');
 }
 
     console.log('通过 ' + pass + '/' + (pass + fails.length));

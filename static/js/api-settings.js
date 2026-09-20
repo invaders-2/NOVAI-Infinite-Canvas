@@ -40,6 +40,14 @@ const geminiCliInfo = document.getElementById('geminiCliInfo');
 const geminiCliHelpOverlay = document.getElementById('geminiCliHelpOverlay');
 const geminiCliHelpCommand = document.getElementById('geminiCliHelpCommand');
 const geminiCliHelpOutput = document.getElementById('geminiCliHelpOutput');
+const lovartPanel = document.getElementById('lovartPanel');
+const lovartAkInput = document.getElementById('lovartAkInput');
+const lovartSkInput = document.getElementById('lovartSkInput');
+const lovartAutoConfirmInput = document.getElementById('lovartAutoConfirmInput');
+const lovartKeyHint = document.getElementById('lovartKeyHint');
+const lovartUnlimitedInput = document.getElementById('lovartUnlimitedInput');
+const lovartModeApplyBtn = document.getElementById('lovartModeApplyBtn');
+const lovartModeHint = document.getElementById('lovartModeHint');
 const runninghubConfigBlock = document.getElementById('runninghubConfigBlock');
 const rhPasteInput = document.getElementById('rhPasteInput');
 const rhAppsList = document.getElementById('rhAppsList');
@@ -79,6 +87,7 @@ const MS_BUILTIN_IMAGE_MODELS = [
 ];
 const MS_DEFAULT_BASE_URL = 'https://api-inference.modelscope.cn/v1';
 const RH_DEFAULT_BASE_URL = 'https://www.runninghub.cn';
+const LOVART_DEFAULT_BASE_URL = 'https://lgw.lovart.ai';
 const LINGJING_DEFAULT_BASE_URL = 'https://api.vectorengine.cn';
 const LINGJING_REGISTER_URL = 'https://api.vectorengine.cn/register?aff=g1CT';
 const VIP_GPT_DEFAULT_BASE_URL = 'https://www.vip-gpt.net';
@@ -92,8 +101,32 @@ const CODEX_DEFAULT_IMAGE_MODELS = ['gpt-image-2'];
 const CODEX_DEFAULT_CHAT_MODELS = ['gpt-5.5'];
 const GEMINI_CLI_DEFAULT_IMAGE_MODELS = ['auto'];
 const GEMINI_CLI_DEFAULT_CHAT_MODELS = ['auto'];
+const LOVART_DEFAULT_CHAT_MODELS = ['lovart-agent'];
+const LOVART_DEFAULT_IMAGE_MODELS = [
+    'generate_image_gpt_image_2_5_flare', 'generate_image_gpt_image_2_5_flare_low', 'generate_image_gpt_image_2_5_flare_medium',
+    'generate_image_gpt_image_2_5_flare_high', 'generate_image_gpt_image_2_5_flare_xhigh', 'generate_image_gpt_image_2_5_flare_max',
+    'generate_image_gpt_image_2_5_sunburst', 'generate_image_gpt_image_2_5_sunburst_low', 'generate_image_gpt_image_2_5_sunburst_medium',
+    'generate_image_gpt_image_2_5_sunburst_high', 'generate_image_gpt_image_2_5_sunburst_xhigh', 'generate_image_gpt_image_2_5_sunburst_max',
+    'generate_image_gpt_image_2', 'generate_image_gpt_image_2_low', 'generate_image_gpt_image_2_medium',
+    'generate_image_gpt_image_2_high', 'generate_image_nano_banana_pro', 'generate_image_nano_banana_2',
+    'generate_image_seedream_v5_pro', 'generate_image_gpt_image_1_5', 'generate_image_seedream_v5',
+    'generate_image_luma_uni_1', 'generate_image_luma_uni_1_max', 'generate_image_flux_2_max',
+    'generate_image_flux_2_pro', 'generate_image_seedream_v4_5', 'generate_image_nano_banana',
+    'generate_image_seedream_v4', 'generate_image_midjourney', 'generate_image_ideogram_v4',
+    'generate_image_qwen_image3', 'generate_image_qwen_image3_pro', 'generate_image_nano_banana_2_lite',
+    'generate_image_p_image_ideogram'
+];
+const LOVART_DEFAULT_VIDEO_MODELS = [
+    'generate_video_seedance_v2_5', 'generate_video_seedance_v2_0', 'generate_video_seedance_v2_0_fast',
+    'generate_video_seedance_v2_0_mini', 'generate_video_kling_v3', 'generate_video_kling_v3_omni',
+    'generate_video_minimax_h3', 'generate_video_seedance_pro_v1_5', 'generate_video_kling_v2_6',
+    'generate_video_wan_v2_6', 'generate_video_veo3_1', 'generate_video_veo3_1_fast',
+    'generate_video_kling_omni_v1', 'generate_video_hailuo_v2_3', 'generate_video_veo3',
+    'generate_video_vidu_q2', 'generate_video_gemini_omni_flash', 'generate_video_minimax_h3_max',
+    'generate_video_wan_v3', 'generate_video_wan_v3_prime'
+];
 const CLI_PROTOCOLS = new Set(['jimeng', 'codex', 'gemini-cli']);
-const API_PROTOCOLS = ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex', 'gemini-cli'];
+const API_PROTOCOLS = ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex', 'gemini-cli', 'lovart'];
 const CLI_PROVIDER_PRESETS = {
     jimeng:{id:'jimeng', name:'即梦 CLI', protocol:'jimeng'},
     codex:{id:'codex', name:'GPT CLI', protocol:'codex'},
@@ -147,10 +180,23 @@ function applyCliProtocolDefaults(item, protocol){
         item.video_models = [];
     }
 }
+// reset 只在用户主动把协议切到 Lovart 时为 true：网关回官方地址并合并预置工具清单。
+// 被动渲染/保存时只补空值，避免覆盖已配置的网关、避免用户删掉的模型被反复加回来。
+function applyLovartProtocolDefaults(item, reset=false){
+    if(!item) return;
+    item.protocol = 'lovart';
+    item.base_url = reset ? LOVART_DEFAULT_BASE_URL : (item.base_url || LOVART_DEFAULT_BASE_URL);
+    item.image_request_mode = 'openai';
+    item.image_edit_route = 'general';
+    if(reset || !(item.chat_models || []).length) item.chat_models = unique([...(item.chat_models || []), ...LOVART_DEFAULT_CHAT_MODELS]);
+    if(reset || !(item.image_models || []).length) item.image_models = unique([...(item.image_models || []), ...LOVART_DEFAULT_IMAGE_MODELS]);
+    if(reset || !(item.video_models || []).length) item.video_models = unique([...(item.video_models || []), ...LOVART_DEFAULT_VIDEO_MODELS]);
+}
 let rhWorkflowEditorState = { open:false, index:-1, entry:null, config:null, expanded:{}, activeNodeId:'', graph:{ k:1, x:0, y:0, w:0, h:0 }, pan:null, bound:false, previewParams:{}, previewRunning:false, previewStatus:'', previewOutputs:[] };
 let rhEditorMode = 'workflow';
 let recommendInlineOpen = false;
 let providerDragId = '';
+const lovartModeHints = new Map();
 // category: 'allround'（全能）| 'value'（性价比）| 'free'（免费），推荐面板按分组分节展示
 const RECOMMENDED_APIS = [
     {
@@ -487,7 +533,7 @@ function deriveIdFromName(name, existingId){
 function updateIdPreview(){
     const item = provider();
     if(!item) return;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng';
+    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'lovart';
     const idPreview = document.getElementById('idPreview');
     if(!idPreview) return;
     if(isBuiltin){
@@ -508,7 +554,7 @@ function visibleProviders(){
 function isFixedProvider(itemOrId){
     const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
     // 即梦 CLI 不再是固定平台：可删除、可排序，未添加则不存在。
-    return id === 'modelscope' || id === 'runninghub' || id === 'volcengine';
+    return id === 'modelscope' || id === 'runninghub' || id === 'volcengine' || id === 'lovart';
 }
 function unique(values){
     const seen = new Set();
@@ -675,6 +721,11 @@ function volcengineArkKeyHintText(item){
 function volcengineAssetKeyHintText(item){
     const ak = item?.has_volcengine_access_key ? `AK 已保存：${item.volcengine_access_key_env || 'API/.env'} ${item.volcengine_access_key_preview || ''}` : 'AK 未保存';
     const sk = item?.has_volcengine_secret_key ? `SK 已保存：${item.volcengine_secret_key_env || 'API/.env'} ${item.volcengine_secret_key_preview || ''}` : 'SK 未保存';
+    return `${ak} · ${sk}`;
+}
+function lovartKeyHintText(item){
+    const ak = item?.has_lovart_access_key ? `AK 已保存：${item.lovart_access_key_env || 'API/.env'} ${item.lovart_access_key_preview || ''}` : 'AK 未保存';
+    const sk = item?.has_lovart_secret_key ? `SK 已保存：${item.lovart_secret_key_env || 'API/.env'} ${item.lovart_secret_key_preview || ''}` : 'SK 未保存';
     return `${ak} · ${sk}`;
 }
 function isNewUserProvider(item){
@@ -861,7 +912,7 @@ function syncEditor(){
     const item = provider();
     if(!item) return;
     const oldId = item.id;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng';
+    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'lovart';
     // 内置和自定义平台的 ID 都保持稳定；新建时若没有 ID 才生成一次。
     const nextId = isBuiltin ? item.id : deriveIdFromName(nameInput.value, item.id);
     item.id = nextId;
@@ -876,19 +927,22 @@ function syncEditor(){
         ? 'runninghub'
         : item.id === 'volcengine'
         ? 'volcengine'
+        : item.id === 'lovart'
+        ? 'lovart'
         : (protocolInput?.value || 'openai');
     item.base_url = CLI_PROTOCOLS.has(selectedProtocol) ? '' : baseInput.value.trim();
     // 固定平台不从协议下拉读取
     item.protocol = selectedProtocol;
+    const isLovart = isLovartContext(item, selectedProtocol);
     item.image_request_mode = normalizeImageRequestMode(
-        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol)
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isLovart || CLI_PROTOCOLS.has(selectedProtocol)
             ? 'openai'
             : lockedApi
             ? lockedApi.image_request_mode
             : (imageRequestModeInput?.value || item.image_request_mode)
     );
     item.image_edit_route = normalizeImageEditRoute(
-        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(selectedProtocol)
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isLovart || CLI_PROTOCOLS.has(selectedProtocol)
             ? 'general'
             : (imageEditRouteInput?.value || item.image_edit_route)
     );
@@ -912,6 +966,14 @@ function syncEditor(){
         item.volcengine_project_name = (volcProjectInput?.value.trim() || VOLCENGINE_DEFAULT_PROJECT_NAME);
         item.volcengine_region = (volcRegionInput?.value.trim() || VOLCENGINE_DEFAULT_REGION);
     }
+    if(isLovart){
+        applyLovartProtocolDefaults(item);
+        const ak = lovartAkInput?.value.trim() || '';
+        const sk = lovartSkInput?.value.trim() || '';
+        if(ak) item.lovart_access_key = ak;
+        if(sk) item.lovart_secret_key = sk;
+        if(lovartAutoConfirmInput) item.lovart_auto_confirm = lovartAutoConfirmInput.checked === true;
+    }
 }
 function ensureRunningHubLists(item){
     if(!item) return;
@@ -930,6 +992,7 @@ function updateProtocolFromInput(){
     item.protocol = API_PROTOCOLS.includes(value) ? value : 'openai';
     if(CLI_PROTOCOLS.has(item.protocol)) item.base_url = '';
     applyCliProtocolDefaults(item, item.protocol);
+    if(item.protocol === 'lovart') applyLovartProtocolDefaults(item, true);
     document.body.classList.toggle('show-jimeng', item.protocol === 'jimeng');
     document.body.classList.toggle('show-codex', item.protocol === 'codex');
     document.body.classList.toggle('show-gemini-cli', item.protocol === 'gemini-cli');
@@ -943,6 +1006,11 @@ function updateProtocolFromInput(){
 }
 function isVolcengineProvider(item){
     return String(item?.protocol || '').toLowerCase() === 'volcengine';
+}
+function isLovartContext(item, protocol=''){
+    if(!item) return false;
+    if(item.id === 'lovart') return true;
+    return String(protocol || protocolInput?.value || item.protocol || '').toLowerCase() === 'lovart';
 }
 function handleRhPasteInput(value){
     const parsed = parseRunningHubRunRef(value);
@@ -2434,7 +2502,7 @@ async function saveRecommendedApi(index){
     if(ok) setStatus(trf('api.recommendSaved', {name:api.name}));
 }
 function sortedProviders(){
-    const order = ['modelscope', 'runninghub', 'volcengine'];
+    const order = ['modelscope', 'runninghub', 'volcengine', 'lovart'];
     return visibleProviders().sort((a, b) => {
         const ai = order.indexOf(a.id);
         const bi = order.indexOf(b.id);
@@ -2566,19 +2634,37 @@ function renderEditor(){
     const lockedApi = lockedRecommendedApi(item);
     if(lockedApi) applyLockedRecommendedProtocol(item);
     if(protocolInput){
-        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : (item.protocol || 'openai');
+        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'lovart' ? 'lovart' : (item.protocol || 'openai');
         protocolInput.disabled = FIXED_PROTOCOL_PROVIDER_IDS.has(item.id) || Boolean(lockedApi);
         protocolInput.title = lockedApi ? '推荐平台使用固定协议' : (protocolInput.disabled ? '内置平台使用固定协议' : '');
     }
+    const isLovart = isLovartContext(item);
     if(imageRequestModeInput){
         imageRequestModeInput.value = normalizeImageRequestMode(item.image_request_mode);
-        imageRequestModeInput.disabled = Boolean(lockedApi) || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
+        imageRequestModeInput.disabled = Boolean(lockedApi) || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isLovart || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
         imageRequestModeInput.title = lockedApi ? '推荐平台使用固定图片协议' : '';
     }
     if(imageEditRouteInput){
         imageEditRouteInput.value = normalizeImageEditRoute(item.image_edit_route);
-        imageEditRouteInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
+        imageEditRouteInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isLovart || CLI_PROTOCOLS.has(String(protocolInput?.value || item.protocol || '').toLowerCase());
     }
+    const apiKeyField = document.querySelector('.api-key-field');
+    if(apiKeyField) apiKeyField.style.display = isLovart ? 'none' : '';
+    baseInput.disabled = isLovart;
+    baseInput.title = isLovart ? 'Lovart 使用固定网关地址' : '';
+    const fetchModelsBtn = document.getElementById('fetchModelsBtn');
+    if(fetchModelsBtn){
+        fetchModelsBtn.disabled = isLovart;
+        fetchModelsBtn.style.opacity = isLovart ? '.5' : '';
+        fetchModelsBtn.title = isLovart ? 'Lovart 使用内置工具清单，不支持拉取模型' : '';
+    }
+    const probeAsyncBtn = document.getElementById('probeAsyncBtn');
+    if(probeAsyncBtn){
+        probeAsyncBtn.disabled = isLovart;
+        probeAsyncBtn.style.display = isLovart ? 'none' : '';
+    }
+    const imageModeWrap = document.querySelector('.image-request-mode-wrap');
+    if(imageModeWrap) imageModeWrap.style.display = isLovart ? 'none' : '';
     keyInput.value = '';
     keyInput.placeholder = item.has_key ? `${tr('api.keepCurrentKey')} ${item.key_preview || ''}` : tr('api.enterKey');
     keyHint.textContent = item.has_key ? `${tr('api.keySaved')}${item.key_env || 'API/.env'}` : tr('api.noKey');
@@ -2641,6 +2727,23 @@ function renderEditor(){
         keyInput.placeholder = 'Antigravity CLI 使用本机 agy 登录态，无需 API Key';
         keyHint.textContent = '请先安装 Antigravity CLI，并在终端执行 agy 完成登录';
     }
+    if(isLovart){
+        applyLovartProtocolDefaults(item);
+        baseInput.value = item.base_url;
+        if(lovartAkInput){
+            lovartAkInput.value = '';
+            lovartAkInput.placeholder = item.has_lovart_access_key ? `保持当前 AK ${item.lovart_access_key_preview || ''}` : 'Access Key';
+        }
+        if(lovartSkInput){
+            lovartSkInput.value = '';
+            lovartSkInput.placeholder = item.has_lovart_secret_key ? `保持当前 SK ${item.lovart_secret_key_preview || ''}` : 'Secret Key';
+        }
+        if(lovartAutoConfirmInput) lovartAutoConfirmInput.checked = item.lovart_auto_confirm === true;
+        if(lovartUnlimitedInput) lovartUnlimitedInput.checked = item.lovart_unlimited === true;
+        if(lovartKeyHint) lovartKeyHint.textContent = lovartKeyHintText(item);
+        const modeHint = lovartModeHints.get(item.id);
+        setLovartModeHint(modeHint || '点『应用』查询/切换', modeHint ? 'ok' : '');
+    }
     document.body.classList.toggle('show-ms', isModelScope);
     document.body.classList.toggle('show-runninghub', isRunningHub);
     document.body.classList.toggle('show-volcengine', isVolcengine);
@@ -2677,6 +2780,10 @@ function renderEditor(){
         geminiCliPanel.hidden = !isGeminiCli;
         geminiCliPanel.style.display = isGeminiCli ? 'flex' : 'none';
         if(isGeminiCli) refreshGeminiCliStatus(false);
+    }
+    if(lovartPanel){
+        lovartPanel.hidden = !isLovart;
+        lovartPanel.style.display = isLovart ? 'flex' : 'none';
     }
     const deleteBtn = document.getElementById('deleteBtn');
     if(deleteBtn) deleteBtn.style.display = isFixedProvider(item) ? 'none' : 'inline-flex';
@@ -3132,6 +3239,7 @@ async function testConnection(){
     const isJimeng = (protocolInput?.value || '') === 'jimeng';
     const currentProtocol = String(protocolInput?.value || item.protocol || '').toLowerCase();
     const isCliProtocol = CLI_PROTOCOLS.has(currentProtocol);
+    const isLovart = isLovartContext(item, currentProtocol);
     if(!baseUrl && !isJimeng && !isCliProtocol){ alert('请先填写请求地址'); return; }
     if(btn){ btn.disabled = true; btn.querySelector('span').textContent = tr('api.testingUrl') || '验证中...'; }
     showVerifyResult(`<span style="color:var(--muted);font-size:11px;font-weight:700">验证中...</span>`);
@@ -3143,9 +3251,11 @@ async function testConnection(){
             body: JSON.stringify({
                 base_url: baseUrl,
                 api_key: apiKey,
-                provider_id: runninghubContext ? 'runninghub' : item.id,
-                protocol: runninghubContext ? 'runninghub' : (protocolInput?.value || 'openai'),
-                image_request_mode: imageRequestModeInput?.value || item.image_request_mode || 'openai'
+                provider_id: isLovart ? 'lovart' : runninghubContext ? 'runninghub' : item.id,
+                protocol: isLovart ? 'lovart' : runninghubContext ? 'runninghub' : (protocolInput?.value || 'openai'),
+                image_request_mode: imageRequestModeInput?.value || item.image_request_mode || 'openai',
+                lovart_access_key: isLovart ? (lovartAkInput?.value.trim() || '') : '',
+                lovart_secret_key: isLovart ? (lovartSkInput?.value.trim() || '') : ''
             })
         }).then(async r => {
             if(!r.ok) throw new Error((await r.json()).detail || (tr('api.urlInvalid') || '验证失败'));
@@ -3165,7 +3275,7 @@ async function testConnection(){
                 video: new Set(data.video_models || []),
             };
             const openBtn = document.getElementById('openPickerBtn');
-            if(openBtn){ openBtn.disabled = false; openBtn.style.opacity = '1'; }
+            if(openBtn && !isLovart){ openBtn.disabled = false; openBtn.style.opacity = '1'; }
             const isRunningHubNow = runninghubContext || detectedProtocol === 'runninghub';
             const isVolcengineNow = !isRunningHubNow && (detectedProtocol === 'volcengine' || isVolcengineProvider(item));
             const volcengineNote = isVolcengineNow
@@ -3178,7 +3288,11 @@ async function testConnection(){
             const runninghubNote = isRunningHubNow
                 ? ` · RunningHub OpenAPI${runninghubModelSourceNote(data)}`
                 : imageModeNote;
-            showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 地址验证通过 · 找到 ${data.model_count} 个模型${runninghubNote}</span>${volcengineNote}${jimengNote}${codexNote}${geminiCliNote}`);
+            const lovartNote = isLovart ? `<div style="margin-top:6px;color:#15803d;font-size:11px;font-weight:700">Lovart 密钥可用，可在画布里选择 Lovart 设计代理出图或出视频。</div>` : '';
+            const verifySummary = isLovart
+                ? '✓ Lovart 签名密钥验证通过'
+                : `✓ 地址验证通过 · 找到 ${data.model_count} 个模型${runninghubNote}`;
+            showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">${verifySummary}</span>${volcengineNote}${jimengNote}${codexNote}${geminiCliNote}${lovartNote}`);
         } else {
             showVerifyResult(`
                 <div style="font-size:11px;font-weight:800;color:#b45309">⚠ 地址验证未通过 (HTTP ${data.status})</div>
@@ -3477,7 +3591,7 @@ async function clearKeyOnly(){
     if(ok) keyInput.value = '';
 }
 // 与后端 FIXED_PROTOCOL_PROVIDER_IDS 对齐：这些平台协议固定，不显示/不接受单模型协议覆盖。
-const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'jimeng', 'runninghub']);
+const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'jimeng', 'runninghub', 'lovart']);
 function providerSupportsModelProtocol(item){
     return Boolean(item) && !FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
 }
@@ -3801,6 +3915,77 @@ async function clearVolcengineAssetKeys(){
         if(volcSkInput) volcSkInput.value = '';
     }
 }
+async function clearLovartKeys(){
+    const item = provider();
+    if(!item || !isLovartContext(item)) return;
+    if(!confirm('确认清除已保存的 Lovart Access Key / Secret Key？')) return;
+    item._clearLovartAccessKey = true;
+    item._clearLovartSecretKey = true;
+    const ok = await saveProviders();
+    if(ok){
+        if(lovartAkInput) lovartAkInput.value = '';
+        if(lovartSkInput) lovartSkInput.value = '';
+    }
+}
+function lovartModeLabel(mode, unlimited){
+    const raw = String(mode || '').trim();
+    const key = raw.toLowerCase();
+    if(key.includes('unlimited') || key.includes('queue') || raw.includes('排队')) return '排队模式';
+    if(key.includes('fast') || raw.includes('快速')) return '快速模式';
+    if(typeof unlimited === 'boolean') return unlimited ? '排队模式' : '快速模式';
+    return raw || '未知模式';
+}
+function lovartModeText(prefix, mode, unlimited, credits){
+    const creditText = (credits === null || credits === undefined || credits === '') ? '' : ` · 额度 ${credits}`;
+    return `${prefix}${lovartModeLabel(mode, unlimited)}${creditText}`;
+}
+function lovartModeErrorText(data, status){
+    const detail = data?.detail;
+    if(typeof detail === 'string' && detail.trim()) return detail.trim();
+    if(detail) return prettyJson(detail);
+    return `切换失败（HTTP ${status}）`;
+}
+function setLovartModeHint(text, kind){
+    if(!lovartModeHint) return;
+    lovartModeHint.textContent = text || '';
+    lovartModeHint.style.color = kind === 'error' ? 'var(--danger-text)' : kind === 'ok' ? 'var(--success)' : '';
+}
+async function applyLovartMode(){
+    const item = provider();
+    if(!item || !isLovartContext(item)) return;
+    const body = { unlimited: lovartUnlimitedInput?.checked === true };
+    const ak = lovartAkInput?.value.trim() || '';
+    const sk = lovartSkInput?.value.trim() || '';
+    if(ak) body.lovart_access_key = ak;
+    if(sk) body.lovart_secret_key = sk;
+    const baseUrl = String(baseInput?.value || item.base_url || '').trim();
+    if(baseUrl) body.base_url = baseUrl;
+    if(lovartModeApplyBtn) lovartModeApplyBtn.disabled = true;
+    setLovartModeHint('正在应用...', '');
+    try {
+        const res = await fetch('/api/providers/lovart/mode', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(lovartModeErrorText(data, res.status));
+        const unlimited = data.unlimited === true;
+        item.lovart_unlimited = unlimited;
+        if(lovartUnlimitedInput) lovartUnlimitedInput.checked = unlimited;
+        const text = lovartModeText('当前：', data.mode, unlimited, data.credits);
+        lovartModeHints.set(item.id, text);
+        setLovartModeHint(text, 'ok');
+        apiToast(lovartModeText('已切换为', data.mode, unlimited, data.credits), 'ok');
+    } catch(err) {
+        lovartModeHints.delete(item.id);
+        const message = err?.message || String(err);
+        setLovartModeHint(message, 'error');
+        apiToast(message, 'error');
+    } finally {
+        if(lovartModeApplyBtn) lovartModeApplyBtn.disabled = false;
+    }
+}
 function addModel(kind){
     const item = provider();
     const key = kind === 'image' ? 'image_models' : kind === 'video' ? 'video_models' : 'chat_models';
@@ -3893,17 +4078,19 @@ async function saveProviders(){
             ? 'volcengine'
             : API_PROTOCOLS.includes(String(item.protocol || '').toLowerCase()) ? String(item.protocol).toLowerCase() : 'openai';
         const isCliProtocol = CLI_PROTOCOLS.has(item.protocol);
+        const isLovart = isLovartContext(item, item.protocol);
         item.image_request_mode = normalizeImageRequestMode(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol
+            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isLovart || isCliProtocol
                 ? 'openai'
                 : item.image_request_mode
         );
         item.image_edit_route = normalizeImageEditRoute(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol
+            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isLovart || isCliProtocol
                 ? 'general'
                 : item.image_edit_route
         );
         if(isCliProtocol) applyCliProtocolDefaults(item, item.protocol);
+        if(isLovart) applyLovartProtocolDefaults(item);
         if(item.id === 'runninghub'){
             item.base_url = item.base_url || RH_DEFAULT_BASE_URL;
             item.image_models = unique(item.image_models || []);
@@ -3947,7 +4134,7 @@ async function saveProviders(){
                 id:item.id,
                 name:item.name,
                 base_url:item.base_url,
-                protocol:(item.id === 'modelscope') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : (item.protocol || 'openai'),
+                protocol:(item.id === 'modelscope') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'lovart' ? 'lovart' : (item.protocol || 'openai'),
                 image_request_mode:item.image_request_mode || 'openai',
                 image_edit_route:item.image_edit_route || 'general',
                 image_generation_endpoint:item.image_generation_endpoint || '',
@@ -3967,12 +4154,18 @@ async function saveProviders(){
                 volcengine_region:item.id === 'volcengine' ? (item.volcengine_region || VOLCENGINE_DEFAULT_REGION) : '',
                 volcengine_access_key_id:item.volcengine_access_key_id || undefined,
                 volcengine_secret_access_key:item.volcengine_secret_access_key || undefined,
+                lovart_auto_confirm:isLovartContext(item, item.protocol) ? item.lovart_auto_confirm === true : false,
+                lovart_project_id:isLovartContext(item, item.protocol) ? (item.lovart_project_id || '') : '',
+                lovart_access_key:isLovartContext(item, item.protocol) ? (item.lovart_access_key || undefined) : undefined,
+                lovart_secret_key:isLovartContext(item, item.protocol) ? (item.lovart_secret_key || undefined) : undefined,
                 api_key:item.api_key || undefined,
                 wallet_api_key:item.wallet_api_key || undefined,
                 clear_key:item._clearKey === true,
                 clear_wallet_key:item._clearWalletKey === true,
                 clear_volcengine_access_key_id:item._clearVolcengineAccessKey === true,
-                clear_volcengine_secret_access_key:item._clearVolcengineSecretKey === true
+                clear_volcengine_secret_access_key:item._clearVolcengineSecretKey === true,
+                clear_lovart_access_key:isLovartContext(item, item.protocol) && item._clearLovartAccessKey === true,
+                clear_lovart_secret_key:isLovartContext(item, item.protocol) && item._clearLovartSecretKey === true
             })))
         });
         if(!res.ok) throw new Error((await res.json()).detail || tr('api.saveFailed'));
@@ -3987,6 +4180,10 @@ async function saveProviders(){
             delete item._clearWalletKey;
             delete item._clearVolcengineAccessKey;
             delete item._clearVolcengineSecretKey;
+            delete item.lovart_access_key;
+            delete item.lovart_secret_key;
+            delete item._clearLovartAccessKey;
+            delete item._clearLovartSecretKey;
         });
         selectedId = provider()?.id || providers[0]?.id || '';
         renderEditor();

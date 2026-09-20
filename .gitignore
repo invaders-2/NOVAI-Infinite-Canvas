@@ -28,6 +28,8 @@ data/conversations/
 data/media_previews/
 data/projects.json
 data/security.json
+data/settings.json
+data/storage_settings.json
 data/update_backups/
 # 下面这些是运行时产生的用户数据（画布版本快照 / Agent 会话 / 运行调度 / 素材索引），
 # 之前漏在 .gitignore 外，会随 git add -A 混进仓库，这里补齐。
@@ -68,6 +70,7 @@ test-*.png
 tmp_*.png
 *.bak
 *.bak-*
+tests/artifacts/
 
 # 设计概念稿/临时原型（非正式页面）
 static/canvas-entry-redesign-*.html

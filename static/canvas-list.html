@@ -6,17 +6,18 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>画布工作台</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.117.1789606971"></script>
-    <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.117.1789606971">
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.117.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.117.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
+    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.120.1789606971"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
+    <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.120.1789606971">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
 
     <style>
         /* ═══ V4 Apple-style Glassmorphism Design System ═══ */
@@ -1407,6 +1408,8 @@
                 purgeConfirmDesc.textContent = desc || '';
                 purgeConfirmDesc.style.display = desc ? '' : 'none';
                 purgeConfirmAction = action;
+                // Morph Button 在点击瞬间读走 onclick 并代它执行，动效才有状态可驱动
+                purgeConfirmOk.onclick = action;
                 purgeConfirmOverlay.classList.add('active');
             }
             function closePurgeConfirm() {
@@ -1418,6 +1421,8 @@
             });
             document.getElementById('purgeConfirmCancel').addEventListener('click', closePurgeConfirm);
             document.getElementById('purgeConfirmOk').addEventListener('click', function() {
+                // 模块接上后由它执行 onclick，这里只兜底模块缺失的情况，否则一次点击会删两次
+                if (purgeConfirmOk.__nvMorph) return;
                 const action = purgeConfirmAction;
                 if (action) action();
             });
@@ -1565,6 +1570,24 @@
             document.addEventListener('gesturechange', e => { e.preventDefault(); }, { capture: true });
             document.addEventListener('gestureend', e => { e.preventDefault(); }, { capture: true });
         })();
+    </script>
+    <script>
+    /* ═══ Morph Button 接入：彻底删除二次确认的「确定」按钮（只驱动状态，不改原有删除逻辑） ═══
+       本页逻辑全在内联脚本里、canvas-list.js 未被任何页面加载，所以接入代码只能放这里。 */
+    (function(){
+        'use strict';
+        var tries = 0;
+        var wait = setInterval(function(){
+            var m = window.NovaMorphButton;
+            tries += 1;
+            if(!m && tries <= 40) return;
+            clearInterval(wait);
+            var el = document.getElementById('purgeConfirmOk');
+            if(m && el && !el.__nvMorph){
+                try { m.attach(el, { keepWidth: true }); } catch(e){}
+            }
+        }, 250);
+    })();
     </script>
 </body>
 </html>

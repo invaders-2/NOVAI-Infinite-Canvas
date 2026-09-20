@@ -809,6 +809,8 @@ body.smart-chat-input-resize .prompt-node-llm select { pointer-events:none !impo
 .table-batch-panel.is-empty .table-batch-empty-tip {
     padding: 0;
     text-align: center;
+    font-size: 11px;
+    color: var(--text-3);
 }
 
 /* LLM 节点的缩放我接不上（画布不给提示词节点绑 resize，我自己挂的 mousedown 也没触发），

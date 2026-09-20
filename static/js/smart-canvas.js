@@ -412,6 +412,22 @@ const GPT_IMAGE_2_SIZE_MAP = {
     ultrawide:    {'1k':'1536x1024','2k':'2048x1152','4k':'3840x2160'},
     ultratall:    {'1k':'1024x1536','2k':'1024x1536','4k':'2160x3840'}
 };
+// GPT Image 1.x 官方只有 1K 三档（1024x1024 / 1536x1024 / 1024x1536 / auto），2.x 起才有 2K/4K 离散档。
+const GPT_IMAGE_1_SIZE_MAP = {
+    square:       {'1k':'1024x1024'},
+    portrait:     {'1k':'1024x1536'},
+    landscape:    {'1k':'1536x1024'},
+    portrait43:   {'1k':'1024x1536'},
+    landscape43:  {'1k':'1536x1024'},
+    story:        {'1k':'1024x1536'},
+    wide:         {'1k':'1536x1024'},
+    ultrawide:    {'1k':'1536x1024'},
+    ultratall:    {'1k':'1024x1536'}
+};
+const GPT_IMAGE_1_SIZES = ['1024x1024','1536x1024','1024x1536'];
+const GPT_IMAGE_2_SIZES = ['1024x1024','1536x1024','1024x1536','2048x2048','2048x1152','3840x2160','2160x3840'];
+const API_RES_LEVELS = ['1k','2k','4k'];
+const API_RATIO_LABELS = {square:'正方形', portrait:'竖图', portrait43:'竖图', landscape:'横图', landscape43:'横图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖'};
 const RES_LONG_SIDE = { '1k':1536, '2k':2048, '4k':3840 };
 const RES_PIXEL_LIMIT = { '1k':1572864, '2k':4194304, '4k':8294400 };
 // Clipboard helpers: delegate to NovaUtils
@@ -898,20 +914,33 @@ function smartLoopRoundSettings(runSettings, ctx=smartLoopContext){
     }
     return next;
 }
+// Lovart 的图片工具名形如 generate_image_gpt_image_2_5_sunburst_max，归一化后同样命中。
 function isGptImageAutoSizeModel(model){
     const raw = String(model || '').trim().toLowerCase();
     const normalized = raw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     const compact = raw.replace(/[^a-z0-9]+/g, '');
-    return normalized === 'gpt-image-2'
-        || normalized.startsWith('gpt-image-2-')
-        || normalized.endsWith('-gpt-image-2')
-        || normalized.includes('-gpt-image-2-')
-        || compact === 'gptimage2'
-        || compact.startsWith('gptimage2')
-        || compact.endsWith('gptimage2');
+    return /(^|-)gpt-image-\d/.test(normalized) || /gptimage\d/.test(compact);
+}
+// 0 = 非 GPT Image 系列；1 = 1.x（只有 1K）；2+ = 2.x（1K/2K/4K 离散档）
+function gptImageModelVersion(model){
+    const raw = String(model || '').trim().toLowerCase();
+    const match = raw.replace(/[^a-z0-9]+/g, '-').match(/(?:^|-)gpt-image-(\d+)/) || raw.replace(/[^a-z0-9]+/g, '').match(/gptimage(\d+)/);
+    return match ? Number(match[1]) : 0;
+}
+function gptImageSizeMap(model){
+    const version = gptImageModelVersion(model);
+    return version >= 2 ? GPT_IMAGE_2_SIZE_MAP : (version ? GPT_IMAGE_1_SIZE_MAP : null);
+}
+function gptImageMaxLevel(model){
+    const version = gptImageModelVersion(model);
+    return version >= 2 ? '4k' : (version ? '1k' : '');
+}
+function gptImageDiscreteSizes(model){
+    const version = gptImageModelVersion(model);
+    return version >= 2 ? GPT_IMAGE_2_SIZES : (version ? GPT_IMAGE_1_SIZES : null);
 }
 function defaultSmartApiResolution(model){
-    return isGptImageAutoSizeModel(model) ? '4k' : '1k';
+    return isGptImageAutoSizeModel(model) ? (gptImageMaxLevel(model) || '4k') : '1k';
 }
 function mediaItemForStorage(item){
     if(!item || typeof item !== 'object') return item;
@@ -964,6 +993,7 @@ function canvasForStorage(){
         delete node._batchRunRows;
         delete node._batchRunConcurrency;
         delete node._batchStopRequested;
+        delete node._stopContextId;
         delete node.tableBatchRunning;
         /* 结果节点的「这一批还剩几格」也是页面内的临时状态 */
         delete node.batchRunExpected;
@@ -975,6 +1005,13 @@ function canvasForStorage(){
         delete node.batchRowStates;
         delete node.__renderHtml;   // 渲染缓存：只在页面内用，别写进画布
         delete node.__renderKey;
+        /* 「运行中」也是页面内的临时状态：聊天/节点请求挂起时刷新或关页，running=true 会被存进画布，
+           重开后发送键永远显示「发送中」。任务续跑只认 pendingTasks（smartPendingTasks / resumeSmartPendingTasks），
+           全库没有任何一处从落盘的 running 恢复运行，所以持久化时一律剥掉。 */
+        delete node.running;
+        /* 聊天贴底 / 抢焦点标记同理（旧版本这两个字段也写进过用户画布） */
+        delete node.chatStickBottom;
+        delete node.chatFocusInput;
     });
     return clean;
 }
@@ -2229,7 +2266,7 @@ function groupImageGridLayout(count, explicitW, explicitH, maxThumb, pad=32, gap
     }
     const fallbackCols = Math.min(count, 2);
     const fallbackRows = Math.ceil(count / fallbackCols);
-    return best || {cols:fallbackCols, rows:fallbackRows, visibleRows:Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, fallbackRows), thumb:28};
+    return best || {cols:fallbackCols, rows:fallbackRows, visibleRows:Math.min(Math.max(1, maxVisibleRows), fallbackRows), thumb:28};
 }
 function smartNodeInputThumbRows(count){
     return count ? Math.ceil(Math.min(10, count) / 5) : 0;
@@ -2487,9 +2524,10 @@ function imageLayout(images, scale=1, node=null){
     if(grid){
         const cols = Math.max(1, Number(grid.cols || 1));
         const rows = Math.max(1, Number(grid.rows || 1));
-        const visibleRows = Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, rows);
+        // 手动拖过尺寸：宫格也按框铺满全部行（缩略图缩小到塞得下，下限 28），不再只露 3 行
+        const manual = Boolean(node?.sizeUserSet);
+        const visibleRows = manual ? rows : Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, rows);
         if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
-            const manual = Boolean(node?.sizeUserSet);
             const fittedThumb = Math.max(28, Math.floor(Math.min((explicitW - PAD - (cols - 1) * 8) / cols, (explicitH - PAD - (visibleRows - 1) * 8) / visibleRows)));
             return {cols, rows, visibleRows, width:Math.round(explicitW),
                 height:manual ? Math.round(explicitH) : visibleRows * (fittedThumb + 8) - 8 + PAD, thumb:fittedThumb};
@@ -2513,7 +2551,7 @@ function imageLayout(images, scale=1, node=null){
      表现就是「结果群组往下拉不动」（用户报的）。 */
 function fittedMediaGridLayout(node, count, explicitW, explicitH, maxThumb, PAD){
     const manual = Boolean(node && node.sizeUserSet);
-    const fitted = groupImageGridLayout(count, explicitW, explicitH, manual ? 100000 : maxThumb, PAD, 8);
+    const fitted = groupImageGridLayout(count, explicitW, explicitH, manual ? 100000 : maxThumb, PAD, 8, manual ? count : MEDIA_GROUP_MAX_VISIBLE_ROWS);
     return {
         cols:fitted.cols,
         rows:fitted.rows,
@@ -2567,17 +2605,31 @@ function connectedSmartClusterIds(seedId){
 }
 function smartArrangeAtomicIds(ids){
     const out = new Set((ids || []).filter(id => nodes.some(n => n.id === id)));
-    let changed = true;
-    while(changed){
-        changed = false;
-        nodes.filter(isSmartGroupNode).forEach(group => {
-            (group.items || []).forEach(itemId => {
-                if(!out.has(itemId)) return;
-                out.delete(itemId);
-                out.add(group.id);
-                changed = true;
-            });
+    const groups = nodes.filter(isSmartGroupNode);
+    /* 「成员并进所属分组」要做定点迭代（分组可以嵌套，得一层层往上提），但成员关系可能是**环**：
+       A 的 items 含 B、B 的 items 又含 A，或某个组把自己列进 items。
+       原来那版 while(changed) 在这种数据下会「删掉再放回去」把 changed 永久置真 → 主线程死循环、整页点不动。
+       现在：每个组最多被上提一次（promoted 记账，上提本身是幂等操作），再叠一个「组数 + 1」的硬轮次上限。
+       无环数据的结果与旧实现完全一致（每轮至少新提一个组才会继续，最多 groups.length 轮）；
+       有环数据最多 groups.length 轮就收敛，绝不在这里挂住主线程。 */
+    const promoted = new Set();
+    const maxRounds = groups.length + 1;
+    for(let round = 0; round < maxRounds; round += 1){
+        let changed = false;
+        groups.forEach(group => {
+            if(promoted.has(group.id)) return;
+            const absorbed = (group.items || []).filter(itemId => itemId !== group.id && out.has(itemId));
+            if(!absorbed.length) return;
+            /* 被吸收的成员里出现了「已经上提过的组」= 组之间互相包含（环），只预警、不停工 */
+            if(absorbed.some(id => promoted.has(id))){
+                console.warn('[smart-canvas] 群组成员关系存在环（组互相包含），smartArrangeAtomicIds 已按「每组只上提一次」收敛，请检查分组成员：', group.id, absorbed);
+            }
+            absorbed.forEach(itemId => out.delete(itemId));
+            out.add(group.id);
+            promoted.add(group.id);
+            changed = true;
         });
+        if(!changed) break;
     }
     return [...out];
 }
@@ -2655,8 +2707,23 @@ function arrangeSelectedSmartNodes(){
     scheduleSave();
     toast('已整理选中节点');
 }
+/* 节点浮动工具栏的屏幕可见尺寸 = 基准 × clamp(画布缩放, 1, 1.4)：
+   ≤100% 不再跟着缩小（缩到 30% 也保持 100% 的大小，看得清点得准），100%~140% 跟着一起放大，
+   ≥140% 封顶（顺带解决 200% 下整条 bar 超出屏幕的问题）。变量写在 world 上——工具栏在 #world 里，
+   而斜杠/提及/参数弹层都在 world 外，不会被波及。
+   所有改 viewport.scale 的入口（zoomBar / 滚轮 / fitAll / 载入 / 缩放预览恢复）后面都会调 applyViewport()，
+   所以只需在这一个漏斗里更新；值没变就不写，避免平移时反复触发样式重算。 */
+let nodeUiInverseScale = '';
+function syncNodeUiInverseScale(){
+    const scale = safeScale(viewport.scale);
+    const next = String(Math.min(1.4, Math.max(1, scale)) / scale);
+    if(next === nodeUiInverseScale) return;
+    nodeUiInverseScale = next;
+    world.style.setProperty('--nv-nodeui-inv', next);
+}
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
+    syncNodeUiInverseScale();
     // world 被 transform:scale 缩放后，其内部带 backdrop-filter 的卡片（参数设置/合成卡等）
     // 会被部分浏览器（Chrome/Edge 等 Blink 内核）当作独立合成层先按 1x 栅格化、再整体缩放，
     // 缩小时位图被降采样 → 组件发虚。缩放态下关闭这些 backdrop-filter（底色本身已接近不透明，
@@ -2885,7 +2952,7 @@ function toggleZoomPreview(){
     else enterZoomPreview();
 }
 function imageProviders(){
-    return (apiProviders || []).filter(p => p.enabled !== false && p.id !== 'modelscope' && p.id !== 'volcengine' && (p.image_models || []).length);
+    return (apiProviders || []).filter(p => p.enabled !== false && p.has_key !== false && p.id !== 'modelscope' && p.id !== 'volcengine' && (p.image_models || []).length);
 }
 function volcengineProvider(){
     return (apiProviders || []).find(p => p.id === 'volcengine' && p.enabled !== false) || {
@@ -3008,12 +3075,12 @@ function sortRunningHubFields(fields){
     });
 }
 function chatApiProviders(){
-    return (apiProviders || []).filter(p => p.enabled !== false && (p.chat_models || []).length);
+    return (apiProviders || []).filter(p => p.enabled !== false && p.has_key !== false && (p.chat_models || []).length);
 }
 function resolveChatProviderId(providerId=''){
     const providers = chatApiProviders();
     if(providers.some(p => p.id === providerId)) return providerId;
-    return providers[0]?.id || 'comfly';
+    return providers[0]?.id || '';
 }
 function providerChatModels(providerId){
     const provider = chatApiProviders().find(p => p.id === providerId);
@@ -3021,7 +3088,25 @@ function providerChatModels(providerId){
 }
 function resolveChatModel(model='', providerId=''){
     const models = providerChatModels(resolveChatProviderId(providerId));
-    return models.includes(model) ? model : (models[0] || model || 'gpt-4o-mini');
+    return model || models[0] || 'gpt-4o-mini';
+}
+// 换平台后旧平台的对话模型名在新平台不存在（如 Lovart 的 lovart-agent，发出去上游必报模型不存在）：
+// 优先用该平台上一次用过的对话模型，没有记忆再用列表第一个；模型本身对新平台合法时保持不动；平台没给列表时不动。
+function correctedChatModelForProvider(providerId, currentModel){
+    // 精确匹配平台，不走 resolveChatProviderId 的兜底，免得把别的平台的列表当成当前平台的
+    const models = providerChatModels(providerId).map(model => String(model || '').trim()).filter(Boolean);
+    const current = String(currentModel || '').trim();
+    if(!models.length || models.includes(current)) return current;
+    const remembered = window.NovaUtils?.rememberedProviderChatModel?.(providerId) || '';
+    return models.includes(remembered) ? remembered : models[0];
+}
+function correctPromptNodeChatModel(node){
+    if(!node) return '';
+    const next = correctedChatModelForProvider(node.llmProvider, node.llmModel);
+    if(!next || next === node.llmModel) return '';
+    node.llmModel = next;
+    const name = (apiProviders || []).find(p => p.id === node.llmProvider)?.name || node.llmProvider;
+    return `已切换到 ${name} 的模型 ${next}`;
 }
 function chatProviderOptions(selectedId=''){
     const selected = resolveChatProviderId(selectedId);
@@ -3030,7 +3115,9 @@ function chatProviderOptions(selectedId=''){
 function chatModelOptions(selectedModel='', providerId=''){
     const selectedProvider = resolveChatProviderId(providerId);
     const models = providerChatModels(selectedProvider);
-    const selected = resolveChatModel(selectedModel, selectedProvider);
+    // selected 先按平台校正：只有「模型本就合法」或「该平台没给列表」时才会保留当前值，
+    // 旧平台的失效模型不会再被塞进候选里。
+    const selected = correctedChatModelForProvider(selectedProvider, resolveChatModel(selectedModel, selectedProvider));
     return [...new Set([selected, ...models].filter(Boolean))].map(model => `<option value="${escapeHtml(model)}" ${model === selected ? 'selected' : ''}>${escapeHtml(model)}</option>`).join('');
 }
 function apiProviderById(providerId){
@@ -3061,6 +3148,22 @@ function jimengImageEditMode(){
 function filterJimengImageModels(models){
     if(settings.provider_id !== 'jimeng' || !jimengImageEditMode()) return models;
     return (models || []).filter(m => !JIMENG_IMAGE2IMAGE_UNSUPPORTED.includes(String(m)));
+}
+// 换平台后旧平台的模型名在新平台不存在（如 Lovart 的 generate_image_* 工具名，发出去上游必报模型不存在）：
+// 优先用该平台上一次用过的模型，没有记忆再用列表第一个；模型本身对新平台合法时保持不动。
+function correctedApiModelForProvider(providerId, currentModel){
+    const models = providerImageModels(providerId).map(model => String(model || '').trim()).filter(Boolean);
+    const current = String(currentModel || '').trim();
+    if(!models.length || models.includes(current)) return current;
+    const remembered = window.NovaUtils?.rememberedProviderModel?.(providerId) || '';
+    return models.includes(remembered) ? remembered : models[0];
+}
+function correctSmartApiModelForProvider(){
+    const next = correctedApiModelForProvider(settings.provider_id, settings.model);
+    if(!next || next === settings.model) return '';
+    settings.model = next;
+    const name = (apiProviders || []).find(p => p.id === settings.provider_id)?.name || settings.provider_id;
+    return `已切换到 ${name} 的模型 ${next}`;
 }
 let _jimengLastEditMode = null;
 let _jimengModelRefreshing = false;
@@ -3120,18 +3223,18 @@ function sanitizeSmartApiSelection(target=settings){
         if(target.apiKind === 'video'){
             target.videoProvider = 'volcengine';
             const models = volcengineVideoModels();
-            if(!models.includes(target.videoModel)) target.videoModel = models[0] || '';
+            if(!target.videoModel) target.videoModel = models[0] || '';
         } else {
             target.provider_id = 'volcengine';
             const models = providerImageModels('volcengine');
-            if(!models.includes(target.model)) target.model = models[0] || '';
+            if(!target.model) target.model = models[0] || '';
         }
         return target;
     }
     clearVolcengineSelectionOutsideVolcengine(target);
     if(target.provider_id){
         const models = providerImageModels(target.provider_id);
-        if(models.length && !models.includes(target.model)) target.model = models[0] || '';
+        if(models.length && !target.model) target.model = models[0] || '';
     }
     if((target.engine || 'api') === 'api' && (target.apiKind || 'image') !== 'video'){
         const allowAuto = isGptImageAutoSizeModel(target.model);
@@ -3140,7 +3243,7 @@ function sanitizeSmartApiSelection(target=settings){
     }
     if(target.videoProvider){
         const models = providerVideoModels(target.videoProvider);
-        if(models.length && !models.includes(target.videoModel)) target.videoModel = models[0] || '';
+        if(models.length && !target.videoModel) target.videoModel = models[0] || '';
     }
     return target;
 }
@@ -3150,11 +3253,16 @@ function modelscopeProvider(){
 function modelscopeImageModels(){
     return modelscopeProvider()?.image_models || ['Tongyi-MAI/Z-Image-Turbo'];
 }
+// 自定义图片模型可能已在 API 设置里从 ModelScope 的 image_models 删掉：渲染阶段静默回落到该平台第一个合法模型。
+function correctedMsCustomModel(currentModel){
+    const models = modelscopeImageModels().map(model => String(model || '').trim()).filter(Boolean);
+    const current = String(currentModel || '').trim();
+    if(!models.length || models.includes(current)) return current;
+    return models[0];
+}
 const DEFAULT_VIDEO_MODELS = ['veo3-fast','veo3','sora','runway','kling','pika','minimax-video','wan-v2','seedance-1.0-pro','jimeng-vide-3.0','jimeng-video-3.0-pro'];
 function videoApiProviders(){
-    const fromConfig = (apiProviders || []).filter(p => p.enabled !== false && p.id !== 'volcengine' && (p.video_models || []).length);
-    if(fromConfig.length) return fromConfig;
-    return [{id:'comfly', name:'Comfly', video_models:DEFAULT_VIDEO_MODELS, enabled:true}];
+    return (apiProviders || []).filter(p => p.enabled !== false && p.has_key !== false && p.id !== 'volcengine' && (p.video_models || []).length);
 }
 function videoProviderById(providerId){
     if(providerId === 'volcengine') return volcengineProvider();
@@ -3163,12 +3271,41 @@ function videoProviderById(providerId){
 function providerVideoModels(providerId){
     if(providerId === 'volcengine') return volcengineVideoModels();
     const provider = videoApiProviders().find(p => p.id === providerId);
-    const models = provider?.video_models || DEFAULT_VIDEO_MODELS;
+    const models = provider?.video_models || [];
     return [...new Set(models)];
 }
 function volcengineVideoModels(){
     const provider = (apiProviders || []).find(p => p.id === 'volcengine');
     return [...new Set(provider?.video_models || DEFAULT_VIDEO_MODELS)];
+}
+// 与图片模型同一口径：换平台后旧平台的视频模型名在新平台不存在时，优先用该平台上一次用过的视频模型，
+// 没有记忆再用列表第一个；模型本身对新平台合法时保持不动；平台没给列表时不动。
+function correctedVideoModelForProvider(providerId, currentModel){
+    // 精确匹配平台，不走 videoProviderById 的兜底，免得把别的平台的列表当成当前平台的
+    const models = providerVideoModels(providerId).map(model => String(model || '').trim()).filter(Boolean);
+    const current = String(currentModel || '').trim();
+    if(!models.length || models.includes(current)) return current;
+    const remembered = window.NovaUtils?.rememberedProviderVideoModel?.(providerId) || '';
+    return models.includes(remembered) ? remembered : models[0];
+}
+function correctVideoModelForProvider(){
+    const next = correctedVideoModelForProvider(settings.videoProvider, settings.videoModel);
+    if(!next || next === settings.videoModel) return '';
+    settings.videoModel = next;
+    const name = (apiProviders || []).find(p => p.id === settings.videoProvider)?.name || settings.videoProvider;
+    return `已切换到 ${name} 的模型 ${next}`;
+}
+// 换引擎＝换平台：切到火山引擎时图片和视频模型一起按火山列表校正（旧引擎的模型名在火山列表里
+// 不存在就换掉，改用该平台上次用过的、没有再用列表第一个），校正结果写进该平台的记忆。
+// 模型本来就合法（两平台通用）时不动也不提示。
+function correctVolcengineEngineSelection(){
+    if(settings.engine !== 'volcengine') return '';
+    settings.provider_id = 'volcengine';
+    settings.videoProvider = 'volcengine';
+    const notice = [correctSmartApiModelForProvider(), correctVideoModelForProvider()].filter(Boolean).join(' · ');
+    window.NovaUtils?.rememberProviderModel?.('volcengine', settings.model);
+    window.NovaUtils?.rememberProviderVideoModel?.('volcengine', settings.videoModel);
+    return notice;
 }
 function renderVideoProviderControl(providers){
     const current = (providers || []).find(p => p.id === settings.videoProvider) || videoProviderById(settings.videoProvider);
@@ -3183,12 +3320,13 @@ function renderVideoProviderControl(providers){
     </div>`;
 }
 function renderVideoModelControl(models){
+    const list = [...new Set([settings.videoModel, ...(models || [])].filter(Boolean))];
     return `<div class="smart-control model-control">
         <button class="smart-pill" type="button"><i data-lucide="film"></i><span class="sub">${escapeHtml(settings.videoModel || tr('smart.model'))}</span></button>
         <div class="smart-popover compact-popover">
             <div class="smart-popover-title">${escapeHtml(tr('smart.videoModel'))}</div>
             <div class="model-list">
-                ${models.map(m => `<button type="button" class="direct-option ${m === settings.videoModel ? 'active' : ''}" data-smart-param="videoModel" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(m)}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noVideoModel'))}</div>`}
+                ${list.map(m => `<button type="button" class="direct-option ${m === settings.videoModel ? 'active' : ''}" data-smart-param="videoModel" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(m)}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noVideoModel'))}</div>`}
             </div>
         </div>
     </div>`;
@@ -3279,6 +3417,34 @@ function parseRatioValue(value){
     const h = Number(parts[1]);
     return w > 0 && h > 0 ? w / h : 0;
 }
+function gptImageSizeTier(width, height){
+    const area = Number(width) * Number(height);
+    for(const level of API_RES_LEVELS){
+        if(area <= RES_PIXEL_LIMIT[level]) return level;
+    }
+    return API_RES_LEVELS[API_RES_LEVELS.length - 1];
+}
+// GPT Image 没有 4:3 / 21:9 等比例：在同档位同方向里挑比例最接近的，该档位没有同方向尺寸就降一档，
+// 结果与预设离散表（GPT_IMAGE_1/2_SIZE_MAP）一致。
+function nearestGptImageSize(model, ratio, level){
+    const target = Number(ratio) > 0 ? Number(ratio) : 1;
+    const square = target > 0.95 && target < 1.05;
+    const rank = API_RES_LEVELS.indexOf(level);
+    const maxRank = rank < 0 ? API_RES_LEVELS.length - 1 : rank;
+    const pool = (gptImageDiscreteSizes(model) || []).map(candidate => {
+        const match = String(candidate).match(/^(\d+)x(\d+)$/);
+        if(!match) return null;
+        const width = Number(match[1]);
+        const height = Number(match[2]);
+        if(square !== (width === height)) return null;
+        if(!square && (width < height) !== (target < 1)) return null;
+        const itemRank = API_RES_LEVELS.indexOf(gptImageSizeTier(width, height));
+        return itemRank > maxRank ? null : {candidate, width, height, rank:itemRank};
+    }).filter(Boolean);
+    if(!pool.length) return '';
+    pool.sort((a, b) => (b.rank - a.rank) || (Math.abs(Math.log(target / (a.width / a.height))) - Math.abs(Math.log(target / (b.width / b.height)))));
+    return pool[0].candidate;
+}
 function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSizeValue='', model=''){
     if(resolutionValue === 'auto') return 'auto';
     if(resolutionValue === 'custom') return String(customSizeValue || '').trim();
@@ -3292,12 +3458,85 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSi
             const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;
             const width = Math.floor(rawWidth / 16) * 16;
             const height = Math.floor(rawHeight / 16) * 16;
-            return `${Math.max(64, width)}x${Math.max(64, height)}`;
+            const size = `${Math.max(64, width)}x${Math.max(64, height)}`;
+            // 自定义/适配比例算出的尺寸往往不是 GPT Image 的合法枚举，直接发会被上游退回默认 1K。
+            return gptImageSizeMap(model) ? (nearestGptImageSize(model, parsed, resolutionKey) || size) : size;
         }
     }
     const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
-    const table = isGptImageAutoSizeModel(model) ? GPT_IMAGE_2_SIZE_MAP : SIZE_MAP;
-    return table[ratioKey]?.[resolutionKey] || table.square[resolutionKey] || table.square['1k'];
+    const gptTable = gptImageSizeMap(model);
+    if(gptTable){
+        const rank = API_RES_LEVELS.indexOf(resolutionKey);
+        for(let i = (rank < 0 ? API_RES_LEVELS.length - 1 : rank); i >= 0; i--){
+            const row = gptTable[ratioKey] || gptTable.square;
+            if(row[API_RES_LEVELS[i]]) return row[API_RES_LEVELS[i]];
+        }
+        return gptTable.square['1k'];
+    }
+    return SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
+}
+function gptImageSeriesLabel(model){
+    const raw = String(model || '').trim();
+    const match = raw.toLowerCase().match(/gpt[-_.\s]?image[-_.\s]?(\d+)(?:[-_.](\d+))?/);
+    return match ? `GPT Image ${match[1]}${match[2] ? '.' + match[2] : ''}` : raw;
+}
+function apiRatioLabel(ratioValue){
+    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
+    return API_RATIO_LABELS[ratioValue] || API_RATIO_LABELS[ratioKey] || ratioKey;
+}
+// GPT Image 只有离散合法尺寸：高位档可能没有对应尺寸（例如 2.x 的正方形没有 4K、1.x 最高只有 1K）。
+function apiResolutionSupport(model, ratioValue, customRatioValue=''){
+    const table = gptImageSizeMap(model);
+    if(!table) return {levels:API_RES_LEVELS.slice(), supported:API_RES_LEVELS.slice(), notes:{}};
+    const maxIndex = Math.max(0, API_RES_LEVELS.indexOf(gptImageMaxLevel(model)));
+    const trackTiers = (ratioValue !== 'custom' && ratioValue !== 'source') || parseRatioValue(customRatioValue) > 0;
+    const supported = [];
+    const notes = {};
+    API_RES_LEVELS.forEach((level, index) => {
+        if(index > maxIndex){ notes[level] = `最高 ${API_RES_LEVELS[maxIndex].toUpperCase()}`; return; }
+        const previous = supported.length ? apiImageSize(ratioValue, supported[supported.length - 1], customRatioValue, '', model) : '';
+        const size = apiImageSize(ratioValue, level, customRatioValue, '', model);
+        if(trackTiers && previous && size === previous){ notes[level] = `等同 ${supported[supported.length - 1].toUpperCase()}`; return; }
+        supported.push(level);
+    });
+    return {levels:API_RES_LEVELS.slice(), supported, notes};
+}
+function apiResolutionNote(model, ratioValue, level, customRatioValue=''){
+    return apiResolutionSupport(model, ratioValue, customRatioValue).notes[level] || '';
+}
+function apiResolutionDisabledText(model, ratioValue, level, customRatioValue=''){
+    const note = apiResolutionNote(model, ratioValue, level, customRatioValue);
+    return note ? `${level.toUpperCase()} ${apiRatioLabel(ratioValue)}尺寸不可用（${note}）` : '';
+}
+// 只有一档可用时把档位固定住，并说明原因。
+function apiResolutionFixedNote(model, ratioValue, customRatioValue=''){
+    const info = apiResolutionSupport(model, ratioValue, customRatioValue);
+    return info.supported.length === 1 ? `${gptImageSeriesLabel(model)} 只支持 ${info.supported[0].toUpperCase()} 尺寸` : '';
+}
+// 档位失效时的落点：取不高于请求档位的最高可用档位（被禁档位本就"等同"于它，清晰度不损失、
+// 也不会让用户按更高清晰度多花点数）；只有完全没有更低档位时才往上取。
+function nearestApiResolution(model, ratioValue, level, customRatioValue=''){
+    const info = apiResolutionSupport(model, ratioValue, customRatioValue);
+    const index = info.levels.indexOf(level);
+    for(let i = (index < 0 ? info.levels.length - 1 : index); i >= 0; i--){
+        if(info.supported.includes(info.levels[i])) return info.levels[i];
+    }
+    return info.supported.find(item => info.levels.indexOf(item) > index) || info.supported[0] || '1k';
+}
+function apiResolutionChangeNotice(model, ratioValue, level, target){
+    return `${gptImageSeriesLabel(model)} 不支持 ${level.toUpperCase()} ${apiRatioLabel(ratioValue)}尺寸，已自动调整为 ${target.toUpperCase()}`;
+}
+// 换模型/换比例后档位可能失效：自动换到该模型可用的档位并提示，避免静默出低清图。
+function applySmartApiResolutionLimit(){
+    if(settings.engine !== 'api' || (settings.apiKind || 'image') === 'video') return '';
+    if(API_RES_LEVELS.indexOf(settings.resolution) < 0) return '';
+    const ratio = settings.ratio || 'square';
+    const customRatio = settings.customRatio || '';
+    if(!apiResolutionNote(settings.model, ratio, settings.resolution, customRatio)) return '';
+    const target = nearestApiResolution(settings.model, ratio, settings.resolution, customRatio);
+    const notice = apiResolutionChangeNotice(settings.model, ratio, settings.resolution, target);
+    settings.resolution = target;
+    return notice;
 }
 function normalizeApiSizeSettings(prefix=''){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
@@ -3306,6 +3545,8 @@ function normalizeApiSizeSettings(prefix=''){
     if(!settings[resKey] || (allowAuto && settings[resKey] === 'auto')) settings[resKey] = allowAuto ? defaultSmartApiResolution(settings.model) : '1k';
     if(!allowAuto && settings[resKey] === 'auto') settings[resKey] = '1k';
     if(settings[resKey] === 'auto' && !settings[ratioKey]) settings[ratioKey] = 'square';
+    // 默认档位/历史存档可能对新模型无效（如正方形 4K），渲染前先归一，避免标签和实发尺寸不一致。
+    if(!prefix) applySmartApiResolutionLimit();
 }
 async function ensureComfyWorkflow(name){
     if(!name) return null;
@@ -3426,12 +3667,18 @@ function renderDynamicParams(){
     updatePromptPlaceholder();
     persistActiveSmartSettings();
     if(window.lucide) lucide.createIcons();
+    /* 尺寸弹窗在 composer 里（屏幕空间），HTML 每次都在上面几行重建，收尾补接线；
+       composer 是 opacity 显隐、不是 display:none，这里量得到真实尺寸。 */
+    wireSizePickerGlide(dynamicParams);
+    wireSmartParamsGlide(dynamicParams);
 }
 function renderApiParams(){
     const providers = imageProviders();
     if(!settings.provider_id || !providers.some(p => p.id === settings.provider_id)) settings.provider_id = providers[0]?.id || '';
     const models = filterJimengImageModels(providerImageModels(settings.provider_id));
-    if(!settings.model || !models.includes(settings.model)) settings.model = models[0] || '';
+    if(!settings.model) settings.model = models[0] || '';
+    // 历史存档或换平台可能留下不属于当前平台的模型（且渲染阶段不能弹提示），先静默归一。
+    if(models.length) settings.model = correctedApiModelForProvider(settings.provider_id, settings.model);
     // 切换平台/模型时保留用户已选的分辨率（记忆），normalizeApiSizeSettings 只会修正非法的 auto。
     normalizeApiSizeSettings('');
     const outpaintLocked = settings.outpaintResolutionLocked === true;
@@ -3445,9 +3692,11 @@ function renderApiParams(){
 }
 function renderApiVideoParams(){
     const providers = videoApiProviders();
-    if(!settings.videoProvider || !providers.some(p => p.id === settings.videoProvider)) settings.videoProvider = providers[0]?.id || 'comfly';
+    if(!settings.videoProvider || !providers.some(p => p.id === settings.videoProvider)) settings.videoProvider = providers[0]?.id || '';
     const models = filterJimengVideoModels(providerVideoModels(settings.videoProvider));
-    if(!settings.videoModel || !models.includes(settings.videoModel)) settings.videoModel = models[0] || 'veo3-fast';
+    if(!settings.videoModel) settings.videoModel = models[0] || '';
+    // 历史存档或换平台可能留下不属于当前平台的视频模型（渲染阶段不能弹提示），先静默归一。
+    if(models.length) settings.videoModel = correctedVideoModelForProvider(settings.videoProvider, settings.videoModel);
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
@@ -3469,7 +3718,9 @@ function renderVolcengineParams(){
     const providers = [provider];
     const models = providerImageModels('volcengine');
     settings.provider_id = 'volcengine';
-    if(!settings.model || !models.includes(settings.model)) settings.model = models[0] || '';
+    if(!settings.model) settings.model = models[0] || '';
+    // 历史存档或换引擎可能留下不属于火山的图片模型（渲染阶段不能弹提示），先静默归一。
+    if(models.length) settings.model = correctedApiModelForProvider('volcengine', settings.model);
     normalizeApiSizeSettings('');
     const outpaintLocked = settings.outpaintResolutionLocked === true;
     dynamicParams.innerHTML = `
@@ -3485,7 +3736,9 @@ function renderVolcengineVideoParams(){
     const providers = [provider];
     const models = volcengineVideoModels();
     settings.videoProvider = 'volcengine';
-    if(!settings.videoModel || !models.includes(settings.videoModel)) settings.videoModel = models[0] || 'seedance-1.0-pro';
+    if(!settings.videoModel) settings.videoModel = models[0] || 'seedance-1.0-pro';
+    // 历史存档或换引擎可能留下不属于火山的视频模型（渲染阶段不能弹提示），先静默归一。
+    if(models.length) settings.videoModel = correctedVideoModelForProvider('volcengine', settings.videoModel);
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
@@ -3587,6 +3840,7 @@ function renderRhMachineControl(){
 function renderMsParams(){
     settings.msgenModel = MS_GEN_MODELS[settings.msgenModel] ? settings.msgenModel : 'zimage';
     if(!settings.msCustomModel) settings.msCustomModel = modelscopeImageModels()[0] || 'Tongyi-MAI/Z-Image-Turbo';
+    else settings.msCustomModel = correctedMsCustomModel(settings.msCustomModel);
     normalizeApiSizeSettings('ms');
     dynamicParams.innerHTML = `
         ${renderMsFunctionControl()}
@@ -3770,12 +4024,13 @@ function renderProviderControl(providers){
     </div>`;
 }
 function renderModelControl(models){
+    const list = [...new Set([settings.model, ...(models || [])].filter(Boolean))];
     return `<div class="smart-control model-control">
         <button class="smart-pill" type="button"><i data-lucide="sparkles"></i><span class="sub">${escapeHtml(settings.model || tr('smart.model'))}</span></button>
         <div class="smart-popover compact-popover">
             <div class="smart-popover-title">${escapeHtml(tr('smart.imageModel'))}</div>
             <div class="model-list">
-                ${models.map(m => `<button type="button" class="direct-option ${m === settings.model ? 'active' : ''}" data-smart-param="model" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(m)}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noImageModel'))}</div>`}
+                ${list.map(m => `<button type="button" class="direct-option ${m === settings.model ? 'active' : ''}" data-smart-param="model" data-smart-value="${escapeHtml(m)}"><span>${escapeHtml(m)}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noImageModel'))}</div>`}
             </div>
         </div>
     </div>`;
@@ -3888,6 +4143,9 @@ function renderSizePickerControl(prefix='', includeSource=false){
     ];
     const wKey = prefix ? `${prefix}CustomWidth` : 'customWidth';
     const hKey = prefix ? `${prefix}CustomHeight` : 'customHeight';
+    const apiSizeScope = !prefix && settings.engine === 'api' && (settings.apiKind || 'image') !== 'video';
+    const resSupport = apiSizeScope ? apiResolutionSupport(settings.model, currentRatio, currentCustomRatio) : {notes:{}};
+    const resFixNote = apiSizeScope ? apiResolutionFixedNote(settings.model, currentRatio, currentCustomRatio) : '';
     return `<div class="smart-control size-picker-control ${scope === 'auto' ? 'auto-mode' : ''} ${scope === 'custom' ? 'custom-mode' : ''}">
         <button class="smart-pill size-picker-pill" type="button"><i data-lucide="scan-line"></i><span class="size-picker-label"><span class="size-picker-type">尺寸</span><span class="size-picker-dot"></span><span class="size-picker-value">${escapeHtml(sizePickerLabel(prefix))}</span></span></button>
         <div class="smart-popover size-picker-popover">
@@ -3905,8 +4163,13 @@ function renderSizePickerControl(prefix='', includeSource=false){
                     ${ratios.map(([value, label, sub]) => `<button type="button" class="size-picker-option ${value === currentRatio ? 'active' : ''}" data-smart-param="${ratioKey}" data-smart-value="${escapeHtml(value)}"><span>${escapeHtml(label)}</span><small>${escapeHtml(sub)}</small></button>`).join('')}
                 </div>
                 <div class="size-picker-list">
-                    ${options.filter(v => v !== 'auto').map(value => `<button type="button" class="size-picker-option ${value === currentRes ? 'active' : ''}" data-smart-param="${resKey}" data-smart-value="${value}"><span>${value.toUpperCase()}</span><small>${escapeHtml(apiImageSize(currentRatio, value, currentCustomRatio, '', settings.model) || '')}</small></button>`).join('')}
+                    ${options.filter(v => v !== 'auto').map(value => {
+                        const note = resSupport.notes[value] || '';
+                        const sizeLabel = apiImageSize(currentRatio, value, currentCustomRatio, '', settings.model) || '';
+                        return `<button type="button" class="size-picker-option ${value === currentRes ? 'active' : ''}" data-smart-param="${resKey}" data-smart-value="${value}" ${note ? `disabled title="${escapeHtml(apiResolutionDisabledText(settings.model, currentRatio, value, currentCustomRatio))}" style="opacity:.45"` : ''}><span>${value.toUpperCase()}</span><small>${escapeHtml(note || sizeLabel)}</small></button>`;
+                    }).join('')}
                 </div>
+                ${resFixNote ? `<div class="size-picker-note" style="grid-column:1/-1"><span>${escapeHtml(resFixNote)}</span></div>` : ''}
             </div>` : ''}
             ${scope === 'custom' ? `<div class="size-picker-pane size-picker-custom">
                 <div class="size-custom-box">
@@ -4531,8 +4794,8 @@ function setDynamicSetting(key, value){
     const numericKeys = new Set(['count','width','height','videoDuration','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight']);
     const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
-    if(key === 'provider_id') settings.model = '';
-    if(key === 'videoProvider') settings.videoModel = '';
+    if(key === 'model' && settings.model && settings.provider_id) window.NovaUtils?.rememberProviderModel?.(settings.provider_id, settings.model);
+    if(key === 'videoModel' && settings.videoModel && settings.videoProvider) window.NovaUtils?.rememberProviderVideoModel?.(settings.videoProvider, settings.videoModel);
     if(key === 'videoMultimodal') settings._videoMultimodalUserSet = true;
     if(key === 'videoMultimodal' && settings.videoMultimodal) settings.videoUseFrameRoles = false;
     normalizeSmartVideoModeSettings(settings, key === 'videoUseFrameRoles');
@@ -4558,6 +4821,16 @@ function setDynamicSetting(key, value){
     if(key === 'customWidth' || key === 'customHeight'){
         settings.customSize = settings.customWidth && settings.customHeight ? `${settings.customWidth}x${settings.customHeight}` : '';
         settings.resolution = 'custom';
+    }
+    // 换平台先校正模型，再按校正后的模型校正档位：两次修正合并成一次渲染、一条提示。
+    const providerModelNotice = key === 'provider_id' ? correctSmartApiModelForProvider() : '';
+    const videoProviderModelNotice = key === 'videoProvider' ? correctVideoModelForProvider() : '';
+    if(key === 'model' || key === 'provider_id' || key === 'ratio'){
+        const sizeNotice = applySmartApiResolutionLimit();
+        const notice = [providerModelNotice, sizeNotice].filter(Boolean).join(' · ');
+        if(notice) toast(notice, '!');
+    } else if(videoProviderModelNotice){
+        toast(videoProviderModelNotice, '!');
     }
     if(key === 'msCustomWidth' || key === 'msCustomHeight'){
         settings.msCustomSize = settings.msCustomWidth && settings.msCustomHeight ? `${settings.msCustomWidth}x${settings.msCustomHeight}` : '';
@@ -4888,6 +5161,7 @@ function openSlashMenu(){
     slashSub.style.left = (rect.left + 248) + 'px';
     renderSlashItems(SLASH_COMMANDS, slashMenu, true);
     slashMenu.classList.add('open');
+    refreshGlideHost(slashMenu);   // 菜单在 display:none 下渲染时量不到尺寸，打开后补量一次
 }
 function selectSlashItem(item){
     if(slashTarget && slashTarget.type === 'smart-prompt'){
@@ -4900,6 +5174,65 @@ function selectSlashItem(item){
     closeSlashMenu();
 }
 function buildItemHtml(item){ return '<div class="slash-item"><span class="slash-item-icon">'+item.icon+'</span><div class="slash-item-body"><span class="slash-item-label">'+item.title+'</span><span class="slash-item-sub">'+(item.sub||'')+'</span></div>'+(item.children?'<span class="slash-item-arrow">›</span>':'')+'</div>'; }
+/* ── NovaGlide 接线（shared/glide.js）──
+   弹层里的「一组可选项」统一交给 NovaGlide：悬停/选中/键盘光标只点亮同一个滑块，
+   底色由滑块独家表达（glide.css 会压掉选项自己的 background-color / border-color）。
+   每个 host 只接一次线 —— render() 被拖拽/缩放/选中反复触发，重复 attach 会反复重建滑块、
+   重复挂 MutationObserver。WeakSet 记「已接线」，元素随 DOM 重建后条目自动消失，不泄漏。 */
+const glideHosts = new WeakSet();
+function attachGlideHost(host, options){
+    const api = window.NovaGlide;
+    if(!host || !api || typeof api.attach !== 'function') return null;
+    /* innerHTML 重写会把滑块连同旧选项一起抹掉（#slashSub 每次悬停分类都要重写一遍），
+       这时元素留着接线记录但 DOM 里的滑块已经没了，必须重新接而不是跳过。 */
+    if(glideHosts.has(host) && host.querySelector(':scope > .' + api.PILL_CLASS)) return host.__nvGlide || null;
+    glideHosts.add(host);
+    return api.attach(host, options);
+}
+/* 容器藏在 display:none 里时量不到尺寸（滑块只能先隐藏），打开之后补一次 refresh，
+   否则「当前选中项」既没有底色（被 glide.css 压掉）也没有滑块，整个列表看不出选了哪个。 */
+function refreshGlideHost(host){
+    if(host && host.__nvGlide) host.__nvGlide.refresh();
+    return host;
+}
+/* 尺寸/数字弹窗的选项列表：节点 DOM 整块重建，所以在重建它的两个函数收尾各补扫一遍 ——
+   world 里的节点控件走 render()，屏幕空间的 composer 参数面板走 renderDynamicParams()。
+   已接线的元素靠 WeakSet 直接跳过（不会越接越多、也不会重复量尺寸）。 */
+function wireSizePickerGlide(root){
+    if(!root) return;
+    const hosts = root.querySelectorAll('.size-picker-popover, .loop-number-grid');
+    if(!hosts.length) return;
+    hosts.forEach(host => {
+        if(host.classList.contains('loop-number-grid')){
+            attachGlideHost(host, {item: '.loop-number-cell', orientation: 'grid'});
+            return;
+        }
+        attachGlideHost(host.querySelector('.size-picker-scope'), {item: 'button', orientation: 'horizontal'});
+        host.querySelectorAll('.size-picker-list').forEach(list => attachGlideHost(list, {item: '.size-picker-option'}));
+    });
+}
+/* 参数行里同族的可选项弹层：质量 / 数量 / 画幅比例 / 视频时长 / 平台 / 模型 / 视频分辨率。
+   它们和尺寸弹窗是同一个参数行里的一族控件，接同一条滑块 —— 否则「尺寸会滑、旁边不会滑」很扎眼。
+   只扫 composer 的 #dynamicParams：这些弹层不出现在节点 DOM 里，不必每次 render 再扫一遍 world。 */
+const GLIDE_OPTION_GROUPS = [
+    ['.seg-row', 'button'],              // 质量、图片分辨率（自动/1K/2K/4K/自定义）
+    ['.count-grid', '.count-cell'],      // 数量
+    ['.ratio-grid', '.ratio-option'],    // 图片比例、视频画幅
+    ['.duration-grid', '.duration-option'],   // 视频时长
+    ['.model-list', '.direct-option']    // 平台 / 模型 / 视频分辨率
+];
+function wireSmartParamsGlide(root){
+    if(!root) return;
+    GLIDE_OPTION_GROUPS.forEach(([hostSel, itemSel]) => {
+        root.querySelectorAll(hostSel).forEach(host => attachGlideHost(host, {item: itemSel, orientation: 'grid'}));
+    });
+}
+/* 静态弹层（创建菜单 / 导出菜单）的 DOM 不重建，初始化时接一次线就够：
+   它们靠容器自己的 .open class 显隐，模块的 observer 会跟着重新量尺寸。 */
+function wireStaticMenuGlide(){
+    attachGlideHost(createMenu, {item: '.menu-btn'});
+    attachGlideHost(smartExportMenu, {item: '.smart-export-item'});
+}
 function renderSlashItems(items, target, isRoot){
     target.innerHTML = items.map(buildItemHtml).join('');
     target.querySelectorAll('.slash-item').forEach((el, i) => {
@@ -4908,11 +5241,13 @@ function renderSlashItems(items, target, isRoot){
             el.addEventListener('mouseenter', () => {
                 renderSlashItems(item.children, slashSub, false);
                 slashSub.classList.add('open');
+                refreshGlideHost(slashSub);   // 内容刚换过且容器刚显形，滑块要立刻落到激活项上
             });
         } else if(!item.children){
             el.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); selectSlashItem(item); });
         }
     });
+    attachGlideHost(target, {item: '.slash-item'});
 }
 let slashCloseTimer = 0;
 function checkSlashClose(){
@@ -4989,7 +5324,6 @@ function executeChatActions(actions){
             var nx = Number(a.x) || 300, ny = Number(a.y) || 200;
             var node = null;
             if(a.type === 'prompt') node = createPromptNode(nx, ny, {skipUndo:true});
-            else if(a.type === 'loop') node = createLoopNode(nx, ny, {skipUndo:true});
             else { var imgNode = createImageNodeAt({x:nx, y:ny}, [], {skipUndo:true}); node = imgNode; }
             if(node) createdIds.push(node.id);
         } else if(a.cmd === 'connect'){
@@ -5485,10 +5819,37 @@ function typewriteText(el, text, done){
         }
     }, 22);
 }
-// ── 思考动画：三个跳动圆点 + 文案 ──
-function thinkingHtml(text){
-    return '<div class="agent-thinking"><span class="agent-thinking-dots"><i></i><i></i><i></i></span>' +
-           '<span class="agent-thinking-text">' + escapeHtml(text || '正在规划…') + '</span></div>';
+// ── 思考动画：闪光图标（呼吸）+ 微光扫过的文案 + 秒表（ThoughtLine 风格，纯原生实现）──
+const THOUGHT_LINE_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>';
+/* 计时起点放模块级 Map：render 会重建节点 DOM，而 node 字段会被 canvasForStorage 落盘。
+   key = 聊天节点 id / 'agent'（智能画布助手气泡），运行结束时由调用方 delete。 */
+const thoughtLineStarts = new Map();
+let thoughtLineTicker = null;
+function thoughtLineFmt(ds){
+    return ds < 600 ? (ds / 10).toFixed(1) + 's' : Math.floor(ds / 600) + 'm ' + ((ds % 600) / 10).toFixed(1) + 's';
+}
+/* 全局 ticker 只为页面上真实存在的秒表服务：一个都不剩就自清理，常驻定时器不存在 */
+function thoughtLineSync(){
+    const timers = document.querySelectorAll('.thought-line__timer[data-start]');
+    if(!timers.length){
+        clearInterval(thoughtLineTicker);
+        thoughtLineTicker = null;
+        return;
+    }
+    const now = performance.now();
+    timers.forEach(el => { el.textContent = thoughtLineFmt(Math.floor((now - Number(el.dataset.start)) / 100)); });
+}
+function thinkingHtml(text, key){
+    const k = key || 'agent';
+    let start = thoughtLineStarts.get(k);
+    if(start === undefined){
+        start = performance.now();
+        thoughtLineStarts.set(k, start);
+    }
+    if(!thoughtLineTicker) thoughtLineTicker = setInterval(thoughtLineSync, 100);
+    return '<div class="thought-line"><span class="thought-line__glyph">' + THOUGHT_LINE_GLYPH + '</span>' +
+           '<span class="thought-line__label"><span class="thought-line__breath">' + escapeHtml(text || '正在规划…') + '</span></span>' +
+           '<span class="thought-line__timer" data-start="' + start + '">0.0s</span></div>';
 }
 let chatSending = false;
 // ── V2 Phase 5B: Agent 对话模式（计划卡片 / 预览 / 应用 / 回滚）──
@@ -5572,7 +5933,7 @@ async function requestAgentPlan(instruction){
 }
 async function sendChatFallback(text, msgDiv){
     // 降级路径：原 /api/canvas-llm 单轮聊天 + 2 命令正则执行（保持原有行为）
-    var sysP = '你是 NOVAI 智能画布助手，请用中文自然对话。如果用户要求你操作画布（如创建节点、建立连接），在回复末尾附加 JSON：{"actions":[{"cmd":"create_node","type":"image","x":300,"y":200},{"cmd":"connect","from":"{0}","to":"{1}"}]}。{0}表示第1个创建的节点，{1}第2个。可创建 image|prompt|loop 类型节点。';
+    var sysP = '你是 NOVAI 智能画布助手，请用中文自然对话。如果用户要求你操作画布（如创建节点、建立连接），在回复末尾附加 JSON：{"actions":[{"cmd":"create_node","type":"image","x":300,"y":200},{"cmd":"connect","from":"{0}","to":"{1}"}]}。{0}表示第1个创建的节点，{1}第2个。可创建 image|prompt 类型节点。';
     var fullMsg = text;
     if(chatRefs.length) fullMsg += '\n\n[引用的画布节点: '+chatRefs.map(function(r){return r.name+'('+r.type+')'}).join(', ')+']';
     var provider = chatProvider || resolveChatProviderId();
@@ -5599,14 +5960,385 @@ async function sendChatFallback(text, msgDiv){
     // 打字机效果逐步显示
     typewriteText(msgDiv, reply);
 }
+// ── V2 Phase 5C: /api/agent/run 流式 Agent（SSE + 逐步落图）──
+var AGENT_RUN_MAX_STEPS = 12;
+var agentRunAbort = null; // 非 null = 正在流式运行（同时作为「发送键 = 停止键」的判据）
+// __SSE_PARSER_START__ 独立可测：不依赖 DOM/window，验证脚本按标记整段提取后可直接喂数据
+function createSseParser(onEvent){
+    // SSE 解析：处理跨 chunk 半行、event:/data: 字段、': ping' 心跳注释行、空行分发
+    var buf = '', evName = '', dataLines = [];
+    function dispatch(){
+        if(!dataLines.length){ evName = ''; return; }
+        var raw = dataLines.join('\n');
+        dataLines = [];
+        var name = evName || 'message';
+        evName = '';
+        var payload;
+        try { payload = JSON.parse(raw); }
+        catch(e){ payload = {__raw: raw}; }
+        onEvent(name, payload);
+    }
+    function handleLine(line){
+        if(line.charAt(line.length - 1) === '\r') line = line.slice(0, -1);
+        if(!line){ dispatch(); return; }
+        if(line.charAt(0) === ':') return; // 心跳注释行（: ping）
+        var idx = line.indexOf(':');
+        var field = idx === -1 ? line : line.slice(0, idx);
+        var value = idx === -1 ? '' : line.slice(idx + 1);
+        if(value.charAt(0) === ' ') value = value.slice(1);
+        if(field === 'event') evName = value;
+        else if(field === 'data') dataLines.push(value);
+    }
+    return {
+        push: function(chunk){
+            buf += chunk;
+            var idx;
+            while((idx = buf.indexOf('\n')) !== -1){
+                var line = buf.slice(0, idx);
+                buf = buf.slice(idx + 1);
+                handleLine(line);
+            }
+        },
+        flush: function(){
+            if(buf){ handleLine(buf); buf = ''; }
+            dispatch();
+        }
+    };
+}
+// __SSE_PARSER_END__
+function buildAgentFocus(){
+    // 结构化「焦点」：只表达用户此刻的注意力，画布权威状态由后端自己 load_canvas
+    var focus = { selected_node_ids: [], reference_images: [], reference_videos: [], viewport: {x:0, y:0, scale:1} };
+    try {
+        var live = nodes || [];
+        focus.selected_node_ids = selectedNodeIds().filter(function(id){ return live.some(function(n){ return n.id === id; }); });
+        focus.reference_images = chatContextImages();
+        focus.reference_videos = chatContextVideos();
+        if(typeof viewport !== 'undefined' && viewport){
+            focus.viewport = { x: Math.round(Number(viewport.x) || 0), y: Math.round(Number(viewport.y) || 0), scale: Number(viewport.scale) || 1 };
+        }
+    } catch(e){}
+    return focus;
+}
+function agentSetComposerRunning(running){
+    // 运行态：输入框锁住防重复提交，发送键变停止键（中止能力）
+    var inp = document.getElementById('chatInput');
+    var btn = document.getElementById('chatSendBtn');
+    if(inp) inp.disabled = !!running;
+    if(btn){
+        btn.classList.toggle('is-running', !!running);
+        btn.setAttribute('aria-label', running ? '停止' : '发送');
+        btn.title = running ? '停止' : '发送';
+        btn.innerHTML = '<i data-lucide="' + (running ? 'square' : 'arrow-up') + '"></i>';
+        btn.disabled = false;
+    }
+    refreshIcons();
+}
+function abortAgentRun(){
+    if(agentRunAbort) agentRunAbort.abort();
+}
+function agentRunCardInit(bubble){
+    bubble.innerHTML = '';
+    var card = document.createElement('div');
+    card.className = 'agent-plan-card agent-stream-card';
+    card._run = { run_id:'', finished:false, lastMessage:'', lastRow:null, seq:0, steps:{}, max_steps:AGENT_RUN_MAX_STEPS };
+    card.innerHTML =
+        '<div class="agent-plan-head">' +
+            '<span class="agent-plan-badge"><i data-lucide="workflow"></i> Agent 运行</span>' +
+            '<span class="agent-plan-status">连接中…</span>' +
+        '</div>' +
+        '<div class="agent-plan-intent"><i data-lucide="list-todo" class="agent-intent-icon"></i> 正在执行你的指令…</div>' +
+        '<div class="agent-run-rounds"></div>' +
+        '<div class="agent-plan-timeline"></div>' +
+        '<div class="agent-run-notes"></div>';
+    bubble.appendChild(card);
+    refreshIcons();
+    return card;
+}
+function agentRunSetStatus(card, state, text){
+    if(!card) return;
+    card.setAttribute('data-run-state', state || '');
+    var el = card.querySelector('.agent-plan-status');
+    if(el) el.textContent = text || '';
+}
+function agentRunNote(card, text, kind){
+    if(!card || !text) return;
+    var box = card.querySelector('.agent-run-notes');
+    if(!box) return;
+    var el = document.createElement('div');
+    // 复用计划卡片既有样式，不新增 CSS
+    el.className = kind === 'fail' ? 'agent-step-error' : (kind === 'warn' ? 'agent-warn' : 'agent-preview-note');
+    el.textContent = text;
+    box.appendChild(el);
+    el.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+function agentRunRound(card, round){
+    var box = card && card.querySelector('.agent-run-rounds');
+    var n = Number(round) || 0;
+    if(!box || n < 2 || box.querySelector('[data-round="' + n + '"]')) return;
+    var el = document.createElement('div');
+    el.className = 'agent-preview-note';
+    el.setAttribute('data-round', String(n));
+    el.textContent = '第 ' + n + ' 轮';
+    box.appendChild(el);
+}
+function agentRunAssistantBubble(card, text){
+    // message / done.message → 助手气泡（同一段文本只出一次）
+    var t = String(text || '').trim();
+    if(!t) return;
+    if(card && card._run){
+        if(card._run.lastMessage === t) return;
+        card._run.lastMessage = t;
+    }
+    chatMessages.push({role:'assistant', text:t});
+    removeChatWelcome();
+    var parts = createChatMsgEl('assistant');
+    parts.bubble.innerHTML = escapeHtml(t).replace(/\n/g, '<br>');
+    document.getElementById('chatMessages').appendChild(parts.div);
+    parts.div.scrollIntoView({behavior:'smooth', block:'end'});
+}
+function applyAgentCanvasOps(ops){
+    // 立即落图：把服务端 ops 合进本地 nodes/connections，复用 render()，不另造渲染
+    if(!ops || typeof ops !== 'object') return 0;
+    var changed = 0;
+    var removes = Array.isArray(ops.nodes_remove) ? ops.nodes_remove.map(String) : [];
+    if(removes.length && Array.isArray(nodes)){
+        var dead = new Set(removes);
+        var kept = nodes.filter(function(n){ return !dead.has(n.id); });
+        if(kept.length !== nodes.length){ nodes = kept; changed += removes.length; }
+        if(canvas && Array.isArray(canvas.connections)){
+            canvas.connections = canvas.connections.filter(function(c){ return !dead.has(c.from) && !dead.has(c.to); });
+        }
+    }
+    var upserts = Array.isArray(ops.nodes_upsert) ? ops.nodes_upsert : [];
+    upserts.forEach(function(raw){
+        if(!raw || !raw.id) return;
+        var incoming;
+        try { incoming = normalizeLegacySmartNode(JSON.parse(JSON.stringify(raw))); } catch(e){ return; }
+        var i = nodes.findIndex(function(n){ return n.id === incoming.id; });
+        if(i === -1) nodes.push(incoming);
+        else nodes[i] = Object.assign({}, nodes[i], incoming);
+        changed++;
+    });
+    var connUp = Array.isArray(ops.connections_upsert) ? ops.connections_upsert : [];
+    if(connUp.length){
+        if(canvas) canvas.connections = Array.isArray(canvas.connections) ? canvas.connections : [];
+        connUp.forEach(function(c){
+            if(!c || !c.from || !c.to || !canvas) return;
+            var dup = canvas.connections.some(function(x){ return x.from === c.from && x.to === c.to && (x.kind || 'flow') === (c.kind || 'flow'); });
+            if(!dup){ canvas.connections.push({from:c.from, to:c.to, kind:c.kind || 'flow'}); changed++; }
+        });
+    }
+    var connRm = Array.isArray(ops.connections_remove) ? ops.connections_remove : [];
+    if(connRm.length && canvas && Array.isArray(canvas.connections)){
+        var before = canvas.connections.length;
+        canvas.connections = canvas.connections.filter(function(c){
+            return !connRm.some(function(r){ return r && r.from === c.from && r.to === c.to; });
+        });
+        changed += before - canvas.connections.length;
+    }
+    if(changed){
+        render();
+        if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
+    }
+    return changed;
+}
+function agentRunStepStart(card, ev){
+    var tool = ev.tool || '';
+    var key = (ev.index === undefined || ev.index === null) ? ('seq' + (++card._run.seq)) : String(ev.index);
+    var row = document.createElement('div');
+    row.className = 'agent-step running';
+    row.setAttribute('data-index', key);
+    row.innerHTML =
+        '<div class="agent-step-rail">' +
+            '<span class="agent-step-icon"><i data-lucide="' + agentToolIcon(tool) + '"></i></span>' +
+            '<span class="agent-step-line"></span>' +
+        '</div>' +
+        '<div class="agent-step-body">' +
+            '<div class="agent-step-head">' +
+                '<span class="agent-step-tool"><i data-lucide="' + agentToolIcon(tool) + '"></i>' + escapeHtml(tool) + '</span>' +
+                '<span class="agent-step-state">' + agentStepStateHtml('spin') + '</span>' +
+            '</div>' +
+            '<div class="agent-step-desc">正在执行：' + escapeHtml(ev.description || tool) + '（' + escapeHtml(tool) + '）</div>' +
+        '</div>';
+    row._descText = ev.description || tool; // step_result 不带 description，完成态要沿用 step_start 的描述
+    card.querySelector('.agent-plan-timeline').appendChild(row);
+    card._run.steps[key] = row;
+    card._run.lastRow = row;
+    refreshIcons();
+    row.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+function agentRunStepResult(card, ev){
+    var tool = ev.tool || '';
+    var key = (ev.index === undefined || ev.index === null) ? null : String(ev.index);
+    var row = (key && card._run.steps[key]) || card._run.lastRow;
+    if(!row){ agentRunStepStart(card, ev); row = card._run.lastRow; }
+    card._run.lastRow = null;
+    var stateEl = row.querySelector('.agent-step-state');
+    var descEl = row.querySelector('.agent-step-desc');
+    var bodyEl = row.querySelector('.agent-step-body');
+    row.classList.remove('running');
+    if(ev.ok){
+        row.classList.add('ok');
+        if(stateEl) stateEl.innerHTML = agentStepStateHtml('ok');
+        if(descEl) descEl.textContent = '已完成：' + (ev.description || row._descText || tool) + '（' + tool + '）';
+        var info = ev.message || agentResultText(ev.result);
+        if(info && bodyEl){
+            var m = document.createElement('div');
+            m.className = 'agent-preview-note';
+            m.textContent = String(info).slice(0, 200);
+            bodyEl.appendChild(m);
+        }
+        var touched = applyAgentCanvasOps(ev.canvas_ops);
+        if(touched && bodyEl){
+            var opsNote = document.createElement('div');
+            opsNote.className = 'agent-preview-note';
+            opsNote.textContent = '画布已更新 ' + touched + ' 处';
+            bodyEl.appendChild(opsNote);
+        }
+        var res = ev.result || {};
+        if(res.task_id && res.node_id && (tool === 'generate_image' || tool === 'generate_video')){
+            agentPollGenerateTask(res.node_id, res.task_id, row, card, tool === 'generate_video' ? 'video' : 'image');
+        }
+    } else {
+        row.classList.add('fail');
+        if(stateEl) stateEl.innerHTML = agentStepStateHtml('fail');
+        if(descEl) descEl.textContent = '失败：' + (ev.description || row._descText || tool) + '（' + tool + '）';
+        if(bodyEl){
+            var err = document.createElement('div');
+            err.className = 'agent-step-error';
+            err.textContent = String(ev.error || ev.message || '执行失败') +
+                (ev.code ? ' [' + ev.code + ']' : '') + (ev.retryable ? '（可重试）' : '');
+            bodyEl.appendChild(err);
+        }
+        applyAgentCanvasOps(ev.canvas_ops);
+    }
+    refreshIcons();
+}
+function agentRunHandleEvent(card, name, data){
+    if(!card) return;
+    var ev = data || {};
+    if(name === 'run_start'){
+        card._run.run_id = ev.run_id || '';
+        card._run.max_steps = Number(ev.max_steps) || card._run.max_steps;
+        agentRunSetStatus(card, 'running', '运行中');
+        return;
+    }
+    if(name === 'plan'){
+        var intentEl = card.querySelector('.agent-plan-intent');
+        if(intentEl && ev.intent) intentEl.innerHTML = '<i data-lucide="list-todo" class="agent-intent-icon"></i> ' + escapeHtml(ev.intent);
+        card._run.planned = (ev.steps || []).length;
+        agentRunRound(card, ev.round);
+        refreshIcons();
+        return;
+    }
+    if(name === 'round_start'){ agentRunRound(card, ev.round); return; }
+    if(name === 'step_start'){ agentRunStepStart(card, ev); return; }
+    if(name === 'step_result'){ agentRunStepResult(card, ev); return; }
+    if(name === 'message'){ agentRunAssistantBubble(card, ev.text); return; }
+    if(name === 'confirm_required'){
+        var label = (ev.tool || '该操作') + (ev.description ? '：' + ev.description : '');
+        agentRunNote(card, '需确认已跳过：' + label + (ev.reason ? '（' + ev.reason + '）' : ''), 'warn');
+        addChatMessage('system', '「' + label + '」需要确认，本次已跳过该步' + (ev.reason ? '（' + ev.reason + '）' : '') + '，其余步骤继续。');
+        return;
+    }
+    if(name === 'done'){
+        card._run.finished = true;
+        var status = ev.status || 'ok';
+        if(ev.message) agentRunAssistantBubble(card, ev.message);
+        var label2 = status === 'ok' ? '完成' : (status === 'aborted' ? '已中止' : '失败');
+        var steps = Number(ev.steps_executed);
+        agentRunSetStatus(card, status, label2 + (steps ? ' · ' + steps + ' 步' : ''));
+        refreshCanvasAfterAgent(); // done 后以服务端画布为准做权威刷新
+        return;
+    }
+    if(name === 'error'){
+        var msg = ev.message || '未知错误';
+        agentRunNote(card, '错误：' + msg + (ev.code ? '（' + ev.code + '）' : ''), 'fail');
+        addChatMessage('system', '智能画布运行出错：' + msg + (ev.code ? '（' + ev.code + '）' : ''));
+        agentRunSetStatus(card, 'failed', '失败');
+        return;
+    }
+}
+async function runAgentStream(instruction, bubble){
+    // POST /api/agent/run 消费 SSE。EventSource 不支持 POST，只能 fetch + getReader 手写解析。
+    var text = String(instruction || '');
+    if(text.length > 4000) return {unavailable:true, reason:'指令超过 4000 字上限'};
+    var provider = chatProvider || resolveChatProviderId();
+    var model = currentChatModel();
+    var ctl = new AbortController();
+    agentRunAbort = ctl;
+    var resp;
+    try {
+        resp = await fetch('/api/agent/run', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                canvas_id: canvasId,
+                instruction: text,
+                focus: buildAgentFocus(),
+                provider: provider,
+                model: model,
+                ms_model: provider === 'modelscope' ? model : '',
+                max_steps: AGENT_RUN_MAX_STEPS
+            }),
+            signal: ctl.signal
+        });
+    } catch(e){
+        if(agentRunAbort === ctl) agentRunAbort = null;
+        if(e && e.name === 'AbortError') return {aborted:true};
+        return {unavailable:true, reason:(e && e.message) || '网络错误'};
+    }
+    if(!resp.ok || !resp.body){
+        var detail = '';
+        if(!resp.ok){ try { detail = agentErrText(await resp.json()); } catch(e){} }
+        if(agentRunAbort === ctl) agentRunAbort = null;
+        return {unavailable:true, reason: detail || ('HTTP ' + resp.status)};
+    }
+    var card = agentRunCardInit(bubble);
+    var parser = createSseParser(function(name, data){ agentRunHandleEvent(card, name, data); });
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder('utf-8');
+    try {
+        for(;;){
+            var chunk = await reader.read();
+            if(chunk.done) break;
+            parser.push(decoder.decode(chunk.value, {stream:true}));
+        }
+        parser.push(decoder.decode());
+        parser.flush();
+        if(!card._run.finished){
+            agentRunNote(card, '连接提前结束：没有收到 done 事件', 'warn');
+            agentRunSetStatus(card, 'broken', '连接中断');
+            addChatMessage('system', '智能画布流式连接提前结束（未收到 done），已按当前画布状态刷新。');
+            refreshCanvasAfterAgent();
+        }
+        return {ok:true, card:card};
+    } catch(e){
+        if(e && e.name === 'AbortError'){
+            agentRunNote(card, '已手动停止', 'warn');
+            agentRunSetStatus(card, 'aborted', '已停止');
+            return {aborted:true};
+        }
+        agentRunNote(card, '流式中断：' + ((e && e.message) || '未知错误'), 'fail');
+        agentRunSetStatus(card, 'failed', '流式中断');
+        addChatMessage('system', '智能画布流式中断：' + ((e && e.message) || '未知错误'));
+        return {failed:true};
+    } finally {
+        try { var p = reader.cancel(); if(p && p.catch) p.catch(function(){}); } catch(e){}
+        if(agentRunAbort === ctl) agentRunAbort = null;
+    }
+}
 async function sendChatMessage(){
+    /* —— 运行中：发送键就是停止键（中止本次流式运行）—— */
+    if(agentRunAbort){ abortAgentRun(); return; }
     /* —— 防重入保护：防止用户连续按Enter发送多条消息产生竞态 —— */
     if(chatSending) return;
     var inp = document.getElementById('chatInput');
     var text = inp.value.trim();
     if(!text) return;
     chatSending = true;
-    inp.disabled = true;
+    agentSetComposerRunning(true);
     refreshChatModels();
     inp.value = ''; inp.style.height = 'auto';
     addChatMessage('user', text, chatContextImages());
@@ -5615,20 +6347,31 @@ async function sendChatMessage(){
     document.getElementById('chatMessages').appendChild(parts.div);
     parts.div.scrollIntoView({behavior:'smooth',block:'end'});
     try {
-        // Agent 优先：计划成功 → 计划卡片；失败（模型不可用等）→ 降级普通聊天，不伪造计划
-        var plan = canvasId ? await requestAgentPlan(text) : null;
-        if(plan && plan.steps && plan.steps.length){
-            renderAgentPlanCard(parts.bubble, plan);
-        } else {
+        // 流式 Agent 优先：/api/agent/run 可用 → SSE 边跑边落图；
+        // 不可用（非 200 / 断网）→ 明确提示后降级原计划模式，再不行降级普通聊天
+        var result = canvasId ? await runAgentStream(text, parts.bubble) : null;
+        if(!canvasId){
+            parts.bubble.innerHTML = '';
             await sendChatFallback(text, parts.bubble);
+        } else if(result && result.unavailable){
+            addChatMessage('system', '流式 Agent 暂不可用' + (result.reason ? '（' + result.reason + '）' : '') + '，已切换为原计划模式。');
+            var plan = await requestAgentPlan(text);
+            if(plan && plan.steps && plan.steps.length){
+                renderAgentPlanCard(parts.bubble, plan);
+            } else {
+                parts.bubble.innerHTML = '';
+                await sendChatFallback(text, parts.bubble);
+            }
         }
     } catch(e){
         parts.bubble.textContent = '失败: ' + (e.message || '未知');
         chatMessages.push({role:'assistant', text:parts.bubble.textContent});
     } finally {
         chatSending = false;
-        inp.disabled = false;
+        agentSetComposerRunning(false);
         inp.focus();
+        /* 计时 key 用完即删：不清的话下一轮发送会接着上一轮的秒数往下走 */
+        thoughtLineStarts.delete('agent');
     }
 }
 // ── Agent 计划卡片渲染与操作（时间线卡片流）──
@@ -6929,7 +7672,13 @@ async function openPromptTemplatePanel(nodeId='', templateId='', options={}){
     promptTemplateSearch?.focus();
 }
 function closePromptTemplatePanel(){
-    promptTemplatePanel?.classList.remove('open');
+    /* 面板本来就关着（绝大多数 document click 都是这种）：再 render 一次纯属浪费，
+       而且会和同帧里的另一次 render 抢聊天记录的滚动位置。按钮状态照旧同步。 */
+    if(!promptTemplatePanel?.classList.contains('open')){
+        syncComposerTemplateButton();
+        return;
+    }
+    promptTemplatePanel.classList.remove('open');
     syncComposerTemplateButton();
     render();
 }
@@ -6962,12 +7711,12 @@ function applyPromptTemplateToNode(mode='positive'){
 async function saveCurrentPromptAsTemplate(){
     const library = activePromptLibrary();
     // 系统库 readonly=false，也允许新增条目（走后端，与素材库管理同步）。
-    if(library.readonly){ toast('请选择可编辑的提示词库'); return; }
+    if(library.readonly){ toast('请选择可编辑的提示词库'); return false; }
     const templateNode = nodes.find(n => n.id === promptTemplatePanel?.dataset.nodeId);
     const text = promptTemplatePanel?.dataset.target === 'composer'
         ? promptPlainText()
         : String((templateNode?.llmEnabled ? templateNode.llmInstruction : '') || templateNode?.text || '').trim();
-    if(!text){ toast(tr('smart.promptPresetEmpty')); return; }
+    if(!text){ toast(tr('smart.promptPresetEmpty')); return false; }
     try {
         const data = await fetch('/api/prompt-libraries/items', {
             method:'POST',
@@ -6985,6 +7734,7 @@ async function saveCurrentPromptAsTemplate(){
         renderPromptTemplatePanel({preserveScroll:false});
     } catch(err) {
         toast(err.message || '保存失败');
+        return false;
     }
 }
 async function createBlankPromptTemplate(){
@@ -7017,7 +7767,7 @@ async function savePromptTemplateEdit(){
     const name = promptTemplatePanel.querySelector('[data-template-edit-name]')?.value?.trim() || '';
     const text = promptTemplatePanel.querySelector('[data-template-edit-text]')?.value?.trim() || '';
     const category = promptTemplatePanel.querySelector('[data-template-edit-category]')?.value || 'mine';
-    if(!name || !text){ toast(tr('smart.tplRequired')); return; }
+    if(!name || !text){ toast(tr('smart.tplRequired')); return false; }
     if(item.remote){
         try {
             const data = await fetch(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {
@@ -7032,7 +7782,7 @@ async function savePromptTemplateEdit(){
             promptTemplateSelectedId = data.item?.id || item.id;
         } catch(err) {
             toast(err.message || '保存失败');
-            return;
+            return false;
         }
     } else if(item.builtin){
         promptTemplateOverrides.editedBuiltins = promptTemplateOverrides.editedBuiltins || {};
@@ -7045,7 +7795,7 @@ async function savePromptTemplateEdit(){
         savePromptTemplateOverrides();
     } else {
         const preset = currentPromptPreset(item.sourceId);
-        if(!preset) return;
+        if(!preset) return false;
         const idx = promptPresets.findIndex(p => p.id === preset.id);
         if(idx >= 0) promptPresets[idx] = {...promptPresets[idx], name, text, category, updatedAt:Date.now()};
         savePromptPresets();
@@ -7408,6 +8158,27 @@ function clearCompletedNodeBusyStates(){
     if(clearCompletedSourceBusyStates()) changed = true;
     return changed;
 }
+/* 旧版本把「运行中」存进了画布：请求挂起时刷新/关页 → 重开后发送键永久置灰、动效常驻。
+   载入时（此刻不可能有请求在飞）把「没有任何在跑任务却还 running」的智能提示词节点清掉，
+   脏数据会在随后的 scheduleSave 里自愈；用户画布里的历史脏节点也靠这条修好。 */
+function healStalePromptNodeRunning(){
+    let changed = false;
+    (nodes || []).forEach(node => {
+        if(!node) return;
+        /* 旧版本把聊天的贴底/焦点标记写进了每个节点（不分类型）：载入时一并清掉，
+           免得首屏就替用户聚焦某个聊天框；脏字段也会随这次 scheduleSave 从画布文件里消失。 */
+        if(node.chatStickBottom !== undefined || node.chatFocusInput !== undefined){
+            delete node.chatStickBottom;
+            delete node.chatFocusInput;
+            changed = true;
+        }
+        if(node.type !== 'smart-prompt' || !node.running) return;
+        if(node.pending || node.queued || node.jimengPending || smartPendingTasks(node).length) return;
+        node.running = false;
+        changed = true;
+    });
+    return changed;
+}
 function usedCanvasOutputUrls(){
     const used = new Set();
     (nodes || []).forEach(node => (node.images || []).forEach(img => {
@@ -7458,19 +8229,31 @@ function completeSmartNodeWithImages(node, images){
     return copy;
 }
 /* ── 停止生成（单张 + 批量通用）─────────────────────────────
-   stopRequested 由用户点「停止」置位；activeSmartGenerationTaskIds 是当前在跑、
-   可以调后端取消的任务。轮询/等待循环每轮检查 stopRequested，setTimeout 醒来后立刻退出。 */
-let smartGenerationStopRequested = false;
+   停止按节点记录（smartStopRequestedNodeIds），一个节点自己的停止请求只掐它自己的生成，
+   不再用一个全局布尔把别人正在跑的节点一起停掉。
+   activeSmartGenerationTaskIds: taskId → 发起它的停止上下文 id，点停止只取消这个上下文的任务。
+   有图的节点重跑时会另开一个下游占位节点（branchNode），它的 _stopContextId 指回源节点，
+   所以按钮与停止判定认的仍是用户选中的那个源节点。 */
+const smartStopRequestedNodeIds = new Set();
 let runBtnModeKey = '';
-const activeSmartGenerationTaskIds = new Set();
+const activeSmartGenerationTaskIds = new Map();
 
+/* 一个节点在跑时归属哪个停止上下文：占位节点用 _stopContextId 指回源节点，其余就是自己。 */
+function smartNodeStopContextId(node){
+    if(!node) return '';
+    return node._stopContextId || node.id || '';
+}
 function smartGenerationStoppedError(){
     const err = new Error('已停止生成');
     err.smartGenerationStopped = true;
     return err;
 }
-function throwIfSmartGenerationStopped(){
-    if(smartGenerationStopRequested) throw smartGenerationStoppedError();
+function smartGenerationStopRequestedFor(nodeOrId){
+    const id = typeof nodeOrId === 'string' ? nodeOrId : smartNodeStopContextId(nodeOrId);
+    return Boolean(id && smartStopRequestedNodeIds.has(id));
+}
+function throwIfSmartGenerationStopped(nodeOrId){
+    if(smartGenerationStopRequestedFor(nodeOrId)) throw smartGenerationStoppedError();
 }
 function smartGenerationStopText(stopping=false){ return stopping ? '停止中…' : '停止'; }
 function cancelSmartTask(taskId){
@@ -7479,25 +8262,44 @@ function cancelSmartTask(taskId){
         .then(() => undefined)
         .catch(() => undefined);
 }
-/* 有没有生成在跑：在途任务 / 单节点 pending+running / 批量在跑。 */
-function smartGenerationIsRunning(){
-    if(activeSmartGenerationTaskIds.size) return true;
-    return (nodes || []).some(node => Boolean(node && (smartNodeInFlight(node) || node._batchRunning)));
+/* 这个停止上下文里还有没有节点在跑（含它派生的下游占位节点）。 */
+function smartStopContextActive(contextId){
+    if(!contextId) return false;
+    return (nodes || []).some(node => Boolean(node && smartNodeStopContextId(node) === contextId && (smartNodeInFlight(node) || node._batchRunning)));
 }
-function requestSmartGenerationStop(){
-    if(smartGenerationStopRequested) return;
-    smartGenerationStopRequested = true;
-    /* 已有 taskId 的：调后端取消（排队中真取消，运行中尽力而为）。 */
-    Array.from(activeSmartGenerationTaskIds).forEach(taskId => { cancelSmartTask(taskId); });
-    activeSmartGenerationTaskIds.clear();
-    (nodes || []).forEach(node => {
-        if(!node) return;
-        if(node._batchRunning) node._batchStopRequested = true;
+/* 「运行/停止」按钮只认选中的这个节点：它自己在跑，或它派生的下游占位节点在跑。 */
+function smartNodeRunActive(node){
+    if(!node?.id) return false;
+    if(smartNodeInFlight(node) || node._batchRunning) return true;
+    return smartStopContextActive(smartNodeStopContextId(node));
+}
+/* 停完的节点及时从停止集合里摘掉，否则下次再点「运行」会被当成还在停。 */
+function smartClearSettledStopRequests(){
+    if(!smartStopRequestedNodeIds.size) return;
+    Array.from(smartStopRequestedNodeIds).forEach(contextId => {
+        if(!smartStopContextActive(contextId)) smartStopRequestedNodeIds.delete(contextId);
+    });
+}
+function requestSmartGenerationStop(node=selectedNode()){
+    const contextId = smartNodeStopContextId(node);
+    if(!contextId || smartStopRequestedNodeIds.has(contextId)) return;
+    smartStopRequestedNodeIds.add(contextId);
+    /* 只取消这个上下文自己的在途任务（排队中真取消，运行中尽力而为）。 */
+    Array.from(activeSmartGenerationTaskIds.entries()).forEach(([taskId, ownerId]) => {
+        if(ownerId !== contextId) return;
+        cancelSmartTask(taskId);
+        activeSmartGenerationTaskIds.delete(taskId);
+    });
+    /* 批量：只停这一批，别的批量节点不动。选中结果节点时停止上下文是上游那个批量节点。 */
+    const targets = contextId === (node && node.id) ? [node] : [node, (nodes || []).find(n => n.id === contextId)];
+    targets.forEach(target => {
+        if(!target) return;
+        if(target._batchRunning) target._batchStopRequested = true;
         /* 批量逐行状态：还没跑完的行直接标「已取消」，已出的图留着。 */
-        if(node.batchRowOrder && node.batchRowStates){
-            Object.keys(node.batchRowStates).forEach(rowNumber => {
-                const state = node.batchRowStates[rowNumber];
-                if(state === 'queued' || state === 'running') node.batchRowStates[rowNumber] = 'cancelled';
+        if(target.batchRowOrder && target.batchRowStates){
+            Object.keys(target.batchRowStates).forEach(rowNumber => {
+                const state = target.batchRowStates[rowNumber];
+                if(state === 'queued' || state === 'running') target.batchRowStates[rowNumber] = 'cancelled';
             });
         }
     });
@@ -7508,21 +8310,21 @@ function requestSmartGenerationStop(){
 }
 function syncRunButtonState(node=selectedNode()){
     if(!runBtn) return;
-    const running = smartGenerationIsRunning();
-    /* 真的停完了（没有任何生成在跑）→ 收掉停止态，按钮恢复「运行」。 */
-    if(smartGenerationStopRequested && !running) smartGenerationStopRequested = false;
-    const active = smartGenerationStopRequested || running;
-    const mode = !active ? 'run' : (smartGenerationStopRequested ? 'stopping' : 'stop');
+    smartClearSettledStopRequests();
+    const running = smartNodeRunActive(node);
+    const stopRequested = smartGenerationStopRequestedFor(node);
+    const active = stopRequested || running;
+    const mode = !active ? 'run' : (stopRequested ? 'stopping' : 'stop');
     if(mode !== runBtnModeKey){
         runBtnModeKey = mode;
         runBtn.classList.toggle('is-stop', active);
         runBtn.innerHTML = active
-            ? '<i data-lucide="square"></i><span>' + escapeHtml(smartGenerationStopText(smartGenerationStopRequested)) + '</span>'
+            ? '<i data-lucide="square"></i><span>' + escapeHtml(smartGenerationStopText(stopRequested)) + '</span>'
             : '<i data-lucide="sparkles"></i><span data-i18n="smart.run">' + escapeHtml(tr('smart.run')) + '</span>';
         refreshIcons();
     }
     runBtn.disabled = active
-        ? smartGenerationStopRequested
+        ? stopRequested
         : (!isSmartRunnableNode(node) || smartNodeInFlight(node) || smartCascadeIsLoopRunning(node?.id));
 }
 function mergeSmartNode(local, remote){
@@ -8217,6 +9019,7 @@ async function loadCanvas(){
             }
         });
         const cleanedCompletedState = clearCompletedNodeBusyStates();
+        const healedPromptRunning = healStalePromptNodeRunning();
         const resetBatchRuns = resetStaleBatchRuns();
         const recoveredLoopOutputs = recoverStuckLoopOutputsFromLogs();
         const hiddenCompletedTimers = hideCompletedRunTimers();
@@ -8237,7 +9040,7 @@ async function loadCanvas(){
         if(nodes.length && viewport.scale < 0.1) fitAllNodesViewport();
         else applyViewport();
         render();
-        if(cleanedDetachedInputs || cleanedCompletedState || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers) scheduleSave();
+        if(cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers) scheduleSave();
         resumeSmartPendingTasks();
         resumeJimengPendingNodes();
         startCanvasMetaPoll();
@@ -8709,14 +9512,12 @@ function updateNodeElementDuringResize(node){
             loadingGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
             loadingGrid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
         }
-        const maxVisibleRows = isSmartGroupNode(node)
-            ? (smartGroupCompactMembers(node).length ? Number(layout.rows || 1) : SMART_GROUP_MAX_VISIBLE_ROWS)
-            : MEDIA_GROUP_MAX_VISIBLE_ROWS;
         const grid = body.querySelector('.thumb-grid');
         if(grid){
             grid.style.setProperty('--thumb-cols', layout.cols);
             grid.style.setProperty('--thumb-size', `${layout.thumb}px`);
-            const visibleRows = Math.max(1, Math.min(maxVisibleRows, Number(layout.visibleRows || layout.rows || 1)));
+            // imageLayout 已按「手动尺寸铺满全部 / 自适应封顶」算好可见行数，这里直接用，不能再夹一次
+            const visibleRows = Math.max(1, Number(layout.visibleRows || layout.rows || 1));
             const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
             grid.style.setProperty('--thumb-max-height', `${maxHeight}px`);
             grid.querySelectorAll('.thumb-item').forEach((itemEl, index) => {
@@ -9412,15 +10213,105 @@ function openSmartCanvasShortcuts(){
 function closeSmartCanvasShortcuts(){
     smartShortcutModal?.classList.remove('open');
 }
+/* 聊天模式角色：唯一真源是节点的 llmSystemPrompt（请求体里的 system_prompt），
+   chips 只负责往它里面写内容，chatPersonaId 仅用于标记「当前是哪个角色 / 是否自定义」。 */
+const SMART_CHAT_DEFAULT_PERSONA_ID = 'builtin_prompt_optimizer';
+const SMART_CHAT_PERSONA_CUSTOM = 'custom';
+/* 老节点的出厂默认系统提示词：等价于「没设过」，不能拿它挡住默认角色 */
+const SMART_CHAT_LEGACY_SYSTEM_PROMPT = 'You are a helpful prompt assistant.';
+/* /api/personas 拿不到时的兜底：内置「提示词优化」的精简版 */
+const SMART_CHAT_FALLBACK_PERSONA = {
+    id: SMART_CHAT_DEFAULT_PERSONA_ID,
+    description: '把模糊提示词改写成结构清晰、意图明确的优质提示词',
+    content: '你是一名提示词优化专家，擅长把用户模糊、冗长或意图不清的提示词，改写成语义清晰、结构完整、可直接使用的优质提示词。\n\n优化流程：\n1. 先简短复述你对原提示词意图的理解，并指出缺失或歧义的关键信息（角色、目标、约束、格式、受众）；\n2. 输出优化后的提示词（放进代码块或清晰标注，方便直接复制）；\n3. 简述主要改动与原因。\n\n优化原则：角色明确、目标具体、约束清晰、分步骤、必要时给示例、忠实原意。\n\n输出保持紧凑、直接可复制，不做冗长铺垫。',
+    builtin: true,
+};
+let chatPersonaLibrary = null;
+let chatPersonaRequest = null;
+function chatPersonaOptions(){
+    if(Array.isArray(chatPersonaLibrary) && chatPersonaLibrary.length) return chatPersonaLibrary;
+    return [Object.assign({}, SMART_CHAT_FALLBACK_PERSONA, {name: tr('smart.chatPersonaDefault')})];
+}
+function loadChatPersonas(){
+    if(chatPersonaRequest) return chatPersonaRequest;
+    chatPersonaRequest = fetch('/api/personas')
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+            const list = (Array.isArray(data?.personas) ? data.personas : []).filter(item => item && item.id && String(item.content || '').trim());
+            chatPersonaLibrary = list;
+            upgradeChatPersonaDefaults();
+            if(list.length && nodes.some(n => n.type === 'smart-prompt' && n.llmTab === 'chat')) render();
+        })
+        .catch(() => { chatPersonaLibrary = []; });
+    return chatPersonaRequest;
+}
+function applyChatPersona(node, personaId){
+    const persona = chatPersonaOptions().filter(item => item.id === personaId)[0];
+    if(!persona) return false;
+    node.llmSystemPrompt = String(persona.content || '');
+    node.chatPersonaId = persona.id;
+    node.llmSystemEnabled = true;
+    return true;
+}
+/* 角色库比首屏慢：默认角色可能先套上了兜底文案。等真角色到手，
+   只把「还是兜底原文 + 仍是默认角色」的节点升级成后端内容（手写过的一律不碰）。 */
+function upgradeChatPersonaDefaults(){
+    if(!Array.isArray(chatPersonaLibrary) || !chatPersonaLibrary.length) return;
+    const real = chatPersonaLibrary.filter(item => item.id === SMART_CHAT_DEFAULT_PERSONA_ID)[0];
+    if(!real || !String(real.content || '').trim()) return;
+    let changed = false;
+    nodes.forEach(node => {
+        if(node.type !== 'smart-prompt' || node.chatPersonaId !== SMART_CHAT_DEFAULT_PERSONA_ID) return;
+        if(String(node.llmSystemPrompt || '').trim() !== SMART_CHAT_FALLBACK_PERSONA.content) return;
+        node.llmSystemPrompt = String(real.content);
+        changed = true;
+    });
+    if(changed) scheduleSave();
+}
+function ensureChatPersonaDefault(node){
+    if(node.llmTab !== 'chat' || node.chatPersonaId) return false;
+    const current = String(node.llmSystemPrompt || '').trim();
+    if(current && current !== SMART_CHAT_LEGACY_SYSTEM_PROMPT) return false;
+    if(!applyChatPersona(node, SMART_CHAT_DEFAULT_PERSONA_ID)) return false;
+    scheduleSave();
+    return true;
+}
+/* chips 的高亮只看「当前生效的 system 提示词」：手写过的（含老画布带手写内容、没有 chatPersonaId 的）
+   显示「自定义」。纯显示判断，绝不回写 chatPersonaId。 */
+function chatPersonaDisplayState(node){
+    const text = String(node.llmSystemPrompt || '').trim();
+    const stored = String(node.chatPersonaId || '');
+    if(stored && stored !== SMART_CHAT_PERSONA_CUSTOM){
+        /* 角色库还没到手时先信 chatPersonaId，免得闪一下「自定义」；到手后库里没有这个 id 才继续往下判 */
+        if(!Array.isArray(chatPersonaLibrary) || !chatPersonaLibrary.length || chatPersonaLibrary.some(item => item.id === stored)) return {id: stored, custom: false};
+    }
+    if(!text || text === SMART_CHAT_LEGACY_SYSTEM_PROMPT) return {id: '', custom: false};
+    const hit = chatPersonaOptions().filter(item => String(item.content || '').trim() === text)[0];
+    return hit ? {id: hit.id, custom: false} : {id: '', custom: true};
+}
+function chatPersonaChipsHtml(node){
+    const state = chatPersonaDisplayState(node);
+    const chips = chatPersonaOptions().map(persona => `<button class="llm-persona-chip prompt-node-control ${!state.custom && persona.id === state.id ? 'is-active' : ''}" type="button" data-persona-id="${escapeAttr(persona.id)}" title="${escapeAttr(persona.description || persona.name || '')}">${escapeHtml(persona.name || persona.id)}</button>`).join('');
+    return chips + `<span class="llm-persona-chip llm-persona-custom ${state.custom ? 'is-active' : ''}" ${state.custom ? '' : 'hidden'}>${escapeHtml(tr('smart.chatPersonaCustom'))}</span>`;
+}
+/* 改系统提示词时只同步 chips 高亮，不重建子树 —— 否则每敲一个字都要重排一次。 */
+function syncChatPersonaChips(el, node){
+    const state = chatPersonaDisplayState(node);
+    el.querySelectorAll('.llm-persona-chip[data-persona-id]').forEach(chip => chip.classList.toggle('is-active', !state.custom && chip.dataset.personaId === state.id));
+    const customChip = el.querySelector('.llm-persona-custom');
+    if(customChip){ customChip.hidden = !state.custom; customChip.classList.toggle('is-active', state.custom); }
+}
 function promptNodeBodyHtml(node){
     node.llmProvider = resolveChatProviderId(node.llmProvider || '');
-    node.llmModel = resolveChatModel(node.llmModel || '', node.llmProvider);
+    // 历史存档或换平台可能留下不属于当前平台的对话模型（渲染阶段不能弹提示），先静默归一。
+    node.llmModel = correctedChatModelForProvider(node.llmProvider, resolveChatModel(node.llmModel || '', node.llmProvider));
     node.llmSystemEnabled = node.llmSystemEnabled === true;
     node.promptSplitEnabled = node.promptSplitEnabled === true;
     node.promptSeparator = promptNodeSeparator(node);
     const readonly = node.llmEnabled ? 'readonly' : '';
-    const systemPrompt = (node.llmSystemPrompt || '').trim();
     node.llmTab = node.llmTab === 'chat' ? 'chat' : 'node';
+    ensureChatPersonaDefault(node);
+    const systemPrompt = (node.llmSystemPrompt || '').trim();
     const chatMessages = Array.isArray(node.chatMessages) ? node.chatMessages : [];
     const inputThumbs = smartNodeInputThumbsHtml(promptNodeInputImages(node));
     const templateActive = activePromptTemplateNodeId() === node.id;
@@ -9444,8 +10335,12 @@ function promptNodeBodyHtml(node){
                 <select class="prompt-node-control prompt-llm-model">${chatModelOptions(node.llmModel, node.llmProvider)}</select>
             </div>
             ${node.llmTab === 'chat' ? `
+            <div class="llm-persona-row">
+                <span class="llm-persona-label">${escapeHtml(tr('smart.chatPersona'))}</span>
+                <div class="llm-persona-chips">${chatPersonaChipsHtml(node)}</div>
+            </div>
             <div class="llm-chat-pane">
-                <div class="llm-chat-log">${chatMessages.length ? chatMessages.map((msg, mi) => `<div class="llm-bubble ${msg.role === 'user' ? 'user' : 'assistant'}" data-msg-idx="${mi}">${escapeHtml(msg.content || '')}${msg.role === 'assistant' ? `<button class="llm-bubble-copy" type="button" title="复制"><i data-lucide="copy"></i></button>` : ''}</div>`).join('') : `<div class="llm-chat-empty">${escapeHtml(tr('canvas.startChat'))}</div>`}</div>
+                <div class="llm-chat-log">${chatMessages.length ? chatMessages.map((msg, mi) => `<div class="llm-bubble ${msg.role === 'user' ? 'user' : 'assistant'}" data-msg-idx="${mi}">${escapeHtml(msg.content || '')}${msg.role === 'assistant' ? `<button class="llm-bubble-copy" type="button" title="复制"><i data-lucide="copy"></i></button>` : ''}</div>`).join('') : `<div class="llm-chat-empty">${escapeHtml(tr('canvas.startChat'))}</div>`}${node.running ? `<div class="llm-chat-thinking">${thinkingHtml(tr('smart.chatThinking'), node.id)}</div>` : ''}</div>
                 <textarea class="llm-chat-input prompt-node-control" rows="2" placeholder="${escapeHtml(tr('canvas.chatInput'))}" style="height:${promptChatInputHeight(node)}px">${escapeHtml(node.chatInput || '')}</textarea>
                 <div class="prompt-llm-instruction-resize prompt-node-control" data-llm-chat-input-resize="1" title="拖动调整高度"><span></span></div>
                 <button class="llm-chat-send prompt-node-control" type="button" ${node.running ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'send'}"></i><span>${node.running ? escapeHtml(tr('canvas.sending')) : escapeHtml(tr('chat.send'))}</span></button>
@@ -9668,8 +10563,7 @@ function smartGroupBodyHtml(node){
             </div>`;
         }
         // 组内有真实图片节点时铺满整个框，行数不截断（否则格子会被 max-height 裁掉）。
-        const groupMaxVisibleRows = ((groupThumbLayout.memberImages || []).length || (groupThumbLayout.compactMembers || []).length) ? Number(groupThumbLayout.rows || 1) : SMART_GROUP_MAX_VISIBLE_ROWS;
-        const visibleRows = Math.max(1, Math.min(groupMaxVisibleRows, Number(groupThumbLayout.visibleRows || groupThumbLayout.rows || 1)));
+        const visibleRows = Math.max(1, Number(groupThumbLayout.visibleRows || groupThumbLayout.rows || 1));
         const groupCellH = Math.max(24, Math.round(Number(groupThumbLayout.thumbH) || Number(groupThumbLayout.thumb) || 96));
         // 网格在框内垂直居中：上下留白对称（图片比例和分组框比例不一致时的余量）
         const contentOffsetY = Math.max(0, Math.round(Number(groupThumbLayout.contentOffsetY) || 0));
@@ -9915,7 +10809,8 @@ function nodeBodyHtml(node, layout){
 /* 多图网格：已出的缩略图 + 还没出来的占位格（pendingSlots）。
    占位格只用 .loading-cell（闪底），**不能加 .thumb-item** —— 那个类会被缩略图预览/拖动处理器认领。 */
 function thumbGridHtml(node, imgs, layout, pendingSlots = 0, failedSlots = 0){
-    const visibleRows = Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, Number(layout.visibleRows || layout.rows || 1)));
+    const layoutVisibleRows = Math.max(1, Number(layout.visibleRows || layout.rows || 1));
+    const visibleRows = node?.sizeUserSet ? layoutVisibleRows : Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, layoutVisibleRows));
     const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
     const thumb = Number(layout.thumb || 96);
     const thumbs = imgs.map((img, i) => `<div class="thumb-item has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === i ? 'image-selected' : ''}" data-image-index="${i}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${i}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`).join('');
@@ -9989,6 +10884,188 @@ function smartNodeToolbarHtml(node){
         <button type="button" data-smart-node-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.tip || action.label)}">
             <i data-lucide="${escapeAttr(action.icon)}"></i><span>${escapeHtml(action.label)}</span>
         </button>`).join('')}</div>`;
+}
+/* 图片节点工具栏的展开态（对齐 Spectrum UI 的 Expandable Action Bar）：指针进入整条 bar 就让所有标签一起展开，
+   高亮底只跟随当前悬停的那个按钮。展开态是容器级的 class，这里只负责增删它和滑块几何。
+   按钮在展开动画里会被相邻标签推着走，所以几何只在 pointerover / transitionend 这些离散时机读，
+   pointermove 里不做任何计算。 */
+function initSmartNodeMenuMotion(root){
+    if(!root || root.__smartNodeMenuMotion) return;
+    root.__smartNodeMenuMotion = true;
+    const MENU_SELECTOR = '[data-smart-node-menu="1"]';
+    /* 图片节点工具栏按钮是 data-smart-node-action，群组工具栏是 data-smart-group-action：动效一视同仁 */
+    const MENU_BUTTON_SELECTOR = 'button[data-smart-node-action], button[data-smart-group-action]';
+    const EXPANDED_CLASS = 'smart-node-menu-expanded';
+    /* 参考实现的 collapseDelay：指针从按钮之间穿过去时会先 leave 再 over，立刻折叠就会闪 */
+    const COLLAPSE_DELAY = 90;
+    const reducedMotion = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    /* max-width:0 + overflow:hidden 会把 span 的盒子压成 0，标签的自然宽度只能量文字本身。
+       rect 被祖先缩放乘过，除回去才是菜单自己坐标里的宽度——内联 max-width 和几何都得用这个值。 */
+    const naturalWidth = (span, scale) => {
+        try {
+            const range = document.createRange();
+            range.selectNodeContents(span);
+            return range.getBoundingClientRect().width / scale;
+        } catch(error) { return (span.scrollWidth || 0) / scale; }
+    };
+    /* 按钮还差多少才长到位：文字宽 + 5px 左间距，减掉已经占掉的，动画中途调也一样对。 */
+    const labelGrowth = (button, scale) => {
+        const span = button.querySelector('span');
+        if(!span) return 0;
+        const rendered = span.getBoundingClientRect().width / scale + (parseFloat(getComputedStyle(span).marginLeft) || 0);
+        return Math.max(0, naturalWidth(span, scale) + 5 - rendered);
+    };
+    /* 滑块样式用菜单自己的坐标，而 getBoundingClientRect 已经被画布缩放乘过，得把祖先 zoom / transform 的乘积除回去。 */
+    const localScale = menu => {
+        let scale = 1;
+        for(let node = menu; node; node = node.parentElement){
+            const style = getComputedStyle(node);
+            const zoom = parseFloat(style.zoom);
+            if(zoom > 0) scale *= zoom;
+            const transform = style.transform;
+            if(transform && transform !== 'none'){
+                const values = transform.slice(transform.indexOf('(') + 1, -1).split(',').map(Number);
+                if(values.length >= 4) scale *= Math.hypot(values[0], values[1]) || 1;
+            }
+            /* 独立的 transform 属性（工具栏的 scale 反向补偿）不进 style.transform，得单独取；
+               漏了这一下，滑块坐标会差一个反向缩放倍数（画布 ≤100% 时直接错位）。 */
+            const own = style.scale;
+            if(own && own !== 'none'){
+                const ownScale = Math.abs(parseFloat(own));
+                if(ownScale > 0) scale *= ownScale;
+            }
+        }
+        return Number.isFinite(scale) && scale > 0 ? scale : 1;
+    };
+    const highlightOf = menu => {
+        let highlight = menu.querySelector(':scope > .smart-node-menu-highlight');
+        if(!highlight){
+            menu.insertAdjacentHTML('afterbegin', '<span class="smart-node-menu-highlight" aria-hidden="true"></span>');
+            highlight = menu.firstElementChild;
+        }
+        return highlight;
+    };
+    const setExpanded = (menu, expanded) => {
+        if(menu.__smartMenuExpanded === expanded) return;
+        menu.__smartMenuExpanded = expanded;
+        const spans = menu.querySelectorAll('button[data-smart-node-action] span');
+        if(expanded){
+            /* max-content 是关键字，过渡只能离散跳变；写成实测 px 才能从 0 连续长到自然宽 */
+            const scale = localScale(menu);
+            spans.forEach(span => {
+                const width = naturalWidth(span, scale);
+                if(width > 0) span.style.maxWidth = width + 'px';
+            });
+            menu.classList.add(EXPANDED_CLASS);
+        } else {
+            menu.classList.remove(EXPANDED_CLASS);
+            /* 清掉内联宽度，max-width 才会从当前值过渡回 CSS 里的 0 */
+            spans.forEach(span => { span.style.maxWidth = ''; });
+        }
+    };
+    const expand = menu => {
+        clearTimeout(menu.__smartMenuCollapseTimer);
+        menu.__smartMenuCollapseTimer = null;
+        setExpanded(menu, true);
+    };
+    const collapse = menu => {
+        clearTimeout(menu.__smartMenuCollapseTimer);
+        menu.__smartMenuCollapseTimer = null;
+        setExpanded(menu, false);
+        menu.__smartMenuButton = null;
+        const highlight = menu.querySelector(':scope > .smart-node-menu-highlight');
+        if(highlight) highlight.style.opacity = '0';
+    };
+    /* 连续 over/leave 只留最后一个定时器，重入安全 */
+    const scheduleCollapse = menu => {
+        clearTimeout(menu.__smartMenuCollapseTimer);
+        menu.__smartMenuCollapseTimer = setTimeout(() => {
+            menu.__smartMenuCollapseTimer = null;
+            collapse(menu);
+        }, COLLAPSE_DELAY);
+    };
+    /* 滑块要落到「整条展开后」的位置：目标前面的按钮都会因为标签变宽把它往右推，
+       所以拿当前 rect（亚像素）加上还没长出来的增量推终态，一次滑到位。 */
+    const placeHighlight = (menu, button) => {
+        const highlight = highlightOf(menu);
+        const previous = menu.__smartMenuButton;
+        menu.__smartMenuButton = button;
+        const scale = localScale(menu);
+        const menuRect = menu.getBoundingClientRect();
+        const buttonRect = button.getBoundingClientRect();
+        let shift = 0;
+        const items = menu.querySelectorAll(MENU_BUTTON_SELECTOR);
+        for(const item of items){
+            if(item === button) break;
+            shift += labelGrowth(item, scale);
+        }
+        const x = (buttonRect.left - menuRect.left) / scale - menu.clientLeft + menu.scrollLeft + shift;
+        const width = buttonRect.width / scale + labelGrowth(button, scale);
+        const top = (buttonRect.top - menuRect.top) / scale - menu.clientTop + menu.scrollTop;
+        const height = buttonRect.height / scale;
+        const prevX = Number(highlight.dataset.prevX);
+        const prevW = Number(highlight.dataset.prevW);
+        highlight.dataset.prevX = String(x);
+        highlight.dataset.prevW = String(width);
+        highlight.style.top = top + 'px';
+        highlight.style.height = height + 'px';
+        highlight.style.opacity = '1';
+        /* 第一次出现没有起点，直接落位；之后从上一个按钮的位置滑过来。 */
+        if(Number.isFinite(prevX) && Number.isFinite(prevW) && (prevX !== x || prevW !== width) && !reducedMotion() && highlight.animate){
+            highlight.animate([
+                {transform: `translateX(${prevX}px)`, width: `${prevW}px`},
+                {transform: `translateX(${x}px)`, width: `${width}px`}
+            ], {duration: 130, easing: 'cubic-bezier(.22,1,.36,1)'});
+        }
+        highlight.style.width = width + 'px';
+        highlight.style.transform = `translateX(${x}px)`;
+    };
+    root.querySelectorAll(MENU_SELECTOR).forEach(highlightOf);
+    /* 进 toolbar 的任意位置（含内边距和按钮间隙）就整条展开 */
+    root.addEventListener('pointerover', event => {
+        const menu = event.target.closest?.(MENU_SELECTOR);
+        if(!menu) return;
+        expand(menu);
+        const button = event.target.closest?.(MENU_BUTTON_SELECTOR);
+        if(!button || button.disabled || menu.__smartMenuButton === button) return;
+        /* 「一键运行」自带常驻底框（--soft + 边框）：滑块再压一层就是双层底色，
+           所以它不参与滑块，改为把滑块藏起来（否则会误停在旁边那个按钮上）。 */
+        if(button.dataset.smartGroupAction === 'run'){
+            const highlight = menu.querySelector(':scope > .smart-node-menu-highlight');
+            if(highlight) highlight.style.opacity = '0';
+            menu.__smartMenuButton = null;
+            return;
+        }
+        placeHighlight(menu, button);
+    });
+    /* pointerleave 不冒泡，捕获阶段才收得到；按钮之间移动不会触发它，真离开才延迟折叠。 */
+    root.addEventListener('pointerleave', event => {
+        if(!event.target.matches?.(MENU_SELECTOR)) return;
+        scheduleCollapse(event.target);
+    }, true);
+    /* 键盘 focus 进来同样整条展开（参考的 expandOnFocus），焦点离开整条 bar 才折叠。 */
+    root.addEventListener('focusin', event => {
+        const menu = event.target.closest?.(MENU_SELECTOR);
+        if(menu) expand(menu);
+    });
+    root.addEventListener('focusout', event => {
+        const menu = event.target.closest?.(MENU_SELECTOR);
+        if(menu && !menu.contains(event.relatedTarget)) collapse(menu);
+    });
+    /* 标签展开跑完按钮才落到最终位置，这时按真实几何校正一次（估算只差亚像素就不会重复播动画）。 */
+    root.addEventListener('transitionend', event => {
+        if(event.propertyName !== 'max-width') return;
+        const menu = event.target.closest?.(MENU_SELECTOR);
+        if(menu?.__smartMenuButton) placeHighlight(menu, menu.__smartMenuButton);
+    });
+    /* 工具栏是渲染时 insertAdjacentHTML 出来的，新增的靠 Observer 补滑块，不在 render 里挂钩子。 */
+    new MutationObserver(records => {
+        records.forEach(record => record.addedNodes.forEach(added => {
+            if(added.nodeType !== 1) return;
+            if(added.matches(MENU_SELECTOR)) highlightOf(added);
+            added.querySelectorAll(MENU_SELECTOR).forEach(highlightOf);
+        }));
+    }).observe(root, {childList: true, subtree: true});
 }
 function duplicateSmartNodeMediaToCanvas(node, imageIndex){
     const source = node?.images?.[imageIndex];
@@ -10358,7 +11435,9 @@ function smartGroupToolbarHtml(node){
         {key:'download', icon:'archive', label:'批量下载', enabled:imageCount > 0},
         {key:'ungroup', icon:'ungroup', label:'解散分组', enabled:true}
     ];
-    return `<div class="smart-node-floating-menu" data-smart-group-menu="1">${actions.map(action => `
+    /* data-smart-node-menu="1" 是「带滑动高亮动效的工具栏」标记：图片节点一直有，群组这边补上，
+       这样 initSmartNodeMenuMotion 与相关 CSS（含窄屏隐藏滑块那条）会一并接管。 */
+    return `<div class="smart-node-floating-menu" data-smart-group-menu="1" data-smart-node-menu="1">${actions.map(action => `
         <button type="button" data-smart-group-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.tip || action.label)}">
             <i data-lucide="${escapeAttr(action.icon)}"></i><span>${escapeHtml(action.label)}</span>
         </button>`).join('')}</div>`;
@@ -10459,9 +11538,84 @@ function rememberInlineVideoActivations(){
         if(image && mediaKindForItem(image) === 'video') image._inlineVideoActive = true;
     });
 }
+/* 重绘会重建节点子树：.llm-chat-log 的滚动位置被打回 0、正在输入的光标也一起丢。
+   这里在重建前把「滚动位置 / 原来是否贴底 / 正在输入的控件」记下来，重建后原样还回去
+   （贴底判定照搬经典画布 captureOutputScrolls：scrollHeight - scrollTop - clientHeight < 12）。
+   贴底（chatStickBottom）与抢焦点（chatFocusInput）是两个标记：回复到达时只贴底，
+   绝不能把用户正在**别的节点**打字的焦点抢走。 */
+function capturePromptNodeChatUiState(){
+    const scrolls = new Map();
+    const stickIds = [];
+    const focusIds = [];
+    world.querySelectorAll('.image-node[data-id]').forEach(el => {
+        const id = el.dataset.id;
+        const node = nodes.find(n => n.id === id);
+        if(node){
+            if(node.chatStickBottom) stickIds.push(id);
+            if(node.chatFocusInput) focusIds.push(id);
+            /* 用完即清（delete 而不是写 false）：这两个是页面内临时标记，不能留在节点上被存进画布 */
+            delete node.chatStickBottom;
+            delete node.chatFocusInput;
+        }
+        const log = el.querySelector('.llm-chat-log');
+        if(!log) return;
+        const stick = stickIds.includes(id);
+        scrolls.set(id, {top: log.scrollTop || 0, atBottom: stick || log.scrollHeight - log.scrollTop - log.clientHeight < 12});
+    });
+    const active = document.activeElement;
+    const host = active && active.closest ? active.closest('.image-node[data-id]') : null;
+    const selector = active && active.classList
+        ? (active.classList.contains('llm-chat-input') ? '.llm-chat-input'
+            : active.classList.contains('prompt-llm-system') ? '.prompt-llm-system'
+            : active.classList.contains('prompt-llm-instruction') ? '.prompt-llm-instruction' : '')
+        : '';
+    const focus = host && selector && world.contains(host)
+        ? {id: host.dataset.id, selector, start: active.selectionStart, end: active.selectionEnd}
+        : null;
+    return {scrolls, stickIds, focusIds, focus};
+}
+function restorePromptNodeChatUiState(state){
+    if(!state) return;
+    const active = document.activeElement;
+    /* 只有焦点确实被重建弄丢（没有 / 掉到 body / 元素已不在文档）才恢复；
+       用户当前有焦点时一律不抢。目标优先「发送时那个节点的聊天输入框」，否则原来那个输入控件。 */
+    const lostFocus = !active || active === document.body || !document.contains(active);
+    const target = !lostFocus ? null
+        : state.focusIds.length ? {id: state.focusIds[0], selector: '.llm-chat-input', start: null, end: null}
+        : state.focus;
+    if(target){
+        const input = world.querySelector(`.image-node[data-id="${CSS.escape(target.id)}"] ${target.selector}`);
+        if(input && input.focus){
+            input.focus({preventScroll:true});
+            const end = target.end == null ? input.value.length : Math.min(Number(target.end) || 0, input.value.length);
+            const start = target.start == null ? end : Math.min(Number(target.start) || 0, end);
+            if(input.setSelectionRange) input.setSelectionRange(start, end);
+        }
+    }
+    if(!state.scrolls.size && !state.stickIds.length) return;
+    const applyChatScroll = () => {
+        state.scrolls.forEach((pos, id) => {
+            const log = world.querySelector(`.image-node[data-id="${CSS.escape(id)}"] .llm-chat-log`);
+            if(log) log.scrollTop = pos.atBottom ? log.scrollHeight : (pos.top || 0);
+        });
+        /* 从别的页签切回聊天：旧 DOM 里没有聊天记录、没有位置可恢复 —— 直接贴底看最新回复 */
+        state.stickIds.forEach(id => {
+            if(state.scrolls.has(id)) return;
+            const log = world.querySelector(`.image-node[data-id="${CSS.escape(id)}"] .llm-chat-log`);
+            if(log) log.scrollTop = log.scrollHeight;
+        });
+    };
+    /* 先同步写一次：拖动 mouseup 后的 click 会在同一帧连触两次 render（shell.onclick 一次 +
+       document 里 closePromptTemplatePanel 一次），第二次的 capture 必须读到已经修好的位置，
+       否则它的 rAF 会把 0 写回去（用户报的「拖动节点把上翻的记录打回顶部」）。 */
+    applyChatScroll();
+    /* rAF 再校正一次：lucide 图标替换 / 图片撑开高度之后 scrollHeight 才定型 */
+    requestAnimationFrame(applyChatScroll);
+}
 function render(){
     if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
     rememberInlineVideoActivations();
+    const chatUiState = capturePromptNodeChatUiState();
     world.classList.toggle('smart-multi-selected', selectedNodeIds().length > 1);
     const composerEl = composer;
     const mediaStates = captureMediaPlaybackStates();
@@ -10485,7 +11639,7 @@ function render(){
         .map(node => {
         const imgs = node.images || [];
         // 分组名是用户输入，直接进 innerHTML 会变成注入点（node-head 平时 display:none，但 DOM 已经建出来了）。
-        const title = node.type === 'table' ? '多维表格' : node.type === 'smart-batch' ? '批量生成' : node.type === 'smart-group' ? escapeHtml(smartGroupDisplayTitle(node)) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.type === 'table' ? '多维表格' : node.type === 'smart-batch' ? '生成输入' : node.type === 'smart-group' ? escapeHtml(smartGroupDisplayTitle(node)) : node.type === 'smart-prompt' ? '文本生成' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -10566,6 +11720,7 @@ function render(){
     mountSmartBatchNodes();
     restoreMediaPlaybackStates(mediaStates);
     bindNodeEvents();
+    restorePromptNodeChatUiState(chatUiState);
     bindConnectionEvents();
     updateComposer();
     renderMinimap();
@@ -10577,6 +11732,7 @@ function render(){
        一次布局就能量到最终尺寸，不会边改边读反复触发 reflow。 */
     flushContentMeasurements();
     refreshRunTimerPills();
+    wireSizePickerGlide(world);
     sbSyncStarBorderFrames();
     syncRunButtonState();
     return;
@@ -10585,7 +11741,7 @@ function render(){
     world.insertAdjacentHTML('beforeend', renderConnections());
     const nodesHtml = nodes.map(node => {
         const imgs = node.images || [];
-        const title = node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : 'Image');
+        const title = node.type === 'smart-prompt' ? '文本生成' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : 'Image');
         const scale = nodeScale(node);
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -10819,12 +11975,21 @@ function bindPromptNodeControls(el, node){
     if(providerEl) providerEl.onchange = e => {
         e.stopPropagation();
         node.llmProvider = resolveChatProviderId(e.target.value);
-        node.llmModel = resolveChatModel('', node.llmProvider);
+        node.llmModel = resolveChatModel(node.llmModel || '', node.llmProvider);
+        // 换平台先按新平台校正模型，再记住这次用的模型，最后弹一条提示。
+        const providerModelNotice = correctPromptNodeChatModel(node);
+        window.NovaUtils?.rememberProviderChatModel?.(node.llmProvider, node.llmModel);
         render();
         scheduleSave();
+        if(providerModelNotice) toast(providerModelNotice, '!');
     };
     const modelEl = el.querySelector('.prompt-llm-model');
-    if(modelEl) modelEl.onchange = e => { e.stopPropagation(); node.llmModel = e.target.value; scheduleSave(); };
+    if(modelEl) modelEl.onchange = e => {
+        e.stopPropagation();
+        node.llmModel = e.target.value;
+        window.NovaUtils?.rememberProviderChatModel?.(node.llmProvider, node.llmModel);
+        scheduleSave();
+    };
     const systemToggleEl = el.querySelector('.prompt-system-toggle');
     if(systemToggleEl) systemToggleEl.onclick = e => {
         e.preventDefault();
@@ -10845,7 +12010,16 @@ function bindPromptNodeControls(el, node){
         scheduleSave();
     };
     const systemEl = el.querySelector('.prompt-llm-system');
-    if(systemEl) { bindScrollableText(systemEl); systemEl.oninput = e => { node.llmSystemPrompt = e.target.value; scheduleSave(); }; }
+    if(systemEl){
+        bindScrollableText(systemEl);
+        /* 手写过系统提示词就记成自定义：自动套默认角色的逻辑从此不再碰它 */
+        systemEl.oninput = e => {
+            node.llmSystemPrompt = e.target.value;
+            node.chatPersonaId = SMART_CHAT_PERSONA_CUSTOM;
+            syncChatPersonaChips(el, node);
+            scheduleSave();
+        };
+    }
     const instructionEl = el.querySelector('.prompt-llm-instruction');
     if(instructionEl) { bindScrollableText(instructionEl); instructionEl.oninput = e => { node.llmInstruction = e.target.value; scheduleSave(); }; }
     const instructionResizeEl = el.querySelector('[data-llm-instruction-resize]');
@@ -10878,7 +12052,15 @@ function bindPromptNodeControls(el, node){
             event.stopPropagation();
             const which = tab.dataset.llmTab;
             if(which === 'node'){ node.llmTab = 'node'; render(); scheduleSave(); }
-            else if(which === 'chat'){ node.llmTab = 'chat'; render(); scheduleSave(); }
+            else if(which === 'chat'){
+                const switched = node.llmTab !== 'chat';
+                node.llmTab = 'chat';
+                /* 从别的页签切回来时聊天 DOM 是新造的，没有历史滚动状态可恢复 —— 直接贴底看最新回复。
+                   本来就在聊天页签（只是重绘）不置标记，免得把用户上翻的位置拽到底。 */
+                if(switched && (node.chatMessages || []).length) node.chatStickBottom = true;
+                render();
+                scheduleSave();
+            }
             else if(which === 'system'){ node.llmSystemEnabled = !node.llmSystemEnabled; render(); scheduleSave(); }
             else if(which === 'reverse'){ node.reverse = !node.reverse; render(); scheduleSave(); }
         };
@@ -10934,7 +12116,17 @@ function bindPromptNodeControls(el, node){
     if(chatLogEl){
         bindScrollableText(chatLogEl);
         chatLogEl.addEventListener('click', e => e.stopPropagation());
+        loadChatPersonas();
     }
+    el.querySelectorAll('.llm-persona-chip[data-persona-id]').forEach(chip => {
+        chip.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if(!applyChatPersona(node, chip.dataset.personaId)) return;
+            render();
+            scheduleSave();
+        };
+    });
     const chatInputEl = el.querySelector('.llm-chat-input');
     if(chatInputEl){
         bindScrollableText(chatInputEl);
@@ -16170,6 +17362,11 @@ function renderMentionPicker(source){
     // 先 open 再定位：display:none 下量不到尺寸，翻转/限高需要真实高度。
     mentionPicker.classList.add('open');
     positionMentionPickerAtCaret();
+    /* 三个可选项列表各接一条滑块：grid 里的选项是二维排布，横向那两条只走 x。
+       放在 open 之后接线，否则 display:none 里量到的全是 0，滑块会一直藏着。 */
+    attachGlideHost(mentionPicker.querySelector('.mention-option-grid'), {item: '.mention-option', orientation: 'grid'});
+    attachGlideHost(mentionPicker.querySelector('.mention-folder-chips'), {item: '.mention-folder-chip', orientation: 'horizontal'});
+    attachGlideHost(mentionPicker.querySelector('.mention-source-tabs'), {item: '.mention-source-tab', orientation: 'horizontal'});
     mentionPicker.querySelectorAll('[data-mention-source]').forEach(btn => {
         btn.addEventListener('mousedown', e => {
             e.preventDefault(); e.stopPropagation();
@@ -17483,7 +18680,7 @@ async function createSmartComfyTask(payload){
     if(!res.ok) throw new Error(await smartResponseErrorMessage(res, tr('smart.errRunFailed')));
     return res.json();
 }
-async function waitSmartComfyTaskResult(taskId){
+async function waitSmartComfyTaskResult(taskId, node=null){
     if(!taskId) throw new Error(tr('smart.errRunFailed'));
     while(true){
         const res = await fetch(`/api/canvas-comfy-tasks/${encodeURIComponent(taskId)}`);
@@ -17494,12 +18691,12 @@ async function waitSmartComfyTaskResult(taskId){
         if(data.status === 'succeeded') return data.result || {};
         if(data.status === 'failed') throw new Error(data.error || tr('smart.errRunFailed'));
         await sleep(1600);
-        throwIfSmartGenerationStopped();
+        throwIfSmartGenerationStopped(node);
     }
 }
-async function runQueuedSmartComfyGenerate(payload){
+async function runQueuedSmartComfyGenerate(payload, node=null){
     const task = await createSmartComfyTask(payload);
-    return waitSmartComfyTaskResult(task.task_id);
+    return waitSmartComfyTaskResult(task.task_id, node);
 }
 function comfyParamsFromWorkflowValues(config, values={}){
     const params = {};
@@ -17532,12 +18729,12 @@ function buildPromptRequestForNode(node, defaultImages, ctx=smartLoopContext){
 }
 async function generateUrlsForCurrentSettings(node, prompt, refs, runSettings=settings){
     const activeSettings = runSettings || settings;
-    if(activeSettings.engine === 'comfy') return generateComfyUrlsWithSettings(activeSettings, prompt, refs);
+    if(activeSettings.engine === 'comfy') return generateComfyUrlsWithSettings(activeSettings, prompt, refs, node);
     if(activeSettings.engine === 'runninghub' && runningHubSelectedModel(activeSettings)){
-        const taskResult = await runApiGeneration(prompt, refs, runningHubModelApiSettings(activeSettings));
+        const taskResult = await runApiGeneration(prompt, refs, runningHubModelApiSettings(activeSettings), node);
         const taskIds = Array.isArray(taskResult?.taskIds) ? taskResult.taskIds : [];
         if(taskIds.length){
-            const settled = await Promise.all(taskIds.map(taskId => pollSmartCanvasTask(taskId)));
+            const settled = await Promise.all(taskIds.map(taskId => pollSmartCanvasTask(taskId, node)));
             const urls = settled.flatMap(result => resultMediaUrls(result?.image_items?.length ? result.image_items : (result?.images?.length ? result.images : result))).filter(Boolean);
             return {urls, kind:mediaKindForUrls(urls, 'image')};
         }
@@ -17545,14 +18742,14 @@ async function generateUrlsForCurrentSettings(node, prompt, refs, runSettings=se
         return {urls, kind:mediaKindForUrls(urls, 'image')};
     }
     if(isApiLikeEngine(activeSettings.engine) && activeSettings.apiKind === 'video'){
-        const vRes = await runApiVideoGeneration(prompt, refs, activeSettings);
+        const vRes = await runApiVideoGeneration(prompt, refs, activeSettings, node);
         return {urls:Array.isArray(vRes) ? vRes : (vRes?.urls || []), kind:'video', canvas_meta:(!Array.isArray(vRes) && vRes?.canvas_meta) || {}};
     }
     if(isApiLikeEngine(activeSettings.engine)){
-        const taskResult = await runApiGeneration(prompt, refs, activeSettings);
+        const taskResult = await runApiGeneration(prompt, refs, activeSettings, node);
         const taskIds = Array.isArray(taskResult?.taskIds) ? taskResult.taskIds : [];
         if(taskIds.length){
-            const settled = await Promise.all(taskIds.map(taskId => pollSmartCanvasTask(taskId)));
+            const settled = await Promise.all(taskIds.map(taskId => pollSmartCanvasTask(taskId, node)));
             const urls = settled.flatMap(result => resultMediaUrls(result?.image_items?.length ? result.image_items : (result?.images?.length ? result.images : result))).filter(Boolean);
             return {urls, kind:mediaKindForUrls(urls, 'image')};
         }
@@ -17560,25 +18757,25 @@ async function generateUrlsForCurrentSettings(node, prompt, refs, runSettings=se
         return {urls, kind:mediaKindForUrls(urls, 'image')};
     }
     const urls = activeSettings.engine === 'runninghub'
-        ? await runRunningHubGeneration(prompt, refs, activeSettings)
+        ? await runRunningHubGeneration(prompt, refs, activeSettings, node)
         : activeSettings.engine === 'modelscope'
-            ? await runModelscopeGeneration(prompt, refs, activeSettings)
+            ? await runModelscopeGeneration(prompt, refs, activeSettings, node)
             : [];
     return {urls, kind:mediaKindForUrls(urls, 'image')};
 }
-async function generateComfyUrlsWithSettings(runSettings, prompt, refs){
+async function generateComfyUrlsWithSettings(runSettings, prompt, refs, node=null){
     const allRefs = refs || [];
     const imageRefs = imageRefsOnly(allRefs);
     const mode = runSettings.comfyMode || 'text';
     if(mode === 'text'){
-        const data = await runQueuedSmartComfyGenerate({prompt, width:Number(runSettings.width || 1024), height:Number(runSettings.height || 1024), workflow_json:'Z-Image.json', type:'zimage', client_id:smartClientId});
+        const data = await runQueuedSmartComfyGenerate({prompt, width:Number(runSettings.width || 1024), height:Number(runSettings.height || 1024), workflow_json:'Z-Image.json', type:'zimage', client_id:smartClientId}, node);
         const urls = resultMediaUrls(data);
         return {urls, kind:mediaKindForUrls(urls, 'image')};
     }
     if(mode === 'enhance'){
         if(!imageRefs.length) throw new Error(tr('smart.errEnhanceNeedRefs'));
         const inputName = await comfyNameForRef(imageRefs[0]);
-        const data = await runQueuedSmartComfyGenerate({workflow_json:'Z-Image-Enhance.json', type:'enhance', params:{"15":{image:inputName},"204":{value:Number(runSettings.enhanceStrength ?? 0.5)}}, client_id:smartClientId});
+        const data = await runQueuedSmartComfyGenerate({workflow_json:'Z-Image-Enhance.json', type:'enhance', params:{"15":{image:inputName},"204":{value:Number(runSettings.enhanceStrength ?? 0.5)}}, client_id:smartClientId}, node);
         const urls = resultMediaUrls(data);
         return {urls, kind:mediaKindForUrls(urls, 'image')};
     }
@@ -17586,7 +18783,7 @@ async function generateComfyUrlsWithSettings(runSettings, prompt, refs){
         if(!imageRefs.length) throw new Error(tr('smart.errEditNeedRefs'));
         const names = [];
         for(const ref of imageRefs.slice(0, 3)) names.push(await comfyNameForRef(ref));
-        const data = await runQueuedSmartComfyGenerate({prompt, workflow_json:'Flux2-Klein.json', type:'klein', params:{"168":{text:prompt},"158":{noise_seed:Math.floor(Math.random()*1000000)},"278":{image:names[0] || ""},"270":{image:names[1] || ""},"292":{image:names[2] || ""},"313":{value:Boolean(names[1])},"314":{value:Boolean(names[2])}}, client_id:smartClientId});
+        const data = await runQueuedSmartComfyGenerate({prompt, workflow_json:'Flux2-Klein.json', type:'klein', params:{"168":{text:prompt},"158":{noise_seed:Math.floor(Math.random()*1000000)},"278":{image:names[0] || ""},"270":{image:names[1] || ""},"292":{image:names[2] || ""},"313":{value:Boolean(names[1])},"314":{value:Boolean(names[2])}}, client_id:smartClientId}, node);
         const urls = resultMediaUrls(data);
         return {urls, kind:mediaKindForUrls(urls, 'image')};
     }
@@ -17616,7 +18813,7 @@ async function generateComfyUrlsWithSettings(runSettings, prompt, refs){
             values[field.id] = runSettings.comfyParams?.[field.id] ?? field.default;
         }
     });
-    const result = await runQueuedSmartComfyGenerate({prompt, workflow_json:workflowName, params:comfyParamsFromWorkflowValues(wf.config || {fields:[]}, values), type:'workflow-custom', client_id:smartClientId});
+    const result = await runQueuedSmartComfyGenerate({prompt, workflow_json:workflowName, params:comfyParamsFromWorkflowValues(wf.config || {fields:[]}, values), type:'workflow-custom', client_id:smartClientId}, node);
     const urls = resultMediaUrls(result);
     const fallbackKind = result.videos?.length ? 'video' : result.audios?.length ? 'audio' : result.texts?.length ? 'text' : 'image';
     return {urls, kind:mediaKindForUrls(urls, fallbackKind)};
@@ -17769,7 +18966,7 @@ async function runLoopRoundIntoSlot(loopNode, rootNode, outputSlot, loopIndex, c
         settings = previousSettings;
         let result;
         if(isApiLikeEngine(runSettings.engine) && runSettings.apiKind !== 'video'){
-            const taskResult = await runApiGeneration(prompt, request.refs || [], runSettings);
+            const taskResult = await runApiGeneration(prompt, request.refs || [], runSettings, outputSlot);
             const taskIds = Array.isArray(taskResult?.taskIds) ? taskResult.taskIds : [];
             if(!taskIds.length) throw new Error(tr('smart.errRunFailed'));
             const existing = cleanHistoryImages(outputSlot.images || []);
@@ -18199,6 +19396,8 @@ async function runGeneration(){
     if(shouldCreateBranchOutput) branchNode = createPendingOutputFromSource(node, expectedCount, pendingMeta, {connectSource:false, selectOutput:true, refs});
     undoSuppressed = false;
     const pendingNode = branchNode || node;
+    /* 有图节点重跑时真正在跑的是新开的下游占位节点：把停止上下文指回用户选中的源节点。 */
+    if(branchNode) pendingNode._stopContextId = node.id;
     if(extracted) pendingNode._runMetaTargetId = extracted.id;
     if(!branchNode){
         pendingNode.pending = Math.max(1, Number(expectedCount) || 1);
@@ -18228,7 +19427,7 @@ async function runGeneration(){
             return;
         }
         if(isApiLikeEngine(settings.engine) && settings.apiKind === 'video'){
-            const outResult = await runApiVideoGeneration(prompt, refs);
+            const outResult = await runApiVideoGeneration(prompt, refs, settings, pendingNode);
             const outVideos = Array.isArray(outResult) ? outResult : (outResult?.urls || []);
             const canvasMeta = (!Array.isArray(outResult) && outResult?.canvas_meta) || {};
             if(!outVideos.length) throw new Error(tr('smart.errNoOutVideos'));
@@ -18247,12 +19446,12 @@ async function runGeneration(){
         }
         const rhModelMode = settings.engine === 'runninghub' && Boolean(runningHubSelectedModel(settings));
         const outImages = rhModelMode
-            ? await runApiGeneration(prompt, refs, runningHubModelApiSettings(settings))
+            ? await runApiGeneration(prompt, refs, runningHubModelApiSettings(settings), pendingNode)
             : settings.engine === 'runninghub'
-                ? await runRunningHubGeneration(prompt, refs)
+                ? await runRunningHubGeneration(prompt, refs, settings, pendingNode)
                 : settings.engine === 'modelscope'
-                ? await runModelscopeGeneration(prompt, refs)
-                : await runApiGeneration(prompt, refs);
+                ? await runModelscopeGeneration(prompt, refs, settings, pendingNode)
+                : await runApiGeneration(prompt, refs, settings, pendingNode);
         if(isApiLikeEngine(settings.engine) || rhModelMode){
             const taskIds = Array.isArray(outImages?.taskIds) ? outImages.taskIds : [];
             if(!taskIds.length) throw new Error(tr('smart.errRunFailed'));
@@ -18384,21 +19583,28 @@ async function runSmartPromptChat(node){
     node.chatMessages.push({role:'user', content:message});
     node.chatInput = '';
     node.running = true;
+    node.chatStickBottom = true;
+    node.chatFocusInput = true;
     render();
     try {
-        const text = await callSmartCanvasLLM(node, message, history);
+        const text = await callSmartCanvasLLM(node, message, history, {chat:true});
         node.chatMessages.push({role:'assistant', content:String(text || '')});
         node.outputText = String(text || '');
         node.running = false;
+        node.chatStickBottom = true;
         render();
         scheduleSave();
     } catch(e) {
         node.running = false;
+        node.chatStickBottom = true;
         render();
         /* 失败也要落盘：否则 running=true 会跟着 scheduleSave 存进画布，
            刷新后聊天发送键永远卡在「发送中」。 */
         scheduleSave();
         toast((e && e.message) || tr('smart.promptLlmFailed'));
+    } finally {
+        /* 成功/失败都要清：否则下一次发送会显示上一轮累计的荒唐秒数 */
+        thoughtLineStarts.delete(node.id);
     }
 }
 function comfyFieldKind(field){
@@ -18407,7 +19613,7 @@ function comfyFieldKind(field){
     if(field?.type === 'textarea' || /prompt|text|提示词|正向|负向/.test(key)) return 'prompt';
     return 'setting';
 }
-async function runApiGeneration(prompt, refs, runSettings=settings){
+async function runApiGeneration(prompt, refs, runSettings=settings, node=null){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
     const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX)};
@@ -18416,15 +19622,16 @@ async function runApiGeneration(prompt, refs, runSettings=settings){
         return r.json();
     })));
     const taskIds = tasks.map(task => task.task_id).filter(Boolean);
-    /* 停止已请求：任务刚建出来就取消，不再往下跑。 */
-    if(smartGenerationStopRequested){
+    /* 这个节点自己请求了停止：任务刚建出来就取消，不再往下跑。 */
+    if(smartGenerationStopRequestedFor(node)){
         taskIds.forEach(taskId => { cancelSmartTask(taskId); });
         throw smartGenerationStoppedError();
     }
-    taskIds.forEach(taskId => activeSmartGenerationTaskIds.add(taskId));
+    const stopContextId = smartNodeStopContextId(node);
+    taskIds.forEach(taskId => activeSmartGenerationTaskIds.set(taskId, stopContextId));
     return {taskIds, count, providerId:payload.provider_id, model:payload.model};
 }
-async function runRunningHubGeneration(prompt, refs, runSettings=settings){
+async function runRunningHubGeneration(prompt, refs, runSettings=settings, node=null){
     const ref = selectedRunningHubRef(runSettings);
     if(!ref) throw new Error(tr('smart.rhNeedConfig'));
     const fields = rhActiveFields(runSettings);
@@ -18451,7 +19658,7 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings){
     if(!taskId) throw new Error(tr('smart.rhNoTaskId'));
     for(let i = 0; i < 720; i++){
         await sleep(2500);
-        throwIfSmartGenerationStopped();
+        throwIfSmartGenerationStopped(node);
         const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(async r => {
             const json = await r.json();
             if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('smart.rhFailed'));
@@ -18466,7 +19673,7 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings){
     }
     throw new Error(tr('smart.rhTimeout'));
 }
-async function runApiVideoGeneration(prompt, refs, runSettings=settings){
+async function runApiVideoGeneration(prompt, refs, runSettings=settings, node=null){
     if(!runSettings.videoModel) throw new Error(tr('smart.errNoVideoModel'));
     /* 「原图比例」在这里解析成参考素材的实际比例（单节点这条路径：refs 是节点自己的参考，
        多数已经量过尺寸）。批量那条路径在 tableRunOneRow 里已经解析过，这里再兜一次底。 */
@@ -18530,7 +19737,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             multimodal: Boolean(runSettings.videoMultimodal),
             trusted_asset: useAssetUris
         };
-        throwIfSmartGenerationStopped();
+        throwIfSmartGenerationStopped(node);
         const result = await fetch('/api/canvas-video', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
@@ -18544,7 +19751,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
         transientSmartCloudLinks = [];
     }
 }
-async function runModelscopeGeneration(prompt, refs, runSettings=settings){
+async function runModelscopeGeneration(prompt, refs, runSettings=settings, node=null){
     refs = imageRefsOnly(refs);
     const modelKey = runSettings.msgenModel || 'zimage';
     const msModel = MS_GEN_MODELS[modelKey] || MS_GEN_MODELS.zimage;
@@ -18561,7 +19768,7 @@ async function runModelscopeGeneration(prompt, refs, runSettings=settings){
     }
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
     const submit = async () => {
-        throwIfSmartGenerationStopped();
+        throwIfSmartGenerationStopped(node);
         let body;
         if(modelKey === 'zimage') body = {prompt, resolution:`${width}x${height}`};
         else if(modelKey === 'qwen_edit') body = {prompt, image_urls:imageUrls, resolution:`${width}x${height}`};
@@ -18619,7 +19826,7 @@ async function runComfyGeneration(node, prompt, refs, pendingNode, meta){
             values[field.id] = settings.comfyParams?.[field.id] ?? field.default;
         }
     });
-    const result = await runQueuedSmartComfyGenerate({prompt, workflow_json:workflowName, params:comfyParamsFromWorkflowValues(wf.config || {fields:[]}, values), type:'workflow-custom', client_id:smartClientId});
+    const result = await runQueuedSmartComfyGenerate({prompt, workflow_json:workflowName, params:comfyParamsFromWorkflowValues(wf.config || {fields:[]}, values), type:'workflow-custom', client_id:smartClientId}, node);
     const urls = resultMediaUrls(result);
     if(!urls.length) throw new Error(tr('smart.errComfyNoImages'));
     const kind = mediaKindForUrls(urls, result.videos?.length ? 'video' : result.audios?.length ? 'audio' : result.texts?.length ? 'text' : 'image');
@@ -18638,7 +19845,7 @@ async function runComfyGeneration(node, prompt, refs, pendingNode, meta){
     scheduleSave();
 }
 async function runComfyText(node, prompt, pendingNode, meta){
-    const data = await runQueuedSmartComfyGenerate({prompt, width:Number(settings.width || 1024), height:Number(settings.height || 1024), workflow_json:'Z-Image.json', type:'zimage', client_id:smartClientId});
+    const data = await runQueuedSmartComfyGenerate({prompt, width:Number(settings.width || 1024), height:Number(settings.height || 1024), workflow_json:'Z-Image.json', type:'zimage', client_id:smartClientId}, node);
     const out = data.outputs || data.images || [];
     if(!out.length) throw new Error(tr('smart.errComfyNoImages'));
     if(pendingNode){
@@ -18654,7 +19861,7 @@ async function runComfyText(node, prompt, pendingNode, meta){
 async function runComfyEnhance(node, refs, pendingNode, meta){
     if(!refs.length) throw new Error(tr('smart.errEnhanceNeedRefs'));
     const inputName = await comfyNameForRef(refs[0]);
-    const data = await runQueuedSmartComfyGenerate({workflow_json:'Z-Image-Enhance.json', type:'enhance', params:{"15":{image:inputName},"204":{value:Number(settings.enhanceStrength ?? 0.5)}}, client_id:smartClientId});
+    const data = await runQueuedSmartComfyGenerate({workflow_json:'Z-Image-Enhance.json', type:'enhance', params:{"15":{image:inputName},"204":{value:Number(settings.enhanceStrength ?? 0.5)}}, client_id:smartClientId}, node);
     const out = data.outputs || data.images || [];
     if(!out.length) throw new Error(tr('smart.errComfyNoImages'));
     if(pendingNode){
@@ -18670,7 +19877,7 @@ async function runComfyEdit(node, prompt, refs, pendingNode, meta){
     if(!refs.length) throw new Error(tr('smart.errEditNeedRefs'));
     const names = [];
     for(const ref of refs.slice(0, 3)) names.push(await comfyNameForRef(ref));
-    const data = await runQueuedSmartComfyGenerate({prompt, workflow_json:'Flux2-Klein.json', type:'klein', params:{"168":{text:prompt},"158":{noise_seed:Math.floor(Math.random()*1000000)},"278":{image:names[0] || ""},"270":{image:names[1] || ""},"292":{image:names[2] || ""},"313":{value:Boolean(names[1])},"314":{value:Boolean(names[2])}}, client_id:smartClientId});
+    const data = await runQueuedSmartComfyGenerate({prompt, workflow_json:'Flux2-Klein.json', type:'klein', params:{"168":{text:prompt},"158":{noise_seed:Math.floor(Math.random()*1000000)},"278":{image:names[0] || ""},"270":{image:names[1] || ""},"292":{image:names[2] || ""},"313":{value:Boolean(names[1])},"314":{value:Boolean(names[2])}}, client_id:smartClientId}, node);
     const out = data.outputs || data.images || [];
     if(!out.length) throw new Error(tr('smart.errComfyNoImages'));
     if(pendingNode){
@@ -18925,14 +20132,14 @@ function resumeJimengPendingNodes(){
         startJimengPoll(n);
     });
 }
-async function pollSmartCanvasTask(taskId){
+async function pollSmartCanvasTask(taskId, node=null){
     if(!taskId) throw new Error(tr('smart.errRunFailed'));
     if(activeSmartTaskPolls.has(taskId)) return activeSmartTaskPolls.get(taskId);
     const promise = (async () => {
         for(let i = 0; i < 900; i++){
             await new Promise(resolve => setTimeout(resolve, 2000));
             /* 停止请求：2s 计时器一醒来就退出，不等这一轮请求。 */
-            if(smartGenerationStopRequested) throw smartGenerationStoppedError();
+            if(smartGenerationStopRequestedFor(node)) throw smartGenerationStoppedError();
             const task = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`).then(async r => {
                 if(!r.ok) throw new Error(await r.text());
                 return r.json();
@@ -19064,7 +20271,7 @@ async function resumeSmartPendingNode(node, logContext={}){
             scheduleSave();
         }
     }));
-    if(smartGenerationStopRequested) throw smartGenerationStoppedError();
+    if(smartGenerationStopRequestedFor(node)) throw smartGenerationStoppedError();
     if(failures.length && !(node.images || []).length){
         throw failures[0];
     }
@@ -19318,7 +20525,7 @@ function addCreatedNodeToMenuGroup(node){
    面板与按钮都复用 shared/table-node.js 里那套（和经典画布同一个实现）。 */
 function createSmartBatchNode(x, y){
     pushUndo();
-    const node = {id: uid('batch'), type: 'smart-batch', x, y, w: 420, h: 0, title: '批量生成'};
+    const node = {id: uid('batch'), type: 'smart-batch', x, y, w: 420, h: 0, title: '生成输入'};
     nodes.push(node);
     render();
     scheduleSave();
@@ -19339,7 +20546,7 @@ function mountSmartBatchNodes(){
         ensureNodeResizeHandle(hostEl);
         markNodeSizeUserSet(hostEl, node);
         if(!hostEl.querySelector(':scope > .table-node-drag-bar')){
-            const bar = tableHostDragBar('批量生成');
+            const bar = tableHostDragBar('生成输入');
             bar.title = '拖动这一栏可以移动节点';
             hostEl.appendChild(bar);
         }
@@ -19379,7 +20586,7 @@ function mountSmartBatchNodes(){
                     && (nodes || []).some(item => item.id === conn.to && item.type === 'table'));
                 tip.textContent = reversed
                     ? '连接方向反了：要从「多维表格」右侧的输出口，拖到本节点左侧的输入口'
-                    : '还没有接入多维表格：把「多维表格」右侧的输出口拖到本节点左侧的输入口';
+                    : '请接入上游节点';
                 empty.appendChild(tip);
                 hostEl.appendChild(empty);
             }
@@ -19418,7 +20625,6 @@ function createNodeFromMenu(type){
     let created = null;
     if(type === 'group') created = createSmartGroupNode(p.x - 170, p.y - 110);
     else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
-    else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
     else if(type === 'table') created = createSmartTableNode(p.x - 260, p.y - 60);
     else if(type === 'batch') created = createSmartBatchNode(p.x - 210, p.y - 60);
     else created = createImageNodeAt(p);
@@ -20230,6 +21436,8 @@ const WHEEL_LOCK_SELECTOR = [
     '.workflow-transfer-panel', '.log-modal', '.shortcut-modal',
     '.prompt-node-segments', '.prompt-node-text', '.prompt-node-llm', '.smart-group-list',
     '[data-thumb-scroll]',
+    // 多维表格/批量节点的可滚动区：滚轮交给浏览器原生滚动，不放大画布
+    '.table-node-grid', '.table-batch-panel',
     '.prompt-template-panel', '.prompt-preset-panel', '.mention-picker', '.mention-preview',
     '.slash-menu', '.smart-popover', '.loop-number-popover', '.create-menu',
     '.chat-modal', '.version-panel', '.smart-log-lightbox', '.asset-dialog-backdrop',
@@ -20409,9 +21617,12 @@ engineSelect.onchange = () => {
     settings.engine = engineSelect.value;
     applyRecentSmartSettingsForCurrentMode();
     syncApiKindToggleVisibility();
+    // 换引擎＝换平台：切到火山引擎时先按火山列表校正图片/视频模型，再渲染参数面板。
+    const providerModelNotice = correctVolcengineEngineSelection();
     renderDynamicParams();
     persistActiveSmartSettings();
     scheduleSave();
+    if(providerModelNotice) toast(providerModelNotice, '!');
 };
 function syncApiKindToggleVisibility(){
     if(!apiKindToggle) return;
@@ -20447,8 +21658,9 @@ if(promptResize){
     });
 }
 runBtn.onclick = () => {
-    if(smartGenerationStopRequested) return;
-    if(smartGenerationIsRunning()){ requestSmartGenerationStop(); return; }
+    const node = selectedNode();
+    if(smartGenerationStopRequestedFor(node)) return;
+    if(smartNodeRunActive(node)){ requestSmartGenerationStop(node); return; }
     runGeneration();
 };
 cascadeRunBtn.onclick = () => {
@@ -21353,6 +22565,8 @@ async function deleteCanvasVersion(version){
     }
 }
 window.onload = async () => {
+    initSmartNodeMenuMotion(world);
+    wireStaticMenuGlide();
     shell.style.touchAction = 'none';
     applyTheme(localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light');
     loadPromptPresets();
@@ -21395,6 +22609,9 @@ window.redoEditDrawing = redoEditDrawing;
 window.resetGridJoinLayout = resetGridJoinLayout;
 window.restoreCanvasVersion = restoreCanvasVersion;
 window.sendChatMessage = sendChatMessage;
+window.abortAgentRun = abortAgentRun;
+window.runAgentStream = runAgentStream;
+window.buildAgentFocus = buildAgentFocus;
 window.agentPlanAction = agentPlanAction;
 window.chatUploadClick = chatUploadClick;
 window.chatUploadSelected = chatUploadSelected;
@@ -21991,6 +23208,8 @@ function batchResultNodeForRun(runId, sourceNode, meta, refs, ratio){
     undoSuppressed = true;
     try {
         output = createPendingOutputFromSource(sourceNode, totalRows, meta, {connectSource:false, selectOutput:false, refs, ratio});
+        /* 结果节点的停止上下文指回上游批量节点：选中结果节点点停止也要能停到这一批。 */
+        output._stopContextId = sourceNode.id;
         output.pending = totalRows;
         /* 这一批「应该出几行 / 已经落了几行 / 失败几行」：进度占位格按这三个数算，
            某一行失败或产出重复都不会让进度框提前收起来（用户会以为生成失败了）。 */
@@ -22055,7 +23274,8 @@ function batchRowGridHtml(node, imgs, layout, order){
     const thumb = Number(layout.thumb) > 0 ? Math.round(Number(layout.thumb)) : 96;
     const total = order.length;
     const cols = Number(layout.cols) > 0 ? Number(layout.cols) : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(total))));
-    const visibleRows = Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, Number(layout.visibleRows || layout.rows) || Math.ceil(total / cols)));
+    const layoutVisibleRows = Math.max(1, Number(layout.visibleRows || layout.rows) || Math.ceil(total / cols));
+    const visibleRows = node?.sizeUserSet ? layoutVisibleRows : Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, layoutVisibleRows));
     const maxHeight = visibleRows * thumb + Math.max(0, visibleRows - 1) * 8;
     const states = node.batchRowStates && typeof node.batchRowStates === 'object' ? node.batchRowStates : {};
     const byRow = new Map();
@@ -22108,7 +23328,7 @@ function batchRowStatusTextFor(node){
     return model.batchRowStatusText(model.batchRowStateSummary(order, node.batchRowStates));
 }
 /* 第一次拿到结果节点时按本轮真实行号建逐行状态（初始全部 queued）。 */
-function ensureBatchRowPlan(node, rowNumbers){
+function ensureBatchRowPlan(node, rowNumbers, stopRequested=false){
     const model = window.NovaTableModel;
     if(!node || !model || typeof model.batchRowPlan !== 'function') return;
     if(Array.isArray(node.batchRowOrder) && node.batchRowOrder.length) return;
@@ -22117,7 +23337,7 @@ function ensureBatchRowPlan(node, rowNumbers){
     node.batchRowOrder = plan.order;
     node.batchRowStates = plan.states;
     /* 停止请求发生在结果节点建出来之前：没跑的行直接算「已取消」。 */
-    if(smartGenerationStopRequested){
+    if(stopRequested){
         plan.order.forEach(rowNumber => { node.batchRowStates[rowNumber] = 'cancelled'; });
     }
 }
@@ -22206,7 +23426,7 @@ async function tableRunOneRow(nodeId, options, forceVideo){
     if(liveOutput){
         /* 第一次拿到结果节点：按本轮真实行号建逐行状态（初始全部 queued），
            再把这一行置 running —— 进度框由真实回调驱动，不再靠并发猜。 */
-        ensureBatchRowPlan(liveOutput, runContext.batchRowNumbers);
+        ensureBatchRowPlan(liveOutput, runContext.batchRowNumbers, smartGenerationStopRequestedFor(node) || Boolean(node._batchStopRequested));
         setBatchRowState(liveOutput, rowNumber, 'running');
     }
     syncRunButtonState();
@@ -22216,6 +23436,9 @@ async function tableRunOneRow(nodeId, options, forceVideo){
     try {
         const out = await generateUrlsForCurrentSettings(node, prompt, refs, runSettings);
         urls = Array.isArray(out && out.urls) ? out.urls : [];
+        /* 批量是「一行一个参考，出一张」：上游一次可能回多张（Lovart 实测第 1 行回 4 张），
+           全落下去结果节点里就是几张几乎一样的图，用户会误判成每一行都用了第一张参考图。 */
+        if(options.batch === true || Number(rowNumber) > 0) urls = urls.slice(0, 1);
         if(!urls.length) throw new Error('这一行没有产出素材');
         const additions = rowUrls();
         additions.forEach(item => node.images.push({...item, role:'batch'}));
@@ -22308,6 +23531,7 @@ async function callSmartCanvasLLM(node, message, messages=[], options={}){
         target_type: target.target_type,
         target_model: target.target_model,
     };
+    if(options.chat) body.no_prompt_intelligence = true;
     if(options.maxTokens) body.max_tokens = Math.max(0, Math.floor(Number(options.maxTokens) || 0));
     /* 必须带超时：模型端挂住不返回时，fetch 永远 pending → 调用方的 finally 不执行
        → node.running 一直是 true，还被保存进画布，刷新后节点永远显示「运行中」（用户报的"不显示了"）。 */
@@ -22433,10 +23657,104 @@ function ensureTableApi(){
         showErrorModal: text => toast(String(text || '出错了'), '!'),
         runGenerator: tableRunGenerator,
         runVideoNode: tableRunVideo,
-        generationStopRequested: () => smartGenerationStopRequested,
+        generationStopRequested: nodeId => smartGenerationStopRequestedFor(nodeId),
         onBatchSettled: () => syncRunButtonState(),
     });
     return tableApi;
 }
 
+/* ═══ Morph Button 接入：保存/确定类按钮的点击动效（只驱动状态，不改原有点击逻辑） ═══ */
+(function(){
+    'use strict';
+    var bindTimer = 0;
+
+    function api(){ return window.NovaMorphButton || null; }
+
+    function bind(el, opts){
+        var m = api();
+        if(!m || !el || el.__nvMorph) return false;
+        try { m.attach(el, opts); } catch(e){ return false; }
+        return true;
+    }
+
+    /* 预设面板这两个按钮是闭包 onclick，命名对话框的 onclick 每次打开都会重写：
+       都由模块在点击瞬间读取并接管，这里不自己包一层。 */
+    function bindClosureButtons(){
+        [promptPresetApply, promptPresetSave, assetDialogOk].forEach(function(el){
+            bind(el, { keepWidth: true });
+        });
+    }
+
+    /* 提示词模板面板这两个按钮走面板事件委托，元素上没有 onclick：
+       swallow 完全接管这次点击，action 里复刻原委托逻辑（都是调同一个函数），保证原函数只跑一次。
+       成功后面板会整体重渲染、旧节点连包装层一起被替换，模块的 success 落在已移除的节点上，
+       所以把结果补到新按钮上，绿勾才看得见。 */
+    function bindTemplateSaveButton(selector, run){
+        var el = promptTemplatePanel && promptTemplatePanel.querySelector(selector);
+        if(!el) return;
+        bind(el, {
+            keepWidth: true,
+            swallow: true,
+            action: function(){
+                /* 面板重渲染与我这条 then 在同一批里，扫描器还没绑上新按钮，这里等它几拍 */
+                var forward = function(state){
+                    var tries = 0;
+                    var retryPaint = function(){
+                        var fresh = promptTemplatePanel && promptTemplatePanel.querySelector(selector);
+                        var m = api();
+                        if(fresh && fresh !== el && fresh.__nvMorph && m){ m.setState(fresh, state); return; }
+                        if(tries++ < 8) setTimeout(retryPaint, 50);
+                    };
+                    retryPaint();
+                };
+                return Promise.resolve(run()).then(function(value){
+                    forward(value === false ? 'error' : 'success');
+                    return value;
+                }, function(err){
+                    forward('error');
+                    throw err;
+                });
+            }
+        });
+    }
+
+    function bindTemplateSaveButtons(){
+        bindTemplateSaveButton('[data-template-save-current]', function(){ return saveCurrentPromptAsTemplate(); });
+        bindTemplateSaveButton('[data-template-edit-save]', function(){ return savePromptTemplateEdit(); });
+    }
+
+    function bindAll(){
+        var m = api();
+        if(!m) return;
+        /* 白名单里本页只有 edit 工具栏的「应用XX」命中，工具栏按钮宽度 morph 会顶到邻居；
+           容器级重扫还能让模块在被 innerHTML 冲掉包装层后就地重建。 */
+        m.autoBind(document.getElementById('imageEditModal') || document, { keepWidth: true });
+        m.autoBind(promptTemplatePanel || document, { keepWidth: true });
+        bindClosureButtons();
+        bindTemplateSaveButtons();
+    }
+
+    function scheduleBind(){
+        if(bindTimer) return;
+        bindTimer = setTimeout(function(){ bindTimer = 0; bindAll(); }, 60);
+    }
+
+    function watch(el){
+        if(!el || typeof MutationObserver !== 'function') return;
+        new MutationObserver(scheduleBind).observe(el, { childList: true, subtree: true });
+    }
+
+    function start(){
+        bindAll();
+        watch(document.getElementById('imageEditModal'));
+        watch(promptTemplatePanel);
+    }
+
+    /* 模块由别的执行岗并行开发，未就绪时轮询等待；等不到就静默放弃（动效不得影响功能） */
+    var tries = 0;
+    var wait = setInterval(function(){
+        tries += 1;
+        if(api() || tries > 40){ clearInterval(wait); start(); }
+    }, 250);
+})();
 })();

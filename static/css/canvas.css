@@ -814,6 +814,18 @@ body.studio-theme-dark .select-lite { background-image:url("data:image/svg+xml,%
 .nd-menu .nd-option.active .nd-check { opacity:1; }
 .nd-menu .nd-option.is-active:not(.active) { background:var(--surface-2); color:var(--text); }
 .nd-option:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
+/* NovaGlide 滑块接管高亮后（shared/glide.js 会往弹层上加 .nv-glide-host）：
+   glide.css 只压 background-color，选中项的 color:var(--strong-text) 还留着 ——
+   浅色主题下那是白字，底被压成透明就成了白纸白字。
+   滑块底用 --nav-hover-bg（本应用真正的通用 hover 底色），两个主题同一个值、不按主题分叉：
+   滑块至少要跟原来的 hover 一样明显，否则「滑过去」根本看不出来。
+   别用 --soft：theme.css 在 body.studio-theme-dark / .shell.theme-dark 这些更具体的选择器下
+   把 --soft 重定义成 var(--bg)=#0a0a0a，而弹层就挂在 shell 里会继承到 —— 深色下滑块比面板还深，方向反了。
+   也别用 --surface-2：浅色下是 #fafafa 压 #ffffff，只差 5 级通道，等于没画。
+   被覆盖项的文字跟着回到 --text；没接线（没有 .nv-glide-host）时原样不变。 */
+.nd-menu { --nv-glide-bg: var(--nav-hover-bg); }
+.nd-menu.nv-glide-host .nd-option.active { color: var(--text); }
+
 
 .model-select { min-width:150px; max-width:100%; }
 .compact-select { min-width:58px; }

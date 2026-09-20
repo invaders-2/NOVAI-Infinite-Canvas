@@ -6,14 +6,14 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png" data-page-node-id="d2lTaxgg4dwHWvOR7TLKCK">
     <title>GPT 对话</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.117.1789606971"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.117.1789606971" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.117.1789606971" data-page-node-id="sBSjKrFOadAKo0d0aaQqPR">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
+    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
+    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971" data-page-node-id="sBSjKrFOadAKo0d0aaQqPR">
     <style>
         :root {
             --ease:cubic-bezier(.4,0,.2,1);
@@ -37,6 +37,10 @@
             --chat-user-text:#ffffff;
             --chat-shadow:rgba(0,0,0,.06);
             --chat-width:900px;
+            /* NovaGlide 滑块底色：取本页 hover 底色 token，与未接管时的高亮一致；
+               --nv-glide-fg 给「选中态是深底反色文字」的选项兜底（背景被压制后仍要读得清） */
+            --nv-glide-bg:var(--nav-hover-bg);
+            --nv-glide-fg:var(--text);
         }
         html.studio-theme-dark,
         body.studio-theme-dark,
@@ -57,6 +61,8 @@
             --chat-active-bg:rgba(255,255,255,0.06);
             --chat-active-text:#f5f5f7;
             --chat-active-border:rgba(255,255,255,0.08);
+            --nv-glide-bg:var(--nav-hover-bg);
+            --nv-glide-fg:var(--text);
             --chat-user-bg:#2e2e30;
             --chat-user-text:#f5f5f7;
             --chat-shadow:rgba(0,0,0,.28);
@@ -538,7 +544,7 @@
             background:transparent !important;
         }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.117.1789606971" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         html body,
@@ -663,15 +669,25 @@ html.theme-dark .topbar, html.studio-theme-dark .topbar {
 }
 .action-btn:hover { background: var(--soft) !important; color: var(--text) !important; }
 
-/* ── 右侧弹层：玻璃浮层（online nv-select-menu 同款 68% + blur28） ── */
+/* ── 右侧弹层：玻璃浮层（浮在内容之上，背景必须近乎不透光：68% 时背后卡片文字会透上来） ── */
 .chat-rail, .system-prompt-popover, .model-picker-popover, .model-picker-submenu, .resolution-picker-popover {
-    background: color-mix(in srgb, var(--elevated) 68%, transparent) !important;
+    background: color-mix(in srgb, var(--elevated) 96%, transparent) !important;
     backdrop-filter: blur(28px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
     border: 1px solid color-mix(in srgb, var(--text) 10%, transparent) !important;
     border-radius: var(--radius-xl) !important;
     box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent), var(--shadow-xl) !important;
     color: var(--text) !important;
+}
+/* 暗色下这 5 个弹层被更早的 `body.theme-dark .X{background:var(--chat-panel)}`(alpha .6) 按特异性压过，
+   只补背景不透明度、其余保持暗色原样；--elevated 在暗色是 #1a1a1a，天然自适应 */
+html.theme-dark body .chat-rail, html.theme-dark body .system-prompt-popover,
+html.theme-dark body .model-picker-popover, html.theme-dark body .model-picker-submenu,
+html.theme-dark body .resolution-picker-popover,
+html.studio-theme-dark body .chat-rail, html.studio-theme-dark body .system-prompt-popover,
+html.studio-theme-dark body .model-picker-popover, html.studio-theme-dark body .model-picker-submenu,
+html.studio-theme-dark body .resolution-picker-popover {
+    background: color-mix(in srgb, var(--elevated) 96%, transparent) !important;
 }
 .model-picker-popover, .model-picker-submenu, .resolution-picker-popover { border-radius: var(--radius-lg) !important; }
 .system-prompt-textarea, .resolution-custom-box {
@@ -1043,9 +1059,10 @@ html.studio-theme-dark #sendBtn.nv-beam {
         -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
         border-bottom: 0 !important;
         box-shadow: none !important;
-        /* 刻意保持 z-index:auto：它让顶栏作为“定位元素”盖住常规流里的消息内容，
-           同时不新建层叠上下文，历史抽屉(70)/模型弹窗(9999) 的层级与改动前完全一致 */
-        z-index: auto;
+        /* backdrop-filter 已让顶栏成为层叠上下文，z-index:auto 时它与同样「定位 + 层叠上下文」的
+           欢迎卡片（.welcome-card 带 animation/transform）同属 auto 档，DOM 靠后的卡片会盖住
+           顶栏及其弹窗（保存/清空/textarea 点不到）。给正数层级让顶栏整体稳定画在消息区之上 */
+        z-index: 30;
     }
     /* 首条消息起点下移到玻璃下方；滚动时内容从玻璃后穿过，形成磨砂效果。
        上面 V15/V20 块用 padding:24px 0 18px !important 压过静态规则，这里必须同级 !important */
@@ -1327,40 +1344,78 @@ html.studio-theme-dark #sendBtn.nv-beam {
         box-shadow: none !important;
     }
 
-    /* —— 1.a 「正在思考」占位：文案呼吸 + 三个圆点跳动 —— */
-    .bubble.thinking .bubble-text {
-        display: inline-flex;
-        align-items: center;
-        gap: 2px;
-        animation: thinking-pulse 1.6s ease-in-out infinite;
+    /* —— 1.a 思考条：ThoughtLine 风格（闪光图标呼吸 + 文案微光 + 秒表）+ 可折叠思考 trace ——
+       与智能画布 .thought-line 同款视觉；颜色全部走本页 --chat-* 变量，深浅主题自适应。 */
+    .bubble-thought { display:flex; flex-direction:column; gap:2px; margin:0 0 4px; }
+    .bubble-thought .thought-line {
+        display:inline-flex;
+        align-items:center;
+        gap:5px;
+        align-self:flex-start;
+        max-width:100%;
+        padding:3px 6px 3px 2px;
+        margin-left:-2px;
+        border:0;
+        border-radius:8px;
+        background:transparent;
+        font-size:11px;
+        font-weight:500;
+        line-height:1.2;
+        color:var(--chat-muted);
+        text-align:left;
+        cursor:default;
+        transition:background .16s var(--ease), color .16s var(--ease);
     }
-    @keyframes thinking-pulse {
-        0%, 100% { opacity: .5; }
-        50% { opacity: 1; }
+    /* 只有真的带了 trace 才可点开，折叠态靠右侧小箭头示意 */
+    .bubble-thought.has-trace .thought-line { cursor:pointer; }
+    .bubble-thought.has-trace .thought-line:hover { background:var(--chat-soft); color:var(--chat-text); }
+    .thought-line__glyph { display:inline-flex; flex:none; width:12px; height:12px; color:var(--chat-text); animation:thoughtLineBreath 1.6s cubic-bezier(.77,0,.175,1) infinite; }
+    .thought-line__glyph svg { display:block; width:100%; height:100%; }
+    @keyframes thoughtLineBreath {
+        0%, 100% { opacity:.55; }
+        50% { opacity:1; }
     }
-    .thinking-dots {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        margin-left: 2px;
-        vertical-align: middle;
-        line-height: 1;
+    .thought-line__label { display:inline-block; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    /* 只把文字填充色透明掉、不动 color，渐变里的 currentColor 才拿得到 .thought-line 的颜色 */
+    .thought-line__breath {
+        display:inline-block;
+        background:linear-gradient(100deg, color-mix(in srgb, currentColor 50%, transparent) 30%, currentColor 50%, color-mix(in srgb, currentColor 50%, transparent) 70%);
+        background-size:250% 100%;
+        background-position:125% 0;
+        -webkit-background-clip:text;
+        background-clip:text;
+        -webkit-text-fill-color:transparent;
+        animation:thoughtLineShimmer 1.8s linear infinite;
     }
-    .thinking-dots i {
-        width: 6px; height: 6px;
-        border-radius: 50%;
-        background: currentColor;
-        display: inline-block;
-        animation: thinking-bounce 1.05s infinite ease-in-out;
-        will-change: transform, opacity;
+    @keyframes thoughtLineShimmer { to { background-position:-125% 0; } }
+    .thought-line__breath.is-done { animation:none; background:none; -webkit-text-fill-color:currentColor; }
+    /* flex:none + nowrap：气泡窄的时候秒表会被挤到换行（"0.0" / "s" 两行） */
+    .thought-line__timer { flex:none; white-space:nowrap; font-variant-numeric:tabular-nums; opacity:.55; }
+    .thought-line__caret { display:none; flex:none; width:10px; height:10px; opacity:.55; transition:transform .16s var(--ease); }
+    .thought-line__caret svg { display:block; width:100%; height:100%; }
+    .bubble-thought.has-trace .thought-line__caret { display:inline-flex; }
+    .bubble-thought.is-collapsed .thought-line__caret { transform:rotate(-90deg); }
+    /* settle 后不再呼吸：那是「正在思考」的动效，答案已经开始了 */
+    .bubble-thought.is-settled .thought-line__glyph { animation:none; opacity:.6; }
+    .thought-trace { max-height:160px; overflow-y:auto; overscroll-behavior:contain; margin:2px 0 2px 14px; padding-left:5px; border-left:1px solid var(--chat-line-2); display:flex; flex-direction:column; gap:3px; }
+    .thought-trace:empty { display:none; }
+    .bubble-thought.is-collapsed .thought-trace { display:none; }
+    .thought-trace__row { display:flex; align-items:flex-start; gap:6px; color:var(--chat-muted); font-size:11.5px; line-height:1.5; }
+    .thought-trace__mark { flex:none; width:12px; height:12px; margin-top:4px; display:inline-flex; align-items:center; justify-content:center; }
+    .thought-trace__mark svg { display:block; width:1em; height:1em; opacity:.5; }
+    .thought-trace__pulse { display:block; width:5px; height:5px; border-radius:50%; background:currentColor; animation:thoughtTracePulse 1.05s ease-in-out infinite; }
+    @keyframes thoughtTracePulse {
+        0%, 100% { opacity:.35; transform:scale(.7); }
+        50% { opacity:1; transform:scale(1.15); }
     }
-    .thinking-dots i:nth-child(2) { animation-delay: .13s; }
-    .thinking-dots i:nth-child(3) { animation-delay: .26s; }
-    @keyframes thinking-bounce {
-        0%   { transform: translateY(0) scale(.75); opacity: .3; }
-        35%  { transform: translateY(-7px) scale(1.15); opacity: 1; }
-        70%  { transform: translateY(0) scale(.75); opacity: .3; }
-        100% { transform: translateY(0) scale(.75); opacity: .3; }
+    .thought-trace__text { min-width:0; word-break:break-word; }
+    /* status 条目：后端真实在跑的动作（生图/改图…），图标与打勾区分开，不写死任何假步骤 */
+    .thought-trace__row.is-status { color:var(--chat-text); font-weight:500; }
+    .thought-trace__row.is-status .thought-trace__mark svg { opacity:.8; }
+    @media (prefers-reduced-motion: reduce) {
+        .thought-line__glyph { animation:none; opacity:.8; }
+        .thought-line__breath { animation:none; background:none; -webkit-text-fill-color:currentColor; }
+        .thought-trace__pulse { animation:none; opacity:.8; }
     }
 
     /* —— 7) 去掉右侧边栏 —— */
@@ -1372,7 +1427,21 @@ html.studio-theme-dark #sendBtn.nv-beam {
     /* —— 顶部那条线：V11 给顶栏加了 inset 0 1px 0 高光，看似顶栏下边缘线 —— */
     .topbar { box-shadow: none !important; }
 
+    /* —— 9) NovaGlide 滑块：底色压制之后，选中项的文字颜色要拉回可读色 ——
+       glide.css 的 (0,3,0) 压制只清 background-color / border-color，不动 color。
+       本页这几个选中态原本是「深底 + 反色文字」（--chat-strong-text 浅主题下是 #ffffff），
+       底被清掉后反色文字会落在浅色滑块上 = 隐形。这里用 (0,4,0) 把文字拉回正色，
+       选择器限定在滑块 host 内，只影响挂了滑块的这几个列表；声明放在最后一个 <style> 里，
+       保证排在前面那批 !important 规则之后。 */
+    .nv-glide-host .model-picker-model-btn.active,
+    .nv-glide-host .model-picker-provider-btn.active,
+    .nv-glide-host .model-picker-scope button.active,
+    .nv-glide-host .resolution-picker-scope button.active { color: var(--nv-glide-fg, var(--text)); }
+
     </style>
+    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.120.1789742566">
+    <script src="/static/js/shared/glide.js?v=1.0.120.1789742748"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
 </head>
 <body data-page-node-id="B0FSrTLRPPotTcEryWhCSp">
     <div class="chat-shell" data-page-node-id="MRDi657CZfPyLahTJpQS7R">
@@ -2019,14 +2088,17 @@ html.studio-theme-dark #sendBtn.nv-beam {
             renderPersonaChips();
         }
 
-        /** #systemPromptInput 的 oninput：同步角色高亮态与状态文案。
-            只在「命中角色 id 变化」或「状态文案变化」时才落盘 + 重绘，避免每敲一个字都重排。 */
+        /** #systemPromptInput 的 oninput：把 textarea 文本提交给 systemPrompt 并落盘。
+            不提交的话，不点「保存」直接关面板 / 刷新后，syncSystemPromptUI() 会用旧值把输入冲掉。
+            角色 chips 仍只在「命中角色 id 变化」或「状态文案变化」时重绘，避免每敲一个字都重排。 */
         function handleSystemPromptInput(){
+            const input = document.getElementById('systemPromptInput');
             const prevId = activePersonaId;
             const prevStatus = String(document.getElementById('personaStatus')?.textContent || '');
-            activePersonaId = personaIdForContent(personaCurrentText());
+            systemPrompt = String(input?.value || '');
+            activePersonaId = personaIdForContent(systemPrompt);
+            saveChatSettings();
             if(activePersonaId !== prevId || personaStatusText() !== prevStatus){
-                saveChatSettings();
                 renderPersonaChips();
             }
         }
@@ -2605,6 +2677,31 @@ html.studio-theme-dark #sendBtn.nv-beam {
             saveChatSettings();
         }
 
+        /* ── NovaGlide 通用滑块：只在「内容被 innerHTML 重写之后」attach 一次，
+              选择逻辑（.active / .hovered 谁说了算）完全不动 —— 模块自己用 MutationObserver
+              接住 class 变化并瞬间归位。重复 attach 同一容器由模块内部 destroy 旧实例兜住
+              （glide.js 会先 destroy 再建，不会叠出两个滑块）。 */
+        const glideHosts = {};
+        function glideAttach(id, options){
+            const el = document.getElementById(id);
+            if(!el || !window.NovaGlide) return null;
+            glideHosts[id] = window.NovaGlide.attach(el, options);
+            return glideHosts[id];
+        }
+        /* 弹层从 display:none 打开之后要重量一次，否则滑块尺寸停在 0（模块自己测不到隐藏元素） */
+        function glideRefresh(id){
+            const controller = glideHosts[id];
+            if(controller) controller.refresh();
+        }
+        function attachStaticGlides(){
+            glideAttach('resolutionRatioList', { item: '.resolution-picker-option' });
+            glideAttach('resolutionLevelList', { item: '.resolution-picker-option' });
+            glideAttach('resolutionPickerScope', { item: 'button', orientation: 'horizontal' });
+        }
+        /* 静态标记的三处 host（比例 / 分辨率列表 + 三段 scope）：这段脚本在 </body> 之前同步跑，
+           DOM 已经就绪，就地挂一次即可 —— 它们的内容不再被重写，后续由模块自己接住 class 变化 */
+        attachStaticGlides();
+
         function renderModelPicker(){
             const kind = activePickerKind();
             const picker = document.getElementById('modelPicker');
@@ -2637,6 +2734,10 @@ html.studio-theme-dark #sendBtn.nv-beam {
                     return `<button class="model-picker-provider-btn ${isActive ? 'active' : ''}" data-pid="${escapeHtml(p.id)}" onmouseenter="hoverProvider('${escapeHtml(p.id)}','${kind}')" onclick="hoverProvider('${escapeHtml(p.id)}','${kind}')"><span class="p-name">${escapeHtml(p.name || p.id)}</span>${tail}</button>`;
                 }).join('')
                 : `<div class="model-picker-empty">未配置任何平台 · 去「API 设置」添加并填写 Key</div>`;
+            /* 供应商列表 / 对话·图像分段（agent 模式才有按钮）/ 模型子菜单三处内容刚被重写 */
+            glideAttach('modelProviderList', { item: '.model-picker-provider-btn' });
+            glideAttach('modelPickerScope', { item: 'button', orientation: 'horizontal' });
+            glideAttach('modelSubmenu', { item: '.model-picker-model-btn' });
             closeModelSubmenu();
             lucide.createIcons();
         }
@@ -2655,6 +2756,8 @@ html.studio-theme-dark #sendBtn.nv-beam {
             submenu.innerHTML = models.length
                 ? models.map(m => `<button class="model-picker-model-btn ${m === currentMdl ? 'active' : ''}" data-model="${escapeHtml(m)}" onclick="setProvider('${escapeHtml(pid)}','${kind}');setActiveModel('${escapeHtml(m)}','${kind}');toggleModelPicker(false)"><span>${escapeHtml(shortModelName(m))}</span>${m === currentMdl ? '<i data-icon="check"></i>' : ''}</button>`).join('')
                 : `<div class="model-picker-empty">暂无模型</div>`;
+            /* 每次悬停供应商都会整套重写模型列表，attach 必须跟在每一次重写之后 */
+            glideAttach('modelSubmenu', { item: '.model-picker-model-btn' });
             lucide.createIcons();
         }
 
@@ -2930,6 +3033,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
                 const active = t.key === thinkLevel ? ' active' : '';
                 return '<button type="button" class="model-picker-model-btn' + active + '" data-key="' + t.key + '"><span>' + t.label + '</span>' + (t.key === thinkLevel ? '<i data-icon="check"></i>' : '') + '</button>';
             }).join('');
+            glideAttach('thinkList', { item: '.model-picker-model-btn' });
             pop.classList.add('open');
             if(window.lucide && lucide.createIcons) lucide.createIcons();
         }
@@ -2977,7 +3081,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
             toggleModelPicker(false); toggleResolutionPicker(false);
             if(pop && pop.parentElement !== document.documentElement){ thinkPickerHome = picker; document.documentElement.appendChild(pop); }
             renderThinkChip(); openThinkPopover();
-            requestAnimationFrame(function(){ positionThinkPicker(); if(window.lucide && lucide.createIcons) lucide.createIcons(); });
+            requestAnimationFrame(function(){ positionThinkPicker(); glideRefresh('thinkList'); if(window.lucide && lucide.createIcons) lucide.createIcons(); });
         }
         document.getElementById('thinkChipBtn').addEventListener('click', function(e){ e.stopPropagation(); toggleThinkPicker(); });
         document.getElementById('thinkList').addEventListener('click', function(e){
@@ -3232,6 +3336,174 @@ html.studio-theme-dark #sendBtn.nv-beam {
             }
         }
 
+        /* ═══ 思考条（ReactBits ThoughtLine 风格）+ 可折叠思考 trace ═══
+           视觉与智能画布 .thought-line 同款：闪光图标呼吸 + 文案微光 + 秒表。
+           计时起点放 Map（key = 气泡编号），结尾处 delete；全局 ticker 没有秒表时自清理。 */
+        const THOUGHT_LINE_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>';
+        const THOUGHT_CHECK_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+        const THOUGHT_CARET_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+        /* status 事件的图标（闪电 = 正在跑的动作），与「已完成的勾」区分 */
+        const THOUGHT_STEP_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>';
+        const thoughtLineStarts = new Map();
+        /* 已结束的思考耗时（十分之一秒）：done 事件后整表重建时用它渲染「已思考 x.xs」 */
+        const thoughtDurations = new Map();
+        let thoughtLineTicker = null;
+        function thoughtLineFmt(ds){
+            return ds < 600 ? (ds / 10).toFixed(1) + 's' : Math.floor(ds / 600) + 'm ' + ((ds % 600) / 10).toFixed(1) + 's';
+        }
+        /* 全局 ticker 只为页面上真实存在的秒表服务：一个都不剩就自清理，常驻定时器不存在 */
+        function thoughtLineSync(){
+            const timers = document.querySelectorAll('.thought-line__timer[data-start]');
+            if(!timers.length){
+                clearInterval(thoughtLineTicker);
+                thoughtLineTicker = null;
+                return;
+            }
+            const now = performance.now();
+            timers.forEach(el => { el.textContent = thoughtLineFmt(Math.floor((now - Number(el.dataset.start)) / 100)); });
+        }
+        function thoughtLineHtml(text, key){
+            const k = key || 'chat';
+            if(!thoughtLineStarts.has(k)) thoughtLineStarts.set(k, performance.now());
+            if(!thoughtLineTicker) thoughtLineTicker = setInterval(thoughtLineSync, 100);
+            return '<span class="thought-line__glyph">' + THOUGHT_LINE_GLYPH + '</span>' +
+                   '<span class="thought-line__label"><span class="thought-line__breath">' + escapeHtml(text || tr('chat.agentWorking')) + '</span></span>' +
+                   '<span class="thought-line__timer" data-start="' + thoughtLineStarts.get(k) + '">0.0s</span>' +
+                   '<span class="thought-line__caret">' + THOUGHT_CARET_GLYPH + '</span>';
+        }
+        /* 思考文本 → 条目：先按换行切，长行再按句末切（流式常见一整段没有换行） */
+        function thoughtTraceEntries(text){
+            const entries = [];
+            String(text || '').split('\n').forEach(line => {
+                const trimmed = line.trim();
+                if(!trimmed) return;
+                (trimmed.match(/[^。！？!?；;]+[。！？!?；;]*/g) || [trimmed]).forEach(piece => {
+                    const item = piece.trim();
+                    if(item) entries.push(item);
+                });
+            });
+            return entries;
+        }
+        function createThoughtBlock(text, key){
+            const block = document.createElement('div');
+            block.className = 'bubble-thought is-open';
+            block.dataset.thoughtKey = key;
+            const line = document.createElement('button');
+            line.type = 'button';
+            line.className = 'thought-line';
+            line.setAttribute('aria-expanded', 'true');
+            line.innerHTML = thoughtLineHtml(text, key);
+            line.addEventListener('click', () => toggleThoughtBlock(block));
+            block.appendChild(line);
+            const trace = document.createElement('div');
+            trace.className = 'thought-trace';
+            trace.setAttribute('role', 'log');
+            trace.setAttribute('aria-label', tr('chat.thoughtTrace'));
+            trace.dataset.pinned = '1';
+            /* 用户自己往上翻时不要被自动贴底拽回去（与消息区 messagesPinned 同一策略） */
+            trace.addEventListener('wheel', event => { if(event.deltaY < 0 && trace.scrollTop > 0) trace.dataset.pinned = '0'; }, { passive:true });
+            trace.addEventListener('scroll', () => { trace.dataset.pinned = (trace.scrollHeight - trace.scrollTop - trace.clientHeight < 8) ? '1' : '0'; }, { passive:true });
+            block.appendChild(trace);
+            return block;
+        }
+        function toggleThoughtBlock(block, open){
+            if(!block || !block.classList.contains('has-trace')) return;
+            const next = open === undefined ? block.classList.contains('is-collapsed') : !!open;
+            block.classList.toggle('is-collapsed', !next);
+            block.classList.toggle('is-open', next);
+            const line = block.querySelector('.thought-line');
+            if(line) line.setAttribute('aria-expanded', next ? 'true' : 'false');
+        }
+        function createThoughtTraceRow(){
+            const row = document.createElement('div');
+            row.className = 'thought-trace__row is-active';
+            const mark = document.createElement('span');
+            mark.className = 'thought-trace__mark';
+            mark.innerHTML = '<span class="thought-trace__pulse"></span>';
+            const text = document.createElement('span');
+            text.className = 'thought-trace__text';
+            row.appendChild(mark);
+            row.appendChild(text);
+            return row;
+        }
+        /* 逐条同步：只有最后一条挂跳动点，之前的打勾；条目上限 200 条，长思考不撑爆 DOM。
+           条目是字符串，或 {text, status:true}——status 是后端真实在跑的动作，图标/颜色单独区分 */
+        function syncThoughtTrace(block, entries, activeLast){
+            const trace = block && block.querySelector('.thought-trace');
+            if(!trace) return;
+            for(let i = 0; i < entries.length; i++){
+                const entry = entries[i];
+                const label = typeof entry === 'string' ? entry : (entry.text || '');
+                const isStatus = typeof entry === 'object' && entry !== null && !!entry.status;
+                const row = trace.children[i] || trace.appendChild(createThoughtTraceRow());
+                const textEl = row.querySelector('.thought-trace__text');
+                if(textEl.textContent !== label) textEl.textContent = label;
+                const active = activeLast !== false && i === entries.length - 1;
+                row.classList.toggle('is-active', active);
+                row.classList.toggle('is-done', !active && !isStatus);
+                row.classList.toggle('is-status', isStatus);
+                const mark = active ? 'active' : (isStatus ? 'status' : 'done');
+                if(row.dataset.mark !== mark){
+                    row.dataset.mark = mark;
+                    row.querySelector('.thought-trace__mark').innerHTML = active ? '<span class="thought-trace__pulse"></span>' : (isStatus ? THOUGHT_STEP_GLYPH : THOUGHT_CHECK_GLYPH);
+                }
+            }
+            while(trace.children.length > entries.length) trace.lastElementChild.remove();
+            while(trace.children.length > 200) trace.firstElementChild.remove();
+            const hadTrace = block.classList.contains('has-trace');
+            block.classList.toggle('has-trace', trace.children.length > 0);
+            /* 提示只在真的有 trace（能点开）时挂上 */
+            if(!hadTrace && trace.children.length) block.querySelector('.thought-line').title = tr('chat.thoughtTrace');
+            if(trace.dataset.pinned !== '0') trace.scrollTop = trace.scrollHeight;
+        }
+        /* 收尾：冻结秒表 → 全部打勾 → 折叠。没有思考内容时整块撤掉（不编造假步骤） */
+        function settleThoughtBlock(block){
+            if(!block) return false;
+            const trace = block.querySelector('.thought-trace');
+            if(!trace || !trace.children.length){ block.remove(); return false; }
+            const timer = block.querySelector('.thought-line__timer');
+            const breath = block.querySelector('.thought-line__breath');
+            if(timer && timer.dataset.start){
+                const ds = Math.floor((performance.now() - Number(timer.dataset.start)) / 100);
+                block.dataset.thoughtTenths = String(ds);
+                timer.textContent = thoughtLineFmt(ds);
+                timer.removeAttribute('data-start');   /* 秒表冻结：全局 ticker 不再改写这个数字 */
+            }
+            thoughtLineStarts.delete(block.dataset.thoughtKey);
+            syncThoughtTrace(block, Array.from(trace.children).map(row => ({
+                text: row.querySelector('.thought-trace__text').textContent,
+                status: row.classList.contains('is-status'),
+            })), false);
+            if(breath && block.dataset.thoughtTenths){
+                /* 数字留在秒表元素里（此时已冻结），文案只写「已思考」，避免重复一遍 */
+                breath.textContent = tr('chat.thoughtDone');
+            }
+            if(breath) breath.classList.add('is-done');   /* 停掉微光：这句话已经说完了 */
+            block.classList.add('is-settled');
+            toggleThoughtBlock(block, false);
+            return true;
+        }
+        /* 落盘的思考内容（刷新 / 切历史会话）：折叠态 trace。有本次会话的秒表读数才显示「已思考 x.xs」 */
+        function buildReasoningBlock(msg){
+            const ds = thoughtDurations.get(msg.id);
+            const block = createThoughtBlock(tr('chat.thoughtTrace'), 'msg:' + (msg.id || uuid()));
+            thoughtLineStarts.delete(block.dataset.thoughtKey);
+            const timer = block.querySelector('.thought-line__timer');
+            const breath = block.querySelector('.thought-line__breath');
+            if(ds === undefined){
+                timer.remove();
+            } else {
+                timer.textContent = thoughtLineFmt(ds);
+                timer.removeAttribute('data-start');
+                breath.textContent = tr('chat.thoughtDone');
+            }
+            breath.classList.add('is-done');
+            block.classList.add('is-settled');
+            syncThoughtTrace(block, thoughtTraceEntries(msg.reasoning), false);
+            toggleThoughtBlock(block, false);
+            return block;
+        }
+
         function addMessageBubble(msg){
             const box = document.getElementById('messages');
             const row = document.createElement('div');
@@ -3243,14 +3515,16 @@ html.studio-theme-dark #sendBtn.nv-beam {
             const text = document.createElement('div');
             text.textContent = msg.type === 'image' ? (msg.agent_reply || tr('chat.generated')) : (msg.content || '');
             text.className = 'bubble-text';
+            if(msg.reasoning){
+                /* 落盘的思考内容：折叠态 trace（刷新 / 切会话后仍能看到想了什么） */
+                bubble.appendChild(buildReasoningBlock(msg));
+            }
+            let thought = null;
             if(msg.thinking){
-                /* 「正在思考」占位 → 文本末尾追加三个跳动的圆点（动画在 CSS） */
+                /* 「正在思考」→ ThoughtLine（闪光图标呼吸 + 微光文案 + 秒表），不再是三个跳动的圆点 */
                 bubble.classList.add('thinking');
-                const dots = document.createElement('span');
-                dots.className = 'thinking-dots';
-                dots.innerHTML = '<i></i><i></i><i></i>';
-                text.appendChild(document.createTextNode(' '));
-                text.appendChild(dots);
+                thought = createThoughtBlock(tr('chat.agentWorking'), msg.thoughtKey || uuid());
+                bubble.appendChild(thought);
             }
             bubble.appendChild(text);
             if(msg.attachments?.length){
@@ -3296,7 +3570,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
             row.appendChild(bubble);
             box.appendChild(row);
             lucide.createIcons();
-            return {row, bubble, text};
+            return {row, bubble, text, thought};
         }
 
         function openImagePreview(url){
@@ -3428,8 +3702,9 @@ html.studio-theme-dark #sendBtn.nv-beam {
             }
             addMessageBubble({role:'user', content:message, attachments:pendingRefs});
             const useStreaming = mode === 'chat';
-            const pendingText = mode === 'image' ? tr('chat.generatingImage') : (useStreaming ? '' : (mode === 'agent' ? tr('chat.agentWorking') : ''));
-            const assistantBubble = addMessageBubble({role:'assistant', content: pendingText, thinking: mode === 'agent'});
+            const pendingText = mode === 'image' ? tr('chat.generatingImage') : '';
+            /* 流式 chat 等首字、agent 等决策期间都先出思考条（生图模式维持原文案） */
+            const assistantBubble = addMessageBubble({role:'assistant', content: pendingText, thinking: mode !== 'image', thoughtKey: 'live:' + uuid()});
             if(useStreaming) assistantBubble.bubble.classList.add('streaming');
             scrollBottom(true);   /* 自己发消息 → 强制跟随到最新 */
 
@@ -3459,29 +3734,8 @@ html.studio-theme-dark #sendBtn.nv-beam {
                     renderMessages(currentConversation.messages || []);
                     await loadConversations();
                 } else if(mode === 'agent') {
-                    const data = await fetch('/api/chat/agent', {
-                        method:'POST',
-                        headers:headers(),
-                        body:JSON.stringify({
-                            conversation_id: currentConversation.id || '',
-                            message,
-                            system_prompt: currentSystemPrompt(),
-                            mode:'agent',
-                            size: requestedSize,
-                            model: provider === 'modelscope' ? (msModel || activeChatModel) : activeChatModel,
-                            ms_model: provider === 'modelscope' ? (msModel || activeChatModel) : '',
-                            image_model: activeImageModel,
-                            reference_images: pendingRefs,
-                            provider,
-                            image_provider: activeImageProvider,
-                            think_level: thinkLevel,
-                        })
-                    }).then(async r => { if(!r.ok) throw new Error((await r.json()).detail || tr('chat.requestFailed')); return r.json(); });
-                    currentConversation = data.conversation;
-                    rememberConversation(currentConversation.id);
-                    setChatTitle(currentConversation.title);
-                    renderMessages(currentConversation.messages || []);
-                    await loadConversations();
+                    /* agent 模式走流式接口：思考条目在等待期间就实时长出来 */
+                    await streamAgentMessage(message, pendingRefs, assistantBubble, requestedSize);
                 } else {
                     const data = await fetch('/api/chat', {
                         method:'POST',
@@ -3534,10 +3788,44 @@ html.studio-theme-dark #sendBtn.nv-beam {
                 })
             });
             if(!res.ok) throw new Error((await res.json()).detail || tr('chat.requestFailed'));
+            await readChatStream(res, assistantBubble);
+        }
+
+        /* agent 模式也走流式接口：决策阶段的思考增量实时到达，事件语义与 /api/chat/stream 一致 */
+        async function streamAgentMessage(message, pendingRefs, assistantBubble, requestedSize){
+            const res = await fetch('/api/chat/agent/stream', {
+                method:'POST',
+                headers:headers(),
+                body:JSON.stringify({
+                    conversation_id: currentConversation.id || '',
+                    message,
+                    system_prompt: currentSystemPrompt(),
+                    mode:'agent',
+                    size: requestedSize,
+                    model: provider === 'modelscope' ? (msModel || activeChatModel) : activeChatModel,
+                    ms_model: provider === 'modelscope' ? (msModel || activeChatModel) : '',
+                    image_model: activeImageModel,
+                    reference_images: pendingRefs,
+                    provider,
+                    image_provider: activeImageProvider,
+                    think_level: thinkLevel
+                })
+            });
+            if(!res.ok) throw new Error((await res.json()).detail || tr('chat.requestFailed'));
+            await readChatStream(res, assistantBubble);
+        }
+
+        /* chat 与 agent 共用的事件循环：meta / reasoning / status / delta / done / error */
+        async function readChatStream(res, assistantBubble){
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
             let fullText = '';
+            let reasoningText = '';
+            const steps = [];   /* status 事件 = 后端真实在跑的动作，作为条目插进 trace */
+            let thoughtSettled = false;
+            /* status 条目排在思考条目之后：后端只在决策结束后才发 status */
+            const traceEntries = () => thoughtTraceEntries(reasoningText).concat(steps.map(text => ({text, status:true})));
             while(true){
                 const {value, done} = await reader.read();
                 if(done) break;
@@ -3553,10 +3841,25 @@ html.studio-theme-dark #sendBtn.nv-beam {
                         rememberConversation(currentConversation.id);
                         setChatTitle(currentConversation.title);
                     }
+                    if(event.type === 'reasoning'){
+                        /* 思考增量：逐条长进 trace，最后一条挂跳动点 */
+                        reasoningText += event.delta || '';
+                        if(assistantBubble.thought?.isConnected) syncThoughtTrace(assistantBubble.thought, traceEntries());
+                        scrollBottom();
+                    }
+                    if(event.type === 'status'){
+                        /* 后端真实在跑的动作（生图/改图…）：插一条闪电图标的条目，无 detail 就不插 */
+                        if(event.detail) steps.push(String(event.detail));
+                        if(assistantBubble.thought?.isConnected) syncThoughtTrace(assistantBubble.thought, traceEntries());
+                        scrollBottom();
+                    }
                     if(event.type === 'delta'){
                         fullText += event.delta || '';
-                        /* 首个字到达 → 思考占位结束：摘掉 thinking 让 dots 与呼吸动画停止
-                           （非流式分支走 renderMessages 整体重建，无需处理） */
+                        /* 首个字到达 → 思考条收尾：有思考内容就折叠成「已思考 x.xs」+ 全打勾，没有就整块撤掉 */
+                        if(!thoughtSettled){
+                            thoughtSettled = true;
+                            settleThoughtBlock(assistantBubble.thought);
+                        }
                         assistantBubble.bubble.classList.remove('thinking');
                         assistantBubble.text.textContent = fullText;
                         scrollBottom();
@@ -3564,6 +3867,14 @@ html.studio-theme-dark #sendBtn.nv-beam {
                     if(event.type === 'error') throw new Error(event.detail || tr('chat.requestFailed'));
                     if(event.type === 'done'){
                         assistantBubble.bubble.classList.remove('streaming');
+                        /* 图片动作没有正文 delta：整表重建前先收尾一次，真实秒表读数才不会丢 */
+                        if(!thoughtSettled){
+                            thoughtSettled = true;
+                            settleThoughtBlock(assistantBubble.thought);
+                        }
+                        /* 秒表读数留给紧随其后的整表重建：renderMessages 会重建同一个气泡 */
+                        const tenths = Number(assistantBubble.thought?.dataset.thoughtTenths);
+                        if(event.message?.id && Number.isFinite(tenths)) thoughtDurations.set(event.message.id, tenths);
                         currentConversation = event.conversation;
                         rememberConversation(currentConversation.id);
                         setChatTitle(currentConversation.title);
@@ -3672,9 +3983,8 @@ html.studio-theme-dark #sendBtn.nv-beam {
             }
         });
         box.querySelectorAll('.bubble-text').forEach(function(el){
-            /* 「正在思考」占位气泡里挂着三个跳动的圆点（真实 DOM 节点），
-               下面的 md() 会整体重写 innerHTML 把圆点抹掉 —— 思考态下直接跳过渲染。
-               圆点消失（流式写入 textContent）后 thinking class 也会被摘掉，届时正常渲染。 */
+            /* 思考态下气泡正文是空的（思考条单独挂在 .bubble-thought，不在 .bubble-text 里），
+               跳过 md() 免得和思考条抢 DOM；首字写进 textContent 后 thinking class 被摘掉，届时正常渲染。 */
             if(el.closest('.bubble.thinking')) return;
             var raw = el.textContent;
             if(el.dataset.mdRaw === raw) return;
@@ -3821,6 +4131,9 @@ html.studio-theme-dark #sendBtn.nv-beam {
     tb.style.setProperty('border-bottom', '0', 'important');
     /* V11 的 inset 0 1px 0 box-shadow 在浅色下会渲染成顶栏底部那条线，一并去掉 */
     tb.style.setProperty('box-shadow', 'none', 'important');
+    /* 顶栏自身是层叠上下文，弹窗的 z-index 逃不出去：顶栏必须持正数层级，
+       否则空态欢迎卡片会整个盖住系统提示词弹窗等顶栏弹层 */
+    tb.style.setProperty('z-index', '30', 'important');
   }
   function forceSend(){
     var s = document.getElementById('sendBtn');
@@ -3934,6 +4247,51 @@ window.__novaiForceMemories = forceMemories;
   document.addEventListener('DOMContentLoaded', applyAll);
   window.addEventListener('load', applyAll);
 })();
+</script>
+<script>
+/* ── Morph 状态按钮接入（GPT 对话页）─────────────────────────────────────────
+   本页按钮都是行内 onclick，交给模块包装全局函数即可；只有两颗的原函数自己吞异常或
+   只改 UI，返回值判不出结果，这里在「动作期间」包一层探针读页面自己的失败信号，
+   探针只转发不拦截，原函数、参数、报错提示逻辑都不动。 */
+(function initGptChatMorph(){
+    const Morph = window.NovaMorphButton;
+    if(!Morph || typeof Morph.attach !== 'function') return;
+
+    /* 角色保存：submitPersonaSave 自己 catch，promise 永远 resolve，靠状态条探针判失败 */
+    function personaSaveAction(){
+        const original = window.flashPersonaStatus;
+        let flashed = false;
+        if(typeof original === 'function'){
+            window.flashPersonaStatus = function(){ flashed = true; return original.apply(this, arguments); };
+        }
+        const restore = () => { window.flashPersonaStatus = original; return !flashed; };
+        let result;
+        try { result = submitPersonaSave(); }
+        catch(err){ window.flashPersonaStatus = original; throw err; }
+        if(result && typeof result.then === 'function'){
+            return result.then(restore, () => { window.flashPersonaStatus = original; return false; });
+        }
+        return restore();
+    }
+
+    /* 自定义分辨率：同步函数，合法/非法都返回 undefined，读页面自己打的 error 态判断 */
+    function applyResolutionAction(){
+        applyCustomResolution();
+        const hint = document.getElementById('customResolutionHint');
+        return !(hint && hint.classList.contains('error'));
+    }
+
+    /* 三颗都挨着邻居（角色框挨取消、弹窗底挨清空、尺寸区挨提示），统一锁住 idle 宽度 */
+    const personaBtn = document.getElementById('personaSaveConfirmBtn');
+    if(personaBtn) Morph.attach(personaBtn, {action: personaSaveAction, keepWidth:true});
+    const applyBtn = document.querySelector('button[onclick="applyCustomResolution()"]');
+    if(applyBtn) Morph.attach(applyBtn, {action: applyResolutionAction, keepWidth:true});
+    const systemPromptBtn = document.querySelector('button[onclick="saveSystemPromptFromUI()"]');
+    if(systemPromptBtn) Morph.attach(systemPromptBtn, {keepWidth:true});
+
+    /* 其余白名单按钮（保存/确定/应用 + 全局 onclick）走通用扫描 */
+    Morph.autoBind(document);
+}());
 </script>
 </body>
 </html>

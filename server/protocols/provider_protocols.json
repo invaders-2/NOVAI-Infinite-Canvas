@@ -105,6 +105,35 @@
         "image"
       ],
       "docs": []
+    },
+    {
+      "id": "lovart",
+      "label": "Lovart 设计代理",
+      "version": 1,
+      "kind": "provider",
+      "summary": "Lovart 设计代理 Agent OpenAPI：AK/SK 自定义 HMAC-SHA256 签名鉴权（非 Bearer），提交 prompt 后按线程轮询取产物。",
+      "auth": {
+        "type": "api_key_header",
+        "header": "X-Access-Key",
+        "scheme": "hmac-sha256",
+        "headers": [
+          "X-Access-Key",
+          "X-Timestamp",
+          "X-Signature",
+          "X-Signed-Method",
+          "X-Signed-Path"
+        ],
+        "sign_string": "{METHOD}\n{PATH}\n{timestamp}",
+        "signature_encoding": "hex",
+        "secret_env": "LOVART_SECRET_KEY",
+        "access_key_env": "LOVART_ACCESS_KEY"
+      },
+      "models_endpoint": "",
+      "categories": [
+        "image",
+        "video"
+      ],
+      "docs": []
     }
   ]
 }

@@ -865,6 +865,20 @@ function tableRowInputsFingerprint(node){
     return cached ? cached.fingerprint : '';
 }
 
+/* 一行只带 1 张主参考图：非「全部」通道里多出来的图会被裁掉，指向它们的
+   @图片N 如果留在提示词里，就会指向一张不会发出去的图（模型会去找），还会被
+   rewriteMentions 判成悬空、批量执行前拦下整行 —— 所以按序号把它们删掉。
+   只删 trimmedOrdinals 里「本行确实取到、只是按一行一张裁掉」的序号；本行根本
+   取不到的真正悬空引用不在这个集合里，照旧报出来。类型对不上的 mention 也留着
+   （那是真正的引用错误，不能顺带吞掉）。 */
+function stripTrimmedMentions(model, prompt, trimmedOrdinals){
+    if(!model || !trimmedOrdinals || !trimmedOrdinals.size) return String(prompt || '');
+    return String(prompt || '').replace(model.MENTION_RE, (token, label, digits) => {
+        const kind = trimmedOrdinals.get(Number(digits));
+        return kind && model.mentionLabel(kind) === label ? '' : token;
+    });
+}
+
 function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId){
     // 每个通道的条目在全局输入清单里的起始序号
     const ordinalBase = [];
@@ -906,12 +920,23 @@ function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId
         const texts = [];
         const references = [];
         const ordinalMap = new Map();
-        channelItems.forEach(list => {
+        /* 一行只要 1 张主参考图：非「全部」的通道（含手动上传的那一格）整行合计
+           只保留最先遇到的那一张，其余裁掉；「全部」（多角度）通道的整组照旧全带。
+           多个非 all 通道也只合计留一张 —— 用户口径是一行一张主参考图，不是一列一张。 */
+        const trimmedOrdinals = new Map();
+        let keptMain = false;
+        channelItems.forEach((list, channelIndex) => {
+            const keepWholeGroup = channels[channelIndex].mode === 'all';
             list.forEach(entry => {
                 if(entry.kind === 'text'){
                     if(String(entry.text || '').trim()) texts.push(String(entry.text).trim());
                     return;
                 }
+                if(!keepWholeGroup && keptMain){
+                    trimmedOrdinals.set(entry.ordinal, entry.kind);
+                    return;
+                }
+                if(!keepWholeGroup) keptMain = true;
                 // 该行内的 1-based 参考图序号，就是重写后的 @图片N
                 ordinalMap.set(entry.ordinal, {position: media.length + 1, kind: entry.kind});
                 media.push(entry);
@@ -923,7 +948,7 @@ function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId
             .map((name, columnIndex) => model.cellText(row[columnIndex]))
             .filter(value => value.trim()).join('\n'));
         const rawPrompt = model.buildRowPrompt(upstreamTexts, node.tablePrompt || '', rowText);
-        const rewritten = model.rewriteMentions(rawPrompt, ordinalMap);
+        const rewritten = model.rewriteMentions(stripTrimmedMentions(model, rawPrompt, trimmedOrdinals), ordinalMap);
         /* 这一行真正会发出去的素材清单：模型写的提示词常常只 @ 了其中一张
            （「全部」的组一行带整组，提示词里却只出现一张）→ 用户以为「只读取了一张」。
            末尾补一行显式清单，提示词、批量面板、结果节点上都能看到整组。 */
@@ -1605,7 +1630,7 @@ async function runTableBatch(genId, options={}){
        （host.generationStopRequested），以及本节点/调用方显式标记（经典画布等）。 */
     gen._batchStopRequested = false;
     const shouldStopBatch = () => Boolean(gen._batchStopRequested)
-        || (typeof generationStopRequested === 'function' ? Boolean(generationStopRequested()) : false)
+        || (typeof generationStopRequested === 'function' ? Boolean(generationStopRequested(gen && gen.id)) : false)
         || (typeof options.shouldStop === 'function' ? Boolean(options.shouldStop()) : false);
     gen._batchRunning = true;
     table.tableBatchRunning = true;
@@ -1757,8 +1782,10 @@ function materializeLlmTable(llmNode, table, groups, plan){
     if(!model) return null;
     /* 规划里为每一组指定了用法：per-row → 逐行（行驱动），every-row → 全部（每行都带整组）。
        这样「多张参考图 → 多行」和「多张白底图 → 每行都带」是自动落下来的，
-       用户不切模式也能对；表头仍可手动覆盖。 */
-    const planModes = model.planGroupModes(plan, groups.length);
+       用户不切模式也能对；表头仍可手动覆盖。
+       经典画布的规划遍可能为空（规划请求失败/被跳过），生成遍回执的 inputGroups 才是权威。 */
+    const modeSource = (table && Array.isArray(table.inputGroups) && table.inputGroups.length) ? table : plan;
+    const planModes = model.planGroupModes(modeSource, groups.length);
     const channelModes = {};
     groups.forEach((group, index) => {
         if(model.CHANNEL_MODES.includes(planModes[index])) channelModes[model.channelIdAt(index)] = planModes[index];

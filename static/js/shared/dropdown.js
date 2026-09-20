@@ -80,6 +80,9 @@ function refreshIcons(){
 }
 
 function closeMenu(){
+    /* 菜单是每次 open 新建、close 直接扔掉的：挂在它身上的 MutationObserver / 事件监听
+       虽然会跟着节点一起变成垃圾，但删节点前显式 destroy 才是确定的，也顺手停掉排队中的 rAF。 */
+    if(active && active.glide && typeof active.glide.destroy === 'function') active.glide.destroy();
     if(active && active.menu && active.menu.parentNode) active.menu.parentNode.removeChild(active.menu);
     active = null;
 }
@@ -186,6 +189,14 @@ function open(select){
         if(row && typeof row.scrollIntoView === 'function') row.scrollIntoView({block:'nearest'});
     }
     refreshIcons();
+    /* 滑块高亮交给通用模块（NovaGlide = shared/glide.js）。
+       放在 refreshIcons() 之后：lucide 会把 <i data-lucide="check"> 换成 <svg>，几何要以换完的 DOM 为准。
+       cursorClass 用 .is-active —— 键盘光标就是这个类（.active 是当前选中的值），
+       于是「指针在容器内跟指针、否则跟光标、否则跟选中值」正好对上。存在才调：
+       测试垫片和没引 glide.js 的页面没有 window.NovaGlide，这里不能抛。 */
+    if(window.NovaGlide && typeof window.NovaGlide.attach === 'function'){
+        active.glide = window.NovaGlide.attach(menu, { item: '.nd-option', cursorClass: 'is-active' });
+    }
     return menu;
 }
 
@@ -269,6 +280,15 @@ function onOutsideMouseDown(event){
 
 function onViewportChange(){ closeMenu(); }
 
+/* 滚轮单独处理：.nd-menu 是 max-height:320px + overflow:auto，长列表本来就该能滚。
+   以前任何 wheel 都无条件 closeMenu，用户想在列表里往下滚，第一下就把菜单关了。
+   现在只有滚轮落在弹层外面才关；弹层内部（含滚到顶/底后的惯性余量）一律不管，交给浏览器原生滚动。
+   关闭仍有 点外面 / Esc / 选中一项 三条路。 */
+function onWheel(event){
+    if(active && active.menu && active.menu.contains && event && active.menu.contains(event.target)) return;
+    closeMenu();
+}
+
 /* 画布上的 select 是节点重绘时动态生成的，所以用事件委托而不是逐个绑定。
    install() 幂等。 */
 function install(){
@@ -282,7 +302,7 @@ function install(){
     d.addEventListener('keydown', onKeyDown, true);
     if(window){
         window.addEventListener('resize', onViewportChange);
-        window.addEventListener('wheel', onViewportChange, {passive:true});
+        window.addEventListener('wheel', onWheel, {passive:true});
     }
     return true;
 }

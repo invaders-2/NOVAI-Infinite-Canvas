@@ -276,6 +276,7 @@ async function refreshCanvasConfigFromSettings(){
     (nodes || []).forEach(node => {
         sanitizeImageNodeProviderModel(node);
         sanitizeVideoNodeProviderModel(node);
+        sanitizeChatNodeProviderModel(node);
     });
     if(typeof render === 'function') render();
 }
@@ -573,6 +574,22 @@ const GPT_IMAGE_2_SIZE_MAP = {
     ultrawide:    { '1k':'1536x1024', '2k':'2048x1152', '4k':'3840x2160' },
     ultratall:    { '1k':'1024x1536', '2k':'1024x1536', '4k':'2160x3840' }
 };
+// GPT Image 1.x 官方只有 1K 三档（1024x1024 / 1536x1024 / 1024x1536 / auto），2.x 起才有 2K/4K 离散档。
+const GPT_IMAGE_1_SIZE_MAP = {
+    square:       { '1k':'1024x1024' },
+    portrait:     { '1k':'1024x1536' },
+    landscape:    { '1k':'1536x1024' },
+    portrait43:   { '1k':'1024x1536' },
+    landscape43:  { '1k':'1536x1024' },
+    story:        { '1k':'1024x1536' },
+    wide:         { '1k':'1536x1024' },
+    ultrawide:    { '1k':'1536x1024' },
+    ultratall:    { '1k':'1024x1536' }
+};
+const GPT_IMAGE_1_SIZES = ['1024x1024','1536x1024','1024x1536'];
+const GPT_IMAGE_2_SIZES = ['1024x1024','1536x1024','1024x1536','2048x2048','2048x1152','3840x2160','2160x3840'];
+const API_RES_LEVELS = ['1k','2k','4k'];
+const API_RATIO_LABELS = {square:'正方形', portrait:'竖图', portrait43:'竖图', landscape:'横图', landscape43:'横图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖'};
 const RES_LONG_SIDE = { '1k':1536, '2k':2048, '4k':3840 };
 const RES_PIXEL_LIMIT = { '1k':1572864, '2k':4194304, '4k':8294400 };
 const CUSTOM_IMAGE_MODELS_KEY = 'canvas_custom_image_models';
@@ -711,13 +728,13 @@ function normalizeProviderId(value){
    但服务端 generate_ai_image 本来就有 modelscope 分支，去掉排除即可让生成节点直接调它。
    排序上把 ModelScope 放最后：providers[0] 是新建节点的默认平台，不该被它抢掉。 */
 function imageApiProviders(){
-    const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
-        .filter(p => p.enabled !== false && providerImageModels(p.id).length);
+    const providers = (apiProviders || [])
+        .filter(p => p.enabled !== false && p.has_key !== false && providerImageModels(p.id).length);
     return providers.filter(p => p.id !== 'modelscope').concat(providers.filter(p => p.id === 'modelscope'));
 }
 function midjourneyApiProviders(){
-    return (apiProviders.length ? apiProviders : [])
-        .filter(provider => provider.enabled !== false && (
+    return (apiProviders || [])
+        .filter(provider => provider.enabled !== false && provider.has_key !== false && (
             String(provider.protocol || '').toLowerCase() === 'apimart'
             || /(^|\.)apimart\.ai(?:\/|$)/i.test(String(provider.base_url || ''))
         ));
@@ -733,19 +750,18 @@ function midjourneyProviderOptions(selectedId){
     return providers.map(provider => `<option value="${escapeHtml(provider.id)}" ${provider.id === selected ? 'selected' : ''}>${escapeHtml(provider.name || provider.id)}</option>`).join('');
 }
 function providerById(id){
-    return (apiProviders.length ? apiProviders : defaultApiProviders()).find(p => p.id === id) || imageApiProviders()[0] || defaultApiProviders()[0];
+    return (apiProviders || []).find(p => p.id === id) || imageApiProviders()[0] || null;
 }
 function resolveProviderId(id){
-    return providerById(id)?.id || 'comfly';
+    return providerById(id)?.id || '';
 }
 function chatApiProviders(){
-    const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
-        .filter(p => p.enabled !== false && (p.chat_models || []).length);
-    return providers.length ? providers : defaultApiProviders();
+    return (apiProviders || [])
+        .filter(p => p.enabled !== false && p.has_key !== false && (p.chat_models || []).length);
 }
 function resolveChatProviderId(id){
     const providers = chatApiProviders();
-    return providers.find(p => p.id === id)?.id || providers[0]?.id || 'comfly';
+    return providers.find(p => p.id === id)?.id || providers[0]?.id || '';
 }
 function chatProviderOptions(selectedId){
     const selected = resolveChatProviderId(selectedId);
@@ -773,21 +789,59 @@ function providerImageModels(providerId){
     if(!models.length && String(providerId || '').toLowerCase() === 'modelscope') return modelscopeImageModels();
     return models;
 }
+// 换平台后旧平台的模型名在新平台不存在（如 Lovart 的 generate_image_* 工具名，发出去上游必报模型不存在）：
+// 优先用该平台上一次用过的模型，没有记忆再用列表第一个；模型本身对新平台合法时保持不动。
+function correctNodeModelForProvider(node){
+    if(!node || !node.model) return '';
+    const models = providerImageModels(node.apiProvider);
+    if(!models.length) return '';
+    if(models.includes(resolveImageModel(node.model))) return '';
+    const remembered = window.NovaUtils?.rememberedProviderModel?.(node.apiProvider) || '';
+    const next = models.includes(remembered) ? remembered : (models[0] || '');
+    if(!next || next === node.model) return '';
+    node.model = next;
+    const name = providerById(node.apiProvider)?.name || node.apiProvider;
+    return `已切换到 ${name} 的模型 ${next}`;
+}
 function sanitizeImageNodeProviderModel(node){
     if(!node || node.type !== 'generator') return;
     node.apiProvider = resolveImageProviderId(node.apiProvider || '');
     const models = providerImageModels(node.apiProvider);
-    if(!models.length) node.model = '';
-    else if(!models.includes(resolveImageModel(node.model))) node.model = models[0] || '';
+    if(!node.model) node.model = models[0] || '';
+    else correctNodeModelForProvider(node);
+}
+// 换平台后旧平台的对话模型名在新平台不存在（如 Lovart 的 lovart-agent，发出去上游必报模型不存在）：
+// 优先用该平台上一次用过的对话模型，没有记忆再用列表第一个；模型本身对新平台合法时保持不动；平台没给列表时不动。
+function correctedChatModelForProvider(providerId, currentModel){
+    // 精确匹配平台，不走 resolveChatProviderId 的兜底，免得把别的平台的列表当成当前平台的
+    const models = providerChatModels(providerId);
+    const current = String(currentModel || '').trim();
+    if(!models.length || models.includes(current)) return current;
+    const remembered = window.NovaUtils?.rememberedProviderChatModel?.(providerId) || '';
+    return models.includes(remembered) ? remembered : models[0];
+}
+function correctChatNodeModelForProvider(node){
+    if(!node) return '';
+    const next = correctedChatModelForProvider(node.llmProvider, node.model);
+    if(!next || next === node.model) return '';
+    node.model = next;
+    const name = (apiProviders || []).find(p => p.id === node.llmProvider)?.name || node.llmProvider;
+    return `已切换到 ${name} 的模型 ${next}`;
+}
+function sanitizeChatNodeProviderModel(node){
+    if(!node || node.type !== 'llm') return;
+    node.llmProvider = resolveChatProviderId(node.llmProvider || '');
+    if(node.llmProvider === 'modelscope') node.model = node.llmMsModel || node.model;
+    if(!node.model) node.model = providerChatModels(node.llmProvider)[0] || node.model;
+    else correctChatNodeModelForProvider(node);
 }
 function videoApiProviders(){
-    const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
-        .filter(p => p.id !== 'modelscope' && p.enabled !== false && (p.video_models || []).length);
-    return providers.length ? providers : defaultApiProviders();
+    return (apiProviders || [])
+        .filter(p => p.id !== 'modelscope' && p.enabled !== false && p.has_key !== false && (p.video_models || []).length);
 }
 function resolveVideoProviderId(id){
     const providers = videoApiProviders();
-    return providers.find(p => p.id === id)?.id || providers[0]?.id || 'comfly';
+    return providers.find(p => p.id === id)?.id || providers[0]?.id || '';
 }
 function videoProviderOptions(selectedId){
     const selected = resolveVideoProviderId(selectedId);
@@ -798,12 +852,31 @@ function providerVideoModels(providerId){
     const provider = apiProviders.find(p => p.id === providerId);
     return uniqueModels(provider?.video_models || []);
 }
+// 与智能画布视频轴同一口径：换平台后旧平台的视频模型名在新平台不存在时，优先用该平台上一次用过的
+// 视频模型，没有记忆再用列表第一个；模型本身对新平台合法时保持不动；平台没给列表时不动。
+function correctedVideoModelForProvider(providerId, currentModel){
+    // 精确匹配平台，不走 resolveVideoProviderId 的兜底，免得把别的平台的列表当成当前平台的
+    const models = providerVideoModels(providerId).map(model => String(model || '').trim()).filter(Boolean);
+    const current = String(currentModel || '').trim();
+    if(!models.length || models.includes(current)) return current;
+    const remembered = window.NovaUtils?.rememberedProviderVideoModel?.(providerId) || '';
+    return models.includes(remembered) ? remembered : models[0];
+}
+function correctVideoNodeModelForProvider(node){
+    if(!node) return '';
+    const next = correctedVideoModelForProvider(node.apiProvider, node.model);
+    if(!next || next === node.model) return '';
+    node.model = next;
+    const name = (apiProviders || []).find(p => p.id === node.apiProvider)?.name || node.apiProvider;
+    return `已切换到 ${name} 的模型 ${next}`;
+}
 function sanitizeVideoNodeProviderModel(node){
     if(!node || node.type !== 'video') return;
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
     const models = providerVideoModels(node.apiProvider);
-    if(!models.length) node.model = '';
-    else if(!models.includes(node.model)) node.model = models[0] || '';
+    if(!node.model) node.model = models[0] || '';
+    // 历史存档或换平台可能留下不属于当前平台的视频模型（渲染阶段不能弹提示），先静默归一。
+    else correctVideoNodeModelForProvider(node);
 }
 // 视频模型支持的比例映射：键名按匹配优先级排列，model name 包含键名即命中
 // 未列出的模型默认支持全部比例
@@ -883,20 +956,33 @@ function resolveImageModel(value){
     if(value === 'nano') return models.nano;
     return value || allImageModels(managedProviderId)[0] || models.gpt;
 }
+// Lovart 的图片工具名形如 generate_image_gpt_image_2_5_sunburst_max，归一化后同样命中。
 function isGptImageAutoSizeModel(model){
     const raw = String(model || '').trim().toLowerCase();
     const normalized = raw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     const compact = raw.replace(/[^a-z0-9]+/g, '');
-    return normalized === 'gpt-image-2'
-        || normalized.startsWith('gpt-image-2-')
-        || normalized.endsWith('-gpt-image-2')
-        || normalized.includes('-gpt-image-2-')
-        || compact === 'gptimage2'
-        || compact.startsWith('gptimage2')
-        || compact.endsWith('gptimage2');
+    return /(^|-)gpt-image-\d/.test(normalized) || /gptimage\d/.test(compact);
+}
+// 0 = 非 GPT Image 系列；1 = 1.x（只有 1K）；2+ = 2.x（1K/2K/4K 离散档）
+function gptImageModelVersion(model){
+    const raw = String(model || '').trim().toLowerCase();
+    const match = raw.replace(/[^a-z0-9]+/g, '-').match(/(?:^|-)gpt-image-(\d+)/) || raw.replace(/[^a-z0-9]+/g, '').match(/gptimage(\d+)/);
+    return match ? Number(match[1]) : 0;
+}
+function gptImageSizeMap(model){
+    const version = gptImageModelVersion(model);
+    return version >= 2 ? GPT_IMAGE_2_SIZE_MAP : (version ? GPT_IMAGE_1_SIZE_MAP : null);
+}
+function gptImageMaxLevel(model){
+    const version = gptImageModelVersion(model);
+    return version >= 2 ? '4k' : (version ? '1k' : '');
+}
+function gptImageDiscreteSizes(model){
+    const version = gptImageModelVersion(model);
+    return version >= 2 ? GPT_IMAGE_2_SIZES : (version ? GPT_IMAGE_1_SIZES : null);
 }
 function defaultApiImageResolution(model){
-    return isGptImageAutoSizeModel(resolveImageModel(model)) ? '4k' : '1k';
+    return isGptImageAutoSizeModel(resolveImageModel(model)) ? (gptImageMaxLevel(resolveImageModel(model)) || '4k') : '1k';
 }
 function normalizedImageQuality(value){
     const quality = String(value || 'auto').trim().toLowerCase();
@@ -1067,6 +1153,34 @@ function ratioPartsFromDimensions(width, height){
     const g = gcdInt(best.width, best.height);
     return {width:best.width / g, height:best.height / g};
 }
+function gptImageSizeTier(width, height){
+    const area = Number(width) * Number(height);
+    for(const level of API_RES_LEVELS){
+        if(area <= RES_PIXEL_LIMIT[level]) return level;
+    }
+    return API_RES_LEVELS[API_RES_LEVELS.length - 1];
+}
+// GPT Image 没有 4:3 / 21:9 等比例：在同档位同方向里挑比例最接近的，该档位没有同方向尺寸就降一档，
+// 结果与预设离散表（GPT_IMAGE_1/2_SIZE_MAP）一致。
+function nearestGptImageSize(model, ratio, level){
+    const target = Number(ratio) > 0 ? Number(ratio) : 1;
+    const square = target > 0.95 && target < 1.05;
+    const rank = API_RES_LEVELS.indexOf(level);
+    const maxRank = rank < 0 ? API_RES_LEVELS.length - 1 : rank;
+    const pool = (gptImageDiscreteSizes(model) || []).map(candidate => {
+        const match = String(candidate).match(/^(\d+)x(\d+)$/);
+        if(!match) return null;
+        const width = Number(match[1]);
+        const height = Number(match[2]);
+        if(square !== (width === height)) return null;
+        if(!square && (width < height) !== (target < 1)) return null;
+        const itemRank = API_RES_LEVELS.indexOf(gptImageSizeTier(width, height));
+        return itemRank > maxRank ? null : {candidate, width, height, rank:itemRank};
+    }).filter(Boolean);
+    if(!pool.length) return '';
+    pool.sort((a, b) => (b.rank - a.rank) || (Math.abs(Math.log(target / (a.width / a.height))) - Math.abs(Math.log(target / (b.width / b.height)))));
+    return pool[0].candidate;
+}
 function apiImageSize(ratioValue, resolutionValue, customRatioValue = '', customSizeValue = '', model = ''){
     if(resolutionValue === 'auto') return 'auto';
     if(resolutionValue === 'custom') return String(customSizeValue || '').trim();
@@ -1080,12 +1194,90 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue = '', custom
             const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;
             const width = Math.floor(rawWidth / 16) * 16;
             const height = Math.floor(rawHeight / 16) * 16;
-            return `${Math.max(64, width)}x${Math.max(64, height)}`;
+            const size = `${Math.max(64, width)}x${Math.max(64, height)}`;
+            // 自定义/适配比例算出的尺寸往往不是 GPT Image 的合法枚举，直接发会被上游退回默认 1K。
+            return gptImageSizeMap(model) ? (nearestGptImageSize(model, parsed, resolutionKey) || size) : size;
         }
     }
     const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
-    const table = isGptImageAutoSizeModel(model) ? GPT_IMAGE_2_SIZE_MAP : SIZE_MAP;
-    return table[ratioKey]?.[resolutionKey] || table.square[resolutionKey] || table.square['1k'];
+    const gptTable = gptImageSizeMap(model);
+    if(gptTable){
+        const rank = API_RES_LEVELS.indexOf(resolutionKey);
+        for(let i = (rank < 0 ? API_RES_LEVELS.length - 1 : rank); i >= 0; i--){
+            const row = gptTable[ratioKey] || gptTable.square;
+            if(row[API_RES_LEVELS[i]]) return row[API_RES_LEVELS[i]];
+        }
+        return gptTable.square['1k'];
+    }
+    return SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
+}
+function gptImageSeriesLabel(model){
+    const raw = String(model || '').trim();
+    const match = raw.toLowerCase().match(/gpt[-_.\s]?image[-_.\s]?(\d+)(?:[-_.](\d+))?/);
+    return match ? `GPT Image ${match[1]}${match[2] ? '.' + match[2] : ''}` : raw;
+}
+function apiRatioLabel(ratioValue){
+    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
+    return API_RATIO_LABELS[ratioValue] || API_RATIO_LABELS[ratioKey] || ratioKey;
+}
+// GPT Image 只有离散合法尺寸：高位档可能没有对应尺寸（例如 2.x 的正方形没有 4K、1.x 最高只有 1K）。
+function apiResolutionSupport(model, ratioValue, customRatioValue = ''){
+    const table = gptImageSizeMap(model);
+    if(!table) return {levels:API_RES_LEVELS.slice(), supported:API_RES_LEVELS.slice(), notes:{}};
+    const maxIndex = Math.max(0, API_RES_LEVELS.indexOf(gptImageMaxLevel(model)));
+    const trackTiers = (ratioValue !== 'custom' && ratioValue !== 'source') || parseRatioValue(customRatioValue) > 0;
+    const supported = [];
+    const notes = {};
+    API_RES_LEVELS.forEach((level, index) => {
+        if(index > maxIndex){ notes[level] = `最高 ${API_RES_LEVELS[maxIndex].toUpperCase()}`; return; }
+        const previous = supported.length ? apiImageSize(ratioValue, supported[supported.length - 1], customRatioValue, '', model) : '';
+        const size = apiImageSize(ratioValue, level, customRatioValue, '', model);
+        if(trackTiers && previous && size === previous){ notes[level] = `等同 ${supported[supported.length - 1].toUpperCase()}`; return; }
+        supported.push(level);
+    });
+    return {levels:API_RES_LEVELS.slice(), supported, notes};
+}
+function apiResolutionNote(model, ratioValue, level, customRatioValue = ''){
+    return apiResolutionSupport(model, ratioValue, customRatioValue).notes[level] || '';
+}
+function apiResolutionDisabledText(model, ratioValue, level, customRatioValue = ''){
+    const note = apiResolutionNote(model, ratioValue, level, customRatioValue);
+    return note ? `${level.toUpperCase()} ${apiRatioLabel(ratioValue)}尺寸不可用（${note}）` : '';
+}
+// 只有一档可用时把档位固定住，并说明原因。
+function apiResolutionFixedNote(model, ratioValue, customRatioValue = ''){
+    const info = apiResolutionSupport(model, ratioValue, customRatioValue);
+    return info.supported.length === 1 ? `${gptImageSeriesLabel(model)} 只支持 ${info.supported[0].toUpperCase()} 尺寸` : '';
+}
+// 档位失效时的落点：取不高于请求档位的最高可用档位（被禁档位本就"等同"于它，清晰度不损失、
+// 也不会让用户按更高清晰度多花点数）；只有完全没有更低档位时才往上取。
+function nearestApiResolution(model, ratioValue, level, customRatioValue = ''){
+    const info = apiResolutionSupport(model, ratioValue, customRatioValue);
+    const index = info.levels.indexOf(level);
+    for(let i = (index < 0 ? info.levels.length - 1 : index); i >= 0; i--){
+        if(info.supported.includes(info.levels[i])) return info.levels[i];
+    }
+    return info.supported.find(item => info.levels.indexOf(item) > index) || info.supported[0] || '1k';
+}
+function apiResolutionChangeNotice(model, ratioValue, level, target){
+    return `${gptImageSeriesLabel(model)} 不支持 ${level.toUpperCase()} ${apiRatioLabel(ratioValue)}尺寸，已自动调整为 ${target.toUpperCase()}`;
+}
+// 换模型/换比例后档位可能失效：自动换到该模型可用的档位并提示，避免静默出低清图。
+function applyApiResolutionLimit(node){
+    if(!node || API_RES_LEVELS.indexOf(node.resolution) < 0) return '';
+    const model = resolveImageModel(node.model);
+    const ratio = node.ratio || 'square';
+    const customRatio = node.customRatio || '';
+    if(!apiResolutionNote(model, ratio, node.resolution, customRatio)) return '';
+    const target = nearestApiResolution(model, ratio, node.resolution, customRatio);
+    const notice = apiResolutionChangeNotice(model, ratio, node.resolution, target);
+    node.resolution = target;
+    return notice;
+}
+function notifyCanvasSize(text){
+    if(!text) return;
+    if(window.NovaUtils && typeof window.NovaUtils.showToast === 'function') window.NovaUtils.showToast(text);
+    else setStatus(text);
 }
 function parseSizePair(value){
     const match = String(value || '').match(/(\d+)\s*x\s*(\d+)/i);
@@ -1156,7 +1348,11 @@ function chatModelOptions(selectedModel, providerId=''){
     if(!models.length){
         return `<option value="" disabled selected>${tr('canvas.noModelsHint') || '暂无模型，请到 API 设置添加'}</option>`;
     }
-    const selectedValue = resolveChatModel(selectedModel, providerId);
+    // selectedValue 先按平台校正：只有「模型本就合法」或「该平台没给列表」时才会保留当前值，
+    // 旧平台的失效模型不会再被塞进候选里。providerId 为空（无平台）时退回保留当前值。
+    const selectedValue = providerId
+        ? correctedChatModelForProvider(providerId, resolveChatModel(selectedModel, providerId))
+        : resolveChatModel(selectedModel, providerId);
     const options = models.map(model => `<option value="${escapeHtml(model)}" ${model === selectedValue ? 'selected' : ''}>${escapeHtml(model)}</option>`).join('');
     const hasSelected = models.includes(selectedValue);
     return `${hasSelected || !selectedValue ? '' : `<option value="${escapeHtml(selectedValue)}" selected>${escapeHtml(selectedValue)}</option>`}${options}`;
@@ -2882,6 +3078,25 @@ function addOutputNode(point){
     const p = point || defaultPoint(260, 0);
     return addNode({id:uid('out'), type:'output', x:p.x, y:p.y, images:[]});
 }
+/* 滑块高亮（NovaGlide = shared/glide.js）接进经典画布的弹层。
+   dropdown.js 那套 .nd-menu 是「每次开菜单新建节点」，可以 attach 一次就撒手；
+   这里五个弹层是页面上的常驻节点、内容每次打开都被 innerHTML 重写，
+   所以必须在每次写完内容（含 refreshIcons 之后）重新调一次。
+   attach 内部遇到同一个容器会先 destroy 旧的（glide.js 里 container.__nvGlide 那段），
+   所以这里不需要自己判断「是否已接线」——重调只会换掉旧滑块，不会叠出第二个。
+   存在才调：没引 glide.js 的页面 / 测试垫片里不能抛。 */
+function glideSync(container, item){
+    if(!container || !item) return null;
+    if(!window.NovaGlide || typeof window.NovaGlide.attach !== 'function') return null;
+    const glide = window.NovaGlide.attach(container, {item});
+    /* 菜单是 display:none → block 切换的：attach 那一刻布局还没算过，
+       getBoundingClientRect 全是 0，滑块会停在左上角等下一次内容/悬停事件。
+       读一次 offsetHeight 强制布局，再 refresh 一次，滑块在指针进来之前就已经到位。 */
+    void container.offsetHeight;
+    if(!glide) return null;
+    glide.refresh();
+    return glide;
+}
 function openCreateMenu(clientX, clientY){
     menuPoint = screenToWorld(clientX, clientY);
     closeLinkCreateMenu();
@@ -2889,6 +3104,7 @@ function openCreateMenu(clientX, clientY){
     createMenu.style.top = `${clientY}px`;
     createMenu.classList.add('open');
     refreshIcons();
+    glideSync(createMenu, '.menu-btn');   /* 内容是 HTML 静态标记，但每次打开都要重新量一次几何 */
 }
 function closeCreateMenu(){
     createMenu.classList.remove('open');
@@ -2938,6 +3154,7 @@ function openLinkCreateMenu(originId, originKind, clientX, clientY){
         };
     });
     refreshIcons();
+    glideSync(linkCreateMenu, '.menu-btn');   /* 每次打开都重写 innerHTML，attach 得跟在后面 */
     return true;
 }
 function openGeneratorNodeMenu(nodeId, clientX, clientY){
@@ -2981,6 +3198,10 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
         };
     }));
     refreshIcons();
+    /* 两列 grid + .menu-section-title 分组标题：滑块几何走 getBoundingClientRect 差值，
+       所以分组标题和二维布局都能对齐（不会按 index × 行高算错行） */
+    glideSync(nodeInputMenu, '.menu-btn');
+    glideSync(nodeOutputMenu, '.menu-btn');
     return true;
 }
 function closeLinkCreateMenu(){
@@ -3031,6 +3252,7 @@ function openImageNodeMenu(nodeId, clientX, clientY){
         pickImageForNode(nodeId);
     };
     refreshIcons();
+    glideSync(imageNodeMenu, '.menu-btn');   /* 每次打开都重写 innerHTML（图片菜单 / 输出节点菜单共用此容器） */
 }
 function openImageNodePreview(nodeId){
     const node = nodes.find(n => n.id === nodeId);
@@ -7055,9 +7277,9 @@ function syncCanvasPromptTemplateMutation(data, fallbackSelectedId=''){
 }
 async function saveCurrentCanvasPromptAsTemplate(){
     const lib = activeCanvasPromptLibrary();
-    if(!currentCanvasPromptTemplateLibraryEditable()){ setStatus('请选择可编辑的提示词库'); return; }
+    if(!currentCanvasPromptTemplateLibraryEditable()){ setStatus('请选择可编辑的提示词库'); return false; }
     const text = currentCanvasPromptTemplateNodeText();
-    if(!text){ setStatus('当前提示词为空'); return; }
+    if(!text){ setStatus('当前提示词为空'); return false; }
     try {
         const data = await fetch('/api/prompt-libraries/items', {
             method:'POST',
@@ -7079,6 +7301,7 @@ async function saveCurrentCanvasPromptAsTemplate(){
         renderPromptTemplateModal();
     } catch(err) {
         setStatus(err.message || '保存失败');
+        return false;
     }
 }
 async function createBlankCanvasPromptTemplate(){
@@ -7110,7 +7333,7 @@ async function saveCanvasPromptTemplateEdit(){
     const name = promptTemplatePanel.querySelector('[data-template-edit-name]')?.value?.trim() || '';
     const positive = promptTemplatePanel.querySelector('[data-template-edit-text]')?.value?.trim() || '';
     const category = promptTemplatePanel.querySelector('[data-template-edit-category]')?.value || 'mine';
-    if(!name || !positive){ setStatus(tr('smart.tplRequired')); return; }
+    if(!name || !positive){ setStatus(tr('smart.tplRequired')); return false; }
     try {
         // 仅当模板不是后端项（非 remote）时才退回本地覆盖；系统库现在是 remote，走下面的后端 PATCH 同步。
         if(item.builtin && !item.remote){
@@ -7146,6 +7369,7 @@ async function saveCanvasPromptTemplateEdit(){
         renderPromptTemplateModal();
     } catch(err) {
         setStatus(err.message || '保存失败');
+        return false;
     }
 }
 async function deleteCanvasPromptTemplate(){
@@ -7434,7 +7658,9 @@ function renderLLMBody(node){
     node.llmProvider = resolveChatProviderId(node.llmProvider || 'comfly');
     const llmProv = node.llmProvider;
     if(llmProv === 'modelscope') node.model = node.llmMsModel || node.model;
-    if(!providerChatModels(llmProv).includes(node.model)) node.model = providerChatModels(llmProv)[0] || node.model;
+    if(!node.model) node.model = providerChatModels(llmProv)[0] || node.model;
+    // 历史存档或换平台可能留下不属于当前平台的对话模型（渲染阶段不能弹提示），先静默归一。
+    node.model = correctedChatModelForProvider(llmProv, node.model);
     const modelOpts = chatModelOptions(node.model, llmProv);
     const imgs = llmInputImages(node);
     const videos = llmInputVideos(node);
@@ -7469,15 +7695,20 @@ function renderLLMBody(node){
         e.stopPropagation();
         node.llmProvider = e.target.value;
         const models = providerChatModels(node.llmProvider);
-        node.model = models[0] || '';
+        if(!node.model) node.model = models[0] || '';
+        // 换平台先按新平台校正模型，再记住这次用的模型，最后弹一条提示。
+        const providerModelNotice = correctChatNodeModelForProvider(node);
         if(node.llmProvider === 'modelscope') node.llmMsModel = node.model;
+        window.NovaUtils?.rememberProviderChatModel?.(node.llmProvider, node.model);
         render();
         scheduleSave();
+        if(providerModelNotice) notifyCanvasSize(providerModelNotice);
     };
     modelSelect.onchange = e => {
         e.stopPropagation();
         node.model = e.target.value;
         if((node.llmProvider||'comfly') === 'modelscope') node.llmMsModel = e.target.value;
+        window.NovaUtils?.rememberProviderChatModel?.(node.llmProvider, node.model);
         scheduleSave();
     };
     wrap.querySelector('.llm-sys-toggle:not(.llm-reverse-toggle)').onclick = e => { e.stopPropagation(); node.showSystem = !node.showSystem; render(); scheduleSave(); };
@@ -7823,6 +8054,8 @@ function renderGeneratorBody(node){
     const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
     sanitizeImageNodeProviderModel(node);
     normalizeApiNodeSizeChoice(node);
+    // 默认档位/历史存档可能对新模型无效（如正方形 4K），渲染前先归一，避免标签和实发尺寸不一致。
+    applyApiResolutionLimit(node);
     wrap.innerHTML = `
         <div class="gen-scroll">
         <div class="prompt-list mb-3"></div>
@@ -7905,12 +8138,16 @@ function renderGeneratorBody(node){
         e.stopPropagation();
         node.apiProvider = e.target.value;
         const providerModels = providerImageModels(node.apiProvider);
-        if(!providerModels.includes(resolveImageModel(node.model))) node.model = providerModels[0] || '';
+        if(!node.model) node.model = providerModels[0] || '';
+        const providerModelNotice = correctNodeModelForProvider(node);
         node._apiResolutionUserSet = false;
         node.resolution = defaultApiImageResolution(node.model);
         modelSelect.innerHTML = imageModelOptions(node.model, node.apiProvider);
+        const providerSizeNotice = applyApiResolutionLimit(node);
         syncSizeControls();
         syncQualityControls();
+        const notice = [providerModelNotice, providerSizeNotice].filter(Boolean).join(' · ');
+        if(notice) notifyCanvasSize(notice);
         scheduleSave();
     };
     modelSelect.onmousedown = e => e.stopPropagation();
@@ -7918,10 +8155,13 @@ function renderGeneratorBody(node){
     modelSelect.onchange = e => {
         e.stopPropagation();
         node.model = e.target.value;
+        window.NovaUtils?.rememberProviderModel?.(node.apiProvider, node.model);
         node._apiResolutionUserSet = false;
         if(node.resolution !== 'custom') node.resolution = defaultApiImageResolution(node.model);
+        const modelSizeNotice = applyApiResolutionLimit(node);
         syncSizeControls();
         syncQualityControls();
+        if(modelSizeNotice) notifyCanvasSize(modelSizeNotice);
         scheduleSave();
     };
     const ratioSelect = wrap.querySelector('.ratio');
@@ -7983,8 +8223,18 @@ function renderGeneratorBody(node){
     };
     const syncSizeControls = () => {
         normalizeApiNodeSizeChoice(node);
+        const apiModel = resolveImageModel(node.model);
         const autoOption = resolutionSelect.querySelector('option[value="auto"]');
-        if(autoOption) autoOption.disabled = !isGptImageAutoSizeModel(resolveImageModel(node.model));
+        if(autoOption) autoOption.disabled = !isGptImageAutoSizeModel(apiModel);
+        const sizeSupport = apiResolutionSupport(apiModel, node.ratio || 'square', node.customRatio || '');
+        [...resolutionSelect.options].forEach(option => {
+            if(option.value !== '1k' && option.value !== '2k' && option.value !== '4k') return;
+            const note = sizeSupport.notes[option.value] || '';
+            option.disabled = Boolean(note);
+            option.title = apiResolutionDisabledText(apiModel, node.ratio || 'square', option.value, node.customRatio || '');
+            option.textContent = note ? `${option.value.toUpperCase()} · ${note}` : option.value.toUpperCase();
+        });
+        resolutionSelect.title = apiResolutionFixedNote(apiModel, node.ratio || 'square', node.customRatio || '');
         const squareOption = ratioSelect.querySelector('option[value="square"]');
         if(squareOption){
             squareOption.disabled = false;
@@ -8028,7 +8278,9 @@ function renderGeneratorBody(node){
             node.customRatioWidth = '';
             node.customRatioHeight = '';
         }
+        const ratioSizeNotice = applyApiResolutionLimit(node);
         syncSizeControls();
+        if(ratioSizeNotice) notifyCanvasSize(ratioSizeNotice);
         scheduleSave();
     };
     resolutionSelect.onmousedown = e => e.stopPropagation();
@@ -8326,7 +8578,10 @@ function renderVideoBody(node){
         e.stopPropagation();
         node.apiProvider = e.target.value;
         const models = providerVideoModels(node.apiProvider);
-        if(!models.includes(node.model)) node.model = models[0] || node.model;
+        if(!node.model) node.model = models[0] || node.model;
+        // 换平台先按新平台的视频模型校正，再记住这次用的模型，最后弹一条提示。
+        const providerModelNotice = correctVideoNodeModelForProvider(node);
+        window.NovaUtils?.rememberProviderVideoModel?.(node.apiProvider, node.model);
         modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
         // Update aspect ratio options for new model
         const allowed = getVideoAspectRatios(node.model);
@@ -8339,10 +8594,12 @@ function renderVideoBody(node){
             node.aspectRatio = aspectSelect.value;
         }
         scheduleSave();
+        if(providerModelNotice) notifyCanvasSize(providerModelNotice);
     };
     modelSelect.onchange = e => {
         e.stopPropagation();
         node.model = e.target.value;
+        window.NovaUtils?.rememberProviderVideoModel?.(node.apiProvider, node.model);
         // Update aspect ratio options for new model
         const allowed = getVideoAspectRatios(node.model);
         aspectSelect.querySelectorAll('option').forEach(opt => {
@@ -10974,6 +11231,7 @@ async function callCanvasLLM(node, message, messages=[], options={}){
         target_type:target.target_type,
         target_model:target.target_model,
     };
+    if(options.chat) body.no_prompt_intelligence = true;
     if(options.maxTokens) body.max_tokens = Math.max(0, Math.floor(Number(options.maxTokens) || 0));
     const result = await cascadeFetch('/api/canvas-llm', {
         method:'POST',
@@ -11442,7 +11700,7 @@ async function runLLMChat(nodeId){
     node.running = true;
     refreshNodes([node.id]);
     try {
-        const text = await callCanvasLLM(node, message, history);
+        const text = await callCanvasLLM(node, message, history, {chat:true});
         node.messages.push({role:'assistant', content:text});
         node.outputText = text;
         node.running = false;
@@ -13480,10 +13738,12 @@ function openSlashMenu(ta){
                 slashSub.innerHTML=item.children.map(function(c){ return '<div class="slash-item"><span class="slash-item-icon">'+c.icon+'</span><div class="slash-item-body"><span class="slash-item-label">'+c.title+'</span><span class="slash-item-sub">'+(c.sub||'')+'</span></div></div>'; }).join('');
                 slashSub.querySelectorAll('.slash-item').forEach(function(se,si){ se.addEventListener('click',function(e){ e.stopPropagation();e.preventDefault(); selectSlashItem(item.children[si]); }); });
                 slashSub.classList.add('open');
+                glideSync(slashSub, '.slash-item');   /* 每次悬停分类项都重写 innerHTML，attach 得跟在后面 */
             });
         }else{ el.addEventListener('click',function(e){ e.stopPropagation();e.preventDefault(); selectSlashItem(item); }); }
     });
     slashMenu.classList.add('open');
+    glideSync(slashMenu, '.slash-item');   /* 每次唤出都重写 innerHTML，attach 得跟在后面 */
 }
 function selectSlashItem(item){ var t=slashTarget||{}; t.value=fillSlashTemplate(item.template,t.value||''); t.dispatchEvent(new Event('input',{bubbles:true})); closeSlashMenu(); scheduleSave(); }
 function checkSlashClose(){ slashCloseTimer=setTimeout(function(){ if(!slashMenu.matches(':hover')&&!slashSub.matches(':hover')){slashSub.classList.remove('open');slashSub.innerHTML='';} },200); }
@@ -13646,7 +13906,10 @@ function startLink(e, originId, originKind){
             if(bodyNode && bodyNode.dataset.id && bodyNode.dataset.id !== originId){
                 const fromId = originKind === 'out' ? originId : bodyNode.dataset.id;
                 const toId = originKind === 'out' ? bodyNode.dataset.id : originId;
-                if(canConnect(fromId, toId) && bodyNode.querySelector(`> .port.${targetKind}`)){
+                /* ':scope > ' 不能省成 '> '：querySelector 收到以组合符开头的选择器是非法 CSS，
+                   会抛 SyntaxError 并打断整个 mouseup 处理器 —— 表现为「拖到可连接节点上既不吸附也不弹菜单」。
+                   项目里表达「只看直接子元素」的既有写法就是 :scope >（见 smart-canvas.js 多处）。 */
+                if(canConnect(fromId, toId) && bodyNode.querySelector(`:scope > .port.${targetKind}`)){
                     if(connectNodes(fromId, toId, tableDropPortFor(hitEl, toId))) syncLatestGeneratedOutputToConnection(fromId, toId);
                     syncGeneratorInputs();
                     scheduleSave();
@@ -14628,6 +14891,8 @@ function markBoardWheelGesture(){
 board.onwheel = e => {
     if(!canvas) return;
     if(outputLightbox?.classList.contains('open')) return;
+    // 表格/批量节点的可滚动区：放行给浏览器原生滚动，画布不缩放/平移
+    if(e.target.closest?.('.table-node-grid, .table-batch-panel')) return;
     e.preventDefault();
     e.stopPropagation();
     const rect = board.getBoundingClientRect();
@@ -14973,5 +15238,91 @@ window.imageAdjust = {
     stage.addEventListener('pointerup', endPan);
     stage.addEventListener('pointercancel', endPan);
     stage.addEventListener('pointerleave', endPan);
+})();
+
+/* ═══ Morph Button 接入：保存/确定类按钮的点击动效（只驱动状态，不改原有点击逻辑） ═══ */
+(function(){
+    'use strict';
+    var bindTimer = 0;
+
+    function api(){ return window.NovaMorphButton || null; }
+
+    function bind(el, opts){
+        var m = api();
+        if(!m || !el || el.__nvMorph) return false;
+        try { m.attach(el, opts); } catch(e){ return false; }
+        return true;
+    }
+
+    /* 提示词模板弹窗这两个按钮走面板事件委托，元素上没有 onclick：
+       swallow 完全接管这次点击，action 里复刻原委托逻辑（都是调同一个函数），保证原函数只跑一次。
+       成功后弹窗会整体重渲染、旧节点连包装层一起被替换，模块的 success 落在已移除的节点上，
+       所以把结果补到新按钮上，绿勾才看得见。 */
+    function bindTemplateSaveButton(selector, run){
+        var el = document.querySelector(selector);
+        if(!el) return;
+        bind(el, {
+            keepWidth: true,
+            swallow: true,
+            action: function(){
+                /* 面板重渲染与我这条 then 在同一批里，扫描器还没绑上新按钮，这里等它几拍 */
+                var forward = function(state){
+                    var tries = 0;
+                    var retryPaint = function(){
+                        var fresh = document.querySelector(selector);
+                        var m = api();
+                        if(fresh && fresh !== el && fresh.__nvMorph && m){ m.setState(fresh, state); return; }
+                        if(tries++ < 8) setTimeout(retryPaint, 50);
+                    };
+                    retryPaint();
+                };
+                return Promise.resolve(run()).then(function(value){
+                    forward(value === false ? 'error' : 'success');
+                    return value;
+                }, function(err){
+                    forward('error');
+                    throw err;
+                });
+            }
+        });
+    }
+
+    function bindTemplateSaveButtons(){
+        bindTemplateSaveButton('[data-template-save-current]', function(){ return saveCurrentCanvasPromptAsTemplate(); });
+        bindTemplateSaveButton('[data-template-edit-save]', function(){ return saveCanvasPromptTemplateEdit(); });
+    }
+
+    function bindAll(){
+        var m = api();
+        if(!m) return;
+        /* 白名单里本页只有 edit 工具栏的「应用XX」命中，工具栏按钮宽度 morph 会顶到邻居；
+           容器级重扫还能让模块在被 innerHTML 冲掉包装层后就地重建。 */
+        m.autoBind(document.getElementById('imageEditModal') || document, { keepWidth: true });
+        m.autoBind(document.getElementById('promptTemplatePanel') || document, { keepWidth: true });
+        bindTemplateSaveButtons();
+    }
+
+    function scheduleBind(){
+        if(bindTimer) return;
+        bindTimer = setTimeout(function(){ bindTimer = 0; bindAll(); }, 60);
+    }
+
+    function watch(el){
+        if(!el || typeof MutationObserver !== 'function') return;
+        new MutationObserver(scheduleBind).observe(el, { childList: true, subtree: true });
+    }
+
+    function start(){
+        bindAll();
+        watch(document.getElementById('imageEditModal'));
+        watch(document.getElementById('promptTemplatePanel'));
+    }
+
+    /* 模块由别的执行岗并行开发，未就绪时轮询等待；等不到就静默放弃（动效不得影响功能） */
+    var tries = 0;
+    var wait = setInterval(function(){
+        tries += 1;
+        if(api() || tries > 40){ clearInterval(wait); start(); }
+    }, 250);
 })();
 })();

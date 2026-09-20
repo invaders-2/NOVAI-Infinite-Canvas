@@ -23,9 +23,18 @@ console.log('[1] 智能画布引入了共享表格三件套（都带 ?v=）');
     ok(new RegExp(asset.replace(/[.]/g, '\\.') + '\\?v=\\d').test(html), asset + ' 已引入且带版本号');
 });
 
-console.log('[2] 创建菜单有「多维表格」「批量生成」');
+console.log('[2] 创建菜单：多维表格 / 生成输入 / 文本生成，且已移除循环');
 ok(html.includes('data-create-type="table"'), '菜单有 table');
 ok(html.includes('data-create-type="batch"'), '菜单有 batch');
+ok(html.includes('<span>生成输入</span>'), '批量节点菜单名为「生成输入」');
+ok(html.includes('<span>文本生成</span>'), '提示词节点菜单名为「文本生成」');
+ok(!html.includes('data-create-type="loop"'), '菜单已移除循环节点');
+ok(!/type === 'loop'\) created = createLoopNode/.test(js), 'createNodeFromMenu 不再创建循环节点');
+ok(!/a\.type === 'loop'\) node = createLoopNode/.test(js), 'create_node 命令不再创建循环节点');
+ok(js.includes("title: '生成输入'"), '批量节点标题为「生成输入」');
+ok(js.includes("tableHostDragBar('生成输入')"), '批量节点拖拽条为「生成输入」');
+ok(js.includes(": '请接入上游节点';"), '空状态提示为「请接入上游节点」');
+ok(/\.table-batch-panel\.is-empty \.table-batch-empty-tip\s*\{[^}]*font-size:\s*11px/.test(tableCss), '空状态提示字号更小');
 ok(/type === 'table'\).*createSmartTableNode/.test(js), 'createNodeFromMenu 分发 table');
 ok(/type === 'batch'\).*createSmartBatchNode/.test(js), 'createNodeFromMenu 分发 batch');
 
@@ -240,16 +249,16 @@ ok(modelSrc.includes('function batchRowPlan(') && modelSrc.includes('function ba
 ok(canvasCss.includes('.loading-cell.pending-thumb.is-completed'), '中性格样式在');
 
 console.log('[18] 停止生成（单张 + 批量，随时可停）');
-ok(js.includes('let smartGenerationStopRequested') && js.includes('const activeSmartGenerationTaskIds'), '全局停止标志 + 在跑任务集合');
+ok(js.includes('const smartStopRequestedNodeIds = new Set()') && js.includes('const activeSmartGenerationTaskIds = new Map()'), '按节点的停止集合 + 在跑任务上下文');
 ok(js.includes('function requestSmartGenerationStop('), 'requestSmartGenerationStop 存在');
 ok(js.includes("fetch('/api/tasks/' + encodeURIComponent(taskId) + '/cancel'"), '停止时调 /api/tasks/{id}/cancel');
-ok(js.includes('runBtn.onclick = () => {') && js.includes('requestSmartGenerationStop()'), '底部运行按钮在跑时变成停止');
+ok(js.includes('runBtn.onclick = () => {') && js.includes('smartNodeRunActive(node)') && js.includes('requestSmartGenerationStop(node)'), '底部运行按钮只按选中节点变成停止');
 ok(js.includes('function smartGenerationStopText('), '停止 / 停止中… 文案');
 ok(js.includes("runBtn.classList.toggle('is-stop', active)"), '停止态用 is-stop');
-ok(js.includes('if(smartGenerationStopRequested) throw smartGenerationStoppedError();'), '轮询每轮检查停止并抛带标记错误');
-ok(js.includes('activeSmartGenerationTaskIds.add(taskId)') && js.includes('activeSmartGenerationTaskIds.delete(taskId)'), '任务登记 / 结算时移除');
-ok(js.includes('throwIfSmartGenerationStopped()'), '其它引擎等待点检查停止');
-ok(js.includes('generationStopRequested: () => smartGenerationStopRequested'), '共享表格模块通过 host 读到停止标志');
+ok(js.includes('if(smartGenerationStopRequestedFor(node)) throw smartGenerationStoppedError();'), '轮询每轮检查这个节点的停止并抛带标记错误');
+ok(js.includes('activeSmartGenerationTaskIds.set(taskId, stopContextId)') && js.includes('activeSmartGenerationTaskIds.delete(taskId)'), '任务按停止上下文登记 / 结算时移除');
+ok(js.includes('throwIfSmartGenerationStopped(node)'), '其它引擎等待点按节点检查停止');
+ok(js.includes('generationStopRequested: nodeId => smartGenerationStopRequestedFor(nodeId)'), '共享表格模块通过 host 按节点读停止标志');
 ok(moduleSrc.includes('gen._batchStopRequested') && moduleSrc.includes('shouldStop: shouldStopBatch'), '批量把停止判定接进 runWithSharedCursor');
 ok(moduleSrc.includes("journalMarkRow(journal, entry.rowNumber, 'cancelled')"), '取消行记 cancelled，不记 failed');
 ok(moduleSrc.includes('已停止：完成 '), '停止摘要「已停止：完成 X · 已取消 Y」');
@@ -258,6 +267,10 @@ ok(modelSrc.includes('shouldStop'), 'runWithSharedCursor 支持 shouldStop');
 ok(js.includes("state === 'cancelled'") && js.includes('data-pending-cancelled'), '取消占位格渲染分支');
 ok(canvasCss.includes('.loading-cell.pending-thumb.is-cancelled'), '取消占位样式在');
 ok(js.includes('delete node._batchStopRequested'), '批量停止标记是页面临时字段');
+ok(js.includes('function smartNodeRunActive(node)') && js.includes('function requestSmartGenerationStop(node=selectedNode())'), '运行按钮与停止都按选中节点');
+ok(js.includes('pendingNode._stopContextId = node.id') && js.includes('output._stopContextId = sourceNode.id'), '占位/结果节点指回停止上下文');
+ok(js.includes('delete node._stopContextId'), '停止上下文是页面临时字段');
+ok(moduleSrc.includes('generationStopRequested(gen && gen.id)'), '批量把本节点 id 交给 host 判定停止');
 
 console.log('[19] 停止/运行按钮生命周期同步（批量任何收尾都回到「运行」）');
 ok(moduleSrc.includes('generationStopRequested, onBatchSettled,'), 'host 解构里加了可选 onBatchSettled');
@@ -280,7 +293,8 @@ ok(js.includes("tr('canvas.chatMode')") && js.includes("tr('canvas.startChat')")
 ok(js.includes("which === 'chat'") && js.includes("node.llmTab = 'chat'"), '点聊天 tab → llmTab=chat');
 ok(js.includes("which === 'node'") && js.includes("node.llmTab = 'node'"), '点节点 tab → llmTab=node');
 ok(js.includes('function runSmartPromptChat('), 'runSmartPromptChat 存在');
-ok(js.includes('callSmartCanvasLLM(node, message, history)'), '聊天带 history 调 callSmartCanvasLLM');
+ok(js.includes('callSmartCanvasLLM(node, message, history, {chat:true})'), '聊天带 history 调 callSmartCanvasLLM');
+ok(js.includes('if(options.chat) body.no_prompt_intelligence = true;'), '聊天请求跳过 Prompt Intelligence');
 ok(js.includes("node.chatMessages.push({role:'user', content:message})"), '发送前 push user 消息');
 ok(js.includes("node.chatMessages.push({role:'assistant', content:String(text || '')})"), '成功后 push assistant 回复');
 ok(js.includes("node.outputText = String(text || '')"), '回复写 outputText 供下游取用');
@@ -400,6 +414,177 @@ eq(builtinCase.state.nodes[0].promptPresetId, '', '内置模板：promptPresetId
 // 保存当前提示词：LLM 节点优先读 llmInstruction（否则 LLM 模式 node.text 为空会存空）
 const saveSrc = (js.match(/async function saveCurrentPromptAsTemplate\(\)\{[\s\S]*?\n\}/) || [])[0] || '';
 ok(saveSrc.includes('templateNode?.llmEnabled ? templateNode.llmInstruction'), '保存提示词在 LLM 节点优先读 llmInstruction');
+
+console.log('[24] 多图节点手动尺寸：8 张图全部排进框（不再只显示 3 张）');
+const gridConstSrc = (js.match(/const MEDIA_GROUP_THUMB_BASE = \d+;\s*\nconst MEDIA_GROUP_MAX_VISIBLE_ROWS = \d+;/) || [])[0] || '';
+const scaleConstSrc = (js.match(/const MEDIA_NODE_DEFAULT_SCALE = \d+;\s*\nconst MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE = [\d.]+;\s*\nconst MEDIA_GROUP_DEFAULT_SCALE = [\d.]+;/) || [])[0] || '';
+const mediaScaleSrc = (js.match(/function mediaNodeDefaultScale\(node\)\{[\s\S]*?\n\}/) || [])[0] || '';
+const groupGridSrc = (js.match(/function groupImageGridLayout\([\s\S]*?\n\}/) || [])[0] || '';
+const fittedSrc = (js.match(/function fittedMediaGridLayout\([\s\S]*?\n\}/) || [])[0] || '';
+const imageLayoutSrc = (js.match(/function imageLayout\([\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(gridConstSrc && scaleConstSrc && mediaScaleSrc && groupGridSrc && fittedSrc && imageLayoutSrc), '布局函数与常量都能从源码抠出来');
+let imageLayoutFn = null;
+try {
+    imageLayoutFn = new Function('pendingSlotsForNode',
+        scaleConstSrc + '\n' + gridConstSrc + '\n' + mediaScaleSrc + '\n' + groupGridSrc + '\n' + fittedSrc + '\n' + imageLayoutSrc
+        + '\nreturn imageLayout;')(() => 0);
+} catch(e){ imageLayoutFn = null; }
+ok(typeof imageLayoutFn === 'function', 'imageLayout 可求值');
+if(typeof imageLayoutFn === 'function'){
+    const eightImages = Array.from({length:8}, (_, i) => ({url:'/output/pic' + i + '.png'}));
+    const manualLayout = imageLayoutFn(eightImages, 1, {type:'smart-image', sizeUserSet:true, w:218, h:592, images:eightImages});
+    console.log('    手动尺寸 218x592 / 8 张 → ' + manualLayout.cols + ' 列 x ' + manualLayout.rows + ' 行，可见 ' + manualLayout.visibleRows + ' 行，缩略图 ' + manualLayout.thumb + 'px');
+    ok(manualLayout.visibleRows === manualLayout.rows && manualLayout.rows > 3, '手动尺寸：visibleRows 用真实行数（' + manualLayout.visibleRows + '/' + manualLayout.rows + '）');
+    eq([manualLayout.cols, manualLayout.rows], [2, 4], '手动尺寸：218x592 的 8 张图排成 2 列 x 4 行');
+    ok(manualLayout.cols * manualLayout.rows >= eightImages.length, '手动尺寸：格子数覆盖全部 8 张');
+    ok(manualLayout.thumb >= 28, '手动尺寸：缩略图不低于下限 28（' + manualLayout.thumb + 'px）');
+    const manualUsedH = manualLayout.rows * manualLayout.thumb + (manualLayout.rows - 1) * 8;
+    ok(manualUsedH <= 592, '手动尺寸：全部行能塞进 592 高（内容 ' + manualUsedH + 'px）');
+    const autoLayout = imageLayoutFn(eightImages, 1, {type:'smart-image', w:218, h:592, images:eightImages});
+    ok(autoLayout.visibleRows <= 3, '未手动拖过：可见行数仍 <= 3（' + autoLayout.visibleRows + '）');
+    // 线上那张 8 图节点带 grid-split 元数据（rows:8, cols:1），走的是宫格分支
+    const gridImages = Array.from({length:8}, (_, i) => ({url:'/output/g' + i + '.png', ...(i === 0 ? {grid:{type:'grid-split', rows:8, cols:1}} : {})}));
+    const gridLayout = imageLayoutFn(gridImages, 1, {type:'smart-image', sizeUserSet:true, w:218, h:592, images:gridImages});
+    console.log('    宫格 218x592 / 8 张 → ' + gridLayout.cols + ' 列 x ' + gridLayout.rows + ' 行，可见 ' + gridLayout.visibleRows + ' 行，缩略图 ' + gridLayout.thumb + 'px');
+    ok(gridLayout.visibleRows === gridLayout.rows && gridLayout.rows === 8, '宫格手动尺寸：8 行全部可见');
+    const gridUsedH = gridLayout.rows * gridLayout.thumb + (gridLayout.rows - 1) * 8;
+    ok(gridUsedH <= 592 && gridLayout.thumb >= 28, '宫格手动尺寸：全部行塞进 592 且缩略图不低于 28（' + gridUsedH + 'px / ' + gridLayout.thumb + 'px）');
+}
+
+console.log('[25] LLM 模型解析：用户已选模型原样保留（不再被换成 provider 第一个）');
+const resolveChatModelSrc = (js.match(/function resolveChatModel\(model='', providerId=''\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(resolveChatModelSrc), 'resolveChatModel 能从源码抠出来');
+ok(!/models\.includes\(model\)/.test(resolveChatModelSrc), '不再用「model 是否在列表里」决定要不要替换');
+const AGNES_MODELS = ['agnes-2.0-flash', 'agnes-2.5-pro', 'agnes-3.0'];
+const evalResolve = providerModels => new Function(
+    'providerChatModels', 'resolveChatProviderId',
+    resolveChatModelSrc + '\nreturn resolveChatModel;'
+)(() => providerModels, id => id || 'agnes-ai');
+const resolveAgnes = evalResolve(AGNES_MODELS);
+eq(resolveAgnes('agnes-2.5-pro', 'agnes-ai'), 'agnes-2.5-pro', '列表内的非第一个模型原样保留');
+eq(resolveAgnes('某不在列表里的模型', 'agnes-ai'), '某不在列表里的模型', '不在列表里的用户模型也原样保留');
+eq(resolveAgnes('', 'agnes-ai'), 'agnes-2.0-flash', '空模型才回落到 provider 第一个');
+eq(evalResolve([])('', 'agnes-ai'), 'gpt-4o-mini', 'provider 无模型且未选模型时才用兜底 gpt-4o-mini');
+const chatModelOptionsSrc = (js.match(/function chatModelOptions\(selectedModel='', providerId=''\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(chatModelOptionsSrc), 'chatModelOptions 能从源码抠出来');
+// chatModelOptions 会按平台校正已选模型，校正函数也抠真实源码注入（它用到 window.NovaUtils 的记忆）
+const correctedChatModelSrc = (js.match(/function correctedChatModelForProvider\(providerId, currentModel\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(correctedChatModelSrc), 'correctedChatModelForProvider 能从源码抠出来');
+const correctChatModel = new Function(
+    'providerChatModels', 'window',
+    correctedChatModelSrc + '\nreturn correctedChatModelForProvider;'
+)(() => AGNES_MODELS, {});
+const chatModelOptionsFn = new Function(
+    'providerChatModels', 'resolveChatProviderId', 'resolveChatModel', 'correctedChatModelForProvider', 'escapeHtml',
+    chatModelOptionsSrc + '\nreturn chatModelOptions;'
+)(() => AGNES_MODELS, id => id || 'agnes-ai', resolveAgnes, correctChatModel, s => String(s));
+const chatModelOptionsHtml = chatModelOptionsFn('agnes-2.5-pro', 'agnes-ai');
+ok(chatModelOptionsHtml.includes('value="agnes-2.5-pro"'), '用户选的模型一定在选项里');
+ok(/<option value="agnes-2\.5-pro" selected>/.test(chatModelOptionsHtml), '用户选的模型是 selected');
+
+console.log('[26] 模型不被自动替换：仅「空」才回落 provider 第一个');
+const canvasJs = read('static/js/canvas.js');
+// 静态：经典画布四处覆盖点已去掉「不在列表就替换」
+ok(!/!models\.includes\(resolveImageModel\(node\.model\)\)/.test(canvasJs), 'canvas.js sanitizeImageNodeProviderModel 不再按列表替换');
+ok(!/!models\.includes\(node\.model\)/.test(canvasJs), 'canvas.js sanitizeVideoNodeProviderModel 不再按列表替换');
+ok(!/!providerModels\.includes\(/.test(canvasJs), 'canvas.js image provider 切换不再按列表替换');
+ok(!/!providerChatModels\(llmProv\)\.includes/.test(canvasJs), 'canvas.js LLM 节点渲染不再按列表替换');
+// 静态：智能画布覆盖点已去掉
+ok(!js.includes('!models.includes('), 'smart-canvas 不再出现 !models.includes(');
+ok(!/settings\.model\s*=\s*''/.test(js), 'provider 切换不再把 settings.model 清空');
+ok(!/settings\.videoModel\s*=\s*''/.test(js), 'video provider 切换不再把 settings.videoModel 清空');
+
+// 求值：sanitizeSmartApiSelection —— 非空原样返回，空才回落 models[0]
+const sanitizeSrc = (js.match(/function sanitizeSmartApiSelection\(target=settings\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(sanitizeSrc), 'sanitizeSmartApiSelection 能从源码抠出来');
+const buildSanitize = (imageModels, videoModels, volcModels) => new Function(
+    'settings','providerImageModels','providerVideoModels','volcengineVideoModels',
+    'clearVolcengineSelectionOutsideVolcengine','isGptImageAutoSizeModel','defaultSmartApiResolution',
+    sanitizeSrc + '\nreturn sanitizeSmartApiSelection;'
+)({engine:'api'}, () => imageModels, () => videoModels, () => volcModels, t => t, () => false, () => '1k');
+const sanitize = buildSanitize(['real-a','real-b'], ['real-v1','real-v2'], ['volc-v1']);
+eq(sanitize({engine:'api', apiKind:'image', provider_id:'p1', model:'fake-image'}).model, 'fake-image', '非空且不在列表的 image model 原样保留');
+eq(sanitize({engine:'api', apiKind:'image', provider_id:'p1', model:''}).model, 'real-a', '空 image model 回落到 models[0]');
+eq(sanitize({engine:'api', apiKind:'video', videoProvider:'vp', videoModel:'fake-video'}).videoModel, 'fake-video', '非空且不在列表的 video model 原样保留');
+eq(sanitize({engine:'api', apiKind:'video', videoProvider:'vp', videoModel:''}).videoModel, 'real-v1', '空 video model 回落到 models[0]');
+eq(sanitize({engine:'volcengine', apiKind:'image', model:'fake-volc-img'}).model, 'fake-volc-img', '火山图：非空假模型原样保留');
+eq(sanitize({engine:'volcengine', apiKind:'image', model:''}).model, 'real-a', '火山图：空才回落');
+eq(sanitize({engine:'volcengine', apiKind:'video', videoModel:'fake-volc-vid'}).videoModel, 'fake-volc-vid', '火山视频：非空假模型原样保留');
+eq(sanitize({engine:'volcengine', apiKind:'video', videoModel:''}).videoModel, 'volc-v1', '火山视频：空才回落');
+
+// 求值：两个模型下拉必须把「用户已选但不在列表」的模型前置且 active
+const renderModelSrc = (js.match(/function renderModelControl\(models\)\{[\s\S]*?\n\}/) || [])[0] || '';
+const renderVideoModelSrc = (js.match(/function renderVideoModelControl\(models\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(renderModelSrc) && Boolean(renderVideoModelSrc), '两个 render*ModelControl 都能抠出来');
+const renderImageControl = new Function('settings','escapeHtml','tr', renderModelSrc + '\nreturn renderModelControl;')({model:'fake-image-xyz'}, String, k => k);
+const imageControlHtml = renderImageControl(['real-a','real-b']);
+ok(imageControlHtml.includes('data-smart-value="fake-image-xyz"'), '图片下拉能看到用户选的假模型');
+ok(/class="direct-option active"[^>]*data-smart-value="fake-image-xyz"/.test(imageControlHtml), '假模型处于 active 态');
+eq((imageControlHtml.match(/data-smart-value="fake-image-xyz"/g) || []).length, 1, '假模型只出现一次（去重）');
+const renderVideoControl = new Function('settings','escapeHtml','tr', renderVideoModelSrc + '\nreturn renderVideoModelControl;')({videoModel:'fake-video-xyz'}, String, k => k);
+const videoControlHtml = renderVideoControl(['real-v']);
+ok(/class="direct-option active"[^>]*data-smart-value="fake-video-xyz"/.test(videoControlHtml), '视频下拉假模型可见且 active');
+
+// 求值：经典画布 sanitize —— 列表内的模型原样保留，空才回落 models[0]；不在列表的旧模型按平台归一（有平台记忆用记忆）
+const correctNodeModelSrc = (canvasJs.match(/function correctNodeModelForProvider\(node\)\{[\s\S]*?\n\}/) || [])[0] || '';
+const correctedVideoModelSrc = (canvasJs.match(/function correctedVideoModelForProvider\(providerId, currentModel\)\{[\s\S]*?\n\}/) || [])[0] || '';
+const correctVideoNodeModelSrc = (canvasJs.match(/function correctVideoNodeModelForProvider\(node\)\{[\s\S]*?\n\}/) || [])[0] || '';
+const sanitizeImageNodeSrc = (canvasJs.match(/function sanitizeImageNodeProviderModel\(node\)\{[\s\S]*?\n\}/) || [])[0] || '';
+const sanitizeVideoNodeSrc = (canvasJs.match(/function sanitizeVideoNodeProviderModel\(node\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(sanitizeImageNodeSrc) && Boolean(sanitizeVideoNodeSrc), '经典画布两个 sanitize 能抠出来');
+ok(Boolean(correctNodeModelSrc) && Boolean(correctedVideoModelSrc) && Boolean(correctVideoNodeModelSrc), '经典画布三个 correct* 能抠出来');
+const buildImageNodeCorrector = (models, remembered) => new Function(
+    'providerImageModels', 'resolveImageModel', 'providerById', 'window',
+    correctNodeModelSrc + '\nreturn correctNodeModelForProvider;'
+)(() => models, v => v, () => ({id:'p1', name:'P1'}), {NovaUtils:{rememberedProviderModel: () => remembered}});
+const buildSanitizeImageNode = (models, remembered) => new Function('resolveImageProviderId','providerImageModels','correctNodeModelForProvider',
+    sanitizeImageNodeSrc + '\nreturn sanitizeImageNodeProviderModel;')(id => id || 'p1', () => models, buildImageNodeCorrector(models, remembered));
+const sanitizeImageNode = buildSanitizeImageNode(['real-a','real-b'], '');
+const keepImageNode = {type:'generator', apiProvider:'p1', model:'real-b'};
+sanitizeImageNode(keepImageNode);
+eq(keepImageNode.model, 'real-b', '经典生成节点：列表内的非第一个模型原样保留');
+const staleImageNode = {type:'generator', apiProvider:'p1', model:'fake-node-model'};
+sanitizeImageNode(staleImageNode);
+eq(staleImageNode.model, 'real-a', '经典生成节点：不在列表的旧模型归一（无记忆 → models[0]）');
+const rememberedImageNode = {type:'generator', apiProvider:'p1', model:'fake-node-model'};
+buildSanitizeImageNode(['real-a','real-b'], 'real-b')(rememberedImageNode);
+eq(rememberedImageNode.model, 'real-b', '经典生成节点：不在列表的旧模型优先用平台记忆');
+const fillImageNode = {type:'generator', apiProvider:'p1', model:''};
+sanitizeImageNode(fillImageNode);
+eq(fillImageNode.model, 'real-a', '经典生成节点：空模型回落到 models[0]');
+const buildVideoNodeCorrector = (models, remembered) => {
+    const correctedVideoModelForProvider = new Function('providerVideoModels', 'window',
+        correctedVideoModelSrc + '\nreturn correctedVideoModelForProvider;')(() => models, {NovaUtils:{rememberedProviderVideoModel: () => remembered}});
+    return new Function('correctedVideoModelForProvider', 'apiProviders',
+        correctVideoNodeModelSrc + '\nreturn correctVideoNodeModelForProvider;')(correctedVideoModelForProvider, [{id:'v1', name:'V1'}]);
+};
+const buildSanitizeVideoNode = (models, remembered) => new Function('resolveVideoProviderId','providerVideoModels','correctVideoNodeModelForProvider',
+    sanitizeVideoNodeSrc + '\nreturn sanitizeVideoNodeProviderModel;')(id => id || 'v1', () => models, buildVideoNodeCorrector(models, remembered));
+const sanitizeVideoNode = buildSanitizeVideoNode(['real-v','real-v2'], '');
+const keepVideoNode = {type:'video', apiProvider:'v1', model:'real-v2'};
+sanitizeVideoNode(keepVideoNode);
+eq(keepVideoNode.model, 'real-v2', '经典视频节点：列表内的非第一个模型原样保留');
+const staleVideoNode = {type:'video', apiProvider:'v1', model:'fake-vid-model'};
+sanitizeVideoNode(staleVideoNode);
+eq(staleVideoNode.model, 'real-v', '经典视频节点：不在列表的旧模型归一（无记忆 → models[0]）');
+const rememberedVideoNode = {type:'video', apiProvider:'v1', model:'fake-vid-model'};
+buildSanitizeVideoNode(['real-v','real-v2'], 'real-v2')(rememberedVideoNode);
+eq(rememberedVideoNode.model, 'real-v2', '经典视频节点：不在列表的旧模型优先用平台记忆');
+const fillVideoNode = {type:'video', apiProvider:'v1', model:''};
+sanitizeVideoNode(fillVideoNode);
+eq(fillVideoNode.model, 'real-v', '经典视频节点：空模型回落到 models[0]');
+
+// 确认经典画布两个 *ModelOptions 仍把「用户已选但不在列表」的模型前置且 selected（未改动，回归确认）
+const uniqueModels = list => { const seen = new Set(); return (list || []).map(x => String(x || '').trim()).filter(x => { if(!x || seen.has(x)) return false; seen.add(x); return true; }); };
+const videoModelOptionsSrc = (canvasJs.match(/function videoModelOptions\(selectedModel, providerId\)\{[\s\S]*?\n\}/) || [])[0] || '';
+const imageModelOptionsSrc = (canvasJs.match(/function imageModelOptions\(selectedModel, providerId\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(videoModelOptionsSrc) && Boolean(imageModelOptionsSrc), '经典画布两个 *ModelOptions 能抠出来');
+const videoModelOptions = new Function('providerVideoModels','uniqueModels','escapeHtml','tr',
+    videoModelOptionsSrc + '\nreturn videoModelOptions;')(() => ['real-v'], uniqueModels, String, k => k);
+const imageModelOptions = new Function('imageApiProviders','allImageModels','resolveImageModel','escapeHtml','tr',
+    imageModelOptionsSrc + '\nreturn imageModelOptions;')(() => [{id:'p'}], () => ['real-a'], v => v, String, k => k);
+ok(/<option value="fake-vid" selected>/.test(videoModelOptions('fake-vid', 'p')), '经典视频下拉仍把用户模型前置为 selected');
+ok(/<option value="fake-img" selected>/.test(imageModelOptions('fake-img', 'p')), '经典图片下拉仍把用户模型前置为 selected');
 
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

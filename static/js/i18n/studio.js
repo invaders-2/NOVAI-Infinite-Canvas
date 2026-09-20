@@ -113,6 +113,8 @@
         "chat.generated": { zh: "生成完成", en: "Done" },
         "chat.generatingImage": { zh: "正在生成图片...", en: "Generating image..." },
         "chat.agentWorking": { zh: "正在思考", en: "Thinking" },
+        "chat.thoughtDone": { zh: "已思考", en: "Thought for" },
+        "chat.thoughtTrace": { zh: "思考过程", en: "Thought process" },
         "chat.requestFailed": { zh: "请求失败", en: "Request failed" },
         "chat.chatMode": { zh: "聊天", en: "Chat" },
         "chat.agentMode": { zh: "Agent", en: "Agent" },

@@ -1,0 +1,58 @@
+/* NOVAI 通用「滑块高亮」视觉层（配合 shared/glide.js）。
+
+   滑块接管高亮之后，选项自己的 hover/选中底色必须让位，不然两层底色叠在一起就是重影。
+   压制选择器写成 (0,3,0)：比 gpt-chat.html 里那批 `background: var(--nav-hover-bg) !important`
+   的 (0,2,0) 高一级 —— 两边都是 !important 时比的就是权重；权重打平的那条
+   （.upload-btn.attach-btn:hover 也是 0,3,0）只能靠「本文件排在那些 <style> 之后」取胜，
+   所以每个页面都必须把 glide.css 放在其它样式表之后。
+   只压 background-color / border-color：字重、文字颜色、勾选图标这些
+   「选中」标识留给选项自己表达，滑块只负责底。
+
+   --nv-glide-bg 留出各页面覆写的口子；默认走 --soft（marvis-shared.css 的 hover 底），
+   深浅主题都成立，取不到时退回中性半透明灰。
+
+   位移是单条 transform: translate(x, y)（见 glide.js）：
+   grid / 双列布局要横向纵向同时动，拆成 left/top 两条过渡会在斜向移动时不同步。 */
+.nv-glide-pill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    z-index: 0;
+    border-radius: var(--radius-sm, 8px);
+    background: var(--nv-glide-bg, var(--soft, rgba(127, 127, 127, .12)));
+    opacity: 0;
+    pointer-events: none;
+    will-change: transform;
+    transition:
+        transform var(--nv-glide-ms, 220ms) cubic-bezier(.23, 1, .32, 1),
+        width var(--nv-glide-ms, 220ms) cubic-bezier(.23, 1, .32, 1),
+        height var(--nv-glide-ms, 220ms) cubic-bezier(.23, 1, .32, 1),
+        opacity 150ms ease;
+}
+
+/* 键盘移动 / 内容重写 / 菜单打开 / 列表滚动：瞬间到位，不播滑动 */
+.nv-glide-host.nv-glide-instant .nv-glide-pill {
+    transition: none;
+}
+
+/* 选项必须在滑块之上，否则滑块会盖住文字和图标 */
+.nv-glide-host [data-nv-glide-item] {
+    position: relative;
+    z-index: 1;
+}
+
+.nv-glide-host [data-nv-glide-item]:hover,
+.nv-glide-host [data-nv-glide-item].active,
+.nv-glide-host [data-nv-glide-item].is-active,
+.nv-glide-host [data-nv-glide-item].hovered {
+    background-color: transparent !important;
+    border-color: transparent !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nv-glide-pill {
+        transition: none;
+    }
+}

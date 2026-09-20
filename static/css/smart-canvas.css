@@ -42,6 +42,12 @@ html[data-studio-scale="off"].studio-scale-managed .preview-modal {
    底色本身接近不透明，关闭毛玻璃后观感几乎无差，但能在各浏览器下保持清晰。 */
 .world.canvas-scaled .image-node,
 .world.canvas-scaled .image-node * { backdrop-filter:none !important; -webkit-backdrop-filter:none !important; }
+/* 例外：节点浮动工具栏保留真毛玻璃。
+   上面那条封杀的动机是「world 被 scale 后带 backdrop-filter 的卡片会被按 1x 栅格化再缩放 → 缩小发虚」，
+   而工具栏有了 --nv-nodeui-inv 反向补偿后**屏幕有效缩放恒为 clamp(画布缩放,1,1.4) ≥ 1**，永远不会被缩小，
+   那条理由对它不成立。选择器权重 (0,4,0) 高过上面那条 (0,3,0)，且写在它之后，所以只在工具栏上生效；
+   节点里的其它元素（参数卡等）保持原样继续关闭毛玻璃。 */
+.world.canvas-scaled .image-node .smart-node-floating-menu { backdrop-filter:blur(16px) saturate(180%) !important; -webkit-backdrop-filter:blur(16px) saturate(180%) !important; }
 .smart-back { position:absolute; left:22px; top:22px; z-index:20; height:40px; padding:0 14px; border-radius:var(--radius-full); display:flex; align-items:center; gap:8px; color:var(--text); background:var(--panel); border:1px solid var(--line); box-shadow:0 16px 40px var(--shadow); backdrop-filter:blur(20px) saturate(180%); font-size:12px; font-weight:850; cursor:pointer; }
 .smart-back:hover { transform:translateY(-1px); }
 .smart-back i { width:16px; height:16px; }
@@ -285,6 +291,32 @@ body.smart-prompt-split-resize .prompt-node-llm select { pointer-events:none !im
 }
 .prompt-node-llm .llm-chat-send i,.prompt-node-llm .llm-chat-send svg { width:12px; height:12px; }
 .prompt-node-llm .llm-chat-send:disabled { opacity:.55; cursor:wait; }
+/* 「思考中」用 ThoughtLine 动效，只按聊天记录里的尺寸对齐一下 */
+.prompt-node-llm .llm-chat-thinking { align-self:flex-start; padding:1px 4px; }
+.prompt-node-llm .llm-chat-thinking .thought-line { font-size:10.5px; gap:4px; }
+.prompt-node-llm .llm-chat-thinking .thought-line__glyph { width:12px; height:12px; }
+/* 聊天角色 chips（只在聊天模式出现）：换行排，装不下时自身可滚 */
+.prompt-node-llm .llm-persona-row { width:100%; flex:0 0 auto; display:flex; align-items:flex-start; gap:6px; min-width:0; }
+.prompt-node-llm .llm-persona-label { flex:0 0 auto; font-size:10px; font-weight:750; color:var(--text-3); line-height:20px; }
+.prompt-node-llm .llm-persona-chips { display:flex; flex-wrap:wrap; gap:4px; min-width:0; max-height:44px; overflow-y:auto; }
+.prompt-node-llm .llm-persona-chip {
+    height:20px;
+    padding:0 8px;
+    border:1px solid var(--border-2);
+    border-radius:var(--radius-full);
+    background:rgba(255,255,255,.62);
+    color:var(--muted);
+    display:inline-flex;
+    align-items:center;
+    font-size:10px;
+    font-weight:650;
+    white-space:nowrap;
+    cursor:pointer;
+}
+.theme-dark .prompt-node-llm .llm-persona-chip { background:rgba(28, 28, 28, .42); }
+.prompt-node-llm .llm-persona-chip.is-active { background:var(--strong); color:var(--strong-text); border-color:var(--strong); }
+.prompt-node-llm .llm-persona-chip[hidden] { display:none; }
+.prompt-node-llm span.llm-persona-chip { cursor:default; }
 .prompt-node-system-toggle { flex:0 0 auto; justify-content:center; }
 .smart-node-input-thumbs { width:100%; display:grid; grid-template-columns:repeat(5, 44px); gap:6px; align-items:start; justify-content:start; pointer-events:none; }
 .smart-node-input-thumb { position:relative; width:44px; height:44px; border-radius:var(--radius-sm); overflow:hidden; border:1px solid var(--border-2); background:rgba(255,255,255,.58); box-shadow:inset 0 1px 0 rgba(255,255,255,.48); }
@@ -417,26 +449,54 @@ body.smart-prompt-split-resize .prompt-node-llm select { pointer-events:none !im
 .floating-node-actions { position:absolute; right:7px; top:7px; z-index:8; opacity:0; pointer-events:none; transition:opacity .14s ease; }
 .image-node:hover .floating-node-actions { opacity:1; pointer-events:auto; }
 .image-node.dragging .floating-node-actions { opacity:0 !important; pointer-events:none !important; }
-.smart-node-floating-menu { position:absolute; left:50%; top:-38px; z-index:18; display:inline-flex; align-items:center; gap:4px; height:30px; max-width:min(760px, calc(100vw - 48px)); padding:3px 5px; border-radius:var(--radius-md); border:1px solid var(--line); background:color-mix(in srgb, var(--panel) 88%, transparent); box-shadow:0 14px 34px var(--shadow); backdrop-filter:blur(28px); transform:translateX(-50%) translateY(3px); opacity:0; pointer-events:none; white-space:nowrap; cursor:default; transition:opacity .14s ease, transform .14s ease; }
-.image-node.selected .smart-node-floating-menu { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
+.smart-node-floating-menu { position:absolute; left:50%; top:-46px; z-index:18; display:inline-flex; align-items:center; gap:5px; height:38px; max-width:min(960px, calc(100vw - 48px)); padding:4px 6px; border-radius:var(--radius-md); border:1px solid color-mix(in srgb, var(--text) 12%, transparent); background:color-mix(in srgb, var(--panel) 76%, transparent); box-shadow:0 14px 34px var(--shadow), inset 0 1px 0 color-mix(in srgb, var(--bg) 55%, transparent); backdrop-filter:blur(16px) saturate(180%); -webkit-backdrop-filter:blur(16px) saturate(180%); translate:-50% 3px; scale:var(--nv-nodeui-inv, 1); transform-origin:50% 100%; opacity:0; pointer-events:none; white-space:nowrap; cursor:default; transition:opacity .14s ease, translate .14s ease; }
+.image-node.selected .smart-node-floating-menu { opacity:1; pointer-events:auto; translate:-50% 0; }
 .world.smart-multi-selected .smart-node-floating-menu { opacity:0 !important; pointer-events:none !important; }
-.theme-dark .smart-node-floating-menu { background:color-mix(in srgb, var(--panel) 82%, transparent); border-color:var(--border-2); box-shadow:0 16px 38px rgba(0,0,0,.36); }
-.smart-node-floating-menu button { height:24px; min-width:34px; padding:0 9px; border:0; border-radius:var(--radius-md); display:inline-flex; align-items:center; justify-content:center; gap:5px; background:transparent; color:var(--muted); font-size:10px; line-height:1; font-weight:400; cursor:pointer; transition:background .14s ease, color .14s ease, transform .14s ease; }
+.theme-dark .smart-node-floating-menu { background:color-mix(in srgb, var(--panel) 70%, transparent); border-color:color-mix(in srgb, var(--text) 16%, transparent); box-shadow:0 16px 38px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.08); backdrop-filter:blur(16px) saturate(180%); -webkit-backdrop-filter:blur(16px) saturate(180%); }
+.smart-node-floating-menu button { height:30px; min-width:42px; padding:0 11px; border:0; border-radius:var(--radius-md); display:inline-flex; align-items:center; justify-content:center; gap:6px; background:transparent; color:var(--muted); font-size:12.5px; line-height:1; font-weight:400; cursor:pointer; transition:background .14s ease, color .14s ease, transform .14s ease; }
 .smart-node-floating-menu button:hover { background:var(--soft); color:var(--text); transform:translateY(-1px); }
 .smart-node-floating-menu button:disabled { opacity:.36; cursor:not-allowed; transform:none; }
 /* 分组「一键运行」是主操作：给一个常驻底框（同一排其他按钮只有 hover 才有底色）。
    颜色/边框沿用右下角「运行选中」的同一套 token，不引入新色值。 */
 .smart-node-floating-menu button[data-smart-group-action="run"] { background:var(--soft); border:1px solid var(--line); color:var(--strong); }
 .smart-node-floating-menu button[data-smart-group-action="run"]:hover { background:var(--panel); border-color:var(--selected-ring); color:var(--strong); }
-.smart-node-floating-menu button i,.smart-node-floating-menu button svg { width:12px; height:12px; stroke-width:2.2; flex:0 0 auto; }
+.smart-node-floating-menu button i,.smart-node-floating-menu button svg { width:15px; height:15px; stroke-width:2.2; flex:0 0 auto; }
 body.smart-node-drag .smart-node-floating-menu,
 body.smart-node-resize .smart-node-floating-menu,
 .image-node.dragging .smart-node-floating-menu { opacity:0 !important; pointer-events:none !important; }
 @media (max-width: 760px){
-    .smart-node-floating-menu { top:-40px; overflow-x:auto; scrollbar-width:none; }
+    .smart-node-floating-menu { top:-48px; overflow-x:auto; scrollbar-width:none; }
     .smart-node-floating-menu::-webkit-scrollbar { display:none; }
     .smart-node-floating-menu button span { display:none; }
-    .smart-node-floating-menu button { width:30px; padding:0; }
+    .smart-node-floating-menu button { min-width:38px; width:38px; padding:0; }
+}
+/* 图片节点工具栏 hover 展开（对齐 Spectrum UI 的 Expandable Action Bar）：指针进入整条 bar（内边距和按钮间隙也算）
+   就让所有标签一起展开，高亮底只跟随当前悬停的那一个。只认 [data-smart-node-menu="1"]，分组工具栏里没有滑块子元素。 */
+[data-smart-node-menu="1"] button { position:relative; z-index:1; overflow:hidden; }
+/* 底色改由滑块承担，按钮自己再给一层就会和滑块同时亮；translateY 会推动相邻按钮，滑块几何对不上 */
+[data-smart-node-menu="1"] button:hover { background:transparent; transform:none; }
+/* 宽度只能用 max-width 插值（width:auto 不能过渡）。max-content 保证最长标签在画布放大或换语言后不被截断；
+   它是关键字、只有 allow-discrete 的引擎能过渡（等价于 50% 处跳变），所以 JS 展开时会把实测自然宽写成内联 px 拿到连续插值，
+   这里留 max-content 兜住没有 JS 的那条路。 */
+[data-smart-node-menu="1"] button span { max-width:0; margin-left:0; overflow:hidden; white-space:nowrap; opacity:0; transform:translateX(-4px); filter:blur(3px); transition:max-width .2s var(--fluid-ease), margin-left .2s var(--fluid-ease), opacity .18s ease, transform .2s var(--fluid-ease), filter .2s var(--fluid-ease); transition-behavior:allow-discrete; }
+/* 展开态是容器级的：class 由 pointerover 加，:has(:focus-visible) 让纯 CSS 的键盘路径走同一套样式。
+   只认 :focus-visible——鼠标点过的按钮也会拿到焦点，用它会让 bar 移开指针后钉在展开态。
+   :is() 是宽容列表，老引擎不认 :has() 时前半截照样生效。 */
+[data-smart-node-menu="1"]:is(.smart-node-menu-expanded, :has(:focus-visible)) button span { max-width:max-content; margin-left:5px; opacity:1; transform:none; filter:blur(0); }
+@supports not (transition-behavior: allow-discrete){
+    /* 旧引擎不认关键字过渡，给一个远超任何标签的像素上限 */
+    [data-smart-node-menu="1"]:is(.smart-node-menu-expanded, :has(:focus-visible)) button span { max-width:200px; }
+}
+[data-smart-node-menu="1"] > .smart-node-menu-highlight { position:absolute; left:0; top:4px; width:0; height:30px; border-radius:var(--radius-md); background:var(--soft); opacity:0; pointer-events:none; z-index:0; transition:opacity .14s ease; }
+@media (max-width: 760px){
+    /* 移动端是 30px 方图标条（标签本来就 display:none），没有悬停语义，滑块一并不出现 */
+    [data-smart-node-menu="1"] > .smart-node-menu-highlight { display:none; }
+}
+@media (prefers-reduced-motion: reduce){
+    /* 展开要瞬间到位、不做模糊；选择器得压过展开态那条 */
+    [data-smart-node-menu="1"] button span,
+    [data-smart-node-menu="1"]:is(.smart-node-menu-expanded, :has(:focus-visible)) button span { transition:none; transform:none; filter:none; }
+    [data-smart-node-menu="1"] > .smart-node-menu-highlight { transition:none; }
 }
 .node-count { min-width:22px; height:20px; padding:0 7px; border-radius:var(--radius-full); display:flex; align-items:center; justify-content:center; background:var(--soft); border:1px solid var(--line); color:var(--muted); font-size:10px; font-weight:900; }
 .mini-x { width:26px; height:26px; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; color:var(--text-3); background:rgba(255,255,255,.92); border:1px solid transparent; opacity:1; cursor:pointer; box-shadow:var(--shadow-md); backdrop-filter:blur(15px); transition:opacity .14s ease, transform .14s ease, background .14s ease, color .14s ease, border-color .14s ease; }
@@ -1874,20 +1934,48 @@ html.studio-theme-dark .chat-modal { border-color: var(--border-2); }
     .chat-tw-caret { animation: none; }
     .chat-send.is-holding { animation: none; }
 }
-/* 思考动画：三个跳动圆点 + 文案 */
-.agent-thinking { display: flex; align-items: center; gap: 9px; padding: 3px 0; }
-.agent-thinking-dots { display: inline-flex; gap: 4px; }
-.agent-thinking-dots i {
-    width: 6px; height: 6px; border-radius:var(--radius-full); background: var(--accent);
-    animation: agentDotBounce 1.1s infinite ease-in-out; opacity: .45;
+/* 思考动画：闪光图标（呼吸）+ 微光扫过的文案 + 秒表（ReactBits ThoughtLine 的视觉，纯原生实现） */
+.thought-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 0;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--muted);
 }
-.agent-thinking-dots i:nth-child(2) { animation-delay: .15s; }
-.agent-thinking-dots i:nth-child(3) { animation-delay: .3s; }
-@keyframes agentDotBounce {
-    0%, 60%, 100% { transform: translateY(0); opacity: .4; }
-    30% { transform: translateY(-4px); opacity: 1; }
+.thought-line__glyph {
+    display: inline-flex;
+    flex: none;
+    width: 12px;
+    height: 12px;
+    color: var(--accent);
+    animation: thoughtLineBreath 1.6s cubic-bezier(.77, 0, .175, 1) infinite;
 }
-.agent-thinking-text { font-size: 11px; color: var(--muted); }
+.thought-line__glyph svg { display: block; width: 100%; height: 100%; }
+@keyframes thoughtLineBreath {
+    0%, 100% { opacity: .55; }
+    50% { opacity: 1; }
+}
+.thought-line__label { display: inline-block; white-space: nowrap; }
+/* 只把文字填充色透明掉、不动 color，渐变里的 currentColor 才拿得到 .thought-line 的 var(--muted) */
+.thought-line__breath {
+    display: inline-block;
+    background: linear-gradient(100deg, color-mix(in srgb, currentColor 50%, transparent) 30%, currentColor 50%, color-mix(in srgb, currentColor 50%, transparent) 70%);
+    background-size: 250% 100%;
+    background-position: 125% 0;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: thoughtLineShimmer 1.8s linear infinite;
+}
+@keyframes thoughtLineShimmer { to { background-position: -125% 0; } }
+.thought-line__timer { font-variant-numeric: tabular-nums; opacity: .55; }
+@media (prefers-reduced-motion: reduce) {
+    .thought-line__glyph { animation: none; opacity: .8; }
+    .thought-line__breath { animation: none; background: none; -webkit-text-fill-color: currentColor; }
+}
 /* M2: 生成后快捷操作建议条（底部浮出，半透明暗色胶囊） */
 .smart-suggest-bar { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); z-index:88;
   display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:var(--radius-lg);
@@ -2171,6 +2259,18 @@ html.studio-theme-dark .chat-modal { border-color: var(--border-2); }
 .nd-menu .nd-option.active .nd-check { opacity:1; }
 .nd-menu .nd-option.is-active:not(.active) { background:var(--surface-2); color:var(--text); }
 .nd-option:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
+/* NovaGlide 滑块接管高亮后（shared/glide.js 会往弹层上加 .nv-glide-host）：
+   glide.css 只压 background-color，选中项的 color:var(--strong-text) 还留着 ——
+   浅色主题下那是白字，底被压成透明就成了白纸白字。
+   滑块底用 --nav-hover-bg（本应用真正的通用 hover 底色），两个主题同一个值、不按主题分叉：
+   滑块至少要跟原来的 hover 一样明显，否则「滑过去」根本看不出来。
+   别用 --soft：theme.css 在 body.studio-theme-dark / .shell.theme-dark 这些更具体的选择器下
+   把 --soft 重定义成 var(--bg)=#0a0a0a，而弹层就挂在 shell 里会继承到 —— 深色下滑块比面板还深，方向反了。
+   也别用 --surface-2：浅色下是 #fafafa 压 #ffffff，只差 5 级通道，等于没画。
+   被覆盖项的文字跟着回到 --text；没接线（没有 .nv-glide-host）时原样不变。 */
+.nd-menu { --nv-glide-bg: var(--nav-hover-bg); }
+.nd-menu.nv-glide-host .nd-option.active { color: var(--text); }
+
 
 /* 图片编辑区拖动平移光标 */
 .image-edit-stage.panning { cursor:grabbing; }

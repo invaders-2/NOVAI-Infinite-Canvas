@@ -414,6 +414,19 @@ API_ENV_FILE = os.path.join(_DATA_ROOT, "API", ".env")
 DATA_DIR = os.path.join(_DATA_ROOT, "data")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
+# 设置文件（settings.json）的统一读取口径：缺失/损坏都当空配置，由调用方各自兜默认值。
+def load_settings() -> Dict[str, Any]:
+    try:
+        if os.path.isfile(SETTINGS_FILE):
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                return cfg
+    except Exception:
+        pass
+    return {}
+
+
 # --- 局域网访问口令（LAN access token）---
 # 本机 loopback（桌面版 / Chrome 扩展 / PS 面板）永远放行；局域网来源必须带口令。
 # 口令存 data/security.json（0600）；可用 NOVAI_LAN_TOKEN 覆盖，NOVAI_LAN_AUTH=0 整体关闭。
@@ -522,15 +535,9 @@ async def lan_access_guard(request: Request, call_next):
 # 从持久化设置加载自定义输出目录
 def _load_custom_output_dir():
     """读取 settings.json 中的 output_dir，若存在且有效则返回。"""
-    try:
-        if os.path.isfile(SETTINGS_FILE):
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            custom = str(cfg.get("output_dir", "")).strip()
-            if custom and os.path.isdir(custom):
-                return custom
-    except Exception:
-        pass
+    custom = str(load_settings().get("output_dir", "")).strip()
+    if custom and os.path.isdir(custom):
+        return custom
     return ""
 
 _CUSTOM_OUTPUT_DIR = _load_custom_output_dir()
@@ -543,8 +550,14 @@ ASSET_LIBRARY_PATH = os.path.join(DATA_DIR, "asset_library.json")
 # V2 Phase 2：画布版本快照目录 + 画布资产注册表（Asset 对象化，JSON 文件，无数据库）
 CANVAS_VERSIONS_DIR = os.path.join(DATA_DIR, "canvas_versions")
 CANVAS_ASSETS_REGISTRY_PATH = os.path.join(DATA_DIR, "assets_registry.json")
-# 每画布保留最近 N 个版本快照（环境变量可调，默认 20）
-CANVAS_VERSION_LIMIT = max(1, int(os.getenv("NOVAI_CANVAS_VERSION_LIMIT", "20")))
+# 每画布保留最近 N 个版本快照（设置文件 > 环境变量 > 默认 20，最小 1）
+def canvas_version_limit() -> int:
+    for raw in (load_settings().get("canvas_version_limit"), os.getenv("NOVAI_CANVAS_VERSION_LIMIT", "20")):
+        try:
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            continue
+    return 20
 PROMPT_LIBRARY_PATH = os.path.join(DATA_DIR, "prompt_libraries.json")
 # 系统角色库（persona）：与生图提示词模板库（prompt_libraries.json）完全独立的数据文件。
 # prompt_libraries.json 的 item 是 {name, category, positive, negative}（生图正/负向提示词）；
@@ -714,16 +727,24 @@ def store_uploaded_bytes(content: bytes, filename: str, category: str = "input",
 
 
 # --- 预览缓存容量清理 ---
+def _limit_setting_or_env(cfg: Dict[str, Any], key: str, env_name: str, default: int) -> int:
+    """单项上限取值优先级：设置文件 > 环境变量 > 默认；0 是合法的（表示该维度不清理）。"""
+    try:
+        if cfg.get(key) is not None:
+            return max(0, int(cfg[key]))
+    except (TypeError, ValueError):
+        pass
+    try:
+        return max(0, int(os.getenv(env_name, str(default)) or 0))
+    except (TypeError, ValueError):
+        return default
+
+
 def preview_cache_limits() -> Tuple[int, int]:
     """返回 (max_files, max_bytes)；某维度为 0 表示不清理。"""
-    try:
-        max_files = max(0, int(os.getenv("NOVAI_PREVIEW_CACHE_MAX_FILES", "5000") or 0))
-    except (TypeError, ValueError):
-        max_files = 5000
-    try:
-        max_mb = max(0, int(os.getenv("NOVAI_PREVIEW_CACHE_MAX_MB", "1024") or 0))
-    except (TypeError, ValueError):
-        max_mb = 1024
+    cfg = load_settings()
+    max_files = _limit_setting_or_env(cfg, "preview_limit_files", "NOVAI_PREVIEW_CACHE_MAX_FILES", 5000)
+    max_mb = _limit_setting_or_env(cfg, "preview_limit_mb", "NOVAI_PREVIEW_CACHE_MAX_MB", 1024)
     return max_files, max_mb * 1024 * 1024
 
 
@@ -793,7 +814,7 @@ def prune_media_previews(max_files: Optional[int] = None, max_bytes: Optional[in
 
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "gemini-cli", "volcengine", "runninghub", "jimeng", "codex", "lovart"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json", "openai-video-proxy", "openai-responses", "tudou-async"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.cn"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.cn/openapi/v2"
@@ -876,6 +897,76 @@ except Exception:
 VOLCENGINE_DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 VOLCENGINE_DEFAULT_PROJECT_NAME = "default"
 VOLCENGINE_DEFAULT_REGION = "cn-beijing"
+LOVART_DEFAULT_BASE_URL = "https://lgw.lovart.ai"
+LOVART_OPENAPI_PREFIX = "/v1/openapi"
+LOVART_OPENAPI_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LovartAgentSkill/1.0"
+LOVART_ARTIFACT_USER_AGENT = "Mozilla/5.0"
+LOVART_ARTIFACT_REFERER = "https://www.lovart.ai/"
+LOVART_CHAT_POLL_INTERVAL = 3
+LOVART_CHAT_DONE_RECHECK_DELAY = 5
+try:
+    LOVART_CHAT_POLL_TIMEOUT = max(60, min(7200, int(os.getenv("LOVART_POLL_TIMEOUT", "1800"))))
+except Exception:
+    LOVART_CHAT_POLL_TIMEOUT = 1800
+LOVART_DEFAULT_CHAT_MODELS = ["lovart-agent"]
+LOVART_DEFAULT_IMAGE_MODELS = [
+    "generate_image_gpt_image_2_5_flare",
+    "generate_image_gpt_image_2_5_flare_low",
+    "generate_image_gpt_image_2_5_flare_medium",
+    "generate_image_gpt_image_2_5_flare_high",
+    "generate_image_gpt_image_2_5_flare_xhigh",
+    "generate_image_gpt_image_2_5_flare_max",
+    "generate_image_gpt_image_2_5_sunburst",
+    "generate_image_gpt_image_2_5_sunburst_low",
+    "generate_image_gpt_image_2_5_sunburst_medium",
+    "generate_image_gpt_image_2_5_sunburst_high",
+    "generate_image_gpt_image_2_5_sunburst_xhigh",
+    "generate_image_gpt_image_2_5_sunburst_max",
+    "generate_image_gpt_image_2",
+    "generate_image_gpt_image_2_low",
+    "generate_image_gpt_image_2_medium",
+    "generate_image_gpt_image_2_high",
+    "generate_image_nano_banana_pro",
+    "generate_image_nano_banana_2",
+    "generate_image_seedream_v5_pro",
+    "generate_image_gpt_image_1_5",
+    "generate_image_seedream_v5",
+    "generate_image_luma_uni_1",
+    "generate_image_luma_uni_1_max",
+    "generate_image_flux_2_max",
+    "generate_image_flux_2_pro",
+    "generate_image_seedream_v4_5",
+    "generate_image_nano_banana",
+    "generate_image_seedream_v4",
+    "generate_image_midjourney",
+    "generate_image_ideogram_v4",
+    "generate_image_qwen_image3",
+    "generate_image_qwen_image3_pro",
+    "generate_image_nano_banana_2_lite",
+    "generate_image_p_image_ideogram",
+]
+LOVART_DEFAULT_VIDEO_MODELS = [
+    "generate_video_seedance_v2_5",
+    "generate_video_seedance_v2_0",
+    "generate_video_seedance_v2_0_fast",
+    "generate_video_seedance_v2_0_mini",
+    "generate_video_kling_v3",
+    "generate_video_kling_v3_omni",
+    "generate_video_minimax_h3",
+    "generate_video_seedance_pro_v1_5",
+    "generate_video_kling_v2_6",
+    "generate_video_wan_v2_6",
+    "generate_video_veo3_1",
+    "generate_video_veo3_1_fast",
+    "generate_video_kling_omni_v1",
+    "generate_video_hailuo_v2_3",
+    "generate_video_veo3",
+    "generate_video_vidu_q2",
+    "generate_video_gemini_omni_flash",
+    "generate_video_minimax_h3_max",
+    "generate_video_wan_v3",
+    "generate_video_wan_v3_prime",
+]
 RUNNINGHUB_DEFAULT_IMAGE_MODELS = [
     "gpt-image-2.0/text-to-image-channel-low-price",
     "gpt-image-2.0/edit-channel-low-price",
@@ -1073,8 +1164,10 @@ _THINK_MODEL_PATTERN = _re.compile(
     r"(?:thinking|qwq|qwen3|reasoner|\br1\b|deepseek[-_]?r1|deepseek[-_]?reasoner"
     r"|glm[-_]?z1|glm[-_]?zero|kimi[-_]?(?:thinking|k2)|k2"
     r"|(?:^|[^a-z0-9])o[1-9](?:[^a-z0-9]|$)"
-    r"|claude[-_]?3[-_]?(?:7|5)[-_]?sonnet|claude[-_]?3[-_]?opus"
-    r"|gemini[-_]?2[.-]?(?:0|5)[-_]?(?:pro|flash)?)",
+    r"|claude[-_.]?3[-_.]?(?:7|5)[-_.]?sonnet|claude[-_.]?3[-_.]?opus"
+    r"|claude[-_.]?opus[-_.]?\d+"
+    r"|gemini[-_]?[23][.-]?(?:\d+)?[-_]?(?:pro|flash)?"
+    r"|lovart[-_]?agent)",
     _re.IGNORECASE,
 )
 THINK_LEVELS_FULL = ["low","mid","high","xhigh","max"]
@@ -1286,6 +1379,20 @@ def volcengine_secret_key_value() -> str:
     env_key = volcengine_secret_key_env()
     return os.getenv(env_key, "") or read_api_env_value(env_key)
 
+def lovart_access_key_env():
+    return "LOVART_ACCESS_KEY"
+
+def lovart_secret_key_env():
+    return "LOVART_SECRET_KEY"
+
+def lovart_access_key_value() -> str:
+    env_key = lovart_access_key_env()
+    return os.getenv(env_key, "") or read_api_env_value(env_key)
+
+def lovart_secret_key_value() -> str:
+    env_key = lovart_secret_key_env()
+    return os.getenv(env_key, "") or read_api_env_value(env_key)
+
 def volcengine_provider_api_key(explicit_key: str = "") -> str:
     explicit_key = str(explicit_key or "").strip()
     if explicit_key:
@@ -1364,6 +1471,25 @@ def default_api_providers():
             "volcengine_project_name": VOLCENGINE_DEFAULT_PROJECT_NAME,
             "volcengine_region": VOLCENGINE_DEFAULT_REGION,
         },
+        {
+            "id": "lovart",
+            "name": "Lovart",
+            "base_url": LOVART_DEFAULT_BASE_URL,
+            "protocol": "lovart",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": LOVART_DEFAULT_IMAGE_MODELS,
+            "chat_models": LOVART_DEFAULT_CHAT_MODELS,
+            "video_models": LOVART_DEFAULT_VIDEO_MODELS,
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+            "lovart_auto_confirm": False,
+            "lovart_project_id": "",
+            "lovart_unlimited": False,
+        },
     ]
 
 def merge_default_api_providers(providers, inject_missing=True):
@@ -1428,6 +1554,22 @@ def merge_default_api_providers(providers, inject_missing=True):
             current["protocol"] = "volcengine"
             current["volcengine_project_name"] = str(current.get("volcengine_project_name") or VOLCENGINE_DEFAULT_PROJECT_NAME).strip() or VOLCENGINE_DEFAULT_PROJECT_NAME
             current["volcengine_region"] = str(current.get("volcengine_region") or VOLCENGINE_DEFAULT_REGION).strip() or VOLCENGINE_DEFAULT_REGION
+    lovart_default = next((d for d in default_api_providers() if d["id"] == "lovart"), None)
+    if lovart_default:
+        current = next((item for item in merged if item.get("id") == "lovart"), None)
+        if not current:
+            if inject_missing:
+                merged.append(lovart_default)
+        else:
+            if not current.get("base_url"):
+                current["base_url"] = lovart_default["base_url"]
+            current["protocol"] = "lovart"
+            current["lovart_auto_confirm"] = bool(current.get("lovart_auto_confirm", False))
+            current["lovart_project_id"] = str(current.get("lovart_project_id") or "").strip()
+            current["lovart_unlimited"] = bool(current.get("lovart_unlimited", False))
+            current["image_models"] = model_list_from_values(current.get("image_models") or [])
+            current["chat_models"] = model_list_from_values([*(current.get("chat_models") or []), *LOVART_DEFAULT_CHAT_MODELS])
+            current["video_models"] = model_list_from_values(current.get("video_models") or [])
     # 即梦 CLI 不再是强制保留的默认平台：仅在用户已添加了即梦协议的平台时，规范化其默认模型/地址。
     for current in merged:
         if not is_jimeng_provider(current):
@@ -1794,6 +1936,9 @@ def normalize_provider(item):
     image_edit_endpoint = normalize_endpoint_override(item.get("image_edit_endpoint"), "图生图/编辑端口")
     volc_project = re.sub(r"\s+", " ", str(item.get("volcengine_project_name") or "").strip())[:80]
     volc_region = re.sub(r"\s+", " ", str(item.get("volcengine_region") or "").strip())[:40]
+    lovart_auto_confirm = bool(item.get("lovart_auto_confirm", False))
+    lovart_project_id = re.sub(r"\s+", " ", str(item.get("lovart_project_id") or "").strip())[:120]
+    lovart_unlimited = item.get("lovart_unlimited")
     if provider_id == "volcengine":
         protocol = "volcengine"
         base_url = base_url or VOLCENGINE_DEFAULT_BASE_URL
@@ -1807,6 +1952,9 @@ def normalize_provider(item):
     if provider_id == "runninghub":
         protocol = "runninghub"
         base_url = base_url or RUNNINGHUB_DEFAULT_BASE_URL
+    if provider_id == "lovart" or protocol == "lovart":
+        protocol = "lovart"
+        base_url = base_url or LOVART_DEFAULT_BASE_URL
     locked_rule = locked_recommended_provider_rule(provider_id, name, base_url)
     if locked_rule:
         protocol = locked_rule["protocol"]
@@ -1834,6 +1982,9 @@ def normalize_provider(item):
         "rh_workflows": normalize_runninghub_entries(item.get("rh_workflows") or [], "workflow"),
         "volcengine_project_name": volc_project,
         "volcengine_region": volc_region,
+        "lovart_auto_confirm": lovart_auto_confirm,
+        "lovart_project_id": lovart_project_id,
+        "lovart_unlimited": bool(lovart_unlimited) if lovart_unlimited is not None else False,
     }
 
 def load_api_providers():
@@ -1897,6 +2048,18 @@ def public_provider(provider):
             "volcengine_secret_key_env": volcengine_secret_key_env(),
             "volcengine_project_name": provider.get("volcengine_project_name") or VOLCENGINE_DEFAULT_PROJECT_NAME,
             "volcengine_region": provider.get("volcengine_region") or VOLCENGINE_DEFAULT_REGION,
+        })
+    if provider.get("id") == "lovart" or str(provider.get("protocol") or "").strip().lower() == "lovart":
+        ak = lovart_access_key_value()
+        sk = lovart_secret_key_value()
+        item.update({
+            "has_key": bool(key) or (bool(ak) and bool(sk)),
+            "has_lovart_access_key": bool(ak),
+            "lovart_access_key_preview": mask_secret(ak),
+            "lovart_access_key_env": lovart_access_key_env(),
+            "has_lovart_secret_key": bool(sk),
+            "lovart_secret_key_preview": mask_secret(sk),
+            "lovart_secret_key_env": lovart_secret_key_env(),
         })
     return item
 
@@ -3985,10 +4148,17 @@ class ApiProviderPayload(BaseModel):
     volcengine_secret_access_key: Optional[str] = None
     api_key: Optional[str] = None
     wallet_api_key: Optional[str] = None
+    lovart_auto_confirm: bool = False
+    lovart_project_id: str = ""
+    lovart_unlimited: Optional[bool] = None
+    lovart_access_key: Optional[str] = None
+    lovart_secret_key: Optional[str] = None
     clear_key: bool = False
     clear_wallet_key: bool = False
     clear_volcengine_access_key_id: bool = False
     clear_volcengine_secret_access_key: bool = False
+    clear_lovart_access_key: bool = False
+    clear_lovart_secret_key: bool = False
 
 class ChatRequest(BaseModel):
     conversation_id: str = ""
@@ -4034,6 +4204,7 @@ class CanvasLLMRequest(BaseModel):
     reverse: bool = False    # 反推开关：OFF 仅允许必要定向分析；ON 允许完整 Reverse Analysis
     target_type: str = ""    # 下游生成类型：image / video / ""（未知）
     target_model: str = ""   # 下游生成模型（如 nano-banana-pro / doubao-seedance-2-0-260128），用于模型专用 Compiler
+    no_prompt_intelligence: bool = False  # 聊天模式用：跳过 Prompt Intelligence，仍保留 images/videos/reverse 让模型能看图对话
 
 class ConversationCreateRequest(BaseModel):
     title: str = "新对话"
@@ -4646,8 +4817,9 @@ def snapshot_canvas_version(canvas, note=""):
             with open(os.path.join(vdir, f"v{next_version}.json"), "w", encoding="utf-8") as f:
                 json.dump(record, f, ensure_ascii=False, indent=2)
             # 保留最近 N 个版本（含刚写入的这版）：version <= next - N 的旧版本删除
+            limit = canvas_version_limit()
             for v in versions:
-                if v["version"] <= next_version - CANVAS_VERSION_LIMIT:
+                if v["version"] <= next_version - limit:
                     try:
                         os.remove(os.path.join(vdir, f"v{v['version']}.json"))
                     except Exception:
@@ -5278,6 +5450,53 @@ def text_delta_from_chat_chunk(data):
         return "".join(parts)
     return str(content) if content else ""
 
+def reasoning_text_from_fragment(value):
+    """思考内容片段：字符串直接返回，数组按元素拼，dict 取 text/content。"""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict):
+                parts.append(item.get("text") or item.get("content") or "")
+            elif isinstance(item, str):
+                parts.append(item)
+        return "".join(parts)
+    if isinstance(value, dict):
+        return value.get("text") or value.get("content") or ""
+    return str(value) if value else ""
+
+def reasoning_delta_from_chat_chunk(data):
+    """流式思考增量：delta.reasoning_content 优先，兼容 delta.reasoning；没有就返回空串。"""
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    delta = choices[0].get("delta") or {}
+    if not isinstance(delta, dict):
+        return ""
+    for field in ("reasoning_content", "reasoning"):
+        if field in delta:
+            text = reasoning_text_from_fragment(delta.get(field))
+            if text:
+                return text
+    return ""
+
+def reasoning_from_chat_response(data):
+    """非流式思考内容：message.reasoning_content 优先，兼容 message.reasoning。"""
+    data = unwrap_apimart_response(data)
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    message = choices[0].get("message") or {}
+    if not isinstance(message, dict):
+        return ""
+    for field in ("reasoning_content", "reasoning"):
+        if field in message:
+            text = reasoning_text_from_fragment(message.get(field))
+            if text:
+                return text
+    return ""
+
 def sse_event(data):
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -5784,7 +6003,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（仅 OpenAI / Gemini，二者可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "lovart"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留 openai/gemini。"""
@@ -11243,6 +11462,639 @@ def volcengine_image_payload(ref):
         return None
     return value
 
+def is_lovart_provider(provider):
+    return provider_protocol(provider) == "lovart" or str((provider or {}).get("id") or "").strip().lower() == "lovart"
+
+def lovart_base_url(provider=None):
+    base_url = str((provider or {}).get("base_url") or LOVART_DEFAULT_BASE_URL).strip().rstrip("/")
+    return base_url or LOVART_DEFAULT_BASE_URL
+
+def lovart_http_client(timeout):
+    # Lovart 服务在海外且被 Cloudflare 挡直连，必须跟随系统代理
+    return httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=True, timeout=timeout)
+
+def lovart_api_path(path: str) -> str:
+    text = str(path or "").strip()
+    if not text:
+        return LOVART_OPENAPI_PREFIX
+    if text.startswith(LOVART_OPENAPI_PREFIX):
+        return text
+    return f"{LOVART_OPENAPI_PREFIX}/{text.lstrip('/')}"
+
+def lovart_signed_headers(method: str, path: str, access_key: str, secret_key: str) -> Dict[str, str]:
+    timestamp = str(int(time.time()))
+    signature = hmac.new(
+        str(secret_key or "").encode("utf-8"),
+        f"{method}\n{path}\n{timestamp}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    headers = {
+        "X-Access-Key": str(access_key or ""),
+        "X-Timestamp": timestamp,
+        "X-Signature": signature,
+        "X-Signed-Method": method,
+        "X-Signed-Path": path,
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        "User-Agent": LOVART_OPENAPI_USER_AGENT,
+    }
+    if method == "POST":
+        headers["Idempotency-Key"] = uuid.uuid4().hex
+    return headers
+
+def lovart_credentials(access_key="", secret_key=""):
+    access = str(access_key or "").strip() or lovart_access_key_value()
+    secret = str(secret_key or "").strip() or lovart_secret_key_value()
+    if not access or not secret:
+        raise HTTPException(status_code=400, detail="未配置 Lovart 的 Access Key / Secret Key，请在 API 设置中填写。")
+    return access, secret
+
+def lovart_error_detail(status_code, payload):
+    code = payload.get("code") if isinstance(payload, dict) else None
+    message = ""
+    if isinstance(payload, dict):
+        message = str(payload.get("message") or payload.get("error") or payload.get("msg") or "").strip()
+        details = str(payload.get("details") or "").strip()
+        if details:
+            message = f"{message}：{details}" if message else details
+    if not message:
+        message = str(payload)[:300] if payload is not None else ""
+    if status_code == 401 or str(code) == "1005":
+        return "Lovart 密钥无效，请检查 Access Key / Secret Key"
+    label = f"HTTP {status_code}" + (f"，code={code}" if code is not None else "")
+    return f"Lovart 接口失败（{label}）：{message}" if message else f"Lovart 接口失败（{label}）"
+
+async def lovart_request(client, provider, method, path, body=None, params=None, access_key="", secret_key=""):
+    path = lovart_api_path(path)
+    method = method.upper()
+    access, secret = lovart_credentials(access_key, secret_key)
+    url = f"{lovart_base_url(provider)}{path}"
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+    headers = lovart_signed_headers(method, path, access, secret)
+    payload_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+    response = await client.request(method, url, headers=headers, content=payload_bytes)
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    if response.status_code >= 400:
+        raw = payload if payload is not None else (response.text or "")[:300]
+        raise HTTPException(status_code=response.status_code, detail=lovart_error_detail(response.status_code, raw))
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail=f"Lovart 接口返回非 JSON 响应：{(response.text or '')[:300]}")
+    code = payload.get("code", 0)
+    if code not in (0, "0", None):
+        raise HTTPException(status_code=502, detail=lovart_error_detail(response.status_code, payload))
+    data = payload.get("data")
+    return data if isinstance(data, dict) else (data if data is not None else {})
+
+def lovart_provider_config(provider_id="lovart"):
+    try:
+        return get_api_provider_exact(provider_id or "lovart")
+    except HTTPException:
+        provider = {"id": "lovart", "name": "Lovart", "base_url": LOVART_DEFAULT_BASE_URL, "protocol": "lovart"}
+    provider["lovart_auto_confirm"] = bool(provider.get("lovart_auto_confirm", False))
+    provider["lovart_project_id"] = str(provider.get("lovart_project_id") or "").strip()
+    return provider
+
+def lovart_store_project_id(project_id: str):
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        return
+    try:
+        providers = load_api_providers()
+        changed = False
+        for item in providers:
+            if str(item.get("id") or "").strip().lower() != "lovart" and str(item.get("protocol") or "").strip().lower() != "lovart":
+                continue
+            if str(item.get("lovart_project_id") or "").strip() != project_id:
+                item["lovart_project_id"] = project_id
+                changed = True
+        if changed:
+            save_api_providers(providers)
+    except Exception as exc:
+        print(f"Lovart 项目 ID 保存失败（不影响本次生成）: {exc}")
+
+def lovart_store_unlimited(unlimited: bool):
+    try:
+        providers = load_api_providers()
+        found = False
+        for item in providers:
+            if str(item.get("id") or "").strip().lower() != "lovart" and str(item.get("protocol") or "").strip().lower() != "lovart":
+                continue
+            found = True
+            item["lovart_unlimited"] = bool(unlimited)
+        if found:
+            save_api_providers(providers)
+    except Exception as exc:
+        print(f"Lovart 账号模式保存失败（不影响本次切换）: {exc}")
+
+async def lovart_ensure_project_id(client, provider):
+    project_id = str((provider or {}).get("lovart_project_id") or "").strip()
+    if project_id:
+        return project_id
+    data = await lovart_request(client, provider, "POST", "/project/save", body={
+        "project_id": "",
+        "canvas": "",
+        "project_cover_list": [],
+        "pic_count": 0,
+        "project_type": 3,
+    })
+    project_id = str((data or {}).get("project_id") or "").strip() if isinstance(data, dict) else ""
+    if not project_id:
+        raise HTTPException(status_code=502, detail="Lovart 新建项目失败：接口未返回 project_id")
+    provider["lovart_project_id"] = project_id
+    lovart_store_project_id(project_id)
+    return project_id
+
+def lovart_upload_url(payload):
+    if isinstance(payload, str):
+        return payload.strip()
+    if isinstance(payload, list):
+        for item in payload:
+            url = lovart_upload_url(item)
+            if url:
+                return url
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("url", "file_url", "fileUrl", "cdn_url", "cdnUrl", "content", "path"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    for key in ("files", "list", "urls", "data", "file", "result"):
+        if key in payload:
+            url = lovart_upload_url(payload.get(key))
+            if url:
+                return url
+    return ""
+
+async def lovart_upload_file(client, provider, local_path):
+    with open(local_path, "rb") as f:
+        file_bytes = f.read()
+    if not file_bytes:
+        return ""
+    filename = os.path.basename(str(local_path or "")) or "reference.png"
+    filename = filename.replace('"', "_").replace("\r", "_").replace("\n", "_")
+    boundary = uuid.uuid4().hex
+    path = lovart_api_path("/file/upload")
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f"Content-Type: application/octet-stream\r\n\r\n"
+    ).encode("utf-8") + file_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    access, secret = lovart_credentials()
+    headers = lovart_signed_headers("POST", path, access, secret)
+    headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+    response = await client.post(f"{lovart_base_url(provider)}{path}", headers=headers, content=body)
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    if response.status_code >= 400:
+        raw = payload if payload is not None else (response.text or "")[:300]
+        raise HTTPException(status_code=response.status_code, detail=lovart_error_detail(response.status_code, raw))
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail=f"Lovart 参考图上传返回非 JSON 响应：{(response.text or '')[:300]}")
+    if payload.get("code", 0) not in (0, "0", None):
+        raise HTTPException(status_code=502, detail=lovart_error_detail(response.status_code, payload))
+    url = lovart_upload_url(payload.get("data"))
+    if not url:
+        raise HTTPException(status_code=502, detail=f"Lovart 参考图上传成功但没有返回 CDN 地址：{json.dumps(payload, ensure_ascii=False)[:300]}")
+    return url
+
+async def lovart_attachment_urls(client, provider, refs):
+    urls = []
+    for ref in refs or []:
+        ref_url = str((ref or {}).get("url") or "").strip()
+        if not ref_url:
+            continue
+        if ref_url.startswith(("http://", "https://")):
+            urls.append(ref_url)
+            continue
+        local_path = output_file_from_url(ref_url)
+        if not local_path or not os.path.isfile(local_path):
+            continue
+        uploaded = await lovart_upload_file(client, provider, local_path)
+        if uploaded:
+            urls.append(uploaded)
+    return urls
+
+def lovart_thread_id(data):
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("thread_id") or data.get("threadId") or "").strip()
+
+async def lovart_start_chat(client, provider, prompt, model, category, attachments=None):
+    project_id = await lovart_ensure_project_id(client, provider)
+    body = {"prompt": str(prompt or ""), "project_id": project_id}
+    if attachments:
+        body["attachments"] = list(attachments)
+    model = str(model or "").strip()
+    if model:
+        body["tool_config"] = {
+            "prefer_tool_categories": {category: [model]},
+            "include_tools": [model],
+        }
+    data = await lovart_request(client, provider, "POST", "/chat", body=body)
+    thread_id = lovart_thread_id(data)
+    if not thread_id:
+        raise HTTPException(status_code=502, detail=f"Lovart 提交任务失败：接口未返回 thread_id（{json.dumps(data, ensure_ascii=False)[:300]}）")
+    return thread_id, project_id
+
+def lovart_failures_text(result):
+    failures = (result or {}).get("failures") if isinstance(result, dict) else None
+    texts = []
+    if isinstance(failures, list):
+        for item in failures:
+            if isinstance(item, dict):
+                text = item.get("message") or item.get("reason") or item.get("error")
+                if text:
+                    texts.append(str(text))
+            elif item:
+                texts.append(str(item))
+    elif failures:
+        texts.append(str(failures))
+    return "；".join(texts)[:300]
+
+def lovart_pending_signature(pending):
+    try:
+        return hashlib.sha1(json.dumps(pending, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    except Exception:
+        return str(pending)[:200]
+
+def lovart_pending_confirmation_detail(pending):
+    detail = ""
+    if isinstance(pending, dict):
+        detail = str(pending.get("message") or pending.get("reason") or pending.get("title") or "").strip()
+        cost = pending.get("estimated_cost") or pending.get("cost") or pending.get("credits")
+        if cost not in (None, ""):
+            detail = f"{detail}（预计消耗 {cost} 积分）" if detail else f"预计消耗 {cost} 积分"
+    elif pending:
+        detail = str(pending)[:200]
+    message = "Lovart 把这个操作判定为高成本操作（例如视频生成、高端图片模型），需要确认后才会继续。"
+    if detail:
+        message = f"{message}\n{detail}"
+    return (
+        f"{message}\n"
+        "请到 Lovart 网页端确认这次任务，或在「API 设置 → Lovart」里打开「自动确认」（lovart_auto_confirm）后重试。"
+    )
+
+async def lovart_wait_for_result(client, provider, thread_id):
+    auto_confirm = bool((provider or {}).get("lovart_auto_confirm", False))
+    confirmed = set()
+    auto_confirmed = False
+    done_rechecked = False
+    poll_count = 0
+    deadline = time.monotonic() + LOVART_CHAT_POLL_TIMEOUT
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise HTTPException(status_code=504, detail=f"Lovart 任务超时（已等待 {int(LOVART_CHAT_POLL_TIMEOUT)} 秒），thread_id={thread_id}")
+        status_data = await lovart_request(client, provider, "GET", "/chat/status", params={"thread_id": thread_id})
+        status = str((status_data or {}).get("status") or "").strip().lower() if isinstance(status_data, dict) else ""
+        poll_count += 1
+        if status == "abort":
+            reason = lovart_failures_text(await lovart_request(client, provider, "GET", "/chat/result", params={"thread_id": thread_id}))
+            raise HTTPException(status_code=502, detail=f"Lovart 任务被中断：{reason}" if reason else "Lovart 任务被中断（abort）")
+        if status == "done":
+            if not done_rechecked:
+                done_rechecked = True
+                await asyncio.sleep(min(LOVART_CHAT_DONE_RECHECK_DELAY, max(0.0, deadline - time.monotonic())))
+                continue
+            result = await lovart_request(client, provider, "GET", "/chat/result", params={"thread_id": thread_id})
+            result = result if isinstance(result, dict) else {}
+            pending = result.get("pending_confirmation")
+            if not pending:
+                result["final_status"] = "done"
+                result["auto_confirmed"] = auto_confirmed
+                return result
+            signature = lovart_pending_signature(pending)
+            if signature in confirmed:
+                raise HTTPException(status_code=502, detail="Lovart 已确认该高成本操作，但任务仍在等待确认，请到 Lovart 网页端检查任务状态。")
+            if not auto_confirm:
+                raise HTTPException(status_code=409, detail=lovart_pending_confirmation_detail(pending))
+            await lovart_request(client, provider, "POST", "/chat/confirm", body={"thread_id": thread_id})
+            confirmed.add(signature)
+            auto_confirmed = True
+            done_rechecked = False
+        elif status == "running" and poll_count % 3 == 0:
+            result = await lovart_request(client, provider, "GET", "/chat/result", params={"thread_id": thread_id})
+            pending = result.get("pending_confirmation") if isinstance(result, dict) else None
+            if pending:
+                signature = lovart_pending_signature(pending)
+                if signature in confirmed:
+                    raise HTTPException(status_code=502, detail="Lovart 已确认该高成本操作，但任务仍在等待确认，请到 Lovart 网页端检查任务状态。")
+                if not auto_confirm:
+                    raise HTTPException(status_code=409, detail=lovart_pending_confirmation_detail(pending))
+                await lovart_request(client, provider, "POST", "/chat/confirm", body={"thread_id": thread_id})
+                confirmed.add(signature)
+                auto_confirmed = True
+        await asyncio.sleep(min(LOVART_CHAT_POLL_INTERVAL, max(0.0, deadline - time.monotonic())))
+
+def lovart_artifact_urls(result, category="IMAGE"):
+    kind = "video" if str(category or "").upper() == "VIDEO" else "image"
+    urls = []
+    seen = set()
+    items = (result or {}).get("items") if isinstance(result, dict) else None
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        for artifact in item.get("artifacts") or []:
+            if not isinstance(artifact, dict):
+                continue
+            content = artifact.get("content")
+            if isinstance(content, list):
+                content = next((one for one in content if isinstance(one, str) and one.strip()), "")
+            content = str(content or "").strip()
+            if not content or content in seen:
+                continue
+            atype = str(artifact.get("type") or "").strip().lower()
+            if atype:
+                if kind not in atype:
+                    continue
+            elif kind == "video":
+                if not re.search(r"\.(mp4|webm|mov|m4v)(\?|$)", content, re.I):
+                    continue
+            elif re.search(r"\.(mp4|webm|mov|m4v)(\?|$)", content, re.I):
+                continue
+            seen.add(content)
+            urls.append(content)
+    return urls
+
+async def lovart_download_artifact(client, url, prefix="lovart_"):
+    text = str(url or "").strip()
+    if not text or text.startswith(("/output/", "/assets/")):
+        return text
+    if not text.startswith(("http://", "https://")):
+        return text
+    ext = os.path.splitext(text.split("?", 1)[0].split("#", 1)[0])[1].lower()
+    if ext not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mov", ".m4v"}:
+        ext = ".png"
+    response = await client.get(text, headers={
+        "User-Agent": LOVART_ARTIFACT_USER_AGENT,
+        "Referer": LOVART_ARTIFACT_REFERER,
+    })
+    response.raise_for_status()
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    for token, suffix in (("jpeg", ".jpg"), ("jpg", ".jpg"), ("webp", ".webp"), ("mp4", ".mp4"), ("webm", ".webm"), ("quicktime", ".mov")):
+        if token in content_type:
+            ext = suffix
+            break
+    filename = f"{prefix}{uuid.uuid4().hex[:10]}{ext}"
+    path = output_path_for(filename, "output")
+    with open(path, "wb") as f:
+        f.write(response.content)
+    return output_url_for(filename, "output")
+
+async def lovart_run_generation(client, provider, prompt, model, category, reference_images=None):
+    kind = str(category or "IMAGE").upper()
+    attachments = await lovart_attachment_urls(client, provider, (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX])
+    thread_id, project_id = await lovart_start_chat(client, provider, prompt, model, kind, attachments)
+    result = await lovart_wait_for_result(client, provider, thread_id)
+    remote_urls = lovart_artifact_urls(result, kind)
+    if not remote_urls:
+        failures = lovart_failures_text(result)
+        detail = "Lovart 没有返回产物"
+        if failures:
+            detail = f"{detail}：{failures}"
+        else:
+            detail = f"{detail}，可能是提示词被上游模型拒绝，或 Agent 只回复了文字没有出图/出视频。"
+        raise HTTPException(status_code=502, detail=detail)
+    local_urls = []
+    for remote in remote_urls:
+        local = await lovart_download_artifact(client, remote, prefix="lovart_video_" if kind == "VIDEO" else "lovart_")
+        if local:
+            local_urls.append(local)
+    if not local_urls:
+        raise HTTPException(status_code=502, detail="Lovart 产物下载失败（CDN 地址不可访问）")
+    raw = {
+        "task_id": thread_id,
+        "thread_id": thread_id,
+        "project_id": project_id,
+        "provider": "lovart",
+        "model": str(model or ""),
+        "final_status": result.get("final_status"),
+        "auto_confirmed": result.get("auto_confirmed"),
+        "failures": lovart_failures_text(result),
+        "images" if kind == "IMAGE" else "videos": local_urls,
+    }
+    return local_urls, raw
+
+def lovart_chat_mode(payload):
+    hint = " ".join([
+        str(getattr(payload, "think_level", "") or ""),
+        str(getattr(payload, "mode", "") or ""),
+    ]).lower()
+    return "thinking" if any(key in hint for key in ("think", "high", "max", "deep", "reason")) else "fast"
+
+def lovart_chat_prompt(payload, history_messages=None):
+    parts = []
+    system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
+    mem = memory_block(getattr(payload, "conversation_id", "") or "")
+    if system_prompt or mem:
+        block = system_prompt
+        if mem:
+            block = (block + "\n\n" + mem).strip() if block else mem
+        parts.append(f"系统要求：\n{block}")
+    history = (history_messages or [])[-MAX_HISTORY_MESSAGES:]
+    for item in history:
+        role = str(item.get("role") or "").strip()
+        content = item.get("content")
+        if role in {"user", "assistant"} and content:
+            label = "用户" if role == "user" else "助手"
+            parts.append(f"{label}：\n{content}")
+    message = str(getattr(payload, "message", "") or "").strip()
+    last = history[-1] if history else None
+    # /api/chat 已把本条用户消息写进 history，末尾再拼一次会让上游把同一句话读两遍
+    if not (isinstance(last, dict) and str(last.get("role") or "").strip() == "user" and str(last.get("content") or "").strip() == message):
+        parts.append(f"用户：\n{message}")
+    parts.append("请直接回答用户，输出纯文本。")
+    return "\n\n".join(part for part in parts if part).strip()
+
+def lovart_chat_image_refs(payload):
+    refs = []
+    if hasattr(payload, "images"):
+        refs.extend([{"url": item} for item in (getattr(payload, "images", None) or []) if item])
+    if hasattr(payload, "reference_images"):
+        refs.extend([ref.dict() for ref in (getattr(payload, "reference_images", None) or []) if getattr(ref, "url", "")])
+    return refs
+
+def lovart_result_text(result):
+    items = (result or {}).get("items") if isinstance(result, dict) else None
+    texts = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        if isinstance(text, list):
+            text = next((one for one in text if isinstance(one, str) and one.strip()), "")
+        text = str(text or "").strip()
+        if text:
+            texts.append(text)
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        for artifact in item.get("artifacts") or []:
+            if not isinstance(artifact, dict):
+                continue
+            if str(artifact.get("type") or "").strip().lower() != "text":
+                continue
+            content = artifact.get("content")
+            if isinstance(content, list):
+                content = next((one for one in content if isinstance(one, str) and one.strip()), "")
+            content = str(content or "").strip()
+            if content:
+                texts.append(content)
+    return "\n\n".join(dict.fromkeys(texts))
+
+async def lovart_chat_text(payload, history_messages=None):
+    provider = lovart_provider_config()
+    model = str(getattr(payload, "model", "") or "").strip() or LOVART_DEFAULT_CHAT_MODELS[0]
+    prompt = lovart_chat_prompt(payload, history_messages)
+    mode = lovart_chat_mode(payload)
+    links = []
+    try:
+        async with lovart_http_client(httpx.Timeout(connect=20.0, read=180.0, write=180.0, pool=20.0)) as client:
+            project_id = await lovart_ensure_project_id(client, provider)
+            attachments = await lovart_attachment_urls(client, provider, lovart_chat_image_refs(payload))
+            body = {"prompt": prompt, "project_id": project_id, "mode": mode}
+            if attachments:
+                body["attachments"] = attachments
+            data = await lovart_request(client, provider, "POST", "/chat", body=body)
+            thread_id = lovart_thread_id(data)
+            if not thread_id:
+                raise HTTPException(status_code=502, detail=f"Lovart 提交对话失败：接口未返回 thread_id（{json.dumps(data, ensure_ascii=False)[:300]}）")
+            result = await lovart_wait_for_result(client, provider, thread_id)
+            text = lovart_result_text(result)
+            for remote in [*lovart_artifact_urls(result, "IMAGE"), *lovart_artifact_urls(result, "VIDEO")]:
+                try:
+                    local = await lovart_download_artifact(client, remote, prefix="lovart_")
+                except httpx.HTTPError as exc:
+                    print(f"Lovart 对话产物下载失败，已改用远程地址: {exc}")
+                    local = remote
+                if local:
+                    links.append(f"- [{os.path.basename(local.split('?', 1)[0])}]({local})")
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"请求 Lovart 对话接口失败：{exc}") from exc
+    if not text and not links:
+        failures = lovart_failures_text(result)
+        detail = f"Lovart 没有返回文字回复：{failures}" if failures else "Lovart 没有返回文字回复，Agent 可能只执行了工具调用。"
+        raise HTTPException(status_code=502, detail=detail)
+    if links:
+        header = f"{text}\n\n产物：" if text else "Lovart 已完成本次任务，产物："
+        text = f"{header}\n" + "\n".join(links)
+    raw = {
+        "task_id": thread_id,
+        "thread_id": thread_id,
+        "project_id": project_id,
+        "provider": "lovart",
+        "model": model,
+        "mode": mode,
+        "final_status": result.get("final_status"),
+        "auto_confirmed": result.get("auto_confirmed"),
+        "artifacts": links,
+        "failures": lovart_failures_text(result),
+    }
+    return text, raw
+
+def lovart_prompt_with_requirements(prompt, requirements):
+    text = str(prompt or "")
+    items = [str(item).strip() for item in (requirements or []) if str(item or "").strip()]
+    if not items:
+        return text
+    return f"{text}\n\n要求：{'；'.join(items)}"
+
+# GPT Image 系列只有离散合法尺寸（长边 ≤GPT_IMAGE2_MAX_EDGE、总像素 ≤GPT_IMAGE2_MAX_PIXELS，无方形 4K）
+LOVART_GPT_IMAGE_TOOL_PREFIX = "generate_image_gpt_image_"
+LOVART_GPT_IMAGE_SIZES = ["1024x1024", "1536x1024", "1024x1536", "2048x2048", "2048x1152", "3840x2160", "2160x3840"]
+
+def lovart_gpt_image_size(size):
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        return ""
+    target_ratio = width / height
+    target_area = width * height
+    best = ""
+    best_score = None
+    for candidate in LOVART_GPT_IMAGE_SIZES:
+        cand_width, cand_height = parse_size_pair(candidate)
+        if max(cand_width, cand_height) > GPT_IMAGE2_MAX_EDGE or cand_width * cand_height > GPT_IMAGE2_MAX_PIXELS:
+            continue
+        score = (abs(math.log(target_ratio / (cand_width / cand_height))), abs(cand_width * cand_height - target_area))
+        if best_score is None or score < best_score:
+            best_score = score
+            best = candidate
+    return best
+
+def lovart_effective_image_size(model, size):
+    size = str(size or "").strip()
+    if str(model or "").strip().startswith(LOVART_GPT_IMAGE_TOOL_PREFIX):
+        return lovart_gpt_image_size(size) or size
+    return size
+
+def lovart_size_tier(size):
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        return ""
+    edge = max(width, height)
+    if edge >= 2160:
+        return "4K"
+    if edge >= 1440:
+        return "2K"
+    return "1K"
+
+def lovart_image_requirements(size, requested_size=""):
+    size = str(size or "").strip()
+    if not size or size == "1024x1024":
+        return []
+    tier = lovart_size_tier(size)
+    if not tier:
+        return [f"画面尺寸 {size}"]
+    text = f"{tier} 分辨率（画面尺寸 {size}）"
+    requested = str(requested_size or "").strip()
+    if requested and requested != size:
+        text = f"{text}，已从请求尺寸 {requested} 调整为 GPT Image 支持的尺寸"
+    return [text]
+
+def lovart_video_requirements(payload):
+    items = []
+    try:
+        duration = int(getattr(payload, "duration", 0) or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    if duration > 0:
+        items.append(f"时长 {duration} 秒")
+    aspect_ratio = str(getattr(payload, "aspect_ratio", "") or "").strip()
+    if aspect_ratio:
+        items.append(f"画面比例 {aspect_ratio}")
+    resolution = str(getattr(payload, "resolution", "") or "").strip()
+    if resolution:
+        items.append(f"分辨率 {resolution}")
+    return items
+
+async def generate_lovart_provider_image(prompt, size, model, reference_images=None, provider=None):
+    provider = provider or lovart_provider_config()
+    model = str(model or "").strip() or LOVART_DEFAULT_IMAGE_MODELS[0]
+    effective_size = lovart_effective_image_size(model, size)
+    prompt = lovart_prompt_with_requirements(prompt, lovart_image_requirements(effective_size, size))
+    timeout = httpx.Timeout(connect=20.0, read=180.0, write=180.0, pool=20.0)
+    async with lovart_http_client(timeout) as client:
+        local_urls, raw = await lovart_run_generation(client, provider, prompt, model, "IMAGE", reference_images)
+    return {"type": "url", "value": local_urls[0]}, raw
+
+async def generate_lovart_video(payload, provider=None):
+    provider = provider or lovart_provider_config()
+    model = str(getattr(payload, "model", "") or "").strip() or LOVART_DEFAULT_VIDEO_MODELS[0]
+    refs = [ref.dict() for ref in (getattr(payload, "images", None) or []) if getattr(ref, "url", "")]
+    refs = image_references(refs)
+    prompt = lovart_prompt_with_requirements(getattr(payload, "prompt", ""), lovart_video_requirements(payload))
+    timeout = httpx.Timeout(connect=20.0, read=180.0, write=180.0, pool=20.0)
+    async with lovart_http_client(timeout) as client:
+        local_urls, raw = await lovart_run_generation(client, provider, prompt, model, "VIDEO", refs)
+    return {**{"videos": local_urls, "task_id": raw.get("thread_id"), "raw": raw}, **build_canvas_meta(local_urls, payload, "video")}
+
 async def generate_volcengine_provider_image(prompt, size, model, reference_images=None, provider=None):
     endpoint = volcengine_endpoint_url(provider)
     size = normalize_volcengine_size(size, model)
@@ -12392,6 +13244,8 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
         return await generate_jimeng_provider_image(prompt, size, model, reference_images, provider)
     if is_runninghub_provider(provider):
         return await generate_runninghub_provider_image(prompt, size, model, reference_images, provider)
+    if is_lovart_provider(provider):
+        return await generate_lovart_provider_image(prompt, size, model, reference_images, provider)
     if effective_protocol(provider, model) == "gemini":
         return await generate_gemini_provider_image(prompt, size, model, reference_images, provider)
     if is_volcengine_provider(provider):
@@ -12713,17 +13567,8 @@ def parse_agent_decision(raw_text, message, refs, has_previous_image):
         action = "generate_image" if any(key.lower() in str(message).lower() for key in AGENT_IMAGE_KEYWORDS) else "chat"
     return {"action": action, "prompt": prompt, "reply": reply}
 
-async def decide_chat_agent_action(payload, conversation, refs):
-    has_previous_image = bool(latest_chat_image_refs(conversation, 1))
-    fallback = heuristic_agent_decision(payload.message, refs, has_previous_image)
-    provider_cfg = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
-    if is_codex_provider(provider_cfg):
-        fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
-        return fallback
-    if is_gemini_cli_provider(provider_cfg):
-        fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
-        return fallback
-    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
+def chat_agent_router_messages(payload, conversation, refs, has_previous_image):
+    """意图路由的上游 messages（流式与非流式共用，保证提示词一字不差）。"""
     history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
     custom_system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
     mem = memory_block(getattr(payload, "conversation_id", "") or "")
@@ -12753,6 +13598,23 @@ async def decide_chat_agent_action(payload, conversation, refs):
             "请返回 JSON，例如 {\"action\":\"generate_image\",\"prompt\":\"...\",\"reply\":\"...\"}"
         )
     })
+    return upstream_messages
+
+async def decide_chat_agent_action(payload, conversation, refs):
+    has_previous_image = bool(latest_chat_image_refs(conversation, 1))
+    fallback = heuristic_agent_decision(payload.message, refs, has_previous_image)
+    provider_cfg = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
+    if is_codex_provider(provider_cfg):
+        fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
+        return fallback
+    if is_gemini_cli_provider(provider_cfg):
+        fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
+        return fallback
+    if is_lovart_provider(provider_cfg):
+        fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or LOVART_DEFAULT_CHAT_MODELS)[0])
+        return fallback
+    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
+    upstream_messages = chat_agent_router_messages(payload, conversation, refs, has_previous_image)
     try:
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=AI_REQUEST_TIMEOUT) as client:
             req_body = {"model": model, "messages": upstream_messages}
@@ -12767,11 +13629,88 @@ async def decide_chat_agent_action(payload, conversation, refs):
             raw = response.json()
             decision = parse_agent_decision(text_from_chat_response(raw), payload.message, refs, has_previous_image)
             decision["router_model"] = model
+            decision["reasoning"] = reasoning_from_chat_response(raw).strip()
             return decision
     except Exception as exc:
         print(f"[chat-agent] intent router fallback: {exc}")
         fallback["router_model"] = model
         return fallback
+
+async def stream_chat_agent_decision(payload, conversation, refs, decision_out):
+    """流式版意图路由：reasoning 增量实时 yield 出去，最终决策写进 decision_out。
+    提示词 / JSON 解析 / heuristic 兜底与 decide_chat_agent_action 完全一致，只把上游调用改成流式。"""
+    has_previous_image = bool(latest_chat_image_refs(conversation, 1))
+    fallback = heuristic_agent_decision(payload.message, refs, has_previous_image)
+    provider_cfg = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
+    if is_codex_provider(provider_cfg):
+        fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
+        decision_out.update(fallback)
+        return
+    if is_gemini_cli_provider(provider_cfg):
+        fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
+        decision_out.update(fallback)
+        return
+    if is_lovart_provider(provider_cfg):
+        fallback["router_model"] = selected_model(payload.model, (provider_cfg.get("chat_models") or LOVART_DEFAULT_CHAT_MODELS)[0])
+        decision_out.update(fallback)
+        return
+    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
+    upstream_messages = chat_agent_router_messages(payload, conversation, refs, has_previous_image)
+    content_parts = []
+    reasoning_parts = []
+    try:
+        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=AI_REQUEST_TIMEOUT) as client:
+            if is_apimart_provider(provider_cfg):
+                # APIMart 不支持流式：仍然整包拿回来，拿到后一次性转发思考内容
+                response = await client.post(
+                    f"{chat_base}/chat/completions",
+                    headers=chat_hdrs,
+                    json={"model": model, "messages": upstream_messages, "stream": False},
+                )
+                response.raise_for_status()
+                raw = response.json()
+                content_parts.append(text_from_chat_response(raw))
+                reasoning_text = reasoning_from_chat_response(raw).strip()
+                if reasoning_text:
+                    reasoning_parts.append(reasoning_text)
+                    yield {"type": "reasoning", "delta": reasoning_text}
+            else:
+                async with client.stream(
+                    "POST",
+                    f"{chat_base}/chat/completions",
+                    headers=chat_hdrs,
+                    json={"model": model, "messages": upstream_messages, "stream": True},
+                ) as response:
+                    if response.status_code >= 400:
+                        body = (await response.aread()).decode("utf-8", errors="ignore")
+                        raise RuntimeError(f"上游接口错误：{body[:300]}")
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        if line.startswith("data:"):
+                            line = line[5:].strip()
+                        if line == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        reasoning_delta = reasoning_delta_from_chat_chunk(chunk)
+                        if reasoning_delta:
+                            reasoning_parts.append(reasoning_delta)
+                            yield {"type": "reasoning", "delta": reasoning_delta}
+                        delta = text_delta_from_chat_chunk(chunk)
+                        if delta:
+                            content_parts.append(delta)
+    except Exception as exc:
+        print(f"[chat-agent] intent router fallback: {exc}")
+        fallback["router_model"] = model
+        decision_out.update(fallback)
+        return
+    decision = parse_agent_decision("".join(content_parts), payload.message, refs, has_previous_image)
+    decision["router_model"] = model
+    decision["reasoning"] = "".join(reasoning_parts).strip()
+    decision_out.update(decision)
 
 async def build_chat_text_reply(payload, conversation):
     provider_cfg = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
@@ -12792,6 +13731,19 @@ async def build_chat_text_reply(payload, conversation):
         model = selected_model(payload.model, (provider_cfg.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
         payload.model = model
         text, raw = await gemini_cli_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+        return {
+            "id": uuid.uuid4().hex,
+            "role": "assistant",
+            "content": text,
+            "created_at": now_ms(),
+            "model": model,
+            "raw_usage": None,
+            "raw": raw,
+        }
+    if is_lovart_provider(provider_cfg):
+        model = selected_model(payload.model, (provider_cfg.get("chat_models") or LOVART_DEFAULT_CHAT_MODELS)[0])
+        payload.model = model
+        text, raw = await lovart_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
         return {
             "id": uuid.uuid4().hex,
             "role": "assistant",
@@ -12823,7 +13775,7 @@ async def build_chat_text_reply(payload, conversation):
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
     raw_data = unwrap_apimart_response(raw) if isinstance(raw, dict) else raw
-    return {
+    message = {
         "id": uuid.uuid4().hex,
         "role": "assistant",
         "content": text_from_chat_response(raw).strip() or "接口返回了空回复。",
@@ -12831,6 +13783,10 @@ async def build_chat_text_reply(payload, conversation):
         "model": model,
         "raw_usage": raw_data.get("usage") if isinstance(raw_data, dict) else None,
     }
+    reasoning_text = reasoning_from_chat_response(raw).strip()
+    if reasoning_text:
+        message["reasoning"] = reasoning_text
+    return message
 
 # --- 路由接口 ---
 
@@ -14505,6 +15461,11 @@ async def save_providers(payload: List[ApiProviderPayload]):
     env_updates = {}
     # 收集每个 item 的 primary 字段
     raw_primary_flags = [bool(getattr(item, "primary", False)) for item in payload]
+    stored_lovart_unlimited = {
+        p["id"]: bool(p.get("lovart_unlimited"))
+        for p in load_api_providers()
+        if p.get("id") == "lovart" or p.get("protocol") == "lovart"
+    }
     for item in payload:
         provider = normalize_provider(item.dict(exclude={"api_key"}))
         if provider["id"] == "runninghub":
@@ -14534,6 +15495,20 @@ async def save_providers(payload: List[ApiProviderPayload]):
                 env_updates[sk_env] = ""
             elif item.volcengine_secret_access_key is not None and item.volcengine_secret_access_key.strip():
                 env_updates[sk_env] = item.volcengine_secret_access_key.strip()
+        if provider["id"] == "lovart" or provider["protocol"] == "lovart":
+            ak_env = lovart_access_key_env()
+            sk_env = lovart_secret_key_env()
+            if item.clear_lovart_access_key:
+                env_updates[ak_env] = ""
+            elif item.lovart_access_key is not None and item.lovart_access_key.strip():
+                env_updates[ak_env] = item.lovart_access_key.strip()
+            if item.clear_lovart_secret_key:
+                env_updates[sk_env] = ""
+            elif item.lovart_secret_key is not None and item.lovart_secret_key.strip():
+                env_updates[sk_env] = item.lovart_secret_key.strip()
+            if item.lovart_unlimited is None:
+                provider["lovart_unlimited"] = stored_lovart_unlimited.get(provider["id"], False)
+            provider["protocol"] = "lovart"
         if provider["id"] == "comfly":
             env_updates["COMFLY_BASE_URL"] = provider["base_url"]
             env_updates["IMAGE_MODELS"] = ",".join(provider["image_models"])
@@ -14603,22 +15578,19 @@ async def api_pick_folder():
     except Exception:
         return {"path": ""}
 
-@app.get("/api/settings/output-dir")
-async def api_get_output_dir():
-    """返回当前自定义输出目录设置。空字符串表示使用默认路径。"""
-    custom = ""
-    try:
-        if os.path.isfile(SETTINGS_FILE):
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            custom = str(cfg.get("output_dir", "")).strip()
-    except Exception:
-        pass
+def output_dir_setting() -> Dict[str, Any]:
+    """自定义输出目录的唯一读取口径：/api/settings/output-dir 与 /api/settings/storage 共用。"""
+    custom = str(load_settings().get("output_dir", "")).strip()
     return {
         "output_dir": custom,
         "effective_output_dir": OUTPUT_DIR,
         "is_custom": bool(custom and os.path.isdir(custom)),
     }
+
+@app.get("/api/settings/output-dir")
+async def api_get_output_dir():
+    """返回当前自定义输出目录设置。空字符串表示使用默认路径。"""
+    return output_dir_setting()
 
 @app.put("/api/settings/output-dir")
 async def api_set_output_dir(payload: OutputDirPayload):
@@ -14654,6 +15626,138 @@ async def api_set_output_dir(payload: OutputDirPayload):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
     return {"output_dir": expanded, "effective_output_dir": expanded, "message": "输出目录已更新，重启后生效"}
+
+# ── 存储用量与上限（设置页用）──
+
+def _storage_limit_int(raw) -> Optional[int]:
+    """只接受整数值（含 100.0）；字符串/布尔/小数都算非法，返回 None 交给调用方 400。"""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    if isinstance(raw, float) and not raw.is_integer():
+        return None
+    return int(raw)
+
+
+def preview_cache_usage() -> Dict[str, int]:
+    """预览缓存用量，口径同 prune_media_previews：MEDIA_PREVIEW_DIR 内非符号链接的普通文件（不递归）。"""
+    root = os.path.abspath(MEDIA_PREVIEW_DIR)
+    files, total = 0, 0
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return {"files": 0, "bytes": 0}
+    for name in names:
+        full = os.path.join(root, name)
+        try:
+            if os.path.islink(full) or not os.path.isfile(full):
+                continue
+        except OSError:
+            continue
+        if not is_within_dir(full, root):
+            continue
+        try:
+            total += os.stat(full).st_size
+        except OSError:
+            continue
+        files += 1
+    return {"files": files, "bytes": total}
+
+
+def canvas_versions_count() -> int:
+    """全部画布的版本快照文件数，口径同 list_canvas_versions（data/canvas_versions/{id}/v{N}.json）。"""
+    try:
+        canvas_ids = os.listdir(CANVAS_VERSIONS_DIR)
+    except OSError:
+        return 0
+    count = 0
+    for canvas_id in canvas_ids:
+        vdir = os.path.join(CANVAS_VERSIONS_DIR, canvas_id)
+        try:
+            names = os.listdir(vdir)
+        except OSError:
+            continue
+        for filename in names:
+            if re.match(r"^v\d+\.json$", filename) and os.path.isfile(os.path.join(vdir, filename)):
+                count += 1
+    return count
+
+
+def dir_total_bytes(root: str) -> int:
+    """root 下所有普通文件的总字节数（递归；读不到的文件跳过）。"""
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            path = os.path.join(dirpath, filename)
+            try:
+                if os.path.islink(path):
+                    continue
+                total += os.stat(path).st_size
+            except OSError:
+                continue
+    return total
+
+
+async def storage_settings_payload() -> Dict[str, Any]:
+    """GET/PUT /api/settings/storage 共用的响应体；上限现读现算，PUT 后立刻反映新值。"""
+    usage, versions, data_bytes = await asyncio.gather(
+        asyncio.to_thread(preview_cache_usage),
+        asyncio.to_thread(canvas_versions_count),
+        asyncio.to_thread(dir_total_bytes, DATA_DIR),
+    )
+    limit_files, limit_bytes = preview_cache_limits()
+    out_dir = output_dir_setting()
+    return {
+        "preview_cache": {
+            "files": usage["files"],
+            "bytes": usage["bytes"],
+            "limit_files": limit_files,
+            "limit_mb": limit_bytes // (1024 * 1024),
+        },
+        "canvas_versions": {"count": versions, "limit": canvas_version_limit()},
+        "data": {"dir": os.path.abspath(DATA_DIR), "bytes": data_bytes},
+        "output_dir": {
+            "custom": out_dir["output_dir"],
+            "effective": out_dir["effective_output_dir"],
+            "is_custom": out_dir["is_custom"],
+        },
+    }
+
+
+@app.get("/api/settings/storage")
+async def api_get_storage_settings():
+    """存储用量与上限：预览缓存 / 画布版本 / 数据目录 / 输出目录。"""
+    return await storage_settings_payload()
+
+
+@app.put("/api/settings/storage")
+async def api_set_storage_settings(request: Request):
+    """更新存储上限：preview_limit_files / preview_limit_mb（0=该维度不清理）、canvas_version_limit（最小 1）。"""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="请求体必须是 JSON 对象")
+
+    # 先全部校验再落盘：避免同一次请求里前几个字段已经写入、后面的字段才报 400
+    updates = {}
+    for key, minimum in (("preview_limit_files", 0), ("preview_limit_mb", 0), ("canvas_version_limit", 1)):
+        if key not in payload:
+            continue
+        value = _storage_limit_int(payload.get(key))
+        if value is None or value < minimum:
+            raise HTTPException(status_code=400, detail=f"{key} 必须是不小于 {minimum} 的整数")
+        updates[key] = value
+
+    if updates:
+        cfg = load_settings()
+        cfg.update(updates)
+        os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    return await storage_settings_payload()
+
 
 @app.get("/api/asset/classification-prompt")
 async def api_get_classification_prompt():
@@ -14724,6 +15828,8 @@ class TestConnectionPayload(BaseModel):
     provider_id: str = ""
     protocol: str = "openai"
     image_request_mode: str = "openai"
+    lovart_access_key: str = ""
+    lovart_secret_key: str = ""
 
 def protocol_from_payload(payload):
     provider_id = str(getattr(payload, "provider_id", "") or "").strip().lower()
@@ -14733,6 +15839,8 @@ def protocol_from_payload(payload):
         return "runninghub"
     if provider_id == "jimeng":
         return "jimeng"
+    if provider_id == "lovart":
+        return "lovart"
     base_url = str(getattr(payload, "base_url", "") or "").strip().lower()
     if "runninghub.cn" in base_url or "runninghub.ai" in base_url:
         return "runninghub"
@@ -15016,6 +16124,47 @@ async def test_provider_connection(payload: TestConnectionPayload):
             "protocol": "runninghub",
             "raw": payload_models.get("raw"),
         }
+    if protocol == "lovart":
+        provider = {"id": payload.provider_id or "lovart", "name": "Lovart", "base_url": (payload.base_url or LOVART_DEFAULT_BASE_URL).strip().rstrip("/"), "protocol": "lovart"}
+        try:
+            async with lovart_http_client(20) as client:
+                data = await lovart_request(
+                    client, provider, "POST", "/mode/query", body={},
+                    access_key=str(payload.api_key or "").strip() or str(getattr(payload, "lovart_access_key", "") or "").strip(),
+                    secret_key=str(getattr(payload, "lovart_secret_key", "") or "").strip(),
+                )
+        except httpx.HTTPError as e:
+            reason = str(e) or type(e).__name__
+            return {"ok": False, "status": 0, "protocol": "lovart", "message": f"Lovart 连通性测试失败：{reason[:300]}"}
+        data = data if isinstance(data, dict) else {}
+        details = []
+        for key in ("mode", "current_mode"):
+            value = data.get(key)
+            if value not in (None, ""):
+                details.append(f"模式：{value}")
+                break
+        if data.get("unlimited") is not None:
+            details.append(f"unlimited={bool(data.get('unlimited'))}")
+        for key in ("credits", "credit", "balance", "quota", "points"):
+            value = data.get(key)
+            if value not in (None, ""):
+                details.append(f"额度：{value}")
+                break
+        message = "Lovart 密钥有效，签名鉴权通过"
+        if details:
+            message = f"{message}（{'，'.join(str(item) for item in details)}）"
+        return {
+            "ok": True,
+            "status": 200,
+            "protocol": "lovart",
+            "message": message,
+            "model_count": len(LOVART_DEFAULT_IMAGE_MODELS) + len(LOVART_DEFAULT_CHAT_MODELS) + len(LOVART_DEFAULT_VIDEO_MODELS),
+            "image_models": LOVART_DEFAULT_IMAGE_MODELS,
+            "chat_models": LOVART_DEFAULT_CHAT_MODELS,
+            "video_models": LOVART_DEFAULT_VIDEO_MODELS,
+            "all": [*LOVART_DEFAULT_IMAGE_MODELS, *LOVART_DEFAULT_CHAT_MODELS, *LOVART_DEFAULT_VIDEO_MODELS],
+            "raw": data,
+        }
     base_url = (payload.base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -15250,6 +16399,17 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
     if protocol == "runninghub":
         provider = {"id": "runninghub", "name": "RunningHub", "base_url": base_url or RUNNINGHUB_DEFAULT_BASE_URL, "protocol": "runninghub", "api_key": api_key}
         return await runninghub_models_payload(provider)
+    if protocol == "lovart":
+        return {
+            "total": len(LOVART_DEFAULT_IMAGE_MODELS) + len(LOVART_DEFAULT_CHAT_MODELS) + len(LOVART_DEFAULT_VIDEO_MODELS),
+            "protocol": "lovart",
+            "image_models": LOVART_DEFAULT_IMAGE_MODELS,
+            "chat_models": LOVART_DEFAULT_CHAT_MODELS,
+            "video_models": LOVART_DEFAULT_VIDEO_MODELS,
+            "all": [*LOVART_DEFAULT_IMAGE_MODELS, *LOVART_DEFAULT_CHAT_MODELS, *LOVART_DEFAULT_VIDEO_MODELS],
+            "message": "Lovart OpenAPI 使用平台内置模型清单。",
+            "raw": {},
+        }
     base_url = (base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -15372,12 +16532,63 @@ async def fetch_upstream_models(provider_id: str):
         return await fetch_models_from_upstream("", "", "codex", provider.get("image_request_mode") or "openai")
     if is_gemini_cli_provider(provider):
         return await fetch_models_from_upstream("", "", "gemini-cli", provider.get("image_request_mode") or "openai")
+    if is_lovart_provider(provider):
+        return await fetch_models_from_upstream(provider.get("base_url") or "", "", "lovart", provider.get("image_request_mode") or "openai")
     api_key = os.getenv(runninghub_wallet_key_env(), "") if provider["id"] == "runninghub" else ""
     if not api_key:
         api_key = provider_env_key_value(provider["id"])
     if not api_key:
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider_id} 未配置 API Key")
     return await fetch_models_from_upstream(provider.get("base_url") or "", api_key, provider_protocol(provider), provider.get("image_request_mode") or "openai")
+
+class LovartModePayload(BaseModel):
+    unlimited: bool = False
+    base_url: str = ""
+    lovart_access_key: str = ""
+    lovart_secret_key: str = ""
+
+@app.post("/api/providers/lovart/mode")
+async def set_lovart_mode(payload: LovartModePayload):
+    provider = lovart_provider_config()
+    base_url = str(payload.base_url or "").strip().rstrip("/")
+    if base_url:
+        provider = {**provider, "base_url": base_url}
+    access_key = str(payload.lovart_access_key or "").strip()
+    secret_key = str(payload.lovart_secret_key or "").strip()
+    # unlimited=true 是排队模式（不消耗积分），false 是快速模式（消耗积分）
+    unlimited = bool(payload.unlimited)
+    try:
+        async with lovart_http_client(20) as client:
+            await lovart_request(client, provider, "POST", "/mode/set", body={"unlimited": unlimited}, access_key=access_key, secret_key=secret_key)
+            data = await lovart_request(client, provider, "POST", "/mode/query", body={}, access_key=access_key, secret_key=secret_key)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"请求 Lovart 接口失败：{exc}") from exc
+    data = data if isinstance(data, dict) else {}
+    mode = ""
+    for key in ("mode", "current_mode"):
+        value = data.get(key)
+        if value not in (None, ""):
+            mode = str(value)
+            break
+    credits = None
+    for key in ("credits", "credit", "balance", "quota", "points"):
+        value = data.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            credits = value
+            break
+        text = str(value or "").strip()
+        if re.fullmatch(r"-?\d+(?:\.\d+)?", text):
+            credits = float(text) if "." in text else int(text)
+            break
+    effective = unlimited if data.get("unlimited") is None else bool(data.get("unlimited"))
+    lovart_store_unlimited(effective)
+    label = "排队模式（不消耗积分）" if effective else "快速模式（消耗积分）"
+    message = f"Lovart 已切换为{label}"
+    if mode:
+        message = f"{message}，当前模式：{mode}"
+    if credits is not None:
+        message = f"{message}，剩余额度：{credits}"
+    return {"ok": True, "unlimited": effective, "mode": mode, "credits": credits, "message": message}
 
 async def build_online_image_result(payload: OnlineImageRequest):
     provider = get_api_provider(payload.provider_id)
@@ -17033,6 +18244,15 @@ async def canvas_video_run(payload: CanvasVideoRequest):
         except httpx.HTTPError as exc:
             log_net_error(f"视频(RunningHub) 网络/TLS错误 model={payload.model}", exc)
             raise HTTPException(status_code=502, detail=f"请求 RunningHub 视频接口失败：{exc}") from exc
+    if is_lovart_provider(provider):
+        try:
+            return await generate_lovart_video(payload, provider)
+        except httpx.HTTPStatusError as exc:
+            text = exc.response.text
+            raise HTTPException(status_code=exc.response.status_code, detail=f"Lovart 视频接口错误：{text[:300]}") from exc
+        except httpx.HTTPError as exc:
+            log_net_error(f"视频(Lovart) 网络/TLS错误 model={payload.model}", exc)
+            raise HTTPException(status_code=502, detail=f"请求 Lovart 视频接口失败：{exc}") from exc
     base_url = video_api_root(provider)
     if not base_url:
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
@@ -17584,6 +18804,9 @@ async def _pi_llm_call(payload, message, system_prompt, images, videos):
     if is_gemini_cli_provider(prov):
         text, _raw = await gemini_cli_chat_text(fake, [])
         return text
+    if is_lovart_provider(prov):
+        text, _raw = await lovart_chat_text(fake, [])
+        return text
     chat_base, chat_hdrs, mdl = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     content_parts: list = [{"type": "text", "text": message}]
     for img in (images or [])[:8]:
@@ -17638,7 +18861,7 @@ async def _run_prompt_intelligence(payload):
 async def canvas_llm(payload: CanvasLLMRequest):
     _provider = get_api_provider(payload.provider)
     # —— Prompt Intelligence（v1）：有参考素材或反推 ON 时启用；失败自动回退原流程 ——
-    if HAS_PROMPT_INTELLIGENCE and (payload.reverse or payload.images or payload.videos):
+    if HAS_PROMPT_INTELLIGENCE and not payload.no_prompt_intelligence and (payload.reverse or payload.images or payload.videos):
         try:
             _pi_result = await _run_prompt_intelligence(payload)
             if _pi_result and _pi_result.get("ok") and _pi_result.get("final_prompt"):
@@ -17660,6 +18883,11 @@ async def canvas_llm(payload: CanvasLLMRequest):
         model = selected_model(payload.model, (_provider.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
         payload.model = model
         text, raw = await gemini_cli_chat_text(payload, payload.messages)
+        return {"text": text, "model": model, "raw_usage": None, "raw": raw}
+    if is_lovart_provider(_provider):
+        model = selected_model(payload.model, (_provider.get("chat_models") or LOVART_DEFAULT_CHAT_MODELS)[0])
+        payload.model = model
+        text, raw = await lovart_chat_text(payload, payload.messages)
         return {"text": text, "model": model, "raw_usage": None, "raw": raw}
     chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     # 判断协议：APIMart 异步 vs 标准 OpenAI
@@ -18744,6 +19972,16 @@ async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_m
         )
         text, _raw = await gemini_cli_chat_text(payload, [])
         return text, resolved_model
+    if is_lovart_provider(llm_provider):
+        resolved_model = selected_model(model, (llm_provider.get("chat_models") or LOVART_DEFAULT_CHAT_MODELS)[0])
+        payload = CanvasLLMRequest(
+            message=(prompt or "描述图片").strip() or "描述图片",
+            provider=provider_id or "lovart",
+            model=resolved_model,
+            images=[abs_path],
+        )
+        text, _raw = await lovart_chat_text(payload, [])
+        return text, resolved_model
     chat_base, chat_hdrs, resolved_model = resolve_chat_provider(provider_id, model, ms_model)
     is_apimart = is_apimart_provider(llm_provider)
     prompt_text = (prompt or "描述图片").strip() or "描述图片"
@@ -18849,7 +20087,7 @@ async def purge_canvas(canvas_id: str):
 @app.get("/api/canvases/{canvas_id}/versions")
 async def list_canvas_versions_api(canvas_id: str):
     load_canvas(canvas_id)  # 404 校验（含软删除）
-    return {"versions": list_canvas_versions(canvas_id), "limit": CANVAS_VERSION_LIMIT}
+    return {"versions": list_canvas_versions(canvas_id), "limit": canvas_version_limit()}
 
 @app.get("/api/canvases/{canvas_id}/versions/{version}")
 async def get_canvas_version_api(canvas_id: str, version: int):
@@ -18984,6 +20222,23 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
             return {"conversation": conversation, "message": assistant_message}
+        if is_lovart_provider(_codex_provider):
+            model = selected_model(payload.model, (_codex_provider.get("chat_models") or LOVART_DEFAULT_CHAT_MODELS)[0])
+            payload.model = model
+            text, raw = await lovart_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+            assistant_message = {
+                "id": uuid.uuid4().hex,
+                "role": "assistant",
+                "content": text,
+                "created_at": now_ms(),
+                "model": model,
+                "raw_usage": None,
+                "raw": raw,
+            }
+            conversation["messages"].append(assistant_message)
+            conversation["updated_at"] = now_ms()
+            save_conversation(user_id, conversation)
+            return {"conversation": conversation, "message": assistant_message}
         chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
         _conv_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
         _conv_is_apimart = is_apimart_provider(_conv_provider)
@@ -19020,6 +20275,9 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             "model": model,
             "raw_usage": raw_data.get("usage") if isinstance(raw_data, dict) else None,
         }
+        reasoning_text = reasoning_from_chat_response(raw).strip()
+        if reasoning_text:
+            assistant_message["reasoning"] = reasoning_text
 
     conversation["messages"].append(assistant_message)
     conversation["updated_at"] = now_ms()
@@ -19107,10 +20365,135 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
         assistant_message = await build_chat_text_reply(payload, conversation)
         assistant_message["agent_action"] = "chat"
 
+    reasoning_text = str(decision.pop("reasoning", "") or "").strip()
+    if reasoning_text and not assistant_message.get("reasoning"):
+        assistant_message["reasoning"] = reasoning_text
     conversation["messages"].append(assistant_message)
     conversation["updated_at"] = now_ms()
     save_conversation(user_id, conversation)
     return {"conversation": conversation, "message": assistant_message, "agent": {"action": action, "decision": decision}}
+
+@app.post("/api/chat/agent/stream")
+async def chat_agent_stream(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
+    """agent 模式的流式版：决策阶段的 reasoning 实时转发、动作阶段发 status，落盘与 /api/chat/agent 一致。"""
+    user_id = safe_user_id(x_user_id, request)
+    started_at = time.monotonic()
+    conversation = (
+        load_conversation(user_id, payload.conversation_id)
+        if payload.conversation_id
+        else new_conversation(user_id, display_title(payload.message))
+    )
+    if not conversation.get("messages"):
+        conversation["title"] = display_title(payload.message)
+
+    refs = [ref.dict() for ref in payload.reference_images if ref.url]
+    image_refs = image_references(refs)
+    user_message = {
+        "id": uuid.uuid4().hex,
+        "role": "user",
+        "content": payload.message,
+        "created_at": now_ms(),
+        "attachments": refs,
+        "mode": "agent",
+    }
+    conversation["messages"].append(user_message)
+    conversation["updated_at"] = now_ms()
+    save_conversation(user_id, conversation)
+
+    async def stream():
+        yield sse_event({"type": "meta", "conversation": conversation})
+        decision = {}
+        try:
+            async for event in stream_chat_agent_decision(payload, conversation, image_refs, decision):
+                yield sse_event(event)
+        except HTTPException as exc:
+            yield sse_event({"type": "error", "detail": exc.detail})
+            return
+        except Exception as exc:
+            yield sse_event({"type": "error", "detail": f"请求上游接口失败：{exc}"})
+            return
+
+        action = decision.get("action") or "chat"
+        tool_refs = image_refs[:]
+        inherited_size = ""
+        if action == "edit_image" and not tool_refs:
+            tool_refs = latest_chat_image_refs(conversation, 1)
+            inherited_size = image_size_from_reference(tool_refs[0]) if tool_refs else ""
+        if action == "edit_image" and not tool_refs:
+            action = "generate_image"
+
+        if action in {"generate_image", "edit_image"}:
+            try:
+                image_provider = pick_chat_image_provider(payload.image_provider or payload.provider, payload.provider)
+            except HTTPException as exc:
+                yield sse_event({"type": "error", "detail": exc.detail})
+                return
+            default_model = (image_provider.get("image_models") or [IMAGE_MODEL])[0]
+            model = selected_model(payload.image_model or default_model, default_model)
+            prompt = decision.get("prompt") or payload.message
+            prompt_size = chat_prompt_size_override(payload.message, payload.size) or chat_prompt_size_override(prompt, payload.size)
+            image_size = prompt_size or inherited_size or payload.size
+            requested_count = 1 if action == "edit_image" else chat_requested_image_count(payload.message)
+            prompts = chat_split_parallel_prompts(prompt, requested_count)
+            yield sse_event({"type": "status", "detail": "正在修改图片…" if action == "edit_image" else "正在生成图片…"})
+            local_urls = []
+            raw_items = []
+            try:
+                for item_prompt in prompts:
+                    image_data, raw = await generate_ai_image(item_prompt, image_size, payload.quality, model, tool_refs, image_provider["id"])
+                    local_urls.append(await save_ai_image_to_output(image_data, prefix="chat_"))
+                    raw_items.append(raw)
+            except httpx.HTTPStatusError as exc:
+                text = exc.response.text or ""
+                detail = friendly_image_error_detail(text, image_size, model) or f"上游生图接口错误：{text[:300]}"
+                yield sse_event({"type": "error", "detail": detail})
+                return
+            except httpx.HTTPError as exc:
+                log_net_error(f"对话生图 网络/TLS错误 model={model}", exc)
+                yield sse_event({"type": "error", "detail": f"请求上游生图接口失败：{exc}"})
+                return
+            local_url = local_urls[0] if local_urls else ""
+            assistant_message = {
+                "id": uuid.uuid4().hex,
+                "role": "assistant",
+                "type": "image",
+                "content": prompt,
+                "image_url": local_url,
+                "image_urls": local_urls,
+                "created_at": now_ms(),
+                "model": model,
+                "provider": image_provider["id"],
+                "size": image_size,
+                "image_count": len(local_urls),
+                "prompts": prompts,
+                "agent_action": action,
+                "agent_reply": decision.get("reply") or "",
+                "used_references": tool_refs,
+                "raw_usage": raw_items[0].get("usage") if raw_items and isinstance(raw_items[0], dict) else None,
+            }
+        else:
+            try:
+                assistant_message = await build_chat_text_reply(payload, conversation)
+            except HTTPException as exc:
+                yield sse_event({"type": "error", "detail": exc.detail})
+                return
+            except Exception as exc:
+                yield sse_event({"type": "error", "detail": f"请求上游接口失败：{exc}"})
+                return
+            assistant_message["agent_action"] = "chat"
+
+        reasoning_text = str(decision.pop("reasoning", "") or "").strip()
+        if reasoning_text and not assistant_message.get("reasoning"):
+            assistant_message["reasoning"] = reasoning_text
+        assistant_message["elapsed_ms"] = int((time.monotonic() - started_at) * 1000)
+        conversation["messages"].append(assistant_message)
+        conversation["updated_at"] = now_ms()
+        save_conversation(user_id, conversation)
+        if action not in {"generate_image", "edit_image"}:
+            yield sse_event({"type": "delta", "delta": assistant_message.get("content") or ""})
+        yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 @app.post("/api/chat/stream")
 async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
@@ -19196,6 +20579,34 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
 
         return StreamingResponse(gemini_cli_stream(), media_type="text/event-stream")
 
+    if is_lovart_provider(_codex_provider):
+        model = selected_model(payload.model, (_codex_provider.get("chat_models") or LOVART_DEFAULT_CHAT_MODELS)[0])
+        payload.model = model
+
+        async def lovart_stream():
+            yield sse_event({"type": "meta", "conversation": conversation})
+            try:
+                text, raw = await lovart_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+            except HTTPException as exc:
+                yield sse_event({"type": "error", "detail": exc.detail})
+                return
+            assistant_message = {
+                "id": uuid.uuid4().hex,
+                "role": "assistant",
+                "content": text,
+                "created_at": now_ms(),
+                "model": model,
+                "raw_usage": None,
+                "raw": raw,
+            }
+            conversation["messages"].append(assistant_message)
+            conversation["updated_at"] = now_ms()
+            save_conversation(user_id, conversation)
+            yield sse_event({"type": "delta", "delta": text})
+            yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
+
+        return StreamingResponse(lovart_stream(), media_type="text/event-stream")
+
     chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     _stream_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
     history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
@@ -19207,6 +20618,7 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
 
     async def stream():
         content_parts = []
+        reasoning_parts = []
         raw_usage = None
         yield sse_event({"type": "meta", "conversation": conversation})
         try:
@@ -19236,6 +20648,10 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
                             continue
                         if isinstance(chunk, dict) and chunk.get("usage"):
                             raw_usage = chunk.get("usage")
+                        reasoning_delta = reasoning_delta_from_chat_chunk(chunk)
+                        if reasoning_delta:
+                            reasoning_parts.append(reasoning_delta)
+                            yield sse_event({"type": "reasoning", "delta": reasoning_delta})
                         delta = text_delta_from_chat_chunk(chunk)
                         if delta:
                             content_parts.append(delta)
@@ -19253,6 +20669,9 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
             "model": model,
             "raw_usage": raw_usage,
         }
+        reasoning_text = "".join(reasoning_parts).strip()
+        if reasoning_text:
+            assistant_message["reasoning"] = reasoning_text
         conversation["messages"].append(assistant_message)
         conversation["updated_at"] = now_ms()
         save_conversation(user_id, conversation)
@@ -24504,6 +25923,656 @@ async def agent_session_get(session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"session": session}
+
+
+# ===========================================================================
+# Agent 真·循环（POST /api/agent/run · SSE 流式）—— 接口契约 v1
+#   每一轮把「用户指令 + 最新画布摘要 + 已执行步骤与结果 + 失败原因」回灌模型，
+#   模型决定下一批步骤 → 服务端真实执行 → 结果再回灌，直到模型给出总结。
+#   硬规则：max_steps 上限 / 最多 6 轮模型调用 / 同一 tool+args 连续失败 2 次跳过 /
+#          连续两轮无成功步骤终止 / 删除类与 force 类步骤发 confirm_required 后跳过。
+#   画布权威状态一律由后端 load_canvas(canvas_id) 读取，不信任前端传的图。
+# ===========================================================================
+
+AGENT_RUN_MAX_ROUNDS = 6
+AGENT_RUN_MAX_STEPS_CAP = 24
+AGENT_RUN_HEARTBEAT_SECONDS = 15
+AGENT_RUN_CONFIRM_TOOLS = {"delete_node"}
+# 这些错误码重试同样的调用没意义（其余按 retryable=true 回灌给模型换招）
+AGENT_RUN_NON_RETRYABLE_CODES = {
+    "unknown_tool", "invalid_args", "node_not_found", "canvas_not_found",
+    "task_not_found", "references_exist",
+}
+
+_AGENT_RUN_SYSTEM_PROMPT = (
+    "你是 NOVAI 无限画布的智能助手 Agent，运行在服务端的循环里：每一轮你只决定「接下来做哪几步」，"
+    "系统会真实执行这些步骤，并把执行结果回灌给你；你据此决定下一轮，直到可以回复用户为止。\n"
+    "可用工具清单（JSON Schema）：\n{tools_json}\n"
+    "当前画布快照摘要（由后端从磁盘读取，是权威状态，只能引用其中真实存在的 ID）：\n{canvas_summary}\n"
+    "{focus_text}\n"
+    "输出要求：只返回 JSON，不要 Markdown 代码围栏，不要任何解释文字。\n"
+    "1) 还需要继续操作时：{{\"thought\": \"你的判断\", \"steps\": [{{\"tool\": \"工具名\", \"args\": {{...}}, "
+    "\"description\": \"这一步做什么（给用户看的中文短句）\"}}], \"done\": false, \"message\": \"\"}}\n"
+    "2) 已经完成或无需再操作时：{{\"done\": true, \"message\": \"给用户的总结（中文，说明做了什么、结果如何、失败了什么）\"}}\n"
+    "3) 每轮 steps 建议 1-3 步，只做当前最有必要的，先看结果再决定下一步，不要一次把整个任务排完。\n"
+    "4) 某步失败时要换一种做法（改参数、换工具、先补前置步骤），不要重复提交完全相同的 tool+args。\n"
+    "5) 生成图片/视频优先用 generate_image / generate_video（一步完成建节点 + 发起真实生成）；"
+    "用户选中的节点及其素材 URL（见画布摘要）优先用作参考图。\n"
+    "6) 删除类操作会被系统拦截（一期不执行），不要把删除当成达成目标的手段。\n"
+)
+
+_AGENT_RUN_RESULT_KEYS = (
+    "node_id", "prompt_node_id", "task_id", "status", "message", "connection", "duplicate",
+    "node_count", "connection_count", "canvas_id", "total", "removed_connections",
+    "deleted_node", "provider", "model", "size", "duration", "motion_transfer",
+    "reference_count", "query", "kind",
+)
+
+
+class AgentRunError(Exception):
+    """Agent 循环内部错误（带机器可读 code，最终以 SSE error 事件返回）。"""
+
+    def __init__(self, message, code="agent_run_error"):
+        super().__init__(message)
+        self.message = str(message)
+        self.code = code
+
+
+class AgentRunFocus(BaseModel):
+    """用户此刻的注意力：只是提示，后端不据此做任何正确性判断。"""
+
+    selected_node_ids: List[str] = []
+    reference_images: List[str] = []
+    reference_videos: List[str] = []
+    viewport: Optional[Dict[str, Any]] = None
+
+
+class AgentRunRequest(BaseModel):
+    canvas_id: str
+    instruction: str = Field(min_length=1, max_length=4000)
+    focus: Optional[AgentRunFocus] = None
+    provider: str = "comfly"
+    model: str = ""
+    ms_model: str = ""
+    max_steps: int = 12
+
+
+def _agent_sse_event(event, data):
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _agent_run_focus_dict(focus):
+    if focus is None:
+        return {}
+    if hasattr(focus, "model_dump"):
+        return focus.model_dump()
+    if hasattr(focus, "dict"):
+        return focus.dict()
+    return focus if isinstance(focus, dict) else {}
+
+
+def _agent_run_normalize_focus(focus):
+    """清洗 focus：只做类型收敛，缺字段/空对象一律可用。"""
+    data = _agent_run_focus_dict(focus)
+
+    def _str_list(key, limit=20):
+        raw = data.get(key)
+        if isinstance(raw, str):
+            raw = [raw]
+        out = []
+        for item in (raw if isinstance(raw, list) else []):
+            text = str(item or "").strip()
+            if text and text not in out:
+                out.append(text)
+        return out[:limit]
+
+    vp = None
+    raw_vp = data.get("viewport")
+    if isinstance(raw_vp, dict):
+        try:
+            vp = {"x": float(raw_vp.get("x") or 0), "y": float(raw_vp.get("y") or 0),
+                  "scale": float(raw_vp.get("scale") or 1)}
+        except (TypeError, ValueError):
+            vp = None
+    return {
+        "selected_node_ids": _str_list("selected_node_ids"),
+        "reference_images": _str_list("reference_images"),
+        "reference_videos": _str_list("reference_videos"),
+        "viewport": vp,
+    }
+
+
+def _agent_run_focus_text(focus, canvas):
+    """把 focus 渲染成 system prompt 的「用户当前注意力」段落（选中节点标注真实存在性）。"""
+    nodes = {}
+    for node in (canvas.get("nodes") or []):
+        if isinstance(node, dict) and node.get("id"):
+            nodes[str(node["id"])] = node
+    lines = []
+    selected = focus.get("selected_node_ids") or []
+    if selected:
+        exist = [nid for nid in selected if nid in nodes]
+        missing = [nid for nid in selected if nid not in nodes]
+        if exist:
+            lines.append("用户当前选中的节点（画布上真实存在，操作应优先考虑它们）：")
+            for nid in exist:
+                node = nodes[nid]
+                lines.append(f"- {nid}｜type={node.get('type')}｜标题={node.get('title') or '无'}")
+        if missing:
+            lines.append("用户提到但当前画布上不存在的节点 ID（可能已过期，不要盲信）：" + "、".join(missing))
+    else:
+        lines.append("用户当前没有选中任何节点。")
+    if focus.get("reference_images"):
+        lines.append("用户附带的参考图 URL：" + "、".join(focus["reference_images"][:5]))
+    if focus.get("reference_videos"):
+        lines.append("用户附带的参考视频 URL：" + "、".join(focus["reference_videos"][:5]))
+    if focus.get("viewport"):
+        vp = focus["viewport"]
+        lines.append(f"用户视口：x={vp.get('x')} y={vp.get('y')} scale={vp.get('scale')}")
+    lines.append("注意：以上只是「用户此刻的注意力」提示；画布权威状态以画布摘要为准。")
+    return "\n".join(lines)
+
+
+def _agent_run_trim_text(value, limit=700):
+    text = value if isinstance(value, str) else str(value)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _agent_run_digest_text(result, max_chars=700):
+    """把工具返回值压成给模型看的短摘要（成功给关键字段，避免回灌整张画布）。"""
+    if result is None:
+        return "（无返回）"
+    if not isinstance(result, dict):
+        return _agent_run_trim_text(result, 300)
+    digest = {}
+    for key in _AGENT_RUN_RESULT_KEYS:
+        if key in result:
+            digest[key] = result[key]
+    canvas = result.get("canvas")
+    if isinstance(canvas, dict):
+        digest["canvas"] = {"canvas_id": canvas.get("canvas_id"), "title": canvas.get("title"),
+                            "node_count": canvas.get("node_count"),
+                            "connection_count": canvas.get("connection_count")}
+    items = result.get("items") if isinstance(result.get("items"), list) else result.get("results")
+    if isinstance(items, list):
+        digest["items"] = [{"url": (it or {}).get("url"), "name": (it or {}).get("name"),
+                            "kind": (it or {}).get("kind")} for it in items[:5] if isinstance(it, dict)]
+    canvases = result.get("canvases")
+    if isinstance(canvases, list):
+        digest["canvases"] = [{"id": (c or {}).get("id"), "title": (c or {}).get("title"),
+                               "node_count": (c or {}).get("node_count")} for c in canvases[:10] if isinstance(c, dict)]
+    if not digest:
+        digest = {k: result[k] for k in list(result.keys())[:8]}
+    try:
+        text = json.dumps(digest, ensure_ascii=False)
+    except Exception:
+        text = str(digest)
+    return text if len(text) <= max_chars else text[:max_chars] + "…"
+
+
+def _agent_run_history_text(history, max_items=30):
+    if not history:
+        return "（还没有执行任何步骤）"
+    lines = []
+    for rec in history[-max_items:]:
+        if rec.get("ok"):
+            lines.append(f"- #{rec.get('index')} {rec.get('tool')} 成功，返回：{rec.get('digest')}")
+        else:
+            lines.append(f"- #{rec.get('index')} {rec.get('tool')} 失败（code={rec.get('code')}）：{rec.get('error')}")
+    return "\n".join(lines)
+
+
+def _agent_run_user_prompt(instruction, history, round_no, max_steps, steps_executed, last_error):
+    parts = [f"用户指令：{instruction}"]
+    parts.append(f"进度：第 {round_no} 轮（最多 {AGENT_RUN_MAX_ROUNDS} 轮），已执行 {steps_executed}/{max_steps} 步。")
+    parts.append("本轮之前已执行的步骤与结果：\n" + _agent_run_history_text(history))
+    if last_error:
+        parts.append(f"最近一次失败原因（请换一种做法，不要重复同样的调用）：{last_error}")
+    parts.append("请返回 JSON：还需要操作就给 steps（done=false），已经完成就给 done=true + message。")
+    return "\n".join(parts)
+
+
+def _agent_run_normalize_steps(raw_steps):
+    steps, unknown = [], []
+    if not isinstance(raw_steps, list):
+        return steps, unknown
+    for item in raw_steps:
+        if not isinstance(item, dict):
+            unknown.append("<非对象>")
+            continue
+        tool = str(item.get("tool") or "").strip()
+        if tool not in AGENT_TOOLS:
+            unknown.append(tool or "<空>")
+            continue
+        args = item.get("args")
+        if args is None:
+            args = {}
+        if not isinstance(args, dict):
+            unknown.append(f"{tool}（args 不是对象）")
+            continue
+        steps.append({"tool": tool, "args": dict(args),
+                      "description": str(item.get("description") or "")[:300]})
+    return steps, unknown
+
+
+def _agent_run_step_signature(tool, args):
+    try:
+        return f"{tool}:{json.dumps(args or {}, ensure_ascii=False, sort_keys=True)}"
+    except Exception:
+        return f"{tool}:{args}"
+
+
+def _agent_run_confirm_reason(tool, args):
+    """删除类 / force 类步骤一期不执行：返回给用户看的理由，否则返回空串。"""
+    if tool in AGENT_RUN_CONFIRM_TOOLS or str(tool).startswith("delete"):
+        return f"{tool} 会删除画布内容，需要用户确认才能执行（一期不做交互确认，已跳过该步）"
+    for key, value in (args or {}).items():
+        if str(key).lower() == "force" and value:
+            return f"{tool} 要求 force=true（强制删除/覆盖），需要用户确认才能执行（一期不做交互确认，已跳过该步）"
+    return ""
+
+
+def _agent_run_load_canvas_soft(canvas_id):
+    try:
+        return load_canvas(canvas_id)
+    except Exception:
+        return None
+
+
+def _agent_canvas_ops(before_canvas, after_canvas):
+    """按执行前后真实画布差异生成 canvas_ops；没有任何变化时返回空 dict（前端会省略该字段）。"""
+    if not isinstance(before_canvas, dict) or not isinstance(after_canvas, dict):
+        return {}
+
+    def _index(canvas):
+        nodes, conns = {}, {}
+        for node in (canvas.get("nodes") or []):
+            if isinstance(node, dict) and node.get("id"):
+                nodes[str(node["id"])] = node
+        for conn in (canvas.get("connections") or []):
+            if isinstance(conn, dict):
+                key = (str(conn.get("from") or ""), str(conn.get("to") or ""), str(conn.get("kind") or "input"))
+                conns[key] = conn
+        return nodes, conns
+
+    before_nodes, before_conns = _index(before_canvas)
+    after_nodes, after_conns = _index(after_canvas)
+    ops = {}
+    upsert = [after_nodes[nid] for nid in after_nodes
+              if nid not in before_nodes or after_nodes[nid] != before_nodes[nid]]
+    removed = [nid for nid in before_nodes if nid not in after_nodes]
+    conn_upsert = [after_conns[key] for key in after_conns
+                   if key not in before_conns or after_conns[key] != before_conns[key]]
+    conn_remove = [{"from": key[0], "to": key[1]} for key in before_conns if key not in after_conns]
+    if upsert:
+        ops["nodes_upsert"] = upsert
+    if removed:
+        ops["nodes_remove"] = removed
+    if conn_upsert:
+        ops["connections_upsert"] = conn_upsert
+    if conn_remove:
+        ops["connections_remove"] = conn_remove
+    return ops
+
+
+def _agent_run_resolve_chat(provider, model, ms_model):
+    """按 plan 同样的顺序挑一个可用对话 provider；全都不可用则 400（前端据此回退原聊天）。"""
+    tried, last_detail = [], ""
+    seen = set()
+    candidates = [provider] if provider and provider != "comfly" else []
+    candidates += _agent_available_providers()
+    candidates = [p for p in candidates if not (p in seen or seen.add(p))]
+    for cand in candidates:
+        tried.append(cand)
+        try:
+            chat_base, chat_hdrs, mdl = resolve_chat_provider(
+                cand, model if cand == provider else "", ms_model if cand == "modelscope" else "")
+        except HTTPException as exc:
+            last_detail = str(exc.detail)
+            continue
+        if not chat_base:
+            last_detail = f"{cand} 未配置 Base URL"
+            continue
+        return {"provider": cand, "base": chat_base, "headers": chat_hdrs, "model": mdl,
+                "provider_cfg": get_api_provider(cand) if cand not in ("modelscope",) else {}}
+    raise HTTPException(status_code=400,
+                        detail=f"无法运行 Agent（对话模型不可用）：{last_detail or '无可用 provider'}"
+                               f"（已尝试: {'、'.join(tried)}）")
+
+
+async def _agent_run_chat(chat, messages):
+    """单次非流式对话调用（与 plan 同一套 provider/请求风格）。"""
+    try:
+        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV,
+                                     timeout=AI_REQUEST_TIMEOUT) as client:
+            body = {"model": chat["model"], "messages": messages}
+            if is_apimart_provider(chat.get("provider_cfg")):
+                body["stream"] = False
+            response = await client.post(f"{chat['base']}/chat/completions", headers=chat["headers"], json=body)
+            response.raise_for_status()
+            raw = response.json()
+    except httpx.HTTPStatusError as exc:
+        raise AgentRunError(f"上游模型接口错误 {exc.response.text[:200]}", code="provider_http_error")
+    except httpx.HTTPError as exc:
+        raise AgentRunError(f"请求上游模型接口出错：{exc}", code="provider_unreachable")
+    except Exception as exc:
+        raise AgentRunError(f"{type(exc).__name__}: {exc}", code="provider_error")
+    text = text_from_chat_response(raw) or ""
+    if not text.strip():
+        raise AgentRunError("模型返回了空内容", code="empty_model_reply")
+    return text
+
+
+def _agent_run_parse_round(text):
+    """解析模型单轮返回：{thought, steps, done, message}。"""
+    json_text = _agent_extract_json(text)
+    if not json_text:
+        raise AgentRunError(f"模型返回的不是合法 JSON：{(text or '')[:200]}", code="bad_model_json")
+    try:
+        data = json.loads(json_text)
+    except Exception as exc:
+        raise AgentRunError(f"模型 JSON 解析失败：{exc}", code="bad_model_json")
+    if not isinstance(data, dict):
+        raise AgentRunError("模型返回的不是 JSON 对象", code="bad_model_json")
+    return data
+
+
+def _agent_run_persist_session(session, status, message, history, rounds, steps_executed,
+                               mutated, canvas_id, run_id, intent, instruction, focus):
+    """run 记录写入现有 session 存储（GET /api/agent/sessions/{id} 可查）。纯同步，可安全用于收尾。"""
+    if not isinstance(session, dict):
+        return
+    try:
+        session["plan"] = {
+            "intent": intent or instruction[:80],
+            "steps": [{"tool": rec.get("tool"), "args": rec.get("args"), "description": ""} for rec in history],
+            "expected_output": "",
+        }
+        session["execution_log"] = history
+        session["run_status"] = status
+        session["status"] = {"ok": "applied", "failed": "failed", "aborted": "aborted"}.get(status, "failed")
+        session["rounds"] = rounds
+        session["steps_executed"] = steps_executed
+        session["message"] = message
+        session["focus"] = focus
+        if mutated:
+            try:
+                fresh = load_canvas(canvas_id)
+                session["version"] = _agent_snapshot(fresh, note=f"agent run {run_id}")
+            except Exception as exc:
+                print(f"[Agent] run {run_id} 版本快照失败（不影响结果）: {exc}")
+        session["updated_at"] = time.time()
+        session["finished_at"] = time.time()
+        agent_session_save(session)
+    except Exception as exc:
+        print(f"[Agent] run {run_id} 会话持久化失败: {exc}")
+
+
+async def _agent_run_producer(req, queue):
+    """真正的 agent 循环：执行步骤 → 结果回灌模型 → 下一轮，全程把事件塞进 queue。"""
+    canvas_id = req["canvas_id"]
+    instruction = req["instruction"]
+    focus = req["focus"]
+    chat = req["chat"]
+    max_steps = req["max_steps"]
+
+    def emit(event, data):
+        queue.put_nowait(_agent_sse_event(event, data))
+
+    run_id = f"run_{uuid.uuid4().hex[:16]}"
+    status, message, limit_reason = "failed", "", ""
+    steps_executed, rounds = 0, 0
+    no_progress_rounds = 0
+    history, results = [], []
+    fail_counts = {}
+    skipped_notes, fail_notes = [], []
+    mutated = False
+    session, intent, last_error = None, "", ""
+    finished = False
+
+    try:
+        load_canvas(canvas_id)  # 权威状态校验（并发删除时由下面的 snapshot 兜底）
+        emit("run_start", {"run_id": run_id, "canvas_id": canvas_id,
+                           "model": chat["model"], "max_steps": max_steps})
+        session = _agent_new_session(canvas_id, instruction, "",
+                                     {"intent": "", "steps": [], "expected_output": ""})
+        session.update({"run_id": run_id, "mode": "run", "focus": focus, "status": "running",
+                        "rounds": 0, "steps_executed": 0, "started_at": time.time()})
+        agent_session_save(session)
+        print(f"[Agent] run {run_id} start canvas={canvas_id} provider={chat['provider']} "
+              f"model={chat['model']} max_steps={max_steps}", flush=True)
+
+        while True:
+            if steps_executed >= max_steps:
+                status = "aborted"
+                limit_reason = f"已达到最大步数上限 {max_steps}，停止后续步骤"
+                break
+            if rounds >= AGENT_RUN_MAX_ROUNDS:
+                status = "aborted"
+                limit_reason = f"已达到最大轮次上限 {AGENT_RUN_MAX_ROUNDS}，停止后续步骤"
+                break
+            rounds += 1
+            if rounds > 1:
+                emit("round_start", {"round": rounds})
+            snapshot = _agent_run_load_canvas_soft(canvas_id)
+            if not isinstance(snapshot, dict):
+                status = "failed"
+                message = "画布不可用（可能已被删除或移入回收站），运行已停止"
+                emit("error", {"message": message, "code": "canvas_unavailable"})
+                break
+            system = _AGENT_RUN_SYSTEM_PROMPT.format(
+                tools_json=json.dumps(_agent_build_tools_catalog(), ensure_ascii=False),
+                canvas_summary=json.dumps(_agent_canvas_summary(snapshot), ensure_ascii=False),
+                focus_text=_agent_run_focus_text(focus, snapshot))
+            user_text = _agent_run_user_prompt(instruction, history, rounds, max_steps,
+                                               steps_executed, last_error)
+            try:
+                raw_text = await _agent_run_chat(chat, [{"role": "system", "content": system},
+                                                        {"role": "user", "content": user_text}])
+                decision = _agent_run_parse_round(raw_text)
+            except AgentRunError as exc:
+                last_error = exc.message
+                fail_notes.append(f"第 {rounds} 轮模型调用失败：{exc.message}")
+                no_progress_rounds += 1
+                if no_progress_rounds >= 2:
+                    status = "failed"
+                    message = f"模型连续两轮不可用，已停止：{exc.message}"
+                    emit("error", {"message": exc.message, "code": exc.code})
+                    break
+                continue
+            if decision.get("done") is True:
+                summary_text = str(decision.get("message") or "").strip()
+                if summary_text:
+                    emit("message", {"text": summary_text})
+                status = "ok"
+                message = summary_text or f"Agent 已完成（执行 {steps_executed} 步，共 {rounds} 轮）"
+                break
+            thought = str(decision.get("thought") or decision.get("intent") or "").strip()
+            if thought:
+                intent = intent or thought[:200]
+            steps, unknown = _agent_run_normalize_steps(decision.get("steps"))
+            if unknown:
+                last_error = f"模型给出了不可用步骤：{'、'.join(unknown[:5])}"
+                fail_notes.append(f"第 {rounds} 轮：{last_error}")
+            if not steps:
+                no_progress_rounds += 1
+                if not last_error:
+                    last_error = "模型本轮没有给出任何可执行步骤"
+                if no_progress_rounds >= 2:
+                    status = "failed"
+                    message = f"连续两轮没有可执行步骤，已停止：{last_error}"
+                    break
+                continue
+            plan_steps = []
+            for offset, step in enumerate(steps):
+                plan_steps.append({"index": len(results) + offset, "tool": step["tool"],
+                                   "args": step["args"], "description": step["description"]})
+            emit("plan", {"intent": intent or instruction[:60], "steps": plan_steps, "round": rounds})
+            round_success = 0
+            for offset, step in enumerate(steps):
+                if steps_executed >= max_steps:
+                    break
+                index = plan_steps[offset]["index"]
+                tool = step["tool"]
+                resolved_args = _agent_resolve_step_refs(step["args"], results)
+                description = step["description"] or AGENT_TOOLS[tool]["description"]
+                signature = _agent_run_step_signature(tool, resolved_args)
+                if fail_counts.get(signature, 0) >= 2:
+                    reason = "同一 tool+args 已连续失败 2 次，跳过该步"
+                    skipped_notes.append(f"#{index} {tool}（{reason}）")
+                    history.append({"index": index, "tool": tool, "args": resolved_args, "ok": False,
+                                    "error": reason, "code": "skipped_after_failures"})
+                    results.append({"ok": False, "tool": tool, "error": reason,
+                                    "code": "skipped_after_failures"})
+                    emit("step_result", {"index": index, "tool": tool, "ok": False, "error": reason,
+                                         "code": "skipped_after_failures", "retryable": False})
+                    continue
+                confirm_reason = _agent_run_confirm_reason(tool, resolved_args)
+                if confirm_reason:
+                    skipped_notes.append(f"#{index} {tool}（{confirm_reason}）")
+                    history.append({"index": index, "tool": tool, "args": resolved_args, "ok": False,
+                                    "error": confirm_reason, "code": "confirm_required"})
+                    results.append({"ok": False, "tool": tool, "error": confirm_reason,
+                                    "code": "confirm_required"})
+                    emit("confirm_required", {"index": index, "tool": tool, "args": resolved_args,
+                                              "reason": confirm_reason})
+                    continue
+                emit("step_start", {"index": index, "tool": tool, "args": resolved_args,
+                                    "description": description})
+                before_canvas = _agent_run_load_canvas_soft(canvas_id)
+                result = await agent_execute_step(tool, resolved_args)
+                after_canvas = _agent_run_load_canvas_soft(canvas_id)
+                results.append(result)
+                if result.get("ok"):
+                    steps_executed += 1
+                    round_success += 1
+                    ops = _agent_canvas_ops(before_canvas, after_canvas)
+                    if ops:
+                        mutated = True
+                    raw_result = result.get("result")
+                    payload = {"index": index, "tool": tool, "ok": True,
+                               "result": raw_result if isinstance(raw_result, (dict, list)) else {"value": raw_result},
+                               "message": result.get("message") or "执行成功"}
+                    if ops:
+                        payload["canvas_ops"] = ops
+                    emit("step_result", payload)
+                    history.append({"index": index, "tool": tool, "args": resolved_args, "ok": True,
+                                    "digest": _agent_run_digest_text(raw_result)})
+                    last_error = ""
+                else:
+                    error_text = result.get("error") or "执行失败"
+                    code = result.get("code") or "tool_error"
+                    retryable = code not in AGENT_RUN_NON_RETRYABLE_CODES
+                    fail_counts[signature] = fail_counts.get(signature, 0) + 1
+                    fail_notes.append(f"#{index} {tool}：{error_text}（code={code}）")
+                    history.append({"index": index, "tool": tool, "args": resolved_args, "ok": False,
+                                    "error": error_text, "code": code, "retryable": retryable})
+                    last_error = f"第 {rounds} 轮第 {index} 步（{tool}）失败：{error_text}（code={code}）"
+                    emit("step_result", {"index": index, "tool": tool, "ok": False, "error": error_text,
+                                         "code": code, "retryable": retryable})
+            no_progress_rounds = no_progress_rounds + 1 if round_success == 0 else 0
+            if no_progress_rounds >= 2:
+                status = "failed"
+                message = "连续两轮没有任何步骤执行成功，已停止以免空转"
+                if last_error:
+                    message += f"（最后失败：{last_error}）"
+                break
+
+        if mutated:
+            try:
+                fresh = load_canvas(canvas_id)
+                await manager.broadcast_canvas_updated(canvas_id, int(fresh.get("updated_at") or now_ms()))
+            except Exception as exc:
+                print(f"[Agent] run {run_id} 画布变更广播失败（不影响结果）: {exc}")
+    except asyncio.CancelledError:
+        status = "aborted"
+        message = "客户端断开连接，运行已取消"
+        raise
+    except HTTPException as exc:
+        status = "failed"
+        message = str(exc.detail)
+        emit("error", {"message": message, "code": "http_error"})
+    except Exception as exc:
+        status = "failed"
+        message = f"Agent 运行异常：{type(exc).__name__}: {exc}"
+        print(f"[Agent] run {run_id} 异常: {traceback.format_exc()}", flush=True)
+        emit("error", {"message": message, "code": "agent_run_exception"})
+    finally:
+        if not finished:
+            finished = True
+            parts = [message] if message else []
+            if limit_reason:
+                parts.append(limit_reason)
+            if skipped_notes:
+                parts.append("已跳过：" + "；".join(skipped_notes[:6]))
+            if fail_notes:
+                parts.append("失败记录：" + "；".join(fail_notes[-4:]))
+            final_message = " ".join(p for p in parts if p).strip() or \
+                f"Agent 运行结束：执行 {steps_executed} 步，共 {rounds} 轮"
+            emit("done", {"run_id": run_id, "status": status, "steps_executed": steps_executed,
+                          "rounds": rounds, "message": final_message[:2000]})
+            _agent_run_persist_session(session, status, final_message, history, rounds, steps_executed,
+                                       mutated, canvas_id, run_id, intent, instruction, focus)
+            print(f"[Agent] run {run_id} done status={status} steps={steps_executed} rounds={rounds} "
+                  f"msg={final_message[:160]}", flush=True)
+        queue.put_nowait(None)
+
+
+async def _agent_run_event_stream(req):
+    """SSE 输出层：空闲超过 15 秒发注释心跳，客户端断开时取消生产者。"""
+    queue = asyncio.Queue()
+    producer = asyncio.create_task(_agent_run_producer(req, queue))
+
+    def _drain(task):
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            print(f"[Agent] run producer 异常: {exc!r}")
+
+    producer.add_done_callback(_drain)
+    try:
+        while True:
+            try:
+                chunk = await asyncio.wait_for(queue.get(), timeout=AGENT_RUN_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                yield "\n: ping\n\n"
+                continue
+            if chunk is None:
+                break
+            yield chunk
+    finally:
+        if not producer.done():
+            producer.cancel()
+
+
+@app.post("/api/agent/run")
+async def agent_run(payload: AgentRunRequest):
+    """真·agent 循环：服务端多轮执行 + 结果回灌模型 + SSE 流式返回（契约 v1）。
+    请求非法 / 画布不存在 / 无可用对话模型 → 直接 4xx（前端据此回退原聊天）。"""
+    canvas_id = str(payload.canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    instruction = str(payload.instruction or "").strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="instruction 不能为空")
+    load_canvas(canvas_id)  # 404 校验
+    chat = _agent_run_resolve_chat(payload.provider, payload.model, payload.ms_model)
+    try:
+        max_steps = int(payload.max_steps if payload.max_steps is not None else 12)
+    except (TypeError, ValueError):
+        max_steps = 12
+    max_steps = max(1, min(max_steps, AGENT_RUN_MAX_STEPS_CAP))
+    req = {
+        "canvas_id": canvas_id,
+        "instruction": instruction,
+        "focus": _agent_run_normalize_focus(payload.focus),
+        "chat": chat,
+        "max_steps": max_steps,
+    }
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+    return StreamingResponse(_agent_run_event_stream(req), media_type="text/event-stream",
+                             headers=headers)
 
 
 # --- T05 素材路由接入（依赖全部定义完后才 bind）---

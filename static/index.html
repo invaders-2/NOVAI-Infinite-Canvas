@@ -33,12 +33,13 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.117.1789606971"></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.117.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.117.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
+    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
     <style>
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -1060,6 +1061,49 @@
             border-radius: 24px;
             padding: 32px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        /* 详情 iframe 里的浮层打开时，iframe 之外（左栏/标题/边距）套同值遮罩压暗+模糊，
+           否则只有 iframe 那块变暗，接缝很明显；z-index 低于 .settings-detail，不遮浮层本体。
+           遮罩的外沿被面板圆角裁切时 blur 采样不到背景，面板白底会在弧线上露出一圈没压暗的亮边，
+           所以开启时把底衬退到 padding box（padding 补回 1px，内容位置不变），那圈就落到深色蒙层上 */
+        #settings-modal .settings-modal-panel.is-overlay-open {
+            border: 2px solid transparent;
+            padding: 31px;
+            background-clip: padding-box;
+        }
+        /* 内容面板同样在圆角处被裁切：缺口那块没有东西盖住，会露出没压暗的底（iframe 里的白页）。
+           先把它自己与 iframe 的底衬透明，再由它自己的 ::after 沿圆角外沿补一圈「等于遮罩压暗后」
+           的描边，把缺口和 iframe 溢出的一圈一起盖平；描边外扩 2px 是为了让它自己的抗锯齿边
+           落在已经压暗的区域上，而不是落在缺口里。 */
+        .settings-modal-panel.is-overlay-open .settings-detail,
+        .settings-modal-panel.is-overlay-open .settings-detail-body iframe {
+            background: transparent;
+        }
+        .settings-modal-panel.is-overlay-open .settings-detail {
+            overflow: visible;
+        }
+        .settings-modal-panel.is-overlay-open .settings-detail::after {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            z-index: 99;
+            border-radius: 16px;
+            box-shadow:
+                inset 0 0 0 8px color-mix(in srgb, var(--stage-bg) 72%, #000),
+                0 0 0 8px color-mix(in srgb, var(--stage-bg) 72%, #000);
+            pointer-events: none;
+        }
+        .settings-modal-panel.is-overlay-open::after {
+            content: '';
+            position: absolute;
+            /* 相对 padding box，-2px 正好补回上面让出的那圈 */
+            inset: -2px;
+            z-index: 5;
+            border-radius: inherit;
+            background: rgba(0, 0, 0, 0.28);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
         }
 
         /* 左侧 aside */
@@ -3276,17 +3320,17 @@
                     <div class="skeleton-card"></div>
                 </div>
             </div>
-            <iframe id="frame-home" src="/static/home.html?v=1.0.117.1789608219" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.117.1789608219" scrolling="yes"></iframe>
+            <iframe id="frame-home" src="/static/home.html?v=1.0.120.1789699447" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
+            <iframe id="frame-enhance" data-src="/static/enhance.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
+            <iframe id="frame-angle" data-src="/static/angle.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -3416,7 +3460,7 @@
                 <button class="studio-modal-btn" type="button" onclick="closeProjectUpdateModal()">
                     <span id="project-update-cancel-text">取消</span>
                 </button>
-                <button id="project-update-confirm-btn" class="studio-modal-btn primary" type="button" onclick="confirmProjectUpdate()">
+                <button id="project-update-confirm-btn" class="studio-modal-btn primary" type="button" data-morph data-morph-keep-width onclick="confirmProjectUpdate()">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
                         <path d="M21 3v6h-6"></path>
@@ -3567,6 +3611,79 @@
                                 <div class="settings-path-row">
                                     <span class="settings-path-text" id="setting-data-path">—</span>
                                     <button class="settings-path-btn" onclick="openDataFolder()">打开</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 存储与缓存 -->
+                        <div class="settings-card">
+                            <div class="settings-card-header">
+                                <h4 class="settings-card-title">存储与缓存</h4>
+                                <p class="settings-card-desc">预览缓存占用、历史上限与生成文件的存放位置。</p>
+                            </div>
+                            <div class="settings-card-body">
+                                <div class="settings-toggle-row">
+                                    <div>
+                                        <div class="settings-toggle-label">预览缓存</div>
+                                        <div class="settings-toggle-desc" id="storage-preview-text">—</div>
+                                    </div>
+                                    <button class="settings-path-btn" id="storage-prune-btn" type="button" title="按下面的上限清理预览缓存">立即清理</button>
+                                </div>
+                                <hr class="settings-divider">
+                                <div class="settings-toggle-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+                                    <div>
+                                        <div class="settings-toggle-label">缓存上限</div>
+                                        <div class="settings-toggle-desc">超过上限时自动清理最旧的预览文件</div>
+                                    </div>
+                                    <div class="settings-pill-group" id="storage-limit-files" role="group" aria-label="预览缓存文件数上限"></div>
+                                </div>
+                                <hr class="settings-divider">
+                                <div class="settings-toggle-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+                                    <div>
+                                        <div class="settings-toggle-label">画布版本保留</div>
+                                        <div class="settings-toggle-desc">每个画布最多保留多少个历史版本快照，超出自动删最旧的</div>
+                                    </div>
+                                    <div class="settings-pill-group" id="storage-limit-versions" role="group" aria-label="画布版本保留数量"></div>
+                                </div>
+                                <hr class="settings-divider">
+                                <div class="settings-toggle-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+                                    <div>
+                                        <div class="settings-toggle-label">生成文件目录</div>
+                                        <div class="settings-toggle-desc">生成的图片、视频保存位置；自定义路径在「API 设置 → 存储设置」里修改</div>
+                                    </div>
+                                    <div class="settings-path-row">
+                                        <span class="settings-path-text" id="storage-output-path">—</span>
+                                        <button class="settings-path-btn" id="storage-output-open" type="button" onclick="openOutputFolder()">打开</button>
+                                        <button class="settings-path-btn" id="storage-output-reset" type="button" onclick="resetOutputFolder()">恢复默认</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 更新 -->
+                        <div class="settings-card">
+                            <div class="settings-card-header">
+                                <h4 class="settings-card-title">更新</h4>
+                                <p class="settings-card-desc">启动时是否检查新版本，以及从哪个源下载更新。</p>
+                            </div>
+                            <div class="settings-card-body">
+                                <div class="settings-toggle-row">
+                                    <div>
+                                        <div class="settings-toggle-label">启动时自动检查更新</div>
+                                        <div class="settings-toggle-desc">关闭后启动不再自动检查；「关于」里的手动检查不受影响</div>
+                                    </div>
+                                    <label class="settings-toggle-switch">
+                                        <input type="checkbox" id="setting-auto-check-update" onchange="saveGeneralSetting('autoCheckUpdate', this.checked)">
+                                        <span class="settings-toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <hr class="settings-divider">
+                                <div class="settings-toggle-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+                                    <div>
+                                        <div class="settings-toggle-label">更新源</div>
+                                        <div class="settings-toggle-desc">与更新弹窗里的来源选择保持同步</div>
+                                    </div>
+                                    <div class="settings-pill-group" id="setting-update-source" role="group" aria-label="更新源"></div>
                                 </div>
                             </div>
                         </div>
@@ -4055,6 +4172,14 @@
                 }
                 return;
             }
+            // 设置详情 iframe 的浮层开合：只认该 iframe 的消息，整块设置界面一起压暗+模糊
+            if (event.data && event.data.type === 'settings-iframe-overlay') {
+                const detailFrame = document.getElementById('settings-detail-frame');
+                if (detailFrame && event.source === detailFrame.contentWindow) {
+                    setSettingsOverlayVeil(event.data.open);
+                }
+                return;
+            }
             forwardStudioApiChange(event.data);
         });
 
@@ -4298,6 +4423,8 @@
             } else {
                 pathEl.textContent = '%APPDATA%\\NOVAI';
             }
+            refreshStorageCard();
+            refreshUpdateCard();
         }
 
         function applyGeneralSetting(key, value) {
@@ -4319,11 +4446,210 @@
             }
         }
 
+        // ===== 存储与缓存（通用 tab）=====
+        var STORAGE_FILE_CHOICES = [500, 2000, 5000, 10000];
+        var STORAGE_VERSION_CHOICES = [5, 10, 20, 50];
+        var storageCacheInfo = null;
+
+        function formatBytes(bytes) {
+            var n = Number(bytes) || 0;
+            if (n < 1024) return n + ' B';
+            if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+            if (n < 1024 * 1024 * 1024) {
+                var mb = n / 1024 / 1024;
+                return (mb < 10 ? mb.toFixed(1) : Math.round(mb)) + ' MB';
+            }
+            return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+        }
+
+        /* 上限档位用 pill 呈现；当前值不在档位里时临时补一个「自定义」档，避免看不出当前设置 */
+        function renderStoragePills(containerId, choices, current, onPick) {
+            var box = document.getElementById(containerId);
+            if (!box) return;
+            var value = Number(current);
+            if (!Number.isFinite(value)) { box.innerHTML = ''; return; }
+            var known = choices.indexOf(value) >= 0;
+            var list = known ? choices.slice() : choices.concat([value]);
+            box.innerHTML = '';
+            list.forEach(function (choice) {
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'settings-pill' + (choice === value ? ' active' : '');
+                btn.textContent = known ? String(choice) : (choice === value ? '自定义 ' + choice : String(choice));
+                btn.setAttribute('aria-pressed', choice === value ? 'true' : 'false');
+                btn.addEventListener('click', function () { onPick(choice); });
+                box.appendChild(btn);
+            });
+        }
+
+        function setStorageControlsEnabled(enabled) {
+            ['storage-prune-btn', 'storage-output-open', 'storage-output-reset'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                el.disabled = !enabled;
+                el.style.opacity = enabled ? '' : '.5';
+                el.style.cursor = enabled ? '' : 'default';
+            });
+            ['storage-limit-files', 'storage-limit-versions'].forEach(function (id) {
+                var box = document.getElementById(id);
+                if (!box) return;
+                Array.prototype.forEach.call(box.querySelectorAll('button'), function (btn) {
+                    btn.disabled = !enabled;
+                    btn.style.opacity = enabled ? '' : '.5';
+                    btn.style.cursor = enabled ? '' : 'default';
+                });
+            });
+        }
+
+        function refreshStorageCard() {
+            fetch('/api/settings/storage').then(function (res) {
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res.json();
+            }).then(function (info) {
+                storageCacheInfo = info || {};
+                var cache = storageCacheInfo.preview_cache || {};
+                var versions = storageCacheInfo.canvas_versions || {};
+                var previewEl = document.getElementById('storage-preview-text');
+                if (previewEl) previewEl.textContent = (Number(cache.files) || 0) + ' 个文件 · ' + formatBytes(cache.bytes);
+                renderStoragePills('storage-limit-files', STORAGE_FILE_CHOICES, cache.limit_files, pickStorageFileLimit);
+                renderStoragePills('storage-limit-versions', STORAGE_VERSION_CHOICES, versions.limit, pickStorageVersionLimit);
+                var outputEl = document.getElementById('storage-output-path');
+                var out = storageCacheInfo.output_dir || {};
+                if (outputEl) outputEl.textContent = out.effective || '—';
+                setStorageControlsEnabled(true);
+            }).catch(function () {
+                // 接口还没就绪时只降级显示，不弹错、不影响同页其它设置
+                storageCacheInfo = null;
+                var previewEl = document.getElementById('storage-preview-text');
+                if (previewEl) previewEl.textContent = '—';
+                var outputEl = document.getElementById('storage-output-path');
+                if (outputEl) outputEl.textContent = '—';
+                var filesBox = document.getElementById('storage-limit-files');
+                var versionBox = document.getElementById('storage-limit-versions');
+                if (filesBox) filesBox.innerHTML = '';
+                if (versionBox) versionBox.innerHTML = '';
+                setStorageControlsEnabled(false);
+            });
+        }
+
+        function putStorageSettings(payload) {
+            return fetch('/api/settings/storage', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(function (res) {
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res.json();
+            });
+        }
+
+        function pickStorageFileLimit(value) {
+            putStorageSettings({ preview_limit_files: value }).then(function () {
+                showUpdateToast('已保存：预览缓存上限 ' + value + ' 个文件', { kind: 'ok' });
+                refreshStorageCard();
+            }).catch(function () {
+                showUpdateToast('保存失败，已保留原设置', { kind: 'fail' });
+                refreshStorageCard();
+            });
+        }
+
+        function pickStorageVersionLimit(value) {
+            putStorageSettings({ canvas_version_limit: value }).then(function () {
+                showUpdateToast('已保存：每个画布保留 ' + value + ' 个版本', { kind: 'ok' });
+                refreshStorageCard();
+            }).catch(function () {
+                showUpdateToast('保存失败，已保留原设置', { kind: 'fail' });
+                refreshStorageCard();
+            });
+        }
+
+        /* 交给 NovaMorphButton 驱动状态：成功绿勾、失败红叉，所以这里必须把失败继续抛出去 */
+        function prunePreviewsNow() {
+            return fetch('/api/maintenance/prune-previews', { method: 'POST' }).then(function (res) {
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res.json().catch(function () { return {}; });
+            }).then(function (data) {
+                var removed = Number((data && (data.removed_files ?? data.removed ?? data.deleted)) || 0);
+                showUpdateToast(removed ? ('已清理 ' + removed + ' 个预览文件') : '预览缓存无需清理', { kind: 'ok' });
+                refreshStorageCard();
+            }).catch(function (err) {
+                showUpdateToast('清理失败：' + ((err && err.message) || '接口不可用'), { kind: 'fail' });
+                throw err;
+            });
+        }
+
+        /* 桌面壳只暴露了「打开数据目录」这一个桥；生成目录默认就在数据目录下，直接复用，
+           自定义到别的盘时没有对应入口，只提示不假装能打开 */
+        function openOutputFolder() {
+            var api = window.pywebview && window.pywebview.api;
+            var dir = storageCacheInfo && storageCacheInfo.output_dir ? String(storageCacheInfo.output_dir.effective || '') : '';
+            var dataDir = storageCacheInfo && storageCacheInfo.data ? String(storageCacheInfo.data.dir || '') : '';
+            var insideData = Boolean(dir && dataDir) && (dir === dataDir || dir.indexOf(dataDir + '/') === 0 || dir.indexOf(dataDir + '\\') === 0);
+            if (api && typeof api.open_data_dir === 'function' && insideData) {
+                api.open_data_dir().catch(function(){});
+                return;
+            }
+            showUpdateToast('自定义目录请在「API 设置 → 存储设置」里用「浏览」打开', {});
+        }
+
+        function resetOutputFolder() {
+            fetch('/api/settings/output-dir', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ output_dir: '' })
+            }).then(function (res) {
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                return res.json();
+            }).then(function () {
+                showUpdateToast('已恢复默认输出目录', { kind: 'ok' });
+                refreshStorageCard();
+            }).catch(function (err) {
+                showUpdateToast('恢复失败：' + ((err && err.message) || ''), { kind: 'fail' });
+            });
+        }
+
+        // ===== 更新（通用 tab）=====
+        var UPDATE_SOURCE_CHOICES = [
+            { value: 'github', label: 'GitHub' },
+            { value: 'gitee', label: 'Gitee' },
+            { value: 'modelscope', label: '国内镜像' }
+        ];
+
+        /* 与更新弹窗里的三张卡片共用 updateSource / studio_update_source，两处始终同源 */
+        function renderUpdateSourcePills() {
+            var box = document.getElementById('setting-update-source');
+            if (!box) return;
+            box.innerHTML = '';
+            UPDATE_SOURCE_CHOICES.forEach(function (choice) {
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'settings-pill' + (choice.value === updateSource ? ' active' : '');
+                btn.setAttribute('aria-pressed', choice.value === updateSource ? 'true' : 'false');
+                btn.textContent = choice.label;
+                btn.addEventListener('click', function () {
+                    setUpdateSource(choice.value);
+                    renderUpdateSourcePills();
+                });
+                box.appendChild(btn);
+            });
+        }
+
+        function refreshUpdateCard() {
+            setToggle('setting-auto-check-update', getGeneralSettings().autoCheckUpdate !== false);
+            renderUpdateSourcePills();
+        }
+
+        function setSettingsOverlayVeil(open) {
+            const panel = document.querySelector('#settings-modal .settings-modal-panel');
+            if (panel) panel.classList.toggle('is-overlay-open', Boolean(open));
+        }
+
         function closeSettingsModal() {
             const modal = document.getElementById('settings-modal');
             if (!modal) return;
             // 清理详情页状态
             closeSettingsDetail();
+            setSettingsOverlayVeil(false);
             modal.hidden = true;
         }
 
@@ -4413,6 +4739,7 @@
 
             // 先关闭内嵌详情页（如果之前打开的话）
             closeSettingsDetail();
+            setSettingsOverlayVeil(false);
 
             // 更新左侧标签高亮
             modal.querySelectorAll('.settings-tab').forEach(btn => {
@@ -4467,6 +4794,7 @@
         }
 
         function closeSettingsDetail() {
+            setSettingsOverlayVeil(false);
             const detail = document.getElementById('settings-detail');
             const frame = document.getElementById('settings-detail-frame');
             if (detail) {
@@ -4536,7 +4864,10 @@
             }
             window.addEventListener('resize', syncCanvasSidebarInset);
             syncCanvasSidebarInset();
-            checkForUpdates();
+            // 启动自动检查可关；「关于」里的手动检查照旧
+            if (getGeneralSettings().autoCheckUpdate !== false) checkForUpdates();
+            var pruneBtn = document.getElementById('storage-prune-btn');
+            if (pruneBtn && window.NovaMorphButton) NovaMorphButton.attach(pruneBtn, { action: prunePreviewsNow, keepWidth: true });
         });
 
         // sync theme when iframe loads
@@ -5541,6 +5872,10 @@
         document.addEventListener('gesturestart', e => { e.preventDefault(); }, { capture: true });
         document.addEventListener('gesturechange', e => { e.preventDefault(); }, { capture: true });
         document.addEventListener('gestureend', e => { e.preventDefault(); }, { capture: true });
+    </script>
+    <script>
+        // 设置外壳里的保存/确认按钮都是静态标记，扫一次就够；页面画布重绘频繁，不开 observe
+        if (window.NovaMorphButton) NovaMorphButton.autoBind(document);
     </script>
 </body>
 

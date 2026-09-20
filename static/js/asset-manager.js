@@ -484,7 +484,7 @@ function localItemsForFolder(folderId=activeLocalFolderId){
     });
 }
 function localCaptionProviders(){
-    return (apiProviders || []).filter(p => p && p.enabled !== false && Array.isArray(p.chat_models) && p.chat_models.length);
+    return (apiProviders || []).filter(p => p && p.enabled !== false && p.has_key !== false && Array.isArray(p.chat_models) && p.chat_models.length);
 }
 function normalizeLocalCaptionSettings(){
     const providers = localCaptionProviders();
@@ -499,13 +499,15 @@ function normalizeLocalCaptionSettings(){
     let provider = providers.find(p => p.id === localCaptionProvider) || providers[0];
     localCaptionProvider = provider.id || '';
     const models = (provider.chat_models || []).filter(Boolean);
-    if(!models.includes(localCaptionModel)) localCaptionModel = models[0] || '';
+    if(!localCaptionModel) localCaptionModel = models[0] || '';
     if(beforeProvider !== localCaptionProvider || beforeModel !== localCaptionModel) writeLocalCaptionSettings();
 }
 function localCaptionModels(){
     normalizeLocalCaptionSettings();
     const provider = localCaptionProviders().find(p => p.id === localCaptionProvider);
-    return (provider?.chat_models || []).filter(Boolean);
+    const models = (provider?.chat_models || []).filter(Boolean);
+    // 用户已选的模型可能不在当前平台/供应商列表里，前置显示并保持选中，避免被静默换掉
+    return localCaptionModel && !models.includes(localCaptionModel) ? [localCaptionModel, ...models] : models;
 }
 function renderLocalCaptionTools(imageCount){
     normalizeLocalCaptionSettings();
@@ -4763,4 +4765,113 @@ window.addEventListener('message', event => {
     if(event.data?.type === 'studio-theme') window.StudioTheme?.apply?.(event.data.theme);
 });
 document.addEventListener('DOMContentLoaded', () => loadAll().catch(err => setStatus(err.message || '加载失败')));
+
+/* ── Morph 状态按钮接入（素材页）─────────────────────────────────────────────
+   本页保存按钮全走 root/document 上的事件委托，既没有 onclick，保存函数也只是本 IIFE 里
+   的局部声明（不是 window 属性），模块的白名单扫描与全局函数包装都用不上；
+   所以这里只借它的 attach/setState 落状态：不接管点击、不改事件流，
+   原委托分支、参数、异常与 setStatus 报错路径全部照旧。 */
+(function initAssetManagerMorph(){
+    const Morph = window.NovaMorphButton;
+    if(!Morph || typeof Morph.attach !== 'function' || typeof Morph.setState !== 'function') return;
+
+    const SAVE_SELECTOR = [
+        '[data-storage-save]',
+        '[data-pref-editor-save]',
+        '[data-localup-caption-save]',
+        '[data-asset-tree-edit-save]',
+        '[data-workflow-tree-edit-save]',
+        '[data-prompt-tree-edit-save]',
+        '[data-asset-edit-save]',
+        '[data-prompt-edit-save]',
+        '[data-prompt-create-save]'
+    ].join(',');
+
+    /* 这些按钮都挤在工具条/表单行里，状态层只剩一个图标，宽度一缩就会带偏邻居，统一锁住 idle 宽度 */
+    const MORPH_OPTS = {keepWidth:true};
+    const MIN_LOADING = 300;
+
+    function bind(el){
+        if(el && el.tagName === 'BUTTON' && !el.__nvMorph) Morph.attach(el, MORPH_OPTS);
+        return el;
+    }
+
+    function saveButtonOf(node){
+        const el = node && node.closest ? node.closest(SAVE_SELECTOR) : null;
+        return el && el.tagName === 'BUTTON' ? bind(el) : null;
+    }
+
+    /* 重渲染会换掉按钮，用同一个 data-*save 键把状态续到新按钮上 */
+    function keyOf(el){
+        const names = el.getAttributeNames ? el.getAttributeNames() : [];
+        const attr = names.filter(name => name.indexOf('data-') === 0 && /-save$/.test(name))[0];
+        if(!attr) return '';
+        const value = el.getAttribute(attr);
+        return value ? '[' + attr + '="' + CSS.escape(value) + '"]' : '[' + attr + ']';
+    }
+
+    function rescan(){
+        document.querySelectorAll(SAVE_SELECTOR).forEach(bind);
+    }
+
+    /* 只扫这 9 个选择器，不做全量 innerText 判定，避免大网格重渲染时的开销 */
+    let scanTimer = 0;
+    if(typeof MutationObserver === 'function'){
+        new MutationObserver(() => {
+            if(scanTimer) return;
+            scanTimer = setTimeout(() => { scanTimer = 0; rescan(); }, 60);
+        }).observe(document.body, {childList:true, subtree:true});
+    }
+
+    /* 只记「这一下点的是哪颗保存按钮」，事件照常冒泡给原委托 */
+    let clicked = null;
+    document.addEventListener('click', event => {
+        clicked = saveButtonOf(event.target);
+    }, true);
+    /* 委托分支同步调用保存函数，本轮事件走完还没被消费就作废，免得键盘/程序化调用被误挂到旧按钮 */
+    document.addEventListener('click', () => { setTimeout(() => { clicked = null; }, 0); });
+
+    function drive(el, result){
+        if(!el || !el.__nvMorph) return;
+        const key = keyOf(el);
+        const started = performance.now();
+        Morph.setState(el, 'loading');
+        const finish = state => {
+            const wait = Math.max(0, MIN_LOADING - (performance.now() - started));
+            setTimeout(() => {
+                const target = el.isConnected ? el : (key ? document.querySelector(key) : null);
+                if(!target) return;                 /* 保存成功后表单收起、按钮没了，就没有可以演完状态的地方 */
+                bind(target);
+                if(target === el && target.__nvMorph.state !== 'loading') return;
+                Morph.setState(target, state);
+            }, wait);
+        };
+        if(result && typeof result.then === 'function'){
+            result.then(value => finish(value === false ? 'error' : 'success'), () => finish('error'));
+        } else {
+            finish(result === false ? 'error' : 'success');
+        }
+    }
+
+    function driveWrap(fn){
+        return function(){
+            const btn = clicked;
+            clicked = null;
+            const result = fn.apply(this, arguments);   /* 原样调用：同 this、同参数、同返回值 */
+            drive(btn, result);                         /* 只观察结果，返回给调用方的仍是原 promise */
+            return result;
+        };
+    }
+
+    saveStorageSettings = driveWrap(saveStorageSettings);
+    saveLocalUploadCaption = driveWrap(saveLocalUploadCaption);
+    saveAssetTreeEdit = driveWrap(saveAssetTreeEdit);
+    saveWorkflowTreeEdit = driveWrap(saveWorkflowTreeEdit);
+    savePromptTreeEdit = driveWrap(savePromptTreeEdit);
+    saveAssetEdit = driveWrap(saveAssetEdit);
+    savePromptEdit = driveWrap(savePromptEdit);
+    savePromptCreate = driveWrap(savePromptCreate);
+
+    rescan();
+}());
 })();

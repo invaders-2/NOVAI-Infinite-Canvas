@@ -58,7 +58,11 @@ global.document = {
     body,
     addEventListener(type, fn){ (listeners[type] = listeners[type] || []).push(fn); },
 };
-global.window = {innerWidth: 1200, innerHeight: 800, addEventListener(){}};
+const winListeners = {};   // window 级监听（resize / wheel）也记下来，不然驱动不了
+global.window = {
+    innerWidth: 1200, innerHeight: 800,
+    addEventListener(type, fn){ (winListeners[type] = winListeners[type] || []).push(fn); },
+};
 global.Event = class { constructor(type, init){ this.type = type; this.bubbles = Boolean(init && init.bubbles); } };
 
 const D = require('../static/js/shared/dropdown.js');
@@ -213,6 +217,69 @@ ok((listeners.mousedown || []).length > 0, 'install() 注册了 document 级 mou
     ok(src.indexOf("dataset.lucide = 'check'") >= 0, '选中态用 Lucide check 图标（线性）');
     ok(src.indexOf("addEventListener('mousedown', onDocMouseDown, true)") >= 0, 'mousedown 走 capture 阶段');
     ok(src.indexOf("event.preventDefault()") >= 0 && src.indexOf('拦掉原生弹层') >= 0, '说明并拦掉了原生弹层');
+}
+
+/* ── 5b. 接线：NovaGlide 滑块（shared/glide.js）接到自绘弹层 ── */
+{
+    const root = path.join(__dirname, '..');
+    const read = p => fs.readFileSync(path.join(root, p), 'utf8');
+    const src = read('static/js/shared/dropdown.js');
+    ok(src.indexOf('window.NovaGlide') >= 0 && src.indexOf("typeof window.NovaGlide.attach === 'function'") >= 0,
+        'dropdown.js 用「存在才调」守卫接 NovaGlide（垫片里没有它，否则一开菜单就抛）');
+    ok(/NovaGlide\.attach\(menu, \{ item: '\.nd-option', cursorClass: 'is-active' \}\)/.test(src),
+        "attach(menu, {item:'.nd-option', cursorClass:'is-active'})：滑块跟键盘光标（.is-active）");
+    ok(src.indexOf('refreshIcons();') < src.indexOf('NovaGlide.attach'),
+        'attach 排在 refreshIcons() 之后（lucide 换完 svg 才量几何）');
+    const closeBody = (src.match(/function closeMenu\(\)\{([\s\S]*?)\n\}/) || [null, ''])[1];
+    ok(/active\.glide\.destroy\(\)/.test(closeBody),
+        'closeMenu() 里显式 destroy（菜单一移除就断开 MutationObserver）');
+
+    [['canvas.html', 'css/canvas.css'], ['smart-canvas.html', 'css/smart-canvas.css']].forEach(pair => {
+        const html = read('static/' + pair[0]);
+        const css = read('static/' + pair[1]);
+        const links = html.match(/<link[^>]+rel="stylesheet"[^>]*>/g) || [];
+        const at = links.findIndex(tag => /\/static\/css\/glide\.css\?v=[0-9.]+/.test(tag));
+        ok(at >= 0, pair[0] + ' 带 ?v= 引入 glide.css');
+        ok(at === links.length - 1, pair[0] + ' 的 glide.css 排在其它的 <link rel="stylesheet"> 之后');
+        ok(/shared\/glide\.js\?v=[0-9.]+/.test(html), pair[0] + ' 带 ?v= 引入 shared/glide.js');
+        ok(/\.nd-menu \{ --nv-glide-bg: var\(--nav-hover-bg\); \}/.test(css),
+            pair[1] + ' 滑块底色 = --nav-hover-bg（真·hover token，两个主题都亮过面板）');
+        // --surface-2 浅色看不见；--soft 深色被 theme.css 重定义成 --bg，会比面板还深
+        ok(!/--nv-glide-bg: var\(--(surface-2|soft)\)/.test(css),
+            pair[1] + ' 不用 --surface-2、也不用会被 theme.css 改写的 --soft');
+        ok(/\.nd-menu\.nv-glide-host \.nd-option\.active \{ color: var\(--text\); \}/.test(css),
+            pair[1] + ' 滑块 host 内选中项文字回到 --text（否则浅色下 --strong-text 白字不可见）');
+    });
+}
+
+/* ── 5c. 滚轮：弹层内部不关（长列表要能滚），外部照旧关；resize 照旧关 ── */
+{
+    const fireWin = (type, event) => (winListeners[type] || []).forEach(fn => fn(event));
+    ok((winListeners.wheel || []).length > 0 && (winListeners.resize || []).length > 0,
+        'install() 分别注册了 window 级 wheel 与 resize');
+    const wheelEvt = target => ({target, preventDefault(){}, stopPropagation(){}});
+
+    const select = makeSelect(OPTIONS, 1);
+    mouseDown(select);
+    eq(body.children.length, 1, '（前置）菜单已打开');
+    const menu = body.children[0];
+    const option = menu.querySelectorAll('.nd-option')[1];
+
+    fireWin('wheel', wheelEvt(option));
+    eq(body.children.length, 1, '滚轮落在选项上 → 菜单不关（列表才滚得动）');
+    fireWin('wheel', wheelEvt(menu));
+    eq(body.children.length, 1, '滚轮落在弹层空白处 → 也不关');
+    fireWin('wheel', wheelEvt(option));
+    fireWin('wheel', wheelEvt(option));
+    eq(body.children.length, 1, '连续滚（触控板惯性余量）→ 仍然不关');
+
+    fireWin('wheel', wheelEvt(makeEl('div')));
+    eq(body.children.length, 0, '滚轮落在弹层外面 → 照旧关（原意图保留）');
+
+    mouseDown(select);
+    eq(body.children.length, 1, '（前置）再次打开');
+    fireWin('resize', {});
+    eq(body.children.length, 0, 'resize → 照旧关（弹层位置会失效）');
 }
 
 console.log('通过 ' + pass + '/' + (pass + fails.length));

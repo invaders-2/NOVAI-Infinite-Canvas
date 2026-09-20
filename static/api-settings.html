@@ -13,17 +13,18 @@
             }
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.117.1789606971"></script>
-    <script src="/static/vendor/js/lucide-subset.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.117.1789606971"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.117.1789606971">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=1.0.117.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
+    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
+    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=1.0.120.1789606971">
 
-<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.117.1789606971">
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.117.1789606971">
+<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 body { background: transparent !important; color: var(--text) !important; }
@@ -42,77 +43,1249 @@ body { background: transparent !important; color: var(--text) !important; }
 .model-list .model-item { background: var(--bg) !important; border-color: var(--border) !important; border-radius: var(--radius-sm) !important; }
 .picker-modal { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-xl) !important; }
 .picker-search { background: var(--bg) !important; border-color: var(--border) !important; border-radius: var(--radius-lg) !important; color: var(--text) !important; }
-/* 设置弹窗内嵌模式 — 与通用/外观/关于面板风格统一 */
-html.settings-embed body { background: transparent !important; font-family: var(--font-sans) !important; }
+/* ═══════════════════════════════════════════════════════════════════
+   设置弹窗内嵌（?embed=1）— 对齐 index.html「通用设置」的设计语言：
+   扁平、半透明、细边、无重阴影、灰度中性，唯一强调是黑白反转。
+   规则全部限定在 html.settings-embed，独立页面观感不受影响。
+   body:not(#settings-embed-scope) 用来把这些规则提到 id 级特异性：
+   api-settings.css 里有大量 body:not(...) 前缀的 !important 规则，否则盖不住。
+   亮/暗差异收敛到下面的 --embed-* 令牌，其余规则只写一份。
+   ═══════════════════════════════════════════════════════════════════ */
 html.settings-embed,
-html.settings-embed * {
+html.settings-embed body,
+html.settings-embed body:not(#settings-embed-scope) {
+    --stage-bg: #ffffff;
+    --bg: #f5f5f7;
+    --panel-bg: #ffffff;
+    --panel: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f5f5f7;
+    --card: #ffffff;
+    --text: #1c1c1e;
+    --muted: #656569;
+    --faint: #8a8a8a;
+    --text-2: #656569;
+    --text-3: #8a8a8a;
+    --nav-hover-bg: rgba(0, 0, 0, .04);
+    --soft: rgba(0, 0, 0, .04);
+    --divider: rgba(0, 0, 0, .06);
+    --border: rgba(0, 0, 0, .06);
+    --border-2: rgba(0, 0, 0, .08);
+    --line: rgba(0, 0, 0, .06);
+    --line-strong: rgba(0, 0, 0, .08);
+    --info: #656569;
+    --info-bg: rgba(0, 0, 0, .04);
+    --info-border: rgba(0, 0, 0, .08);
+    --info-text: #656569;
+    --shadow-sm: none;
+    --shadow-md: none;
+    --embed-canvas: #ffffff;
+    --embed-aside: #F5F5F6;
+    --embed-card: rgba(255, 255, 255, .45);
+    --embed-line: rgba(0, 0, 0, .06);
+    --embed-line-btn: rgba(0, 0, 0, .08);
+    background: var(--embed-canvas) !important;
+    color: var(--text) !important;
+    font-family: var(--font-sans) !important;
+}
+html.settings-embed.theme-dark,
+html.settings-embed.studio-theme-dark,
+html.settings-embed.theme-dark body,
+html.settings-embed.studio-theme-dark body,
+html.settings-embed.theme-dark body:not(#settings-embed-scope),
+html.settings-embed.studio-theme-dark body:not(#settings-embed-scope) {
+    --stage-bg: #141416;
+    --bg: #0c0c0c;
+    --panel-bg: #141416;
+    --panel: #141416;
+    --surface: #141416;
+    --surface-2: #1c1c1e;
+    --card: #141416;
+    --text: #f5f5f7;
+    --muted: #96969a;
+    --faint: #8a8a8a;
+    --text-2: #96969a;
+    --text-3: #8a8a8a;
+    --nav-hover-bg: rgba(255, 255, 255, .05);
+    --soft: rgba(255, 255, 255, .05);
+    --divider: rgba(255, 255, 255, .07);
+    --border: rgba(255, 255, 255, .07);
+    --border-2: rgba(255, 255, 255, .10);
+    --line: rgba(255, 255, 255, .07);
+    --line-strong: rgba(255, 255, 255, .10);
+    --info: #96969a;
+    --info-bg: rgba(255, 255, 255, .05);
+    --info-border: rgba(255, 255, 255, .10);
+    --info-text: #96969a;
+    --embed-canvas: #141416;
+    --embed-aside: #222326;
+    --embed-card: rgba(255, 255, 255, .04);
+    --embed-line: rgba(255, 255, 255, .07);
+    --embed-line-btn: rgba(255, 255, 255, .10);
+}
+html.settings-embed,
+html.settings-embed body:not(#settings-embed-scope) * {
     scrollbar-width: none !important;
     -ms-overflow-style: none !important;
 }
 html.settings-embed::-webkit-scrollbar,
-html.settings-embed *::-webkit-scrollbar {
+html.settings-embed body:not(#settings-embed-scope) *::-webkit-scrollbar {
     width: 0 !important;
     height: 0 !important;
     display: none !important;
 }
-html.settings-embed .page { padding: 0; min-height: auto; background: transparent !important; }
-html.settings-embed .wrap { max-width: none; }
-html.settings-embed .page-head { display: none; }
-html.settings-embed .layout { grid-template-columns: 260px minmax(0,1fr); gap: 10px; align-items: start; }
-html.settings-embed .sidebar {
-    position: static;
-    max-height: none;
-    width: 260px;
-    min-width: 260px;
+
+/* ── 画布与栅格 ── */
+html.settings-embed body:not(#settings-embed-scope) .page { padding: 0 !important; margin: 0 !important; min-height: auto !important; background: transparent !important; }
+html.settings-embed body:not(#settings-embed-scope) .wrap { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .page-head { display: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .layout {
+    grid-template-columns: 244px minmax(0, 1fr) !important;
+    gap: 20px !important;
+    align-items: start !important;
+    height: 100%;
+    overflow: hidden;
+}
+html.settings-embed body:not(#settings-embed-scope) .content {
+    display: flex;
+    flex-direction: column;
+    gap: 0 !important;
+    min-width: 0;
+    overflow-y: auto !important;
+}
+/* Tailwind 注入的 [hidden] 规则特异性低，这里兜底保证 JS 的 hidden 切换有效 */
+html.settings-embed body:not(#settings-embed-scope) [hidden] { display: none !important; }
+
+/* ── 左侧导航面（= .settings-aside） ── */
+html.settings-embed body:not(#settings-embed-scope) .sidebar {
+    position: static !important;
+    top: auto !important;
+    width: 244px !important;
+    min-width: 244px !important;
+    max-height: none !important;
     flex-shrink: 0;
-    background: var(--bg) !important;
-    border: 1px solid var(--divider) !important;
-    border-radius: 20px !important;
-    padding: 14px;
-}
-html.settings-embed .block {
-    background: var(--stage-bg) !important;
-    border: 1px solid var(--divider) !important;
-    border-radius: 20px !important;
+    gap: 4px !important;
+    padding: 24px 14px 22px !important;
+    border: none !important;
+    border-radius: 24px !important;
+    background: var(--embed-aside) !important;
     box-shadow: none !important;
-    padding: 18px 20px !important;
+    overflow-y: auto !important;
 }
-html.settings-embed .content-head {
-    border-radius: 20px !important;
-    border: 1px solid var(--divider) !important;
-    background: var(--stage-bg) !important;
+html.settings-embed body:not(#settings-embed-scope) .side-section-title {
+    padding: 0 0 0 12px !important;
+    margin: 8px 0 2px !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    letter-spacing: .02em !important;
+    line-height: 1.4 !important;
+    text-transform: none !important;
 }
-html.settings-embed .field-frame {
-    background: var(--bg) !important;
+/* 左栏高度确定后，flex 子项会被压缩导致行重叠，这里禁止收缩改为滚动 */
+html.settings-embed body:not(#settings-embed-scope) .sidebar > * { flex: 0 0 auto !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-list {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .cli-quick-group { gap: 4px !important; padding-top: 0 !important; margin-top: 8px !important; }
+html.settings-embed body:not(#settings-embed-scope) .cli-quick-list { gap: 4px !important; }
+
+/* ── 平台条目（= .settings-tab 行式导航） ── */
+html.settings-embed body:not(#settings-embed-scope) .provider-card,
+html.settings-embed body:not(#settings-embed-scope) .provider-card.provider-card-banner,
+html.settings-embed body:not(#settings-embed-scope) .provider-card.provider-card-sortable {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 10px 12px !important;
+    border: none !important;
     border-radius: 10px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: var(--muted) !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    text-align: left !important;
+    transition: background .2s ease, color .2s ease !important;
 }
-html.settings-embed .provider-list .provider-item { border-radius: 10px !important; }
-html.settings-embed .model-list .model-item { border-radius: 10px !important; }
-html.settings-embed .action-btn { border-radius: 10px !important; }
-/* 顶部保存按钮：深浅色模式下都保证高对比，文字始终可见 */
-.action-btn.save-btn.api-page-save-btn,
-.action-btn.save-btn.api-page-save-btn:hover,
-body.studio-theme-dark .action-btn.save-btn.api-page-save-btn,
-html.studio-theme-dark body .action-btn.save-btn.api-page-save-btn,
-body.theme-dark .action-btn.save-btn.api-page-save-btn,
-body.studio-theme-dark .action-btn.save-btn.api-page-save-btn:hover,
-html.studio-theme-dark body .action-btn.save-btn.api-page-save-btn:hover,
-body.theme-dark .action-btn.save-btn.api-page-save-btn:hover {
-    background: var(--text) !important;
-    color: var(--text-on-accent) !important;
+/* 品牌行没有拖拽手柄，左侧补同样宽度，让 logo 与普通行的图标列对齐 */
+html.settings-embed body:not(#settings-embed-scope) .provider-card.provider-card-banner { padding-left: 36px !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-card::before,
+html.settings-embed body:not(#settings-embed-scope) .provider-card.active::before { content: none !important; display: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-card:hover,
+html.settings-embed body:not(#settings-embed-scope) .provider-card.active,
+html.settings-embed body:not(#settings-embed-scope) .provider-card.active:hover {
+    background: var(--nav-hover-bg) !important;
+    color: var(--text) !important;
     border-color: transparent !important;
+    box-shadow: none !important;
 }
-@media (max-width: 700px) {
-    html.settings-embed .layout { grid-template-columns: 1fr; }
-    html.settings-embed .sidebar { position: static; max-height: none; }
+html.settings-embed body:not(#settings-embed-scope) .provider-card.is-disabled { opacity: .48 !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-card.is-dragging { opacity: .5 !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-card.provider-card-drop-target {
+    background: var(--nav-hover-bg) !important;
+    box-shadow: inset 0 0 0 1px var(--text) !important;
 }
-/* ═══ Modal embed: fill iframe height, content scrolls ═══ */
-html.settings-embed .wrap,
-html.settings-embed .page { height: 100%; overflow: hidden; }
-html.settings-embed .layout { height: 100%; overflow: hidden; }
-html.settings-embed .content { overflow-y: auto; }
-html.settings-embed .sidebar { overflow-y: auto; }
-html.settings-embed .content-head { position: sticky; top: 0; z-index: 5; }
+html.settings-embed body:not(#settings-embed-scope) .provider-banner-inner {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-logo-wrap {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    width: auto !important;
+    min-width: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-card-banner img {
+    display: block !important;
+    width: auto !important;
+    height: 18px !important;
+    max-width: 96px !important;
+    object-fit: contain !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-card-banner .runninghub-icon,
+html.settings-embed body:not(#settings-embed-scope) .provider-card-banner .volcengine-icon { height: 18px !important; max-width: 96px !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-card-banner .ms-icon-dark { display: none !important; }
+html.settings-embed.theme-dark body:not(#settings-embed-scope) .provider-card-banner .ms-icon-light,
+html.settings-embed.studio-theme-dark body:not(#settings-embed-scope) .provider-card-banner .ms-icon-light { display: none !important; }
+html.settings-embed.theme-dark body:not(#settings-embed-scope) .provider-card-banner .ms-icon-dark,
+html.settings-embed.studio-theme-dark body:not(#settings-embed-scope) .provider-card-banner .ms-icon-dark { display: block !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-info { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-name {
+    color: inherit !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    line-height: 1.3 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-card.active .provider-name { color: var(--text) !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-meta {
+    margin-top: 1px !important;
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 400 !important;
+    line-height: 1.3 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-mark {
+    flex: 0 0 auto !important;
+    width: 18px !important;
+    height: 18px !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-mark svg { width: 18px !important; height: 18px !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-card:hover .provider-mark,
+html.settings-embed body:not(#settings-embed-scope) .provider-card.active .provider-mark { background: transparent !important; color: var(--text) !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-drag-handle {
+    flex: 0 0 auto !important;
+    width: 14px !important;
+    height: 18px !important;
+    border: none !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+    opacity: .55;
+    cursor: grab;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-drag-handle svg { width: 14px !important; height: 14px !important; }
+html.settings-embed body:not(#settings-embed-scope) .provider-card:hover .provider-drag-handle { opacity: .9; }
+html.settings-embed body:not(#settings-embed-scope) .provider-side-meta {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-protocol-pill,
+html.settings-embed body:not(#settings-embed-scope) .provider-card-banner .provider-protocol-pill {
+    display: inline-flex !important;
+    align-items: center !important;
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: none !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    white-space: nowrap !important;
+    opacity: .8;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-status-dot {
+    display: block !important;
+    flex: 0 0 auto !important;
+    width: 6px !important;
+    height: 6px !important;
+    border-radius: 999px !important;
+    background: var(--faint) !important;
+    opacity: .55 !important;
+}
+/* 外壳走中性灰，状态点保留原有语义色（已配置=绿） */
+html.settings-embed body:not(#settings-embed-scope) .provider-card.has-key .provider-status-dot {
+    background: #16a34a !important;
+    opacity: .85 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-card.missing-key .provider-status-dot {
+    background: var(--faint) !important;
+    opacity: .5 !important;
+}
+html.settings-embed.theme-dark body:not(#settings-embed-scope) .provider-card.has-key .provider-status-dot,
+html.settings-embed.studio-theme-dark body:not(#settings-embed-scope) .provider-card.has-key .provider-status-dot {
+    background: #4ade80 !important;
+    opacity: .75 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .provider-logo-fallback { display: none !important; }
+
+/* ── 次级按钮语言（新增平台 / CLI 快捷项） ── */
+html.settings-embed body:not(#settings-embed-scope) .add-btn,
+html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 10px !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 9px 12px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 10px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    transition: background .2s ease, color .2s ease !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .add-btn:hover,
+html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn:hover,
+html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn.active { background: var(--nav-hover-bg) !important; color: var(--text) !important; border-color: var(--embed-line-btn) !important; }
+html.settings-embed body:not(#settings-embed-scope) .add-btn svg,
+html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn svg { width: 16px !important; height: 16px !important; flex: 0 0 auto; }
+html.settings-embed body:not(#settings-embed-scope) .cli-quick-note {
+    padding: 2px 12px 0 !important;
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+}
+
+/* ── 左栏唯一主按钮：推荐API（黑白反转） ── */
+html.settings-embed body:not(#settings-embed-scope) .api-link-btn {
+    position: relative !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    width: 100% !important;
+    height: 38px !important;
+    min-height: 38px !important;
+    margin: 4px 0 0 !important;
+    border: 1px solid var(--text) !important;
+    border-radius: 10px !important;
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    transform: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .api-link-btn::after { content: none !important; display: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .api-link-btn svg,
+html.settings-embed body:not(#settings-embed-scope) .api-link-btn i { animation: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .api-link-btn:hover {
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    border-color: var(--text) !important;
+    opacity: .88;
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+/* ── 右列标题行（纯标题，无卡片底/边框） ── */
+html.settings-embed body:not(#settings-embed-scope) .content-head {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 16px !important;
+    flex-wrap: nowrap !important;
+    padding: 0 0 16px !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: var(--embed-canvas) !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .content-head .editor-title {
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0 !important;
+    line-height: 1.3 !important;
+    color: var(--text) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .content-head .editor-sub {
+    margin-top: 2px !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    letter-spacing: 0 !important;
+    line-height: 1.5 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .content-actions { display: flex !important; align-items: center !important; gap: 8px !important; flex: 0 0 auto; }
+
+/* ── 卡片（= .settings-card） ── */
+html.settings-embed body:not(#settings-embed-scope) .block {
+    margin: 0 0 16px !important;
+    padding: 18px 20px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 16px !important;
+    background: var(--embed-card) !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .block:last-child { margin-bottom: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .model-grid { display: flex !important; flex-direction: column !important; gap: 16px !important; }
+html.settings-embed body:not(#settings-embed-scope) .model-grid .block { margin-bottom: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .block-head {
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    gap: 12px !important;
+    margin: 0 0 16px !important;
+    padding: 0 !important;
+    border: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .block-title {
+    margin: 0 0 4px !important;
+    color: var(--text) !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0 !important;
+    line-height: 1.35 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .block-desc {
+    margin: 0 !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    letter-spacing: 0 !important;
+    line-height: 1.5 !important;
+}
+
+/* ── 表单 ── */
+html.settings-embed body:not(#settings-embed-scope) .form { display: flex !important; flex-direction: column !important; gap: 16px !important; }
+html.settings-embed body:not(#settings-embed-scope) .field { gap: 6px !important; }
+html.settings-embed body:not(#settings-embed-scope) .label {
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .field-frame {
+    display: flex !important;
+    align-items: center !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .field-frame:focus-within { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .field-frame input,
+html.settings-embed body:not(#settings-embed-scope) .field-frame select,
+html.settings-embed body:not(#settings-embed-scope) .field-frame textarea {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    height: 34px !important;
+    padding: 0 12px !important;
+    border: none !important;
+    border-radius: 10px !important;
+    background: transparent !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .field-frame input:focus,
+html.settings-embed body:not(#settings-embed-scope) .field-frame select:focus,
+html.settings-embed body:not(#settings-embed-scope) .field-frame textarea:focus { border: none !important; box-shadow: none !important; outline: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .field-frame input::placeholder { color: var(--muted) !important; opacity: .7; }
+html.settings-embed body:not(#settings-embed-scope) .hint,
+html.settings-embed body:not(#settings-embed-scope) .ms-hint,
+html.settings-embed body:not(#settings-embed-scope) .field-hint {
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+    letter-spacing: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .ms-line { color: var(--muted) !important; }
+html.settings-embed body:not(#settings-embed-scope) .ms-hint a,
+html.settings-embed body:not(#settings-embed-scope) .hint a,
+html.settings-embed body:not(#settings-embed-scope) .runninghub-hint a,
+html.settings-embed body:not(#settings-embed-scope) .apimart-hint a,
+html.settings-embed body:not(#settings-embed-scope) .rh-key-links a {
+    color: var(--text) !important;
+    font-weight: 600 !important;
+    text-decoration: underline !important;
+    text-underline-offset: 2px;
+}
+html.settings-embed body:not(#settings-embed-scope) .inline-code {
+    padding: 1px 5px !important;
+    border: none !important;
+    border-radius: 4px !important;
+    background: var(--bg) !important;
+    color: var(--muted) !important;
+    font-family: var(--font-mono) !important;
+    font-size: 11px !important;
+    font-weight: 400 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .key-panel,
+html.settings-embed body:not(#settings-embed-scope) .rh-key-item,
+html.settings-embed body:not(#settings-embed-scope) .rh-card-group,
+html.settings-embed body:not(#settings-embed-scope) .rh-config-card,
+html.settings-embed body:not(#settings-embed-scope) .advanced-endpoints {
+    padding: 12px 14px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: var(--bg) !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-key-title,
+html.settings-embed body:not(#settings-embed-scope) .rh-group-title {
+    color: var(--text) !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-key-desc {
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-group-count,
+html.settings-embed body:not(#settings-embed-scope) .jimeng-status-pill {
+    display: inline-flex !important;
+    align-items: center !important;
+    padding: 2px 9px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .verify-action-row { gap: 8px !important; flex-wrap: wrap !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-paste-row { gap: 8px !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-paste-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 34px !important;
+    padding: 0 12px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-paste-input:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+
+/* ── 按钮家族 ── */
+html.settings-embed body:not(#settings-embed-scope) .action-btn,
+html.settings-embed body:not(#settings-embed-scope) .ghost-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    height: auto !important;
+    min-height: 34px !important;
+    padding: 7px 14px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 8px !important;
+    background: var(--stage-bg) !important;
+    color: var(--text) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    transform: none !important;
+    transition: background .2s ease, color .2s ease !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .action-btn:hover,
+html.settings-embed body:not(#settings-embed-scope) .ghost-btn:hover {
+    background: var(--nav-hover-bg) !important;
+    color: var(--text) !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .action-btn svg,
+html.settings-embed body:not(#settings-embed-scope) .ghost-btn svg { width: 15px !important; height: 15px !important; }
+html.settings-embed body:not(#settings-embed-scope) .action-btn.primary-btn,
+html.settings-embed body:not(#settings-embed-scope) .action-btn.save-btn {
+    border-color: var(--text) !important;
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .action-btn.primary-btn:hover,
+html.settings-embed body:not(#settings-embed-scope) .action-btn.save-btn:hover {
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    border-color: var(--text) !important;
+    opacity: .88;
+}
+html.settings-embed body:not(#settings-embed-scope) .action-btn.danger-btn {
+    border-color: var(--embed-line-btn) !important;
+    background: var(--stage-bg) !important;
+    color: var(--danger-text) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .action-btn.danger-btn:hover {
+    border-color: var(--danger-border) !important;
+    background: var(--danger-bg) !important;
+    color: var(--danger-text) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .key-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    padding: 0 !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 8px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .key-btn:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+html.settings-embed body:not(#settings-embed-scope) .key-btn svg { width: 15px !important; height: 15px !important; }
+html.settings-embed body:not(#settings-embed-scope) .key-btn.key-clear { color: var(--danger-text) !important; }
+html.settings-embed body:not(#settings-embed-scope) .key-btn.key-clear:hover {
+    border-color: var(--danger-border) !important;
+    background: var(--danger-bg) !important;
+    color: var(--danger-text) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .key-input-line { gap: 8px !important; }
+html.settings-embed body:not(#settings-embed-scope) .key-actions { gap: 6px !important; }
+
+/* ── 模型区：分类 pill + 行式条目 ── */
+html.settings-embed body:not(#settings-embed-scope) .models-toolbar { display: flex; flex-direction: column; gap: 12px; }
+html.settings-embed body:not(#settings-embed-scope) .models-toolbar-main {
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    gap: 12px !important;
+    margin: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .models-toolbar-actions { display: flex !important; gap: 8px !important; flex-wrap: wrap !important; }
+html.settings-embed body:not(#settings-embed-scope) .model-cat-tabs {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .model-cat-tab {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    height: auto !important;
+    padding: 8px 14px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    transition: background .2s ease, border-color .2s ease, color .2s ease !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .model-cat-tab:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed body:not(#settings-embed-scope) .model-cat-tab.active {
+    border-color: var(--text) !important;
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .model-row,
+html.settings-embed body:not(#settings-embed-scope) .lora-row {
+    display: grid !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 8px 10px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .model-row { grid-template-columns: minmax(0, 1fr) 36px !important; }
+html.settings-embed body:not(#settings-embed-scope) .model-row.has-protocol { grid-template-columns: minmax(0, 1fr) auto 36px !important; }
+html.settings-embed body:not(#settings-embed-scope) .lora-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 86px 36px !important; }
+html.settings-embed body:not(#settings-embed-scope) .model-id-field,
+html.settings-embed body:not(#settings-embed-scope) .model-protocol-auto,
+html.settings-embed body:not(#settings-embed-scope) .model-protocol-select { min-width: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .model-display-name {
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .model-row input,
+html.settings-embed body:not(#settings-embed-scope) .lora-row input,
+html.settings-embed body:not(#settings-embed-scope) .lora-field input,
+html.settings-embed body:not(#settings-embed-scope) .lora-field select,
+html.settings-embed body:not(#settings-embed-scope) .model-protocol-select {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 32px !important;
+    padding: 0 12px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 8px !important;
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .model-protocol-select { min-width: 74px !important; cursor: pointer; }
+html.settings-embed body:not(#settings-embed-scope) .model-protocol-auto {
+    display: inline-flex !important;
+    align-items: center !important;
+    height: 30px !important;
+    padding: 0 9px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    white-space: nowrap;
+}
+html.settings-embed body:not(#settings-embed-scope) .lora-field { gap: 5px !important; min-width: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .lora-field > span {
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .icon-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 30px !important;
+    height: 30px !important;
+    padding: 0 !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 8px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .icon-btn:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+html.settings-embed body:not(#settings-embed-scope) .icon-btn svg { width: 15px !important; height: 15px !important; }
+html.settings-embed body:not(#settings-embed-scope) .model-row input:focus,
+html.settings-embed body:not(#settings-embed-scope) .lora-row input:focus,
+html.settings-embed body:not(#settings-embed-scope) .lora-field input:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .model-list,
+html.settings-embed body:not(#settings-embed-scope) .lora-list { display: flex !important; flex-direction: column !important; gap: 8px !important; }
+html.settings-embed body:not(#settings-embed-scope) .models-fetch-hint,
+html.settings-embed body:not(#settings-embed-scope) .empty { color: var(--muted) !important; font-size: 12px !important; font-weight: 400 !important; }
+
+/* ── 推荐平台视图（API 标签默认落地页） ── */
+html.settings-embed body:not(#settings-embed-scope) .recommend-content { max-width: none !important; }
+/* 推荐视图顶部三行标题去掉（推荐平台 / 推荐多平台注册 / 分组名），卡片直接顶到内容区顶部；
+   用子选择器限定作用域：#providerOnboardingCard 那张新手引导卡的标题必须留着 */
+html.settings-embed body:not(#settings-embed-scope) #recommendContent > .content-head,
+html.settings-embed body:not(#settings-embed-scope) #recommendPanel > .onboarding-head,
+html.settings-embed body:not(#settings-embed-scope) #recommendPanel .recommend-group-head {
+    display: none !important;
+}
+/* 推荐/新手引导视图不再套外层底板：内容是直接铺在弹窗面上，卡片自己就是唯一的框，
+   与通用设置「卡片直接铺在弹窗面」的层级一致 */
+html.settings-embed body:not(#settings-embed-scope) .provider-onboarding-card,
+html.settings-embed body:not(#settings-embed-scope) .recommend-inline-card {
+    max-width: none !important;
+    /* 去掉基类 min-height:360px 的占位，但必须显式声明为不可压缩的 flex 子项：
+       否则 .content 这个定高 flex 列会把它压扁成 0 高（min-height:0 会连自动最小尺寸一起取消） */
+    flex: 0 0 auto !important;
+    min-height: auto !important;
+    justify-content: flex-start !important;
+    gap: 16px !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-inline-body { display: flex !important; flex-direction: column !important; gap: 16px !important; padding: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-api-body { display: flex !important; flex-direction: column !important; gap: 16px !important; padding: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-group { display: flex !important; flex-direction: column !important; gap: 16px !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-group-head,
+html.settings-embed body:not(#settings-embed-scope) .recommend-group-value,
+html.settings-embed body:not(#settings-embed-scope) .recommend-setup-title {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    color: var(--text) !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-group-value { margin-top: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-platform-card,
+html.settings-embed body:not(#settings-embed-scope) .recommend-inline-card .recommend-platform-card {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    padding: 14px 16px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 16px !important;
+    background: var(--embed-card) !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-name,
+html.settings-embed body:not(#settings-embed-scope) .recommend-name span {
+    color: var(--text) !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-platform-summary {
+    margin: 0 !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-badge,
+html.settings-embed body:not(#settings-embed-scope) .onboarding-badge,
+html.settings-embed body:not(#settings-embed-scope) .recommend-tag,
+html.settings-embed body:not(#settings-embed-scope) .recommend-perk-tag,
+html.settings-embed body:not(#settings-embed-scope) .recommend-seedance-tag,
+html.settings-embed body:not(#settings-embed-scope) .recommend-tag.recommend-free-tag {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    height: auto !important;
+    padding: 3px 10px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-tag.recommend-free-tag,
+html.settings-embed body:not(#settings-embed-scope) .recommend-tag.recommend-free-tag > span,
+html.settings-embed body:not(#settings-embed-scope) .recommend-tag.recommend-free-tag i,
+html.settings-embed body:not(#settings-embed-scope) .recommend-tag.recommend-free-tag svg {
+    background: var(--stage-bg) !important;
+    border-color: var(--embed-line-btn) !important;
+    color: var(--muted) !important;
+    stroke: var(--muted) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-tags { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-platform-head { display: flex !important; align-items: center !important; gap: 8px !important; flex-wrap: wrap !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-platform-info { display: flex !important; flex-direction: column !important; gap: 8px !important; min-width: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-platform-setup { display: flex !important; flex-direction: column !important; gap: 8px !important; min-width: 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-source,
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save {
+    padding: 12px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: var(--stage-bg) !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-flow-arrow,
+html.settings-embed body:not(#settings-embed-scope) .onboarding-flow-arrow,
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-arrow { color: var(--muted) !important; opacity: .55; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-flow-arrow span,
+html.settings-embed body:not(#settings-embed-scope) .onboarding-rh-row-arrow span,
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-arrow span { color: var(--muted) !important; opacity: .55 !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-flow-arrow i,
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-arrow i { color: var(--muted) !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-key-btn,
+html.settings-embed body:not(#settings-embed-scope) .onboarding-key-btn,
+html.settings-embed body:not(#settings-embed-scope) .recommend-account-link,
+html.settings-embed body:not(#settings-embed-scope) .recommend-single-action button {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 14px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 8px !important;
+    background: var(--stage-bg) !important;
+    color: var(--text) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    text-decoration: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-key-btn:hover,
+html.settings-embed body:not(#settings-embed-scope) .onboarding-key-btn:hover,
+html.settings-embed body:not(#settings-embed-scope) .recommend-account-link:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed body:not(#settings-embed-scope) .onboarding-save-btn,
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save-btn,
+html.settings-embed body:not(#settings-embed-scope) .recommend-register,
+html.settings-embed body:not(#settings-embed-scope) .recommend-fill,
+html.settings-embed body:not(#settings-embed-scope) .recommend-actions a,
+html.settings-embed body:not(#settings-embed-scope) .recommend-actions button {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 14px !important;
+    border: 1px solid var(--text) !important;
+    border-radius: 8px !important;
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    text-decoration: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .onboarding-save-btn:hover,
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save-btn:hover,
+html.settings-embed body:not(#settings-embed-scope) .recommend-register:hover,
+html.settings-embed body:not(#settings-embed-scope) .recommend-fill:hover,
+html.settings-embed body:not(#settings-embed-scope) .recommend-actions a:hover,
+html.settings-embed body:not(#settings-embed-scope) .recommend-actions button:hover {
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    border-color: var(--text) !important;
+    opacity: .88;
+}
+html.settings-embed body:not(#settings-embed-scope) .onboarding-key-field input,
+html.settings-embed body:not(#settings-embed-scope) .onboarding-rh-row-field input,
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save input {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 34px !important;
+    padding: 0 12px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 8px !important;
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .onboarding-key-field input:focus,
+html.settings-embed body:not(#settings-embed-scope) .onboarding-rh-row-field input:focus,
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save input:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .onboarding-title {
+    color: var(--text) !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .onboarding-desc,
+html.settings-embed body:not(#settings-embed-scope) .recommend-key-hint,
+html.settings-embed body:not(#settings-embed-scope) .recommend-key-inline-hint,
+html.settings-embed body:not(#settings-embed-scope) .recommend-api-key-label,
+html.settings-embed body:not(#settings-embed-scope) .onboarding-rh-source-label {
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .recommend-note {
+    margin: 0 !important;
+    padding: 14px 16px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 16px !important;
+    background: var(--embed-card) !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+}
+/* 新手引导里的内容框：底板拍平后它承担内层卡片的角色，规格对齐其它内层框 */
+html.settings-embed body:not(#settings-embed-scope) .onboarding-step-panel {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: var(--bg) !important;
+    box-shadow: none !important;
+}
+
+/* ── 浮层（推荐API / 模型选择 / 帮助 / RH 工作流编辑器） ── */
+html.settings-embed body:not(#settings-embed-scope) .picker-overlay { background: rgba(0, 0, 0, .28) !important; }
+html.settings-embed body:not(#settings-embed-scope) .picker-modal {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 20px !important;
+    background: var(--stage-bg) !important;
+    box-shadow: var(--shadow-xl) !important;
+    overflow: hidden !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-head {
+    padding: 20px 22px 14px !important;
+    border-bottom: 1px solid var(--embed-line) !important;
+    background: transparent !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-title {
+    color: var(--text) !important;
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-count {
+    margin-top: 2px !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-close {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 30px !important;
+    height: 30px !important;
+    border: 1px solid transparent !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-close:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+html.settings-embed body:not(#settings-embed-scope) .picker-search,
+html.settings-embed body:not(#settings-embed-scope) .picker-toolbar input {
+    height: 36px !important;
+    padding: 0 12px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 8px !important;
+    background: var(--bg) !important;
+    color: var(--muted) !important;
+    font-size: 13px !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-search:focus,
+html.settings-embed body:not(#settings-embed-scope) .picker-toolbar input:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .picker-cat-tab {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    height: auto !important;
+    padding: 8px 14px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-cat-tab:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed body:not(#settings-embed-scope) .picker-cat-tab.active {
+    border-color: var(--text) !important;
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+}
+/* 计数徽标嵌在黑白反转的分段控件里，必须继承字色，否则黑底黑字/白底白字 */
+html.settings-embed body:not(#settings-embed-scope) .picker-cat-tab .cat-count,
+html.settings-embed body:not(#settings-embed-scope) .picker-type-btn .cat-count,
+html.settings-embed body:not(#settings-embed-scope) .model-cat-tab .cat-count {
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+    box-shadow: none !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    opacity: .65;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-foot {
+    padding: 14px 22px 18px !important;
+    border-top: 1px solid var(--embed-line) !important;
+    background: transparent !important;
+    gap: 8px !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-summary {
+    border: none !important;
+    border-top: 1px solid var(--embed-line) !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .picker-sum-chip,
+html.settings-embed body:not(#settings-embed-scope) .picker-sum-chip-empty,
+html.settings-embed body:not(#settings-embed-scope) .picker-type-btn {
+    padding: 2px 9px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    box-shadow: none !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .jimeng-help-toolbar { display: flex !important; align-items: center !important; gap: 8px !important; padding: 14px 22px 0 !important; }
+html.settings-embed body:not(#settings-embed-scope) .jimeng-help-output {
+    margin: 12px 22px 18px !important;
+    padding: 12px 14px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    color: var(--muted) !important;
+    font-family: var(--font-mono) !important;
+    font-size: 11.5px !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-overlay { background: rgba(0, 0, 0, .28) !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-modal {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 20px !important;
+    background: var(--stage-bg) !important;
+    box-shadow: var(--shadow-xl) !important;
+    overflow: hidden !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-head {
+    padding: 18px 22px !important;
+    border-bottom: 1px solid var(--embed-line) !important;
+    background: transparent !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-title {
+    color: var(--text) !important;
+    font-size: 16px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-sub {
+    margin-top: 2px !important;
+    color: var(--muted) !important;
+    font-family: var(--font-sans) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    letter-spacing: 0 !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-close {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 30px !important;
+    height: 30px !important;
+    border: 1px solid transparent !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-close:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-side { border-right: 1px solid var(--embed-line) !important; background: transparent !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-field { gap: 6px !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-field > span { color: var(--muted) !important; font-size: 12px !important; font-weight: 600 !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-field input,
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-field textarea {
+    padding: 8px 12px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-field input:focus,
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-field textarea:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-node-list,
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-summary {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: var(--bg) !important;
+    color: var(--muted) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-graph-wrap,
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-graph-svg { border: none !important; border-radius: 0 !important; background: var(--bg) !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-graph-controls {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--stage-bg) !important;
+    box-shadow: none !important;
+    color: var(--muted) !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-graph-controls button { color: var(--muted) !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-graph-controls button:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+
+/* ── CLI 面板 / 存储设置 / 校验结果 ── */
+html.settings-embed body:not(#settings-embed-scope) .jimeng-cli-panel {
+    padding: 12px 14px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: var(--bg) !important;
+    box-shadow: none !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .jimeng-actions { display: flex !important; flex-wrap: wrap !important; gap: 8px !important; }
+html.settings-embed body:not(#settings-embed-scope) .jimeng-credit,
+html.settings-embed body:not(#settings-embed-scope) .jimeng-output { color: var(--muted) !important; font-size: 12px !important; line-height: 1.5 !important; }
+html.settings-embed body:not(#settings-embed-scope) .jimeng-output {
+    padding: 10px 12px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--stage-bg) !important;
+    font-family: var(--font-mono) !important;
+    font-size: 11.5px !important;
+}
+html.settings-embed body:not(#settings-embed-scope) #verifyResult { font-size: 12px !important; color: var(--muted) !important; }
+html.settings-embed body:not(#settings-embed-scope) input[type="checkbox"] { accent-color: var(--text) !important; }
+
+/* ═══ Modal embed: fill iframe height, content scrolls ═══
+   高度链必须逐级确定（html→body→.page→.wrap→.layout），
+   否则 .layout 会被内容撑高，左栏跟着整页滚走、页头也粘不住。 */
+html.settings-embed,
+html.settings-embed body,
+html.settings-embed body:not(#settings-embed-scope) { height: 100%; }
+html.settings-embed body:not(#settings-embed-scope) .wrap,
+html.settings-embed body:not(#settings-embed-scope) .page { height: 100%; overflow: hidden; }
+html.settings-embed body:not(#settings-embed-scope) .layout {
+    height: 100%;
+    overflow: hidden !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    align-items: stretch !important;
+}
+html.settings-embed body:not(#settings-embed-scope) .content,
+html.settings-embed body:not(#settings-embed-scope) .sidebar { min-height: 0; }
+html.settings-embed body:not(#settings-embed-scope) .content-head { position: sticky; top: 0; z-index: 5; }
+@media (max-width: 760px) {
+    html.settings-embed body:not(#settings-embed-scope) .layout { grid-template-columns: 1fr !important; }
+    html.settings-embed body:not(#settings-embed-scope) .sidebar { position: static !important; max-height: none !important; width: 100% !important; min-width: 0 !important; }
+}
 /* Close button */
 .settings-close-btn, .modal-close-btn { transition: transform 0.2s ease-out; }
 .settings-close-btn:hover, .modal-close-btn:hover { transform: rotate(90deg) scale(1.1); }
@@ -163,7 +1336,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                         </div>
                         <div class="content-actions">
                             <button id="deleteBtn" class="action-btn danger-btn api-page-delete-btn" type="button" onclick="deleteProvider()"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span data-i18n="api.delete">删除</span></button>
-                            <button class="action-btn save-btn api-page-save-btn" type="button" onclick="saveProviders()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span data-i18n="api.save">保存</span></button>
+                            <button class="action-btn save-btn api-page-save-btn" type="button" data-morph-keep-width onclick="saveProviders()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span data-i18n="api.save">保存</span></button>
                         </div>
                     </div>
 
@@ -203,7 +1376,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                     <div class="key-input-line">
                                         <div class="field-frame"><input id="keyInput" type="password"></div>
                                         <div class="key-actions">
-                                            <button class="key-btn" type="button" onclick="saveKeyOnly()" title="保存 Key" data-i18n-title="api.saveKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
+                                            <button class="key-btn" type="button" data-morph onclick="saveKeyOnly()" title="保存 Key" data-i18n-title="api.saveKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
                                             <button class="key-btn key-clear" type="button" onclick="clearKeyOnly()" title="清除 Key" data-i18n-title="api.clearKeyTitle"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                                         </div>
                                     </div>
@@ -225,7 +1398,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                         <div class="key-input-line">
                                             <div class="field-frame"><input id="rhFreeKeyInput" type="password"></div>
                                             <div class="key-actions">
-                                                <button class="key-btn" type="button" onclick="saveRhKeyOnly('free')" title="保存 RH币 Key" data-i18n-title="api.saveRhCoinKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
+                                                <button class="key-btn" type="button" data-morph onclick="saveRhKeyOnly('free')" title="保存 RH币 Key" data-i18n-title="api.saveRhCoinKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
                                                 <button class="key-btn key-clear" type="button" onclick="clearRhKeyOnly('free')" title="清除 RH币 Key" data-i18n-title="api.clearRhCoinKeyTitle"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                                             </div>
                                         </div>
@@ -246,7 +1419,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                         <div class="key-input-line">
                                             <div class="field-frame"><input id="rhWalletKeyInput" type="password"></div>
                                             <div class="key-actions">
-                                                <button class="key-btn" type="button" onclick="saveRhKeyOnly('wallet')" title="保存账户余额 Key" data-i18n-title="api.saveRhWalletKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
+                                                <button class="key-btn" type="button" data-morph onclick="saveRhKeyOnly('wallet')" title="保存账户余额 Key" data-i18n-title="api.saveRhWalletKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
                                                 <button class="key-btn key-clear" type="button" onclick="clearRhKeyOnly('wallet')" title="清除账户余额 Key" data-i18n-title="api.clearRhWalletKeyTitle"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                                             </div>
                                         </div>
@@ -310,6 +1483,42 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                 </div>
                                 <div id="geminiCliInfo" class="jimeng-credit"></div>
                             </div>
+                            <div id="lovartPanel" class="jimeng-cli-panel" hidden>
+                                <div class="jimeng-cli-head">
+                                    <div>
+                                        <div class="rh-key-title">Lovart 设计代理账户</div>
+                                        <div class="rh-key-desc">到 lovart.ai 登录后点头像 → Settings，复制 access_key 和 secret_key。<a href="https://lovart.notion.site/Lovart-OpenClaw-User-Guide-33da46b16a0f80f6a7fff8e4896b9fca" target="_blank" rel="noopener noreferrer" style="display:inline-flex;align-items:center;gap:3px;color:var(--text);font-weight:800;text-decoration:underline;text-underline-offset:3px;"><i data-lucide="external-link" class="w-3 h-3"></i>查看官方文档</a></div>
+                                    </div>
+                                    <div class="jimeng-actions">
+                                        <button class="action-btn" type="button" onclick="clearLovartKeys()"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span>清除已保存密钥</span></button>
+                                    </div>
+                                </div>
+                                <div class="rh-key-item">
+                                    <label class="field">
+                                        <span class="label">Access Key</span>
+                                        <div class="field-frame"><input id="lovartAkInput" type="password" autocomplete="off" placeholder="Access Key"></div>
+                                    </label>
+                                    <label class="field">
+                                        <span class="label">Secret Key</span>
+                                        <div class="field-frame"><input id="lovartSkInput" type="password" autocomplete="off" placeholder="Secret Key"></div>
+                                    </label>
+                                </div>
+                                <div id="lovartKeyHint" class="hint"></div>
+                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input type="checkbox" id="lovartAutoConfirmInput" style="accent-color:var(--accent);">
+                                    <span style="font-size:13px;color:var(--text-secondary);">高成本操作（视频等）自动确认</span>
+                                </label>
+                                <div class="hint">勾选后 Lovart 遇到高成本操作会自动确认并继续执行，会自动消耗账户额度。</div>
+                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input type="checkbox" id="lovartUnlimitedInput" style="accent-color:var(--accent);">
+                                    <span style="font-size:13px;color:var(--text-secondary);">排队模式（不消耗积分，出图更慢）</span>
+                                </label>
+                                <div class="hint">关闭 = 快速模式，会消耗积分。</div>
+                                <div class="jimeng-actions">
+                                    <button id="lovartModeApplyBtn" class="action-btn" type="button" onclick="applyLovartMode()"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>应用</span></button>
+                                    <span id="lovartModeHint" class="hint">点『应用』查询/切换</span>
+                                </div>
+                            </div>
                             <!-- 验证操作行 -->
                             <div class="verify-action-row">
                                 <button id="testUrlBtn" class="action-btn" type="button" onclick="testConnection()">
@@ -328,6 +1537,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                         <option value="jimeng">即梦 CLI</option>
                                         <option value="codex">OpenAI Codex CLI</option>
                                         <option value="gemini-cli">Antigravity CLI</option>
+                                        <option value="lovart">Lovart 设计代理</option>
                                     </select>
                                 </div>
                                 <div class="field-frame image-request-mode-wrap">
@@ -635,7 +1845,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                 </div>
                 <div class="rh-workflow-editor-actions">
                     <button class="action-btn" type="button" onclick="fetchRhWorkflowEditor(true)"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span>重新拉取</span></button>
-                    <button id="rhWorkflowSaveBtn" class="action-btn save-btn" type="button" onclick="saveRhWorkflowEditor()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span>保存</span></button>
+                    <button id="rhWorkflowSaveBtn" class="action-btn save-btn" type="button" data-morph-keep-width onclick="saveRhWorkflowEditor()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span>保存</span></button>
                     <button class="rh-workflow-editor-close" type="button" onclick="closeRhWorkflowEditor()"><i data-lucide="x" class="w-4 h-4"></i></button>
                 </div>
             </div>
@@ -667,6 +1877,39 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
         </div>
     </div>
 
-    <script src="/static/js/api-settings.js?v=1.0.117.1789606971"></script>
+    <script src="/static/js/api-settings.js?v=1.0.120.1789709849"></script>
+    <script>
+        // 保存类按钮多为动态渲染（推荐卡片/新手引导/RH 编辑器），渲染后需要重扫
+        (function () {
+            if (!window.NovaMorphButton) return;
+            NovaMorphButton.autoBind(document);
+            NovaMorphButton.observe(document.body);
+        })();
+    </script>
+    <script>
+        // 浮层开合上报父页：让 iframe 外的设置界面（左栏/标题）一起模糊压暗，避免接缝
+        (function () {
+            var OVERLAY_IDS = ['recommendApiOverlay', 'modelPickerOverlay', 'jimengHelpOverlay', 'codexHelpOverlay', 'geminiCliHelpOverlay', 'rhWorkflowEditorOverlay'];
+            var lastOpen = null;
+            function isOpen(el) {
+                if (!el || el.hidden) return false;
+                var cs = window.getComputedStyle(el);
+                return cs.display !== 'none' && cs.visibility !== 'hidden';
+            }
+            function syncOverlayState() {
+                var open = OVERLAY_IDS.some(function (id) { return isOpen(document.getElementById(id)); });
+                if (open === lastOpen) return;
+                lastOpen = open;
+                try { window.parent && window.parent.postMessage({ type: 'settings-iframe-overlay', open: open }, '*'); } catch (e) {}
+            }
+            var observer = new MutationObserver(syncOverlayState);
+            OVERLAY_IDS.forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) observer.observe(el, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
+            });
+            window.addEventListener('load', syncOverlayState);
+            syncOverlayState();
+        })();
+    </script>
 </body>
 </html>

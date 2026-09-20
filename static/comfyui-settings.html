@@ -13,17 +13,17 @@
             }
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.117.1789606971"></script>
-    <script src="/static/vendor/js/lucide-subset.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.117.1789606971"></script>
-    <link rel="stylesheet" href="/static/css/comfyui-settings.css?v=1.0.117.1789606971">
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.117.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
+    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
+    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
+    <link rel="stylesheet" href="/static/css/comfyui-settings.css?v=1.0.120.1789606971">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
 
-<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.117.1789606971">
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.117.1789606971">
+<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 body { background: transparent !important; color: var(--text) !important; }
@@ -34,7 +34,63 @@ header { background: var(--sidebar-bg) !important; backdrop-filter: blur(28px) !
 .graph-card { background: transparent !important; border-radius: var(--radius-lg) !important; }
 button.primary { background: var(--text) !important; color: var(--bg) !important; border-radius: var(--radius-md) !important; }
 input, select { background: var(--stage-bg) !important; border-radius: var(--radius-sm) !important; color: var(--text) !important; }
-/* 设置弹窗内嵌模式 — 与通用/外观/关于面板风格统一 */
+/* ═══ 设置弹窗内嵌模式（?embed=1）— 与通用/外观/关于面板同一套设计语言 ═══
+   扁平 / 半透明 / 1px 细边 / 无重阴影；唯一强调 = 黑白反转
+   所有规则都挂在 html.settings-embed 下，不带 embed=1 打开时观感不变 */
+html.settings-embed {
+    --embed-canvas: #ffffff;
+    --embed-aside: #F5F5F6;
+    --embed-card: rgba(255, 255, 255, .45);
+    --embed-line: rgba(0, 0, 0, .06);
+    --embed-line-btn: rgba(0, 0, 0, .08);
+    --text: #1c1c1e;
+    --text-2: #656569;
+    --text-3: #8a8a8a;
+    --muted: #656569;
+    --faint: #8a8a8a;
+    --bg: #f5f5f7;
+    --stage-bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #fafafa;
+    --panel: #ffffff;
+    --panel-bg: #ffffff;
+    --soft: rgba(0, 0, 0, .04);
+    --nav-hover-bg: rgba(0, 0, 0, .04);
+    --border: rgba(0, 0, 0, .06);
+    --border-2: rgba(0, 0, 0, .10);
+    --line: rgba(0, 0, 0, .06);
+    --line-strong: rgba(0, 0, 0, .08);
+    background: var(--embed-canvas) !important;
+    color: var(--text) !important;
+    font-family: var(--font-sans) !important;
+}
+html.settings-embed.theme-dark,
+html.settings-embed.studio-theme-dark,
+html.settings-embed.theme-dark body,
+html.settings-embed.studio-theme-dark body {
+    --embed-canvas: #141416;
+    --embed-aside: #222326;
+    --embed-card: rgba(255, 255, 255, .04);
+    --embed-line: rgba(255, 255, 255, .07);
+    --embed-line-btn: rgba(255, 255, 255, .10);
+    --text: #f5f5f7;
+    --text-2: #96969a;
+    --text-3: #8a8a8a;
+    --muted: #96969a;
+    --faint: #8a8a8a;
+    --bg: #0c0c0c;
+    --stage-bg: #141416;
+    --surface: #141416;
+    --surface-2: #1c1c1e;
+    --panel: #141416;
+    --panel-bg: #141416;
+    --soft: rgba(255, 255, 255, .05);
+    --nav-hover-bg: rgba(255, 255, 255, .05);
+    --border: rgba(255, 255, 255, .07);
+    --border-2: rgba(255, 255, 255, .10);
+    --line: rgba(255, 255, 255, .07);
+    --line-strong: rgba(255, 255, 255, .10);
+}
 html.settings-embed body { background: transparent !important; font-family: var(--font-sans) !important; }
 html.settings-embed,
 html.settings-embed * {
@@ -47,62 +103,744 @@ html.settings-embed *::-webkit-scrollbar {
     height: 0 !important;
     display: none !important;
 }
-html.settings-embed .page { padding: 0 24px; min-height: auto; background: transparent !important; }
-html.settings-embed .wrap { max-width: none; }
-html.settings-embed .page-head { display: none; }
-html.settings-embed .layout { grid-template-columns: 260px minmax(0,1fr); gap: 10px; align-items: stretch; }
-html.settings-embed .sidebar { position: static; max-height: none; width: 260px; min-width: 260px; flex-shrink: 0; overflow-y: auto; }
-html.settings-embed .side-card {
-    background: var(--stage-bg) !important;
-    border-radius: 20px !important;
-}
-html.settings-embed .graph-card,
-html.settings-embed .content-head {
-    background: var(--stage-bg) !important;
-    border-radius: 20px !important;
-}
-html.settings-embed .field-frame,
-html.settings-embed input,
-html.settings-embed select { border-radius: 10px !important; }
-html.settings-embed .action-btn { border-radius: 10px !important; }
-html.settings-embed .graph-svg-wrap { border-radius: 10px !important; }
-@media (max-width: 720px) {
-    html.settings-embed .layout { grid-template-columns: 1fr; grid-auto-rows: auto; overflow-y: auto; }
-    html.settings-embed .sidebar { position: relative; max-height: none; overflow-y: visible; }
-    html.settings-embed .graph-svg-wrap { height: 420px; }
-}
-/* ═══ Modal embed: fill iframe height, content scrolls ═══ */
+/* 填满 iframe，内部各自滚动 */
 html.settings-embed,
 html.settings-embed body { height: 100%; overflow: hidden; }
 html.settings-embed .wrap,
 html.settings-embed .page { height: 100%; overflow: hidden; }
-html.settings-embed .layout { height: 100%; overflow: hidden; grid-auto-rows: 100%; }
-html.settings-embed .content { overflow-y: auto; }
-html.settings-embed .sidebar { overflow-y: auto; }
-/* Close button */
-.settings-close-btn, .modal-close-btn { transition: transform 0.2s ease-out; }
-.settings-close-btn:hover, .modal-close-btn:hover { transform: rotate(90deg) scale(1.1); }
-/* Switch animation */
-input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
-.ios-slider, .toggle-track { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
-/* ═══ R5 表单布局重塑：右侧内容列限宽居中，左右视觉平衡 ═══ */
-.content > * { max-width: 760px; width: 100%; margin-left: auto; margin-right: auto; }
-html.settings-embed .layout { grid-template-columns: 300px minmax(0,1fr); }
-html.settings-embed .sidebar { width: 300px; min-width: 300px; }
-@media (max-width: 720px) {
-    html.settings-embed .sidebar { width: auto; min-width: 0; }
+html.settings-embed .page { padding: 18px 24px 22px; min-height: auto; background: transparent !important; }
+html.settings-embed .wrap { max-width: none; }
+html.settings-embed .page-head { display: none; }
+html.settings-embed .layout {
+    display: grid;
+    grid-template-columns: 264px minmax(0, 1fr);
+    grid-auto-rows: 100%;
+    gap: 16px;
+    height: 100%;
+    overflow: hidden;
+    align-items: stretch;
 }
-/* 触控目标：主操作按钮 ≥44px，输入控件加高 */
-.upload-btn { min-height: 44px; }
-.action-btn { min-height: 44px; padding: 0 18px; }
-.run-btn { min-height: 44px; }
-.workflow-card { min-height: 44px; }
-.nodes-toggle { min-height: 44px; }
-.workspace-mode-tabs button { min-height: 36px; }
-.pfield-input, .pfield-select { min-height: 40px; }
-.small-input, .small-select { min-height: 36px; }
+html.settings-embed .content { overflow-y: auto; gap: 16px; padding-bottom: 24px; }
+html.settings-embed .sidebar {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    width: 264px;
+    min-width: 264px;
+    max-height: none;
+    flex-shrink: 0;
+    overflow-y: auto;
+    padding: 22px 14px;
+    border: none !important;
+    border-radius: 24px !important;
+    background: var(--embed-aside) !important;
+}
+
+/* ── 左栏：栏内不再套白卡，全部平铺 ── */
+html.settings-embed .side-card {
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    gap: 10px !important;
+}
+html.settings-embed .side-title {
+    padding: 0 12px !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    letter-spacing: .02em !important;
+    text-transform: none !important;
+}
+html.settings-embed .workflow-list { gap: 2px !important; max-height: 230px; }
+html.settings-embed .workflow-card {
+    min-height: 0 !important;
+    gap: 10px !important;
+    padding: 10px 12px !important;
+    border: none !important;
+    border-radius: 10px !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+    transition: background .2s ease, color .2s ease !important;
+}
+html.settings-embed .workflow-card:hover,
+html.settings-embed .workflow-card.active {
+    background: var(--nav-hover-bg) !important;
+    color: var(--text) !important;
+}
+html.settings-embed .workflow-icon,
+html.settings-embed .workflow-card.active .workflow-icon {
+    width: 18px !important;
+    height: 18px !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+}
+html.settings-embed .workflow-icon svg { width: 18px !important; height: 18px !important; }
+html.settings-embed .workflow-name { font-size: 14px !important; font-weight: 600 !important; }
+html.settings-embed .workflow-meta {
+    margin-top: 2px !important;
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 400 !important;
+}
+html.settings-embed .builtin-badge,
+html.settings-embed .workflow-card.active .builtin-badge {
+    margin-left: auto !important;
+    padding: 2px 8px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+}
+/* 后端地址行（行式条目，内联样式需要 !important 覆盖） */
+html.settings-embed #comfyInstancesList { gap: 2px !important; }
+html.settings-embed #comfyInstancesList > div {
+    padding: 6px 8px !important;
+    border-radius: 10px !important;
+    background: transparent !important;
+    transition: background .2s ease !important;
+}
+html.settings-embed #comfyInstancesList > div:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed #comfyInstancesList > div > span {
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+}
+html.settings-embed #comfyInstancesList .small-input {
+    height: 32px !important;
+    padding: 0 10px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 8px !important;
+    background: var(--stage-bg) !important;
+    font-size: 12.5px !important;
+}
+html.settings-embed #comfyInstancesList .small-input:focus { border-color: var(--border-2) !important; }
+/* 格式提示（唯一的 inline 样式小字）：字号收紧 + 微字距，保证窄栏里单行不折断 */
+html.settings-embed .workflow-panel-comfy > div[style*="10.5px"] {
+    padding: 0 12px !important;
+    color: var(--muted) !important;
+    font-size: 10.5px !important;
+    font-weight: 400 !important;
+    letter-spacing: -.01em !important;
+    line-height: 1.5 !important;
+    white-space: nowrap !important;
+}
+
+/* ── 次级按钮语言（虚线框一律取消） ── */
+html.settings-embed .upload-btn,
+html.settings-embed .ghost-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    height: auto !important;
+    min-height: 34px !important;
+    padding: 7px 14px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 8px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    transform: none !important;
+    transition: background .2s ease, color .2s ease !important;
+}
+html.settings-embed .upload-btn { width: 100% !important; }
+html.settings-embed .upload-btn:hover,
+html.settings-embed .ghost-btn:hover {
+    background: var(--nav-hover-bg) !important;
+    color: var(--text) !important;
+    border-color: var(--embed-line-btn) !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+html.settings-embed .upload-btn svg,
+html.settings-embed .ghost-btn svg { width: 15px !important; height: 15px !important; }
+
+/* ── 画布节点预览（左栏第三段） ── */
+html.settings-embed .preview-title-row { gap: 8px; }
+html.settings-embed .preview-title-row svg { width: 16px; height: 16px; color: var(--muted); }
+html.settings-embed .preview-title {
+    color: var(--text) !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    letter-spacing: .02em !important;
+}
+html.settings-embed .preview-pill {
+    padding: 2px 8px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+}
+html.settings-embed .preview-desc {
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+}
+html.settings-embed #previewContent { gap: 10px; padding-top: 4px; }
+html.settings-embed .preview-empty {
+    padding: 20px 12px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 400 !important;
+    line-height: 1.6 !important;
+}
+
+/* ── 右列标题行：纯标题，无卡片底/边框 ── */
+html.settings-embed .graph-card {
+    padding: 18px 20px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 16px !important;
+    background: var(--embed-card) !important;
+    box-shadow: none !important;
+}
+html.settings-embed .graph-head { gap: 12px !important; margin-bottom: 16px !important; }
+html.settings-embed .graph-title-row { gap: 16px !important; }
+html.settings-embed .title-edit-row { gap: 8px !important; margin-bottom: 4px !important; }
+html.settings-embed .workflow-title-input {
+    width: 100% !important;
+    height: 34px !important;
+    padding: 0 10px !important;
+    border: 1px solid transparent !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    color: var(--text) !important;
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0 !important;
+    line-height: 1.3 !important;
+    text-overflow: ellipsis !important;
+    transition: background .2s ease, border-color .2s ease !important;
+}
+html.settings-embed .workflow-title-input:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed .workflow-title-input:focus {
+    background: var(--bg) !important;
+    border-color: var(--border-2) !important;
+}
+html.settings-embed .workflow-title-input::placeholder { color: var(--muted) !important; opacity: .75; }
+html.settings-embed .graph-head .editor-sub {
+    margin-top: 0 !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+}
+html.settings-embed .content-actions { gap: 8px !important; }
+
+/* ── 主/次级按钮：黑白反转是唯一强调 ── */
+html.settings-embed .action-btn {
+    height: auto !important;
+    min-height: 34px !important;
+    padding: 7px 14px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 8px !important;
+    background: var(--stage-bg) !important;
+    color: var(--text) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    transform: none !important;
+    transition: background .2s ease, color .2s ease, border-color .2s ease !important;
+}
+html.settings-embed .action-btn:hover {
+    background: var(--nav-hover-bg) !important;
+    color: var(--text) !important;
+    border-color: var(--embed-line-btn) !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+html.settings-embed .action-btn.save-btn {
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    border-color: var(--text) !important;
+}
+html.settings-embed .action-btn.save-btn:hover {
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    border-color: var(--text) !important;
+    opacity: .88;
+}
+html.settings-embed .action-btn.danger-btn {
+    background: var(--stage-bg) !important;
+    color: var(--danger-text, var(--danger)) !important;
+    border-color: var(--embed-line-btn) !important;
+}
+html.settings-embed .action-btn.danger-btn:hover {
+    background: var(--danger-bg) !important;
+    color: var(--danger-text, var(--danger)) !important;
+    border-color: var(--danger-border) !important;
+}
+html.settings-embed .action-btn svg { width: 15px !important; height: 15px !important; }
+
+/* ── 分段 tab = pill 选项组 ── */
+html.settings-embed .workspace-mode-tabs {
+    display: inline-flex !important;
+    gap: 8px !important;
+    width: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+}
+html.settings-embed .workspace-mode-tabs button {
+    height: auto !important;
+    min-height: 0 !important;
+    min-width: 0 !important;
+    padding: 7px 14px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    transition: background .2s ease, color .2s ease, border-color .2s ease !important;
+}
+html.settings-embed .workspace-mode-tabs button:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed .workspace-mode-tabs button.active {
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    border-color: var(--text) !important;
+    box-shadow: none !important;
+}
+
+/* ── 图画布区（外框卡片语言，画布本身保留中性底） ── */
+html.settings-embed .graph-svg-wrap {
+    height: 760px;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 14px !important;
+    background: var(--bg) !important;
+}
+html.settings-embed .graph-controls { top: 10px; right: 10px; gap: 6px; }
+html.settings-embed .graph-ctrl-btn,
+html.settings-embed .graph-zoom-pill {
+    height: 30px !important;
+    padding: 0 9px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 8px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    transition: background .2s ease, color .2s ease !important;
+}
+html.settings-embed .graph-ctrl-btn { width: 30px !important; min-width: 30px !important; }
+html.settings-embed .graph-zoom-pill { border-radius: 999px !important; }
+html.settings-embed .graph-ctrl-btn:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+
+/* ── 测试画布（mini canvas） ── */
+html.settings-embed .mini-canvas {
+    height: 420px;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 14px !important;
+    background-color: var(--bg) !important;
+}
+html.settings-embed .mini-canvas.large { height: 760px; }
+html.settings-embed .mini-tool {
+    height: 30px !important;
+    padding: 0 10px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+}
+html.settings-embed .mini-tool:hover { color: var(--text) !important; }
+html.settings-embed .mini-card {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: var(--stage-bg) !important;
+    box-shadow: var(--shadow-md) !important;
+}
+html.settings-embed .mini-card-head {
+    border-bottom: 1px solid var(--embed-line) !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+}
+html.settings-embed .mini-textarea,
+html.settings-embed .mini-input {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    font-size: 12.5px !important;
+    font-weight: 400 !important;
+}
+html.settings-embed .mini-image-drop {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 400 !important;
+}
+html.settings-embed .mini-line { background: var(--border-2) !important; }
+html.settings-embed .mini-card .uppercase {
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: .02em !important;
+    text-transform: none !important;
+}
+
+/* ── 表单控件 ── */
+html.settings-embed .pfield { gap: 6px !important; }
+html.settings-embed .pfield-label {
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    letter-spacing: .01em !important;
+}
+html.settings-embed .pfield-input,
+html.settings-embed .pfield-select,
+html.settings-embed .small-input,
+html.settings-embed .small-select {
+    width: 100%;
+    height: 34px !important;
+    padding: 0 10px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    outline: none !important;
+    box-shadow: none !important;
+    transition: border-color .2s ease !important;
+}
+html.settings-embed .pfield-textarea,
+html.settings-embed .extras-row textarea {
+    padding: 9px 10px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    color: var(--text) !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+html.settings-embed .pfield-textarea { min-height: 76px; resize: vertical; }
+html.settings-embed .pfield-input:focus,
+html.settings-embed .pfield-select:focus,
+html.settings-embed .pfield-textarea:focus,
+html.settings-embed .small-input:focus,
+html.settings-embed .small-select:focus,
+html.settings-embed .extras-row textarea:focus { border-color: var(--border-2) !important; }
+html.settings-embed .small-input:disabled,
+html.settings-embed .small-select:disabled { opacity: .6 !important; }
+/* theme.css 暗色下用 !important 把 input/textarea/select 的底色/边框强制为 --bg/--border-strong，
+   这里用更高优先级把内嵌模式拉回本设计语言（细边，聚焦只换边框色） */
+html.settings-embed.theme-dark body input:not(.group-title-input),
+html.settings-embed.studio-theme-dark body input:not(.group-title-input),
+html.settings-embed.theme-dark body select,
+html.settings-embed.studio-theme-dark body select,
+html.settings-embed.theme-dark body textarea,
+html.settings-embed.studio-theme-dark body textarea {
+    background-color: var(--bg) !important;
+    border-color: var(--embed-line) !important;
+}
+html.settings-embed.theme-dark body input.workflow-title-input,
+html.settings-embed.studio-theme-dark body input.workflow-title-input,
+html.settings-embed.theme-dark body .dropdown-opt-row input.small-input,
+html.settings-embed.studio-theme-dark body .dropdown-opt-row input.small-input {
+    background-color: transparent !important;
+    border-color: transparent !important;
+}
+html.settings-embed.theme-dark body #comfyInstancesList .small-input,
+html.settings-embed.studio-theme-dark body #comfyInstancesList .small-input {
+    background-color: var(--stage-bg) !important;
+}
+html.settings-embed.theme-dark body input:not(.group-title-input):focus,
+html.settings-embed.studio-theme-dark body input:not(.group-title-input):focus,
+html.settings-embed.theme-dark body select:focus,
+html.settings-embed.studio-theme-dark body select:focus,
+html.settings-embed.theme-dark body textarea:focus,
+html.settings-embed.studio-theme-dark body textarea:focus {
+    border-color: var(--border-2) !important;
+}
+html.settings-embed.theme-dark body .workflow-title-input:focus,
+html.settings-embed.studio-theme-dark body .workflow-title-input:focus {
+    background-color: var(--bg) !important;
+    border-color: var(--border-2) !important;
+}
+html.settings-embed .pfield-slider-val { font-size: 12.5px !important; font-weight: 600 !important; }
+html.settings-embed .random-btn {
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 10px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+}
+html.settings-embed .random-btn:hover {
+    background: var(--nav-hover-bg) !important;
+    color: var(--text) !important;
+}
+html.settings-embed .random-btn.active {
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    border-color: var(--text) !important;
+}
+html.settings-embed .random-toggle {
+    height: 32px !important;
+    padding: 0 10px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+}
+html.settings-embed .random-toggle input { accent-color: var(--text); }
+html.settings-embed .pfield-image-drop {
+    padding: 16px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+    color: var(--muted) !important;
+    font-size: 11.5px !important;
+    font-weight: 400 !important;
+}
+html.settings-embed .pfield-image-drop.has-image { padding: 0 !important; }
+html.settings-embed .pfield-image-drop:hover { color: var(--text) !important; }
+html.settings-embed .media-file-name { font-size: 11.5px !important; font-weight: 600 !important; }
+
+/* ── 开关：44×26 / 滑块 20px / 选中底 var(--text) ── */
+html.settings-embed .pfield-bool-track {
+    width: 44px !important;
+    height: 26px !important;
+    border-radius: 999px !important;
+    background: rgba(0, 0, 0, .15) !important;
+    transition: background .25s ease !important;
+}
+html.settings-embed .pfield-bool-track.on { background: var(--text) !important; }
+html.settings-embed .pfield-bool-thumb {
+    top: 3px !important;
+    left: 3px !important;
+    width: 20px !important;
+    height: 20px !important;
+    background: #fff !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .15) !important;
+    transition: transform .25s ease !important;
+}
+html.settings-embed .pfield-bool-track.on .pfield-bool-thumb { transform: translateX(18px) !important; }
+html.settings-embed.theme-dark .pfield-bool-track,
+html.settings-embed.studio-theme-dark .pfield-bool-track { background: rgba(255, 255, 255, .16) !important; }
+html.settings-embed.theme-dark .pfield-bool-track.on,
+html.settings-embed.studio-theme-dark .pfield-bool-track.on { background: var(--text) !important; }
+/* 勾选：同等克制的细边小控件，选中黑白反转（保留 .checked 状态类） */
+html.settings-embed .check-toggle {
+    width: 20px !important;
+    height: 20px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 6px !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+    box-shadow: none !important;
+    transition: background .2s ease, border-color .2s ease, color .2s ease !important;
+}
+html.settings-embed .check-toggle:hover { border-color: var(--border-strong) !important; color: var(--text) !important; }
+html.settings-embed .check-toggle.checked {
+    background: var(--text) !important;
+    border-color: var(--text) !important;
+    color: var(--stage-bg) !important;
+}
+
+/* ── 节点卡 / 输入行 ── */
+html.settings-embed .node-list { gap: 10px !important; }
+html.settings-embed .node-card {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: var(--embed-card) !important;
+    box-shadow: none !important;
+}
+html.settings-embed .node-card-head { padding: 12px 14px !important; }
+html.settings-embed .node-card-head:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed .node-card.expanded .node-card-head { border-bottom: 1px solid var(--embed-line) !important; }
+html.settings-embed .node-class { font-size: 13.5px !important; font-weight: 700 !important; letter-spacing: 0 !important; }
+html.settings-embed .node-id { color: var(--muted) !important; font-size: 11.5px !important; font-weight: 400 !important; letter-spacing: 0 !important; }
+html.settings-embed .node-stats { color: var(--muted) !important; font-size: 11.5px !important; font-weight: 600 !important; letter-spacing: 0 !important; }
+html.settings-embed .node-chev { color: var(--muted) !important; }
+html.settings-embed .node-inputs { padding: 10px 12px 12px !important; gap: 6px !important; }
+html.settings-embed .input-row {
+    gap: 10px !important;
+    padding: 8px !important;
+    border: none !important;
+    border-radius: 10px !important;
+    background: transparent !important;
+}
+html.settings-embed .node-inputs .input-row { grid-template-columns: 20px minmax(0, 1fr) 110px 120px !important; }
+html.settings-embed .popup-body .input-row { grid-template-columns: 20px minmax(0, 1fr) !important; }
+html.settings-embed .input-row.is-active { background: var(--nav-hover-bg) !important; }
+html.settings-embed .input-key { font-size: 13px !important; font-weight: 600 !important; }
+html.settings-embed .input-orig { color: var(--muted) !important; font-size: 11.5px !important; font-weight: 400 !important; }
+html.settings-embed .extras-row {
+    gap: 8px !important;
+    padding-top: 10px !important;
+    border-top: 1px solid var(--embed-line) !important;
+}
+html.settings-embed .extra-pair { color: var(--muted) !important; font-size: 11.5px !important; font-weight: 600 !important; }
+html.settings-embed .dropdown-opt-row {
+    padding: 4px 6px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 10px !important;
+    background: var(--bg) !important;
+}
+html.settings-embed .dropdown-opt-row .opt-index { color: var(--muted) !important; font-size: 11px !important; font-weight: 600 !important; }
+html.settings-embed .dropdown-opt-row .small-input {
+    height: 30px !important;
+    border-color: transparent !important;
+    background: transparent !important;
+}
+html.settings-embed .opt-type-tag,
+html.settings-embed .opt-type-tag.is-num {
+    padding: 2px 8px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 999px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0 !important;
+}
+/* 本页按钮带 !important，优先级高于模块的 .nv-morph[data-nv-morph-state]，显式让位给状态色 */
+html.settings-embed .nv-morph.nv-morph[data-nv-morph-state="success"] { background: #10b981 !important; border-color: #10b981 !important; color: #fff !important; }
+html.settings-embed .nv-morph.nv-morph[data-nv-morph-state="error"] { background: #f43f5e !important; border-color: #f43f5e !important; color: #fff !important; }
+html.settings-embed .opt-del { border-radius: 6px !important; color: var(--muted) !important; }
+html.settings-embed .opt-del:hover { color: var(--danger-text, var(--danger)) !important; background: var(--nav-hover-bg) !important; }
+html.settings-embed .nodes-toggle {
+    min-height: 0 !important;
+    padding: 11px 14px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 10px !important;
+    background: var(--stage-bg) !important;
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+}
+html.settings-embed .nodes-toggle:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+
+/* ── 运行按钮 / 运行结果 ── */
+html.settings-embed .run-btn {
+    height: 36px !important;
+    min-height: 0 !important;
+    padding: 0 14px !important;
+    border: 1px solid var(--text) !important;
+    border-radius: 10px !important;
+    background: var(--text) !important;
+    color: var(--stage-bg) !important;
+    font-size: 12.5px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+html.settings-embed .run-btn:hover { opacity: .88; box-shadow: none !important; transform: none !important; }
+html.settings-embed .run-btn:disabled { opacity: .5; }
+html.settings-embed .run-result {
+    padding: 12px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: transparent !important;
+}
+html.settings-embed .run-status { color: var(--muted) !important; font-size: 11.5px !important; font-weight: 400 !important; }
+
+/* ── 浮层：参数浮窗 / 确认弹窗 / Toast / 灯箱 ── */
+html.settings-embed .popup-backdrop { border-radius: 14px !important; }
+html.settings-embed .popup-panel {
+    width: 400px;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 20px !important;
+    background: var(--stage-bg) !important;
+    box-shadow: var(--shadow-xl) !important;
+}
+html.settings-embed .popup-head {
+    padding: 14px 16px !important;
+    border-bottom: 1px solid var(--embed-line) !important;
+    background: transparent !important;
+}
+html.settings-embed .popup-title { font-size: 14px !important; font-weight: 700 !important; letter-spacing: 0 !important; }
+html.settings-embed .popup-sub { color: var(--muted) !important; font-size: 11px !important; font-weight: 600 !important; letter-spacing: 0 !important; }
+html.settings-embed .popup-close { border-radius: 8px !important; color: var(--muted) !important; }
+html.settings-embed .popup-close:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+html.settings-embed .popup-body { padding: 12px !important; gap: 8px !important; }
+html.settings-embed .popup-empty { padding: 24px 12px !important; color: var(--muted) !important; font-size: 11.5px !important; font-weight: 400 !important; }
+html.settings-embed .image-lightbox img {
+    border: 1px solid var(--embed-line);
+    border-radius: 20px !important;
+    background: var(--stage-bg);
+    box-shadow: var(--shadow-xl) !important;
+}
+html.settings-embed .wf-confirm-panel {
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 20px !important;
+    background: var(--stage-bg) !important;
+    box-shadow: var(--shadow-xl) !important;
+}
+html.settings-embed .wf-confirm-title { font-size: 15px !important; font-weight: 800 !important; }
+html.settings-embed .wf-confirm-desc { color: var(--muted) !important; font-size: 12.5px !important; font-weight: 400 !important; line-height: 1.6 !important; }
+html.settings-embed .wf-confirm-btn {
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 14px !important;
+    border: 1px solid var(--embed-line-btn) !important;
+    border-radius: 8px !important;
+    background: var(--stage-bg) !important;
+    color: var(--text) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+}
+html.settings-embed .wf-confirm-btn:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed .wf-confirm-btn.danger {
+    border-color: var(--embed-line-btn) !important;
+    background: var(--stage-bg) !important;
+    color: var(--danger-text, var(--danger)) !important;
+}
+html.settings-embed .wf-confirm-btn.danger:hover {
+    border-color: var(--danger-border) !important;
+    background: var(--danger-bg) !important;
+    color: var(--danger-text, var(--danger)) !important;
+    filter: none !important;
+}
+html.settings-embed .wf-toast {
+    padding: 10px 14px !important;
+    border: 1px solid var(--embed-line) !important;
+    border-radius: 12px !important;
+    background: var(--stage-bg) !important;
+    color: var(--text) !important;
+    font-size: 12.5px !important;
+    font-weight: 600 !important;
+    box-shadow: var(--shadow-xl) !important;
+}
+html.settings-embed .wf-toast.error {
+    border-color: var(--danger-border) !important;
+    background: var(--stage-bg) !important;
+    color: var(--danger-text, var(--danger)) !important;
+}
+@media (max-width: 720px) {
+    html.settings-embed .layout { grid-template-columns: 1fr; grid-auto-rows: auto; overflow-y: auto; }
+    html.settings-embed .sidebar { position: relative; width: auto; min-width: 0; max-height: none; overflow-y: visible; }
+    html.settings-embed .graph-svg-wrap { height: 420px; }
+}
+
 /* Hover 微弱反馈补强 + 键盘 focus 可见环 */
-.upload-btn:hover { border-color: var(--muted); transform: translateY(-1px); }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 /* 异步操作中的按钮 loading 态 */
 .action-btn.is-loading, .upload-btn.is-loading { opacity: .55; pointer-events: none; }
@@ -129,6 +867,33 @@ body.studio-theme-dark .wf-confirm-backdrop { background: rgba(0,0,0,.55); }
 .wf-confirm-btn:hover { background: var(--line); }
 .wf-confirm-btn.danger { background: var(--danger); color: #fff; }
 .wf-confirm-btn.danger:hover { background: var(--danger); filter: brightness(1.1); }
+/* 页面级 R5 规则（非 embed 专属，原文保留，避免影响不带 embed=1 的老页面） */
+.settings-close-btn, .modal-close-btn { transition: transform 0.2s ease-out; }
+.settings-close-btn:hover, .modal-close-btn:hover { transform: rotate(90deg) scale(1.1); }
+input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
+.ios-slider, .toggle-track { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
+.content > * { max-width: 760px; width: 100%; margin-left: auto; margin-right: auto; }
+/* 触控目标：桌面用紧凑密度，粗指针（触摸）设备保留 ≥44px */
+@media (pointer: coarse) {
+    .upload-btn { min-height: 44px; }
+    .action-btn { min-height: 44px; padding: 0 18px; }
+    .run-btn { min-height: 44px; }
+    .workflow-card { min-height: 44px; }
+    .nodes-toggle { min-height: 44px; }
+    .workspace-mode-tabs button { min-height: 36px; }
+    .pfield-input, .pfield-select { min-height: 40px; }
+    .small-input, .small-select { min-height: 36px; }
+    html.settings-embed .upload-btn,
+    html.settings-embed .action-btn,
+    html.settings-embed .nodes-toggle,
+    html.settings-embed .workflow-card { min-height: 44px !important; }
+    html.settings-embed .run-btn { height: 44px !important; min-height: 44px !important; }
+    html.settings-embed .pfield-input,
+    html.settings-embed .pfield-select,
+    html.settings-embed .small-input,
+    html.settings-embed .small-select { height: 40px !important; min-height: 40px !important; }
+    html.settings-embed .workspace-mode-tabs button { min-height: 36px !important; }
+}
 </style>
 </head>
 <body>
@@ -231,7 +996,7 @@ body.studio-theme-dark .wf-confirm-backdrop { background: rgba(0,0,0,.55); }
         <img id="imageLightboxImg" src="" alt="preview" onclick="event.stopPropagation()">
     </div>
 
-    <script defer src="/static/js/comfyui-settings.js?v=1.0.117.1789606971"></script>
+    <script defer src="/static/js/comfyui-settings.js?v=1.0.120.1789606971"></script>
     <script>
     /* ═══ R5 交互反馈：轻量 Toast + 二次确认 + 保存/上传/删除反馈包装 ═══ */
     (function(){
@@ -433,6 +1198,133 @@ body.studio-theme-dark .wf-confirm-backdrop { background: rgba(0,0,0,.55); }
                 okText: pick('工作流已上传', 'Workflow uploaded')
             });
         });
+    })();
+    </script>
+    <script>
+    /* ═══ 浮层状态转发：任一浮层打开时通知父页，把设置弹窗 iframe 之外的界面一起模糊 ═══
+       只旁听 .wf-confirm-backdrop / #nodePopup / #imageLightbox 的开合，不改它们的逻辑与样式 */
+    (function(){
+        'use strict';
+        var last = null;
+        var pending = 0;
+        function overlayOpen(){
+            try {
+                if(document.querySelector('.wf-confirm-backdrop.show')) return true;
+                var popup = document.getElementById('nodePopup');
+                if(popup && getComputedStyle(popup).display !== 'none') return true;
+                var box = document.getElementById('imageLightbox');
+                if(box && box.classList.contains('open')) return true;
+            } catch(e){}
+            return false;
+        }
+        function sync(){
+            pending = 0;
+            try {
+                var open = overlayOpen();
+                if(open === last) return;
+                last = open;
+                if(window.parent && window.parent !== window){
+                    window.parent.postMessage({ type: 'settings-iframe-overlay', open: open }, '*');
+                }
+            } catch(e){}
+        }
+        function schedule(){
+            if(pending) return;
+            pending = setTimeout(sync, 0);
+        }
+        function start(){
+            sync();
+            try {
+                new MutationObserver(schedule).observe(document.body, {
+                    childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style']
+                });
+            } catch(e){}
+        }
+        if(document.body) start();
+        else document.addEventListener('DOMContentLoaded', start);
+    })();
+    </script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
+    <script>
+    /* ═══ Morph Button 接入：保存/确定按钮的点击状态动效（只旁挂状态，不改原有点击逻辑） ═══ */
+    (function(){
+        'use strict';
+        var hookedBackdrops = typeof WeakSet === 'function' ? new WeakSet() : null;
+        var bindTries = 0;
+
+        function api(){ return window.NovaMorphButton || null; }
+
+        function hasBackend(){
+            var inputs = document.querySelectorAll('#comfyInstancesList input');
+            return Array.prototype.some.call(inputs, function(i){ return i.value.trim(); });
+        }
+        // 校验失败时 R5 包装脚本只弹 toast 且 promise 正常 resolve，这里让它按失败收尾，避免画成绿勾
+        function comfySaveAction(){
+            var ret = window.saveComfyInstances.apply(this, arguments);
+            if(hasBackend()) return ret;
+            var p = Promise.resolve(ret).then(function(){ throw new Error('comfy-no-backend'); });
+            p.catch(function(){});   // 自行消费，避免 unhandledrejection；模块仍按 failure 处理
+            return p;
+        }
+        function bindSaveButtons(){
+            var m = api();
+            if(!m) return;
+            var save = document.getElementById('saveBtn');
+            if(save) m.attach(save, { keepWidth: true, action: function(){ return window.onSave.apply(this, arguments); } });
+            var comfySave = document.getElementById('comfySaveBtn');
+            if(comfySave) m.attach(comfySave, { keepWidth: true, action: comfySaveAction });
+        }
+        /* 二次确认是 Promise 风格：按钮先 loading→success，再把点击放行给原本的 done(true) */
+        function hookConfirm(){
+            var m = api();
+            if(!m) return;
+            var list = document.querySelectorAll('.wf-confirm-backdrop');
+            Array.prototype.forEach.call(list, function(bd){
+                if(hookedBackdrops && hookedBackdrops.has(bd)) return;
+                if(hookedBackdrops) hookedBackdrops.add(bd);
+                var ok = bd.querySelector('.wf-confirm-btn.danger');
+                if(!ok) return;
+                m.attach(ok, { keepWidth: true });   // 无 onclick，只建立状态层，由这里手动驱动
+                var release = false;
+                bd.addEventListener('click', function(e){
+                    var btn = e.target && e.target.closest ? e.target.closest('.wf-confirm-btn') : null;
+                    if(btn !== ok || release) return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    release = true;
+                    m.setState(ok, 'loading');
+                    setTimeout(function(){
+                        if(!ok.isConnected) return;
+                        m.setState(ok, 'success');
+                        setTimeout(function(){
+                            if(!ok.isConnected) return;
+                            m.setState(ok, 'idle');   // 模块会拦掉非 idle 状态的点击，先回 idle 才放行
+                            ok.click();
+                        }, 450);
+                    }, 300);
+                }, true);
+            });
+        }
+        function bindAll(){
+            try { bindSaveButtons(); } catch(e){}
+            try { hookConfirm(); } catch(e){}
+        }
+        function start(){
+            bindAll();
+            try {
+                new MutationObserver(function(){
+                    if(document.querySelector('.wf-confirm-backdrop')) bindAll();
+                }).observe(document.body, { childList: true, subtree: true });
+            } catch(e){}
+            // 模块由别的执行岗并行开发，未就绪时轮询重试
+            var wait = setInterval(function(){
+                bindTries++;
+                if(api() || bindTries > 40){ clearInterval(wait); bindAll(); }
+            }, 250);
+        }
+        if(document.body) start();
+        else document.addEventListener('DOMContentLoaded', start);
+        window.addEventListener('load', bindAll);
     })();
     </script>
 </body>
