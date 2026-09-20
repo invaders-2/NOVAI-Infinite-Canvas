@@ -50,6 +50,14 @@ with_timeout() {
   return $rc
 }
 
+# tag 里带 "-"（如 v1.0.112-beta.1）算预览版，正式版本一律 false
+prerelease_for_tag() {
+  case "$1" in
+    *-*) printf 'true' ;;
+    *)   printf 'false' ;;
+  esac
+}
+
 shopt -s nullglob
 ARTIFACTS=("$RELEASE_DIR"/*.dmg "$RELEASE_DIR"/*.zip "$RELEASE_DIR"/*.exe \
            "$RELEASE_DIR"/*.AppImage "$RELEASE_DIR"/*.deb "$RELEASE_DIR"/*.blockmap)
@@ -69,7 +77,8 @@ sync_gitee() {
   fi
 
   local api="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
-  local release_id
+  local release_id pre
+  pre=$(prerelease_for_tag "$RELEASE_TAG")
 
   echo "== Gitee: 创建/获取 Release ${RELEASE_TAG} =="
   # 用 python 稳妥解析顶层 id（旧版贪婪 sed 会误抓 JSON 末尾 author.id，
@@ -77,7 +86,7 @@ sync_gitee() {
   local body
   body=$(curl -sS --max-time 60 -X POST "${api}/releases" \
     -H "Content-Type: application/json" \
-    -d "{\"access_token\":\"${GITEE_TOKEN}\",\"tag_name\":\"${RELEASE_TAG}\",\"name\":\"NOVAI ${RELEASE_TAG}\",\"body\":\"国内下载镜像（与 GitHub Release 相同内容）。\",\"target_commitish\":\"main\",\"prerelease\":true}")
+    -d "{\"access_token\":\"${GITEE_TOKEN}\",\"tag_name\":\"${RELEASE_TAG}\",\"name\":\"NOVAI ${RELEASE_TAG}\",\"body\":\"国内下载镜像（与 GitHub Release 相同内容）。\",\"target_commitish\":\"main\",\"prerelease\":${pre}}")
   release_id=$(printf '%s' "$body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null)
 
   if [ -z "$release_id" ]; then
@@ -88,6 +97,12 @@ sync_gitee() {
     echo "::warning::Gitee Release 创建/查询失败（tag 是否已推送到 gitee？），跳过附件上传"
     return 0
   fi
+
+  # 该 Release 可能是按 tag 查到的历史遗留对象，这里按 tag 统一纠正预览标记
+  curl -sS --max-time 60 -X PATCH "${api}/releases/${release_id}" \
+    -H "Content-Type: application/json" \
+    -d "{\"access_token\":\"${GITEE_TOKEN}\",\"prerelease\":${pre}}" > /dev/null || \
+    echo "::warning::Gitee Release ${release_id} 预览标记更新失败（prerelease=${pre}）"
 
   local f name
   for f in "${ARTIFACTS[@]}" "${YML_FILES[@]}"; do

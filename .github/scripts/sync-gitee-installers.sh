@@ -20,6 +20,15 @@ trap 'rm -rf "$WORK"' EXIT
 if [ -z "$TAG" ]; then echo "::warning::没有传 tag"; exit 0; fi
 if [ -z "$GITEE_TOKEN" ]; then echo "::warning::没有 GITEE_TOKEN，跳过"; exit 0; fi
 
+# tag 里带 "-"（如 v1.0.112-beta.1）算预览版，正式版本一律 false
+prerelease_for_tag() {
+  case "$1" in
+    *-*) printf 'true' ;;
+    *)   printf 'false' ;;
+  esac
+}
+PRE=$(prerelease_for_tag "$TAG")
+
 echo "== 目标 tag: $TAG  仓库: $REPO"
 
 # ---- 1. 取该 tag 的 Release 资产清单
@@ -54,12 +63,17 @@ if [ -z "$RID" ]; then
   echo "   Gitee 上没有 $TAG 的 Release，新建一个"
   RID=$(curl -sS --max-time 60 -X POST "$API/releases" \
     -d "access_token=$GITEE_TOKEN" -d "tag_name=$TAG" -d "name=NOVAI $TAG" \
-    -d "target_commitish=main" -d "prerelease=false" \
+    -d "target_commitish=main" -d "prerelease=$PRE" \
     -d "body=国内下载镜像（与 GitHub Release 相同内容）。安装包超过 Gitee 单附件 100MB 限制，已按 .part00/.part01 分卷，下载后合并即可。" \
     | python3 -c "import sys,json;print(json.load(sys.stdin).get('id','') or '')" 2>/dev/null)
 fi
 if [ -z "$RID" ]; then echo "::warning::拿不到 Gitee Release id（tag 是否已推到 gitee？）"; exit 0; fi
 echo "   Gitee release id = $RID"
+
+# Release 已存在时创建接口不会生效，这里按 tag 统一纠正预览标记
+curl -sS --max-time 60 -X PATCH "$API/releases/$RID" \
+  -d "access_token=$GITEE_TOKEN" -d "prerelease=$PRE" > /dev/null \
+  || echo "::warning::Gitee Release $RID 预览标记更新失败（prerelease=$PRE）"
 
 # ---- 3. 下载 → 分卷 → 上传
 while IFS=$'\t' read -r name aid size; do
