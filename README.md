@@ -317,5 +317,3 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 - **新增后端工具 API**：7 个 API 端点（存储管理、图片检测、分类 Prompt、模型规范化、RunningHub 钱包状态）
 - **修复竞态问题**：sendChatMessage 防重入、setTimeout 递归轮询、node.running 过早清零
 
-你的心意，是我最大动力
-<img width="3269" height="2130" alt="收款" src="https://github.com/user-attachments/assets/eb435bd5-7d4d-4751-9d55-31564cf5d462" />
