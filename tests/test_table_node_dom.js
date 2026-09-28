@@ -865,7 +865,7 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     nodes.push(gen);
     const plain = api.tableBatchSingleButtonHtml(gen);
     ok(plain.indexOf('class="gen-btn"') >= 0, '没接表格 → 渲染主按钮');
-    ok(plain.indexOf('data-lucide="zap"') >= 0, '生成节点用 zap 图标');
+    ok(plain.indexOf('data-lucide="arrow-up"') >= 0, '生成节点用 arrow-up 图标（全局运行键统一成同一套线性图标）');
     ok(plain.indexOf('API生成') >= 0, '没接表格 → 文案是「API生成」');
     ok(plain.indexOf('disabled') < 0, '没在运行 → 不禁用');
 
@@ -876,7 +876,7 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     const vid = {id:'vidBtn1', type:'video', model:'x'};
     nodes.push(vid);
     const videoPlain = api.tableBatchSingleButtonHtml(vid);
-    ok(videoPlain.indexOf('data-lucide="clapperboard"') >= 0, '视频节点用 clapperboard 图标');
+    ok(videoPlain.indexOf('data-lucide="arrow-up"') >= 0, '视频节点也是 arrow-up（跟生成节点同一套运行键图标）');
     ok(videoPlain.indexOf('生成视频') >= 0, '视频节点未接表格 → 文案是「生成视频」');
     connections.push({id:'c_btn_tbl2', from:tbl.id, to:vid.id});
     eq(api.tableBatchSingleButtonHtml(vid), '', '视频节点接了表格也不渲染主按钮');
@@ -1236,6 +1236,44 @@ eq(api.friendlyBatchError(undefined), '', 'undefined 安全');
     // 真正的悬空引用（本行根本取不到的第 3 张 tn3，全局序号 3）仍然要报出来
     two.table.rows[0][0] = '用 @图片3 生成';
     eq(api.tableRowInputs(two)[0].danglingMentions.map(d => d.token), ['@图片3'], '本行取不到的图仍报悬空（没有把 dangling 一律吞掉）');
+}
+
+// ═══ Q. 表头张数：没连线的「额外通道」按每行手动素材算 ═══
+{
+    // ① 只在指令里 @ 到、没连线的通道：items = 0，但每行都有 4 张手动素材
+    const extra = api.addTableNode();
+    api.addTableColumn(extra);
+    api.addTableRow(extra);
+    api.addTableRow(extra);
+    extra.tableInputChannelCount = 1;
+    extra.tableInputChannelModes = {'input-1': 'all'};
+    extra.tableManualInputItems = {'input-1': {
+        '0': ['a','b','c','d'].map(n => ({url:'/static/extra_' + n + '.png', mediaType:'image', name:n + '.png'})),
+        '1': ['a','b','c','d'].map(n => ({url:'/static/extra_' + n + '.png', mediaType:'image', name:n + '.png'})),
+    }};
+    api.renderTableBody(extra);
+    eq(api.ensureTableChannels(extra)[0].items.length, 0, '额外通道没有连线条目');
+    eq(byClass(extra._tableEl, 'table-input-count')[0].textContent, '4', '表头张数按每行手动素材算（不是 0）');
+    eq(api.tableRowInputs(extra)[0].media.map(m => m.url),
+        ['/static/extra_a.png','/static/extra_b.png','/static/extra_c.png','/static/extra_d.png'],
+        '这一行真的带 4 张（和表头一致）');
+
+    // ② 连线 2 张 + 某一行手动 5 张 → 表头取较大值
+    const mixed = api.addTableNode();
+    ['mx1','mx2'].forEach(id => nodes.push({id, type:'image', url:'/p/' + id + '.png'}));
+    ['mx1','mx2'].forEach(id => connections.push({id:'c_' + id, from:id, to:mixed.id}));
+    api.addTableColumn(mixed);
+    api.addTableRow(mixed);
+    mixed.tableManualInputItems = {'input-1': {'0': [1,2,3,4,5].map(n => ({url:'/static/mix_' + n + '.png', mediaType:'image', name:'m' + n + '.png'}))}};
+    api.renderTableBody(mixed);
+    eq(byClass(mixed._tableEl, 'table-input-count')[0].textContent, '5', '连线 2 张 + 手动 5 张 → 表头 5');
+
+    // ③ 只有连线、没有手动素材时保持原样
+    const plain = api.addTableNode();
+    ['pl1','pl2','pl3'].forEach(id => nodes.push({id, type:'image', url:'/p/' + id + '.png'}));
+    ['pl1','pl2','pl3'].forEach(id => connections.push({id:'c_' + id, from:id, to:plain.id}));
+    api.renderTableBody(plain);
+    eq(byClass(plain._tableEl, 'table-input-count')[0].textContent, '3', '只有连线 → 表头仍是连线条目数');
 }
 
     console.log('通过 ' + pass + '/' + (pass + fails.length));

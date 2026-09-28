@@ -6,14 +6,14 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>素材库管理</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
-    <link rel="stylesheet" href="/static/css/asset-manager.css?v=1.0.120.1789606971">
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
+    <link rel="stylesheet" href="/static/css/asset-manager.css?v=1.0.123.1790240705">
 
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
 <style>
 /* ═══ V4 Apple-style Glassmorphism 设计变量 ═══ */
 :root {
@@ -101,7 +101,7 @@ body::-webkit-scrollbar { width: 0; height: 0; display: none; }
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     border-radius: 10px !important;
     font-weight: 500 !important;
     font-size: 11px !important;
@@ -109,7 +109,7 @@ body::-webkit-scrollbar { width: 0; height: 0; display: none; }
 }
 .asset-btn {
     border-radius: 10px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
@@ -121,30 +121,25 @@ body::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .asset-btn:hover {
     transform: translateY(-1px) !important;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover) !important;
-    border-color: rgba(0,0,0,0.08) !important;
     background: var(--v4-card-solid) !important;
     color: var(--v4-text) !important;
 }
-.theme-dark .asset-btn:hover { border-color: rgba(255,255,255,0.08) !important; }
 .asset-btn.primary {
     background: var(--v4-btn-bg) !important;
     color: var(--v4-btn-text) !important;
-    border-color: transparent !important;
 }
 .asset-btn.primary:hover {
     background: var(--v4-btn-bg) !important;
     transform: scale(1.03) !important;
-    border-color: transparent !important;
 }
 .asset-btn.danger:hover {
     color: var(--v4-danger) !important;
-    border-color: rgba(239,68,68,0.28) !important;
     background: var(--v4-danger-soft) !important;
 }
 
 .asset-icon-btn {
     border-radius: 10px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
@@ -156,17 +151,15 @@ body::-webkit-scrollbar { width: 0; height: 0; display: none; }
     color: var(--v4-text) !important;
     transform: translateY(-1px) !important;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover) !important;
-    border-color: rgba(0,0,0,0.08) !important;
     background: var(--v4-card-solid) !important;
 }
-.theme-dark .asset-icon-btn:hover { border-color: rgba(255,255,255,0.08) !important; }
 
 /* ═══ TABS ═══ */
 .asset-tabs {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     border-radius: 14px !important;
     padding: 5px !important;
     gap: 2px !important;
@@ -207,17 +200,15 @@ body::-webkit-scrollbar { width: 0; height: 0; display: none; }
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow) !important;
     overflow: hidden !important;
 }
 
 .panel-head {
     padding: 14px 14px !important;
-    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
     min-height: 48px !important;
 }
-.theme-dark .panel-head { border-bottom-color: rgba(255,255,255,0.06) !important; }
 .panel-title strong {
     font-size: 13px !important;
     font-weight: 600 !important;
@@ -244,8 +235,6 @@ html body .asset-page .asset-panel .panel-head .panel-title span {
 .nav-row:hover { background: var(--v4-bg) !important; }
 .nav-row.active {
     background: var(--v4-accent-soft) !important;
-    border-color: var(--v4-accent) !important;
-    box-shadow: 0 0 0 1px var(--v4-accent) !important;
 }
 .nav-row-name { font-weight: 500 !important; }
 .nav-row-count {
@@ -272,7 +261,6 @@ html body .asset-page .asset-panel .panel-head .panel-title span {
 .tree-row:hover { background: var(--v4-bg) !important; }
 .tree-row.active {
     background: var(--v4-accent-soft) !important;
-    border-color: rgba(0,113,227,0.18) !important;
     box-shadow: none !important;
 }
 .tree-row.active::before {
@@ -286,16 +274,13 @@ html body .asset-page .asset-panel .panel-head .panel-title span {
     background: var(--v4-accent) !important;
     color: var(--strong-text) !important;
 }
-.tree-children { border-left-color: rgba(128,128,128,0.15) !important; }
 .nav-section-title { font-weight: 500 !important; }
 .tree-smart-title { font-weight: 500 !important; }
 
 /* ═══ CONTENT TOOLBAR ═══ */
 .content-toolbar {
     padding: 12px 14px !important;
-    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
 }
-.theme-dark .content-toolbar { border-bottom-color: rgba(255,255,255,0.06) !important; }
 .content-heading strong {
     font-size: 14px !important;
     font-weight: 600 !important;
@@ -316,7 +301,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
 }
 .asset-search {
@@ -326,16 +311,14 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
 
 /* ═══ MANAGE TOOLS ═══ */
 .manage-tools {
-    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
     background: rgba(128,128,128,0.03) !important;
 }
-.theme-dark .manage-tools { border-bottom-color: rgba(255,255,255,0.06) !important; }
 .manage-select {
     border-radius: 9px !important;
-    background: var(--v4-card-bg) !important;
+    background-color: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     font-weight: 500 !important;
     box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
 }
@@ -343,23 +326,21 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
 /* ═══ ASSET CARDS ═══ */
 .asset-card {
     border-radius: 14px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
     box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow) !important;
-    transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out), border-color 0.35s var(--v4-ease-out) !important;
+    transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out) !important;
     overflow: hidden !important;
 }
 .asset-card:hover {
     transform: translateY(-4px) scale(1.02) !important;
     box-shadow: 0 4px 20px -4px var(--v4-card-shadow-hover) !important;
-    border-color: rgba(0,0,0,0.12) !important;
 }
-.theme-dark .asset-card:hover { border-color: rgba(255,255,255,0.08) !important; }
 .asset-card.active {
-    border-color: var(--v4-accent) !important;
-    box-shadow: 0 0 0 1px var(--v4-accent), 0 4px 16px -4px var(--v4-card-shadow) !important;
+    background: var(--v4-accent-soft) !important;
+    box-shadow: 0 4px 16px -4px var(--v4-card-shadow) !important;
 }
 .asset-thumb {
     background: var(--v4-bg) !important;
@@ -377,7 +358,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
 .asset-card-actions button {
     border-radius: 8px !important;
     background: var(--v4-card-bg) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     transition: all 0.2s var(--v4-ease-hover) !important;
 }
 .asset-card-actions button:hover {
@@ -389,7 +370,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-solid) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow) !important;
 }
 .asset-kind-badge {
@@ -397,28 +378,25 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-solid) !important;
     backdrop-filter: blur(16px) !important;
     -webkit-backdrop-filter: blur(16px) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 12px -2px var(--v4-card-shadow) !important;
 }
 
 /* ═══ PROMPT ROWS ═══ */
 .prompt-row {
     border-radius: 14px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
     box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow) !important;
-    transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out), border-color 0.35s var(--v4-ease-out) !important;
+    transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out) !important;
 }
 .prompt-row:hover {
     transform: translateY(-1px) !important;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover) !important;
-    border-color: rgba(0,0,0,0.08) !important;
 }
-.theme-dark .prompt-row:hover { border-color: rgba(255,255,255,0.08) !important; }
 .prompt-row.active {
-    border-color: var(--v4-accent) !important;
     background: var(--v4-accent-soft) !important;
     box-shadow: none !important;
 }
@@ -444,12 +422,11 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px dashed rgba(128,128,128,0.2) !important;
+    border: 0 !important;
     box-shadow: none !important;
     transition: all 0.3s var(--v4-ease-out) !important;
 }
 .upload-grid-card:hover {
-    border-color: var(--v4-accent) !important;
     background: var(--v4-accent-soft) !important;
 }
 .upload-body strong { font-weight: 500 !important; }
@@ -462,7 +439,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px dashed rgba(128,128,128,0.15) !important;
+    border: 0 !important;
     font-weight: 500 !important;
 }
 .detail-name {
@@ -472,7 +449,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
 }
 .detail-media {
     border-radius: 14px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     background: var(--v4-card-bg) !important;
     overflow: hidden !important;
 }
@@ -481,7 +458,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
 }
 .detail-meta span { font-weight: 500 !important; }
 .detail-meta strong { font-weight: 500 !important; }
@@ -490,17 +467,16 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
 }
 .detail-caption-card {
     border-radius: 14px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
 }
 .detail-caption-head {
-    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
 }
 .detail-caption-head strong { font-weight: 600 !important; }
 .detail-caption-textarea { font-weight: 400 !important; }
@@ -508,13 +484,12 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
 /* ═══ PROMPT BLOCKS ═══ */
 .prompt-block {
     border-radius: 14px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
 }
 .prompt-block-head {
-    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
     font-weight: 500 !important;
 }
 .prompt-block-body {
@@ -534,7 +509,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
 }
 .param-row strong { font-weight: 500 !important; }
 .param-row span { font-weight: 400 !important; }
@@ -545,13 +520,12 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px dashed rgba(128,128,128,0.15) !important;
+    border: 0 !important;
     font-weight: 500 !important;
 }
 
 /* ═══ CLIPBOARD BAR ═══ */
 .asset-clipboard-bar {
-    border-bottom: 1px solid rgba(128,128,128,0.1) !important;
     background: rgba(128,128,128,0.03) !important;
     font-weight: 500 !important;
 }
@@ -562,11 +536,10 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px dashed rgba(128,128,128,0.2) !important;
+    border: 0 !important;
     font-weight: 500 !important;
 }
 .asset-drop.drag-over {
-    border-color: var(--v4-accent) !important;
     background: var(--v4-accent-soft) !important;
 }
 
@@ -576,12 +549,11 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px dashed rgba(128,128,128,0.2) !important;
+    border: 0 !important;
 }
 .side-upload-card strong { font-weight: 500 !important; }
 .side-upload-card span { font-weight: 400 !important; }
 .side-upload-card.drag-over {
-    border-color: var(--v4-accent) !important;
     background: var(--v4-accent-soft) !important;
 }
 
@@ -592,7 +564,6 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
 }
 .classification-chips button.active {
     background: var(--v4-accent) !important;
-    border-color: var(--v4-accent) !important;
     color: #fff !important;
 }
 
@@ -604,7 +575,6 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
 }
 .smart-class-pill.active {
     background: var(--v4-accent) !important;
-    border-color: var(--v4-accent) !important;
     color: #fff !important;
 }
 
@@ -614,7 +584,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
 }
 .tree-action-bar button { font-weight: 500 !important; }
 
@@ -624,7 +594,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     background: var(--v4-card-bg) !important;
     backdrop-filter: blur(20px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     font-weight: 400 !important;
 }
 
@@ -690,7 +660,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
         <main id="assetManagerRoot" class="asset-manager-root"></main>
 
         <!-- 素材存储目录设置 -->
-        <div id="storagePathSection" class="storage-path-section" style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin-top:8px;border-radius:14px;background:var(--v4-card-bg);backdrop-filter:blur(20px) saturate(150%);-webkit-backdrop-filter:blur(20px) saturate(150%);border:1px solid transparent;box-shadow:0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow);">
+        <div id="storagePathSection" class="storage-path-section" style="display:flex;align-items:center;gap:10px;padding:10px 14px;margin-top:8px;border-radius:14px;background:var(--v4-card-bg);backdrop-filter:blur(20px) saturate(150%);-webkit-backdrop-filter:blur(20px) saturate(150%);border:0;box-shadow:0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow);">
             <i data-lucide="folder-open" style="width:15px;height:15px;color:var(--v4-muted);flex:0 0 auto;"></i>
             <span style="font-size:11px;color:var(--v4-muted);font-weight:500;flex:0 0 auto;">素材保存路径:</span>
             <span class="storage-current-path" style="flex:1;font-size:11px;color:var(--v4-text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">加载中...</span>
@@ -700,8 +670,8 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     </div>
 
     <input id="assetUploadInput" type="file" accept="image/*,video/*,audio/*,.json,.zip,application/json,application/zip" multiple hidden>
-    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
-    <script defer src="/static/js/asset-manager.js?v=1.0.120.1789853084"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
+    <script defer src="/static/js/asset-manager.js?v=1.0.123.1789853084"></script>
     <script>
     /* --- 素材存储目录管理 --- */
     async function loadStorageConfig() {

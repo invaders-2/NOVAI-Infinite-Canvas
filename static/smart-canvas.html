@@ -7,27 +7,29 @@
     <title data-i18n="smart.title">智能画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.120.1789751995">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
-    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.120.1789716971">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
-    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.120.1789742566">
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/vendor/js/html-to-image.js?v=1.0.120.1789615756"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/shared/media.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/workflow-utils.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/node-registry.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/table-model.js?v=1.0.120.1789612695"></script>
-    <script src="/static/js/shared/table-node.js?v=1.0.120.1789696438"></script>
-    <script src="/static/js/shared/dropdown.js?v=1.0.120.1789746233"></script>
-    <script src="/static/js/shared/glide.js?v=1.0.120.1789742748"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.123.1790557117">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
+    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.123.1790259488">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
+    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.123.1789742566">
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/vendor/js/html-to-image.js?v=1.0.123.1789615756"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/shared/size-policy.js?v=1.0.123.1790057117"></script>
+    <script src="/static/js/shared/media.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/psd-writer.js?v=1.0.123.1790444164"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/workflow-utils.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/node-registry.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/table-model.js?v=1.0.123.1790098666"></script>
+    <script src="/static/js/shared/table-node.js?v=1.0.123.1790504358"></script>
+    <script src="/static/js/shared/dropdown.js?v=1.0.123.1789746233"></script>
+    <script src="/static/js/shared/glide.js?v=1.0.123.1789742748"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -46,7 +48,7 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
     -ms-overflow-style: none;
     scrollbar-width: none;
 }
-        body { background-color: var(--bg); background-image: radial-gradient(var(--grid-color) 1px, transparent 1px); background-size: 24px 24px; color: var(--text) !important; }
+        body { background-color: var(--bg); background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px); background-size: 24px 24px; color: var(--text) !important; }
         /* ═══ Canvas/SVG 响应式：跟随窗口缩放 ═══ */
 #shell { width: 100%; height: 100%; overflow: hidden; }
 /* world 是无限画布坐标系：节点允许位于负坐标/超出视口，不能加 overflow:hidden（会把视口外节点裁掉） */
@@ -67,9 +69,8 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
 
 /* ═══ 节点选中/拖动 ═══ */
 .node.selected, .node.dragging {
-    outline: 1px solid var(--selected-ring);
+    box-shadow: 0 8px 20px rgba(0,0,0,.12), 0 0 20px 3px color-mix(in srgb, var(--selected-ring) 70%, transparent);
     filter: brightness(1.03);
-    border-color: var(--selected-ring);
 }
 
 /* ═══ 工具栏/面板 resize 重定位 ═══ */
@@ -99,12 +100,12 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
 }
 .smart-popover { left: 0 !important; transform: none !important; }
 /* --- Marvis 增强覆盖 (smart-canvas.html) --- */
-.composer-panel { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-lg) !important; }
-.search-input { background: var(--bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-lg) !important; color: var(--text) !important; }
+.composer-panel { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-lg) !important; }
+.search-input { background: var(--bg) !important; border: 0 !important; border-radius: var(--radius-lg) !important; color: var(--text) !important; }
 .menu-item { color: var(--muted) !important; border-radius: var(--radius-sm) !important; }
 .menu-item:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
-.modal { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-xl) !important; }
-.asset-panel { background: var(--stage-bg) !important; border-color: var(--border) !important; }
+.modal { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-xl) !important; }
+.asset-panel { background: var(--stage-bg) !important; }
 .btn { border-radius: var(--radius-sm) !important; }
 .btn-primary { background: var(--text) !important; color: var(--bg) !important; }
 /* ═══ 底部胶囊缩放工具栏 ═══ */
@@ -113,10 +114,10 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
     z-index: 26; height: 36px; padding: 0 6px;
     display: flex; align-items: center; gap: 2px;
     border-radius: 999px;
-    background: var(--panel-bg, rgba(255,255,255,.92));
-    border: 1px solid rgba(0,0,0,.08);
-    box-shadow: 0 8px 22px var(--shadow-color, rgba(0,0,0,.16));
-    backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
+    background: color-mix(in srgb, var(--panel) 70%, transparent);
+    border: 0;
+    box-shadow: 0 20px 48px var(--shadow), 0 6px 18px var(--shadow);
+    backdrop-filter: blur(44px) saturate(190%); -webkit-backdrop-filter: blur(44px) saturate(190%);
     pointer-events: auto; user-select: none;
 }
 .canvas-zoombar button {
@@ -129,15 +130,15 @@ html::-webkit-scrollbar, body::-webkit-scrollbar,
 }
 .canvas-zoombar button:hover { background: var(--nav-hover-bg); color: var(--text); }
 .canvas-zoombar button i, .canvas-zoombar button svg { width: 14px; height: 14px; stroke-width: 1.6; flex: 0 0 auto; }
-.canvas-zoombar .zoombar-sep { width: 1px; height: 16px; margin: 0 3px; background: rgba(0,0,0,.12); flex: 0 0 auto; }
+.canvas-zoombar .zoombar-sep { width: 7px; height: 16px; margin: 0; background: transparent; flex: 0 0 auto; }
 .canvas-zoombar .zoombar-level { min-width: 46px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 html.theme-dark .canvas-zoombar,
 html.studio-theme-dark .canvas-zoombar,
 body.theme-dark .canvas-zoombar,
 body.studio-theme-dark .canvas-zoombar {
-    background: #2A2A2A;
-    border: 1px solid rgba(255,255,255,.08);
-    box-shadow: 0 8px 22px rgba(0,0,0,.45);
+    background: color-mix(in srgb, var(--panel) 62%, transparent);
+    border: 0;
+    box-shadow: 0 20px 48px var(--shadow), 0 6px 18px var(--shadow);
 }
 html.theme-dark .canvas-zoombar button,
 html.studio-theme-dark .canvas-zoombar button,
@@ -159,10 +160,6 @@ html.theme-dark .canvas-zoombar button:hover i, html.theme-dark .canvas-zoombar 
 html.studio-theme-dark .canvas-zoombar button:hover i, html.studio-theme-dark .canvas-zoombar button:hover svg,
 body.theme-dark .canvas-zoombar button:hover i, body.theme-dark .canvas-zoombar button:hover svg,
 body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .canvas-zoombar button:hover svg { color: #FFFFFF !important; }
-html.theme-dark .canvas-zoombar .zoombar-sep,
-html.studio-theme-dark .canvas-zoombar .zoombar-sep,
-body.theme-dark .canvas-zoombar .zoombar-sep,
-body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,255,.12); }
 
 /* ═══ NovaGlide 滑块（shared/glide.js + css/glide.css） ═══
    glide.css 只压选项自己的 background-color / border-color，压不掉文字颜色：
@@ -173,11 +170,9 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
 .mention-option-grid.nv-glide-host,
 .mention-folder-chips.nv-glide-host,
 .smart-export-menu.nv-glide-host,
-.create-menu.nv-glide-host,
-.size-picker-list.nv-glide-host { --nv-glide-bg: var(--soft); }
+.create-menu.nv-glide-host { --nv-glide-bg: var(--soft); }
 /* 容器自己就是 --soft 底（分段控件）的，滑块再用 --soft 会融成一片，改用它的选中底色 --card */
 .mention-source-tabs.nv-glide-host,
-.size-picker-scope.nv-glide-host,
 .loop-number-grid.nv-glide-host { --nv-glide-bg: var(--card); }
 /* 文件夹 chip 是圆形胶囊，方形滑块压在下面很扎眼 */
 .mention-folder-chips.nv-glide-host .nv-glide-pill { border-radius: var(--radius-full); }
@@ -191,14 +186,12 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
 /* 参数行同族弹层（质量/数量/画幅/时长/平台/模型/视频分辨率）：
    容器自己就是 --soft 底的分段控件用它的选中底色 --card，否则滑块与容器融成一片；
    容器透明的用 --soft（这几个的 hover 底色是 --card，浅色下就是白色，压在白色弹层上看不见）。 */
-.seg-row.nv-glide-host,
-.count-grid.nv-glide-host { --nv-glide-bg: var(--card); }
+.seg-row.nv-glide-host { --nv-glide-bg: var(--card); }
 .ratio-grid.nv-glide-host,
 .duration-grid.nv-glide-host,
 .model-list.nv-glide-host { --nv-glide-bg: var(--soft); }
 /* 深底 + 反色文字的选中项：底色被压掉后文字拉回可读色（比例/时长/平台的 .active 本来就是 --strong 字，不用救） */
-.seg-row.nv-glide-host button.active,
-.count-grid.nv-glide-host .count-cell.active { color: var(--text); }
+.seg-row.nv-glide-host button.active { color: var(--text); }
 /* .direct-option 悬停上浮 1px 会让滑块差 1px（同 @ 提及的缩略图） */
 .model-list.nv-glide-host .direct-option:hover { transform: none; }
 </style>
@@ -240,9 +233,17 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                     <div id="dynamicParams" class="dynamic-params"></div>
                 </div>
                 <div class="composer-actions">
-                    <button id="cascadeRunBtn" class="run-btn cascade-run-btn" type="button" style="display:none"><i data-lucide="workflow"></i><span>一键运行</span></button>
-                    <button id="runBtn" class="run-btn" type="button"><i data-lucide="sparkles"></i><span data-i18n="smart.run">运行</span></button>
+                    <button id="cascadeRunBtn" class="run-btn cascade-run-btn" type="button" style="display:none" title="一键运行" aria-label="一键运行"><i data-lucide="arrow-up"></i></button>
+                    <button id="runBtn" class="run-btn composer-run-btn" type="button" data-i18n-title="smart.run" title="运行" aria-label="运行"><i data-lucide="arrow-up"></i></button>
                 </div>
+                <!-- 「文本生成」节点的控制台（模板库/分隔符/LLM 三颗药丸 + INPUT/OUTPUT/运行）
+                     选中该节点时从节点里整块搬到这里，节点上只留只读的结果预览。 -->
+                <div id="composerConsoleHost" class="composer-console-host"></div>
+                <!-- 「更多参数」的展开面板宿主：点药丸时把开关行渲染进来（跟控制台停靠同一套思路） -->
+                <div id="composerMoreParamsHost" class="composer-more-host" hidden></div>
+                <!-- 没被选中的「文本生成」节点：控制台先停在这里（hidden）。
+                     停在节点里会被 :has(.prompt-node-llm) 那套自适应高度规则认领，把节点撑到 300px。 -->
+                <div id="promptConsolePark" class="prompt-console-park" hidden></div>
             </div>
         </div>
         <button class="smart-back" type="button" onclick="backToCanvasList()"><i data-lucide="arrow-left"></i><span data-i18n="canvas.backToList">返回画布列表</span></button>
@@ -251,6 +252,8 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
             <button class="menu-btn" type="button" data-create-type="image"><i data-lucide="upload-cloud" class="w-4 h-4"></i><span>上传</span></button>
             <button class="menu-btn" type="button" data-create-type="group"><i data-lucide="group" class="w-4 h-4"></i><span>分组</span></button>
             <button class="menu-btn" type="button" data-create-type="prompt"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span>文本生成</span></button>
+            <button class="menu-btn" type="button" data-create-type="text"><i data-lucide="file-text" class="w-4 h-4"></i><span>纯文本</span></button>
+            <button class="menu-btn" type="button" data-create-type="label"><i data-lucide="tag" class="w-4 h-4"></i><span>标签</span></button>
             <button class="menu-btn" type="button" data-create-type="table"><i data-lucide="table" class="w-4 h-4"></i><span>多维表格</span></button>
             <button class="menu-btn" type="button" data-create-type="batch"><i data-lucide="play" class="w-4 h-4"></i><span>生成输入</span></button>
         </div>
@@ -291,7 +294,7 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
             <div id="promptTemplateBody" class="prompt-template-body"></div>
         </div>
         <div class="minimap-selection-actions">
-            <button id="smartRunSelectedBtn" class="minimap-arrange-btn selected-run-btn" type="button" title="运行框选节点" aria-label="运行框选节点"><i data-lucide="workflow"></i><span>运行选中</span></button>
+            <button id="smartRunSelectedBtn" class="minimap-arrange-btn selected-run-btn" type="button" title="运行选中" aria-label="运行选中"><i data-lucide="arrow-up"></i></button>
             <button id="smartArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid"></i><span>整理选中</span></button>
         </div>
         <button id="chatToggleBtn" class="chat-toggle" onclick="toggleChatPanel()" title="画布对话助手"><i data-lucide="message-square"></i></button>
@@ -418,6 +421,63 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                 </div>
             </div>
         </div>
+        <!-- ═══ 标签节点样式面板（选中标签节点时出现，锚在节点旁边） ═══ -->
+        <div id="smartLabelPanel" class="smart-label-panel" role="dialog" aria-label="标签样式">
+            <div class="smart-label-panel-head">
+                <div class="smart-label-panel-title"><i data-lucide="tag"></i><span>标签样式</span></div>
+                <button class="smart-label-panel-close" type="button" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+            </div>
+            <div class="smart-label-panel-body">
+                <div class="smart-label-field">
+                    <span class="smart-label-field-label">背景</span>
+                    <div class="smart-label-seg" id="smartLabelStyleSeg">
+                        <button type="button" data-label-style="outline">线框</button>
+                        <button type="button" data-label-style="none">无背景</button>
+                        <button type="button" data-label-style="solid">纯色</button>
+                    </div>
+                </div>
+                <div class="smart-label-field">
+                    <span class="smart-label-field-label">颜色</span>
+                    <div class="smart-label-colors" id="smartLabelColors"></div>
+                    <input type="color" id="smartLabelColorPicker" class="smart-label-color-picker" value="#22c55e" title="自定义颜色" aria-label="自定义颜色">
+                </div>
+                <div class="smart-label-field">
+                    <span class="smart-label-field-label">字号</span>
+                    <div class="smart-label-size">
+                        <button type="button" id="smartLabelFontMinus" title="变小">A-</button>
+                        <input type="number" id="smartLabelFontSize" min="10" max="40" step="1" value="13" aria-label="字号">
+                        <button type="button" id="smartLabelFontPlus" title="变大">A+</button>
+                    </div>
+                    <span class="smart-label-field-label">圆点</span>
+                    <button type="button" id="smartLabelDotToggle" class="smart-label-toggle" aria-pressed="true" title="显示 / 隐藏圆点"><span></span></button>
+                </div>
+                <div class="smart-label-field">
+                    <span class="smart-label-field-label">图标</span>
+                    <div class="smart-label-icons" id="smartLabelIcons"></div>
+                </div>
+            </div>
+            <div class="smart-label-panel-tip">双击标签上的文字可直接改内容</div>
+        </div>
+        <!-- ═══ 纯文本节点的大弹窗编辑器（双击节点打开） ═══ -->
+        <div id="smartTextModal" class="smart-text-modal" aria-hidden="true">
+            <div class="smart-text-modal-mask" data-text-modal-close="1"></div>
+            <div class="smart-text-modal-panel" role="dialog" aria-modal="true" aria-label="文本编辑">
+                <div class="smart-text-modal-head">
+                    <div class="smart-text-modal-title"><i data-lucide="file-text"></i><span>文本编辑</span></div>
+                    <button class="smart-text-modal-close" type="button" data-text-modal-close="1" title="关闭"><i data-lucide="x"></i></button>
+                </div>
+                <div class="smart-text-modal-body">
+                    <div id="smartTextModalInput" class="smart-text-modal-input" contenteditable="true" data-placeholder="在这里输入文本..." spellcheck="false"></div>
+
+                </div>
+                <div class="smart-text-modal-foot">
+                    <span id="smartTextModalCount" class="smart-text-modal-count">0 字</span>
+                    <span class="smart-text-modal-tip">Ctrl/⌘ + Enter 保存 · Esc 关闭 · 取消撤销本次修改</span>
+                    <button id="smartTextModalCancel" class="smart-text-modal-btn" type="button">取消</button>
+                    <button id="smartTextModalSave" class="smart-text-modal-btn primary" type="button">保存</button>
+                </div>
+            </div>
+        </div>
         <!-- ═══ IMAGE-EDIT-MODAL (shared with canvas.html) ═══ -->
         <div id="imageEditModal" class="image-edit-modal">
             <div class="image-edit-panel">
@@ -427,13 +487,9 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                         <div id="imageEditSub" class="image-edit-sub" data-i18n="canvas.editImageSub">选择裁剪、遮罩或画笔模式</div>
                     </div>
                     <div class="image-edit-mode">
+                        <!-- 预览弹层只留「预览 / 对比原图 / 调色」三样（Boss 硬规则）：裁剪/扩图/遮罩/画笔/缩放/宫格切分
+                             全部搬到节点工具条上、直接在节点图上做（见 smart-canvas.js 的 in-canvas 覆盖层）。 -->
                         <button type="button" data-image-edit-mode="preview" class="active"><i data-lucide="eye" class="w-3.5 h-3.5"></i><span data-i18n="smart.modePreview">预览</span></button>
-                        <button type="button" data-image-edit-mode="crop"><i data-lucide="crop" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeCrop">裁剪</span></button>
-                        <button type="button" data-image-edit-mode="outpaint"><i data-lucide="expand" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeOutpaint">Expand</span></button>
-                        <button type="button" data-image-edit-mode="mask"><i data-lucide="brush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeMask">遮罩</span></button>
-                        <button type="button" data-image-edit-mode="brush"><i data-lucide="paintbrush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeBrush">画笔</span></button>
-                        <button type="button" data-image-edit-mode="resize"><i data-lucide="minimize-2" class="w-3.5 h-3.5"></i><span>缩放</span></button>
-                        <button type="button" data-image-edit-mode="grid"><i data-lucide="grid-3x3" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeGrid">宫格切分</span></button>
                         <button type="button" data-image-edit-mode="adjust" title="专业调色"><i data-lucide="wand-sparkles" class="w-3.5 h-3.5"></i><span>调色</span></button>
                         
                     </div>
@@ -650,6 +706,7 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                     <div class="chat-composer-left">
                         <button id="chatUploadBtn" class="chat-round-btn chat-attach" type="button" onclick="chatUploadClick()" title="上传素材（图片/视频，生成时自动作为参考）" aria-label="添加素材"><i data-lucide="plus"></i></button>
                         <select id="chatModelSelect" class="chat-model-select" onchange="changeChatModel(this.value)" title="对话模型"></select>
+                        <select id="agentImageProviderSelect" class="chat-model-select" onchange="changeAgentImageProvider(this.value)" title="生图平台"></select>
                     </div>
                     <button id="chatSendBtn" class="chat-round-btn chat-send" type="button" onclick="sendChatMessage()" aria-label="发送"><i data-lucide="arrow-up"></i></button>
                 </div>
@@ -666,14 +723,8 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         </div>
         <div id="versionList" class="version-list"></div>
     </div>
-    <!-- M2: 生成后快捷操作建议条 -->
-    <div id="smartSuggestBar" class="smart-suggest-bar" style="display:none">
-        <div class="smart-suggest-label"><i data-lucide="sparkles" class="w-3 h-3"></i><span>接下来</span></div>
-        <div id="smartSuggestBtns" class="smart-suggest-btns"></div>
-        <button type="button" class="smart-suggest-close" onclick="closeSmartSuggestions()" title="关闭"><i data-lucide="x"></i></button>
-    </div>
-    <script defer src="/static/vendor/js/glfx.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/js/image-adjust-editor.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/js/smart-canvas.js?v=1.0.120.1789858679"></script>
+    <script defer src="/static/vendor/js/glfx.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/js/image-adjust-editor.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/js/smart-canvas.js?v=1.0.123.1790557117"></script>
 </body>
 </html>

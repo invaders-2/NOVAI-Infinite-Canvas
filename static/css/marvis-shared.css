@@ -22,6 +22,8 @@
     --text: #0a0a0a;
     --text-2: #737373;
     --text-3: #8a8a8a;
+    /* 线性下拉箭头（替代原来的两条 linear-gradient 实心三角）：描边人字，颜色跟正文色一致 */
+    --select-caret: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' fill='none' stroke='%23171717' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><path d='M2.5 4L5 6.5L7.5 4'/></svg>");
     --text-on-accent: #fafafa;
     --accent: #171717;
     --accent-hover: #2b2b2b;
@@ -165,6 +167,8 @@ body.studio-theme-dark {
     --text: #fafafa;
     --text-2: #a3a3a3;
     --text-3: #8a8a8a;
+    /* 深色下同一枚线性箭头，描边色换成 #fafafa */
+    --select-caret: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' fill='none' stroke='%23fafafa' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><path d='M2.5 4L5 6.5L7.5 4'/></svg>");
     --text-on-accent: #0a0a0a;
     --accent: #fafafa;
     --accent-hover: #ffffff;
@@ -320,31 +324,9 @@ html.settings-embed *::-webkit-scrollbar {
    Apple 规范（WWDC 2026 八大原则）视觉补齐追加层
    ═══════════════════════════════════════════ */
 
-/* ── 亮色顶边：标题栏/侧边栏顶部 1px 高光 ── */
-.frameless-titlebar,
-.sidebar {
-    border-top: 1px solid rgba(255, 255, 255, 0.4);
-}
-html.theme-dark .frameless-titlebar,
-html.theme-dark .sidebar,
-body.theme-dark .frameless-titlebar,
-body.theme-dark .sidebar {
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-/* ── 滚动边缘渐变：标题栏底部分隔线改渐隐过渡 ── */
+/* ── 标题栏：不再画底部分隔线（1px 渐隐线按设计约束移除） ── */
 .frameless-titlebar {
     border-bottom: none;
-}
-.frameless-titlebar::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--border) 12%, var(--border) 88%, transparent);
-    pointer-events: none;
 }
 
 /* ── 滚动内容容器边缘渐隐遮罩（侧边栏底部淡出） ── */

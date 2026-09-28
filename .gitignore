@@ -73,6 +73,7 @@ tmp_*.png
 tests/artifacts/
 
 # 设计概念稿/临时原型（非正式页面）
+_shimmer-preview/
 static/canvas-entry-redesign-*.html
 static/canvas-list-redesign-*.html
 static/images/concept/*

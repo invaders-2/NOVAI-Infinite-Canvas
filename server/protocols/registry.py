@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -232,4 +233,316 @@ def manifest() -> dict:
             {"id": item["id"], "kind": item["kind"], "version": item["version"]}
             for item in data["providers"] + data["models"]
         ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 生图尺寸策略
+# ---------------------------------------------------------------------------
+# 尺寸知识的唯一来源是模型协议条目的 size 块：上游真枚举的通道声明 enum，
+# 只作为提示词下发的通道声明 free，后端与前端共用同一份声明。
+# 供应商配置由 main.py 传入（本模块不反向依赖服务层），这里只做纯计算。
+SIZE_POLICY_FORMAT = "novai-size-policy/v1"
+
+DEFAULT_SIZE_POLICY: Dict[str, Any] = {
+    "mode": "free",
+    "hintOnly": False,
+    "maxEdge": 0,
+    "maxPixels": 0,
+    "minPixels": 0,
+    "multipleOf": 0,
+    "options": [],
+    "prefer": "ratio",
+    "autoSize": False,
+    "defaultLevel": "",
+    "tiers": [
+        {"id": "1k", "maxPixels": 1572864},
+        {"id": "2k", "maxPixels": 4194304},
+        {"id": "4k", "maxPixels": 8294400},
+    ],
+}
+
+SIZE_MODES = ("free", "bounds", "enum")
+SIZE_PREFERS = ("ratio", "area")
+SIZE_LEVELS = ("1k", "2k", "4k")
+# 同一模型名出现在多个供应商时保留更严格的一方，避免自由声明覆盖真枚举
+SIZE_MODE_RANK = {"free": 0, "bounds": 1, "enum": 2}
+
+
+def _size_int(value: Any) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0
+
+
+def _default_size_policy() -> Dict[str, Any]:
+    policy = dict(DEFAULT_SIZE_POLICY)
+    policy["options"] = []
+    policy["tiers"] = [dict(item) for item in DEFAULT_SIZE_POLICY["tiers"]]
+    return policy
+
+
+def _size_tiers(value: Any) -> Optional[List[Dict[str, Any]]]:
+    """校验档位表（id + 递增 maxPixels）；非法返回 None，由调用方退回默认档位。"""
+    if not isinstance(value, list):
+        return None
+    tiers: List[Dict[str, Any]] = []
+    previous = 0
+    for item in value:
+        if not isinstance(item, dict):
+            return None
+        tier_id = str(item.get("id") or "").strip()
+        max_pixels = _size_int(item.get("maxPixels"))
+        if not tier_id or not max_pixels or max_pixels <= previous:
+            return None
+        tiers.append({"id": tier_id, "maxPixels": max_pixels})
+        previous = max_pixels
+    return tiers
+
+
+def _normalize_size_policy(block: Any) -> Dict[str, Any]:
+    """把 size 块补全成固定字段的策略；声明坏了就退回默认值。"""
+    policy = _default_size_policy()
+    if not isinstance(block, dict):
+        return policy
+    mode = str(block.get("mode") or "").strip().lower()
+    if mode in SIZE_MODES:
+        policy["mode"] = mode
+    prefer = str(block.get("prefer") or "").strip().lower()
+    if prefer in SIZE_PREFERS:
+        policy["prefer"] = prefer
+    options = block.get("options")
+    if isinstance(options, list):
+        policy["options"] = [str(item).strip() for item in options if str(item or "").strip()]
+    level = str(block.get("defaultLevel") or "").strip().lower()
+    if level in SIZE_LEVELS:
+        policy["defaultLevel"] = level
+    tiers = _size_tiers(block.get("tiers"))
+    policy["tiers"] = tiers if tiers is not None else [dict(item) for item in DEFAULT_SIZE_POLICY["tiers"]]
+    policy["hintOnly"] = bool(block.get("hintOnly"))
+    policy["autoSize"] = bool(block.get("autoSize"))
+    for key in ("maxEdge", "maxPixels", "minPixels", "multipleOf"):
+        if key in block:
+            policy[key] = _size_int(block.get(key))
+    return policy
+
+
+def _model_pattern_hit_length(entry: dict, model: str) -> int:
+    """条目 match.model_patterns 对模型名的命中长度；未命中返回 0（匹配规则同 _match_score）。"""
+    match = entry.get("match") if isinstance(entry.get("match"), dict) else {}
+    lowered = str(model or "").lower()
+    if not lowered:
+        return 0
+    lengths = []
+    for raw in match.get("model_patterns") or []:
+        pattern = str(raw or "").lower()
+        if pattern == "*":
+            lengths.append(1)
+        elif pattern and pattern in lowered:
+            lengths.append(len(pattern))
+    return max(lengths) if lengths else 0
+
+
+def _size_family_block(model: str) -> Optional[dict]:
+    """按模型名找尺寸族声明；命中多个时取 pattern 最长（最具体）的，同长度取文件顺序靠前。"""
+    best_block: Optional[dict] = None
+    best_length = 0
+    for entry in load_protocols()["models"]:
+        block = entry.get("size")
+        if not isinstance(block, dict):
+            continue
+        hit = _model_pattern_hit_length(entry, model)
+        if hit > best_length:
+            best_block = block
+            best_length = hit
+    return best_block
+
+
+def _explicit_size_block(provider: dict, model: str) -> Optional[dict]:
+    """该 (供应商, 模型) 命中的条目里自带 size 块的，按匹配得分取最高者。
+
+    model_protocols_for 用空模型名打分，所以「provider_ids + model_patterns」的条目
+    会对该供应商的每个模型都拿到最高分；这里必须再要求 model_patterns 真正命中模型名。
+    """
+    best_block: Optional[dict] = None
+    best_score = -1
+    for entry in model_protocols_for(provider or {}):
+        block = entry.get("size")
+        if not isinstance(block, dict):
+            continue
+        if "image.generate" not in (entry.get("capabilities") or []):
+            continue
+        match = entry.get("match") if isinstance(entry.get("match"), dict) else {}
+        patterns = [str(x or "") for x in (match.get("model_patterns") or [])]
+        if patterns and _model_pattern_hit_length(entry, model) == 0:
+            continue
+        score = _match_score(entry, provider or {}, model)
+        if score > best_score:
+            best_block = block
+            best_score = score
+    return best_block
+
+
+def size_policy_for(provider: dict, model: str) -> Dict[str, Any]:
+    """该 (供应商, 模型) 的生图尺寸策略，按三步解析；任何异常返回默认策略。
+
+    1. 命中的模型协议条目自己声明了 size 块 → 用它（供应商专属声明优先）；
+    2. 否则取按模型名命中的尺寸族声明（离散枚举属于模型族，不属于"某协议"）；
+    3. 都没有 → DEFAULT_SIZE_POLICY。
+    """
+    try:
+        name = str(model or "")
+        block = _explicit_size_block(provider or {}, name)
+        if not isinstance(block, dict):
+            block = _size_family_block(name)
+        return _normalize_size_policy(block)
+    except Exception:
+        return _default_size_policy()
+
+
+# 尺寸收敛：与 static/js/shared/size-policy.js 的 constrain 同规则。
+# 前端只做预览，真正下发上游的值必须由同一套规则算出，否则两端显示不一致。
+_SIZE_PATTERN = re.compile(r"^\s*(\d+)\s*[xX*]\s*(\d+)\s*$")
+
+
+def _size_pair(value: Any) -> Optional[Tuple[int, int]]:
+    match = _SIZE_PATTERN.match(str(value if value is not None else ""))
+    if not match:
+        return None
+    width, height = int(match.group(1)), int(match.group(2))
+    return (width, height) if width > 0 and height > 0 else None
+
+
+def _size_orientation(pair: Tuple[int, int]) -> str:
+    if pair[0] == pair[1]:
+        return "square"
+    return "landscape" if pair[0] > pair[1] else "portrait"
+
+
+def _size_tier_index(pair: Tuple[int, int], tiers: List[Dict[str, Any]]) -> int:
+    """尺寸属于哪一档：第一个 maxPixels ≥ 面积的档；超过最后一档取最后一档。"""
+    area = pair[0] * pair[1]
+    for index, tier in enumerate(tiers):
+        if area <= tier["maxPixels"]:
+            return index
+    return max(0, len(tiers) - 1)
+
+
+def _size_align(value: float, multiple: int, round_up: bool) -> int:
+    if multiple < 2:
+        return max(1, int(math.floor(value + 0.5)))
+    if round_up:
+        return max(multiple, int(math.ceil(value / multiple)) * multiple)
+    return max(multiple, int(math.floor(value / multiple)) * multiple)
+
+
+def _fit_size_within(pair: Tuple[int, int], policy: Dict[str, Any]) -> str:
+    """等比缩进 maxEdge / maxPixels，按 multipleOf 对齐；不足 minPixels 再等比放大。"""
+    max_edge = _size_int(policy.get("maxEdge"))
+    max_pixels = _size_int(policy.get("maxPixels"))
+    min_pixels = _size_int(policy.get("minPixels"))
+    multiple = _size_int(policy.get("multipleOf"))
+    scale = 1.0
+    if max_edge > 0:
+        scale = min(scale, max_edge / max(pair))
+    if max_pixels > 0:
+        scale = min(scale, math.sqrt(max_pixels / (pair[0] * pair[1])))
+    width = _size_align(pair[0] * scale, multiple, False)
+    height = _size_align(pair[1] * scale, multiple, False)
+    if min_pixels > 0 and width * height < min_pixels:
+        grow = math.sqrt(min_pixels / max(1, width * height))
+        width = _size_align(width * grow, multiple, True)
+        height = _size_align(height * grow, multiple, True)
+    return "%dx%d" % (width, height)
+
+
+def _pick_best_size(candidates: List[Tuple[str, int, int]], pair: Tuple[int, int],
+                    policy: Dict[str, Any], tiers: List[Dict[str, Any]]) -> Optional[str]:
+    """池内先比档位高，再比比例接近（prefer=area 时先比面积），最后比次要项；同分取先出现的。"""
+    prefer_area = str(policy.get("prefer") or "").strip().lower() == "area"
+    best: Optional[str] = None
+    best_key: Optional[Tuple[int, float, float]] = None
+    for text, width, height in candidates:
+        tier = _size_tier_index((width, height), tiers) if tiers else 0
+        ratio_score = abs(math.log((pair[0] / pair[1]) / (width / height)))
+        area_score = abs(float(width * height - pair[0] * pair[1]))
+        first, second = (area_score, ratio_score) if prefer_area else (ratio_score, area_score)
+        key = (tier, -first, -second)
+        if best_key is None or key > best_key:
+            best, best_key = text, key
+    return best
+
+
+def _snap_enum_size(size: str, pair: Tuple[int, int], policy: Dict[str, Any]) -> str:
+    max_edge = _size_int(policy.get("maxEdge"))
+    max_pixels = _size_int(policy.get("maxPixels"))
+    candidates: List[Tuple[str, int, int]] = []
+    for option in policy.get("options") or []:
+        cand = _size_pair(option)
+        if not cand:
+            continue
+        if max_edge > 0 and max(cand) > max_edge:
+            continue
+        if max_pixels > 0 and cand[0] * cand[1] > max_pixels:
+            continue
+        candidates.append((str(option), cand[0], cand[1]))
+    if not candidates:
+        return size
+    tiers = policy.get("tiers") if isinstance(policy.get("tiers"), list) else []
+    if not tiers:
+        return _pick_best_size(candidates, pair, policy, tiers) or size
+    # 用户请求的档位不能被吃掉：先按方向收窄，再只留「不超过请求档位」的候选，池空退回全表
+    target_orientation = _size_orientation(pair)
+    target_tier = _size_tier_index(pair, tiers)
+    pool = [item for item in candidates
+            if _size_orientation((item[1], item[2])) == target_orientation
+            and _size_tier_index((item[1], item[2]), tiers) <= target_tier]
+    if not pool:
+        pool = candidates
+    return _pick_best_size(pool, pair, policy, tiers) or size
+
+
+def constrain_size(provider: dict, model: str, size: str) -> str:
+    """把请求尺寸收敛成真正能下发的值：enum 吸附到合法枚举，bounds 等比缩进上限，free 原样。
+
+    与前端 shared/size-policy.js 的 constrain 同规则；无法解析的尺寸（如 auto、占位符）原样返回。
+    """
+    raw = str(size if size is not None else "")
+    pair = _size_pair(raw)
+    if not pair:
+        return raw
+    policy = size_policy_for(provider or {}, str(model or ""))
+    if policy.get("mode") == "enum":
+        return _snap_enum_size(raw, pair, policy)
+    if policy.get("mode") == "bounds" or policy.get("maxEdge") or policy.get("maxPixels") or policy.get("minPixels"):
+        return _fit_size_within(pair, policy)
+    return raw
+
+
+def size_policy_table(providers: Any) -> Dict[str, Any]:
+    """前端一次性全量表（novai-size-policy/v1）：按模型名展开，前端不必自己映射供应商。
+
+    providers 由调用方传入；只取 enabled 的平台，模型名重复时保留更严格的策略。
+    """
+    models: Dict[str, Any] = {}
+    for provider in providers if isinstance(providers, list) else []:
+        try:
+            if not isinstance(provider, dict) or not provider.get("enabled", True):
+                continue
+            for raw in provider.get("image_models") or []:
+                model = str(raw or "").strip()
+                if not model:
+                    continue
+                policy = size_policy_for(provider, model)
+                current = models.get(model)
+                if current is None or SIZE_MODE_RANK.get(policy["mode"], 0) > SIZE_MODE_RANK.get(current["mode"], 0):
+                    models[model] = policy
+        except Exception:
+            continue
+    return {
+        "format": SIZE_POLICY_FORMAT,
+        "default": _default_size_policy(),
+        "models": models,
     }

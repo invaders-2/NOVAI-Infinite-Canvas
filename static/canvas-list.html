@@ -6,18 +6,18 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>画布工作台</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
-    <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.120.1789606971">
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
+    <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.123.1790236178">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
 
     <style>
         /* ═══ V4 Apple-style Glassmorphism Design System ═══ */
@@ -138,7 +138,7 @@
         }
         .btn-primary:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
         .btn-primary:active { transform: scale(0.97); }
-        .btn-primary:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .btn-primary:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 
         .btn-secondary {
             display: inline-flex; align-items: center; gap: 8px;
@@ -146,7 +146,7 @@
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
             color: var(--v4-text);
-            border: 1px solid transparent;
+            border: 0;
             border-radius: 12px;
             padding: 14px 32px;
             font-size: 14px; font-weight: 500;
@@ -160,11 +160,9 @@
         .btn-secondary:hover {
             transform: translateY(-1px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.08);
         }
-        .theme-dark .btn-secondary:hover { border-color: rgba(255,255,255,0.08); }
         .btn-secondary:active { transform: translateY(0); }
-        .btn-secondary:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .btn-secondary:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 
         /* ═══ CAROUSEL ═══ */
         .hero-carousel {
@@ -173,7 +171,7 @@
             border-radius: 16px;
             overflow: hidden;
             position: relative;
-            border: 1px solid transparent;
+            border: 0;
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
         }
         .carousel-slide {
@@ -216,13 +214,11 @@
             -webkit-backdrop-filter: blur(20px) saturate(180%);
             color: #fff;
             box-shadow: 0 -1px 2px rgba(0,0,0,0.04);
-            border-top: 1px solid rgba(255,255,255,0.14);
             display: flex; align-items: center; justify-content: space-between;
             gap: 16px;
         }
         .theme-dark .carousel-caption {
             background: rgba(0,0,0,0.35);
-            border-top-color: rgba(255,255,255,0.08);
         }
         .carousel-caption-title {
             font-size: 14px; font-weight: 600;
@@ -284,7 +280,7 @@
         }
         .btn-new-project:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
         .btn-new-project:active { transform: scale(0.97); }
-        .btn-new-project:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .btn-new-project:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 
         /* ═══ CARDS GRID ═══ */
         .cards-grid {
@@ -297,12 +293,12 @@
             background: var(--v4-card-bg);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
+            border: 0;
             border-radius: 16px;
             overflow: hidden;
             cursor: pointer;
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
-            transition: transform 0.18s var(--v4-ease-out), box-shadow 0.18s var(--v4-ease-out), border-color 0.18s var(--v4-ease-out), background 0.18s var(--v4-ease-out);
+            transition: transform 0.18s var(--v4-ease-out), box-shadow 0.18s var(--v4-ease-out), background 0.18s var(--v4-ease-out);
             text-decoration: none;
             color: inherit;
             display: flex;
@@ -315,7 +311,7 @@
         }
         .theme-dark .project-card:hover { background: rgba(255, 255, 255, 0.06); box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover); }
         .project-card:active { transform: translateY(0) scale(0.98); }
-        .project-card:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 2px; }
+        .project-card:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 
         /* 四宫格预览 */
         .card-preview {
@@ -365,7 +361,7 @@
             backdrop-filter: blur(20px) saturate(150%);
             -webkit-backdrop-filter: blur(20px) saturate(150%);
             color: var(--v4-muted);
-            border: 1px solid transparent;
+            border: 0;
             display: flex; align-items: center; justify-content: center;
             cursor: pointer;
             opacity: 0;
@@ -392,11 +388,11 @@
             min-width: 130px;
             padding: 6px;
             border-radius: 12px;
-            background: var(--v4-card-bg);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover);
+            background: color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter: blur(44px) saturate(190%);
+            -webkit-backdrop-filter: blur(44px) saturate(190%);
+            border: 0;
+            box-shadow: 0 24px 56px var(--shadow), 0 8px 24px color-mix(in srgb, var(--shadow) 60%, transparent);
             opacity: 0;
             transform: translateY(-6px) scale(0.96);
             pointer-events: none;
@@ -408,6 +404,7 @@
             transform: translateY(0) scale(1);
             pointer-events: auto;
         }
+        .theme-dark .card-more-menu { background: color-mix(in srgb, var(--panel) 70%, transparent); box-shadow: 0 26px 60px rgba(0,0,0,.36), 0 8px 24px rgba(0,0,0,.24); }
         .card-more-menu-item {
             display: flex; align-items: center; gap: 8px;
             width: 100%; padding: 8px 10px;
@@ -479,8 +476,8 @@
             color: var(--v4-muted);
             display: flex; align-items: center; justify-content: center;
             cursor: pointer;
-            border: 1px solid transparent;
-            transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out), color 0.2s var(--v4-ease-hover), border-color 0.35s var(--v4-ease-out);
+            border: 0;
+            transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out), color 0.2s var(--v4-ease-hover);
             text-decoration: none;
             z-index: 50;
         }
@@ -488,11 +485,9 @@
             color: var(--v4-text);
             transform: scale(1.05);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.08);
         }
-        .theme-dark .trash-fab:hover { border-color: rgba(255,255,255,0.08); }
         .trash-fab:active { transform: scale(0.95); }
-        .trash-fab:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .trash-fab:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
         .trash-fab svg { width: 20px; height: 20px; }
         .trash-badge {
             position: absolute; top: -4px; right: -4px;
@@ -515,7 +510,7 @@
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
             color: var(--v4-text);
-            border: 1px solid transparent;
+            border: 0;
             border-radius: 12px;
             padding: 12px 28px;
             font-size: 13px; font-weight: 500;
@@ -527,11 +522,9 @@
         .view-more-btn:hover {
             transform: translateY(-1px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.08);
         }
-        .theme-dark .view-more-btn:hover { border-color: rgba(255,255,255,0.08); }
         .view-more-btn:active { transform: translateY(0); }
-        .view-more-btn:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .view-more-btn:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
         .view-more-btn svg { width: 14px; height: 14px; }
 
         /* ═══ CANVAS PICKER ═══ */
@@ -550,15 +543,16 @@
             width: 380px; max-width: calc(100vw - 48px);
             padding: 24px;
             border-radius: 20px;
-            background: var(--v4-card-bg);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--v4-card-shadow-hover);
+            background: color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter: blur(44px) saturate(190%);
+            -webkit-backdrop-filter: blur(44px) saturate(190%);
+            border: 0;
+            box-shadow: 0 24px 56px var(--shadow), 0 8px 24px color-mix(in srgb, var(--shadow) 60%, transparent);
             transform: translateY(8px) scale(0.97);
             transition: transform 0.3s var(--v4-ease-out);
         }
         .picker-overlay.active .picker-panel { transform: translateY(0) scale(1); }
+        .theme-dark .picker-panel { background: color-mix(in srgb, var(--panel) 70%, transparent); box-shadow: 0 26px 60px rgba(0,0,0,.36), 0 8px 24px rgba(0,0,0,.24); }
         .picker-header {
             display: flex; align-items: center; justify-content: space-between;
             margin-bottom: 20px;
@@ -577,22 +571,20 @@
             display: flex; align-items: center; gap: 14px;
             width: 100%; padding: 14px 16px;
             border-radius: 14px;
-            border: 1px solid transparent;
+            border: 0;
             background: var(--v4-bg);
             color: var(--v4-text);
             cursor: pointer;
             text-align: left;
-            transition: transform 0.3s var(--v4-ease-out), box-shadow 0.3s var(--v4-ease-out), border-color 0.3s var(--v4-ease-out);
+            transition: transform 0.3s var(--v4-ease-out), box-shadow 0.3s var(--v4-ease-out);
             font-family: var(--font-sans, inherit);
         }
         .picker-option:hover {
             transform: translateY(-1px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.08);
         }
-        .theme-dark .picker-option:hover { border-color: rgba(255,255,255,0.08); }
         .picker-option:active { transform: translateY(0) scale(0.98); }
-        .picker-option:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 2px; }
+        .picker-option:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
         .picker-option-icon {
             width: 42px; height: 42px; border-radius: 12px;
             background: var(--v4-card-bg);
@@ -629,17 +621,18 @@
         .trash-panel-v4 {
             width: 420px; max-width: calc(100vw - 48px); max-height: 80vh;
             border-radius: 20px;
-            background: var(--v4-card-bg);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--v4-card-shadow-hover);
+            background: color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter: blur(44px) saturate(190%);
+            -webkit-backdrop-filter: blur(44px) saturate(190%);
+            border: 0;
+            box-shadow: 0 24px 56px var(--shadow), 0 8px 24px color-mix(in srgb, var(--shadow) 60%, transparent);
             transform: translateY(8px) scale(0.97);
             transition: transform 0.3s var(--v4-ease-out);
             display: flex; flex-direction: column;
             overflow: hidden;
         }
         .trash-overlay.active .trash-panel-v4 { transform: translateY(0) scale(1); }
+        .theme-dark .trash-panel-v4 { background: color-mix(in srgb, var(--panel) 70%, transparent); box-shadow: 0 26px 60px rgba(0,0,0,.36), 0 8px 24px rgba(0,0,0,.24); }
         .trash-panel-head {
             display: flex; align-items: center; justify-content: space-between;
             padding: 20px 20px 12px;
@@ -723,16 +716,17 @@
         .purge-confirm-panel {
             width: 340px; max-width: calc(100vw - 48px);
             border-radius: 20px;
-            background: var(--v4-card-bg);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--v4-card-shadow-hover);
+            background: color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter: blur(44px) saturate(190%);
+            -webkit-backdrop-filter: blur(44px) saturate(190%);
+            border: 0;
+            box-shadow: 0 24px 56px var(--shadow), 0 8px 24px color-mix(in srgb, var(--shadow) 60%, transparent);
             transform: translateY(8px) scale(0.97);
             transition: transform 0.3s var(--v4-ease-out);
             padding: 20px;
         }
         .purge-confirm-overlay.active .purge-confirm-panel { transform: translateY(0) scale(1); }
+        .theme-dark .purge-confirm-panel { background: color-mix(in srgb, var(--panel) 70%, transparent); box-shadow: 0 26px 60px rgba(0,0,0,.36), 0 8px 24px rgba(0,0,0,.24); }
         .purge-confirm-title { font-size: 15px; font-weight: 600; line-height: 1.4; }
         .purge-confirm-desc { font-size: 12px; color: var(--v4-muted); margin-top: 6px; line-height: 1.5; word-break: break-all; }
         .purge-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }

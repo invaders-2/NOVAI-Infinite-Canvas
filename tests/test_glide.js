@@ -154,6 +154,29 @@ const G = require('../static/js/shared/glide.js');
 {
     const root = path.join(__dirname, '..');
     const read = p => fs.readFileSync(path.join(root, p), 'utf8');
+    /* 版本号不写死：能读到项目版本（desktop/package.json，退回 VERSION）就比对当前版本，
+       读不到只守形状（点分版本号 + mtime 秒），保证「已按 main.py 规则重写过」这个意图不丢。 */
+    const projectVersions = (() => {
+        const found = [];
+        try {
+            const version = JSON.parse(fs.readFileSync(path.join(root, 'desktop/package.json'), 'utf8')).version;
+            if(version) found.push(String(version));
+        } catch(e) {}
+        try {
+            const version = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim().split('\n')[0].trim();
+            if(version) found.push(version);
+        } catch(e) {}
+        return found;
+    })();
+    const versionTagOk = value => {
+        const text = String(value || '');
+        const cut = text.lastIndexOf('.');
+        if(cut <= 0) return false;
+        const version = text.slice(0, cut);
+        const mtime = text.slice(cut + 1);
+        if(!/^\d+(?:\.\d+)*$/.test(version) || !/^\d{9,}$/.test(mtime)) return false;
+        return !projectVersions.length || projectVersions.indexOf(version) >= 0;
+    };
     const css = read('static/css/glide.css');
     const src = read('static/js/shared/glide.js');
 
@@ -239,8 +262,8 @@ const G = require('../static/js/shared/glide.js');
 
     ['static/canvas.html', 'static/smart-canvas.html', 'static/gpt-chat.html'].forEach(page => {
         const html = read(page);
-        const cssTag = /<link rel="stylesheet" href="\/static\/css\/glide\.css\?v=1\.0\.120\.(\d+)"/.exec(html);
-        const jsTag = /<script src="\/static\/js\/shared\/glide\.js\?v=1\.0\.120\.(\d+)"><\/script>/.exec(html);
+        const cssTag = /<link rel="stylesheet" href="\/static\/css\/glide\.css\?v=([0-9.]+)"/.exec(html);
+        const jsTag = /<script src="\/static\/js\/shared\/glide\.js\?v=([0-9.]+)"><\/script>/.exec(html);
         ok(!!cssTag, page + ' 引入 glide.css 且带 ?v= 版本号');
         ok(!!jsTag, page + ' 引入 shared/glide.js 且带 ?v= 版本号');
         /* 版本串的约定（main.py:2357 versioned_static_html / 2377 sync_static_html_versions）：
@@ -249,8 +272,8 @@ const G = require('../static/js/shared/glide.js');
            谁再去把它们「统一」成一个值，下一次服务重启就会被 main.py 按 mtime 改回去。
            这里只守形式（带纯数字缓存串），不守两者相等、也不守等于磁盘 mtime：
            开发中改了文件但没重启服务时，页面里的串落后于 mtime 属于正常，不该在测试里假红。 */
-        ok(!!cssTag && /^\d+$/.test(cssTag[1]), page + ' glide.css 的 ?v= 是「版本号.纯数字」（main.py 按 mtime 重写，别去统一）');
-        ok(!!jsTag && /^\d+$/.test(jsTag[1]), page + ' glide.js 的 ?v= 是「版本号.纯数字」（与 css 不同属正常）');
+        ok(!!cssTag && versionTagOk(cssTag[1]), page + ' glide.css 的 ?v= 是「VERSION.mtime」形式（main.py 按 mtime 重写，别去统一）');
+        ok(!!jsTag && versionTagOk(jsTag[1]), page + ' glide.js 的 ?v= 是「VERSION.mtime」形式（与 css 不同属正常）');
         /* glide.css 必须是本页最后一个样式表：gpt-chat 那批 !important 靠权重赢，
            但同权重时靠的就是「后引入」，顺序写错会静默失效 */
         const links = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)];

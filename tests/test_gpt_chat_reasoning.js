@@ -16,6 +16,30 @@ const i18nStudio = read('static/js/i18n/studio.js');
 const i18nLoader = read('static/js/i18n.js');
 const indexHtml = read('static/index.html');
 
+/* 缓存串不写死版本号：能读到项目版本（desktop/package.json，退回 VERSION）就比对当前版本，
+   读不到只守形状（点分版本号 + mtime 秒）；main.py:2403 versioned_static_html 按「版本号 + 文件 mtime」重写 */
+const projectVersions = (() => {
+    const found = [];
+    try {
+        const version = JSON.parse(fs.readFileSync(path.join(root, 'desktop/package.json'), 'utf8')).version;
+        if(version) found.push(String(version));
+    } catch(e) {}
+    try {
+        const version = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim().split('\n')[0].trim();
+        if(version) found.push(version);
+    } catch(e) {}
+    return found;
+})();
+function versionTagOk(value){
+    const text = String(value || '');
+    const cut = text.lastIndexOf('.');
+    if(cut <= 0) return false;
+    const version = text.slice(0, cut);
+    const mtime = text.slice(cut + 1);
+    if(!/^\d+(?:\.\d+)*$/.test(version) || !/^\d{9,}$/.test(mtime)) return false;
+    return !projectVersions.length || projectVersions.indexOf(version) >= 0;
+}
+
 let pass = 0;
 const fails = [];
 const ok = (cond, label) => { if(cond) pass += 1; else fails.push(label); };
@@ -234,7 +258,7 @@ const pageVersions = i18nPages.map(n => {
 }).filter(item => item.v);
 ok(pageVersions.length >= 12, '引用 i18n.js 的页面都扫到了（' + pageVersions.length + ' 个）');
 ok(pageVersions.every(item => Number(item.v.split('.').pop()) > 1789606971), '每个引用 i18n.js 的页面 ?v= 都升过（未漏页面）');
-ok(pageVersions.every(item => item.v.split('.').slice(0, 3).join('.') === '1.0.120'), '?v= 仍是 VERSION 前缀 + mtime 的既有格式');
+ok(pageVersions.every(item => versionTagOk(item.v)), '?v= 仍是「VERSION + mtime」的既有格式（比对当前项目版本，不写死版本号）');
 const chatIframe = indexHtml.match(/\/static\/gpt-chat\.html\?v=([0-9.]+)/);
 ok(Boolean(chatIframe) && Number(String(chatIframe[1]).split('.').pop()) >= 1789725884, 'index.html 里 iframe 的 gpt-chat.html ?v= 已升（' + (chatIframe || [])[1] + '）');
 

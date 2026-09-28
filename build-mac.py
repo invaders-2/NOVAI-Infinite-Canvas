@@ -135,7 +135,8 @@ def copy_business_files(app_path):
     src_assets = os.path.join(ROOT, "assets")
     if os.path.isdir(src_assets):
         for item in os.listdir(src_assets):
-            if item in ("input", "output", "uploads"):
+            # models（HD 高清放大运行时、RMBG 抠图模型等）按需下载，不打进安装包
+            if item in ("input", "output", "uploads", "models"):
                 continue
             s = os.path.join(src_assets, item)
             d = os.path.join(dst_assets, item)

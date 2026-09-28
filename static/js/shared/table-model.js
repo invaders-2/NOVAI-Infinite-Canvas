@@ -561,8 +561,45 @@
     const TABLE_REPAIR_INSTRUCTION = '请把下面未通过校验的结果修复为合法的多维表格 JSON。不要删减原有信息，不要输出解释或 Markdown。';
     const LLM_REPAIR_MAX_TOKENS = 8192;
 
-    // 剥 ```json 代码块 → 取首尾大括号 → JSON.parse
-    function extractJsonObject(text){
+    /* 把 JSON **字符串字面量内部**的裸控制字符转成转义序列。
+       模型经常把真实换行写进字符串值里（原始响应里就是 0x0A），严格 JSON 会判
+       「Bad control character in string literal」。字符串外的换行/缩进是合法空白，
+       原样保留；反斜杠转义之后的字符不碰（本来就是对的 \n 写法不能被改坏）。 */
+    function escapeJsonControlChars(source){
+        const text = String(source || '');
+        let out = '';
+        let inString = false;
+        let escaped = false;
+        for(let index = 0; index < text.length; index += 1){
+            const ch = text.charAt(index);
+            if(!inString){
+                out += ch;
+                if(ch === '"') inString = true;
+                continue;
+            }
+            if(escaped){ out += ch; escaped = false; continue; }
+            if(ch === '\\'){ out += ch; escaped = true; continue; }
+            if(ch === '"'){ out += ch; inString = false; continue; }
+            const code = text.charCodeAt(index);
+            if(code >= 0x20){ out += ch; continue; }
+            if(ch === '\n') out += '\\n';
+            else if(ch === '\r') out += '\\r';
+            else if(ch === '\t') out += '\\t';
+            else out += '\\u' + ('000' + code.toString(16)).slice(-4);
+        }
+        return out;
+    }
+
+    /* 先按原样 parse（合法 JSON 的结果与报错行为一点不变），失败了才做控制字符修复。 */
+    function parseJsonLenient(body){
+        try { return JSON.parse(body); }
+        catch(error){
+            try { return JSON.parse(escapeJsonControlChars(body)); }
+            catch(retryError){ return null; }
+        }
+    }
+
+    function stripJsonFence(text){
         let source = String(text || '').trim();
         const fenced = /^```(?:json)?\s*([\s\S]*?)```$/i.exec(source);
         if(fenced) source = fenced[1].trim();
@@ -570,11 +607,26 @@
             const inline = /```(?:json)?\s*([\s\S]*?)```/i.exec(source);
             if(inline) source = inline[1].trim();
         }
+        return source;
+    }
+
+    // 剥 ```json 代码块 → 取首尾大括号 → JSON.parse
+    function extractJsonObject(text){
+        const source = stripJsonFence(text);
         const first = source.indexOf('{');
         const last = source.lastIndexOf('}');
         if(first < 0 || last <= first) return null;
-        try { return JSON.parse(source.slice(first, last + 1)); }
-        catch(error){ return null; }
+        return parseJsonLenient(source.slice(first, last + 1));
+    }
+
+    /* 顶层直接是数组的 JSON（模型偶尔省掉 {"shots":…} 外壳）。 */
+    function extractJsonArray(text){
+        const source = stripJsonFence(text);
+        const first = source.indexOf('[');
+        const last = source.lastIndexOf(']');
+        if(first < 0 || last <= first) return null;
+        const parsed = parseJsonLenient(source.slice(first, last + 1));
+        return Array.isArray(parsed) ? parsed : null;
     }
 
     /* a6(t)：校验模型返回的表格。
@@ -761,6 +813,297 @@
         ].join('\n');
     }
 
+    /* ── 参考视频分段（视频分镜表：一段 = 一行）──────────────────────
+       参考视频按「每段秒数」切成若干段，一段一行：每行的视频参考只有这一段自己的
+       片段，产品图 / 模特穿搭图每行都带。分段规则与后端 /api/video/segments 的
+       plan_video_segments 完全一致（末段不足 1 秒并入上一段；超上限只留前 N 段），
+       后端不可用时前端照它兜底算行数 —— 兜底没有片段地址，绝不能编造 clip_url。 */
+    const VIDEO_SEGMENT_SECONDS_DEFAULT = 3;
+    const VIDEO_SEGMENT_SECONDS_MIN = 1;
+    const VIDEO_SEGMENT_SECONDS_MAX = 5;
+    const VIDEO_SEGMENT_MAX_SEGMENTS = 30;
+    const VIDEO_SEGMENT_MAX_SEGMENTS_LIMIT = 60;
+    const VIDEO_SEGMENT_MIN_TAIL_SECONDS = 1;
+
+    function segmentSeconds(raw){
+        const value = Number(raw);
+        if(!Number.isFinite(value)) return VIDEO_SEGMENT_SECONDS_DEFAULT;
+        return Math.min(VIDEO_SEGMENT_SECONDS_MAX, Math.max(VIDEO_SEGMENT_SECONDS_MIN, value));
+    }
+
+    function segmentMaxSegments(raw){
+        const value = Math.floor(Number(raw));
+        if(!Number.isFinite(value) || value < 1) return VIDEO_SEGMENT_MAX_SEGMENTS;
+        return Math.min(VIDEO_SEGMENT_MAX_SEGMENTS_LIMIT, value);
+    }
+
+    // 秒数文案：整数不带小数位（3 而不是 3.0），小数最多两位
+    function formatSeconds(raw){
+        const value = Number(raw);
+        if(!Number.isFinite(value)) return '0';
+        return String(Math.round(value * 100) / 100);
+    }
+
+    /* 分段规划：[{index,start,end,duration}]。
+       1e-6 容差：时长恰为整数倍时不再多切一个 0 秒空段。 */
+    function planVideoSegments(duration, seconds, maxSegments){
+        const total = Number(duration);
+        if(!Number.isFinite(total) || total <= 0) return [];
+        const step = segmentSeconds(seconds);
+        const round = value => Math.round(value * 1000) / 1000;
+        const segments = [];
+        let start = 0;
+        while(start < total - 1e-6){
+            const end = Math.min(start + step, total);
+            segments.push({index:segments.length + 1, start:round(start), end:round(end), duration:round(end - start)});
+            start += step;
+        }
+        if(segments.length > 1 && segments[segments.length - 1].duration < VIDEO_SEGMENT_MIN_TAIL_SECONDS){
+            segments.pop();
+            const last = segments[segments.length - 1];
+            last.end = round(total);
+            last.duration = round(last.end - last.start);
+        }
+        const limit = segmentMaxSegments(maxSegments);
+        return segments.length > limit ? segments.slice(0, limit) : segments;
+    }
+
+    function segmentCountOf(duration, seconds, maxSegments){
+        return planVideoSegments(duration, seconds, maxSegments).length;
+    }
+
+    /* 角色的判据分三层（优先级从高到低）：
+       ① 节点名 / 文件名里的关键词；② 指令文本语境（用名字在指令里定位，看它前面
+       最近的语义词）；③ 兜底：第一个没分类的图当产品，其余当模特/穿搭。
+       语境这一层必须有：用户的素材名常常是 DSC07792.jpg 这种，关键词认不出来，
+       但指令里写着「人物替换成 @lovart…，鞋子替换成 @DSC07792.jpg」。 */
+    const SEGMENT_PRODUCT_RE = /产品|商品|鞋|靴|包|帽|主图|白底|细节|product|sku/i;
+    const SEGMENT_MODEL_RE = /模特|人物|穿搭|服装|衣服|上身|outfit|model|look/i;
+    const SEGMENT_CONTEXT_PRODUCT_RE = /产品|商品|鞋|靴|包|帽|logo|材质|细节|product|sku/gi;
+    const SEGMENT_CONTEXT_MODEL_RE = /模特|人物|穿搭|服装|衣服|上身|outfit|model|look/gi;
+
+    // 最近一次匹配的位置（-1 = 没匹配到）；用来判「名字前面最近的那个语义词」
+    function lastMatchIndex(text, pattern){
+        pattern.lastIndex = 0;
+        let last = -1;
+        let hit;
+        while((hit = pattern.exec(text))){
+            last = hit.index;
+            if(!pattern.lastIndex) break;    // 零宽匹配保护，避免死循环
+        }
+        pattern.lastIndex = 0;
+        return last;
+    }
+
+    function segmentEntryRole(entry, instructionText){
+        const label = [entry && entry.label, entry && entry.name].filter(Boolean).join(' ');
+        if(SEGMENT_PRODUCT_RE.test(label)) return 'product';
+        if(SEGMENT_MODEL_RE.test(label)) return 'modelOutfit';
+        const name = String((entry && entry.name) || '').trim();
+        const text = String(instructionText || '');
+        if(!name || !text) return '';
+        const at = text.indexOf(name);
+        if(at < 0) return '';
+        const before = text.slice(0, at);
+        const productAt = lastMatchIndex(before, SEGMENT_CONTEXT_PRODUCT_RE);
+        const modelAt = lastMatchIndex(before, SEGMENT_CONTEXT_MODEL_RE);
+        if(productAt < 0 && modelAt < 0) return '';
+        return productAt >= modelAt ? 'product' : 'modelOutfit';
+    }
+
+    /* 素材分角色。kind==='video' 的只有第一个当参考分镜来源，其余视频进 others
+       （多段参考视频无法同时当「本行那一段」的参考，只能忽略）。
+       非图片（音频/文件）也进 others，不参与参考用法。 */
+    function classifySegmentInputs(entries, instructionText){
+        const list = Array.isArray(entries) ? entries : [];
+        const out = {video:null, product:[], modelOutfit:[], others:[]};
+        const unclassified = [];
+        list.forEach(entry => {
+            if(!entry) return;
+            const kind = String(entry.kind || 'image');
+            if(kind === 'video'){
+                if(!out.video) out.video = entry;
+                else out.others.push(entry);
+                return;
+            }
+            if(kind !== 'image'){ out.others.push(entry); return; }
+            const role = segmentEntryRole(entry, instructionText);
+            if(role === 'product') out.product.push(entry);
+            else if(role === 'modelOutfit') out.modelOutfit.push(entry);
+            else unclassified.push(entry);
+        });
+        unclassified.forEach((entry, index) => {
+            if(!index) out.product.push(entry);
+            else out.modelOutfit.push(entry);
+        });
+        return out;
+    }
+
+    /* 逐段写画面描述：把这一批段的首帧图按顺序发给多模态模型。
+       只描述图里真实存在的东西 —— 图看不清就照实写，不编造。
+       options.onlyIndexes：这一批只是「补齐缺失段」时，开头就点名只写哪几段 ——
+       不点名的话模型会以为又要从头写一遍，把已经拿到的段重复输出。 */
+    function buildSegmentShotPrompt(requirement, entries, segments, options={}){
+        const media = Array.isArray(entries) ? entries : [];
+        const list = Array.isArray(segments) ? segments : [];
+        if(!list.length) return '';
+        const first = list[0];
+        const last = list[list.length - 1];
+        const step = formatSeconds(first.duration);
+        const onlyIndexes = (Array.isArray(options.onlyIndexes) ? options.onlyIndexes : []).map(Number).filter(Number.isFinite);
+        const lines = list.map((segment, index) => {
+            const name = String((media[index] && media[index].name) || '').trim();
+            return '第 ' + segment.index + ' 段（' + formatSeconds(segment.start) + '–' + formatSeconds(segment.end)
+                + 's，共 ' + formatSeconds(segment.duration) + ' 秒）：下面第 ' + (index + 1) + ' 张图' + (name ? '（' + name + '）' : '');
+        });
+        return [
+            onlyIndexes.length
+                ? '你在为「参考视频分镜表」补齐缺失段：原片已按每段 ' + step + ' 秒切分，本次只写第 '
+                    + onlyIndexes.join('、') + ' 段，下面 ' + list.length + ' 张图依次就是这几段的**首帧画面**。'
+                : '你在为「参考视频分镜表」逐段写画面描述：原片已按每段 ' + step + ' 秒切分，'
+                    + '下面 ' + list.length + ' 张图依次是第 ' + first.index + '–' + last.index + ' 段的**首帧画面**。',
+            '',
+            '用户要求：',
+            String(requirement || '').trim(),
+            '',
+            ...lines,
+            '',
+            '要求：',
+            '- 只写图里真实能看到的内容：主体与动作、场景与环境、景别与机位、光线与氛围。图里看不清或没有的东西一律不要编造。',
+            '- 「画面描述」一到两句，写完整；「运镜」按这一帧的构图推断（如「缓慢推近」「固定机位」），拿不准就写「固定机位」。',
+            '- 「景别」写「远景 / 全景 / 中景 / 近景 / 特写」之一。',
+            '- 只返回一个 JSON 对象，不要 Markdown 代码块，不要解释：',
+            '{"shots":[{"index":1,"画面描述":"...","运镜":"...","景别":"..."}]}'
+        ].join('\n');
+    }
+
+    /* 解析逐段描述：{shots:[…]} 与「顶层直接数组」两种都认；解析失败返回 []（不抛错，
+       出表不能因为它挂掉）。index 是字符串数字也认（模型常写 "index":"2"）。 */
+    /* 取字段：先按原名找；模型把裸换行写进键名里（"\n景别"）时，
+       再按「去掉控制字符与空白后同名」找一遍，否则那一列会白白空掉。 */
+    function shotField(source, names){
+        for(const name of names){
+            const value = source[name];
+            if(value !== undefined && value !== null && value !== '') return value;
+        }
+        const bare = key => String(key).replace(/[\u0000-\u001f\s]/g, '');
+        for(const key of Object.keys(source)){
+            if(!names.includes(bare(key))) continue;
+            const value = source[key];
+            if(value !== undefined && value !== null && value !== '') return value;
+        }
+        return '';
+    }
+
+    function parseSegmentShots(text){
+        const parsed = extractJsonObject(text);
+        const list = (parsed && typeof parsed === 'object' && Array.isArray(parsed.shots))
+            ? parsed.shots
+            : extractJsonArray(text);
+        if(!Array.isArray(list)) return [];
+        return list.map((item, index) => {
+            const source = item && typeof item === 'object' ? item : {};
+            const raw = Number(source.index);
+            return {
+                index: Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : index + 1,
+                '画面描述': cellText(shotField(source, ['画面描述', 'description', 'shot'])),
+                '运镜': cellText(shotField(source, ['运镜', 'camera'])),
+                '景别': cellText(shotField(source, ['景别', 'shotSize'])),
+            };
+        }).sort((a, b) => a.index - b.index);
+    }
+
+    /* 「参考用法」文案：@序号是**全局序号**，由调用方按通道 ordinalBase 算好传进来
+       （与 computeTableRowInputs / rewriteMentions 同一套口径）。 */
+    function segmentReferenceLine(options={}){
+        const video = mentionTokenAt('video', Math.max(1, Number(options.videoOrdinal) || 1));
+        const products = (Array.isArray(options.productOrdinals) ? options.productOrdinals : []).map(Number).filter(n => n >= 1);
+        const outfits = (Array.isArray(options.modelOutfitOrdinals) ? options.modelOutfitOrdinals : []).map(Number).filter(n => n >= 1);
+        const range = formatSeconds(options.start) + '–' + formatSeconds(options.end) + 's';
+        const head = video + ' 是本行的参考分镜片段（原片 ' + range + '）：严格照搬它的画面内容、景别、机位、运镜与节奏';
+        if(!products.length) return head + '，其余保持不变。';
+        const lines = [head + '；把画面中的原产品替换为 ' + products.map(n => mentionTokenAt('image', n)).join('、')
+            + ' 的产品，其余保持不变，画面干净、无文字。'];
+        if(outfits.length){
+            lines.push('人物与穿搭参考 ' + outfits.map(n => mentionTokenAt('image', n)).join('、')
+                + '（模特/穿搭），保持原片的人物动作与环境不变。');
+        }
+        return lines.join('\n');
+    }
+
+    /* 指令文本里 @ 到的媒体（mention chip）。
+       用户经常只在指令里 @ 素材、并不连线，这些素材同样要能当产品 / 模特参考图，
+       所以从 llmInstructionHtml 里把 chip 的 data-* 抠出来。
+       plain = chip 还原成名字后的纯文本（分类要看名字前面的语义词，位置不能丢）。 */
+    function unescapeMentionAttr(value){
+        return String(value || '')
+            .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+            .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+    }
+
+    function stripHtmlTags(html){
+        return unescapeMentionAttr(String(html || '').replace(/<[^>]*>/g, '')).replace(/\u00a0/g, ' ');
+    }
+
+    /* 从 chip 的 <span ...> 起点往后数 <span>/</span> 配平，拿到整个 chip 的结束位置
+       （plain 要把整块替换成名字，只跳到开标签会把 chip 里的名字再算一遍）。 */
+    function mentionSpanEnd(source, tagStart){
+        const tagRe = /<(\/?)span\b[^>]*>/gi;
+        tagRe.lastIndex = tagStart;
+        let depth = 0;
+        let hit;
+        while((hit = tagRe.exec(source))){
+            if(hit[1] === '/'){
+                depth -= 1;
+                if(depth <= 0) return tagRe.lastIndex;
+            } else {
+                depth += 1;
+            }
+        }
+        return -1;
+    }
+
+    function parseInstructionMentions(html){
+        const source = String(html || '');
+        const mentions = [];
+        const spans = [];
+        const classRe = /class="[^"]*mention-image-token[^"]*"/g;
+        let hit;
+        while((hit = classRe.exec(source))){
+            const tagStart = source.lastIndexOf('<', hit.index);
+            const tagEnd = source.indexOf('>', hit.index);
+            if(tagStart < 0 || tagEnd < 0) continue;
+            const tag = source.slice(tagStart, tagEnd + 1);
+            const attr = name => {
+                const matched = new RegExp('\\s' + name + '="([^"]*)"').exec(tag);
+                return matched ? unescapeMentionAttr(matched[1]) : '';
+            };
+            const url = attr('data-url');
+            if(!url) continue;
+            const name = attr('data-name');
+            const spanEnd = mentionSpanEnd(source, tagStart);
+            spans.push({start:tagStart, end:spanEnd > tagEnd ? spanEnd : tagEnd + 1, name});
+            const item = {
+                kind: attr('data-kind') || 'image',
+                url,
+                name,
+                nodeId: attr('data-node-id'),
+                imageIndex: Number(attr('data-image-index') || 0),
+            };
+            // 同一张素材被 @ 多次只算一次（否则会重复占一个通道序号）
+            if(!mentions.some(exist => exist.url === item.url)) mentions.push(item);
+        }
+        let plain = '';
+        let cursor = 0;
+        spans.forEach(span => {
+            plain += stripHtmlTags(source.slice(cursor, span.start)) + span.name;
+            cursor = span.end;
+        });
+        plain += stripHtmlTags(source.slice(cursor));
+        return {mentions, plain};
+    }
+
     /* 输出模式与按钮文案（DX OS: _u / US）。
        'list'       = 多维表格（下游是图像节点，或者链路还没接好）
        'list-video' = 视频分镜表（下游是视频节点）—— 显式选，链路没接好时也能出分镜
@@ -862,10 +1205,16 @@
         journalPendingRows, journalInflightRows, journalCompletedRows, journalFailedRows, journalCancelledRows,
         batchMissingMaterials, runWithSharedCursor,
         TABLE_PARSE_ERRORS, TABLE_REPAIR_INSTRUCTION, LLM_REPAIR_MAX_TOKENS,
-        extractJsonObject, parseTableOutput, buildRepairPrompt, inputListText,
+        extractJsonObject, extractJsonArray, escapeJsonControlChars, parseJsonLenient,
+        parseTableOutput, buildRepairPrompt, inputListText,
         buildListPlanPrompt, buildListGeneratePrompt, planGroupModes, llmOutputMode, llmRunStageLabel,
         LLM_OUTPUT_MODES, llmOutputModeChoice, llmModeTargetKind,
         llmTargetKind, VIDEO_PLAN_BLOCK, VIDEO_GENERATE_BLOCK,
+        VIDEO_SEGMENT_SECONDS_DEFAULT, VIDEO_SEGMENT_SECONDS_MIN, VIDEO_SEGMENT_SECONDS_MAX,
+        VIDEO_SEGMENT_MAX_SEGMENTS, VIDEO_SEGMENT_MIN_TAIL_SECONDS,
+        segmentSeconds, segmentMaxSegments, formatSeconds, planVideoSegments, segmentCountOf,
+        SEGMENT_PRODUCT_RE, SEGMENT_MODEL_RE, segmentEntryRole, classifySegmentInputs,
+        buildSegmentShotPrompt, parseSegmentShots, segmentReferenceLine, parseInstructionMentions,
         emptyTable, cellText, normalizeColumns, normalizeTable, cloneTable,
         MEDIA_CELL_KIND, mediaCell, isMediaCell,
         toIndex, columnIndex, rowIndex, applyOperation,

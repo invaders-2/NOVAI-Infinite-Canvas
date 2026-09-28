@@ -57,7 +57,7 @@ body.studio-theme-dark .stage {
 
 html.studio-theme-dark body .stage,
 body.studio-theme-dark .stage {
-    box-shadow: inset 0 2px 8px -2px rgba(0,0,0,.3), 0 0 0 1px rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 2px 8px -2px rgba(0,0,0,.3);
 }
 
 html.studio-theme-dark body .nav-item,
@@ -93,7 +93,7 @@ body.studio-theme-dark .nano-monitor {
     background: rgba(20, 20, 20, .92) !important;
     color: var(--text);
     border-color: transparent !important;
-    box-shadow: 0 8px 24px -4px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.06);
+    box-shadow: 0 8px 24px -4px rgba(0,0,0,.4);
 }
 
 html.studio-theme-dark body .divider,
@@ -388,7 +388,9 @@ body.studio-theme-dark .composer-wrap {
 html.studio-theme-dark body .canvas-gate,
 body.studio-theme-dark .canvas-gate {
     background-color: var(--bg) !important;
-    background-image: radial-gradient(rgba(120, 120, 120, .18) 1px, transparent 1px) !important;
+    background-image: radial-gradient(rgba(206, 212, 224, .12) 1px, transparent 1px) !important;
+    background-size: 24px 24px !important;
+    background-position: 0 0 !important;
 }
 
 html.studio-theme-dark body .gate-panel,
@@ -482,21 +484,18 @@ html.studio-theme-dark body .create-cancel:hover,
 body.studio-theme-dark .canvas-delete:hover,
 body.studio-theme-dark .create-cancel:hover {
     background: rgba(248,113,113,.14) !important;
-    border-color: rgba(248,113,113,.32) !important;
     color: var(--danger-text) !important;
 }
 
 html.studio-theme-dark body .canvas-restore:hover,
 body.studio-theme-dark .canvas-restore:hover {
     background: rgba(16,185,129,.14) !important;
-    border-color: rgba(16,185,129,.32) !important;
     color: var(--success-text) !important;
 }
 
 html.studio-theme-dark body .canvas-delete-box,
 body.studio-theme-dark .canvas-delete-box {
     background: var(--surface-2) !important;
-    border: 1px solid transparent;
 }
 
 html.studio-theme-dark body .canvas-confirm-btn,
@@ -520,18 +519,22 @@ body.studio-theme-dark .shell .topbar {
     backdrop-filter: none !important;
 }
 
+/* 点阵配方与 smart-canvas.css:20 的 .shell 保持一致；这些页面的 <html> 上没有 theme-dark，
+   拿不到那边 .theme-dark 作用域的 --grid-dot，所以这里写死同款颜色，只改一处时两边一起改 */
 html.studio-theme-dark body .shell,
 html.studio-theme-dark body .shell .board,
 body.studio-theme-dark .shell,
 body.studio-theme-dark .shell .board {
     background-color: var(--bg) !important;
-    background-image: radial-gradient(rgba(120, 120, 120, .18) 1px, transparent 1px) !important;
+    background-image: radial-gradient(rgba(206, 212, 224, .12) 1px, transparent 1px) !important;
+    background-size: 24px 24px !important;
+    background-position: 0 0 !important;
 }
 
 html.studio-theme-dark body .shell.theme-dark,
 body.studio-theme-dark .shell.theme-dark {
     --page: var(--bg);
-    --grid: rgba(120, 120, 120, .18);
+    --grid-dot: rgba(206, 212, 224, .12);
     --panel: rgba(17,17,17,.88);
     --card: var(--surface);
     --card-solid: var(--surface);
@@ -554,7 +557,6 @@ body.studio-theme-dark .shell.theme-dark {
 html.studio-theme-dark body .shell .panel,
 body.studio-theme-dark .shell .panel {
     background: rgba(17,17,17,.86) !important;
-    border: 1px solid transparent !important;
     box-shadow: 0 14px 36px rgba(0,0,0,.18) !important;
 }
 
@@ -577,11 +579,6 @@ body.studio-theme-dark .shell .node-title {
     color: var(--text-3) !important;
 }
 
-html.studio-theme-dark body .shell .node.selected,
-body.studio-theme-dark .shell .node.selected {
-    outline-color: rgba(255, 255, 255, .1) !important;
-}
-
 html.studio-theme-dark body .shell .toolbar,
 body.studio-theme-dark .shell .toolbar {
     gap: 8px;
@@ -600,7 +597,6 @@ body.studio-theme-dark .shell .seg,
 body.studio-theme-dark .shell .llm-mode,
 body.studio-theme-dark .shell .mode-tabs {
     background: var(--bg) !important;
-    border: 1px solid transparent !important;
     box-shadow: none !important;
     color: var(--text-3) !important;
 }
@@ -623,7 +619,6 @@ body.studio-theme-dark .shell .gen-settings,
 body.studio-theme-dark .shell .setting-row,
 body.studio-theme-dark .shell .comfy-settings {
     background: var(--bg) !important;
-    border: 1px solid transparent !important;
     box-shadow: none !important;
     color: var(--accent) !important;
 }
@@ -746,7 +741,7 @@ body.studio-theme-dark .shell .model-input {
 html.studio-theme-dark body .shell .blank-image,
 body.studio-theme-dark .shell .blank-image {
     color: var(--text-3) !important;
-    border-style: dashed !important;
+    border: 0 !important;
 }
 
 html.studio-theme-dark body .shell .blank-image:hover,
@@ -802,7 +797,6 @@ body.studio-theme-dark .output-drag-preview,
     padding: 8px;
     border-radius:var(--radius-lg);
     background: var(--bg);
-    border: 1px solid transparent;
     box-shadow: 0 16px 40px rgba(0,0,0,.28);
     pointer-events: none;
     z-index: -1;
@@ -814,20 +808,6 @@ body.studio-theme-dark .output-drag-preview,
     object-fit: contain;
     border-radius:var(--radius-md);
     background: var(--bg);
-}
-
-html.studio-theme-dark body .shell .resize-handle,
-body.studio-theme-dark .shell .resize-handle {
-    background: rgba(17,17,17,.86) !important;
-    border-color: transparent !important;
-    color: var(--text-3) !important;
-}
-
-html.studio-theme-dark body .shell .resize-handle:hover,
-body.studio-theme-dark .shell .resize-handle:hover {
-    background: var(--surface) !important;
-    border-color: transparent !important;
-    color: var(--accent) !important;
 }
 
 /* Standalone studio pages: zimage / enhance / klein / angle */
@@ -1058,7 +1038,6 @@ body.studio-theme-dark .ios-switch input:checked + .ios-slider,
 body.studio-theme-dark #cloud-progress-bar {
     background: var(--text) !important;
     color: var(--bg) !important;
-    border-color: var(--text) !important;
 }
 
 html.studio-theme-dark body .mode-btn.active,
@@ -1082,7 +1061,6 @@ body.studio-theme-dark input:not(.group-title-input),
 body.studio-theme-dark textarea,
 body.studio-theme-dark select {
     background-color: var(--bg) !important;
-    border-color: var(--border-strong) !important;
     color: var(--text) !important;
 }
 
@@ -1241,7 +1219,6 @@ body.studio-theme-dark input:not(.group-title-input),
 body.studio-theme-dark textarea,
 body.studio-theme-dark select {
     background-color: var(--bg) !important;
-    border-color: var(--border-strong) !important;
     color: var(--text) !important;
 }
 
@@ -1250,7 +1227,6 @@ html.studio-theme-dark body .size-custom,
 body.studio-theme-dark .size-select,
 body.studio-theme-dark .size-custom {
     background-color: var(--bg) !important;
-    border-color: var(--border-strong) !important;
     color: var(--text) !important;
 }
 
@@ -1369,7 +1345,6 @@ body.studio-theme-dark .provider-switch,
 html.studio-theme-dark body .engine-switch,
 body.studio-theme-dark .engine-switch {
     background: var(--bg) !important;
-    border: 1px solid var(--border-strong) !important;
     box-shadow: none !important;
 }
 
@@ -1443,7 +1418,6 @@ body.studio-theme-dark input[type=range]::-webkit-slider-runnable-track {
 html.studio-theme-dark body input[type=range]::-webkit-slider-thumb,
 body.studio-theme-dark input[type=range]::-webkit-slider-thumb {
     background: var(--accent) !important;
-    border-color: var(--bg) !important;
 }
 
 html.studio-theme-dark body ::placeholder,
@@ -1501,7 +1475,6 @@ body.studio-theme-dark .history-popover {
 html.studio-theme-dark body .composer-body,
 body.studio-theme-dark .composer-body {
     background: var(--bg) !important;
-    border-color: var(--border-strong) !important;
 }
 
 html.studio-theme-dark body #messageInput,
@@ -1531,7 +1504,6 @@ body.studio-theme-dark .action-btn,
 html.studio-theme-dark body .thread-item,
 body.studio-theme-dark .thread-item {
     background: var(--bg) !important;
-    border-color: var(--border-strong) !important;
     color: var(--accent) !important;
 }
 
@@ -1547,7 +1519,6 @@ html.studio-theme-dark body .bubble.user,
 body.studio-theme-dark .bubble.user {
     background: var(--surface-2) !important;
     color: var(--text) !important;
-    border: 1px solid var(--border-strong) !important;
     box-shadow: 0 10px 24px rgba(0,0,0,.18) !important;
 }
 
@@ -1562,11 +1533,6 @@ body.studio-theme-dark .bubble.assistant {
 html.studio-theme-dark body .bubble.assistant.streaming::after,
 body.studio-theme-dark .bubble.assistant.streaming::after {
     background: var(--accent) !important;
-}
-
-html.studio-theme-dark body .bubble img.generated,
-body.studio-theme-dark .bubble img.generated {
-    border-color: var(--border-strong) !important;
 }
 
 /* Dark-card clipping: keep inner fills from poking through rounded top corners. */
@@ -1614,8 +1580,7 @@ body.studio-theme-dark .shell .node-head {
 html.studio-theme-dark body .ios-switch .ios-slider,
 body.studio-theme-dark .ios-switch .ios-slider {
     background: var(--surface-2) !important;
-    border: 1px solid var(--border-strong) !important;
-    box-shadow: inset 0 1px 2px rgba(0,0,0,.28), 0 0 0 1px rgba(222, 222, 222, .05) !important;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,.28) !important;
 }
 
 html.studio-theme-dark body .ios-switch .ios-slider:before,

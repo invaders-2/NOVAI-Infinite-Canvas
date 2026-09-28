@@ -1037,6 +1037,252 @@
       },
       "param_engine": "api",
       "docs": []
+    },
+    {
+      "id": "lovart-gpt-image",
+      "label": "Lovart GPT Image 工具",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "provider_ids": [
+          "lovart"
+        ],
+        "model_patterns": [
+          "gpt_image"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "size": "auto",
+        "quality": "auto",
+        "n": 1
+      },
+      "limits": {
+        "n": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "size": {
+        "mode": "free",
+        "hintOnly": true,
+        "autoSize": true,
+        "defaultLevel": "4k",
+        "maxEdge": 0,
+        "maxPixels": 0,
+        "minPixels": 0,
+        "multipleOf": 0
+      },
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "lovart-image",
+      "label": "Lovart 设计代理图片",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "provider_protocols": [
+          "lovart"
+        ]
+      },
+      "inputs": {
+        "images": {
+          "min": 0,
+          "max": 9,
+          "roles": [
+            "reference_image"
+          ],
+          "maxBytes": 10485760,
+          "mimeTypes": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "videos": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "audios": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        },
+        "files": {
+          "min": 0,
+          "max": 0,
+          "roles": [],
+          "maxBytes": 0,
+          "mimeTypes": []
+        }
+      },
+      "defaults": {
+        "size": "auto",
+        "quality": "auto",
+        "n": 1
+      },
+      "limits": {
+        "n": {
+          "min": 1,
+          "max": 4
+        }
+      },
+      "size": {
+        "mode": "free",
+        "hintOnly": true,
+        "autoSize": false,
+        "defaultLevel": "",
+        "maxEdge": 0,
+        "maxPixels": 0,
+        "minPixels": 0,
+        "multipleOf": 0
+      },
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "gpt-image-2-family",
+      "label": "GPT Image 2 系列尺寸族",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "model_patterns": [
+          "gpt-image-2"
+        ]
+      },
+      "size": {
+        "mode": "enum",
+        "autoSize": true,
+        "options": [
+          "auto",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536",
+          "2048x2048",
+          "2048x1152",
+          "3840x2160",
+          "2160x3840"
+        ],
+        "maxEdge": 3840,
+        "maxPixels": 8294400,
+        "minPixels": 655360,
+        "multipleOf": 16,
+        "prefer": "ratio",
+        "tiers": [
+          {
+            "id": "1k",
+            "maxPixels": 1572864
+          },
+          {
+            "id": "2k",
+            "maxPixels": 4194304
+          },
+          {
+            "id": "4k",
+            "maxPixels": 8294400
+          }
+        ]
+      },
+      "param_engine": "api",
+      "docs": []
+    },
+    {
+      "id": "gpt-image-1-family",
+      "label": "GPT Image 1 系列尺寸族",
+      "version": 1,
+      "kind": "model",
+      "capabilities": [
+        "image.generate",
+        "image.edit"
+      ],
+      "match": {
+        "model_patterns": [
+          "gpt-image-1"
+        ]
+      },
+      "size": {
+        "mode": "enum",
+        "autoSize": true,
+        "options": [
+          "1024x1024",
+          "1536x1024",
+          "1024x1536"
+        ],
+        "maxEdge": 3840,
+        "maxPixels": 8294400,
+        "minPixels": 655360,
+        "multipleOf": 16,
+        "prefer": "ratio",
+        "tiers": [
+          {
+            "id": "1k",
+            "maxPixels": 1572864
+          },
+          {
+            "id": "2k",
+            "maxPixels": 4194304
+          },
+          {
+            "id": "4k",
+            "maxPixels": 8294400
+          }
+        ]
+      },
+      "param_engine": "api",
+      "docs": []
     }
   ]
 }

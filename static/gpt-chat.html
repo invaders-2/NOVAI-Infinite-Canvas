@@ -6,14 +6,14 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png" data-page-node-id="d2lTaxgg4dwHWvOR7TLKCK">
     <title>GPT 对话</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971" data-page-node-id="sBSjKrFOadAKo0d0aaQqPR">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971" data-page-node-id="sBSjKrFOadAKo0d0aaQqPR">
     <style>
         :root {
             --ease:cubic-bezier(.4,0,.2,1);
@@ -76,13 +76,13 @@
         button,input,select,textarea { font:inherit; }
         button { border:0; cursor:pointer; }
         .chat-shell { height:calc(100vh / var(--studio-ui-scale, 1)); min-width:0; display:block; background:var(--chat-bg); padding:0 24px; }
-        .chat-rail { position:absolute; top:52px; right:0; width:min(360px,calc(100vw - 36px)); max-height:min(520px,calc(100vh - 92px)); display:none; flex-direction:column; gap:10px; padding:12px; background:var(--chat-panel); border:1px solid transparent; border-radius:16px; color:var(--chat-text); overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); z-index:70; }
+        .chat-rail { position:absolute; top:52px; right:0; width:min(360px,calc(100vw - 36px)); max-height:min(520px,calc(100vh - 92px)); display:none; flex-direction:column; gap:10px; padding:12px; background:var(--chat-panel); border:0; border-radius:16px; color:var(--chat-text); overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); z-index:70; }
         .chat-rail.open { display:flex; animation:popIn .16s var(--ease); }
         .rail-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:2px 2px 4px; }
         .rail-kicker { display:none; }
         .rail-title { color:var(--chat-text); font-size:13px; line-height:1.15; font-weight:950; letter-spacing:0; }
         .rail-close { display:none; width:32px; height:32px; border-radius:10px; align-items:center; justify-content:center; background:transparent; color:var(--chat-muted); border:0; }
-        .rail-close:hover { background:var(--chat-soft); color:var(--chat-text); border-color:transparent; }
+        .rail-close:hover { background:var(--chat-soft); color:var(--chat-text); }
         .rail-new { display:none; }
         .rail-new i,.rail-new svg { width:16px; height:16px; }
         .thread-list { flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:7px; padding:2px 2px 10px; scrollbar-width:thin; scrollbar-color:rgba(132,132,132,.18) transparent; }
@@ -94,9 +94,9 @@
         .thread-list::-webkit-scrollbar-thumb,.messages::-webkit-scrollbar-thumb,.ref-strip::-webkit-scrollbar-thumb { background:rgba(132,132,132,.16); border-radius:999px; }
         .thread-list:hover::-webkit-scrollbar-thumb,.ref-strip:hover::-webkit-scrollbar-thumb { background:rgba(132,132,132,.34); }
         .thread-row { position:relative; min-width:0; }
-        .thread-item { width:100%; min-height:58px; min-width:0; border:0; background:transparent; color:var(--chat-text); border-radius:12px; padding:11px 34px 11px 12px; text-align:left; transition:background .16s var(--ease), border-color .16s var(--ease), color .16s var(--ease); }
-        .thread-item:hover { background:var(--chat-soft); border-color:transparent; }
-        .thread-item.active { background:var(--chat-active-bg); color:var(--chat-active-text); border-color:transparent; box-shadow:0 8px 18px rgba(28,28,28,.06); }
+        .thread-item { width:100%; min-height:58px; min-width:0; border:0; background:transparent; color:var(--chat-text); border-radius:12px; padding:11px 34px 11px 12px; text-align:left; transition:background .16s var(--ease), color .16s var(--ease); }
+        .thread-item:hover { background:var(--chat-soft); }
+        .thread-item.active { background:var(--chat-active-bg); color:var(--chat-active-text); box-shadow:0 8px 18px rgba(28,28,28,.06); }
         .thread-delete { position:absolute; top:7px; right:7px; width:22px; height:22px; border-radius:7px; display:flex; align-items:center; justify-content:center; color:var(--chat-faint); background:transparent; opacity:0; transition:opacity .16s var(--ease), background .16s var(--ease), color .16s var(--ease); }
         .thread-row:hover .thread-delete,
         .thread-row:focus-within .thread-delete { opacity:1; }
@@ -110,21 +110,21 @@
         .title-block h1 { margin:0; color:var(--chat-text); font-size:18px; line-height:1.2; font-weight:950; letter-spacing:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .title-block p { margin:0; width:max-content; max-width:100%; height:24px; padding:0 9px; border-radius:999px; display:inline-flex; align-items:center; background:var(--chat-panel); border:0; color:var(--chat-muted); font-size:10px; line-height:1; font-weight:850; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .top-actions { display:flex; align-items:center; gap:8px; position:relative; }
-        .action-btn { height:38px; min-width:38px; padding:0 12px; border-radius:12px; display:flex; align-items:center; justify-content:center; gap:7px; background:var(--chat-panel); border:0; color:var(--chat-muted); font-size:11px; font-weight:850; transition:background .16s var(--ease), color .16s var(--ease), border-color .16s var(--ease); }
-        .action-btn:hover { background:var(--chat-soft); color:var(--chat-text); border-color:transparent; }
+        .action-btn { height:38px; min-width:38px; padding:0 12px; border-radius:12px; display:flex; align-items:center; justify-content:center; gap:7px; background:var(--chat-panel); border:0; color:var(--chat-muted); font-size:11px; font-weight:850; transition:background .16s var(--ease), color .16s var(--ease); }
+        .action-btn:hover { background:var(--chat-soft); color:var(--chat-text); }
         .action-btn i,.action-btn svg { width:16px; height:16px; }
         .history-toggle { display:flex; }
-        .system-prompt-popover { position:absolute; top:52px; right:0; width:min(430px,calc(100vw - 36px)); display:none; flex-direction:column; gap:10px; padding:12px; background:var(--chat-panel); border:1px solid transparent; border-radius:16px; color:var(--chat-text); box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); z-index:72; }
+        .system-prompt-popover { position:absolute; top:52px; right:0; width:min(430px,calc(100vw - 36px)); display:none; flex-direction:column; gap:10px; padding:12px; background:var(--chat-panel); border:0; border-radius:16px; color:var(--chat-text); box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); z-index:72; }
         .system-prompt-popover.open { display:flex; animation:popIn .16s var(--ease); }
         .system-prompt-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:2px 2px 0; }
         .system-prompt-head .rail-close { display:flex; }
         .system-prompt-title { font-size:13px; font-weight:950; color:var(--chat-text); }
         .system-prompt-textarea { width:100%; min-height:150px; max-height:38vh; resize:vertical; border:0; border-radius:12px; background:var(--chat-panel); color:var(--chat-text); padding:11px 12px; font-size:13px; line-height:1.65; outline:none; }
-        .system-prompt-textarea:focus { border-color:transparent; }
+        .system-prompt-textarea:focus { box-shadow:0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
         .system-prompt-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
         .system-prompt-actions button { height:32px; padding:0 12px; border-radius:10px; font-size:11px; font-weight:850; border:0; background:var(--chat-panel); color:var(--chat-muted); }
-        .system-prompt-actions button:hover { background:var(--chat-soft); color:var(--chat-text); border-color:transparent; }
-        .system-prompt-actions .primary { background:var(--chat-strong); color:var(--chat-strong-text); border-color:transparent; }
+        .system-prompt-actions button:hover { background:var(--chat-soft); color:var(--chat-text); }
+        .system-prompt-actions .primary { background:var(--chat-strong); color:var(--chat-strong-text); }
         .system-prompt-actions .primary:hover { background:var(--chat-strong); color:var(--chat-strong-text); opacity:.92; }
         /* 系统角色库（persona）· 角色选择区
            配色走 color-mix(--text) 中性灰阶，与 V20.1 去框风格一致，不依赖主题色变量。
@@ -153,7 +153,7 @@
         .system-prompt-popover .persona-name-input::placeholder { color:color-mix(in srgb, var(--text) 34%, transparent); }
         .system-prompt-popover .persona-hint { font-size:10px; font-weight:700; color:color-mix(in srgb, var(--text) 34%, transparent); }
         /* 长期记忆库（memory）· 列表管理区，配色同上走 color-mix(--text) 中性灰阶 */
-        .system-prompt-popover .memory-bar { display:flex; flex-direction:column; gap:7px; padding-top:10px; border-top:1px solid color-mix(in srgb, var(--text) 10%, transparent); }
+        .system-prompt-popover .memory-bar { display:flex; flex-direction:column; gap:7px; padding-top:14px; }
         .system-prompt-popover .memory-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
         .system-prompt-popover .memory-title { font-size:11px; font-weight:850; color:color-mix(in srgb, var(--text) 72%, transparent); }
         .system-prompt-popover .memory-status { font-size:10px; font-weight:750; color:color-mix(in srgb, var(--text) 42%, transparent); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -187,9 +187,9 @@
         .empty-state-text { font-size:11px; line-height:1; font-weight:950; letter-spacing:.22em; text-transform:uppercase; }
         .bubble-row { width:100%; display:flex; gap:10px; align-items:flex-end; justify-content:flex-start; }
         .bubble-row.user { justify-content:flex-end; }
-        .bubble { max-width:min(860px,78%); overflow:visible; border-radius:18px; padding:14px 16px; font-size:14px; line-height:1.72; white-space:pre-wrap; word-break:break-word; box-shadow:0 1px 0 rgba(28,28,28,.03); }
+        .bubble { max-width:min(860px,78%); overflow:visible; border-radius:18px; padding:14px 16px; font-size:14px; line-height:1.72; white-space:pre-wrap; word-break:break-word; }
         .bubble.user { background:var(--chat-user-bg); color:var(--chat-user-text); border-bottom-right-radius:6px; }
-        .bubble.assistant { background:var(--chat-panel); backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%); color:var(--chat-text); border:1px solid transparent; border-bottom-left-radius:6px; }
+        .bubble.assistant { background:var(--chat-panel); backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%); color:var(--chat-text); border:0; border-bottom-left-radius:6px; }
         .bubble.image-bubble { width:max-content; max-width:min(600px,78%); padding:10px; }
         .bubble.image-bubble .bubble-text { max-width:min(560px,100%); margin:0 2px 8px; color:var(--chat-muted); font-size:12px; line-height:1.55; white-space:pre-wrap; }
         .bubble.image-bubble .bubble-text:empty { display:none; }
@@ -207,28 +207,27 @@
         .thumb.file-thumb { width:auto; max-width:210px; padding:0 10px; display:flex; align-items:center; gap:7px; background:rgba(132,132,132,.12); color:currentColor; font-size:11px; font-weight:850; }
         .thumb.file-thumb i,.thumb.file-thumb svg { width:15px; height:15px; flex:0 0 auto; color:var(--chat-muted); }
         .thumb-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .assistant .thumb { border-color:transparent; }
         .composer-wrap { min-height:0; padding:10px 30px 18px; background:linear-gradient(to top,var(--chat-bg) 82%,rgba(238,242,246,0)); border-top:0; z-index:6; }
-        .composer { width:min(var(--chat-width),calc(100% - 60px)); margin:0 auto; min-height:0; max-height:min(34vh,310px); background:var(--chat-panel); border:1px solid transparent; border-radius:18px; box-shadow:0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--chat-shadow); padding:8px; display:flex; flex-direction:column; gap:8px; backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); overflow:hidden; }
+        .composer { width:min(var(--chat-width),calc(100% - 60px)); margin:0 auto; min-height:0; max-height:min(34vh,310px); background:var(--chat-panel); border:0; border-radius:18px; box-shadow:0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--chat-shadow); padding:8px; display:flex; flex-direction:column; gap:8px; backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); overflow:hidden; }
         .mode-switch { display:none; }
         .mode-switch button { height:30px; min-width:72px; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:5px; color:var(--chat-muted); background:transparent; font-size:11px; font-weight:800; transition:background .16s var(--ease), color .16s var(--ease), box-shadow .16s var(--ease); }
         .mode-switch button.active { background:var(--chat-panel); color:var(--chat-text); box-shadow:0 1px 3px rgba(28,28,28,.08); }
         .model-picker { position:relative; z-index:24; width:220px; min-width:220px; max-width:220px; flex:0 0 220px; }
         .model-picker.open { z-index:80; }
-        .model-picker-button { width:100%; height:36px; border-radius:12px; border:0; background:rgba(248,250,252,.86); color:var(--chat-text); display:grid; grid-template-columns:18px minmax(0,1fr) 16px; align-items:center; gap:8px; padding:0 10px; box-shadow:0 7px 18px rgba(28,28,28,.08), inset 0 1px 0 rgba(255,255,255,.55); transition:background .16s var(--ease), border-color .16s var(--ease), box-shadow .16s var(--ease), transform .16s var(--ease); }
-        .model-picker-button:hover { background:var(--chat-panel); border-color:transparent; box-shadow:0 10px 24px rgba(28,28,28,.12), inset 0 1px 0 rgba(255,255,255,.62); transform:translateY(-1px); }
+        .model-picker-button { width:100%; height:36px; border-radius:12px; border:0; background:rgba(248,250,252,.86); color:var(--chat-text); display:grid; grid-template-columns:18px minmax(0,1fr) 16px; align-items:center; gap:8px; padding:0 10px; box-shadow:0 7px 18px rgba(28,28,28,.08); transition:background .16s var(--ease), box-shadow .16s var(--ease), transform .16s var(--ease); }
+        .model-picker-button:hover { background:var(--chat-panel); box-shadow:0 10px 24px rgba(28,28,28,.12); transform:translateY(-1px); }
         .model-picker-button i,.model-picker-button svg { width:15px; height:15px; color:var(--chat-muted); }
         .model-picker-labels { min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; }
         .model-picker-provider { flex:0 0 auto; max-width:34%; color:var(--chat-muted); font-size:10px; font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .model-picker-model { min-width:0; color:var(--chat-text); font-size:11px; font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .model-picker-dot { width:3px; height:3px; border-radius:50%; background:var(--chat-faint); flex:0 0 auto; opacity:.72; }
-        .model-picker-popover { position:fixed; left:0; top:auto; bottom:auto; width:var(--model-picker-width,320px); min-width:260px; max-width:min(360px,calc(100vw - 40px)); max-height:var(--model-picker-max-height,min(420px,68vh)); display:none; grid-template-rows:auto minmax(0,1fr); overflow:hidden; border:1px solid transparent; border-radius:12px; background:var(--chat-panel); box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); z-index:9999; transform-origin:center bottom; }
+        .model-picker-popover { position:fixed; left:0; top:auto; bottom:auto; width:var(--model-picker-width,320px); min-width:260px; max-width:min(360px,calc(100vw - 40px)); max-height:var(--model-picker-max-height,min(420px,68vh)); display:none; grid-template-rows:auto minmax(0,1fr); overflow:hidden; border:0; border-radius:12px; background:var(--chat-panel); box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); z-index:9999; transform-origin:center bottom; }
         .model-picker-popover.open { display:grid; animation:popIn .16s var(--ease); }
         .model-picker-popover.above { transform-origin:center bottom; }
         .model-picker-popover.below { transform-origin:center top; }
         .model-picker-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 8px 6px; border-bottom:0; }
         .model-picker-title { color:var(--chat-text); font-size:11px; font-weight:950; }
-        .model-picker-scope { display:flex; align-items:center; gap:2px; padding:2px; border:0; border-radius:10px; background:var(--chat-panel); box-shadow:0 4px 10px rgba(28,28,28,.08), inset 0 1px 0 rgba(255,255,255,.48); }
+        .model-picker-scope { display:flex; align-items:center; gap:2px; padding:2px; border:0; border-radius:10px; background:var(--chat-panel); box-shadow:0 4px 10px rgba(28,28,28,.08); }
         .model-picker-scope button { height:26px; min-width:50px; border-radius:8px; background:transparent; color:var(--chat-muted); font-size:10px; font-weight:950; }
         .model-picker-scope button.active { background:var(--chat-strong); color:var(--chat-strong-text); box-shadow:0 5px 12px rgba(28,28,28,.14); }
         .model-picker-body { min-height:0; display:grid; grid-template-columns:minmax(90px,.7fr) minmax(0,1.3fr); }
@@ -272,8 +271,8 @@
         .resolution-picker.auto-mode .resolution-picker-value { min-width:max-content; overflow:visible; text-overflow:clip; }
         .resolution-picker.custom-mode { width:190px; min-width:180px; max-width:210px; flex-basis:190px; }
         .resolution-picker.open { z-index:80; }
-        .resolution-picker-button { width:100%; height:36px; border-radius:12px; border:0; background:var(--chat-panel); color:var(--chat-text); display:grid; grid-template-columns:18px minmax(0,1fr) 16px; align-items:center; gap:8px; padding:0 10px; box-shadow:none; transition:background .16s var(--ease), border-color .16s var(--ease); }
-        .resolution-picker-button:hover { background:var(--chat-soft); border-color:transparent; }
+        .resolution-picker-button { width:100%; height:36px; border-radius:12px; border:0; background:var(--chat-panel); color:var(--chat-text); display:grid; grid-template-columns:18px minmax(0,1fr) 16px; align-items:center; gap:8px; padding:0 10px; box-shadow:none; transition:background .16s var(--ease); }
+        .resolution-picker-button:hover { background:var(--chat-soft); }
         .resolution-picker-button i,.resolution-picker-button svg { width:15px; height:15px; color:var(--chat-muted); }
         .resolution-picker-labels { min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden; }
         .resolution-picker-type { flex:0 0 auto; max-width:30%; color:var(--chat-muted); font-size:10px; font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -302,7 +301,7 @@
         .resolution-custom-title { margin-bottom:7px; color:var(--chat-text); font-size:11px; font-weight:950; }
         .resolution-custom-row { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto; align-items:center; gap:6px; }
         .resolution-custom-row input { width:100%; height:30px; min-width:0; border:0; border-radius:9px; background:var(--chat-panel-2); color:var(--chat-text); padding:0 8px; font-size:11px; font-weight:850; outline:none; }
-        .resolution-custom-row input:focus { border-color:transparent; box-shadow:none; }
+        .resolution-custom-row input:focus { box-shadow:0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
         .resolution-custom-row span { color:var(--chat-faint); font-size:11px; font-weight:900; }
         .resolution-custom-row button { height:30px; min-width:46px; border-radius:9px; background:var(--chat-soft); color:var(--chat-text); border:0; font-size:11px; font-weight:950; padding:0 10px; }
         .resolution-custom-hint { margin-top:6px; color:var(--chat-faint); font-size:10px; font-weight:750; }
@@ -310,15 +309,15 @@
         .composer-body { flex:1 1 auto; min-height:92px; min-width:0; border:0; background:var(--chat-panel-2); border-radius:14px; padding:10px; display:flex; flex-direction:column; gap:8px; overflow:hidden; }
         .composer-body:focus-within,
         .composer-body.has-overflow { overflow:auto; }
-        .composer-body.drag-over { border-color:transparent; background:var(--chat-soft); box-shadow:inset 0 0 0 1px var(--chat-line); }
+        .composer-body.drag-over { background:var(--chat-soft); }
         textarea { width:100%; flex:1 1 auto; min-height:120px; max-height:150px; resize:none; outline:none; border:0; padding:2px; font-size:14px; line-height:1.55; background:transparent; color:var(--chat-text); overflow-y:auto; transition:height 0.15s ease-out; }
         textarea::placeholder { color:var(--chat-faint); }
         .attachment-stack { display:flex; flex-direction:column; align-items:flex-start; gap:8px; min-width:0; }
         .composer-inside-foot { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:12px; overflow:visible; flex:0 0 auto; }
         .left-tools { display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap; overflow:visible; }
         .inline-controls { width:100%; display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap; overflow:visible; }
-        .upload-btn { width:36px; height:36px; border-radius:12px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; background:var(--chat-panel); border:0; color:var(--chat-muted); transition:background .16s var(--ease), color .16s var(--ease), border-color .16s var(--ease), transform .16s var(--ease); }
-        .upload-btn:hover { background:var(--chat-soft); color:var(--chat-text); border-color:transparent; transform:translateY(-1px); }
+        .upload-btn { width:36px; height:36px; border-radius:12px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; background:var(--chat-panel); border:0; color:var(--chat-muted); transition:background .16s var(--ease), color .16s var(--ease), transform .16s var(--ease); }
+        .upload-btn:hover { background:var(--chat-soft); color:var(--chat-text); transform:translateY(-1px); }
         .upload-btn i,.upload-btn svg { width:16px; height:16px; }
         .file-input { display:none; }
         .send-btn { width:42px; height:42px; border-radius:13px; display:flex; align-items:center; justify-content:center; background:var(--chat-strong); color:var(--chat-strong-text); transition:opacity 0.2s ease-out, transform 0.2s ease-out; flex:0 0 auto; }
@@ -365,15 +364,15 @@
         html.studio-theme-dark body .chat-rail,
         body.studio-theme-dark .chat-rail,
         html.theme-dark body .chat-rail,
-        body.theme-dark .chat-rail { background:var(--chat-panel) !important; border:1px solid transparent !important; box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow) !important; color:var(--chat-text) !important; }
+        body.theme-dark .chat-rail { background:var(--chat-panel) !important; border:0 !important; box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow) !important; color:var(--chat-text) !important; }
         html.studio-theme-dark body .system-prompt-popover,
         body.studio-theme-dark .system-prompt-popover,
         html.theme-dark body .system-prompt-popover,
-        body.theme-dark .system-prompt-popover { background:var(--chat-panel) !important; border:1px solid transparent !important; box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow) !important; color:var(--chat-text) !important; }
+        body.theme-dark .system-prompt-popover { background:var(--chat-panel) !important; border:0 !important; box-shadow:0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--chat-shadow) !important; color:var(--chat-text) !important; }
         html.studio-theme-dark body .composer-wrap,
         body.studio-theme-dark .composer-wrap,
         html.theme-dark body .composer-wrap,
-        body.theme-dark .composer-wrap { background:linear-gradient(to top,var(--chat-bg) 82%,rgba(12,12,12,0)) !important; border-color:transparent !important; }
+        body.theme-dark .composer-wrap { background:linear-gradient(to top,var(--chat-bg) 82%,rgba(12,12,12,0)) !important; }
         html.studio-theme-dark body .composer-body,
         body.studio-theme-dark .composer-body,
         html.theme-dark body .composer-body,
@@ -405,7 +404,7 @@
         html.theme-dark body .model-picker-button,
         html.theme-dark body .upload-btn,
         body.theme-dark .model-picker-button,
-        body.theme-dark .upload-btn { background:rgba(17,17,17,.86) !important; border:0 !important; color:var(--chat-text) !important; box-shadow:0 10px 24px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.04) !important; }
+        body.theme-dark .upload-btn { background:rgba(17,17,17,.86) !important; border:0 !important; color:var(--chat-text) !important; box-shadow:0 10px 24px rgba(0,0,0,.26) !important; }
         html.studio-theme-dark body .model-picker-button:hover,
         html.studio-theme-dark body .upload-btn:hover,
         body.studio-theme-dark .model-picker-button:hover,
@@ -433,7 +432,7 @@
         html.studio-theme-dark body .model-picker-scope,
         body.studio-theme-dark .model-picker-scope,
         html.theme-dark body .model-picker-scope,
-        body.theme-dark .model-picker-scope { background:var(--chat-panel-2) !important; border:0 !important; box-shadow:0 8px 20px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.04) !important; }
+        body.theme-dark .model-picker-scope { background:var(--chat-panel-2) !important; border:0 !important; box-shadow:0 8px 20px rgba(0,0,0,.24) !important; }
         html.studio-theme-dark body .thread-delete,
         body.studio-theme-dark .thread-delete,
         html.theme-dark body .thread-delete,
@@ -544,7 +543,7 @@
             background:transparent !important;
         }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         html body,
@@ -576,8 +575,7 @@
         position:fixed; top:0; right:0; bottom:0; width:320px; z-index:95;
         display:flex; flex-direction:column; min-height:0; overflow:hidden;
         transform:translateX(100%);
-        border-left:1px solid color-mix(in srgb, var(--text) 8%, transparent);
-        box-shadow:inset 1px 0 0 color-mix(in srgb, var(--text) 4%, transparent), -14px 0 44px rgba(0,0,0,.10);
+        box-shadow:-14px 0 44px rgba(0,0,0,.10);
         background:color-mix(in srgb, var(--elevated) 72%, transparent);
         backdrop-filter:blur(28px) saturate(180%);
         -webkit-backdrop-filter:blur(28px) saturate(180%);
@@ -594,9 +592,9 @@
     /* 分组玻璃卡（online 左面板语言） */
     .v10-group {
         background:color-mix(in srgb, var(--elevated) 55%, transparent);
-        border:1px solid color-mix(in srgb, var(--text) 7%, transparent);
+        border:0;
         border-radius:var(--radius-lg);
-        box-shadow:inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent), var(--shadow-sm);
+        box-shadow:var(--shadow-sm);
         padding:12px; display:flex; flex-direction:column; gap:10px;
     }
     .v10-group-title { margin:0; font-size:10px; font-weight:900; letter-spacing:.18em; text-transform:uppercase; color:var(--faint); }
@@ -606,7 +604,7 @@
     .v10-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
     .v10-img-demo {
         aspect-ratio:4/3; border-radius:var(--radius-md);
-        border:1px solid color-mix(in srgb, var(--text) 6%, transparent);
+        border:0;
         background:linear-gradient(135deg, color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, var(--text) 24%, var(--bg)));
         display:flex; align-items:center; justify-content:center;
         color:var(--faint); font-size:10px; font-weight:850; letter-spacing:.08em;
@@ -614,7 +612,7 @@
     .v10-quick { display:flex; flex-direction:column; gap:6px; }
     .v10-quick-btn {
         height:36px; border-radius:var(--radius-md);
-        border:1px solid color-mix(in srgb, var(--text) 8%, transparent);
+        border:0;
         background:color-mix(in srgb, var(--elevated) 55%, transparent);
         color:var(--text); font-size:11px; font-weight:850;
         display:flex; align-items:center; justify-content:center; gap:7px;
@@ -630,8 +628,7 @@
         .v10-rail {
             position:fixed; top:52px; right:0; bottom:0; width:min(320px,calc(100vw - 28px)); z-index:96;
             transform:translateX(100%); transition:transform .26s var(--ease);
-            border-left:1px solid color-mix(in srgb, var(--text) 8%, transparent);
-            box-shadow:inset 1px 0 0 color-mix(in srgb, var(--text) 4%, transparent), -14px 0 44px rgba(0,0,0,.14);
+            box-shadow:-14px 0 44px rgba(0,0,0,.14);
         }
         .v10-rail.open { transform:translateX(0); }
     }
@@ -652,20 +649,16 @@
     background: color-mix(in srgb, var(--elevated) 55%, transparent) !important;
     backdrop-filter: blur(28px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
-    border-bottom: 1px solid color-mix(in srgb, var(--text) 7%, transparent) !important;
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent) !important;
-}
-html.theme-dark .topbar, html.studio-theme-dark .topbar {
-    border-bottom-color: color-mix(in srgb, var(--text) 14%, transparent) !important;
+    border-bottom: 0 !important;
 }
 
 /* ── 顶部操作按钮：玻璃胶囊 ── */
 .action-btn {
     background: color-mix(in srgb, var(--elevated) 55%, transparent) !important;
-    border: 1px solid color-mix(in srgb, var(--text) 7%, transparent) !important;
+    border: 0 !important;
     border-radius: var(--radius-md) !important;
     color: var(--muted) !important;
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent), var(--shadow-sm) !important;
+    box-shadow: var(--shadow-sm) !important;
 }
 .action-btn:hover { background: var(--soft) !important; color: var(--text) !important; }
 
@@ -674,9 +667,9 @@ html.theme-dark .topbar, html.studio-theme-dark .topbar {
     background: color-mix(in srgb, var(--elevated) 96%, transparent) !important;
     backdrop-filter: blur(28px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
-    border: 1px solid color-mix(in srgb, var(--text) 10%, transparent) !important;
+    border: 0 !important;
     border-radius: var(--radius-xl) !important;
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent), var(--shadow-xl) !important;
+    box-shadow: var(--shadow-xl) !important;
     color: var(--text) !important;
 }
 /* 暗色下这 5 个弹层被更早的 `body.theme-dark .X{background:var(--chat-panel)}`(alpha .6) 按特异性压过，
@@ -692,7 +685,7 @@ html.studio-theme-dark body .resolution-picker-popover {
 .model-picker-popover, .model-picker-submenu, .resolution-picker-popover { border-radius: var(--radius-lg) !important; }
 .system-prompt-textarea, .resolution-custom-box {
     background: var(--stage-bg) !important;
-    border: 1px solid var(--border) !important;
+    border: 0 !important;
     border-radius: var(--radius-md) !important;
 }
 
@@ -701,16 +694,16 @@ html.studio-theme-dark body .resolution-picker-popover {
     background: color-mix(in srgb, var(--elevated) 55%, transparent) !important;
     backdrop-filter: blur(28px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
-    border: 1px solid color-mix(in srgb, var(--text) 7%, transparent) !important;
+    border: 0 !important;
     border-radius: var(--radius-lg) !important;
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent), var(--shadow-md) !important;
+    box-shadow: var(--shadow-md) !important;
 }
 .composer-body {
     background: var(--stage-bg) !important;
-    border: 1px solid var(--border) !important;
+    border: 0 !important;
     border-radius: var(--radius-md) !important;
 }
-.composer-body.drag-over { box-shadow: inset 0 0 0 1px var(--border-2) !important; background: var(--soft) !important; }
+.composer-body.drag-over { background: var(--soft) !important; }
 .composer-wrap { background: linear-gradient(to top, var(--bg) 82%, transparent) !important; }
 
 /* ── 消息气泡：online 同款卡片语言（玻璃磨砂） ── */
@@ -718,9 +711,9 @@ html.studio-theme-dark body .resolution-picker-popover {
     background: color-mix(in srgb, var(--elevated) 55%, transparent) !important;
     backdrop-filter: blur(28px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
-    border: 1px solid color-mix(in srgb, var(--text) 7%, transparent) !important;
+    border: 0 !important;
     border-radius: var(--radius-lg) !important;
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent), var(--shadow-md) !important;
+    box-shadow: var(--shadow-md) !important;
     color: var(--text) !important;
 }
 .bubble.user {
@@ -742,7 +735,7 @@ html.studio-theme-dark body .resolution-picker-popover {
 }
 .bubble.user .bubble-time { color: color-mix(in srgb, var(--bg) 60%, transparent); }
 
-/* ── 日期分组（两侧渐隐分隔线 + 居中日期） ── */
+/* ── 日期分组（居中日期；两侧分隔线已按无框规则删除） ── */
 .date-divider {
     display: flex;
     align-items: center;
@@ -755,7 +748,7 @@ html.studio-theme-dark body .resolution-picker-popover {
     letter-spacing: var(--tracking-xs);
     text-transform: uppercase;
 }
-.date-divider::before, .date-divider::after { content: ''; flex: 1; height: 1px; background: var(--divider); }
+.date-divider::before, .date-divider::after { content: ''; flex: 1; }
 
 /* ── Markdown 元素（消息正文排版节奏） ── */
 .bubble-text h1, .bubble-text h2, .bubble-text h3, .bubble-text h4 {
@@ -770,33 +763,34 @@ html.studio-theme-dark body .resolution-picker-popover {
 .bubble-text li { margin: .22em 0; }
 .bubble-text code {
     font-family: var(--font-mono); font-size: .9em;
-    background: var(--soft); border: 1px solid var(--border);
+    background: var(--soft);
     padding: .12em .4em; border-radius: var(--radius-sm);
 }
 .bubble-text pre {
-    background: var(--stage-bg); border: 1px solid var(--border);
+    background: var(--stage-bg);
     border-radius: var(--radius-md); padding: 12px 14px; overflow-x: auto; margin: .6em 0;
 }
 .bubble-text pre code { background: transparent; border: 0; padding: 0; }
 .bubble-text blockquote {
-    border-left: 3px solid var(--border-2); padding-left: 12px;
+    background: var(--soft); border-radius: var(--radius-sm); padding: 8px 12px;
     color: var(--text-2); margin: .6em 0;
 }
 .bubble-text a { color: var(--text); text-decoration: underline; text-decoration-color: var(--border-2); text-underline-offset: 2px; }
-.bubble-text hr { border: 0; height: 1px; background: var(--divider); margin: .9em 0; }
+.bubble-text hr { border: 0; height: 0; background: none; margin: 1.4em 0; }
 .bubble-text table { border-collapse: collapse; margin: .6em 0; font-size: var(--text-sm); }
-.bubble-text th, .bubble-text td { border: 1px solid var(--border-2); padding: 6px 10px; text-align: left; }
+.bubble-text th, .bubble-text td { border: 0; padding: 6px 10px; text-align: left; }
 .bubble-text th { background: var(--soft); font-weight: 800; }
+.bubble-text tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text) 4%, transparent); }
 
 /* 用户气泡（深底浅字）内 Markdown 适配 */
 .bubble.user .bubble-text h1, .bubble.user .bubble-text h2,
 .bubble.user .bubble-text h3, .bubble.user .bubble-text h4 { color: inherit; }
-.bubble.user .bubble-text code { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.18); }
-.bubble.user .bubble-text pre { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.18); }
-.bubble.user .bubble-text blockquote { border-color: rgba(255,255,255,.4); color: rgba(255,255,255,.8); }
+.bubble.user .bubble-text code { background: rgba(255,255,255,.14); }
+.bubble.user .bubble-text pre { background: rgba(255,255,255,.08); }
+.bubble.user .bubble-text blockquote { background: rgba(255,255,255,.08); color: rgba(255,255,255,.8); }
 .bubble.user .bubble-text a { color: inherit; }
 .bubble.user .bubble-text th { background: rgba(255,255,255,.12); }
-.bubble.user .bubble-text th, .bubble.user .bubble-text td { border-color: rgba(255,255,255,.22); }
+.bubble.user .bubble-text tbody tr:nth-child(even) { background: rgba(255,255,255,.06); }
 
 /* ── nv-beam 动态光束（延续 online.html 定稿） ── */
 @property --beam-angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
@@ -849,7 +843,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
     background: #1d1d1f !important;
     color: #ffffff !important;
     border-radius: var(--radius-md) !important;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.08), var(--shadow-md) !important;
+    box-shadow: var(--shadow-md) !important;
 }
 #sendBtn.nv-beam:hover { transform: scale(1.08); }
 #sendBtn.nv-beam:disabled { opacity: .45; cursor: not-allowed; }
@@ -862,8 +856,8 @@ html.studio-theme-dark #sendBtn.nv-beam {
     background: color-mix(in srgb, var(--elevated) 60%, transparent) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 1px solid color-mix(in srgb, var(--text) 8%, transparent) !important;
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent), var(--shadow-sm) !important;
+    border: 0 !important;
+    box-shadow: var(--shadow-sm) !important;
 }
     </style>
     <style>
@@ -873,7 +867,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
        1) 画布加径向光斑，让磨砂有内容可模糊
        2) 消息区整体玻璃容器框，空对话也有结构
        3) 空状态占位玻璃卡
-       4) 浅色下顶栏/气泡/输入区边框加深、不透明度降低，玻璃分层可见
+       4) 浅色下顶栏/气泡/输入区不透明度降低，玻璃分层可见（不再加深边框）
        5) 发送按钮光束加粗
        ═══════════════════════════════════════════ */
 
@@ -902,9 +896,9 @@ html.studio-theme-dark #sendBtn.nv-beam {
         background: color-mix(in srgb, var(--elevated) 42%, transparent) !important;
         backdrop-filter: blur(20px) saturate(150%) !important;
         -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-        border: 1px dashed color-mix(in srgb, var(--text) 18%, transparent) !important;
+        border: 0 !important;
         border-radius: var(--radius-xl) !important;
-        box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent), var(--shadow-sm) !important;
+        box-shadow: var(--shadow-sm) !important;
         padding: 38px 52px !important;
         gap: 12px !important;
     }
@@ -920,11 +914,9 @@ html.studio-theme-dark #sendBtn.nv-beam {
     }
     html:not(.theme-dark):not(.studio-theme-dark) body:not(.theme-dark):not(.studio-theme-dark) .bubble.assistant {
         background: color-mix(in srgb, var(--elevated) 38%, transparent) !important;
-        border-color: color-mix(in srgb, var(--text) 14%, transparent) !important;
     }
     html:not(.theme-dark):not(.studio-theme-dark) body:not(.theme-dark):not(.studio-theme-dark) .composer {
         background: color-mix(in srgb, var(--elevated) 38%, transparent) !important;
-        border-color: color-mix(in srgb, var(--text) 14%, transparent) !important;
     }
 
     /* 5) 光束加粗 */
@@ -968,18 +960,17 @@ html.studio-theme-dark #sendBtn.nv-beam {
         background: color-mix(in srgb, var(--elevated) 55%, transparent);
         backdrop-filter: blur(20px) saturate(180%);
         -webkit-backdrop-filter: blur(20px) saturate(180%);
-        border: 1px solid transparent;
+        border: 0;
         border-radius: 14px;
         box-shadow: 0 1px 2px rgba(0,0,0,.03), 0 4px 16px -4px rgba(0,0,0,.06);
         color: var(--text);
-        transition: transform .26s var(--ease), box-shadow .26s var(--ease), border-color .26s var(--ease);
+        transition: transform .26s var(--ease), box-shadow .26s var(--ease);
         animation: welcomeFadeUp .7s var(--ease) .08s both;
     }
     .welcome-card:nth-child(2) { animation-delay: .14s; }
     .welcome-card:nth-child(3) { animation-delay: .2s; }
     .welcome-card:hover {
         transform: translateY(-3px);
-        border-color: color-mix(in srgb, var(--text) 10%, transparent);
         box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 16px 34px -12px rgba(0,0,0,.1);
     }
     .welcome-card:active { transform: translateY(-1px) scale(.99); }
@@ -1003,7 +994,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
         font-size: 10.5px; font-weight: 600; letter-spacing: .14em;
         text-transform: uppercase; color: var(--muted);
     }
-    .welcome-recent-head::after { content: ''; flex: 1; height: 1px; background: var(--divider); }
+    .welcome-recent-head::after { content: ''; flex: 1; }
     .welcome-recent-box {
         display: flex; flex-direction: column;
         background: transparent;
@@ -1103,7 +1094,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
         padding: 14px 14px 10px !important;
         gap: 8px !important;
         background: color-mix(in srgb, var(--elevated) 55%, transparent) !important;
-        border: 1px solid transparent !important;
+        border: 0 !important;
         box-shadow: 0 1px 2px rgba(0,0,0,.03), 0 4px 16px -4px rgba(0,0,0,.08) !important;
     }
     .composer-body {
@@ -1397,7 +1388,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
     .bubble-thought.is-collapsed .thought-line__caret { transform:rotate(-90deg); }
     /* settle 后不再呼吸：那是「正在思考」的动效，答案已经开始了 */
     .bubble-thought.is-settled .thought-line__glyph { animation:none; opacity:.6; }
-    .thought-trace { max-height:160px; overflow-y:auto; overscroll-behavior:contain; margin:2px 0 2px 14px; padding-left:5px; border-left:1px solid var(--chat-line-2); display:flex; flex-direction:column; gap:3px; }
+    .thought-trace { max-height:160px; overflow-y:auto; overscroll-behavior:contain; margin:2px 0 2px 14px; padding-left:5px; display:flex; flex-direction:column; gap:3px; }
     .thought-trace:empty { display:none; }
     .bubble-thought.is-collapsed .thought-trace { display:none; }
     .thought-trace__row { display:flex; align-items:flex-start; gap:6px; color:var(--chat-muted); font-size:11.5px; line-height:1.5; }
@@ -1424,7 +1415,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
     /* —— 8) 页面背景：去掉径向光斑，回到纯色 —— */
     .chat-shell { background: var(--bg) !important; }
 
-    /* —— 顶部那条线：V11 给顶栏加了 inset 0 1px 0 高光，看似顶栏下边缘线 —— */
+    /* —— 顶栏不留任何投影（历史上 V11 那条 inset 0 1px 0 高光已删） —— */
     .topbar { box-shadow: none !important; }
 
     /* —— 9) NovaGlide 滑块：底色压制之后，选中项的文字颜色要拉回可读色 ——
@@ -1439,9 +1430,9 @@ html.studio-theme-dark #sendBtn.nv-beam {
     .nv-glide-host .resolution-picker-scope button.active { color: var(--nv-glide-fg, var(--text)); }
 
     </style>
-    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.120.1789742566">
-    <script src="/static/js/shared/glide.js?v=1.0.120.1789742748"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
+    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.123.1789742566">
+    <script src="/static/js/shared/glide.js?v=1.0.123.1789742748"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
 </head>
 <body data-page-node-id="B0FSrTLRPPotTcEryWhCSp">
     <div class="chat-shell" data-page-node-id="MRDi657CZfPyLahTJpQS7R">

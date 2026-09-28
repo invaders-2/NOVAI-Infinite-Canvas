@@ -108,7 +108,8 @@ def copy_assets():
             shutil.copytree(src, dst, ignore=COPY_IGNORE)
 
     # assets（排除 input/output/uploads + 测试图片/日志，安装后运行时创建）
-    ASSET_SKIP_ITEMS = {"input", "output", "uploads"}
+    # models（HD 高清放大运行时、RMBG 抠图模型等）按需下载，不打进安装包
+    ASSET_SKIP_ITEMS = {"input", "output", "uploads", "models"}
     ASSET_IGNORE = shutil.ignore_patterns("*.pyc", "__pycache__", "test-*.png", "tmp_*.png", "*.log")
     dst_assets = os.path.join(DIST_DESKTOP, "assets")
     os.makedirs(dst_assets, exist_ok=True)

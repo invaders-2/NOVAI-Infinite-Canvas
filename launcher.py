@@ -107,12 +107,13 @@ def _hide_mac_titlebar_chrome(win):
 _native_drag_state = {"monitors": []}
 
 # 红绿灯目标位（窗口坐标 pt，与前端 CSS px 一一对应）：
-# 这两个值就是 macOS 原生位置——左缘 7pt、中心距窗口顶 14pt（标准 28px 标题栏）。
-# 设成原生值后 applyTrafficLights_ 算出的 dx/dy 为 0，直接 return，红绿灯保持系统原生
-# 位置不动；保留该函数是为了 FullSizeContentView/relayout 场景下重复调用仍幂等，
-# 避免 AppKit relayout 把灯弹走后没人复位。
+# 前端把 macOS 标题带加高到 40px（static/index.html 的 .app-header），红绿灯随之下移：
+# 左缘保持系统原生 7pt，中心取 40px 标题带的中线 26pt（比系统原生 14pt 低 12pt），
+# 与前端右上角 .stage-actions 按钮中心同一条水平线。
+# 该值非原生，applyTrafficLights_ 会算出 dx=0 / dy=12 并真正平移灯位；重复调用幂等，
+# 用于 FullSizeContentView/relayout 场景下 AppKit 把灯弹走后复位。
 _MAC_TL_LEFT_X = 7.0
-_MAC_TL_CENTER_Y = 14.0
+_MAC_TL_CENTER_Y = 26.0
 
 
 def _end_native_window_drag():
@@ -326,6 +327,7 @@ def main():
                 self._maximized = False
                 self._fr_direction = ''
                 self._fr_geo = None
+                self._save_file_lock = threading.Lock()
 
             def minimize(self):
                 webview.windows[0].minimize()
@@ -427,6 +429,11 @@ def main():
             def save_file(self, data: str, filename: str = None) -> str:
                 """保存文件：接收 base64 数据，弹出原生另存为对话框，返回保存路径或空字符串"""
                 import base64, re
+                # 原生保存框是模态的；pywebview 每次 JS 调用都新起线程（util.py js_bridge_call），
+                # 「先查布尔再置位」会漏掉并发插入的第二次调用 —— 用非阻塞锁，抢不到就直接跳过
+                if not self._save_file_lock.acquire(blocking=False):
+                    log("save_file: busy, skipped")
+                    return ""
                 try:
                     # 解析 data URL 或纯 base64
                     b64 = data
@@ -459,6 +466,8 @@ def main():
                 except Exception as e:
                     log(f"save_file error: {e}")
                     return ""
+                finally:
+                    self._save_file_lock.release()
 
             def get_data_dir(self) -> str:
                 """返回用户数据目录路径"""
@@ -1047,7 +1056,7 @@ def main():
                                     NSColor.colorWithSRGBRed_green_blue_alpha_(*initial_rgb, 1.0)
                                 )
 
-                                # 6. 红绿灯平移：红灯左缘对齐侧栏面板左缘（实测 15，常量 14 抵消 +1pt 偏差），中心与 Header 按钮同线 y=36；
+                                # 6. 红绿灯下移到 40px 标题带的中线 y=26（左缘保持原生 7pt），与前端 .stage-actions 按钮中心同线；
                                 #    同时隐藏随容器下移的标题栏装饰视图（顶部亮线来源）
                                 self.applyTrafficLights_(None)
 

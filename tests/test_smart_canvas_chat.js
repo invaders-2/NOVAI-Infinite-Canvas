@@ -12,6 +12,31 @@ const js = read('static/js/smart-canvas.js');
 const css = read('static/css/smart-canvas.css');
 const i18n = read('static/js/i18n/smart-canvas.js');
 
+/* 缓存串不写死版本号：能读到项目版本（desktop/package.json，退回 VERSION）就比对当前版本，
+   读不到只守形状（点分版本号 + mtime 秒）；main.py:2403 versioned_static_html 按「版本号 + 文件 mtime」重写 */
+const projectVersions = (() => {
+    const found = [];
+    try {
+        const version = JSON.parse(fs.readFileSync(path.join(root, 'desktop/package.json'), 'utf8')).version;
+        if(version) found.push(String(version));
+    } catch(e) {}
+    try {
+        const version = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim().split('\n')[0].trim();
+        if(version) found.push(version);
+    } catch(e) {}
+    return found;
+})();
+function versionTagOk(value){
+    const text = String(value || '');
+    const cut = text.lastIndexOf('.');
+    if(cut <= 0) return false;
+    const version = text.slice(0, cut);
+    const mtime = text.slice(cut + 1);
+    if(!/^\d+(?:\.\d+)*$/.test(version) || !/^\d{9,}$/.test(mtime)) return false;
+    return !projectVersions.length || projectVersions.indexOf(version) >= 0;
+}
+const mtimeOf = value => Number(String(value || '').split('.').pop());
+
 let pass = 0;
 const fails = [];
 const ok = (cond, label) => { if(cond) pass += 1; else fails.push(label); };
@@ -120,16 +145,13 @@ ok(/if\(node\.llmTab !== 'chat' \|\| node\.chatPersonaId\) return false;/.test(j
 ok(/if\(current && current !== SMART_CHAT_LEGACY_SYSTEM_PROMPT\) return false;/.test(js), '手写过的系统提示词不覆盖');
 ok(/if\(!applyChatPersona\(node, SMART_CHAT_DEFAULT_PERSONA_ID\)\) return false;\n    scheduleSave\(\);/.test(js), '默认一次性写入并持久化');
 ok(/node\.llmSystemPrompt = String\(persona\.content \|\| ''\);\n    node\.chatPersonaId = persona\.id;\n    node\.llmSystemEnabled = true;/.test(js), 'applyChatPersona 写 llmSystemPrompt / chatPersonaId / llmSystemEnabled');
-ok(js.includes("if(!applyChatPersona(node, chip.dataset.personaId)) return;") && js.includes('render();\n            scheduleSave();'), 'chip 点击 = applyChatPersona + render + scheduleSave');
-ok(js.includes("if(systemEl){\n        bindScrollableText(systemEl);"), '系统提示词文本框的绑定没被压成一行（可插入自定义标记）');
-ok(/systemEl\.oninput = e => \{[\s\S]{0,220}node\.chatPersonaId = SMART_CHAT_PERSONA_CUSTOM;/.test(js), '手写系统提示词 → chatPersonaId = custom');
-ok(js.includes('function syncChatPersonaChips(el, node)') && js.includes('customChip.hidden = !state.custom'), 'chips 高亮/自定义标记能就地同步');
-ok(js.includes("const selector = active && active.classList"), '系统提示词框也在焦点保护范围内');
-/* 默认必须在 llmTab 归一化之后、systemPrompt 快照之前，否则第一屏拿到的还是旧值 */
+ok(js.includes("if(!applyChatPersona(node, e.target.value)) return;") && js.includes('render();\n            scheduleSave();'), '角色下拉 = applyChatPersona + render + scheduleSave');
+ok(!/const systemEl = el\.querySelector\('\.prompt-llm-system'\)/.test(js), '聊天控制台不再绑定已移除的 System 文本框');
+ok(js.includes('function syncChatPersonaSelect(el, node)') && js.includes('select.value = state.custom ? SMART_CHAT_PERSONA_CUSTOM : (state.id || \'\');'), '角色下拉仍能显示历史自定义人设');
+ok(js.includes("const selector = active && active.classList"), '聊天输入框仍在焦点保护范围内');
 const ensureAt = js.indexOf('ensureChatPersonaDefault(node);');
-const sysAt = js.indexOf("const systemPrompt = (node.llmSystemPrompt || '').trim();");
 ok(js.includes("node.llmTab = node.llmTab === 'chat' ? 'chat' : 'node';\n    ensureChatPersonaDefault(node);"), 'ensureChatPersonaDefault 紧跟 llmTab 归一化');
-ok(sysAt > ensureAt, '默认角色在读取 systemPrompt 之前生效（第一屏就带上）');
+ok(ensureAt > 0 && js.indexOf('const chatMessages = Array.isArray(node.chatMessages)', ensureAt) > ensureAt, '默认角色在聊天内容渲染前生效');
 
 console.log('[5] /api/personas：一次拉取 + 失败兜底');
 ok(js.includes("fetch('/api/personas')"), '调用了 /api/personas');
@@ -148,8 +170,8 @@ ok(displayFn.length > 100, 'F3：有 chatPersonaDisplayState');
 ok(displayFn.includes('SMART_CHAT_PERSONA_CUSTOM'), 'F3：仍识别显式 custom');
 ok(displayFn.includes("return hit ? {id: hit.id, custom: false} : {id: '', custom: true};"), 'F3：内容不匹配任何角色 → 自定义');
 ok(!/node\.\w+\s*=/.test(displayFn), 'F3：显示判断里没有任何写操作（不回写 chatPersonaId）');
-ok(/chatPersonaChipsHtml\(node\)\{\n    const state = chatPersonaDisplayState\(node\);/.test(js), 'F3：chips HTML 用显示状态');
-ok(/function syncChatPersonaChips\(el, node\)\{\n    const state = chatPersonaDisplayState\(node\);/.test(js), 'F3：就地同步也用显示状态');
+ok(/chatPersonaSelectHtml\(node\)\{\n    const state = chatPersonaDisplayState\(node\);/.test(js), 'F3：角色下拉的 HTML 用显示状态');
+ok(/function syncChatPersonaSelect\(el, node\)\{[\s\S]{0,200}const state = chatPersonaDisplayState\(node\);/.test(js), 'F3：就地同步也用显示状态');
 
 console.log('[5c] F4/F5：运行态与临时标记不落盘 + 载入自愈');
 ok(/delete node\.running;/.test(js), 'F4a：canvasForStorage 剥掉 running');
@@ -167,11 +189,12 @@ ok(loadAt > 0 && loadRenderAt > loadAt, 'F4b：在 loadCanvas 首屏 render() �
 ok(js.includes('if(cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns'), 'F4b：自愈后落盘（脏数据自动消失）');
 ok(js.indexOf('function render(){') > 0 && !/function render\(\)\{[\s\S]{0,3000}healStalePromptNodeRunning\(/.test(js), 'F4b：不在 render() 里自愈（聊天 running 时没有 pendingTasks，会被误杀）');
 
-console.log('[6] 只影响聊天模式：节点模式 / 出表模式 / 经典画布不动');
-ok(js.includes("system_prompt: node.llmSystemPrompt || 'You are a helpful assistant.',"), '请求体 system_prompt 字段结构不变');
+console.log('[6] 聊天与文本生成各自跳过前置分析，出表与经典画布沿用原路径');
+ok(js.includes("options.promptOnlySystem ? smartLlmDefaultSystemPrompt() : ''") && js.includes('node.llmSystemPrompt ||'), '文本生成节点忽略历史 System，聊天仍保留角色人设');
 ok(js.includes('if(options.chat) body.no_prompt_intelligence = true;'), 'no_prompt_intelligence 语义不变');
 ok(!/ensureChatPersonaDefault\(node\);\n    const message = promptNodeLLMInputText/.test(js), '节点模式入口不注入角色');
-ok(js.includes("const text = await callSmartCanvasLLM(node, message, []);"), 'runPromptLLMNode 调用方式不变');
+ok(js.includes('answer = await callSmartCanvasLLM(node, message, [], {noPromptIntelligence:true, promptOnlySystem:true});') && js.includes('callSmartCanvasLLM(node, message, [], {'),
+    'runPromptLLMNode 走流式优先、退回普通接口（两条路都在）');
 ok(js.includes("const history = node.chatMessages.slice();"), '聊天历史快照逻辑不变');
 
 console.log('[7] i18n：四个新 key 的 zh + en 都在');
@@ -183,11 +206,11 @@ console.log('[7] i18n：四个新 key 的 zh + en 都在');
     ok(hit, key + ' 的 zh/en 都存在且为「' + zh + ' / ' + en + '」');
 });
 
-console.log('[8] 缓存串：改过的两个资源都升到 1.0.120.<epoch>');
-const cssV = (html.match(/css\/smart-canvas\.css\?v=1\.0\.120\.(\d+)/) || [])[1];
-const jsV = (html.match(/js\/smart-canvas\.js\?v=1\.0\.120\.(\d+)/) || [])[1];
-ok(Boolean(cssV) && Number(cssV) > 1789719097, 'smart-canvas.css 的 ?v= 已更新（' + cssV + '）');
-ok(Boolean(jsV) && Number(jsV) > 1789720396, 'smart-canvas.js 的 ?v= 已更新（' + jsV + '）');
+console.log('[8] 缓存串：改过的两个资源都升到「项目版本 + mtime」');
+const cssV = (html.match(/css\/smart-canvas\.css\?v=([0-9.]+)/) || [])[1];
+const jsV = (html.match(/js\/smart-canvas\.js\?v=([0-9.]+)/) || [])[1];
+ok(Boolean(cssV) && versionTagOk(cssV) && mtimeOf(cssV) > 1789719097, 'smart-canvas.css 的 ?v= 已更新（' + cssV + '）');
+ok(Boolean(jsV) && versionTagOk(jsV) && mtimeOf(jsV) > 1789720396, 'smart-canvas.js 的 ?v= 已更新（' + jsV + '）');
 
 console.log('');
 if(fails.length){

@@ -170,6 +170,17 @@ The app checks all three sources for the latest version on startup, pushes updat
 
 ## Changelog
 
+### v1.0.123
+
+- **New floating toolbar on Smart Canvas image nodes**: portrait & emotion adjustment, panorama, multi-angle, relighting, nine-grid templates, crop (HD / outpainting / redraw / erase / cutout / crop), element editing, layer separation, grid split, annotation, rotate, download and preview — all from one entry point
+- **New "HD Upscale"**: free offline local AI upscaling to 2K / 4K; images already close to the target resolution fall back to high-quality resampling instead of forcing the AI model (about 50MB of components download on first use)
+- **PSD export with real layers**: a single image is split into subject + background automatically, multiple images become one layer each, and text can be layered automatically
+- **Reference videos turn into storyboard tables automatically**: works on both the classic canvas and the Smart Canvas — set "seconds per shot" (1–5, default 3) and the video is cut into one row per shot, with each row using only its own clip as the video reference
+- **Canvas Agent plan mode and a rebuilt LLM console**: the Agent now presents a plan card and its impact first and only runs after you confirm, keeps a run history and matches image / video providers to the model you picked; LLM nodes and the prompt console stream as they generate, can be cancelled or retried, abort automatically when no text arrives for a long time, support @-referencing upstream assets, and use unified dropdowns for provider / model / output form
+- **Upgraded image and video node parameters**: image generation adds a Background option (auto / keep / transparent), and sizes can be picked from presets, entered manually or matched to the input image's aspect ratio; video nodes add count, aspect ratio, resolution, a sound toggle and a "More parameters" panel, with a status label and elapsed time while generating
+- **Consistent UI and a slimmer installer**: outlines and hairlines are gone across the app, popovers use frosted glass, every select caret is the same linear chevron and selection uses a soft tint; the HD upscale runtime and the cutout model are no longer bundled and download on first use instead
+- **Fixes**: saving or downloading no longer opens several system dialogs from a single click; JSON containing real newlines from a model no longer breaks table parsing; macOS HD upscale components are made executable after extraction, so no more "Permission denied"
+
 ### v1.0.122
 
 - **Fix**: Lovart was missing from existing installs — the platform list only received it when it was empty (fresh installs). After upgrading it shows up directly in API Settings; fill in an Access Key / Secret Key to use it. A platform without keys never appears in generation node dropdowns

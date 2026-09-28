@@ -32,9 +32,9 @@ ok(!html.includes('data-create-type="loop"'), '菜单已移除循环节点');
 ok(!/type === 'loop'\) created = createLoopNode/.test(js), 'createNodeFromMenu 不再创建循环节点');
 ok(!/a\.type === 'loop'\) node = createLoopNode/.test(js), 'create_node 命令不再创建循环节点');
 ok(js.includes("title: '生成输入'"), '批量节点标题为「生成输入」');
-ok(js.includes("tableHostDragBar('生成输入')"), '批量节点拖拽条为「生成输入」');
+ok(js.includes('const bar = tableHostDragBar();') && !/tableHostDragBar\('/.test(js) && !js.includes('⠿'), '拖拽条只当把手（顶部无标题文字、也不再画 ⠿）');
 ok(js.includes(": '请接入上游节点';"), '空状态提示为「请接入上游节点」');
-ok(/\.table-batch-panel\.is-empty \.table-batch-empty-tip\s*\{[^}]*font-size:\s*11px/.test(tableCss), '空状态提示字号更小');
+ok(/\.table-batch-panel\.is-empty \.table-batch-empty-tip\s*\{[^}]*font-size:\s*10\.5px/.test(tableCss), '空状态提示字号更小');
 ok(/type === 'table'\).*createSmartTableNode/.test(js), 'createNodeFromMenu 分发 table');
 ok(/type === 'batch'\).*createSmartBatchNode/.test(js), 'createNodeFromMenu 分发 batch');
 
@@ -146,7 +146,7 @@ ok(js.includes("row.status === 'running' || row.status === 'deferred'"), '卡在
 // ② 播放中的视频不再把节点钉死
 ok(js.includes("const videoEl = e.target.closest('video');"), '视频区域允许起拖（只有控制条除外）');
 ok(js.includes('nativeBar'), '底部原生控制条位置留给控件');
-ok(/\.smart-node-floating-menu, \.node-resize-handle, \.thumb-item, \.node-port, \.prompt-node-control, select, input, textarea, button, \.smart-video-controls'/.test(js), '拖拽排除名单里换成了 .smart-video-controls');
+ok(/\.smart-node-floating-menu, \.node-resize-handle, \.node-inline-editor, \.thumb-item, \.node-port, \.prompt-node-control, select, input, textarea, button, \.smart-video-controls'/.test(js), '拖拽排除名单里换成了 .smart-video-controls（节点内编辑层也不参与拖拽）');
 // ③ 视频「原图比例」要解析成参考素材的真实比例
 ok(js.includes('function nearestVideoAspectForSize('), '按参考素材比例找最接近的受支持比例');
 ok(js.includes('VIDEO_ASPECT_SUPPORTED'), '有受支持视频比例表');
@@ -373,7 +373,7 @@ ok(applySrc.includes('node.llmInstruction = text;'), 'LLM 分支写 llmInstructi
 ok(applySrc.includes('node.text = text;'), '非 LLM 分支仍写 text');
 ok(js.includes('class="prompt-node-control prompt-llm-instruction"'), 'INPUT 框存在');
 ok(/escapeHtml\(node\.llmInstruction \|\| ''\)/.test(js), 'INPUT 框 value 渲染自 node.llmInstruction');
-ok(js.includes("instructionEl.oninput = e => { node.llmInstruction = e.target.value;"), 'INPUT 框手动输入也写 llmInstruction');
+ok(/instructionEl\.oninput = \(\) => \{\s*node\.llmInstruction = llmEditorPlainText\(instructionEl, node\);/.test(js), 'INPUT 框手动输入也写 llmInstruction（contenteditable 版：chip 还原成 图N）');
 
 function buildApplyFn(){
     const state = { template: {id:'t1', builtin:false, sourceId:'src1'}, nodes: [] };
@@ -499,7 +499,7 @@ const sanitizeSrc = (js.match(/function sanitizeSmartApiSelection\(target=settin
 ok(Boolean(sanitizeSrc), 'sanitizeSmartApiSelection 能从源码抠出来');
 const buildSanitize = (imageModels, videoModels, volcModels) => new Function(
     'settings','providerImageModels','providerVideoModels','volcengineVideoModels',
-    'clearVolcengineSelectionOutsideVolcengine','isGptImageAutoSizeModel','defaultSmartApiResolution',
+    'clearVolcengineSelectionOutsideVolcengine','apiAllowsAuto','defaultSmartApiResolution',
     sanitizeSrc + '\nreturn sanitizeSmartApiSelection;'
 )({engine:'api'}, () => imageModels, () => videoModels, () => volcModels, t => t, () => false, () => '1k');
 const sanitize = buildSanitize(['real-a','real-b'], ['real-v1','real-v2'], ['volc-v1']);
