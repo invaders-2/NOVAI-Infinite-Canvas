@@ -150,9 +150,9 @@ Installers and update sources:
 |----------|-----|
 | GitHub | https://github.com/invaders-2/NOVAI-Infinite-Canvas |
 | Gitee | https://gitee.com/invaders/novai |
-| ModelScope | https://modelscope.cn/studios/bllack/NOVAI |
+| ModelScope | https://modelscope.cn/models/bllack/NOVAI-releases |
 
-The app checks all three sources for the latest version on startup, pushes update notifications, and upgrades with one click.
+The app checks all three sources for the latest version on startup, pushes update notifications, and upgrades with one click (ModelScope installers live under `electron-release/` in that repo — the same source the app uses for mirror updates).
 
 ---
 
