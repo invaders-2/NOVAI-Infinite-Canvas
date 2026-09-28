@@ -170,9 +170,9 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 |------|------|
 | GitHub | https://github.com/invaders-2/NOVAI-Infinite-Canvas |
 | Gitee | https://gitee.com/invaders/novai |
-| ModelScope | https://modelscope.cn/studios/bllack/NOVAI |
+| ModelScope | https://modelscope.cn/models/bllack/NOVAI-releases |
 
-项目启动后会自动检查三个源的最新版本，推送更新通知，一键升级。
+项目启动后会自动检查三个源的最新版本，推送更新通知，一键升级（ModelScope 的安装包在这个仓库的 `electron-release/` 目录下，客户端国内自动更新也走这里）。
 
 > **Gitee 安装包说明**：Gitee 免费版附件有 100MB 单文件限制，安装包已分卷上传（`.part00`/`.part01`），下载后需先合并再安装：
 > - Windows（CMD）：`copy /b NOVAI-Setup-*.exe.part00 + NOVAI-Setup-*.exe.part01 NOVAI-Setup-*.exe`
