@@ -210,9 +210,12 @@ ok((listeners.mousedown || []).length > 0, 'install() 注册了 document 级 mou
     ok(/\.nd-menu \{/.test(css), 'canvas.css 有 .nd-menu 弹层样式');
     ok(/\.nd-menu \{/.test(smartCss), 'smart-canvas.css 也有 .nd-menu 弹层样式');
     ok(/\.nd-option\.active \{/.test(css) && /\.nd-option\.active \{/.test(smartCss), '两处都有选中态样式');
-    // --card-solid 只在 canvas.css 里定义，smart-canvas 解析不了；弹层底色统一用 marvis-shared 的 --surface
-    ok(/\.nd-menu \{[^}]*background:var\(--surface\)/.test(css)
-        && /\.nd-menu \{[^}]*background:var\(--surface\)/.test(smartCss), '弹层底色用 marvis-shared 的 --surface');
+    // AGENTS.md 硬规则：弹层走磨砂玻璃配方（border:0 + --panel 78% 半透明底 + backdrop-filter）。
+    // 不透明底色（--surface / --card-solid）会让 backdrop-filter 失效，两套画布统一成同一条配方。
+    const frostedMenu = text => /\.nd-menu \{[^}]*border:0;/.test(text)
+        && /\.nd-menu \{[^}]*background:color-mix\(in srgb, var\(--panel\) 78%, transparent\)/.test(text)
+        && /\.nd-menu \{[^}]*backdrop-filter:blur\(44px\) saturate\(190%\); -webkit-backdrop-filter:blur\(44px\) saturate\(190%\)/.test(text);
+    ok(frostedMenu(css) && frostedMenu(smartCss), '弹层底色用磨砂玻璃配方（--panel 78% + border:0 + backdrop-filter 44px，两套画布一致）');
     const src = read('static/js/shared/dropdown.js');
     ok(src.indexOf("dataset.lucide = 'check'") >= 0, '选中态用 Lucide check 图标（线性）');
     ok(src.indexOf("addEventListener('mousedown', onDocMouseDown, true)") >= 0, 'mousedown 走 capture 阶段');

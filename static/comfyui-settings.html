@@ -13,17 +13,17 @@
             }
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
-    <script src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
-    <link rel="stylesheet" href="/static/css/comfyui-settings.css?v=1.0.120.1789606971">
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
+    <link rel="stylesheet" href="/static/css/comfyui-settings.css?v=1.0.123.1790240705">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
 
-<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
+<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 body { background: transparent !important; color: var(--text) !important; }
@@ -33,9 +33,9 @@ header { background: var(--sidebar-bg) !important; backdrop-filter: blur(28px) !
 .side-card { background: transparent !important; border-radius: var(--radius-lg) !important; }
 .graph-card { background: transparent !important; border-radius: var(--radius-lg) !important; }
 button.primary { background: var(--text) !important; color: var(--bg) !important; border-radius: var(--radius-md) !important; }
-input, select { background: var(--stage-bg) !important; border-radius: var(--radius-sm) !important; color: var(--text) !important; }
+input, select { background-color: var(--stage-bg) !important; border-radius: var(--radius-sm) !important; color: var(--text) !important; }
 /* ═══ 设置弹窗内嵌模式（?embed=1）— 与通用/外观/关于面板同一套设计语言 ═══
-   扁平 / 半透明 / 1px 细边 / 无重阴影；唯一强调 = 黑白反转
+   扁平 / 半透明 / 无描边 / 柔和投影；唯一强调 = 黑白反转
    所有规则都挂在 html.settings-embed 下，不带 embed=1 打开时观感不变 */
 html.settings-embed {
     --embed-canvas: #ffffff;
@@ -190,9 +190,9 @@ html.settings-embed .builtin-badge,
 html.settings-embed .workflow-card.active .builtin-badge {
     margin-left: auto !important;
     padding: 2px 8px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--muted) !important;
     font-size: 10px !important;
     font-weight: 600 !important;
@@ -215,12 +215,12 @@ html.settings-embed #comfyInstancesList > div > span {
 html.settings-embed #comfyInstancesList .small-input {
     height: 32px !important;
     padding: 0 10px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: var(--stage-bg) !important;
     font-size: 12.5px !important;
 }
-html.settings-embed #comfyInstancesList .small-input:focus { border-color: var(--border-2) !important; }
+html.settings-embed #comfyInstancesList .small-input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 /* 格式提示（唯一的 inline 样式小字）：字号收紧 + 微字距，保证窄栏里单行不折断 */
 html.settings-embed .workflow-panel-comfy > div[style*="10.5px"] {
     padding: 0 12px !important;
@@ -242,9 +242,9 @@ html.settings-embed .ghost-btn {
     height: auto !important;
     min-height: 34px !important;
     padding: 7px 14px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 8px !important;
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--muted) !important;
     font-size: 12px !important;
     font-weight: 600 !important;
@@ -255,9 +255,8 @@ html.settings-embed .ghost-btn {
 html.settings-embed .upload-btn { width: 100% !important; }
 html.settings-embed .upload-btn:hover,
 html.settings-embed .ghost-btn:hover {
-    background: var(--nav-hover-bg) !important;
+    background: var(--border-2) !important;
     color: var(--text) !important;
-    border-color: var(--embed-line-btn) !important;
     box-shadow: none !important;
     transform: none !important;
 }
@@ -275,9 +274,9 @@ html.settings-embed .preview-title {
 }
 html.settings-embed .preview-pill {
     padding: 2px 8px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--muted) !important;
     font-size: 10px !important;
     font-weight: 600 !important;
@@ -292,9 +291,9 @@ html.settings-embed .preview-desc {
 html.settings-embed #previewContent { gap: 10px; padding-top: 4px; }
 html.settings-embed .preview-empty {
     padding: 20px 12px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
-    background: transparent !important;
+    background: var(--soft) !important;
     color: var(--muted) !important;
     font-size: 11.5px !important;
     font-weight: 400 !important;
@@ -304,10 +303,10 @@ html.settings-embed .preview-empty {
 /* ── 右列标题行：纯标题，无卡片底/边框 ── */
 html.settings-embed .graph-card {
     padding: 18px 20px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 16px !important;
     background: var(--embed-card) !important;
-    box-shadow: none !important;
+    box-shadow: var(--shadow-md) !important;
 }
 html.settings-embed .graph-head { gap: 12px !important; margin-bottom: 16px !important; }
 html.settings-embed .graph-title-row { gap: 16px !important; }
@@ -316,7 +315,7 @@ html.settings-embed .workflow-title-input {
     width: 100% !important;
     height: 34px !important;
     padding: 0 10px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: transparent !important;
     color: var(--text) !important;
@@ -325,12 +324,12 @@ html.settings-embed .workflow-title-input {
     letter-spacing: 0 !important;
     line-height: 1.3 !important;
     text-overflow: ellipsis !important;
-    transition: background .2s ease, border-color .2s ease !important;
+    transition: background .2s ease, box-shadow .2s ease !important;
 }
 html.settings-embed .workflow-title-input:hover { background: var(--nav-hover-bg) !important; }
 html.settings-embed .workflow-title-input:focus {
     background: var(--bg) !important;
-    border-color: var(--border-2) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important;
 }
 html.settings-embed .workflow-title-input::placeholder { color: var(--muted) !important; opacity: .75; }
 html.settings-embed .graph-head .editor-sub {
@@ -347,43 +346,38 @@ html.settings-embed .action-btn {
     height: auto !important;
     min-height: 34px !important;
     padding: 7px 14px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 8px !important;
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--text) !important;
     font-size: 12px !important;
     font-weight: 600 !important;
     box-shadow: none !important;
     transform: none !important;
-    transition: background .2s ease, color .2s ease, border-color .2s ease !important;
+    transition: background .2s ease, color .2s ease !important;
 }
 html.settings-embed .action-btn:hover {
-    background: var(--nav-hover-bg) !important;
+    background: var(--border-2) !important;
     color: var(--text) !important;
-    border-color: var(--embed-line-btn) !important;
     box-shadow: none !important;
     transform: none !important;
 }
 html.settings-embed .action-btn.save-btn {
     background: var(--text) !important;
     color: var(--stage-bg) !important;
-    border-color: var(--text) !important;
 }
 html.settings-embed .action-btn.save-btn:hover {
     background: var(--text) !important;
     color: var(--stage-bg) !important;
-    border-color: var(--text) !important;
     opacity: .88;
 }
 html.settings-embed .action-btn.danger-btn {
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--danger-text, var(--danger)) !important;
-    border-color: var(--embed-line-btn) !important;
 }
 html.settings-embed .action-btn.danger-btn:hover {
     background: var(--danger-bg) !important;
     color: var(--danger-text, var(--danger)) !important;
-    border-color: var(--danger-border) !important;
 }
 html.settings-embed .action-btn svg { width: 15px !important; height: 15px !important; }
 
@@ -402,27 +396,26 @@ html.settings-embed .workspace-mode-tabs button {
     min-height: 0 !important;
     min-width: 0 !important;
     padding: 7px 14px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--text) !important;
     font-size: 13px !important;
     font-weight: 600 !important;
     box-shadow: none !important;
-    transition: background .2s ease, color .2s ease, border-color .2s ease !important;
+    transition: background .2s ease, color .2s ease !important;
 }
-html.settings-embed .workspace-mode-tabs button:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed .workspace-mode-tabs button:hover { background: var(--border-2) !important; }
 html.settings-embed .workspace-mode-tabs button.active {
     background: var(--text) !important;
     color: var(--stage-bg) !important;
-    border-color: var(--text) !important;
     box-shadow: none !important;
 }
 
 /* ── 图画布区（外框卡片语言，画布本身保留中性底） ── */
 html.settings-embed .graph-svg-wrap {
     height: 760px;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 14px !important;
     background: var(--bg) !important;
 }
@@ -431,7 +424,7 @@ html.settings-embed .graph-ctrl-btn,
 html.settings-embed .graph-zoom-pill {
     height: 30px !important;
     padding: 0 9px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: var(--stage-bg) !important;
     color: var(--muted) !important;
@@ -447,7 +440,7 @@ html.settings-embed .graph-ctrl-btn:hover { background: var(--nav-hover-bg) !imp
 /* ── 测试画布（mini canvas） ── */
 html.settings-embed .mini-canvas {
     height: 420px;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 14px !important;
     background-color: var(--bg) !important;
 }
@@ -455,7 +448,7 @@ html.settings-embed .mini-canvas.large { height: 760px; }
 html.settings-embed .mini-tool {
     height: 30px !important;
     padding: 0 10px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
     background: var(--stage-bg) !important;
     color: var(--muted) !important;
@@ -465,26 +458,26 @@ html.settings-embed .mini-tool {
 }
 html.settings-embed .mini-tool:hover { color: var(--text) !important; }
 html.settings-embed .mini-card {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
     background: var(--stage-bg) !important;
     box-shadow: var(--shadow-md) !important;
 }
 html.settings-embed .mini-card-head {
-    border-bottom: 1px solid var(--embed-line) !important;
+    background: var(--soft) !important;
     font-size: 11.5px !important;
     font-weight: 600 !important;
 }
 html.settings-embed .mini-textarea,
 html.settings-embed .mini-input {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     font-size: 12.5px !important;
     font-weight: 400 !important;
 }
 html.settings-embed .mini-image-drop {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     color: var(--muted) !important;
@@ -515,7 +508,7 @@ html.settings-embed .small-select {
     width: 100%;
     height: 34px !important;
     padding: 0 10px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     color: var(--text) !important;
@@ -523,12 +516,22 @@ html.settings-embed .small-select {
     font-weight: 400 !important;
     outline: none !important;
     box-shadow: none !important;
-    transition: border-color .2s ease !important;
+    transition: background .2s ease, box-shadow .2s ease !important;
+}
+html.settings-embed .pfield-select,
+html.settings-embed .small-select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    padding-right: 24px !important;
+    background-image:var(--select-caret) !important;
+    background-position:calc(100% - 8px) 50% !important;
+    background-size:10px 10px !important;
+    background-repeat:no-repeat !important;
 }
 html.settings-embed .pfield-textarea,
 html.settings-embed .extras-row textarea {
     padding: 9px 10px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     color: var(--text) !important;
@@ -544,11 +547,11 @@ html.settings-embed .pfield-select:focus,
 html.settings-embed .pfield-textarea:focus,
 html.settings-embed .small-input:focus,
 html.settings-embed .small-select:focus,
-html.settings-embed .extras-row textarea:focus { border-color: var(--border-2) !important; }
+html.settings-embed .extras-row textarea:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 html.settings-embed .small-input:disabled,
 html.settings-embed .small-select:disabled { opacity: .6 !important; }
 /* theme.css 暗色下用 !important 把 input/textarea/select 的底色/边框强制为 --bg/--border-strong，
-   这里用更高优先级把内嵌模式拉回本设计语言（细边，聚焦只换边框色） */
+   这里用更高优先级把内嵌模式拉回本设计语言（软底，聚焦只加柔光聚焦环） */
 html.settings-embed.theme-dark body input:not(.group-title-input),
 html.settings-embed.studio-theme-dark body input:not(.group-title-input),
 html.settings-embed.theme-dark body select,
@@ -556,14 +559,12 @@ html.settings-embed.studio-theme-dark body select,
 html.settings-embed.theme-dark body textarea,
 html.settings-embed.studio-theme-dark body textarea {
     background-color: var(--bg) !important;
-    border-color: var(--embed-line) !important;
 }
 html.settings-embed.theme-dark body input.workflow-title-input,
 html.settings-embed.studio-theme-dark body input.workflow-title-input,
 html.settings-embed.theme-dark body .dropdown-opt-row input.small-input,
 html.settings-embed.studio-theme-dark body .dropdown-opt-row input.small-input {
     background-color: transparent !important;
-    border-color: transparent !important;
 }
 html.settings-embed.theme-dark body #comfyInstancesList .small-input,
 html.settings-embed.studio-theme-dark body #comfyInstancesList .small-input {
@@ -575,33 +576,32 @@ html.settings-embed.theme-dark body select:focus,
 html.settings-embed.studio-theme-dark body select:focus,
 html.settings-embed.theme-dark body textarea:focus,
 html.settings-embed.studio-theme-dark body textarea:focus {
-    border-color: var(--border-2) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important;
 }
 html.settings-embed.theme-dark body .workflow-title-input:focus,
 html.settings-embed.studio-theme-dark body .workflow-title-input:focus {
     background-color: var(--bg) !important;
-    border-color: var(--border-2) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important;
 }
 html.settings-embed .pfield-slider-val { font-size: 12.5px !important; font-weight: 600 !important; }
 html.settings-embed .random-btn {
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 10px !important;
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--muted) !important;
 }
 html.settings-embed .random-btn:hover {
-    background: var(--nav-hover-bg) !important;
+    background: var(--border-2) !important;
     color: var(--text) !important;
 }
 html.settings-embed .random-btn.active {
     background: var(--text) !important;
     color: var(--stage-bg) !important;
-    border-color: var(--text) !important;
 }
 html.settings-embed .random-toggle {
     height: 32px !important;
     padding: 0 10px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     color: var(--muted) !important;
@@ -611,7 +611,7 @@ html.settings-embed .random-toggle {
 html.settings-embed .random-toggle input { accent-color: var(--text); }
 html.settings-embed .pfield-image-drop {
     padding: 16px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     color: var(--muted) !important;
@@ -645,35 +645,33 @@ html.settings-embed.theme-dark .pfield-bool-track,
 html.settings-embed.studio-theme-dark .pfield-bool-track { background: rgba(255, 255, 255, .16) !important; }
 html.settings-embed.theme-dark .pfield-bool-track.on,
 html.settings-embed.studio-theme-dark .pfield-bool-track.on { background: var(--text) !important; }
-/* 勾选：同等克制的细边小控件，选中黑白反转（保留 .checked 状态类） */
+/* 勾选：同等克制的软底小控件，选中黑白反转（保留 .checked 状态类） */
 html.settings-embed .check-toggle {
     width: 20px !important;
     height: 20px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 6px !important;
-    background: transparent !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--muted) !important;
     box-shadow: none !important;
-    transition: background .2s ease, border-color .2s ease, color .2s ease !important;
+    transition: background .2s ease, color .2s ease !important;
 }
-html.settings-embed .check-toggle:hover { border-color: var(--border-strong) !important; color: var(--text) !important; }
+html.settings-embed .check-toggle:hover { background: var(--border-2) !important; color: var(--text) !important; }
 html.settings-embed .check-toggle.checked {
     background: var(--text) !important;
-    border-color: var(--text) !important;
     color: var(--stage-bg) !important;
 }
 
 /* ── 节点卡 / 输入行 ── */
 html.settings-embed .node-list { gap: 10px !important; }
 html.settings-embed .node-card {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
     background: var(--embed-card) !important;
-    box-shadow: none !important;
+    box-shadow: var(--shadow-md) !important;
 }
-html.settings-embed .node-card-head { padding: 12px 14px !important; }
-html.settings-embed .node-card-head:hover { background: var(--nav-hover-bg) !important; }
-html.settings-embed .node-card.expanded .node-card-head { border-bottom: 1px solid var(--embed-line) !important; }
+html.settings-embed .node-card-head { padding: 12px 14px !important; background: var(--soft) !important; }
+html.settings-embed .node-card-head:hover { background: var(--border-2) !important; }
 html.settings-embed .node-class { font-size: 13.5px !important; font-weight: 700 !important; letter-spacing: 0 !important; }
 html.settings-embed .node-id { color: var(--muted) !important; font-size: 11.5px !important; font-weight: 400 !important; letter-spacing: 0 !important; }
 html.settings-embed .node-stats { color: var(--muted) !important; font-size: 11.5px !important; font-weight: 600 !important; letter-spacing: 0 !important; }
@@ -694,56 +692,54 @@ html.settings-embed .input-orig { color: var(--muted) !important; font-size: 11.
 html.settings-embed .extras-row {
     gap: 8px !important;
     padding-top: 10px !important;
-    border-top: 1px solid var(--embed-line) !important;
 }
 html.settings-embed .extra-pair { color: var(--muted) !important; font-size: 11.5px !important; font-weight: 600 !important; }
 html.settings-embed .dropdown-opt-row {
     padding: 4px 6px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
 }
 html.settings-embed .dropdown-opt-row .opt-index { color: var(--muted) !important; font-size: 11px !important; font-weight: 600 !important; }
 html.settings-embed .dropdown-opt-row .small-input {
     height: 30px !important;
-    border-color: transparent !important;
     background: transparent !important;
 }
 html.settings-embed .opt-type-tag,
 html.settings-embed .opt-type-tag.is-num {
     padding: 2px 8px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--muted) !important;
     font-size: 10px !important;
     font-weight: 600 !important;
     letter-spacing: 0 !important;
 }
 /* 本页按钮带 !important，优先级高于模块的 .nv-morph[data-nv-morph-state]，显式让位给状态色 */
-html.settings-embed .nv-morph.nv-morph[data-nv-morph-state="success"] { background: #10b981 !important; border-color: #10b981 !important; color: #fff !important; }
-html.settings-embed .nv-morph.nv-morph[data-nv-morph-state="error"] { background: #f43f5e !important; border-color: #f43f5e !important; color: #fff !important; }
+html.settings-embed .nv-morph.nv-morph[data-nv-morph-state="success"] { background: #10b981 !important; color: #fff !important; }
+html.settings-embed .nv-morph.nv-morph[data-nv-morph-state="error"] { background: #f43f5e !important; color: #fff !important; }
 html.settings-embed .opt-del { border-radius: 6px !important; color: var(--muted) !important; }
 html.settings-embed .opt-del:hover { color: var(--danger-text, var(--danger)) !important; background: var(--nav-hover-bg) !important; }
 html.settings-embed .nodes-toggle {
     min-height: 0 !important;
     padding: 11px 14px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 10px !important;
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--muted) !important;
     font-size: 12px !important;
     font-weight: 600 !important;
     box-shadow: none !important;
 }
-html.settings-embed .nodes-toggle:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
+html.settings-embed .nodes-toggle:hover { background: var(--border-2) !important; color: var(--text) !important; }
 
 /* ── 运行按钮 / 运行结果 ── */
 html.settings-embed .run-btn {
     height: 36px !important;
     min-height: 0 !important;
     padding: 0 14px !important;
-    border: 1px solid var(--text) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--text) !important;
     color: var(--stage-bg) !important;
@@ -756,9 +752,9 @@ html.settings-embed .run-btn:hover { opacity: .88; box-shadow: none !important; 
 html.settings-embed .run-btn:disabled { opacity: .5; }
 html.settings-embed .run-result {
     padding: 12px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
-    background: transparent !important;
+    background: var(--soft) !important;
 }
 html.settings-embed .run-status { color: var(--muted) !important; font-size: 11.5px !important; font-weight: 400 !important; }
 
@@ -766,14 +762,15 @@ html.settings-embed .run-status { color: var(--muted) !important; font-size: 11.
 html.settings-embed .popup-backdrop { border-radius: 14px !important; }
 html.settings-embed .popup-panel {
     width: 400px;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 20px !important;
-    background: var(--stage-bg) !important;
+    background: color-mix(in srgb, var(--panel) 78%, transparent) !important;
+    backdrop-filter: blur(44px) saturate(190%) !important;
+    -webkit-backdrop-filter: blur(44px) saturate(190%) !important;
     box-shadow: var(--shadow-xl) !important;
 }
 html.settings-embed .popup-head {
     padding: 14px 16px !important;
-    border-bottom: 1px solid var(--embed-line) !important;
     background: transparent !important;
 }
 html.settings-embed .popup-title { font-size: 14px !important; font-weight: 700 !important; letter-spacing: 0 !important; }
@@ -783,16 +780,24 @@ html.settings-embed .popup-close:hover { background: var(--nav-hover-bg) !import
 html.settings-embed .popup-body { padding: 12px !important; gap: 8px !important; }
 html.settings-embed .popup-empty { padding: 24px 12px !important; color: var(--muted) !important; font-size: 11.5px !important; font-weight: 400 !important; }
 html.settings-embed .image-lightbox img {
-    border: 1px solid var(--embed-line);
+    border: 0;
     border-radius: 20px !important;
     background: var(--stage-bg);
     box-shadow: var(--shadow-xl) !important;
 }
 html.settings-embed .wf-confirm-panel {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 20px !important;
-    background: var(--stage-bg) !important;
+    background: color-mix(in srgb, var(--panel) 78%, transparent) !important;
+    backdrop-filter: blur(44px) saturate(190%) !important;
+    -webkit-backdrop-filter: blur(44px) saturate(190%) !important;
     box-shadow: var(--shadow-xl) !important;
+}
+html.settings-embed.theme-dark .popup-panel,
+html.settings-embed.studio-theme-dark .popup-panel,
+html.settings-embed.theme-dark .wf-confirm-panel,
+html.settings-embed.studio-theme-dark .wf-confirm-panel {
+    background: color-mix(in srgb, var(--panel) 70%, transparent) !important;
 }
 html.settings-embed .wf-confirm-title { font-size: 15px !important; font-weight: 800 !important; }
 html.settings-embed .wf-confirm-desc { color: var(--muted) !important; font-size: 12.5px !important; font-weight: 400 !important; line-height: 1.6 !important; }
@@ -800,28 +805,26 @@ html.settings-embed .wf-confirm-btn {
     height: 34px !important;
     min-height: 34px !important;
     padding: 0 14px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 8px !important;
-    background: var(--stage-bg) !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--text) !important;
     font-size: 12px !important;
     font-weight: 600 !important;
 }
-html.settings-embed .wf-confirm-btn:hover { background: var(--nav-hover-bg) !important; }
+html.settings-embed .wf-confirm-btn:hover { background: var(--border-2) !important; }
 html.settings-embed .wf-confirm-btn.danger {
-    border-color: var(--embed-line-btn) !important;
-    background: var(--stage-bg) !important;
+    background: var(--danger-bg) !important;
     color: var(--danger-text, var(--danger)) !important;
 }
 html.settings-embed .wf-confirm-btn.danger:hover {
-    border-color: var(--danger-border) !important;
-    background: var(--danger-bg) !important;
+    background: color-mix(in srgb, var(--danger) 20%, transparent) !important;
     color: var(--danger-text, var(--danger)) !important;
     filter: none !important;
 }
 html.settings-embed .wf-toast {
     padding: 10px 14px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
     background: var(--stage-bg) !important;
     color: var(--text) !important;
@@ -830,8 +833,7 @@ html.settings-embed .wf-toast {
     box-shadow: var(--shadow-xl) !important;
 }
 html.settings-embed .wf-toast.error {
-    border-color: var(--danger-border) !important;
-    background: var(--stage-bg) !important;
+    background: var(--danger-bg) !important;
     color: var(--danger-text, var(--danger)) !important;
 }
 @media (max-width: 720px) {
@@ -841,11 +843,11 @@ html.settings-embed .wf-toast.error {
 }
 
 /* Hover 微弱反馈补强 + 键盘 focus 可见环 */
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [role="button"]:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 /* 异步操作中的按钮 loading 态 */
 .action-btn.is-loading, .upload-btn.is-loading { opacity: .55; pointer-events: none; }
 /* 校验失败的输入高亮（错误就近） */
-.wf-invalid { outline: 2px solid var(--danger) !important; outline-offset: 1px; }
+.wf-invalid { background: var(--danger-bg) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent) !important; }
 /* ═══ R5 轻量 Toast 反馈（自动消失） ═══ */
 .wf-toast-host { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 140; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
 .wf-toast { display: flex; align-items: center; gap: 8px; max-width: min(460px, calc(100vw - 48px)); padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 12.5px; font-weight: 700; line-height: 1.45; box-shadow: 0 12px 32px rgba(0,0,0,.18); opacity: 0; transform: translateY(12px); transition: opacity .2s ease-out, transform .2s ease-out; pointer-events: auto; cursor: pointer; }
@@ -996,7 +998,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
         <img id="imageLightboxImg" src="" alt="preview" onclick="event.stopPropagation()">
     </div>
 
-    <script defer src="/static/js/comfyui-settings.js?v=1.0.120.1789606971"></script>
+    <script defer src="/static/js/comfyui-settings.js?v=1.0.123.1789606971"></script>
     <script>
     /* ═══ R5 交互反馈：轻量 Toast + 二次确认 + 保存/上传/删除反馈包装 ═══ */
     (function(){
@@ -1244,7 +1246,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
         else document.addEventListener('DOMContentLoaded', start);
     })();
     </script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
     <script>
     /* ═══ Morph Button 接入：保存/确定按钮的点击状态动效（只旁挂状态，不改原有点击逻辑） ═══ */
     (function(){

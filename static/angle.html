@@ -7,19 +7,19 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>Angle Control | 视角重塑</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
-    <script src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
-    <script src="/static/js/image-preview.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/history-bulk-manager.js?v=1.0.120.1789606971"></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
+    <script src="/static/js/image-preview.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/history-bulk-manager.js?v=1.0.123.1789606971"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
     <script type="importmap">
         {
             "imports": {
-                "three": "/static/vendor/js/three-0.160.0.module.js?v=1.0.120"
+                "three": "/static/vendor/js/three-0.160.0.module.js?v=1.0.123"
             }
         }
     </script>
@@ -74,20 +74,20 @@
 
         .upload-item {
             background: var(--card);
-            border: 1px dashed transparent;
+            border: 0;
             transition: all 0.4s var(--easing);
         }
 
         .upload-item:hover {
-            border-color: #000;
             background: #fff;
+            box-shadow: var(--shadow-md);
             transform: translateY(-2px);
         }
 
         .result-frame {
             background: #ffffff;
             border-radius:var(--radius-xl);
-            border: 1px solid transparent;
+            border: 0;
             box-shadow: 0 2px 15px rgba(0, 0, 0, 0.02);
         }
 
@@ -106,7 +106,7 @@
         .masonry-item {
             aspect-ratio: 1 / 1;
             background: #fff;
-            border: 1px solid transparent;
+            border: 0;
             border-radius:var(--radius-xl);
             overflow: hidden;
             transition: all 0.5s var(--easing);
@@ -122,13 +122,12 @@
             background: #ffffff;
             border-radius:var(--radius-lg);
             transition: all 0.3s ease;
-            border: 1px solid transparent;
+            border: 0;
         }
 
         .nano-input:focus {
             background: #ffffff;
-            box-shadow: 0 0 0 2px #000;
-            border-color: transparent;
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent);
         }
 
         @keyframes b-loading {
@@ -210,7 +209,6 @@
             height: 14px;
             border-radius:var(--radius-full);
             background: var(--text);
-            border: 2px solid #fff;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
             cursor: pointer;
         }
@@ -221,7 +219,6 @@
             height: 14px;
             border-radius:var(--radius-full);
             background: var(--text);
-            border: 2px solid #fff;
             cursor: pointer;
         }
         html.studio-theme-dark #rotate-h,
@@ -233,33 +230,31 @@
         html.studio-theme-dark #rotate-v::-webkit-slider-thumb,
         html.studio-theme-dark #distance::-webkit-slider-thumb {
             background: #dcdcdc;
-            border-color: #0c0c0c;
         }
         html.studio-theme-dark #rotate-h::-moz-range-thumb,
         html.studio-theme-dark #rotate-v::-moz-range-thumb,
         html.studio-theme-dark #distance::-moz-range-thumb {
             background: #dcdcdc;
-            border-color: #0c0c0c;
         }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         body { background: var(--bg) !important; color: var(--text) !important; }
 /* --- Marvis 增强覆盖 (angle.html) --- */
-.mode-switcher { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-md) !important; }
+.mode-switcher { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-md) !important; }
 .mode-switcher button { color: var(--muted) !important; border-radius: var(--radius-sm) !important; }
 .mode-switcher button.active { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
-.prompt-input { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-lg) !important; color: var(--text) !important; }
-.prompt-input:focus { border-color: var(--text) !important; }
+.prompt-input { background: var(--soft) !important; border: 0 !important; border-radius: var(--radius-lg) !important; color: var(--text) !important; }
+.prompt-input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 .control-group label { color: var(--muted) !important; }
 .control-group input[type="range"] { accent-color: var(--text) !important; }
-.archive-grid .archive-item { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-lg) !important; }
+.archive-grid .archive-item { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-lg) !important; }
 button.primary { background: var(--text) !important; color: var(--bg) !important; border-radius: var(--radius-md) !important; }
 button.primary:hover { opacity: 0.88 !important; }
 </style>
 
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
 </head>
 
 <body class="selection:bg-black selection:text-white">
@@ -274,7 +269,7 @@ button.primary:hover { opacity: 0.88 !important; }
                 </p>
             </div>
             <nav class="flex gap-8 text-[11px] font-bold uppercase tracking-widest text-gray-500">
-                <span class="text-black border-b-2 border-black pb-1" data-i18n="nav.angle">Angle</span>
+                <span class="text-black pb-1" data-i18n="nav.angle">Angle</span>
             </nav>
         </header>
 
@@ -290,7 +285,7 @@ button.primary:hover { opacity: 0.88 !important; }
 
                         <div id="uploadContent" class="text-center space-y-4">
                             <div
-                                class="w-14 h-14 rounded-full border border-gray-200 bg-white flex items-center justify-center mx-auto group-hover:bg-black group-hover:text-white group-hover:border-black transition-all duration-500">
+                                class="w-14 h-14 rounded-full bg-gray-50 shadow-sm flex items-center justify-center mx-auto group-hover:bg-black group-hover:text-white transition-all duration-500">
                                 <i data-lucide="arrow-up" class="w-5 h-5"></i>
                             </div>
                             <p class="text-[11px] font-bold uppercase tracking-tight" data-i18n="studio.dropImage">Drop image here</p>
@@ -309,13 +304,13 @@ button.primary:hover { opacity: 0.88 !important; }
                 <section id="cameraControl" class="space-y-6 w-full">
                     <h3 class="text-[9px] font-black uppercase tracking-[0.3em] text-gray-400">02. <span data-i18n="studio.cameraControl">Camera Control</span></h3>
                     <div
-                        class="w-full aspect-[4/3] flex flex-col md:flex-row bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                        class="w-full aspect-[4/3] flex flex-col md:flex-row bg-white rounded-2xl shadow-sm overflow-hidden">
                         <!-- 3D View -->
                         <div id="threeContainer" class="relative flex-1 bg-[#222] h-full min-h-0"></div>
 
                         <!-- Controls -->
                         <div
-                            class="w-full md:w-64 flex-shrink-0 p-5 flex flex-col justify-center gap-4 border-l border-gray-100 bg-white overflow-y-auto">
+                            class="w-full md:w-64 flex-shrink-0 p-5 flex flex-col justify-center gap-4 bg-white overflow-y-auto">
                             <!-- Horizontal -->
                             <div class="space-y-3">
                                 <div
@@ -475,7 +470,7 @@ button.primary:hover { opacity: 0.88 !important; }
                             onclick="zoomImage()">
 
                         <a id="downloadBtn" href="#" download
-                            class="hidden absolute bottom-8 right-8 w-14 h-14 bg-white shadow-2xl rounded-2xl flex items-center justify-center hover:bg-black hover:text-white transition-all duration-500 border border-gray-100">
+                            class="hidden absolute bottom-8 right-8 w-14 h-14 bg-white shadow-2xl rounded-2xl flex items-center justify-center hover:bg-black hover:text-white transition-all duration-500">
                             <i data-lucide="download" class="w-5 h-5"></i>
                         </a>
                     </div>
@@ -486,7 +481,7 @@ button.primary:hover { opacity: 0.88 !important; }
         <section class="mt-32">
             <div class="flex items-center gap-6 mb-10">
                 <h2 class="text-[11px] font-black uppercase tracking-[0.5em]">Archive</h2>
-                <div class="h-px flex-1 bg-black/5"></div>
+                <div class="flex-1"></div>
             </div>
             <div id="masonry" class="masonry-grid"></div>
             <div id="loadMoreTrigger"
@@ -507,7 +502,7 @@ button.primary:hover { opacity: 0.88 !important; }
             <div id="lightboxFrame" class="studio-preview-frame hidden">
                 <img id="lightboxImg" src="" class="studio-preview-img" alt="preview">
                 <div id="lightboxRes" data-no-pan
-                    class="absolute top-4 left-4 bg-black/30 backdrop-blur-md border border-white/20 text-white px-3 py-1.5 rounded-full text-[10px] font-medium tracking-wider opacity-0 transition-opacity duration-300 pointer-events-none z-10">
+                    class="absolute top-4 left-4 bg-black/30 backdrop-blur-md shadow-lg text-white px-3 py-1.5 rounded-full text-[10px] font-medium tracking-wider opacity-0 transition-opacity duration-300 pointer-events-none z-10">
                 </div>
             </div>
             <div class="mt-8">
@@ -820,14 +815,14 @@ button.primary:hover { opacity: 0.88 !important; }
         // Drag and Drop
         dropzone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            dropzone.classList.add('border-black', 'bg-gray-50');
+            dropzone.classList.add('shadow-md', 'bg-gray-50');
         });
         dropzone.addEventListener('dragleave', () => {
-            dropzone.classList.remove('border-black', 'bg-gray-50');
+            dropzone.classList.remove('shadow-md', 'bg-gray-50');
         });
         dropzone.addEventListener('drop', (e) => {
             e.preventDefault();
-            dropzone.classList.remove('border-black', 'bg-gray-50');
+            dropzone.classList.remove('shadow-md', 'bg-gray-50');
             if (e.dataTransfer.files && e.dataTransfer.files[0]) {
                 handleFile(e.dataTransfer.files[0]);
             }
@@ -917,10 +912,8 @@ button.primary:hover { opacity: 0.88 !important; }
 
             // Visual feedback
             promptInput.style.transition = "0.2s";
-            promptInput.style.borderColor = "#000";
-            promptInput.style.boxShadow = "0 0 0 2px rgba(0,0,0,0.1)";
+            promptInput.style.boxShadow = "0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent)";
             setTimeout(() => {
-                promptInput.style.borderColor = "";
                 promptInput.style.boxShadow = "";
             }, 500);
         }
@@ -1067,10 +1060,10 @@ button.primary:hover { opacity: 0.88 !important; }
                 // ... existing local check ...
                 const dropzone = document.getElementById('dropzone');
                 dropzone.style.transition = "0.2s";
-                dropzone.style.borderColor = "#ef4444";
+                dropzone.style.backgroundColor = "color-mix(in srgb, var(--danger) 14%, transparent)";
                 dropzone.style.transform = "scale(0.98)";
                 setTimeout(() => {
-                    dropzone.style.borderColor = "";
+                    dropzone.style.backgroundColor = "";
                     dropzone.style.transform = "scale(1)";
                 }, 300);
                 return;
@@ -1084,9 +1077,9 @@ button.primary:hover { opacity: 0.88 !important; }
             // Allow manual prompt even if angle not applied, but require prompt input
             if (!promptInput.value.trim()) {
                 promptInput.style.transition = "0.2s";
-                promptInput.style.borderColor = "#ef4444";
+                promptInput.style.backgroundColor = "color-mix(in srgb, var(--danger) 14%, transparent)";
                 setTimeout(() => {
-                    promptInput.style.borderColor = "";
+                    promptInput.style.backgroundColor = "";
                 }, 300);
                 return;
             }

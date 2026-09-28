@@ -235,58 +235,70 @@
         try { localStorage.setItem(PROVIDER_VIDEO_MODEL_MEMORY_KEY, JSON.stringify(memory)); } catch(e) {}
     }
 
+    /* 同一时刻只允许一个保存流程：一次点击若被多组监听器跑了 N 遍，会同时弹出多个原生保存框。
+       标记在模块作用域共享，try/finally 保证成功/失败/取消/抛错任何分支都会复位，不会永久锁死。 */
+    let downloadInFlight = false;
     async function downloadBlob(blob, filename){
-        const name = filename || 'download';
-        // 桌面应用（pywebview）：调用原生保存对话框
-        // 注意：smart-canvas 等 iframe 中 window.pywebview 不存在，需向上查顶层窗口（同源）
-        var wv = window.pywebview;
-        if(!wv){
-            try { wv = window.top && window.top.pywebview; } catch(_){}
-            if(!wv){
-                try { wv = window.parent && window.parent.pywebview; } catch(_){}
-            }
-        }
-        if(wv && wv.api && typeof wv.api.save_file === 'function'){
-            showToast('正在准备文件...');
-            try {
-                const dataUrl = await new Promise(function(resolve, reject){
-                    const reader = new FileReader();
-                    reader.onload = function(){ resolve(reader.result); };
-                    reader.onerror = function(){ reject(reader.error || new Error('read failed')); };
-                    reader.readAsDataURL(blob);
-                });
-                // pywebview JS 桥是异步的，返回值是 Promise：非空字符串=已保存，空串=用户取消
-                const saved = await wv.api.save_file(dataUrl, name);
-                if(saved) showToast('已保存');
-                // 空串：用户取消，静默
-            } catch(e) {
-                showToast('保存失败');
-            }
+        if(downloadInFlight){
+            showToast('正在保存，请稍候...');
             return;
         }
-        // Chromium 浏览器：File System Access API 系统级保存对话框
-        if(typeof window.showSaveFilePicker === 'function'){
-            try {
-                const handle = await window.showSaveFilePicker({ suggestedName: name });
-                const writable = await handle.createWritable();
-                await writable.write(blob);
-                await writable.close();
-                showToast('已保存');
-                return;
-            } catch(e) {
-                // AbortError = 用户取消，静默；其他错误（如无用户手势/iframe 限制）回退到普通下载
-                if(e && e.name === 'AbortError') return;
+        downloadInFlight = true;
+        try {
+            const name = filename || 'download';
+            // 桌面应用（pywebview）：调用原生保存对话框
+            // 注意：smart-canvas 等 iframe 中 window.pywebview 不存在，需向上查顶层窗口（同源）
+            var wv = window.pywebview;
+            if(!wv){
+                try { wv = window.top && window.top.pywebview; } catch(_){}
+                if(!wv){
+                    try { wv = window.parent && window.parent.pywebview; } catch(_){}
+                }
             }
+            if(wv && wv.api && typeof wv.api.save_file === 'function'){
+                showToast('正在准备文件...');
+                try {
+                    const dataUrl = await new Promise(function(resolve, reject){
+                        const reader = new FileReader();
+                        reader.onload = function(){ resolve(reader.result); };
+                        reader.onerror = function(){ reject(reader.error || new Error('read failed')); };
+                        reader.readAsDataURL(blob);
+                    });
+                    // pywebview JS 桥是异步的，返回值是 Promise：非空字符串=已保存，空串=用户取消
+                    const saved = await wv.api.save_file(dataUrl, name);
+                    if(saved) showToast('已保存');
+                    // 空串：用户取消，静默
+                } catch(e) {
+                    showToast('保存失败');
+                }
+                return;
+            }
+            // Chromium 浏览器：File System Access API 系统级保存对话框
+            if(typeof window.showSaveFilePicker === 'function'){
+                try {
+                    const handle = await window.showSaveFilePicker({ suggestedName: name });
+                    const writable = await handle.createWritable();
+                    await writable.write(blob);
+                    await writable.close();
+                    showToast('已保存');
+                    return;
+                } catch(e) {
+                    // AbortError = 用户取消，静默；其他错误（如无用户手势/iframe 限制）回退到普通下载
+                    if(e && e.name === 'AbortError') return;
+                }
+            }
+            // Web 浏览器：<a download> + blob URL
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+        } finally {
+            downloadInFlight = false;
         }
-        // Web 浏览器：<a download> + blob URL
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
     }
 
     /* ── theme helper ── */

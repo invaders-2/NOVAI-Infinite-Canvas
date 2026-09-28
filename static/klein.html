@@ -7,15 +7,15 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>Flux Klein | 极简一体化终端</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
-    <script src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
-    <script src="/static/js/image-preview.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/history-bulk-manager.js?v=1.0.120.1789606971"></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
+    <script src="/static/js/image-preview.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/history-bulk-manager.js?v=1.0.123.1789606971"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
     <style>
 
         :root {
@@ -51,20 +51,20 @@
 
         .nano-input {
             background: var(--card);
-            border: 1px solid #ececee;
+            border: 0;
             transition: all 0.3s var(--easing);
         }
-        .nano-input:focus { border-color: #000; box-shadow: 0 0 0 1px #000; }
+        .nano-input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 
         .upload-item {
             background: var(--card);
-            border: 1px dashed #d0d0d2;
+            border: 0;
             transition: all 0.4s var(--easing);
             position: relative;
             overflow: hidden;
         }
-        .upload-item:hover { border-color: #000; background: #fff; transform: translateY(-2px); }
-        .upload-item.drag-over { border-style: solid; border-color: #000; box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+        .upload-item:hover { background: #fff; box-shadow: var(--shadow-md); transform: translateY(-2px); }
+        .upload-item.drag-over { background: var(--soft); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
 
         .preview-img {
             position: absolute;
@@ -85,7 +85,7 @@
         /* Engine panel (above run button) */
         .engine-panel {
             background: #fff;
-            border: 1px solid #ececee;
+            border: 0;
             border-radius:var(--radius-xl);
             padding: 12px;
             display: flex;
@@ -102,8 +102,8 @@
             letter-spacing: .04em;
         }
         .engine-switch {
-            background: var(--bg);
-            border: 1px solid #dcdcde;
+            background: var(--soft);
+            border: 0;
             border-radius:var(--radius-full);
             padding: 3px;
             display: grid;
@@ -155,7 +155,7 @@
         .result-frame {
             background: #ffffff;
             border-radius:var(--radius-xl);
-            border: 1px solid var(--border);
+            border: 0;
             box-shadow: 0 2px 15px rgba(0,0,0,0.02);
         }
 
@@ -171,7 +171,7 @@
             border-radius:var(--radius-xl);
             overflow: hidden;
             background: #fff;
-            border: 1px solid var(--border);
+            border: 0;
             transition: all 0.5s var(--easing);
         }
         .masonry-item:hover { transform: translateY(-6px); box-shadow: 0 20px 40px rgba(0,0,0,0.08); }
@@ -184,7 +184,7 @@
         html.studio-theme-dark .lora-track { background: #323234; }
         html.studio-theme-dark .lora-track.on { background: var(--info); }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         :root { --accent: #1c1c1e; --bg: #f5f5f7; --card: var(--stage-bg); }
@@ -192,21 +192,21 @@
         .container-box { margin-top: 60px; }
         .glass-btn { background: var(--text) !important; border-radius: var(--radius-md) !important; }
         .glass-btn:hover { background: var(--text) !important; opacity: 0.9; }
-        .upload-item { border-color: var(--border) !important; border-radius: var(--radius-lg) !important; }
-        .engine-panel { background: var(--stage-bg) !important; border-color: var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-sm) !important; }
-        .engine-switch { background: var(--bg) !important; border-color: var(--border) !important; }
+        .upload-item { border: 0 !important; border-radius: var(--radius-lg) !important; }
+        .engine-panel { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-sm) !important; }
+        .engine-switch { background: var(--soft) !important; border: 0 !important; }
         .engine-btn.active { background: var(--stage-bg) !important; color: var(--text) !important; }
-        .result-frame { background: var(--stage-bg) !important; border-color: var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-sm) !important; }
-        .masonry-item { background: var(--stage-bg) !important; border-color: var(--border) !important; border-radius: var(--radius-xl) !important; }
-        .nano-input { background: var(--stage-bg) !important; border-color: var(--border) !important; border-radius: var(--radius-lg) !important; }
-        .nano-input:focus { border-color: var(--text) !important; box-shadow: 0 0 0 1px var(--text) !important; }
+        .result-frame { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-sm) !important; }
+        .masonry-item { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-xl) !important; }
+        .nano-input { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-lg) !important; }
+        .nano-input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
         .engine-label { color: var(--muted) !important; }
         html.theme-dark body { background: var(--bg) !important; }
         html.theme-dark .engine-panel { background: var(--stage-bg) !important; }
         html.theme-dark .result-frame { background: var(--stage-bg) !important; }
 </style>
 
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
 </head>
 
 <body class="antialiased transition-colors duration-300">
@@ -284,7 +284,7 @@
                         <div class="cloud-dot"></div>
                         <span id="cloudStatusText" data-i18n="studio.connecting">Connecting...</span>
                     </div>
-                    <div id="loraSection" class="hidden flex-col gap-3 pt-2 border-t border-gray-100">
+                    <div id="loraSection" class="hidden flex-col gap-3 mt-2 p-3 rounded-xl bg-black/5">
                         <label class="flex items-center gap-3 cursor-pointer select-none" onclick="toggleLora()">
                             <div class="relative w-9 h-5 flex-shrink-0">
                                 <div id="loraTrack" class="lora-track w-full h-full rounded-full transition-colors duration-200"></div>
@@ -336,7 +336,7 @@
         <section class="mt-32">
             <div class="flex items-center gap-6 mb-12">
                 <h2 class="text-[11px] font-black uppercase tracking-[0.5em]" data-i18n="studio.archives">Archives</h2>
-                <div class="h-px flex-1 bg-gray-100"></div>
+                <div class="flex-1"></div>
             </div>
             <div id="masonry" class="masonry-grid"></div>
             <div id="loadMoreTrigger"
@@ -354,11 +354,11 @@
                     class="hidden relative w-full h-[75vh] rounded-[2.5rem] overflow-hidden shadow-2xl bg-[#fafafa]">
                     <img id="compareGenerated" class="absolute inset-0 w-full h-full object-contain">
                     <div id="compareOriginalWrapper"
-                        class="absolute inset-0 w-full h-full overflow-hidden border-r-2 border-white/50">
+                        class="absolute inset-0 w-full h-full overflow-hidden">
                         <img id="compareOriginal" class="absolute inset-0 w-full h-full object-contain">
                     </div>
                     <div id="compareSlider" class="absolute inset-y-0 left-1/2 w-0.5 bg-white z-20 cursor-ew-resize">
-                        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-white shadow-2xl rounded-full flex items-center justify-center border border-gray-100">
+                        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-white shadow-2xl rounded-full flex items-center justify-center">
                             <i data-lucide="move-horizontal" class="w-4 h-4 text-black"></i>
                         </div>
                     </div>
@@ -366,7 +366,7 @@
                 <div id="lightboxFrame" class="studio-preview-frame hidden">
                     <img id="lightboxImg" src="" class="studio-preview-img" alt="preview">
                     <div id="lightboxRes" data-no-pan
-                        class="absolute top-6 left-6 bg-black/30 backdrop-blur-md border border-white/20 text-white px-3 py-1.5 rounded-full text-[10px] font-medium tracking-wider opacity-0 transition-opacity duration-300 pointer-events-none z-30">
+                        class="absolute top-6 left-6 bg-black/30 backdrop-blur-md shadow-lg text-white px-3 py-1.5 rounded-full text-[10px] font-medium tracking-wider opacity-0 transition-opacity duration-300 pointer-events-none z-30">
                     </div>
                     <button onclick="downloadLightboxImage(event)" data-no-pan
                         class="absolute top-6 right-6 bg-black text-white w-12 h-12 rounded-2xl flex items-center justify-center shadow-2xl z-30 hover:scale-105 transition-transform pointer-events-auto">
@@ -374,7 +374,7 @@
                     </button>
                 </div>
             </div>
-            <div class="w-full bg-white border border-gray-100 rounded-[2rem] p-8 shadow-sm flex justify-between items-center gap-8">
+            <div class="w-full bg-white rounded-[2rem] p-8 shadow-sm flex justify-between items-center gap-8">
                 <div class="flex-1">
                     <span class="text-[9px] font-black text-gray-300 uppercase tracking-widest block mb-2" data-i18n="studio.promptExecution">Prompt Execution</span>
                     <p id="lightboxPrompt" class="text-gray-700 text-sm leading-relaxed"></p>

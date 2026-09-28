@@ -13,39 +13,39 @@
             }
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
-    <script src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=1.0.120.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=1.0.123.1790241060">
 
-<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
+<link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 body { background: transparent !important; color: var(--text) !important; }
 /* --- Marvis 增强覆盖 (api-settings.html) --- */
 .page { background: var(--bg) !important; padding: 20px 24px !important; }
 .page-head { border-bottom-color: var(--divider) !important; }
-.sidebar { background: var(--stage-bg) !important; border-color: var(--border) !important; border-radius: var(--radius-xl) !important; }
-.block { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-sm) !important; }
-.field-frame { background: var(--bg) !important; border-color: var(--border) !important; border-radius: var(--radius-sm) !important; }
+.sidebar { background: var(--stage-bg) !important; border-radius: var(--radius-xl) !important; }
+.block { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-sm) !important; }
+.field-frame { background: var(--bg) !important; border-radius: var(--radius-sm) !important; }
 .field-frame input, .field-frame select { color: var(--text) !important; }
-.field-frame input:focus, .field-frame select:focus { border-color: var(--text) !important; }
+.field-frame input:focus, .field-frame select:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 .action-btn { border-radius: var(--radius-sm) !important; }
 .save-btn { background: var(--text) !important; color: var(--bg) !important; }
 .provider-list .provider-item { color: var(--muted) !important; border-radius: var(--radius-sm) !important; }
 .provider-list .provider-item.active { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
-.model-list .model-item { background: var(--bg) !important; border-color: var(--border) !important; border-radius: var(--radius-sm) !important; }
-.picker-modal { background: var(--stage-bg) !important; border: 1px solid var(--border) !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-xl) !important; }
-.picker-search { background: var(--bg) !important; border-color: var(--border) !important; border-radius: var(--radius-lg) !important; color: var(--text) !important; }
+.model-list .model-item { background: var(--bg) !important; border-radius: var(--radius-sm) !important; }
+.picker-modal { background: color-mix(in srgb, var(--panel) 78%, transparent) !important; border: 0 !important; border-radius: var(--radius-xl) !important; box-shadow: var(--shadow-xl) !important; backdrop-filter: blur(44px) saturate(190%); -webkit-backdrop-filter: blur(44px) saturate(190%); }
+.picker-search { background: var(--bg) !important; border-radius: var(--radius-lg) !important; color: var(--text) !important; }
 /* ═══════════════════════════════════════════════════════════════════
    设置弹窗内嵌（?embed=1）— 对齐 index.html「通用设置」的设计语言：
-   扁平、半透明、细边、无重阴影、灰度中性，唯一强调是黑白反转。
+   扁平、半透明、无描边、无重阴影、灰度中性，唯一强调是黑白反转。
    规则全部限定在 html.settings-embed，独立页面观感不受影响。
    body:not(#settings-embed-scope) 用来把这些规则提到 id 级特异性：
    api-settings.css 里有大量 body:not(...) 前缀的 !important 规则，否则盖不住。
@@ -82,8 +82,6 @@ html.settings-embed body:not(#settings-embed-scope) {
     --embed-canvas: #ffffff;
     --embed-aside: #F5F5F6;
     --embed-card: rgba(255, 255, 255, .45);
-    --embed-line: rgba(0, 0, 0, .06);
-    --embed-line-btn: rgba(0, 0, 0, .08);
     background: var(--embed-canvas) !important;
     color: var(--text) !important;
     font-family: var(--font-sans) !important;
@@ -120,8 +118,6 @@ html.settings-embed.studio-theme-dark body:not(#settings-embed-scope) {
     --embed-canvas: #141416;
     --embed-aside: #222326;
     --embed-card: rgba(255, 255, 255, .04);
-    --embed-line: rgba(255, 255, 255, .07);
-    --embed-line-btn: rgba(255, 255, 255, .10);
 }
 html.settings-embed,
 html.settings-embed body:not(#settings-embed-scope) * {
@@ -227,14 +223,13 @@ html.settings-embed body:not(#settings-embed-scope) .provider-card.active,
 html.settings-embed body:not(#settings-embed-scope) .provider-card.active:hover {
     background: var(--nav-hover-bg) !important;
     color: var(--text) !important;
-    border-color: transparent !important;
     box-shadow: none !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .provider-card.is-disabled { opacity: .48 !important; }
 html.settings-embed body:not(#settings-embed-scope) .provider-card.is-dragging { opacity: .5 !important; }
 html.settings-embed body:not(#settings-embed-scope) .provider-card.provider-card-drop-target {
     background: var(--nav-hover-bg) !important;
-    box-shadow: inset 0 0 0 1px var(--text) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .provider-banner-inner {
     display: flex !important;
@@ -370,7 +365,7 @@ html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn {
     min-height: 0 !important;
     margin: 0 !important;
     padding: 9px 12px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--stage-bg) !important;
     color: var(--muted) !important;
@@ -381,7 +376,7 @@ html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn {
 }
 html.settings-embed body:not(#settings-embed-scope) .add-btn:hover,
 html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn:hover,
-html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn.active { background: var(--nav-hover-bg) !important; color: var(--text) !important; border-color: var(--embed-line-btn) !important; }
+html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn.active { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
 html.settings-embed body:not(#settings-embed-scope) .add-btn svg,
 html.settings-embed body:not(#settings-embed-scope) .cli-quick-btn svg { width: 16px !important; height: 16px !important; flex: 0 0 auto; }
 html.settings-embed body:not(#settings-embed-scope) .cli-quick-note {
@@ -403,7 +398,7 @@ html.settings-embed body:not(#settings-embed-scope) .api-link-btn {
     height: 38px !important;
     min-height: 38px !important;
     margin: 4px 0 0 !important;
-    border: 1px solid var(--text) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--text) !important;
     color: var(--stage-bg) !important;
@@ -419,7 +414,6 @@ html.settings-embed body:not(#settings-embed-scope) .api-link-btn i { animation:
 html.settings-embed body:not(#settings-embed-scope) .api-link-btn:hover {
     background: var(--text) !important;
     color: var(--stage-bg) !important;
-    border-color: var(--text) !important;
     opacity: .88;
     box-shadow: none !important;
     transform: none !important;
@@ -459,7 +453,7 @@ html.settings-embed body:not(#settings-embed-scope) .content-actions { display: 
 html.settings-embed body:not(#settings-embed-scope) .block {
     margin: 0 0 16px !important;
     padding: 18px 20px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 16px !important;
     background: var(--embed-card) !important;
     box-shadow: none !important;
@@ -508,12 +502,12 @@ html.settings-embed body:not(#settings-embed-scope) .field-frame {
     align-items: center !important;
     min-height: 36px !important;
     padding: 0 !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     box-shadow: none !important;
 }
-html.settings-embed body:not(#settings-embed-scope) .field-frame:focus-within { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .field-frame:focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 html.settings-embed body:not(#settings-embed-scope) .field-frame input,
 html.settings-embed body:not(#settings-embed-scope) .field-frame select,
 html.settings-embed body:not(#settings-embed-scope) .field-frame textarea {
@@ -571,7 +565,7 @@ html.settings-embed body:not(#settings-embed-scope) .rh-card-group,
 html.settings-embed body:not(#settings-embed-scope) .rh-config-card,
 html.settings-embed body:not(#settings-embed-scope) .advanced-endpoints {
     padding: 12px 14px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
     background: var(--bg) !important;
     box-shadow: none !important;
@@ -594,7 +588,7 @@ html.settings-embed body:not(#settings-embed-scope) .jimeng-status-pill {
     display: inline-flex !important;
     align-items: center !important;
     padding: 2px 9px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
     background: var(--stage-bg) !important;
     color: var(--muted) !important;
@@ -609,14 +603,14 @@ html.settings-embed body:not(#settings-embed-scope) .rh-paste-input {
     min-width: 0;
     height: 34px !important;
     padding: 0 12px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     color: var(--text) !important;
     font-size: 13px !important;
     box-shadow: none !important;
 }
-html.settings-embed body:not(#settings-embed-scope) .rh-paste-input:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-paste-input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 
 /* ── 按钮家族 ── */
 html.settings-embed body:not(#settings-embed-scope) .action-btn,
@@ -628,7 +622,7 @@ html.settings-embed body:not(#settings-embed-scope) .ghost-btn {
     height: auto !important;
     min-height: 34px !important;
     padding: 7px 14px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: var(--stage-bg) !important;
     color: var(--text) !important;
@@ -649,7 +643,6 @@ html.settings-embed body:not(#settings-embed-scope) .action-btn svg,
 html.settings-embed body:not(#settings-embed-scope) .ghost-btn svg { width: 15px !important; height: 15px !important; }
 html.settings-embed body:not(#settings-embed-scope) .action-btn.primary-btn,
 html.settings-embed body:not(#settings-embed-scope) .action-btn.save-btn {
-    border-color: var(--text) !important;
     background: var(--text) !important;
     color: var(--stage-bg) !important;
 }
@@ -657,17 +650,14 @@ html.settings-embed body:not(#settings-embed-scope) .action-btn.primary-btn:hove
 html.settings-embed body:not(#settings-embed-scope) .action-btn.save-btn:hover {
     background: var(--text) !important;
     color: var(--stage-bg) !important;
-    border-color: var(--text) !important;
     opacity: .88;
 }
 html.settings-embed body:not(#settings-embed-scope) .action-btn.danger-btn {
-    border-color: var(--embed-line-btn) !important;
-    background: var(--stage-bg) !important;
+    background: var(--danger-bg) !important;
     color: var(--danger-text) !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .action-btn.danger-btn:hover {
-    border-color: var(--danger-border) !important;
-    background: var(--danger-bg) !important;
+    background: color-mix(in srgb, var(--danger) 20%, transparent) !important;
     color: var(--danger-text) !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .key-btn {
@@ -678,7 +668,7 @@ html.settings-embed body:not(#settings-embed-scope) .key-btn {
     height: 30px !important;
     min-width: 30px !important;
     padding: 0 !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: var(--stage-bg) !important;
     color: var(--muted) !important;
@@ -688,8 +678,7 @@ html.settings-embed body:not(#settings-embed-scope) .key-btn:hover { background:
 html.settings-embed body:not(#settings-embed-scope) .key-btn svg { width: 15px !important; height: 15px !important; }
 html.settings-embed body:not(#settings-embed-scope) .key-btn.key-clear { color: var(--danger-text) !important; }
 html.settings-embed body:not(#settings-embed-scope) .key-btn.key-clear:hover {
-    border-color: var(--danger-border) !important;
-    background: var(--danger-bg) !important;
+    background: color-mix(in srgb, var(--danger) 20%, transparent) !important;
     color: var(--danger-text) !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .key-input-line { gap: 8px !important; }
@@ -719,18 +708,17 @@ html.settings-embed body:not(#settings-embed-scope) .model-cat-tab {
     gap: 6px !important;
     height: auto !important;
     padding: 8px 14px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
     background: var(--stage-bg) !important;
     color: var(--text) !important;
     font-size: 13px !important;
     font-weight: 600 !important;
     box-shadow: none !important;
-    transition: background .2s ease, border-color .2s ease, color .2s ease !important;
+    transition: background .2s ease, color .2s ease !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .model-cat-tab:hover { background: var(--nav-hover-bg) !important; }
 html.settings-embed body:not(#settings-embed-scope) .model-cat-tab.active {
-    border-color: var(--text) !important;
     background: var(--text) !important;
     color: var(--stage-bg) !important;
 }
@@ -740,9 +728,9 @@ html.settings-embed body:not(#settings-embed-scope) .lora-row {
     align-items: center !important;
     gap: 8px !important;
     padding: 8px 10px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
-    background: transparent !important;
+    background: var(--embed-card) !important;
     box-shadow: none !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .model-row { grid-template-columns: minmax(0, 1fr) 36px !important; }
@@ -765,22 +753,24 @@ html.settings-embed body:not(#settings-embed-scope) .model-protocol-select {
     min-width: 0 !important;
     height: 32px !important;
     padding: 0 12px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 8px !important;
-    background: var(--bg) !important;
+    background-color: var(--bg) !important;
     color: var(--text) !important;
     font-size: 13px !important;
     box-shadow: none !important;
 }
+html.settings-embed body:not(#settings-embed-scope) .lora-field select,
+html.settings-embed body:not(#settings-embed-scope) .model-protocol-select { padding-right: 24px !important; }
 html.settings-embed body:not(#settings-embed-scope) .model-protocol-select { min-width: 74px !important; cursor: pointer; }
 html.settings-embed body:not(#settings-embed-scope) .model-protocol-auto {
     display: inline-flex !important;
     align-items: center !important;
     height: 30px !important;
     padding: 0 9px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 8px !important;
-    background: transparent !important;
+    background: var(--nav-hover-bg) !important;
     color: var(--muted) !important;
     font-size: 11px !important;
     font-weight: 600 !important;
@@ -801,7 +791,7 @@ html.settings-embed body:not(#settings-embed-scope) .icon-btn {
     width: 30px !important;
     height: 30px !important;
     padding: 0 !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: var(--stage-bg) !important;
     color: var(--muted) !important;
@@ -811,7 +801,7 @@ html.settings-embed body:not(#settings-embed-scope) .icon-btn:hover { background
 html.settings-embed body:not(#settings-embed-scope) .icon-btn svg { width: 15px !important; height: 15px !important; }
 html.settings-embed body:not(#settings-embed-scope) .model-row input:focus,
 html.settings-embed body:not(#settings-embed-scope) .lora-row input:focus,
-html.settings-embed body:not(#settings-embed-scope) .lora-field input:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .lora-field input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 html.settings-embed body:not(#settings-embed-scope) .model-list,
 html.settings-embed body:not(#settings-embed-scope) .lora-list { display: flex !important; flex-direction: column !important; gap: 8px !important; }
 html.settings-embed body:not(#settings-embed-scope) .models-fetch-hint,
@@ -870,7 +860,7 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-inline-card .reco
     align-items: stretch !important;
     gap: 10px !important;
     padding: 14px 16px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 16px !important;
     background: var(--embed-card) !important;
     box-shadow: none !important;
@@ -900,7 +890,7 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-tag.recommend-fre
     gap: 4px !important;
     height: auto !important;
     padding: 3px 10px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
     background: var(--stage-bg) !important;
     color: var(--muted) !important;
@@ -914,7 +904,6 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-tag.recommend-fre
 html.settings-embed body:not(#settings-embed-scope) .recommend-tag.recommend-free-tag i,
 html.settings-embed body:not(#settings-embed-scope) .recommend-tag.recommend-free-tag svg {
     background: var(--stage-bg) !important;
-    border-color: var(--embed-line-btn) !important;
     color: var(--muted) !important;
     stroke: var(--muted) !important;
 }
@@ -925,7 +914,7 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-platform-setup { 
 html.settings-embed body:not(#settings-embed-scope) .recommend-guide-source,
 html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save {
     padding: 12px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
     background: var(--stage-bg) !important;
     box-shadow: none !important;
@@ -949,7 +938,7 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-single-action but
     height: 34px !important;
     min-height: 34px !important;
     padding: 0 14px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: var(--stage-bg) !important;
     color: var(--text) !important;
@@ -974,7 +963,7 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-actions button {
     height: 34px !important;
     min-height: 34px !important;
     padding: 0 14px !important;
-    border: 1px solid var(--text) !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: var(--text) !important;
     color: var(--stage-bg) !important;
@@ -991,7 +980,6 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-actions a:hover,
 html.settings-embed body:not(#settings-embed-scope) .recommend-actions button:hover {
     background: var(--text) !important;
     color: var(--stage-bg) !important;
-    border-color: var(--text) !important;
     opacity: .88;
 }
 html.settings-embed body:not(#settings-embed-scope) .onboarding-key-field input,
@@ -1001,7 +989,7 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save input 
     min-width: 0 !important;
     height: 34px !important;
     padding: 0 12px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: var(--bg) !important;
     color: var(--text) !important;
@@ -1011,7 +999,7 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save input 
 }
 html.settings-embed body:not(#settings-embed-scope) .onboarding-key-field input:focus,
 html.settings-embed body:not(#settings-embed-scope) .onboarding-rh-row-field input:focus,
-html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save input:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .recommend-guide-save input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 html.settings-embed body:not(#settings-embed-scope) .onboarding-title {
     color: var(--text) !important;
     font-size: 14px !important;
@@ -1031,7 +1019,7 @@ html.settings-embed body:not(#settings-embed-scope) .onboarding-rh-source-label 
 html.settings-embed body:not(#settings-embed-scope) .recommend-note {
     margin: 0 !important;
     padding: 14px 16px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 16px !important;
     background: var(--embed-card) !important;
     color: var(--muted) !important;
@@ -1041,7 +1029,7 @@ html.settings-embed body:not(#settings-embed-scope) .recommend-note {
 }
 /* 新手引导里的内容框：底板拍平后它承担内层卡片的角色，规格对齐其它内层框 */
 html.settings-embed body:not(#settings-embed-scope) .onboarding-step-panel {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
     background: var(--bg) !important;
     box-shadow: none !important;
@@ -1050,15 +1038,16 @@ html.settings-embed body:not(#settings-embed-scope) .onboarding-step-panel {
 /* ── 浮层（推荐API / 模型选择 / 帮助 / RH 工作流编辑器） ── */
 html.settings-embed body:not(#settings-embed-scope) .picker-overlay { background: rgba(0, 0, 0, .28) !important; }
 html.settings-embed body:not(#settings-embed-scope) .picker-modal {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 20px !important;
-    background: var(--stage-bg) !important;
+    background: color-mix(in srgb, var(--panel) 78%, transparent) !important;
+    backdrop-filter: blur(44px) saturate(190%);
+    -webkit-backdrop-filter: blur(44px) saturate(190%);
     box-shadow: var(--shadow-xl) !important;
     overflow: hidden !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .picker-head {
-    padding: 20px 22px 14px !important;
-    border-bottom: 1px solid var(--embed-line) !important;
+    padding: 24px 22px 14px !important;
     background: transparent !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .picker-title {
@@ -1080,7 +1069,7 @@ html.settings-embed body:not(#settings-embed-scope) .picker-close {
     justify-content: center !important;
     width: 30px !important;
     height: 30px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: transparent !important;
     color: var(--muted) !important;
@@ -1090,7 +1079,7 @@ html.settings-embed body:not(#settings-embed-scope) .picker-search,
 html.settings-embed body:not(#settings-embed-scope) .picker-toolbar input {
     height: 36px !important;
     padding: 0 12px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: var(--bg) !important;
     color: var(--muted) !important;
@@ -1098,14 +1087,14 @@ html.settings-embed body:not(#settings-embed-scope) .picker-toolbar input {
     box-shadow: none !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .picker-search:focus,
-html.settings-embed body:not(#settings-embed-scope) .picker-toolbar input:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .picker-toolbar input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 html.settings-embed body:not(#settings-embed-scope) .picker-cat-tab {
     display: inline-flex !important;
     align-items: center !important;
     gap: 6px !important;
     height: auto !important;
     padding: 8px 14px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
     background: var(--stage-bg) !important;
     color: var(--text) !important;
@@ -1115,7 +1104,6 @@ html.settings-embed body:not(#settings-embed-scope) .picker-cat-tab {
 }
 html.settings-embed body:not(#settings-embed-scope) .picker-cat-tab:hover { background: var(--nav-hover-bg) !important; }
 html.settings-embed body:not(#settings-embed-scope) .picker-cat-tab.active {
-    border-color: var(--text) !important;
     background: var(--text) !important;
     color: var(--stage-bg) !important;
 }
@@ -1134,14 +1122,12 @@ html.settings-embed body:not(#settings-embed-scope) .model-cat-tab .cat-count {
     opacity: .65;
 }
 html.settings-embed body:not(#settings-embed-scope) .picker-foot {
-    padding: 14px 22px 18px !important;
-    border-top: 1px solid var(--embed-line) !important;
+    padding: 18px 22px 18px !important;
     background: transparent !important;
     gap: 8px !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .picker-summary {
     border: none !important;
-    border-top: 1px solid var(--embed-line) !important;
     border-radius: 0 !important;
     background: transparent !important;
     color: var(--muted) !important;
@@ -1151,7 +1137,7 @@ html.settings-embed body:not(#settings-embed-scope) .picker-sum-chip,
 html.settings-embed body:not(#settings-embed-scope) .picker-sum-chip-empty,
 html.settings-embed body:not(#settings-embed-scope) .picker-type-btn {
     padding: 2px 9px !important;
-    border: 1px solid var(--embed-line-btn) !important;
+    border: 0 !important;
     border-radius: 999px !important;
     background: var(--stage-bg) !important;
     color: var(--muted) !important;
@@ -1163,7 +1149,7 @@ html.settings-embed body:not(#settings-embed-scope) .jimeng-help-toolbar { displ
 html.settings-embed body:not(#settings-embed-scope) .jimeng-help-output {
     margin: 12px 22px 18px !important;
     padding: 12px 14px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     color: var(--muted) !important;
@@ -1172,15 +1158,16 @@ html.settings-embed body:not(#settings-embed-scope) .jimeng-help-output {
 }
 html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-overlay { background: rgba(0, 0, 0, .28) !important; }
 html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-modal {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 20px !important;
-    background: var(--stage-bg) !important;
+    background: color-mix(in srgb, var(--panel) 78%, transparent) !important;
+    backdrop-filter: blur(44px) saturate(190%);
+    -webkit-backdrop-filter: blur(44px) saturate(190%);
     box-shadow: var(--shadow-xl) !important;
     overflow: hidden !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-head {
-    padding: 18px 22px !important;
-    border-bottom: 1px solid var(--embed-line) !important;
+    padding: 22px 22px 12px !important;
     background: transparent !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-title {
@@ -1203,19 +1190,19 @@ html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-close {
     justify-content: center !important;
     width: 30px !important;
     height: 30px !important;
-    border: 1px solid transparent !important;
+    border: 0 !important;
     border-radius: 8px !important;
     background: transparent !important;
     color: var(--muted) !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-close:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
-html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-side { border-right: 1px solid var(--embed-line) !important; background: transparent !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-workflow-editor-side { background: var(--embed-aside) !important; }
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-field { gap: 6px !important; }
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-field > span { color: var(--muted) !important; font-size: 12px !important; font-weight: 600 !important; }
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-field input,
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-field textarea {
     padding: 8px 12px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--bg) !important;
     color: var(--text) !important;
@@ -1223,10 +1210,10 @@ html.settings-embed body:not(#settings-embed-scope) .rh-editor-field textarea {
     box-shadow: none !important;
 }
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-field input:focus,
-html.settings-embed body:not(#settings-embed-scope) .rh-editor-field textarea:focus { border-color: var(--border-strong) !important; box-shadow: none !important; }
+html.settings-embed body:not(#settings-embed-scope) .rh-editor-field textarea:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent) !important; }
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-node-list,
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-summary {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
     background: var(--bg) !important;
     color: var(--muted) !important;
@@ -1234,7 +1221,7 @@ html.settings-embed body:not(#settings-embed-scope) .rh-editor-summary {
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-graph-wrap,
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-graph-svg { border: none !important; border-radius: 0 !important; background: var(--bg) !important; }
 html.settings-embed body:not(#settings-embed-scope) .rh-editor-graph-controls {
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--stage-bg) !important;
     box-shadow: none !important;
@@ -1246,7 +1233,7 @@ html.settings-embed body:not(#settings-embed-scope) .rh-editor-graph-controls bu
 /* ── CLI 面板 / 存储设置 / 校验结果 ── */
 html.settings-embed body:not(#settings-embed-scope) .jimeng-cli-panel {
     padding: 12px 14px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 12px !important;
     background: var(--bg) !important;
     box-shadow: none !important;
@@ -1256,7 +1243,7 @@ html.settings-embed body:not(#settings-embed-scope) .jimeng-credit,
 html.settings-embed body:not(#settings-embed-scope) .jimeng-output { color: var(--muted) !important; font-size: 12px !important; line-height: 1.5 !important; }
 html.settings-embed body:not(#settings-embed-scope) .jimeng-output {
     padding: 10px 12px !important;
-    border: 1px solid var(--embed-line) !important;
+    border: 0 !important;
     border-radius: 10px !important;
     background: var(--stage-bg) !important;
     font-family: var(--font-mono) !important;
@@ -1877,7 +1864,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
         </div>
     </div>
 
-    <script src="/static/js/api-settings.js?v=1.0.120.1789709849"></script>
+    <script src="/static/js/api-settings.js?v=1.0.123.1789709849"></script>
     <script>
         // 保存类按钮多为动态渲染（推荐卡片/新手引导/RH 编辑器），渲染后需要重扫
         (function () {

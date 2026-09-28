@@ -33,13 +33,13 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
     <style>
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -143,8 +143,7 @@
 
         *::-webkit-scrollbar-thumb {
             background-color: var(--scrollbar) !important;
-            border: 1px solid transparent !important;
-            border-right-width: 1px !important;
+            border: 2px solid transparent !important;
             background-clip: padding-box !important;
             border-radius: 10px !important;
             min-height: 36px;
@@ -399,8 +398,8 @@
         }
 
         .nav-item:focus-visible {
-            outline: 2px solid var(--focus-ring);
-            outline-offset: 2px;
+            outline: none;
+            box-shadow: 0 0 0 3px var(--focus-ring);
             background: var(--nav-hover);
             color: var(--text);
         }
@@ -417,8 +416,8 @@
         }
 
         .nav-item.active:focus-visible {
-            outline: 2px solid var(--focus-ring);
-            outline-offset: 3px;
+            outline: none;
+            box-shadow: 0 0 0 3px var(--focus-ring);
         }
 
         /* 展开时 hover/active 还原为原样式 */
@@ -462,7 +461,7 @@
         .nav-divider {
             width: 32px;
             height: 1px;
-            background: var(--divider);
+            background: transparent;
             margin: 8px auto;
             transition: width 0.3s var(--ease-out);
         }
@@ -476,16 +475,16 @@
             flex: 0 0 36px;
             margin: 0 0 8px;
             padding-left: 14px;
-            border: 1px solid var(--border);
+            border: 0;
             border-radius: 16px;
-            background: transparent;
+            background: var(--nav-hover-bg);
             color: var(--muted);
             display: flex;
             align-items: center;
             justify-content: flex-start;
             cursor: pointer;
             overflow: hidden;
-            transition: width 0.3s var(--ease-out) 0.5s, background-color 0.2s var(--ease-hover), color 0.2s var(--ease-hover), border-color 0.2s var(--ease-hover);
+            transition: width 0.3s var(--ease-out) 0.5s, background-color 0.2s var(--ease-hover), color 0.2s var(--ease-hover);
         }
 
         .sidebar:hover .nav-fold-toggle {
@@ -494,14 +493,13 @@
         }
 
         .nav-fold-toggle:hover {
-            background: var(--nav-hover-bg);
+            background: var(--nav-hover);
             color: var(--text);
-            border-color: var(--stage-border);
         }
 
         .nav-fold-toggle:focus-visible {
-            outline: 2px solid var(--focus-ring);
-            outline-offset: 2px;
+            outline: none;
+            box-shadow: 0 0 0 3px var(--focus-ring);
         }
 
         .nav-fold-icon {
@@ -591,8 +589,8 @@
         body.route-canvas.has-frameless-titlebar .stage { margin-top: 48px; }
         /* 边栏不跟随全屏出血：保持与其他页面一致的 15px 内缩，避免无边框窗口下贴到窗口边缘/压住红绿灯 */
         body.route-canvas .sidebar { margin: 15px 0 15px 15px; }
-        /* macOS 原生标题栏模式下其他页面边栏 = 外壳15 + 标题带28 = 43px，这里补齐同样的顶部偏移 */
-        body.route-canvas.has-native-titlebar .sidebar { margin-top: 43px; }
+        /* macOS 原生标题栏模式下其他页面边栏 = 外壳15 + 标题带40 = 55px，这里补齐同样的顶部偏移 */
+        body.route-canvas.has-native-titlebar .sidebar { margin-top: 55px; }
         /* Windows 无边框同理：48px 标题带 + 15px 内缩 */
         body.route-canvas.has-frameless-titlebar .sidebar { margin-top: 63px; }
 
@@ -605,9 +603,9 @@
             display: flex;
             gap: 8px;
         }
-        /* macOS 原生窗口：28px 顶栏，按钮排在 top:2（中心 y = 2 + 12 = 14，与系统原生红绿灯同一条水平线） */
+        /* macOS 原生窗口：40px 顶栏，按钮排在 top:14（中心 y = 14 + 12 = 26，与 launcher.py 下移后的红绿灯同一条水平线） */
         body.has-native-titlebar .stage-actions {
-            top: 2px;
+            top: 14px;
             -webkit-app-region: no-drag;
         }
         /* 网页版（无 pywebview）：隐藏右上角主题/设置快捷按钮，侧栏已有设置入口，功能不丢 */
@@ -644,7 +642,7 @@
             height: 16px;
         }
 
-        /* ═══ macOS 原生窗口：顶部 28px Header 带（macOS 原生标题栏高度的拖拽区；透明，视觉与页面同一块背景） ═══ */
+        /* ═══ macOS 原生窗口：顶部 40px Header 带（加高的 macOS 标题栏拖拽区；透明，视觉与页面同一块背景） ═══ */
         .app-header {
             display: none;
         }
@@ -654,7 +652,7 @@
             top: 0;
             left: 0;
             right: 0;
-            height: 28px;
+            height: 40px;
             z-index: 40;
             -webkit-app-region: drag;
             -webkit-user-select: none;
@@ -662,11 +660,11 @@
         }
         /* 侧栏与舞台从 Header 带下方开始，页面内容不钻进标题区 */
         body.has-native-titlebar .sidebar {
-            margin-top: 28px;
-            height: calc(100vh - 30px - 28px);
+            margin-top: 40px;
+            height: calc(100vh - 30px - 40px);
         }
         body.has-native-titlebar .stage {
-            margin-top: 28px;
+            margin-top: 40px;
         }
         /* Windows 无边框：侧栏与舞台同样让出 48px 自定义标题栏高度，否则标题栏压住边栏顶部 */
         body.has-frameless-titlebar .sidebar {
@@ -760,7 +758,7 @@
             -webkit-backdrop-filter: blur(24px) saturate(200%);
             padding: 8px 14px;
             border-radius: 14px;
-            border: 1px solid transparent;
+            border: 0;
             box-shadow: var(--card-shadow-sm), 0 4px 16px -2px var(--monitor-shadow);
             font-family: var(--font-mono);
             transition: all 0.3s var(--ease-out);
@@ -774,7 +772,6 @@
         .nano-monitor.is-busy {
             background: #1c1c1e;
             color: #fff;
-            border-color: transparent;
             box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.3);
         }
 
@@ -803,11 +800,11 @@
         .divider {
             width: 1px;
             height: 12px;
-            background: var(--divider);
+            background: transparent;
         }
 
         .is-busy .divider {
-            background: rgba(255, 255, 255, 0.2);
+            background: transparent;
         }
 
         .pulse-dot {
@@ -882,14 +879,12 @@
             margin: 2px auto;
             border-radius: 12px;
             background: transparent;
-            outline: 1px solid transparent;
-            outline-offset: -1px;
             color: var(--muted);
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            transition: background-color 0.2s, color 0.2s, outline-color 0.2s, transform 0.2s, box-shadow 0.2s, width 0.3s ease-out, margin 0.3s ease-out;
+            transition: background-color 0.2s, color 0.2s, transform 0.2s, box-shadow 0.2s, width 0.3s ease-out, margin 0.3s ease-out;
             flex-shrink: 0;
             overflow: hidden;
             gap: 0;
@@ -912,27 +907,23 @@
         .side-pill:hover {
             background: var(--nav-hover);
             color: var(--text);
-            outline-color: var(--stage-border);
         }
 
         .sidebar:hover .side-pill:hover {
             background: var(--nav-hover-bg);
             color: var(--text);
-            outline-color: var(--stage-border);
             transform: translateX(2px);
         }
 
         .side-pill.active {
             background: var(--nav-active);
             color: var(--text);
-            outline-color: var(--nav-active);
             box-shadow: none;
         }
 
         .sidebar:hover .side-pill.active {
             background: var(--text);
             color: var(--bg);
-            outline-color: var(--text);
             box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.12);
         }
 
@@ -946,7 +937,7 @@
         }
 
         .side-pill.update-available {
-            outline-color:#22c55e;
+            background:color-mix(in srgb, #22c55e 16%, transparent);
             color:#16a34a;
             overflow:visible;
         }
@@ -1068,9 +1059,8 @@
            遮罩的外沿被面板圆角裁切时 blur 采样不到背景，面板白底会在弧线上露出一圈没压暗的亮边，
            所以开启时把底衬退到 padding box（padding 补回 1px，内容位置不变），那圈就落到深色蒙层上 */
         #settings-modal .settings-modal-panel.is-overlay-open {
-            border: 2px solid transparent;
+            border: 0;
             padding: 31px;
-            background-clip: padding-box;
         }
         /* 内容面板同样在圆角处被裁切：缺口那块没有东西盖住，会露出没压暗的底（iframe 里的白页）。
            先把它自己与 iframe 的底衬透明，再由它自己的 ::after 沿圆角外沿补一圈「等于遮罩压暗后」
@@ -1213,7 +1203,7 @@
             width: 32px;
             height: 32px;
             border-radius: 8px;
-            border: 1px solid transparent;
+            border: 0;
             background: transparent;
             color: var(--muted);
             display: flex;
@@ -1283,7 +1273,7 @@
             display: flex;
             align-items: center;
             gap: 16px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+            padding-bottom: 22px;
         }
 
         .settings-detail-back {
@@ -1404,8 +1394,9 @@
 
         /* 卡片 */
         .settings-card {
-            border: 1px solid rgba(0, 0, 0, 0.06);
+            border: 0;
             border-radius: 16px;
+            box-shadow: var(--shadow-sm);
             background: rgba(255, 255, 255, 0.45);
             padding: 18px 20px;
             margin-bottom: 16px;
@@ -1481,10 +1472,10 @@
 
         /* 分段线 */
         .settings-divider {
-            height: 1px;
-            background: rgba(0, 0, 0, 0.06);
-            margin: 10px 0;
-            border: none;
+            height: 0;
+            background: transparent;
+            margin: 16px 0;
+            border: 0;
         }
 
         /* Toggle 开关 */
@@ -1554,19 +1545,18 @@
             font-size: 13px;
             color: var(--muted);
             padding: 8px 12px;
-            background: var(--bg);
+            background: var(--nav-hover-bg);
             border-radius: 8px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            border: 1px solid rgba(0,0,0,0.06);
         }
         .settings-path-btn {
             flex: 0 0 auto;
             padding: 7px 14px;
             border-radius: 8px;
-            border: 1px solid rgba(0,0,0,0.08);
-            background: var(--stage-bg);
+            border: 0;
+            background: var(--nav-hover-bg);
             color: var(--text);
             font-size: 12px;
             font-weight: 600;
@@ -1591,25 +1581,24 @@
             gap: 6px;
             padding: 8px 14px;
             border-radius: 999px;
-            border: 1px solid rgba(0, 0, 0, 0.08);
+            border: 0;
             background: var(--stage-bg);
+            box-shadow: var(--shadow-sm);
             color: var(--text);
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+            transition: background 0.2s ease, color 0.2s ease;
             font-family: inherit;
         }
 
         .settings-pill:hover {
-            border-color: rgba(0, 0, 0, 0.14);
             background: var(--nav-hover-bg);
         }
 
         .settings-pill.active {
             background: var(--text);
             color: var(--stage-bg);
-            border-color: var(--text);
         }
 
         .settings-pill svg {
@@ -1658,7 +1647,6 @@
 
         html.theme-dark .settings-card,
         body.theme-dark .settings-card {
-            border-color: rgba(255, 255, 255, 0.07);
             background: rgba(255, 255, 255, 0.04);
         }
 
@@ -1679,13 +1667,11 @@
 
         html.theme-dark .settings-pill,
         body.theme-dark .settings-pill {
-            border-color: rgba(255, 255, 255, 0.1);
             background: var(--stage-bg);
         }
 
         html.theme-dark .settings-pill:hover,
         body.theme-dark .settings-pill:hover {
-            border-color: rgba(255, 255, 255, 0.18);
             background: var(--nav-hover-bg);
         }
 
@@ -1693,7 +1679,6 @@
         body.theme-dark .settings-pill.active {
             background: var(--text);
             color: var(--bg);
-            border-color: var(--text);
         }
 
         /* 移动端：上下堆叠 */
@@ -1770,7 +1755,7 @@
 
         html.theme-dark .side-pill.update-available,
         body.theme-dark .side-pill.update-available {
-            border-color:#86efac;
+            background:color-mix(in srgb, #86efac 18%, transparent);
             color:#86efac;
         }
 
@@ -1866,8 +1851,6 @@
             min-height:18px;
             padding:0 0 0 14px;
             border-radius:999px;
-            outline:1px solid transparent;
-            outline-offset:-1px;
             background:transparent;
             color:var(--muted);
             display:none;
@@ -1879,14 +1862,13 @@
             white-space:nowrap;
             overflow:hidden;
             cursor:pointer;
-            transition:width 0.3s var(--fluid-ease) 0.5s, color .2s, outline-color .2s, background-color .2s;
+            transition:width 0.3s var(--fluid-ease) 0.5s, color .2s, background-color .2s;
         }
-        .project-version-badge:hover { color:var(--text); outline-color:var(--accent, #6366f1); }
+        .project-version-badge:hover { color:var(--text); background:color-mix(in srgb, var(--accent, #6366f1) 14%, transparent); }
         .project-version-badge.checking { opacity:.6; animation:badge-pulse 1s ease-in-out infinite; }
         .project-version-badge.has-update {
             color: #fff;
             background: #f59e0b;
-            outline-color: #f59e0b;
             animation: update-glow 2s ease-in-out infinite;
         }
         @keyframes update-glow {
@@ -1911,8 +1893,6 @@
             min-height:24px;
             padding:0 0 0 14px;
             border-radius:999px;
-            outline:1px solid rgba(34,197,94,.35);
-            outline-offset:-1px;
             background:rgba(34,197,94,.1);
             color:#16a34a;
             align-items:center;
@@ -1921,11 +1901,11 @@
             font-size:9px;
             font-weight:900;
             overflow:hidden;
-            transition:width 0.3s var(--fluid-ease) 0.5s, background-color .2s, color .2s, outline-color .2s;
+            transition:width 0.3s var(--fluid-ease) 0.5s, background-color .2s, color .2s;
         }
         .update-now-btn.show { display:flex; }
         .sidebar:hover .update-now-btn { width:190px; transition-delay:0s; }
-        .update-now-btn:hover { background:#16a34a; color:#fff; border-color:#16a34a; }
+        .update-now-btn:hover { background:#16a34a; color:#fff; }
         .update-now-btn[disabled] { opacity:.7; cursor:wait; }
         .update-now-btn svg { display:none; width:14px; height:14px; flex:0 0 auto; }
         .sidebar:hover .update-now-btn svg { display:block; }
@@ -1944,7 +1924,6 @@
         .sidebar:hover .update-now-text { max-width:130px; transition-delay:.15s; }
         html.theme-dark .update-now-btn,
         body.theme-dark .update-now-btn {
-            border-color:rgba(134,239,172,.42);
             background:rgba(74,222,128,.12);
             color:#86efac;
         }
@@ -1989,8 +1968,7 @@
                 margin-top:auto;
                 margin-bottom:6px;
                 gap:5px;
-                padding-top:8px;
-                border-top:1px solid var(--border);
+                padding-top:14px;
             }
             .settings-fold-group {
                 gap: 5px;
@@ -2073,10 +2051,12 @@
             flex-direction:column;
             overflow:hidden;
             border-radius:var(--radius-lg);
-            border:1px solid var(--border);
-            background:var(--surface);
+            border:0;
+            background:color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter:blur(44px) saturate(190%);
+            -webkit-backdrop-filter:blur(44px) saturate(190%);
             color:var(--text);
-            box-shadow:var(--shadow-xl);
+            box-shadow:0 26px 60px var(--shadow), 0 10px 28px rgba(0,0,0,.12);
         }
 
         .studio-modal-head {
@@ -2084,8 +2064,7 @@
             align-items:flex-start;
             justify-content:space-between;
             gap:16px;
-            padding:20px 20px 14px;
-            border-bottom:1px solid var(--border);
+            padding:20px 20px 22px;
         }
 
         .studio-modal-kicker {
@@ -2109,8 +2088,8 @@
             width:32px;
             height:32px;
             border-radius:var(--radius-md);
-            border:1px solid var(--border);
-            background:var(--surface);
+            border:0;
+            background:var(--nav-hover-bg);
             color:var(--text-2);
             display:flex;
             align-items:center;
@@ -2121,8 +2100,7 @@
 
         .studio-modal-close:hover {
             color:var(--text);
-            border-color:var(--border-2);
-            background:var(--nav-hover-bg);
+            background:var(--nav-hover);
         }
 
         .studio-modal-body {
@@ -2143,7 +2121,7 @@
             gap:10px;
             margin-top:16px;
             padding:12px;
-            border:1px solid var(--border);
+            border:0;
             border-radius:var(--radius-md);
             background:var(--surface-2);
             color:var(--text-2);
@@ -2172,7 +2150,7 @@
         .update-modal-summary.fail .update-modal-dot { background:var(--danger); }
 
         /* 更新进度条：复用弹窗卡片样式，进度条走绿色强调色 */
-        .update-progress-box { margin:12px 0 0; padding:12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface-2); }
+        .update-progress-box { margin:12px 0 0; padding:12px; border:0; border-radius:var(--radius-md); background:var(--surface-2); }
         .update-progress-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
         .update-progress-stage { color:var(--text); font-size:12px; font-weight:950; line-height:1.4; }
         .update-progress-percent { color:var(--text-2); font-size:12px; font-weight:900; white-space:nowrap; }
@@ -2208,9 +2186,11 @@
             align-items:flex-start;
             gap:12px;
             padding:14px;
-            border:1px solid var(--border-2);
+            border:0;
             border-radius:var(--radius-xl);
-            background:var(--elevated);
+            background:color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter:blur(44px) saturate(190%);
+            -webkit-backdrop-filter:blur(44px) saturate(190%);
             color:var(--text);
             box-shadow:var(--shadow-xl);
             opacity:0;
@@ -2247,14 +2227,14 @@
             height:30px;
             padding:0 12px;
             border-radius:var(--radius-md);
-            border:1px solid var(--accent);
+            border:0;
             background:var(--accent);
             color:var(--accent-text);
             font-size:12px;
             font-weight:700;
             cursor:pointer;
         }
-        .update-reminder-btn:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
+        .update-reminder-btn:hover { background:var(--accent-hover); }
         .update-reminder-close {
             position:absolute;
             top:8px;
@@ -2278,7 +2258,7 @@
 
         /* 更新弹窗：双卡片需要更宽的面板，避免左右布局被裁剪 */
         #project-update-modal .studio-modal-panel { width:min(880px, 100%); max-height:min(840px, calc(100vh - 48px)); }
-        .update-notes-box { margin:2px 0 14px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface-2); }
+        .update-notes-box { margin:2px 0 14px; padding:12px; border:0; border-radius:var(--radius-md); background:var(--surface-2); }
         .update-notes-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
         .update-notes-head strong { font-size:12px; color:var(--text); font-weight:950; }
         .update-notes-version { color:var(--text-2); font-size:11px; font-weight:800; white-space:nowrap; }
@@ -2287,9 +2267,9 @@
         .update-source-list { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:14px; align-items:stretch; }
         @media (max-width: 900px) { .update-source-list { grid-template-columns:1fr 1fr; } }
         @media (max-width: 600px) { .update-source-list { grid-template-columns:1fr; } }
-        .update-source-card { width:100%; min-width:0; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface); color:var(--text); text-align:left; padding:12px; display:flex; flex-direction:column; gap:10px; cursor:pointer; transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease; }
-        .update-source-card:hover { transform:translateY(-1px); border-color:var(--border-2); box-shadow:var(--shadow-md); }
-        .update-source-card.active { border-color:var(--success); box-shadow:0 0 0 2px var(--success-bg); background:var(--success-bg); }
+        .update-source-card { width:100%; min-width:0; border:0; border-radius:var(--radius-lg); background:var(--surface); color:var(--text); text-align:left; padding:12px; display:flex; flex-direction:column; gap:10px; box-shadow:var(--shadow-sm); cursor:pointer; transition:box-shadow .16s ease, transform .16s ease, background .16s ease; }
+        .update-source-card:hover { transform:translateY(-1px); box-shadow:var(--shadow-md); }
+        .update-source-card.active { box-shadow:0 0 0 3px var(--success-bg); background:var(--success-bg); }
         .update-source-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
         .update-source-title { min-width:0; display:flex; flex-direction:column; gap:4px; }
         .update-source-title strong { color:var(--text); font-size:13px; line-height:1.2; font-weight:950; }
@@ -2310,9 +2290,9 @@
             gap:10px;
             min-height:42px;
             padding:9px 10px;
-            border:1px solid var(--border);
+            border:0;
             border-radius:var(--radius-md);
-            background:var(--surface);
+            background:var(--surface-2);
         }
         .connectivity-row > div { min-width:0; }
 
@@ -2370,8 +2350,7 @@
             display:flex;
             justify-content:flex-end;
             gap:10px;
-            padding:14px 20px 18px;
-            border-top:1px solid var(--border);
+            padding:20px 20px 18px;
             background:var(--surface);
         }
 
@@ -2379,7 +2358,7 @@
             min-height:36px;
             padding:0 14px;
             border-radius:var(--radius-md);
-            border:1px solid var(--border);
+            border:0;
             background:var(--surface-2);
             color:var(--text);
             display:inline-flex;
@@ -2399,19 +2378,16 @@
 
         .studio-modal-btn:hover {
             background:var(--nav-hover-bg);
-            border-color:var(--border-2);
         }
 
         #connectivity-test-btn {
-            border-color:var(--info-border);
             background:var(--info-bg);
             color:var(--info-text);
-            transition:transform .16s ease, background-color .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+            transition:transform .16s ease, background-color .18s ease, color .18s ease, box-shadow .18s ease;
         }
 
         #connectivity-test-btn:hover {
             transform:translateY(-1px);
-            border-color:var(--info);
             background:var(--info);
             color:var(--text-on-accent);
             box-shadow:var(--shadow-md);
@@ -2432,13 +2408,11 @@
 
         .studio-modal-btn.primary {
             background:var(--accent);
-            border-color:var(--accent);
             color:var(--accent-text);
         }
 
         .studio-modal-btn.primary:hover {
             background:var(--success);
-            border-color:var(--success);
             color:var(--text-on-accent);
         }
 
@@ -2628,7 +2602,7 @@
             background: var(--v4-card-bg);
             backdrop-filter: blur(40px) saturate(200%);
             -webkit-backdrop-filter: blur(40px) saturate(200%);
-            border: 1px solid transparent;
+            border: 0;
             font-size: 12px;
             font-weight: 500;
             letter-spacing: 0.02em;
@@ -2689,7 +2663,7 @@
             padding: 28px 24px 24px;
             background: var(--v4-card-bg);
             border-radius: 16px;
-            border: 1px solid transparent;
+            border: 0;
             backdrop-filter: blur(40px) saturate(200%);
             -webkit-backdrop-filter: blur(40px) saturate(200%);
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--monitor-shadow);
@@ -2699,13 +2673,11 @@
 
         .homepage-feature:hover {
             transform: translateY(-2px);
-            border-color: rgba(0,0,0,0.08);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px rgba(0,0,0,0.1);
         }
 
         html.theme-dark .homepage-feature:hover,
         body.theme-dark .homepage-feature:hover {
-            border-color: rgba(255,255,255,0.08);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px rgba(0,0,0,0.5);
         }
 
@@ -2828,7 +2800,7 @@
             padding: 40px;
             max-width: 720px;
             width: 90%;
-            border: 1px solid transparent;
+            border: 0;
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 24px 64px -12px rgba(0,0,0,0.12);
         }
 
@@ -2860,7 +2832,7 @@
             backdrop-filter: blur(20px) saturate(150%);
             -webkit-backdrop-filter: blur(20px) saturate(150%);
             border-radius: 16px;
-            border: 1px solid transparent;
+            border: 0;
         }
 
         .onboarding-feature-icon {
@@ -2925,9 +2897,8 @@
             justify-content: space-between;
             padding: 0 8px 0 14px;
             background: var(--bg);
-            border-bottom: 1px solid var(--border);
             color: var(--text);
-            transition: background 0.3s var(--ease-out), color 0.3s var(--ease-out), border-color 0.3s var(--ease-out);
+            transition: background 0.3s var(--ease-out), color 0.3s var(--ease-out);
             box-sizing: border-box;
         }
         body.has-frameless-titlebar {
@@ -3004,7 +2975,7 @@
         .titlebar-sep {
             width: 1px;
             height: 16px;
-            background: var(--border);
+            background: transparent;
             margin: 0 4px;
             opacity: 0.5;
         }
@@ -3219,7 +3190,7 @@
             <nav>
 
                 <!-- 分隔线 -->
-                <div class="nav-divider" style="width:32px;height:1px;background:var(--border);margin:8px auto;transition:width 0.35s var(--fluid-ease);"></div>
+                <div class="nav-divider" style="width:32px;height:1px;background:transparent;margin:8px auto;transition:width 0.35s var(--fluid-ease);"></div>
 
                 <div class="nav-item active" data-route="home" onclick="switchUI(this, 'home')">
                     <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3320,17 +3291,17 @@
                     <div class="skeleton-card"></div>
                 </div>
             </div>
-            <iframe id="frame-home" src="/static/home.html?v=1.0.120.1789699447" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=1.0.120.1789739355" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.120.1789893282" scrolling="yes"></iframe>
+            <iframe id="frame-home" src="/static/home.html?v=1.0.123.1790252741" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-enhance" data-src="/static/enhance.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-klein" data-src="/static/klein.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-angle" data-src="/static/angle.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -3556,7 +3527,6 @@
                                         <span class="settings-toggle-slider"></span>
                                     </label>
                                 </div>
-                                <hr class="settings-divider">
                                 <div class="settings-toggle-row">
                                     <div>
                                         <div class="settings-toggle-label">显示系统托盘图标</div>
@@ -3587,7 +3557,6 @@
                                         <span class="settings-toggle-slider"></span>
                                     </label>
                                 </div>
-                                <hr class="settings-divider">
                                 <div class="settings-toggle-row">
                                     <div>
                                         <div class="settings-toggle-label">恢复上次窗口状态</div>
@@ -3629,7 +3598,6 @@
                                     </div>
                                     <button class="settings-path-btn" id="storage-prune-btn" type="button" title="按下面的上限清理预览缓存">立即清理</button>
                                 </div>
-                                <hr class="settings-divider">
                                 <div class="settings-toggle-row" style="flex-direction:column;align-items:stretch;gap:8px;">
                                     <div>
                                         <div class="settings-toggle-label">缓存上限</div>
@@ -3637,7 +3605,6 @@
                                     </div>
                                     <div class="settings-pill-group" id="storage-limit-files" role="group" aria-label="预览缓存文件数上限"></div>
                                 </div>
-                                <hr class="settings-divider">
                                 <div class="settings-toggle-row" style="flex-direction:column;align-items:stretch;gap:8px;">
                                     <div>
                                         <div class="settings-toggle-label">画布版本保留</div>
@@ -3645,7 +3612,6 @@
                                     </div>
                                     <div class="settings-pill-group" id="storage-limit-versions" role="group" aria-label="画布版本保留数量"></div>
                                 </div>
-                                <hr class="settings-divider">
                                 <div class="settings-toggle-row" style="flex-direction:column;align-items:stretch;gap:8px;">
                                     <div>
                                         <div class="settings-toggle-label">生成文件目录</div>
@@ -3677,7 +3643,6 @@
                                         <span class="settings-toggle-slider"></span>
                                     </label>
                                 </div>
-                                <hr class="settings-divider">
                                 <div class="settings-toggle-row" style="flex-direction:column;align-items:stretch;gap:8px;">
                                     <div>
                                         <div class="settings-toggle-label">更新源</div>
@@ -3848,10 +3813,10 @@
             if (!header) return;
             header.addEventListener('mousedown', function(e){
                 if (e.button !== 0) return;
-                // 红绿灯区域不发起拖拽：三灯在 Header 带内（红灯左缘实测 15 / 中心 y 36，
+                // 红绿灯区域不发起拖拽：三灯在 Header 带内（红灯左缘 7 / 中心 y 26，
                 // 与 launcher.py applyTrafficLights_ 的灯位常数一致），三灯 widget 跨度
-                // 15..67 × 30..42，外放 6px 余量；命中说明点的是灯，必须留给原生按钮处理
-                if (e.clientX >= 9 && e.clientX <= 73 && e.clientY >= 24 && e.clientY <= 48) return;
+                // 7..59 × 20..32，外放 6px 余量；命中说明点的是灯，必须留给原生按钮处理
+                if (e.clientX >= 1 && e.clientX <= 65 && e.clientY >= 14 && e.clientY <= 38) return;
                 var api = window.pywebview && window.pywebview.api;
                 if (api && typeof api.start_window_drag === 'function') {
                     e.preventDefault();

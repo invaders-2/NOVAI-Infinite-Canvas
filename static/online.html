@@ -6,15 +6,16 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>在线生图</title>
     <script>(function(){try{var u=new URLSearchParams(location.search).get('theme');var t=u||localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
-    <script src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
-    <script src="/static/js/image-preview.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/history-bulk-manager.js?v=1.0.120.1789606971"></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/shared/size-policy.js?v=1.0.123.1790057117"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
+    <script src="/static/js/image-preview.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/history-bulk-manager.js?v=1.0.123.1789606971"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
     <style>
         :root { --accent: #1c1c1e; --bg: #f9fafb; --card: #fff; --easing:cubic-bezier(0.4,0,0.2,1); }
         /* body 被 UI 缩放 transform 后底部可能露出 html 根区域，显式铺背景避免露出黑色底框 */
@@ -35,9 +36,9 @@
         * { scrollbar-width: none; -ms-overflow-style: none; }
         *::-webkit-scrollbar { width: 0; height: 0; display: none; }
         .container-box { max-width:1280px; margin:0 auto; padding:0 40px; margin-top:50px; }
-        .nano-input { background:var(--card); border:0px solid transparent; transition:all .3s var(--easing); }
-        .nano-input:focus { box-shadow:0 0 0 1px rgba(0,0,0,0.15); }
-        .upload-item { background:var(--card); border:0px solid transparent; transition:all .4s var(--easing); position:relative; overflow:hidden; }
+        .nano-input { background:var(--card); border:0; transition:all .3s var(--easing); }
+        .nano-input:focus { box-shadow:0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
+        .upload-item { background:var(--card); border:0; transition:all .4s var(--easing); position:relative; overflow:hidden; }
         .upload-item:hover,.upload-item.drag-over { background:#f0f0f2; transform:translateY(-2px); }
         .preview-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; animation:fadeIn .5s var(--easing); }
         .glass-btn { background:var(--text); transition:all .3s var(--easing); }
@@ -51,7 +52,7 @@
         .control-label { display:flex; align-items:center; gap:6px; color:var(--text-3); font-size:10px; font-weight:600; letter-spacing:.04em; }
         .size-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; align-items:start; }
         .size-field { min-width:0; display:flex; flex-direction:column; gap:6px; }
-        .size-select,.size-custom { width:100%; min-width:0; max-width:100%; height:34px; border:0px solid transparent; border-radius:var(--radius-md); background:var(--bg); color:var(--text); outline:none; padding:0 10px; font-size:11px; font-weight:700; }
+        .size-select,.size-custom { width:100%; min-width:0; max-width:100%; height:34px; border:0; border-radius:var(--radius-md); background:var(--bg); color:var(--text); outline:none; padding:0 10px; font-size:11px; font-weight:700; }
         .size-select { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .size-select:disabled { opacity:.55; cursor:not-allowed; }
         .size-custom { display:none; background:#fff; }
@@ -60,8 +61,10 @@
         .size-field.custom .size-pair { display:grid; }
         .size-pair .size-custom { display:block; }
         .size-pair.with-fit { grid-template-columns:1fr 1fr auto; align-items:center; }
-        .size-fit-btn { height:34px; border:0px solid transparent; border-radius:var(--radius-md); background:#fff; color:var(--text); padding:0 10px; font-size:10px; font-weight:800; white-space:nowrap; }
+        .size-fit-btn { height:34px; border:0; border-radius:var(--radius-md); background:#fff; color:var(--text); padding:0 10px; font-size:10px; font-weight:800; white-space:nowrap; }
         .size-fit-btn:disabled { opacity:.45; cursor:not-allowed; }
+        .size-notice { margin-top:6px; font-size:10px; font-weight:700; color:#b45309; }
+        html.theme-dark .size-notice, html.studio-theme-dark .size-notice { color:#fbbf24; }
         .mode-badge { font-size:9px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:var(--text); background:#f5f5f5; padding:2px 8px; border-radius:var(--radius-full); }
         /* 深色主题：badge 背景写死浅色 #f5f5f5 会与白色文字叠成白底白字看不清，改为深底浅字 */
         html.theme-dark .mode-badge, html.studio-theme-dark .mode-badge {
@@ -71,12 +74,12 @@
         .masonry-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:20px; }
         @media (min-width:768px){ .masonry-grid{ grid-template-columns:repeat(4,1fr); } }
         @media (max-width:640px){ .size-row{ grid-template-columns:1fr; } }
-        .masonry-item { aspect-ratio:1/1; border-radius:var(--radius-xl); overflow:hidden; background:#fff; border:0px solid transparent; transition:all .5s var(--easing); }
+        .masonry-item { aspect-ratio:1/1; border-radius:var(--radius-xl); overflow:hidden; background:#fff; border:0; transition:all .5s var(--easing); }
         .masonry-item:hover { transform:translateY(-6px); box-shadow:0 20px 40px rgba(0,0,0,.08); }
         .gallery-lightbox { background:rgba(255,255,255,.99); backdrop-filter:blur(33px) saturate(1.05); }
         @keyframes fadeIn { from{opacity:0} to{opacity:1} }
     </style>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
     <style>
         html:not(.studio-theme-dark) body:not(.studio-theme-dark) #lightbox.gallery-lightbox {
             background: rgba(255,255,255,.99) !important;
@@ -84,14 +87,14 @@
             -webkit-backdrop-filter: blur(33px) saturate(1.05) !important;
         }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         body { background: var(--bg) !important; color: var(--text) !important; }
 /* --- Marvis 增强覆盖 (online.html) --- */
 .nano-input { background: var(--stage-bg) !important; color: var(--text) !important; border: 0 !important; border-radius: var(--radius-lg) !important; }
 .nano-input::placeholder { color: var(--faint) !important; }
-.upload-item { background: var(--stage-bg) !important; border: 1px dashed var(--border) !important; border-radius: var(--radius-lg) !important; }
+.upload-item { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-lg) !important; }
 .upload-item:hover, .upload-item.drag-over { background: var(--soft) !important; }
 .tool-panel, .control-panel { background: var(--stage-bg) !important; border: 0 !important; border-radius: var(--radius-lg) !important; }
 .size-select, .size-custom { background: var(--soft) !important; color: var(--text) !important; border: 0 !important; border-radius: var(--radius-md) !important; }
@@ -102,13 +105,13 @@
 /* --- 左右双栏 Split Layout：左栏固定宽自滚动，右栏填满剩余空间 --- */
 /* 100vh 需除以全局 UI 缩放系数（theme.js autoScale），否则缩放窗口下填不满视口高度 */
 .split-root { display: flex; height: calc(100vh / var(--studio-ui-scale, 1)); overflow: hidden; }
-.split-left { width: clamp(300px, 30vw, 360px); flex-shrink: 0; height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; padding: 32px 24px; border-right: none; }
+.split-left { width: clamp(300px, 30vw, 360px); flex-shrink: 0; height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; padding: 32px 24px; }
 .split-right { flex: 1; min-width: 0; height: 100%; overflow-y: auto; }
 .split-right-inner { max-width: 1080px; margin: 0 auto; padding: 32px 24px 72px; display: flex; flex-direction: column; gap: 56px; }
 #resultBox { height: clamp(420px, 58vh, 720px); }
 @media (max-width: 768px) {
     .split-root { flex-direction: column; height: auto; overflow: visible; }
-    .split-left { width: 100% !important; height: auto; max-height: none; overflow-y: visible; border-right: none; border-bottom: 1px solid var(--border); padding: 16px 24px; }
+    .split-left { width: 100% !important; height: auto; max-height: none; overflow-y: visible; padding: 16px 24px; }
     .split-right { height: auto; overflow-y: visible; }
     .split-right-inner { padding: 16px 24px 48px; gap: 40px; }
     #resultBox { height: auto; min-height: 320px; }
@@ -125,14 +128,13 @@
     background: color-mix(in srgb, var(--elevated) 55%, transparent);
     backdrop-filter: blur(28px) saturate(180%);
     -webkit-backdrop-filter: blur(28px) saturate(180%);
-    border: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
+    border: 0;
     border-radius: var(--radius-lg);
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent), var(--shadow-md);
+    box-shadow: var(--shadow-md);
     overflow: visible;
 }
 html.theme-dark .nv-card, html.studio-theme-dark .nv-card {
-    border-color: color-mix(in srgb, var(--text) 14%, transparent);
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent);
+    box-shadow: var(--shadow-md);
 }
 .nv-card.lifted { position: relative; z-index: 5; }
 .nv-card > .nv-card-head {
@@ -195,11 +197,11 @@ html.theme-dark .nv-card, html.studio-theme-dark .nv-card {
     font-weight: 700;
     letter-spacing: var(--tracking-xs);
     cursor: pointer;
-    border: 1px solid transparent;
-    transition: border-color var(--duration-fast) var(--ease-apple), background var(--duration-fast) var(--ease-apple);
+    border: 0;
+    transition: background var(--duration-fast) var(--ease-apple);
 }
-.nv-select-trigger:hover { border-color: var(--border-2); }
-.nv-select-trigger:focus-visible { outline: 2px solid var(--accent-subtle); outline-offset: 1px; }
+.nv-select-trigger:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.nv-select-trigger:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 .nv-select-trigger .nv-select-label {
     white-space: nowrap;
     overflow: hidden;
@@ -223,12 +225,12 @@ html.theme-dark .nv-card, html.studio-theme-dark .nv-card {
     left: 0;
     right: 0;
     z-index: 30;
-    background: color-mix(in srgb, var(--elevated) 68%, transparent);
-    backdrop-filter: blur(28px) saturate(180%);
-    -webkit-backdrop-filter: blur(28px) saturate(180%);
-    border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+    background: color-mix(in srgb, var(--elevated) 78%, transparent);
+    backdrop-filter: blur(44px) saturate(190%);
+    -webkit-backdrop-filter: blur(44px) saturate(190%);
+    border: 0;
     border-radius: var(--radius-md);
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent), var(--shadow-lg);
+    box-shadow: var(--shadow-lg);
     padding: 5px;
     max-height: 300px;
     overflow-y: auto;
@@ -359,7 +361,7 @@ html.studio-theme-dark #genBtn.nv-beam {
     background: var(--text-3);
 }
 .nv-select-opt.disabled { opacity: .4; pointer-events: none; }
-.nv-select-sep { height: 1px; background: var(--divider); margin: 4px 0 3px; }
+.nv-select-sep { height: 9px; margin: 0; }
 
 /* ═══ 方向 E · 暗色残留修复 ═══ */
 html.theme-dark #del1, html.theme-dark #del2, html.theme-dark #del3,
@@ -382,7 +384,7 @@ html.theme-dark #lightbox.gallery-lightbox, html.studio-theme-dark #lightbox.gal
 }
 html.theme-dark #lightboxCard, html.studio-theme-dark #lightboxCard {
     background: var(--stage-bg) !important;
-    border: 1px solid var(--border) !important;
+    border: 0 !important;
 }
 html.theme-dark #sameStyleBtn, html.studio-theme-dark #sameStyleBtn {
     background: var(--text) !important;
@@ -513,6 +515,7 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
                             </span>
                         </label>
                     </div>
+                    <p id="sizeNotice" class="size-notice hidden"></p>
                 </div>
                     </div>
                 </details>
@@ -533,7 +536,7 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
                 </div>
 
                 <section>
-                    <div class="flex items-center gap-6 mb-12"><div class="h-px flex-1 bg-gray-100"></div></div>
+                    <div class="flex items-center gap-6 mb-12"><div class="flex-1"></div></div>
                     <div id="masonry" class="masonry-grid"></div>
                     <div id="loadMoreTrigger" class="py-20 text-center text-gray-500 text-[10px] font-bold uppercase tracking-widest cursor-pointer hover:text-black">Load More Archive</div>
                 </section>
@@ -601,7 +604,7 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
             square: [
                 ['1024x1024', '1k'],
                 ['2048x2048', '2k'],
-                ['3840x2160', '4k']
+                ['4096x4096', '4k']
             ],
             portrait: [
                 ['1024x1536', '1k'],
@@ -827,11 +830,91 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
             return SIZE_OPTIONS;
         }
 
+        // enum 模型（策略 mode=enum）的可用尺寸只认策略枚举：先按方向归组，档位由 tiers 的 maxPixels 判定；
+        // 同方向同档位有多个枚举时取比例最接近的，该方向在该档位一个都没有就整条不列出，绝不借别的方向凑数
+        function enumSizeOptions(model) {
+            const options = NovaSizePolicy.enumOptions(model);
+            if (!options) return null;
+            const tiers = NovaSizePolicy.policy(model).tiers || [];
+            const pool = [];
+            options.forEach(value => {
+                const pair = parseSizeValue(value);
+                if (!pair) return;
+                const width = Number(pair.width), height = Number(pair.height);
+                for (let i = 0; i < tiers.length; i++) {
+                    if (width * height <= Number(tiers[i].maxPixels)) {
+                        pool.push({
+                            value: value,
+                            ratio: width / height,
+                            tier: String(tiers[i].id || '').toLowerCase(),
+                            orientation: width === height ? 'square' : (width > height ? 'landscape' : 'portrait')
+                        });
+                        return;
+                    }
+                }
+            });
+            const result = {};
+            Object.keys(SIZE_OPTIONS).forEach(key => {
+                const nominal = parseSizeValue(SIZE_OPTIONS[key][0][0]);
+                if (!nominal) return;
+                const width = Number(nominal.width), height = Number(nominal.height);
+                const ratio = width / height;
+                const group = pool.filter(item => item.orientation === (width === height ? 'square' : (width > height ? 'landscape' : 'portrait')));
+                if (!group.length) return;
+                const sizes = [];
+                tiers.forEach(tier => {
+                    const id = String(tier.id || '').toLowerCase();
+                    const candidates = group.filter(item => item.tier === id);
+                    if (!candidates.length) return;
+                    let best = candidates[0];
+                    candidates.forEach(item => {
+                        if (Math.abs(Math.log(item.ratio / ratio)) < Math.abs(Math.log(best.ratio / ratio))) best = item;
+                    });
+                    sizes.push([best.value, id]);
+                });
+                if (sizes.length) result[key] = sizes;
+            });
+            return result;
+        }
+
         function currentSizeOptions() {
-            return getSizeOptionsForModel(selectedModel);
+            // enum 模型用推导表（可能为空表），只有非 enum 模型才回落到写死的 presets
+            return enumSizeOptions(selectedModel) || getSizeOptionsForModel(selectedModel);
         }
         const RES_LONG_SIDE = { '1k': 1536, '2k': 2048, '4k': 3840 };
-        const RES_PIXEL_LIMIT = { '1k': 1572864, '2k': 4194304, '4k': 8294400 };
+        // 与 resolutionSelect 的档位顺序一致，换档落点按它比较
+        const RES_LEVELS = ['1k', '2k', '4k'];
+        // 档位像素上限的唯一真值源是策略 tiers（shared/size-policy.js），这份常量只是策略取不到时的兜底
+        const RES_PIXEL_LIMIT_FALLBACK = { '1k': 1572864, '2k': 4194304, '4k': 8294400 };
+        function resPixelLimitFor(model){
+            const limits = {};
+            const tiers = NovaSizePolicy.policy(model).tiers;
+            if(Array.isArray(tiers)) tiers.forEach(tier => {
+                const id = String(tier?.id || '').trim().toLowerCase();
+                const maxPixels = Number(tier?.maxPixels);
+                if(id && maxPixels > 0) limits[id] = maxPixels;
+            });
+            Object.keys(RES_PIXEL_LIMIT_FALLBACK).forEach(level => { if(!limits[level]) limits[level] = RES_PIXEL_LIMIT_FALLBACK[level]; });
+            return limits;
+        }
+        // 落点：不高于请求档位的最高可用档位；没有更低档才往上取（与画布页 nearestApiResolution 同规则）
+        function nearestUsableLevel(levels, want){
+            const selectable = levels.filter(level => RES_LEVELS.indexOf(level) >= 0);
+            if(!selectable.length) return '';
+            const index = RES_LEVELS.indexOf(want);
+            const below = selectable.filter(level => RES_LEVELS.indexOf(level) <= index).sort((a, b) => RES_LEVELS.indexOf(b) - RES_LEVELS.indexOf(a));
+            if(below.length) return below[0];
+            return selectable.sort((a, b) => RES_LEVELS.indexOf(a) - RES_LEVELS.indexOf(b))[0];
+        }
+        // 换档提示：页面留一行 + toast（与画布页换档提示同为“用户知情就不算偷偷改”）
+        function setSizeNotice(text){
+            const el = document.getElementById('sizeNotice');
+            if(el){
+                if(el.textContent !== text) el.textContent = text;
+                el.classList.toggle('hidden', !text);
+            }
+            if(text && window.NovaUtils && typeof window.NovaUtils.showToast === 'function') window.NovaUtils.showToast(text);
+        }
 
         function uniqueModels(list){
             const seen = new Set();
@@ -974,12 +1057,14 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
         document.addEventListener('visibilitychange', () => { if(!document.hidden) scheduleProviderRefresh(); });
 
         function setProvider(next){
+            setSizeNotice('');
             provider = next;
             selectedModel = providerModels(provider)[0] || selectedModel;
             renderProviderControls();
             updateSizeUI();
         }
         function setModel(next){
+            setSizeNotice('');
             selectedModel = next;
             updateSizeUI();
         }
@@ -1012,6 +1097,7 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
         }
 
         function setRatio(next, preferredSize = ''){
+            setSizeNotice('');
             ratio = next;
             if (preferredSize) {
                 const match = currentSizeOptions()[next]?.find(([value]) => value === preferredSize);
@@ -1040,6 +1126,7 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
         }
 
         function setResolution(next){
+            setSizeNotice('');
             resolution = next;
             if(next === 'custom'){
                 ratio = '';
@@ -1071,6 +1158,26 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
             if (!opts[ratio]) {
                 ratio = Object.keys(opts)[0] || 'square';
             }
+            // 所有模型统一口径：该 (比例, 档位) 没有合法尺寸就置灰并写明原因，绝不拿别的比例或别的档位顶替
+            const usable = (opts[ratio] || []).map(([, level]) => level);
+            const modelLevels = new Set();
+            Object.keys(opts).forEach(key => (opts[key] || []).forEach(([, level]) => modelLevels.add(level)));
+            Array.from(resolutionSelect.options).forEach(opt => {
+                if (opt.value === 'custom') return;
+                const enabled = usable.indexOf(opt.value) >= 0;
+                const label = String(opt.value).toUpperCase() + (enabled ? '' : '（' + (modelLevels.has(opt.value) ? '该比例无此档位' : '该模型无此档位') + '）');
+                if (opt.disabled !== !enabled) opt.disabled = !enabled;
+                if (opt.textContent !== label) opt.textContent = label;
+            });
+            // 换模型/换比例后档位失效：落到不高于请求档位的最高可用档位并提示，用户被告知就不算偷偷改。
+            // 提示只在下次用户改模型/比例/档位时清掉，别的刷新（如拖入参考图）不该把它抹掉
+            if (usable.length && RES_LEVELS.indexOf(resolution) >= 0 && usable.indexOf(resolution) < 0) {
+                const target = nearestUsableLevel(usable, resolution);
+                if (target) {
+                    setSizeNotice('该比例没有 ' + resolution.toUpperCase() + ' 尺寸，已切换到 ' + target.toUpperCase());
+                    resolution = target;
+                }
+            }
             ratioSelect.value = ratio;
             ratioSelect.disabled = resolution === 'custom';
             ratioField.classList.toggle('custom', ratio === 'custom');
@@ -1096,24 +1203,28 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
             updateSizeUI();
         }
 
+        // 枚举模型只收固定几档尺寸：游离尺寸交给策略收口；模型取不到时策略按 free 原样放行
+        function constrainSize(size){ return size ? NovaSizePolicy.constrain(size, selectedModel) : size; }
+
         function currentSize(){
-            if(resolution === 'custom') return customSizeValue();
+            if(resolution === 'custom') return constrainSize(customSizeValue());
             const opts = currentSizeOptions();
-            const options = opts[ratio] || opts.square;
+            const options = opts[ratio] || [];
             if(ratio === 'custom'){
                 const parsed = customRatioValue();
                 const longSide = RES_LONG_SIDE[resolution] || 1024;
                 if(parsed){
-                    const pixelLimit = RES_PIXEL_LIMIT[resolution] || (longSide * longSide);
+                    const pixelLimit = resPixelLimitFor(selectedModel)[resolution] || (longSide * longSide);
                     const rawWidth = parsed >= 1 ? longSide : Math.min(longSide * parsed, Math.sqrt(pixelLimit * parsed));
                     const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;
                     const width = Math.floor(rawWidth / 16) * 16;
                     const height = Math.floor(rawHeight / 16) * 16;
-                    return `${Math.max(64, width)}x${Math.max(64, height)}`;
+                    return constrainSize(`${Math.max(64, width)}x${Math.max(64, height)}`);
                 }
             }
-            const match = options.find(([, label]) => label === resolution) || opts.square.find(([, label]) => label === resolution) || opts.square[0];
-            return match[0];
+            const match = options.find(([, label]) => label === resolution);
+            // 所有模型统一：查不到这个「比例+档位」就是不可用，沿用方形兜底会静默改掉出图尺寸
+            return match ? constrainSize(match[0]) : '';
         }
 
         [1,2,3].forEach(id => {
@@ -1158,10 +1269,13 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
         async function submitImage(){
             const prompt = document.getElementById('promptInput').value.trim();
             if(!prompt){ alert(tr('online.promptRequired')); return; }
+            // 尺寸为空 = 当前「比例+档位」在该模型下没有合法尺寸，出声而不是拿别的尺寸顶替
+            const size = currentSize();
+            if(!size){ alert('当前比例在该分辨率下没有可用尺寸，请改选其它档位或比例'); return; }
             const btn = document.getElementById('genBtn'), loader = document.getElementById('loader'), placeholder = document.getElementById('placeholder'), out = document.getElementById('outputImg'), dl = document.getElementById('downloadBtn');
             btn.disabled = true; placeholder.classList.add('hidden'); out.classList.add('hidden'); dl.classList.add('hidden'); loader.classList.remove('hidden');
             try {
-                const reqBody = { prompt, provider_id:provider, model:selectedModel, size:currentSize(), n:outputCount, reference_images:Object.values(refs).filter(Boolean) };
+                const reqBody = { prompt, provider_id:provider, model:selectedModel, size, n:outputCount, reference_images:Object.values(refs).filter(Boolean) };
                 if(QUALITY_PROTOCOLS.has(providerProtocol(provider))) reqBody.quality = quality;
                 const result = await fetch('/api/online-image', {
                     method:'POST', headers:{'Content-Type':'application/json'},
@@ -1286,7 +1400,11 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
             if(res.success) document.getElementById(`history-${ts}`)?.remove();
         }
         const observer = new IntersectionObserver(entries => { if(entries[0].isIntersecting && currentIndex < allHistory.length) loadHistory(1); }, {threshold:.1});
-        window.onload = async () => { applyLanguage(); setRatio('square'); setResolution('1k'); await initModels(); await loadHistory(0); window.HistoryBulkManager?.attach({masonry:'#masonry'}); observer.observe(document.getElementById('loadMoreTrigger')); document.getElementById('loadMoreTrigger').onclick = () => loadHistory(1);
+        window.onload = async () => {
+            // 尺寸策略先拉起来（不 await：没到位时 policy() 返回 free 默认值，不吸附也不会崩）；
+            // 策略到位后要重刷尺寸 UI——enum 模型的可用尺寸得等策略到齐才推得出来
+            NovaSizePolicy.load().then(updateSizeUI);
+            applyLanguage(); setRatio('square'); setResolution('1k'); await initModels(); updateSizeUI(); await loadHistory(0); window.HistoryBulkManager?.attach({masonry:'#masonry'}); observer.observe(document.getElementById('loadMoreTrigger')); document.getElementById('loadMoreTrigger').onclick = () => loadHistory(1);
             // Prompt auto-height
             const promptEl = document.getElementById('promptInput');
             if(promptEl){ const autoResize=()=>{ promptEl.style.height='auto'; promptEl.style.height=Math.max(80,Math.min(promptEl.scrollHeight,300))+'px'; }; promptEl.addEventListener('input',autoResize); autoResize(); }

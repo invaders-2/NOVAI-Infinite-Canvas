@@ -46,7 +46,9 @@ console.log('[3] C 尺寸选择弹窗（world 收尾钩子）');
 const wirePicker = (js.match(/function wireSizePickerGlide\(root\)\{([\s\S]*?)\n\}/) || [])[1] || '';
 ok(wirePicker.length > 200, '有 wireSizePickerGlide(root)');
 ok(wirePicker.includes("root.querySelectorAll('.size-picker-popover, .loop-number-grid')"), '一次扫描拿到尺寸弹窗与 Loop 数字面板');
-ok(wirePicker.includes("host.querySelector('.size-picker-scope')") && wirePicker.includes("{item: 'button', orientation: 'horizontal'}"), 'size-picker-scope 的「自动/系统参数/自定义」接上');
+ok(wirePicker.includes("host.querySelector('.size-level-row')") && wirePicker.includes("{item: 'button', orientation: 'horizontal'}"), 'size-level-row（尺寸档位）接上');
+ok(wirePicker.includes("host.querySelector('.size-bg-row')") && wirePicker.includes("{item: 'button', orientation: 'horizontal'}"), 'size-bg-row（背景处理）接上');
+ok(wirePicker.includes("host.querySelector('.size-ratio-grid')") && wirePicker.includes("{item: '.size-ratio-tile', orientation: 'grid'}"), 'size-ratio-grid（画幅比例）用 grid 语义接上');
 ok(wirePicker.includes("host.querySelectorAll('.size-picker-list')") && wirePicker.includes("{item: '.size-picker-option'}"), '两个 size-picker-list（比例 / 分辨率）各接一条');
 ok(wirePicker.includes('if(!hosts.length) return;'), 'root 里没有目标时直接早退（render 很频繁）');
 const renderFn = (js.match(/function render\(\)\{([\s\S]*?)\n    return;/ ) || [])[1] || '';
@@ -116,7 +118,8 @@ if(typeof attachGlideHost === 'function'){
 ok(!/function wireSmartWorldGlide\(\)\{[\s\S]*?NovaGlide\.attach/.test(js), 'world 钩子不绕过守卫');
 
 console.log('[6] 样式：底色 token + 反色文字拉回 + 不用深底 --strong');
-ok(html.includes('.size-picker-list.nv-glide-host { --nv-glide-bg: var(--soft); }'), '尺寸列表用弹层 hover 底 --soft');
+ok(html.includes('.create-menu.nv-glide-host { --nv-glide-bg: var(--soft); }'), '弹层列表（斜杠/提及/导出/创建菜单）用弹层 hover 底 --soft');
+ok(!/\.(size-picker-scope|size-picker-head|size-picker-list|size-picker-option|size-picker-auto|size-picker-custom|count-grid|count-cell)\b/.test(html), '补偿块里不残留尺寸/数量的旧类（这些类已无标记使用）');
 ok(/\.mention-option-grid\.nv-glide-host,[\s\S]{0,240}--nv-glide-bg: var\(--soft\);/.test(html), '@ 提及的缩略图/文件夹 chip 用 --soft');
 ok(/\.mention-source-tabs\.nv-glide-host,[\s\S]{0,200}\.loop-number-grid\.nv-glide-host \{ --nv-glide-bg: var\(--card\); \}/.test(html), '容器自己就是 --soft 底的分段控件改用选中底色 --card');
 ok(!/--nv-glide-bg: var\(--strong/.test(html), '滑块底色不用深底 --strong（否则文字必隐形）');
@@ -128,9 +131,9 @@ ok(activeTextRule.length > 0, '「深底 + 反色文字」的选中项有一条�
 ok(html.includes('.mention-folder-chips.nv-glide-host .nv-glide-pill { border-radius: var(--radius-full); }'), '圆形 chip 上的滑块跟着圆');
 ok(html.includes('.mention-option-grid.nv-glide-host .mention-option:hover { transform: none; }'), '缩略图悬停上浮会与滑块差 1px，滑块 host 内关掉');
 /* 参数行同族弹层：容器自己是 --soft 底的用 --card；容器透明的用 --soft（它们的 hover 底色 --card 浅色下是白色，看不见） */
-ok(/\.seg-row\.nv-glide-host,\n\.count-grid\.nv-glide-host \{ --nv-glide-bg: var\(--card\); \}/.test(html), '质量/数量（容器自身 --soft 底）滑块改用 --card 才看得见');
+ok(/\.seg-row\.nv-glide-host \{ --nv-glide-bg: var\(--card\); \}/.test(html), '质量（容器自身 --soft 底）滑块改用 --card 才看得见');
 ok(/\.ratio-grid\.nv-glide-host,\n\.duration-grid\.nv-glide-host,\n\.model-list\.nv-glide-host \{ --nv-glide-bg: var\(--soft\); \}/.test(html), '画幅/时长/平台模型（容器透明）滑块用 --soft，不用它的 --card 白底');
-ok(/\.seg-row\.nv-glide-host button\.active,\n\.count-grid\.nv-glide-host \.count-cell\.active \{ color: var\(--text\); \}/.test(html), '质量/数量的「深底 + 反色文字」选中项文字拉回可读色');
+ok(/\.seg-row\.nv-glide-host button\.active \{ color: var\(--text\); \}/.test(html), '质量的「深底 + 反色文字」选中项文字拉回可读色');
 ok(html.includes('.model-list.nv-glide-host .direct-option:hover { transform: none; }'), '.direct-option 悬停上浮同样会让滑块差 1px，滑块 host 内关掉');
 
 console.log('[7] 资源顺序：滑块样式/脚本都得排在页面样式与 smart-canvas.js 之前');

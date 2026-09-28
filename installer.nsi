@@ -90,8 +90,9 @@ Section "Install"
   File "登录即梦CLI.bat"
 
   ; assets（图标等，排除 input/output/uploads + 测试/临时文件）
+  ; models（HD 高清放大运行时、RMBG 抠图模型等）按需下载，不打进安装包
   SetOutPath "$INSTDIR\assets"
-  File /r /x "*.pyc" /x "__pycache__" /x "test-*.png" /x "tmp_*.png" /x "*.log" /x ".env" /x "input" /x "output" /x "uploads" "assets\*.*"
+  File /r /x "*.pyc" /x "__pycache__" /x "test-*.png" /x "tmp_*.png" /x "*.log" /x ".env" /x "input" /x "output" /x "uploads" /x "models" "assets\*.*"
 
   ; ── 注册表 ──
   WriteRegStr HKLM "${PRODUCT_DIR_REGKEY}" "" "$INSTDIR\NOVAI.exe"

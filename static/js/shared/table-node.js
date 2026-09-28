@@ -1145,8 +1145,8 @@ function normalizeContentHeightNode(node){
    没接表格就一个按钮都不变。 */
 function tableBatchRunButtonHtml(node){
     if(!generatorUpstreamTables(node.id).length) return '';
-    return '<button class="table-batch-run-btn" type="button" title="按多维表格逐行批量生成">'
-        + '<i data-lucide="table" class="w-4 h-4"></i>批量生成</button>';
+    return '<button class="table-batch-run-btn" type="button" title="批量生成（按多维表格逐行）" aria-label="批量生成">'
+        + '<i data-lucide="arrow-up" class="w-4 h-4"></i></button>';
 }
 
 function tableBatchSingleLabel(node){
@@ -1161,8 +1161,8 @@ function tableBatchSingleButtonHtml(node){
     if(generatorUpstreamTables(node.id).length) return '';
     const video = node.type === 'video';
     const label = node.running ? tr('canvas.generating') : tableBatchSingleLabel(node);
-    return '<button class="gen-btn' + (node.running ? ' running' : '') + '"' + (node.running ? ' disabled' : '') + '>'
-        + '<i data-lucide="' + (video ? 'clapperboard' : 'zap') + '" class="w-4 h-4"></i>' + label + '</button>';
+    return '<button class="gen-btn' + (node.running ? ' running' : '') + '"' + (node.running ? ' disabled' : '') + ' title="' + label + '" aria-label="' + label + '">'
+        + '<i data-lucide="arrow-up" class="w-4 h-4"></i></button>';
 }
 
 /* 表格批量执行的生效并发。
@@ -1970,9 +1970,14 @@ function renderTableBody(node){
             mode.textContent = tableChannelModeLabel(channel.mode);
             mode.onclick = event => { event.stopPropagation(); toggleTableChannelMode(node, index); };
             cell.appendChild(mode);
+            /* 这一列每行真实有多少张：连线条目数与手动素材数取较大值 ——
+               「只在指令里 @ 到、没连线」的通道 items 是 0，但每一行都写了手动素材，
+               表头显示 0 会让人以为这列坏了。 */
+            const manualMax = state.rows.reduce((max, row, rowIndex) =>
+                Math.max(max, tableManualInputList(node, channel.id, rowIndex).length), 0);
             const count = document.createElement('small');
             count.className = 'table-input-count';
-            count.textContent = String(channel.items.length);
+            count.textContent = String(Math.max(channel.items.length, manualMax));
             cell.appendChild(count);
             // 只剩一列时不给删（ensureTableChannels 至少会留一列，删了也白删）
             if(channels.length > 1){

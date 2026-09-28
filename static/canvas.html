@@ -7,28 +7,29 @@
     <title>无限画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.120.1789744000">
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.120.1789628251">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
-    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.120.1789716971">
-    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.120.1789742566">
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.120.1789628219"></script>
-    <script src="/static/js/theme.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.120.1789739144"></script>
-    <script src="/static/js/shared/media.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/workflow-utils.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/node-registry.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/shared/table-model.js?v=1.0.120.1789612695"></script>
-    <script src="/static/js/shared/table-node.js?v=1.0.120.1789696438"></script>
-    <script src="/static/js/shared/dropdown.js?v=1.0.120.1789746233"></script>
-    <script src="/static/js/shared/glide.js?v=1.0.120.1789742748"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.120.1789845865"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.120.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.120.1789723648"></script>
+    <link rel="stylesheet" href="/static/css/canvas.css?v=1.0.123.1790254284">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
+    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.123.1790259488">
+    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.123.1789742566">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/shared/size-policy.js?v=1.0.123.1790057117"></script>
+    <script src="/static/js/shared/media.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/workflow-utils.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/node-registry.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/shared/table-model.js?v=1.0.123.1790098666"></script>
+    <script src="/static/js/shared/table-node.js?v=1.0.123.1790504358"></script>
+    <script src="/static/js/shared/dropdown.js?v=1.0.123.1789746233"></script>
+    <script src="/static/js/shared/glide.js?v=1.0.123.1789742748"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.123.1789606971"></script>
+    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -74,9 +75,8 @@ body.theme-dark:not(.canvas-node-drag):not(.canvas-node-resize):not(.canvas-sele
 
 /* ═══ 节点选中/拖动 ═══ */
 .node.selected, .node.dragging {
-    outline: 1px solid var(--selected-ring);
     filter: brightness(1.03);
-    border-color: var(--selected-ring);
+    box-shadow: 0 0 0 3px var(--selected-ring);
 }
 
 /* ═══ 工具栏单行：不换行，横向滚动兜底（canvas.css 统一管理） ═══ */
@@ -87,16 +87,16 @@ body.theme-dark:not(.canvas-node-drag):not(.canvas-node-resize):not(.canvas-sele
     background: rgba(255,255,255,0.48) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 0.5px solid transparent !important;
-    box-shadow: 0 1px 0 rgba(255,255,255,0.7) inset, 0 -1px 0 rgba(0,0,0,0.03) inset, 0 2px 8px -2px rgba(0,0,0,0.04) !important;
+    border: 0 !important;
+    box-shadow: 0 2px 8px -2px rgba(0,0,0,0.04) !important;
 }
 /* Toolbar - Apple glass (light mode) */
 .toolbar {
     background: rgba(255,255,255,0.48) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 0.5px solid transparent !important;
-    box-shadow: 0 1px 0 rgba(255,255,255,0.7) inset, 0 -1px 0 rgba(0,0,0,0.03) inset, 0 2px 8px -2px rgba(0,0,0,0.04) !important;
+    border: 0 !important;
+    box-shadow: 0 2px 8px -2px rgba(0,0,0,0.04) !important;
 }
 /* Canvas nav - Apple glass (dark mode) */
 html.theme-dark .panel.canvas-nav,
@@ -106,8 +106,8 @@ body.studio-theme-dark .panel.canvas-nav {
     background: rgba(18,18,18,0.48) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 0.5px solid rgba(255,255,255,0.05) !important;
-    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 -1px 0 rgba(0,0,0,0.12) inset, 0 4px 16px -4px rgba(0,0,0,0.2) !important;
+    border: 0 !important;
+    box-shadow: 0 4px 16px -4px rgba(0,0,0,0.2) !important;
 }
 /* Toolbar - Apple glass (dark mode) */
 html.theme-dark .toolbar,
@@ -117,8 +117,8 @@ body.studio-theme-dark .toolbar {
     background: rgba(18,18,18,0.48) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 0.5px solid rgba(255,255,255,0.05) !important;
-    box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 -1px 0 rgba(0,0,0,0.12) inset, 0 4px 16px -4px rgba(0,0,0,0.2) !important;
+    border: 0 !important;
+    box-shadow: 0 4px 16px -4px rgba(0,0,0,0.2) !important;
 }
 .toolbar button { color: var(--muted) !important; border-radius: var(--radius-sm) !important; }
 .toolbar button:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
@@ -139,7 +139,7 @@ body.studio-theme-dark .toolbar {
     display: flex; align-items: center; gap: 2px;
     border-radius: 999px;
     background: var(--panel-bg, rgba(255,255,255,.92));
-    border: 1px solid rgba(0,0,0,.08);
+    border: 0;
     box-shadow: 0 8px 22px var(--shadow-color, rgba(0,0,0,.16));
     backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
     pointer-events: auto; user-select: none;
@@ -154,14 +154,13 @@ body.studio-theme-dark .toolbar {
 }
 .canvas-zoombar button:hover { background: var(--nav-hover-bg); color: var(--text); }
 .canvas-zoombar button i, .canvas-zoombar button svg { width: 14px; height: 14px; stroke-width: 1.6; flex: 0 0 auto; }
-.canvas-zoombar .zoombar-sep { width: 1px; height: 16px; margin: 0 3px; background: rgba(0,0,0,.12); flex: 0 0 auto; }
+.canvas-zoombar .zoombar-sep { width: 1px; height: 16px; margin: 0 3px; background: transparent; flex: 0 0 auto; }
 .canvas-zoombar .zoombar-level { min-width: 46px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 html.theme-dark .canvas-zoombar,
 html.studio-theme-dark .canvas-zoombar,
 body.theme-dark .canvas-zoombar,
 body.studio-theme-dark .canvas-zoombar {
     background: #2A2A2A;
-    border: 1px solid rgba(255,255,255,.08);
     box-shadow: 0 8px 22px rgba(0,0,0,.45);
 }
 html.theme-dark .canvas-zoombar button,
@@ -187,7 +186,7 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
 html.theme-dark .canvas-zoombar .zoombar-sep,
 html.studio-theme-dark .canvas-zoombar .zoombar-sep,
 body.theme-dark .canvas-zoombar .zoombar-sep,
-body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,255,.12); }
+body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: transparent; }
 
 /* ═══ NovaGlide 滑块底色（经典画布这几个弹层专用） ═══
    不能用模块默认的 --soft：theme.css 在深色下把 .shell 作用域里的 --soft 重定义成 var(--bg)
@@ -363,7 +362,7 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
                 <div id="outputPromptText" class="output-prompt-text"></div>
                 <div class="output-prompt-actions">
                     <button id="outputCopyPromptBtn" class="preview-text-btn secondary" type="button"><i data-lucide="copy" class="w-3.5 h-3.5"></i><span data-i18n="canvas.copyPrompt">复制提示词</span></button>
-                    <button id="outputRerunBtn" class="preview-text-btn" type="button"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i><span data-i18n="canvas.rerun">再次运行</span></button>
+                    <button id="outputRerunBtn" class="preview-text-btn" type="button" title="再次运行" aria-label="再次运行"><i data-lucide="arrow-up" class="w-3.5 h-3.5"></i></button>
                 </div>
             </div>
             </div>
@@ -546,8 +545,8 @@ body.studio-theme-dark .canvas-zoombar .zoombar-sep { background: rgba(255,255,2
         </div>
     </div>
 
-    <script defer src="/static/vendor/js/glfx.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/js/image-adjust-editor.js?v=1.0.120.1789606971"></script>
-    <script defer src="/static/js/canvas.js?v=1.0.120.1789858679"></script>
+    <script defer src="/static/vendor/js/glfx.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/js/image-adjust-editor.js?v=1.0.123.1789606971"></script>
+    <script defer src="/static/js/canvas.js?v=1.0.123.1790504358"></script>
 </body>
 </html>

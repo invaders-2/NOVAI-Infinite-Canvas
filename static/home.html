@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NOVAI - 首页</title>
     <script>(function(){try{var t=localStorage.getItem('studio_theme')||localStorage.getItem('canvas_theme')||'light';if(t==='dark'){document.documentElement.classList.add('studio-theme-dark');document.documentElement.classList.add('theme-dark');}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.120.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.120.1789636499">
-    <link rel="stylesheet" href="/static/css/nv-beam.css?v=1.0.120.1789606971">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
+    <link rel="stylesheet" href="/static/css/nv-beam.css?v=1.0.123.1790240038">
     <style>
         /* ═══ V4 Apple-style Glassmorphism Design System ═══ */
         :root {
@@ -133,11 +133,11 @@
             background: var(--v4-card-bg);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
+            border: 0;
             border-radius: 14px;
             padding: 16px 16px 14px;
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
-            transition: transform 0.25s cubic-bezier(0.25,0.1,0.25,1), box-shadow 0.25s, border-color 0.25s;
+            transition: transform 0.25s cubic-bezier(0.25,0.1,0.25,1), box-shadow 0.25s;
             cursor: pointer;
             text-decoration: none;
             color: inherit;
@@ -152,17 +152,15 @@
         .hp-tool:hover {
             transform: translateY(-2px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 14px 30px -12px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.1);
         }
-        .theme-dark .hp-tool:hover { border-color: rgba(255,255,255,0.1); }
 
         .hp-tool:active {
             transform: translateY(0) scale(0.98);
         }
 
         .hp-tool:focus-visible {
-            outline: 2px solid var(--v4-focus-ring);
-            outline-offset: 2px;
+            outline: none;
+            box-shadow: 0 0 0 3px var(--v4-focus-ring);
         }
 
         .hp-tool-icon {
@@ -224,7 +222,7 @@
 
         .hp-btn:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
         .hp-btn:active { transform: scale(0.97); }
-        .hp-btn:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .hp-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--v4-focus-ring); }
 
         .hp-btn svg {
             width: 16px;
@@ -250,12 +248,11 @@
             background: var(--v4-card-bg);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
+            border: 0;
             color: var(--v4-text);
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow);
         }
-        .hp-btn-ghost:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); border-color: rgba(0,0,0,0.08); }
-        .theme-dark .hp-btn-ghost:hover { border-color: rgba(255,255,255,0.08); }
+        .hp-btn-ghost:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
 
         /* ===== 最近项目 ===== */
         .recent-section {
@@ -299,8 +296,8 @@
         }
 
         .view-all-btn:focus-visible {
-            outline: 2px solid var(--v4-focus-ring);
-            outline-offset: 2px;
+            outline: none;
+            box-shadow: 0 0 0 3px var(--v4-focus-ring);
         }
 
         .view-all-btn svg {
@@ -322,12 +319,12 @@
             background: var(--v4-card-bg);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
+            border: 0;
             border-radius: 14px;
             overflow: hidden;
             cursor: pointer;
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 2px 8px -2px var(--v4-card-shadow);
-            transition: transform 0.25s cubic-bezier(0.25,0.1,0.25,1), box-shadow 0.25s, border-color 0.25s;
+            transition: transform 0.25s cubic-bezier(0.25,0.1,0.25,1), box-shadow 0.25s;
             text-decoration: none;
             color: var(--v4-text);
             display: flex;
@@ -337,13 +334,11 @@
         .hp-proj:hover {
             transform: translateY(-2px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 10px 28px -8px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.09);
         }
-        .theme-dark .hp-proj:hover { border-color: rgba(255,255,255,0.09); }
 
         .hp-proj:focus-visible {
-            outline: 2px solid var(--v4-focus-ring);
-            outline-offset: 2px;
+            outline: none;
+            box-shadow: 0 0 0 3px var(--v4-focus-ring);
         }
 
         .hp-proj-thumb {
@@ -413,8 +408,8 @@
         }
 
         .hp-proj-new {
-            border: 1.5px dashed rgba(0,0,0,0.18);
-            background: transparent;
+            border: 0;
+            background: color-mix(in srgb, var(--v4-text) 5%, transparent);
             backdrop-filter: none;
             -webkit-backdrop-filter: none;
             box-shadow: none;
@@ -425,15 +420,12 @@
             color: var(--v4-muted);
             border-radius: 14px;
         }
-        .theme-dark .hp-proj-new { border-color: rgba(255,255,255,0.22); }
 
         .hp-proj-new:hover {
-            border-color: rgba(0,0,0,0.4);
             background: var(--v4-card-bg);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04);
             transform: translateY(-2px);
         }
-        .theme-dark .hp-proj-new:hover { border-color: rgba(255,255,255,0.45); }
 
         .hp-proj-new .plus {
             width: 26px;
@@ -518,15 +510,11 @@
             padding: 14px 18px;
             margin-bottom: 8px;
             background: var(--v4-card-solid);
-            border: 1px solid rgba(0, 0, 0, 0.06);
+            border: 0;
             border-radius: 14px;
             box-shadow: 0 2px 12px var(--v4-card-shadow);
             animation: fadeUp 0.5s var(--v4-ease-out) both;
             position: relative;
-        }
-        .theme-dark .lan-notice,
-        [data-theme="dark"] .lan-notice {
-            border-color: rgba(255, 255, 255, 0.08);
         }
         .lan-notice.visible { display: flex; }
         .lan-notice-text {
@@ -566,8 +554,8 @@
             width: 32px;
             height: 32px;
             border-radius: 8px;
-            border: 1px solid rgba(0, 0, 0, 0.08);
-            background: transparent;
+            border: 0;
+            background: color-mix(in srgb, var(--v4-text) 6%, transparent);
             color: var(--v4-text);
             cursor: pointer;
             display: flex;
@@ -579,7 +567,6 @@
         .lan-qr-btn:hover {
             background: var(--v4-focus-ring);
             color: #fff;
-            border-color: var(--v4-focus-ring);
         }
         .lan-qr-btn svg { width: 16px; height: 16px; }
         .lan-qr-popup {
@@ -589,15 +576,11 @@
             right: 0;
             padding: 12px;
             background: var(--v4-card-solid);
-            border: 1px solid rgba(0, 0, 0, 0.08);
+            border: 0;
             border-radius: 12px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
             z-index: 100;
             white-space: nowrap;
-        }
-        .theme-dark .lan-qr-popup,
-        [data-theme="dark"] .lan-qr-popup {
-            border-color: rgba(255, 255, 255, 0.08);
         }
         .lan-qr-popup.show { display: block; }
         .lan-qr-popup img {

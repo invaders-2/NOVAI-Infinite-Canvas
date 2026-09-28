@@ -6,9 +6,10 @@
 #   - tests/test_canvas_log_cleanup.py 是**陈旧测试**：它 import 的
 #     main.delete_canvas_log / collect_local_media_urls / generated_media_path_from_url
 #     在本分支 HEAD 的 main.py 里都不存在，跑起来必然报错，故这里不跑它（文件保留，未删除）。
-#   - 两个 python 单测会 `import main`，需要 main.py 顶层 import 用到的最小依赖
+#   - 若干 python 单测会 `import main`，需要 main.py 顶层 import 用到的最小依赖
 #     （fastapi / pydantic / requests / httpx / pillow / python-multipart）；
 #     cv2、onnxruntime 等都是函数内惰性导入，不需要装，也不跑打包。
+#   - tests/test_video_segments.py 需要 ffmpeg（ubuntu-latest 自带；缺失时真实切分用例自动 skip）。
 name: tests
 
 on:
@@ -54,7 +55,7 @@ jobs:
           python -m pip install fastapi pydantic requests httpx pillow python-multipart
 
       - name: Python unit tests
-        run: python -m unittest tests.test_lan_auth tests.test_asset_dedupe tests.test_lovart_provider_injection
+        run: python -m unittest tests.test_lan_auth tests.test_asset_dedupe tests.test_lovart_provider_injection tests.test_video_segments tests.test_agent_image_size tests.test_agent_run_history tests.test_agent_run_plan_mode
 
       - name: Compile main.py
         run: python -m py_compile main.py
