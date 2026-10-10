@@ -78,8 +78,11 @@ if errorlevel 1 (
 )
 
 :: ---- 确定端口 ----
+:: NOVAI_PORT 是后端真正读的变量（DEPLOY_RUN_PORT 只是历史别名）；写回去让 main.py 与脚本用同一个端口
 set "PORT=3000"
+if defined NOVAI_PORT set "PORT=%NOVAI_PORT%"
 if defined DEPLOY_RUN_PORT set "PORT=%DEPLOY_RUN_PORT%"
+set "NOVAI_PORT=%PORT%"
 
 if "!DESKTOP_MODE!"=="1" (
     echo [NOVAI] 正在启动桌面窗口模式...

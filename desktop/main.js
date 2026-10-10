@@ -224,6 +224,37 @@ function shutdownBackend() {
   }
 }
 
+// 安装新版前必须先让后端彻底退出，否则 Windows 安装程序覆盖 NOVAI.exe 会被占用中的文件挡住。
+function stopBackendForUpdate(timeoutMs) {
+  const limit = timeoutMs || 15000;
+  return new Promise((resolve) => {
+    const proc = backendProc;
+    if (!proc || proc.killed || !proc.pid) return resolve();
+    let settled = false;
+    let timer = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+    // 超时兜底：拿不到退出事件也要放行安装，避免更新流程卡死。
+    timer = setTimeout(finish, limit);
+    proc.once('exit', finish);
+    try {
+      if (process.platform === 'win32') {
+        // PyInstaller onefile 是“引导进程 + 同名子进程”，只 kill 引导进程会留下子进程占住 exe
+        spawn('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { stdio: 'ignore' });
+      } else {
+        proc.kill();
+      }
+    } catch (err) {
+      clog('updater', '停止后端进程失败: ' + (err && err.message || err));
+      try { proc.kill(); } catch (_) {}
+    }
+  });
+}
+
 // ---------- 托盘 ----------
 function createTray() {
   if (tray) return;
@@ -392,6 +423,7 @@ function setupAutoUpdate() {
     if (!autoUpdater) return;
   } catch (_) { return; }
   autoUpdater.autoDownload = false;
+  let updateStage = 'checking';
   // 测试版（版本号含 -，如 1.0.112-beta.1）允许接收 prerelease 更新；正式版只看正式 Release。
   autoUpdater.allowPrerelease = app.getVersion().includes('-');
   // 国内用户访问 GitHub Releases 常被阻断：检查失败时自动切换到该
@@ -400,6 +432,7 @@ function setupAutoUpdate() {
   const MIRROR_UPDATE_URL = 'https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/electron-release';
   let switchedToMirror = false;
   autoUpdater.on('update-available', (info) => {
+    updateStage = 'available';
     const current = app.getVersion();
     const next = info && info.version;
     if (!next || next === current) return;
@@ -415,7 +448,9 @@ function setupAutoUpdate() {
       if (response === 0) autoUpdater.downloadUpdate();
     }).catch(() => {});
   });
+  autoUpdater.on('download-progress', () => { updateStage = 'downloading'; });
   autoUpdater.on('update-downloaded', () => {
+    updateStage = 'downloaded';
     if (process.platform === 'darwin') {
       dialog.showMessageBox(mainWindow, {
         type: 'info',
@@ -437,13 +472,16 @@ function setupAutoUpdate() {
       defaultId: 0,
       cancelId: 1,
     }).then(({ response }) => {
-      if (response === 0) autoUpdater.quitAndInstall();
+      if (response === 0) {
+        stopBackendForUpdate().then(() => autoUpdater.quitAndInstall());
+      }
     }).catch(() => {});
   });
   autoUpdater.on('error', (err) => {
-    clog('updater', '检查更新失败: ' + (err && err.message || err));
-    // GitHub 不通时切换到国内镜像重试一次（仅切换一次，避免死循环）
-    if (!switchedToMirror) {
+    const stageLabel = { checking: '检查更新', available: '检查更新', downloading: '下载更新包', downloaded: '安装更新' }[updateStage] || '检查更新';
+    clog('updater', '[' + stageLabel + '] 更新失败: ' + (err && err.message || err));
+    // GitHub 不通时切换到国内镜像重试一次（仅切换一次，避免死循环）；安装阶段重试下载没有意义
+    if (!switchedToMirror && updateStage !== 'downloaded') {
       switchedToMirror = true;
       try {
         autoUpdater.setFeedURL({ provider: 'generic', url: MIRROR_UPDATE_URL });
@@ -457,11 +495,26 @@ function setupAutoUpdate() {
     // 镜像也失败，或 macOS 未签名构建无法自动安装（Squirrel 要求签名）→
     // 引导手动下载覆盖安装，数据目录独立不受影响。
     if (!mainWindow) return;
+    const rawError = String(err && err.message || err);
+    if (updateStage === 'downloaded') {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: '自动更新未能安装',
+        message: '新版安装包已下载完成，但安装阶段失败',
+        detail: '原始错误：' + rawError + '\n可尝试以管理员身份运行 NOVAI 后重试自动更新，或到发布页手动下载安装包覆盖安装（用户数据不会丢失）。',
+        buttons: ['前往下载', '稍后'],
+        defaultId: 0,
+        cancelId: 1,
+      }).then(({ response }) => {
+        if (response === 0) shell.openExternal('https://gitee.com/invaders/novai/releases');
+      }).catch(() => {});
+      return;
+    }
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: '自动更新不可用',
       message: '新版本已发布，但自动更新未能完成',
-      detail: '可能是网络无法连接更新服务器，或 macOS 未签名构建不支持自动安装。可前往发布页手动下载最新安装包覆盖安装，数据不会丢失。',
+      detail: '可能是网络无法连接更新服务器，或 macOS 未签名构建不支持自动安装。可前往发布页手动下载最新安装包覆盖安装，数据不会丢失。\n原始错误：' + rawError,
       buttons: ['前往下载', '稍后'],
       defaultId: 0,
       cancelId: 1,

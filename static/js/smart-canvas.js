@@ -178,6 +178,8 @@ let suppressNodeClickUntil = 0;
 let textSelectionGuard = null;
 const UNDO_LIMIT = 40;
 const undoStack = [];
+/* 恢复栈：撤销时把当前状态压进来；任何新的可撤销操作都会清空它（与常见编辑器一致） */
+const redoStack = [];
 let undoSuppressed = false;
 let pendingUndoSnapshot = null;
 let runningHubWorkflowCache = {};
@@ -210,17 +212,51 @@ function commitPendingUndo(){
     if(pendingUndoSnapshot){
         undoStack.push(pendingUndoSnapshot);
         if(undoStack.length > UNDO_LIMIT) undoStack.shift();
+        redoStack.length = 0;
         pendingUndoSnapshot = null;
     }
 }
 function discardPendingUndo(){ pendingUndoSnapshot = null; }
+/* 撤销快照做「结构共享」：每个节点序列化后跟上一次快照里同 id 的比较，内容没变就直接复用那份只读副本，
+   只对真的变了的节点重新 parse。40 步撤销里绝大多数节点是同一份对象，内存从「40 份全量」降到「1 份 + 改动」，
+   每次 pushUndo 也省掉了大部分 JSON.parse。快照里的对象是共享的，所以恢复时必须再拷一份给画布用（见 thawUndoSnapshot）。 */
+let undoNodeCache = new Map();
+let undoConnCache = {json:'', value:[]};
+function freezeUndoNodes(list){
+    const next = new Map();
+    const out = (list || []).map(node => {
+        const json = JSON.stringify(node);
+        const key = node && node.id != null ? String(node.id) : '';
+        const hit = key ? undoNodeCache.get(key) : null;
+        const value = hit && hit.json === json ? hit.value : JSON.parse(json);
+        if(key) next.set(key, {json, value});
+        return value;
+    });
+    undoNodeCache = next;
+    return out;
+}
+function freezeUndoConnections(list){
+    const json = JSON.stringify(list || []);
+    if(json !== undoConnCache.json) undoConnCache = {json, value:JSON.parse(json)};
+    return undoConnCache.value;
+}
 function snapshotForUndo(){
     return {
-        nodes: JSON.parse(JSON.stringify(nodes)),
-        connections: JSON.parse(JSON.stringify(canvas?.connections || [])),
+        nodes: freezeUndoNodes(nodes),
+        connections: freezeUndoConnections(canvas?.connections || []),
         selectedId,
         selectedIds: selectedIds.slice(),
         selectedImage: {...selectedImage}
+    };
+}
+/* 快照里的节点和连线在多个快照之间共享，交给画布前拷一份，画布后续的原地修改不会改到历史 */
+function thawUndoSnapshot(snap){
+    return {
+        ...snap,
+        nodes: JSON.parse(JSON.stringify(snap.nodes || [])),
+        connections: JSON.parse(JSON.stringify(snap.connections || [])),
+        selectedIds: (snap.selectedIds || []).slice(),
+        selectedImage: {...(snap.selectedImage || {})}
     };
 }
 function pushUndo(){
@@ -228,10 +264,35 @@ function pushUndo(){
     if(!canvas) return;
     undoStack.push(snapshotForUndo());
     if(undoStack.length > UNDO_LIMIT) undoStack.shift();
+    redoStack.length = 0;
+}
+function restoreUndoSnapshot(frozen){
+    const snap = thawUndoSnapshot(frozen);
+    undoSuppressed = true;
+    nodes = snap.nodes;
+    if(canvas) canvas.connections = snap.connections;
+    selectedId = snap.selectedId;
+    selectedIds = snap.selectedIds;
+    selectedImage = snap.selectedImage;
+    activeComposerSubject = null;
+    lastComposerNodeId = '';
+    render();
+    scheduleSave();
+    undoSuppressed = false;
+}
+function performRedo(){
+    if(!redoStack.length){ toast(tr('smart.toastNoRedo')); return; }
+    const snap = redoStack.pop();
+    undoStack.push(snapshotForUndo());
+    if(undoStack.length > UNDO_LIMIT) undoStack.shift();
+    restoreUndoSnapshot(snap);
+    toast(tr('smart.toastRedone'));
 }
 function performUndo(){
     if(!undoStack.length){ toast(tr('smart.toastNoUndo')); return; }
-    const snap = undoStack.pop();
+    const snap = thawUndoSnapshot(undoStack.pop());
+    redoStack.push(snapshotForUndo());
+    if(redoStack.length > UNDO_LIMIT) redoStack.shift();
     undoSuppressed = true;
     nodes = snap.nodes;
     if(canvas) canvas.connections = snap.connections;
@@ -1117,6 +1178,17 @@ function smartCanvasExportPixelRatio(width, height){
     if(width * height * 4 > SMART_EXPORT_MAX_PIXELS) return 1;
     return 2;
 }
+/* 右上角 / 右下角的面板（工作流、资源库、版本历史、画布助手、日志、快捷键、导出）同一时间只开一个：
+   以前各开各的，版本历史和画布助手、工作流和资源库会叠在一起。打开任何一个前先调用这里收掉其它的。 */
+function closeSmartSidePanels(except=''){
+    if(except !== 'workflow') closeSmartWorkflowTransferModal();
+    if(except !== 'assets' && assetLibraryOpen) toggleAssetLibrary(false);
+    if(except !== 'versions') closeCanvasVersionsPanel();
+    if(except !== 'chat' && document.getElementById('chatModal')?.classList.contains('open')) toggleChatPanel();
+    if(except !== 'log') closeSmartCanvasLog();
+    if(except !== 'shortcuts') closeSmartCanvasShortcuts();
+    if(except !== 'export') closeSmartExportMenu();
+}
 function closeSmartExportMenu(){
     smartExportMenu?.classList.remove('open');
     smartExportToggle?.classList.remove('active');
@@ -1124,6 +1196,7 @@ function closeSmartExportMenu(){
 function toggleSmartExportMenu(open){
     if(!smartExportMenu) return;
     const next = typeof open === 'boolean' ? open : !smartExportMenu.classList.contains('open');
+    if(next) closeSmartSidePanels('export');
     smartExportMenu.classList.toggle('open', next);
     smartExportToggle?.classList.toggle('active', next);
 }
@@ -1182,6 +1255,11 @@ async function exportSmartCanvasImage(format){
     smartExportToggle?.classList.add('busy');
     toast(ext === 'svg' ? '正在导出 SVG…' : '正在导出 PNG…');
     world.classList.add('is-exporting');
+    /* 导出要全细节：临时撤掉缩放分级和视口外收起（html-to-image 按计算样式克隆，收起的节点会导出成空白） */
+    world.classList.remove('lod-far', 'lod-tiny');
+    smartLodLevel = '';
+    world.querySelectorAll('.image-node.nv-offscreen').forEach(el => el.classList.remove('nv-offscreen'));
+    smartExportingNow = true;
     try {
         let blob;
         if(ext === 'svg'){
@@ -1206,6 +1284,9 @@ async function exportSmartCanvasImage(format){
     } finally {
         world.classList.remove('is-exporting');
         smartExportToggle?.classList.remove('busy');
+        smartExportingNow = false;
+        syncCanvasLod();
+        cullOffscreenNodes();
     }
 }
 function clearSmartNodeTransientRunState(node, options={}){
@@ -1258,7 +1339,7 @@ function normalizeImportedSmartWorkflow(data){
 }
 function openSmartWorkflowTransferModal(){
     if(!canvas){ toast('请先打开画布'); return; }
-    toggleAssetLibrary(false);
+    closeSmartSidePanels('workflow');
     updateSmartWorkflowTransferMeta();
     smartWorkflowTransferModal?.classList.add('open');
     smartWorkflowToggle?.classList.add('active');
@@ -1645,12 +1726,21 @@ function stripOutpaintDisplaySettings(settingsObj, node=null){
 }
 function smartSettingsForNode(node){
     const nodeSettings = stripOutpaintDisplaySettings(node?.runSettings || {}, node);
-    const recentSettings = Object.keys(nodeSettings).length ? {} : recentSmartSettingsForMode();
+    /* 节点上已经有素材时，生成模式必须跟着素材走：上传进来的图片节点不能继承"上一次视频模式"的参数
+       ——继承后会被 persistActiveSmartSettings 写进节点，后端据此把节点编号判成"视频N"（多图群组同一条链）。
+       空节点没有素材可依据，仍沿用当前模式（用户手动把空节点切成视频的用法不变）。 */
+    const mediaItems = (node?.images || []).filter(img => img?.url);
+    const mediaApiKind = mediaItems.length ? (mediaItems.some(isVideoMediaItem) ? 'video' : 'image') : '';
+    const recentModeKey = mediaApiKind
+        ? smartSettingsModeKey({engine:(canvasDefaultSmartSettings || initialSmartSettings || settings).engine, apiKind:mediaApiKind})
+        : '';
+    const recentSettings = Object.keys(nodeSettings).length ? {} : recentSmartSettingsForMode(recentModeKey);
     const base = {
         ...cloneSmartSettings(canvasDefaultSmartSettings || initialSmartSettings),
         ...recentSettings,
         ...nodeSettings
     };
+    if(mediaApiKind && isApiLikeEngine(base.engine)) base.apiKind = mediaApiKind;
     normalizeSmartVideoModeSettings(base, true);
     return withOutpaintDisplaySettings(node, base);
 }
@@ -1790,6 +1880,8 @@ function syncSelectionUi(){
     if(selectedImage.nodeId) touchedIds.add(selectedImage.nodeId);
     world.classList.toggle('smart-multi-selected', ids.length > 1);
     smartArrangeBtn?.classList.toggle('visible', ids.length > 0);
+    syncConcatVideosButton(ids);
+    syncPickSelectedButton(ids);
     syncRunSelectedButton();
     smartNodeElementsByIds(touchedIds).forEach(el => {
         const id = el.dataset.id || '';
@@ -2656,14 +2748,19 @@ function imageLayout(images, scale=1, node=null){
     if(count === 0){
         const explicitW = Number(node?.w);
         const explicitH = Number(node?.h);
+        const hasExplicit = Number.isFinite(explicitW) && explicitW > 24 && Number.isFinite(explicitH) && explicitH > 24;
         const pending = Number(node?.pending) > 0 || Boolean(node?.queued);
+        /* 生成中的占位框比例 = 本次请求的比例：没被用户拉过尺寸的节点（助手直接跑生成时建的
+           结果节点就没有 w/h）优先取 runSettings 里的请求比例，算不出来才退回原 260x180。 */
+        const requestBox = pending && !hasExplicit ? pendingRequestBoxForNode(node) : null;
+        if(requestBox) return {cols:1, rows:1, width:requestBox.w, height:requestBox.h, thumb:Math.round(96*s), single:true};
         const fallbackW = pending ? 260 * s : EMPTY_UPLOAD_NODE_WIDTH;
         const fallbackH = pending ? 180 * s : EMPTY_UPLOAD_NODE_HEIGHT;
         return {
             cols:1,
             rows:1,
-            width:Math.round(Number.isFinite(explicitW) && explicitW > 24 ? explicitW : fallbackW),
-            height:Math.round(Number.isFinite(explicitH) && explicitH > 24 ? explicitH : fallbackH),
+            width:Math.round(hasExplicit ? explicitW : fallbackW),
+            height:Math.round(hasExplicit ? explicitH : fallbackH),
             thumb:Math.round(96*s),
             single:true
         };
@@ -2854,6 +2951,93 @@ function arrangeSmartIdsByConnections(ids){
     });
     return true;
 }
+/* 第 44 轮：助手「整理一下」—— 按连线把每一串流程从左到右排好（复用「整理选中节点」的分层排法），
+   一串一串自上而下摞起来；没连线的散节点最后按行排开。返回整理前的位置，用来一键撤销。 */
+function agentArrangeCanvas(ids){
+    if(!canvas) return {count:0, before:{}};
+    var pool = (ids && ids.length ? ids : nodes.map(function(n){ return n.id; }))
+        .filter(function(id){ return nodes.some(function(n){ return n.id === id; }); });
+    var atoms = smartArrangeAtomicIds(pool);
+    if(atoms.length < 2) return {count:0, before:{}};
+    var before = {};
+    nodes.forEach(function(n){ before[n.id] = {x:n.x, y:n.y}; });
+    var atomSet = new Set(atoms);
+    var atomOf = function(id){
+        if(atomSet.has(id)) return id;
+        var g = nodes.find(function(n){ return atomSet.has(n.id) && isSmartGroupNode(n) && (n.items || []).indexOf(id) !== -1; });
+        return g ? g.id : '';
+    };
+    var adj = new Map(atoms.map(function(id){ return [id, new Set()]; }));
+    (canvas.connections || []).forEach(function(c){
+        var a = atomOf(c.from), b = atomOf(c.to);
+        if(a && b && a !== b){ adj.get(a).add(b); adj.get(b).add(a); }
+    });
+    var seen = new Set(), clusters = [];
+    atoms.forEach(function(id){
+        if(seen.has(id)) return;
+        var comp = [], queue = [id];
+        seen.add(id);
+        while(queue.length){
+            var cur = queue.shift();
+            comp.push(cur);
+            adj.get(cur).forEach(function(nx){ if(!seen.has(nx)){ seen.add(nx); queue.push(nx); } });
+        }
+        clusters.push(comp);
+    });
+    var box = function(list){
+        var rs = list.map(function(id){ return nodeRect(nodes.find(function(n){ return n.id === id; })); });
+        var x = Math.min.apply(null, rs.map(function(r){ return r.x; })), y = Math.min.apply(null, rs.map(function(r){ return r.y; }));
+        return {x:x, y:y, w:Math.max.apply(null, rs.map(function(r){ return r.x + r.width; })) - x,
+                h:Math.max.apply(null, rs.map(function(r){ return r.y + r.height; })) - y};
+    };
+    var all = box(atoms);
+    var x0 = all.x, curY = all.y;
+    clusters.sort(function(a, b){ var A = box(a), B = box(b); return (A.y - B.y) || (A.x - B.x); });
+    pushUndo();
+    clusters.filter(function(c){ return c.length > 1; }).forEach(function(c){
+        arrangeSmartIdsByConnections(c);
+        var b = box(c);
+        c.forEach(function(id){
+            var n = nodes.find(function(x){ return x.id === id; });
+            moveSmartNodeAtom(n, (n.x || 0) + (x0 - b.x), (n.y || 0) + (curY - b.y));
+        });
+        curY += b.h + 140;
+    });
+    var singles = clusters.filter(function(c){ return c.length === 1; }).map(function(c){ return c[0]; });
+    var x = x0, rowH = 0, rowMax = Math.max(1600, all.w);
+    singles.forEach(function(id){
+        var n = nodes.find(function(z){ return z.id === id; });
+        var r = nodeRect(n);
+        if(x > x0 && x - x0 + r.width > rowMax){ x = x0; curY += rowH + 80; rowH = 0; }
+        moveSmartNodeAtom(n, x, curY);
+        x += r.width + 80;
+        rowH = Math.max(rowH, r.height);
+    });
+    render();
+    scheduleSave();
+    return {count:atoms.length, before:before};
+}
+function agentArrangeUndo(before){
+    nodes.forEach(function(n){ var b = before[n.id]; if(b){ n.x = b.x; n.y = b.y; } });
+    render();
+    scheduleSave();
+}
+function agentArrangeNote(result){
+    if(!result || !result.count){ addChatMessage('system', '节点太少，不用整理。'); return; }
+    var parts = createChatMsgEl('assistant');
+    document.getElementById('chatMessages').appendChild(parts.div);
+    parts.bubble.innerHTML = '<div class="agent-memory-note"><i data-lucide="layout-grid"></i><span>已整理 <b>' + result.count +
+        '</b> 个节点：按连线从左到右排好 · <button type="button">撤销</button></span></div>';
+    var btn = parts.bubble.querySelector('button');
+    btn.addEventListener('click', function(){
+        agentArrangeUndo(result.before);
+        parts.bubble.querySelector('span').textContent = '已撤销整理，节点回到原来的位置。';
+    });
+    refreshIcons();
+    parts.div.scrollIntoView({behavior:'smooth', block:'end'});
+}
+window.__agentArrangeCanvas = agentArrangeCanvas;
+window.__agentArrangeNote = agentArrangeNote;
 function arrangeSelectedSmartNodes(){
     if(!canvas) return;
     const explicit = selectedNodeIds().filter(id => nodes.some(n => n.id === id));
@@ -2889,6 +3073,8 @@ function applyViewport(){
     // 缩小时位图被降采样 → 组件发虚。缩放态下关闭这些 backdrop-filter（底色本身已接近不透明，
     // 观感几乎无差），让卡片随矢量重新栅格化，保持清晰。
     world.classList.toggle('canvas-scaled', Math.abs(viewport.scale - 1) > 0.001);
+    syncCanvasLod();
+    scheduleOffscreenCull();
     shell.style.backgroundSize = '24px 24px';
     shell.style.backgroundPosition = '0 0';
     renderMinimap();
@@ -2933,6 +3119,8 @@ function viewportCenter(){
 function renderMinimap(){
     if(!minimapContent || !minimapViewport) return;
     smartArrangeBtn?.classList.toggle('visible', selectedNodeIds().length > 0);
+    syncConcatVideosButton();
+    syncPickSelectedButton();
     syncRunSelectedButton();
     const width = minimapContent.clientWidth || 170;
     const height = minimapContent.clientHeight || 108;
@@ -2980,7 +3168,7 @@ function centerViewportOnWorldPoint(point){
     viewport.x = shell.clientWidth / 2 - point.x * viewport.scale;
     viewport.y = shell.clientHeight / 2 - point.y * viewport.scale;
     applyViewport();
-    scheduleSave();
+    scheduleViewportSave();
 }
 function fitAllNodesViewport(){
     if(!nodes.length){
@@ -2988,7 +3176,7 @@ function fitAllNodesViewport(){
         viewport.x = shell.clientWidth / 2;
         viewport.y = shell.clientHeight / 2;
         applyViewport();
-        scheduleSave();
+        scheduleViewportSave();
         return;
     }
     const rects = nodes.map(nodeRect);
@@ -3006,7 +3194,7 @@ function fitAllNodesViewport(){
     viewport.x = shell.clientWidth / 2 - cx * viewport.scale;
     viewport.y = shell.clientHeight / 2 - cy * viewport.scale;
     applyViewport();
-    scheduleSave();
+    scheduleViewportSave();
 }
 const ZOOM_BAR_MIN_SCALE = 0.12;
 const ZOOM_BAR_MAX_SCALE = 8;
@@ -3041,7 +3229,7 @@ function zoomBarApplyScale(nextScale){
     viewport.y = cy - (cy - viewport.y) * (target / oldScale);
     viewport.scale = target;
     applyViewport();
-    scheduleSave();
+    scheduleViewportSave();
 }
 function zoomBarZoomIn(){
     zoomBarApplyScale(Math.round((viewport.scale || 1) * 100 + 5) / 100);
@@ -3090,7 +3278,7 @@ function exitZoomPreview(point=null){
         viewport.y = prev.y;
     }
     applyViewport();
-    scheduleSave();
+    scheduleViewportSave();
     return true;
 }
 function exitZoomPreviewToNode(nodeId){
@@ -3115,7 +3303,7 @@ function exitZoomPreviewToNode(nodeId){
     viewport.x = shell.clientWidth / 2 - cx * viewport.scale;
     viewport.y = shell.clientHeight / 2 - cy * viewport.scale;
     applyViewport();
-    scheduleSave();
+    scheduleViewportSave();
     return true;
 }
 function toggleZoomPreview(){
@@ -3670,9 +3858,9 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSi
         const parsed = parseRatioValue(customRatioValue);
         const longSide = RES_LONG_SIDE[resolutionKey] || 1024;
         if(parsed){
-            const pixelLimit = resPixelLimitFor(model)[resolutionKey] || (longSide * longSide);
-            const rawWidth = parsed >= 1 ? longSide : Math.min(longSide * parsed, Math.sqrt(pixelLimit * parsed));
-            const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;
+            // 档位只定长边，短边按比例等比算：单独拿像素上限夹一条边会把比例改掉（56:75@4K 曾出成 2480x3840）。
+            const rawWidth = parsed >= 1 ? longSide : longSide * parsed;
+            const rawHeight = parsed >= 1 ? longSide / parsed : longSide;
             const width = Math.floor(rawWidth / 16) * 16;
             const height = Math.floor(rawHeight / 16) * 16;
             // 比例算出来的游离尺寸交给策略收口：枚举模型吸附到合法值，free/hintOnly 原样放行。
@@ -3874,11 +4062,95 @@ function renderDynamicParams(){
        composer 是 opacity 显隐、不是 display:none，这里量得到真实尺寸。 */
     wireSizePickerGlide(dynamicParams);
     wireSmartParamsGlide(dynamicParams);
+    renderUnifiedPlatformControl();
     /* 弹层开着时点档位/背景/比例都会重建控件、丢掉上一次的收口值；没打开就不量，避免无谓的布局读取 */
     dynamicParams.querySelectorAll('.size-picker-control').forEach(ctrl => {
         if(ctrl.classList.contains('pinned') || ctrl.classList.contains('interacting')) fitSizePickerPopover(ctrl);
     });
     syncVideoMoreDock();
+}
+/* ── 平台选择合一：以前要先在左上角选「API生成 / 火山 / ModelScope / ComfyUI / RunningHub」，
+   选了 API 生成后底部还有第二个「平台」下拉。现在合成左上角一个下拉，按「你配置的 API 平台」和「其它引擎」分两组。
+   外观完全复用参数栏的 .smart-control / .smart-pill / .smart-popover / .direct-option；底层仍走原来的
+   engineSelect.onchange 与 setDynamicSetting，不改任何生成逻辑。原来的 select 和底部平台下拉只是隐藏。 */
+function unifiedPlatformEntries(){
+    const isVideo = settings.apiKind === 'video' && isApiLikeEngine(settings.engine);
+    const apiList = isVideo ? videoApiProviders() : imageProviders();
+    const engineName = value => (engineSelect?.querySelector(`option[value="${value}"]`)?.textContent?.trim() || value).replace(/\s*生成$/, '');
+    const api = apiList.map(p => ({engine:'api', id:p.id, name:p.name || p.id}));
+    const others = (isVideo ? ['volcengine'] : ['volcengine', 'modelscope', 'comfy', 'runninghub'])
+        .map(value => ({engine:value, id:'', name:value === 'modelscope' ? 'ModelScope' : engineName(value)}));
+    return {api, others, isVideo};
+}
+function currentUnifiedPlatformLabel(){
+    if(settings.engine === 'api'){
+        const id = settings.apiKind === 'video' ? settings.videoProvider : settings.provider_id;
+        const provider = (settings.apiKind === 'video' ? videoProviderById(id) : apiProviderById(id));
+        return provider?.name || id || tr('smart.platform');
+    }
+    if(settings.engine === 'modelscope') return 'ModelScope';
+    return (engineSelect?.querySelector(`option[value="${settings.engine}"]`)?.textContent?.trim() || settings.engine).replace(/\s*生成$/, '');
+}
+function renderUnifiedPlatformControl(){
+    const head = engineSelect?.parentElement;
+    if(!head) return;
+    let ctrl = document.getElementById('unifiedPlatformControl');
+    if(!ctrl){
+        ctrl = document.createElement('div');
+        ctrl.id = 'unifiedPlatformControl';
+        ctrl.className = 'smart-control unified-platform-control';
+        head.insertBefore(ctrl, engineSelect);
+        engineSelect.classList.add('is-merged');
+        composer?.classList.add('has-unified-platform');
+        ctrl.addEventListener('mouseleave', () => ctrl.classList.remove('interacting'));
+    }
+    const {api, others} = unifiedPlatformEntries();
+    const activeId = settings.apiKind === 'video' ? settings.videoProvider : settings.provider_id;
+    const option = entry => {
+        const active = entry.engine === settings.engine && (entry.engine !== 'api' || entry.id === activeId);
+        return `<button type="button" class="direct-option ${active ? 'active' : ''}" data-unified-engine="${escapeAttr(entry.engine)}" data-unified-id="${escapeAttr(entry.id)}"><span>${escapeHtml(entry.name)}</span></button>`;
+    };
+    ctrl.innerHTML = `
+        <button class="smart-pill" type="button"><span class="sub">${escapeHtml(currentUnifiedPlatformLabel())}</span><i data-lucide="chevron-down" class="pill-caret"></i></button>
+        <div class="smart-popover compact-popover unified-platform-popover">
+            <div class="model-list">
+                <div class="smart-popover-title unified-platform-group">我的 API 平台</div>
+                ${api.map(option).join('') || `<div class="muted-note">${escapeHtml(tr('smart.noApiPlatform'))}</div>`}
+                <div class="smart-popover-title unified-platform-group">其它引擎</div>
+                ${others.map(option).join('')}
+            </div>
+        </div>`;
+    ctrl.querySelector('.smart-pill').onclick = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const wasPinned = ctrl.classList.contains('pinned');
+        closeAllSmartPopovers();
+        if(!wasPinned) ctrl.classList.add('pinned');
+    };
+    ctrl.querySelectorAll('[data-unified-engine]').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            ctrl.classList.remove('pinned', 'interacting');
+            applyUnifiedPlatform(btn.dataset.unifiedEngine, btn.dataset.unifiedId);
+        };
+    });
+    /* 平台下拉在 composer-head 里，不在 #dynamicParams，wireSmartParamsGlide 扫不到：
+       单独接同一条 NovaGlide 滑块（与参数行的平台/模型列表同款 .model-list → .direct-option）。 */
+    attachGlideHost(ctrl.querySelector('.model-list'), {item: '.direct-option', orientation: 'grid'});
+    if(window.lucide) lucide.createIcons();
+}
+function applyUnifiedPlatform(engine, id){
+    if(!engine) return;
+    if(settings.engine !== engine){
+        engineSelect.value = engine;
+        engineSelect.onchange?.();
+    }
+    if(engine === 'api' && id){
+        const key = settings.apiKind === 'video' ? 'videoProvider' : 'provider_id';
+        if(settings[key] !== id) setDynamicSetting(key, id);
+    }
+    renderUnifiedPlatformControl();
 }
 function renderApiParams(){
     const providers = imageProviders();
@@ -5673,15 +5945,21 @@ function initChatModel(){
         if(!models.length && p.image_models) models = p.image_models;
         if(!models.length && p.model_protocols) models = Object.keys(p.model_protocols);
         models.forEach(function(m){
-            if(!allModels.some(function(x){return x.name===m})) allModels.push({name:m, provider:p.id});
+            if(!allModels.some(function(x){ return x.name === m && x.provider === p.id; })) allModels.push({name:m, provider:p.id});
         });
+    });
+    // 选了平台：模型下拉只留这个平台的模型，其他平台的藏起来（「自动」时列全部，同名模型只列一次）
+    var own = agentImageProvider ? allModels.filter(function(m){ return m.provider === agentImageProvider; }) : [];
+    allModels = own.length ? own : allModels.filter(function(m, i){
+        return allModels.findIndex(function(x){ return x.name === m.name; }) === i;
     });
     if(!allModels.length) allModels.push({name:'gpt-4o-mini', provider:'openai'});
     // 优先恢复用户上次选择的模型（localStorage 记忆），否则取第一个
     var savedModel = localStorage.getItem('smart_chat_model') || '';
     var savedProvider = localStorage.getItem('smart_chat_provider') || '';
     var chosen = null;
-    if(savedModel){
+    if(chatModel && chatProvider) chosen = allModels.find(function(m){ return m.name === chatModel && m.provider === chatProvider; }) || null;
+    if(!chosen && savedModel){
         chosen = allModels.find(function(m){ return m.name === savedModel && (!savedProvider || m.provider === savedProvider); });
         if(!chosen) chosen = allModels.find(function(m){ return m.name === savedModel; });
     }
@@ -5729,9 +6007,12 @@ function changeAgentImageProvider(val){
     agentImageProvider = val || '';
     // 记忆用户选择，下次打开助手沿用
     try { localStorage.setItem('smart_agent_image_provider', agentImageProvider); } catch(e){}
+    // 模型下拉跟着换成这个平台的模型
+    initChatModel();
+    if(chatModelSelect.value) changeChatModel(chatModelSelect.value);
 }
-initChatModel();
 initAgentImageProvider();
+initChatModel();
 window.changeAgentImageProvider = changeAgentImageProvider;
 window.changeChatModel = changeChatModel;
 window.initChatModel = initChatModel;
@@ -5740,8 +6021,8 @@ window.agentStepEditChange = agentStepEditChange;
 /* 供端到端脚本直接驱动「助手动作 → 文本节点」这条链（助手本体已走 agent 通道） */
 window.executeChatActions = executeChatActions;
 function refreshChatModels(){
-    initChatModel();
     initAgentImageProvider();
+    initChatModel();
 }
 function currentChatModel(){ return chatModel || 'gpt-4o-mini'; }
 /* 助手新建纯文本节点放哪：视口中心；那儿已经有节点就往下让开，别叠成一摞 */
@@ -5806,6 +6087,7 @@ function executeChatActions(actions){
     scheduleSave();
 }
 function toggleChatPanel(){
+    if(!chatModal.classList.contains('open')) closeSmartSidePanels('chat');
     chatModal.classList.toggle('open');
     var opened = chatModal.classList.contains('open');
     if(!opened){
@@ -5814,9 +6096,10 @@ function toggleChatPanel(){
         return;
     }
     var inp = document.getElementById('chatInput');
-    setTimeout(function(){
+    setTimeout(async function(){
         syncChatContext();
         refreshChatModels();
+        await loadAgentThreadOnce();
         renderChatWelcomeIfEmpty();
         // 已经有对话 → 直接把焦点给输入框；空对话 → 让打字机先说话，点一下才接管。
         if(chatMessages.length){ if(inp) inp.focus(); }
@@ -5826,7 +6109,144 @@ function toggleChatPanel(){
 // ── Agent 历史记录面板（只读展示，不做删除）──
 var agentHistoryMode = 'canvas'; // 'canvas'=当前画布 / 'all'=全部
 var agentHistorySessions = [];
+/* ── 项目记忆面板（第 42 轮）：沿用历史记录面板的样子；「这张画布」同时列出所有画布通用的那几条 ── */
+var agentMemoryMode = 'canvas';
+var agentMemoryData = {canvas: [], global: []};
+function initAgentMemoryUi(){
+    var hist = document.querySelector('#chatModal .chat-history-btn');
+    if(hist && !document.getElementById('chatMemoryBtn')){
+        var btn = document.createElement('button');
+        btn.id = 'chatMemoryBtn';
+        btn.type = 'button';
+        btn.className = hist.className.replace('chat-history-btn', 'chat-memory-btn');
+        btn.title = '记忆'; btn.setAttribute('aria-label', '记忆');
+        btn.innerHTML = '<i data-lucide="pin"></i>';
+        btn.addEventListener('click', toggleAgentMemoryPanel);
+        hist.parentNode.insertBefore(btn, hist);
+    }
+    var histPanel = document.getElementById('agentHistoryPanel');
+    if(histPanel && !document.getElementById('agentMemoryPanel')){
+        histPanel.insertAdjacentHTML('afterend',
+            '<div id="agentMemoryPanel" class="agent-history-panel agent-memory-panel">' +
+                '<div class="agent-history-head"><span class="agent-history-title"><i data-lucide="pin"></i> 记忆</span>' +
+                    '<div class="agent-history-filter">' +
+                        '<button type="button" class="agent-history-filter-btn agent-memory-mode active" data-mode="canvas">这张画布</button>' +
+                        '<button type="button" class="agent-history-filter-btn agent-memory-mode" data-mode="global">所有画布</button>' +
+                    '</div>' +
+                    '<button type="button" class="chat-modal-close" data-act="close" title="关闭"><i data-lucide="x"></i></button></div>' +
+                '<div id="agentMemoryList" class="agent-memory-list"></div>' +
+                '<form class="agent-memory-add"><input id="agentMemoryInput" placeholder="添加一条，例如：人物统一亚洲面孔" maxlength="300">' +
+                    '<button type="submit" class="agent-btn primary">记住</button></form>' +
+            '</div>');
+        var panel = document.getElementById('agentMemoryPanel');
+        panel.querySelector('[data-act="close"]').addEventListener('click', toggleAgentMemoryPanel);
+        panel.querySelectorAll('.agent-memory-mode').forEach(function(b){
+            b.addEventListener('click', function(){
+                agentMemoryMode = b.getAttribute('data-mode');
+                panel.querySelectorAll('.agent-memory-mode').forEach(function(x){ x.classList.toggle('active', x === b); });
+                renderAgentMemoryList();
+            });
+        });
+        panel.querySelector('form').addEventListener('submit', async function(e){
+            e.preventDefault();
+            var inp = document.getElementById('agentMemoryInput');
+            var text = (inp.value || '').trim();
+            if(!text) return;
+            try {
+                var r = await fetch('/api/agent/memory', {method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({canvas_id: canvasId, scope: agentMemoryMode, text: text})});
+                if(!r.ok) throw new Error(agentErrText(await r.json().catch(function(){ return {}; })) || ('HTTP ' + r.status));
+                inp.value = '';
+                await loadAgentMemory();
+            } catch(err){ toast('没记住：' + ((err && err.message) || '未知错误')); }
+        });
+    }
+    refreshIcons();
+}
+function toggleAgentMemoryPanel(){
+    var panel = document.getElementById('agentMemoryPanel');
+    if(!panel) return;
+    if(panel.classList.contains('open')){ panel.classList.remove('open'); return; }
+    closeAgentHistoryPanel();
+    panel.classList.add('open');
+    loadAgentMemory();
+}
+async function loadAgentMemory(){
+    if(!canvasId) return;
+    try {
+        var r = await fetch('/api/agent/memory/' + encodeURIComponent(canvasId));
+        agentMemoryData = r.ok ? await r.json() : {canvas: [], global: []};
+    } catch(e){ agentMemoryData = {canvas: [], global: []}; }
+    renderAgentMemoryList();
+}
+function agentMemoryItemHtml(item, scope){
+    var meta = (item.source === 'agent' ? '助手记的' : '你说的') + ' · ' + agentRelativeTime(item.updated_at || item.created_at);
+    return '<div class="agent-memory-item" data-id="' + escapeHtml(item.id) + '" data-scope="' + scope + '"><div>' +
+        '<div class="agent-memory-text" contenteditable="true" spellcheck="false">' + escapeHtml(item.text) + '</div>' +
+        '<div class="agent-memory-meta">' + escapeHtml(meta) + '</div></div>' +
+        '<button type="button" class="agent-memory-del" title="删掉这条" aria-label="删掉这条"><i data-lucide="x"></i></button></div>';
+}
+function renderAgentMemoryList(){
+    var box = document.getElementById('agentMemoryList');
+    if(!box) return;
+    var own = agentMemoryData.canvas || [], common = agentMemoryData.global || [];
+    var html = '';
+    if(agentMemoryMode === 'canvas' && own.length) html += '<div class="agent-memory-group">这张画布 · ' + own.length + ' 条</div>' + own.map(function(i){ return agentMemoryItemHtml(i, 'canvas'); }).join('');
+    if(common.length) html += '<div class="agent-memory-group">所有画布 · ' + common.length + ' 条</div>' + common.map(function(i){ return agentMemoryItemHtml(i, 'global'); }).join('');
+    if(!html) html = '<div class="agent-memory-empty">还没有记住什么。<br>跟助手说「以后都用 3:4 竖版」「记住品牌主色 #E8505B」，<br>或者在下面直接加一条。</div>';
+    box.innerHTML = html;
+    box.querySelectorAll('.agent-memory-item').forEach(function(row){
+        var id = row.getAttribute('data-id'), scope = row.getAttribute('data-scope');
+        var textEl = row.querySelector('.agent-memory-text');
+        var before = textEl.textContent;
+        textEl.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); textEl.blur(); } });
+        textEl.addEventListener('blur', async function(){
+            var now = textEl.textContent.trim();
+            if(now === before) return;
+            try {
+                var r = await fetch('/api/agent/memory/' + encodeURIComponent(id), {method:'PUT', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({canvas_id: canvasId, scope: scope, text: now})});
+                if(!r.ok) throw new Error('HTTP ' + r.status);
+                before = now;
+                if(!now) loadAgentMemory();
+            } catch(err){ textEl.textContent = before; toast('没改成：' + ((err && err.message) || '未知错误')); }
+        });
+        row.querySelector('.agent-memory-del').addEventListener('click', async function(){
+            try {
+                await fetch('/api/agent/memory/' + encodeURIComponent(id) + '?canvas_id=' + encodeURIComponent(canvasId) + '&scope=' + scope, {method:'DELETE'});
+            } catch(e){}
+            loadAgentMemory();
+        });
+    });
+    refreshIcons();
+}
+/* 对话里的一行：已记住（这张画布）：… · 撤回 */
+function agentMemoryNote(mem){
+    var items = (mem && mem.items) || [];
+    if(!items.length) return;
+    var parts = createChatMsgEl('assistant');
+    document.getElementById('chatMessages').appendChild(parts.div);
+    var forget = mem.action === 'forget';
+    var where = forget ? '' : (mem.scope === 'global' ? '（所有画布）' : '（这张画布）');
+    parts.bubble.innerHTML = '<div class="agent-memory-note"><i data-lucide="pin"></i><span>' + (forget ? '已忘掉' : '已记住') + escapeHtml(where) + '：' +
+        items.map(function(i){ return '<b>' + escapeHtml(i.text) + '</b>'; }).join('、') +
+        (forget ? '' : ' · <button type="button">撤回</button>') + '</span></div>';
+    var undo = parts.bubble.querySelector('button');
+    if(undo) undo.addEventListener('click', async function(){
+        undo.disabled = true;
+        for(const it of items){
+            try { await fetch('/api/agent/memory/' + encodeURIComponent(it.id) + '?canvas_id=' + encodeURIComponent(canvasId) + '&scope=' + (mem.scope || 'canvas'), {method:'DELETE'}); } catch(e){}
+        }
+        parts.bubble.querySelector('span').textContent = '已撤回，这' + (items.length > 1 ? '几' : '') + '条不记了。';
+        if(document.getElementById('agentMemoryPanel')?.classList.contains('open')) loadAgentMemory();
+    });
+    refreshIcons();
+    parts.div.scrollIntoView({behavior:'smooth', block:'end'});
+}
+window.toggleAgentMemoryPanel = toggleAgentMemoryPanel;
 function toggleAgentHistoryPanel(){
+    var memPanel = document.getElementById('agentMemoryPanel');
+    if(memPanel) memPanel.classList.remove('open');
     var panel = document.getElementById('agentHistoryPanel');
     if(!panel) return;
     if(panel.classList.contains('open')){ panel.classList.remove('open'); return; }
@@ -5965,7 +6385,7 @@ function syncChatContext(){
         });
         var firstImg = imgs[0] || {};
         var thumbUrl = firstImg.preview || firstImg.url || '';
-        chatRefs.push({id:sel.id, name:sel.title || (sel.type||'node'), thumbUrl:thumbUrl, type:sel.type, images:imgs});
+        chatRefs.push({id:sel.id, name:nodeAliasText(sel) || sel.title || (sel.type||'node'), thumbUrl:thumbUrl, type:sel.type, images:imgs});
     });
     renderChatContext();
 }
@@ -6249,7 +6669,35 @@ window.chatTypewriterTakeOver = chatTypewriterTakeOver;
     }, true);
 })();
 // Spectrum 头部的重置按钮：清空本次对话 + 图标转一圈 + 打字机重来
+var agentThreadLoaded = false;
+async function loadAgentThreadOnce(){
+    if(agentThreadLoaded || !canvasId) return;
+    agentThreadLoaded = true;
+    if(chatMessages.length) return;
+    try {
+        var res = await fetch('/api/agent/thread/' + encodeURIComponent(canvasId) + '?limit=40');
+        if(!res.ok) return;
+        var data = await res.json();
+        var msgs = Array.isArray(data.messages) ? data.messages : [];
+        if(!msgs.length || chatMessages.length) return;
+        removeChatWelcome();
+        chatTypewriterStop(true);
+        var box = document.getElementById('chatMessages');
+        msgs.forEach(function(m){
+            var role = m.role === 'user' ? 'user' : 'assistant';
+            var text = String(m.text || '');
+            if(!text.trim()) return;
+            chatMessages.push({role:role, text:text, images:[]});
+            var parts = createChatMsgEl(role);
+            parts.bubble.innerHTML = '<span>' + escapeHtml(text).replace(/\n/g, '<br>') + '</span>';
+            box.appendChild(parts.div);
+        });
+        box.scrollTop = box.scrollHeight;
+    } catch(e){}
+}
 function resetChatConversation(){
+    if(canvasId) fetch('/api/agent/thread/' + encodeURIComponent(canvasId), {method:'DELETE'}).catch(function(){});
+    agentThreadLoaded = true;
     var btn = document.querySelector('.chat-reset-btn');
     var ico = btn ? btn.querySelector('.chat-reset-ico') : null;
     if(btn && ico){
@@ -6430,7 +6878,8 @@ async function sendChatFallback(text, msgDiv){
     // 打字机效果逐步显示
     typewriteText(msgDiv, reply);
 }
-// ── 方案确认开关：默认「每次先给方案」，关掉才回到一句话直接执行 ──
+// ── 方案确认开关：写操作 / 生成操作一律先给方案（服务端强制，关不掉）；
+//    开关只控制聊天与只读动作是否也先走一轮方案 ──
 var AGENT_PLAN_CONFIRM_KEY = 'smart_agent_plan_confirm';
 function agentPlanConfirmEnabled(){
     try { return localStorage.getItem(AGENT_PLAN_CONFIRM_KEY) !== '0'; } catch(e){ return true; }
@@ -6442,9 +6891,9 @@ function renderAgentPlanConfirmToggle(){
     btn.className = 'agent-btn ' + (on ? 'primary' : 'ghost');
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     btn.title = on
-        ? '「每次先给方案」已开启：助手先出方案，点「执行」才动画布 / 消耗额度（点击关闭）'
-        : '「每次先给方案」已关闭：助手收到指令直接执行（点击开启）';
-    btn.innerHTML = '<i data-lucide="' + (on ? 'check' : 'x') + '"></i> 每次先给方案 · ' + (on ? '开' : '关');
+        ? '所有写操作都要先确认：助手先出方案，点「执行」才动画布 / 消耗额度；开关只控制聊天与只读动作（点击关闭）'
+        : '所有写操作仍然先给方案（服务端强制，关不掉）；关闭后只有聊天 / 只读动作直接执行（点击开启）';
+    btn.innerHTML = '<i data-lucide="' + (on ? 'check' : 'x') + '"></i> 写操作先确认 · ' + (on ? '开' : '关');
     refreshIcons();
 }
 function toggleAgentPlanConfirm(){
@@ -6452,19 +6901,43 @@ function toggleAgentPlanConfirm(){
     try { localStorage.setItem(AGENT_PLAN_CONFIRM_KEY, on ? '1' : '0'); } catch(e){}
     renderAgentPlanConfirmToggle();
 }
+var AGENT_REVIEW_KEY = 'smart_agent_review';
+function agentReviewEnabled(){
+    try { return localStorage.getItem(AGENT_REVIEW_KEY) !== '0'; } catch(e){ return true; }
+}
+function renderAgentReviewToggle(){
+    var btn = document.getElementById('chatReviewToggle');
+    if(!btn) return;
+    var on = agentReviewEnabled();
+    btn.className = 'agent-btn ' + (on ? 'primary' : 'ghost');
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on
+        ? '「生成后检查」已开启：出图后助手对照你的要求看一遍，有问题才提醒，重做要你点（点击关闭）'
+        : '「生成后检查」已关闭：出图后不再检查（点击开启）';
+    btn.innerHTML = '<i data-lucide="' + (on ? 'check' : 'x') + '"></i> 生成后检查 · ' + (on ? '开' : '关');
+    refreshIcons();
+}
+function toggleAgentReview(){
+    try { localStorage.setItem(AGENT_REVIEW_KEY, agentReviewEnabled() ? '0' : '1'); } catch(e){}
+    renderAgentReviewToggle();
+}
+window.toggleAgentReview = toggleAgentReview;
 function initAgentPlanConfirmToggle(){
-    if(document.getElementById('chatPlanConfirmToggle')){ renderAgentPlanConfirmToggle(); return; }
+    if(document.getElementById('chatPlanConfirmToggle')){ renderAgentPlanConfirmToggle(); renderAgentReviewToggle(); return; }
     var host = document.querySelector('.chat-composer');
     if(!host) return;
     var row = document.createElement('div');
     row.id = 'chatPlanConfirmRow';
     row.className = 'agent-plan-actions';
     row.style.marginBottom = '6px';
-    row.innerHTML = '<button id="chatPlanConfirmToggle" type="button" class="agent-btn ghost" onclick="toggleAgentPlanConfirm()"></button>';
+    row.innerHTML = '<button id="chatPlanConfirmToggle" type="button" class="agent-btn ghost" onclick="toggleAgentPlanConfirm()"></button>' +
+        '<button id="chatReviewToggle" type="button" class="agent-btn ghost" onclick="toggleAgentReview()"></button>';
     host.insertBefore(row, host.firstChild);
     renderAgentPlanConfirmToggle();
+    renderAgentReviewToggle();
 }
 initAgentPlanConfirmToggle(); // 挂载点必须在常量赋值之后：var 提升会让文件顶层调用时 AGENT_PLAN_CONFIRM_KEY 还是 undefined
+initAgentMemoryUi();
 // ── V2 Phase 5C: /api/agent/run 流式 Agent（SSE + 逐步落图）──
 var AGENT_RUN_MAX_STEPS = 12;
 var agentRunAbort = null; // 非 null = 正在流式运行（同时作为「发送键 = 停止键」的判据）
@@ -6599,6 +7072,15 @@ function agentRunAssistantBubble(card, text){
     removeChatWelcome();
     var parts = createChatMsgEl('assistant');
     parts.bubble.innerHTML = escapeHtml(t).replace(/\n/g, '<br>');
+    // 看图说明跟着第一条回复走（纯问答时运行卡会被收掉，说明不能跟着消失）
+    if(card && card._run && card._run.visionText && !card._run.visionInBubble && card._run.planRound && !Object.keys(card._run.steps || {}).length){
+        card._run.visionInBubble = true;
+        var vn = document.createElement('div');
+        vn.className = 'agent-preview-note';
+        vn.style.marginTop = '6px';
+        vn.textContent = card._run.visionText;
+        parts.bubble.appendChild(vn);
+    }
     document.getElementById('chatMessages').appendChild(parts.div);
     parts.div.scrollIntoView({behavior:'smooth', block:'end'});
 }
@@ -6615,17 +7097,58 @@ function applyAgentCanvasOps(ops){
             canvas.connections = canvas.connections.filter(function(c){ return !dead.has(c.from) && !dead.has(c.to); });
         }
     }
+    removes.forEach(function(id){ smartServerBaseNodes.delete(id); });
     var upserts = Array.isArray(ops.nodes_upsert) ? ops.nodes_upsert : [];
     upserts.forEach(function(raw){
         if(!raw || !raw.id) return;
         var incoming;
         try { incoming = normalizeLegacySmartNode(JSON.parse(JSON.stringify(raw))); } catch(e){ return; }
+        smartServerBaseNodes.set(raw.id, JSON.stringify(raw));
         var i = nodes.findIndex(function(n){ return n.id === incoming.id; });
         if(i === -1) nodes.push(incoming);
         else nodes[i] = Object.assign({}, nodes[i], incoming);
         changed++;
     });
+    var activeNode = activeComposerNode();
+    var typingId = (activeNode && promptInput && document.activeElement === promptInput) ? activeNode.id : '';
+    var refreshActive = false;
+    var keptTyping = false;
+    var PROMPT_KEYS = ['promptDraftText', 'promptDraftHtml', 'promptDraftTouched', 'text'];
+    var patches = Array.isArray(ops.nodes_patch) ? ops.nodes_patch : [];
+    patches.forEach(function(p){
+        if(!p || !p.id) return;
+        var set = (p.set && typeof p.set === 'object') ? p.set : {};
+        var unset = Array.isArray(p.unset) ? p.unset : [];
+        // 基线跟着服务器走（就算本地因为用户在打字没应用，基线也要是服务器的样子）
+        var baseRaw = smartServerBaseNodes.get(p.id);
+        if(baseRaw){
+            try {
+                var baseObj = JSON.parse(baseRaw);
+                Object.keys(set).forEach(function(k){ baseObj[k] = set[k]; });
+                unset.forEach(function(k){ delete baseObj[k]; });
+                smartServerBaseNodes.set(p.id, JSON.stringify(baseObj));
+            } catch(e){}
+        }
+        var node = nodes.find(function(n){ return n.id === p.id; });
+        if(!node) return;
+        var typing = typingId === p.id;
+        Object.keys(set).forEach(function(k){
+            if(typing && PROMPT_KEYS.indexOf(k) !== -1){ keptTyping = true; return; }
+            try { node[k] = JSON.parse(JSON.stringify(set[k])); } catch(e){ node[k] = set[k]; }
+        });
+        unset.forEach(function(k){
+            if(typing && PROMPT_KEYS.indexOf(k) !== -1){ keptTyping = true; return; }
+            delete node[k];
+        });
+        if(activeNode && activeNode.id === p.id && !typing) refreshActive = true;
+        changed++;
+    });
+    if(keptTyping) toast('你正在编辑这个节点的提示词，助手的修改没有覆盖你的输入');
     var connUp = Array.isArray(ops.connections_upsert) ? ops.connections_upsert : [];
+    connUp.forEach(function(c){ if(c && c.from && c.to) smartServerBaseConns.add(smartBaseConnKey(c)); });
+    (Array.isArray(ops.connections_remove) ? ops.connections_remove : []).forEach(function(c){
+        if(c && c.from && c.to) smartServerBaseConns.delete(smartBaseConnKey({from:c.from, to:c.to, kind:c.kind || 'input'}));
+    });
     if(connUp.length){
         if(canvas) canvas.connections = Array.isArray(canvas.connections) ? canvas.connections : [];
         connUp.forEach(function(c){
@@ -6638,13 +7161,20 @@ function applyAgentCanvasOps(ops){
     if(connRm.length && canvas && Array.isArray(canvas.connections)){
         var before = canvas.connections.length;
         canvas.connections = canvas.connections.filter(function(c){
-            return !connRm.some(function(r){ return r && r.from === c.from && r.to === c.to; });
+            return !connRm.some(function(r){ return r && r.from === c.from && r.to === c.to && (!r.kind || (c.kind || 'flow') === r.kind); });
         });
         changed += before - canvas.connections.length;
     }
     if(changed){
+        if(refreshActive){
+            // 编辑栏正开着被改的节点：重新从节点读一遍提示词和参数（先清掉当前绑定，避免把旧输入存回节点）
+            lastComposerNodeId = '';
+            updateComposer();
+        }
         render();
         if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
+        // 助手登记的生成任务：节点上立刻显示进度，并由前端自己轮询收尾
+        if(typeof resumeSmartPendingTasks === 'function') resumeSmartPendingTasks();
     }
     return changed;
 }
@@ -6661,12 +7191,15 @@ function agentRunStepStart(card, ev){
         '</div>' +
         '<div class="agent-step-body">' +
             '<div class="agent-step-head">' +
-                '<span class="agent-step-tool"><i data-lucide="' + agentToolIcon(tool) + '"></i>' + escapeHtml(tool) + '</span>' +
+                '<span class="agent-step-tool agent-step-human"><i data-lucide="' + agentToolIcon(tool) + '"></i><span></span></span>' +
                 '<span class="agent-step-state">' + agentStepStateHtml('spin') + '</span>' +
             '</div>' +
-            '<div class="agent-step-desc">正在执行：' + escapeHtml(ev.description || tool) + '（' + escapeHtml(tool) + '）</div>' +
+            '<div class="agent-step-desc"></div>' +
         '</div>';
-    row._descText = ev.description || tool; // step_result 不带 description，完成态要沿用 step_start 的描述
+    var humanText = agentStepPlainText({tool:tool, args:ev.args || {}, description:ev.description});
+    row.querySelector('.agent-step-human span').textContent = humanText;
+    row.querySelector('.agent-step-desc').textContent = '正在做…';
+    row._descText = humanText; // step_result 不带 description，完成态要沿用 step_start 的描述
     card.querySelector('.agent-plan-timeline').appendChild(row);
     card._run.steps[key] = row;
     card._run.lastRow = row;
@@ -6686,7 +7219,7 @@ function agentRunStepResult(card, ev){
     if(ev.ok){
         row.classList.add('ok');
         if(stateEl) stateEl.innerHTML = agentStepStateHtml('ok');
-        if(descEl) descEl.textContent = '已完成：' + (ev.description || row._descText || tool) + '（' + tool + '）';
+        if(descEl) descEl.textContent = '完成';
         var info = ev.message || agentResultText(ev.result);
         if(info && bodyEl){
             var m = document.createElement('div');
@@ -6702,13 +7235,20 @@ function agentRunStepResult(card, ev){
             bodyEl.appendChild(opsNote);
         }
         var res = ev.result || {};
-        if(res.task_id && res.node_id && (tool === 'generate_image' || tool === 'generate_video')){
-            agentPollGenerateTask(res.node_id, res.task_id, row, card, tool === 'generate_video' ? 'video' : 'image');
+        if(tool === 'refine_prompt' && Array.isArray(res.candidates) && res.candidates.length) agentDiffCardRender(res);
+        // 要在画布页面里执行的动作（批量生成逐行出图）：等这一轮结束、画布合并好再跑
+        if(res.memory && (tool === 'remember' || tool === 'forget')) agentMemoryNote(res.memory);
+        if(res.client_action && res.client_action.type) (card._run.clientActions = card._run.clientActions || []).push(res.client_action);
+        if(Array.isArray(res.tasks)) res.tasks.forEach(function(t){
+            if(t && t.task_id && t.node_id) agentPollGenerateTask(t.node_id, t.task_id, row, card, t.kind === 'video' ? 'video' : 'image');
+        });
+        if(res.task_id && res.node_id && (tool === 'generate_image' || tool === 'generate_video' || tool === 'run_generation')){
+            agentPollGenerateTask(res.node_id, res.task_id, row, card, (tool === 'generate_video' || res.kind === 'video') ? 'video' : 'image');
         }
     } else {
         row.classList.add('fail');
         if(stateEl) stateEl.innerHTML = agentStepStateHtml('fail');
-        if(descEl) descEl.textContent = '失败：' + (ev.description || row._descText || tool) + '（' + tool + '）';
+        if(descEl) descEl.textContent = '没做成';
         if(bodyEl){
             var err = document.createElement('div');
             err.className = 'agent-step-error';
@@ -6748,7 +7288,15 @@ function agentRunHandleEvent(card, name, data){
         return;
     }
     if(name === 'plan'){
-        if(card._run.planRound && !card._run.planHandedOff) agentRunPlanHandoff(card, ev);
+        // 带 round 的 plan = 服务端已经在执行（例如只出改写候选这种不花钱的步骤，不用先确认方案）
+        if(card._run.planRound && ev.round) card._run.planRound = false;
+        // 服务端把未确认的写操作 / 生成操作拦成「待确认方案」：run 模式（开关关掉）也会收到
+        // requires_confirmation 的 plan，同样要交棒给方案卡，点「执行」才动画布 / 消耗额度
+        var confirmPlan = !card._run.planRound && ev.requires_confirmation;
+        if(!card._run.planHandedOff && (card._run.planRound || confirmPlan)){
+            agentRunPlanHandoff(card, ev);
+            if(confirmPlan) card._run.planRound = true; // 收尾按规划轮走：不刷新画布、不重复出总结气泡
+        }
         var intentEl = card.querySelector('.agent-plan-intent');
         if(intentEl && ev.intent) intentEl.innerHTML = '<i data-lucide="list-todo" class="agent-intent-icon"></i> ' + escapeHtml(ev.intent);
         card._run.planned = (ev.steps || []).length;
@@ -6757,19 +7305,25 @@ function agentRunHandleEvent(card, name, data){
         return;
     }
     if(name === 'round_start'){ agentRunRound(card, ev.round); return; }
+    if(name === 'vision'){
+        // 看图说明：直接给模型看 / 先转成文字 / 看不了，都在运行卡里写一句，不让用户以为模型看过图
+        if(ev.text){ card._run.visionText = ev.text; agentRunNote(card, ev.text, ev.mode === 'direct' ? '' : 'warn'); }
+        return;
+    }
     if(name === 'step_start'){ agentRunStepStart(card, ev); return; }
     if(name === 'step_result'){ agentRunStepResult(card, ev); return; }
     if(name === 'message'){ agentRunAssistantBubble(card, ev.text); return; }
     if(name === 'confirm_required'){
         var label = (ev.tool || '该操作') + (ev.description ? '：' + ev.description : '');
-        agentRunNote(card, '需确认已跳过：' + label + (ev.reason ? '（' + ev.reason + '）' : ''), 'warn');
-        addChatMessage('system', '「' + label + '」需要确认，本次已跳过该步' + (ev.reason ? '（' + ev.reason + '）' : '') + '，其余步骤继续。');
+        agentRunNote(card, '等你确认：' + label, 'warn');
+        agentConfirmCardAdd(card, ev);
         return;
     }
     if(name === 'done'){
         card._run.finished = true;
         var status = ev.status || 'ok';
         if(ev.message) agentRunAssistantBubble(card, ev.message);
+        if(ev.undoable && ev.session_id) agentRunUndoFooter(card, ev);
         var label2 = status === 'ok' ? '完成' : (status === 'aborted' ? '已中止' : '失败');
         var steps = Number(ev.steps_executed);
         agentRunSetStatus(card, status, label2 + (steps ? ' · ' + steps + ' 步' : ''));
@@ -6781,7 +7335,11 @@ function agentRunHandleEvent(card, name, data){
             }
             return;
         }
-        refreshCanvasAfterAgent(); // done 后以服务端画布为准做权威刷新
+        var pendingActions = card._run.clientActions || [];
+        card._run.clientActions = [];
+        if(!(Number(card._run.genPending) > 0)) setTimeout(function(){ agentReviewRun(card); }, 1200);
+        Promise.resolve(refreshCanvasAfterAgent()) // done 后以服务端画布为准做权威刷新
+            .then(function(){ return agentRunClientActions(card, pendingActions); });
         return;
     }
     if(name === 'error'){
@@ -6792,6 +7350,348 @@ function agentRunHandleEvent(card, name, data){
         if(card._run.planCard) agentStreamPlanSetState(card._run.planCard, 'pending', '待执行 · 本轮出错');
         return;
     }
+}
+/* ── 生成后检查（P2-1）：出图后对照用户原话看一遍；有问题给建议，重做要用户点 ── */
+function agentReviewSettle(card){
+    if(!card || !card._run) return;
+    card._run.genPending = Math.max(0, (Number(card._run.genPending) || 0) - 1);
+    if(!card._run.genPending && card._run.finished) agentReviewRun(card);
+}
+function agentReviewRun(card){
+    if(!card || !card._run || card._run.reviewed || !agentReviewEnabled()) return;
+    var items = card._run.reviewItems || [];
+    if(!items.length) return;
+    card._run.reviewed = true;
+    var seen = {};
+    items = items.filter(function(it){ if(seen[it.url]) return false; seen[it.url] = 1; return true; }).slice(-6);
+    agentReviewRequest({instruction: card._run.instruction || '', items: items});
+}
+function agentReviewBatch(card, batchId, startCount){
+    if(!agentReviewEnabled()) return;
+    var node = nodes.find(function(n){ return n.id === batchId; });
+    if(!node) return;
+    var fresh = (node.images || []).slice(startCount || 0).filter(function(it){ return it && it.role === 'batch' && it.url && !isVideoUrl(it.url); });
+    var byRow = {};
+    fresh.forEach(function(it){ if(Number(it.rowNumber) > 0) byRow[it.rowNumber] = it; });
+    var items = Object.keys(byRow).map(Number).sort(function(a, b){ return a - b; }).map(function(r){
+        return {url: byRow[r].url, row: r, label: '第 ' + r + ' 行', node_id: batchId};
+    });
+    if(!items.length) return;
+    agentReviewRequest({instruction: (card && card._run && card._run.instruction) || '', items: items.slice(0, 6), batch_node_id: batchId});
+}
+function isVideoUrl(u){ return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(String(u || '')); }
+async function agentReviewRequest(ctx){
+    var parts = createChatMsgEl('assistant');
+    document.getElementById('chatMessages').appendChild(parts.div);
+    parts.bubble.innerHTML = thinkingHtml('正在对照你的要求看图…');
+    parts.div.scrollIntoView({behavior:'smooth', block:'end'});
+    var res = null;
+    try {
+        var r = await fetch('/api/agent/review', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({canvas_id: canvasId, instruction: ctx.instruction || '', items: ctx.items,
+                batch_node_id: ctx.batch_node_id || '', provider: chatProvider || '', model: currentChatModel()})});
+        res = await r.json().catch(function(){ return null; });
+        if(!r.ok) res = {mode:'error', text: agentErrText(res) || ('检查没做成（HTTP ' + r.status + '）')};
+    } catch(e){ res = {mode:'error', text:'检查没做成：' + ((e && e.message) || '网络错误')}; }
+    agentReviewCardRender(parts.bubble, res || {mode:'error', text:'检查没做成'}, ctx);
+}
+function agentReviewThumb(url, bad){
+    return '<span class="agent-review-thumb"><img src="' + escapeHtml(url) + '" alt=""><span class="agent-review-mark"><i data-lucide="' + (bad ? 'x' : 'check') + '"></i></span></span>';
+}
+function agentReviewCardRender(bubble, res, ctx){
+    bubble.innerHTML = '';
+    if(res.mode !== 'ok'){
+        if(res.mode === 'skip') { bubble.closest('.chat-msg') && bubble.closest('.chat-msg').remove(); return; }
+        bubble.innerHTML = '<div class="agent-review-note"><i data-lucide="eye"></i><span></span></div>';
+        bubble.querySelector('span').textContent = res.text || '这次没检查';
+        refreshIcons();
+        return;
+    }
+    var items = res.items || [];
+    var bad = items.filter(function(v){ return !v.ok; });
+    var good = items.filter(function(v){ return v.ok; });
+    var isBatch = !!res.batch_node_id;
+    var batchNode = isBatch ? nodes.find(function(n){ return n.id === res.batch_node_id; }) : null;
+    var refHtml = function(text){ return '<span class="agent-plan2-ref">' + escapeHtml(text) + '</span>'; };
+    var title;
+    if(!bad.length){
+        title = items.length === 1 ? (isBatch ? '这 1 行' : refHtml(items[0].label) + ' ') + '符合你的要求'
+            : (isBatch ? items.length + ' 行' : items.length + ' 张') + '都符合你的要求';
+    } else if(isBatch){
+        title = refHtml((batchNode && batchNode.alias) || '批量') + ' 检查了 ' + items.length + ' 行，有 ' + bad.length + ' 行不太对';
+    } else if(items.length === 1){
+        title = refHtml(bad[0].label) + ' 有 ' + Math.max(1, bad[0].issues.length) + ' 处和你的要求不一致';
+    } else {
+        title = items.length + ' 张里有 ' + bad.length + ' 张和你的要求不一致';
+    }
+    var card = document.createElement('div');
+    card.className = 'agent-plan2 agent-review';
+    card.setAttribute('data-plan-state', bad.length ? 'pending' : 'done');
+    var html = '<div class="agent-plan2-head"><span class="agent-plan2-kicker"><i data-lucide="eye"></i>检查结果</span>' +
+        '<span class="agent-plan2-state">' + (bad.length ? '有问题' : '没问题') + '</span></div>' +
+        '<div class="agent-plan2-title">' + title + '</div>';
+    if(good.length) html += '<div class="agent-review-oklist">' + good.map(function(v){ return agentReviewThumb(v.url, false); }).join('') + '</div>';
+    if(bad.length){
+        html += '<div class="agent-review-items">' + bad.map(function(v){
+            return '<div class="agent-review-item bad">' + agentReviewThumb(v.url, true) + '<div class="agent-review-body">' +
+                ((isBatch || items.length > 1) ? '<div class="agent-review-head">' + escapeHtml(v.label) + '</div>' : '') +
+                '<ul class="agent-review-issues">' + (v.issues.length ? v.issues : ['和你的要求对不上']).map(function(t){ return '<li>' + escapeHtml(t) + '</li>'; }).join('') + '</ul>' +
+                (v.revised_prompt ? '<div class="agent-review-fix">' + (isBatch ? '建议这一行改成：' : '建议提示词改成：') + '<b>「' + escapeHtml(v.revised_prompt) + '」</b></div>' : '') +
+            '</div></div>';
+        }).join('') + '</div>';
+        var steps = res.steps || [];
+        var units = Number(res.units) || 0;
+        var cost = steps.length
+            ? (isBatch ? '改好这 ' + units + ' 行、只重跑这几行，会用掉 <b>' + units + '</b> 次生成' : '按建议重做会用掉 <b>' + units + '</b> 次生成，原图保留')
+            : '这次没法自动改，直接告诉我怎么改就行';
+        html += '<div class="agent-plan2-cost"><i data-lucide="' + (steps.length ? 'coins' : 'sparkles') + '"></i><span>' + cost + '</span></div>' +
+            '<div class="agent-plan2-actions">' +
+                '<button type="button" class="agent-btn ghost" data-act="skip">不用了</button>' +
+                '<button type="button" class="agent-btn ghost" data-act="say">我来说怎么改</button>' +
+                (steps.length ? '<button type="button" class="agent-btn primary" data-act="redo"><i data-lucide="refresh-cw"></i>' + (isBatch ? '改好重跑' : '按建议重做') + '</button>' : '') +
+            '</div>';
+    } else {
+        html += '<div class="agent-review-note"><i data-lucide="eye"></i><span></span></div>';
+    }
+    card.innerHTML = html;
+    if(!bad.length){
+        card.querySelector('.agent-review-note span').textContent = '用 ' + agentModelName(res.model || '能看图的模型') + ' 对照你的要求看过' + (res.summary ? '：' + res.summary : '');
+    }
+    var setState = function(text){ card.setAttribute('data-plan-state', 'done'); card.querySelector('.agent-plan2-state').textContent = text; };
+    var skipBtn = card.querySelector('[data-act="skip"]');
+    if(skipBtn) skipBtn.addEventListener('click', function(){ setState('不改了'); });
+    var sayBtn = card.querySelector('[data-act="say"]');
+    if(sayBtn) sayBtn.addEventListener('click', function(){
+        var inp = document.getElementById('chatInput');
+        if(!inp) return;
+        var who = isBatch ? bad.map(function(v){ return v.label; }).join('、') : bad.map(function(v){ return v.label; }).join('、');
+        inp.value = who + ' ';
+        inp.focus();
+        inp.setSelectionRange(inp.value.length, inp.value.length);
+    });
+    var redoBtn = card.querySelector('[data-act="redo"]');
+    if(redoBtn) redoBtn.addEventListener('click', async function(){
+        if(agentRunAbort || chatSending){ toast('助手还在执行，等这一轮结束再点'); return; }
+        setState('重做中');
+        chatSending = true;
+        agentSetComposerRunning(true);
+        var parts = createChatMsgEl('assistant');
+        document.getElementById('chatMessages').appendChild(parts.div);
+        var out = null;
+        try {
+            out = await runAgentStream('按检查建议重做' + (ctx.instruction ? '：' + ctx.instruction : ''), parts.bubble, {approved_steps: res.steps});
+        } catch(e){ out = {failed:true}; }
+        chatSending = false;
+        agentSetComposerRunning(false);
+        setState(out && out.ok ? '已按建议重做' : '没重做成');
+    });
+    bubble.appendChild(card);
+    refreshIcons();
+    card.scrollIntoView({behavior:'smooth', block:'end'});
+}
+/* ── 运行结束的「撤销本次」 ─────────────────────────────────────────── */
+function agentChangeSummaryText(ch){
+    ch = ch || {};
+    var parts = [];
+    if(ch.nodes_created) parts.push('新建 ' + ch.nodes_created + ' 个节点');
+    if(ch.nodes_modified) parts.push('修改 ' + ch.nodes_modified + ' 个节点');
+    if(ch.nodes_deleted) parts.push('删除 ' + ch.nodes_deleted + ' 个节点');
+    if(ch.connections) parts.push('连线 ' + ch.connections + ' 条');
+    if(ch.generations) parts.push('生成 ' + ch.generations + ' 次');
+    return parts.length ? '本次改动：' + parts.join(' · ') : '本次改动了画布';
+}
+function agentRunUndoFooter(card, ev){
+    var box = document.getElementById('chatMessages');
+    var last = box ? box.lastElementChild : null;
+    var bubble = last && last.classList.contains('assistant') ? last.querySelector('.chat-bubble') : null;
+    if(!bubble){
+        var parts = createChatMsgEl('assistant');
+        box.appendChild(parts.div);
+        bubble = parts.bubble;
+    }
+    var row = document.createElement('div');
+    row.className = 'agent-run-footer';
+    row.innerHTML = '<span class="agent-run-summary"></span>' +
+        '<button type="button" class="agent-btn agent-undo-btn"><i data-lucide="undo-2"></i>撤销本次</button>';
+    row.querySelector('.agent-run-summary').textContent = agentChangeSummaryText(ev.changes);
+    var btn = row.querySelector('button');
+    btn.addEventListener('click', function(){ agentUndoRun(ev.session_id, row, btn); });
+    bubble.appendChild(row);
+    refreshIcons();
+    row.scrollIntoView({behavior:'smooth', block:'end'});
+}
+async function agentUndoRun(sessionId, row, btn){
+    if(btn.disabled) return;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="agent-btn-spinner"></span>撤销中…';
+    var summary = row.querySelector('.agent-run-summary');
+    try {
+        var res = await fetch('/api/agent/undo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session_id:sessionId})});
+        var data = await res.json().catch(function(){ return {}; });
+        if(!res.ok) throw new Error(agentErrText(data) || ('HTTP ' + res.status));
+        var bits = [];
+        if(data.removed_nodes) bits.push('移除 ' + data.removed_nodes + ' 个节点');
+        if(data.restored_fields) bits.push('还原 ' + data.restored_fields + ' 处修改');
+        if(data.restored_nodes) bits.push('找回 ' + data.restored_nodes + ' 个节点');
+        if(data.connections) bits.push(data.connections + ' 条连线');
+        if(data.cancelled_tasks) bits.push('取消 ' + data.cancelled_tasks + ' 个生成任务');
+        summary.textContent = '已撤销' + (bits.length ? '：' + bits.join(' · ') : '');
+        btn.innerHTML = '<i data-lucide="check"></i>已撤销';
+        await mergeReloadCanvasNow();
+    } catch(e){
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="undo-2"></i>撤销本次';
+        summary.textContent = '撤销没有成功：' + ((e && e.message) || '未知错误');
+    }
+    refreshIcons();
+}
+/* ── 提示词对比卡：删掉的划线、新增的铺浅底；点「用这个」才写进节点 ── */
+function agentDiffHtml(diff){
+    return (diff || []).map(function(seg){
+        var t = escapeHtml(seg.text || '');
+        if(seg.op === 'del') return '<del>' + t + '</del>';
+        if(seg.op === 'ins') return '<ins>' + t + '</ins>';
+        return t;
+    }).join('');
+}
+function agentDiffCardRender(res){
+    var parts = createChatMsgEl('assistant');
+    document.getElementById('chatMessages').appendChild(parts.div);
+    var el = document.createElement('div');
+    el.className = 'agent-diff-card';
+    var many = res.candidates.length > 1;
+    el.innerHTML = '<div class="agent-diff-head"><span class="agent-diff-target"><i data-lucide="wand-sparkles"></i><span></span></span>' +
+        (many ? '<span class="agent-diff-pager"><button type="button" data-pg="-1" aria-label="上一个"><i data-lucide="chevron-left"></i></button><span class="agent-diff-index"></span><button type="button" data-pg="1" aria-label="下一个"><i data-lucide="chevron-right"></i></button></span>'
+              : '<span class="agent-chip"></span>') + '</div>' +
+        '<div class="agent-diff-text"></div><div class="agent-diff-note"></div>' +
+        '<div class="agent-confirm-actions"><button type="button" class="agent-btn ghost" data-act="drop">放弃</button>' +
+        '<button type="button" class="agent-btn ghost" data-act="more">再改改</button>' +
+        '<button type="button" class="agent-btn primary" data-act="use">用这个</button></div>' +
+        '<div class="agent-confirm-result" hidden></div>';
+    el.querySelector('.agent-diff-target span').textContent = (res.title || '节点') + (res.mode_label ? ' · ' + res.mode_label : '');
+    if(!many) el.querySelector('.agent-chip').textContent = res.model ? res.model : (res.kind === 'video' ? '视频' : '图片');
+    var idx = 0;
+    function paint(){
+        var c = res.candidates[idx];
+        el.querySelector('.agent-diff-text').innerHTML = agentDiffHtml(c.diff);
+        var notes = [];
+        if(c.note) notes.push(c.note);
+        if(c.upstream_rewrite) notes.push('这个模型会在上游再自动改写一次（提示词里有中文时）。');
+        if(!notes.length && res.guidance) notes.push(res.guidance);
+        el.querySelector('.agent-diff-note').textContent = notes.join(' ');
+        var ix = el.querySelector('.agent-diff-index');
+        if(ix) ix.textContent = (idx + 1) + ' / ' + res.candidates.length;
+    }
+    el.querySelectorAll('[data-pg]').forEach(function(b){
+        b.addEventListener('click', function(){
+            idx = (idx + Number(b.getAttribute('data-pg')) + res.candidates.length) % res.candidates.length;
+            paint();
+        });
+    });
+    var result = el.querySelector('.agent-confirm-result');
+    function done(text){ el.classList.add('is-resolved'); result.hidden = false; result.textContent = text; }
+    el.querySelector('[data-act="drop"]').addEventListener('click', function(){ done('已放弃，节点提示词没有改。'); });
+    el.querySelector('[data-act="more"]').addEventListener('click', function(){
+        var inp = document.getElementById('chatInput');
+        if(inp){ inp.value = '再改改：'; inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+    });
+    el.querySelector('[data-act="use"]').addEventListener('click', async function(){
+        var btn = this;
+        if(btn.disabled) return;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="agent-btn-spinner"></span>写入中…';
+        try {
+            var r = await fetch('/api/agent/apply-prompt', {method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({canvas_id:res.canvas_id || canvasId, node_id:res.node_id, prompt:res.candidates[idx].prompt})});
+            var data = await r.json().catch(function(){ return {}; });
+            if(!r.ok) throw new Error(agentErrText(data) || ('HTTP ' + r.status));
+            applyAgentCanvasOps(data.canvas_ops);
+            done('已写进「' + (res.title || '节点') + '」。要用新提示词出图，说一声「重新生成」。');
+        } catch(e){
+            btn.disabled = false;
+            btn.textContent = '用这个';
+            toast('没写进去：' + ((e && e.message) || '未知错误'));
+        }
+    });
+    parts.bubble.appendChild(el);
+    paint();
+    refreshIcons();
+    el.scrollIntoView({behavior:'smooth', block:'end'});
+}
+/* ── 需要你确认的步骤（删除 / 超出批准的生成次数）：确认后单独跑这几步 ── */
+function agentNodeLabel(id){
+    var n = nodes.find(function(x){ return x.id === id; });
+    if(!n) return id;
+    return String(n.alias || n.title || (n.type === 'smart-prompt' ? '提示词' : '节点')).slice(0, 24);
+}
+function agentConfirmCardAdd(runCard, ev){
+    var kind = ev.confirm_kind || (String(ev.tool || '').indexOf('delete') === 0 ? 'delete' : 'budget');
+    var key = kind === 'delete' ? '_deleteConfirm' : '_budgetConfirm';
+    var st = runCard._run[key];
+    if(!st){
+        var parts = createChatMsgEl('assistant');
+        document.getElementById('chatMessages').appendChild(parts.div);
+        var el = document.createElement('div');
+        el.className = 'agent-confirm-card';
+        el.innerHTML = '<div class="agent-confirm-title"></div><div class="agent-step-chips"></div>' +
+            '<div class="agent-confirm-note"></div><div class="agent-confirm-actions">' +
+            '<button type="button" class="agent-btn ghost" data-act="no"></button>' +
+            '<button type="button" class="agent-btn primary" data-act="yes"></button></div>' +
+            '<div class="agent-confirm-result" hidden></div>';
+        parts.bubble.appendChild(el);
+        st = runCard._run[key] = {el:el, kind:kind, steps:[], units:0, instruction:runCard._run.instruction || ''};
+        el.querySelector('[data-act="no"]').addEventListener('click', function(){ agentConfirmResolve(st, false); });
+        el.querySelector('[data-act="yes"]').addEventListener('click', function(){ agentConfirmResolve(st, true); });
+    }
+    var args = Object.assign({}, ev.args || {});
+    if(kind === 'delete') args.force = true;  // 卡片上已经写明会连同连线一起删
+    st.steps.push({tool:ev.tool, args:args, description:ev.description || ''});
+    st.units += Number(ev.units) || 0;
+    var el2 = st.el;
+    var chips = el2.querySelector('.agent-step-chips');
+    if(kind === 'delete'){
+        var ids = st.steps.map(function(s){ return s.args.node_id; }).filter(Boolean);
+        var links = (canvas?.connections || []).filter(function(c){ return ids.indexOf(c.from) !== -1 || ids.indexOf(c.to) !== -1; }).length;
+        el2.querySelector('.agent-confirm-title').innerHTML = '<i data-lucide="trash-2"></i>' + escapeHtml('要删除这 ' + ids.length + ' 个节点吗？');
+        chips.innerHTML = ids.map(function(id){ return '<span class="agent-chip">' + escapeHtml(agentNodeLabel(id)) + '</span>'; }).join('');
+        el2.querySelector('.agent-confirm-note').textContent = (links ? '会连同 ' + links + ' 条连线一起删掉。' : '') + '删了之后还能用「撤销本次」找回。';
+        el2.querySelector('[data-act="no"]').textContent = '保留';
+        el2.querySelector('[data-act="yes"]').textContent = '删除';
+    } else {
+        var n = st.units || st.steps.length;
+        el2.querySelector('.agent-confirm-title').innerHTML = '<i data-lucide="images"></i>' + escapeHtml('还要再生成 ' + n + ' 次吗？');
+        chips.innerHTML = st.steps.map(function(s){ return s.description ? '<span class="agent-chip">' + escapeHtml(s.description) + '</span>' : ''; }).join('');
+        el2.querySelector('.agent-confirm-note').textContent = (ev.reason ? String(ev.reason).replace(/，需要你重新确认后才能执行$/, '') + '。' : '') + '继续会再消耗 ' + n + ' 次生成额度。';
+        el2.querySelector('[data-act="no"]').textContent = '不用了';
+        el2.querySelector('[data-act="yes"]').textContent = '继续生成';
+    }
+    refreshIcons();
+    el2.scrollIntoView({behavior:'smooth', block:'end'});
+}
+async function agentConfirmResolve(st, yes){
+    var el = st.el;
+    var result = el.querySelector('.agent-confirm-result');
+    if(!yes){
+        el.classList.add('is-resolved');
+        result.hidden = false;
+        result.textContent = st.kind === 'delete' ? '已保留，没有删除。' : '好的，不再多生成。';
+        return;
+    }
+    if(agentRunAbort || chatSending){ toast('助手还在执行，等这一轮结束再确认'); return; }
+    el.classList.add('is-resolved');
+    result.hidden = false;
+    result.textContent = st.kind === 'delete' ? '正在删除…' : '正在生成…';
+    chatSending = true;
+    agentSetComposerRunning(true);
+    var parts = createChatMsgEl('assistant');
+    document.getElementById('chatMessages').appendChild(parts.div);
+    var res = null;
+    try {
+        res = await runAgentStream(st.instruction || (st.kind === 'delete' ? '删除选中的节点' : '继续生成'), parts.bubble, {approved_steps:st.steps});
+    } catch(e){ res = {failed:true}; }
+    chatSending = false;
+    agentSetComposerRunning(false);
+    result.textContent = res && res.ok ? (st.kind === 'delete' ? '已确认删除。' : '已确认继续生成。') : '没有执行成功，可以再说一次要做什么。';
 }
 var AGENT_HISTORY_MAX_ROUNDS = 8, AGENT_HISTORY_MAX_TOTAL_CHARS = 4000, AGENT_HISTORY_MAX_ITEM_CHARS = 1000;
 function agentHistoryPayload(instruction){
@@ -6829,7 +7729,9 @@ async function runAgentStream(instruction, bubble, opts){
     var text = String(instruction || '');
     if(text.length > 4000) return {unavailable:true, reason:'指令超过 4000 字上限'};
     var approved = (opts && Array.isArray(opts.approved_steps) && opts.approved_steps.length) ? opts.approved_steps : null;
-    // 带 approved_steps = 用户已经点过「执行」，后端忽略 mode 直接跑；否则按开关决定这一轮只出方案
+    // 带 approved_steps = 用户已经点过「执行」，后端忽略 mode 直接跑；否则按开关决定这一轮只出方案。
+    // 写操作 / 生成操作在服务端有强制闸门：开关只影响聊天与只读动作的即时性，关掉开关也不会让写操作直接执行——
+    // 服务端会返回 requires_confirmation 的方案，由上面的 plan 事件交棒方案卡，等用户点「执行」。
     var planRound = !approved && agentPlanConfirmEnabled();
     var provider = chatProvider || resolveChatProviderId();
     var model = currentChatModel();
@@ -6993,11 +7895,13 @@ function agentStepStateHtml(state){
     if(state === 'spin') return '<span class="agent-state-dot spin" title="执行中"></span>';
     return '';
 }
-function agentImageModelOptions(selected){
+function agentImageModelOptions(selected, providerId){
     // 收集可用生图模型（apiProviders 的 image_models；没有则用 models——绝不用 chat_models）
+    // 选了平台就只列这个平台的模型，别的平台的模型藏起来
     var opts = [];
     (apiProviders||[]).forEach(function(p){
         if(!p.enabled) return;
+        if(providerId && p.id !== providerId) return;
         var models = p.image_models || [];
         if(!models.length && Array.isArray(p.models)) models = p.models;
         models.forEach(function(m){
@@ -7011,11 +7915,12 @@ function agentImageModelOptions(selected){
     }).join('');
     return {html: html, count: opts.length};
 }
-function agentVideoModelOptions(selected){
-    // 收集可用生视频模型（apiProviders 的 video_models——绝不用对话/生图模型）
+function agentVideoModelOptions(selected, providerId){
+    // 收集可用生视频模型（apiProviders 的 video_models——绝不用对话/生图模型）；选了平台就只列这个平台的
     var opts = [];
     (apiProviders||[]).forEach(function(p){
         if(!p.enabled) return;
+        if(providerId && p.id !== providerId) return;
         var models = p.video_models || [];
         models.forEach(function(m){
             if(!opts.some(function(o){return o.value===m;})) opts.push({value:m, provider:p.id});
@@ -7047,6 +7952,258 @@ function agentStepProviderOptions(isVid, selected){
         return '<option value="'+escapeHtml(o.value)+'"'+(o.value===selected?' selected':'')+'>'+escapeHtml(o.name)+'</option>';
     }).join('');
 }
+function agentStepIsVideo(s){
+    var a = (s && s.args) || {};
+    return (s && s.tool) === 'generate_video' || a.kind === 'video' || a.type === 'video' || a.media === 'video'
+        || Boolean(a.settings && (a.settings.apiKind === 'video' || a.settings.kind === 'video'));
+}
+/* ── 方案步骤 → 人话（不出现工具名、参数名、节点 ID）── */
+var AGENT_NODE_TYPE_LABEL = {prompt:'提示词', image:'图片', video:'视频', text:'文本', table:'多维表格', batch:'批量生成'};
+var AGENT_RATIO_LABEL = {square:'1:1', wide:'16:9', story:'9:16', portrait:'3:4', landscape:'4:3'};
+function agentHumanRef(id){
+    var raw = String(id || '');
+    if(!raw) return '';
+    if(/^\{step\d+/.test(raw)) return '上一步新建的节点';
+    var n = nodes.find(function(x){ return x.id === raw || x.alias === raw; });
+    if(n) return n.alias || agentNodeLabel(n.id);
+    return raw.length > 12 ? '节点' : raw;
+}
+function agentRefChip(id){ return '<span class="agent-plan2-ref">' + escapeHtml(agentHumanRef(id)) + '</span>'; }
+function agentModelName(m){ return String(m || '').split('/').pop(); }
+function agentSettingsMeta(st){
+    st = st || {};
+    var out = [];
+    if(st.model) out.push(agentModelName(st.model));
+    else if(st.provider){ var pv = (apiProviders||[]).find(function(p){ return p.id === st.provider; }); out.push((pv && pv.name) || st.provider); }
+    if(st.ratio) out.push(AGENT_RATIO_LABEL[st.ratio] || st.ratio);
+    if(st.size) out.push(st.size);
+    if(st.resolution) out.push(String(st.resolution).toUpperCase());
+    if(st.duration) out.push(st.duration + ' 秒');
+    if(st.count && Number(st.count) > 1) out.push(st.count + ' 张');
+    return out;
+}
+function agentSettingsChangeText(st){
+    st = st || {};
+    var parts = [];
+    if(st.ratio) parts.push('比例改成 <b>' + escapeHtml(AGENT_RATIO_LABEL[st.ratio] || st.ratio) + '</b>');
+    if(st.model) parts.push('模型换成 <b>' + escapeHtml(agentModelName(st.model)) + '</b>');
+    else if(st.provider) parts.push('平台换成 <b>' + escapeHtml(agentSettingsMeta({provider:st.provider})[0] || st.provider) + '</b>');
+    if(st.resolution) parts.push('清晰度改成 <b>' + escapeHtml(String(st.resolution).toUpperCase()) + '</b>');
+    if(st.count) parts.push('张数改成 <b>' + escapeHtml(String(st.count)) + '</b>');
+    if(st.duration) parts.push('时长改成 <b>' + escapeHtml(String(st.duration)) + ' 秒</b>');
+    if(st.quality) parts.push('质量改成 <b>' + escapeHtml(String(st.quality)) + '</b>');
+    return parts;
+}
+function agentRowsHtml(rows, limit){
+    rows = Array.isArray(rows) ? rows : [];
+    limit = limit || 3;
+    var html = rows.slice(0, limit).map(function(r, i){
+        var text = Array.isArray(r) ? r.filter(Boolean).join(' / ') : String(r || '');
+        return '<div class="agent-plan2-row"><em>' + (i + 1) + '</em><span>' + escapeHtml(text) + '</span></div>';
+    }).join('');
+    if(rows.length > limit) html += '<div class="agent-plan2-more">还有 ' + (rows.length - limit) + ' 行，执行后可以在表格里直接改</div>';
+    return html ? '<div class="agent-plan2-rows">' + html + '</div>' : '';
+}
+function agentQuoteHtml(text){
+    text = String(text || '').trim();
+    if(!text) return '';
+    return '<div class="agent-plan2-meta"><span class="agent-plan2-quote">「' + escapeHtml(text.length > 60 ? text.slice(0, 60) + '…' : text) + '」</span></div>';
+}
+function agentStepHuman(s){
+    var a = (s && s.args) || {};
+    var tool = (s && s.tool) || '';
+    var what = '', meta = [], extra = '';
+    var st = a.settings || {};
+    if(tool === 'generate_image'){
+        what = '生成 ' + (Number(a.count) || 1) + ' 张图片';
+        meta = agentSettingsMeta({model:a.model, provider:a.provider, ratio:a.ratio, size:a.size});
+        extra = agentQuoteHtml(a.prompt);
+    } else if(tool === 'generate_video'){
+        what = (a.motion_transfer ? '按参考视频的动作' : '') + '生成 1 段视频';
+        meta = agentSettingsMeta({model:a.model, provider:a.provider, ratio:a.ratio, duration:a.duration});
+        extra = agentQuoteHtml(a.prompt);
+    } else if(tool === 'create_node'){
+        var tl = AGENT_NODE_TYPE_LABEL[a.type] || '';
+        what = '新建' + tl + (a.type === 'table' || a.type === 'batch' ? '' : '节点');
+        var ins = Array.isArray(a.inputs) ? a.inputs : [];
+        if(ins.length) what += '，接在 ' + ins.map(agentRefChip).join(' ') + ' 后面';
+        if(a.type === 'table') extra = agentRowsHtml(a.rows);
+        else if(a.prompt) extra = agentQuoteHtml(a.prompt);
+        meta = agentSettingsMeta(st);
+        if(a.type === 'batch') meta.unshift(a.media === 'video' ? '逐行出视频' : '逐行出图');
+    } else if(tool === 'update_node'){
+        var parts = [];
+        if(a.prompt != null) parts.push('提示词改成下面这段');
+        if(a.prompt_append) parts.push('提示词末尾加上「' + escapeHtml(a.prompt_append) + '」');
+        parts = parts.concat(agentSettingsChangeText(st));
+        if(a.title) parts.push('标题改成「' + escapeHtml(a.title) + '」');
+        if(a.rows) parts.push('表格换成 ' + a.rows.length + ' 行');
+        if(a.append_rows) parts.push('表格末尾加 ' + a.append_rows.length + ' 行');
+        if(a.x != null || a.y != null) parts.push('挪个位置');
+        what = agentRefChip(a.node_id) + ' ' + (parts.join('，') || '修改');
+        extra = a.prompt != null ? agentQuoteHtml(a.prompt) : (a.rows || a.append_rows ? agentRowsHtml(a.rows || a.append_rows) : '');
+        return {html: what, meta: [], extra: extra};
+    } else if(tool === 'run_generation'){
+        what = '用 ' + agentRefChip(a.node_id) + ' 重新生成';
+        meta = agentSettingsMeta(st).concat(['原图保留，新结果放在旁边']);
+        return {html: what, meta: meta, extra: ''};
+    } else if(tool === 'batch_generate'){
+        var rows = Array.isArray(a.rows) ? a.rows : [];
+        what = '新建多维表格写入 ' + rows.length + ' 行，接批量生成逐行出' + (a.media === 'video' ? '视频' : '图');
+        meta = agentSettingsMeta(st);
+        if(Array.isArray(a.inputs) && a.inputs.length) meta.push('参考图 ' + a.inputs.map(agentHumanRef).join('、'));
+        if(a.run === false) meta.push('只建好，先不跑');
+        extra = agentRowsHtml(rows) + (a.common_prompt ? '<div class="agent-plan2-meta"><span>每行都带上：' + escapeHtml(String(a.common_prompt).slice(0, 60)) + '</span></div>' : '');
+    } else if(tool === 'run_batch'){
+        what = '运行 ' + agentRefChip(a.node_id) + '，按表格逐行生成';
+        return {html: what, meta: [], extra: ''};
+    } else if(tool === 'arrange_canvas'){
+        var ids2 = Array.isArray(a.node_ids) ? a.node_ids : [];
+        what = ids2.length ? '整理 ' + ids2.map(agentRefChip).join(' ') + '，按连线从左到右排好' : '整理整张画布，按连线从左到右排好';
+        meta = ['只挪位置，不改内容', '整理完可以一键撤销'];
+    } else if(tool === 'run_downstream'){
+        what = '把 ' + agentRefChip(a.node_id) + ' 后面还没出结果的节点按顺序跑完';
+        meta = ['前面出完结果，后面的自动接着跑', '已经有结果的不重跑'];
+    } else if(tool === 'remember'){
+        var mem = (Array.isArray(a.items) ? a.items : [a.text]).filter(Boolean);
+        what = '记住：' + mem.map(function(t){ return '「' + escapeHtml(t) + '」'; }).join('、');
+        meta = [a.scope === 'global' ? '所有画布都按这个来' : '这张画布以后都按这个来'];
+    } else if(tool === 'forget'){
+        what = '忘掉「' + escapeHtml(a.text || a.id || '') + '」这条记忆';
+    } else if(tool === 'list_templates'){
+        what = '看看资产库里有哪些流程模板';
+    } else if(tool === 'save_template'){
+        var ids = Array.isArray(a.node_ids) ? a.node_ids : [];
+        what = '把 ' + ids.map(agentRefChip).join(' ') + ' 存成模板「' + escapeHtml(a.name || '') + '」';
+        meta = ['存进资产库 · 工作流', '连线、模型和比例一起存', '参考图一起打包'];
+    } else if(tool === 'apply_template'){
+        what = '按模板「' + escapeHtml(a.template || '') + '」搭出整套节点，放在画布右边空处';
+        var ins = Array.isArray(a.inputs) ? a.inputs : [];
+        var lines = '';
+        if(ins.length) lines += '<div class="agent-plan2-meta"><span>模板里的空素材位换成 ' + ins.map(agentRefChip).join(' ') + '</span></div>';
+        if(a.prompt) lines += '<div class="agent-plan2-meta"><span class="agent-plan2-quote">提示词换成「' + escapeHtml(String(a.prompt).slice(0, 60)) + '」</span></div>';
+        meta = agentSettingsMeta(st).concat([a.run === false ? '只搭好，先不跑' : '整套跑完：前面出完结果，后面的自动接着跑']);
+        return {html: what, meta: meta, extra: lines};
+    } else if(tool === 'connect_nodes'){
+        return {html: '把 ' + agentRefChip(a.from) + ' 接到 ' + agentRefChip(a.to), meta: [], extra: ''};
+    } else if(tool === 'disconnect_nodes'){
+        return {html: '断开 ' + agentRefChip(a.from) + ' 和 ' + agentRefChip(a.to), meta: [], extra: ''};
+    } else if(tool === 'delete_node'){
+        return {html: '删除 ' + agentRefChip(a.node_id), meta: ['删除前会再问你一次'], extra: ''};
+    } else if(tool === 'refine_prompt'){
+        return {html: '给 ' + agentRefChip(a.node_id) + ' 写几版改写提示词，你挑一版再写进去', meta: [], extra: ''};
+    } else if(tool === 'get_canvas' || tool === 'list_canvases'){
+        what = '看一下画布现在的样子';
+    } else if(tool === 'check_task'){
+        what = '查一下生成进度';
+    } else if(tool === 'use_asset'){
+        what = '从素材库找素材' + (a.query ? '「' + escapeHtml(a.query) + '」' : '');
+    } else {
+        what = escapeHtml(s.description || '处理画布');
+    }
+    return {html: what, meta: meta, extra: extra};
+}
+function agentStepPlainText(s){
+    var tmp = document.createElement('div');
+    tmp.innerHTML = agentStepHuman(s).html;
+    return tmp.textContent.replace(/\s+/g, ' ').trim();
+}
+function agentPlanCostHtml(plan){
+    var im = plan.impact || {};
+    var steps = plan.steps || [];
+    var parts = [];
+    var gens = Number(im.generations) || 0;
+    parts.push(gens ? '会用掉 <b>' + gens + '</b> 次生成' : '不消耗生成额度');
+    var created = Number(im.nodes) || 0;
+    steps.forEach(function(s){ if(s.tool === 'generate_image' || s.tool === 'generate_video') created += 2; });
+    if(created) parts.push('新增 <b>' + created + '</b> 个节点');
+    var touched = {};
+    steps.forEach(function(s){ if(s.tool === 'update_node' && s.args && s.args.node_id) touched[s.args.node_id] = 1; });
+    var mod = Object.keys(touched).length;
+    if(mod) parts.push('修改 <b>' + mod + '</b> 个节点');
+    var del = steps.filter(function(s){ return s.tool === 'delete_node'; }).length;
+    if(del) parts.push('删除 <b>' + del + '</b> 个节点');
+    return parts.join(' · ');
+}
+function agentStepEditable(s){
+    var a = (s && s.args) || {};
+    return s.tool === 'generate_image' || s.tool === 'generate_video' || s.tool === 'batch_generate'
+        || (s.tool === 'create_node' && (a.type === 'image' || a.type === 'video' || a.type === 'batch'));
+}
+function agentPlan2EditHtml(s, i){
+    var a = s.args || {};
+    var st = a.settings || {};
+    var isVid = agentStepIsVideo(s) || a.media === 'video';
+    var curProvider = a.provider || st.provider || agentImageProvider || chatProvider || resolveChatProviderId() || '';
+    var curModel = a.model || st.model || '';
+    var modelOpts = isVid ? agentVideoModelOptions(curModel, curProvider) : agentImageModelOptions(curModel, curProvider);
+    var curRatio = a.ratio || st.ratio || '';
+    curRatio = AGENT_RATIO_LABEL[curRatio] || curRatio;
+    var ratios = isVid ? ['adaptive','16:9','9:16','1:1','4:3','3:4'] : ['1:1','3:4','4:3','16:9','9:16','2:3','3:2'];
+    var ratioOpts = '<option value="">自动</option>' + ratios.map(function(r){
+        return '<option value="'+r+'"'+(r===curRatio?' selected':'')+'>'+(r === 'adaptive' ? '自适应' : r)+'</option>';
+    }).join('');
+    var title = s.tool === 'batch_generate' || a.type === 'batch' ? '批量生成的出' + (isVid ? '视频' : '图') + '设置'
+        : '第 ' + (i + 1) + ' 步的' + (isVid ? '视频' : '出图') + '设置';
+    var extra = '';
+    if(isVid && s.tool === 'generate_video'){
+        var curDuration = Number(a.duration) || 5;
+        extra = '<div class="agent-plan2-field"><label>时长</label><select class="agent-edit-duration" data-step="'+i+'" onchange="agentStepEditChange(this)">' +
+            [3,5,8,10,15].map(function(d){ return '<option value="'+d+'"'+(d===curDuration?' selected':'')+'>'+d+' 秒</option>'; }).join('') + '</select></div>';
+    }
+    return '<div class="agent-plan2-edit-group">' +
+        '<div class="agent-plan2-edit-title">' + escapeHtml(title) + '</div>' +
+        '<div class="agent-plan2-field"><label>平台</label><select class="agent-edit-provider" data-step="'+i+'" onchange="agentStepEditChange(this)">' + agentStepProviderOptions(isVid, curProvider) + '</select></div>' +
+        '<div class="agent-plan2-field"><label>模型</label><select class="agent-edit-model" data-step="'+i+'" onchange="agentStepEditChange(this)">' + modelOpts.html + '</select></div>' +
+        '<div class="agent-plan2-field"><label>比例</label><select class="agent-edit-ratio" data-step="'+i+'" onchange="agentStepEditChange(this)">' + ratioOpts + '</select></div>' +
+        extra +
+    '</div>';
+}
+function renderAgentPlanCard2(bubble, plan, opts){
+    bubble.innerHTML = '';
+    var card = document.createElement('div');
+    card.className = 'agent-plan-card agent-plan2';
+    card._agentPlan = {
+        session_id: plan.session_id || '', canvas_id: plan.canvas_id || canvasId, steps: plan.steps || [],
+        intent: plan.intent || '', expected_output: plan.expected_output || '', summary: plan.summary || '',
+        impact: plan.impact || null, instruction: opts.instruction || plan.instruction || '',
+        stream: true, version: null, status: 'planned'
+    };
+    card.setAttribute('data-plan-state', 'pending');
+    var steps = plan.steps || [];
+    var stepsHtml = steps.map(function(s, i){
+        var h = agentStepHuman(s);
+        var meta = (h.meta || []).filter(Boolean).map(function(m){ return '<span>' + escapeHtml(m) + '</span>'; }).join('');
+        return '<div class="agent-plan2-step agent-step" data-step="' + i + '"><span class="agent-plan2-num">' + (i + 1) + '</span><div>' +
+            '<div class="agent-plan2-what">' + h.html + '</div>' +
+            (meta ? '<div class="agent-plan2-meta">' + meta + '</div>' : '') + (h.extra || '') +
+        '</div></div>';
+    }).join('');
+    var editable = steps.map(function(s, i){ return agentStepEditable(s) ? agentPlan2EditHtml(s, i) : ''; }).join('');
+    var gens = Number((plan.impact || {}).generations) || 0;
+    var title = String(plan.intent || '').trim() || String(plan.summary || '').trim() || '按你说的改画布';
+    card.innerHTML =
+        '<div class="agent-plan2-head"><span class="agent-plan2-kicker"><i data-lucide="list-checks"></i>我打算这样做</span>' +
+            '<span class="agent-plan2-state agent-plan-status">等你确认</span></div>' +
+        '<div class="agent-plan2-title">' + escapeHtml(title) + '</div>' +
+        '<div class="agent-plan2-steps">' + stepsHtml + '</div>' +
+        '<div class="agent-plan2-cost"><i data-lucide="' + (gens ? 'coins' : 'check') + '"></i><span>' + agentPlanCostHtml(plan) + '</span>' +
+            (editable ? '<button type="button" class="agent-plan2-tweak">调整参数<i data-lucide="chevron-down"></i></button>' : '') + '</div>' +
+        (editable ? '<div class="agent-plan2-edit">' + editable + '</div>' : '') +
+        '<div class="agent-plan-preview"></div>' +
+        '<div class="agent-plan2-actions agent-plan-actions">' +
+            '<button type="button" class="agent-btn ghost" data-act="cancel" onclick="agentPlanAction(\'cancel\', this)">取消</button>' +
+            '<button type="button" class="agent-btn ghost" data-act="adjust" onclick="agentPlanAction(\'adjust\', this)">换个说法</button>' +
+            '<button type="button" class="agent-btn primary" data-act="run" onclick="agentPlanAction(\'run\', this)"><i data-lucide="play"></i>' + (gens ? '开始生成' : '开始') + '</button>' +
+        '</div>';
+    var tweak = card.querySelector('.agent-plan2-tweak');
+    if(tweak) tweak.addEventListener('click', function(){ card.classList.toggle('tweaking'); });
+    bubble.appendChild(card);
+    refreshIcons();
+    chatMessages.push({role:'assistant', text:'[方案] ' + title});
+    card.scrollIntoView({behavior:'smooth', block:'end'});
+    return card;
+}
 function agentStepEditHtml(s, i){
     var a = s.args || {};
     var isGen = s.tool === 'generate_image';
@@ -7064,7 +8221,7 @@ function agentStepEditHtml(s, i){
         });
         curModel = provFirst || '';
     }
-    var modelOpts = isVid ? agentVideoModelOptions(curModel) : agentImageModelOptions(curModel);
+    var modelOpts = isVid ? agentVideoModelOptions(curModel, curProvider) : agentImageModelOptions(curModel, curProvider);
     var curRatio = a.ratio || (isVid ? 'adaptive' : '1:1');
     var curSize = a.size || '';
     var curDuration = a.duration || 5;
@@ -7123,9 +8280,29 @@ function agentStepEditChange(el){
     var step = card._agentPlan.steps[stepIdx];
     if(!step) return;
     step.args = step.args || {};
-    if(el.classList.contains('agent-edit-provider')){ step.args.provider = el.value; step._providerEdited = true; }
+    if(el.classList.contains('agent-edit-provider')){
+        step.args.provider = el.value; step._providerEdited = true;
+        // 换了平台：模型下拉只留这个平台的模型，默认选第一个
+        var isVidStep = step.tool === 'generate_video' || agentStepIsVideo(step);
+        var opts = isVidStep ? agentVideoModelOptions('', el.value) : agentImageModelOptions('', el.value);
+        var modelSel = el.closest('.agent-step-edit, .agent-plan2-edit-group');
+        modelSel = modelSel && modelSel.querySelector('.agent-edit-model');
+        if(modelSel){
+            modelSel.innerHTML = opts.html;
+            modelSel.selectedIndex = 0;
+            step.args.model = modelSel.value || '';
+        }
+    }
     if(el.classList.contains('agent-edit-model')) step.args.model = el.value;
     if(el.classList.contains('agent-edit-ratio')) step.args.ratio = el.value || '';
+    // 批量生成 / 新建节点的参数在 settings 里
+    if(step.tool === 'batch_generate' || step.tool === 'create_node'){
+        var stt = Object.assign({}, step.args.settings || {});
+        ['provider', 'model', 'ratio'].forEach(function(k){
+            if(step.args[k] !== undefined){ if(step.args[k]) stt[k] = step.args[k]; else delete stt[k]; delete step.args[k]; }
+        });
+        step.args.settings = stt;
+    }
     if(el.classList.contains('agent-edit-size')) step.args.size = el.value || '';
     if(el.classList.contains('agent-edit-duration')) step.args.duration = Number(el.value) || 5;
     if(el.classList.contains('agent-edit-prompt')) step.args.prompt = el.value;
@@ -7133,6 +8310,7 @@ function agentStepEditChange(el){
 function renderAgentPlanCard(bubble, plan, opts){
     opts = opts || {};
     var isStream = !!opts.stream; // 流式方案卡：用户点「执行」后才会真的跑
+    if(isStream) return renderAgentPlanCard2(bubble, plan, opts);
     bubble.innerHTML = '';
     var card = document.createElement('div');
     card.className = 'agent-plan-card';
@@ -7292,8 +8470,8 @@ async function agentPlanAction(act, btn){
         return agentStreamPlanExecute(card, btn);
     }
     if(st.stream && act === 'adjust'){
-        agentStreamPlanFreeze(card, 'adjusted', '已作废 · 待你描述修改');
-        addChatMessage('system', '已放弃这版方案。直接说要改什么（例如「换成 16:9」「只出 1 张」「模型换 xxx」），我会重新给一版。');
+        agentStreamPlanFreeze(card, 'adjusted', '换个说法');
+        addChatMessage('system', '好的，这版先不做。直接说想怎么改（例如「换成 16:9」「只出 3 张」「用表格批量出」），我重新给你一版。');
         var adjustInp = document.getElementById('chatInput');
         if(adjustInp) adjustInp.focus();
         return;
@@ -7506,6 +8684,9 @@ function agentPollGenerateTask(nodeId, taskId, stepEl, card, kind){
     if(!taskId || agentGenPolls[taskId]) return;
     agentGenPolls[taskId] = true;
     kind = kind || 'image';
+    if(card && card._run) card._run.genPending = (Number(card._run.genPending) || 0) + 1;
+    var settled = false;
+    function settle(){ if(settled) return; settled = true; agentReviewSettle(card); }
     var stateEl = stepEl ? stepEl.querySelector('.agent-step-state') : null;
     if(stateEl) stateEl.innerHTML = agentStepStateHtml('spin');
     agentExecTaskSet(card, taskId, kind, null); // 执行详情：登记任务段（排队中）
@@ -7513,6 +8694,7 @@ function agentPollGenerateTask(nodeId, taskId, stepEl, card, kind){
     var tick = 0;
     function finalizeSucceeded(task){
         delete agentGenPolls[taskId];
+        setTimeout(settle, 1200); // 等结果落到节点上再检查
         agentExecTaskSet(card, taskId, kind, task); // 执行详情：任务段 → 成功
         if(stepEl){
             stepEl.classList.add('ok');
@@ -7529,6 +8711,7 @@ function agentPollGenerateTask(nodeId, taskId, stepEl, card, kind){
             var first = urls[0];
             thumbUrl = typeof first === 'string' ? first : (first && first.url) || '';
         }
+        if(thumbUrl && kind === 'image' && card && card._run) (card._run.reviewItems = card._run.reviewItems || []).push({node_id:nodeId, url:thumbUrl});
         // 结果落画布节点（merge 拉取后按 id 找最新节点，最多等 8 秒）
         var tries = 0;
         (function place(){
@@ -7575,6 +8758,7 @@ function agentPollGenerateTask(nodeId, taskId, stepEl, card, kind){
                 if(task.status === 'succeeded'){ finalizeSucceeded(task); return; }
                 if(task.status === 'failed' || task.status === 'cancelled'){
                     delete agentGenPolls[taskId];
+                    settle();
                     if(stepEl){
                         stepEl.classList.add('fail');
                         if(stateEl) stateEl.innerHTML = agentStepStateHtml('fail');
@@ -7596,9 +8780,9 @@ function agentPollGenerateTask(nodeId, taskId, stepEl, card, kind){
                     toast('生成失败：' + (task.error || '').slice(0, 80), '!');
                     return;
                 }
-                if(++tick < maxTicks) setTimeout(tickOnce, 3000);
+                if(++tick < maxTicks) setTimeout(tickOnce, 3000); else settle();
             })
-            .catch(function(){ if(++tick < maxTicks) setTimeout(tickOnce, 3000); });
+            .catch(function(){ if(++tick < maxTicks) setTimeout(tickOnce, 3000); else settle(); });
     })();
 }
 // 失败任务重试：POST /api/tasks/{id}/retry → 成功后清理错误 UI + 重置防重入 + 重新轮询
@@ -7868,9 +9052,33 @@ function agentExecAttach(card){
 function refreshCanvasAfterAgent(){
     // 应用/回滚后刷新画布状态（复用现有合并机制，不打断用户操作）
     try {
-        if(typeof mergeReloadCanvasNow === 'function'){ mergeReloadCanvasNow(); }
-        else if(canvasId){ location.reload(); }
+        if(typeof mergeReloadCanvasNow === 'function') return mergeReloadCanvasNow();
+        if(canvasId) location.reload();
     } catch(e){}
+    return Promise.resolve();
+}
+/* 助手交给页面执行的动作。run_batch：和用户点批量节点的「运行」一样，按表格逐行出图/视频 */
+async function agentRunClientActions(card, actions){
+    for(const action of (actions || [])){
+        if(action && action.type === 'arrange'){ agentArrangeNote(agentArrangeCanvas(action.node_ids || [])); continue; }
+        if(!action || action.type !== 'run_batch') continue;
+        const id = String(action.node_id || '');
+        const api = typeof ensureTableApi === 'function' ? ensureTableApi() : null;
+        const node = nodes.find(n => n.id === id);
+        if(!api || typeof api.runTableBatch !== 'function' || !node){
+            addChatMessage('system', '表格和批量节点已经建好，但页面没能自动开跑：点批量节点上的「运行」就会逐行生成。');
+            continue;
+        }
+        const label = node.alias || nodeAliasText(node) || '批量节点';
+        agentRunNote(card, '已在画布上开始逐行生成：' + label + ' · ' + (Number(action.rows) || 0) + ' 行');
+        var startCount = (node.images || []).length;
+        try {
+            await api.runTableBatch(id, {});
+        } catch(e){
+            addChatMessage('system', label + ' 批量生成中断：' + ((e && e.message) || '未知错误'));
+        }
+        agentReviewBatch(card, id, startCount);
+    }
 }
 // 输入框自动撑高 + @ 引用节点
 var chatInput = document.getElementById('chatInput');
@@ -9027,6 +10235,35 @@ function syncRunButtonState(node=selectedNode()){
         ? stopRequested
         : (!isSmartRunnableNode(node) || smartNodeInFlight(node) || smartCascadeIsLoopRunning(node?.id));
 }
+/* 三方合并的基线：上次和服务器对齐时（加载 / 保存成功 / 合并 / 助手逐步改动）服务器上每个节点与连线的样子。
+   合并时据此分清「谁改了」：服务器没动过的节点保留本地修改；服务器删掉而本地没动的节点不再复活；
+   本地删掉而服务器没动的节点也不再被拉回来。没有基线的节点按原来的规则合并。 */
+let smartServerBaseNodes = new Map();
+let smartServerBaseConns = new Set();
+function smartBaseConnKey(c){ return `${c?.from}->${c?.to}:${c?.kind || 'flow'}`; }
+function smartBaseClone(value){ try { return JSON.parse(JSON.stringify(value)); } catch(e){ return null; } }
+function setSmartServerBase(rawNodes, rawConns){
+    smartServerBaseNodes = new Map();
+    (Array.isArray(rawNodes) ? rawNodes : []).forEach(n => {
+        if(n && n.id) smartServerBaseNodes.set(n.id, JSON.stringify(n));
+    });
+    smartServerBaseConns = new Set((Array.isArray(rawConns) ? rawConns : []).filter(c => c && c.from && c.to).map(smartBaseConnKey));
+}
+/* 节点编号（图1 / 视频2 / 提示词3）由服务器分配：保存回包里有、本地还没有的就沿用过来 */
+function adoptServerNodeAliases(serverCanvas){
+    var byId = new Map((Array.isArray(serverCanvas?.nodes) ? serverCanvas.nodes : []).filter(function(n){ return n && n.id && n.alias; }).map(function(n){ return [n.id, n.alias]; }));
+    var changed = false;
+    nodes.forEach(function(n){
+        var a = byId.get(n.id);
+        if(a && n.alias !== a){ n.alias = a; changed = true; }
+    });
+    if(serverCanvas && serverCanvas.alias_counters && canvas) canvas.alias_counters = serverCanvas.alias_counters;
+    return changed;
+}
+function smartServerTombstones(serverCanvas){
+    return new Set((Array.isArray(serverCanvas?.deleted_node_ids) ? serverCanvas.deleted_node_ids : [])
+        .map(item => typeof item === 'string' ? item : item?.id).filter(Boolean));
+}
 function mergeSmartNode(local, remote){
     const images = mergeSmartImageLists(local.images, remote.images);
     const localDone = smartNodeHasCompletedResult(local);
@@ -9050,28 +10287,45 @@ function mergeSmartNode(local, remote){
         ? completeSmartNodeWithImages(merged, images)
         : merged;
 }
-function mergeSmartNodeLists(localNodes, remoteNodes){
+function mergeSmartNodeLists(localNodes, remoteNodes, remoteRawById=null, tombstones=null){
     const localById = new Map((localNodes || []).map(n => [n.id, n]));
     const remoteById = new Map((remoteNodes || []).map(n => [n.id, n]));
     const order = [];
     const seen = new Set();
     (localNodes || []).forEach(n => { if(!seen.has(n.id)){ seen.add(n.id); order.push(n.id); } });
     (remoteNodes || []).forEach(n => { if(!seen.has(n.id)){ seen.add(n.id); order.push(n.id); } });
+    const base = smartServerBaseNodes;
+    const stones = tombstones || new Set();
+    const remoteUnchanged = id => base.has(id) && remoteRawById && remoteRawById.has(id) && remoteRawById.get(id) === base.get(id);
     return order.map(id => {
         const local = localById.get(id);
         const remote = remoteById.get(id);
-        if(local && !remote) return local;     // 仅本地存在：保留（我新建的节点；对方删了也宁可复活也不丢结果）
-        if(remote && !local) return remote;     // 仅对方存在：加入对方新建的节点
+        if(local && !remote){
+            // 仅本地存在：我新建的保留；服务器删掉的（助手删除/撤销记了墓碑，或基线里有而服务器没了）不再复活，
+            // 正在生成的节点例外——宁可留着也不丢结果
+            if((stones.has(id) || base.has(id)) && !smartNodeInFlight(local)) return null;
+            return local;
+        }
+        if(remote && !local){
+            if(remoteUnchanged(id)) return null;   // 我刚删掉、服务器那边没人动过：别再拉回来
+            return remote;                          // 对方新建的节点
+        }
+        // 服务器上这个节点自上次对齐后没人改过：以本地为准（保住我这段时间的修改）
+        if(remoteUnchanged(id)) return local;
         return mergeSmartNode(local, remote);
     }).filter(Boolean);
 }
 function mergeSmartConnections(localConns, remoteConns, nodeIds){
     const out = [];
     const seen = new Set();
+    const localKeys = new Set((localConns || []).filter(Boolean).map(smartBaseConnKey));
+    const remoteKeys = new Set((remoteConns || []).filter(Boolean).map(smartBaseConnKey));
     [...(localConns || []), ...(remoteConns || [])].forEach(c => {
         if(!c || !nodeIds.has(c.from) || !nodeIds.has(c.to)) return;
-        const key = `${c.from}->${c.to}:${c.kind || 'flow'}`;
+        const key = smartBaseConnKey(c);
         if(seen.has(key)) return;
+        // 基线里有、但有一边已经删了：删除生效（不再取并集把它拉回来）
+        if(smartServerBaseConns.has(key) && (!localKeys.has(key) || !remoteKeys.has(key))) return;
         seen.add(key);
         out.push(c);
     });
@@ -9079,11 +10333,14 @@ function mergeSmartConnections(localConns, remoteConns, nodeIds){
 }
 function applyMergedServerCanvas(serverCanvas){
     if(!serverCanvas || !canvas) return false;
-    const remoteNodes = (Array.isArray(serverCanvas.nodes) ? serverCanvas.nodes : []).map(normalizeLegacySmartNode).filter(Boolean);
-    const mergedNodes = mergeSmartNodeLists(nodes, remoteNodes);
+    const rawNodes = Array.isArray(serverCanvas.nodes) ? serverCanvas.nodes : [];
+    const remoteRawById = new Map(rawNodes.filter(n => n && n.id).map(n => [n.id, JSON.stringify(n)]));
+    const remoteNodes = (smartBaseClone(rawNodes) || []).map(normalizeLegacySmartNode).filter(Boolean);
+    const mergedNodes = mergeSmartNodeLists(nodes, remoteNodes, remoteRawById, smartServerTombstones(serverCanvas));
     const nodeIds = new Set(mergedNodes.map(n => n.id));
     nodes = mergedNodes;
     canvas.connections = mergeSmartConnections(canvas.connections, serverCanvas.connections, nodeIds);
+    setSmartServerBase(rawNodes, serverCanvas.connections);
     const cleanedState = clearCompletedNodeBusyStates();
     const recoveredLoopOutputs = recoverStuckLoopOutputsFromLogs();
     canvas.updated_at = Number(serverCanvas.updated_at || canvas.updated_at || 0);
@@ -9210,6 +10467,7 @@ function setAssetLibraryFromResponse(data, options={}){
 }
 function toggleAssetLibrary(open=!assetLibraryOpen){
     if(!assetPanel || !assetToggle) return;
+    if(open) closeSmartSidePanels('assets');
     assetLibraryOpen = !!open;
     assetPanel.classList.toggle('open', assetLibraryOpen);
     assetToggle?.classList.toggle('active', assetLibraryOpen);
@@ -9702,6 +10960,7 @@ async function loadCanvas(){
         canvasUsesConnections = Object.prototype.hasOwnProperty.call(canvas || {}, 'connections');
         document.title = canvas.title || tr('canvas.smartCanvas');
         document.getElementById('smartTitle').textContent = canvas.title || tr('canvas.smartCanvas');
+        setSmartServerBase(canvas.nodes, canvas.connections);
         nodes = (Array.isArray(canvas.nodes) ? canvas.nodes : []).map(normalizeLegacySmartNode).filter(Boolean);
         // V2 Phase 2: 兼容旧画布——加载时自动补 asset_id（服务端已迁移，客户端兜底）
         ensureAllSmartNodeAssetIds();
@@ -9724,7 +10983,7 @@ async function loadCanvas(){
         const recoveredLoopOutputs = recoverStuckLoopOutputsFromLogs();
         const hiddenCompletedTimers = hideCompletedRunTimers();
         const cleanedDetachedInputs = cleanupDetachedRunInputRefs();
-        viewport = {...viewport, ...(canvas.viewport || {})};
+        viewport = {...viewport, ...(canvas.viewport || {}), ...(loadLocalViewport() || {})};
         viewport.scale = safeScale(viewport.scale);
         if(canvas.settings) settings = {...settings, ...canvas.settings};
         normalizeSmartVideoModeSettings(settings, true);
@@ -9737,18 +10996,85 @@ async function loadCanvas(){
         if(settings.comfy_params && !settings.comfyParams) settings.comfyParams = settings.comfy_params;
         updateProviderModels();
         // 旧版本可保存几乎不可见的视口：缩放极小（<0.1 时节点已无法看清和操作）时，重新适配内容
-        if(nodes.length && viewport.scale < 0.1) fitAllNodesViewport();
+        /* 视口缩得太小，或者恢复的位置上一个节点都看不到（例如停在 200% 的空白处），都重新适配全部内容 */
+        if(nodes.length && (viewport.scale < 0.1 || !viewportShowsAnySmartNode())) fitAllNodesViewport();
         else applyViewport();
+        /* 素材库「在画布中定位」：?focus=<节点 id> → 选中该节点并把它移到屏幕中央（缩放至少 60%，看得清） */
+        const focusNodeId = params.get('focus') || '';
+        const focusTarget = focusNodeId ? nodes.find(n => n.id === focusNodeId) : null;
+        if(focusTarget){
+            const r = nodeRect(focusTarget);
+            viewport.scale = Math.max(safeScale(viewport.scale), 0.6);
+            selectedId = focusTarget.id;
+            selectedIds = [];
+            selectedImage = {nodeId:focusTarget.id, index:0};
+            centerViewportOnWorldPoint({x:r.x + r.width / 2, y:r.y + r.height / 2});
+        }
         render();
         if(cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers) scheduleSave();
+        /* 记下刚加载的内容签名：之后只有内容真的变了才会保存。载入时做过自愈的，签名留空，保证自愈结果一定落盘 */
+        canvas.nodes = nodes;
+        lastSavedContentSig = (cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers)
+            ? '' : canvasContentSignature(canvasForStorage());
         resumeSmartPendingTasks();
         resumeJimengPendingNodes();
         startCanvasMetaPoll();
     } catch(e) { toast(tr('smart.toastCanvasFail')); }
 }
+function viewportShowsAnySmartNode(){
+    if(!shell) return true;
+    const scale = safeScale(viewport.scale);
+    const left = -viewport.x / scale, top = -viewport.y / scale;
+    const right = left + shell.clientWidth / scale, bottom = top + shell.clientHeight / scale;
+    return nodes.some(node => {
+        if(node.id === SMART_LOG_PREVIEW_NODE_ID) return false;
+        const r = nodeRect(node);
+        return r.x < right && r.x + r.width > left && r.y < bottom && r.y + r.height > top;
+    });
+}
 function scheduleSave(){
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveCanvas, 450);
+}
+/* 视口（缩放/平移位置）按画布记在本机 localStorage：纯浏览不再触发整张画布保存。
+   内容真的变了时，saveCanvas 仍会把当前视口一起带给后端，换设备打开也能落在最近的位置。 */
+let viewportSaveTimer = null;
+let lastSavedContentSig = '';
+function smartViewportStorageKey(){ return canvasId ? `novai_smart_viewport:${canvasId}` : ''; }
+function persistViewportLocally(){
+    const key = smartViewportStorageKey();
+    if(!key) return;
+    try { localStorage.setItem(key, JSON.stringify({x:viewport.x, y:viewport.y, scale:viewport.scale})); } catch(e) {}
+}
+function scheduleViewportSave(){
+    clearTimeout(viewportSaveTimer);
+    viewportSaveTimer = setTimeout(persistViewportLocally, 300);
+}
+function loadLocalViewport(){
+    const key = smartViewportStorageKey();
+    if(!key) return null;
+    try {
+        const v = JSON.parse(localStorage.getItem(key) || 'null');
+        if(v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.scale) && v.scale > 0) return {x:v.x, y:v.y, scale:v.scale};
+    } catch(e) {}
+    return null;
+}
+/* ── 标题下方的保存状态（沿用标题的弱化灰字，不加图形） ── */
+let smartSaveStateTimer = null;
+function setSmartSaveState(state){
+    const el = document.getElementById('smartSaveState');
+    if(!el) return;
+    clearTimeout(smartSaveStateTimer);
+    el.dataset.state = state;
+    el.textContent = state === 'saving' ? '保存中…' : state === 'failed' ? '保存失败，稍后会自动重试' : state === 'saved' ? '已保存' : '';
+    if(state === 'saved') smartSaveStateTimer = setTimeout(() => { el.textContent = ''; el.dataset.state = ''; }, 2400);
+    if(state === 'failed') smartSaveStateTimer = setTimeout(scheduleSave, 4000);
+}
+/* 内容签名：不含视口、选中态等纯界面状态。和上次成功保存一致就跳过 PUT（点选节点、打开面板都会调 scheduleSave）。 */
+function canvasContentSignature(storageCanvas){
+    try {
+        return JSON.stringify([storageCanvas?.title || '', storageCanvas?.icon || '', storageCanvas?.nodes || [], storageCanvas?.connections || [], storageCanvas?.logs || [], storageCanvas?.settings || null]);
+    } catch(e) { return ''; }
 }
 async function saveCanvas(){
     if(!canvasId || !canvas) return;
@@ -9761,6 +11087,12 @@ async function saveCanvas(){
     canvas.settings = settingsForStorage(canvasDefaultSmartSettings || initialSmartSettings);
     canvas.viewport = {...viewport};
     const storageCanvas = canvasForStorage();
+    const contentSig = canvasContentSignature(storageCanvas);
+    if(contentSig && contentSig === lastSavedContentSig){
+        persistViewportLocally();
+        return;
+    }
+    setSmartSaveState('saving');
     canvasSyncInFlight = true;
     try {
         const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}`, {
@@ -9779,8 +11111,13 @@ async function saveCanvas(){
             })
         });
         if(res.ok){
+            lastSavedContentSig = contentSig;
+            setSmartSaveState('saved');
+            persistViewportLocally();
             const data = await res.json();
             if(data.canvas && data.canvas.updated_at) canvas.updated_at = data.canvas.updated_at;
+            if(data.canvas) setSmartServerBase(data.canvas.nodes, data.canvas.connections);
+            if(data.canvas) adoptServerNodeAliases(data.canvas);
         } else if(res.status === 409) {
             // 冲突：别人先保存了。合并对方的状态（节点 id 合并、图片取并集，谁都不丢），
             // 然后用对方最新的 updated_at 作为基底重存，把合并结果落盘——而不是直接覆盖对方。
@@ -9798,8 +11135,10 @@ async function saveCanvas(){
             }
             clearTimeout(saveTimer);
             saveTimer = setTimeout(saveCanvas, 300);
+        } else {
+            setSmartSaveState('failed');
         }
-    } catch(e) {} finally {
+    } catch(e) { setSmartSaveState('failed'); } finally {
         canvasSyncInFlight = false;
     }
 }
@@ -9902,6 +11241,64 @@ function copySelectedNodes(){
         connections:JSON.parse(JSON.stringify(copiedConnections))
     };
     toast(`已复制 ${copiedNodes.length} 个节点`);
+}
+/* Ctrl/Cmd+A：选中画布上全部节点（日志预览用的临时节点除外） */
+function selectAllSmartNodes(){
+    if(!canvas) return;
+    const ids = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID).map(n => n.id);
+    if(!ids.length) return;
+    selectedId = ids.length === 1 ? ids[0] : '';
+    selectedIds = ids.length > 1 ? ids : [];
+    selectedImage = {nodeId:'', index:-1};
+    render();
+}
+/* Ctrl/Cmd+D：原地复制一份选中节点（向右下偏移一点），选中内部的连线一起复制，不占用剪贴板 */
+function duplicateSelectedSmartNodes(){
+    if(!canvas) return;
+    const ids = selectedNodeIds();
+    const sourceNodes = ids.map(id => nodes.find(n => n.id === id)).filter(n => n && n.id !== SMART_LOG_PREVIEW_NODE_ID);
+    if(!sourceNodes.length) return;
+    pushUndo();
+    const offset = Math.round(32 / safeScale(viewport.scale));
+    const idSet = new Set(sourceNodes.map(n => n.id));
+    const idMap = new Map();
+    const copies = JSON.parse(JSON.stringify(sourceNodes)).map(n => {
+        const copy = cloneSmartNode(n, offset, offset);
+        idMap.set(n.id, copy.id);
+        return copy;
+    });
+    copies.forEach(copy => {
+        if(Array.isArray(copy.inputNodeIds)) copy.inputNodeIds = copy.inputNodeIds.map(id => idMap.get(id)).filter(Boolean);
+        if(copy.sourceNodeId) copy.sourceNodeId = idMap.get(copy.sourceNodeId) || '';
+    });
+    const newConnections = (canvas.connections || [])
+        .filter(c => idSet.has(c.from) && idSet.has(c.to))
+        .map(conn => ({...JSON.parse(JSON.stringify(conn)), from:idMap.get(conn.from), to:idMap.get(conn.to)}))
+        .filter(conn => conn.from && conn.to && conn.from !== conn.to);
+    canvas.connections = [...(canvas.connections || []), ...newConnections];
+    nodes.push(...copies);
+    selectedId = copies.length === 1 ? copies[0].id : '';
+    selectedIds = copies.length > 1 ? copies.map(n => n.id) : [];
+    selectedImage = {nodeId:'', index:-1};
+    render();
+    scheduleSave();
+}
+/* 方向键微调选中节点：每次 1 个屏幕像素，按住 Shift 10 个；连续按住只记一步撤销 */
+function nudgeSelectedSmartNodes(key, big, isRepeat){
+    const ids = selectedNodeIds();
+    if(!ids.length) return false;
+    const step = Math.max(1, Math.round((big ? 10 : 1) / safeScale(viewport.scale)));
+    const dx = key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0;
+    const dy = key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0;
+    if(!dx && !dy) return false;
+    if(!isRepeat) pushUndo();
+    smartArrangeAtomicIds(ids).forEach(id => {
+        const node = nodes.find(n => n.id === id);
+        if(node) translateSmartNodeWithMembers(node, dx, dy);
+    });
+    render();
+    scheduleSave();
+    return true;
 }
 function pasteNodes(){
     if(!canvas || !nodeClipboard?.nodes?.length || isEditableTarget(document.activeElement)) return;
@@ -10129,9 +11526,11 @@ function renderConnections(){
         ].filter(Boolean).join(' ');
         const color = isCascade ? '#16a34a' : isHistory ? 'rgba(88, 88, 88, 0.46)' : kind === 'input' ? 'rgba(88, 88, 88, 0.62)' : 'rgba(132, 132, 132, 0.62)';
         const width = kind === 'input' ? '1.9' : '1.6';
-        return `<path class="${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="1"></path>${lightPath}<path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle cx="${tx}" cy="${ty}" r="3.5" fill="${color}" opacity=".66"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})"><circle r="8" fill="var(--card)" stroke="${color}" stroke-width="1.4"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="${color}" stroke-width="1.5" stroke-linecap="round"></path></g>`;
+        return `<path class="conn-line ${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="1"></path>${lightPath}<path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle cx="${tx}" cy="${ty}" r="3.5" fill="${color}" opacity=".66"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})"><circle r="8" fill="var(--card)" stroke="${color}" stroke-width="1.4"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="${color}" stroke-width="1.5" stroke-linecap="round"></path></g>`;
     }).join('');
-    return `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${lightDefs.length ? `<defs>${lightDefs.join('')}</defs>` : ''}${paths}</svg>`;
+    /* 选中节点时整层加 has-selection：只有与选中节点相连的线保持实色，其余线淡出，一眼看清上下游 */
+    const focusCls = selectedConnIds.size > 0 && paths.includes('conn-selected') ? 'has-selection' : '';
+    return `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''} ${focusCls}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${lightDefs.length ? `<defs>${lightDefs.join('')}</defs>` : ''}${paths}</svg>`;
 }
 function refreshConnectionLayer(){
     connectionLayerRaf = 0;
@@ -10782,8 +12181,70 @@ function addSmartGenerationLog({run, outputs=[], runMs=0, error=''}) {
     };
     canvas.logs = [entry, ...canvas.logs].slice(0, 500);
     if(!error && recoverStuckLoopOutputsFromLogs()) render();
+    if(!error && outputItems.length) maybeAutoNameSmartCanvas(entry.prompt);
+    notifySmartGenerationFinished(entry);
     scheduleSave();
 }
+/* ── 画布自动命名：新画布默认叫「智能画布 17:13」，列表和素材库里几十个都分不清。
+   第一次成功出图后，用这次的提示词前几个字当标题；用户自己改过名（不再是默认格式）就永远不动。 */
+const SMART_DEFAULT_TITLE_RE = /^(智能画布|画布|smart canvas|canvas|新建画布|未命名画布)(\s*\d{1,2}:\d{2})?$/i;
+function smartTitleFromPrompt(prompt){
+    let text = String(prompt || '')
+        .replace(/@\S+/g, ' ')
+        .replace(/[#*`>\[\]{}<>]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if(!text) return '';
+    const first = text.split(/[，。,.;；!！?？\n]/).map(part => part.trim()).find(part => part.length >= 2) || text;
+    if(/^[\x00-\x7f]+$/.test(first)){
+        if(first.length <= 28) return first;
+        const cut = first.slice(0, 28);
+        return (cut.lastIndexOf(' ') > 12 ? cut.slice(0, cut.lastIndexOf(' ')) : cut) + '…';
+    }
+    const chars = Array.from(first);
+    return chars.length > 16 ? chars.slice(0, 16).join('') + '…' : first;
+}
+function maybeAutoNameSmartCanvas(prompt){
+    if(!canvas) return;
+    const current = String(canvas.title || '').trim();
+    if(current && !SMART_DEFAULT_TITLE_RE.test(current)) return;
+    const next = smartTitleFromPrompt(prompt);
+    if(!next) return;
+    canvas.title = next;
+    document.title = next;
+    const titleEl = document.getElementById('smartTitle');
+    if(titleEl) titleEl.textContent = next;
+}
+/* ── 生成完成提醒：页面不在前台时发系统通知，并在标签页标题前加「✓ / ✕」，回到页面自动还原。
+   通知权限在第一次点「生成」时申请（必须由用户手势触发）；桌面壳里没有 Notification 时只改标题。 */
+let smartTitleBeforeNotice = '';
+function requestSmartNotificationPermission(){
+    try {
+        if(typeof Notification === 'function' && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+    } catch(_) {}
+}
+function notifySmartGenerationFinished(entry){
+    const away = document.hidden || (typeof document.hasFocus === 'function' && !document.hasFocus());
+    if(!away || !entry) return;
+    const failed = entry.status === 'failed';
+    const base = smartTitleBeforeNotice || document.title;
+    smartTitleBeforeNotice = base;
+    document.title = (failed ? '✕ 生成失败 · ' : '✓ 生成完成 · ') + base;
+    try {
+        if(typeof Notification === 'function' && Notification.permission === 'granted'){
+            const body = failed ? (entry.error || '生成失败').slice(0, 80) : `${entry.model || entry.platform || ''} · ${entry.outputs?.length || 0} 个结果`;
+            const note = new Notification(failed ? 'NOVAI 生成失败' : 'NOVAI 生成完成', {body, tag:'novai-generation', silent:true});
+            note.onclick = () => { try { window.focus(); } catch(_) {} note.close(); };
+        }
+    } catch(_) {}
+}
+function restoreSmartTitleAfterNotice(){
+    if(document.hidden || !smartTitleBeforeNotice) return;
+    document.title = canvas?.title || smartTitleBeforeNotice;
+    smartTitleBeforeNotice = '';
+}
+document.addEventListener('visibilitychange', restoreSmartTitleAfterNotice);
+window.addEventListener('focus', restoreSmartTitleAfterNotice);
 const SMART_LOG_PREVIEW_NODE_ID = '__smart_log_preview__';
 let smartLogPreviewRestore = null;
 function smartLogOutputItem(output){
@@ -10897,6 +12358,7 @@ function renderSmartCanvasLog(){
                 <div class="log-subline">${subParts.map(part => `<span title="${escapeAttr(part)}">${escapeHtml(part)}</span>`).join('')}</div>
                 ${log.error ? `<div class="log-error" title="${escapeAttr(log.error)}" data-error="${escapeAttr(log.error)}">${escapeHtml(log.error)}</div>` : ''}
                 <div class="log-prompt" title="${escapeAttr(log.prompt || tr('canvas.noPromptMeta'))}" data-prompt="${escapeAttr(log.prompt || '')}">${escapeHtml(log.prompt || tr('canvas.noPromptMeta'))}</div>
+                ${log.status === 'failed' && log.nodeId && nodes.some(n => n.id === log.nodeId) ? `<button type="button" class="log-retry-btn" data-log-retry="${escapeAttr(log.id || '')}"><i data-lucide="rotate-ccw"></i><span>回到节点重试</span></button>` : ''}
             </div>
             <div class="log-thumbs">${thumbs}</div>
         </div>`;
@@ -10926,10 +12388,38 @@ function renderSmartCanvasLog(){
     };
     bindLogCopy('[data-prompt]', 'prompt');
     bindLogCopy('[data-error]', 'error');
+    smartLogList.querySelectorAll('[data-log-retry]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const log = (canvas?.logs || []).find(item => item.id === btn.dataset.logRetry);
+            if(log) retrySmartLogEntry(log);
+        };
+    });
     refreshIcons();
+}
+/* 失败日志「回到节点重试」：关掉日志、选中并对准出错的节点、把当时的提示词放回输入框（输入框为空时），
+   不自动发起——重发前让用户确认一下参数，避免上游已扣费的情况下又被动多扣一次。 */
+function retrySmartLogEntry(log){
+    const node = nodes.find(n => n.id === log.nodeId);
+    if(!node){ toast('原节点已不在画布上'); return; }
+    closeSmartCanvasLog();
+    selectedId = node.id;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    const rect = nodeRect(node);
+    centerViewportOnWorldPoint({x:rect.x + rect.width / 2, y:rect.y + rect.height / 2});
+    render();
+    setTimeout(() => {
+        if(log.prompt && !String(promptInput.textContent || '').trim()) setPromptText(log.prompt);
+        runBtn?.classList.add('retry-hint');
+        setTimeout(() => runBtn?.classList.remove('retry-hint'), 2400);
+        try { promptInput.focus(); } catch(_) {}
+    }, 80);
+    toast('已回到出错的节点，确认参数后点生成（或 ⌘/Ctrl+Enter）');
 }
 function openSmartCanvasLog(){
     if(!canvas) return;
+    closeSmartSidePanels('log');
     renderSmartCanvasLog();
     smartLogModal.classList.add('open');
 }
@@ -10937,6 +12427,7 @@ function closeSmartCanvasLog(){
     smartLogModal.classList.remove('open');
 }
 function openSmartCanvasShortcuts(){
+    closeSmartSidePanels('shortcuts');
     smartShortcutModal?.classList.add('open');
     refreshIcons();
 }
@@ -11059,7 +12550,10 @@ function promptNodePreviewHtml(node){
         const last = messages.slice().reverse().find(msg => String(msg?.content || '').trim());
         text = last ? String(last.content) : '';
     } else {
-        text = String(llm ? (node.outputText || node.text) : node.text || '').trim();
+        /* LLM 节点模式：有产出就显示产出；还没跑（或产出为空）时显示用户填在 INPUT 里的指令，
+           否则节点上永远只有空态占位——控制台搬进下方编辑栏后节点就没有别的文字可看了
+           （用户报的「文本节点上面不显示文字」）。指令为空才回落到节点自身正文。 */
+        text = String(llm ? (node.outputText || node.llmInstruction || node.text) : node.text || '').trim();
     }
     const placeholder = llm
         ? (node.llmTab === 'chat' ? tr('smart.promptChatPreviewEmpty') : tr('smart.promptLlmPreviewEmpty'))
@@ -12115,11 +13609,13 @@ function thumbGridHtml(node, imgs, layout, pendingSlots = 0, failedSlots = 0){
     const visibleRows = node?.sizeUserSet ? layoutVisibleRows : Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, layoutVisibleRows));
     const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
     const thumb = Number(layout.thumb || 96);
-    const thumbs = imgs.map((img, i) => `<div class="thumb-item has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === i ? 'image-selected' : ''}" data-image-index="${i}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${i}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`).join('');
+    const aspectOf = img => { const size = mediaLayoutSize(img); return size.width > 0 && size.height > 0 ? size.width / size.height : 1; };
+    const pendingAspect = (() => { const box = pendingRequestBoxForNode(node); return box && box.h > 0 ? box.w / box.h : 1; })();
+    const thumbs = imgs.map((img, i) => `<div class="thumb-item has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === i ? 'image-selected' : ''}" style="--thumb-aspect:${aspectOf(img)}" data-image-index="${i}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${i}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`).join('');
     const kinds = batchPendingSlotKinds(node, pendingSlots);
-    const slots = Array.from({length:kinds.running}).map(() => `<div class="loading-cell pending-thumb" data-pending-slot="1" title="${escapeHtml(tr('smart.hintPending'))}" style="width:${thumb}px;height:${thumb}px"></div>`).join('')
-        + Array.from({length:kinds.queued}).map(() => `<div class="loading-cell pending-thumb is-queued" data-pending-queued="1" title="排队中" style="width:${thumb}px;height:${thumb}px"></div>`).join('')
-        + Array.from({length:Math.max(0, failedSlots)}).map(() => `<div class="loading-cell pending-thumb is-failed" data-pending-failed="1" title="这一行生成失败" style="width:${thumb}px;height:${thumb}px"></div>`).join('');
+    const slots = Array.from({length:kinds.running}).map(() => `<div class="loading-cell pending-thumb" data-pending-slot="1" title="${escapeHtml(tr('smart.hintPending'))}" style="width:${thumb}px;aspect-ratio:${pendingAspect}"></div>`).join('')
+        + Array.from({length:kinds.queued}).map(() => `<div class="loading-cell pending-thumb is-queued" data-pending-queued="1" title="排队中" style="width:${thumb}px;aspect-ratio:${pendingAspect}"></div>`).join('')
+        + Array.from({length:Math.max(0, failedSlots)}).map(() => `<div class="loading-cell pending-thumb is-failed" data-pending-failed="1" title="这一行生成失败" style="width:${thumb}px;aspect-ratio:${pendingAspect}"></div>`).join('');
     return `<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${layout.cols}; --thumb-size:${thumb}px; --thumb-max-height:${maxHeight}px">${thumbs}${slots}</div>`;
 }
 function jimengPendingBodyHtml(node, layout){
@@ -12176,7 +13672,7 @@ const HD_TOOLBAR_ICON = '<svg class="hd-badge" viewBox="0 0 1024 1024" width="15
    element-edit / adjust / template:<id>），工具条自己不重写任何工具行为。
    工具条本身的动效（图标态 → 指针进入整条 bar 一起展开 + 滑块跟随）走 initSmartNodeMenuMotion 同一套机器：
    .smart-image-toolbar 是它认的第二种菜单容器，标签 span 一律由 menuLabelSpan 定位。 */
-const SMART_TOOLBAR_PICKS = {crop:'crop', grid:'grid-split', template:''};
+const SMART_TOOLBAR_PICKS = {crop:'outpaint', grid:'grid-split', template:''};
 /* 分组按钮的文案不跟着子项走的组：参考里「人像质感调节」那颗按钮点开人像/情绪后名字不变 */
 const SMART_TOOL_LABEL_LOCKED = new Set(['portrait']);
 /* 人像质感调节（参考按钮「人像质感调节 NEW ▾」）：两个子项各自开一个面板，面板里再去挑档位 */
@@ -12184,15 +13680,14 @@ const SMART_TOOL_PORTRAIT_ITEMS = [
     {key:'portrait', icon:'user-round', label:'人像调节', tip:'人像质感调节：肤质 / 光影 / 强度'},
     {key:'emotion', icon:'user-round-cog', label:'情绪调节', tip:'情绪调节：表情与情绪强度'}
 ];
+/* 「AI 局部编辑」下拉（分组 id 沿用 crop）：高清挪到「输出」组、裁剪挪到「基础调整」组，各自是独立按钮 */
 const SMART_TOOL_CROP_ITEMS = [
-    {key:'hd', icon:'sparkles', hdIcon:true, label:'高清', tip:'本地 AI 高清放大（2K/4K，免费离线）'},
     {key:'outpaint', icon:'expand', label:'扩图', tip:'向外扩展画布并补全画面'},
     {key:'mask', icon:'brush', label:'重绘', tip:'涂抹要改的区域，再写要求重新生成'},
     {key:'erase', icon:'eraser', label:'擦除', tip:'涂抹要擦掉的物体，自动移除并补全背景'},
     {key:'matting', icon:'scissors', label:'抠图', tip:'一键抠出主体', children:[
         {key:'matting-hq', icon:'wand-sparkles', label:'高质量抠图', tip:'高质量抠图（本地AI，首次需下载349MB模型）'}
-    ]},
-    {key:'crop', icon:'crop', label:'裁剪', tip:'裁剪画幅'}
+    ]}
 ];
 /* 宫格切分：4/9/16/25 四档直接切好落新节点，自定义开面板填行列；宫格拼接仍需多图上下文，走图片编辑器 */
 const SMART_TOOL_GRID_ITEMS = [
@@ -12293,6 +13788,81 @@ function smartToolGroupHtml(config){
         <div class="smart-tool-menu${config.wide ? ' is-wide' : ''}" role="menu" data-smart-tool-menu="${escapeAttr(config.id)}" aria-label="${escapeAttr(config.label)}"${lazyKey ? ` data-smart-tool-lazy="${escapeAttr(lazyKey)}"` : ''}>${config.itemsBuilder ? '' : (config.itemsHtml || '')}</div>
     </div>`;
 }
+
+/* ── 末端「…」溢出入口 ─────────────────────────────────────────────────────────
+   常驻条上只留高频核心项（裁剪 / 旋转 / 调色 / 局部编辑 / 标注 / 宫格切分 / 高清 / 预览 / 下载 /
+   再来一张 / 挑图），低频或次要项收进这里。收纳项全部用和条上同一份工厂函数生成，
+   图标 / 文案 / 禁用态 / data-smart-node-action 逐字一致，只是换了个入口，功能一个不少。 */
+const SMART_TOOL_OVERFLOW_SECTIONS = [
+    {id:"basic",   title:"基础调整",   rows:["lossless-edit"], groups:[]},
+    {id:"aiedit",  title:"AI 变换",   rows:["element-edit", "layer-split", "relight", "multi-angle", "panorama"], groups:["portrait"]},
+    {id:"menu",    title:"模板与菜单", rows:[], groups:["template"]}
+];
+/* 菜单里的一行：数据属性和条上按钮一致（同一个 data-smart-node-action），
+   形状直接复用现成的 .smart-tool-item（100% 宽、左对齐、带 hover 软底）。 */
+function smartToolOverflowRowHtml(key, icon, label, tip, enabled, nodeId){
+    return '<button type="button" class="smart-tool-item" role="menuitem" data-smart-node-action="' + escapeAttr(key) + '" data-node-id="' + escapeAttr(nodeId) + '" title="' + escapeAttr(tip || label) + '"' + (enabled ? '' : ' disabled') + '>'
+        + '<i data-lucide="' + escapeAttr(icon) + '"></i><span>' + escapeHtml(label) + '</span></button>';
+}
+/* 收纳项的 key → 与条上完全同源的图标 / 文案 / 提示 */
+function smartToolOverflowRow(key, nodeId, canEditImage){
+    const rows = {
+        'lossless-edit': ['eraser', '无损改图', '无损改图：上传原图 + AI 改后的图，自动对齐/校色，只把改动那块合进来，其余像素与原图一致'],
+        'annotate': ['pencil', '标注', '在图上画箭头 / 方框 / 文字，烧进图片'],
+        'element-edit': ['mouse-pointer-click', '元素编辑', '元素编辑：点选 / 框选 / 画笔标记要改的地方，再写编辑内容'],
+        'layer-split': ['layers', '图层分离', '图层分离：拆出主体层与背景层'],
+        'relight': ['zap', '打光', '打光效果：透视 / 亮度 / 颜色 / 主光源 / 轮廓光'],
+        'multi-angle': ['camera', '多角度', '多角度编辑器：拖动立方体调机位（旋转 / 俯仰 / 缩放 / 广角镜头）'],
+        'panorama': ['radar', '全景', '基于当前场景创建 720° 全景图']
+    }[key];
+    if(!rows) return '';
+    return smartToolOverflowRowHtml(key, rows[0], rows[1], rows[2], canEditImage, nodeId);
+}
+/* 模板分组的图标：lucide 线性，取自项目已打包的图标集（lucide-subset） */
+const SMART_TOOL_TEMPLATE_GROUP_ICONS = {scene:'image', character:'user-round', grid:'layout-grid', storyboard:'clapperboard'};
+/* 一级「带子菜单」的行：和「局部编辑 → 抠图 → 高质量抠图」同一套结构（.smart-tool-row[data-smart-tool-sub]），
+   悬停展开、点外面收起、右侧放不下翻到左边、菜单一起 portal 到 body —— 全部复用现成实现，没有第二套。
+   父项不带 data-smart-node-action：它只负责展开子菜单，本身不是一个动作。 */
+function smartToolOverflowParentRowHtml(group, nodeId){
+    const children = group.items.map(entry => {
+        const key = 'template:' + entry.id;
+        return '<button type="button" class="smart-tool-item" role="menuitem" data-smart-node-action="' + escapeAttr(key) + '" data-node-id="' + escapeAttr(nodeId) + '" title="' + escapeAttr(entry.sub ? entry.title + '：' + entry.sub : entry.title) + '"><span>' + escapeHtml(entry.title) + '</span></button>';
+    }).join('');
+    const icon = SMART_TOOL_TEMPLATE_GROUP_ICONS[group.id] || 'layout-grid';
+    const tip = group.sub ? group.title + '：' + group.sub : group.title;
+    return '<div class="smart-tool-row" data-smart-tool-sub="1">'
+        + '<button type="button" class="smart-tool-item" role="menuitem" aria-haspopup="menu" aria-expanded="false" title="' + escapeAttr(tip) + '">'
+        + '<i data-lucide="' + escapeAttr(icon) + '"></i><span>' + escapeHtml(group.title) + '</span>'
+        + '<i data-lucide="chevron-right" class="smart-tool-arrow"></i></button>'
+        + '<div class="smart-tool-submenu"><div class="smart-tool-submenu-panel" role="menu" aria-label="' + escapeAttr(group.title) + '">' + children + '</div></div>'
+        + '</div>';
+}
+/* 「…」菜单本体：**两级**。一级 = 收纳的功能项 + 模板分组的四个入口（右侧带箭头）；
+   二级 = 悬停 / 键盘展开在那一行旁边的那组模板；一级里不直接铺开子项内容。
+   aria：容器 role="menu"，一级行 role="menuitem"，带子菜单的行 aria-haspopup="menu"。 */
+function smartToolOverflowMenuHtml(node, canEditImage){
+    const sectionHtml = SMART_TOOL_OVERFLOW_SECTIONS.map(section => {
+        const rows = section.rows.map(key => smartToolOverflowRow(key, node.id, canEditImage)).join('');
+        const groups = section.groups.map(groupId => {
+            if(groupId === 'portrait'){
+                return SMART_TOOL_PORTRAIT_ITEMS.map(item => smartToolOverflowRowHtml(item.key, item.icon, item.label, item.tip, canEditImage, node.id)).join('');
+            }
+            if(groupId === 'template'){
+                return smartToolTemplates().map(group => smartToolOverflowParentRowHtml(group, node.id)).join('');
+            }
+            return '';
+        }).join('');
+        const body = rows + groups;
+        if(!body) return '';
+        return '<div class="smart-tool-section" data-smart-tool-section="' + escapeAttr(section.id) + '">'
+            + '<div class="smart-tool-section-head"><span>' + escapeHtml(section.title) + '</span></div>'
+            + '<div class="smart-tool-section-body">' + body + '</div></div>';
+    }).join('');
+    return '<div class="smart-tool-group" data-smart-tool-group="more">'
+        + '<button type="button" class="smart-tool-group-btn" data-smart-tool-toggle="more" aria-haspopup="menu" aria-expanded="false" title="更多工具：低频 / 次要的入口都收在这里，功能一个不少"><span class="smart-tool-group-icon"><i data-lucide="ellipsis"></i></span><span class="smart-tool-group-label">更多</span></button>'
+        + '<div class="smart-tool-menu is-wide is-sections" role="menu" aria-label="更多工具" data-smart-tool-menu="more">' + sectionHtml + '</div></div>';
+}
+
 function smartNodeToolbarHtml(node){
     const isImageNode = node?.type === 'smart-image' || !node?.type;
     const images = node?.images || [];
@@ -12301,33 +13871,47 @@ function smartNodeToolbarHtml(node){
     if(!item?.url) return '';
     const kind = mediaKindForItem(item);
     const canEditImage = kind === 'image';
-    const templatePick = SMART_TOOLBAR_PICKS.template ? smartToolPickForAction(SMART_TOOLBAR_PICKS.template)?.item : null;
     /* 图标按钮也带标签 span：悬停展开时和其它入口一样出文字，收起态由 CSS 的 max-width:0 压回纯图标 */
-    const iconButton = (key, icon, label, tip, enabled) => `<button type="button" class="smart-tool-icon-btn" data-smart-node-action="${escapeAttr(key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(tip || label)}" aria-label="${escapeAttr(label)}" ${enabled ? '' : 'disabled'}><i data-lucide="${escapeAttr(icon)}"></i><span>${escapeHtml(label)}</span></button>`;
+    /* 溢出菜单用同一份图标/文案生成，data-node-id 要能显式传（动作委托靠它找节点） */
+    const iconButton = (key, icon, label, tip, enabled, nodeId) => `<button type="button" class="smart-tool-icon-btn" data-smart-node-action="${escapeAttr(key)}" data-node-id="${escapeAttr(nodeId || node.id)}" title="${escapeAttr(tip || label)}" aria-label="${escapeAttr(label)}" ${enabled ? '' : 'disabled'}><i data-lucide="${escapeAttr(icon)}"></i><span>${escapeHtml(label)}</span></button>`;
     const plainButton = (key, icon, label, tip, enabled) => `<button type="button" class="smart-tool-standalone" data-smart-node-action="${escapeAttr(key)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(tip || label)}" ${enabled ? '' : 'disabled'}><i data-lucide="${escapeAttr(icon)}"></i><span>${escapeHtml(label)}</span></button>`;
     const sep = '<span class="smart-tool-sep" aria-hidden="true"></span>';
     /* 入口顺序对齐参考画布：人像质感调节▾ · 全景 · 多角度 · 打光 · 九宫格▾ ｜ 裁剪▾ · 元素编辑 · 图层分离 · 宫格切分▾ ｜
        标注 · 旋转 · 下载 · 预览（+ 我们保留的调色；视频节点多一颗人脸模糊）。 */
     smartToolLazyMenuBuilders.clear();
-    return `<div class="smart-node-floating-menu smart-image-toolbar" data-smart-image-menu="1">
-        ${smartToolGroupHtml({id:'portrait', label:'人像质感调节', tip:'人像质感调节：人像调节 / 情绪调节', nodeId:node.id, pick:smartToolPickOf('portrait'), disabled:!canEditImage, itemsBuilder:() => SMART_TOOL_PORTRAIT_ITEMS.map(entry => smartToolMenuItemHtml(entry, node.id, SMART_TOOLBAR_PICKS.portrait)).join('')})}
-        ${plainButton('panorama', 'radar', '全景', '基于当前场景创建 720° 全景图', canEditImage)}
-        ${plainButton('multi-angle', 'camera', '多角度', '多角度编辑器：视角预设 + 水平环绕 / 垂直俯仰 / 景别缩放', canEditImage)}
-        ${plainButton('relight', 'zap', '打光', '打光效果：透视 / 亮度 / 颜色 / 主光源 / 轮廓光', canEditImage)}
-        ${smartToolGroupHtml({id:'template', label:'出图模板', tip:'出图模板：同「/」斜杠指令那一份，选中即写进当前节点的提示词草稿', nodeId:node.id, wide:true, pick:templatePick || {key:'', icon:'layout-grid', label:'九宫格'}, itemsBuilder:() => smartToolTemplatesMenuHtml(node.id)})}
+    /* 视频节点：图片编辑工具全是灰的，单独给一条视频工具条（预览截帧 / 尾帧接力 / 人脸模糊 / 下载） */
+    if(kind === 'video'){
+        return `<div class="smart-node-floating-menu smart-image-toolbar smart-video-toolbar" data-smart-image-menu="1">
+        ${plainButton('preview', 'play', '预览 / 截帧', '放大预览，可逐帧查看并导出首帧 / 当前帧 / 尾帧', true)}
+        ${plainButton('video-relay', 'skip-forward', '尾帧接力', '取这段视频的最后一帧，作为下一段视频的首帧继续生成', true)}
+        ${plainButton('video-first-frame', 'skip-back', '首帧成图', '取第一帧生成一张图片节点', true)}
+        ${smartRerunInfo(node) ? plainButton('rerun', 'refresh-cw', '再来一条', '用同样的提示词、参考图和参数再生成一次，新结果放在旁边', true) : ''}
         ${sep}
-        ${smartToolGroupHtml({id:'crop', label:'裁剪', tip:'裁剪 / 高清 / 扩图 / 重绘 / 擦除 / 抠图', nodeId:node.id, pick:smartToolPickOf('crop'), disabled:!canEditImage, itemsBuilder:() => SMART_TOOL_CROP_ITEMS.map(entry => smartToolMenuItemHtml(entry, node.id, SMART_TOOLBAR_PICKS.crop)).join('')})}
-        ${plainButton('element-edit', 'mouse-pointer-click', '元素编辑', '元素编辑：点选 / 框选 / 画笔标记要改的地方，再写编辑内容', canEditImage)}
-        ${plainButton('layer-split', 'layers', '图层分离', '图层分离：拆出主体层与背景层', canEditImage)}
-        ${smartToolGroupHtml({id:'grid', label:'宫格切分', tip:'宫格切分 / 宫格拼接', nodeId:node.id, pick:smartToolPickOf('grid'), disabled:!canEditImage, itemsBuilder:() => SMART_TOOL_GRID_ITEMS.map(entry => smartToolMenuItemHtml(entry, node.id, SMART_TOOLBAR_PICKS.grid)).join('')})}
-        ${sep}
-        ${iconButton('annotate', 'pencil', '标注', '在图上画箭头 / 方框 / 文字，烧进图片', canEditImage)}
-        ${iconButton('rotate', 'rotate-ccw', '旋转', '左转 / 右转 90°、水平 / 垂直翻转', canEditImage)}
+        ${iconButton('blurfaces', 'user-round', '人脸模糊', '人脸模糊（视频）', true)}
         ${iconButton('download', 'download', '下载', '下载当前素材', true)}
-        ${iconButton('preview', 'eye', '预览', '放大预览', canEditImage || kind === 'video')}
+    </div>`;
+    }
+    /* 常驻条只留高频核心项（Boss 第 45 轮：条太长 → 按钮被压小；把低频/次要项收进末端「…」）。
+       保留：裁剪 / 旋转 / 调色 ｜ 局部编辑▾ ｜ 标注 ｜ 宫格切分▾ ｜ 高清 / 预览 / 下载（+ 再来一张 / 挑图）。
+       收纳：无损改图 / 元素编辑 / 图层分离 / 打光 / 多角度 / 全景 / 人像质感调节 / 出图模板 → 见 smartToolOverflowMenuHtml。
+       条上的位置顺序沿用参考画布：基础调整 → AI 局部编辑 → 标注 → 批量出图 → 输出 → 「…」。 */
+    const multiImage = (node.images || []).filter(img => img?.url).length > 1;
+    return `<div class="smart-node-floating-menu smart-image-toolbar" data-smart-image-menu="1">
+        ${iconButton('crop', 'crop', '裁剪', '裁剪画幅', canEditImage)}
+        ${iconButton('rotate', 'rotate-ccw', '旋转', '左转 / 右转 90°、水平 / 垂直翻转', canEditImage)}
         ${iconButton('adjust', 'sliders-horizontal', '调色', '打开预览并进入调色', canEditImage)}
-        ${kind === 'video' ? iconButton('blurfaces', 'user-round', '人脸模糊', '人脸模糊（视频）', true) : ''}
-        <button type="button" class="smart-tool-compact-more" data-smart-tool-compact-more="1" title="更多工具"><i data-lucide="ellipsis"></i></button>
+        ${sep}
+        ${smartToolGroupHtml({id:'crop', label:'局部编辑', tip:'AI 局部编辑：扩图 / 重绘 / 擦除 / 抠图', nodeId:node.id, pick:smartToolPickOf('crop'), disabled:!canEditImage, itemsBuilder:() => SMART_TOOL_CROP_ITEMS.map(entry => smartToolMenuItemHtml(entry, node.id, SMART_TOOLBAR_PICKS.crop)).join('')})}
+        ${iconButton('annotate', 'pencil', '标注', '在图上画箭头 / 方框 / 文字，烧进图片', canEditImage)}
+        ${sep}
+        ${smartToolGroupHtml({id:'grid', label:'宫格切分', tip:'宫格切分 / 宫格拼接', nodeId:node.id, pick:smartToolPickOf('grid'), disabled:!canEditImage, itemsBuilder:() => SMART_TOOL_GRID_ITEMS.map(entry => smartToolMenuItemHtml(entry, node.id, SMART_TOOLBAR_PICKS.grid)).join('')})}
+        ${smartToolOverflowMenuHtml(node, canEditImage)}
+        ${sep}
+        ${iconButton('hd', 'sparkles', '高清', '本地 AI 高清放大（2K/4K，免费离线）', canEditImage)}
+        ${iconButton('preview', 'eye', '预览', '放大预览', canEditImage || kind === 'video')}
+        ${iconButton('download', 'download', '下载', '下载当前素材', true)}
+        ${smartRerunInfo(node) ? iconButton('rerun', 'refresh-cw', '再来一张', '用同样的提示词、参考图和参数再生成一次，新结果放在旁边', true) : ''}
+        ${multiImage ? iconButton('pick', 'layout-grid', '挑图', '并排对比这一组图：标星 / 淘汰，保留想要的', true) : ''}
     </div>`;
 }
 /* 工具条屏幕有效缩放 = clamp(画布缩放, 1, 1.4)（工具栏有 --nv-nodeui-inv 反向补偿）。
@@ -12337,7 +13921,14 @@ function smartToolbarScreenScale(){
 }
 /* 工具条比节点宽时按窗口夹取（左右各留 8px），不然伸到窗口外的那截点不到。
    节点整体在窗口外时不夹：那时工具条本来就该跟着节点在窗口外，钉在窗口边上反而像浮错了地方。 */
-/* 展开后的工具条宽度预估：标签展开会把每颗按钮撑宽（自然宽 + 5px 左间距），
+/* 标签展开后与图标之间那条缝（CSS 里的 --st-label-gap，默认 --space-2 = 8px）。
+   宽度预估 / 滑块落位 / 生长量都按这个值算，必须和 CSS 保持同一份来源，所以直接读变量。 */
+function smartToolLabelGap(element){
+    const bar = element?.closest?.('.smart-image-toolbar') || (element?.matches?.('.smart-image-toolbar') ? element : null);
+    const value = bar ? parseFloat(getComputedStyle(bar).getPropertyValue('--st-label-gap')) : NaN;
+    return Number.isFinite(value) && value > 0 ? value : 8;
+}
+/* 展开后的工具条宽度预估：标签展开会把每颗按钮撑宽（自然宽 + 图标间距），
    按最宽状态先算 fit/夹取，展开时就不会溢出窗口。 */
 function smartToolbarExpandedWidth(bar, uiScale){
     if(!bar || bar.classList.contains('is-compact')) return bar ? bar.offsetWidth : 0;
@@ -12358,7 +13949,7 @@ function smartToolbarExpandedWidth(bar, uiScale){
         probe.textContent = span.textContent || '';
         const natural = probe.offsetWidth / scale;
         const rendered = Math.max(0, span.getBoundingClientRect().width) / scale;
-        extra += Math.max(0, natural + 5 - rendered);
+        extra += Math.max(0, natural + smartToolLabelGap(bar) - rendered);
     });
     probe.remove();
     return bar.offsetWidth + extra;
@@ -12373,7 +13964,6 @@ function syncSmartImageToolbarBounds(){
     if(!nodeEl) return;
     const frame = 8;
     const nodeRect = nodeEl.getBoundingClientRect();
-    if(nodeRect.right < 0 || nodeRect.left > window.innerWidth){ bar.style.marginLeft = ''; return; }
     /* 放大档（画布 1.4 → 工具条按 1.4 渲染）自然宽会超过窗口：原来只夹右边界、
        左边界放任为负 → 左边几个入口被裁掉点不到。先清掉上次的缩放宽限量自然宽，
        超了就整条等比缩 k=clamp(可用宽/自然宽, 0.6, 1)，缩完再夹一次位置。 */
@@ -12399,7 +13989,10 @@ function syncSmartImageToolbarBounds(){
        图标屏幕尺寸不再低于约 9.6px（16px × 60%，与画布「低于 60% 才跟着缩」同口径）；
        窗口放不下时仍以窗口为准，交给下面第 ③ 步继续缩。 */
     const screenScale = uiScale * (safeScale(viewport.scale) || 1);
-    const minIconPx = 9.6;
+    /* 屏上图标的下限。原来 9.6px（=16 × 60%，跟着画布「低于 60% 才缩」的口径）实测把整条压到 0.6，
+       40px 的按钮在屏上只剩 24px、18px 图标只剩 11px —— Boss 反馈「按钮偏小」就是这条造成的。
+       提到 13px：屏上图标 ≥13px、按钮 ≥29px，条变短之后 fit 还能往上走。 */
+    const minIconPx = 13;
     const minFit = Math.min(1, minIconPx / (16 * screenScale));
     let fit = renderedW > nodeTarget ? Math.max(minFit, nodeTarget / renderedW) : 1;
     /* 「…」铺开态：不再按节点收，只保证进窗口，换可读可点 */
@@ -12414,26 +14007,12 @@ function syncSmartImageToolbarBounds(){
     if(screenW * fit > avail) fit = Math.max(compact ? 0.7 : 0.5, avail / screenW);
     if(screenW * fit > avail) bar.classList.add('is-fit-scroll');
     if(fit < 1) bar.style.setProperty('--smart-toolbar-fit', fit.toFixed(4));
-    const barRect = bar.getBoundingClientRect();
-    /* 夹取也用「展开后的宽度」算：idle 时按现在这 515 宽算是不会夹的，但一 hover 就变 840 会溢出窗口。
-       同一个值在悬停前后都成立，所以不会引入悬停位移。
-       单位和上面统一：barRect.width 已是屏幕 px，预估的那项（世界宽 × --nv-nodeui-inv × fit）要再乘画布缩放。
-       少了这一步，窄窗口 + 画布缩小时会按虚高的宽度算夹取，把整条推到窗口外（900 宽实测 L708/R1133）。 */
-    const renderedExpanded = Math.max(barRect.width, predictedW * uiScale * fit * safeScale(viewport.scale));
-    /* 展开时 motion 会把指针下那颗按钮钉住（margin-left 反向补偿），它会抵消掉一部分夹取量；
-       motion 自己的窗口夹取只在「位移 ≤ 半个按钮宽」时才生效，所以这里多留一段余量，
-       保证钉住之后每个入口仍然落在窗口内（老板要求：任何状态都不得有入口点不到）。 */
-    const pinSlack = renderedExpanded > nodeRect.width ? Math.min(72, Math.max(0, (renderedExpanded - nodeRect.width) / 4)) : 0;
-    const naturalLeft = nodeRect.left + nodeRect.width / 2 - renderedExpanded / 2;
-    const maxLeft = Math.max(frame + pinSlack, window.innerWidth - frame - pinSlack - renderedExpanded);
-    const left = Math.min(Math.max(naturalLeft, frame + pinSlack), maxLeft);
-    /* 偏移按「相对节点居中位置」算，不读上一次写进去的值 —— 重复调用结果一致 */
-    /* 窗口夹取写在 left 上（不是 margin-left）：margin-left 是 motion 用来「钉住指针下那颗按钮」的，
-       两者抢同一个属性时，展开态要么被推走点空、要么整条溢出窗口（老板「左边一截被切掉」）。
-       分开写之后：left 负责「整条永远在窗口内」，margin-left 负责展开锚定，互不干扰。 */
-    const parentScale = nodeEl.offsetWidth > 0 ? nodeRect.width / nodeEl.offsetWidth : 1;
-    const shift = left - naturalLeft;
-    bar.style.left = shift ? 'calc(50% + ' + (shift / (parentScale || 1)).toFixed(2) + 'px)' : '';
+    /* 位置一律交给 CSS 的 left:50% + translate:-50% —— 条永远钉在节点中间，不再写内联 left 往窗口里夹。
+       以前按「整条必须在窗口内」夹取，节点一靠边整条就横向滑走：实测节点在窗口左侧时条被推到
+       calc(50% + 218px)（相对节点偏 220px）、节点在窗口右侧时偏 -39px，画布一平移还会卡在窗口边不动，
+       相对节点飞出去 800px 以上（Boss 截图里条跑到节点右边、和图1 对不上就是这么来的）。
+       节点本身比窗口宽时，条跟着节点一起被裁是正常表现，不拿「脱离节点」去换「整条可见」。 */
+    bar.style.left = '';
 }
 /* 分组菜单的窗口夹取：左右夹取 + 下面放不下（窗口底 / 底部编辑栏）就翻到按钮上方 */
 function smartToolMenuBottomLimit(rect){
@@ -12476,8 +14055,12 @@ function portalSmartToolMenu(bar, group, menu){
 }
 function unportalSmartToolMenu(menu){
     if(!menu) return;
-    menu.querySelectorAll('.smart-tool-submenu').forEach(sub => unportalSmartToolSubmenu(sub));
     const group = menu.__smartToolGroup, host = menu.__smartToolHost;
+    /* 二级面板 portal 之后是和 menu 平级的兄弟（都在 host 里），不在 menu 子树里。
+       只扫 menu 会漏掉它们：host 一 remove，那些面板就成了「脱开文档的孤儿」——
+       菜单再次打开时 portalSmartToolSubmenu 看到它已经带 is-portal 就跳过重新挂载，
+       于是悬停看着正常、键盘却操作到一个不在文档里的面板（点了没反应）。所以按 host 扫。 */
+    (host || menu).querySelectorAll('.smart-tool-submenu').forEach(sub => unportalSmartToolSubmenu(sub));
     menu.classList.remove('is-portal', 'is-open', 'is-flip-v');
     menu.removeAttribute('style');
     if(group && group.isConnected) group.appendChild(menu);
@@ -12554,11 +14137,13 @@ function placeSmartToolSubmenu(row){
     const panel = submenu.querySelector('.smart-tool-submenu-panel');
     const anchor = row.getBoundingClientRect();
     const frame = 8;
+    /* 行与二级面板之间的缝 = --space-2（8px），和面板自己的 padding-left 桥面同宽，视觉上是一致的 8px 节奏 */
+    const gap = 8;
     const width = panel?.offsetWidth || submenu.offsetWidth;
     const height = panel?.offsetHeight || submenu.offsetHeight;
-    const flip = anchor.right + 6 + width > window.innerWidth - frame;
+    const flip = anchor.right + gap + width > window.innerWidth - frame;
     submenu.classList.toggle('is-flip', flip);
-    let left = flip ? anchor.left - 6 - width : anchor.right + 6;
+    let left = flip ? anchor.left - gap - width : anchor.right + gap;
     left = Math.max(frame, Math.min(left, window.innerWidth - frame - width));
     const top = Math.max(frame, Math.min(anchor.top, window.innerHeight - frame - height));
     submenu.style.left = Math.round(left) + 'px';
@@ -12725,6 +14310,89 @@ function openDownloadToolPanel(node, index){
                 });
             });
         }
+    });
+}
+/* ── 替换素材：节点里的全部素材被新素材整体替换，ID / 位置 / 尺寸 / 连线 / 上下游关系全不动。
+   类型锁：目标素材是图片就只能换图片、是视频就只能换视频；候选里有一个不匹配就整体拒绝、零写入。 */
+function replaceSmartNodeMedia(node, items){
+    if(!node) return false;
+    const candidates = [...(items || [])].filter(item => item?.url);
+    if(!candidates.length) return false;
+    const targetKind = mediaKindForItem(imageForDisplay(node.images?.[smartNodeToolbarImageIndex(node)]));
+    if(candidates.some(item => mediaKindForItem(item) !== targetKind)){
+        toast(tr('smart.replaceKindMismatch'));
+        return false;
+    }
+    pushUndo();
+    node.images = candidates.map(item => ensureSmartImageAssetId({...item, kind:mediaKindForItem(item)}));
+    node.title = uploadTitleForItems(node.images, node.title || 'Image');
+    render();
+    scheduleSave();
+    toast(tr('smart.replaceDone'));
+    return true;
+}
+function replaceMediaPanelHtml(){
+    return '<div class="stp-row"><div class="stp-label">' + escapeHtml(tr('smart.replaceLocal')) + '</div>'
+        + '<button type="button" class="stp-btn" data-stp-replace-local style="justify-content:flex-start;height:38px"><i data-lucide="folder-open"></i><span>' + escapeHtml(tr('smart.replacePickFile')) + '</span></button></div>'
+        + '<div class="stp-row"><div class="stp-label">' + escapeHtml(tr('smart.replaceUrl')) + '</div>'
+        + '<div class="stp-inline"><input type="text" data-stp-replace-url placeholder="' + escapeAttr(tr('smart.replaceUrlHint')) + '"><button type="button" class="stp-btn is-primary" data-stp-replace-url-ok><span>' + escapeHtml(tr('smart.replaceConfirm')) + '</span></button></div></div>'
+        + '<div class="stp-row"><div class="stp-label">' + escapeHtml(tr('smart.replaceLibrary')) + '</div>'
+        + '<div class="asset-grid stp-asset-grid" data-stp-replace-library><div class="stp-empty-state">' + escapeHtml(tr('smart.replaceLibraryLoading')) + '</div></div></div>';
+}
+function bindReplaceMediaPanel(panel, node){
+    panel.querySelector('[data-stp-replace-local]')?.addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*,video/*';
+        input.multiple = true;
+        input.addEventListener('change', async () => {
+            const files = [...(input.files || [])];
+            if(!files.length) return;
+            try {
+                const uploaded = await uploadFiles(files);
+                if(!uploaded.length){ toast(tr('smart.toastUploadFail')); return; }
+                if(replaceSmartNodeMedia(node, uploaded)) closeSmartToolPanel();
+            } catch(error) {
+                toast(error?.message || tr('smart.toastUploadFail'));
+            }
+        });
+        input.click();
+    });
+    const urlInput = panel.querySelector('[data-stp-replace-url]');
+    const submitUrl = () => {
+        const url = String(urlInput?.value || '').trim();
+        if(!url){ toast(tr('smart.replaceUrlInvalid')); return; }
+        if(replaceSmartNodeMedia(node, [{url, name:smartImageNameFromUrl(url)}])) closeSmartToolPanel();
+    };
+    panel.querySelector('[data-stp-replace-url-ok]')?.addEventListener('click', submitUrl);
+    urlInput?.addEventListener('keydown', event => { if(event.key === 'Enter'){ event.preventDefault(); submitUrl(); } });
+    const library = panel.querySelector('[data-stp-replace-library]');
+    if(!library) return;
+    loadAssetLibrary().then(() => {
+        const usable = assetCategories('image').flatMap(category => category.items || []).filter(item => item?.url);
+        if(!usable.length){
+            library.innerHTML = '<div class="stp-empty-state">' + escapeHtml(tr('smart.replaceLibraryEmpty')) + '</div>';
+            return;
+        }
+        library.innerHTML = usable.map((item, index) => '<button type="button" class="asset-item stp-asset-item" data-stp-replace-asset="' + index + '" title="' + escapeAttr(item.name || '') + '">' + assetThumbHtml(item) + '</button>').join('');
+        refreshIcons();
+        library.querySelectorAll('[data-stp-replace-asset]').forEach(button => {
+            button.addEventListener('click', () => {
+                const item = usable[Number(button.dataset.stpReplaceAsset)] || null;
+                if(!item) return;
+                if(replaceSmartNodeMedia(node, [assetNodeImageFromItem(item, node.title || 'asset')])) closeSmartToolPanel();
+            });
+        });
+    }).catch(() => {
+        library.innerHTML = '<div class="stp-empty-state">' + escapeHtml(tr('smart.replaceLibraryEmpty')) + '</div>';
+    });
+}
+function openReplaceMediaPanel(node){
+    return openSmartToolPanel({
+        id:'replace', nodeId:node.id, anchor:'replace', icon:'image-plus',
+        title:tr('smart.replaceMedia'),
+        body:replaceMediaPanelHtml(),
+        mount:panel => bindReplaceMediaPanel(panel, node)
     });
 }
 /* ── PSD 文字自动分层（6c）：视觉模型 OCR → 文字掩码 → 遮罩重绘抹字 → 文字独立层 ── */
@@ -12944,10 +14612,10 @@ function initSmartImageToolbar(root){
         bar.classList.toggle('is-menu-open', raised);
         const nodeEl = bar.closest('.image-node');
         if(nodeEl) nodeEl.style.zIndex = raised ? '33' : '';
-        /* world 自己带 transform（applyViewport）→ 它就是一个层叠上下文，
-           里面的节点 z-index 再大也压不过 world 之外的编辑栏（fixed z-index:30）。
-           菜单开着时把 world 这一层也抬起来，菜单才真的压得住。 */
-        world.classList.toggle('smart-menu-layer-up', raised);
+        /* 以前在这里把整个 world 抬到 z-index:34 让菜单压过编辑栏，副作用是菜单开着时所有节点都盖在编辑栏上
+           （编辑栏被图片挡住、点不到）。菜单现在挂到 body（portalSmartToolMenu，宿主 z-index 高于编辑栏），
+           world 不再需要抬层；这里顺手清掉旧 class，防止残留。 */
+        world.classList.remove('smart-menu-layer-up');
     };
     const closeMenus = bar => {
         if(!bar) return;
@@ -13006,6 +14674,7 @@ function initSmartImageToolbar(root){
     const cancelSubmenuClose = () => { if(submenuCloseTimer){ clearTimeout(submenuCloseTimer); submenuCloseTimer = 0; } };
     const closeRowSubmenu = row => {
         row.classList.remove('is-open');
+        row.querySelector('[aria-haspopup="menu"]')?.setAttribute('aria-expanded', 'false');
         (row.__smartSubmenu || row.querySelector('.smart-tool-submenu'))?.classList.remove('is-open');
     };
     const openRowSubmenu = row => {
@@ -13016,6 +14685,7 @@ function initSmartImageToolbar(root){
         placeSmartToolSubmenu(row);
         row.classList.add('is-open');
         submenu.classList.add('is-open');
+        row.querySelector('[aria-haspopup="menu"]')?.setAttribute('aria-expanded', 'true');
         /* 二级菜单也挂到 body 了，:hover 不再连着父子：进出两侧都自己管，中间留一点延迟别掉 hover */
         if(submenu.__smartHoverBound !== true){
             submenu.__smartHoverBound = true;
@@ -13044,15 +14714,6 @@ function initSmartImageToolbar(root){
     document.addEventListener('click', event => {
         const bar = barForEvent(event);
         if(!bar) return;
-        const more = event.target.closest('[data-smart-tool-compact-more]');
-        if(more){
-            event.preventDefault();
-            event.stopPropagation();
-            const target = more.closest(BAR);
-            target?.classList.toggle('is-compact-open');
-            syncSmartImageToolbarBounds();
-            return;
-        }
         const toggle = event.target.closest('[data-smart-tool-toggle]');
         if(toggle){
             event.preventDefault();
@@ -13068,11 +14729,23 @@ function initSmartImageToolbar(root){
         if(head){
             event.preventDefault();
             event.stopPropagation();
+            /* 只有「出图模板」那种可折叠的节（带 aria-expanded）才折叠；「…」菜单里的分节标题只是分组说明 */
+            if(!head.hasAttribute('aria-expanded')) return;
             const section = head.closest('.smart-tool-section');
             if(!section) return;
             const folded = section.classList.toggle('is-folded');
             head.setAttribute('aria-expanded', folded ? 'false' : 'true');
             if(section.dataset.smartToolSection) smartToolTemplateOpen[section.dataset.smartToolSection] = !folded;
+            return;
+        }
+        /* 「…」里带子菜单的一级行（模板分组）：点它只开合子菜单，不关整个菜单 —— 父项本身不是动作。
+           真正的动作项（带 data-smart-node-action）走下面那条，点了就收起菜单并执行。 */
+        const parentRow = event.target.closest('.smart-tool-row[data-smart-tool-sub="1"]');
+        if(parentRow && !event.target.closest('[data-smart-node-action]')){
+            event.preventDefault();
+            event.stopPropagation();
+            if(parentRow.classList.contains('is-open')) closeRowSubmenu(parentRow);
+            else openRowSubmenu(parentRow);
             return;
         }
         if(event.target.closest('.smart-tool-item, .smart-tool-standalone, .smart-tool-icon-btn')){
@@ -13113,8 +14786,174 @@ function initSmartImageToolbar(root){
         root.querySelectorAll(BAR).forEach(bar => closeMenus(bar));
         closeAllSmartToolPortals();
     });
+    /* ── 键盘：Tab 能走遍条上每个入口（都是原生 button，标记都删了，这里不拦）；「…」菜单里补方向键 ──
+       和 llm-mention 那套命名一致（.is-active 当前项 / 方向键移动 / Enter 选中 / Esc 关）。
+       smart-menu-active 是“这个菜单正被键盘操作”的开关，目的是让画布的“方向键移动选中节点”让位。 */
+    const menuItems = menu => Array.from(menu.querySelectorAll('.smart-tool-item:not([disabled])'));
+    const setActiveItem = (menu, item) => {
+        /* 清标记的范围：整条「菜单树」。二级面板 portal 出去之后和 menu 平级（同一个宿主），
+           只清 menu 子树会留下旧的那颗继续高亮（两级各亮一颗 / 收二级后子项还亮着）。
+           用 menu 的父节点当范围，既覆盖二级、又不会碰到别的工具条。 */
+        (menu.parentElement || menu).querySelectorAll('.smart-tool-item.is-active').forEach(other => other.classList.remove('is-active'));
+        if(!item) return;
+        item.classList.add('is-active');
+        menu.__smartKbActive = true;
+        const focusItem = () => {
+            /* 二级菜单是「同一个 tick 里刚切到可见」的：样式还没重算，浏览器认为它仍不可见 → focus() 被忽略。
+               先读一次 offsetWidth 把样式/布局刷出来，再 focus，才能真的把焦点落到子项上。 */
+            try { void item.offsetWidth; } catch(_) {}
+            try { item.focus({preventScroll:true}); } catch(_) { try { item.focus(); } catch(__) {} }
+        };
+        focusItem();
+        if(document.activeElement !== item){
+            requestAnimationFrame(() => { if(document.activeElement !== item) focusItem(); });
+            /* 二级面板的 visibility 是「离散过渡」：展开后的头 ~140ms 浏览器仍按 hidden 记账，
+               这期间 focus() 会被静默忽略。等过渡跑完再补一次，键盘焦点才真的落到子项上
+               （is-active 标记是同步加的，所以视觉高亮不受影响）。 */
+            setTimeout(() => { if(document.activeElement !== item) focusItem(); }, 180);
+        }
+    };
+    const closeMenuFromKeyboard = menu => {
+        const bar = menu.closest(BAR) || menu.__smartToolBar || null;
+        const group = menu.closest('.smart-tool-group') || menu.__smartToolGroup || null;
+        if(bar) closeMenus(bar);
+        menu.__smartKbActive = false;
+        const toggle = group?.querySelector('[data-smart-tool-toggle]');
+        try { toggle?.focus({preventScroll:true}); } catch(_) {}
+    };
+    const arrowStep = (key, items, current) => {
+        if(key === 'ArrowDown') return (current + 1) % items.length;
+        if(key === 'ArrowUp') return (current - 1 + items.length) % items.length;
+        if(key === 'Home') return 0;
+        if(key === 'End') return items.length - 1;
+        return -1;
+    };
+    const rowOfNode = element => element?.closest?.('.smart-tool-row[data-smart-tool-sub="1"]') || null;
+    const submenuOfRow = row => row ? (row.__smartSubmenu || row.querySelector('.smart-tool-submenu')) : null;
+    /* 取「当前这一级」的条目：扫一级菜单时要排掉二级里的项（它们也算 .smart-tool-item，
+       否则 ↓ 会从一级直接走进某一组的子项里）；扫二级面板时只看它自己的项。 */
+    const itemsIn = container => {
+        if(!container) return [];
+        const isSub = container.classList.contains('smart-tool-submenu');
+        return Array.from(container.querySelectorAll('.smart-tool-item:not([disabled])'))
+            .filter(item => isSub ? item.closest('.smart-tool-submenu') === container : !item.closest('.smart-tool-submenu'));
+    };
+    const parentButtonOf = row => row?.querySelector('.smart-tool-item') || null;
+    /* 展开一级行的子菜单并把「当前项」落到第一颗子项（→ / Enter 共用）。
+       渲染可能刚好把这条工具条重建过，手上这行会脱开文档 —— 那时改认当前真正打开的那一行。 */
+    const openParentRow = (menu, row) => {
+        if(!row) return;
+        /* 行可能已经脱开文档（渲染刚重建过整条工具条）：按文案认回当前菜单里那一行 */
+        if(!row.isConnected){
+            const labelOf = r => ((r.querySelector('.smart-tool-item span') || {}).textContent || '').trim();
+            const live = Array.from(document.querySelectorAll('.smart-tool-menu.is-open .smart-tool-row[data-smart-tool-sub="1"]'))
+                .find(r => labelOf(r) === labelOf(row));
+            if(live) row = live;
+        }
+        openRowSubmenu(row);
+        let kids = itemsIn(submenuOfRow(row));
+        if(!kids.length){
+            const liveRow = Array.from(document.querySelectorAll('.smart-tool-row[data-smart-tool-sub="1"].is-open'))
+                .find(r => r.isConnected && r !== row);
+            if(liveRow) kids = itemsIn(submenuOfRow(liveRow));
+        }
+        if(kids.length) setActiveItem(menu, kids[0]);
+    };
+    document.addEventListener('keydown', event => {
+        /* 菜单收到键盘时它可能已经挂到 body 上（portal），所以按「谁开着」找，不按 DOM 位置找。
+           指针事件走分组按钮，键盘从同一个按钮进来，两条路都认。
+           两级菜单的键盘模型：↑↓/Home/End 在「当前这一级」里移动；→ 或 Enter 展开一级行的子菜单；
+           ← 或 Esc 收起子菜单并把焦点还给父项；Esc（一级）关整条菜单并把焦点还给「…」。 */
+        const openMenu = () => document.querySelector('.smart-tool-menu.is-open');
+        const isToggle = element => Boolean(element?.closest?.('[data-smart-tool-toggle]'));
+        const openSubmenu = () => document.querySelector('.smart-tool-submenu.is-open');
+        /* 「当前在二级里吗」不能只看 document.activeElement：二级刚展开时可见性过渡还没跑完，
+           focus() 可能要等一下才生效，这期间按键应该已经算在二级里 —— 所以用 is-active 标记优先判定。 */
+        const inSub = () => {
+            const sub = openSubmenu();
+            if(!sub) return null;
+            const activeItem = document.querySelector('.smart-tool-item.is-active');
+            if(activeItem && sub.contains(activeItem)) return sub;
+            return document.activeElement && sub.contains(document.activeElement) ? sub : null;
+        };
+        if(event.altKey || event.ctrlKey || event.metaKey) return;
+        if(event.key === 'Escape'){
+            /* 焦点在二级里：先收二级、焦点回到父项，整条菜单不动 */
+            const sub = inSub();
+            if(sub){
+                const row = rowOfNode(sub) || sub.__smartToolRow || null;
+                if(row){
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeRowSubmenu(row);
+                    const parent = parentButtonOf(row);
+                    if(parent){
+                        const menu = openMenu();
+                        if(menu) setActiveItem(menu, parent); else parent.focus();
+                    }
+                    return;
+                }
+            }
+            return;
+        }
+        if(!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter', ' '].includes(event.key)) return;
+        const menu = openMenu();
+        const openSub = openSubmenu();
+        /* 焦点不在「菜单树」里（比如刚展开的条上按方向键）时不吃键 —— 画布的方向键移动/其它快捷键保持原样。
+           二级面板是 portal 到宿主的，不在 menu 子树里，所以单独认一份（否则子项上的 ↑↓ 会漏给画布，
+           节点会被方向键挪走、菜单也跟着关掉）。 */
+        const activeEl = document.querySelector('.smart-tool-item.is-active');
+        const inside = menu && (menu.contains(event.target) || isToggle(event.target)
+            || (openSub && (openSub.contains(event.target) || (activeEl && openSub.contains(activeEl)))));
+        if(!inside) return;
+        const sub = inSub();
+        const items = itemsIn(sub || menu);
+        if(!items.length) return;
+        const active = items.find(item => item.classList.contains('is-active'));
+        if(event.key === 'ArrowRight'){
+            const row = rowOfNode(event.target);
+            if(row && !event.target.closest('[data-smart-node-action]')){
+                event.preventDefault();
+                event.stopPropagation();
+                openParentRow(menu, row);
+            }
+            return;
+        }
+        if(event.key === 'ArrowLeft' && sub){
+            const row = rowOfNode(sub) || sub.__smartToolRow || null;
+            event.preventDefault();
+            event.stopPropagation();
+            if(row){
+                closeRowSubmenu(row);
+                const parent = parentButtonOf(row);
+                if(parent) setActiveItem(menu, parent);
+            }
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if(event.key === 'Enter' || event.key === ' '){
+            /* 没有任何一项被方向键选中时，Enter 从第一项开始（和 llm-mention 一致） */
+            const target = active || items[0];
+            setActiveItem(menu, target);
+            /* 一级里带子菜单的行：Enter 展开子菜单、焦点落到第一颗子项，不执行动作 */
+            const targetRow = rowOfNode(target);
+            if(targetRow && !target.closest('[data-smart-node-action]')){
+                openParentRow(menu, targetRow);
+                return;
+            }
+            /* 走真实 click：动作委托、菜单收起、aria-expanded 复位这些副作用一次都不落 */
+            target.click();
+            return;
+        }
+        const current = items.indexOf(active);
+        setActiveItem(menu, items[arrowStep(event.key, items, current)]);
+    }, true);
+    /* Esc：关菜单 + 把焦点还给「…」按钮（键盘用户不会掉在页面上找不着北） */
     document.addEventListener('keydown', event => {
         if(event.key !== 'Escape') return;
+        const menu = document.querySelector('.smart-tool-menu.is-open');
+        if(menu) closeMenuFromKeyboard(menu);
         root.querySelectorAll(BAR).forEach(bar => closeMenus(bar));
         closeAllSmartToolPortals();
     });
@@ -13151,12 +14990,12 @@ function initSmartNodeMenuMotion(root){
             return range.getBoundingClientRect().width / scale;
         } catch(error) { return (span.scrollWidth || 0) / scale; }
     };
-    /* 按钮还差多少才长到位：文字宽 + 5px 左间距，减掉已经占掉的，动画中途调也一样对。 */
+    /* 按钮还差多少才长到位：文字宽 + 图标间距（--st-label-gap），减掉已经占掉的，动画中途调也一样对。 */
     const labelGrowth = (button, scale) => {
         const span = menuLabelSpan(button);
         if(!span) return 0;
         const rendered = span.getBoundingClientRect().width / scale + (parseFloat(getComputedStyle(span).marginLeft) || 0);
-        return Math.max(0, naturalWidth(span, scale) + 5 - rendered);
+        return Math.max(0, naturalWidth(span, scale) + smartToolLabelGap(button) - rendered);
     };
     /* 滑块样式用菜单自己的坐标，而 getBoundingClientRect 已经被画布缩放乘过，得把祖先 zoom / transform 的乘积除回去。 */
     const localScale = menu => {
@@ -13188,63 +15027,40 @@ function initSmartNodeMenuMotion(root){
         }
         return highlight;
     };
-    /* 悬停瞬间指针指着的那个按钮，展开时不许从指针下溜走：标签一起长出来会把整排按钮推走
-       （实测 HD 在 200ms 里被推 +98px），真人悬停后立刻按下，mousedown 还在这个按钮上、mouseup 已经落在
-       隔壁按钮，浏览器只在两者共同祖先上派发 click，动作就没了。展开前先量一遍前面各按钮还要长多少，
-       用容器 margin-left 反向补掉同一段位移：margin 不参与「-50%」居中（那是按自身 border box 算的），
-       和 max-width 共用同一条缓动曲线，动画全程那个按钮都钉在指针下。 */
-    const pinPointerButton = (menu, clientX) => {
-        /* 精简条：标签本来就隐藏，展开不该有任何宽度变化；这里再写 margin-left 会把整条平移，
-           悬停前量到的按钮坐标就全错了（用户/脚本按旧坐标点会落到隔壁分组）。 */
-        if(menu.classList.contains('is-compact')) return;
-        const items = menuButtons(menu);
-        if(!items.length) return;
-        const scale = localScale(menu);
-        const scaleParent = menu.parentElement ? localScale(menu.parentElement) : 1;
-        const firstRect = items[0].getBoundingClientRect();
-        const gap = items.length > 1 ? Math.abs(items[1].getBoundingClientRect().left - firstRect.right) : 5;
-        let pinned = null;
-        let pinnedRect = null;
-        let pinnedGrowth = 0;
-        let pinnedBefore = 0;
-        let growthBefore = 0;
-        let total = 0;
-        for(const item of items){
-            const growth = labelGrowth(item, scale);
-            if(!pinned){
-                const rect = item.getBoundingClientRect();
-                if(clientX >= rect.left - gap / 2 && clientX <= rect.right + gap / 2){
-                    pinned = item;
-                    pinnedRect = rect;
-                    pinnedGrowth = growth;
-                    pinnedBefore = growthBefore;
-                }
-            }
-            total += growth;
-            growthBefore += growth;
+    /* 展开态不做整条平移：Boss 定的规则是「工具条只显示在节点中间、不许移动」，所以整条的位置
+       永远由节点中心决定（left/top 都在 CSS 里写死为居中），悬停只让标签在条内长出来。
+       代价是光标下那颗按钮会被两侧长出来的标签推走——命中修正由 pointermove 里的
+       repositionMenuUnderPointer 承担，不再靠拖动整条。 */
+    const buttonAtPoint = (menu, clientX) => menuButtons(menu).find(button => {
+        const rect = button.getBoundingClientRect();
+        return clientX >= rect.left && clientX <= rect.right;
+    }) || null;
+    /* 指针最后停在哪：transitionend 那类「不是指针事件」的时机要用它把滑块校正回指针下那颗按钮 */
+    const lastPointerX = new WeakMap();
+    /* 指针还在不在条内。这条必须是「事实」，不能靠 transitionend 的时机去猜：标签收起（max-width 回 0）
+       会照样抛 transitionend，那时指针早就不在条里了，按残留坐标重解析会把滑块又点亮一次 ——
+       收起的条只剩图标、左下角没有按钮落位，亮块就悬在图标之间，看起来就是一个凭空的灰色方块
+       （Boss 截图里那枚灰块，实测：离开后 @1007ms 隐藏，@1239ms 又被点亮）。 */
+    const pointerInside = new WeakSet();
+    /* 标签展开会把按钮在条内推走，指针没有移动也可能不再落在原来那颗按钮上。
+       每次 pointermove 按「指针当前横坐标」重新解析：找得到就重放滑块、找不到就把滑块藏掉，
+       不能再让滑块停在明明不在指针下的那颗按钮上（Boss 报的「高亮跟着乱跑」）。 */
+    const repositionMenuUnderPointer = (menu, clientX) => {
+        if(Number.isFinite(clientX)) lastPointerX.set(menu, clientX);
+        else clientX = lastPointerX.get(menu);
+        if(!Number.isFinite(clientX)) return;
+        /* 指针已经离开条：不许再根据残留坐标把滑块点亮（这是「凭空的灰块」的唯一来源） */
+        if(!pointerInside.has(menu)) return;
+        if(menu.querySelector('.smart-tool-group.is-open')) return;
+        const button = buttonAtPoint(menu, clientX);
+        if(!button || button.disabled || button.dataset.smartGroupAction === 'run'){
+            const highlight = menu.querySelector(':scope > .smart-node-menu-highlight');
+            if(highlight) highlight.style.opacity = '0';
+            menu.__smartMenuButton = null;
+            return;
         }
-        /* 指针落在两端留白或容器外：没有要钉的按钮，保持原来的居中展开 */
-        if(!pinned) return;
-        const menuRect = menu.getBoundingClientRect();
-        /* 菜单自己的反向缩放只作用于「菜单内部的偏移」：标签生长量在菜单自己的坐标系里，而 margin-left
-           落在父级坐标系、只被祖先缩放乘。两个系数混用会让补偿差一个倍数（画布 50% 时正好差一半，
-           按钮被推出指针下 56px，点下去落到隔壁的「高质量抠图」）。scaleParent 就是祖先那一层。 */
-        const ownScale = scaleParent > 0 ? scale / scaleParent : scale;
-        const expandedWidth = menuRect.width + total * scale;
-        const minShift = (8 - menuRect.left) / scaleParent;
-        const maxShift = (window.innerWidth - 8 - expandedWidth - menuRect.left) / scaleParent;
-        /* 指针下那个按钮自己的中心在菜单里也会右移 pinnedBefore + pinnedGrowth/2（除了前面按钮的生长，
-           它自己也长了半格），减掉这一项才是钉住按钮本身，否则钉的是整条 bar 的中心。 */
-        const centered = ownScale * (total / 2 - pinnedBefore - pinnedGrowth / 2);
-        const clamped = Math.min(Math.max(centered, minShift), Math.max(minShift, maxShift));
-        /* 窗口夹取只在「不把指针下那个按钮拖走」时才生效：画布 150% 时展开的整条 bar 比窗口还宽
-           （反向缩放被夹在 0.933，渲染宽 1334 > 窗口 1680 减去边距），硬夹会一次把 bar 横向拖走 340px，
-           指针随即离开菜单 → 菜单折叠、指针落到「下载」上再展开，点谁都不是。夹取后指针仍落在按钮里
-           （半个按钮宽内）才用夹取值，否则保留钉住的值，bar 允许压出窗口一点。 */
-        const pinnedHalf = (pinnedRect.width + pinnedGrowth * scale) / 2;
-        const clampedDelta = Math.abs((clamped - centered) * scaleParent);
-        const shift = clampedDelta <= pinnedHalf ? clamped : centered;
-        menu.style.marginLeft = shift.toFixed(2) + 'px';
+        if(menu.__smartMenuButton === button) return;
+        placeHighlight(menu, button);
     };
     const setExpanded = (menu, expanded) => {
         if(menu.__smartMenuExpanded === expanded) return;
@@ -13259,12 +15075,18 @@ function initSmartNodeMenuMotion(root){
                 const width = naturalWidth(span, scale);
                 if(width > 0) span.style.maxWidth = width + 'px';
             });
+            /* 指针压着哪颗，滑块就留在哪颗；指针落在按钮间隙或 padding 上就直接收起 ——
+               不能按「展开后的按钮位置」随便挑一颗（标签一长按钮就滑走了，会高亮到隔壁） */
+            const highlight = highlightOf(menu);
+            const pointerX = lastPointerX.get(menu);
+            const pointed = Number.isFinite(pointerX) ? buttonAtPoint(menu, pointerX) : null;
+            if(!pointed || pointed.disabled || pointed !== menu.__smartMenuButton) highlight.style.opacity = '0';
             menu.classList.add(EXPANDED_CLASS);
         } else {
             menu.classList.remove(EXPANDED_CLASS);
             /* 清掉内联宽度，max-width 才会从当前值过渡回 CSS 里的 0 */
             spans.forEach(span => { span.style.maxWidth = ''; });
-            /* 补偿和标签一起收回去，折叠过程同样钉住那个按钮 */
+            /* 历史值：早点名那版用 margin-left 把整条平移去钉住指针下的按钮，现在整条不动，清掉残留 */
             menu.style.marginLeft = '';
         }
     };
@@ -13333,10 +15155,12 @@ function initSmartNodeMenuMotion(root){
     root.addEventListener('pointerover', event => {
         const menu = event.target.closest?.(MENU_SELECTOR);
         if(!menu) return;
-        /* 只有「折叠→展开」这一步要钉：这时几何还没变，量出来的是指针最初指着的按钮。
-           已经展开时几何不再变动，重算反而会把整条 bar 拖着跟指针走。 */
-        if(!menu.__smartMenuExpanded) pinPointerButton(menu, event.clientX);
+        /* 先记下指针进条那一刻的位置：标签展开结束后 transitionend 要按它重解析滑块 */
+        pointerInside.add(menu);
+        if(Number.isFinite(event.clientX)) lastPointerX.set(menu, event.clientX);
         expand(menu);
+        /* 悬停到哪颗就把滑块放哪颗：条本身不移动，展开后指针可能已经不在原来那颗按钮上，
+           交给 pointermove 的修正逻辑（repositionMenuUnderPointer）持续重解析。 */
         const button = buttonUnderPointer(menu, event.target);
         if(!button || button.disabled || menu.__smartMenuButton === button) return;
         /* 「一键运行」自带常驻底框（--soft + 边框）：滑块再压一层就是双层底色，
@@ -13349,9 +15173,12 @@ function initSmartNodeMenuMotion(root){
         }
         placeHighlight(menu, button);
     });
-    /* pointerleave 不冒泡，捕获阶段才收得到；按钮之间移动不会触发它，真离开才延迟折叠。 */
+    /* pointerleave 不冒泡，捕获阶段才收得到；按钮之间移动不会触发它，真离开才延迟折叠。
+       「指针已经出去」要立刻记账（不要等 90ms 的折叠定时器）：标签收起时抛的 transitionend
+       就发生在离开后的这段时间里，晚一步记账滑块就会被重新点亮。 */
     root.addEventListener('pointerleave', event => {
         if(!event.target.matches?.(MENU_SELECTOR)) return;
+        pointerInside.delete(event.target);
         scheduleCollapse(event.target);
     }, true);
     /* 键盘 focus 进来同样整条展开（参考的 expandOnFocus），焦点离开整条 bar 才折叠。 */
@@ -13363,11 +15190,18 @@ function initSmartNodeMenuMotion(root){
         const menu = event.target.closest?.(MENU_SELECTOR);
         if(menu && !menu.contains(event.relatedTarget)) collapse(menu);
     });
-    /* 标签展开跑完按钮才落到最终位置，这时按真实几何校正一次（估算只差亚像素就不会重复播动画）。 */
+    /* 指针在条里移动：标签展开把按钮推走后，按指针当前横坐标重新解析一次滑块该停在哪颗。
+       只认真的落在条里的 pointermove（别把菜单浮层、面板上的移动也算进来）。 */
+    root.addEventListener('pointermove', event => {
+        const menu = event.target.closest?.(MENU_SELECTOR);
+        if(!menu || !menu.__smartMenuExpanded) return;
+        repositionMenuUnderPointer(menu, event.clientX);
+    });
+    /* 标签展开跑完按钮才落到最终位置，这时再按指针最后一次所在横坐标校正一次滑块（不带坐标，用记下的那个）。 */
     root.addEventListener('transitionend', event => {
         if(event.propertyName !== 'max-width') return;
         const menu = event.target.closest?.(MENU_SELECTOR);
-        if(menu?.__smartMenuButton) placeHighlight(menu, menu.__smartMenuButton);
+        if(menu) repositionMenuUnderPointer(menu);
     });
     /* 工具栏是渲染时 insertAdjacentHTML 出来的，新增的靠 Observer 补滑块，不在 render 里挂钩子。 */
     new MutationObserver(records => {
@@ -13901,89 +15735,266 @@ function openPanoramaToolPanel(node, index){
     });
 }
 /* ── 多角度编辑器 ── */
-const SMART_TOOL_ANGLE_PRESETS = [
-    {key:'custom', label:'自定义'},
-    {key:'fisheye', label:'鱼眼视角', tip:'超广角鱼眼镜头'},
-    {key:'tilt', label:'倾斜视角', tip:'荷兰角，水平 -35°/俯仰 15°'},
-    {key:'front-high', label:'正面俯拍', tip:'正面俯视 35°，近景'},
-    {key:'front-low', label:'正面仰拍', tip:'正面仰视 30°'},
-    {key:'top', label:'全景俯拍', tip:'近乎正上方俯视 70°，远景'},
-    {key:'back', label:'背面视角', tip:'绕到主体背后 180°'}
-];
-const SMART_TOOL_ANGLE_SHOTS = [
-    {key:'closeup', label:'特写'}, {key:'near', label:'近景'}, {key:'medium', label:'中景'},
-    {key:'full', label:'全景'}, {key:'wide', label:'远景'}
-];
-/* 预设 = 一组滑杆初值；「自定义」不动用户的当前值 */
-const SMART_TOOL_ANGLE_PRESET_VALUES = {
-    fisheye:{h:0, v:0, shot:'full', note:'鱼眼镜头，超广角畸变'},
-    tilt:{h:-35, v:15, shot:'medium', note:'倾斜构图（荷兰角）'},
-    'front-high':{h:0, v:35, shot:'near', note:''},
-    'front-low':{h:0, v:-30, shot:'medium', note:''},
-    top:{h:0, v:70, shot:'wide', note:'从正上方俯视'},
-    back:{h:180, v:0, shot:'medium', note:''}
-};
+function maSliderRow(label, name, min, max, value, suffix=''){
+    return `<div class="ma-param"><span class="ma-param-label">${escapeHtml(label)}</span><div class="ma-param-ctrl">${stpSliderHtml(name, min, max, 1, value, suffix)}</div></div>`;
+}
+function maSwitchRow(state){
+    return `<div class="ma-param"><span class="ma-param-label">广角镜头</span><div class="ma-param-ctrl ma-param-end"><button type="button" class="ma-switch${state.wide ? ' is-on' : ''}" role="switch" aria-checked="${state.wide ? 'true' : 'false'}" aria-label="广角镜头" data-ma-wide><span class="ma-switch-knob"></span></button></div></div>`;
+}
+function maBodyHtml(state){
+    return `<div class="ma-body"><div class="ma-stage" data-ma-stage><div class="ma-scene"><div class="ma-cube" data-ma-cube><div class="ma-face ma-face-front"><i data-lucide="image"></i></div><div class="ma-face ma-face-back"></div><div class="ma-face ma-face-left"></div><div class="ma-face ma-face-right"></div><div class="ma-face ma-face-top"></div><div class="ma-face ma-face-bottom"></div></div></div><button type="button" class="ma-reset" data-stp-reset><i data-lucide="rotate-ccw"></i><span>重置</span></button></div><div class="ma-params">${maSliderRow('旋转', 'rotation', -180, 180, state.rotation, '°')}${maSliderRow('俯仰', 'pitch', -90, 90, state.pitch, '°')}${maSliderRow('缩放', 'zoom', 0, 100, state.zoom)}${maSwitchRow(state)}</div></div>`;
+}
+function maCubeTransform(state){
+    const pitch = 14 + Number(state.pitch || 0);
+    const yaw = -24 - Number(state.rotation || 0);
+    const scale = 1 + Number(state.zoom || 0) * 0.0018;
+    return `rotateX(${pitch}deg) rotateY(${yaw}deg) scale(${scale.toFixed(3)})`;
+}
 function openMultiAngleToolPanel(node, index){
     const item = imageForDisplay(node?.images?.[index]);
     if(!item?.url) return null;
     openSmartToolFormPanel({
         id:'multi-angle', nodeId:node.id, anchor:'multi-angle', icon:'camera',
-        title:'多角度编辑器',
-        state:{preset:'custom', h:0, v:0, shot:'medium', extra:''},
-        rows:state => [
-            stpRowHtml('视角预设', stpChipsHtml('preset', SMART_TOOL_ANGLE_PRESETS, state.preset)),
-            stpRowHtml('水平环绕', stpSliderHtml('h', -180, 180, 5, state.h, '°')),
-            stpRowHtml('垂直俯仰', stpSliderHtml('v', -90, 90, 5, state.v, '°')),
-            stpRowHtml('景别缩放', stpChipsHtml('shot', SMART_TOOL_ANGLE_SHOTS, state.shot)),
-            `<div class="stp-row"><textarea data-stp-extra placeholder="画面补充说明（可留空）">${escapeHtml(state.extra)}</textarea></div>`
-        ],
-        onChange:(name, state, paint) => {
-            if(name !== 'preset') return;
-            const preset = SMART_TOOL_ANGLE_PRESET_VALUES[state.preset];
-            if(!preset) return;
-            state.h = preset.h;
-            state.v = preset.v;
-            state.shot = preset.shot;
-            paint();
+        title:'拖动立方体调整角度',
+        state:{rotation:0, pitch:0, zoom:0, wide:false},
+        rows:state => [maBodyHtml(state)],
+        afterPaint:(panel, state) => {
+            panel.querySelector('.stp-foot [data-stp-reset]')?.remove();
+            const stage = panel.querySelector('[data-ma-stage]');
+            const cube = panel.querySelector('[data-ma-cube]');
+            const rotInput = panel.querySelector('[data-stp-range="rotation"]');
+            const pitchInput = panel.querySelector('[data-stp-range="pitch"]');
+            const zoomInput = panel.querySelector('[data-stp-range="zoom"]');
+            const rotOut = panel.querySelector('[data-stp-readout="rotation"]');
+            const pitchOut = panel.querySelector('[data-stp-readout="pitch"]');
+            const wideBtn = panel.querySelector('[data-ma-wide]');
+            const paintCube = () => { if(cube) cube.style.transform = maCubeTransform(state); };
+            const paintReadouts = () => {
+                if(rotInput) rotInput.value = String(state.rotation);
+                if(pitchInput) pitchInput.value = String(state.pitch);
+                if(rotOut) rotOut.textContent = state.rotation + '°';
+                if(pitchOut) pitchOut.textContent = state.pitch + '°';
+            };
+            paintCube();
+            rotInput?.addEventListener('input', paintCube);
+            pitchInput?.addEventListener('input', paintCube);
+            zoomInput?.addEventListener('input', paintCube);
+            wideBtn?.addEventListener('click', event => {
+                event.preventDefault();
+                state.wide = !state.wide;
+                wideBtn.classList.toggle('is-on', state.wide);
+                wideBtn.setAttribute('aria-checked', state.wide ? 'true' : 'false');
+                stage?.classList.toggle('is-wide', state.wide);
+            });
+            if(stage){
+                const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+                let pointerId = null;
+                let startX = 0;
+                let startY = 0;
+                let startRotation = 0;
+                let startPitch = 0;
+                stage.addEventListener('pointerdown', event => {
+                    if(event.button !== 0 || event.target.closest?.('[data-stp-reset]')) return;
+                    pointerId = event.pointerId;
+                    startX = event.clientX;
+                    startY = event.clientY;
+                    startRotation = Number(state.rotation) || 0;
+                    startPitch = Number(state.pitch) || 0;
+                    stage.classList.add('is-dragging');
+                    try { stage.setPointerCapture(pointerId); } catch(_) {}
+                    event.preventDefault();
+                });
+                stage.addEventListener('pointermove', event => {
+                    if(pointerId === null || event.pointerId !== pointerId) return;
+                    state.rotation = clamp(Math.round(startRotation + (event.clientX - startX) * 0.6), -180, 180);
+                    state.pitch = clamp(Math.round(startPitch - (event.clientY - startY) * 0.5), -90, 90);
+                    paintReadouts();
+                    paintCube();
+                    event.preventDefault();
+                });
+                const endDrag = event => {
+                    if(pointerId === null || (event && event.pointerId !== pointerId)) return;
+                    try { stage.releasePointerCapture(pointerId); } catch(_) {}
+                    pointerId = null;
+                    stage.classList.remove('is-dragging');
+                };
+                stage.addEventListener('pointerup', endDrag);
+                stage.addEventListener('pointercancel', endDrag);
+                stage.addEventListener('lostpointercapture', endDrag);
+            }
         },
         run:(state, panel) => {
-            const extra = String(state.extra || '').trim();
-            const note = SMART_TOOL_ANGLE_PRESET_VALUES[state.preset]?.note || '';
-            const prompt = `把镜头换到新的机位重拍同一场景：视角预设=${stpLabelOf(SMART_TOOL_ANGLE_PRESETS, state.preset)}${note ? `（${note}）` : ''}，水平环绕=${state.h}°，垂直俯仰=${state.v}°，景别=${stpLabelOf(SMART_TOOL_ANGLE_SHOTS, state.shot)}。保持主体、场景内容、材质与光线一致，只改变观察角度与景别。${extra ? `补充要求：${extra}。` : ''}`;
+            const rotation = Math.round(Number(state.rotation) || 0);
+            const pitch = Math.round(Number(state.pitch) || 0);
+            const zoom = Math.round(Number(state.zoom) || 0);
+            const prompt = `把镜头换到新的机位重拍同一场景：水平环绕=${rotation}°，垂直俯仰=${pitch}°，缩放=${zoom}${state.wide ? '，使用广角镜头（超广角，画面边缘轻微畸变）' : ''}。保持主体、场景内容、材质与光线一致，只改变观察角度与景别。`;
             closeSmartToolPanel();
             runSmartToolbarGeneration(node, index, prompt, [{...item}]);
         }
     });
 }
 /* ── 打光效果 ── */
-const SMART_TOOL_LIGHT_PERSPECTIVE = [{key:'front', label:'正面'}, {key:'global', label:'全局'}, {key:'smart', label:'智能模式'}];
-const SMART_TOOL_LIGHT_COLORS = [
-    {key:'neutral', label:'中性白'}, {key:'warm', label:'暖黄'}, {key:'cool', label:'冷蓝'},
-    {key:'neon', label:'霓虹粉'}, {key:'forest', label:'森绿'}, {key:'sunset', label:'日落橙'}
-];
 const SMART_TOOL_LIGHT_KEYS = [
     {key:'left', label:'左侧'}, {key:'top', label:'顶部'}, {key:'right', label:'右侧'},
     {key:'front', label:'前方'}, {key:'bottom', label:'底部'}, {key:'back', label:'后方'}
 ];
-const SMART_TOOL_LIGHT_RIM = [{key:'off', label:'关闭'}, {key:'low', label:'弱'}, {key:'mid', label:'中'}, {key:'high', label:'强'}];
+const SMART_TOOL_LIGHT_ANGLES = {right:0, bottom:90, left:180, top:270, front:315, back:135};
+const SMART_TOOL_LIGHT_VIEWS = [{key:'perspective', label:'透视'}, {key:'front', label:'正面'}];
+const SMART_TOOL_LIGHT_EXTRA_ICONS = {
+    Sun: [["circle",{cx:'12',cy:'12',r:'4'}],["path",{d:'M12 2v2'}],["path",{d:'M12 20v2'}],["path",{d:'m4.93 4.93 1.41 1.41'}],["path",{d:'m17.66 17.66 1.41 1.41'}],["path",{d:'M2 12h2'}],["path",{d:'M20 12h2'}],["path",{d:'m6.34 17.66-1.41 1.41'}],["path",{d:'m19.07 4.93-1.41 1.41'}]],
+    Thermometer: [["path",{d:'M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z'}]],
+    CircleHelp: [["circle",{cx:'12',cy:'12',r:'10'}],["path",{d:'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3'}],["path",{d:'M12 17h.01'}]]
+};
+function rlRegisterIcons(){
+    const icons = window.lucide?.icons;
+    if(!icons) return;
+    Object.keys(SMART_TOOL_LIGHT_EXTRA_ICONS).forEach(name => {
+        if(!icons[name]) icons[name] = SMART_TOOL_LIGHT_EXTRA_ICONS[name];
+    });
+}
+function rlLightAngle(key){
+    const angle = SMART_TOOL_LIGHT_ANGLES[key];
+    return Number.isFinite(angle) ? angle : 180;
+}
+function rlLightKey(angle){
+    const value = ((Number(angle) % 360) + 360) % 360;
+    let matched = SMART_TOOL_LIGHT_KEYS[0].key;
+    let gap = Infinity;
+    SMART_TOOL_LIGHT_KEYS.forEach(option => {
+        const diff = Math.abs(((rlLightAngle(option.key) - value + 540) % 360) - 180);
+        if(diff < gap){ gap = diff; matched = option.key; }
+    });
+    return matched;
+}
+function rlSliderRow(label, name, min, max, step, value, suffix, icon){
+    const current = Number(value) || 0;
+    return `<div class="rl-param"><div class="rl-param-label">${escapeHtml(label)}</div><div class="rl-param-line"><input type="range" min="${min}" max="${max}" step="${step}" value="${current}" data-stp-range="${escapeAttr(name)}" data-stp-suffix="${escapeAttr(suffix)}" aria-label="${escapeAttr(label)}"><span class="rl-value"><i data-lucide="${escapeAttr(icon)}"></i><em data-stp-readout="${escapeAttr(name)}">${current}${escapeHtml(suffix)}</em></span></div></div>`;
+}
+function rlStageHtml(state, item){
+    const segment = SMART_TOOL_LIGHT_VIEWS.map(view => `<button type="button" class="rl-seg-btn${state.view === view.key ? ' is-active' : ''}" data-rl-view="${escapeAttr(view.key)}">${escapeHtml(view.label)}</button>`).join('');
+    const activeLabel = state.active === 'rim' ? '轮廓光' : '主光源';
+    return `<div class="rl-stage" data-rl-stage>`
+        + `<div class="rl-seg">${segment}</div>`
+        + `<div class="rl-beam rl-beam-rim" data-rl-beam="rim"></div>`
+        + `<div class="rl-beam rl-beam-key" data-rl-beam="key"></div>`
+        + `<div class="rl-photo"><img src="${escapeAttr(displayMediaUrl(item))}" alt=""></div>`
+        + `<span class="rl-source rl-source-rim" data-rl-source="rim"></span>`
+        + `<span class="rl-source rl-source-key" data-rl-source="key"></span>`
+        + `</div>`
+        + `<div class="rl-stage-bar"><span class="rl-pill" data-rl-pill>${escapeHtml(activeLabel)}</span><button type="button" class="rl-reset" data-stp-reset><i data-lucide="rotate-ccw"></i><span>重置</span></button></div>`;
+}
 function openRelightToolPanel(node, index){
     const item = imageForDisplay(node?.images?.[index]);
     if(!item?.url) return null;
+    rlRegisterIcons();
     openSmartToolFormPanel({
         id:'relight', nodeId:node.id, anchor:'relight', icon:'zap',
         title:'打光效果',
-        state:{perspective:'smart', brightness:100, color:'neutral', key:'left', rim:'mid', extra:''},
+        state:{view:'perspective', brightness:50, temp:5600, key:'left', keyAngle:200, rim:false, rimAngle:20, active:'key'},
         rows:state => [
-            stpRowHtml('透视', stpChipsHtml('perspective', SMART_TOOL_LIGHT_PERSPECTIVE, state.perspective)),
-            stpRowHtml('亮度', stpSliderHtml('brightness', 20, 200, 5, state.brightness, '%')),
-            stpRowHtml('颜色', stpChipsHtml('color', SMART_TOOL_LIGHT_COLORS, state.color)),
-            stpRowHtml('主光源', stpChipsHtml('key', SMART_TOOL_LIGHT_KEYS, state.key)),
-            stpRowHtml('轮廓光', stpChipsHtml('rim', SMART_TOOL_LIGHT_RIM, state.rim)),
-            `<div class="stp-row"><textarea data-stp-extra placeholder="光照补充说明（可留空）">${escapeHtml(state.extra)}</textarea></div>`
+            `<div class="rl-body"><div class="rl-left">${rlStageHtml(state, item)}</div><div class="rl-params">`
+                + `<div class="rl-section">全局</div>`
+                + rlSliderRow('亮度', 'brightness', 0, 100, 1, state.brightness, '%', 'sun')
+                + rlSliderRow('色温', 'temp', 2000, 8000, 100, state.temp, 'K', 'thermometer')
+                + `<div class="rl-section">主光源</div>`
+                + stpChipsHtml('key', SMART_TOOL_LIGHT_KEYS, state.key)
+                + `<div class="rl-rim-row"><span class="rl-rim-label">轮廓光<i data-lucide="circle-help" title="${escapeAttr('轮廓光：沿主体边缘勾一圈光，把轮廓与体积从背景里提出来')}"></i></span><button type="button" class="rl-switch${state.rim ? ' is-on' : ''}" role="switch" aria-checked="${state.rim ? 'true' : 'false'}" aria-label="轮廓光" data-rl-rim><span class="rl-switch-knob"></span></button></div>`
+                + `</div></div>`
         ],
+        onChange:(name, state, paint) => {
+            if(name === 'key'){ state.keyAngle = rlLightAngle(state.key); paint(); }
+        },
+        afterPaint:(panel, state) => {
+            panel.querySelector('.stp-foot [data-stp-reset]')?.remove();
+            const stage = panel.querySelector('[data-rl-stage]');
+            const pill = panel.querySelector('[data-rl-pill]');
+            const rimSwitch = panel.querySelector('[data-rl-rim]');
+            const sources = {key:panel.querySelector('[data-rl-source="key"]'), rim:panel.querySelector('[data-rl-source="rim"]')};
+            const paintStage = () => {
+                if(!stage) return;
+                stage.style.setProperty('--rl-key-angle', `${Number(state.keyAngle) || 0}deg`);
+                stage.style.setProperty('--rl-rim-angle', `${Number(state.rimAngle) || 0}deg`);
+                stage.classList.toggle('is-front', state.view === 'front');
+                stage.classList.toggle('is-rim-off', !state.rim);
+                if(pill) pill.textContent = state.active === 'rim' ? '轮廓光' : '主光源';
+                if(rimSwitch){
+                    rimSwitch.classList.toggle('is-on', !!state.rim);
+                    rimSwitch.setAttribute('aria-checked', state.rim ? 'true' : 'false');
+                }
+                panel.querySelectorAll('[data-rl-view]').forEach(btn => btn.classList.toggle('is-active', btn.dataset.rlView === state.view));
+                panel.querySelectorAll('[data-stp-chips="key"] .stp-chip').forEach(chip => chip.classList.toggle('is-active', chip.dataset.stpValue === state.key));
+            };
+            panel.querySelectorAll('[data-rl-view]').forEach(btn => {
+                btn.addEventListener('click', event => {
+                    event.preventDefault();
+                    state.view = btn.dataset.rlView === 'front' ? 'front' : 'perspective';
+                    paintStage();
+                });
+            });
+            rimSwitch?.addEventListener('click', event => {
+                event.preventDefault();
+                state.rim = !state.rim;
+                paintStage();
+            });
+            if(stage){
+                let pointerId = null;
+                let dragging = '';
+                stage.addEventListener('pointerdown', event => {
+                    if(event.button !== 0 || event.target.closest?.('[data-stp-reset]')) return;
+                    const rect = stage.getBoundingClientRect();
+                    const cx = rect.left + rect.width / 2;
+                    const cy = rect.top + rect.height / 2;
+                    let picked = '';
+                    let best = 22;
+                    Object.keys(sources).forEach(name => {
+                        const el = sources[name];
+                        if(!el) return;
+                        const dot = el.getBoundingClientRect();
+                        const distance = Math.hypot(event.clientX - (dot.left + dot.width / 2), event.clientY - (dot.top + dot.height / 2));
+                        if(distance <= best){ best = distance; picked = name; }
+                    });
+                    if(!picked) return;
+                    pointerId = event.pointerId;
+                    dragging = picked;
+                    state.active = picked;
+                    paintStage();
+                    stage.classList.add('is-dragging');
+                    try { stage.setPointerCapture(pointerId); } catch(_) {}
+                    event.preventDefault();
+                });
+                stage.addEventListener('pointermove', event => {
+                    if(pointerId === null || event.pointerId !== pointerId || !dragging) return;
+                    const rect = stage.getBoundingClientRect();
+                    const cx = rect.left + rect.width / 2;
+                    const cy = rect.top + rect.height / 2;
+                    const angle = (Math.atan2(event.clientY - cy, event.clientX - cx) * 180 / Math.PI + 360) % 360;
+                    if(dragging === 'key'){
+                        state.keyAngle = angle;
+                        state.key = rlLightKey(angle);
+                    } else {
+                        state.rimAngle = angle;
+                    }
+                    paintStage();
+                    event.preventDefault();
+                });
+                const endDrag = event => {
+                    if(pointerId === null || (event && event.pointerId !== pointerId)) return;
+                    try { stage.releasePointerCapture(pointerId); } catch(_) {}
+                    pointerId = null;
+                    dragging = '';
+                    stage.classList.remove('is-dragging');
+                };
+                stage.addEventListener('pointerup', endDrag);
+                stage.addEventListener('pointercancel', endDrag);
+                stage.addEventListener('lostpointercapture', endDrag);
+            }
+            paintStage();
+        },
         run:(state, panel) => {
-            const extra = String(state.extra || '').trim();
-            const prompt = `重新为画面打光：透视=${stpLabelOf(SMART_TOOL_LIGHT_PERSPECTIVE, state.perspective)}，主光源=${stpLabelOf(SMART_TOOL_LIGHT_KEYS, state.key)}，亮度=${state.brightness}%，光色=${stpLabelOf(SMART_TOOL_LIGHT_COLORS, state.color)}，轮廓光=${stpLabelOf(SMART_TOOL_LIGHT_RIM, state.rim)}。保持主体结构、材质、颜色与细节不变，只改变光照方向、强度与色温，投影自然。${extra ? `补充要求：${extra}。` : ''}`;
+            const view = state.view === 'front' ? '正面' : '透视';
+            const key = stpLabelOf(SMART_TOOL_LIGHT_KEYS, state.key);
+            const rim = state.rim ? `开启（方位=${stpLabelOf(SMART_TOOL_LIGHT_KEYS, rlLightKey(state.rimAngle))}）` : '关闭';
+            const prompt = `重新为画面打光：视角=${view}，主光源=${key}，亮度=${state.brightness}%，色温=${state.temp}K，轮廓光=${rim}。保持主体结构、材质、颜色与细节不变，只改变光照方向、强度与色温，投影自然。`;
             closeSmartToolPanel();
             runSmartToolbarGeneration(node, index, prompt, [{...item}]);
         }
@@ -14095,6 +16106,7 @@ function syncComposerSuppressed(){
 }
 function closeSmartNodeOverlay(){
     const part = smartNodeOverlay?.part;
+    try { smartNodeOverlay?.listeners?.abort(); } catch(_) {}
     smartNodeOverlay?.el?.remove();
     smartNodeOverlay = null;
     /* 退出编辑态：节点卡片顶部的模式标签跟着消失 */
@@ -14240,9 +16252,28 @@ function smartNodeOverlayBarHtml(mode, options){
         + '<span class="nie-spacer"></span>'
         + '<span class="nie-run-row">' + cancelBtn + promptField + sendBtn + '</span>';
 }
+/* 进入节点内编辑（标注 / 元素编辑 / 宫格等）时，如果节点在屏幕上太小，先把视口对准并放大到该节点：
+   编辑层和它的操作条都挂在节点里、随画布缩放，画布缩到 30% 时操作条文字只有几像素，根本没法用。 */
+function focusNodeForInlineEdit(node){
+    if(!node || !shell) return;
+    const rect = nodeRect(node);
+    if(!rect.width || !rect.height) return;
+    const onScreenW = rect.width * viewport.scale;
+    const onScreenH = rect.height * viewport.scale;
+    const minSide = Math.min(shell.clientWidth, shell.clientHeight);
+    if(viewport.scale >= 0.9 && Math.max(onScreenW, onScreenH) >= Math.min(420, minSide * 0.5)) return;
+    const fit = Math.min(shell.clientWidth * 0.62 / rect.width, (shell.clientHeight - 200) * 0.7 / rect.height);
+    const target = safeScale(Math.max(viewport.scale, Math.min(1.5, Math.max(0.9, fit))));
+    viewport.scale = target;
+    viewport.x = shell.clientWidth / 2 - (rect.x + rect.width / 2) * target;
+    viewport.y = (shell.clientHeight - 120) / 2 - (rect.y + rect.height / 2) * target;
+    applyViewport();
+    scheduleViewportSave();
+}
 async function openSmartNodeOverlay(node, index, mode, options={}){
     /* 同一时刻只留一层：换工具时先把上一个覆盖层收掉，否则两层叠着（旧的还在最上面接事件） */
     closeSmartNodeOverlay();
+    focusNodeForInlineEdit(node);
     const item = options.item || imageForDisplay(node?.images?.[index]);
     /* 分组拼接：底子是整块缩略图网格，没有「一张原图」，坐标直接用渲染盒 */
     const needsImage = !(options.group && mode === 'grid');
@@ -14335,11 +16366,13 @@ async function openSmartNodeOverlay(node, index, mode, options={}){
     paintSmartNodeOverlay(overlay);
     if(mode === 'outpaint') syncNieOutpaintSize(overlay);
     syncComposerSuppressed();
-    /* Esc 关掉节点内编辑层（和浮层面板、下拉菜单一致） */
+    /* Esc 关掉节点内编辑层（和浮层面板、下拉菜单一致）。
+       监听挂在 overlay 自己的 AbortController 上，关层时一起解绑——以前每打开一次就多一个永不移除的 document 监听。 */
+    overlay.listeners = new AbortController();
     document.addEventListener('keydown', event => {
         if(event.key !== 'Escape' || smartNodeOverlay !== overlay) return;
         closeSmartNodeOverlay();
-    });
+    }, {signal:overlay.listeners.signal});
     refreshIcons();
     return overlay;
 }
@@ -15421,6 +17454,12 @@ function runSmartNodeToolbarAction(nodeId, action){
     selectedImage = {nodeId, index};
     /* 分组按钮的文案 = 刚选中的子工具：先切文案和图标，动作继续走各自原来的路径 */
     syncSmartToolbarPick(node, action);
+    if(action === 'replace'){
+        /* 悬浮入口挂在节点左上、不在工具条里：先确保节点是选中态（面板要靠工具条当锚点） */
+        if(!smartToolToolbar(node.id)) render();
+        openReplaceMediaPanel(node);
+        return;
+    }
     if(action === 'download'){
         /* 图片 → 弹「JPG / PNG / PSD」格式菜单；视频/其它素材 → 原样下载；
            图片群组 → 仍然整组打包（zip 保留了原来的语义）。 */
@@ -15437,6 +17476,10 @@ function runSmartNodeToolbarAction(nodeId, action){
         blurFacesForSmartNode(node, index);
         return;
     }
+    if(action === 'video-relay'){ relayFromVideoNode(node, index); return; }
+    if(action === 'rerun'){ rerunSmartNode(node); return; }
+    if(action === 'pick'){ openSmartPickViewer([node.id], index); return; }
+    if(action === 'video-first-frame'){ frameImageFromVideoNode(node, index, 'first'); return; }
     if(action === 'matting'){
         mattingForSmartNode(node, index);
         return;
@@ -15500,6 +17543,11 @@ function runSmartNodeToolbarAction(nodeId, action){
     if(action === 'adjust'){
         openImageEditor(nodeId, index);
         setImageEditMode('adjust', true);
+        return;
+    }
+    if(action === 'lossless-edit'){
+        openImageEditor(nodeId, index);
+        setImageEditMode('lossless', true);
         return;
     }
     if(action === 'grid-split'){
@@ -15583,7 +17631,7 @@ async function mattingForSmartNode(node, index){
         toast('主体分析失败，直接抠图');
     }
     // 第二步：抠图（后端内部还会再分析一次用于精修）
-    toast('抠图中…（本地 AI 推理，约 3-5 秒）');
+    toast('AI 抠图中…（在线生成，约 20-60 秒）');
     try{
         const resp = await fetch('/api/image/matting', {
             method: 'POST',
@@ -15612,8 +17660,31 @@ async function mattingForSmartNode(node, index){
     }
 }
 // ===== 高质量抠图（本地模型，未下载时引导下载） =====
-const MATTING_MODEL_BTN_PRIMARY = 'padding:6px 14px;border:0;border-radius:8px;background:var(--accent);color:var(--panel);font-size:12px;font-weight:600;cursor:pointer';
-const MATTING_MODEL_BTN_GHOST = 'padding:6px 14px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--text);font-size:12px;cursor:pointer';
+/* 抠图 / 高清模型弹窗共用的按钮样式：胶囊、无描边 */
+const MATTING_MODEL_BTN_PRIMARY = 'height:32px;padding:0 16px;border:0;border-radius:99px;background:var(--text);color:var(--panel);font-size:12.5px;font-weight:500;cursor:pointer';
+const MATTING_MODEL_BTN_GHOST = 'height:32px;padding:0 16px;border:0;border-radius:99px;background:var(--soft);color:var(--text);font-size:12.5px;cursor:pointer';
+/* 抠图模型下载弹窗：磨砂玻璃、无描边（样式只注入一次） */
+function ensureMattingModelStyle(){
+    if(document.getElementById('mattingModelStyle')) return;
+    const st = document.createElement('style');
+    st.id = 'mattingModelStyle';
+    st.textContent = `
+.mm-overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.28);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center}
+.mm-panel{width:360px;padding:20px 22px 18px;border:0;border-radius:18px;background:color-mix(in srgb,var(--panel) 92%,transparent);-webkit-backdrop-filter:blur(44px) saturate(190%);backdrop-filter:blur(44px) saturate(190%);box-shadow:0 30px 70px rgba(0,0,0,.28),0 8px 24px rgba(0,0,0,.14);color:var(--text);font-size:12.5px}
+.mm-title{font-size:14px;font-weight:500;margin-bottom:8px}
+.mm-text{color:var(--muted);line-height:1.7}
+.mm-bar{height:6px;border-radius:99px;background:var(--soft);overflow:hidden;margin:14px 0 8px}
+.mm-bar i{display:block;height:100%;border-radius:99px;background:var(--text);transition:width .4s ease}
+.mm-bar.busy i{width:100% !important;opacity:.35;animation:mmPulse 1.2s ease-in-out infinite}
+@keyframes mmPulse{50%{opacity:.7}}
+.mm-meta{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.mm-hint{margin-top:8px;color:var(--muted);line-height:1.6}
+.mm-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.mm-btn{height:32px;padding:0 16px;border:0;border-radius:99px;background:var(--soft);color:var(--text);font-size:12.5px;cursor:pointer}
+.mm-btn.pri{background:var(--text);color:var(--panel);font-weight:500}
+`;
+    document.head.appendChild(st);
+}
 let mattingModelDialog = null;
 let mattingModelPollSeq = 0;
 async function fetchMattingModelStatus(){
@@ -15641,7 +17712,7 @@ async function hqMattingForSmartNode(node, index){
     }
     openMattingModelDialog();
     if(status.downloading){
-        renderMattingModelProgress(status.progress);
+        renderMattingModelProgress(status);
         pollMattingModelDownload(node, index);
     } else {
         renderMattingModelConfirm(node, index, status);
@@ -15649,9 +17720,10 @@ async function hqMattingForSmartNode(node, index){
 }
 function openMattingModelDialog(){
     closeMattingModelDialog();
+    ensureMattingModelStyle();
     const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.32);display:flex;align-items:center;justify-content:center';
-    overlay.innerHTML = `<div data-matting-model-panel style="width:340px;padding:18px 20px;border-radius:12px;background:var(--panel);border:1px solid var(--line);box-shadow:0 12px 32px var(--shadow);font-size:12px;color:var(--text)"></div>`;
+    overlay.className = 'mm-overlay';
+    overlay.innerHTML = `<div class="mm-panel" data-matting-model-panel role="dialog" aria-label="抠图模型"></div>`;
     overlay.addEventListener('mousedown', e => {
         if(e.target === overlay && overlay.dataset.state !== 'downloading') closeMattingModelDialog();
     });
@@ -15668,42 +17740,64 @@ function renderMattingModelConfirm(node, index, status){
     if(!panel) return;
     mattingModelDialog.dataset.state = 'confirm';
     const sizeMb = Math.round(Number(status?.model_size_mb) || 349);
+    const partMb = Number(status?.downloaded_mb) || 0;
+    const resume = partMb > 1 && partMb < sizeMb;
     panel.innerHTML = `
-        <div style="font-weight:700;font-size:13px;margin-bottom:8px">高质量抠图</div>
-        <div style="color:var(--muted);line-height:1.7;margin-bottom:14px">高质量抠图需要下载本地 AI 模型（${sizeMb}MB，仅首次需要），下载后可离线免费使用。现在下载？</div>
-        <div style="display:flex;justify-content:flex-end;gap:8px">
-            <button type="button" data-matting-model-cancel style="${MATTING_MODEL_BTN_GHOST}">取消</button>
-            <button type="button" data-matting-model-start style="${MATTING_MODEL_BTN_PRIMARY}">下载并抠图</button>
+        <div class="mm-title">高质量抠图</div>
+        <div class="mm-text">需要下载本地 AI 模型（${sizeMb}MB，仅首次），下载后离线免费使用，发丝、半透明边缘更干净。${resume ? `<br>上次已下载 ${Math.round(partMb)}MB，会接着下。` : ''}</div>
+        <div class="mm-acts">
+            <button type="button" class="mm-btn" data-matting-model-cancel>取消</button>
+            <button type="button" class="mm-btn pri" data-matting-model-start>${resume ? '继续下载并抠图' : '下载并抠图'}</button>
         </div>`;
     panel.querySelector('[data-matting-model-cancel]').onclick = () => closeMattingModelDialog();
     panel.querySelector('[data-matting-model-start]').onclick = () => startMattingModelDownload(node, index);
 }
-function renderMattingModelProgress(progress){
+function fmtMattingEta(sec){
+    sec = Math.max(0, Math.round(Number(sec) || 0));
+    if(!sec) return '';
+    if(sec < 60) return `剩余约 ${sec} 秒`;
+    return `剩余约 ${Math.ceil(sec / 60)} 分钟`;
+}
+function renderMattingModelProgress(status){
     const panel = mattingModelDialog?.querySelector('[data-matting-model-panel]');
     if(!panel) return;
     mattingModelDialog.dataset.state = 'downloading';
-    const pct = Math.max(0, Math.min(100, Math.round(Number(progress) || 0)));
+    const st = typeof status === 'object' && status ? status : {progress: status};
+    const pct = Math.max(0, Math.min(100, Math.round(Number(st.progress) || 0)));
+    const got = Number(st.downloaded_mb) || 0, total = Number(st.total_mb) || Number(st.model_size_mb) || 349;
+    const speed = Number(st.speed_mbps) || 0;
+    const verifying = !!st.verifying;
+    const right = verifying ? '正在校验文件…' : [speed ? `${speed.toFixed(1)} MB/s` : '', fmtMattingEta(st.eta_seconds)].filter(Boolean).join(' · ');
+    const hint = st.retrying && st.hint ? `${st.hint}（第 ${st.attempt} 次尝试）` : '';
     panel.innerHTML = `
-        <div style="font-weight:700;font-size:13px;margin-bottom:8px">正在下载抠图模型</div>
-        <div style="height:8px;border-radius:6px;background:var(--soft);overflow:hidden;margin-bottom:8px"><div style="height:100%;width:${pct}%;background:var(--accent);border-radius:6px;transition:width .3s ease"></div></div>
-        <div style="color:var(--muted)">${pct}%</div>`;
+        <div class="mm-title">${verifying ? '下载完成，正在校验' : '正在下载抠图模型'}</div>
+        <div class="mm-bar${verifying ? ' busy' : ''}"><i style="width:${pct}%"></i></div>
+        <div class="mm-meta"><span>${verifying ? '' : `${Math.round(got)} / ${Math.round(total)} MB`}</span><span>${right || `${pct}%`}</span></div>
+        ${hint ? `<div class="mm-hint">${escapeHtml(hint)}</div>` : ''}
+        <div class="mm-acts"><button type="button" class="mm-btn" data-matting-model-stop>${verifying ? '后台继续' : '取消下载'}</button></div>`;
+    panel.querySelector('[data-matting-model-stop]').onclick = async () => {
+        if(!verifying){ try{ await fetch('/api/matting/model/cancel', {method: 'POST'}); }catch(e){} toast('已取消，下次会接着下'); }
+        closeMattingModelDialog();
+    };
 }
 function renderMattingModelError(node, index, message){
     const panel = mattingModelDialog?.querySelector('[data-matting-model-panel]');
     if(!panel) return;
     mattingModelDialog.dataset.state = 'error';
     panel.innerHTML = `
-        <div style="font-weight:700;font-size:13px;margin-bottom:8px">模型下载失败</div>
-        <div style="color:var(--muted);line-height:1.7;margin-bottom:14px">${escapeHtml(message || '未知错误')}</div>
-        <div style="display:flex;justify-content:flex-end;gap:8px">
-            <button type="button" data-matting-model-cancel style="${MATTING_MODEL_BTN_GHOST}">取消</button>
-            <button type="button" data-matting-model-retry style="${MATTING_MODEL_BTN_PRIMARY}">重试</button>
+        <div class="mm-title">模型下载没有完成</div>
+        <div class="mm-text">${escapeHtml(message || '未知错误')}</div>
+        <div class="mm-acts">
+            <button type="button" class="mm-btn" data-matting-model-cancel>关闭</button>
+            <button type="button" class="mm-btn" data-matting-model-online>先用在线抠图</button>
+            <button type="button" class="mm-btn pri" data-matting-model-retry>重试</button>
         </div>`;
     panel.querySelector('[data-matting-model-cancel]').onclick = () => closeMattingModelDialog();
+    panel.querySelector('[data-matting-model-online]').onclick = () => { closeMattingModelDialog(); mattingForSmartNode(node, index); };
     panel.querySelector('[data-matting-model-retry]').onclick = () => startMattingModelDownload(node, index);
 }
 async function startMattingModelDownload(node, index){
-    renderMattingModelProgress(0);
+    renderMattingModelProgress({progress: 0});
     try{
         const resp = await fetch('/api/matting/model/download', {method: 'POST'});
         const data = await resp.json().catch(() => ({}));
@@ -15723,14 +17817,16 @@ async function startMattingModelDownload(node, index){
 }
 async function pollMattingModelDownload(node, index){
     const seq = ++mattingModelPollSeq;
-    let lastPct = -1;
+    let fails = 0;
     while(mattingModelDialog && seq === mattingModelPollSeq){
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 800));
         if(!mattingModelDialog || seq !== mattingModelPollSeq) return;
         let status;
         try{
             status = await fetchMattingModelStatus();
+            fails = 0;
         }catch(err){
+            if(++fails < 5) continue;      // 偶发查询失败不打断下载
             renderMattingModelError(node, index, err?.message || String(err));
             return;
         }
@@ -15739,14 +17835,11 @@ async function pollMattingModelDownload(node, index){
             return;
         }
         if(!status.downloading){
-            renderMattingModelError(node, index, '模型下载中断，请重试');
+            if(status.cancelled){ closeMattingModelDialog(); return; }
+            renderMattingModelError(node, index, status.error || '下载中断，请重试（已下载部分会保留）');
             return;
         }
-        const pct = Math.max(0, Math.min(100, Math.round(Number(status.progress) || 0)));
-        if(pct !== lastPct){
-            lastPct = pct;
-            renderMattingModelProgress(pct);
-        }
+        renderMattingModelProgress(status);
     }
 }
 function finishMattingModelDownload(node, index){
@@ -15760,7 +17853,7 @@ async function runLocalMatting(node, index){
         toast('没有可抠图的图片');
         return;
     }
-    toast('高质量抠图中…（本地 AI 推理，约 3-5 秒）');
+    toast('高质量抠图中…（本地 AI 推理，约 10-20 秒）');
     try{
         const resp = await fetch('/api/image/matting', {
             method: 'POST',
@@ -15796,11 +17889,11 @@ function showLocalMattingFallback(node, index, message){
     if(!panel) return;
     mattingModelDialog.dataset.state = 'fallback';
     panel.innerHTML = `
-        <div style="font-weight:700;font-size:13px;margin-bottom:8px">本地抠图失败</div>
-        <div style="color:var(--muted);line-height:1.7;margin-bottom:14px">${escapeHtml(message)}</div>
-        <div style="display:flex;justify-content:flex-end;gap:8px">
-            <button type="button" data-matting-model-cancel style="${MATTING_MODEL_BTN_GHOST}">取消</button>
-            <button type="button" data-matting-model-online style="${MATTING_MODEL_BTN_PRIMARY}">使用在线抠图</button>
+        <div class="mm-title">本地抠图没有成功</div>
+        <div class="mm-text">${escapeHtml(message)}</div>
+        <div class="mm-acts">
+            <button type="button" class="mm-btn" data-matting-model-cancel>取消</button>
+            <button type="button" class="mm-btn pri" data-matting-model-online>使用在线抠图</button>
         </div>`;
     panel.querySelector('[data-matting-model-cancel]').onclick = () => closeMattingModelDialog();
     panel.querySelector('[data-matting-model-online]').onclick = () => {
@@ -16409,6 +18502,23 @@ function restorePromptNodeChatUiState(state){
     /* rAF 再校正一次：lucide 图标替换 / 图片撑开高度之后 scrollHeight 才定型 */
     requestAnimationFrame(applyChatScroll);
 }
+/* 节点编号（图1 / 视频2 / 提示词3）：卡片外左上角，和外侧文件名同一行（编号在前，文件名让开它的宽度）。
+   编号由服务器分配，前端只显示；用户和画布助手都用它指代节点。 */
+function nodeAliasText(node){
+    var a = String(node?.alias || '');
+    return /^(图|视频|提示词|文本|组)\d{1,4}$/.test(a) ? a : '';
+}
+function nodeAliasHtml(node){
+    var a = nodeAliasText(node);
+    return a ? `<span class="node-alias" aria-label="节点编号 ${escapeHtml(a)}">${escapeHtml(a)}</span>` : '';
+}
+function nodeAliasStyle(node){
+    var a = nodeAliasText(node);
+    if(!a) return '';
+    var w = 0;
+    for(var i = 0; i < a.length; i++) w += /[\u4e00-\u9fff]/.test(a[i]) ? 11 : 6.8;
+    return `--alias-w:${Math.ceil(w)}px`;
+}
 function render(){
     if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
     /* 节点 DOM 这一轮要重建：先把挂到 body 的菜单收回原位，避免浮层留在 body 上变成孤儿 */
@@ -16463,14 +18573,16 @@ function render(){
         /* 根节点自身的 class（选中/拖动这些**临时态**都在这里）：单独拿出来，
            比较「要不要重建」时把它排除，这样拖动/选中不会把整棵子树（图标、表格、面板）重建一遍 ——
            重建既慢、又会让实测尺寸在拖动过程中变化（用户报的「拖动时节点忽大忽小」）。 */
-        const rootClass = `image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isText ? 'text-smart-node' : ''} ${isLabel ? 'label-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.sizeUserSet ? 'size-user-set' : ''}`;
-        const html = `<div class="${rootClass}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        const rootClass = `image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isText ? 'text-smart-node' : ''} ${isLabel ? 'label-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.sizeUserSet ? 'size-user-set' : ''} ${smartLodKind(node) ? 'has-lod' : ''} ${node.type === 'table' || node.type === 'smart-batch' ? 'has-lod-band' : ''} ${node.alias ? 'has-alias' : ''}`;
+        const html = `<div class="${rootClass}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${nodeAliasStyle(node)}">
+            ${nodeAliasHtml(node)}
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
-            ${!isEmpty ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
+            ${!isEmpty ? `<div class="floating-node-actions">${imgs.some(img => img?.url) ? `<button class="mini-x node-replace" type="button" data-smart-node-action="replace" data-node-id="${escapeAttr(node.id)}" title="${escapeHtml(tr('smart.replaceMedia'))}" aria-label="${escapeHtml(tr('smart.replaceMedia'))}"><i data-lucide="image-plus"></i></button>` : ''}<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${shouldRenderNodeToolbar(node) ? smartNodeToolbarHtml(node) + smartGroupToolbarHtml(node) : ''}
             ${genHead ? genHeadHtml(node) : ''}
             ${runTimePillHtml(node, genHead)}
             <div class="node-body">${body}</div>
+            ${smartLodCardHtml(node)}
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             ${isLabel || isEmpty ? '' : `<div class="node-hint">${hint}</div>`}
             ${imgs.length || node.pending || isQueued || isJimengPending || isPrompt || isText || isLoop || isSmartGroup ? `<div class="node-resize-handle" data-resize="1" title="${escapeHtml(tr('canvas.resize'))}"></div>` : ''}
@@ -16549,6 +18661,8 @@ function render(){
     syncSmartImageToolbarBounds();
     /* 节点内编辑层跟着新节点 DOM 重新挂回去（画布内容在元素里，不丢） */
     remountSmartNodeOverlay();
+    /* 实测尺寸都量完了再把视口外的节点收起来（根 class 在上面被重写过） */
+    cullOffscreenNodes();
     return;
     world.innerHTML = '';
     if(composerEl) world.appendChild(composerEl);
@@ -16567,7 +18681,8 @@ function render(){
         const isPending = (node.pending || isQueued) && imgs.length === 0;
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
-        return `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        return `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.alias ? 'has-alias' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${nodeAliasStyle(node)}">
+            ${nodeAliasHtml(node)}
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${shouldRenderNodeToolbar(node) ? smartNodeToolbarHtml(node) : ''}
@@ -18370,8 +20485,9 @@ function setImageEditMode(mode, userTouched=false){
     if(userTouched) imageEditModeTouched = true;
     const prev = imageEditMode;
     if(mode !== 'brush') removeEditTextInlineEditor(true);
-    imageEditMode = ['preview','crop','outpaint','mask','brush','resize','grid','adjust'].includes(mode) ? mode : 'preview';
+    imageEditMode = ['preview','crop','outpaint','mask','brush','resize','grid','adjust','lossless'].includes(mode) ? mode : 'preview';
     if(prev === 'adjust' && imageEditMode !== 'adjust' && window.imageAdjustLeaveMode) window.imageAdjustLeaveMode();
+    if(prev === 'lossless' && imageEditMode !== 'lossless' && window.losslessEditLeaveMode) window.losslessEditLeaveMode();
     const cropCanvasEl = document.getElementById('cropCanvas');
     const previewStageEl = document.getElementById('previewStage');
     const editStageEl = document.getElementById('imageEditStage');
@@ -18387,6 +20503,7 @@ function setImageEditMode(mode, userTouched=false){
     cropCanvasEl.style.display = isPreview ? 'none' : '';
     previewStageEl.style.display = isPreview ? 'inline-flex' : 'none';
     editStageEl?.classList.toggle('preview-mode', isPreview);
+    if(editStageEl) editStageEl.style.display = imageEditMode === 'lossless' ? 'none' : '';
     editPanelEl?.classList.toggle('video-preview-mode', isVideoPreview);
     if(previewDownloadBtn) previewDownloadBtn.style.display = isPreview ? 'inline-flex' : 'none';
     if(previewDownloadAllBtn) previewDownloadAllBtn.style.display = isPreview && !isVideoPreview && previewDownloadGroupItems().length > 1 ? 'inline-flex' : 'none';
@@ -18403,6 +20520,7 @@ function setImageEditMode(mode, userTouched=false){
     cropCanvasEl.classList.toggle('grid-mode', imageEditMode === 'grid');
     cropCanvasEl.classList.toggle('outpaint-mode', imageEditMode === 'outpaint');
     cropCanvasEl.classList.toggle('adjust-mode', imageEditMode === 'adjust');
+    cropCanvasEl.classList.toggle('lossless-mode', imageEditMode === 'lossless');
     syncGridCustomCursor();
     document.querySelectorAll('[data-image-edit-mode]').forEach(btn => btn.classList.toggle('active', btn.dataset.imageEditMode === imageEditMode));
     document.getElementById('imagePreviewTools').classList.toggle('active', isPreview && !isVideoPreview);
@@ -18412,6 +20530,7 @@ function setImageEditMode(mode, userTouched=false){
     document.getElementById('imageResizeTools')?.classList.toggle('active', imageEditMode === 'resize');
     document.getElementById('imageGridTools').classList.toggle('active', imageEditMode === 'grid');
     document.getElementById('imageAdjustTools')?.classList.toggle('active', imageEditMode === 'adjust');
+    document.getElementById('imageLosslessTools')?.classList.toggle('active', imageEditMode === 'lossless');
     if(imageEditMode === 'grid' && gridOperationMode === 'join' && !canGridJoinCurrentNode()) gridOperationMode = 'split';
     syncGridOperationControls();
     syncGridGapValue();
@@ -18437,6 +20556,10 @@ function setImageEditMode(mode, userTouched=false){
             document.getElementById('imageEditTitle').textContent = '专业调色';
             document.getElementById('imageEditSub').textContent = '预设与参数实时预览，应用后生成新图片节点';
             applyBtn.innerHTML = `<i data-lucide="wand-sparkles" class="w-4 h-4"></i><span>应用调色</span>`;
+        } else if(imageEditMode === 'lossless'){
+            document.getElementById('imageEditTitle').textContent = '无损改图';
+            document.getElementById('imageEditSub').textContent = '上传原图 + AI 改后的图，自动对齐/校色，只把改动那块合进来；应用后生成新图片节点';
+            applyBtn.innerHTML = '<i data-lucide="eraser" class="w-4 h-4"></i><span>应用无损改图</span>';
         } else if(imageEditMode === 'resize'){
             document.getElementById('imageEditTitle').textContent = '缩放图片';
             document.getElementById('imageEditSub').textContent = '选择缩小倍数，应用会替换当前原图';
@@ -18466,6 +20589,7 @@ function setImageEditMode(mode, userTouched=false){
     resizeEditDrawCanvas();
     if(imageEditMode === 'grid') refreshGridSplitPreview();
     else if(imageEditMode === 'adjust'){ clearEditDrawing(true); if(window.imageAdjustEnterMode) window.imageAdjustEnterMode(); requestAnimationFrame(() => { syncImageEditOverflow(); }); }
+    else if(imageEditMode === 'lossless'){ clearEditDrawing(true); if(window.losslessEditEnterMode) window.losslessEditEnterMode(); requestAnimationFrame(() => { syncImageEditOverflow(); }); }
     else if(imageEditMode === 'crop' || imageEditMode === 'resize' || imageEditMode === 'outpaint' || prev === 'grid') clearEditDrawing(true);
     syncEditDrawingHistoryButtons();
     syncBrushToolButtons();
@@ -20341,6 +22465,9 @@ function closeImageEditor(){
     if(cropCanvasEl){ cropCanvasEl.style.width = ''; cropCanvasEl.style.height = ''; }
     const textCanvas = editTextCanvas();
     if(textCanvas){ textCanvas.style.left = ''; textCanvas.style.top = ''; }
+    /* 直接关弹窗走不到 setImageEditMode 的离开分支，主题观察者和选择器在这里收尾 */
+    losslessEditClosePicker(true);
+    losslessEditUnwatchTheme();
     updatePreviewNavButtons();
 }
 function clampCrop(){
@@ -20721,6 +22848,7 @@ function applyImageEdit(){
     if(imageEditMode === 'resize') return applyImageResize();
     if(imageEditMode === 'grid') return applyImageGridSplit();
     if(imageEditMode === 'adjust') return applyImageAdjust();
+    if(imageEditMode === 'lossless') return applyLosslessEdit();
     return applyImageCrop();
 }
 let lastComposerNodeId = '';
@@ -20782,9 +22910,10 @@ function loadPromptDraft(subject){
     }
     if(subject?.promptDraftHtml){
         const hasToken = String(subject.promptDraftHtml || '').includes('mention-image-token');
+        const draftSource = subject.promptDraftTouched ? subject.promptDraftText : (subject.runPrompt || subject.promptDraftText);
         promptInput.innerHTML = hasToken
             ? subject.promptDraftHtml
-            : (promptHtmlWithMentionTokens(subject.runPrompt || subject.promptDraftText || '', subject.runPromptRefs || []) || subject.promptDraftHtml);
+            : (promptHtmlWithMentionTokens(draftSource || '', subject.runPromptRefs || []) || subject.promptDraftHtml);
     } else if(typeof subject?.runPrompt === 'string'){
         const rebuilt = promptHtmlWithMentionTokens(subject.runPrompt, subject.runPromptRefs || []);
         if(rebuilt) promptInput.innerHTML = rebuilt;
@@ -21731,13 +23860,16 @@ async function handleSmartImageDropPayload(payload, targetId='', opts={}){
         toast(e.message || tr('smart.toastUploadFail'));
     }
 }
-// 「适配输入」按参考图真实像素出尺寸；'自动'/'自定义'档位是用户明确选的，优先让位给它们。
+// 「适配输入」保留参考图比例，但尺寸仍按用户选的档位算；'自动'/'自定义'档位是用户明确选的，优先让位给它们。
 function fitSourceSize(sourceSettings){
     if(sourceSettings.ratio !== 'source') return '';
-    if(['auto','custom'].includes(sourceSettings.resolution)) return '';
+    if(API_RES_LEVELS.indexOf(sourceSettings.resolution) < 0) return '';
     const width = Number(sourceSettings.sourceWidth) || 0;
     const height = Number(sourceSettings.sourceHeight) || 0;
-    return width > 0 && height > 0 ? NovaSizePolicy.fitSource(width, height, sourceSettings.model) : '';
+    if(width <= 0 || height <= 0) return '';
+    const divisor = gcdInt(width, height);
+    const ratio = `${Math.max(1, Math.round(width / divisor))}:${Math.max(1, Math.round(height / divisor))}`;
+    return apiImageSize('source', sourceSettings.resolution, ratio, '', sourceSettings.model);
 }
 function sizeForRun(sourceSettings=settings){
     const fitted = fitSourceSize(sourceSettings);
@@ -21766,19 +23898,38 @@ function expectedOutputSize(){
     }
     return {w:1024, h:1024};
 }
-function explicitRequestOutputSizeForPending(){
-    if(isApiLikeEngine(settings.engine) && settings.apiKind !== 'video'){
-        const parsed = parseSizeValue(sizeForRun());
+/* 「跟随来源素材」的档位（适配比例 / 自定义）：比例和像素都算不出来时，apiImageSize 会静默退回
+   方形尺寸表，宽高就成了同一个数。这里显式判定「没有具体比例可算」，让调用方走源素材兜底。 */
+function ratioFollowsSource(ratioKey, customRatio, customSize){
+    if(ratioKey !== 'source' && ratioKey !== 'custom') return false;
+    if(parseRatioValue(customRatio) > 0) return false;
+    if(parseSizeValue(customSize)) return false;
+    return true;
+}
+function explicitRequestOutputSizeForPending(sourceSettings){
+    const explicit = sourceSettings !== undefined;
+    const active = sourceSettings || settings;
+    /* 视频的比例键是 videoAspect：adaptive / keep_ratio 不是具体比例，返回 null 让调用方维持原兜底。
+       videoAspect 只认调用方显式传入的本次请求参数；否则手点路径 options.ratio 会被全局设置抢走。 */
+    if(explicit && isApiLikeEngine(active.engine) && active.apiKind === 'video'){
+        const aspect = parseRatioValue(active.videoAspect);
+        if(aspect > 0) return aspect >= 1 ? {w:Math.round(aspect * 1000), h:1000} : {w:1000, h:Math.round(1000 / aspect)};
+        return null;
+    }
+    if(isApiLikeEngine(active.engine) && active.apiKind !== 'video'){
+        if(ratioFollowsSource(active.ratio, active.customRatio, active.customSize)) return null;
+        const parsed = parseSizeValue(sizeForRun(active));
         if(parsed) return {w:Number(parsed.width) || 1024, h:Number(parsed.height) || 1024};
     }
-    if(settings.engine === 'modelscope'){
-        const sizeStr = apiImageSize(settings.msRatio || 'square', settings.msResolution || '1k', settings.msCustomRatio || '', settings.msCustomSize || '');
+    if(active.engine === 'modelscope'){
+        if(ratioFollowsSource(active.msRatio, active.msCustomRatio, active.msCustomSize)) return null;
+        const sizeStr = apiImageSize(active.msRatio || 'square', active.msResolution || '1k', active.msCustomRatio || '', active.msCustomSize || '');
         const parsed = parseSizeValue(sizeStr);
         if(parsed) return {w:Number(parsed.width) || 1024, h:Number(parsed.height) || 1024};
     }
-    if(settings.engine === 'comfy' && settings.comfyMode === 'text'){
-        const w = Number(settings.width) || 1024;
-        const h = Number(settings.height) || 1024;
+    if(active.engine === 'comfy' && active.comfyMode === 'text'){
+        const w = Number(active.width) || 1024;
+        const h = Number(active.height) || 1024;
         return {w, h};
     }
     return null;
@@ -21813,6 +23964,18 @@ function displayBoxFromNaturalSize(size){
         MEDIA_NODE_DEFAULT_SCALE
     );
     return {w:layout.width, h:layout.height};
+}
+/* 生成中的占位框按「本次请求」的比例算：和真正跑生成时用同一份参数口径 ——
+   前端 run 是 {...settings, ...smartSettingsForNode(node)}，后端是 {**canvas.settings, **node.runSettings}。
+   节点自己的 runSettings 只是覆盖层：助手建节点时常常只写 provider/model、不写比例，
+   只读它就会把「没写」当成「1:1」，占位框凭空变成正方形。节点没有 runSettings（或不是对象）时
+   仍返回 null，调用方保持原有兜底尺寸。 */
+function pendingRequestBoxForNode(node){
+    const own = node && node.runSettings;
+    if(!own || typeof own !== 'object' || Array.isArray(own)) return null;
+    const requestSize = explicitRequestOutputSizeForPending(Object.assign({}, settings, own));
+    if(!requestSize) return null;
+    return displayBoxFromNaturalSize(requestSize);
 }
 function pendingBaseBoxSize(options={}){
     const requestSize = explicitRequestOutputSizeForPending();
@@ -23640,10 +25803,17 @@ function syncCascadeRunButton(node=selectedNode()){
     const runningForNode = Boolean(loopRunState);
     cascadeRunBtn.disabled = !visible || (!runningForNode && Boolean(node?.running)) || Boolean(loopRunState?.stopRequested);
     cascadeRunBtn.classList.toggle('is-stop', runningForNode);
-    cascadeRunBtn.innerHTML = runningForNode
-        ? `<i data-lucide="square"></i><span>${escapeHtml(smartCascadeStopText(Boolean(loopRunState?.stopRequested)))}</span>`
-        : `<i data-lucide="workflow"></i><span>${escapeHtml(tr('smart.loopRunAll'))}</span>`;
-    refreshIcons();
+    const stopRequested = Boolean(loopRunState?.stopRequested);
+    const mode = runningForNode ? (stopRequested ? 'stopping' : 'stop') : 'run';
+    if(cascadeRunBtn.dataset.runMode !== mode){
+        cascadeRunBtn.dataset.runMode = mode;
+        /* 纯图标方键：26px 宽塞不下文字，文案改挂 title + aria-label */
+        cascadeRunBtn.innerHTML = runningForNode ? '<i data-lucide="square"></i>' : '<i data-lucide="workflow"></i>';
+        const label = runningForNode ? smartCascadeStopText(stopRequested) : tr('smart.loopRunAll');
+        cascadeRunBtn.title = label;
+        cascadeRunBtn.setAttribute('aria-label', label);
+        refreshIcons();
+    }
 }
 /* ── 框选运行：一键运行框选中的链路结尾节点 ── */
 function runnableSelectedCascadeTargets(){
@@ -23723,9 +25893,10 @@ async function runSelectedNodesCascade(){
 function loadNodePromptDraftToInput(node){
     if(node?.promptDraftHtml) {
         const hasToken = String(node.promptDraftHtml || '').includes('mention-image-token');
+        const draftSource = node.promptDraftTouched ? node.promptDraftText : (node.runPrompt || node.promptDraftText);
         promptInput.innerHTML = hasToken
             ? node.promptDraftHtml
-            : (promptHtmlWithMentionTokens(node.runPrompt || node.promptDraftText || '', node.runPromptRefs || []) || node.promptDraftHtml);
+            : (promptHtmlWithMentionTokens(draftSource || '', node.runPromptRefs || []) || node.promptDraftHtml);
     } else {
         const rebuilt = promptHtmlWithMentionTokens(node?.runPrompt || '', node?.runPromptRefs || []);
         if(rebuilt) promptInput.innerHTML = rebuilt;
@@ -26118,7 +28289,12 @@ shell.oncontextmenu = e => {
         openCreateMenu(e, {groupId:groupEl.dataset.id});
         return;
     }
-    if(e.target.closest('.image-node')) return;
+    const nodeEl = e.target.closest('.image-node');
+    if(nodeEl){
+        if(e.target.closest('input,textarea,[contenteditable="true"],.smart-node-floating-menu,.node-inline-editor')) return;
+        openSmartNodeMenu(e, nodeEl.dataset.id);
+        return;
+    }
     openCreateMenu(e);
 };
 shell.ondblclick = e => {
@@ -26156,6 +28332,20 @@ smartArrangeBtn?.addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();
     arrangeSelectedSmartNodes();
+});
+const smartPickSelectedBtn = document.getElementById('smartPickSelectedBtn');
+smartPickSelectedBtn?.addEventListener('mousedown', e => e.stopPropagation());
+smartPickSelectedBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    openSmartPickViewer(pickableSelectedNodeIds());
+});
+const smartConcatVideosBtn = document.getElementById('smartConcatVideosBtn');
+smartConcatVideosBtn?.addEventListener('mousedown', e => e.stopPropagation());
+smartConcatVideosBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    concatSelectedVideos();
 });
 /* ═══ 端口磁性跟随：鼠标靠近节点时，端口向外探出并追随鼠标 ═══ */
 const PORT_FOLLOW_RANGE = 80;   /* 生效半径（屏幕像素） */
@@ -26686,7 +28876,7 @@ window.onmouseup = e => {
         panState = null;
         shell.classList.remove('panning');
         document.body.classList.remove('smart-board-pan');
-        scheduleSave();
+        scheduleViewportSave();
         setTimeout(() => { didPan = false; }, 0);
     }
     if(smartMinimapDrag){
@@ -26860,7 +29050,7 @@ document.addEventListener('gesturechange', e => {
     viewport.x = gestureState.originX - gestureState.worldX * newScale;
     viewport.y = gestureState.originY - gestureState.worldY * newScale;
     applyViewport();
-    scheduleSave();
+    scheduleViewportSave();
 });
 document.addEventListener('gestureend', e => {
     if(gestureState) document.body.classList.remove('smart-board-pan');
@@ -26947,7 +29137,8 @@ shell.addEventListener('wheel', e => {
         viewport.y -= e.deltaY;
         applyViewport();
     }
-    scheduleSave();
+    /* 缩放/平移只改视口，不是内容改动：记在本机，不再把整张画布 PUT 给后端（旧行为会刷新「更新于」并引发多端 409） */
+    scheduleViewportSave();
 }, { passive: false, capture: true });
 shell.ondragover = e => setSmartDropCopyEffect(e, true);
 shell.ondrop = async e => {
@@ -27012,6 +29203,20 @@ window.addEventListener('keydown', e => {
             return;
         }
     }
+    if((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && key === 'a' && !isEditableTarget(e.target) && !imageEditModal.classList.contains('open')){
+        e.preventDefault();
+        selectAllSmartNodes();
+        return;
+    }
+    if((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && key === 'd' && !isEditableTarget(e.target) && !imageEditModal.classList.contains('open')){
+        e.preventDefault();
+        duplicateSelectedSmartNodes();
+        return;
+    }
+    if(!e.ctrlKey && !e.metaKey && !e.altKey && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)
+        && !isEditableTarget(e.target) && !imageEditModal.classList.contains('open') && !smartNodeOverlay){
+        if(nudgeSelectedSmartNodes(e.key, e.shiftKey, e.repeat)){ e.preventDefault(); return; }
+    }
     if((e.ctrlKey || e.metaKey) && key === 'c' && !isEditableTarget(e.target)){
         const selectionText = window.getSelection?.().toString() || '';
         if(selectionText) return;
@@ -27031,10 +29236,20 @@ window.addEventListener('keydown', e => {
         closeImageEditor();
         return;
     }
+    if((e.ctrlKey || e.metaKey) && ((key === 'z' && e.shiftKey) || (key === 'y' && !e.shiftKey)) && !isEditableTarget(e.target)){
+        e.preventDefault();
+        performRedo();
+        return;
+    }
     if((e.ctrlKey || e.metaKey) && key === 'z' && !isEditableTarget(e.target)){
         e.preventDefault();
         performUndo();
         return;
+    }
+    if(e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !isEditableTarget(e.target) && selectedIds.length > 1){
+        const alignByCode = {KeyA:'left', KeyD:'right', KeyW:'top', KeyS:'bottom', KeyH:'hcenter', KeyV:'vcenter'};
+        const mode = alignByCode[e.code];
+        if(mode){ e.preventDefault(); alignSelectedSmartNodes(mode); return; }
     }
     if((e.key === 'Delete' || e.key === 'Backspace') && (selectedId || selectedIds.length) && !isEditableTarget(e.target)){
         e.preventDefault();
@@ -27109,6 +29324,7 @@ if(promptResize){
     });
 }
 runBtn.onclick = () => {
+    requestSmartNotificationPermission();
     const node = selectedNode();
     if(smartGenerationStopRequestedFor(node)) return;
     if(smartNodeRunActive(node)){ requestSmartGenerationStop(node); return; }
@@ -27627,7 +29843,14 @@ promptInput.addEventListener('mouseup', saveMentionRange);
 promptInput.addEventListener('focus', saveMentionRange);
 promptInput.addEventListener('keydown', event => {
     if(event.key === 'Escape') closeMentionPicker();
+    /* Cmd/Ctrl+Enter 直接生成（等同点右下角的生成按钮）；输入法组字中不触发 */
+    if((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !event.isComposing){
+        event.preventDefault();
+        closeMentionPicker();
+        if(runBtn && !runBtn.disabled) runBtn.click();
+    }
 });
+if(runBtn && !/Enter/.test(runBtn.title || '')) runBtn.title = ((runBtn.title || '生成') + '（⌘/Ctrl + Enter）').trim();
 promptInput.addEventListener('mouseover', event => {
     const token = event.target.closest?.('.mention-image-token');
     if(!token) return;
@@ -27678,7 +29901,11 @@ document.addEventListener('click', event => {
     if(!event.target.closest('.prompt-template-panel') && !event.target.closest('.prompt-preset-edit') && !event.target.closest('#composerTemplateBtn')) closePromptTemplatePanel();
 });
 document.addEventListener('keydown', event => {
-    if(event.key === 'Escape') { closeSmartLogLightbox(); closeAllSmartPopovers(); closeCreateMenu(); closeSmartCanvasLog(); closeSmartCanvasShortcuts(); closePromptPresetPanel(); closePromptTemplatePanel(); closeSmartLabelPanel(); if(smartTextEditorOpen()) closeSmartTextEditor(true); }
+    if(event.key === 'Escape') {
+        closeSmartLogLightbox(); closeAllSmartPopovers(); closeCreateMenu(); closeSmartCanvasLog(); closeSmartCanvasShortcuts(); closePromptPresetPanel(); closePromptTemplatePanel(); closeSmartLabelPanel(); if(smartTextEditorOpen()) closeSmartTextEditor(true);
+        /* 工作流、版本历史、导出菜单以前按 Esc 关不掉 */
+        closeSmartWorkflowTransferModal(); closeCanvasVersionsPanel(); closeSmartExportMenu();
+    }
 });
 function cropDragModeFromPointer(event){
     const explicit = event.target.closest?.('[data-crop-handle]')?.dataset?.cropHandle;
@@ -28001,6 +30228,7 @@ async function openCanvasVersionsPanel(){
     const panel = document.getElementById('versionPanel');
     if(!panel || !canvasId) return;
     if(panel.classList.contains('open')){ closeCanvasVersionsPanel(); return; }
+    closeSmartSidePanels('versions');
     panel.classList.add('open');
     const listEl = document.getElementById('versionList');
     listEl.innerHTML = '<div class="version-empty">加载中…</div>';
@@ -28082,6 +30310,7 @@ async function restoreCanvasVersion(version){
         const data = await res.json();
         toast(`已还原到 v${version}`);
         canvas = data.canvas;
+        setSmartServerBase(canvas.nodes, canvas.connections);
         nodes = (Array.isArray(canvas.nodes) ? canvas.nodes : []).map(normalizeLegacySmartNode).filter(Boolean);
         ensureAllSmartNodeAssetIds();
         canvas.connections = Array.isArray(canvas.connections) ? canvas.connections : [];
@@ -28139,6 +30368,7 @@ window.onload = async () => {
     await loadCanvas();
     syncApiKindToggleVisibility();
     render();
+    try { consumeHomeCanvasSeed(); } catch(e) { console.warn('[home-seed]', e); }
 };
 window.applyGridJoinPreset = applyGridJoinPreset;
 window.applyGridPreset = applyGridPreset;
@@ -28192,6 +30422,16 @@ window.zoomBarFitAll = zoomBarFitAll;
 window.zoomBarReset = zoomBarReset;
 window.zoomBarZoomIn = zoomBarZoomIn;
 window.zoomBarZoomOut = zoomBarZoomOut;
+/* 底部栏的创建 / 撤销 / 恢复入口：创建走和双击菜单完全相同的 createNodeFromMenu，只是落点固定在视口中央 */
+window.zoomBarCreate = function(type){
+    closeCreateMenu();
+    createMenuPoint = null;
+    createMenuGroupId = '';
+    createMenuDropConnect = null;
+    return createNodeFromMenu(type || 'image');
+};
+window.zoomBarUndo = () => performUndo();
+window.zoomBarRedo = () => performRedo();
 // ── 网格点范围点亮：鼠标周围 24px 网格点逐点变亮（星星点亮，中心最亮、向外平滑衰减）──
 (function(){
     if(!shell || !document.body) return;
@@ -28511,16 +30751,18 @@ window.imageAdjust = {
         const image = cur && cur.image;
         const img = document.getElementById('cropImage');
         const url = (node && node.url) || (image && image.url) || (img && img.src);
-        return { url: url || '', name: (node && (node.name || node.title)) || (image && image.name) || 'image' };
+        const raw = node && node.images && node.images[cur.index];
+        /* 调色结果节点带 adjust（原图 + 参数），再次调色从原图继续 */
+        return { url: url || '', name: (image && image.name) || (node && (node.name || node.title)) || 'image', adjust: (raw && raw.adjust) || (image && image.adjust) || null };
     },
     upload: function (blob, name) { return uploadCroppedBlob(blob, name); },
-    addResult: async function (file, fromAI) {
+    addResult: async function (file, fromAI, meta) {
         const cur = currentEditImage();
         const node = cur && cur.node;
         if (!node) return;
         const layout = typeof imageLayout === 'function' ? imageLayout(node.images || [], nodeScale(node), node) : { width: 260 };
         const x = (node.x || 0) + (layout.width || 260) + 40;
-        const items = [{ url: file.url, name: file.name }];
+        const items = [Object.assign({ url: file.url, name: file.name }, meta && meta.adjust ? { adjust: meta.adjust } : {})];
         const outNode = createNode(x, (node.y || 0) + 12, items);
         if (outNode) { outNode.title = fromAI ? 'AI 细节增强' : '调色'; }
         if (outNode && typeof addConnection === 'function') {
@@ -28529,6 +30771,385 @@ window.imageAdjust = {
     },
     finish: function () { closeImageEditor(); render(); scheduleSave(); }
 };
+/* ═══ 无损改图（static/tools/lossless-edit/index.html）桥接 ═══
+   本地内置上游工具（CC BY-NC-SA 4.0，作者 陶醉），iframe 懒创建、离开模式不卸载，
+   避免重进时丢掉工具内的对齐/蒙版进度。消息一律校验 event.source，targetOrigin 用 location.origin。 */
+const LOSSLESS_EDIT_FRAME_ID = 'losslessEditFrame';
+const LOSSLESS_EDIT_SOURCE = 'novai-lossless-edit';
+const LOSSLESS_EDIT_HOST_SOURCE = 'novai-lossless-edit-host';
+let losslessEditPendingAbort = null;
+function losslessEditToolsEl(){ return document.getElementById('imageLosslessTools'); }
+function losslessEditFrame(){ return document.getElementById(LOSSLESS_EDIT_FRAME_ID); }
+function losslessEditTheme(){
+    const root = document.documentElement;
+    const dark = !!(root && root.classList.contains('theme-dark'))
+        || !!(document.body && document.body.classList.contains('theme-dark'));
+    return dark ? 'dark' : 'light';
+}
+let losslessEditThemeObserver = null;
+function losslessEditSyncTheme(){
+    if(losslessEditFrame()) losslessEditPost('theme', {theme:losslessEditTheme()});
+}
+function losslessEditWatchTheme(){
+    if(losslessEditThemeObserver || typeof MutationObserver === 'undefined') return;
+    losslessEditThemeObserver = new MutationObserver(losslessEditSyncTheme);
+    losslessEditThemeObserver.observe(document.documentElement, {attributes:true, attributeFilter:['class']});
+}
+function losslessEditUnwatchTheme(){
+    if(!losslessEditThemeObserver) return;
+    losslessEditThemeObserver.disconnect();
+    losslessEditThemeObserver = null;
+}
+function losslessEditPost(type, payload){
+    const frame = losslessEditFrame();
+    const target = frame && frame.contentWindow;
+    if(!target) return false;
+    try {
+        target.postMessage(Object.assign({source:LOSSLESS_EDIT_HOST_SOURCE, type}, payload || {}), location.origin);
+        return true;
+    } catch(e) { return false; }
+}
+function losslessEditIframeUrl(src){
+    const params = new URLSearchParams();
+    params.set('embed', '1');
+    if(src?.orig?.url) params.set('orig', src.orig.url);
+    if(src?.ai?.url) params.set('ai', src.ai.url);
+    params.set('theme', losslessEditTheme());
+    return '/static/tools/lossless-edit/index.html?' + params.toString();
+}
+function losslessEditSourceKey(node, src){
+    return [node?.id || '', (src?.orig && src.orig.url) || '', (src?.ai && src.ai.url) || ''].join('|');
+}
+/* 进入模式：第一次进入才插 iframe（?orig=&ai= 让工具自己载入）；同一节点的同一组图重复进入什么都不做
+   （保住工具内进度）；换节点/换图走 prefill 消息，不重载 iframe。 */
+function losslessEditEnterMode(){
+    const cur = currentEditImage();
+    const node = cur.node;
+    if(!node) return;
+    losslessEditWatchTheme();
+    const src = window.losslessEdit.sourcesFor(node, cur.index);
+    const key = losslessEditSourceKey(node, src);
+    const host = losslessEditToolsEl();
+    if(!host) return;
+    let frame = losslessEditFrame();
+    if(!frame){
+        frame = document.createElement('iframe');
+        frame.id = LOSSLESS_EDIT_FRAME_ID;
+        frame.className = 'lossless-edit-frame';
+        frame.title = '无损改图';
+        frame.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
+        frame.setAttribute('referrerpolicy', 'same-origin');
+        frame.dataset.losslessSource = key;
+        frame.src = losslessEditIframeUrl(src);
+        host.appendChild(frame);
+        return;
+    }
+    losslessEditSyncTheme();
+    if(frame.dataset.losslessSource === key) return;
+    frame.dataset.losslessSource = key;
+    /* reset:true → 工具侧先清空本次没提供的槽位，避免换图/空图进入时左槽残留上一张 */
+    const prefill = {reset:true};
+    if(src.orig?.url) prefill.orig = src.orig.url;
+    if(src.ai?.url) prefill.ai = src.ai.url;
+    losslessEditPost('prefill', prefill);
+}
+function losslessEditLeaveMode(){
+    /* 离开模式保留 iframe（下次进来不重载）；只中断还没回来的取结果请求 */
+    losslessEditUnwatchTheme();
+    losslessEditClosePicker(true);
+    if(losslessEditPendingAbort) losslessEditPendingAbort(new Error('已离开无损改图模式'));
+}
+window.losslessEditEnterMode = losslessEditEnterMode;
+window.losslessEditLeaveMode = losslessEditLeaveMode;
+function losslessEditDataUrlToBlob(dataUrl){
+    if(typeof dataUrl !== 'string' || dataUrl.slice(0, 5) !== 'data:') return null;
+    const comma = dataUrl.indexOf(',');
+    if(comma < 0) return null;
+    const header = dataUrl.slice(5, comma);
+    const mime = header.split(';')[0] || 'image/png';
+    try {
+        const binary = /;base64/i.test(header) ? atob(dataUrl.slice(comma + 1)) : decodeURIComponent(dataUrl.slice(comma + 1));
+        const bytes = new Uint8Array(binary.length);
+        for(let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i) & 0xff;
+        return new Blob([bytes], {type:mime});
+    } catch(e) { return null; }
+}
+/* 向 iframe 要合成结果：只认「本 iframe 发来 + 工具方标记」的消息，带 15s 超时 */
+function losslessEditRequestResult(timeoutMs=15000){
+    return new Promise((resolve, reject) => {
+        const frame = losslessEditFrame();
+        const target = frame && frame.contentWindow;
+        if(!target){ reject(new Error('无损改图面板还没准备好')); return; }
+        let settled = false;
+        const finish = (fn, value) => {
+            if(settled) return;
+            settled = true;
+            clearTimeout(timer);
+            window.removeEventListener('message', onMessage);
+            if(losslessEditPendingAbort === abort) losslessEditPendingAbort = null;
+            fn(value);
+        };
+        const abort = err => finish(reject, err);
+        const onMessage = event => {
+            if(event.source !== target) return;
+            const data = event.data || {};
+            if(data.source !== LOSSLESS_EDIT_SOURCE) return;
+            if(data.type === 'result') finish(resolve, data);
+            else if(data.type === 'error') finish(reject, new Error(data.message || '工具返回错误'));
+        };
+        const timer = setTimeout(() => finish(reject, new Error('工具 15 秒没有返回结果')), timeoutMs);
+        window.addEventListener('message', onMessage);
+        losslessEditPendingAbort = abort;
+        if(!losslessEditPost('request-result')) finish(reject, new Error('无损改图面板还没准备好'));
+    });
+}
+async function applyLosslessEdit(){
+    const {node, image} = currentEditImage();
+    if(!node) return;
+    if(!losslessEditFrame()){ toast('无损改图面板还没准备好，请重开一次'); return; }
+    const applyBtn = document.getElementById('imageEditApplyBtn');
+    if(applyBtn) applyBtn.disabled = true;
+    try {
+        const result = await losslessEditRequestResult();
+        const blob = losslessEditDataUrlToBlob(result.dataUrl);
+        if(!blob) throw new Error('工具没有回传有效的图片');
+        const base = safeExportFileName((downloadNameForMediaItem(image, 'image') || image?.name || 'image').replace(/\.[^.]+$/, ''), 'image');
+        const file = await window.losslessEdit.upload(blob, base + '_lossless.png');
+        if(!file) throw new Error('图片上传失败，未能生成无损改图节点');
+        await window.losslessEdit.addResult(file, false, {kind:'image', natural_w:Number(result.width) || 0, natural_h:Number(result.height) || 0});
+        window.losslessEdit.finish();
+    } catch(err) {
+        /* 用户已经离开这个模式/关掉弹窗时不必再报错，其余失败一律出声 */
+        if(imageEditMode === 'lossless' && imageEditModal.classList.contains('open')){
+            toast('无损改图失败：' + (err && err.message ? err.message : err));
+        }
+    } finally {
+        if(applyBtn) applyBtn.disabled = false;
+    }
+}
+window.losslessEdit = {
+    /* 修改图 = 被点击的那张（node.images[index]，必须带 url）；原图留空由用户自己拖 */
+    sourcesFor: function(node, index){
+        const images = (Array.isArray(node?.images) ? node.images : []).filter(img => img && img.url);
+        const clicked = (node?.images || [])[index];
+        const ai = (clicked && clicked.url) ? clicked : (images[0] || null);
+        return {
+            orig: null,
+            ai: ai,
+            name: (node && (node.title || node.name)) || imageForDisplay(node?.images?.[index])?.name || 'image'
+        };
+    },
+    upload: function(blob, name){ return uploadCroppedBlob(blob, name); },
+    addResult: async function(file, fromAI, meta){
+        const cur = currentEditImage();
+        const node = cur && cur.node;
+        if(!node || !file) return null;
+        const layout = typeof imageLayout === 'function' ? imageLayout(node.images || [], nodeScale(node), node) : {width:260};
+        const x = (node.x || 0) + (layout.width || 260) + 40;
+        const items = [Object.assign({url:file.url, name:file.name}, meta || {})];
+        const outNode = createNode(x, (node.y || 0) + 12, items);
+        if(outNode) outNode.title = '无损改图';
+        if(outNode && typeof addConnection === 'function'){
+            try { addConnection(node.id, outNode.id); } catch (e) {}
+        }
+        return outNode;
+    },
+    finish: function(){ closeImageEditor(); render(); scheduleSave(); }
+};
+/* ── 工具里点素材槽 → 宿主画布挑图（pick-request / pick-result / pick-cancel）──
+   只处理「本 iframe 发来 + 工具方标记」的 pick-request；选中回 URL，取消回 pick-cancel。
+   选择器挂在 iframe 宿主里、盖在 iframe 之上，底部的「应用无损改图」不被遮挡。 */
+let losslessEditPickSlot = null;
+let losslessEditPickSearch = '';
+function losslessEditPickOverlay(){ return document.getElementById('losslessPickOverlay'); }
+function losslessEditPickLabel(slot){ return slot === 'ai' ? '修改图' : '原图'; }
+function losslessEditPickNodeLabel(node){
+    return nodeAliasText(node) || String(node?.title || node?.name || '').trim() || '未命名节点';
+}
+/* 缩略图密度：三档只改网格最小列宽，选择记在 localStorage。 */
+const LOSSLESS_PICK_DENSITIES = [
+    {key:'small', label:'小缩略图', min:72},
+    {key:'medium', label:'中缩略图', min:120},
+    {key:'large', label:'大缩略图', min:180}
+];
+const LOSSLESS_PICK_DENSITY_KEY = 'novai_lossless_pick_density';
+function losslessEditPickDensityIndex(key){
+    const i = LOSSLESS_PICK_DENSITIES.findIndex(item => item.key === key);
+    return i < 0 ? 1 : i;
+}
+let losslessEditPickDensity = (function(){
+    let saved = null;
+    try { saved = localStorage.getItem(LOSSLESS_PICK_DENSITY_KEY); } catch(e) {}
+    return LOSSLESS_PICK_DENSITIES[losslessEditPickDensityIndex(saved)].key;
+})();
+function losslessEditPickDensityCurrent(){
+    return LOSSLESS_PICK_DENSITIES[losslessEditPickDensityIndex(losslessEditPickDensity)];
+}
+function losslessEditPickDensityStep(step){
+    const i = losslessEditPickDensityIndex(losslessEditPickDensity);
+    const next = LOSSLESS_PICK_DENSITIES[(i + step + LOSSLESS_PICK_DENSITIES.length) % LOSSLESS_PICK_DENSITIES.length];
+    losslessEditPickDensity = next.key;
+    try { localStorage.setItem(LOSSLESS_PICK_DENSITY_KEY, next.key); } catch(e) {}
+    losslessEditPickSyncDensity();
+    return next.key;
+}
+function losslessEditPickSyncDensity(){
+    const overlay = losslessEditPickOverlay();
+    if(!overlay) return;
+    const density = losslessEditPickDensityCurrent();
+    const grid = overlay.querySelector('.lossless-pick-grid');
+    if(grid) grid.style.setProperty('--lossless-pick-min', density.min + 'px');
+    const btn = overlay.querySelector('[data-lossless-pick-density]');
+    if(btn){
+        btn.dataset.losslessPickDensity = density.key;
+        const label = btn.querySelector('span');
+        if(label) label.textContent = density.label;
+    }
+}
+/* 搜索严格按「别名 / 第N张 / 别名 第N张 / 别名 · 第N张」四种整串命中；不做子串、纯数字或纯序号兜底。 */
+function losslessEditPickMatch(query, alias, seq){
+    const q = String(query || '').trim();
+    if(!q) return true;
+    const a = String(alias || '');
+    const s = String(seq || '');
+    return q === a || q === s || q === a + ' ' + s || q === a + ' · ' + s;
+}
+/* 所有画布图片摊成一个扁平列表：每项 = 展示图 + 节点别名 + 第N张，顺序保持画布顺序。 */
+function losslessEditPickEntries(){
+    const list = [];
+    (Array.isArray(nodes) ? nodes : []).forEach(node => {
+        const alias = losslessEditPickNodeLabel(node);
+        (Array.isArray(node?.images) ? node.images : []).forEach((raw, i) => {
+            if(!raw || !raw.url) return;
+            list.push({item:imageForDisplay(raw), alias, seq:'第' + (i + 1) + '张'});
+        });
+    });
+    return list;
+}
+function losslessEditPickListHtml(){
+    const all = losslessEditPickEntries();
+    if(!all.length) return '<div class="lossless-pick-empty">画布上还没有带图的节点</div>';
+    const entries = all.filter(entry => losslessEditPickMatch(losslessEditPickSearch, entry.alias, entry.seq));
+    if(!entries.length) return '<div class="lossless-pick-empty">没有匹配「' + escapeHtml(String(losslessEditPickSearch || '').trim()) + '」的图片</div>';
+    const density = losslessEditPickDensityCurrent();
+    const cells = entries.map(entry => {
+        const url = entry.item.url || '';
+        const label = entry.alias + ' · ' + entry.seq;
+        const name = (entry.item.name || entry.seq) + ' · ' + entry.alias;
+        const thumb = smartMediaPreviewUrl(entry.item, 256) || url;
+        return '<button type="button" class="lossless-pick-item" data-lossless-pick-url="' + escapeAttr(url) + '" data-lossless-pick-name="' + escapeAttr(name) + '" title="' + escapeAttr(label) + '">'
+            + '<img class="lossless-pick-thumb" src="' + escapeAttr(thumb) + '" alt="" loading="lazy" draggable="false">'
+            + '<span class="lossless-pick-name">' + escapeHtml(label) + '</span>'
+            + '</button>';
+    }).join('');
+    return '<div class="lossless-pick-grid" style="--lossless-pick-min:' + density.min + 'px">' + cells + '</div>';
+}
+function losslessEditPickRenderList(){
+    const overlay = losslessEditPickOverlay();
+    if(!overlay) return;
+    const box = overlay.querySelector('.lossless-pick-list');
+    if(box) box.innerHTML = losslessEditPickListHtml();
+    losslessEditPickSyncDensity();
+}
+function losslessEditPickSearchInput(event){
+    losslessEditPickSearch = event && event.target ? event.target.value : '';
+    losslessEditPickRenderList();
+}
+function losslessEditOpenPicker(slot){
+    const host = losslessEditToolsEl();
+    if(!host) return;
+    losslessEditPickSlot = slot === 'ai' ? 'ai' : 'orig';
+    let overlay = losslessEditPickOverlay();
+    if(!overlay){
+        overlay = document.createElement('div');
+        overlay.id = 'losslessPickOverlay';
+        overlay.className = 'lossless-pick-overlay';
+        overlay.innerHTML = '<div class="smart-popover lossless-pick-panel" role="dialog" aria-modal="true" aria-label="选择画布图片">'
+            + '<div class="smart-popover-title lossless-pick-title"></div>'
+            + '<div class="lossless-pick-toolbar">'
+            + '<input class="lossless-pick-search" type="search" autocomplete="off" spellcheck="false" placeholder="搜索：图68 或 第1张" aria-label="搜索画布图片">'
+            + '<button type="button" class="lossless-pick-btn lossless-pick-density" data-lossless-pick-density="medium" title="缩略图密度"><i data-lucide="layout-grid" class="w-4 h-4"></i><span>中缩略图</span></button>'
+            + '</div>'
+            + '<div class="lossless-pick-list"></div>'
+            + '<div class="lossless-pick-foot">'
+            + '<button type="button" class="lossless-pick-btn" data-lossless-pick-upload><i data-lucide="upload" class="w-4 h-4"></i><span>本地上传</span></button>'
+            + '<button type="button" class="lossless-pick-btn" data-lossless-pick-cancel>取消</button>'
+            + '</div>'
+            + '<input class="lossless-pick-file" type="file" accept="image/*" hidden>'
+            + '</div>';
+        overlay.addEventListener('click', losslessEditPickClick);
+        overlay.querySelector('input[type=file]').addEventListener('change', event => losslessEditPickUpload(event.target));
+        overlay.querySelector('.lossless-pick-search').addEventListener('input', losslessEditPickSearchInput);
+        host.appendChild(overlay);
+    }
+    losslessEditPickSearch = '';
+    const searchEl = overlay.querySelector('.lossless-pick-search');
+    if(searchEl) searchEl.value = '';
+    overlay.querySelector('.lossless-pick-title').textContent = '选择画布图片 · ' + losslessEditPickLabel(losslessEditPickSlot);
+    losslessEditPickRenderList();
+    overlay.classList.add('open');
+    refreshIcons();
+}
+function losslessEditPickClick(event){
+    const overlay = losslessEditPickOverlay();
+    if(!overlay) return;
+    if(event.target === overlay){ losslessEditClosePicker(true); return; }
+    if(event.target.closest('[data-lossless-pick-cancel]')){ losslessEditClosePicker(true); return; }
+    if(event.target.closest('[data-lossless-pick-upload]')){ overlay.querySelector('input[type=file]')?.click(); return; }
+    if(event.target.closest('[data-lossless-pick-density]')){ losslessEditPickDensityStep(1); return; }
+    const pick = event.target.closest('[data-lossless-pick-url]');
+    if(pick) losslessEditPickResult(pick.dataset.losslessPickUrl, pick.dataset.losslessPickName);
+}
+function losslessEditClosePicker(sendCancel){
+    const overlay = losslessEditPickOverlay();
+    const slot = losslessEditPickSlot;
+    losslessEditPickSlot = null;
+    if(overlay) overlay.classList.remove('open');
+    if(sendCancel && slot) losslessEditPost('pick-cancel', {slot});
+}
+function losslessEditPickResult(url, name){
+    const slot = losslessEditPickSlot;
+    if(!slot || !url) return;
+    losslessEditPickSlot = null;
+    losslessEditPickOverlay()?.classList.remove('open');
+    losslessEditPost('pick-result', {slot, url, name:name || ''});
+}
+async function losslessEditPickUpload(input){
+    const file = input && input.files && input.files[0];
+    if(input) input.value = '';
+    if(!file) return;
+    try {
+        const uploaded = await window.losslessEdit.upload(file, file.name || 'lossless-pick.png');
+        if(!uploaded || !uploaded.url) throw new Error('上传没有返回地址');
+        losslessEditPickResult(uploaded.url, uploaded.name || file.name || '');
+    } catch(err) {
+        toast('上传失败：' + (err && err.message ? err.message : err));
+    }
+}
+function losslessEditPickOutside(event){
+    const overlay = losslessEditPickOverlay();
+    if(!overlay || !overlay.classList.contains('open')) return;
+    if(overlay.contains(event.target)) return;
+    losslessEditClosePicker(true);
+}
+function losslessEditOnMessage(event){
+    const frame = losslessEditFrame();
+    if(!frame || event.source !== frame.contentWindow) return;
+    const data = event.data || {};
+    if(data.source !== LOSSLESS_EDIT_SOURCE) return;
+    if(data.type === 'pick-request') losslessEditOpenPicker(data.slot);
+}
+function losslessEditPickKeydown(event){
+    if(event.key !== 'Escape') return;
+    const overlay = losslessEditPickOverlay();
+    if(!overlay || !overlay.classList.contains('open')) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    losslessEditClosePicker(true);
+}
+window.addEventListener('message', losslessEditOnMessage);
+window.addEventListener('keydown', losslessEditPickKeydown, true);
+document.addEventListener('pointerdown', losslessEditPickOutside, true);
 /* ══════════════════════════════════════════════════════════════════════════
    多维表格宿主（shared/table-node.js 的适配层）
 
@@ -28681,14 +31302,16 @@ function refSourceEntry(ref){
     const item = (src && Number.isFinite(index) && index >= 0) ? (src.images || [])[index] : null;
     return {size:imageSizeForRatio(item), item, url:ref.url || ''};
 }
+/* 一行里有多张参考图且比例不同时，比例固定取第一张（第一个能用尺寸说话的图片/视频）：
+   后面的图只当参考，不改这一行的比例。第一张读不出尺寸就返回 null，交给调用方的兜底链
+   （用户明确选的比例 → 继承上一行 → 原兜底）。 */
 async function rowSourceRatio(refs){
     for(const ref of (refs || [])){
-        const entry = refSourceEntry(ref);
-        if(!entry) continue;
-        if(entry.size) return entry.size;
-        if(!entry.url) continue;
         const kind = mediaKindForItem(ref);
-        if(kind !== 'image' && kind !== 'video') continue;
+        if(kind !== 'image' && kind !== 'video') continue;   // 非媒体（文件/文本等）不算「第一张」
+        const entry = refSourceEntry(ref);
+        if(!entry || !entry.url) return null;                // 第一张素材读不出来：不跳下一张，交给兜底链
+        if(entry.size) return entry.size;
         const measured = kind === 'video'
             ? await Promise.resolve(_probeVideoDimensions(entry.url)).catch(() => null)
             : await Promise.resolve(loadSmartOriginalImageDimensions(entry.url)).catch(() => null);
@@ -28697,6 +31320,7 @@ async function rowSourceRatio(refs){
             if(entry.item){ entry.item.natural_w = measured.w; entry.item.natural_h = measured.h; }
             return {w:measured.w, h:measured.h};
         }
+        return null;                                          // 第一张量不到：不跳下一张
     }
     return null;
 }
@@ -28773,7 +31397,9 @@ function batchResultNodeForRun(runId, sourceNode, meta, refs, ratio){
         .filter(conn => conn && conn.to === sourceNode.id)
         .map(conn => nodes.find(n => n.id === conn.from))
         .filter(n => n && n.type === 'table');
-    const totalRows = Math.max(1, Number(upstreamTables[0]?.table?.rows?.length) || 1);
+    /* 要跑几行看本轮真正派发的行数（勾选/可跑行数），不是整张表的行数：
+       否则 4 行勾 3 行时 pending=4，3 张落地后还差 1，节点永远停在生成中。 */
+    const totalRows = Math.max(1, Number(sourceNode && sourceNode._batchRunRows) || Number(upstreamTables[0]?.table?.rows?.length) || 1);
     undoSuppressed = true;
     try {
         output = createPendingOutputFromSource(sourceNode, totalRows, meta, {connectSource:false, selectOutput:false, refs, ratio});
@@ -28841,11 +31467,6 @@ function batchPendingSlotKinds(node, slots){
    completed 但图被 cleanHistoryImages 去重丢掉 → 中性格（不卡成转圈）。 */
 function batchRowGridHtml(node, imgs, layout, order){
     const thumb = Number(layout.thumb) > 0 ? Math.round(Number(layout.thumb)) : 96;
-    const total = order.length;
-    const cols = Number(layout.cols) > 0 ? Number(layout.cols) : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(total))));
-    const layoutVisibleRows = Math.max(1, Number(layout.visibleRows || layout.rows) || Math.ceil(total / cols));
-    const visibleRows = node?.sizeUserSet ? layoutVisibleRows : Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, layoutVisibleRows));
-    const maxHeight = visibleRows * thumb + Math.max(0, visibleRows - 1) * 8;
     const states = node.batchRowStates && typeof node.batchRowStates === 'object' ? node.batchRowStates : {};
     const byRow = new Map();
     imgs.forEach((img, index) => {
@@ -28854,16 +31475,31 @@ function batchRowGridHtml(node, imgs, layout, order){
         if(!byRow.has(rowNumber)) byRow.set(rowNumber, []);
         byRow.get(rowNumber).push({img:img, index:index});
     });
-    const cells = [];
+    /* 先按本轮行序铺格子（每行一张缩略图或一个进度格），同时记下哪些产出已经画过。 */
+    const drawn = new Set();
+    const rowCells = [];
     order.forEach(rowNumber => {
         const produced = byRow.get(Number(rowNumber)) || [];
         if(produced.length){
-            produced.forEach(entry => cells.push(batchRowThumbHtml(node, entry.img, entry.index)));
+            produced.forEach(entry => { rowCells.push(batchRowThumbHtml(node, entry.img, entry.index)); drawn.add(entry.index); });
             return;
         }
-        cells.push(batchRowSlotHtml(states[rowNumber] || 'queued', thumb));
+        const rowAspect = (node && node.batchRowAspects && Number(node.batchRowAspects[rowNumber])) || (node && node.batchRowAspect) || 1;
+        rowCells.push(batchRowSlotHtml(states[rowNumber] || 'queued', thumb, rowAspect));
     });
-    return '<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:' + cols + '; --thumb-size:' + thumb + 'px; --thumb-max-height:' + maxHeight + 'px">' + cells.join('') + '</div>';
+    /* 兜底：**节点里已有的产出必须全部画出来**，不管它在本轮行序里有没有位置。
+       断点续跑换了行集、结果节点被复用（runId 取不到时按生成节点 id 复用）等情况，
+       只按 order 画会让这些图凭空消失 —— 用户报的「群组拿不到最后一张图」。 */
+    imgs.forEach((img, index) => {
+        if(drawn.has(index)) return;
+        rowCells.push(batchRowThumbHtml(node, img, index));
+    });
+    const total = rowCells.length;
+    const cols = Number(layout.cols) > 0 ? Number(layout.cols) : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(total))));
+    const layoutVisibleRows = Math.max(1, Number(layout.visibleRows || layout.rows) || Math.ceil(total / cols));
+    const visibleRows = node?.sizeUserSet ? layoutVisibleRows : Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, layoutVisibleRows));
+    const maxHeight = visibleRows * thumb + Math.max(0, visibleRows - 1) * 8;
+    return '<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:' + cols + '; --thumb-size:' + thumb + 'px; --thumb-max-height:' + maxHeight + 'px">' + rowCells.join('') + '</div>';
 }
 function batchRowThumbHtml(node, img, index){
     const selected = selectedImage.nodeId === node.id && selectedImage.index === index ? 'image-selected' : '';
@@ -28872,8 +31508,9 @@ function batchRowThumbHtml(node, img, index){
         + thumbMediaHtml(img) + imageNameBadgeHtml(img, {outside:true}) + imageResolutionBadgeHtml(img)
         + '<button class="mini-x image-delete" type="button" data-image-index="' + index + '" title="' + escapeHtml(tr('smart.deleteImage')) + '"><i data-lucide="trash-2"></i></button></div>';
 }
-function batchRowSlotHtml(state, thumb){
-    const size = 'width:' + thumb + 'px;height:' + thumb + 'px';
+function batchRowSlotHtml(state, thumb, aspect){
+    const ratio = Number(aspect) > 0 ? Number(aspect) : 1;
+    const size = 'width:' + thumb + 'px;aspect-ratio:' + ratio + ';';
     if(state === 'running'){
         return '<div class="loading-cell pending-thumb" data-pending-slot="1" title="' + escapeHtml(tr('smart.hintPending')) + '" style="' + size + '"></div>';
     }
@@ -28951,6 +31588,11 @@ async function tableRunOneRow(nodeId, options, forceVideo){
         .map(ref => (ref && typeof ref === 'object') ? ref : {url:String(ref || ''), kind:'image'})
         .filter(ref => ref.url);
     let runSettings = Object.assign({}, settings, smartSettingsForNode(node) || {});
+    /* 分辨率/自定义像素仍以界面当前值为准（节点快照里是上次的档位，会盖掉「这次选了 1K」）；
+       **比例反过来**：节点自己选过的比例说了算，跟单图那条路一致 —— 「适配比例」「16:9」是跟着节点和
+       这一行的素材走的，被界面默认的 1:1 盖掉，多图/批量就会一律出方图。节点没存过才用界面当前值。 */
+    const SMART_RUN_SIZE_KEYS = ['resolution','customRatio','customRatioWidth','customRatioHeight','customSize','customWidth','customHeight','sourceWidth','sourceHeight','videoResolution'];
+    SMART_RUN_SIZE_KEYS.forEach(key => { if(settings[key] !== undefined) runSettings[key] = settings[key]; });
     if(forceVideo) runSettings = Object.assign({}, runSettings, {apiKind: 'video'});
     /* 逐行批量：这一行的 refs 才是权威。runApiVideoGeneration 据此不让「手动视频链接」
        盖掉本行的分镜片段（否则用户填过一次手动链接，每一行都拿同一个视频去生成）。 */
@@ -28993,6 +31635,19 @@ async function tableRunOneRow(nodeId, options, forceVideo){
     /* 一次批量运行只落**一个**下游结果节点，多行的结果都并进它 —— 和单节点生成完全一致：
        跑的时候就有这张卡片，跑完每行 append 进去，>1 张时标题自动变 Group / Videos（自动成组）。
        结果节点就是普通图片/视频节点，可继续往下接生成节点。 */
+    /* 这一行量不到来源比例时的兜底链（Boss 定的规则）：
+       ① 用户/编辑器里明确选了比例 → 就按用户选的（不动它）；
+       ② 都没有 → 继承同一批上一行算出来的比例；
+       ③ 本批第一行也没有 → 保持原兜底，不猜。 */
+    if(!srcRatio && !explicitRequestOutputSizeForPending(runSettings)){
+        const prevNode = runId ? batchRunResultNodes.get(runId) : null;
+        const prev = prevNode && prevNode.batchRunLastRatio;
+        if(prev && Number(prev.w) > 0 && Number(prev.h) > 0){
+            srcRatio = {w:Number(prev.w), h:Number(prev.h)};
+            if(runSettings.ratio === 'source' || runSettings.msRatio === 'source') applyRowSourceRatioToSettings(runSettings, srcRatio);
+            applySourceRatioToVideoAspect(runSettings, srcRatio);
+        }
+    }
     let output = batchResultNodeForRun(runId, node, meta, refs, srcRatio);
     const liveOutput = output ? liveSmartNode(output) : null;
     if(liveOutput){
@@ -29000,6 +31655,20 @@ async function tableRunOneRow(nodeId, options, forceVideo){
            再把这一行置 running —— 进度框由真实回调驱动，不再靠并发猜。 */
         ensureBatchRowPlan(liveOutput, runContext.batchRowNumbers, smartGenerationStopRequestedFor(node) || Boolean(node._batchStopRequested));
         setBatchRowState(liveOutput, rowNumber, 'running');
+        if(srcRatio && Number(srcRatio.w) > 0 && Number(srcRatio.h) > 0){
+            const aspects = liveOutput.batchRowAspects && typeof liveOutput.batchRowAspects === 'object' ? liveOutput.batchRowAspects : {};
+            aspects[rowNumber] = Number(srcRatio.w) / Number(srcRatio.h);
+            liveOutput.batchRowAspects = aspects;
+            liveOutput.batchRunLastRatio = {w:Number(srcRatio.w), h:Number(srcRatio.h)};
+        }
+        if(!liveOutput.batchRowAspect){
+            /* 还没出产出的行，进度格也要有形状：优先用本次请求的比例（固定比例/视频比例），
+               算不出来才退回正方形 1。按行算出的比例在 batchRowAspects 里，优先级更高。 */
+            const requestSize = explicitRequestOutputSizeForPending(runSettings);
+            if(requestSize && Number(requestSize.h) > 0){
+                liveOutput.batchRowAspect = Number(requestSize.w) / Number(requestSize.h);
+            }
+        }
     }
     syncRunButtonState();
     render();
@@ -29883,4 +32552,960 @@ function ensureTableApi(){
         if(api() || tries > 40){ clearInterval(wait); start(); }
     }, 250);
 })();
+/* ── 画布标题：点击就地重命名（Enter 确认 / Esc 取消），沿用原来的弱化标题样式，只在编辑时加一层软底 ── */
+(function bindSmartTitleRename(){
+    const el = document.getElementById('smartTitle');
+    if(!el) return;
+    let before = '';
+    const finish = commit => {
+        if(el.getAttribute('contenteditable') !== 'true') return;
+        el.removeAttribute('contenteditable');
+        el.classList.remove('is-editing');
+        const next = String(el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+        if(!commit || !next || !canvas){ el.textContent = before; return; }
+        el.textContent = next;
+        if(next === before) return;
+        canvas.title = next;
+        document.title = next;
+        scheduleSave();
+    };
+    el.addEventListener('mousedown', e => e.stopPropagation());
+    el.addEventListener('click', e => {
+        e.stopPropagation();
+        if(!canvas || el.getAttribute('contenteditable') === 'true') return;
+        before = String(el.textContent || '');
+        el.setAttribute('contenteditable', 'true');
+        el.classList.add('is-editing');
+        el.focus();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    });
+    el.addEventListener('keydown', e => {
+        if(e.key === 'Enter'){ e.preventDefault(); finish(true); el.blur(); }
+        else if(e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); finish(false); el.blur(); }
+        e.stopPropagation();
+    });
+    el.addEventListener('blur', () => finish(true));
+})();
+
+/* ── 空画布引导：画布上一个节点都没有时，在中央给出几个起步动作。
+   外观照抄双击创建菜单（.create-menu 的磨砂底 + .menu-btn 行），有节点后自动收起。 */
+(function mountSmartEmptyGuide(){
+    if(!world || document.getElementById('smartEmptyGuide')) return;
+    const guide = document.createElement('div');
+    guide.id = 'smartEmptyGuide';
+    guide.className = 'smart-empty-guide';
+    guide.innerHTML = `
+        <div class="smart-empty-guide-title">从这里开始</div>
+        <div class="smart-empty-guide-sub">拖入或粘贴图片，或选一个起点</div>
+        <button class="menu-btn" type="button" data-empty-create="image"><i data-lucide="image-plus"></i><span>图片节点（上传或生成）</span></button>
+        <button class="menu-btn" type="button" data-empty-create="prompt"><i data-lucide="text-cursor-input"></i><span>文本生成</span></button>
+        <button class="menu-btn" type="button" data-empty-create="table"><i data-lucide="table"></i><span>多维表格批量生成</span></button>
+        <button class="menu-btn" type="button" data-empty-create="chat"><i data-lucide="message-square"></i><span>交给画布助手</span></button>
+        <div class="smart-empty-guide-hint">随时双击空白处打开创建菜单</div>`;
+    document.body.appendChild(guide);
+    guide.addEventListener('mousedown', e => e.stopPropagation());
+    guide.addEventListener('click', e => {
+        const btn = e.target.closest('[data-empty-create]');
+        if(!btn) return;
+        e.stopPropagation();
+        const type = btn.dataset.emptyCreate;
+        if(type === 'chat'){ if(!document.getElementById('chatModal')?.classList.contains('open')) toggleChatPanel(); return; }
+        window.zoomBarCreate(type);
+    });
+    const sync = () => {
+        const empty = !!canvas && !nodes.some(n => n.id !== SMART_LOG_PREVIEW_NODE_ID);
+        guide.classList.toggle('open', empty);
+    };
+    new MutationObserver(sync).observe(world, {childList:true});
+    setTimeout(sync, 1200);
+    refreshIcons();
+})();
+/* ═══ 第 7 轮：视频后期 —— 尾帧接力 / 首帧成图 / 拼接选中视频 ═══ */
+function smartVideoItemOfNode(node){
+    if(!node || !(node.type === 'smart-image' || !node.type)) return null;
+    const list = (node.images || []).filter(img => img?.url);
+    if(list.length !== 1) return null;
+    const item = imageForDisplay(list[0]);
+    return item?.url && mediaKindForItem(item) === 'video' ? item : null;
+}
+async function requestVideoFrame(url, which){
+    const resp = await fetch('/api/video/frame', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url, which})});
+    const data = await resp.json().catch(() => ({}));
+    if(!resp.ok) throw new Error(data.detail || '取帧失败');
+    return data;
+}
+async function frameImageFromVideoNode(node, index, which='first', options={}){
+    const item = imageForDisplay(node?.images?.[index]);
+    if(!item?.url){ toast('没有可用的视频'); return null; }
+    if(node.__frameBusy) return null;
+    node.__frameBusy = true;
+    toast(which === 'first' ? '正在取首帧…' : '正在取尾帧…');
+    try {
+        const frame = await requestVideoFrame(item.url, which);
+        const image = {url:frame.url, name:frame.name, kind:'image', natural_w:frame.width, natural_h:frame.height};
+        const point = freeSpotRightOf(node, image);
+        pushUndo();
+        /* select:false：先把接力参数写进节点，再选中，否则编辑栏会先用当前参数接管新节点并把它写回去 */
+        const created = createImageNodeAt(point, [image], {select:false, skipUndo:true});
+        created.title = which === 'first' ? '首帧' : '尾帧';
+        addConnection(node.id, created.id, 'history');
+        if(options.relay){
+            /* 接力：新节点沿用这段视频的生成参数（视频模式、模型、时长…），写一句下一段的描述就能直接生成 */
+            const base = smartSettingsForNode(node);
+            created.runSettings = settingsForStorage({...base, apiKind:'video'});
+            created.runPrompt = '';
+            created.relayFromNodeId = node.id;
+        }
+        selectedId = created.id;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+        render();
+        scheduleSave();
+        centerViewportOnWorldPoint({x:point.x, y:point.y});
+        if(options.relay){
+            setTimeout(() => {
+                try { promptInput.focus(); } catch(_) {}
+                runBtn?.classList.add('retry-hint');
+                setTimeout(() => runBtn?.classList.remove('retry-hint'), 2400);
+            }, 120);
+            toast('已取尾帧作为首帧，写下一段的描述后生成（⌘/Ctrl+Enter）');
+        } else {
+            toast(which === 'first' ? '已生成首帧图片' : '已生成尾帧图片');
+        }
+        return created;
+    } catch(error) {
+        toast(String(error?.message || error).slice(0, 140));
+        return null;
+    } finally {
+        node.__frameBusy = false;
+    }
+}
+/* 新节点放在来源右侧；和已有节点重叠就往下挪，最多试 12 次 */
+function freeSpotRightOf(node, media){
+    const rect = nodeRect(node);
+    const layout = imageLayout([media], mediaNodeDefaultScale({type:'smart-image', images:[media]}), {type:'smart-image', images:[media]});
+    const w = layout.width || 260, h = layout.height || 180;
+    const x = rect.x + rect.width + 120;
+    let y = rect.y + rect.height / 2 - h / 2;
+    const hit = top => nodes.some(n => {
+        const r = nodeRect(n);
+        return x < r.x + r.width + 16 && x + w + 16 > r.x && top < r.y + r.height + 16 && top + h + 16 > r.y;
+    });
+    for(let i = 0; i < 12 && hit(y); i++) y += h + 28;
+    return {x:x + w / 2, y:y + h / 2};
+}
+function relayFromVideoNode(node, index){
+    return frameImageFromVideoNode(node, index, 'last', {relay:true});
+}
+function selectedVideoNodesInOrder(ids){
+    const list = (ids || selectedNodeIds()).map(id => nodes.find(n => n.id === id)).filter(n => smartVideoItemOfNode(n));
+    /* 按画布上的阅读顺序：先按行（中心 y 相差不到半个节点高算同一行），再按 x */
+    return list.map(n => ({n, r:nodeRect(n)})).sort((a, b) => {
+        const ay = a.r.y + a.r.height / 2, by = b.r.y + b.r.height / 2;
+        if(Math.abs(ay - by) > Math.min(a.r.height, b.r.height) / 2) return ay - by;
+        return a.r.x - b.r.x;
+    }).map(entry => entry.n);
+}
+function syncConcatVideosButton(ids){
+    const btn = document.getElementById('smartConcatVideosBtn');
+    if(!btn) return;
+    const selected = ids || selectedNodeIds();
+    const count = selected.length > 1 ? selectedVideoNodesInOrder(selected).length : 0;
+    btn.classList.toggle('visible', count >= 2 && !btn.dataset.busy);
+    const label = btn.querySelector('span');
+    if(label) label.textContent = count >= 2 ? `拼接 ${count} 段视频` : '拼接视频';
+}
+async function concatSelectedVideos(){
+    const btn = document.getElementById('smartConcatVideosBtn');
+    const list = selectedVideoNodesInOrder();
+    if(list.length < 2){ toast('至少选中两段视频'); return; }
+    if(btn?.dataset.busy) return;
+    if(btn){ btn.dataset.busy = '1'; btn.classList.add('is-busy'); }
+    toast(`正在拼接 ${list.length} 段视频（按画布上从左到右、从上到下的顺序）…`);
+    try {
+        const resp = await fetch('/api/video/concat', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({urls:list.map(n => smartVideoItemOfNode(n).url), filename:`拼接_${list.length}段.mp4`})
+        });
+        const data = await resp.json().catch(() => ({}));
+        if(!resp.ok) throw new Error(data.detail || '拼接失败');
+        const video = {url:data.url, name:data.name, kind:'video', natural_w:data.width, natural_h:data.height};
+        const rightmost = list.map(n => ({n, r:nodeRect(n)})).sort((a, b) => (b.r.x + b.r.width) - (a.r.x + a.r.width))[0].n;
+        pushUndo();
+        const created = createImageNodeAt(freeSpotRightOf(rightmost, video), [video], {select:true, skipUndo:true});
+        created.title = `拼接 · ${list.length} 段`;
+        list.forEach(n => addConnection(n.id, created.id, 'history'));
+        selectedId = created.id;
+        selectedIds = [];
+        render();
+        scheduleSave();
+        toast(`已拼接 ${list.length} 段视频`);
+    } catch(error) {
+        toast(String(error?.message || error).slice(0, 160));
+    } finally {
+        if(btn){ delete btn.dataset.busy; btn.classList.remove('is-busy'); }
+        syncConcatVideosButton();
+    }
+}
+window.relayFromVideoNode = relayFromVideoNode;
+window.concatSelectedVideos = concatSelectedVideos;
+/* ═══ 第 8 轮：一键重跑 ═══ */
+/* 只支持 API 类引擎（API 平台 / 火山）出的图片和视频：它们的请求完全由节点上记下的提示词、参考图、参数决定 */
+function smartRerunInfo(node){
+    if(!node || !node.runSettings || !node.runAt) return null;
+    const prompt = String(node.runModelPrompt || node.runPrompt || '').trim();
+    const s = node.runSettings;
+    if(!isApiLikeEngine(s.engine)) return null;
+    const kind = s.apiKind === 'video' ? 'video' : 'image';
+    if(kind === 'image' && (!s.provider_id || !s.model)) return null;
+    if(kind === 'video' && !s.videoModel) return null;
+    if(!prompt && kind === 'image') return null;
+    return {kind, prompt, settings:cloneSmartSettings(s)};
+}
+async function rerunSmartNode(node){
+    const info = smartRerunInfo(node);
+    if(!info){ toast('这个节点没有可重跑的生成记录（目前支持 API 平台生成的图片和视频）'); return; }
+    const refs = (node.runInputRefs || []).map(ref => ({...ref})).filter(ref => ref.url);
+    /* 结果放在「和原结果同一个来源」下面，像多跑了一次；原结果本身就是来源时放在它旁边 */
+    const flowIn = (canvas?.connections || []).find(c => c.to === node.id && (c.kind || 'flow') === 'flow');
+    const source = (flowIn && nodes.find(n => n.id === flowIn.from)) || node;
+    const meta = {
+        prompt:info.prompt,
+        displayPrompt:node.runPrompt || info.prompt,
+        promptHtml:node.promptDraftHtml != null ? node.promptDraftHtml : escapeHtml(node.runPrompt || info.prompt),
+        promptText:node.promptDraftText || node.runPrompt || info.prompt,
+        promptRefs:(node.runPromptRefs || []).map(ref => ({...ref})),
+        inputRefs:refs,
+        sourceNodeId:'',
+        settings:info.settings,
+        createdAt:Date.now()
+    };
+    const expected = info.kind === 'video'
+        ? Math.max(1, Math.min(5, Math.round(Number(info.settings.videoCount) || 1)))
+        : Math.max(1, Math.min(8, Number(info.settings.count || 1)));
+    pushUndo();
+    undoSuppressed = true;
+    const out = createPendingOutputFromSource(source, expected, meta, {connectSource:false, selectOutput:false, refs});
+    undoSuppressed = false;
+    if(source === node){
+        const conn = (canvas.connections || []).find(c => c.from === node.id && c.to === out.id);
+        if(conn) conn.kind = 'history';
+    }
+    selectedId = node.id;
+    const runLog = {nodeId:out.id, nodeType:'smart-image', kind:info.kind, settings:info.settings, prompt:info.prompt,
+        refs:refs.map(ref => ({url:ref.url, name:ref.name || 'image', kind:ref.kind || ''})),
+        size:info.kind === 'image' ? sizeForRun(info.settings) : ''};
+    const start = nowMs();
+    coolNodeRunningState(out, 2000);
+    render();
+    scheduleSave();
+    toast(info.kind === 'video' ? '已按原参数重新提交视频生成' : '已按原参数重新生成');
+    try {
+        if(info.kind === 'video'){
+            const result = await runApiVideoGeneration(info.prompt, refs, info.settings, out);
+            const urls = Array.isArray(result) ? result : (result?.urls || []);
+            if(!urls.length) throw new Error(tr('smart.errNoOutVideos'));
+            finalizePendingNode(out, urls, meta, 'video');
+            afterVideoAutoPlace(out, urls, (!Array.isArray(result) && result?.canvas_meta) || {});
+            addSmartGenerationLog({run:runLog, outputs:urls, runMs:nowMs() - start});
+        } else {
+            const res = await runApiGeneration(info.prompt, refs, info.settings, out);
+            const taskIds = Array.isArray(res?.taskIds) ? res.taskIds : [];
+            if(!taskIds.length) throw new Error(tr('smart.errRunFailed'));
+            out.pendingTasks = taskIds.map(taskId => ({taskId, kind:'image', providerId:res.providerId, model:res.model}));
+            out.pending = Math.max(taskIds.length, Number(out.pending || 0) || taskIds.length);
+            out.runStartedAt = nowMs();
+            out.runTimerHidden = false;
+            out.running = false;
+            render();
+            scheduleSave();
+            await saveCanvas();
+            await resumeSmartPendingNode(out, {run:runLog, runLogStart:start});
+            const live = liveSmartNode(out) || out;
+            if((live.images || []).length) addSmartGenerationLog({run:runLog, outputs:live.images, runMs:nowMs() - start});
+        }
+        scheduleSave();
+    } catch(e) {
+        if(handleJimengPendingSignal(out, e)){ scheduleSave(); return; }
+        const live = liveSmartNode(out) || out;
+        if(!(live.images || []).some(img => img?.url)){
+            nodes = nodes.filter(n => n.id !== live.id);
+            canvas.connections = (canvas.connections || []).filter(c => c.from !== live.id && c.to !== live.id);
+        } else {
+            live.pending = 0;
+            live.running = false;
+        }
+        if(!e?.smartGenerationStopped){
+            if(!e?.smartGenerationLogged) addSmartGenerationLog({run:runLog, outputs:[], runMs:nowMs() - start, error:e.message || String(e)});
+            toast((e.message || tr('smart.errRunFailed')).slice(0, 160));
+        }
+        scheduleSave();
+    } finally {
+        syncRunButtonState();
+        render();
+    }
+}
+
+/* ═══ 第 8 轮：挑图 —— 并排对比、标星 / 淘汰、只留想要的 ═══ */
+let smartPickState = null;
+function pickableImagesOfNode(node){
+    if(!node || !(node.type === 'smart-image' || !node.type) || isSmartGroupNode(node)) return [];
+    return (node.images || []).map((img, index) => ({node, index, item:imageForDisplay(img), raw:img}))
+        .filter(entry => entry.item?.url && mediaKindForItem(entry.item) === 'image');
+}
+function pickableSelectedNodeIds(ids){
+    return (ids || selectedNodeIds()).filter(id => pickableImagesOfNode(nodes.find(n => n.id === id)).length);
+}
+function syncPickSelectedButton(ids){
+    const btn = document.getElementById('smartPickSelectedBtn');
+    if(!btn) return;
+    const selected = ids || selectedNodeIds();
+    const pickIds = selected.length > 1 ? pickableSelectedNodeIds(selected) : [];
+    const count = pickIds.reduce((sum, id) => sum + pickableImagesOfNode(nodes.find(n => n.id === id)).length, 0);
+    btn.classList.toggle('visible', pickIds.length > 1 && count > 1);
+    const label = btn.querySelector('span');
+    if(label) label.textContent = `挑图 ${count} 张`;
+}
+function openSmartPickViewer(nodeIds, focusIndex=-1){
+    const entries = (nodeIds || []).flatMap(id => pickableImagesOfNode(nodes.find(n => n.id === id)));
+    if(entries.length < 2){ toast('至少要两张图才能挑'); return; }
+    smartPickState = {entries, nodeIds:[...new Set(entries.map(e => e.node.id))], focus:-1, cursor:Math.max(0, Math.min(entries.length - 1, focusIndex))};
+    let el = document.getElementById('smartPickViewer');
+    if(!el){
+        el = document.createElement('div');
+        el.id = 'smartPickViewer';
+        el.className = 'nv-pick';
+        el.setAttribute('role', 'dialog');
+        el.setAttribute('aria-label', '挑图');
+        document.body.appendChild(el);
+        el.addEventListener('click', onSmartPickClick);
+    }
+    el.classList.add('open');
+    renderSmartPickViewer();
+    document.addEventListener('keydown', onSmartPickKey, true);
+}
+/* 画布数据可能在交互中被整体替换（撤销、落盘回读等），所以每次都按节点 id 重新取「活的」图片对象，不缓存引用 */
+function refreshSmartPickEntries(){
+    const st = smartPickState;
+    if(!st) return [];
+    st.nodeIds = st.nodeIds.filter(id => nodes.some(n => n.id === id));
+    st.entries = st.nodeIds.flatMap(id => pickableImagesOfNode(nodes.find(n => n.id === id)));
+    const n = st.entries.length;
+    st.cursor = n ? Math.max(0, Math.min(n - 1, st.cursor)) : 0;
+    if(st.focus >= n) st.focus = n - 1;
+    return st.entries;
+}
+function closeSmartPickViewer(){
+    document.getElementById('smartPickViewer')?.classList.remove('open');
+    document.removeEventListener('keydown', onSmartPickKey, true);
+    smartPickState = null;
+    render();
+}
+function smartPickCounts(){
+    const list = smartPickState?.entries || [];
+    return {star:list.filter(e => e.raw.pick === 'star').length, reject:list.filter(e => e.raw.pick === 'reject').length, total:list.length};
+}
+function smartPickCardHtml(entry, i){
+    const pick = entry.raw.pick || '';
+    const size = entry.raw.natural_w && entry.raw.natural_h ? `${entry.raw.natural_w}×${entry.raw.natural_h}` : '';
+    return `<figure class="nv-pick-card${pick ? ' is-' + pick : ''}${smartPickState.cursor === i ? ' is-cursor' : ''}" data-pick-index="${i}">
+        <button type="button" class="nv-pick-img" data-pick-act="focus" title="放大查看（空格）"><img src="${escapeAttr(smartMediaPreviewUrl(entry.item, 1024))}" alt="" loading="lazy" draggable="false"></button>
+        <figcaption>
+            <span class="nv-pick-no">${i + 1}</span>
+            ${size ? `<span class="nv-pick-size">${size}</span>` : ''}
+            <span class="nv-pick-acts">
+                <button type="button" class="nv-pick-btn${pick === 'star' ? ' on' : ''}" data-pick-act="star" title="标星（S）"><i data-lucide="star"></i></button>
+                <button type="button" class="nv-pick-btn nv-pick-reject${pick === 'reject' ? ' on' : ''}" data-pick-act="reject" title="淘汰（X）"><i data-lucide="x"></i></button>
+            </span>
+        </figcaption>
+    </figure>`;
+}
+function renderSmartPickViewer(){
+    const el = document.getElementById('smartPickViewer');
+    if(!el || !smartPickState) return;
+    refreshSmartPickEntries();
+    const {entries, focus, nodeIds} = smartPickState;
+    const counts = smartPickCounts();
+    const multi = nodeIds.length > 1;
+    const cols = entries.length <= 4 ? entries.length : entries.length <= 6 ? 3 : entries.length <= 12 ? 4 : 5;
+    const focusEntry = focus >= 0 ? entries[focus] : null;
+    el.innerHTML = `
+        <div class="nv-pick-panel">
+            <header class="nv-pick-head">
+                <div class="nv-pick-title">挑图<em>${entries.length} 张${multi ? ` · 来自 ${nodeIds.length} 个节点` : ''}</em></div>
+                <div class="nv-pick-stats"><span class="st"><i data-lucide="star"></i>${counts.star}</span><span class="rj"><i data-lucide="x"></i>${counts.reject}</span></div>
+                <div class="nv-pick-hint">S 标星 · X 淘汰 · ← → 切换 · 空格放大 · Esc 关闭</div>
+                <button type="button" class="nv-pick-close" data-pick-act="close" title="关闭（Esc）"><i data-lucide="x"></i></button>
+            </header>
+            ${focusEntry ? `
+            <div class="nv-pick-focus">
+                <button type="button" class="nv-pick-nav" data-pick-act="prev" title="上一张（←）"><i data-lucide="chevron-left"></i></button>
+                <div class="nv-pick-stage">${smartPickCardHtml(focusEntry, focus).replace('nv-pick-card', 'nv-pick-card is-large')}</div>
+                <button type="button" class="nv-pick-nav" data-pick-act="next" title="下一张（→）"><i data-lucide="chevron-right"></i></button>
+            </div>` : `
+            <div class="nv-pick-grid" style="--pick-cols:${cols}">${entries.map((entry, i) => smartPickCardHtml(entry, i)).join('')}</div>`}
+            <footer class="nv-pick-foot">
+                ${focusEntry ? `<button type="button" class="nv-pick-action" data-pick-act="grid"><i data-lucide="layout-grid"></i><span>返回网格</span></button>` : ''}
+                <span class="nv-pick-spacer"></span>
+                <button type="button" class="nv-pick-action" data-pick-act="download" ${counts.star ? '' : 'disabled'}><i data-lucide="download"></i><span>下载标星的</span></button>
+                <button type="button" class="nv-pick-action" data-pick-act="drop-rejected" ${counts.reject ? '' : 'disabled'}><i data-lucide="trash-2"></i><span>删掉淘汰的（${counts.reject}）</span></button>
+                <button type="button" class="nv-pick-action nv-pick-primary" data-pick-act="split-starred" ${counts.star ? '' : 'disabled'}><i data-lucide="image-plus"></i><span>${multi ? '标星的合成新节点' : '标星的拆成新节点'}（${counts.star}）</span></button>
+            </footer>
+        </div>`;
+    refreshIcons();
+}
+function setSmartPickMark(index, mark){
+    const entry = refreshSmartPickEntries()[index];
+    if(!entry) return;
+    entry.raw.pick = entry.raw.pick === mark ? undefined : mark;
+    if(!entry.raw.pick) delete entry.raw.pick;
+    scheduleSave();
+    renderSmartPickViewer();
+}
+function onSmartPickClick(event){
+    if(!smartPickState) return;
+    refreshSmartPickEntries();
+    if(event.target === event.currentTarget){ closeSmartPickViewer(); return; }
+    const btn = event.target.closest('[data-pick-act]');
+    if(!btn) return;
+    const card = btn.closest('[data-pick-index]');
+    const index = card ? Number(card.dataset.pickIndex) : smartPickState.cursor;
+    const act = btn.dataset.pickAct;
+    if(act === 'close') return closeSmartPickViewer();
+    if(act === 'star' || act === 'reject'){ smartPickState.cursor = index; return setSmartPickMark(index, act); }
+    if(act === 'focus'){ smartPickState.cursor = index; smartPickState.focus = smartPickState.focus === index ? -1 : index; return renderSmartPickViewer(); }
+    if(act === 'grid'){ smartPickState.focus = -1; return renderSmartPickViewer(); }
+    if(act === 'prev' || act === 'next') return moveSmartPick(act === 'prev' ? -1 : 1);
+    if(act === 'download') return downloadStarredPicks();
+    if(act === 'drop-rejected') return dropRejectedPicks();
+    if(act === 'split-starred') return splitStarredPicks();
+}
+function moveSmartPick(delta){
+    const st = smartPickState;
+    if(!st) return;
+    const n = st.entries.length;
+    st.cursor = (st.cursor + delta + n) % n;
+    if(st.focus >= 0) st.focus = st.cursor;
+    renderSmartPickViewer();
+    document.querySelector('#smartPickViewer .nv-pick-card.is-cursor')?.scrollIntoView({block:'nearest'});
+}
+function onSmartPickKey(event){
+    if(!smartPickState) return;
+    const key = event.key;
+    const handled = ['Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Enter', 's', 'S', 'x', 'X', 'Delete', 'Backspace'];
+    if(!handled.includes(key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const st = smartPickState;
+    if(key === 'Escape'){ if(st.focus >= 0){ st.focus = -1; renderSmartPickViewer(); } else closeSmartPickViewer(); return; }
+    if(key === 'ArrowLeft') return moveSmartPick(-1);
+    if(key === 'ArrowRight') return moveSmartPick(1);
+    if(key === 'ArrowUp' || key === 'ArrowDown'){
+        const cols = Number(getComputedStyle(document.querySelector('#smartPickViewer .nv-pick-grid') || document.body).getPropertyValue('--pick-cols')) || 1;
+        return moveSmartPick(key === 'ArrowUp' ? -cols : cols);
+    }
+    if(key === ' ' || key === 'Enter'){ st.focus = st.focus >= 0 ? -1 : st.cursor; return renderSmartPickViewer(); }
+    if(key === 's' || key === 'S') return setSmartPickMark(st.cursor, 'star');
+    if(key === 'x' || key === 'X' || key === 'Delete' || key === 'Backspace') return setSmartPickMark(st.cursor, 'reject');
+}
+function downloadStarredPicks(){
+    const starred = (smartPickState ? refreshSmartPickEntries() : []).filter(e => e.raw.pick === 'star');
+    if(!starred.length) return;
+    if(starred.length === 1){ downloadPreviewFile(starred[0].raw); return; }
+    zipDownloadImageItems('标星图片', starred.map(e => e.item));
+}
+function relayoutMediaNodeAfterRemoval(node){
+    if((node.images || []).length <= 1){
+        node.title = 'Image';
+        delete node.w;
+        delete node.h;
+        inheritNodeMetaFromImage(node);
+    }
+}
+function dropRejectedPicks(){
+    const st = smartPickState;
+    if(!st) return;
+    refreshSmartPickEntries();
+    const rejected = st.entries.filter(e => e.raw.pick === 'reject');
+    if(!rejected.length) return;
+    pushUndo();
+    const byNode = new Map();
+    rejected.forEach(e => byNode.set(e.node.id, [...(byNode.get(e.node.id) || []), e.raw]));
+    let removedNodes = 0;
+    byNode.forEach((raws, nodeId) => {
+        const node = nodes.find(n => n.id === nodeId);
+        if(!node) return;
+        node.images = (node.images || []).filter(img => !raws.includes(img));
+        if(!node.images.length){
+            undoSuppressed = true;
+            deleteNode(node.id);
+            undoSuppressed = false;
+            removedNodes += 1;
+        } else relayoutMediaNodeAfterRemoval(node);
+    });
+    toast(`已删掉 ${rejected.length} 张淘汰的图${removedNodes ? `（${removedNodes} 个节点因此清空已移除）` : ''}，可撤销`);
+    const keepIds = st.nodeIds.filter(id => nodes.some(n => n.id === id));
+    scheduleSave();
+    if(keepIds.length && keepIds.reduce((sum, id) => sum + pickableImagesOfNode(nodes.find(n => n.id === id)).length, 0) >= 2) openSmartPickViewer(keepIds);
+    else closeSmartPickViewer();
+}
+function splitStarredPicks(){
+    const st = smartPickState;
+    if(!st) return;
+    refreshSmartPickEntries();
+    const starred = st.entries.filter(e => e.raw.pick === 'star');
+    if(!starred.length) return;
+    const fromIds = [...new Set(starred.map(e => e.node.id))];
+    const anchor = fromIds.map(id => nodes.find(n => n.id === id)).filter(Boolean)
+        .sort((a, b) => (nodeRect(b).x + nodeRect(b).width) - (nodeRect(a).x + nodeRect(a).width))[0];
+    const images = starred.map(e => {
+        const copy = JSON.parse(JSON.stringify(e.raw));
+        delete copy.pick;
+        applyNodeMetaToImage(copy, e.node);
+        return copy;
+    });
+    pushUndo();
+    const point = anchor ? freeSpotRightOf(anchor, images[0]) : viewportCenter();
+    const created = createImageNodeAt(point, images, {select:false, skipUndo:true});
+    created.title = images.length > 1 ? `精选 · ${images.length} 张` : '精选';
+    fromIds.forEach(id => addConnection(id, created.id, 'history'));
+    selectedId = created.id;
+    selectedIds = [];
+    scheduleSave();
+    closeSmartPickViewer();
+    toast(`已把 ${images.length} 张标星的图放进新节点，可以直接连到下一步`);
+}
+window.openSmartPickViewer = openSmartPickViewer;
+window.rerunSmartNode = rerunSmartNode;
+
+/* ═══ 第 9 轮：缩放分级显示 + 视口外节点收起 ═══
+   画布缩到 40% 以下（lod-far）时，表格 / 文本 / 文本生成 / Loop / 生成输入 节点里的小字已经读不出来，
+   改成一张「标题 + 摘要」卡片，字号按缩放反向放大、始终约 13px 屏幕像素；文件名、分辨率角标、端口、
+   连线上的剪断按钮一起收起，连线按屏幕像素保持可见粗细。20% 以下（lod-tiny）连摘要也只留一行。
+   视口外（留半屏余量）的节点加 nv-offscreen → content-visibility:hidden，平移缩放时浏览器跳过它们的
+   布局和绘制；render() 量尺寸时整棵树都是展开的，量完才重新收起，不影响实测尺寸。 */
+var SMART_LOD_FAR = 0.4;
+var SMART_LOD_TINY = 0.2;
+var smartLodLevel = '';
+var smartLodInv = '';
+var smartExportingNow = false;
+function syncCanvasLod(){
+    if(smartExportingNow) return;
+    const scale = safeScale(viewport.scale);
+    const level = scale < SMART_LOD_TINY ? 'tiny' : scale < SMART_LOD_FAR ? 'far' : '';
+    const inv = String(1 / scale);
+    if(inv !== smartLodInv){ smartLodInv = inv; world.style.setProperty('--nv-zoom-inv', inv); }
+    if(level === smartLodLevel) return;
+    smartLodLevel = level;
+    world.classList.toggle('lod-far', Boolean(level));
+    world.classList.toggle('lod-tiny', level === 'tiny');
+}
+function smartLodKind(node){
+    const type = node?.type || '';
+    if(type === 'table' || type === 'smart-batch' || type === 'smart-text' || type === 'smart-prompt' || type === 'smart-loop') return type;
+    return '';
+}
+function smartLodClip(text, max=90){
+    const clean = String(text || '').replace(/\s+/g, ' ').trim();
+    return clean.length > max ? clean.slice(0, max - 1) + '…' : clean;
+}
+function smartLodCardHtml(node){
+    const kind = smartLodKind(node);
+    if(!kind) return '';
+    let icon = 'type', title = '', meta = '', text = '';
+    if(kind === 'table' || kind === 'smart-batch'){
+        const table = node.table || {};
+        const rows = Array.isArray(table.rows) ? table.rows.length : 0;
+        const cols = Array.isArray(table.columns) ? table.columns : [];
+        icon = kind === 'table' ? 'table' : 'list-ordered';
+        title = kind === 'table' ? '多维表格' : '生成输入';
+        meta = rows || cols.length ? `${rows} 行${cols.length ? ` · ${cols.length} 列` : ''}` : '';
+        text = cols.map(col => String(col?.name || col?.title || col?.label || (typeof col === 'string' ? col : ''))).filter(Boolean).slice(0, 4).join(' · ');
+    } else if(kind === 'smart-text'){
+        title = '文本';
+        text = smartTextOwnText(node) || (typeof smartTextUpstreamText === 'function' ? smartTextUpstreamText(node) : '');
+    } else if(kind === 'smart-prompt'){
+        icon = 'sparkles';
+        title = '文本生成';
+        text = node.llmEnabled ? (node.outputText || node.text || '') : (node.text || '');
+    } else if(kind === 'smart-loop'){
+        icon = 'repeat-2';
+        title = 'Loop';
+        const count = Number(node.count) || 0;
+        meta = count ? `${count} 轮 · ${node.mode === 'parallel' ? '并行' : '依次'}` : '';
+    }
+    const band = kind === 'table' || kind === 'smart-batch';
+    return `<div class="nv-lod-card${band ? ' is-band' : ''}" aria-hidden="true"><div class="nv-lod-inner">
+        <div class="nv-lod-head"><i data-lucide="${icon}"></i><span class="nv-lod-title">${escapeHtml(title)}</span>${meta ? `<span class="nv-lod-meta">${escapeHtml(meta)}</span>` : ''}</div>
+        ${text && !band ? `<div class="nv-lod-text">${escapeHtml(smartLodClip(text))}</div>` : ''}
+    </div></div>`;
+}
+var smartCullRaf = 0;
+function scheduleOffscreenCull(){
+    if(smartCullRaf) return;
+    smartCullRaf = requestAnimationFrame(() => { smartCullRaf = 0; cullOffscreenNodes(); });
+}
+function cullOffscreenNodes(){
+    if(!world || !shell || smartExportingNow) return;
+    const scale = safeScale(viewport.scale);
+    const vw = shell.clientWidth / scale, vh = shell.clientHeight / scale;
+    if(!vw || !vh) return;
+    const x0 = -viewport.x / scale - vw * 0.5, y0 = -viewport.y / scale - vh * 0.5;
+    const x1 = x0 + vw * 2, y1 = y0 + vh * 2;
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    world.querySelectorAll(':scope > .image-node').forEach(el => {
+        const node = byId.get(el.dataset.id);
+        let off = false;
+        if(node && !el.classList.contains('selected') && !el.classList.contains('dragging') && !el.contains(document.activeElement)){
+            const r = nodeRect(node);
+            /* 工具条、外置文件名、生成中的标题行会伸出节点框外，四周再放 80px */
+            off = r.x + r.width + 80 < x0 || r.x - 80 > x1 || r.y + r.height + 80 < y0 || r.y - 80 > y1;
+        }
+        if(el.classList.contains('nv-offscreen') !== off) el.classList.toggle('nv-offscreen', off);
+    });
+}
+window.__smartCullOffscreenNodes = cullOffscreenNodes;
+/* 画布助手端到端测试用的只读窥视口 + 两个动作（apply ops / 保存），不改任何行为。 */
+window.__smartAgentTestHooks = {
+    node: id => { const n = nodes.find(x => x.id === id); return n ? JSON.parse(JSON.stringify(n)) : null; },
+    nodes: () => JSON.parse(JSON.stringify(nodes)),
+    connections: () => JSON.parse(JSON.stringify(canvas?.connections || [])),
+    selectedId: () => selectedId,
+    busy: () => Boolean(chatSending || agentRunAbort),
+    setLocal: (id, key, value) => { const n = nodes.find(x => x.id === id); if(n) n[key] = value; return Boolean(n); },
+    applyOps: ops => applyAgentCanvasOps(ops),
+    save: () => saveCanvas()
+};
+
+/* ═══ 第 12 轮：节点右键菜单 + 对齐 / 等间距 ═══
+   右键节点：单选时是「复制一份 / 复制 / 再来一张 / 挑图 / 下载 / 放入分组 / 删除」；
+   多选时顶部是一排对齐按钮（左 / 水平居中 / 右 / 顶 / 垂直居中 / 底 / 横向等距 / 纵向等距），下面是整理、挑图、复制、分组、删除。
+   对齐也有快捷键：Alt + A/D/W/S/H/V（按物理键位，Mac 上 Option 组合出特殊字符也能认）。 */
+const SMART_ALIGN_ICONS = {
+    left:'<path d="M4 3v18"/><rect x="8" y="6" width="12" height="4" rx="1.5"/><rect x="8" y="14" width="7" height="4" rx="1.5"/>',
+    hcenter:'<path d="M12 3v18"/><rect x="5" y="6" width="14" height="4" rx="1.5"/><rect x="8" y="14" width="8" height="4" rx="1.5"/>',
+    right:'<path d="M20 3v18"/><rect x="4" y="6" width="12" height="4" rx="1.5"/><rect x="9" y="14" width="7" height="4" rx="1.5"/>',
+    top:'<path d="M3 4h18"/><rect x="6" y="8" width="4" height="12" rx="1.5"/><rect x="14" y="8" width="4" height="7" rx="1.5"/>',
+    vcenter:'<path d="M3 12h18"/><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="8" width="4" height="8" rx="1.5"/>',
+    bottom:'<path d="M3 20h18"/><rect x="6" y="4" width="4" height="12" rx="1.5"/><rect x="14" y="9" width="4" height="7" rx="1.5"/>',
+    hdist:'<path d="M4 3v18"/><path d="M20 3v18"/><rect x="9" y="7" width="6" height="10" rx="1.5"/>',
+    vdist:'<path d="M3 4h18"/><path d="M3 20h18"/><rect x="7" y="9" width="10" height="6" rx="1.5"/>'
+};
+const SMART_ALIGN_LABELS = {left:'左对齐 Alt+A', hcenter:'水平居中 Alt+H', right:'右对齐 Alt+D', top:'顶对齐 Alt+W', vcenter:'垂直居中 Alt+V', bottom:'底对齐 Alt+S', hdist:'横向等间距', vdist:'纵向等间距'};
+function smartAlignableNodes(){
+    return selectedNodeIds().map(id => nodes.find(n => n.id === id)).filter(n => n && n.id !== SMART_LOG_PREVIEW_NODE_ID && !isSmartGroupCompactMember(n));
+}
+function alignSelectedSmartNodes(mode){
+    const list = smartAlignableNodes();
+    if(list.length < 2 || ((mode === 'hdist' || mode === 'vdist') && list.length < 3)){
+        toast(mode === 'hdist' || mode === 'vdist' ? '等间距至少要选 3 个节点' : '对齐至少要选 2 个节点');
+        return;
+    }
+    const rects = new Map(list.map(n => [n.id, nodeRect(n)]));
+    const all = [...rects.values()];
+    const minX = Math.min(...all.map(r => r.x)), maxX = Math.max(...all.map(r => r.x + r.width));
+    const minY = Math.min(...all.map(r => r.y)), maxY = Math.max(...all.map(r => r.y + r.height));
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    pushUndo();
+    const move = (node, x, y) => {
+        const r = rects.get(node.id);
+        const dx = Math.round(x) - r.x, dy = Math.round(y) - r.y;
+        if(!dx && !dy) return;
+        node.x = (node.x || 0) + dx;
+        node.y = (node.y || 0) + dy;
+        /* 分组本体挪了，组里的成员一起挪 */
+        if(isSmartGroupNode(node)) nodes.forEach(m => {
+            if(m !== node && typeof smartGroupScopeId === 'function' && smartGroupScopeId(m.id) === node.id && !rects.has(m.id)){
+                m.x = (m.x || 0) + dx;
+                m.y = (m.y || 0) + dy;
+            }
+        });
+    };
+    if(mode === 'hdist' || mode === 'vdist'){
+        const horiz = mode === 'hdist';
+        const sorted = list.slice().sort((a, b) => horiz ? rects.get(a.id).x - rects.get(b.id).x : rects.get(a.id).y - rects.get(b.id).y);
+        const total = sorted.reduce((sum, n) => sum + (horiz ? rects.get(n.id).width : rects.get(n.id).height), 0);
+        const span = horiz ? maxX - minX : maxY - minY;
+        const gap = (span - total) / (sorted.length - 1);
+        let cursor = horiz ? minX : minY;
+        sorted.forEach(n => {
+            const r = rects.get(n.id);
+            if(horiz) move(n, cursor, r.y); else move(n, r.x, cursor);
+            cursor += (horiz ? r.width : r.height) + gap;
+        });
+    } else {
+        list.forEach(n => {
+            const r = rects.get(n.id);
+            if(mode === 'left') move(n, minX, r.y);
+            else if(mode === 'right') move(n, maxX - r.width, r.y);
+            else if(mode === 'hcenter') move(n, cx - r.width / 2, r.y);
+            else if(mode === 'top') move(n, r.x, minY);
+            else if(mode === 'bottom') move(n, r.x, maxY - r.height);
+            else if(mode === 'vcenter') move(n, r.x, cy - r.height / 2);
+        });
+    }
+    render();
+    scheduleSave();
+}
+
+let smartNodeMenuEl = null;
+function closeSmartNodeMenu(){
+    if(!smartNodeMenuEl) return;
+    smartNodeMenuEl.classList.remove('open');
+    document.removeEventListener('pointerdown', onSmartNodeMenuOutside, true);
+    document.removeEventListener('keydown', onSmartNodeMenuKey, true);
+    window.removeEventListener('blur', closeSmartNodeMenu);
+}
+function onSmartNodeMenuOutside(event){
+    if(smartNodeMenuEl && !smartNodeMenuEl.contains(event.target)) closeSmartNodeMenu();
+}
+function onSmartNodeMenuKey(event){
+    if(event.key === 'Escape'){ event.preventDefault(); event.stopPropagation(); closeSmartNodeMenu(); }
+}
+function smartMenuKbd(keys){
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
+    return `<span class="nv-ctx-kbd">${keys.replace('Mod', mac ? '⌘' : 'Ctrl+').replace('Shift+', mac ? '⇧' : 'Shift+').replace('Del', mac ? '⌫' : 'Del')}</span>`;
+}
+function smartMenuRow(act, icon, label, keys='', extra=''){
+    return `<button class="menu-btn nv-ctx-row${extra}" type="button" data-ctx-act="${act}"><i data-lucide="${icon}"></i><span>${escapeHtml(label)}</span>${keys ? smartMenuKbd(keys) : ''}</button>`;
+}
+function openSmartNodeMenu(event, nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node) return;
+    closeCreateMenu();
+    /* 右键没选中的节点：先单选它（Figma / Finder 的习惯）；右键已在多选里的节点：保留多选 */
+    if(!isNodeSelected(nodeId)){
+        selectedId = nodeId;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+        render();
+    }
+    const ids = selectedNodeIds();
+    const multi = ids.length > 1;
+    const rows = [];
+    if(multi){
+        const alignable = smartAlignableNodes().length;
+        const btn = mode => `<button type="button" class="nv-ctx-align" data-ctx-align="${mode}" title="${SMART_ALIGN_LABELS[mode]}" ${(mode.endsWith('dist') ? alignable < 3 : alignable < 2) ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${SMART_ALIGN_ICONS[mode]}</svg></button>`;
+        rows.push(`<div class="nv-ctx-head">已选 ${ids.length} 个节点</div>`);
+        rows.push(`<div class="nv-ctx-aligns">${['left','hcenter','right','top','vcenter','bottom'].map(btn).join('')}<span class="nv-ctx-sep"></span>${btn('hdist')}${btn('vdist')}</div>`);
+        rows.push(smartMenuRow('arrange', 'layout-grid', '整理成网格'));
+        const pickIds = pickableSelectedNodeIds(ids);
+        const pickCount = pickIds.reduce((sum, id) => sum + pickableImagesOfNode(nodes.find(n => n.id === id)).length, 0);
+        if(pickIds.length && pickCount > 1) rows.push(smartMenuRow('pick', 'layout-grid', `挑图（${pickCount} 张）`));
+    } else {
+        if(smartRerunInfo(node)) rows.push(smartMenuRow('rerun', 'refresh-cw', node.runSettings?.apiKind === 'video' ? '再来一条' : '再来一张'));
+        if(pickableImagesOfNode(node).length > 1) rows.push(smartMenuRow('pick', 'layout-grid', '挑图'));
+        if((node.images || []).some(img => img?.url)) rows.push(smartMenuRow('download', 'download', (node.images || []).length > 1 ? '全部下载' : '下载'));
+    }
+    rows.push('<div class="nv-ctx-divider"></div>');
+    rows.push(smartMenuRow('duplicate', 'copy-plus', '复制一份', 'ModD'));
+    rows.push(smartMenuRow('copy', 'copy', '复制', 'ModC'));
+    if(isSmartGroupNode(node) && !multi) rows.push(smartMenuRow('ungroup', 'ungroup', '取消分组', 'ModShift+G'));
+    else rows.push(smartMenuRow('group', 'group', '放入分组', 'ModG'));
+    rows.push('<div class="nv-ctx-divider"></div>');
+    rows.push(smartMenuRow('delete', 'trash-2', multi ? `删除 ${ids.length} 个节点` : '删除', 'Del', ' is-danger'));
+    if(!smartNodeMenuEl){
+        smartNodeMenuEl = document.createElement('div');
+        smartNodeMenuEl.id = 'smartNodeMenu';
+        smartNodeMenuEl.className = 'create-menu nv-ctx';
+        smartNodeMenuEl.setAttribute('role', 'menu');
+        document.body.appendChild(smartNodeMenuEl);
+        smartNodeMenuEl.addEventListener('contextmenu', e => e.preventDefault());
+        smartNodeMenuEl.addEventListener('click', onSmartNodeMenuClick);
+    }
+    smartNodeMenuEl.innerHTML = rows.join('');
+    smartNodeMenuEl.dataset.nodeId = nodeId;
+    smartNodeMenuEl.classList.add('open');
+    refreshIcons();
+    const w = smartNodeMenuEl.offsetWidth || 220, h = smartNodeMenuEl.offsetHeight || 260;
+    smartNodeMenuEl.style.left = `${Math.max(14, Math.min(window.innerWidth - w - 14, event.clientX + 4))}px`;
+    smartNodeMenuEl.style.top = `${Math.max(14, Math.min(window.innerHeight - h - 14, event.clientY + 4))}px`;
+    document.addEventListener('pointerdown', onSmartNodeMenuOutside, true);
+    document.addEventListener('keydown', onSmartNodeMenuKey, true);
+    window.addEventListener('blur', closeSmartNodeMenu);
+}
+function onSmartNodeMenuClick(event){
+    const alignBtn = event.target.closest('[data-ctx-align]');
+    if(alignBtn){
+        if(!alignBtn.disabled) alignSelectedSmartNodes(alignBtn.dataset.ctxAlign);
+        return; /* 对齐后菜单留着，方便连续点 */
+    }
+    const row = event.target.closest('[data-ctx-act]');
+    if(!row) return;
+    const act = row.dataset.ctxAct;
+    const node = nodes.find(n => n.id === smartNodeMenuEl.dataset.nodeId);
+    closeSmartNodeMenu();
+    const ids = selectedNodeIds();
+    if(act === 'arrange') return arrangeSelectedSmartNodes();
+    if(act === 'pick') return openSmartPickViewer(ids.length > 1 ? pickableSelectedNodeIds(ids) : [node?.id]);
+    if(act === 'rerun' && node) return rerunSmartNode(node);
+    if(act === 'download' && node){
+        const list = (node.images || []).filter(img => img?.url);
+        if(list.length > 1) return zipDownloadImageItems(node.title || tr('smart.createImportNode'), list.map(img => imageForDisplay(img)));
+        return downloadPreviewFile(list[0]);
+    }
+    if(act === 'duplicate') return duplicateSelectedSmartNodes();
+    if(act === 'copy') return copySelectedNodes();
+    if(act === 'group') return groupSelectedNodes();
+    if(act === 'ungroup' && node){ if(ungroupNode(node.id)){ render(); scheduleSave(); } return; }
+    if(act === 'delete'){
+        if(!ids.length) return;
+        pushUndo();
+        ids.forEach(id => { undoSuppressed = true; deleteNode(id); undoSuppressed = false; });
+        render();
+        scheduleSave();
+    }
+}
+window.alignSelectedSmartNodes = alignSelectedSmartNodes;
+/* ── 首页「提示词框 / 技能 / 模板」开画布的种子 ──────────────────────────────
+   home.html 先建一张空白智能画布，再把种子写进 localStorage：novai_canvas_seed:<画布 id>。
+   这里在 loadCanvas 之后消费一次（读完即删）；只对「还没有任何节点」的画布生效，
+   旧画布、刷新页面都不会被重复铺节点。
+   种子格式：{v:1, nodes:[{key,type,title,text,prompt,ratio,video,count,images,inputs,col}], agent, autoSend, autoRun, toast}
+     type: image（参考图/素材，可为空，等用户拖图进来）· gen（空的生成节点，带提示词草稿）
+           text（纯文本说明，连到生成节点时会并进提示词）· label（标题胶囊）· table / batch（表格批量）
+     inputs: 上游节点 key，建成 input 连线（参考图 / 文本都会自动进生成请求） */
+const HOME_SEED_KEY_PREFIX = 'novai_canvas_seed:';
+function readHomeCanvasSeed(){
+    if(!canvasId) return null;
+    const key = HOME_SEED_KEY_PREFIX + canvasId;
+    let raw = null;
+    try { raw = localStorage.getItem(key); localStorage.removeItem(key); } catch(e) { return null; }
+    if(!raw) return null;
+    try {
+        const seed = JSON.parse(raw);
+        return seed && typeof seed === 'object' ? seed : null;
+    } catch(e) { return null; }
+}
+function homeSeedRunSettings(spec){
+    const next = cloneSmartSettings(settings);
+    if(spec.video){
+        next.apiKind = 'video';
+        const aspect = {square:'1:1', wide:'16:9', story:'9:16', portrait43:'3:4', landscape43:'4:3', ultrawide:'21:9'}[spec.ratio] || spec.ratio;
+        if(aspect && /^\d+:\d+$/.test(aspect)) next.videoAspect = aspect;
+    } else {
+        if(isApiLikeEngine(next.engine || 'api')) next.apiKind = 'image';
+        if(spec.ratio) next.ratio = spec.ratio;
+    }
+    if(Number(spec.count) > 0) next[spec.video ? 'videoCount' : 'count'] = Math.min(4, Number(spec.count));
+    try { normalizeSmartVideoModeSettings(next, true); } catch(e) {}
+    return next;
+}
+function buildHomeSeedNode(spec, x, y){
+    const type = spec.type || 'image';
+    if(type === 'text'){
+        return {id:uid('text'), type:'smart-text', x, y, w:SMART_TEXT_NODE_WIDTH, h:SMART_TEXT_NODE_HEIGHT, text:String(spec.text || '')};
+    }
+    if(type === 'label'){
+        return {id:uid('label'), type:'smart-label', x, y, w:Math.max(120, 40 + String(spec.text || '').length * 15), h:38,
+            text:String(spec.text || SMART_LABEL_DEFAULT_TEXT), labelStyle:'solid', labelColor:spec.color || SMART_LABEL_DEFAULT_COLOR,
+            labelFontSize:SMART_LABEL_DEFAULT_FONT, labelDot:true, labelIcon:''};
+    }
+    if(type === 'table'){
+        const model = window.NovaTableModel;
+        const table = model ? model.emptyTable() : {kind:'table', version:1, columns:[], rows:[], selectedRows:[], mergedGroups:[]};
+        return {id:uid('tbl'), type:'table', x, y, w:520, h:0, title:spec.title || '多维表格', table};
+    }
+    if(type === 'batch'){
+        return {id:uid('batch'), type:'smart-batch', x, y, w:420, h:0, title:spec.title || '生成输入'};
+    }
+    const images = (Array.isArray(spec.images) ? spec.images : [])
+        .filter(img => img && img.url)
+        .map(img => ensureSmartImageAssetId({url:img.url, name:img.name || '参考图', kind:img.kind || 'image'}));
+    const node = {id:uid('smart'), type:'smart-image', x, y, title:spec.title || (images.length > 1 ? 'Group' : 'Image'), images, created_at:Date.now()};
+    node.scale = images.length > 1 ? MEDIA_GROUP_DEFAULT_SCALE : mediaNodeDefaultScale(node);
+    if(type === 'gen'){
+        const text = String(spec.prompt || '');
+        node.promptDraftText = text;
+        node.promptDraftHtml = escapeHtml(text);
+        node.promptDraftTouched = Boolean(text);
+        node.runSettings = homeSeedRunSettings(spec);
+    }
+    return node;
+}
+function applyHomeCanvasSeed(seed){
+    const specs = Array.isArray(seed.nodes) ? seed.nodes.slice(0, 24) : [];
+    const byKey = new Map();
+    const created = [];
+    /* 按列摆放：col 0 放素材/说明，col 1 起放生成节点；同一列里自上而下排，间距 48。 */
+    const COL_GAP = 120, ROW_GAP = 48;
+    const colX = [0];
+    const colY = new Map();
+    const colWidth = new Map();
+    specs.forEach(spec => {
+        const col = Math.max(0, Math.min(6, Number(spec.col) || 0));
+        const x = 0, y = colY.get(col) || 0;
+        const node = buildHomeSeedNode(spec, x, y);
+        node.__seedCol = col;
+        nodes.push(node);
+        const r = nodeRect(node);
+        colY.set(col, y + (r.height || 240) + ROW_GAP);
+        colWidth.set(col, Math.max(colWidth.get(col) || 0, r.width || 300));
+        byKey.set(String(spec.key || node.id), node);
+        created.push({spec, node});
+    });
+    /* 各列 x = 前面列宽之和 + 间距；每列垂直居中到最高那列 */
+    const maxCol = Math.max(0, ...created.map(c => c.node.__seedCol));
+    for(let c = 1; c <= maxCol; c += 1) colX[c] = colX[c - 1] + (colWidth.get(c - 1) || 0) + (colWidth.get(c - 1) ? COL_GAP : 0);
+    const tallest = Math.max(0, ...Array.from(colY.values()));
+    created.forEach(({node}) => {
+        const col = node.__seedCol;
+        node.x = colX[col] || 0;
+        node.y += Math.round((tallest - (colY.get(col) || 0)) / 2);
+        delete node.__seedCol;
+    });
+    created.forEach(({spec, node}) => {
+        (Array.isArray(spec.inputs) ? spec.inputs : []).forEach(key => {
+            const from = byKey.get(String(key));
+            if(from) { try { connectInputNode(from.id, node.id); } catch(e) { addConnection(from.id, node.id, 'input'); } }
+        });
+    });
+    const firstGen = created.find(c => (c.spec.type || 'image') === 'gen')?.node;
+    const firstRef = created.find(c => (c.spec.type || 'image') === 'image')?.node;
+    selectedIds = [];
+    selectedId = (firstGen || firstRef || created[0]?.node)?.id || '';
+    selectedImage = {nodeId:'', index:-1};
+    return {created, firstGen};
+}
+function openHomeSeedAgent(text, autoSend){
+    const value = String(text || '').trim();
+    if(!value) return;
+    if(!chatModal.classList.contains('open')) toggleChatPanel();
+    setTimeout(() => {
+        chatTypewriterStop(true);
+        const inp = document.getElementById('chatInput');
+        if(!inp) return;
+        inp.value = value;
+        inp.dispatchEvent(new Event('input', {bubbles:true}));
+        inp.focus();
+        if(autoSend) sendChatMessage();
+    }, 320);
+}
+function consumeHomeCanvasSeed(){
+    const seed = readHomeCanvasSeed();
+    if(!seed) return;
+    const hasContent = nodes.some(n => n.id !== SMART_LOG_PREVIEW_NODE_ID);
+    let result = null;
+    if(!hasContent && Array.isArray(seed.nodes) && seed.nodes.length){
+        result = applyHomeCanvasSeed(seed);
+        render();
+        fitAllNodesViewport();
+        render();
+        scheduleSave();
+        if(seed.toast) toast(seed.toast);
+    }
+    if(seed.agent) openHomeSeedAgent(seed.agent, Boolean(seed.autoSend));
+    else if(seed.autoRun && result?.firstGen){
+        /* 首页「图片 / 视频」模式直接发送：选中那颗生成节点，走和手点「运行」完全一样的路径 */
+        setTimeout(() => {
+            selectedId = result.firstGen.id;
+            render();
+            setTimeout(() => document.getElementById('runBtn')?.click(), 260);
+        }, 360);
+    }
+}
 })();

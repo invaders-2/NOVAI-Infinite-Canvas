@@ -170,6 +170,13 @@ The app checks all three sources for the latest version on startup, pushes updat
 
 ## Changelog
 
+### v1.0.124
+
+- **Fixed Windows update failures**: when the install folder is not writable, the update no longer fails halfway — it tells you to run as administrator or reinstall with the latest installer
+- **Fix**: update failures now show the real reason instead of an unreadable file error
+- **Fix**: the desktop app now fully shuts down its backend before restarting to install, so new files are not blocked by files in use
+- **Improvement**: new Windows installs default to a user-writable folder, so one-click update works without administrator rights
+
 ### v1.0.123
 
 - **New floating toolbar on Smart Canvas image nodes**: portrait & emotion adjustment, panorama, multi-angle, relighting, nine-grid templates, crop (HD / outpainting / redraw / erase / cutout / crop), element editing, layer separation, grid split, annotation, rotate, download and preview — all from one entry point

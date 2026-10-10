@@ -1,0 +1,169 @@
+/* ═══ NOVAI 专业调色面板（image-adjust-editor.js，iaj- 前缀）═══
+   两个画布编辑器共用；放在 glide.css 之前加载。黑白灰为主，只有白平衡 / HSL / 色轮用低饱和彩色（用户已确认）。
+   无描边：层级靠底色和投影；输入框聚焦只加深底色。 */
+.iaj{
+  --iaj-ink:#0a0a0a;--iaj-ink2:#525252;--iaj-ink3:#737373;--iaj-ink4:#a3a3a3;
+  --iaj-solid:#fff;--iaj-fill1:rgba(0,0,0,.035);--iaj-fill2:rgba(0,0,0,.065);--iaj-fill3:rgba(0,0,0,.1);--iaj-sep:rgba(0,0,0,.06);
+  --iaj-thumb:#fff;--iaj-thumb-sh:0 1px 3px rgba(0,0,0,.3),0 0 1px rgba(0,0,0,.35);--iaj-accent:#0a0a0a;--iaj-on:#fff;
+  --iaj-mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+.theme-dark .iaj,.studio-theme-dark .iaj,[data-theme="dark"] .iaj,html.theme-dark .iaj{
+  --iaj-ink:#fafafa;--iaj-ink2:#a3a3a3;--iaj-ink3:#8a8a8a;--iaj-ink4:#5a5a5a;
+  --iaj-solid:#171717;--iaj-fill1:rgba(255,255,255,.05);--iaj-fill2:rgba(255,255,255,.09);--iaj-fill3:rgba(255,255,255,.14);--iaj-sep:rgba(255,255,255,.07);
+  --iaj-thumb:#e8e8e8;--iaj-thumb-sh:0 1px 3px rgba(0,0,0,.6);--iaj-accent:#fafafa;--iaj-on:#0a0a0a;
+}
+.iaj *{box-sizing:border-box}
+/* 布局：左列（视图条 + 图片）+ 右侧面板 */
+.adjust-row.iaj-row{gap:18px}
+.iaj-col{position:relative;flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;gap:10px}
+.iaj-col > .image-edit-stage{flex:1 1 auto;min-height:0}
+.image-adjust-tools.iaj{flex-direction:column !important;flex-wrap:nowrap !important;align-items:stretch !important;flex:0 0 324px !important;width:324px !important;padding:0 2px 0 0 !important;gap:0 !important;margin:0 !important;background:transparent !important;box-shadow:none !important;border:0 !important;flex-direction:column;min-height:0;overflow:hidden;color:var(--iaj-ink);font-size:12px;font-weight:400}
+.iaj-vbar{display:flex;align-items:center;gap:10px;height:30px;flex:none}
+.iaj-vbar .sp,.iaj .sp{flex:1}
+.iaj-vbar{--iaj-ink:var(--text,#0a0a0a);--iaj-ink3:var(--muted,#737373);--iaj-fill1:color-mix(in srgb,currentColor 5%,transparent);--iaj-solid:var(--card,#fff);color:var(--text,#0a0a0a)}
+.iaj-hold{height:26px;padding:0 12px;border:0;border-radius:99px;background:color-mix(in srgb,currentColor 6%,transparent);color:inherit;font-size:12px;cursor:pointer;opacity:.8;user-select:none}
+.iaj-hold:active{background:color-mix(in srgb,currentColor 12%,transparent)}
+.iaj-note{font-size:12px;opacity:.6}
+/* 图片层 */
+/* 对比用的原图层必须始终等于 #cropCanvas 的框：缩放（applyImageEditZoom）只改 #cropImage 与 WebGL
+   canvas 的尺寸，原图层靠 inset:0 + 100% 跟随。但 .crop-canvas img 上的 max-width/max-height 上限
+   （min(1300px,100vw-100px) / min(840px,100vh-200px)）会把这层单独卡小——缩放一旦超过该上限，
+   原图层不再铺满，底下同一张 #cropImage 就透出来，对比的两半各显示一张、大小不同（放大后"图片重叠"）。
+   这里显式取消这两个上限，原图层在任何缩放比例下都与 holder 完全重合。 */
+.crop-canvas .iaj-orig{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;object-fit:contain;z-index:2;pointer-events:none;display:block}
+.crop-canvas .iaj-canvas{object-fit:contain}
+.crop-canvas.iaj-picking{cursor:crosshair !important}
+.crop-canvas.iaj-picking *{cursor:crosshair !important}
+.iaj-tag{position:absolute;bottom:10px;z-index:7;padding:3px 8px;border-radius:6px;background:rgba(10,10,10,.5);color:#fff;font-size:11px;line-height:16px;pointer-events:none;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);display:none}
+.iaj-tag.l{left:10px}.iaj-tag.r{right:10px}
+.crop-canvas.iaj-split .iaj-tag{display:block}
+.iaj-divider{width:2px !important;margin-left:-1px;background:rgba(255,255,255,.92) !important;mix-blend-mode:normal !important;box-shadow:0 0 6px rgba(0,0,0,.35);z-index:8 !important;cursor:ew-resize}
+.iaj-divider::before{display:none !important}
+.iaj-divider b{position:absolute;top:50%;left:50%;width:28px;height:28px;margin:-14px 0 0 -14px;border-radius:99px;background:rgba(255,255,255,.96);box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.iaj-divider b::before,.iaj-divider b::after{content:"";position:absolute;top:10px;width:6px;height:6px;border-left:1.5px solid #333;border-bottom:1.5px solid #333}
+.iaj-divider b::before{left:8px;transform:rotate(45deg)}.iaj-divider b::after{right:8px;transform:rotate(-135deg)}
+/* 面板顶部 */
+.iaj-top{flex:none;padding:0 0 8px}
+.iaj-hist{position:relative;height:84px;border-radius:12px;background:var(--iaj-fill1);padding:4px 10px}
+.iaj-hist canvas{display:block;width:100%;height:76px}
+.iaj-clip{position:absolute;top:7px;width:0;height:0;border:5px solid transparent;opacity:.5}
+.iaj-clip.lo{left:7px;border-left-color:var(--iaj-ink4);border-top-color:var(--iaj-ink4)}
+.iaj-clip.hi{right:7px;border-right-color:var(--iaj-ink4);border-top-color:var(--iaj-ink4)}
+.iaj-clip.on{opacity:1}.iaj-clip.lo.on{border-left-color:var(--iaj-ink);border-top-color:var(--iaj-ink)}.iaj-clip.hi.on{border-right-color:var(--iaj-ink);border-top-color:var(--iaj-ink)}
+.iaj-hmeta{display:flex;gap:10px;font:11px/1 var(--iaj-mono);color:var(--iaj-ink3);padding:8px 2px 0;white-space:pre}
+.iaj-tools{display:flex;align-items:center;gap:2px;padding-top:10px}
+.iaj-status{height:0;overflow:hidden;font-size:11.5px;color:var(--iaj-ink2);transition:height .16s ease,opacity .16s ease;opacity:0}
+.iaj-status.show{height:22px;padding-top:6px;opacity:1}
+.iaj-pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border:0;border-radius:99px;background:var(--iaj-fill2);color:var(--iaj-ink);font-size:12px;font-weight:500;font-family:inherit;cursor:pointer;transition:background .15s}
+.iaj-pill:hover{background:var(--iaj-fill3)}
+.iaj-pill.sm{height:26px;padding:0 10px}
+.iaj-ib{width:28px;height:28px;border:0;border-radius:8px;background:transparent;color:var(--iaj-ink2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:background .15s,color .15s}
+.iaj-ib:hover{background:var(--iaj-fill2);color:var(--iaj-ink)}
+.iaj-ib:disabled{opacity:.35;cursor:default;background:transparent}
+.iaj-ib.sm{width:24px;height:24px;border-radius:6px;color:var(--iaj-ink3)}
+.iaj-ib.on{background:var(--iaj-accent);color:var(--iaj-on)}
+.iaj-ic{flex:none;display:block}
+.iaj-seg{display:inline-flex;gap:2px;padding:2px;border-radius:99px;background:var(--iaj-fill1);flex:none}
+.iaj-seg b{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border-radius:99px;font-size:12px;font-weight:400;color:var(--iaj-ink3);white-space:nowrap;cursor:pointer;transition:color .15s,background .15s}
+.iaj-seg b:hover{color:var(--iaj-ink2)}
+.iaj-seg b.on{background:var(--iaj-solid);color:var(--iaj-ink);font-weight:500;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.theme-dark .iaj-seg b.on,.studio-theme-dark .iaj-seg b.on{background:var(--iaj-fill3)}
+.iaj-seg.mini b{height:22px;padding:0 9px;font-size:11.5px}
+/* 可滚动区 */
+.iaj-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:6px;margin-right:-4px;scrollbar-width:thin}
+.iaj-prs{padding:2px 0 8px}
+.iaj-prs .prh{display:flex;align-items:center;gap:8px;height:28px}
+.iaj .mt{font-size:13px;font-weight:500;color:var(--iaj-ink)}
+.iaj-save{display:flex;align-items:center;gap:6px;padding:6px 0 2px}
+.iaj-save[hidden]{display:none}
+.iaj-in{flex:1;min-width:0;height:28px;padding:0 10px;border:0 !important;box-shadow:none !important;outline:0;border-radius:8px;background:var(--iaj-fill1);color:var(--iaj-ink);font-size:12px;font-family:inherit}
+.iaj-in:focus{background:var(--iaj-fill2)}
+.iaj-prs .prl{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 6px;scrollbar-width:none}
+.iaj-prs .prl::-webkit-scrollbar{display:none}
+.iaj-pr{position:relative;flex:none;width:66px;display:flex;flex-direction:column;gap:5px;align-items:center;padding:0;border:0;background:none;cursor:pointer;font-family:inherit}
+.iaj-pr img{width:66px;height:46px;object-fit:cover;border-radius:8px;display:block;background:var(--iaj-fill2);transition:transform .16s,box-shadow .16s}
+.iaj-pr:hover img{transform:translateY(-1px)}
+.iaj-pr span{font-size:11px;color:var(--iaj-ink3);white-space:nowrap;max-width:66px;overflow:hidden;text-overflow:ellipsis}
+.iaj-pr.on img{box-shadow:var(--iaj-thumb-sh),0 6px 14px -6px rgba(0,0,0,.45);transform:translateY(-2px)}
+.iaj-pr.on span{color:var(--iaj-ink);font-weight:500}
+.iaj-pr .del{position:absolute;right:-4px;top:-4px;width:16px;height:16px;border-radius:99px;background:var(--iaj-solid);color:var(--iaj-ink2);display:none;align-items:center;justify-content:center;box-shadow:var(--iaj-thumb-sh)}
+.iaj-pr:hover .del{display:flex}
+.iaj-empty{font-size:12px;color:var(--iaj-ink3);padding:14px 2px}
+.iaj-prs .amt.dis{opacity:.4;pointer-events:none}
+/* 模块 */
+.iaj-mods{display:flex;flex-direction:column;gap:2px;padding-bottom:12px}
+.iaj-md{border-radius:12px;transition:background .16s}
+.iaj-md > header{display:flex;align-items:center;gap:6px;height:36px;padding:0 4px 0 6px;border-radius:10px;cursor:pointer;color:var(--iaj-ink2);user-select:none}
+.iaj-md > header:hover{background:var(--iaj-fill1)}
+.iaj-md.open > header:hover{background:transparent}
+.iaj-md .cv{display:inline-flex;color:var(--iaj-ink3);transform:rotate(-90deg);transition:transform .2s}
+.iaj-md.open .cv{transform:none}
+.iaj-md .mt{color:inherit}
+.iaj-md.open > header{color:var(--iaj-ink)}
+.iaj-md .hint{font-size:11px;color:var(--iaj-ink3);margin-left:2px}
+.iaj-md .ma{margin-left:auto;display:flex;gap:2px;opacity:.5;transition:opacity .15s}
+.iaj-md > header:hover .ma,.iaj-md.off .ma,.iaj-md.changed .ma{opacity:1}
+.iaj-md.off > header,.iaj-md.off .hint{color:var(--iaj-ink4)}
+.iaj-md .mb{display:none;padding:0 10px 10px}
+.iaj-md.open{background:var(--iaj-fill1)}
+.iaj-md.open .mb{display:block}
+.iaj-md.off .mb{opacity:.45}
+.iaj-sub{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--iaj-ink3);letter-spacing:.04em;padding:10px 0 2px}
+.iaj-sub:first-child{padding-top:2px}
+/* 滑块 */
+.iaj-sl{display:grid;grid-template-columns:64px 1fr 44px;align-items:center;gap:10px;height:28px}
+.iaj-sl .lb{font-size:12px;color:var(--iaj-ink2);white-space:nowrap;display:flex;align-items:center;gap:6px;cursor:ew-resize;user-select:none;overflow:hidden}
+.iaj-sl.on .lb{color:var(--iaj-ink)}
+.iaj-sl .tr{position:relative;height:3px;border-radius:2px;background:var(--iaj-fill3);cursor:pointer;outline:none;touch-action:none}
+.iaj-sl .tr::before{content:"";position:absolute;left:0;right:0;top:-10px;bottom:-10px}
+.iaj-sl.colored .tr{height:4px;opacity:.85}
+.iaj-sl .tk{position:absolute;left:50%;top:-3px;width:1px;height:9px;margin-left:-.5px;background:var(--iaj-ink4);opacity:.6;pointer-events:none}
+.iaj-sl .fl{position:absolute;top:0;bottom:0;background:var(--iaj-ink3);border-radius:2px;pointer-events:none}
+.iaj-sl .th{position:absolute;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:99px;background:var(--iaj-thumb);box-shadow:var(--iaj-thumb-sh);pointer-events:none;transition:transform .12s}
+.iaj-sl .tr:hover .th,.iaj-sl .tr:active .th{transform:scale(1.15)}
+.iaj-sl .tr:focus-visible .th{transform:scale(1.25)}
+.iaj-sl .vl{width:44px;height:22px;min-height:0;padding:0 2px;border:0 !important;outline:0;box-shadow:none !important;border-radius:6px;background:transparent !important;text-align:right;font:11px/22px var(--iaj-mono);color:var(--iaj-ink3)}
+.iaj-sl .vl:focus{background:var(--iaj-fill2) !important;color:var(--iaj-ink)}
+.iaj-sl.on .vl{color:var(--iaj-ink)}
+.iaj-sl.mini{grid-template-columns:30px 1fr 32px;gap:6px}
+.iaj-sl.mini .vl{width:32px}
+.iaj-dot{width:8px;height:8px;border-radius:99px;flex:none;display:inline-block}
+.iaj-wbrow{display:flex;align-items:center;justify-content:space-between;padding:4px 0 2px}
+.iaj-chs{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:2px 0 8px}
+.iaj-cd{width:7px;height:7px;border-radius:99px;display:inline-block}
+.iaj-cd.lum{background:linear-gradient(90deg,var(--iaj-ink) 50%,var(--iaj-ink4) 50%)}
+.iaj-hgrp + .iaj-hgrp{margin-top:2px}
+/* 曲线 */
+.iaj-curve{border-radius:10px;background:var(--iaj-fill1);padding:8px}
+.iaj-curve canvas{display:block;width:100%;height:200px;cursor:crosshair;touch-action:none}
+.iaj-curve canvas.del{cursor:no-drop}
+.iaj-cvinfo{display:flex;gap:12px;font-size:11px;color:var(--iaj-ink3);padding:8px 2px 0;min-height:19px}
+.iaj-cvinfo b{font:500 11px var(--iaj-mono);color:var(--iaj-ink)}
+.iaj-cvtip{font-size:11px;color:var(--iaj-ink4);padding:2px 2px 0}
+.iaj-cpre{display:flex;flex-wrap:wrap;gap:4px;padding-top:8px}
+.iaj-cpre b{height:24px;padding:0 10px;border-radius:99px;background:var(--iaj-fill1);font-size:11.5px;font-weight:400;color:var(--iaj-ink2);display:inline-flex;align-items:center;cursor:pointer}
+.iaj-cpre b:hover{background:var(--iaj-fill2);color:var(--iaj-ink)}
+/* 色轮 */
+.iaj-wheels{display:flex;flex-direction:column;align-items:center;gap:6px;padding:4px 0 8px}
+.iaj-wheels .wrow{display:flex;gap:14px;width:100%;justify-content:center}
+.iaj-wh{display:flex;flex-direction:column;align-items:center;gap:6px;width:132px}
+.iaj-wheels > .iaj-wh{width:100%}
+.iaj-wheels > .iaj-wh .iaj-sl{width:220px}
+.iaj-wheels .wrow .iaj-sl{width:132px}
+.iaj-wheels.one > .iaj-wh .iaj-sl{display:none}
+.iaj-wh .wc{position:relative;border-radius:99px;cursor:crosshair;touch-action:none;background:radial-gradient(circle,var(--iaj-solid) 0,rgba(255,255,255,0) 72%),conic-gradient(from 0deg,#c46a62,#c7a35b 60deg,#8fb06a 120deg,#5fa5a0 180deg,#5f7fbf 240deg,#9a6db8 300deg,#c46a62);opacity:.92}
+.theme-dark .iaj-wh .wc,.studio-theme-dark .iaj-wh .wc{background:radial-gradient(circle,#262626 0,rgba(38,38,38,0) 72%),conic-gradient(from 0deg,#9c544e,#9f8248 60deg,#718c54 120deg,#4b847f 180deg,#4b6599 240deg,#7b5793 300deg,#9c544e)}
+.iaj-wh .wx{position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px;border-radius:99px;background:var(--iaj-ink4)}
+.iaj-wh .wp{position:absolute;left:50%;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:99px;background:var(--iaj-thumb);box-shadow:var(--iaj-thumb-sh);pointer-events:none}
+.iaj-wh .wn{font-size:12px;color:var(--iaj-ink2)}
+.iaj-wh.on .wn{color:var(--iaj-ink)}
+
+/* 调色模式下隐藏预览模式的「对比原图」按钮：调色面板有自己的对比视图 */
+#imageAdjustRow #compareToggleBtn{display:none !important}
+
+/* 并排对比层 */
+.iaj-sideview{position:absolute;left:0;right:0;top:40px;bottom:0;display:none;gap:10px;z-index:5}
+.iaj-sideview.on{display:flex}
+.iaj-sideview .half{position:relative;flex:1 1 0;min-width:0;display:flex;align-items:center;justify-content:center}
+.iaj-sideview img,.iaj-sideview canvas{display:block;max-width:100%;max-height:100%;object-fit:contain}
+.iaj-tag2{position:absolute;left:10px;bottom:10px;padding:3px 8px;border-radius:6px;background:rgba(10,10,10,.5);color:#fff;font-size:11px;line-height:16px;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}

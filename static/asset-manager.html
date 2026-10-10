@@ -7,13 +7,13 @@
     <title>素材库管理</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
     <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790685706"></script>
     <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
-    <link rel="stylesheet" href="/static/css/asset-manager.css?v=1.0.123.1790240705">
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790560477"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790560477">
+    <link rel="stylesheet" href="/static/css/asset-manager.css?v=1.0.123.1790560477">
 
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790560477">
 <style>
 /* ═══ V4 Apple-style Glassmorphism 设计变量 ═══ */
 :root {
@@ -633,6 +633,43 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
     .asset-tabs button { padding: 0 10px !important; font-size: 11px !important; }
 }
 
+
+/* ═══ 第 11 轮：素材来源切换 + 分批加载 ═══ */
+.asset-tabs-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.asset-source-switch { display:flex; align-items:center; gap:2px; padding:4px; border-radius:12px; background:var(--v4-card-bg); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); box-shadow:0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow); }
+.asset-source-switch[hidden] { display:none; }
+.asset-source-switch button { height:28px; padding:0 11px; border:0; border-radius:9px; display:inline-flex; align-items:center; gap:6px; background:transparent; color:var(--v4-muted); font-size:12px; font-weight:500; cursor:pointer; transition:background .2s var(--v4-ease-out), color .2s var(--v4-ease-out); }
+.asset-source-switch button:hover { color:var(--v4-text); background:var(--v4-bg); }
+.asset-source-switch button.active { color:var(--v4-text); background:var(--v4-bg); font-weight:600; }
+.asset-source-switch button svg { width:13px; height:13px; }
+.asset-source-switch em { font-style:normal; font-size:11px; font-weight:500; color:var(--v4-muted); font-variant-numeric:tabular-nums; }
+.asset-source-switch em:empty { display:none; }
+.asset-grid-more { grid-column:1 / -1; display:flex; justify-content:center; padding:10px 0 4px; }
+.asset-grid-more .asset-btn { font-size:11.5px; }
+.asset-card { content-visibility:auto; contain-intrinsic-size:auto 200px; }
+
+/* ═══ 第 15 轮：生成信息 + 筛选 ═══ */
+.asset-filter-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:0 14px 10px; }
+.asset-filter-seg { display:inline-flex; gap:2px; padding:3px; border-radius:10px; background:var(--v4-bg); }
+.asset-filter-seg button { height:26px; padding:0 10px; border:0; border-radius:8px; background:transparent; color:var(--v4-muted); font-size:11.5px; font-weight:500; cursor:pointer; transition:background .2s var(--v4-ease-out), color .2s var(--v4-ease-out); }
+.asset-filter-seg button:hover { color:var(--v4-text); }
+.asset-filter-seg button.active { background:var(--v4-card-solid, #fff); color:var(--v4-text); font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+.asset-filter-select { height:32px !important; font-size:11.5px !important; max-width:240px; }
+.asset-filter-clear { height:26px; padding:0 10px; border:0; border-radius:8px; background:transparent; color:var(--v4-muted); font-size:11.5px; cursor:pointer; }
+.asset-filter-clear:hover { color:var(--v4-text); background:var(--v4-bg); }
+.gen-info-prompt { padding:10px 12px; font-size:12px; line-height:1.6; color:var(--v4-text); white-space:pre-wrap; word-break:break-word; max-height:180px; overflow:auto; }
+.gen-info-chips { display:flex; flex-wrap:wrap; gap:6px; padding:0 12px 12px; }
+.gen-info-chips.gen-info-plain { padding:0; }
+.gen-info-chips span { display:inline-flex; align-items:center; gap:5px; max-width:100%; padding:4px 9px; border-radius:999px; background:var(--v4-bg); color:var(--v4-text); font-size:11px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gen-info-chips em { font-style:normal; color:var(--v4-muted); }
+.gen-info-actions { display:flex; gap:8px; }
+.gen-info-actions .asset-btn { flex:1 1 auto; justify-content:center; }
+.gen-info-usage { border-radius:14px; background:var(--v4-card-bg); padding:8px; display:flex; flex-direction:column; gap:2px; }
+.gen-info-usage-head { padding:4px 6px 6px; font-size:11.5px; font-weight:600; color:var(--v4-muted); }
+.gen-info-usage-row { display:flex; align-items:center; gap:8px; height:32px; padding:0 8px; border:0; border-radius:9px; background:transparent; color:var(--v4-text); font-size:12px; text-align:left; cursor:pointer; }
+.gen-info-usage-row:hover { background:var(--v4-bg); }
+.gen-info-usage-row span { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gen-info-usage-row svg { width:13px; height:13px; color:var(--v4-muted); flex:0 0 auto; }
 </style>
 </head>
 <body>
@@ -649,12 +686,17 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
             </div>
         </header>
 
-        <div class="asset-tabs">
-            <button id="assetTabAssets" class="active" type="button" data-tab="assets"><i data-lucide="image"></i><span>图片资产</span></button>
-            <button id="assetTabWorkflows" type="button" data-tab="workflows"><i data-lucide="workflow"></i><span>工作流管理</span></button>
-            <button id="assetTabPrompts" type="button" data-tab="prompts"><i data-lucide="text-cursor-input"></i><span>提示词库</span></button>
-            <button id="assetTabCanvasAssets" type="button" data-tab="canvas-assets"><i data-lucide="layout-dashboard"></i><span>画布资产</span></button>
-            <button id="assetTabLocal" type="button" data-tab="local"><i data-lucide="folder-open"></i><span>本地素材</span></button>
+        <div class="asset-tabs-row">
+            <div class="asset-tabs">
+                <button id="assetTabMedia" class="active" type="button"><i data-lucide="image"></i><span>素材</span></button>
+                <button id="assetTabPrompts" type="button" data-tab="prompts"><i data-lucide="text-cursor-input"></i><span>提示词库</span></button>
+                <button id="assetTabWorkflows" type="button" data-tab="workflows"><i data-lucide="workflow"></i><span>工作流</span></button>
+            </div>
+            <div class="asset-source-switch" id="assetSourceSwitch" role="group" aria-label="素材来源">
+                <button id="assetTabAssets" class="active" type="button" data-tab="assets" title="自己整理的资产库：分组、智能分类"><i data-lucide="library"></i><span>资产库</span><em></em></button>
+                <button id="assetTabCanvasAssets" type="button" data-tab="canvas-assets" title="所有画布里用到的图片、视频、音频"><i data-lucide="layout-dashboard"></i><span>画布里的</span><em></em></button>
+                <button id="assetTabLocal" type="button" data-tab="local" title="上传到本机素材目录的文件"><i data-lucide="folder-open"></i><span>本地上传</span><em></em></button>
+            </div>
         </div>
 
         <main id="assetManagerRoot" class="asset-manager-root"></main>
@@ -671,7 +713,7 @@ html body .asset-page .asset-content .content-toolbar .content-heading span {
 
     <input id="assetUploadInput" type="file" accept="image/*,video/*,audio/*,.json,.zip,application/json,application/zip" multiple hidden>
     <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
-    <script defer src="/static/js/asset-manager.js?v=1.0.123.1789853084"></script>
+    <script defer src="/static/js/asset-manager.js?v=1.0.123.1790705563"></script>
     <script>
     /* --- 素材存储目录管理 --- */
     async function loadStorageConfig() {

@@ -3,7 +3,7 @@
 覆盖：
   1. mode=plan + 模型返回方案 → 只发 plan 事件 + done，impact/summary 齐全且数字正确，agent_execute_step 一次都不调；
   2. mode=plan + 模型直接回答 → 无 plan 事件、无工具调用、message 原样透出；
-  3. mode=run → 保持现有行为（真的执行步骤）；
+  3. mode=run → 写 / 生成步骤未 approved 时只出方案（不执行），只读步骤照旧执行；
   4. approved_steps → 跳过规划轮（模型调用不发生在执行之前），按给定步骤执行；
   5. agent_plan_impact 纯函数：0 步 / 只读 / 混合 / 带 model+size；
   6. 脏 approved_steps 不 422，走现有错误路径（无效步骤被过滤并记账，不执行）。
@@ -177,11 +177,10 @@ class AgentRunPlanModeTests(unittest.TestCase):
 
 
 class AgentRunRunModeTests(unittest.TestCase):
-    """mode=run：老的执行行为不能变。"""
+    """mode=run：写操作闸门默认强开，未 approved 的写 / 生成步骤只出方案不执行。"""
 
-    def test_run_mode_executes_steps(self):
-        execute = AsyncMock(side_effect=[
-            {"ok": True, "result": {"node_id": "n1"}, "message": "执行成功"}])
+    def test_run_mode_defers_unconfirmed_write(self):
+        execute = AsyncMock(return_value={"ok": True, "result": {"node_id": "n1"}, "message": "执行成功"})
         replies = [
             json.dumps({"thought": "先建提示词节点",
                         "steps": [{"tool": "create_node",
@@ -197,17 +196,38 @@ class AgentRunRunModeTests(unittest.TestCase):
                 patch.object(main, "_agent_run_chat", new=chat):
             events = parse_events(drain(agent_request(mode="run", instruction="建个提示词节点")))
 
+        # 未 approved：写步骤被拦成待确认方案，一步都不执行
+        self.assertEqual(execute.await_count, 0)
         names = [name for name, _ in events]
-        self.assertEqual([call.args[0] for call in execute.await_args_list], ["create_node"])
-        self.assertEqual(names.count("step_start"), 1)
-        self.assertEqual(names.count("step_result"), 1)
+        self.assertNotIn("step_start", names)
+        self.assertNotIn("step_result", names)
         self.assertEqual(names.count("plan"), 1)
         self.assertEqual(names[-1], "done")
-        self.assertEqual([data for name, data in events if name == "done"][0]["status"], "ok")
         plan = [data for name, data in events if name == "plan"][0]
+        self.assertTrue(plan["requires_confirmation"])
+        self.assertEqual(plan["blocked_tools"], ["create_node"])
+        self.assertEqual([s["tool"] for s in plan["steps"]], ["create_node"])
         self.assertEqual(plan["impact"], {"generations": 0, "writes": 1, "models": [], "sizes": [], "nodes": 1})
-        self.assertEqual(plan["round"], 1)
-        self.assertIn("画布操作", plan["summary"])
+        done = [data for name, data in events if name == "done"][0]
+        self.assertEqual(done["status"], "ok")
+        self.assertEqual(done["steps_executed"], 0)
+
+    def test_run_mode_read_only_steps_still_execute(self):
+        execute = AsyncMock(return_value={"ok": True, "result": {}, "message": "执行成功"})
+        chat = AsyncMock(side_effect=[
+            json.dumps({"thought": "看画布",
+                        "steps": [{"tool": "get_canvas", "args": {"canvas_id": "c1"},
+                                   "description": "看画布"}], "done": False}, ensure_ascii=False),
+            json.dumps({"done": True, "message": "看完了"}, ensure_ascii=False),
+        ])
+        with patch.object(main, "load_canvas", return_value=canvas()), \
+                patch.object(main, "agent_session_save"), \
+                patch.object(main, "agent_execute_step", new=execute), \
+                patch.object(main, "_agent_run_chat", new=chat):
+            events = parse_events(drain(agent_request(mode="run", instruction="看看画布")))
+
+        self.assertEqual([call.args[0] for call in execute.await_args_list], ["get_canvas"])
+        self.assertEqual([data for name, data in events if name == "done"][0]["status"], "ok")
 
 
 class AgentRunApprovedStepsTests(unittest.TestCase):

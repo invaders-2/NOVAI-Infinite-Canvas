@@ -5758,3 +5758,140 @@ html.studio-theme-dark body .recommend-inline-card .recommend-guide-save-btn {
 
 /* ���� �洢���� ���� */
 .settings-hidden { display: none !important; }
+
+/* ── 平台状态（2026-09）：之前为了克制把状态点整体隐藏了，结果列表里分不出哪些平台能用。
+   现在只保留最必要的信号：已配置显示一颗绿点；未配置显示淡色「未配置」字样；停用整行变淡（沿用原样式）。 */
+.provider-card.has-key .provider-status-dot { display:inline-block !important; background:#16a34a; opacity:.9; }
+.provider-card.missing-key .provider-status-dot,
+.provider-card.is-disabled .provider-status-dot { display:none !important; }
+.provider-card.missing-key .provider-side-meta::before { content:"未配置"; font-size:11px; font-weight:500; color:var(--faint); white-space:nowrap; }
+
+/* 平台运行设置：同时生成上限 / 系统代理 */
+.provider-runtime-frame select { width:100%; height:34px; padding:0 28px 0 10px; border:0; border-radius:var(--radius-sm); appearance:none; -webkit-appearance:none; background-color:transparent; background-image:var(--select-caret); background-position:calc(100% - 10px) 50%; background-size:10px 10px; background-repeat:no-repeat; color:var(--text); outline:none; font-size:13px; font-weight:650; cursor:pointer; }
+@media (max-width:720px){ .provider-runtime-field { grid-column:1/-1; } }
+body.show-jimeng .provider-proxy-field,
+body.show-codex .provider-proxy-field,
+body.show-gemini-cli .provider-proxy-field { display:none; }
+
+/* ── 第 5a 轮：API 设置布局与交互 ── */
+#settingsContent { position:relative; }
+/* 吸顶由 JS 平移实现：body 被 UI 缩放 transform 后原生 sticky 会随滚动距离漂移 */
+#settingsContent > .content-head { position:relative; z-index:30; will-change:transform; transition:box-shadow .2s ease, background-color .2s ease; }
+#settingsContent > .content-head.is-stuck { background:color-mix(in srgb, var(--panel) 74%, transparent); -webkit-backdrop-filter:blur(24px) saturate(1.4); backdrop-filter:blur(24px) saturate(1.4); box-shadow:var(--shadow-md); }
+.content-actions { display:flex; align-items:center; gap:8px; }
+.unsaved-indicator { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border-radius:var(--radius-full); background:color-mix(in srgb, #f59e0b 14%, transparent); color:#b45309; font-size:11.5px; font-weight:800; animation:apiFadeUp .22s cubic-bezier(.22,1,.36,1); }
+.unsaved-indicator[hidden] { display:none; }
+.unsaved-indicator i { width:6px; height:6px; border-radius:50%; background:currentColor; animation:apiPulse 1.8s ease-in-out infinite; }
+body.studio-theme-dark .unsaved-indicator, html.studio-theme-dark body .unsaved-indicator { color:#fbbf24; background:color-mix(in srgb, #f59e0b 18%, transparent); }
+
+/* 测试连接：常规按钮 + 状态条 */
+#verifyResult { padding:10px 12px !important; border-radius:var(--radius-md); background:var(--soft); animation:apiFadeUp .24s cubic-bezier(.22,1,.36,1); }
+#verifyResult[data-state="ok"] { background:color-mix(in srgb, #10b981 10%, var(--soft)); }
+#verifyResult[data-state="warn"] { background:color-mix(in srgb, #f59e0b 10%, var(--soft)); }
+
+/* API Key：单层输入框 + 行内显示/粘贴 */
+.api-standard-key-row.key-panel { padding:0; background:transparent; }
+.key-field-frame { gap:2px; padding-right:6px; }
+.key-inline-btn { flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--muted); cursor:pointer; transition:background-color .15s ease, color .15s ease; }
+.key-inline-btn:hover { background:var(--panel); color:var(--text); }
+.key-inline-btn.active { background:var(--panel); color:var(--text); }
+#keyHint.key-saved-tag { display:inline-flex; align-items:center; gap:6px; align-self:flex-start; padding:3px 10px; border-radius:var(--radius-full); background:color-mix(in srgb, #10b981 12%, transparent); color:#047857; font-weight:750; }
+#keyHint.key-saved-tag::before { content:""; width:6px; height:6px; border-radius:50%; background:#10b981; }
+body.studio-theme-dark #keyHint.key-saved-tag, html.studio-theme-dark body #keyHint.key-saved-tag { color:#6ee7b7; }
+
+/* 高级设置（默认收起） */
+.provider-advanced { grid-column:1/-1; border-radius:var(--radius-md); background:var(--soft); }
+.provider-advanced-summary { display:flex; align-items:center; gap:8px; min-height:40px; padding:0 14px; list-style:none; cursor:pointer; color:var(--text); font-size:12.5px; font-weight:800; user-select:none; border-radius:var(--radius-md); }
+.provider-advanced-summary::-webkit-details-marker { display:none; }
+.provider-advanced-summary:hover { background:color-mix(in srgb, var(--panel) 50%, transparent); }
+.provider-advanced-brief { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:11.5px; font-weight:700; text-align:right; }
+.provider-advanced-caret { flex:0 0 auto; color:var(--muted); transition:transform .22s cubic-bezier(.22,1,.36,1); }
+.provider-advanced[open] .provider-advanced-caret { transform:rotate(180deg); }
+.provider-advanced-body { padding:4px 14px 14px; }
+.provider-advanced[open] .provider-advanced-body { animation:apiFadeUp .24s cubic-bezier(.22,1,.36,1); }
+.provider-advanced .field-frame { background:var(--panel); }
+.provider-advanced .image-request-mode-wrap { height:auto; padding:4px; }
+.provider-advanced .image-request-mode-wrap select { width:100%; height:34px; font-size:13px; font-weight:650; appearance:none; -webkit-appearance:none; background-image:var(--select-caret); background-position:calc(100% - 10px) 50%; background-size:10px 10px; background-repeat:no-repeat; }
+body.show-ms .image-request-mode-field,
+body.show-runninghub .image-request-mode-field,
+body.show-volcengine-standalone .image-request-mode-field,
+body.show-jimeng .image-request-mode-field,
+body.show-codex .image-request-mode-field,
+body.show-gemini-cli .image-request-mode-field,
+.image-request-mode-field:has(> .image-request-mode-wrap[style*="none"]) { display:none !important; }
+
+/* 切换平台：内容淡入 */
+#settingsContent.panel-enter > :not(.content-head):not(.content-head-sentinel) { animation:apiFadeUp .2s cubic-bezier(.22,1,.36,1) both; }
+@keyframes apiFadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+@keyframes apiPulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+@media (prefers-reduced-motion: reduce){
+  #settingsContent.panel-enter > *, #verifyResult, .unsaved-indicator, .unsaved-indicator i, .provider-advanced[open] .provider-advanced-body { animation:none !important; }
+  .provider-advanced-caret, #settingsContent > .content-head { transition:none !important; }
+}
+
+/* ── 第 5b 轮：模型区 / 左侧栏 / 新增平台 ── */
+/* 模型筛选行：分类 + 搜索 */
+.model-filter-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.model-filter-row .model-cat-tabs { align-self:auto; }
+.model-search-frame { flex:1 1 200px; max-width:320px; height:44px; padding:0 4px 0 12px; gap:6px; color:var(--muted); cursor:text; }
+.model-search-frame input { height:36px; padding:0 6px; }
+.model-search-frame input::-webkit-search-cancel-button { cursor:pointer; }
+.model-search-frame.has-query { color:var(--text); }
+.model-row.is-filtered-out { display:none !important; }
+/* 分类滑块：选中底色随切换滑动 */
+.model-cat-tabs { position:relative; }
+.model-cat-tabs .model-cat-tab { position:relative; z-index:1; }
+.model-cat-indicator { position:absolute; left:0; top:0; width:0; height:0; border-radius:var(--radius-md); background:var(--panel); box-shadow:var(--shadow-sm); pointer-events:none; opacity:0; transition:transform .26s cubic-bezier(.22,1,.36,1), width .26s cubic-bezier(.22,1,.36,1); }
+.model-cat-tabs.has-indicator .model-cat-indicator { opacity:1; }
+.model-cat-tabs.has-indicator .model-cat-tab.active { background:transparent !important; box-shadow:none !important; }
+/* 删除按钮悬停才出现（触屏常显） */
+.model-row .model-remove-btn { opacity:0; transition:opacity .15s ease, background-color .15s ease, color .15s ease; }
+.model-row:hover .model-remove-btn, .model-row:focus-within .model-remove-btn { opacity:1; }
+@media (hover:none) { .model-row .model-remove-btn { opacity:1; } }
+.model-row.is-removing { overflow:hidden; opacity:0; margin-top:0 !important; margin-bottom:0 !important; padding-top:0 !important; padding-bottom:0 !important; transition:height .2s cubic-bezier(.22,1,.36,1), opacity .16s ease, padding .2s ease; }
+.model-row.just-restored { animation:apiRowFlash .9s ease; }
+@keyframes apiRowFlash { 0% { background:color-mix(in srgb, #10b981 16%, var(--soft)); } 100% { background:var(--soft); } }
+/* 撤销条：磨砂胶囊 */
+.api-undo-bar { position:fixed; left:50%; bottom:36px; z-index:99998; display:flex; align-items:center; gap:14px; padding:8px 8px 8px 16px; border-radius:var(--radius-full, 999px); background:color-mix(in srgb, var(--panel, #fff) 82%, transparent); -webkit-backdrop-filter:blur(24px) saturate(1.4); backdrop-filter:blur(24px) saturate(1.4); box-shadow:var(--shadow-xl, 0 16px 40px rgba(0,0,0,.18)); color:var(--text); font-size:12.5px; font-weight:700; font-family:var(--font-sans); opacity:0; pointer-events:none; transform:translate(-50%, 10px); transition:opacity .2s ease, transform .24s cubic-bezier(.22,1,.36,1); max-width:min(92vw, 520px); }
+.api-undo-bar.show { opacity:1; pointer-events:auto; transform:translate(-50%, 0); }
+.api-undo-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.api-undo-btn { display:inline-flex; align-items:center; gap:5px; height:30px; padding:0 12px; border:0; border-radius:var(--radius-full, 999px); background:var(--soft); color:var(--text); font:inherit; font-weight:850; cursor:pointer; }
+.api-undo-btn:hover { background:var(--text); color:var(--bg); }
+
+/* 左侧栏：品牌平台与自定义平台统一为行式（与设置弹窗内嵌版一致），logo 与图标列对齐 */
+#providerList .provider-card.provider-card-banner { justify-content:flex-start; min-height:48px; padding:8px 10px 8px 36px; background:transparent; box-shadow:none; }
+#providerList .provider-card.provider-card-banner:hover,
+#providerList .provider-card.provider-card-banner.active { background:var(--soft); box-shadow:none; }
+#providerList .provider-card-banner .provider-banner-inner { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-width:0; }
+#providerList .provider-card-banner .provider-logo-wrap { display:flex; align-items:center; justify-content:flex-start; min-width:0; }
+#providerList .provider-card-banner img { height:18px; width:auto; max-width:112px; margin:0 !important; object-position:left center; }
+#providerList .provider-card-banner .provider-logo-fallback { display:none; }
+#providerList .provider-card-banner .provider-protocol-pill { display:inline-flex; }
+#providerList .provider-card.just-added { animation:apiRowFlash 1.2s ease; }
+/* 拖拽排序：被拖行变淡，目标行让出位置 */
+#providerList .provider-card-sortable { transition:background-color .15s ease, color .15s ease, transform .18s cubic-bezier(.22,1,.36,1), opacity .15s ease; }
+#providerList .provider-card-drop-target { background:var(--soft); transform:translateY(6px); }
+.cli-quick-btn.flash-hint { animation:apiRowFlash 1.2s ease; }
+
+/* 新增平台：先选类型（在栏内展开，不被侧栏滚动裁切） */
+.add-btn.active { color:var(--text); background:var(--soft); }
+.add-provider-menu { display:flex; flex-direction:column; gap:2px; padding:4px; margin-top:-4px; border-radius:var(--radius-md); background:var(--soft); animation:apiFadeUp .2s cubic-bezier(.22,1,.36,1); }
+.add-provider-menu[hidden] { display:none; }
+.add-provider-option { display:flex; align-items:flex-start; gap:10px; width:100%; padding:9px 10px; border:0; border-radius:var(--radius-sm); background:transparent; color:var(--muted); text-align:left; cursor:pointer; transition:background-color .15s ease, color .15s ease; }
+.add-provider-option svg, .add-provider-option i { flex:0 0 auto; margin-top:1px; }
+.add-provider-option span { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.add-provider-option b { color:var(--text); font-size:12.5px; font-weight:800; }
+.add-provider-option em { font-style:normal; font-size:11px; font-weight:600; color:var(--faint); }
+.add-provider-option:hover, .add-provider-option:focus-visible { background:var(--panel); color:var(--text); outline:none; }
+
+/* 左侧栏吸顶（JS 平移）；栏内元素不被压缩，超出时侧栏自身滚动 */
+.layout > .sidebar { will-change:transform; }
+.layout > .sidebar > * { flex-shrink:0; }
+.model-search-frame input, .model-search-frame input:focus { border:0 !important; outline:none !important; box-shadow:none !important; }
+
+@media (prefers-reduced-motion: reduce){
+  .model-cat-indicator, .model-row .model-remove-btn, .api-undo-bar, #providerList .provider-card-sortable { transition:none !important; }
+  .add-provider-menu, .model-row.just-restored, #providerList .provider-card.just-added, .cli-quick-btn.flash-hint { animation:none !important; }
+}
+/* 内嵌设置弹窗：侧栏较窄，未配置时只保留「未配置」字样，不再重复显示灰点 */
+html.settings-embed body:not(#settings-embed-scope) .provider-card.missing-key .provider-status-dot { display:none !important; }

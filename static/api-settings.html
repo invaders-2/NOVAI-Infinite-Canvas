@@ -15,16 +15,16 @@
     </script>
     <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
     <script src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.123.1790685706"></script>
     <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790560477"></script>
     <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
     <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=1.0.123.1790241060">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790560477">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=1.0.123.1790673387">
 
 <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790560477">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 body { background: transparent !important; color: var(--text) !important; }
@@ -1280,6 +1280,7 @@ html.settings-embed body:not(#settings-embed-scope) .content-head { position: st
 input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
 .ios-slider, .toggle-track { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
 </style>
+<link rel="stylesheet" href="/static/css/api-settings-v2.css?v=1.0.123.1790688075">
 </head>
 <body>
     <div class="page">
@@ -1293,11 +1294,17 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
             </header>
 
             <div class="layout">
-                <aside class="sidebar">
-                    <div class="side-section-title" data-i18n="api.providersTitle">平台列表</div>
+                <aside class="sidebar platform-switcher" id="platformSwitcher" aria-label="平台列表">
+                    <label class="switcher-search"><i data-lucide="search"></i><input id="platformSearchInput" type="search" placeholder="搜索平台" autocomplete="off" oninput="filterPlatformList()"></label>
                     <div id="providerList" class="provider-list"></div>
-                    <button class="add-btn" type="button" onclick="addProvider()"><i data-lucide="plus" class="w-4 h-4"></i><span data-i18n="api.addProvider">新增平台</span></button>
-                    <button class="api-link-btn" type="button" onclick="openRecommendApi()"><i data-lucide="sparkles" class="w-4 h-4"></i><span data-i18n="api.recommendApi">推荐API</span></button>
+                    <button id="addProviderBtn" class="add-btn" type="button" onclick="toggleAddProviderMenu()" aria-expanded="false" aria-controls="addProviderMenu"><i data-lucide="plus" class="w-4 h-4"></i><span data-i18n="api.addProvider">新增平台</span></button>
+                    <div id="addProviderMenu" class="add-provider-menu" hidden>
+                        <button type="button" class="add-provider-option" onclick="chooseAddProvider('openai')"><i data-lucide="zap" class="w-4 h-4"></i><span><b>OpenAI 兼容</b><em>大多数中转站与官方 API</em></span></button>
+                        <button type="button" class="add-provider-option" onclick="chooseAddProvider('apimart')"><i data-lucide="timer" class="w-4 h-4"></i><span><b>异步任务协议</b><em>提交任务后轮询结果，如 APIMart</em></span></button>
+                        <button type="button" class="add-provider-option" onclick="chooseAddProvider('cli')"><i data-lucide="terminal" class="w-4 h-4"></i><span><b>本机 CLI</b><em>即梦 / GPT / Antigravity，使用本机登录态</em></span></button>
+                        <button type="button" class="add-provider-option" onclick="chooseAddProvider('recommend')"><i data-lucide="sparkles" class="w-4 h-4"></i><span><b>从推荐 API 选择</b><em>一键套用已验证的平台配置</em></span></button>
+                    </div>
+                    <button class="api-link-btn" type="button" onclick="openRecommendApi();closePlatformSwitcher()"><i data-lucide="sparkles" class="w-4 h-4"></i><span data-i18n="api.recommendApi">推荐API</span></button>
                     <div class="cli-quick-group">
                         <div class="side-section-title" data-i18n="api.cliSettings">CLI 设置</div>
                         <div class="cli-quick-list">
@@ -1316,59 +1323,51 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                 </aside>
 
                 <main id="settingsContent" class="content">
-                    <div class="content-head">
-                        <div>
-                            <div id="editorTitle" class="editor-title" data-i18n="api.provider">平台</div>
-                            <div class="editor-sub" data-i18n="api.editorSub">配置基础信息、API Key 和可用模型</div>
+                    <div class="content-head v2-head">
+                        <div class="v2-head-main">
+                            <div class="v2-crumb" id="v2Crumb">平台</div>
+                            <div class="v2-title-row">
+                                <div id="editorTitle" class="editor-title" data-i18n="api.provider">平台</div>
+                                <button id="platformSwitchBtn" class="v2-switch" type="button" onclick="togglePlatformSwitcher(event)" aria-haspopup="true" aria-expanded="false" title="切换平台"><i data-lucide="chevron-down"></i></button>
+                                <span id="unsavedIndicator" class="unsaved-indicator" hidden><i></i>未保存</span>
+                            </div>
+                            <div class="v2-url" id="v2Url"></div>
                         </div>
                         <div class="content-actions">
-                            <button id="deleteBtn" class="action-btn danger-btn api-page-delete-btn" type="button" onclick="deleteProvider()"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span data-i18n="api.delete">删除</span></button>
-                            <button class="action-btn save-btn api-page-save-btn" type="button" data-morph-keep-width onclick="saveProviders()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span data-i18n="api.save">保存</span></button>
+                            <button id="deleteBtn" class="v2-icon-btn api-page-delete-btn" type="button" onclick="deleteProvider()" title="删除平台"><i data-lucide="trash-2"></i></button>
+                            <button class="action-btn save-btn api-page-save-btn v2-btn v2-btn-soft" type="button" data-morph-keep-width onclick="saveProviders()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span data-i18n="api.save">保存</span></button>
+                            <button id="testUrlBtn" class="action-btn primary-btn test-conn-btn v2-btn v2-btn-dark" type="button" data-morph data-morph-keep-width onclick="testProviderConnection()" title="验证地址与 Key，并自动识别接口协议"><i data-lucide="plug-zap" class="w-3.5 h-3.5"></i><span>测试连接</span></button>
                         </div>
                     </div>
 
                     <section id="providerOnboardingCard" class="provider-onboarding-card" hidden></section>
 
-                    <section class="block">
-                        <div class="block-head">
-                            <div>
-                                <div class="block-title" data-i18n="api.basicInfo">基本信息</div>
-                                <div class="block-desc" data-i18n="api.basicHint">平台显示名、唯一 ID 和请求地址</div>
-                            </div>
+                    <section id="providerBento" class="bento">
+                        <!-- 连接状态 -->
+                        <div class="bt s2 bt-status" id="connTile">
+                            <div class="bt-h"><i data-lucide="radar"></i><span>连接状态</span><span id="connChip" class="bt-chip">未测试</span></div>
+                            <div class="bt-big" id="connBig">—</div>
+                            <div class="bt-sub" id="connSummary">点右上角「测试连接」验证地址与 Key，并自动识别协议</div>
+                            <div id="verifyResult" style="display:none"></div>
                         </div>
-                        <div class="form">
-                            <label class="field full">
-                                <span class="label" data-i18n="api.platformName">平台名称</span>
-                                <div class="field-frame"><input id="nameInput" type="text" placeholder="Comfly"></div>
-                                <span class="hint"><span data-i18n="api.platformIdShown">平台 ID</span>: <span id="idPreview" style="font-family: var(--font-mono);color:var(--text)">—</span></span>
-                                <input id="idInput" type="hidden">
-                            </label>
-                            <label class="field full api-base-url-field">
-                                <span class="label" data-i18n="api.baseUrl">请求地址</span>
-                                <div class="field-frame"><input id="baseInput" type="text" placeholder="https://api.example.com/v1"></div>
-                                <div class="ms-hint">
-                                    <span class="ms-line"><span data-i18n="api.msChinaEndpoint">国内默认请求地址：</span><span class="inline-code">https://api-inference.modelscope.cn/v1</span></span>
-                                    <span class="ms-line"><span data-i18n="api.msGlobalEndpoint">国外使用请求地址：</span><span class="inline-code">https://api-inference.modelscope.ai/v1</span></span>
-                                </div>
-                                <div class="runninghub-hint">
-                                    <span class="ms-line">国外地址：<span class="inline-code">https://www.runninghub.ai</span></span>
-                                </div>
-                                <div class="apimart-hint">
-                                    <span class="ms-line">国内请求地址：<span class="inline-code">https://apib.ai</span></span>
-                                </div>
-                            </label>
+                        <!-- API Key -->
+                        <div class="bt s2 bt-key" id="keyTile">
+                            <div class="bt-h"><i data-lucide="key-round"></i><span class="api-key-tile-title">API Key</span><span id="keyHint" class="hint"></span></div>
                             <label class="field full api-key-field">
-                                <span class="label api-key-label">API Key</span>
+                                <span class="label api-key-label" hidden>API Key</span>
                                 <div class="key-panel api-standard-key-row">
                                     <div class="key-input-line">
-                                        <div class="field-frame"><input id="keyInput" type="password"></div>
+                                        <div class="field-frame key-field-frame"><input id="keyInput" type="password" autocomplete="off" spellcheck="false">
+                                            <button class="key-inline-btn" type="button" id="keyRevealBtn" onclick="toggleKeyReveal()" title="显示 / 隐藏"><i data-lucide="eye" class="w-3.5 h-3.5"></i></button>
+                                            <button class="key-inline-btn" type="button" onclick="pasteKeyFromClipboard()" title="从剪贴板粘贴"><i data-lucide="clipboard-paste" class="w-3.5 h-3.5"></i></button>
+                                        </div>
                                         <div class="key-actions">
                                             <button class="key-btn" type="button" data-morph onclick="saveKeyOnly()" title="保存 Key" data-i18n-title="api.saveKeyTitle"><i data-lucide="check" class="w-4 h-4"></i></button>
                                             <button class="key-btn key-clear" type="button" onclick="clearKeyOnly()" title="清除 Key" data-i18n-title="api.clearKeyTitle"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                                         </div>
                                     </div>
                                 </div>
-                                <span id="keyHint" class="hint"></span>
+                                
                                 <div class="rh-key-stack">
                                     <div class="rh-key-item">
                                         <div class="rh-key-head">
@@ -1420,6 +1419,97 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                 <div class="runninghub-hint">
                                 </div>
                             </label>
+                        </div>
+                        <!-- 平台信息 -->
+                        <div class="bt s2 bt-info">
+                            <div class="bt-h"><i data-lucide="link"></i><span>平台信息</span></div>
+                            <label class="field full">
+                                <span class="label" data-i18n="api.platformName">平台名称</span>
+                                <div class="field-frame"><input id="nameInput" type="text" placeholder="Comfly"></div>
+                                <span class="hint"><span data-i18n="api.platformIdShown">平台 ID</span>: <span id="idPreview" style="font-family: var(--font-mono);color:var(--text)">—</span></span>
+                                <input id="idInput" type="hidden">
+                            </label>
+                            <label class="field full api-base-url-field">
+                                <span class="label" data-i18n="api.baseUrl">请求地址</span>
+                                <div class="field-frame"><input id="baseInput" type="text" placeholder="https://api.example.com/v1"></div>
+                                <div class="ms-hint">
+                                    <span class="ms-line"><span data-i18n="api.msChinaEndpoint">国内默认请求地址：</span><span class="inline-code">https://api-inference.modelscope.cn/v1</span></span>
+                                    <span class="ms-line"><span data-i18n="api.msGlobalEndpoint">国外使用请求地址：</span><span class="inline-code">https://api-inference.modelscope.ai/v1</span></span>
+                                </div>
+                                <div class="runninghub-hint">
+                                    <span class="ms-line">国外地址：<span class="inline-code">https://www.runninghub.ai</span></span>
+                                </div>
+                                <div class="apimart-hint">
+                                    <span class="ms-line">国内请求地址：<span class="inline-code">https://apib.ai</span></span>
+                                </div>
+                            </label>
+                        </div>
+                        <!-- 协议 -->
+                        <div class="bt bt-proto" id="protoTile">
+                            <div class="bt-h"><i data-lucide="zap"></i><span>协议</span></div>
+                            <div class="bt-opts" id="protoOpts"></div>
+                            <div class="bt-hidden-select protocol-selector-wrap">
+                                    <select id="protocolInput">
+                                        <option value="openai" data-i18n="api.protocolOpenAI">OpenAI 直连</option>
+                                        <option value="apimart" data-i18n="api.protocolApimart">异步协议</option>
+                                        <option value="gemini" data-i18n="api.protocolGemini">Gemini 协议</option>
+                                        <option value="volcengine">方舟/Ark 任务协议</option>
+                                        <option value="runninghub">RunningHub OpenAPI</option>
+                                        <option value="jimeng">即梦 CLI</option>
+                                        <option value="codex">OpenAI Codex CLI</option>
+                                        <option value="gemini-cli">Antigravity CLI</option>
+                                        <option value="lovart">Lovart 设计代理</option>
+                                    </select>
+                            </div>
+                        </div>
+                        <!-- 图片接口 -->
+                        <div class="bt bt-imgmode image-request-mode-field" id="imgModeTile">
+                            <div class="bt-h"><i data-lucide="image"></i><span>图片接口</span></div>
+                            <div class="bt-opts" id="imgModeOpts"></div>
+                            <div class="bt-hidden-select image-request-mode-wrap">
+                                            <select id="imageRequestModeInput" title="图片接口">
+                                                <option value="openai">图片：OpenAI 标准</option>
+                                                <option value="openai-json">图片：OpenAI JSON</option>
+                                                <option value="openai-video-proxy">图片：OpenAI 中转</option>
+                                                <option value="openai-responses">图片：OpenAI RS</option>
+                                            </select>
+                            </div>
+                        </div>
+                        <!-- 同时生成 -->
+                        <div class="bt s2 bt-conc" id="concTile">
+                            <div class="bt-h"><i data-lucide="timer"></i><span>同时生成</span></div>
+                            <div class="bt-conc-row">
+                                <div class="bt-big" id="concBig">不限</div>
+                                <div class="bt-stepper"><button type="button" onclick="stepConcurrency(-1)" title="减少">−</button><span>上限</span><button type="button" onclick="stepConcurrency(1)" title="增加">+</button></div>
+                            </div>
+                            <div class="bt-sub">同一平台同时进行的生图 / 视频任务数，超出的自动排队，避免被限流（429）</div>
+                            <div class="bt-hidden-select">
+                                            <select id="maxConcurrencyInput" title="同一平台同时进行的生图/视频任务数，超出的会排队">
+                                                <option value="0">不限</option>
+                                                <option value="1">1 个</option>
+                                                <option value="2">2 个</option>
+                                                <option value="3">3 个</option>
+                                                <option value="4">4 个</option>
+                                                <option value="6">6 个</option>
+                                                <option value="8">8 个</option>
+                                            </select>
+                            </div>
+                        </div>
+                        <!-- 系统代理 -->
+                        <div class="bt s2 bt-proxy provider-proxy-field" id="proxyTile">
+                            <div class="bt-h"><i data-lucide="radar"></i><span>系统代理</span></div>
+                            <div class="bt-opts bt-opts-row" id="proxyOpts"></div>
+                            <div class="bt-sub">国内平台可设为直连，海外平台可强制走代理</div>
+                            <div class="bt-hidden-select">
+                                            <select id="useProxyInput" title="该平台请求是否经过系统代理">
+                                                <option value="auto">跟随全局</option>
+                                                <option value="on">走代理</option>
+                                                <option value="off">直连</option>
+                                            </select>
+                            </div>
+                        </div>
+                        <!-- 平台专属（CLI / Lovart） -->
+                        <div class="bt s4 bt-extra" id="extraTile">
                             <div id="jimengCliPanel" class="jimeng-cli-panel" hidden>
                                 <div class="jimeng-cli-head">
                                     <div>
@@ -1506,37 +1596,6 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                     <span id="lovartModeHint" class="hint">点『应用』查询/切换</span>
                                 </div>
                             </div>
-                            <!-- 验证操作行 -->
-                            <div class="verify-action-row">
-                                <button id="testUrlBtn" class="action-btn" type="button" onclick="testConnection()">
-                                    <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span data-i18n="api.testUrl">验证地址</span>
-                                </button>
-                                <button id="probeAsyncBtn" class="action-btn" type="button" onclick="probeAsync()">
-                                    <i data-lucide="radar" class="w-3.5 h-3.5"></i><span>验证协议</span>
-                                </button>
-                                <div class="field-frame protocol-selector-wrap">
-                                    <select id="protocolInput">
-                                        <option value="openai" data-i18n="api.protocolOpenAI">OpenAI 直连</option>
-                                        <option value="apimart" data-i18n="api.protocolApimart">异步协议</option>
-                                        <option value="gemini" data-i18n="api.protocolGemini">Gemini 协议</option>
-                                        <option value="volcengine">方舟/Ark 任务协议</option>
-                                        <option value="runninghub">RunningHub OpenAPI</option>
-                                        <option value="jimeng">即梦 CLI</option>
-                                        <option value="codex">OpenAI Codex CLI</option>
-                                        <option value="gemini-cli">Antigravity CLI</option>
-                                        <option value="lovart">Lovart 设计代理</option>
-                                    </select>
-                                </div>
-                                <div class="field-frame image-request-mode-wrap">
-                                    <select id="imageRequestModeInput" title="图片接口">
-                                        <option value="openai">图片：OpenAI 标准</option>
-                                        <option value="openai-json">图片：OpenAI JSON</option>
-                                        <option value="openai-video-proxy">图片：OpenAI 中转</option>
-                                        <option value="openai-responses">图片：OpenAI RS</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div id="verifyResult" style="display:none;padding:2px 0;grid-column:1/-1"></div>
                         </div>
                     </section>
 
@@ -1585,11 +1644,18 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                             </div>
                         </div>
                         <div id="modelsFetchHint" class="models-fetch-hint" hidden></div>
-                        <div class="model-cat-tabs" id="modelCatTabs" role="tablist" aria-label="模型分类">
-                            <button class="model-cat-tab active" data-cat="all" role="tab" aria-selected="true" type="button" onclick="selectModelGroup('all')">全部 <span class="cat-count" id="catCountAll">0</span></button>
-                            <button class="model-cat-tab" data-cat="image" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('image')">图像 <span class="cat-count" id="catCountImage">0</span></button>
-                            <button class="model-cat-tab" data-cat="chat" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('chat')">对话 <span class="cat-count" id="catCountChat">0</span></button>
-                            <button class="model-cat-tab" data-cat="video" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('video')">视频 <span class="cat-count" id="catCountVideo">0</span></button>
+                        <div class="model-filter-row">
+                            <div class="model-cat-tabs" id="modelCatTabs" role="tablist" aria-label="模型分类">
+                                <span class="model-cat-indicator" aria-hidden="true"></span>
+                                <button class="model-cat-tab active" data-cat="all" role="tab" aria-selected="true" type="button" onclick="selectModelGroup('all')">全部 <span class="cat-count" id="catCountAll">0</span></button>
+                                <button class="model-cat-tab" data-cat="image" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('image')">图像 <span class="cat-count" id="catCountImage">0</span></button>
+                                <button class="model-cat-tab" data-cat="chat" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('chat')">对话 <span class="cat-count" id="catCountChat">0</span></button>
+                                <button class="model-cat-tab" data-cat="video" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('video')">视频 <span class="cat-count" id="catCountVideo">0</span></button>
+                            </div>
+                            <label class="field-frame model-search-frame" title="按模型 ID 或显示名筛选">
+                                <i data-lucide="search" class="w-3.5 h-3.5"></i>
+                                <input id="modelSearchInput" type="search" placeholder="搜索模型" autocomplete="off" spellcheck="false" oninput="applyModelSearch()">
+                            </label>
                         </div>
                     </div>
                     <div class="model-grid" id="modelGrid">
@@ -1647,10 +1713,14 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
 
                 <!-- 存储设置 - 自定义输出目录 -->
                 <div id="storageSettingsBlock" class="settings-hidden">
-                    <div class="content-head">
-                        <div>
-                            <div class="editor-title">输出目录</div>
-                            <div class="editor-sub">自定义生成的图片、视频保存位置（不影响 API 配置和画布数据）</div>
+                    <div class="content-head v2-head">
+                        <div class="v2-head-main">
+                            <div class="v2-crumb">存储设置</div>
+                            <div class="v2-title-row">
+                                <div class="editor-title">输出目录</div>
+                                <button class="v2-switch" type="button" onclick="togglePlatformSwitcher(event)" aria-haspopup="true" title="切换平台"><i data-lucide="chevron-down"></i></button>
+                            </div>
+                            <div class="v2-url">自定义生成的图片、视频保存位置（不影响 API 配置和画布数据）</div>
                         </div>
                         <div class="content-actions">
                             <button class="action-btn save-btn api-page-save-btn" type="button" onclick="saveOutputDir()"><i data-lucide="save" class="w-3.5 h-3.5"></i><span>保存</span></button>
@@ -1683,13 +1753,18 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
 
             </main>
                 <main id="recommendContent" class="content recommend-content" hidden>
-                    <div class="content-head">
-                        <div>
-                            <div class="editor-title" data-i18n="api.recommendPanelTitle">推荐平台</div>
-                            <div class="editor-sub" data-i18n="api.recommendPanelSub">获取 Key 后保存，右侧会切换到刚保存的平台配置。</div>
+                    <div class="content-head v2-head">
+                        <div class="v2-head-main">
+                            <div class="v2-crumb">已验证可用的平台 · 选一个填 Key 即可开始生成</div>
+                            <div class="v2-title-row">
+                                <div class="editor-title">推荐 API</div>
+                                <button class="v2-switch" type="button" onclick="togglePlatformSwitcher(event)" aria-haspopup="true" title="切换平台"><i data-lucide="chevron-down"></i></button>
+                            </div>
+                            <div class="editor-sub" hidden></div>
                         </div>
+                        <div class="content-actions"><div class="v2-seg" id="recommendFilter"></div></div>
                     </div>
-                    <section id="recommendPanel" class="provider-onboarding-card recommend-inline-card"></section>
+                    <section id="recommendPanel" class="recommend-v2"></section>
                 </main>
         </div>
         </div>
@@ -1864,7 +1939,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
         </div>
     </div>
 
-    <script src="/static/js/api-settings.js?v=1.0.123.1789709849"></script>
+    <script src="/static/js/api-settings.js?v=1.0.123.1790684042"></script>
     <script>
         // 保存类按钮多为动态渲染（推荐卡片/新手引导/RH 编辑器），渲染后需要重扫
         (function () {

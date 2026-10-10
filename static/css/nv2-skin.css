@@ -1,0 +1,383 @@
+/* NOVAI 2.0 · 画布编辑器外观统一层（第 23 轮）
+   用户确认：画布编辑器「保留引擎，统一外观」——节点、连线、工具条、编辑层的结构与交互全部不动，
+   只把配色 token、状态色、字重对齐新前端（web/src/styles/ds.css）的规范：
+     · 黑白灰为主，唯一的彩色是 danger（错误 / 删除）；用户自己选的标签色、图片内容不受影响
+     · 字重只用 400 / 500
+     · 底色与新外壳一致（浅 #f5f5f7 / 深 #0c0c0c），侧栏浮在画布上时不会有色差
+   在 smart-canvas.html / canvas.html 里放在 glide.css 前面引入（glide.css 按约定必须最后），其余样式表之后。 */
+
+:root {
+    --bg: #f5f5f7;
+    --canvas-bg: #f5f5f7;
+    --page: #f5f5f7;
+    --danger: #b42318;
+    --danger-bg: rgba(180, 35, 24, 0.07);
+    --danger-border: rgba(180, 35, 24, 0.22);
+    --danger-text: #b42318;
+    /* 成功 / 进行中 / 提示 / 警告：不再用绿 / 蓝 / 黄，统一成墨色 + 浅灰底 */
+    --success: var(--text);
+    --success-bg: var(--nav-hover-bg);
+    --success-border: transparent;
+    --success-text: var(--text);
+    --info: var(--text);
+    --info-bg: var(--nav-hover-bg);
+    --info-border: transparent;
+    --info-text: var(--text);
+    --warning: var(--text-2);
+    --warning-bg: var(--nav-hover-bg);
+    --warning-border: transparent;
+    --warning-text: var(--text);
+    --ok: var(--text);
+    --scrim: rgba(250, 250, 250, 0.55);
+}
+html.theme-dark, html.studio-theme-dark, body.theme-dark, body.studio-theme-dark {
+    --bg: #0c0c0c;
+    --canvas-bg: #0c0c0c;
+    --page: #0c0c0c;
+    --danger: #f97066;
+    --danger-bg: rgba(249, 112, 102, 0.12);
+    --danger-border: rgba(249, 112, 102, 0.26);
+    --danger-text: #f97066;
+    --success: var(--text);
+    --success-bg: var(--nav-hover-bg);
+    --success-text: var(--text);
+    --info: var(--text);
+    --info-bg: var(--nav-hover-bg);
+    --info-text: var(--text);
+    --warning: var(--text-2);
+    --warning-bg: var(--nav-hover-bg);
+    --warning-text: var(--text);
+    --ok: var(--text);
+    --scrim: rgba(10, 10, 10, 0.6);
+}
+
+/* ── 智能画布：写死的彩色状态 ── */
+.prompt-node-llm .llm-bubble-copy.copied, .prompt-preset-status.ok { color: var(--text); }
+.version-btn.danger { color: var(--danger); background: var(--danger-bg); }
+.smart-save-state[data-state="failed"] { color: var(--danger); }
+/* 挑图：标星从琥珀色改成墨色 */
+.nv-pick-stats .st svg { color: var(--text); }
+.nv-pick-card.is-star { background: color-mix(in srgb, var(--text) 8%, var(--soft)); }
+.nv-pick-btn.on, .theme-dark .nv-pick-btn.on { color: var(--text); background: color-mix(in srgb, var(--text) 12%, var(--card)); }
+.theme-dark .nv-pick-card.is-star { background: color-mix(in srgb, var(--text) 10%, var(--soft)); }
+
+/* ── 经典画布：写死的彩色状态 ── */
+.workflow-transfer-meta.busy, .workflow-transfer-btn.busy { background: var(--nav-hover-bg); }
+.node-run-status.queued { color: var(--text-2); }
+body.theme-dark .node-run-status.running, body.theme-dark .node-run-status.done { background: var(--nav-hover-bg); color: var(--text); }
+body.theme-dark .node-run-status.failed { background: var(--danger-bg); color: var(--danger); }
+.output-time-pill.running { background: color-mix(in srgb, var(--text) 86%, transparent); color: var(--bg); }
+.llm-copy-btn.copied { color: var(--text); }
+.gen-btn.running i, .comfy-run.running i { color: currentColor; fill: currentColor; }
+.theme-dark .model-btn.secondary.danger:hover { background: var(--danger); color: #fff; }
+.smart-create-btn, .theme-dark .smart-create-btn { background: var(--accent); color: var(--accent-text); }
+.theme-dark .trash-note { background: var(--nav-hover-bg); color: var(--text-2); }
+.midjourney-body { --mj-accent: var(--text); }
+.mj-task-line.ready, .theme-dark .mj-task-line.ready { background: var(--nav-hover-bg); color: var(--text); }
+.mj-action-grid button:hover, .mj-text-action-grid button:hover, .mj-pan-grid button:hover, .mj-reroll:hover { color: var(--text); background: var(--nav-hover-bg); }
+
+/* ── 自动生成：编辑器里 600–900 的字重统一成 500（新规范只用 400/500）── */
+.agent-btn ,
+.agent-chip b ,
+.agent-exec-badge ,
+.agent-exec-section ,
+.agent-exec-task-id ,
+.agent-exec-task-kind ,
+.agent-exec-tool ,
+.agent-exec-total b ,
+.agent-history-intent ,
+.agent-history-status ,
+.agent-plan-badge ,
+.agent-plan-intent ,
+.agent-step-tool ,
+.agent-warn-mark ,
+.asset-dialog-btn ,
+.asset-dialog-input ,
+.asset-drop-zone ,
+.asset-hover-preview .asset-hover-name ,
+.asset-local-tag ,
+.asset-manager-card .workflow-manager-thumb ,
+.asset-manager-card-actions button ,
+.asset-manager-list small ,
+.asset-manager-tabs button ,
+.asset-manager-tools button,.asset-manager-tools label ,
+.asset-name ,
+.asset-tab ,
+.asset-title ,
+.asset-video-badge ,
+.audio-sub ,
+.canvas-asset-drop ,
+.canvas-asset-empty ,
+.canvas-asset-file-thumb ,
+.canvas-asset-head strong ,
+.canvas-asset-hover-name ,
+.canvas-asset-local-tag ,
+.canvas-asset-name ,
+.canvas-asset-select ,
+.canvas-asset-video-badge ,
+.canvas-card-time ,
+.canvas-card-title  { font-weight: 500; }
+.canvas-card-title-input ,
+.canvas-confirm-btn,.canvas-cancel-btn ,
+.canvas-delete-title ,
+.canvas-kind-chip ,
+.canvas-meta-label ,
+.canvas-owner-chip ,
+.comfy-run ,
+.compare-toggle ,
+.composer-head-hint ,
+.create-card-sub ,
+.create-card-title ,
+.current-canvas-title ,
+.drop-overlay ,
+.dur-value input ,
+.dur-value span ,
+.duration-custom input ,
+.duration-custom span ,
+.duration-option ,
+.error-title ,
+.gate-back-link ,
+.gate-count-pill ,
+.gate-list-empty ,
+.gate-name-input ,
+.gate-sort-btn ,
+.gate-subtitle ,
+.gate-trash-badge ,
+.gen-btn ,
+.gen-cascade-btn ,
+.gen-count-input ,
+.gen-count-label ,
+.grid-gap-control ,
+.grid-gap-value ,
+.hint ,
+.hub-port ,
+.image-edit-btn ,
+.image-edit-sub ,
+.image-edit-title ,
+.image-edit-tools input[type="number"] ,
+.image-edit-tools input[type="number"], .image-edit-tools input[type="text"] ,
+.image-edit-tools label  { font-weight: 500; }
+.image-node .node-head .nie-mode-chip ,
+.image-node.smart-group-member-node .loop-smart-card::before ,
+.image-resize-resolution ,
+.image-resolution-badge ,
+.inline-fields .inline-label ,
+.input-index ,
+.input-thumb-count ,
+.input-thumb-label ,
+.input-thumb.input-blocked::before ,
+.jimeng-pending-text ,
+.llm-mention-empty ,
+.llm-mention-head ,
+.llm-mode button ,
+.llm-output-mode button ,
+.llm-pane-label ,
+.llm-provider button ,
+.llm-run ,
+.llm-tab ,
+.log-chip ,
+.log-empty ,
+.log-error.copied ,
+.log-field-label ,
+.log-field-value ,
+.log-prompt.copied ,
+.log-retry-btn ,
+.log-subline ,
+.log-title ,
+.loop-count-input ,
+.loop-count-label ,
+.loop-image-hint ,
+.loop-node-placeholder ,
+.loop-number-cell ,
+.loop-number-trigger ,
+.loop-number-trigger strong ,
+.loop-prompt-hint ,
+.loop-smart-count ,
+.loop-smart-count input ,
+.loop-smart-counter-token ,
+.loop-smart-icon-btn ,
+.loop-smart-mini > input  { font-weight: 500; }
+.loop-smart-prompt-index ,
+.loop-smart-run ,
+.loop-smart-token ,
+.loop-smart-token-chip ,
+.loop-smart-upstream-label ,
+.media-card-sub ,
+.media-thumb.audio-thumb span ,
+.media-thumb.file-thumb span ,
+.mention-folder-chip ,
+.mention-image-token ,
+.mention-library-row span ,
+.mention-source-tab ,
+.menu-section-title ,
+.midjourney-input-head ,
+.midjourney-input-head span:last-child ,
+.minimap-empty ,
+.missing-asset ,
+.mode-tabs button ,
+.model-btn ,
+.model-empty ,
+.model-list-label ,
+.model-list-label .count ,
+.model-name ,
+.model-panel-title ,
+.node-count ,
+.node-drop ,
+.node-hint ,
+.node-inline-editor .nie-btn ,
+.node-inline-editor .nie-chip.is-active ,
+.node-inline-editor .nie-field em ,
+.node-inline-editor .nie-pick-btn ,
+.node-inline-editor .nie-pick-cancel ,
+.node-retry-btn, .node-stop-btn ,
+.node-retry-msg ,
+.node-run-status ,
+.num-compact .num-label ,
+.num-with-dice .num-label ,
+.nv-ctx-head ,
+.nv-lod-meta ,
+.nv-lod-text  { font-weight: 500; }
+.nv-pick-hint ,
+.nv-pick-no ,
+.nv-pick-size ,
+.nv-pick-title ,
+.nv-pick-title em ,
+.outpaint-resolution ,
+.output-audio-card span ,
+.output-file-card small ,
+.output-recover-query ,
+.output-recover-title ,
+.output-resolution ,
+.output-time-pill ,
+.output-video-badge ,
+.panorama-control-label ,
+.panorama-custom-ratio span ,
+.panorama-loading ,
+.preview-text-btn ,
+.prompt-counter ,
+.prompt-node-run-status ,
+.prompt-node-section-title ,
+.prompt-node-segment span ,
+.prompt-node-slow-hint ,
+.prompt-node-split-control input ,
+.prompt-preset-fields select,.prompt-preset-fields input,.prompt-preset-fields textarea ,
+.prompt-template-actions button ,
+.prompt-template-edit-fields label ,
+.prompt-template-empty ,
+.prompt-template-group-row .group-name ,
+.prompt-template-icon-actions button ,
+.prompt-template-library-select ,
+.prompt-template-section label ,
+.prompt-template-tabs button ,
+.prompt-template-tag ,
+.provider-field input,.provider-field select ,
+.provider-field span ,
+.ratio-icon.r-custom::after ,
+.resize-resolution-overlay ,
+.rh-empty ,
+.rh-mini-summary ,
+.rh-param-head  { font-weight: 500; }
+.rh-slider-pill-value ,
+.secondary-btn ,
+.seg button ,
+.select-lite ,
+.select-lite option:disabled ,
+.setting-check ,
+.setting-input ,
+.setting-title ,
+.shortcut-item kbd ,
+.shortcut-title ,
+.size-bg-row button ,
+.size-custom-row input ,
+.size-custom-row span ,
+.size-custom-title ,
+.size-level-row button b ,
+.size-level-row button small ,
+.size-level-row button.active, .size-bg-row button.active ,
+.size-level-row button:hover, .size-bg-row button:hover ,
+.size-picker-note span ,
+.size-picker-option span ,
+.size-picker-scope button ,
+.size-picker-type ,
+.size-ratio-label ,
+.size-ratio-sub ,
+.size-ratio-tile:hover .size-ratio-label, .size-ratio-tile.active .size-ratio-label ,
+.slash-item-icon ,
+.smart-create-btn ,
+.smart-empty-guide-title ,
+.smart-export-item ,
+.smart-group-empty ,
+.smart-group-summary ,
+.smart-image-toolbar .smart-tool-item.is-active ,
+.smart-image-toolbar .smart-tool-section-head ,
+.smart-label-field-label ,
+.smart-label-panel-tip ,
+.smart-label-panel-title ,
+.smart-label-pill ,
+.smart-label-seg button, .smart-label-size button ,
+.smart-node-input-badge ,
+.smart-node-input-more  { font-weight: 500; }
+.smart-popover-title ,
+.smart-save-state ,
+.smart-text-flow .st-field .st-key ,
+.smart-text-flow .st-h3 ,
+.smart-text-flow .st-list-ordered > li::before ,
+.smart-text-flow .st-ref ,
+.smart-text-foot ,
+.smart-text-modal-tip ,
+.smart-text-modal-title ,
+.smart-text-modal-upstream-head ,
+.smart-text-modal-upstream-head span ,
+.smart-text-source ,
+.smart-title ,
+.smart-tool-panel .stp-btn ,
+.smart-tool-panel .stp-chip.is-active ,
+.smart-tool-panel .stp-label em ,
+.smart-tool-panel .stp-title ,
+.smart-tool-panel .stp-value ,
+.table-batch-run-btn ,
+.table-batch-status-seq ,
+.table-batch-title ,
+.table-cell-mention-trigger ,
+.table-cell-more ,
+.table-cell-ref-token ,
+.table-head-cell ,
+.table-input-label ,
+.table-node-drag-bar ,
+.toast ,
+.tool-btn ,
+.trash-note ,
+.video-frame-label ,
+.video-input-audio span ,
+.video-settings-popover .video-audio-row button ,
+.workflow-import-drop small ,
+.workflow-transfer-card p ,
+.workflow-transfer-card-head ,
+.workflow-transfer-meta ,
+.workflow-transfer-title  { font-weight: 500; }
+
+/* ═══ 输入框聚焦不画环（2026-10-07 用户要求：点击输入不要「秒变环」）═══
+   原样式在 focus 时加 0 0 0 2–3px 的描边环；这里统一去掉，只保留各自原有的底色变化。
+   键盘导航的 :focus-visible（工具条按钮）不在此列。 */
+.prompt-input:focus,
+.prompt-node-text:focus,
+.prompt-node-llm .prompt-llm-instruction:focus, .prompt-node-llm .llm-chat-input:focus,
+.loop-smart-text:focus,
+.node-inline-editor .nie-input.is-focused,
+.mention-library-select:focus,
+.size-custom-row input:focus,
+.duration-custom input:focus,
+.popover-fields input:focus, .popover-fields select:focus,
+.asset-rename-input:focus, .asset-dialog-input:focus, .asset-card-name-input:focus,
+.chat-model-select:focus,
+.agent-edit-row select:focus, .agent-edit-row textarea:focus,
+.smart-text-modal-input:focus,
+.canvas-card-title-input:focus, .canvas-owner-input:focus,
+.prompt-template-edit-fields input:focus, .prompt-template-edit-fields textarea:focus, .prompt-template-edit-fields select:focus,
+.loop-count-input:focus,
+.setting-input:focus,
+.image-edit-tools input[type="number"]:focus, .image-edit-tools input[type="text"]:focus,
+.detail-name-input:focus, .head-inline-edit input:focus, .inline-edit-field input:focus, .inline-edit-field textarea:focus,
+.local-caption-prompt-input:focus, .local-classify-prompt-input:focus,
+.table-batch-input:focus, .table-head-editor:focus,
+.tree-inline-edit input:focus { box-shadow: none !important; outline: none !important; }

@@ -131,7 +131,7 @@ const sendFn = (js.match(/async function sendChatMessage\(\)\{([\s\S]*?\n\})/) |
 const sendFinally = (sendFn.match(/finally \{([\s\S]*?)\n    \}/) || [])[1] || '';
 ok(sendFinally.includes("thoughtLineStarts.delete('agent');"), '助手气泡：sendChatMessage 的 finally 里删 agent key');
 /* CSS：新类名 + 颜色走项目变量 + reduced-motion 关动画 + 旧类名清干净 */
-ok(css.includes('.prompt-node-llm .llm-chat-thinking .thought-line { font-size:10.5px;'), '聊天区局部覆盖 10.5px（原来是 10.5px 文字 + 5px 圆点）');
+ok(css.includes('.prompt-node-llm .llm-chat-thinking .thought-line { font-size:11px;'), '聊天区局部覆盖 11px（第 16 轮字号规范：画布内正文最小 11px）');
 ok(/\.thought-line \{\n    display: inline-flex;[\s\S]{0,220}color: var\(--muted\);/.test(css), '文字色用 var(--muted)');
 ok(/\.thought-line__glyph \{[\s\S]{0,220}color: var\(--accent\);/.test(css), '图标色用 var(--accent)');
 ok(/\.thought-line__breath \{[\s\S]{0,400}color-mix\(in srgb, currentColor 50%, transparent\)/.test(css), 'shimmer 渐变用 color-mix(currentColor)，不写死颜色');

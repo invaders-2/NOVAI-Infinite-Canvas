@@ -8,11 +8,11 @@
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
     <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
     <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790685706"></script>
     <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.123.1790560477"></script>
     <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790560477" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971" data-page-node-id="sBSjKrFOadAKo0d0aaQqPR">
     <style>
         :root {
@@ -543,7 +543,7 @@
             background:transparent !important;
         }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790560477" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         html body,
@@ -2313,10 +2313,15 @@ html.studio-theme-dark #sendBtn.nv-beam {
 
         async function toggleMemory(id, enabled){
             try {
+                /* 只 PATCH enabled 时后端 scope 默认 "global"，会把「本对话」条目打回全局；带上这条自己的 scope / conversation_id */
+                const item = memoryById(id);
+                const body = item && item.scope === 'conversation'
+                    ? { enabled, scope: 'conversation', conversation_id: item.conversation_id || '' }
+                    : { enabled };
                 const res = await fetch('/api/memories/' + encodeURIComponent(id), {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled })
+                    body: JSON.stringify(body)
                 });
                 const data = await res.json().catch(() => ({}));
                 if(!res.ok) throw new Error(data?.detail || '更新失败');

@@ -6,7 +6,13 @@ import sys
 import time
 import os
 
-PORT = 3000
+# 端口跟后端一致：NOVAI_PORT（默认 3000）；写回环境变量让子进程 NOVAI.exe 听同一个端口，
+# 否则设了 NOVAI_PORT 时窗口打 3000、后端在别的端口，页面永远打不开。
+try:
+    PORT = int(os.environ.get("NOVAI_PORT") or 3000)
+except (TypeError, ValueError):
+    PORT = 3000
+os.environ["NOVAI_PORT"] = str(PORT)
 URL = f"http://127.0.0.1:{PORT}"
 
 # 启动后端服务

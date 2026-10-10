@@ -72,7 +72,9 @@ if [ "$DEPS_OK" -eq 0 ]; then
 fi
 
 # ---- 确定端口 ----
-PORT="${DEPLOY_RUN_PORT:-3000}"
+# NOVAI_PORT 是后端真正读的变量（DEPLOY_RUN_PORT 只是历史别名）；导出给 main.py，避免脚本报的端口和后端监听的不一致
+PORT="${NOVAI_PORT:-${DEPLOY_RUN_PORT:-3000}}"
+export NOVAI_PORT="$PORT"
 
 # ---- 清理旧进程 ----
 OLD_PID=$(lsof -ti :$PORT 2>/dev/null)

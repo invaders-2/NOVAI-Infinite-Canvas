@@ -256,7 +256,7 @@ const pageVersions = i18nPages.map(n => {
     const m = src.match(/js\/i18n\.js\?v=([0-9.]+)/);
     return { name: n, v: m ? m[1] : '' };
 }).filter(item => item.v);
-ok(pageVersions.length >= 12, '引用 i18n.js 的页面都扫到了（' + pageVersions.length + ' 个）');
+ok(pageVersions.length >= 9, '引用 i18n.js 的页面都扫到了（' + pageVersions.length + ' 个）');  /* 第 17 轮移除了 细节增强 / 图片编辑 / 角度控制 三个页面 */
 ok(pageVersions.every(item => Number(item.v.split('.').pop()) > 1789606971), '每个引用 i18n.js 的页面 ?v= 都升过（未漏页面）');
 ok(pageVersions.every(item => versionTagOk(item.v)), '?v= 仍是「VERSION + mtime」的既有格式（比对当前项目版本，不写死版本号）');
 const chatIframe = indexHtml.match(/\/static\/gpt-chat\.html\?v=([0-9.]+)/);
