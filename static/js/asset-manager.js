@@ -26,7 +26,9 @@ function writeLocalCaptionSettings(){
 }
 const savedLocalCaptionSettings = readLocalCaptionSettings();
 
-let activeTab = 'assets';
+const MEDIA_TABS = ['assets', 'canvas-assets', 'local'];
+const LAST_MEDIA_TAB_KEY = 'asset_manager_media_source_v1';
+let activeTab = (() => { try { const v = localStorage.getItem(LAST_MEDIA_TAB_KEY); return MEDIA_TABS.includes(v) ? v : 'assets'; } catch(_) { return 'assets'; } })();
 let assetLibrary = {libraries:[], categories:[]};
 let promptLibrary = {libraries:[]};
 let apiProviders = [];
@@ -107,6 +109,8 @@ let selectedCanvasAssetId = '';
 let selectedCanvasAssetIds = new Set();
 let canvasAssetQuery = '';
 let canvasAssetSort = 'canvas_asc';
+let canvasAssetModelFilter = '';
+let canvasAssetDateFilter = '';
 let canvasAssetManageMode = false;
 let searchCompositionActive = false;
 let searchRenderTimer = null;
@@ -740,9 +744,18 @@ function currentCanvasAssetItems(){
     let list = uniqueCanvasAssets(canvasAssetsData.items || []).filter(item => {
         if((item.canvas_kind || 'classic') !== activeCanvasAssetCategory) return false;
         if(activeCanvasAssetCanvasId && item.canvas_id !== activeCanvasAssetCanvasId) return false;
+        if(canvasAssetModelFilter && (canvasAssetModelFilter === '__none__' ? item.gen_model : item.gen_model !== canvasAssetModelFilter)) return false;
+        if(canvasAssetDateFilter){
+            const days = Number(canvasAssetDateFilter) || 0;
+            const t = Number(item.gen_at || item.created_at || 0);
+            const start = days === 1 ? new Date().setHours(0, 0, 0, 0) : Date.now() - days * 86400000;
+            if(!t || t < start) return false;
+        }
         if(!q) return true;
         return [
             item.name,
+            item.gen_prompt,
+            item.gen_model,
             item.url,
             item.canvas_title,
             item.node_title,
@@ -1071,13 +1084,14 @@ async function loadAll(){
 function render(){
     const scrollState = [...document.querySelectorAll('.nav-scroll,.content-scroll,.detail-scroll')]
         .map((el, index) => ({index, top:el.scrollTop, left:el.scrollLeft}));
-    document.querySelectorAll('[data-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === activeTab));
+    syncMediaTabs();
     if(activeTab === 'prompts') renderPromptManager();
     else if(activeTab === 'workflows') renderWorkflowManager();
     else if(activeTab === 'local') renderLocalManager();
     else if(activeTab === 'canvas-assets') renderCanvasAssetsManager();
     else renderAssetManager();
     refreshIcons();
+    observeProgressiveGrids();
     if(scrollState.length){
         requestAnimationFrame(() => {
             document.querySelectorAll('.nav-scroll,.content-scroll,.detail-scroll').forEach((el, index) => {
@@ -1152,6 +1166,7 @@ function renderCanvasAssetsManager(){
                     <button class="asset-btn ${canvasAssetManageMode ? 'primary' : ''}" type="button" data-canvas-asset-manage ${total ? '' : 'disabled'}><i data-lucide="list-checks"></i><span>${canvasAssetManageMode ? '完成管理' : '批量管理'}</span></button>
                 </div>
             </div>
+            ${renderCanvasAssetFilterBar()}
             <div class="manage-tools">
                 <span>已选择 ${selectedCanvasAssetIds.size} 个画布资产，支持拖拽框选或逐个勾选。</span>
                 <div class="asset-tools">
@@ -1162,8 +1177,10 @@ function renderCanvasAssetsManager(){
             </div>
             <div class="content-scroll">
                 <div class="asset-grid">
-                    ${groups.map(group => renderCanvasAssetGroup(group)).join('')}
-                    ${items.length ? '' : '<div class="empty-state">当前分类没有可下载的画布资产。可以点击“刷新资源”，或在画布中生成/导入图片、视频、音频后再查看。</div>'}
+                    ${(groups.length === 1 && !groups[0]?.title)
+                        ? progressiveCardsHtml('canvas-assets', groups[0].items || [], renderCanvasAssetCard, {selectedId:selectedCanvasAssetId})
+                        : progressiveCardsHtml('canvas-assets-groups', groups, renderCanvasAssetGroup, {weight:group => (group.items || []).length || 1, idOf:group => group.title || ''})}
+                    ${items.length ? '' : (canvasAssetModelFilter || canvasAssetDateFilter ? '<div class="empty-state">没有符合筛选条件的素材，可以换个时间范围或模型，或点「清除筛选」。</div>' : '<div class="empty-state">当前分类没有可下载的画布资产。可以点击“刷新资源”，或在画布中生成/导入图片、视频、音频后再查看。</div>')}
                 </div>
             </div>
         </section>
@@ -1256,6 +1273,7 @@ function renderCanvasAssetDetail(item){
                     <div class="detail-meta"><span>来源节点</span><strong title="${escapeAttr(item.node_title || item.node_type || '')}">${escapeHtml(item.node_title || item.node_type || '节点')}</strong></div>
                     <div class="detail-meta"><span>节点类型</span><strong>${escapeHtml(item.node_type || '-')}</strong></div>
                 </div>
+                ${renderCanvasAssetGenInfo(item)}
                 <div class="detail-url">${escapeHtml(item.url || '')}</div>
             </div>
         </div>
@@ -1462,7 +1480,7 @@ function renderLocalManager(){
             <div class="content-scroll">
                 <div class="asset-grid">
                     ${renderLocalUploadAddCard()}
-                    ${items.map(item => renderLocalUploadCard(item)).join('')}
+                    ${progressiveCardsHtml('local', items, renderLocalUploadCard, {selectedId:selectedLocalUploadId})}
                 </div>
             </div>
         </section>
@@ -1515,6 +1533,7 @@ function renderLocalUploadDetail(item){
                     <div class="detail-meta"><span>上传时间</span><strong>${escapeHtml(formatDate((item.created_at||0)*1000))}</strong></div>
                     <div class="detail-meta"><span>来源</span><strong>本地上传</strong></div>
                 </div>
+                ${renderStoredGenerationCard(item.generation, 'local:' + item.id)}
                 <div class="detail-url">${escapeHtml(item.url || '')}</div>
                 ${isImage ? `<div class="detail-caption-card">
                     <div class="detail-caption-head"><strong>智能分类</strong></div>
@@ -1675,7 +1694,7 @@ function renderAssetManager(){
             <div class="content-scroll">
                 <div class="asset-grid">
                     ${activeAssetClassFilter ? '' : renderUploadCard(cat)}
-                    ${items.map(item => renderAssetCard(item)).join('')}
+                    ${progressiveCardsHtml('assets', items, renderAssetCard, {selectedId:selectedAssetId})}
                     ${items.length ? '' : '<div class="empty-state">当前分组还没有素材，可以上传，或从智能画布输出保存到素材库。</div>'}
                 </div>
             </div>
@@ -2039,6 +2058,7 @@ function renderAssetDetail(item){
                     <div class="detail-meta"><span>资产库</span><strong>${escapeHtml(activeAssetLibrary()?.name || '资产库')}</strong></div>
                     <div class="detail-meta"><span>分组</span><strong>${escapeHtml(activeAssetCategory()?.name || '分组')}</strong></div>
                 </div>
+                ${renderStoredGenerationCard(item.generation, 'asset:' + item.id)}
                 <div class="detail-url">${escapeHtml(item.url || '')}</div>
                 ${isImage ? `<div class="detail-caption-card">
                     <div class="detail-caption-head"><strong>智能分类</strong></div>
@@ -4680,6 +4700,12 @@ root.addEventListener('change', event => {
         }).catch(err => setStatus(err.message || '保存失败'));
         return;
     }
+    if(event.target?.id === 'canvasAssetModelFilter'){
+        canvasAssetModelFilter = event.target.value || '';
+        selectedCanvasAssetId = '';
+        render();
+        return;
+    }
     if(event.target?.id === 'canvasAssetSort'){
         canvasAssetSort = event.target.value || 'canvas_asc';
         selectedCanvasAssetId = '';
@@ -4747,8 +4773,14 @@ uploadInput?.addEventListener('change', event => {
     }
     event.target.value = '';
 });
+document.getElementById('assetTabMedia')?.addEventListener('click', () => {
+    if(MEDIA_TABS.includes(activeTab)) return;
+    activeTab = lastMediaTab();
+    render();
+});
 document.querySelectorAll('[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
+        if(btn.dataset.tab === activeTab) return;
         activeTab = btn.dataset.tab || 'assets';
         selectedAssetIds.clear();
         selectedWorkflowIds.clear();
@@ -4874,4 +4906,245 @@ document.addEventListener('DOMContentLoaded', () => loadAll().catch(err => setSt
 
     rescan();
 }());
+
+/* ═══ 第 11 轮：素材入口合并 + 大列表分批渲染 ═══
+   「图片资产 / 画布资产 / 本地素材」合成一个「素材」标签，里面用来源切换；最后看的来源记在本地。
+   卡片不再一次性全部塞进 DOM：先渲染 120 张，滚到底部附近再追加下一批（IntersectionObserver），
+   选中项在后面时会自动把批次放宽到能看见它。全选 / 计数都走数据，不依赖 DOM。 */
+function lastMediaTab(){
+    try {
+        const v = localStorage.getItem(LAST_MEDIA_TAB_KEY);
+        return MEDIA_TABS.includes(v) ? v : 'assets';
+    } catch(_) { return 'assets'; }
+}
+function mediaSourceCounts(){
+    let assets = 0;
+    try { assets = (assetLibraries() || []).reduce((sum, lib) => sum + (lib.categories || []).reduce((n, cat) => n + (cat.items || []).length, 0), 0); } catch(_) {}
+    let canvas = 0;
+    try { canvas = uniqueCanvasAssets(canvasAssetsData?.items || []).length; } catch(_) {}
+    const local = (localAssets || []).length;
+    return {assets, 'canvas-assets':canvas, local};
+}
+function syncMediaTabs(){
+    const isMedia = MEDIA_TABS.includes(activeTab);
+    document.querySelectorAll('[data-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === activeTab));
+    document.getElementById('assetTabMedia')?.classList.toggle('active', isMedia);
+    const sw = document.getElementById('assetSourceSwitch');
+    if(sw){
+        sw.hidden = !isMedia;
+        const counts = mediaSourceCounts();
+        sw.querySelectorAll('[data-tab]').forEach(btn => {
+            const em = btn.querySelector('em');
+            if(em) em.textContent = counts[btn.dataset.tab] ? String(counts[btn.dataset.tab]) : '';
+            btn.setAttribute('aria-pressed', btn.dataset.tab === activeTab ? 'true' : 'false');
+        });
+    }
+    if(isMedia){
+        try { localStorage.setItem(LAST_MEDIA_TAB_KEY, activeTab); } catch(_) {}
+    }
+}
+
+const PROGRESSIVE_CHUNK = 120;
+const progressiveLists = {};
+function progressiveContextKey(source){
+    if(source === 'assets') return [activeAssetLibraryId, activeAssetCategoryId, activeAssetClassFilter, assetQuery].join('|');
+    if(source === 'local') return [activeLocalUploadFolder, activeLocalUploadClassFilter, localUploadQuery].join('|');
+    return [activeCanvasAssetCategory, activeCanvasAssetCanvasId, canvasAssetQuery, canvasAssetSort, canvasAssetModelFilter, canvasAssetDateFilter].join('|');
+}
+function progressiveCardsHtml(source, units, renderUnit, opts={}){
+    const list = Array.isArray(units) ? units : [];
+    const weight = typeof opts.weight === 'function' ? opts.weight : () => 1;
+    const key = progressiveContextKey(source);
+    let st = progressiveLists[source];
+    /* 换了分组 / 筛选 / 搜索才从头来；同一个列表里删掉几张、点选一张时保留已经放开的批次 */
+    if(!st || st.key !== key) st = progressiveLists[source] = {key, limit:PROGRESSIVE_CHUNK};
+    if(opts.selectedId){
+        const idx = list.findIndex(unit => unit?.id === opts.selectedId);
+        if(idx >= st.limit) st.limit = Math.ceil((idx + 1) / PROGRESSIVE_CHUNK) * PROGRESSIVE_CHUNK;
+    }
+    let shown = 0, cards = 0;
+    while(shown < list.length && (cards < st.limit || shown === 0)){
+        cards += weight(list[shown]);
+        shown += 1;
+    }
+    st.units = list;
+    st.render = renderUnit;
+    st.weight = weight;
+    st.shown = shown;
+    const html = list.slice(0, shown).map(unit => renderUnit(unit)).join('');
+    return html + progressiveMoreHtml(source, list, shown, weight);
+}
+function progressiveMoreHtml(source, list, shown, weight){
+    if(shown >= list.length) return '';
+    const rest = list.slice(shown).reduce((sum, unit) => sum + weight(unit), 0);
+    return `<div class="asset-grid-more" data-progressive-more="${escapeAttr(source)}"><button class="asset-btn" type="button" data-progressive-load="${escapeAttr(source)}"><i data-lucide="chevron-down"></i><span>继续加载（还有 ${rest} 个）</span></button></div>`;
+}
+function appendProgressiveChunk(source){
+    const st = progressiveLists[source];
+    const sentinel = root.querySelector(`[data-progressive-more="${CSS.escape(source)}"]`);
+    if(!st || !sentinel || st.shown >= (st.units || []).length){ sentinel?.remove(); return; }
+    const start = st.shown;
+    let end = start, cards = 0;
+    while(end < st.units.length && (cards < PROGRESSIVE_CHUNK || end === start)){
+        cards += st.weight(st.units[end]);
+        end += 1;
+    }
+    st.limit += PROGRESSIVE_CHUNK;
+    st.shown = end;
+    sentinel.insertAdjacentHTML('beforebegin', st.units.slice(start, end).map(unit => st.render(unit)).join(''));
+    const next = progressiveMoreHtml(source, st.units, end, st.weight);
+    if(next) sentinel.outerHTML = next; else sentinel.remove();
+    refreshIcons();
+    observeProgressiveGrids();
+}
+let progressiveObserver = null;
+function observeProgressiveGrids(){
+    if(progressiveObserver) progressiveObserver.disconnect();
+    const sentinels = root.querySelectorAll('[data-progressive-more]');
+    if(!sentinels.length || typeof IntersectionObserver !== 'function') return;
+    progressiveObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            if(!entry.isIntersecting) return;
+            progressiveObserver.unobserve(entry.target);
+            const source = entry.target.dataset.progressiveMore;
+            requestAnimationFrame(() => appendProgressiveChunk(source));
+        });
+    }, {root:root.querySelector('.content-scroll'), rootMargin:'0px 0px 900px 0px'});
+    sentinels.forEach(el => progressiveObserver.observe(el));
+}
+root.addEventListener('click', event => {
+    const btn = event.target.closest?.('[data-progressive-load]');
+    if(!btn) return;
+    event.preventDefault();
+    event.stopPropagation();
+    appendProgressiveChunk(btn.dataset.progressiveLoad);
+}, true);
+
+/* ═══ 第 15 轮：画布资产的生成信息 + 按模型 / 时间筛选 + 在画布中定位 ═══ */
+function canvasAssetModelOptions(){
+    const counts = new Map();
+    uniqueCanvasAssets(canvasAssetsData.items || []).forEach(item => {
+        if((item.canvas_kind || 'classic') !== activeCanvasAssetCategory) return;
+        if(item.gen_model) counts.set(item.gen_model, (counts.get(item.gen_model) || 0) + 1);
+    });
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
+function renderCanvasAssetFilterBar(){
+    const models = canvasAssetModelOptions();
+    const dates = [['', '全部时间'], ['1', '今天'], ['7', '近 7 天'], ['30', '近 30 天']];
+    if(canvasAssetModelFilter && canvasAssetModelFilter !== '__none__' && !models.some(([m]) => m === canvasAssetModelFilter)) canvasAssetModelFilter = '';
+    return `<div class="asset-filter-bar">
+        <div class="asset-filter-seg" role="group" aria-label="按时间筛选">
+            ${dates.map(([v, label]) => `<button type="button" class="${canvasAssetDateFilter === v ? 'active' : ''}" data-canvas-asset-date="${v}">${label}</button>`).join('')}
+        </div>
+        ${models.length ? `<select id="canvasAssetModelFilter" class="manage-select asset-filter-select" title="按生成模型筛选">
+            <option value="">全部模型</option>
+            ${models.map(([m, n]) => `<option value="${escapeAttr(m)}" ${canvasAssetModelFilter === m ? 'selected' : ''}>${escapeHtml(m)}（${n}）</option>`).join('')}
+            <option value="__none__" ${canvasAssetModelFilter === '__none__' ? 'selected' : ''}>非生成素材（上传 / 导入）</option>
+        </select>` : ''}
+        ${canvasAssetModelFilter || canvasAssetDateFilter ? '<button type="button" class="asset-filter-clear" data-canvas-asset-filter-clear>清除筛选</button>' : ''}
+    </div>`;
+}
+function canvasAssetFocusUrl(canvasId, kind, nodeId){
+    const id = encodeURIComponent(canvasId || '');
+    const focus = nodeId ? `&focus=${encodeURIComponent(nodeId)}` : '';
+    return kind === 'smart' ? `/static/smart-canvas.html?id=${id}${focus}&t=${Date.now()}` : `/static/canvas.html?id=${id}&t=${Date.now()}`;
+}
+/* 在外壳里：切到「画布」页并让那个 iframe 直接打开目标画布；单独打开素材页时新开标签 */
+function openCanvasAtNode(canvasId, kind, nodeId){
+    if(!canvasId) return;
+    const url = canvasAssetFocusUrl(canvasId, kind, nodeId);
+    try {
+        const shell = window.parent;
+        const frame = shell && shell !== window ? shell.document.getElementById('frame-canvas') : null;
+        if(frame){
+            shell.postMessage({type:'navigate', route:'canvas'}, location.origin);
+            setTimeout(() => { frame.src = url; }, 80);
+            return;
+        }
+    } catch(_) {}
+    window.open(url, '_blank', 'noopener');
+}
+function renderCanvasAssetGenInfo(item){
+    const hasGen = item.gen_prompt || item.gen_model;
+    const size = item.natural_w && item.natural_h ? `${item.natural_w}×${item.natural_h}` : '';
+    const chips = [
+        item.gen_model ? ['模型', item.gen_model] : null,
+        item.gen_provider ? ['平台', item.gen_provider] : null,
+        item.gen_ratio ? ['比例', item.gen_ratio] : null,
+        size ? ['尺寸', size] : null,
+        item.gen_at ? ['生成于', formatDate(item.gen_at)] : null
+    ].filter(Boolean);
+    const usedIn = Array.isArray(item.used_in) ? item.used_in : [];
+    return `
+        ${hasGen ? `<div class="detail-caption-card gen-info-card">
+            <div class="detail-caption-head"><strong>生成信息</strong>
+                <div class="detail-caption-actions">
+                    ${item.gen_prompt ? `<button class="asset-btn" type="button" data-canvas-asset-copy-prompt="${escapeAttr(item.id)}"><i data-lucide="copy"></i><span>复制提示词</span></button>` : ''}
+                </div>
+            </div>
+            ${item.gen_prompt ? `<div class="gen-info-prompt">${escapeHtml(item.gen_prompt)}</div>` : ''}
+            ${chips.length ? `<div class="gen-info-chips">${chips.map(([k, v]) => `<span><em>${escapeHtml(k)}</em>${escapeHtml(v)}</span>`).join('')}</div>` : ''}
+        </div>` : (size ? `<div class="gen-info-chips gen-info-plain"><span><em>尺寸</em>${escapeHtml(size)}</span><span><em>来源</em>上传 / 导入</span></div>` : '')}
+        <div class="gen-info-actions">
+            <button class="asset-btn primary" type="button" data-canvas-asset-locate="${escapeAttr(item.id)}"><i data-lucide="locate-fixed"></i><span>在画布中定位</span></button>
+        </div>
+        ${usedIn.length > 1 ? `<div class="gen-info-usage"><div class="gen-info-usage-head">用在 ${usedIn.length} 个画布</div>
+            ${usedIn.map(ref => `<button type="button" class="gen-info-usage-row" data-canvas-asset-goto="${escapeAttr(ref.id)}" data-kind="${escapeAttr(ref.kind || '')}" data-node="${escapeAttr(ref.node_id || '')}"><i data-lucide="${ref.kind === 'smart' ? 'sparkles' : 'layout-dashboard'}"></i><span>${escapeHtml(ref.title || '未命名画布')}</span><i data-lucide="chevron-right"></i></button>`).join('')}
+        </div>` : ''}`;
+}
+root.addEventListener('click', async event => {
+    const t = event.target;
+    const dateBtn = t.closest?.('[data-canvas-asset-date]');
+    if(dateBtn){ canvasAssetDateFilter = dateBtn.dataset.canvasAssetDate || ''; selectedCanvasAssetId = ''; render(); return; }
+    if(t.closest?.('[data-canvas-asset-filter-clear]')){ canvasAssetDateFilter = ''; canvasAssetModelFilter = ''; selectedCanvasAssetId = ''; render(); return; }
+    const copyPrompt = t.closest?.('[data-canvas-asset-copy-prompt]');
+    if(copyPrompt){
+        const it = findCanvasAssetItem(copyPrompt.dataset.canvasAssetCopyPrompt || '');
+        const ok = await copyTextToClipboard(it?.gen_prompt || '');
+        setStatus(ok ? '已复制提示词' : '复制失败');
+        return;
+    }
+    const locate = t.closest?.('[data-canvas-asset-locate]');
+    if(locate){
+        const it = findCanvasAssetItem(locate.dataset.canvasAssetLocate || '');
+        if(it) openCanvasAtNode(it.canvas_id, it.canvas_kind, it.node_id);
+        return;
+    }
+    const gotoBtn = t.closest?.('[data-canvas-asset-goto]');
+    if(gotoBtn){ openCanvasAtNode(gotoBtn.dataset.canvasAssetGoto, gotoBtn.dataset.kind, gotoBtn.dataset.node); return; }
+});
+
+/* ═══ 第 16 轮：资产库 / 本地上传也显示生成信息（保存时后端按文件地址回画布查到的，存在 item.generation） ═══ */
+const storedGenPrompts = new Map();
+function renderStoredGenerationCard(gen, key){
+    if(!gen || !(gen.prompt || gen.model)) return '';
+    storedGenPrompts.set(key, gen.prompt || '');
+    const size = gen.width && gen.height ? `${gen.width}×${gen.height}` : '';
+    const chips = [
+        gen.model ? ['模型', gen.model] : null,
+        gen.provider ? ['平台', gen.provider] : null,
+        gen.ratio ? ['比例', gen.ratio] : null,
+        size ? ['尺寸', size] : null,
+        gen.at ? ['生成于', formatDate(gen.at)] : null
+    ].filter(Boolean);
+    return `<div class="detail-caption-card gen-info-card">
+        <div class="detail-caption-head"><strong>生成信息</strong>
+            <div class="detail-caption-actions">
+                ${gen.prompt ? `<button class="asset-btn" type="button" data-gen-copy="${escapeAttr(key)}"><i data-lucide="copy"></i><span>复制提示词</span></button>` : ''}
+            </div>
+        </div>
+        ${gen.prompt ? `<div class="gen-info-prompt">${escapeHtml(gen.prompt)}</div>` : ''}
+        ${chips.length ? `<div class="gen-info-chips">${chips.map(([k, v]) => `<span><em>${escapeHtml(k)}</em>${escapeHtml(v)}</span>`).join('')}</div>` : ''}
+    </div>
+    ${gen.canvas_id ? `<div class="gen-info-usage"><div class="gen-info-usage-head">生成自</div>
+        <button type="button" class="gen-info-usage-row" data-canvas-asset-goto="${escapeAttr(gen.canvas_id)}" data-kind="${escapeAttr(gen.canvas_kind || '')}" data-node="${escapeAttr(gen.node_id || '')}"><i data-lucide="${gen.canvas_kind === 'smart' ? 'sparkles' : 'layout-dashboard'}"></i><span>${escapeHtml(gen.canvas_title || '未命名画布')}</span><i data-lucide="locate-fixed"></i></button>
+    </div>` : ''}`;
+}
+root.addEventListener('click', async event => {
+    const btn = event.target.closest?.('[data-gen-copy]');
+    if(!btn) return;
+    const ok = await copyTextToClipboard(storedGenPrompts.get(btn.dataset.genCopy) || '');
+    setStatus(ok ? '已复制提示词' : '复制失败');
+});
 })();

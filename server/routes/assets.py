@@ -107,6 +107,11 @@ class AssetLibraryBatchAddRequest(BaseModel):
     items: List[AssetLibraryAddRequest] = []
 
 
+def _generation_sidecar(rel):
+    """本地上传的生成信息旁车文件（与 .classification.json 同基名）。"""
+    return deps._local_upload_classification_path(rel)[:-len(".classification.json")] + ".generation.json"
+
+
 class SharedFolderRegister(BaseModel):
     path: str = ""
     name: str = ""
@@ -297,6 +302,13 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
                     classification = await deps.classify_asset_image_best_effort(path, payload.provider, payload.model, payload.ms_model, payload.prompt)
                     if classification:
                         deps._write_local_upload_classification(rel_name, classification)
+                # 从画布存进来的生成图：把提示词 / 模型等生成信息一起带过来
+                try:
+                    gen = await asyncio.to_thread(deps.generation_meta_for_url, src_url)
+                    if gen:
+                        deps._write_local_upload_generation(rel_name, gen)
+                except Exception:
+                    pass
                 item = deps._local_upload_item(rel_name)
                 uploaded.append(item)
                 result.update({"ok": True, "file": rel_name, "item": item})
@@ -377,6 +389,9 @@ async def rename_local_asset_item(payload: LocalAssetRenameRequest, request: Req
     new_classification = deps._local_upload_classification_path(new_rel)
     if os.path.isfile(old_classification) and not os.path.exists(new_classification):
         os.rename(old_classification, new_classification)
+    old_gen, new_gen = _generation_sidecar(rel), _generation_sidecar(new_rel)
+    if os.path.isfile(old_gen) and not os.path.exists(new_gen):
+        os.rename(old_gen, new_gen)
     tree, items = deps._local_upload_tree_and_items()
     return {"ok": True, "item": deps._local_upload_item(new_rel), "old_path": rel, "tree": tree, "items": items}
 
@@ -402,6 +417,9 @@ async def delete_local_assets(payload: dict, request: Request):
                 cls_path = deps._local_upload_classification_path(rel)
                 if os.path.isfile(cls_path):
                     os.remove(cls_path)
+                gen_path = _generation_sidecar(rel)
+                if os.path.isfile(gen_path):
+                    os.remove(gen_path)
                 deleted.append(rel)
             except OSError:
                 pass
@@ -444,6 +462,7 @@ async def move_local_assets(payload: dict, request: Request):
             for src_sib, dst_sib in (
                 (deps._local_upload_caption_path(rel), deps._local_upload_caption_path(new_rel)),
                 (deps._local_upload_classification_path(rel), deps._local_upload_classification_path(new_rel)),
+                (_generation_sidecar(rel), _generation_sidecar(new_rel)),
             ):
                 if os.path.isfile(src_sib) and not os.path.exists(dst_sib):
                     os.rename(src_sib, dst_sib)
@@ -875,6 +894,9 @@ async def add_asset_library_item(payload: AssetLibraryAddRequest):
     if not src:
         raise HTTPException(status_code=400, detail="只支持保存本地 /assets 或 /output 媒体")
     _, item = deps.make_asset_library_item(src, payload.name or os.path.basename(src), subdir=cat.get("dir") or "")
+    gen = await asyncio.to_thread(deps.generation_meta_for_url, payload.url)
+    if gen:
+        item["generation"] = gen
     if item.get("kind") == "image":
         classification = await deps.classify_asset_image_best_effort(deps.output_file_from_url(item.get("url") or "") or src)
         if classification:
@@ -900,6 +922,9 @@ async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest):
         if not src:
             continue
         _, item = deps.make_asset_library_item(src, entry.name or os.path.basename(src), subdir=cat.get("dir") or "")
+        gen = await asyncio.to_thread(deps.generation_meta_for_url, entry.url)
+        if gen:
+            item["generation"] = gen
         if item.get("kind") == "image":
             classification = await deps.classify_asset_image_best_effort(deps.output_file_from_url(item.get("url") or "") or src)
             if classification:

@@ -1,0 +1,386 @@
+/* NOVAI Glass v2 设计系统（与画布效果图 novai.css 同源）：tokens + 基础组件 + 首页动效。
+   深色：html.theme-dark 由 static/js/theme.js 切换，这里同时认 [data-theme=dark]。 */
+@font-face { font-family: "Geist"; src: url("/static/vendor/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Geist Mono"; src: url("/static/vendor/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+:root{--bg:#fafafa;--canvas:#f4f4f4;--canvas-grid:rgba(0,0,0,0.1);--glass:rgba(255,255,255,0.72);--glass-strong:rgba(255,255,255,0.86);--solid:#ffffff;--fill-1:rgba(0,0,0,0.035);--fill-2:rgba(0,0,0,0.065);--fill-3:rgba(0,0,0,0.1);--separator:rgba(0,0,0,0.07);--ink:#0a0a0a;--ink-2:#525252;--ink-3:#737373;--ink-4:#a3a3a3;--accent:#0a0a0a;--on-accent:#ffffff;--danger:#b42318;--danger-fill:rgba(180,35,24,0.07);--shimmer:rgba(255,255,255,0.75);--scrim:rgba(250,250,250,0.55);--shadow-float:0 0 0 0.5px rgba(0,0,0,0.04), 0 8px 24px -12px rgba(0,0,0,0.12);--shadow-lift:0 0 0 0.5px rgba(0,0,0,0.05), 0 18px 40px -16px rgba(0,0,0,0.18);--shadow-pop:0 0 0 0.5px rgba(0,0,0,0.06), 0 12px 32px -8px rgba(0,0,0,0.16), 0 2px 6px -2px rgba(0,0,0,0.06);--shadow-dialog:0 0 0 0.5px rgba(0,0,0,0.06), 0 32px 80px -24px rgba(0,0,0,0.24);--shadow-rim:inset 0 0.5px 0 rgba(255,255,255,0.9);--space-1:2px;--space-2:4px;--space-3:6px;--space-4:8px;--space-5:12px;--space-6:16px;--space-7:24px;--space-8:32px;--space-9:48px;--space-10:64px;--space-11:96px;--radius-xs:4px;--radius-sm:6px;--radius-md:8px;--radius-lg:12px;--radius-xl:16px;--radius-2xl:22px;--radius-pill:999px;--material-thin:blur(10px) saturate(140%);--material-regular:blur(28px) saturate(160%);--material-thick:blur(44px) saturate(170%);--duration-instant:100ms;--duration-fast:160ms;--duration-base:240ms;--duration-slow:400ms;--ease-out:cubic-bezier(0.16, 1, 0.3, 1);--ease-in-out:cubic-bezier(0.65, 0, 0.35, 1);--ease-sheet:cubic-bezier(0.32, 0.72, 0, 1);--ease-in:cubic-bezier(0.4, 0, 1, 1);--stagger:24ms;--control-sm:28px;--control-md:32px;--control-lg:40px;--icon:16px;--icon-sm:14px;--sidebar-w:56px;--z-chrome:20;--z-popover:60;--z-dialog:80;--z-toast:90;--font-sans:"Geist", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", -apple-system, system-ui, sans-serif;--font-mono:"Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;}
+html.theme-dark,[data-theme=dark]{--bg:#0a0a0a;--canvas:#0e0e0e;--canvas-grid:rgba(255,255,255,0.07);--glass:rgba(23,23,23,0.72);--glass-strong:rgba(20,20,20,0.86);--solid:#171717;--fill-1:rgba(255,255,255,0.05);--fill-2:rgba(255,255,255,0.09);--fill-3:rgba(255,255,255,0.14);--separator:rgba(255,255,255,0.08);--ink:#fafafa;--ink-2:#a3a3a3;--ink-3:#8a8a8a;--ink-4:#525252;--accent:#fafafa;--on-accent:#0a0a0a;--danger:#f97066;--danger-fill:rgba(249,112,102,0.12);--shimmer:rgba(255,255,255,0.1);--scrim:rgba(10,10,10,0.6);--shadow-float:0 0 0 0.5px rgba(255,255,255,0.06), 0 10px 28px -12px rgba(0,0,0,0.7);--shadow-lift:0 0 0 0.5px rgba(255,255,255,0.08), 0 20px 44px -16px rgba(0,0,0,0.8);--shadow-pop:0 0 0 0.5px rgba(255,255,255,0.08), 0 14px 36px -8px rgba(0,0,0,0.8);--shadow-dialog:0 0 0 0.5px rgba(255,255,255,0.08), 0 36px 90px -24px rgba(0,0,0,0.9);--shadow-rim:inset 0 0.5px 0 rgba(255,255,255,0.08);color-scheme:dark}
+/* NOVAI Glass v2 — monochrome component styles. Values come from tokens.css only.
+   Prefix nv-. States: .is-on / .is-selected / .is-open / .is-running, or native pseudo-classes. */
+.nv-root, .nv-root * { box-sizing: border-box; }
+.nv-root { font-family: var(--font-sans); color: var(--ink); -webkit-font-smoothing: antialiased; font-feature-settings: "ss01", "cv11"; }
+.nv-row { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.nv-col { display: flex; flex-direction: column; gap: var(--space-4); }
+/* line icons: 16px box, stroke 1.5, round joins — the only icon style */
+.nv-i { width: var(--icon); height: var(--icon); flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.nv-i.sm { width: var(--icon-sm); height: var(--icon-sm); }
+.nv-label-mono { font: 400 11px/14px var(--font-mono); letter-spacing: 0.04em; color: var(--ink-3); text-transform: uppercase; }
+
+/* focus: a quiet 1.5px ink ring with a 2px gap */
+:where(.nv-btn, .nv-icon-btn, .nv-seg button, .nv-chip, .nv-switch, .nv-tab, .nv-nav-item, .nv-menu-item, .nv-card, .nv-link):focus-visible,
+.nv-field:focus-within { outline: 1.5px solid var(--accent); outline-offset: 2px; }
+
+/* ── Materials ── */
+.nv-glass { background: var(--glass); backdrop-filter: var(--material-regular); -webkit-backdrop-filter: var(--material-regular); box-shadow: var(--shadow-rim), var(--shadow-float); }
+.nv-glass-strong { background: var(--glass-strong); backdrop-filter: var(--material-thick); -webkit-backdrop-filter: var(--material-thick); box-shadow: var(--shadow-rim), var(--shadow-float); }
+
+/* ── Button ── */
+.nv-btn {
+  position: relative; overflow: hidden; isolation: isolate;
+  height: var(--control-md); padding: 0 14px; border: 0; border-radius: var(--radius-md);
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-3);
+  font: 500 13px/1 var(--font-sans); white-space: nowrap; cursor: pointer;
+  background: var(--fill-1); color: var(--ink);
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out);
+}
+.nv-btn:hover { background: var(--fill-2); }
+.nv-btn:active { transform: scale(0.98); transition-duration: var(--duration-instant); }
+.nv-btn:disabled { color: var(--ink-4); background: var(--fill-1); cursor: default; transform: none; }
+.nv-btn.sm { height: var(--control-sm); padding: 0 10px; border-radius: var(--radius-sm); font-size: 12px; gap: var(--space-2); }
+.nv-btn.lg { height: var(--control-lg); padding: 0 18px; border-radius: var(--radius-lg); font-size: 14px; }
+.nv-btn.primary { background: var(--accent); color: var(--on-accent); }
+.nv-btn.primary:hover { background: var(--accent); box-shadow: var(--shadow-lift); transform: translateY(-1px); }
+.nv-btn.primary:active { transform: scale(0.98); box-shadow: none; }
+.nv-btn.primary:disabled { background: var(--fill-2); color: var(--ink-4); box-shadow: none; transform: none; }
+.nv-btn.ghost { background: transparent; color: var(--ink-2); }
+.nv-btn.ghost:hover { background: var(--fill-1); color: var(--ink); }
+.nv-btn.danger { background: var(--danger-fill); color: var(--danger); }
+/* Generate: primary + a slow highlight sweep. Monochrome: the motion is the signal. */
+.nv-btn.generate { background: var(--accent); color: var(--on-accent); }
+.nv-btn.generate::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, var(--shimmer) 50%, transparent 65%);
+  background-size: 250% 100%; background-position: 130% 0; opacity: .35;
+  animation: nv-sweep 3.2s var(--ease-in-out) infinite;
+}
+.nv-btn.generate:hover::after { opacity: .6; }
+@keyframes nv-sweep { 0% { background-position: 130% 0; } 55%, 100% { background-position: -30% 0; } }
+
+/* ── Icon button ── */
+.nv-icon-btn {
+  width: var(--control-md); height: var(--control-md); border: 0; border-radius: var(--radius-md);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  background: transparent; color: var(--ink-2);
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), transform var(--duration-base) var(--ease-out);
+}
+.nv-icon-btn:hover { background: var(--fill-1); color: var(--ink); }
+.nv-icon-btn:active { transform: scale(0.94); transition-duration: var(--duration-instant); }
+.nv-icon-btn.is-on { background: var(--fill-2); color: var(--ink); }
+.nv-icon-btn.sm { width: var(--control-sm); height: var(--control-sm); border-radius: var(--radius-sm); }
+.nv-icon-btn.round { border-radius: var(--radius-pill); }
+.nv-icon-btn.send { width: var(--control-lg); height: var(--control-lg); border-radius: var(--radius-pill); background: var(--accent); color: var(--on-accent); }
+.nv-icon-btn.send:hover { box-shadow: var(--shadow-lift); transform: translateY(-1px); }
+.nv-icon-btn.send:disabled { background: var(--fill-2); color: var(--ink-4); box-shadow: none; transform: none; cursor: default; }
+
+/* ── Segmented: one sliding thumb (.thumb) moves under the options ── */
+.nv-seg { position: relative; display: inline-flex; padding: 2px; border-radius: var(--radius-pill); background: var(--fill-1); isolation: isolate; }
+.nv-seg .thumb { position: absolute; z-index: -1; top: 2px; bottom: 2px; left: 2px; border-radius: var(--radius-pill); background: var(--solid); box-shadow: 0 1px 3px rgba(0,0,0,0.08); transition: transform var(--duration-base) var(--ease-in-out), width var(--duration-base) var(--ease-in-out); }
+.nv-seg button {
+  height: 26px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); cursor: pointer;
+  display: inline-flex; align-items: center; gap: var(--space-2); background: transparent;
+  color: var(--ink-3); font: 500 12px/1 var(--font-sans); white-space: nowrap;
+  transition: color var(--duration-base) var(--ease-out);
+}
+.nv-seg button:hover { color: var(--ink-2); }
+.nv-seg button.is-on { color: var(--ink); }
+.nv-seg.static button.is-on { background: var(--solid); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+/* ── Chip (filters, attachments) ── */
+.nv-chip {
+  height: var(--control-sm); padding: 0 10px; border: 0; border-radius: var(--radius-sm); cursor: pointer;
+  display: inline-flex; align-items: center; gap: var(--space-2); background: var(--fill-1);
+  color: var(--ink-2); font: 500 12px/1 var(--font-sans); white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+.nv-chip:hover { background: var(--fill-2); color: var(--ink); }
+.nv-chip.is-on { background: var(--accent); color: var(--on-accent); }
+.nv-chip.mono { font: 400 11px/1 var(--font-mono); letter-spacing: 0.02em; }
+
+/* ── Link-style action (home skills, "查看全部") ── */
+.nv-link { border: 0; background: none; padding: 6px 2px; cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-3);
+  font: 400 13px/20px var(--font-sans); color: var(--ink-3); transition: color var(--duration-fast) var(--ease-out); }
+.nv-link .nv-i { transition: transform var(--duration-base) var(--ease-out); }
+.nv-link:hover { color: var(--ink); }
+.nv-link:hover .nv-i.arrow { transform: translateX(2px); }
+
+/* ── Badge ── */
+.nv-badge { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 6px; border-radius: var(--radius-xs); font: 400 10px/1 var(--font-mono); letter-spacing: 0.04em; text-transform: uppercase; background: var(--fill-2); color: var(--ink-2); white-space: nowrap; }
+.nv-badge.strong { background: var(--accent); color: var(--on-accent); }
+.nv-badge.danger { background: var(--danger-fill); color: var(--danger); }
+.nv-badge.on-image { background: rgba(10,10,10,0.42); color: #ffffff; backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); }
+.nv-badge .live { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: nv-breathe 1.6s var(--ease-in-out) infinite; }
+@keyframes nv-breathe { 50% { opacity: .25; } }
+
+/* ── Field ── */
+.nv-field {
+  display: flex; align-items: center; gap: var(--space-4); min-height: var(--control-md); padding: 0 12px;
+  border-radius: var(--radius-md); background: var(--fill-1); color: var(--ink);
+  transition: background var(--duration-fast) var(--ease-out), box-shadow var(--duration-base) var(--ease-out);
+}
+.nv-field:hover { background: var(--fill-2); }
+.nv-field:focus-within { background: var(--fill-2); box-shadow: none; outline: none; }
+.nv-field input, .nv-field textarea, .nv-field select { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: inherit; font: 400 13px/20px var(--font-sans); padding: 6px 0; }
+.nv-field input::placeholder, .nv-field textarea::placeholder { color: var(--ink-4); }
+.nv-field .nv-i { color: var(--ink-3); }
+.nv-field.is-error { background: var(--danger-fill); }
+.nv-field-label { font: 500 12px/16px var(--font-sans); color: var(--ink-2); }
+.nv-help { font: 400 11px/16px var(--font-sans); color: var(--ink-3); }
+.nv-help.error { color: var(--danger); }
+
+/* ── Switch ── */
+.nv-switch { position: relative; width: 34px; height: 20px; border: 0; padding: 0; border-radius: var(--radius-pill); background: var(--fill-3); cursor: pointer; flex-shrink: 0; transition: background var(--duration-base) var(--ease-out); }
+.nv-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #ffffff; box-shadow: 0 1px 2px rgba(0,0,0,0.2), 0 0 0 0.5px rgba(0,0,0,0.04); transition: transform var(--duration-base) var(--ease-sheet), width var(--duration-fast) var(--ease-out); }
+.nv-switch:active::after { width: 20px; }
+.nv-switch.is-on { background: var(--accent); }
+.nv-switch.is-on::after { transform: translateX(14px); background: var(--on-accent); }
+.nv-switch.is-on:active::after { transform: translateX(10px); }
+
+/* ── Tabs: text only, a 1.5px ink underline slides between them ── */
+.nv-tabs { position: relative; display: inline-flex; gap: var(--space-6); }
+.nv-tab { position: relative; height: var(--control-sm); padding: 0; border: 0; background: transparent; color: var(--ink-3); font: 500 13px/1 var(--font-sans); cursor: pointer; transition: color var(--duration-fast) var(--ease-out); }
+.nv-tab:hover { color: var(--ink-2); }
+.nv-tab.is-on { color: var(--ink); }
+.nv-tab::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1.5px; border-radius: 1px; background: var(--accent); transform: scaleX(0); transition: transform var(--duration-base) var(--ease-out); }
+.nv-tab.is-on::after { transform: scaleX(1); }
+
+/* ── Tile: gallery item — media first, text below, no container ── */
+.nv-tile { display: flex; flex-direction: column; gap: 10px; min-width: 0; cursor: pointer; color: var(--ink); text-decoration: none; border: 0; background: none; padding: 0; text-align: left; font: inherit; }
+.nv-tile-media { position: relative; aspect-ratio: 4 / 3; border-radius: var(--radius-lg); overflow: hidden; background: var(--fill-1); display: flex; align-items: center; justify-content: center; color: var(--ink-4);
+  transition: box-shadow var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out); }
+.nv-tile-media > .img { position: absolute; inset: 0; background-size: cover; background-position: center; transition: transform 600ms var(--ease-out); }
+.nv-tile:hover .nv-tile-media { box-shadow: var(--shadow-lift); transform: translateY(-2px); }
+.nv-tile:hover .nv-tile-media > .img { transform: scale(1.03); }
+.nv-tile:active .nv-tile-media { transform: scale(0.99); }
+.nv-tile-media .nv-badge { position: absolute; left: 10px; top: 10px; }
+.nv-tile-media .check { position: absolute; right: 10px; top: 10px; width: 20px; height: 20px; border-radius: 50%; background: rgba(10,10,10,0.25); box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.9); display: flex; align-items: center; justify-content: center; color: #fff; opacity: 0; transition: opacity var(--duration-fast) var(--ease-out); }
+.nv-tile:hover .check, .nv-tile.is-selected .check { opacity: 1; }
+.nv-tile.is-selected .check { background: var(--accent); color: var(--on-accent); box-shadow: 0 0 0 1.5px var(--solid); }
+.nv-tile.is-selected .nv-tile-media { box-shadow: var(--shadow-lift); }
+.nv-tile-title { font: 500 13px/18px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nv-tile-sub { font: 400 11px/16px var(--font-sans); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: -8px; }
+.nv-tile.new .nv-tile-media { background: var(--fill-1); color: var(--ink-3); }
+.nv-tile.new:hover .nv-tile-media { background: var(--fill-2); color: var(--ink); box-shadow: none; }
+
+/* ── Menu ── */
+.nv-menu { min-width: 200px; padding: var(--space-2); border-radius: var(--radius-lg); background: var(--solid); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 1px; transform-origin: top left; }
+.nv-menu.is-open { animation: nv-pop var(--duration-base) var(--ease-out) both; }
+@keyframes nv-pop { from { opacity: 0; transform: scale(0.97) translateY(-4px); filter: blur(2px); } to { opacity: 1; transform: none; filter: none; } }
+.nv-menu-item { display: flex; align-items: center; gap: var(--space-5); height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink); font: 400 13px/1 var(--font-sans); text-align: left; cursor: pointer; transition: background var(--duration-instant) linear; }
+.nv-menu-item .nv-i { color: var(--ink-3); }
+.nv-menu-item .kbd { margin-left: auto; font: 400 11px/1 var(--font-mono); color: var(--ink-3); }
+.nv-menu-item:hover, .nv-menu-item.is-on { background: var(--fill-1); }
+.nv-menu-item.danger, .nv-menu-item.danger .nv-i { color: var(--danger); }
+.nv-menu-sep { height: 1px; margin: var(--space-2) 10px; background: var(--separator); }
+.nv-menu-label { padding: 8px 10px 4px; font: 400 11px/14px var(--font-mono); letter-spacing: 0.04em; color: var(--ink-3); }
+
+/* ── Dialog ── */
+.nv-scrim { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; padding: var(--space-7); animation: nv-fade var(--duration-slow) var(--ease-out) both; }
+@keyframes nv-fade { from { opacity: 0; } to { opacity: 1; } }
+.nv-dialog { width: 100%; max-width: 360px; padding: var(--space-7); border-radius: var(--radius-xl); background: var(--solid); box-shadow: var(--shadow-dialog); display: flex; flex-direction: column; gap: var(--space-4); animation: nv-dialog-in var(--duration-slow) var(--ease-sheet) both; }
+@keyframes nv-dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+.nv-dialog-title { margin: 0; font: 500 16px/24px var(--font-sans); letter-spacing: -0.01em; }
+.nv-dialog-body { margin: 0; font: 400 13px/20px var(--font-sans); color: var(--ink-2); }
+.nv-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-4); margin-top: var(--space-5); }
+
+/* ── Toast ── */
+.nv-toast { display: inline-flex; align-items: center; gap: var(--space-5); padding: 9px 10px 9px 14px; border-radius: var(--radius-pill); background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-pop); font: 400 13px/18px var(--font-sans); max-width: 440px; animation: nv-toast-in var(--duration-slow) var(--ease-sheet) both; }
+.nv-toast .nv-i { opacity: .7; }
+.nv-toast .act { border: 0; background: rgba(255,255,255,0.14); color: inherit; font: 500 12px/1 var(--font-sans); height: 24px; padding: 0 10px; border-radius: var(--radius-pill); cursor: pointer; }
+[data-theme=dark] .nv-toast .act { background: rgba(0,0,0,0.08); }
+.nv-toast.error { background: var(--solid); color: var(--ink); }
+.nv-toast.error .nv-i { color: var(--danger); opacity: 1; }
+@keyframes nv-toast-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+/* ── Tooltip ── */
+.nv-tooltip { display: inline-flex; align-items: center; gap: var(--space-4); padding: 5px 8px; border-radius: var(--radius-sm); background: var(--accent); color: var(--on-accent); font: 500 12px/16px var(--font-sans); animation: nv-fade var(--duration-fast) var(--ease-out) both; }
+.nv-tooltip .kbd { font: 400 11px/1 var(--font-mono); opacity: .6; }
+
+/* ── Composer ── */
+.nv-composer { border-radius: var(--radius-xl); padding: 14px 14px 10px 18px; background: var(--glass); backdrop-filter: var(--material-regular); -webkit-backdrop-filter: var(--material-regular); box-shadow: var(--shadow-rim), var(--shadow-float); display: flex; flex-direction: column; gap: var(--space-4); transition: box-shadow var(--duration-base) var(--ease-out); }
+.nv-composer:focus-within { box-shadow: var(--shadow-rim), var(--shadow-lift); }
+.nv-composer textarea { width: 100%; min-height: 44px; border: 0; outline: 0; resize: none; background: transparent; color: var(--ink); font: 400 15px/24px var(--font-sans); padding: 2px 0; }
+.nv-composer textarea::placeholder { color: var(--ink-4); }
+.nv-composer-bar { display: flex; align-items: center; gap: var(--space-4); }
+.nv-composer-bar .hint { margin-left: auto; font: 400 11px/1 var(--font-mono); color: var(--ink-4); letter-spacing: 0.02em; }
+.nv-refs { display: flex; gap: var(--space-3); }
+.nv-ref { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--fill-2); background-size: cover; background-position: center; }
+
+/* ── Skeleton ── */
+.nv-skel { border-radius: var(--radius-lg); background: var(--fill-1); position: relative; overflow: hidden; }
+.nv-skel::after { content: ""; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 30%, var(--shimmer) 50%, transparent 70%); background-size: 250% 100%; animation: nv-sweep 1.6s var(--ease-in-out) infinite; opacity: .6; }
+
+/* ── Entrances: add .nv-enter to a list; children rise in with a stagger ── */
+.nv-enter > * { animation: nv-rise var(--duration-slow) var(--ease-out) both; }
+.nv-enter > :nth-child(2) { animation-delay: calc(var(--stagger) * 1); }
+.nv-enter > :nth-child(3) { animation-delay: calc(var(--stagger) * 2); }
+.nv-enter > :nth-child(4) { animation-delay: calc(var(--stagger) * 3); }
+.nv-enter > :nth-child(5) { animation-delay: calc(var(--stagger) * 4); }
+.nv-enter > :nth-child(6) { animation-delay: calc(var(--stagger) * 5); }
+.nv-enter > :nth-child(n+7) { animation-delay: calc(var(--stagger) * 6); }
+@keyframes nv-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .nv-root *, .nv-root *::before, .nv-root *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}
+
+/* ── NOVAI 2.0 screens ── */
+.display { margin: 0; font: 500 32px/38px var(--font-sans); letter-spacing: -0.025em; }
+.t1 { margin: 0; font: 500 20px/28px var(--font-sans); letter-spacing: -0.015em; }
+.t2 { margin: 0; font: 500 16px/24px var(--font-sans); letter-spacing: -0.01em; }
+.p { margin: 0; font: 400 13px/20px var(--font-sans); color: var(--ink-2); }
+.cap { font: 400 11px/16px var(--font-sans); color: var(--ink-3); }
+.mono { font-family: var(--font-mono); }
+.eyebrow { font: 400 11px/14px var(--font-mono); letter-spacing: 0.04em; color: var(--ink-3); text-transform: uppercase; }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.gallery5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 32px 20px; }
+.gallery4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px 20px; }
+.gallery6 { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 28px 16px; }
+.wire { fill: none; stroke: var(--ink-4); stroke-width: 1.25; }
+.wire.on { stroke: var(--ink); stroke-width: 1.5; }
+.tpl-media .mini { position: absolute; border-radius: 6px; background: var(--solid); box-shadow: var(--shadow-float); }
+.tpl-media .mini.gen { background: var(--fill-2); box-shadow: none; }
+.tpl-media { background: var(--fill-1); }
+/* ── Home motion ── */
+.enter > * { animation: nv-rise 520ms var(--ease-out) both; }
+.enter > :nth-child(2) { animation-delay: 60ms; } .enter > :nth-child(3) { animation-delay: 120ms; } .enter > :nth-child(4) { animation-delay: 180ms; } .enter > :nth-child(5) { animation-delay: 240ms; }
+.nv-seg .thumb-slide { position: absolute; z-index: -1; top: 2px; bottom: 2px; left: 2px; border-radius: 999px; background: var(--solid); box-shadow: 0 1px 3px rgba(0,0,0,.08); transition: transform 240ms var(--ease-in-out), width 240ms var(--ease-in-out); }
+.tw-ph { position: absolute; left: 18px; top: 16px; right: 70px; pointer-events: none; font: 400 15px/24px var(--font-sans); color: var(--ink-4); white-space: nowrap; overflow: hidden; }
+.tw-ph .caret { display: inline-block; width: 1.5px; height: 17px; margin-left: 2px; vertical-align: -3px; background: var(--ink-3); animation: caret-blink 1.05s steps(1) infinite; }
+@keyframes caret-blink { 50% { opacity: 0; } }
+.send-live { transition: background 240ms var(--ease-out), color 240ms var(--ease-out), transform 240ms var(--ease-out), box-shadow 240ms var(--ease-out); }
+.send-live .nv-i { transition: transform 320ms var(--ease-out); }
+.send-live.on .nv-i { transform: translateY(-1px); }
+.skill-wrap { position: relative; }
+.skill-peek { position: absolute; left: 50%; top: calc(100% + 10px); z-index: 20; width: 220px; padding: 12px; border-radius: 12px; background: var(--solid); box-shadow: var(--shadow-pop); transform-origin: top center; animation: nv-pop 240ms var(--ease-out) both; translate: -50% 0; text-align: left; }
+.skill-peek .diagram { position: relative; height: 84px; margin-bottom: 10px; border-radius: 8px; background: var(--fill-1); }
+.skill-peek svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.skill-peek .w { fill: none; stroke: var(--ink-4); stroke-width: 1.2; stroke-dasharray: 60; stroke-dashoffset: 60; animation: draw 520ms var(--ease-out) forwards; }
+.skill-peek .w:nth-of-type(2) { animation-delay: 70ms; } .skill-peek .w:nth-of-type(3) { animation-delay: 140ms; } .skill-peek .w:nth-of-type(4) { animation-delay: 210ms; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.skill-peek .box { position: absolute; border-radius: 5px; background: var(--solid); box-shadow: var(--shadow-float); animation: nv-rise 320ms var(--ease-out) both; }
+.skill-peek .box.g { background: var(--fill-2); box-shadow: none; overflow: hidden; }
+.skill-peek .box.g::after { content: ""; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 30%, var(--shimmer) 50%, transparent 70%); background-size: 250% 100%; animation: nv-sweep 1.8s var(--ease-in-out) infinite; }
+.skill-peek b { display: block; font: 500 13px/18px var(--font-sans); }
+.skill-peek span { font: 400 11px/16px var(--font-sans); color: var(--ink-3); }
+.nv-link.is-hot { color: var(--ink); }
+.tpl-media .mini { transition: transform 400ms var(--ease-out), background 240ms var(--ease-out); }
+.nv-tile:hover .tpl-media .mini:not(.gen) { transform: translateX(-4px); }
+.nv-tile:hover .tpl-media .mini.gen { transform: translateX(4px); }
+.tpl-media .mini.gen { overflow: hidden; }
+.nv-tile:hover .tpl-media .mini.gen::after { content: ""; position: absolute; inset: 0; background: linear-gradient(105deg, transparent 30%, var(--shimmer) 50%, transparent 70%); background-size: 250% 100%; animation: nv-sweep 1.6s var(--ease-in-out) infinite; }
+.tab-line { position: absolute; bottom: -1px; left: 0; height: 1.5px; border-radius: 1px; background: var(--accent); transition: transform 240ms var(--ease-in-out), width 240ms var(--ease-in-out); }
+.nv-tabs.sliding .nv-tab::after { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .enter > *, .skill-peek, .skill-peek .w, .skill-peek .box, .ntb, .cmp, .size-pop, .create-menu, .fresh, .sb-glow, .wires .glide, .wires .pending, .wires .beam, .beam-head { animation: none !important; }
+  .skill-peek .w { stroke-dashoffset: 0; }
+}
+
+/* ── Spectrum-style motion (transitions.dev recipes), monochrome ── */
+/* Text States: old text exits up with blur, new text enters from below (150ms, 4px, 2px) */
+.swap { display: inline-block; transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out), filter 150ms var(--ease-out); }
+.swap.out { opacity: 0; transform: translateY(-4px); filter: blur(2px); }
+.swap.pre { opacity: 0; transform: translateY(4px); filter: blur(2px); transition: none; }
+/* Beam Search Bar: a travelling beam lights the composer's bottom edge while it has focus */
+.nv-composer { position: relative; }
+.beam-edge { position: absolute; left: 22px; right: 22px; bottom: 0; height: 1.5px; overflow: hidden; border-radius: 1px; opacity: 0; transition: opacity 320ms var(--ease-out); pointer-events: none; }
+.nv-composer.is-focus .beam-edge, .nv-composer:focus-within .beam-edge { opacity: 1; }
+.beam-edge::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 38%; background: linear-gradient(90deg, transparent, var(--ink), transparent); animation: edge-run 2.4s var(--ease-in-out) infinite; }
+@keyframes edge-run { from { transform: translateX(-100%); } to { transform: translateX(265%); } }
+/* Number Ticker: each digit rolls to its value with a small stagger and blur */
+.ticker { display: inline-flex; height: 1.25em; line-height: 1.25em; overflow: hidden; vertical-align: bottom; font-variant-numeric: tabular-nums; }
+.ticker .col { display: flex; flex-direction: column; transition: transform 900ms var(--ease-out), filter 900ms var(--ease-out); }
+.ticker .col span { height: 1.25em; }
+.ticker.rolling .col { filter: blur(.6px); }
+/* Skeleton Reveal: pulse, then cross-fade and un-blur into content (400ms) */
+.skel-wrap { position: relative; }
+.skel-wrap .skel { position: absolute; inset: 0; border-radius: var(--radius-lg); background: var(--fill-2); animation: skel-pulse 1s var(--ease-in-out) infinite; transition: opacity 400ms var(--ease-out); z-index: 2; }
+@keyframes skel-pulse { 50% { opacity: .55; } }
+.skel-wrap .real { transition: opacity 400ms var(--ease-out), filter 400ms var(--ease-out); }
+.skel-wrap.loading .real { opacity: 0; filter: blur(6px); }
+.skel-wrap:not(.loading) .skel { opacity: 0; animation: none; }
+/* Morph / loading send button */
+.send-morph { position: relative; overflow: hidden; }
+.send-morph .ico { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; transition: opacity 200ms var(--ease-out), transform 260ms var(--ease-out), filter 200ms var(--ease-out); }
+.send-morph .ico.hide { opacity: 0; transform: scale(.6); filter: blur(2px); }
+.spin { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* Undo pill: countdown ring drains; pauses on hover */
+.undo-pill { display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 6px 0 12px; border-radius: 999px; background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-pop); font: 400 13px/1 var(--font-sans); animation: nv-toast-in 400ms var(--ease-sheet) both; }
+.undo-pill .ring { width: 18px; height: 18px; transform: rotate(-90deg); }
+.undo-pill .ring circle { fill: none; stroke-width: 2; }
+.undo-pill .ring .bg { stroke: rgba(255,255,255,.2); }
+[data-theme=dark] .undo-pill .ring .bg { stroke: rgba(0,0,0,.15); }
+.undo-pill .ring .fg { stroke: currentColor; stroke-dasharray: 44; stroke-dashoffset: 0; animation: ring-drain 5s linear forwards; }
+.undo-pill:hover .ring .fg { animation-play-state: paused; }
+@keyframes ring-drain { to { stroke-dashoffset: 44; } }
+.undo-pill button { height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(255,255,255,.14); color: inherit; font: 500 12px/1 var(--font-sans); cursor: pointer; }
+[data-theme=dark] .undo-pill button { background: rgba(0,0,0,.08); }
+/* 3D tilt (very subtle) on template tiles */
+.tilt { perspective: 800px; }
+.tilt .nv-tile-media { transition: transform 400ms var(--ease-out), box-shadow 240ms var(--ease-out); }
+.tilt:hover .nv-tile-media { transform: rotateX(3deg) rotateY(-4deg) translateY(-2px); }
+@media (prefers-reduced-motion: reduce) { .beam-edge::before, .spin, .undo-pill .ring .fg, .skel-wrap .skel { animation: none !important; } .swap, .ticker .col, .skel-wrap .real { transition: none !important; } }
+.send-live:not(.on) { background: var(--fill-2); color: var(--ink-4); box-shadow: none; }
+.send-live:not(.on):hover { transform: none; box-shadow: none; }
+/* before the glide script has measured (or if it never runs) the active item still reads as selected */
+[data-glide]:not(.glide-ready) > .is-on, [data-glide]:not(.glide-ready) > .is-active { background: var(--fill-2); }
+.kind:not(.glide-ready) button.is-on { background: var(--accent); }
+.nv-seg[data-glide]:not(.glide-ready) > button.is-on { background: var(--solid); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.nv-tabs[data-glide]:not(.glide-ready) .nv-tab.is-on::after { display: block; transform: scaleX(1); }
+.ithumb { background-color: var(--fill-2); background-size: cover; }
+.skel-wrap .real > .nv-tile { width: 100%; }
+
+/* home v3 extras */
+.lan { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--solid); box-shadow: var(--shadow-float); font: 400 12px/1 var(--font-sans); }
+.lan .nv-i { width: 16px; height: 16px; color: var(--ink-2); } .lan .url { font: 400 12px/1 var(--font-mono); color: var(--ink-3); }
+.skill-wrap .agent-dot { position: absolute; right: -18px; top: 50%; width: 22px; height: 22px; margin-top: -11px; border-radius: 99px; display: inline-flex; align-items: center; justify-content: center; color: var(--ink-2); background: var(--fill-1); opacity: 0; transform: scale(.8); transition: opacity 160ms var(--ease-out), transform 240ms var(--ease-out); }
+.skill-wrap:hover .agent-dot { opacity: 1; transform: none; } .skill-wrap .agent-dot .nv-i { width: 12px; height: 12px; }
+.use-tpl { position: absolute; left: 50%; bottom: 12px; transform: translate(-50%, 6px); height: 28px; padding: 0 12px; border-radius: 99px; background: var(--accent); color: var(--on-accent); font: 500 12px/1 var(--font-sans); display: inline-flex; align-items: center; gap: 5px; opacity: 0; transition: opacity 200ms var(--ease-out), transform 240ms var(--ease-out); white-space: nowrap; }
+.nv-tile:hover .use-tpl { opacity: 1; transform: translate(-50%, 0); } .use-tpl .nv-i { width: 12px; height: 12px; }
+.tool-row { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; }
+.tool-card { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 14px; background: var(--fill-1); transition: background 160ms var(--ease-out); }
+.tool-card:hover { background: var(--fill-2); } .tool-card .ic { width: 32px; height: 32px; border-radius: 9px; background: var(--solid); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow-float); }
+.tool-card b { display: block; font: 500 13px/18px var(--font-sans); } .tool-card span { font: 400 11px/16px var(--font-sans); color: var(--ink-3); }
+.hp-ref { position: relative; width: 44px; height: 44px; border-radius: 8px; background-size: cover; background-position: center; background-color: var(--fill-2); }
+.hp-ref .x { position: absolute; right: -5px; top: -5px; width: 16px; height: 16px; border-radius: 99px; background: rgba(10,10,10,.7); color: #fff; display: inline-flex; align-items: center; justify-content: center; } .hp-ref .x .nv-i { width: 9px; height: 9px; }
+.hp-ref.loading::after { content: ""; position: absolute; inset: 0; border-radius: 8px; background: linear-gradient(105deg, transparent 30%, var(--shimmer) 50%, transparent 70%); background-size: 250% 100%; animation: nv-sweep 1.4s var(--ease-in-out) infinite; }
+
+/* ═══ 子菜单统一（第 21 轮，用户要求）═══
+   1) 背景：所有下拉 / 弹出菜单改为旧版的磨砂玻璃（面板色 78% + blur 44px saturate 190%，无描边）
+   2) 动效：沿用旧版 —— 打开 / 关闭只做 opacity + 4px 位移，.14s ease；悬停高亮用 NovaGlide 滑块（lib/menus.js 自动挂） */
+.nv-menu, .nv-glass-pop {
+  background: color-mix(in srgb, var(--solid) 78%, transparent) !important;
+  backdrop-filter: blur(44px) saturate(190%) !important; -webkit-backdrop-filter: blur(44px) saturate(190%) !important;
+  box-shadow: var(--shadow-rim), 0 20px 48px -8px rgba(0,0,0,.16), 0 4px 12px -4px rgba(0,0,0,.08) !important;
+  border: 0 !important;
+  --nv-glide-bg: var(--fill-2);
+}
+[data-theme=dark] .nv-menu, [data-theme=dark] .nv-glass-pop, html.theme-dark .nv-menu, html.theme-dark .nv-glass-pop {
+  box-shadow: var(--shadow-rim), 0 20px 48px -8px rgba(0,0,0,.6), 0 4px 12px -4px rgba(0,0,0,.4) !important;
+}
+@keyframes nv-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.nv-menu.is-open { animation-duration: .14s !important; animation-timing-function: ease !important; }
+/* 各组件的菜单 Transition：统一成旧版的 .14s ease + 4px 位移（向上弹出的菜单反向） */
+.pop-enter-active, .pop-leave-active, .ksm-enter-active, .ksm-leave-active, .wsel-m-enter-active, .wsel-m-leave-active, .menu-enter-active, .menu-leave-active {
+  transition: opacity .14s ease, transform .14s ease !important;
+}
+.pop-enter-from, .pop-leave-to, .ksm-enter-from, .ksm-leave-to, .wsel-m-enter-from, .wsel-m-leave-to, .menu-enter-from, .menu-leave-to {
+  opacity: 0 !important; transform: translateY(-4px) !important; filter: none !important;
+}
+.wsel-m-enter-from.up, .wsel-m-leave-to.up { transform: translateY(4px) !important; }
+
+/* NovaGlide 滑块（移植自 static/css/glide.css） */
+.nv-glide-pill {
+  position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 0;
+  border-radius: var(--radius-md, 8px);
+  background: var(--nv-glide-bg, var(--fill-2));
+  opacity: 0; pointer-events: none; will-change: transform;
+  transition: transform var(--nv-glide-ms, 220ms) cubic-bezier(.23, 1, .32, 1), width var(--nv-glide-ms, 220ms) cubic-bezier(.23, 1, .32, 1), height var(--nv-glide-ms, 220ms) cubic-bezier(.23, 1, .32, 1), opacity 150ms ease;
+}
+.nv-glide-host.nv-glide-instant .nv-glide-pill { transition: none; }
+.nv-glide-host [data-nv-glide-item] { position: relative; z-index: 1; }
+.nv-glide-host [data-nv-glide-item]:hover, .nv-glide-host [data-nv-glide-item].active, .nv-glide-host [data-nv-glide-item].is-active,
+.nv-glide-host [data-nv-glide-item].is-on, .nv-glide-host [data-nv-glide-item].on, .nv-glide-host [data-nv-glide-item].hovered {
+  background-color: transparent !important; border-color: transparent !important;
+}
+@media (prefers-reduced-motion: reduce) { .nv-glide-pill { transition: none; } }
+.np.nv-glass-pop { animation: nv-pop .14s ease both !important; }

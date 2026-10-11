@@ -39,7 +39,7 @@ ok(!/class="prompt-node-text/.test(bodyFn), '节点里不再有输入框');
 ok(/is-empty/.test(previewFn), '预览带 is-empty（占位文字走浅色）');
 ok(/promptChatPreviewEmpty/.test(previewFn) && /promptLlmPreviewEmpty/.test(previewFn), '两种模式的空态文案各有各的');
 ok(/chatMessages[\s\S]{0,120}reverse\(\)[\s\S]{0,80}find/.test(previewFn), '聊天模式预览最后一条消息');
-ok(/outputText \|\| node\.text/.test(previewFn), 'LLM 节点模式预览输出（outputText/text）');
+ok(/outputText \|\| node\.llmInstruction \|\| node\.text/.test(previewFn), 'LLM 节点模式预览：产出 → INPUT 指令 → 正文');
 ok(/TEXT_LINES_GLYPH/.test(previewFn) && /^const TEXT_LINES_GLYPH = .*M4 5h16M4 10h16M4 15h16M4 20h9/m.test(js), '空态图标是自绘的四条杆（前三条等长、第四条短一截）');
 const promptItemsFn = new Function(topLevelFunction(js, 'promptNodePromptItems') + '\nreturn promptNodePromptItems;')();
 ok(JSON.stringify(promptItemsFn({text:'一段;二段', promptSplitEnabled:true, promptSeparator:';'})) === '["一段;二段"]', '历史分隔符设置不再暗中拆词');
@@ -115,6 +115,10 @@ const previewApi = new Function('tr', 'escapeHtml', glyphConst + '\n' + previewF
     ok(out.includes('一段提示词') && out.includes('prompt-node-display'), '行为：普通节点预览正文');
     const out2 = previewApi({type:'smart-prompt', text:'旧', outputText:'模型输出', llmEnabled:true});
     ok(out2.includes('模型输出'), '行为：LLM 节点预览输出而不是旧正文');
+    const out2b = previewApi({type:'smart-prompt', text:'', llmInstruction:'保持原图中鞋子的角度', llmEnabled:true});
+    ok(out2b.includes('保持原图中鞋子的角度') && !out2b.includes('点击在下方控制台'), '行为：LLM 节点还没产出时预览 INPUT 指令，不再只显示空态');
+    const out2c = previewApi({type:'smart-prompt', text:'', llmEnabled:true});
+    ok(out2c.includes('is-empty') && out2c.includes('点击在下方控制台'), '行为：LLM 节点确实没有任何内容时才是空态');
     const out3 = previewApi({type:'smart-prompt', llmEnabled:true, llmTab:'chat', chatMessages:[{role:'user',content:'问题'},{role:'assistant',content:'回答'}]});
     ok(out3.includes('回答'), '行为：聊天模式预览最后一条消息');
     const out4 = previewApi({type:'smart-prompt', llmEnabled:true, llmTab:'chat', chatMessages:[]});
@@ -442,6 +446,12 @@ ok(chatSendCss.indexOf('width:26px;') >= 0 && chatSendCss.indexOf('padding:0;') 
 ok(/\.composer-run-btn \{ width:var\(--ctrl-height\); padding:0; border-radius:var\(--radius-md\); background:var\(--soft\)/.test(css)
     && /\.run-btn\.is-stop \{ background:var\(--danger\)/.test(css) && /\.cascade-run-btn \{ width:var\(--ctrl-height\); min-width:var\(--ctrl-height\)/.test(css),
     'CSS：编辑栏运行键同规格（「一键运行」也统一成同尺寸方键，不再是 76px 胶囊）；停止态红色危险态原样保留');
+/* 「一键运行」的渲染也要是真方键：26px 里塞图标 + 文字会溢出压到隔壁 #runBtn */
+const cascadeRunFn = topLevelFunction(js, 'syncCascadeRunButton');
+ok(cascadeRunFn.indexOf('<span>') < 0 && cascadeRunFn.indexOf('<i data-lucide="workflow"></i>') >= 0
+    && cascadeRunFn.indexOf('<i data-lucide="square"></i>') >= 0 && cascadeRunFn.indexOf('arrow-up') < 0
+    && cascadeRunFn.indexOf("setAttribute('aria-label'") >= 0 && cascadeRunFn.indexOf('.title =') >= 0,
+    'syncCascadeRunButton 渲染纯图标方键：没有文字 span，运行/停止只在 workflow/square 之间换（不跟 #runBtn 同款箭头），文案挂 title + aria-label');
 const runBindAt = js.indexOf("const runEl = el.querySelector('.prompt-node-run');");
 const runBindBlock = runBindAt < 0 ? '' : js.slice(runBindAt, runBindAt + 800);
 ok(runBindBlock.indexOf('cancelSmartLlmRun(node.id)') >= 0,

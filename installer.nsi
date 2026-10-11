@@ -19,7 +19,8 @@ Unicode true
 
 Name "${PRODUCT_DISPLAY} ${PRODUCT_VERSION}"
 OutFile "dist-desktop\NOVAI-Setup-${PRODUCT_VERSION}.exe"
-InstallDir "$PROGRAMFILES64\${PRODUCT_NAME}"
+; 默认装到当前用户可写目录，普通权限下的一键更新才能写入安装目录
+InstallDir "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
 InstallDirRegKey HKLM "${PRODUCT_DIR_REGKEY}" ""
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma

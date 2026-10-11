@@ -8098,8 +8098,9 @@ function renderGeneratorBody(node){
         const providerModels = providerImageModels(node.apiProvider);
         if(!node.model) node.model = providerModels[0] || '';
         const providerModelNotice = correctNodeModelForProvider(node);
-        node._apiResolutionUserSet = false;
-        node.resolution = defaultApiImageResolution(node.model);
+        /* 换平台不再无条件重置清晰度：用户选过就保留（对不上新模型的档位由 applyApiResolutionLimit
+           收到最近可用档并提示），否则换一次平台就把用户选的 2K 悄悄变成模型默认的 4K。 */
+        if(node._apiResolutionUserSet !== true) node.resolution = defaultApiImageResolution(node.model);
         modelSelect.innerHTML = imageModelOptions(node.model, node.apiProvider);
         const providerSizeNotice = applyApiResolutionLimit(node);
         syncSizeControls();
@@ -8114,8 +8115,8 @@ function renderGeneratorBody(node){
         e.stopPropagation();
         node.model = e.target.value;
         window.NovaUtils?.rememberProviderModel?.(node.apiProvider, node.model);
-        node._apiResolutionUserSet = false;
-        if(node.resolution !== 'custom') node.resolution = defaultApiImageResolution(node.model);
+        /* 同上：换模型保留用户选过的清晰度，只有没选过才用模型默认档 */
+        if(node._apiResolutionUserSet !== true && node.resolution !== 'custom') node.resolution = defaultApiImageResolution(node.model);
         const modelSizeNotice = applyApiResolutionLimit(node);
         syncSizeControls();
         syncQualityControls();
@@ -15575,13 +15576,14 @@ window.imageAdjust = {
         const node = nodes.find(n => n.id === (cropState && cropState.nodeId));
         const img = document.getElementById('cropImage');
         const url = (node && node.url) || (img && img.src);
-        return { url: url || '', name: (node && (node.name || node.title)) || 'image' };
+        /* 调色结果节点带 adjust（原图 + 参数），再次调色从原图继续 */
+        return { url: url || '', name: (node && (node.name || node.title)) || 'image', adjust: (node && node.adjust) || null };
     },
     upload: function (blob, name) { return uploadCroppedBlob(blob, name); },
-    addResult: async function (file, fromAI) {
+    addResult: async function (file, fromAI, meta) {
         const node = nodes.find(n => n.id === (cropState && cropState.nodeId));
         if (!node) return;
-        addGeneratedImageNode(file, node, fromAI ? 'ai' : 'adj', 0, { role: fromAI ? 'ai_enhance' : 'adjust' });
+        addGeneratedImageNode(file, node, fromAI ? 'ai' : 'adj', 0, Object.assign({ role: fromAI ? 'ai_enhance' : 'adjust' }, meta && meta.adjust ? { adjust: meta.adjust } : {}));
     },
     finish: function () { closeImageEditor(); render(); scheduleSave(); }
 };

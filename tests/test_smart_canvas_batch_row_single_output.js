@@ -57,6 +57,7 @@ const sandboxSrc = [
     'function smartSettingsForNode(){ return {}; }',
     'function snapshotRunMeta(prompt){ return {prompt:String(prompt || "")}; }',
     'function rowSourceRatio(){ return Promise.resolve(null); }',
+    'function explicitRequestOutputSizeForPending(){ return null; }',
     'function applyRowSourceRatioToSettings(){}',
     'function applySourceRatioToVideoAspect(){}',
     'function batchResultNodeForRun(){',

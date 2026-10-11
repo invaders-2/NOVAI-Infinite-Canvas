@@ -33,13 +33,13 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
-    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.123.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.124.1789606971"></script>
+    <script src="/static/js/theme.js?v=1.0.124.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.124.1790560477"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.124.1789845865"></script>
+    <script src="/static/js/i18n.js?v=1.0.124.1790130330"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.124.1789606971">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.124.1790560477">
     <style>
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -1247,6 +1247,12 @@
             position: relative;
         }
 
+        /* API 设置：外层标题收起，关闭按钮浮在右上角，内嵌页直接顶到上方 */
+        #settings-modal.settings-hide-head .settings-content-header { position: absolute; top: 20px; right: 24px; padding: 0; z-index: 12; }
+        #settings-modal.settings-hide-head .settings-content-header-text { display: none; }
+        #settings-modal.settings-hide-head .settings-content-body { padding-top: 0; }
+        #settings-modal.settings-hide-head .settings-detail { top: 20px; bottom: 0; }
+
         /* 右侧内嵌详情页 */
         .settings-detail {
             position: absolute;
@@ -2158,6 +2164,44 @@
         .update-progress-bar { height:100%; border-radius:var(--radius-full); background:var(--success); transition:width .25s ease; }
         .update-progress-files { margin-top:8px; color:var(--text-3); font-size:11px; line-height:1.5; word-break:break-all; }
         .update-progress-box.is-error .update-progress-bar { background:var(--danger); }
+        /* ===== 数据备份（第 10 轮）===== */
+        .bk-stats { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
+        .bk-stat { padding:12px 14px; border-radius:12px; background:var(--nav-hover-bg); display:flex; flex-direction:column; gap:2px; min-width:0; }
+        .bk-stat b { font-size:15px; font-weight:750; color:var(--text); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .bk-stat span { font-size:12px; color:var(--muted); }
+        .settings-toggle-row.bk-stack { flex-direction:column; align-items:stretch; gap:8px; }
+        .settings-pill em { font-style:normal; font-weight:500; opacity:.62; margin-left:2px; font-variant-numeric:tabular-nums; }
+        .bk-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:2px; }
+        .bk-primary { display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 16px; border:0; border-radius:999px; background:var(--text); color:var(--stage-bg); font-size:13px; font-weight:700; font-family:inherit; cursor:pointer; transition:opacity .15s ease, transform .15s ease; }
+        .bk-primary:hover:not(:disabled) { transform:translateY(-1px); }
+        .bk-primary:disabled { opacity:.45; cursor:default; }
+        .bk-primary svg, .bk-soft-btn svg { width:15px; height:15px; flex:0 0 auto; }
+        .bk-soft-btn { display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 14px; border-radius:999px; }
+        .bk-soft-btn:disabled { opacity:.45; cursor:default; }
+        .bk-hint { font-size:12px; color:var(--muted); }
+        .bk-hint.is-ok { color:var(--text); font-weight:600; }
+        .bk-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+        .bk-list { display:flex; flex-direction:column; gap:6px; }
+        .bk-empty { font-size:12px; color:var(--muted); padding:6px 2px; }
+        .bk-row { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:12px; background:var(--nav-hover-bg); }
+        .bk-row-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+        .bk-row-title { font-size:13px; font-weight:700; color:var(--text); display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+        .bk-row-meta { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+        .bk-tag { padding:1px 7px; border-radius:999px; background:var(--stage-bg); color:var(--muted); font-size:11px; font-weight:600; }
+        .bk-row-acts { display:flex; gap:6px; flex:0 0 auto; }
+        .bk-row-acts .settings-path-btn { background:var(--stage-bg); box-shadow:var(--shadow-sm); }
+        .bk-row-acts .settings-path-btn.is-danger { color:var(--danger); }
+        .bk-preview { padding:14px; border-radius:12px; background:var(--nav-hover-bg); display:flex; flex-direction:column; gap:10px; }
+        .bk-preview-head { font-size:13px; font-weight:700; color:var(--text); }
+        .bk-preview-lines { display:flex; flex-direction:column; gap:6px; }
+        .bk-preview-line { display:flex; gap:10px; font-size:12px; color:var(--text); line-height:1.5; }
+        .bk-preview-line span:first-child { flex:0 0 64px; color:var(--muted); }
+        .bk-preview .settings-toggle-row { padding-top:4px; }
+        .bk-preview .settings-path-btn { background:var(--stage-bg); box-shadow:var(--shadow-sm); }
+        .bk-note { font-size:12px; color:var(--muted); line-height:1.5; }
+        html.theme-dark .bk-tag, body.theme-dark .bk-tag { background:rgba(255,255,255,.06); }
+        html.theme-dark .settings-toggle-slider, body.theme-dark .settings-toggle-slider { background:rgba(255,255,255,.16); }
+        @media (max-width: 640px) { .bk-stats { grid-template-columns:1fr; } .bk-row { flex-wrap:wrap; } }
 
         /* 轻量 Toast 反馈（检查更新结果等），自动消失、可点击触发动作 */
         .update-toast {
@@ -3182,7 +3226,7 @@
 
     <div class="app-shell">
         <aside class="sidebar" id="studioSidebar">
-            <button class="logo-text" title="固定导航栏">
+            <button class="logo-text" id="sidebarLogoToggle" title="固定导航栏" onclick="toggleSidebarPinned(event)">
                 <svg class="sidebar-logo-img" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M869.44,200.5L494.98,39.39c-98.45-42.36-208.12,29.86-208.12,137.03v14.48l82.33,35.42v-56.49c0-52.07,53.28-87.15,101.11-66.57l356.27,153.28c16.53,7.11,16.53,30.54,0,37.67l-48.96,21.05c-84.31,36.27-179.84,36.27-264.15,0l-267.88-115.26c-99.7-42.89-210.74,30.23-210.74,138.74v323.08c0,68.38,40.7,130.21,103.52,157.23l384.4,165.37c99.82,42.94,211.01-30.26,211.01-138.93v-2.62l-82.33-35.42v33.92c0,58.62-59.98,98.12-113.84,74.95l-345.18-148.51c-14.35-6.18-14.35-26.53,0-32.7l76.43-32.95c64.04-27.6,136.62-27.63,200.69-.07l278.94,120.01c113.84,48.98,240.66-34.51,240.66-158.45v-281.37c0-79.07-47.06-150.55-119.71-181.8ZM906.83,663.69c0,71.74-73.39,120.06-139.28,91.72l-33.77-14.53-82.33-35.42-155.17-66.76c-77.12-33.18-127.09-109.07-127.09-193.03v-91.04l-82.33-35.42v175.86c0,75.82-45.13,144.37-114.77,174.34l-24.08,10.36c-14.59,6.28-30.84-4.42-30.84-20.3v-326.53c0-53.75,54.99-89.95,104.37-68.7l298.17,128.27c79.94,34.39,131.73,113.06,131.73,200.08v85.91l82.33,35.42v-168.65c0-82.93,49.36-157.9,125.54-190.66l13.46-5.8c16.11-6.94,34.06,4.89,34.06,22.41v292.46Z"/></svg>
                 <span class="logo-text-label">NOVAI</span>
             </button>
@@ -3291,17 +3335,14 @@
                     <div class="skeleton-card"></div>
                 </div>
             </div>
-            <iframe id="frame-home" src="/static/home.html?v=1.0.123.1790252741" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
-            <iframe id="frame-enhance" data-src="/static/enhance.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
-            <iframe id="frame-klein" data-src="/static/klein.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
-            <iframe id="frame-angle" data-src="/static/angle.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.123.1790528540" scrolling="yes"></iframe>
+            <iframe id="frame-home" src="/static/home.html?v=1.0.124.1791623164" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.124.1790685717" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=1.0.124.1790685717" scrolling="yes"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.124.1791552046" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.124.1790705578" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.124.1790688328" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.124.1790685717" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.124.1791554418" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -3475,6 +3516,14 @@
                             <path d="M14 14h7v7h-7z"></path>
                         </svg>
                         <span data-i18n="common.comfyuiSettings">工作流设置</span>
+                    </button>
+                    <button class="settings-tab" data-settings-tab="backup" onclick="switchSettingsTab('backup')" role="tab" aria-selected="false" aria-controls="settings-panel-backup" type="button">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                            <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                            <path d="M10 12h4"></path>
+                        </svg>
+                        <span data-i18n="common.backup">数据备份</span>
                     </button>
                     <button class="settings-tab" data-settings-tab="appearance" onclick="switchSettingsTab('appearance')" role="tab" aria-selected="false" aria-controls="settings-panel-appearance" type="button">
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3650,6 +3699,103 @@
                                     </div>
                                     <div class="settings-pill-group" id="setting-update-source" role="group" aria-label="更新源"></div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="settings-panel-backup" class="settings-panel" role="tabpanel">
+                        <div class="settings-card">
+                            <div class="settings-card-header">
+                                <h4 class="settings-card-title">创建备份</h4>
+                                <p class="settings-card-desc">把画布、素材、提示词库和设置打成一个 zip。换电脑或重装后，在「从备份恢复」里选这个文件就能全部导回。</p>
+                            </div>
+                            <div class="settings-card-body">
+                                <div class="bk-stats" id="bk-stats">
+                                    <div class="bk-stat"><b id="bk-stat-canvases">—</b><span>个画布</span></div>
+                                    <div class="bk-stat"><b id="bk-stat-assets">—</b><span id="bk-stat-assets-label">画布用到的素材</span></div>
+                                    <div class="bk-stat"><b id="bk-stat-data">—</b><span>设置与各类库</span></div>
+                                </div>
+                                <div class="settings-toggle-row bk-stack">
+                                    <div>
+                                        <div class="settings-toggle-label">素材</div>
+                                        <div class="settings-toggle-desc">「画布用到的」只带画布、素材库和历史记录里引用到的图片视频；本地抠图 / 高清模型不进备份，用到时会重新下载</div>
+                                    </div>
+                                    <div class="settings-pill-group" id="bk-asset-mode" role="group" aria-label="备份哪些素材">
+                                        <button class="settings-pill active" type="button" data-mode="referenced">画布用到的<em id="bk-size-referenced"></em></button>
+                                        <button class="settings-pill" type="button" data-mode="all">全部素材<em id="bk-size-all"></em></button>
+                                        <button class="settings-pill" type="button" data-mode="none">不含素材</button>
+                                    </div>
+                                </div>
+                                <div class="settings-toggle-row">
+                                    <div>
+                                        <div class="settings-toggle-label">包含 API Key</div>
+                                        <div class="settings-toggle-desc">换电脑时不用重新填 Key；备份文件里会有明文 Key，别发给别人</div>
+                                    </div>
+                                    <label class="settings-toggle-switch">
+                                        <input type="checkbox" id="bk-include-keys">
+                                        <span class="settings-toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="settings-toggle-row">
+                                    <div>
+                                        <div class="settings-toggle-label">包含画布历史版本</div>
+                                        <div class="settings-toggle-desc" id="bk-versions-desc">每个画布自动保存的旧版本快照</div>
+                                    </div>
+                                    <label class="settings-toggle-switch">
+                                        <input type="checkbox" id="bk-include-versions">
+                                        <span class="settings-toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="bk-actions">
+                                    <button class="bk-primary" id="bk-create-btn" type="button" onclick="startBackupExport()">
+                                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                        <span>创建备份</span>
+                                    </button>
+                                    <span class="bk-hint" id="bk-create-hint"></span>
+                                </div>
+                                <div id="bk-export-progress" class="update-progress-box" hidden>
+                                    <div class="update-progress-head">
+                                        <span class="update-progress-stage" data-role="stage">准备中</span>
+                                        <span class="update-progress-percent" data-role="percent">0%</span>
+                                    </div>
+                                    <div class="update-progress-track"><div class="update-progress-bar" data-role="bar" style="width:0%"></div></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <div class="settings-card-header bk-card-head">
+                                <div>
+                                    <h4 class="settings-card-title">已有备份</h4>
+                                    <p class="settings-card-desc">存放在数据目录的 backups 文件夹里；恢复前自动做的备份也在这里。</p>
+                                </div>
+                                <button class="settings-path-btn" type="button" onclick="revealBackup('')">打开文件夹</button>
+                            </div>
+                            <div class="settings-card-body">
+                                <div class="bk-list" id="bk-list"><div class="bk-empty">还没有备份</div></div>
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <div class="settings-card-header">
+                                <h4 class="settings-card-title">从备份恢复</h4>
+                                <p class="settings-card-desc">把备份合并进本机：本机已有的素材保留不动；同一个画布两边都改过时，备份里的那份另存为副本，不会覆盖。</p>
+                            </div>
+                            <div class="settings-card-body">
+                                <div class="bk-actions">
+                                    <button class="settings-path-btn bk-soft-btn" id="bk-pick-btn" type="button" onclick="document.getElementById('bk-file-input').click()">
+                                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                        <span>选择备份文件（.zip）</span>
+                                    </button>
+                                    <input type="file" id="bk-file-input" accept=".zip,application/zip" hidden onchange="uploadBackupFile(this)">
+                                </div>
+                                <div id="bk-upload-progress" class="update-progress-box" hidden>
+                                    <div class="update-progress-head">
+                                        <span class="update-progress-stage" data-role="stage">正在读取备份</span>
+                                        <span class="update-progress-percent" data-role="percent">0%</span>
+                                    </div>
+                                    <div class="update-progress-track"><div class="update-progress-bar" data-role="bar" style="width:0%"></div></div>
+                                </div>
+                                <div class="bk-preview" id="bk-preview" hidden></div>
                             </div>
                         </div>
                     </div>
@@ -3981,7 +4127,7 @@
         const SIDEBAR_SETTINGS_COLLAPSED_KEY = 'studio_sidebar_settings_collapsed';
         const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
         const DEFAULT_PAGE_ID = 'zimage';
-        const PAGE_IDS = ['home','zimage','enhance','klein','angle','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
+        const PAGE_IDS = ['home','zimage','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
         const PROJECT_URL = 'https://github.com/invaders-2/NOVAI-Infinite-Canvas';
         let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/invaders-2/NOVAI-Infinite-Canvas/main/VERSION' };
         let updateConnectivityResult = null;
@@ -4028,7 +4174,7 @@
             const sidebar = document.getElementById('studioSidebar');
             const frame = document.getElementById('frame-canvas');
             if (!sidebar || !frame || !frame.classList.contains('active')) return;
-            const inset = Math.max(16, sidebar.getBoundingClientRect().right - frame.getBoundingClientRect().left + 17);
+            const inset = Math.max(16, sidebar.getBoundingClientRect().right - frame.getBoundingClientRect().left + 34);
             try {
                 frame.contentDocument?.documentElement.style.setProperty('--studio-sidebar-inset', `${inset}px`);
             } catch(e) {}
@@ -4411,6 +4557,268 @@
             }
         }
 
+        // ===== 数据备份与迁移（第 10 轮）=====
+        var bkState = { summary: null, mode: 'referenced', polling: 0, pendingToken: '', pendingPreview: null, deleteArm: '' };
+
+        function bkEsc(value) {
+            return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+        function bkTime(ms) {
+            var d = new Date(Number(ms) || 0);
+            var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+            return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        }
+        function bkJson(res) {
+            return res.json().catch(function () { return {}; }).then(function (data) {
+                if (!res.ok) throw new Error((data && data.detail) || ('HTTP ' + res.status));
+                return data;
+            });
+        }
+        function bkProgress(id, percent, stage, isError) {
+            var box = document.getElementById(id);
+            if (!box) return;
+            box.hidden = false;
+            box.classList.toggle('is-error', Boolean(isError));
+            box.querySelector('[data-role="stage"]').textContent = stage || '';
+            box.querySelector('[data-role="percent"]').textContent = Math.round(Number(percent) || 0) + '%';
+            box.querySelector('[data-role="bar"]').style.width = Math.max(0, Math.min(100, Number(percent) || 0)) + '%';
+        }
+        function bkSetBusy(busy) {
+            ['bk-create-btn', 'bk-pick-btn'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) el.disabled = Boolean(busy);
+            });
+            document.querySelectorAll('#bk-list [data-bk-act="restore"], #bk-list [data-bk-act="delete"], #bk-preview [data-bk-act="apply"]').forEach(function (el) { el.disabled = Boolean(busy); });
+        }
+
+        function refreshBackupPanel() {
+            return fetch('/api/backup/summary').then(bkJson).then(function (data) {
+                bkState.summary = data;
+                document.getElementById('bk-stat-canvases').textContent = data.canvases != null ? data.canvases : '—';
+                document.getElementById('bk-size-referenced').textContent = ' ' + formatBytes(data.referenced_bytes);
+                document.getElementById('bk-size-all').textContent = ' ' + formatBytes(data.all_assets_bytes);
+                document.getElementById('bk-stat-data').textContent = formatBytes(data.data_bytes);
+                document.getElementById('bk-versions-desc').textContent = '每个画布自动保存的旧版本快照' + (data.versions_bytes ? '（' + formatBytes(data.versions_bytes) + '）' : '');
+                bkRenderMode();
+                bkRenderList(data.backups || []);
+                var job = data.job || {};
+                if (job.status === 'running') bkPoll();
+            }).catch(function (e) {
+                document.getElementById('bk-list').innerHTML = '<div class="bk-empty">读取备份信息失败：' + bkEsc(e.message) + '</div>';
+            });
+        }
+        function bkRenderMode() {
+            var data = bkState.summary || {};
+            document.querySelectorAll('#bk-asset-mode .settings-pill').forEach(function (btn) {
+                btn.classList.toggle('active', btn.dataset.mode === bkState.mode);
+            });
+            var num = document.getElementById('bk-stat-assets'), label = document.getElementById('bk-stat-assets-label');
+            if (bkState.mode === 'all') { num.textContent = formatBytes(data.all_assets_bytes); label.textContent = '全部素材'; }
+            else if (bkState.mode === 'none') { num.textContent = '—'; label.textContent = '不含素材'; }
+            else { num.textContent = formatBytes(data.referenced_bytes); label.textContent = (data.referenced_assets || 0) + ' 个画布用到的素材'; }
+        }
+        document.addEventListener('click', function (e) {
+            var pill = e.target.closest && e.target.closest('#bk-asset-mode .settings-pill');
+            if (pill) { bkState.mode = pill.dataset.mode; bkRenderMode(); return; }
+            var act = e.target.closest && e.target.closest('[data-bk-act]');
+            if (!act || act.disabled) return;
+            var name = act.dataset.name || '';
+            if (act.dataset.bkAct === 'download') window.open('/api/backup/download/' + encodeURIComponent(name), '_blank');
+            else if (act.dataset.bkAct === 'reveal') revealBackup(name);
+            else if (act.dataset.bkAct === 'restore') previewExistingBackup(name);
+            else if (act.dataset.bkAct === 'delete') deleteBackup(name, act);
+            else if (act.dataset.bkAct === 'apply') applyBackupImport();
+            else if (act.dataset.bkAct === 'cancel') bkClearPreview();
+            else if (act.dataset.bkAct === 'reload') location.reload();
+        });
+
+        function bkRenderList(list) {
+            var box = document.getElementById('bk-list');
+            if (!box) return;
+            if (!list.length) { box.innerHTML = '<div class="bk-empty">还没有备份</div>'; return; }
+            var local = window.pywebview && window.pywebview.api;
+            box.innerHTML = list.map(function (b) {
+                var c = b.counts || {}, o = b.options || {};
+                var tags = [];
+                if (b.kind === 'pre-restore') tags.push('恢复前自动备份');
+                if (o.include_keys) tags.push('含 Key');
+                if (o.assets === 'all') tags.push('全部素材'); else if (o.assets === 'none') tags.push('不含素材');
+                var meta = [formatBytes(b.size), (c.canvases || 0) + ' 个画布'];
+                if (c.assets) meta.push(c.assets + ' 个素材');
+                return '<div class="bk-row">'
+                    + '<div class="bk-row-main"><div class="bk-row-title">' + bkEsc(bkTime(b.created_at))
+                    + tags.map(function (t) { return '<span class="bk-tag">' + bkEsc(t) + '</span>'; }).join('') + '</div>'
+                    + '<div class="bk-row-meta">' + bkEsc(meta.join(' · ')) + '</div></div>'
+                    + '<div class="bk-row-acts">'
+                    + (local ? '<button class="settings-path-btn" type="button" data-bk-act="reveal" data-name="' + bkEsc(b.name) + '">在文件夹中显示</button>'
+                             : '<button class="settings-path-btn" type="button" data-bk-act="download" data-name="' + bkEsc(b.name) + '">下载</button>')
+                    + '<button class="settings-path-btn" type="button" data-bk-act="restore" data-name="' + bkEsc(b.name) + '">恢复</button>'
+                    + '<button class="settings-path-btn is-danger" type="button" data-bk-act="delete" data-name="' + bkEsc(b.name) + '">删除</button>'
+                    + '</div></div>';
+            }).join('');
+        }
+
+        function startBackupExport() {
+            var body = {
+                assets: bkState.mode,
+                include_keys: document.getElementById('bk-include-keys').checked,
+                include_versions: document.getElementById('bk-include-versions').checked
+            };
+            var hint = document.getElementById('bk-create-hint');
+            hint.textContent = ''; hint.classList.remove('is-ok');
+            bkSetBusy(true);
+            bkProgress('bk-export-progress', 0, '准备中');
+            fetch('/api/backup/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                .then(bkJson).then(function () { bkPoll(); })
+                .catch(function (e) { bkSetBusy(false); bkProgress('bk-export-progress', 100, '备份失败：' + e.message, true); });
+        }
+
+        function bkPoll() {
+            if (bkState.polling) return;
+            bkSetBusy(true);
+            var tick = function () {
+                fetch('/api/backup/progress').then(bkJson).then(function (job) {
+                    var boxId = job.kind === 'import' ? 'bk-upload-progress' : 'bk-export-progress';
+                    if (job.status === 'running') {
+                        bkProgress(boxId, job.percent, job.message);
+                        bkState.polling = setTimeout(tick, 600);
+                        return;
+                    }
+                    bkState.polling = 0;
+                    bkSetBusy(false);
+                    if (job.status === 'error') { bkProgress(boxId, 100, (job.kind === 'import' ? '恢复失败：' : '备份失败：') + (job.error || ''), true); return; }
+                    if (job.status === 'done' && job.kind === 'export') {
+                        bkProgress(boxId, 100, '备份完成');
+                        var r = job.result || {};
+                        var hint = document.getElementById('bk-create-hint');
+                        hint.textContent = '已生成 ' + formatBytes(r.size) + ' 的备份，在下面的列表里';
+                        hint.classList.add('is-ok');
+                        setTimeout(function () { var b = document.getElementById('bk-export-progress'); if (b) b.hidden = true; }, 1600);
+                    }
+                    if (job.status === 'done' && job.kind === 'import') bkShowImportDone(job.result || {});
+                    refreshBackupPanel();
+                }).catch(function () { bkState.polling = setTimeout(tick, 1500); });
+            };
+            tick();
+        }
+
+        function revealBackup(name) {
+            fetch('/api/backup/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name || '' }) })
+                .then(bkJson).catch(function (e) { showUpdateToast('打开文件夹失败：' + e.message, {}); });
+        }
+
+        function deleteBackup(name, btn) {
+            if (bkState.deleteArm !== name) {
+                bkState.deleteArm = name;
+                btn.textContent = '确认删除';
+                setTimeout(function () { if (bkState.deleteArm === name) { bkState.deleteArm = ''; btn.textContent = '删除'; } }, 3000);
+                return;
+            }
+            bkState.deleteArm = '';
+            fetch('/api/backup/' + encodeURIComponent(name), { method: 'DELETE' }).then(bkJson)
+                .then(function (data) { bkRenderList(data.backups || []); })
+                .catch(function (e) { showUpdateToast('删除失败：' + e.message, {}); });
+        }
+
+        function uploadBackupFile(input) {
+            var file = input.files && input.files[0];
+            input.value = '';
+            if (!file) return;
+            bkClearPreview();
+            bkSetBusy(true);
+            bkProgress('bk-upload-progress', 0, '正在读取 ' + file.name);
+            var form = new FormData();
+            form.append('file', file);
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/backup/import/upload');
+            xhr.upload.onprogress = function (e) {
+                if (e.lengthComputable) bkProgress('bk-upload-progress', e.loaded / e.total * 96, e.loaded < e.total ? '正在读取 ' + file.name : '正在检查备份内容');
+            };
+            xhr.onload = function () {
+                bkSetBusy(false);
+                var data = {};
+                try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) {}
+                if (xhr.status >= 400) { bkProgress('bk-upload-progress', 100, '无法读取：' + (data.detail || ('HTTP ' + xhr.status)), true); return; }
+                document.getElementById('bk-upload-progress').hidden = true;
+                bkShowPreview(data.token, data.preview || {}, file.name);
+            };
+            xhr.onerror = function () { bkSetBusy(false); bkProgress('bk-upload-progress', 100, '上传中断，请重试', true); };
+            xhr.send(form);
+        }
+
+        function previewExistingBackup(name) {
+            bkClearPreview();
+            fetch('/api/backup/import/existing', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name }) })
+                .then(bkJson).then(function (data) {
+                    bkShowPreview(data.token, data.preview || {}, name);
+                    var box = document.getElementById('bk-preview');
+                    if (box && box.scrollIntoView) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                })
+                .catch(function (e) { showUpdateToast('读取备份失败：' + e.message, {}); });
+        }
+
+        function bkShowPreview(token, p, label) {
+            bkState.pendingToken = token;
+            bkState.pendingPreview = p;
+            var m = p.manifest || {};
+            var line = function (k, v) { return '<div class="bk-preview-line"><span>' + k + '</span><span>' + v + '</span></div>'; };
+            var canv = [];
+            if (p.canvases_new) canv.push('新增 ' + p.canvases_new + ' 个');
+            if (p.canvases_same) canv.push(p.canvases_same + ' 个本机已有、内容相同（跳过）');
+            if (p.canvases_conflict) canv.push(p.canvases_conflict + ' 个两边都改过（另存为副本）');
+            var assets = [];
+            if (p.assets_new) assets.push('新增 ' + p.assets_new + ' 个（' + formatBytes(p.assets_new_bytes) + '）');
+            if (p.assets_existing) assets.push(p.assets_existing + ' 个本机已有（保留本机）');
+            var files = (p.settings_files || []).length, missing = (p.settings_missing || []).length;
+            var settingsText = files ? (missing ? '本机缺的 ' + missing + ' 个会补上' : '本机都已有') + (files - missing ? '，其余 ' + (files - missing) + ' 个默认保留本机' : '') : '备份里没有';
+            var box = document.getElementById('bk-preview');
+            box.innerHTML = '<div class="bk-preview-head">' + bkEsc(label) + '</div>'
+                + '<div class="bk-note">备份于 ' + bkEsc(bkTime(m.created_at)) + (m.app_version ? ' · 版本 ' + bkEsc(m.app_version) : '') + (p.has_keys ? ' · 含 API Key' : '') + '</div>'
+                + '<div class="bk-preview-lines">'
+                + line('画布', bkEsc(canv.join('，') || '没有'))
+                + line('素材', bkEsc(assets.join('，') || '没有'))
+                + line('设置与库', bkEsc(settingsText))
+                + '</div>'
+                + (files - missing > 0 ? '<div class="settings-toggle-row"><div><div class="settings-toggle-label">用备份里的设置和库覆盖本机</div><div class="settings-toggle-desc">提示词库、人设、素材库记录、设置' + (p.has_keys ? '、API Key' : '') + '都换成备份里的版本</div></div><label class="settings-toggle-switch"><input type="checkbox" id="bk-overwrite-settings"' + (p.local_canvases ? '' : ' checked') + '><span class="settings-toggle-slider"></span></label></div>' : '')
+                + '<div class="bk-note">开始前会自动给本机数据（不含素材）做一份「恢复前自动备份」，恢复结果不满意可以再用它导回。</div>'
+                + '<div class="bk-actions"><button class="bk-primary" type="button" data-bk-act="apply"><span>开始恢复</span></button><button class="settings-path-btn" type="button" data-bk-act="cancel">取消</button></div>';
+            box.hidden = false;
+        }
+        function bkClearPreview() {
+            bkState.pendingToken = '';
+            bkState.pendingPreview = null;
+            var box = document.getElementById('bk-preview');
+            if (box) { box.hidden = true; box.innerHTML = ''; }
+        }
+        function applyBackupImport() {
+            if (!bkState.pendingToken) return;
+            var overwrite = document.getElementById('bk-overwrite-settings');
+            var body = { token: bkState.pendingToken, overwrite_settings: Boolean(overwrite && overwrite.checked) };
+            bkSetBusy(true);
+            document.getElementById('bk-preview').hidden = true;
+            bkProgress('bk-upload-progress', 0, '准备恢复');
+            fetch('/api/backup/import/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                .then(bkJson).then(function () { bkPoll(); })
+                .catch(function (e) { bkSetBusy(false); bkProgress('bk-upload-progress', 100, '恢复失败：' + e.message, true); });
+        }
+        function bkShowImportDone(r) {
+            var prog = document.getElementById('bk-upload-progress');
+            if (prog) prog.hidden = true;
+            var parts = [];
+            if (r.canvases_added) parts.push('新增 ' + r.canvases_added + ' 个画布');
+            if (r.canvases_copied) parts.push(r.canvases_copied + ' 个画布另存为副本');
+            if (r.assets_added) parts.push('补上 ' + r.assets_added + ' 个素材');
+            if (r.files_added || r.files_replaced) parts.push('设置与库 ' + ((r.files_added || 0) + (r.files_replaced || 0)) + ' 个文件');
+            var box = document.getElementById('bk-preview');
+            box.innerHTML = '<div class="bk-preview-head">恢复完成</div><div class="bk-note">' + bkEsc(parts.join('，') || '没有需要导入的新内容') + '。刷新页面后生效。</div>'
+                + '<div class="bk-actions"><button class="bk-primary" type="button" data-bk-act="reload"><span>刷新页面</span></button></div>';
+            box.hidden = false;
+            if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            bkState.pendingToken = '';
+        }
+
         // ===== 存储与缓存（通用 tab）=====
         var STORAGE_FILE_CHOICES = [500, 2000, 5000, 10000];
         var STORAGE_VERSION_CHOICES = [5, 10, 20, 50];
@@ -4718,6 +5126,7 @@
                 general:           { title: 'common.general',         desc: 'common.generalDesc' },
                 'api-settings':    { title: 'common.apiSettings',     desc: 'api.subtitle' },
                 'comfyui-settings':{ title: 'common.comfyuiSettings', desc: 'comfy.subtitle' },
+                backup:            { title: 'common.backup',          desc: 'common.backupDesc' },
                 appearance:        { title: 'common.appearance',      desc: 'common.appearanceDesc' },
                 about:             { title: 'common.about',           desc: 'common.aboutDesc' }
             };
@@ -4727,6 +5136,8 @@
             if (heading) { heading.dataset.i18n = info.title; heading.textContent = window.StudioI18n ? window.StudioI18n.t(info.title) : heading.textContent; }
             if (desc)    { desc.dataset.i18n    = info.desc;  desc.textContent    = window.StudioI18n ? window.StudioI18n.t(info.desc)  : desc.textContent; }
 
+            // API 设置页自己有标题和操作栏：外层标题 / 描述收起，只留右上角关闭按钮
+            modal.classList.toggle('settings-hide-head', tabId === 'api-settings');
             // API / 工作流标签：隐藏所有普通 panel，打开 iframe 详情页（header 标题/描述继续显示）
             if (tabId === 'api-settings' || tabId === 'comfyui-settings') {
                 modal.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
@@ -4738,6 +5149,7 @@
             modal.querySelectorAll('.settings-panel').forEach(panel => {
                 panel.classList.toggle('active', panel.id === 'settings-panel-' + tabId);
             });
+            if (tabId === 'backup') refreshBackupPanel();
         }
 
         function openSettingsDetail(page) {

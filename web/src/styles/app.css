@@ -1,0 +1,13 @@
+/* 外壳级样式：整窗布局 */
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+#app { height: 100%; }
+/* 弹层层在 body 外，字体 / 颜色要自己带上 */
+#nv-layer { position: relative; font-family: var(--font-sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+button { font-family: inherit; }
+html.studio-route-booting #app { opacity: 0; }
+#app { transition: opacity 240ms var(--ease-out); }
+
+/* 全局盒模型：ds.css 只给 .nv-root 设了 border-box，其余组件里 width:100% + padding 的元素会撑出容器
+   （在线生图提示词框右侧溢出就是这样）。外壳 #app 和弹层 #nv-layer 统一 border-box。 */
+#app, #app *, #app *::before, #app *::after,
+#nv-layer, #nv-layer *, #nv-layer *::before, #nv-layer *::after { box-sizing: border-box; }

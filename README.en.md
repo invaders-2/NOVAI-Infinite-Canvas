@@ -170,6 +170,17 @@ The app checks all three sources for the latest version on startup, pushes updat
 
 ## Changelog
 
+### v1.0.124
+
+- **New front end (NOVAI 2.0), page by page**: the shell, canvas list, online image / Z-Image, GPT chat and the whole settings modal (general / API / workflow / backup / appearance / about) are rewritten in Vue; the previous UI stays available from the "Legacy UI" entry
+- **Rebuilt image color adjust + new "Lossless edit"**: adjust light, color, curves, detail and effects with a draggable before/after divider; lossless edit changes colors and local effects without regenerating
+- **New template library**: portraits, e-commerce sets, multi-angle, posters, retouching, storyboards, try-on, white background, social covers, product videos, video relay and more, applied in one click
+- **New "Data backup"**: package and export canvases, assets and settings in one click, with size stats and a busy hint; settings also gain a "Memory" panel
+- **Provider registry**: each provider's base URL, docs link, aliases and default models now live in one config file, so adding a platform no longer needs code changes; upstream rate limits are retried automatically and errors are explained
+- **Fixed Windows update failures**: when the install folder is not writable, the update no longer fails halfway — it tells you to run as administrator or reinstall with the latest installer
+- **Fix**: update failures now show the real reason instead of an unreadable file error; the desktop app fully shuts its backend down before restarting to install, so new files are not blocked by files in use
+- **Improvement**: new Windows installs default to a user-writable folder, so one-click update works without administrator rights
+
 ### v1.0.123
 
 - **New floating toolbar on Smart Canvas image nodes**: portrait & emotion adjustment, panorama, multi-angle, relighting, nine-grid templates, crop (HD / outpainting / redraw / erase / cutout / crop), element editing, layer separation, grid split, annotation, rotate, download and preview — all from one entry point

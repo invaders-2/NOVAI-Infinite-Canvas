@@ -210,6 +210,10 @@
 
 .table-cell.is-editing { padding: 0; }
 
+/* 编辑态只读层仍在 td 里，编辑器绝对定位盖在它上面；--soft 是半透明 hover token 盖不住，
+   同一段文字被画两遍。用 visibility 而不是 display 隐藏，保住单元格高度不塌陷。 */
+.table-cell.is-editing .table-cell-view { visibility: hidden; }
+
 .table-cell-editor {
     box-sizing: border-box;
     position: absolute;
@@ -220,7 +224,8 @@
     padding: 5px 8px;
     border: 0;
     border-radius: 0;
-    background: var(--soft);
+    /* 与表头编辑态一致：不透明面板底（= 表格容器底色），兜底盖住只读层 */
+    background: var(--surface);
     color: var(--text);
     font-family: inherit;
     font-size: 11px;

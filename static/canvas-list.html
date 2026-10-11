@@ -6,18 +6,18 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>画布工作台</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.123.1789606971"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.123.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.123.1790522901"></script>
-    <script src="/static/js/theme.js?v=1.0.123.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.123.1790043702"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.123.1789606971"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.123.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.123.1790130330"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.123.1789845865"></script>
-    <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.123.1790236178">
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.123.1790254284">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.123.1790240704">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.124.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.124.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.124.1790685706"></script>
+    <script src="/static/js/theme.js?v=1.0.124.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.124.1790560477"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.124.1789606971"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.124.1789606971"></script>
+    <script src="/static/js/i18n.js?v=1.0.124.1790130330"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.124.1789845865"></script>
+    <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.124.1790560477">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.124.1790560477">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.124.1790560477">
 
     <style>
         /* ═══ V4 Apple-style Glassmorphism Design System ═══ */
@@ -209,16 +209,17 @@
             width: 100%;
             margin: 0;
             padding: 16px 20px;
-            background: rgba(255,255,255,0.22);
+            border-radius: 0;
+            background: rgba(0,0,0,0.5);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
             color: #fff;
-            box-shadow: 0 -1px 2px rgba(0,0,0,0.04);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
             display: flex; align-items: center; justify-content: space-between;
             gap: 16px;
         }
         .theme-dark .carousel-caption {
-            background: rgba(0,0,0,0.35);
+            background: rgba(0,0,0,0.66);
         }
         .carousel-caption-title {
             font-size: 14px; font-weight: 600;
@@ -324,6 +325,18 @@
             gap: 2px;
             background: var(--v4-bg);
         }
+        .card-preview[data-thumbs="1"] .card-preview-thumb { grid-column: 1 / -1; grid-row: 1 / -1; }
+        .card-preview[data-thumbs="2"] .card-preview-thumb { grid-row: 1 / -1; }
+        .card-preview[data-thumbs="3"] .card-preview-thumb:first-child { grid-row: 1 / -1; }
+        .canvas-list-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 10px; }
+        .canvas-search { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 999px;
+            background: var(--v4-card-bg); color: var(--v4-text-3, rgba(128,128,128,.9)); box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+        .canvas-search input { width: 160px; border: 0; outline: none; background: transparent; font-size: 13px; color: var(--v4-text, inherit); }
+        .canvas-search input::-webkit-search-cancel-button { cursor: pointer; }
+        .canvas-sort { height: 34px; padding: 0 28px 0 12px; border: 0; border-radius: 999px; background-color: var(--v4-card-bg);
+            font-size: 13px; color: var(--v4-text, inherit); cursor: pointer; appearance: none; -webkit-appearance: none;
+            background-image: var(--select-caret); background-repeat: no-repeat; background-position: calc(100% - 10px) 50%; background-size: 10px; }
+        @media (max-width: 640px) { .canvas-search input { width: 96px; } }
         .card-preview-empty {
             grid-column: 1 / -1;
             grid-row: 1 / -1;
@@ -751,6 +764,8 @@
         @media (max-width: 760px) {
             .page { padding: 48px 0 64px; gap: 32px; }
             .hero { flex-direction: column; gap: 28px; min-height: auto; }
+            /* 竖排后 align-items:center 会让 .hero-right 收缩到内容宽度（轮播 width:100% -> 0） */
+            .hero-right { width: 100%; }
             .hero-title { font-size: 40px; }
             .hero-desc { max-width: 100%; }
             .cards-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
@@ -837,6 +852,17 @@
         <!-- ═══ SECTION HEADER ═══ -->
         <div class="section-header">
             <span class="section-label" id="sectionLabel">所有画布</span>
+            <div class="canvas-list-tools">
+                <label class="canvas-search">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                    <input id="canvasSearchInput" type="search" placeholder="搜索画布名称" autocomplete="off" spellcheck="false">
+                </label>
+                <select id="canvasSortSelect" class="canvas-sort" aria-label="排序方式">
+                    <option value="updated">最近更新</option>
+                    <option value="created">最近创建</option>
+                    <option value="name">按名称</option>
+                </select>
+            </div>
             <button class="btn-new-project" id="btnNewProject">
                 <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
                 新建画布
@@ -961,6 +987,12 @@
             const trashBadgeV4 = document.getElementById('trashBadgeV4');
             const trashListV4 = document.getElementById('trashListV4');
             const sectionLabel = document.getElementById('sectionLabel');
+            const canvasSearchInput = document.getElementById('canvasSearchInput');
+            const canvasSortSelect = document.getElementById('canvasSortSelect');
+            try { const savedSort = localStorage.getItem('novai_canvas_list_sort'); if (savedSort && canvasSortSelect) canvasSortSelect.value = savedSort; } catch (_) {}
+            let canvasSearchTimer = 0;
+            canvasSearchInput?.addEventListener('input', () => { clearTimeout(canvasSearchTimer); canvasSearchTimer = setTimeout(() => renderV4Cards(), 120); });
+            canvasSortSelect?.addEventListener('change', () => { try { localStorage.setItem('novai_canvas_list_sort', canvasSortSelect.value); } catch (_) {} renderV4Cards(); });
 
             // ═══ CAROUSEL ═══
             let carouselCurrent = 0;
@@ -1085,6 +1117,17 @@
                 return div.innerHTML;
             }
 
+            // 卡片缩略图走服务端缩放代理（/api/media-preview，落盘缓存），列表不再直接加载原图
+            function mediaPreviewUrl(url, w) {
+                const raw = String(url || '');
+                if (!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+                let path = raw;
+                if (/^https?:\/\//i.test(raw)) { try { path = new URL(raw).pathname; } catch (e) { return raw; } }
+                if (!(path.startsWith('/assets/') || path.startsWith('/output/'))) return raw;
+                if (!/\.(png|jpe?g|webp|gif|bmp|avif|tiff?)(\?|#|$)/i.test(path)) return raw;
+                return '/api/media-preview?w=' + Math.max(64, Math.min(2048, Math.round(w || 480))) + '&url=' + encodeURIComponent(path);
+            }
+
             // ═══ DATA BRIDGE — 从 canvas-list.js 读取数据 ═══
             // canvas-list.js 是一个 IIFE，内部变量 projects/canvases/deletedCanvases 是私有的。
             // 我们通过劫持 fetch 来拦截 API 响应，或者直接发请求获取数据。
@@ -1143,19 +1186,40 @@
                 if (cardsEmpty) cardsEmpty.style.display = 'none';
 
                 if (!v4Canvases.length) {
-                    if (cardsEmpty) cardsEmpty.style.display = '';
+                    if (cardsEmpty) {
+                        cardsEmpty.style.display = '';
+                        cardsEmpty.querySelectorAll('[data-orig]').forEach(el => { el.textContent = el.dataset.orig; });
+                    }
                     viewMoreSection.style.display = 'none';
                     return;
                 }
 
-                // 按更新时间降序排列画布
-                const sortedCanvases = v4Canvases.slice().sort((a, b) => {
-                    const ta = a.updated_at || a.created_at || 0;
-                    const tb = b.updated_at || b.created_at || 0;
-                    return tb - ta;
-                });
+                // 搜索 + 排序（默认按更新时间降序）；选择记在本机
+                const query = String(canvasSearchInput?.value || '').trim().toLowerCase();
+                const sortMode = canvasSortSelect?.value || 'updated';
+                const sortedCanvases = v4Canvases
+                    .filter(c => !query || String(c.title || '').toLowerCase().includes(query))
+                    .sort((a, b) => {
+                        if (sortMode === 'name') return String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN', {numeric: true});
+                        if (sortMode === 'created') return (b.created_at || 0) - (a.created_at || 0);
+                        const ta = a.updated_at || a.created_at || 0;
+                        const tb = b.updated_at || b.created_at || 0;
+                        return tb - ta;
+                    });
 
-                sectionLabel.textContent = `所有画布 · ${sortedCanvases.length} 个`;
+                sectionLabel.textContent = query
+                    ? `找到 ${sortedCanvases.length} 个 · 共 ${v4Canvases.length} 个画布`
+                    : `所有画布 · ${sortedCanvases.length} 个`;
+                if (cardsEmpty) {
+                    const t = cardsEmpty.querySelector('.cards-empty-title');
+                    const sub = cardsEmpty.querySelector('.cards-empty-sub');
+                    if (t && !t.dataset.orig) t.dataset.orig = t.textContent;
+                    if (sub && !sub.dataset.orig) sub.dataset.orig = sub.textContent;
+                    const noMatch = !sortedCanvases.length;
+                    cardsEmpty.style.display = noMatch ? '' : 'none';
+                    if (t) t.textContent = noMatch ? '没有匹配的画布' : t.dataset.orig;
+                    if (sub) sub.textContent = noMatch ? '换个关键词试试' : sub.dataset.orig;
+                }
 
                 sortedCanvases.forEach((c, idx) => {
                     const card = buildV4Card(c, idx);
@@ -1174,11 +1238,11 @@
                 const updatedAt = formatTime(c.updated_at || c.created_at);
                 const isSmart = c.kind === 'smart';
 
-                // 预览区：最多 4 张图片 2x2 网格
+                // 预览区：最多 4 张图片；按张数铺满（1 张整幅、2 张左右、3 张一大两小），不再留半边空白
                 const thumbs = (c.thumbnails || []).slice(0, 4);
                 let previewHTML = '';
                 if (thumbs.length) {
-                    previewHTML = thumbs.map(url => `<img class="card-preview-thumb" src="${escapeHtml(url)}" alt="" loading="lazy">`).join('');
+                    previewHTML = thumbs.map(url => { const src = mediaPreviewUrl(url, 480); return `<img class="card-preview-thumb" src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async">`; }).join('');
                 } else {
                     previewHTML = `<div class="card-preview-empty"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="width:32px;height:32px;opacity:.4"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div>`;
                 }
@@ -1186,7 +1250,7 @@
                 const kindBadge = isSmart ? `<span class="card-preview-count" style="background:var(--accent);color:var(--text-on-accent)">智能</span>` : `<span class="card-preview-count">画布</span>`;
 
                 card.innerHTML = `
-                    <div class="card-preview" style="aspect-ratio:16/10">
+                    <div class="card-preview" data-thumbs="${thumbs.length}" style="aspect-ratio:16/10">
                         ${previewHTML}
                         ${kindBadge}
                         <button class="card-more-btn" aria-label="更多操作">

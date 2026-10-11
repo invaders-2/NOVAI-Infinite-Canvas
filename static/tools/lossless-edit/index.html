@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<!--
+  无损改图（原名：橡皮擦合成）· Ai 网页版小工具
+  Copyright (c) 2026 陶醉 (taozui.name)
+  开源，采用 CC BY-NC-SA 4.0 许可：可自由使用、分享、修改；须署名并保留链接；禁止商业用途；修改后的作品须以相同协议开源。
+  Licensed under CC BY-NC-SA 4.0: free to use, share and adapt for non-commercial purposes;
+  keep the attribution; derivatives must be shared under the same license.
+  License: https://creativecommons.org/licenses/by-nc-sa/4.0/   Source: https://github.com/perfect12369874/ai-web-tools
+  Version: v260923b (日期即版本号，同日第二版加 b，页面右下角可见并链到源码仓库；每次更新改 #ver 一处即可)
+  图片全部在浏览器本地处理，不会上传。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无损改图</title>
+<style>
+:root{
+  --bg:#0a0a0a;--stage:#0f0f0f;--panel:#0f0f0f;--raise:#171717;--raise-2:#1a1a1a;
+  --line:rgba(255,255,255,0.06);--line-2:rgba(255,255,255,0.12);
+  --text:#fafafa;--muted:#a3a3a3;--faint:#8a8a8a;
+  --accent:#fafafa;--accent-soft:rgba(250,250,250,0.12);
+  --danger:#ff453a;--ok:#30d158;--warn:#ffd60a;
+  --ease:cubic-bezier(.2,.7,.2,1)
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue",Arial,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-font-smoothing:antialiased}
+#app{display:flex;flex-direction:column;height:100%}
+button{background:var(--raise);color:var(--text);border:1px solid var(--line-2);border-radius:9px;padding:7px 12px;font:inherit;cursor:pointer;line-height:1.3;white-space:nowrap;transition:background .14s,border-color .14s,color .14s}
+button:hover{background:var(--raise-2);border-color:rgba(255,255,255,0.20)}
+button:active{background:#18181c}
+button:disabled{opacity:.3;cursor:default}
+button:focus-visible,.slot:focus-within,.dz:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:#fafafa;border-color:#fafafa;color:#0a0a0a;font-weight:600}
+button.primary:hover{background:#ffffff;border-color:#ffffff}
+button.primary:active{background:#d4d4d4}
+button.on{background:var(--accent-soft);border-color:var(--accent);color:#0a0a0a}
+button.icon{padding:7px 9px;font-size:15px;line-height:1}
+
+/* image slots (bottom row): empty = dashed + with a label below; filled = just the thumbnail, × on hover */
+.slots{display:flex;align-items:center;justify-content:center;gap:10px}
+.slot{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 10px;border:1px dashed var(--line-2);border-radius:12px;cursor:pointer;position:relative;min-width:66px;transition:border-color .14s,background .14s}
+.slot:hover,.slot.over{border-color:var(--accent);background:var(--accent-soft)}
+.slot .th{position:relative;display:flex;align-items:center;justify-content:center}
+.slot img{height:60px;width:auto;border-radius:8px;background:#060607;display:none;outline:1px solid var(--line-2);outline-offset:-1px}
+.slot.has img{display:block}
+.slot .ph{width:44px;height:34px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:18px;font-weight:300;line-height:1;background:rgba(255,255,255,.03)}
+.slot.has .ph{display:none}
+.slot b{font-weight:500;font-size:11.5px;color:var(--muted);white-space:nowrap;letter-spacing:.02em}
+.slot.has b{display:none}
+.slot.has{padding:0;border-color:transparent;border-style:solid;background:none}
+.slot.has:hover{border-color:transparent;background:none}
+.slot.has:hover img,.slot.has:focus-visible img{outline:2px solid var(--accent);outline-offset:-2px}
+.slot input{display:none}
+.x{position:absolute;top:-7px;right:-7px;width:18px;height:18px;border-radius:50%;background:#fafafa;color:#0a0a0a;border:0;font-size:12px;font-weight:700;line-height:1;display:none;align-items:center;justify-content:center;cursor:pointer;z-index:2;user-select:none}
+.x:hover{background:rgba(255,69,58,0.12);color:#ff6961}
+.slot.has:hover .x{display:flex}
+.dz.done:hover .x{display:flex}
+.dz .x{top:10px;right:10px;width:24px;height:24px;font-size:15px}
+#bSwap{width:28px;height:28px;padding:0;border-radius:50%;font-size:13px;color:var(--muted);background:transparent;border-color:var(--line)}
+#bSwap:hover:not(:disabled){color:var(--text);background:var(--raise)}
+
+/* stage */
+main{flex:1;position:relative;overflow:hidden;background:transparent}
+#view{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:none;touch-action:none}
+#view.pan{cursor:grab} #view.pan.dragging{cursor:grabbing}
+#cursor{position:absolute;pointer-events:none;border:1.5px solid var(--text);outline:1px solid rgba(0,0,0,.6);border-radius:50%;transform:translate(-50%,-50%);display:none}
+#cursor.restore{border-color:var(--ok)}
+#cursor.soft{border-style:dashed}
+
+/* empty state */
+#empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px;padding:24px}
+.brand{display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
+.brand svg{width:40px;height:40px;display:block;margin-bottom:2px}
+.brand h1{margin:0;font-size:24px;font-weight:600;letter-spacing:.06em}
+.brand p{margin:0;color:var(--muted);font-size:13px;letter-spacing:.02em}
+.dzs{display:flex;align-items:center;gap:14px}
+.dzjoin{color:var(--faint);font-size:18px;font-weight:300;flex:none}
+.dz{width:250px;height:184px;border:1px dashed var(--line-2);border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;color:var(--muted);text-align:center;padding:14px;position:relative;background:linear-gradient(180deg,rgba(250,250,250,0.12),rgba(255,255,255,0.06));transition:border-color .18s var(--ease),background .18s var(--ease),transform .18s var(--ease)}
+.dzc{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:100%;height:100%}
+.dz i{font-style:normal;font:500 10.5px/1 ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.14em;color:var(--faint);margin-bottom:6px}
+.dz b{color:var(--text);font-size:17px;font-weight:600;letter-spacing:.03em}
+.dz em{font-style:normal;font-size:11.5px;margin-top:12px;color:var(--text);padding:4px 12px;border-radius:999px;border:1px solid var(--line-2);background:rgba(255,255,255,0.06);transition:background .18s,border-color .18s,color .18s}
+.dz:hover,.dz.over{border-color:var(--accent);background:linear-gradient(180deg,var(--accent-soft),var(--accent-soft));transform:translateY(-2px)}
+.dz:hover em,.dz.over em{background:var(--accent);border-color:var(--accent);color:#0a0a0a}
+.dz.done{border-style:solid;border-color:rgba(48,209,88,0.30);transform:none;background:#060607}
+.dz.done img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border-radius:17px;background:#060607}
+.dz.done .tag{position:absolute;left:10px;top:10px;background:rgba(0,0,0,0.62);padding:3px 9px;border-radius:999px;color:#fff;font-size:11.5px;font-variant-numeric:tabular-nums}
+.dz input{display:none}
+#empty p.note{color:var(--faint);font-size:12px;margin:0;display:flex;align-items:center;gap:6px}
+#empty p.note svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+main.over #empty .dz:not(.done){border-color:var(--accent)}
+
+/* floating overlays */
+#hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:#1a1a1a;border:1px solid var(--line-2);border-radius:12px;padding:8px 8px 8px 16px;max-width:70%;font-size:13px;line-height:1.5;display:flex;gap:14px;align-items:center;white-space:nowrap}
+#hint>div{overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+#hint .hb{display:flex;gap:6px;flex:none}
+#hint b{color:var(--text);font-weight:600}
+#hint button{flex:none;padding:6px 12px}
+#busy{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.62);font-size:13.5px;color:#fff;gap:12px;letter-spacing:.02em}
+#busy::before{content:"";width:18px;height:18px;border:2px solid rgba(255,255,255,0.12);border-top-color:var(--accent);border-radius:50%;animation:spin .75s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#cands{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+#cands button{position:absolute;pointer-events:auto;transform:translate(0,-100%);font-size:11.5px;font-weight:600;color:#fff;padding:4px 10px;border-radius:7px 7px 7px 2px;border:0;white-space:nowrap;letter-spacing:.02em}
+#cands button.c0{background:#22a86a} #cands button.c1{background:#d4900f} #cands button.c2{background:#e0455a} #cands button.c3{background:#3b78e7} #cands button.c4{background:#9450e0}
+#cands button:hover{filter:brightness(1.15)}
+#chip{position:absolute;bottom:12px;background:#1a1a1a;border:1px solid var(--line);border-radius:8px;padding:3px 10px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+#chip{left:12px;pointer-events:none}
+#toast{position:absolute;left:50%;bottom:16px;transform:translate(-50%,6px);background:#1a1a1a;border:1px solid var(--line-2);border-radius:10px;padding:7px 15px;font-size:13px;pointer-events:none;opacity:0;transition:opacity .22s var(--ease),transform .22s var(--ease)}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.ok{color:var(--ok)} #toast.warn{color:var(--warn)}
+
+/* toolbar */
+#bar{flex:none;display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 16px 22px;border-top:1px solid var(--line);background:linear-gradient(180deg,#1a1a1a,var(--panel));position:relative}
+/* NOVAI 内置改动 + 协议标记: novai-lossless-edit —— 按宿主产品要求移除界面署名/版本号（署名与来源链接保留在本目录 LICENSE/NOTICE 与源码头注释） */
+#tools{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:8px;transition:opacity .2s}
+#tools>*{flex:none}
+.sep{width:1px;height:20px;background:var(--line-2);margin:0 4px}
+#tools>button,#tools .seg{height:34px;box-sizing:border-box}
+#tools>button{padding:0 12px;display:inline-flex;align-items:center}
+#tools>button.arrow{padding:0 9px}
+#tools .seg button{height:100%;padding:0 11px}
+.grp{display:inline-flex;gap:6px}
+#status{font-size:12px;color:var(--muted)} #status.ok{color:var(--ok)} #status.warn{color:var(--warn)} #status.busy{color:var(--accent)}
+.seg{display:flex;gap:2px;padding:3px;background:#0f0f0f;border:1px solid var(--line);border-radius:11px}
+.seg button{border:0;border-radius:8px;background:transparent;color:var(--muted);padding:5px 12px;display:inline-flex;align-items:center;gap:6px}
+.seg button:hover{background:rgba(255,255,255,0.06);color:var(--text)}
+.seg button.on{background:var(--raise-2);color:var(--text)}
+#tool button.on[data-mode=erase] svg{color:var(--accent)}
+#tool button.on[data-mode=restore] svg{color:var(--ok)}
+.seg svg,button.ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+button.ic{display:inline-flex;align-items:center;gap:6px}
+#bShowMask .eye-open{display:none} #bShowMask.on .eye-open{display:block} #bShowMask.on .eye-closed{display:none}
+#bShowMask.on{background:rgba(255,45,85,.13);border-color:rgba(255,45,85,.45);color:#ffd0da}
+.ctl{display:flex;align-items:center;gap:8px}
+.ctl label{color:var(--muted);white-space:nowrap;font-size:12px}
+.ctl input[type=range]{width:92px}
+#tipPrev{width:34px;height:34px;border-radius:9px;background:#0f0f0f;border:1px solid var(--line);flex:none}
+.ctl .val{width:36px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums;text-align:right}
+label.chk.inline{margin:0}
+#tools.off > *{opacity:.3;pointer-events:none}
+
+/* range sliders */
+input[type=range]{-webkit-appearance:none;appearance:none;height:18px;background:transparent;margin:0;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:3px;background:rgba(255,255,255,0.12)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-5.5px;border-radius:50%;background:#fafafa;border:0;transition:transform .12s}
+input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.12)}
+input[type=range]::-moz-range-track{height:3px;border-radius:3px;background:rgba(255,255,255,0.12)}
+input[type=range]::-moz-range-progress{height:3px;border-radius:3px;background:var(--accent)}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#fafafa;border:0}
+input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* advanced panel */
+#adv{position:absolute;right:16px;bottom:14px;width:330px;max-height:calc(100% - 28px);overflow:auto;background:#1a1a1a;border:1px solid var(--line-2);border-radius:14px;padding:14px 16px;z-index:5}
+#adv h3{margin:14px 0 6px;font-size:11px;color:var(--faint);font-weight:600;letter-spacing:.12em}
+#adv h3:first-child{margin-top:0}
+.row{display:flex;align-items:center;gap:8px;margin:6px 0}
+.row label{color:var(--muted);width:44px;flex:none}
+.row input[type=range]{flex:1;min-width:0}
+.row .val{width:44px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;flex:none}
+.row .btns{display:flex;gap:6px;flex:1}
+.row .btns button{flex:1;padding:6px 8px}
+.readout{font:11px/1.65 ui-monospace,"SF Mono",Menlo,monospace;color:var(--muted);background:#0f0f0f;border:1px solid var(--line);border-radius:8px;padding:6px 9px;margin:4px 0}
+.readout b{color:var(--text);font-weight:500}
+label.chk{display:flex;align-items:center;gap:7px;cursor:pointer;margin:6px 0}
+label.chk input{accent-color:var(--accent);margin:0}
+.nudge{display:grid;grid-template-columns:repeat(3,26px);grid-template-rows:repeat(2,24px);gap:2px}
+.nudge button{padding:0;font-size:12px;border-radius:6px}
+.info{color:var(--muted);font-size:11.5px;margin:4px 0}
+#adv::-webkit-scrollbar{width:8px} #adv::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.16);border-radius:8px}
+@supports (height:100dvh){html,body{height:100dvh}}
+
+/* 首屏：两张图都放进来之前，底部工具栏先收起 */
+#app:has(#empty:not([hidden])) #bar .slots,
+#app:has(#empty:not([hidden])) #tools{display:none}
+#app:has(#empty:not([hidden])) #bar{background:transparent;border-top-color:transparent}
+
+/* 电脑 / 触屏两套提示文字 */
+.on-touch{display:none}
+
+/* 触屏设备（手机、平板）：没有悬停，删除按钮常显，滑块加大 */
+@media (hover:none) and (pointer:coarse){
+  .on-desk{display:none}
+  .on-touch{display:inline}
+  body{-webkit-touch-callout:none}
+  button,.slot,.dz,#cands button{touch-action:manipulation}
+  .slot.has .x,.dz.done .x{display:flex}
+  .dz:hover{transform:none;border-color:var(--line-2);background:linear-gradient(180deg,rgba(250,250,250,0.12),rgba(255,255,255,0.06))}
+  .dz:hover em{background:rgba(255,255,255,0.06);border-color:var(--line-2);color:var(--text)}
+  .dz.done:hover{border-color:rgba(48,209,88,0.30);background:#060607}
+  .slot:hover{border-color:var(--line-2);background:none}
+  input[type=range]{height:28px}
+  input[type=range]::-webkit-slider-thumb{width:20px;height:20px;margin-top:-8.5px}
+  input[type=range]::-moz-range-thumb{width:20px;height:20px}
+}
+
+/* 手机竖屏：上传框并排缩小；工具栏一行，左右滑动；「下载合成图」始终钉在右边 */
+@media (max-width:640px){
+  #empty{gap:22px;padding:16px}
+  .brand{gap:8px}
+  .brand svg{width:34px;height:34px}
+  .brand h1{font-size:21px}
+  .brand p{font-size:12.5px;max-width:300px;line-height:1.6}
+  .dzs{width:100%;max-width:420px;gap:10px}
+  .dzjoin{display:none}
+  .dz{flex:1 1 0;width:auto;min-width:0;height:170px;border-radius:16px;padding:10px}
+  .dz b{font-size:15.5px}
+  .dzc>span{font-size:12px}
+  .dz em{margin-top:10px;padding:4px 10px}
+  .dz.done img{border-radius:15px}
+  #empty p.note{font-size:11.5px}
+
+  #bar{padding:8px 0 22px;gap:8px}
+  .slots{gap:8px}
+  .slot{min-width:0;padding:4px 8px}
+  .slot img{width:auto !important;height:auto !important;max-width:72px;max-height:42px;border-radius:6px}
+  .slot .ph{width:34px;height:26px;font-size:15px}
+  #bSwap{width:26px;height:26px}
+  #tools{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:none;width:100%;padding:0 12px}
+  #tools::-webkit-scrollbar{display:none}
+  #bPng{position:sticky;right:0;z-index:2}
+
+  #hint{left:10px;right:10px;bottom:10px;transform:none;max-width:none;white-space:normal;font-size:12.5px;padding:8px 8px 8px 12px;gap:10px}
+  #hint>div{overflow:visible}
+  #chip{top:10px;bottom:auto}
+  #toast{max-width:calc(100% - 24px);white-space:normal;text-align:center;bottom:12px}
+}
+/* ═══ NOVAI 内置改动 + 协议标记: novai-lossless-edit ═══
+   下面两块只在浅色主题 / 嵌入模式下生效，独立打开与默认深色保持上游原样。 */
+/* 浅色主题：只重定义 html.novai-light 上的变量和少数硬编码深色，默认深色变量不变 */
+html.novai-light{
+  --bg:#f5f5f5;--stage:#ffffff;--panel:#ffffff;--raise:#fafafa;--raise-2:#ffffff;
+  --line:rgba(0,0,0,0.06);--line-2:rgba(0,0,0,0.12);
+  --text:#0a0a0a;--muted:#737373;--faint:#8a8a8a;
+  --accent:#171717;--accent-soft:rgba(10,10,10,0.08);
+  --danger:#ff3b30;--ok:#34c759;--warn:#ff9f0a;
+}
+html.novai-light main{background:transparent}
+html.novai-light button{border-color:transparent}
+html.novai-light button:hover{border-color:transparent;background:var(--raise-2)}
+html.novai-light button:active{background:#dedede}
+html.novai-light button.primary{background:#171717;border-color:#171717;color:#fafafa}
+html.novai-light button.primary:hover{background:#2b2b2b;border-color:#2b2b2b}
+html.novai-light button.primary:active{background:#0a0a0a}
+html.novai-light button.on{background:var(--accent-soft);border-color:transparent;color:var(--text)}
+html.novai-light .dz:hover em,html.novai-light .dz.over em{color:#fafafa}
+html.novai-light button.on[data-mode=erase] svg{color:var(--accent)}
+html.novai-light button.on[data-mode=restore] svg{color:#34c759}
+html.novai-light #bShowMask.on{background:rgba(255,45,85,.1);border-color:transparent;color:#c8102e}
+html.novai-light .seg{background:#f5f5f5;border-color:transparent}
+html.novai-light .seg button.on{background:#ffffff}
+html.novai-light #bar{background:linear-gradient(180deg,#ffffff,var(--panel));border-top-color:transparent}
+html.novai-light .slot img{background:#f5f5f5}
+html.novai-light .dz.done{background:#ffffff;border-color:rgba(52,199,89,0.30)}
+html.novai-light .dz.done img{background:#ffffff}
+html.novai-light .x{background:#171717;color:#ffffff}
+html.novai-light .x:hover{background:#ff3b30;color:#ffffff}
+html.novai-light #hint{background:#ffffff;border-color:transparent}
+html.novai-light #hint>div{color:var(--muted)}
+html.novai-light #hint b{color:var(--text)}
+html.novai-light #busy{background:rgba(255,255,255,0.6);color:#0a0a0a}
+html.novai-light #busy::before{border-color:rgba(0,0,0,.12);border-top-color:var(--accent)}
+html.novai-light #chip{background:#ffffff;border-color:transparent}
+html.novai-light #toast{background:#ffffff;border-color:transparent}
+html.novai-light #adv{background:#ffffff;border-color:transparent}
+html.novai-light .readout{background:#f5f5f5;border-color:transparent}
+html.novai-light #tipPrev{background:#ffffff;border-color:transparent}
+html.novai-light #cursor{border-color:rgba(0,0,0,.85);outline-color:rgba(255,255,255,.75)}
+html.novai-light input[type=range]::-webkit-slider-runnable-track{background:rgba(0,0,0,0.12)}
+html.novai-light input[type=range]::-webkit-slider-thumb{background:#171717}
+html.novai-light input[type=range]::-moz-range-track{background:rgba(0,0,0,0.12)}
+html.novai-light input[type=range]::-moz-range-thumb{background:#171717}
+
+/* 嵌入模式：左画布占满剩余空间 + 右一列控制栏；独立打开保持底部栏 */
+html.novai-embed #app{flex-direction:row}
+html.novai-embed #stage{flex:1 1 auto;min-width:0}
+html.novai-embed #bar{flex:none;width:324px;height:100%;min-height:0;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:12px;padding:14px 14px 12px;overflow-y:auto;overflow-x:hidden;border-top:0;background:transparent}
+html.novai-embed #bar .slots{justify-content:center;flex-wrap:wrap}
+html.novai-embed #tools{width:100%;flex-direction:row;flex-wrap:wrap;align-items:stretch;justify-content:flex-start;gap:8px}
+html.novai-embed #tools>*{flex:1 1 100%;min-width:0}
+html.novai-embed #tools .seg{width:100%}
+html.novai-embed #tool button{flex:1;justify-content:center}
+html.novai-embed #brushCtl{flex-wrap:wrap;justify-content:space-between}
+html.novai-embed #brushCtl #tip{flex:1 1 100%}
+html.novai-embed #brushCtl #rSize{flex:1 1 auto;width:auto;min-width:0}
+html.novai-embed #brushCtl #tipPrev{flex:none}
+html.novai-embed #tools>button{width:auto;justify-content:center}
+html.novai-embed #bUndo,html.novai-embed #bRedo{flex:1 1 0}
+html.novai-embed #tools>.sep{display:none}
+html.novai-embed #tools .ctl{flex:1 1 100%;justify-content:space-between}
+html.novai-embed #tools .ctl input[type=range]{flex:1 1 auto;width:auto;min-width:0}
+/* NOVAI 内置改动 + 协议标记: novai-lossless-edit —— 嵌入模式下只放一张图时也保留右侧素材槽与工具栏（无可用图时控件禁用），修掉「右栏空白 / 笔刷一起消失」 */
+html.novai-embed #app:has(#empty:not([hidden])) #bar .slots,
+html.novai-embed #app:has(#empty:not([hidden])) #tools{display:flex}
+/* NOVAI 内置改动 + 协议标记: novai-lossless-edit —— 嵌入时整页透明，交给宿主的弹窗底色 */
+html.novai-embed,
+html.novai-embed body{background:transparent}
+</style>
+</head>
+<body>
+<div id="app">
+
+<main id="stage">
+  <canvas id="view"></canvas>
+  <div id="cursor"></div>
+  <div id="cands"></div>
+  <div id="empty">
+    <div class="brand">
+      <svg viewBox="0 0 34 34" aria-hidden="true"><rect x="5" y="9" width="24" height="16" rx="4" transform="rotate(-18 17 17)" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="5" y="9" width="12" height="16" rx="4" transform="rotate(-18 17 17)" fill="currentColor"/><path d="M6 29h22" stroke="#8a8a8a" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <h1>无损改图</h1>
+      <p>只把 AI 改过的地方贴回原图，其余像素原样保留</p>
+    </div>
+    <div class="dzs">
+      <div class="dz" data-slot="orig"><span class="dzc"><i>01</i><b>原图</b><span>要保留画质的那张</span><em><span class="on-desk">点击、拖入或粘贴</span><span class="on-touch">点一下选图</span></em></span></div>
+      <span class="dzjoin">+</span>
+      <div class="dz" data-slot="ai"><span class="dzc"><i>02</i><b>修改后的图</b><span>AI 处理过的那张</span><em><span class="on-desk">点击、拖入或粘贴</span><span class="on-touch">点一下选图</span></em></span></div>
+    </div>
+    <p class="note"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>图片只在你的浏览器里处理，不会上传</p>
+  </div>
+  <div id="hint" hidden><div></div><button id="hintOk">知道了</button></div>
+  <div id="busy" hidden>正在自动对齐和校色…</div>
+  <div id="chip" hidden></div>
+  <div id="toast"></div>
+  <div id="adv" hidden>
+    <h3>状态</h3>
+    <div class="readout"><span id="status">等待两张图</span></div>
+    <h3>对齐</h3>
+    <div class="row"><div class="btns"><button id="bAlign">重新自动对齐</button><button id="bAlignReset">归零</button></div>
+      <div class="nudge"><span></span><button id="nUp" title="上移 1px">↑</button><span></span><button id="nLeft" title="左移 1px">←</button><button id="nDown" title="下移 1px">↓</button><button id="nRight" title="右移 1px">→</button></div></div>
+    <div class="readout" id="alignInfo">—</div>
+    <h3>校色（修改图向原图对齐颜色）</h3>
+    <label class="chk"><input type="checkbox" id="cCorr" checked>自动校色</label>
+    <div class="row"><label>强度</label><input type="range" id="rStrength" min="0" max="100" value="100"><span class="val" id="vStrength">100%</span></div>
+    <div class="row"><label>红</label><input type="range" id="mR" min="-30" max="30" value="0"><span class="val" id="vR">0</span></div>
+    <div class="row"><label>绿</label><input type="range" id="mG" min="-30" max="30" value="0"><span class="val" id="vG">0</span></div>
+    <div class="row"><label>蓝</label><input type="range" id="mB" min="-30" max="30" value="0"><span class="val" id="vB">0</span></div>
+    <div class="row"><div class="btns"><button id="bRecalc">按未修改区域重新计算</button></div></div>
+    <div class="readout" id="corrInfo">—</div>
+    <h3>自动识别改动</h3>
+    <div class="row"><div class="btns"><button id="bDetect">重新自动识别</button></div></div>
+    <div class="readout" id="detInfo">—</div>
+    <h3>画笔</h3>
+    <div class="row"><label>柔边</label><input type="range" id="rSoft" min="0" max="100" value="50"><span class="val" id="vSoft">50%</span></div>
+    <h3>导出</h3>
+    <div class="row"><div class="btns"><button id="bMask">蒙版 PNG</button></div></div>
+  </div>
+</main>
+
+<div id="bar">
+  <div class="slots">
+    <label class="slot" id="sOrig" for="inOrig" data-slot="orig" title="点击选择或更换原图"><span class="th"><span class="ph">+</span><img id="thOrig" alt=""><span class="x" role="button" title="移除，重新选择">×</span></span><b>原图</b><input id="inOrig" type="file" accept="image/*"></label>
+    <button id="bSwap" title="交换两张图" disabled>⇄</button>
+    <label class="slot" id="sAi" for="inAi" data-slot="ai" title="点击选择或更换修改图"><span class="th"><span class="ph">+</span><img id="thAi" alt=""><span class="x" role="button" title="移除，重新选择">×</span></span><b>修改图</b><input id="inAi" type="file" accept="image/*"></label>
+  </div>
+  <div id="tools" class="off">
+    <div class="seg" id="tool">
+      <button data-mode="erase" class="on" title="画到哪里，哪里换成修改图。X 键切换"><svg viewBox="0 0 24 24"><path d="M11 3.5l1.9 5.4 5.4 1.9-5.4 1.9L11 18.1l-1.9-5.4-5.4-1.9 5.4-1.9z"/><path d="M18.5 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>修改</button>
+      <button data-mode="restore" title="画到哪里，哪里还原成原图。X 键切换"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="m5.5 17 4.3-5 3.4 3.8 2.4-2.8 3.9 4"/><circle cx="16" cy="9.5" r="1.4"/></svg>还原</button>
+    </div>
+    <div class="ctl" id="brushCtl">
+      <div class="seg" id="tip">
+        <button data-hard="1" title="实心画笔，边缘清晰"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="currentColor" stroke="none"/></svg>实心</button>
+        <button data-hard="0.5" class="on" title="柔边画笔，边缘渐变（硬度 50%）"><svg viewBox="0 0 24 24"><defs><radialGradient id="softTip"><stop offset="40%" stop-color="currentColor" stop-opacity="1"/><stop offset="100%" stop-color="currentColor" stop-opacity="0"/></radialGradient></defs><circle cx="12" cy="12" r="9.5" fill="url(#softTip)" stroke="none"/></svg>柔边</button>
+      </div>
+      <input type="range" id="rSize" min="4" max="800" value="160" title="画笔大小，[ 和 ] 也能调">
+      <canvas id="tipPrev" width="80" height="80" title="当前画笔的大小和软硬"></canvas>
+    </div>
+    <button id="bShowMask" class="ic" title="用红色标出已换成修改图的范围"><svg class="eye-open" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-closed" viewBox="0 0 24 24"><path d="M3 10.5c3 4.5 15 4.5 18 0"/><path d="M6.5 13.6 5 16M12 15v2.8M17.5 13.6 19 16"/></svg>修改范围</button>
+    <button id="bUndo" class="ic arrow" title="上一步 ⌘Z" disabled><svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m11 6-6 6 6 6"/></svg></button>
+    <button id="bRedo" class="ic arrow" title="下一步 ⇧⌘Z" disabled><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button>
+    <button id="bClear" title="重做：回到刚载入两张图、自动识别完成时的状态。快捷键 C">重做</button>
+    <span class="sep"></span>
+    <div class="ctl"><label>原图不透明度</label><input type="range" id="rOpacity" min="0" max="100" value="100"><span class="val" id="vOpacity">100%</span></div>
+    <button id="bCompare" title="按住不放显示原图，松开回到合成图。按住 1 键也一样">按住对比</button>
+    <button id="bPng" class="primary" title="导出原尺寸 PNG，蒙版之外的像素与原图完全一致">下载合成图</button>
+    <button id="bPsd" title="导出三层 PSD：原图 / 修改图（已校色，带蒙版）/ 盖印合成">下载 PSD</button>
+  </div>
+</div>
+</div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+
+const S = {
+  origBmp: null, aiBmp: null, origName: '', aiName: '',
+  W: 0, H: 0,
+  align: { sx: 1, sy: 1, tx: 0, ty: 0 },
+  corr: { on: true, k: 1, gain: [1, 1, 1], offset: [0, 0, 0], cast: [0, 0, 0], manual: [0, 0, 0], sampled: 0, computed: false },
+  brush: { size: 160, hardness: 0.5, mode: 'erase' },
+  view: { scale: 1, tx: 0, ty: 0, opacity: 1, compare: false, showMask: false, peek: false, fitted: false },
+  det: null, stroke: null, pendingCand: null, undo: [], redo: [], undoBytes: 0,
+  space: false, panning: null, busy: false, hintDone: false,
+};
+let origC, aiRawC, aiCorrC, maskC, prevMaskC, strokeC, tmpC, compC, tintC, ctx = {};
+const view = $('#view'), vctx = view.getContext('2d');
+const stage = $('#stage'), cursor = $('#cursor');
+const dpr = () => window.devicePixelRatio || 1;
+const ready = () => !!(S.origBmp && S.aiBmp);
+// NOVAI 内置改动 + 协议标记: novai-lossless-edit —— 载入/自动对齐期间保持可见载入态；未就绪时画笔控件禁用（修「笔刷静默失灵」）
+const busyState = { load: 0, align: false };
+function syncBusy() {
+  const b = $('#busy');
+  if (busyState.align) { b.textContent = '正在自动对齐和校色…'; b.hidden = false; }
+  else if (busyState.load > 0) { b.textContent = '正在载入图片…'; b.hidden = false; }
+  else b.hidden = true;
+}
+
+// ---------- messages ----------
+let toastTimer = 0;
+function toast(t, cls, ms = 2800) {
+  const e = $('#toast'); e.textContent = t; e.className = 'show ' + (cls || '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { e.className = ''; }, ms);
+}
+function status(t, cls) { const e = $('#status'); e.textContent = t; e.className = cls || ''; }
+function refreshButtons() {
+  const rdy = ready();
+  $('#tools').classList.toggle('off', !rdy);
+  $$('#tools button, #tools input').forEach(el => { el.disabled = !rdy; });
+  $('#bUndo').disabled = !rdy || !S.undo.length; $('#bRedo').disabled = !rdy || !S.redo.length;
+  $('#bSwap').disabled = !rdy;
+}
+
+// ---------- loading ----------
+async function loadBitmap(file) {
+  try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch (e) { return await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(file); }); }
+}
+function thumbURL(bmp, maxW, maxH) {   // keeps the image's own aspect ratio
+  const k = Math.min(maxW / bmp.width, maxH / bmp.height), w = Math.max(1, Math.round(bmp.width * k)), h = Math.max(1, Math.round(bmp.height * k));
+  const c = mk(w * 2, h * 2), x = c.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(bmp, 0, 0, w * 2, h * 2);
+  return { url: c.toDataURL(), w, h };
+}
+function showSlot(slot, bmp) {
+  const t = thumbURL(bmp, 110, 64), img = $(slot === 'orig' ? '#thOrig' : '#thAi');
+  img.src = t.url; img.style.width = t.w + 'px'; img.style.height = t.h + 'px';
+  $(slot === 'orig' ? '#sOrig' : '#sAi').classList.add('has');
+  const dz = $(`.dz[data-slot="${slot}"]`); dz.classList.add('done');
+  dz.querySelector('.dzc').innerHTML = `<img src="${thumbURL(bmp, 230, 170).url}"><span class="tag">${slot === 'orig' ? '原图' : '修改图'} · ${bmp.width}×${bmp.height}</span><span class="x" role="button" title="移除，重新选择">×</span>`;
+}
+const dzInit = {}; $$('.dz .dzc').forEach(c => { dzInit[c.parentElement.dataset.slot] = c.innerHTML; });
+function clearSlot(slot) {
+  if (slot === 'orig') { S.origBmp = null; S.origName = ''; origC = null; } else { S.aiBmp = null; S.aiName = ''; }
+  $(slot === 'orig' ? '#sOrig' : '#sAi').classList.remove('has'); $(slot === 'orig' ? '#thOrig' : '#thAi').removeAttribute('src');
+  const dz = $(`.dz[data-slot="${slot}"]`); dz.classList.remove('done'); dz.querySelector('.dzc').innerHTML = dzInit[slot];
+  S.det = null; S.undo = []; S.redo = []; S.undoBytes = 0; S.stroke = null; compareOff();
+  if (maskC) { ctx.mask.clearRect(0, 0, S.W, S.H); ctx.prev.clearRect(0, 0, S.W, S.H); }
+  $('#cands').innerHTML = ''; $('#hint').hidden = true; $('#empty').hidden = false; $('#chip').hidden = true;
+  status(S.origBmp || S.aiBmp ? (S.origBmp ? '再选一张修改后的图' : '再选一张原图') : '等待两张图');
+  if (origC) composite(); refreshButtons(); render();
+}
+document.addEventListener('click', e => {
+  const x = e.target.closest('.x'); if (!x) return;
+  e.preventDefault(); e.stopPropagation();
+  const host = x.closest('[data-slot]'); if (host) clearSlot(host.dataset.slot);
+}, true);
+async function setOriginal(file) {
+  busyState.load++; syncBusy();
+  try {
+    const bmp = await loadBitmap(file);
+    S.origBmp = bmp; S.origName = file.name.replace(/\.[^.]+$/, '');
+    S.W = bmp.width; S.H = bmp.height;
+    showSlot('orig', bmp);
+    allocCanvases(); ctx.orig.drawImage(bmp, 0, 0);
+    S.undo = []; S.redo = []; S.undoBytes = 0;
+    if (S.aiBmp) await setupAi(); else { status('再选一张修改后的图'); composite(); }
+  } catch (e) {
+    console.error(e);
+    status('原图载入失败，请换一张试试', 'warn');
+    toast('原图载入失败：' + (e && e.message || e), 'warn', 5000);
+    throw e;
+  } finally {
+    busyState.load--; syncBusy(); refreshButtons();
+  }
+}
+async function setAi(file) {
+  busyState.load++; syncBusy();
+  try {
+    const bmp = await loadBitmap(file);
+    S.aiBmp = bmp; S.aiName = file.name;
+    showSlot('ai', bmp);
+    if (S.origBmp) await setupAi(); else status('再选一张原图');
+  } catch (e) {
+    console.error(e);
+    status('修改图载入失败，请换一张试试', 'warn');
+    toast('修改图载入失败：' + (e && e.message || e), 'warn', 5000);
+    throw e;
+  } finally {
+    busyState.load--; syncBusy(); refreshButtons();
+  }
+}
+function allocCanvases() {
+  const W = S.W, H = S.H;
+  origC = mk(W, H); aiRawC = mk(W, H); aiCorrC = mk(W, H); maskC = mk(W, H); prevMaskC = mk(W, H);
+  strokeC = mk(W, H); tmpC = mk(W, H); compC = mk(W, H); tintC = mk(W, H);
+  ctx = { orig: origC.getContext('2d'), aiRaw: aiRawC.getContext('2d'), aiCorr: aiCorrC.getContext('2d'), mask: maskC.getContext('2d'),
+    prev: prevMaskC.getContext('2d'), stroke: strokeC.getContext('2d'), tmp: tmpC.getContext('2d'), comp: compC.getContext('2d'), tint: tintC.getContext('2d') };
+}
+async function setupAi() {
+  const b = S.aiBmp, ar = b.width / b.height, ar0 = S.W / S.H;
+  $('#empty').hidden = true; $('#chip').hidden = false; S.det = null; $('#cands').innerHTML = '';
+  busyState.align = true; syncBusy();
+  status('正在自动对齐和校色…', 'busy');
+  fitView();
+  setSize(Math.min(S.W, S.H) / 8 < 40 ? 40 : Math.min(400, Math.min(S.W, S.H) / 8));
+  S.align = { sx: 1, sy: 1, tx: 0, ty: 0 };
+  drawAiRaw();
+  try {
+    await autoAlign();
+    S.corr.computed = false; computeCorrection(); applyCorrection();
+    const det = analyzeChanges();
+    composite(); render();
+    let st = `已自动对齐（${S.align.mode || '平移'}）· 已校色`, cls = 'ok';
+    if (b.width !== S.W || b.height !== S.H) st += ` · 修改图已缩放到 ${S.W}×${S.H}`;
+    if (Math.abs(ar - ar0) / ar0 > 0.01) { st += ' · 两图比例不同，已拉伸'; cls = 'warn'; }
+    if (S.align.resid > 2.5) { st += ' · 两图有局部形变，边缘用大一点的画笔'; cls = 'warn'; }
+    if (det && det.bgMode) {
+      applyBackgroundMask();
+      st += ` · 背景替换模式，保留 ${det.keepCount} 处未变前景`;
+      showHint(det.keepCount ? `<div>背景已整体替换，保留了 ${det.keepCount} 处没变的前景；局部不对用「修改」「还原」画笔调。</div><span class="hb"><button id="hintOk">知道了</button></span>`
+        : `<div>整张图都变了，结果就是修改图；想保留哪里用「还原」画笔涂。</div><span class="hb"><button id="hintOk">知道了</button></span>`);
+      setShowMask(true); setOpacity(1);
+    } else if (det && det.auto) {
+      eraseCandidates(det.autoIdx, true);
+      st += ` · 已自动采用 ${det.autoIdx.length} 处改动`;
+      if (det.extra > 0) {
+        showHint(`<div>已自动采用 ${det.autoIdx.length} 处改动；另有 ${det.extra} 处可能的改动已框出，是改动就点它。</div><span class="hb"><button id="hintAll">全部采用</button><button id="hintOk">知道了</button></span>`);
+        $('#hintAll').addEventListener('click', () => { eraseCandidates(S.det.cands.map((c, i) => i), true); dismissHint(); toast('已全部换成修改图', 'ok'); });
+      } else {
+        showHint(`<div>已自动采用 ${det.autoIdx.length} 处改动；范围不对用「修改」「还原」画笔调。</div><span class="hb"><button id="hintOk">知道了</button></span>`);
+      }
+      setShowMask(true); setOpacity(1);
+    } else if (det && det.cands.length) {
+      showHint(`<div>已标出差异最大的 ${det.cands.length} 处，点框采用；漏掉的用「修改」画笔涂。</div><span class="hb"><button id="hintAll">全部采用</button><button id="hintOk">忽略</button></span>`);
+      $('#hintAll').addEventListener('click', () => { eraseCandidates(S.det.cands.map((c, i) => i), true); dismissHint(); setShowMask(true); setOpacity(1); toast('已全部换成修改图', 'ok'); });
+      setShowMask(false); setOpacity(1);
+    } else {
+      showHint(`<div>没找到明显改动，用「修改」画笔涂出改动处；拉低「原图不透明度」能看到重影。</div><span class="hb"><button id="hintOk">知道了</button></span>`);
+      setShowMask(false); setOpacity(1);
+    }
+    layoutCandidates();
+    status(st, cls);
+  } catch (err) {
+    console.error(err);
+    status('自动对齐失败：' + (err && err.message || err), 'warn');
+    toast('自动对齐失败，可以点「重新自动对齐」重试', 'warn', 5000);
+  } finally {
+    busyState.align = false; S.busy = false; syncBusy(); refreshButtons();
+  }
+}
+function showHint(html) {
+  $('#hint').innerHTML = html; $('#hintOk').addEventListener('click', dismissHint); $('#hint').hidden = false; S.hintDone = false;
+  clearTimeout(S.hintTimer); S.hintTimer = setTimeout(() => { $('#hint').hidden = true; }, 8000);   // the bubble fades out by itself; boxes and buttons stay
+}
+function setShowMask(v) { S.view.showMask = v; $('#bShowMask').classList.toggle('on', v); render(); }
+function drawAiRaw() {
+  const A = S.align;
+  ctx.aiRaw.clearRect(0, 0, S.W, S.H); ctx.aiRaw.imageSmoothingQuality = 'high';
+  ctx.aiRaw.drawImage(S.aiBmp, A.tx, A.ty, S.W * A.sx, S.H * A.sy);
+}
+
+// ---------- alignment: translation + slight scale, coarse to fine, gradient-based ----------
+function gradMap(src, sw, sh) {
+  const c = mk(sw, sh), x = c.getContext('2d', { willReadFrequently: true });
+  x.drawImage(src, 0, 0, sw, sh);
+  const d = x.getImageData(0, 0, sw, sh).data, n = sw * sh;
+  const g = new Float32Array(n), m = new Float32Array(n);
+  for (let i = 0, p = 0; i < n; i++, p += 4) g[i] = d[p] * 0.299 + d[p + 1] * 0.587 + d[p + 2] * 0.114;
+  for (let y = 1; y < sh - 1; y++) for (let xx = 1; xx < sw - 1; xx++) { const i = y * sw + xx; m[i] = Math.abs(g[i + 1] - g[i - 1]) + Math.abs(g[i + sw] - g[i - sw]); }
+  return m;
+}
+function alignScore(A, B, sw, sh, ox, oy) {
+  const T = 24; let s = 0, n = 0;
+  const x0 = Math.max(2, 2 - ox), x1 = Math.min(sw - 2, sw - 2 - ox), y0 = Math.max(2, 2 - oy), y1 = Math.min(sh - 2, sh - 2 - oy);
+  for (let y = y0; y < y1; y++) {
+    let ia = y * sw + x0, ib = (y + oy) * sw + x0 + ox;
+    for (let x = x0; x < x1; x++, ia++, ib++) { const d = Math.abs(A[ia] - B[ib]); s += d < T ? d : T; n++; }
+  }
+  return n ? s / n : 1e9;
+}
+function blockScore(A, B, sw, sh, x0, y0, x1, y1, ox, oy, step) {
+  const T = 24; let s = 0, n = 0;
+  for (let y = y0; y < y1; y += step) {
+    const yb = y + oy; if (yb < 1 || yb >= sh - 1) continue;
+    let ia = y * sw + x0, ib = yb * sw + x0 + ox;
+    for (let x = x0; x < x1; x += step, ia += step, ib += step) {
+      const xb = x + ox; if (xb < 1 || xb >= sw - 1) continue;
+      const d = Math.abs(A[ia] - B[ib]); s += d < T ? d : T; n++;
+    }
+  }
+  return n ? s / n : 1e9;
+}
+function fitLine(xs, ds, ws) {
+  let sw = 0, sx = 0, sd = 0, sxx = 0, sxd = 0;
+  for (let i = 0; i < xs.length; i++) { const w = ws[i]; sw += w; sx += w * xs[i]; sd += w * ds[i]; sxx += w * xs[i] * xs[i]; sxd += w * xs[i] * ds[i]; }
+  const den = sw * sxx - sx * sx; if (Math.abs(den) < 1e-9) return { a: 0, b: sw ? sd / sw : 0 };
+  const a = (sw * sxd - sx * sd) / den; return { a, b: (sd - a * sx) / sw };
+}
+async function autoAlign() {
+  if (!ready() || S.busy) return;
+  S.busy = true;
+  await new Promise(r => setTimeout(r, 10));
+  S.align = { sx: 1, sy: 1, tx: 0, ty: 0 }; drawAiRaw();
+  const W = S.W, H = S.H;
+  const widths = [256, 512, 1024, W].filter((w, i, arr) => w <= W && arr.indexOf(w) === i);
+  let bx = 0, by = 0, prevW = 0, A = null, B = null;
+  for (let li = 0; li < widths.length; li++) {
+    const sw = widths[li], sh = Math.max(8, Math.round(H * sw / W));
+    A = gradMap(origC, sw, sh); B = gradMap(aiRawC, sw, sh);
+    let range, cx, cy;
+    if (li === 0) { range = Math.max(8, Math.round(sw * 0.05)); cx = 0; cy = 0; }
+    else { const f = sw / prevW; cx = Math.round(bx * f); cy = Math.round(by * f); range = 2; }
+    let best = Infinity, bestX = cx, bestY = cy;
+    for (let oy = cy - range; oy <= cy + range; oy++) for (let ox = cx - range; ox <= cx + range; ox++) {
+      const sc = alignScore(A, B, sw, sh, ox, oy);
+      if (sc < best) { best = sc; bestX = ox; bestY = oy; }
+    }
+    bx = bestX; by = bestY; prevW = sw;
+  }
+  const bs = Math.max(160, Math.round(Math.min(W, H) / 4)), m = 8, R = 4, step = 2;
+  const cols = Math.max(1, Math.floor((W - 2 * m) / bs)), rows = Math.max(1, Math.floor((H - 2 * m) / bs));
+  const ox0 = Math.floor((W - cols * bs) / 2), oy0 = Math.floor((H - rows * bs) / 2);
+  const xs = [], ys = [], dxs = [], dys = [], ws = [];
+  let gmean = 0, gn = 0; for (let i = 0; i < A.length; i += 7) { gmean += A[i]; gn++; } gmean /= gn;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const x0 = ox0 + c * bs, y0 = oy0 + r * bs, x1 = x0 + bs, y1 = y0 + bs;
+    let tex = 0, n = 0; for (let y = y0; y < y1; y += 4) for (let x = x0; x < x1; x += 4) { tex += A[y * W + x]; n++; } tex /= n;
+    if (tex < gmean * 0.35) continue;
+    let best = Infinity, bxx = bx, byy = by;
+    for (let oy = by - R; oy <= by + R; oy++) for (let ox = bx - R; ox <= bx + R; ox++) {
+      const sc = blockScore(A, B, W, H, x0, y0, x1, y1, ox, oy, step);
+      if (sc < best) { best = sc; bxx = ox; byy = oy; }
+    }
+    if (Math.abs(bxx - bx) >= R || Math.abs(byy - by) >= R) continue;
+    xs.push((x0 + x1) / 2); ys.push((y0 + y1) / 2); dxs.push(bxx); dys.push(byy); ws.push(tex);
+  }
+  let a = 0, b = bx, c = 0, d = by, resid = 0, mode = '平移';
+  if (xs.length >= 6) {
+    const fx = fitLine(xs, dxs, ws), fy = fitLine(ys, dys, ws);
+    if (Math.abs(fx.a) <= 0.02 && Math.abs(fy.a) <= 0.02) {
+      a = fx.a; b = fx.b; c = fy.a; d = fy.b; mode = '平移 + 缩放';
+      let se = 0; for (let i = 0; i < xs.length; i++) { const ex = dxs[i] - (a * xs[i] + b), ey = dys[i] - (c * ys[i] + d); se += ex * ex + ey * ey; }
+      resid = Math.sqrt(se / xs.length);
+    }
+  }
+  S.align = { sx: 1 / (1 + a), sy: 1 / (1 + c), tx: -b / (1 + a), ty: -d / (1 + c), resid, mode, blocks: xs.length };
+  drawAiRaw();
+  if (S.corr.computed) applyCorrection();
+  composite(); render(); updateAlignInfo();
+  S.busy = false;
+}
+function updateAlignInfo() {
+  const A = S.align, f = v => (v > 0 ? '+' : '') + v.toFixed(1);
+  let t = `偏移 x <b>${f(A.tx)}</b> · y <b>${f(A.ty)}</b>`;
+  if (A.sx !== 1 || A.sy !== 1) t += `<br>缩放 x <b>${(A.sx * 100).toFixed(2)}%</b> · y <b>${(A.sy * 100).toFixed(2)}%</b>`;
+  if (A.blocks) t += `<br>${A.mode}，${A.blocks} 个纹理块，拟合残差 ${A.resid.toFixed(1)}px`;
+  $('#alignInfo').innerHTML = t;
+}
+function nudge(dx, dy) {
+  if (!ready()) return;
+  S.align.tx += dx; S.align.ty += dy; drawAiRaw();
+  if (S.corr.computed) applyCorrection();
+  composite(); render(); updateAlignInfo();
+}
+
+// ---------- colour correction ----------
+function computeCorrection() {
+  if (!ready()) return;
+  const W = S.W, H = S.H, total = W * H;
+  const o = ctx.orig.getImageData(0, 0, W, H).data, a = ctx.aiRaw.getImageData(0, 0, W, H).data, m = ctx.mask.getImageData(0, 0, W, H).data;
+  const step = Math.max(1, Math.floor(total / 400000));
+  const sO = [0, 0, 0], sA = [0, 0, 0], qO = [0, 0, 0], qA = [0, 0, 0]; let n = 0, seen = 0;
+  for (let i = 0; i < total; i += step) {
+    const p = i * 4; seen++;
+    if (a[p + 3] < 250) continue;
+    if (m[p + 3] > 8) continue;
+    const dr = Math.abs(a[p] - o[p]), dg = Math.abs(a[p + 1] - o[p + 1]), db = Math.abs(a[p + 2] - o[p + 2]);
+    if (dr + dg + db > 96) continue;
+    for (let c = 0; c < 3; c++) { const vo = o[p + c], va = a[p + c]; sO[c] += vo; sA[c] += va; qO[c] += vo * vo; qA[c] += va * va; }
+    n++;
+  }
+  if (n < 500) { S.corr.gain = [1, 1, 1]; S.corr.offset = [0, 0, 0]; S.corr.cast = [0, 0, 0]; S.corr.sampled = 0; S.corr.computed = true; updateCorrInfo(); return; }
+  for (let c = 0; c < 3; c++) {
+    const mO = sO[c] / n, mA = sA[c] / n;
+    const vO = Math.max(1, qO[c] / n - mO * mO), vA = Math.max(1, qA[c] / n - mA * mA);
+    const g = clamp(Math.sqrt(vO / vA), 0.85, 1.18);
+    S.corr.gain[c] = g; S.corr.offset[c] = mO - g * mA; S.corr.cast[c] = mA - mO;
+  }
+  S.corr.sampled = n / seen; S.corr.computed = true;
+  updateCorrInfo();
+}
+function updateCorrInfo() {
+  const c = S.corr; if (!c.computed) { $('#corrInfo').textContent = '—'; return; }
+  const sg = v => (v >= 0 ? '+' : '') + v.toFixed(1), N = ['R', 'G', 'B'];
+  $('#corrInfo').innerHTML = `修改图偏色 ${N.map((nm, i) => `${nm} <b>${sg(c.cast[i])}</b>`).join(' ')}<br>` +
+    `${N.map((nm, i) => `${nm} ×${c.gain[i].toFixed(3)} ${sg(c.offset[i])}`).join(' ')}<br>` +
+    `采样 ${(c.sampled * 100).toFixed(0)}% 未变化像素` + (c.sampled === 0 ? '，可用像素太少，未校色' : '，已反向校正');
+}
+function applyCorrection() {
+  if (!ready()) return;
+  const c = S.corr, k = c.on ? c.k : 0;
+  const luts = [0, 1, 2].map(ch => { const l = new Uint8ClampedArray(256); for (let v = 0; v < 256; v++) { const t = c.gain[ch] * v + c.offset[ch]; l[v] = v + k * (t - v) + c.manual[ch]; } return l; });
+  const img = ctx.aiRaw.getImageData(0, 0, S.W, S.H), d = img.data, L0 = luts[0], L1 = luts[1], L2 = luts[2];
+  for (let p = 0; p < d.length; p += 4) { d[p] = L0[d[p]]; d[p + 1] = L1[d[p + 1]]; d[p + 2] = L2[d[p + 2]]; }
+  ctx.aiCorr.putImageData(img, 0, 0);
+}
+
+// ---------- change candidates: rank difference blobs; auto-apply when one dominates, else suggest ----------
+// Pixel differencing cannot tell "re-rendered but the same" from "edited" when the edit is subtle, so we never
+// guess silently: only a blob that dwarfs every other one is erased automatically; otherwise the strongest blobs
+// are offered as one-click suggestions and the brush stays the fallback.
+function analyzeChanges() {
+  if (!ready()) return null;
+  const W = S.W, H = S.H, f = Math.max(1, Math.round(Math.max(W, H) / 1024));
+  const w = Math.max(16, Math.round(W / f)), h = Math.max(16, Math.round(H / f)), n = w * h;
+  const small = src => { const c = mk(w, h), x = c.getContext('2d', { willReadFrequently: true }); x.imageSmoothingQuality = 'high'; x.drawImage(src, 0, 0, w, h); return x.getImageData(0, 0, w, h).data; };
+  const o = small(origC), a = small(aiCorrC);
+  const boxMean = (src, r) => { const t = new Float32Array(n), out = new Float32Array(n);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let s = 0, c = 0; for (let k = -r; k <= r; k++) { const xx = x + k; if (xx >= 0 && xx < w) { s += src[y * w + xx]; c++; } } t[y * w + x] = s / c; }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let s = 0, c = 0; for (let k = -r; k <= r; k++) { const yy = y + k; if (yy >= 0 && yy < h) { s += t[yy * w + x]; c++; } } out[y * w + x] = s / c; }
+    return out; };
+  // Two complementary measures, each normalised by its own noise level:
+  //  - signed colour difference averaged over a small window: re-rendered texture that merely shifted cancels out,
+  //    a real change of colour (a needle gone, a badge added) survives even when thin;
+  //  - absolute per-pixel difference averaged over a window: fills regions whose texture changed but whose average colour did not.
+  const mg = Math.max(2, Math.ceil(0.01 * Math.min(w, h)));          // the aligned layer's edge is unreliable: ignore a 1% border
+  const isBorder = i => { const x = i % w, y = (i - x) / w; return x < mg || y < mg || x >= w - mg || y >= h - mg; };
+  const robustT = m => { const inner = []; for (let i = 0; i < n; i++) if (!isBorder(i)) inner.push(m[i]);
+    const sorted = Float32Array.from(inner).sort(), med = sorted[sorted.length >> 1];
+    const dev = Float32Array.from(inner, v => Math.abs(v - med)).sort(), mad = dev[dev.length >> 1];
+    return { T: Math.max(6, med + 8 * Math.max(0.5, mad)), med, mad, sorted }; };
+  const dmS = new Float32Array(n);
+  for (let ch = 0; ch < 3; ch++) {
+    const sd = new Float32Array(n);
+    for (let i = 0, p = ch; i < n; i++, p += 4) sd[i] = a[i * 4 + 3] < 250 ? 0 : o[p] - a[p];
+    const m = boxMean(sd, 1);
+    for (let i = 0; i < n; i++) { const v = Math.abs(m[i]); if (v > dmS[i]) dmS[i] = v; }
+  }
+  const dAbs = new Float32Array(n);
+  for (let i = 0, p = 0; i < n; i++, p += 4) dAbs[i] = a[p + 3] < 250 ? 0 : (Math.abs(o[p] - a[p]) + Math.abs(o[p + 1] - a[p + 1]) + Math.abs(o[p + 2] - a[p + 2])) / 3;
+  const dmA = boxMean(dAbs, 2);
+  const tS = robustT(dmS), tA = robustT(dmA);
+  // --- background-replaced mode: when a large share of the frame changed, the noise estimate is meaningless.
+  //     Instead find the big regions that did NOT change (people, foreground) and keep those; everything else takes the AI image.
+  const sortedA = tA.sorted, changedShare = 1 - (sortedA.findIndex(v => v > 20) + 1) / sortedA.length;
+  if (changedShare >= 0.3) {
+    const q = t => sortedA[Math.min(sortedA.length - 1, Math.floor(t * sortedA.length))];
+    const Tlow = Math.max(12, q(0.2) + 4 * Math.max(0.5, q(0.4) - q(0.2)));
+    let keep = new Uint8Array(n); for (let i = 0; i < n; i++) keep[i] = (!isBorder(i) && dmA[i] < Tlow) ? 1 : 0;
+    keep = morph(morph(keep, w, h, 2, 0), w, h, 2, 1);                         // opening: drop slivers
+    const lab2 = new Int32Array(n).fill(-1), st = new Int32Array(n), areas = [];
+    for (let i = 0; i < n; i++) {
+      if (lab2[i] >= 0 || !keep[i]) continue;
+      const id = areas.length; let sp = 0, area = 0; st[sp++] = i; lab2[i] = id;
+      while (sp) { const j = st[--sp]; area++; const x = j % w; const nb = [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, j - w, j + w];
+        for (const k of nb) if (k >= 0 && k < n && lab2[k] < 0 && keep[k]) { lab2[k] = id; st[sp++] = k; } }
+      areas.push(area);
+    }
+    const bigIds = new Set(areas.map((a, i) => a >= n * 0.01 ? i : -1).filter(i => i >= 0));
+    for (let i = 0; i < n; i++) keep[i] = (lab2[i] >= 0 && bigIds.has(lab2[i])) ? 1 : 0;
+    keep = morph(morph(keep, w, h, 3, 1), w, h, 3, 0);                         // closing: smooth the kept silhouettes
+    const shrink = Math.max(1, Math.round(0.004 * Math.min(w, h)));
+    const kept = morph(keep, w, h, shrink, 0);                                   // push the seam slightly into the kept region: the edge fringe comes from the AI image
+    const bgMask = new Uint8Array(n); for (let i = 0; i < n; i++) bgMask[i] = kept[i] ? 0 : 1;
+    const res = { w, h, f, lab: null, bgMode: true, bgMask, bgFeather: shrink * f, keepCount: bigIds.size, changedShare: +(changedShare * 100).toFixed(0), Tlow: +Tlow.toFixed(1),
+      T: `色差 ${tS.T.toFixed(1)} / 像素差 ${tA.T.toFixed(1)}`, med: +tA.med.toFixed(2), mad: +tA.mad.toFixed(2), comps: 0, dominance: 0, noise: 0, cands: [], all: [], auto: true, autoIdx: [] };
+    S.det = res; updateDetInfo();
+    return res;
+  }
+  // score in units of "times the noise threshold"; anything above 1 counts as changed
+  const dm = new Float32Array(n);
+  for (let i = 0; i < n; i++) dm[i] = isBorder(i) ? 0 : Math.max(dmS[i] / tS.T, dmA[i] / tA.T);
+  const T = 1, med = tS.med, mad = tS.mad;
+  const lab = new Int32Array(n).fill(-1), stack = new Int32Array(n), comps = [];
+  for (let i = 0; i < n; i++) {
+    if (lab[i] >= 0 || dm[i] <= T) continue;
+    const id = comps.length; let sp = 0, area = 0, mass = 0, x0 = w, y0 = h, x1 = 0, y1 = 0; stack[sp++] = i; lab[i] = id;
+    while (sp) {
+      const j = stack[--sp]; area++; mass += dm[j] - T; const x = j % w, y = (j - x) / w;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      const nb = [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, j - w, j + w];
+      for (const k of nb) if (k >= 0 && k < n && lab[k] < 0 && dm[k] > T) { lab[k] = id; stack[sp++] = k; }
+    }
+    comps.push({ id, area, mass, x0, y0, x1, y1 });
+  }
+  comps.sort((p, q) => q.mass - p.mass);
+  const minArea = Math.max(6, n * 0.00005);                             // a needle is tiny: keep small blobs, let the ranking sort them
+  // pieces of one edit often split (where the new content happens to match the old colour): merge blobs whose grown boxes touch
+  const rs = Math.ceil((Math.max(4, Math.round(Math.min(W, H) * 0.012)) * 1.5) / f);
+  const merged = [], sig = comps.length ? comps[0].mass * 0.15 : 0;      // only sizeable pieces merge; specks stay on their own
+  for (const c of comps.filter(c => c.area >= minArea).slice(0, 60)) {
+    const hit = c.mass >= sig ? merged.find(m => m.mass >= sig && c.x0 - rs <= m.x1 + rs && c.x1 + rs >= m.x0 - rs && c.y0 - rs <= m.y1 + rs && c.y1 + rs >= m.y0 - rs) : null;
+    if (hit) { hit.ids.push(c.id); hit.mass += c.mass; hit.area += c.area; hit.x0 = Math.min(hit.x0, c.x0); hit.y0 = Math.min(hit.y0, c.y0); hit.x1 = Math.max(hit.x1, c.x1); hit.y1 = Math.max(hit.y1, c.y1); }
+    else merged.push({ ids: [c.id], mass: c.mass, area: c.area, x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 });
+  }
+  merged.sort((p, q) => q.mass - p.mass);
+  // A real edit is intense: its pixels sit far above the noise threshold on average (mean excess >= 1.4, i.e. average score >= 2.4x T).
+  // Re-rendered texture makes big but faint blobs (mean excess 0.3-1.3), so intensity separates the two where mass alone cannot.
+  const byId = new Map(comps.map(c => [c.id, c]));
+  const intense = (m, thr) => m.ids.some(id => { const c = byId.get(id); return c.mass / c.area >= thr && c.area >= n * 0.0002; });
+  // A slightly warped re-render leaves thin high-contrast edges (a ceiling lamp, a monitor bezel, keyboard keys) misaligned by a
+  // pixel or two after the global fit. Such a blob's difference mostly vanishes when the AI pixels are nudged a little; a real edit
+  // (a pattern removed, a penguin gone) does not. Blobs explained by a small shift are alignment residue, not changes.
+  const shiftExplains = m => {
+    const ids = new Set(m.ids), R = 3;
+    const cost = (dx, dy) => { let s = 0, c = 0;
+      for (let y = m.y0; y <= m.y1; y++) { const yy = y + dy; if (yy < 0 || yy >= h) continue;
+        for (let x = m.x0; x <= m.x1; x++) { const xx = x + dx; if (xx < 0 || xx >= w) continue;
+          const i = y * w + x; if (!ids.has(lab[i])) continue;
+          const q = (yy * w + xx) * 4; if (a[q + 3] < 250) continue;
+          const p = i * 4; s += Math.abs(o[p] - a[q]) + Math.abs(o[p + 1] - a[q + 1]) + Math.abs(o[p + 2] - a[q + 2]); c++; } }
+      return c ? s / c : 0; };
+    const base = cost(0, 0); if (!base) return false;
+    let best = base;
+    for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) if (dx || dy) { const v = cost(dx, dy); if (v < best) best = v; }
+    m.shiftGain = +(1 - best / base).toFixed(2);
+    return best < base * 0.45;
+  };
+  merged.forEach(m => { m.mean = m.mass / m.area; m.shift = m.mean >= 1.0 && shiftExplains(m); m.strong = !m.shift && intense(m, 1.4); });
+  // many intense blobs = a mass removal (crowd, flags): the bar can drop to 1.1 so low-contrast members (a white bear on snow) come along too
+  if (merged.filter(m => m.strong).length >= 8) merged.forEach(m => { if (!m.strong && !m.shift) m.strong = intense(m, 1.1); });
+  const strong = merged.filter(m => m.strong).slice(0, 40);
+  const auto = strong.length > 0 && (strong[0].area >= n * 0.002 || strong.length >= 3);
+  // fainter blobs (mean 1.0-1.4): with more than 5 intense edits they are almost surely edits too, so apply them; otherwise offer them as boxes
+  const faint = merged.filter(m => !m.strong && !m.shift && m.mean >= 1.0).slice(0, 12);
+  if (auto && strong.length > 5) faint.forEach(m => { m.strong = true; });
+  const list = auto ? strong.concat(faint) : merged.filter(m => !m.shift).slice(0, 5);
+  const top = merged.slice(0, 5);
+  const dominance = top.length ? top[0].mass / (top[1] ? top[1].mass : top[0].mass * 0.01) : 0;
+  const res = { w, h, f, lab, T: `色差 ${tS.T.toFixed(1)} / 像素差 ${tA.T.toFixed(1)}`, med: +med.toFixed(2), mad: +mad.toFixed(2), comps: comps.length, dominance: +dominance.toFixed(1),
+    cands: list.map(c => ({ ids: c.ids, area: c.area / n, mass: Math.round(c.mass), mean: +c.mean.toFixed(2), strong: !!c.strong, shiftGain: c.shiftGain, box: [c.x0 * f, c.y0 * f, (c.x1 + 1) * f, (c.y1 + 1) * f], done: false })) };
+  res.all = merged.slice(0, 15).map(c => ({ mass: Math.round(c.mass), area: +(c.area / n * 100).toFixed(3), box: [c.x0 * f, c.y0 * f, (c.x1 + 1) * f, (c.y1 + 1) * f] }));   // for inspection in the advanced panel
+  res.allMasses = comps.filter(c => c.area >= minArea).map(c => Math.round(c.mass));   // sorted desc, for tuning
+  res.allStats = comps.filter(c => c.area >= minArea).slice(0, 40).map(c => [Math.round(c.mass), c.area, +(c.mass / c.area).toFixed(2), +(c.area / n * 100).toFixed(3)]);   // [mass, areaPx, meanExcess, area%]
+  res.shifted = merged.filter(m => m.shift).map(m => ({ mean: +m.mean.toFixed(2), gain: m.shiftGain, area: +(m.area / n * 100).toFixed(3), box: [m.x0 * f, m.y0 * f, (m.x1 + 1) * f, (m.y1 + 1) * f] }));   // blobs dismissed as alignment residue
+  // noise level of this image = typical mass of the blobs ranked 6-15 (the bulk of re-render speckle)
+  const tail = merged.slice(5, 15).map(c => c.mass).sort((a, b) => a - b); res.noise = tail.length ? Math.round(tail[tail.length >> 1]) : 0;
+  res.auto = auto;                                                          // confident when at least one intense blob is sizeable, or three intense blobs exist
+  res.autoIdx = res.cands.map((c, i) => i).filter(i => res.cands[i].strong);   // every intense blob is applied; fainter ones stay as boxed suggestions
+  res.extra = res.cands.length - res.autoIdx.length;
+  S.det = res; updateDetInfo();
+  return res;
+}
+function morph(src, w, h, r, grow) {   // separable square dilation (grow=1) or erosion (grow=0)
+  const t = new Uint8Array(w * h), out = new Uint8Array(w * h), want = grow ? 1 : 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = 1 - want; for (let k = -r; k <= r; k++) { const xx = x + k; if (xx >= 0 && xx < w && src[y * w + xx] === want) { v = want; break; } } t[y * w + x] = v; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let v = 1 - want; for (let k = -r; k <= r; k++) { const yy = y + k; if (yy >= 0 && yy < h && t[yy * w + x] === want) { v = want; break; } } out[y * w + x] = v; }
+  return out;
+}
+function fillHoles(bin, w, h) {          // background not reachable from the image border is a hole inside a blob: fill it
+  const n = w * h, seen = new Uint8Array(n), stack = new Int32Array(n); let sp = 0;
+  const push = i => { if (!seen[i] && !bin[i]) { seen[i] = 1; stack[sp++] = i; } };
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  while (sp) { const j = stack[--sp], x = j % w; if (x > 0) push(j - 1); if (x < w - 1) push(j + 1); if (j >= w) push(j - w); if (j + w < n) push(j + w); }
+  const out = new Uint8Array(bin); for (let i = 0; i < n; i++) if (!bin[i] && !seen[i]) out[i] = 1;
+  return out;
+}
+function paintBlob(ids) {
+  const { w, h, f, lab } = S.det, n = w * h, W = S.W, H = S.H;
+  const grow = Math.max(4, Math.round(Math.min(W, H) * 0.012)), feather = Math.round(grow / 2), rs = Math.ceil((grow + feather) / f);
+  let bin = new Uint8Array(n); for (let i = 0; i < n; i++) if (lab[i] >= 0 && ids.has(lab[i])) bin[i] = 1;
+  // closing (dilate then erode) bridges narrow notches such as a leg whose colour happened to match the background; then fill enclosed holes
+  const rc = Math.max(2, Math.round(0.02 * Math.min(w, h)));
+  bin = fillHoles(morph(morph(bin, w, h, rc, 1), w, h, rc, 0), w, h);
+  paintSmall(morph(bin, w, h, rs, 1), feather);
+}
+function paintSmall(dil, feather) {   // upscale a binary mask from analysis scale into the mask canvas with a soft edge, as one undo step
+  const { w, h } = S.det, n = w * h, W = S.W, H = S.H;
+  const mc = mk(w, h), mx = mc.getContext('2d'), img = mx.createImageData(w, h);
+  for (let i = 0; i < n; i++) if (dil[i]) { img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = 255; img.data[i * 4 + 3] = 255; }
+  mx.putImageData(img, 0, 0);
+  ctx.mask.save(); ctx.mask.globalCompositeOperation = 'source-over'; ctx.mask.imageSmoothingEnabled = true;
+  try { ctx.mask.filter = `blur(${feather}px)`; } catch (e) {}
+  ctx.mask.drawImage(mc, 0, 0, W, H);
+  ctx.mask.restore();
+  pushUndo({ x: 0, y: 0, w: W, h: H }); updateTint();
+}
+function applyBackgroundMask() {
+  const d = S.det; if (!d || !d.bgMode) return;
+  paintSmall(d.bgMask, d.bgFeather); afterMaskChange(); layoutCandidates();
+}
+function eraseCandidate(k, silent) { eraseCandidates([k], silent); }
+function eraseCandidates(ks, silent) {   // several suggestions in one undoable step
+  if (!S.det) return;
+  const list = ks.map(k => S.det.cands[k]).filter(c => c && !c.done); if (!list.length) return;
+  const ids = new Set(); list.forEach(c => c.ids.forEach(id => ids.add(id)));
+  paintBlob(ids); list.forEach(c => { c.done = true; });
+  if (S.undo.length) S.undo[S.undo.length - 1].cands = ks;      // so undo can bring the suggestions back
+  afterMaskChange(); layoutCandidates();
+  if (!silent) { toast('已换成修改图，可用画笔继续修', 'ok'); if (S.det.cands.every(x => x.done)) dismissHint(); }
+}
+function layoutCandidates() {
+  const box = $('#cands'); box.innerHTML = '';
+  if (!S.det || !ready() || S.view.compare || S.view.peek) return;
+  const v = S.view, placed = [];
+  S.det.cands.forEach((c, i) => {
+    if (c.done) return;
+    const b = document.createElement('button'); b.className = 'c' + (i % 5); b.textContent = `#${i + 1} 改动大`;
+    let x = v.tx + c.box[0] * v.scale, y = v.ty + c.box[1] * v.scale - 4;
+    for (let tries = 0; tries < 6; tries++) { const hit = placed.find(p => Math.abs(p.x - x) < 150 && Math.abs(p.y - y) < 30); if (!hit) break; y = hit.y + 30; }
+    placed.push({ x, y });
+    b.style.left = x + 'px'; b.style.top = y + 'px';
+    b.title = `点一下把这块换成修改图。差异强度 ${c.mass}，占画面 ${(c.area * 100).toFixed(1)}%`;
+    b.addEventListener('click', () => eraseCandidate(i));
+    box.appendChild(b);
+  });
+}
+function drawCandidates() {
+  if (!S.det || S.view.compare || S.view.peek) return;
+  const v = S.view, d = dpr(), cols = ['#3ccf8e', '#f5b342', '#ff5c6c', '#4f8cff', '#c77dff'];
+  vctx.setTransform(1, 0, 0, 1, 0, 0); vctx.lineWidth = 2 * d; vctx.setLineDash([8 * d, 6 * d]);
+  S.det.cands.forEach((c, i) => {
+    if (c.done) return;
+    vctx.strokeStyle = cols[i % 5];
+    vctx.strokeRect((v.tx + c.box[0] * v.scale) * d, (v.ty + c.box[1] * v.scale) * d, (c.box[2] - c.box[0]) * v.scale * d, (c.box[3] - c.box[1]) * v.scale * d);
+  });
+  vctx.setLineDash([]);
+}
+function updateDetInfo() {
+  const r = S.det; if (!r) { $('#detInfo').textContent = '—'; return; }
+  if (r.bgMode) { $('#detInfo').innerHTML = `<b>背景替换模式</b>：${r.changedShare}% 的画面像素差异超过 20，未变阈值 ${r.Tlow}，保留 ${r.keepCount} 处大块未变区域，其余换成修改图`; return; }
+  const list = r.cands.map((c, i) => `#${i + 1} 强度 ${c.mass}，占 ${(c.area * 100).toFixed(1)}%`).join('；');
+  $('#detInfo').innerHTML = (r.auto ? `已自动采用 ${r.autoIdx.length} 处高强度改动（平均超阈 ≥ 1.4）${r.extra ? `，另框出 ${r.extra} 处较弱候选` : ''}` : r.cands.length ? `第一名只有第二名的 <b>${r.dominance}</b> 倍，不敢自动采用，改为标出候选` : '没有区域明显高于噪声，请手动涂') +
+    `<br>噪声阈值 ${r.T}，${r.comps} 个区域<br>${list || '—'}<br>整图重渲染的图，细微改动无法可靠识别`;
+}
+
+// ---------- compositing: 修改图 underneath, 原图 (with erased holes) on top at `opacity` ----------
+function compositeTo(target, opacity) {
+  const W = S.W, H = S.H;
+  target.globalCompositeOperation = 'source-over'; target.globalAlpha = 1;
+  target.drawImage(origC, 0, 0);
+  if (!S.aiBmp) return;
+  target.drawImage(aiCorrC, 0, 0);
+  ctx.tmp.globalCompositeOperation = 'source-over'; ctx.tmp.clearRect(0, 0, W, H); ctx.tmp.drawImage(origC, 0, 0);
+  ctx.tmp.globalCompositeOperation = 'destination-out'; ctx.tmp.drawImage(maskC, 0, 0);
+  ctx.tmp.globalCompositeOperation = 'source-over';
+  target.globalAlpha = opacity; target.drawImage(tmpC, 0, 0); target.globalAlpha = 1;
+}
+function composite() { if (origC) compositeTo(ctx.comp, S.view.opacity); }
+function updateTint() {
+  const W = S.W, H = S.H;
+  ctx.tint.globalCompositeOperation = 'source-over'; ctx.tint.clearRect(0, 0, W, H); ctx.tint.drawImage(maskC, 0, 0);
+  ctx.tint.globalCompositeOperation = 'source-in'; ctx.tint.fillStyle = '#ff2d55'; ctx.tint.fillRect(0, 0, W, H);
+  ctx.tint.globalCompositeOperation = 'source-over';
+}
+let renderQueued = false;
+function render() {
+  if (renderQueued) return; renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    const d = dpr(), cw = stage.clientWidth, ch = stage.clientHeight;
+    if (view.width !== Math.round(cw * d) || view.height !== Math.round(ch * d)) { view.width = Math.round(cw * d); view.height = Math.round(ch * d); }
+    vctx.setTransform(1, 0, 0, 1, 0, 0); vctx.clearRect(0, 0, view.width, view.height);
+    if (!origC) return;
+    const v = S.view;
+    vctx.imageSmoothingEnabled = v.scale < 2.5;
+    vctx.setTransform(v.scale * d, 0, 0, v.scale * d, v.tx * d, v.ty * d);
+    vctx.drawImage(v.compare ? origC : compC, 0, 0);
+    if (v.showMask && !v.compare && !v.peek && S.aiBmp) { vctx.globalAlpha = 0.45; vctx.drawImage(tintC, 0, 0); vctx.globalAlpha = 1; }
+    drawCandidates(); layoutCandidates();
+    $('#chip').textContent = `${S.W}×${S.H} · ${(v.scale * 100).toFixed(0)}%` + (v.compare ? ' · 原图' : '');
+  });
+}
+function fitView() {
+  const cw = stage.clientWidth, ch = stage.clientHeight;
+  if (!cw || !ch || !S.W) { S.view.fitted = false; return; }
+  const s = Math.min(cw / S.W, ch / S.H) * 0.96;
+  S.view.scale = s; S.view.tx = (cw - S.W * s) / 2; S.view.ty = (ch - S.H * s) / 2; S.view.fitted = true;
+  render();
+}
+function zoomAt(mx, my, factor) {
+  const v = S.view, ns = clamp(v.scale * factor, 0.03, 40), f = ns / v.scale;
+  v.tx = mx - (mx - v.tx) * f; v.ty = my - (my - v.ty) * f; v.scale = ns;
+  render(); updateCursor();
+}
+const toImg = (mx, my) => ({ x: (mx - S.view.tx) / S.view.scale, y: (my - S.view.ty) / S.view.scale });
+
+// ---------- brush (one path per stroke, ring stack = linear soft falloff, like a PS soft brush) ----------
+function drawStrokePath() {
+  const st = S.stroke, W = S.W, H = S.H, x = ctx.stroke, D = st.size, h = st.hardness;
+  x.globalCompositeOperation = 'source-over'; x.clearRect(0, 0, W, H);
+  x.lineCap = 'round'; x.lineJoin = 'round'; x.strokeStyle = '#fff';
+  const N = h >= 0.99 ? 1 : 14;
+  for (let k = 1; k <= N; k++) {
+    x.lineWidth = N === 1 ? D : Math.max(0.5, D * (h + (1 - h) * (1 - (k - 1) / N)));
+    x.globalAlpha = N === 1 ? 1 : 1 / (N - k + 1);
+    x.beginPath();
+    const p = st.pts; x.moveTo(p[0].x, p[0].y);
+    if (p.length === 1) x.lineTo(p[0].x + 0.01, p[0].y); else for (let i = 1; i < p.length; i++) x.lineTo(p[i].x, p[i].y);
+    x.stroke();
+  }
+  x.globalAlpha = 1;
+}
+function applyStrokeToMask() {
+  const W = S.W, H = S.H, m = ctx.mask;
+  m.globalCompositeOperation = 'source-over'; m.clearRect(0, 0, W, H); m.drawImage(prevMaskC, 0, 0);
+  m.globalCompositeOperation = S.stroke.mode === 'erase' ? 'source-over' : 'destination-out';
+  m.drawImage(strokeC, 0, 0);
+  m.globalCompositeOperation = 'source-over';
+}
+function strokeBox() {
+  const p = S.stroke.pts, r = S.stroke.size / 2 + 3;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const q of p) { if (q.x < x0) x0 = q.x; if (q.y < y0) y0 = q.y; if (q.x > x1) x1 = q.x; if (q.y > y1) y1 = q.y; }
+  x0 = clamp(Math.floor(x0 - r), 0, S.W); y0 = clamp(Math.floor(y0 - r), 0, S.H);
+  x1 = clamp(Math.ceil(x1 + r), 0, S.W); y1 = clamp(Math.ceil(y1 + r), 0, S.H);
+  return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
+}
+function pushUndo(box) {
+  if (!box.w || !box.h) return;
+  const before = ctx.prev.getImageData(box.x, box.y, box.w, box.h), after = ctx.mask.getImageData(box.x, box.y, box.w, box.h);
+  S.undo.push({ ...box, before, after }); S.undoBytes += before.data.length * 2; S.redo = [];
+  while (S.undo.length > 40 || (S.undoBytes > 600e6 && S.undo.length > 1)) { const e = S.undo.shift(); S.undoBytes -= e.before.data.length * 2; }
+  ctx.prev.clearRect(box.x, box.y, box.w, box.h); ctx.prev.drawImage(maskC, box.x, box.y, box.w, box.h, box.x, box.y, box.w, box.h);
+  refreshButtons();
+}
+function undo() { const e = S.undo.pop(); if (!e) return; ctx.mask.putImageData(e.before, e.x, e.y); ctx.prev.putImageData(e.before, e.x, e.y); S.redo.push(e); S.undoBytes -= e.before.data.length * 2; if (e.cands && S.det) e.cands.forEach(k => { if (S.det.cands[k]) S.det.cands[k].done = false; }); afterMaskChange(); layoutCandidates(); refreshButtons(); }
+function redo() { const e = S.redo.pop(); if (!e) return; ctx.mask.putImageData(e.after, e.x, e.y); ctx.prev.putImageData(e.after, e.x, e.y); S.undo.push(e); S.undoBytes += e.before.data.length * 2; if (e.cands && S.det) e.cands.forEach(k => { if (S.det.cands[k]) S.det.cands[k].done = true; }); afterMaskChange(); layoutCandidates(); refreshButtons(); }
+function afterMaskChange() { updateTint(); composite(); render(); }
+
+// ---------- pointer handling ----------
+let mouse = { x: 0, y: 0, over: false };
+function updateCursor() {
+  if (!mouse.over || !ready() || S.space || S.panning || S.busy) { cursor.style.display = 'none'; return; }
+  const d = S.brush.size * S.view.scale;
+  cursor.style.display = 'block'; cursor.style.width = cursor.style.height = d + 'px';
+  cursor.style.left = mouse.x + 'px'; cursor.style.top = mouse.y + 'px';
+  cursor.classList.toggle('restore', S.brush.mode === 'restore');
+}
+view.addEventListener('pointerdown', e => {
+  if (!S.origBmp) return;
+  setPeek(false);
+  view.setPointerCapture(e.pointerId);
+  const mx = e.offsetX, my = e.offsetY;
+  if (S.space || e.button === 1 || e.button === 2) { S.panning = { mx, my, tx: S.view.tx, ty: S.view.ty }; view.classList.add('dragging'); updateCursor(); return; }
+  if (e.button !== 0 || !ready() || S.busy) return;
+  const p = toImg(mx, my);
+  // inside exactly one suggestion box: wait and see. A plain click applies the suggestion; moving turns it into a brush stroke.
+  const hits = S.det && !S.view.compare ? S.det.cands.map((c, i) => i).filter(i => { const c = S.det.cands[i]; return !c.done && p.x >= c.box[0] && p.x <= c.box[2] && p.y >= c.box[1] && p.y <= c.box[3]; }) : [];
+  if (hits.length === 1) { S.pendingCand = { k: hits[0], p, mx, my }; return; }
+  S.stroke = { pts: [p], mode: S.brush.mode, size: S.brush.size, hardness: S.brush.hardness };
+  drawStrokePath(); applyStrokeToMask(); updateTint(); composite(); render();
+});
+let moveQueued = false;
+view.addEventListener('pointermove', e => {
+  const mx = e.offsetX, my = e.offsetY; mouse.x = mx; mouse.y = my; mouse.over = true;
+  if (S.panning) { S.view.tx = S.panning.tx + (mx - S.panning.mx); S.view.ty = S.panning.ty + (my - S.panning.my); render(); return; }
+  updateCursor();
+  if (S.pendingCand) {
+    if (Math.hypot(mx - S.pendingCand.mx, my - S.pendingCand.my) < 4) return;
+    S.stroke = { pts: [S.pendingCand.p], mode: S.brush.mode, size: S.brush.size, hardness: S.brush.hardness }; S.pendingCand = null;
+  }
+  if (!S.stroke) return;
+  const p = toImg(mx, my), last = S.stroke.pts[S.stroke.pts.length - 1];
+  if (Math.hypot(p.x - last.x, p.y - last.y) < 0.5) return;
+  S.stroke.pts.push(p);
+  if (moveQueued) return; moveQueued = true;
+  requestAnimationFrame(() => { moveQueued = false; if (!S.stroke) return; drawStrokePath(); applyStrokeToMask(); updateTint(); composite(); render(); });
+});
+function endStroke() {
+  if (S.panning) { S.panning = null; view.classList.remove('dragging'); updateCursor(); }
+  if (S.pendingCand) { const k = S.pendingCand.k; S.pendingCand = null; eraseCandidate(k); return; }
+  if (!S.stroke) return;
+  drawStrokePath(); applyStrokeToMask();
+  const box = strokeBox(); S.stroke = null;
+  pushUndo(box); afterMaskChange();
+  $('#hint').hidden = true;                                   // first stroke: the bubble goes, the suggestion boxes stay until 忽略 or applied
+}
+view.addEventListener('pointerup', endStroke);
+view.addEventListener('pointercancel', endStroke);
+view.addEventListener('pointerleave', () => { mouse.over = false; updateCursor(); });
+view.addEventListener('contextmenu', e => e.preventDefault());
+view.addEventListener('wheel', e => {
+  e.preventDefault(); if (!S.origBmp) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.012 : 0.0025)));
+  else { S.view.tx -= e.deltaX; S.view.ty -= e.deltaY; render(); }
+}, { passive: false });
+// ---------- touch: two fingers pinch to zoom and drag to move the picture; one finger paints as before ----------
+const touches = new Map(); let pinch = null, touchLock = false;
+const touchPt = e => { const r = view.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+function cancelStroke() {   // a second finger arrived: the half-drawn stroke was the start of a gesture, drop it
+  S.pendingCand = null;
+  if (!S.stroke) return;
+  S.stroke = null;
+  ctx.mask.globalCompositeOperation = 'source-over'; ctx.mask.clearRect(0, 0, S.W, S.H); ctx.mask.drawImage(prevMaskC, 0, 0);
+  afterMaskChange();
+}
+stage.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch' || e.target !== view) return;
+  touches.set(e.pointerId, touchPt(e));
+  if (touches.size === 2 && S.origBmp) {
+    cancelStroke(); touchLock = true;
+    const [a, b] = [...touches.values()];
+    pinch = { d: Math.hypot(b.x - a.x, b.y - a.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, s: S.view.scale, tx: S.view.tx, ty: S.view.ty };
+  }
+  if (touchLock) { try { view.setPointerCapture(e.pointerId); } catch (_) {} e.stopPropagation(); }
+}, true);
+stage.addEventListener('pointermove', e => {
+  if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
+  touches.set(e.pointerId, touchPt(e));
+  if (pinch && touches.size >= 2) {
+    const [a, b] = [...touches.values()];
+    const d = Math.hypot(b.x - a.x, b.y - a.y) || 1, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const ns = clamp(pinch.s * d / pinch.d, 0.03, 40), ix = (pinch.mx - pinch.tx) / pinch.s, iy = (pinch.my - pinch.ty) / pinch.s;
+    S.view.scale = ns; S.view.tx = mx - ix * ns; S.view.ty = my - iy * ns;
+    render();
+  }
+  if (touchLock) e.stopPropagation();
+}, true);
+const touchEnd = e => {
+  if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
+  touches.delete(e.pointerId);
+  const locked = touchLock;
+  if (touches.size < 2) pinch = null;
+  if (touches.size === 0) touchLock = false;   // lifting the last finger after a pinch never paints
+  if (locked) { mouse.over = false; updateCursor(); e.stopPropagation(); }
+};
+stage.addEventListener('pointerup', touchEnd, true);
+stage.addEventListener('pointercancel', touchEnd, true);
+function dismissHint() { S.hintDone = true; $('#hint').hidden = true; if (S.view.showMask) setShowMask(false); if (S.det) { S.det.cands.forEach(c => { c.done = true; }); layoutCandidates(); render(); } }
+
+// ---------- files: slots, drop zones, stage drop ----------
+async function assign(slot, file) { try { if (slot === 'orig') await setOriginal(file); else await setAi(file); } catch (_) {} }
+[...$$('.slot'), ...$$('.dz')].forEach(el => {
+  const slot = el.dataset.slot;
+  let input = el.querySelector('input');
+  if (!input) { input = document.createElement('input'); input.type = 'file'; input.accept = 'image/*'; input.style.display = 'none'; el.appendChild(input); el.addEventListener('click', () => { if (!window.__novaiEmbed) input.click(); }); }
+  input.addEventListener('change', e => { if (e.target.files[0]) assign(slot, e.target.files[0]); e.target.value = ''; });
+  el.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); el.classList.add('over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('over'));
+  el.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); el.classList.remove('over'); stage.classList.remove('over'); const f = [...e.dataTransfer.files].find(f => /^image\//.test(f.type)); if (f) assign(slot, f); });
+});
+// NOVAI 内置改动 + 协议标记: novai-lossless-edit —— 嵌入模式下点素材槽 / 空状态拖放区改为向宿主发 pick-request，拦住原生文件选择（拖放/粘贴通路保留）
+document.addEventListener('click', e => {
+  if (!window.__novaiEmbed) return;
+  const el = e.target.closest('.slot, .dz');
+  if (!el || e.target.closest('.x')) return;
+  e.preventDefault(); e.stopPropagation();
+  try { parent.postMessage({ source: 'novai-lossless-edit', type: 'pick-request', slot: el.dataset.slot }, location.origin); } catch (_) {}
+}, true);
+['dragenter', 'dragover'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); stage.classList.add('over'); }));
+['dragleave', 'drop'].forEach(t => document.addEventListener(t, e => { e.preventDefault(); if (t === 'drop' || !e.relatedTarget) stage.classList.remove('over'); }));
+stage.addEventListener('drop', async e => {
+  const files = [...e.dataTransfer.files].filter(f => /^image\//.test(f.type));
+  if (!files.length) return;
+  try {
+    if (files.length >= 2) { await setOriginal(files[0]); await setAi(files[1]); }
+    else if (!S.origBmp) await setOriginal(files[0]);
+    else await setAi(files[0]);
+  } catch (_) {}
+});
+document.addEventListener('paste', async e => {   // ⌘V / Ctrl+V：和拖到画布上同一套规则
+  const dt = e.clipboardData; if (!dt) return;
+  let files = [...(dt.items || [])].filter(it => it.kind === 'file' && /^image\//.test(it.type)).map(it => it.getAsFile()).filter(Boolean);
+  if (!files.length) files = [...(dt.files || [])].filter(f => /^image\//.test(f.type));
+  if (!files.length) return;
+  e.preventDefault();
+  files = files.map((f, i) => (f.name && !/^image\.\w+$/i.test(f.name)) ? f : new File([f], `粘贴的图${files.length > 1 ? i + 1 : ''}.png`, { type: f.type }));
+  try {
+    if (files.length >= 2) { await setOriginal(files[0]); await setAi(files[1]); }
+    else if (!S.origBmp) await setOriginal(files[0]);
+    else await setAi(files[0]);
+  } catch (_) {}
+});
+$('#bSwap').addEventListener('click', async () => {
+  const a = S.origBmp, b = S.aiBmp, an = S.origName, bn = S.aiName;
+  S.origBmp = b; S.aiBmp = a; S.origName = bn.replace(/\.[^.]+$/, ''); S.aiName = an;
+  S.W = b.width; S.H = b.height; allocCanvases(); ctx.orig.drawImage(b, 0, 0);
+  showSlot('orig', b); showSlot('ai', a);
+  S.undo = []; S.redo = []; S.undoBytes = 0;
+  await setupAi(); refreshButtons();
+});
+
+// ---------- toolbar ----------
+function setMode(m) { S.brush.mode = m; $$('#tool button').forEach(b => b.classList.toggle('on', b.dataset.mode === m)); updateCursor(); }
+$$('#tool button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+async function clearMask() {   // 重做: back to the moment both images were just loaded, automatic analysis included
+  if (!ready() || S.busy) return;
+  ctx.mask.clearRect(0, 0, S.W, S.H); ctx.prev.clearRect(0, 0, S.W, S.H);
+  S.undo = []; S.redo = []; S.undoBytes = 0; S.det = null; $('#cands').innerHTML = ''; S.view.peek = false; S.view.compare = false;
+  await setupAi(); refreshButtons();
+  toast('已重做：回到刚载入两张图时的状态', 'ok');
+}
+$('#bClear').addEventListener('click', clearMask);
+$('#bUndo').addEventListener('click', undo); $('#bRedo').addEventListener('click', redo);
+function drawTipPreview() {
+  const c = $('#tipPrev'), x = c.getContext('2d'), W = c.width, H = c.height;
+  x.clearRect(0, 0, W, H);
+  const t = Math.sqrt((S.brush.size - 4) / 796), r = 3 + 30 * t, h = S.brush.hardness, cx = W / 2, cy = H / 2;
+  if (h >= 0.99) { x.fillStyle = '#e8eaef'; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill(); }
+  else { const g = x.createRadialGradient(cx, cy, 0, cx, cy, r); g.addColorStop(0, 'rgba(232,234,239,1)'); g.addColorStop(Math.max(0.01, h), 'rgba(232,234,239,1)'); g.addColorStop(1, 'rgba(232,234,239,0)'); x.fillStyle = g; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill(); }
+}
+function setSize(v) { S.brush.size = clamp(Math.round(v), 4, 800); $('#rSize').value = S.brush.size; updateCursor(); drawTipPreview(); }
+$('#rSize').addEventListener('input', e => setSize(+e.target.value));
+function setOpacity(v) {
+  S.view.opacity = clamp(v, 0, 1);
+  $('#rOpacity').value = Math.round(S.view.opacity * 100); $('#vOpacity').textContent = Math.round(S.view.opacity * 100) + '%';
+  composite(); render();
+}
+$('#rOpacity').addEventListener('input', e => setOpacity(+e.target.value / 100));
+const setPeek = v => { if (S.view.peek !== v) { S.view.peek = v; render(); } };   // while peeking, the red overlay and the boxes stay hidden so before/after is a clean comparison
+const compareOn = () => { if (!ready() || S.view.compare) return; S.view.compare = true; S.view.peek = true; if (S.view.showMask) setShowMask(false); S.hintWasOpen = !$('#hint').hidden; $('#hint').hidden = true; $('#bCompare').classList.add('on'); render(); };   // comparing turns the red overlay off for good; tick 修改范围 again to bring it back
+const compareOff = () => { if (!S.view.compare) return; S.view.compare = false; if (S.hintWasOpen) $('#hint').hidden = false; $('#bCompare').classList.remove('on'); render(); };
+const cb = $('#bCompare'); cb.addEventListener('pointerdown', compareOn); cb.addEventListener('pointerup', compareOff); cb.addEventListener('pointerleave', () => { compareOff(); setPeek(false); });
+if (new URLSearchParams(location.search).get('debug')) $('#adv').hidden = false;   // readouts for development only
+
+// ---------- advanced ----------
+$('#bAlign').addEventListener('click', async () => { busyState.align = true; syncBusy(); try { await autoAlign(); } finally { busyState.align = false; syncBusy(); } toast('已重新对齐', 'ok'); });
+$('#bAlignReset').addEventListener('click', () => { S.align = { sx: 1, sy: 1, tx: 0, ty: 0 }; nudge(0, 0); });
+$('#nUp').addEventListener('click', () => nudge(0, -1)); $('#nDown').addEventListener('click', () => nudge(0, 1));
+$('#nLeft').addEventListener('click', () => nudge(-1, 0)); $('#nRight').addEventListener('click', () => nudge(1, 0));
+$('#cCorr').addEventListener('change', e => { S.corr.on = e.target.checked; applyCorrection(); composite(); render(); });
+let corrTimer = 0;
+const reapply = () => { clearTimeout(corrTimer); corrTimer = setTimeout(() => { applyCorrection(); composite(); render(); }, 30); };
+const fmt = v => (v > 0 ? '+' : '') + v;
+const sl = (id, vid, f, fn) => { const el = $(id); el.addEventListener('input', () => { $(vid).textContent = f(+el.value); fn(+el.value); }); };
+sl('#rStrength', '#vStrength', v => v + '%', v => { S.corr.k = v / 100; reapply(); });
+sl('#mR', '#vR', fmt, v => { S.corr.manual[0] = v; reapply(); });
+sl('#mG', '#vG', fmt, v => { S.corr.manual[1] = v; reapply(); });
+sl('#mB', '#vB', fmt, v => { S.corr.manual[2] = v; reapply(); });
+$('#bRecalc').addEventListener('click', () => { computeCorrection(); applyCorrection(); composite(); render(); toast('已按当前未修改区域重新计算校色', 'ok'); });
+function setHardness(h) {
+  S.brush.hardness = h; const soft = Math.round((1 - h) * 100);
+  $('#rSoft').value = soft; $('#vSoft').textContent = soft + '%';
+  $$('#tip button').forEach(b => b.classList.toggle('on', Math.abs(+b.dataset.hard - h) < 0.01));
+  cursor.classList.toggle('soft', h < 0.99);
+  drawTipPreview();
+}
+$$('#tip button').forEach(b => b.addEventListener('click', () => setHardness(+b.dataset.hard)));
+$('#rSoft').addEventListener('input', e => setHardness(1 - (+e.target.value) / 100));
+$('#bShowMask').addEventListener('click', () => { S.view.peek = false; setShowMask(!S.view.showMask); });
+$('#bDetect').addEventListener('click', () => { const r = analyzeChanges(); if (r && r.bgMode) { applyBackgroundMask(); setShowMask(true); toast(`背景替换模式：保留 ${r.keepCount} 处前景，其余换成修改图`, 'ok', 4000); } else if (r && r.auto) { eraseCandidates(r.autoIdx, true); setShowMask(true); toast(`已自动采用 ${r.autoIdx.length} 处改动`, 'ok'); } else if (r && r.cands.length) { render(); toast(`已标出差异最大的 ${r.cands.length} 处，点一下就换成修改图`, 'ok', 4000); } else toast('没有区域明显高于噪声，请手动涂', 'warn', 4000); });
+
+// ---------- keyboard ----------
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
+  const k = e.key, meta = e.metaKey || e.ctrlKey;
+  if (k !== '1') setPeek(false);
+  if (k === ' ') { if (!S.space) { S.space = true; view.classList.add('pan'); updateCursor(); } e.preventDefault(); return; }
+  if (meta && (k === 'z' || k === 'Z')) { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (meta && k === 'y') { e.preventDefault(); redo(); return; }
+  if (meta) return;
+  if (k === '[') setSize(S.brush.size / 1.15); else if (k === ']') setSize(S.brush.size * 1.15);
+  else if (k === 'x' || k === 'X') setMode(S.brush.mode === 'erase' ? 'restore' : 'erase');
+  else if (k === 'c' || k === 'C') clearMask();
+  else if (k === '1') compareOn();
+  else if (k === 'f' || k === 'F') { if (S.origBmp) fitView(); }
+  else if (k === '=' || k === '+') zoomAt(stage.clientWidth / 2, stage.clientHeight / 2, 1.25);
+  else if (k === '-') zoomAt(stage.clientWidth / 2, stage.clientHeight / 2, 0.8);
+  else return;
+  e.preventDefault();
+});
+window.addEventListener('keyup', e => {
+  if (e.key === ' ') { S.space = false; view.classList.remove('pan'); updateCursor(); }
+  if (e.key === '1') compareOff();
+});
+window.addEventListener('blur', () => { S.space = false; view.classList.remove('pan'); compareOff(); });
+new ResizeObserver(() => { if (S.origBmp && !S.view.fitted) fitView(); else render(); }).observe(stage);
+
+// ---------- export (always the 100% result, whatever the preview opacity) ----------
+function download(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+function resultCanvas() { const c = mk(S.W, S.H); compositeTo(c.getContext('2d'), 1); return c; }
+async function exportPngBlob() { return await new Promise(r => resultCanvas().toBlob(r, 'image/png')); }
+$('#bPng').addEventListener('click', async () => {
+  if (S.view.opacity < 0.999) setOpacity(1);
+  toast('正在生成 PNG…'); const b = await exportPngBlob(); download(b, `${S.origName}_合成.png`);
+  toast(`已保存 ${S.origName}_合成.png（${(b.size / 1e6).toFixed(1)} MB，原尺寸）`, 'ok', 4000);
+});
+function maskGray() { const g = mk(S.W, S.H), x = g.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, S.W, S.H); x.drawImage(maskC, 0, 0); return g; }
+$('#bMask').addEventListener('click', async () => { const b = await new Promise(r => maskGray().toBlob(r, 'image/png')); download(b, `${S.origName}_蒙版.png`); toast('已保存蒙版 PNG', 'ok'); });
+function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('无法加载 ' + src)); document.head.appendChild(s); }); }
+async function exportPsdBlob() {
+  if (!window.agPsd) await loadScript('vendor/ag-psd.js');
+  const W = S.W, H = S.H, comp = resultCanvas();
+  const psd = { width: W, height: H, canvas: comp, children: [
+    { name: '原图', canvas: origC },
+    { name: '修改图_已校色', canvas: aiCorrC, mask: { top: 0, left: 0, right: W, bottom: H, defaultColor: 0, canvas: maskGray() } },
+    { name: '盖印_合成', canvas: comp },
+  ] };
+  return new Blob([agPsd.writePsd(psd, { generateThumbnail: true })], { type: 'application/octet-stream' });
+}
+$('#bPsd').addEventListener('click', async () => {
+  const btn = $('#bPsd'); btn.disabled = true; toast('正在生成分层 PSD，大图需要几秒…', '', 6000);
+  await new Promise(r => setTimeout(r, 20));
+  try { const b = await exportPsdBlob(); download(b, `${S.origName}_合成.psd`); toast(`已保存 ${S.origName}_合成.psd（${(b.size / 1e6).toFixed(1)} MB）`, 'ok', 4000); }
+  catch (e) { console.error(e); toast('PSD 生成失败：' + e.message, 'warn', 5000); }
+  btn.disabled = false;
+});
+
+// ---------- deep link for testing: ?orig=url&ai=url ----------
+// NOVAI 内置改动 + 协议标记: novai-lossless-edit-host —— 原有 ?orig=&ai= 自动载入逻辑抽成 loadFromUrls()，deep link / prefill / pick-result 共用「URL → File」这一步，逻辑本身未改
+async function novaiFileFromUrl(url, name) {
+  busyState.load++; syncBusy();
+  try {
+    const r = await fetch(url); const b = await r.blob();
+    return new File([b], (name && String(name)) || decodeURIComponent(url.split('/').pop() || 'image.png'), { type: b.type || 'image/png' });
+  } finally { busyState.load--; syncBusy(); }
+}
+async function loadFromUrls(origUrl, aiUrl, reset) {
+  busyState.load++; syncBusy();
+  try {
+    if (reset) {
+      if (!origUrl) clearSlot('orig');
+      if (!aiUrl) clearSlot('ai');
+    }
+    if (origUrl) await setOriginal(await novaiFileFromUrl(origUrl));
+    if (aiUrl) await setAi(await novaiFileFromUrl(aiUrl));
+  } finally { busyState.load--; syncBusy(); }
+}
+
+// ---------- NOVAI 内置改动 + 协议标记: novai-lossless-edit / novai-lossless-edit-host ----------
+// 与宿主（NOVAI 智能画布）通信：页面加载后广播 ready；prefill / pick-result 走上面的「URL → File → setOriginal/setAi」通路；
+// request-result 等待载入完成后，复用「下载合成图」的 exportPngBlob() 通路回发原尺寸 PNG 的 dataURL；
+// theme 即时切换浅色/深色；嵌入模式下点素材槽 / 空状态拖放区改发 pick-request。
+let novaiLoadPromise = Promise.resolve();
+function novaiPrefill(origUrl, aiUrl, reset) { novaiLoadPromise = loadFromUrls(origUrl, aiUrl, reset); return novaiLoadPromise; }
+function novaiTheme(t) { document.documentElement.classList.toggle('novai-light', t === 'light'); }
+function novaiApplyEmbedText() {
+  const so = $('#sOrig'), sa = $('#sAi');
+  if (so) so.title = '点击从画布挑选原图';
+  if (sa) sa.title = '点击从画布挑选修改图';
+  $$('.dz').forEach(d => { d.title = '点击从画布挑选'; });
+}
+(async () => {
+  const q = new URLSearchParams(location.search);
+  // NOVAI 内置改动 + 协议标记: novai-lossless-edit-host —— ?embed=1 进入嵌入模式（右侧栏布局 + 挑图桥接 + 提示文案）
+  const embed = q.get('embed') === '1' || !!window.__novaiEmbed;
+  if (embed) { document.documentElement.classList.add('novai-embed'); window.__novaiEmbed = true; novaiApplyEmbedText(); }
+  const t = q.get('theme'); if (t === 'light' || t === 'dark') novaiTheme(t);
+  if ((q.get('orig') || q.get('ai')) && location.protocol.startsWith('http')) {
+    try { await novaiPrefill(q.get('orig'), q.get('ai'), true); } catch (e) { console.error(e); }
+  }
+})();
+// NOVAI 内置改动 + 协议标记: novai-lossless-edit —— 独立打开时 parent === window，非 http origin 下静默失败
+try { parent.postMessage({ source: 'novai-lossless-edit', type: 'ready' }, location.origin); } catch (e) {}
+window.addEventListener('message', async (e) => {
+  const d = e.data;
+  if (!d || d.source !== 'novai-lossless-edit-host') return;
+  if (d.type === 'request-result') {
+    try {
+      await novaiLoadPromise;
+      if (!origC || !S.W || !S.H) throw new Error('尚未载入图片');
+      const blob = await exportPngBlob();
+      const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error || new Error('导出数据读取失败')); fr.readAsDataURL(blob); });
+      // NOVAI 内置改动 + 协议标记: novai-lossless-edit
+      parent.postMessage({ source: 'novai-lossless-edit', type: 'result', dataUrl, width: S.W, height: S.H }, location.origin);
+    } catch (err) {
+      try { parent.postMessage({ source: 'novai-lossless-edit', type: 'error', message: String(err && err.message || err) }, location.origin); } catch (e2) {}
+    }
+  } else if (d.type === 'prefill' && (d.orig || d.ai || d.reset)) {
+    try { await novaiPrefill(d.orig, d.ai, !!d.reset); }
+    catch (err) { try { parent.postMessage({ source: 'novai-lossless-edit', type: 'error', message: String(err && err.message || err) }, location.origin); } catch (e2) {} }
+  } else if (d.type === 'theme') {
+    // NOVAI 内置改动 + 协议标记: novai-lossless-edit-host
+    if (d.theme === 'light' || d.theme === 'dark') novaiTheme(d.theme);
+  } else if (d.type === 'pick-result' && (d.slot === 'orig' || d.slot === 'ai') && d.url) {
+    // NOVAI 内置改动 + 协议标记: novai-lossless-edit-host —— 复用 prefill 同一条「URL → File → setOriginal/setAi」加载通路
+    try {
+      const f = await novaiFileFromUrl(d.url, d.name);
+      if (d.slot === 'orig') await setOriginal(f); else await setAi(f);
+    } catch (err) {
+      try { parent.postMessage({ source: 'novai-lossless-edit', type: 'error', message: String(err && err.message || err) }, location.origin); } catch (e2) {}
+    }
+  }
+  // pick-cancel：用户取消挑图，保持现状
+});
+window.__eraser = { S, analyzeChanges, eraseCandidate, setOriginal, setAi, clearSlot, get canvases() { return { origC, aiRawC, aiCorrC, maskC, compC }; }, exportPngBlob, exportPsdBlob, autoAlign, computeCorrection, applyCorrection, composite, render, undo, redo, setOpacity, resultCanvas };
+render(); refreshButtons(); setHardness(0.5);
+})();
+</script>
+</body>
+</html>

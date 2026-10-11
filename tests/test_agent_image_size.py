@@ -182,3 +182,47 @@ class AgentImageExecutionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgentModelNotHardcodedTests(unittest.TestCase):
+    """第 46 轮：模型一律来自 API 设置——自动时按清单挑，选了平台只用它的模型，清单外的模型换成清单里的。"""
+
+    def setUp(self):
+        vid = dict(lingjing_provider(), video_models=["MiniMax-Hailuo-02"])
+        for item in (patch.object(main, "load_api_providers", return_value=[unknown_provider(), vid, lovart_provider()]),
+                     patch.object(main, "provider_env_key_value", return_value="test-key"),
+                     patch.object(main, "lovart_access_key_value", return_value="ak-test"),
+                     patch.object(main, "lovart_secret_key_value", return_value="sk-test")):
+            item.start()
+            self.addCleanup(item.stop)
+
+    def resolve(self, args, field="image_models"):
+        picker = main._agent_pick_image_provider if field == "image_models" else main._agent_pick_video_provider
+        return main._agent_resolve_media_target(args, field, picker)
+
+    def test_selected_provider_only_uses_its_models(self):
+        self.assertEqual(self.resolve({"image_provider": "lingjing", "model": "gpt-image-2"})[:2], ("lingjing", "gpt-image-2"))
+        pid, model, note = self.resolve({"image_provider": "lingjing", "model": "my-custom-image"})
+        self.assertEqual((pid, model), ("lingjing", "gpt-image-1"))
+        self.assertIn("没配置模型", note)
+        self.assertEqual(self.resolve({"image_provider": "lingjing"})[:2], ("lingjing", "gpt-image-1"))
+
+    def test_auto_follows_model_owner_and_never_invents(self):
+        self.assertEqual(self.resolve({"model": "generate_image_gpt_image_2"})[:2], ("lovart", "generate_image_gpt_image_2"))
+        # 模型名哪个平台都没配：落到平台清单里的模型，而不是原样下发或用代码默认值
+        pid, model, note = self.resolve({"provider": "lingjing", "model": "gemini-3-pro"})
+        self.assertEqual((pid, model), ("lingjing", "gpt-image-1"))
+        pid, model, _ = self.resolve({})
+        self.assertIn(model, {"my-custom-image", "gpt-image-1", "generate_image_gpt_image_2_5_flare"})
+
+    def test_video_ignores_selected_image_provider_without_video_models(self):
+        pid, model, _ = self.resolve({"image_provider": "my-provider", "model": ""}, "video_models")
+        self.assertEqual((pid, model), ("lingjing", "MiniMax-Hailuo-02"))
+
+    def test_prompt_lists_only_configured_models_and_marks_selection(self):
+        text = main._agent_run_media_platforms_text("lingjing")
+        self.assertIn("【用户选定】lingjing", text)
+        self.assertIn("生图只用它的模型", text)
+        auto = main._agent_run_media_platforms_text("")
+        self.assertIn("没有指定平台（自动）", auto)
+        self.assertNotIn("【用户选定】", auto)

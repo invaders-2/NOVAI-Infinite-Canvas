@@ -586,7 +586,84 @@ const imageModelOptions = new Function('imageApiProviders','allImageModels','res
 ok(/<option value="fake-vid" selected>/.test(videoModelOptions('fake-vid', 'p')), '经典视频下拉仍把用户模型前置为 selected');
 ok(/<option value="fake-img" selected>/.test(imageModelOptions('fake-img', 'p')), '经典图片下拉仍把用户模型前置为 selected');
 
+console.log('[27] 按行来源比例：固定第一张 + 兜底链（用户明确选 / 继承上一行 / 原兜底）');
+const vm = require('vm');
+function topLevelFunction(src, name){
+    const asyncAt = src.indexOf('\nasync function ' + name + '(');
+    const syncAt = src.indexOf('\nfunction ' + name + '(');
+    const start = asyncAt >= 0 ? asyncAt : syncAt;
+    if(start < 0) throw new Error('未找到函数 ' + name);
+    const end = src.indexOf('\n}', start + 1);
+    if(end < 0) throw new Error('未找到函数结尾 ' + name);
+    return src.slice(start + 1, end + 2);
+}
+// ---- 静态断言 ----
+ok(js.includes('batchRunLastRatio'), '结果节点记下这一行最终用的比例（batchRunLastRatio）');
+ok(js.includes('if(!srcRatio && !explicitRequestOutputSizeForPending(runSettings))'), '兜底链只在「量不到来源比例 + 用户没明确选比例」时进');
+ok(js.includes('const prevNode = runId ? batchRunResultNodes.get(runId) : null;'), '继承来源 = 同一批的结果节点');
+const rowFnSrc = topLevelFunction(js, 'rowSourceRatio');
+ok(rowFnSrc.includes("'image' && kind !== 'video'"), 'rowSourceRatio 先按媒体类型筛「第一张」（kind !== image/video 直接跳过）');
+const nullReturns = [];
+{
+    let at = rowFnSrc.indexOf('return null');
+    while(at >= 0){ nullReturns.push(at); at = rowFnSrc.indexOf('return null', at + 1); }
+}
+const measureAt = rowFnSrc.indexOf('loadSmartOriginalImageDimensions');
+ok(nullReturns.length >= 2 && nullReturns[0] < measureAt, '「第一张素材读不出来」在测量之前就 return null（不 continue 跳下一张）');
+ok(nullReturns.some(at => at > measureAt), '测量失败同样 return null（不跳下一张）');
+ok(measureAt > 0 && rowFnSrc.slice(measureAt).indexOf('continue') < 0, '测量之后不再有 continue（后面的素材不会被拿来顶替第一张）');
+
+// ---- 行为断言：沙箱里跑真实 rowSourceRatio（测量用桩控制） ----
+function rowRatioSandbox(entries, imageSizes, videoSizes){
+    const calls = {image:[], video:[], entry:[]};
+    const ctx = {
+        mediaKindForItem: ref => String((ref && ref.kind) || 'image'),
+        refSourceEntry: ref => {
+            calls.entry.push(ref && ref.url);
+            const entry = (entries || {})[ref && ref.url];
+            return entry === undefined ? null : entry;
+        },
+        _probeVideoDimensions: url => { calls.video.push(url); return Promise.resolve((videoSizes || {})[url] || null); },
+        loadSmartOriginalImageDimensions: url => { calls.image.push(url); return Promise.resolve((imageSizes || {})[url] || null); },
+    };
+    vm.createContext(ctx);
+    vm.runInContext(rowFnSrc + '\nglobalThis.__rowSourceRatio = rowSourceRatio;', ctx, {filename:'row-source-ratio-sandbox.js'});
+    return {run: ctx.__rowSourceRatio, calls};
+}
+(async () => {
+    try {
+        // ① 一行两张、比例不同 → 固定取第一张；第二张只当参考，不再量
+        const first = rowRatioSandbox(
+            {a:{url:'a', size:null, item:null}, b:{url:'b', size:null, item:null}},
+            {a:{w:1600, h:900}, b:{w:900, h:1200}}
+        );
+        eq(await first.run([{url:'a', kind:'image'}, {url:'b', kind:'image'}]), {w:1600, h:900}, '两张图比例不同：固定取第一张 1600x900');
+        eq(first.calls.image, ['a'], '只量了第一张，第二张不再量');
+
+        // ② 第一张量不出（远程图失败）→ return null，交给兜底链，不跳到第二张
+        const remote = rowRatioSandbox(
+            {remote:{url:'remote', size:null, item:null}, b:{url:'b', size:null, item:null}},
+            {remote:null, b:{w:900, h:1200}}
+        );
+        eq(await remote.run([{url:'remote', kind:'image'}, {url:'b', kind:'image'}]), null, '第一张测不出：返回 null，不用第二张顶替');
+        eq(remote.calls.image, ['remote'], '第一张测不出后没有继续量第二张');
+
+        // ③ 第一张不是媒体（文件）→ 跳过它，取第一张媒体 b 的尺寸
+        const fileFirst = rowRatioSandbox(
+            {f:{url:'f', size:null, item:null}, b:{url:'b', size:null, item:null}},
+            {b:{w:900, h:1200}}
+        );
+        eq(await fileFirst.run([{url:'f', kind:'file'}, {url:'b', kind:'image'}]), {w:900, h:1200}, '文件不算「第一张」，取第一张媒体 b 的尺寸');
+        eq(fileFirst.calls.image, ['b'], '只量了第一张媒体，文件不量');
+    } catch(error) {
+        fails.push('行为沙箱执行异常：' + (error && error.message));
+    } finally {
+        finishTableWiringTests();
+    }
+})();
+function finishTableWiringTests(){
 console.log('');
 if(fails.length){ console.log('失败 ' + fails.length + ' 项：'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }
 console.log('通过 ' + pass + '/' + pass);
 console.log('全部通过');
+}
