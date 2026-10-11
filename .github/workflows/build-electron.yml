@@ -113,6 +113,23 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      # 无开发者证书时只能 ad-hoc 签名（desktop/scripts/adhoc-sign.js 在 afterPack 里做）；
+      # 这里把结果打出来：没签上会在 Actions 里以 warning 标注，避免又发一个「已损坏」的 dmg。
+      - name: Check macOS ad-hoc signature
+        if: matrix.platform == 'macos-latest'
+        working-directory: desktop
+        run: |
+          app=$(ls -d release/mac*/*.app 2>/dev/null | head -1)
+          if [ -z "$app" ]; then
+            echo "::warning::未找到 macOS .app，跳过签名检查"
+            exit 0
+          fi
+          if codesign --verify --deep --strict --verbose=2 "$app"; then
+            echo "ad-hoc 签名校验通过：$app"
+          else
+            echo "::warning::macOS 产物没有有效签名，下载后可能提示「已损坏」：$app"
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

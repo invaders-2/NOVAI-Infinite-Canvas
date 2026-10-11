@@ -33,6 +33,7 @@
       "preload.js",
       "package.json"
     ],
+    "afterPack": "scripts/adhoc-sign.js",
     "extraResources": [
       {
         "from": "../main.py",

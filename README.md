@@ -38,7 +38,12 @@ NOVAI 是一款面向创作者的全能 AI 工作台。你可以在**无限画�
 
 > 想要自带 Chromium 内核、支持一键自动更新的桌面客户端，用 Electron 包：Windows 是 `NOVAI-Electron-Setup-<版本>.exe`，macOS 是 `NOVAI-<版本>-arm64.dmg`。两者与上面的正式版**共用同一份数据目录**，可随时互换，详见下方「桌面客户端」。
 
-> **首次启动提示**：macOS 可能提示「无法打开，因为它来自未识别的开发者」，请前往 **系统设置 → 隐私与安全性 → 点击「仍要打开」** 即可。
+> **首次启动提示（macOS 安装包没有 Apple 开发者签名，属正常现象）**：下载后首次打开可能提示「无法打开，因为它来自未识别的开发者」，少数情况直接提示「**已损坏，无法打开**」——这**不是文件坏了**，是系统对未签名应用的安全拦截。任选一种处理：
+> - 右键点 `NOVAI.app` → 「打开」→ 再点一次「打开」；
+> - 或 系统设置 → 隐私与安全性 → 点「**仍要打开**」；
+> - 或终端执行：`sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app`（装到别的目录就换路径）。
+>
+> 想先确认下载是否完整：`shasum -a 256 NOVAI-<版本>-arm64.dmg`，与 Release 页该文件的 sha256 对照；或 `hdiutil verify NOVAI-<版本>-arm64.dmg`。若清掉隔离后仍报「已损坏」，再补一步：`sudo codesign --force --deep --sign - /Applications/NOVAI.app`。
 
 ---
 
@@ -79,8 +84,8 @@ python main.py
 
 | 问题 | 解决方法 |
 |------|---------|
-| **「无法打开，因为它来自未识别的开发者」** | 前往 **系统设置 → 隐私与安全性** → 点击「仍要打开」 |
-| **「已损坏，无法打开」** | 终端运行：`sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app` |
+| **「无法打开，因为它来自未识别的开发者」** | 未签名安装包的正常提示：右键点 App → 「打开」→ 再点「打开」；或 系统设置 → 隐私与安全性 → 点「仍要打开」 |
+| **「已损坏，无法打开」（不是文件坏了）** | 未签名应用被 Gatekeeper 拦截。先确认下载完整：`shasum -a 256 NOVAI-<版本>-arm64.dmg`（对照 Release 页的 sha256）或 `hdiutil verify <dmg>`；再去隔离：`sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app`；若仍报损坏再补 `sudo codesign --force --deep --sign - /Applications/NOVAI.app` |
 | **端口 3000 被占用** | 终端运行 `lsof -i :3000` 查看占用进程，`kill <PID>` 结束它；或设置 `DEPLOY_RUN_PORT=3001` 修改端口 |
 | **依赖问题（手动安装时）** | 确保已安装 Python 3.10+：`python3 --version`，再执行 `pip3 install -r requirements.txt` |
 

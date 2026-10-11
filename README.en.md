@@ -38,7 +38,12 @@ No Python installation or environment configuration needed — download the inst
 
 > Want the desktop client with a bundled Chromium engine and one-click auto-update? Use the Electron build: `NOVAI-Electron-Setup-<version>.exe` on Windows, `NOVAI-<version>-arm64.dmg` on macOS. Both **share the same data directory** as the build above, so you can switch at any time — see "Desktop Client" below.
 
-> **First launch note**: macOS may warn "cannot be opened because it is from an unidentified developer". Go to **System Settings → Privacy & Security → click "Open Anyway"**.
+> **First launch note (the macOS installer is not signed with an Apple Developer certificate — this is expected)**: you may see "cannot be opened because it is from an unidentified developer", and occasionally "**NOVAI is damaged and can't be opened**". That does **not** mean the file is corrupt — Gatekeeper is blocking an unsigned app. Any of these works:
+> - Right-click `NOVAI.app` → "Open" → "Open" again;
+> - Or System Settings → Privacy & Security → click "**Open Anyway**";
+> - Or run: `sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app` (adjust the path if you installed elsewhere).
+>
+> To first make sure the download is intact: `shasum -a 256 NOVAI-<version>-arm64.dmg` and compare with the sha256 shown on the Release page, or run `hdiutil verify NOVAI-<version>-arm64.dmg`. If it still says "damaged" after clearing quarantine, add: `sudo codesign --force --deep --sign - /Applications/NOVAI.app`.
 
 ---
 
@@ -79,8 +84,8 @@ Open `http://127.0.0.1:3000/` in your browser.
 
 | Issue | Solution |
 |-------|----------|
-| **"Unidentified developer" warning** | Go to **System Settings → Privacy & Security → click "Open Anyway"** |
-| **"App is damaged" warning** | Run in terminal: `sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app` |
+| **"Unidentified developer" warning** | Normal for an unsigned build: right-click the app → "Open" → "Open" again; or System Settings → Privacy & Security → "Open Anyway" |
+| **"App is damaged" warning (the file is fine)** | Gatekeeper blocking an unsigned app. First verify the download: `shasum -a 256 NOVAI-<version>-arm64.dmg` (compare with the sha256 on the Release page) or `hdiutil verify <dmg>`; then clear quarantine: `sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app`; if it still complains, add `sudo codesign --force --deep --sign - /Applications/NOVAI.app` |
 | **Port 3000 in use** | Run `lsof -i :3000` to find the process, `kill <PID>` to end it; or set `DEPLOY_RUN_PORT=3001` |
 | **Dependency issues (manual install)** | Ensure Python 3.10+: `python3 --version`, then `pip3 install -r requirements.txt` |
 
