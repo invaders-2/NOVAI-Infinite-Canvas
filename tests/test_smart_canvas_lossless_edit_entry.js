@@ -12,6 +12,19 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 
+/* 版本号不写死：能读到项目版本（desktop/package.json，退回 VERSION）就比对当前版本，
+   读不到只守形状，保证「已按 main.py 规则重写过」这个意图不丢。 */
+const projectVersion = (() => {
+    try {
+        const version = JSON.parse(fs.readFileSync(path.join(root, 'desktop/package.json'), 'utf8')).version;
+        if(version) return String(version);
+    } catch(e) {}
+    try {
+        return fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim().split('\n')[0].trim();
+    } catch(e) {}
+    return '';
+})();
+
 const js = read('static/js/smart-canvas.js');
 const html = read('static/smart-canvas.html');
 const css = read('static/css/smart-canvas.css');
@@ -147,7 +160,7 @@ console.log('[10] 缓存戳：?v= 与对应文件 mtime 一致');
 ['static/js/smart-canvas.js', 'static/css/smart-canvas.css'].forEach(file => {
     const tag = versionOf(html, file);
     const mtime = Math.floor(fs.statSync(path.join(root, file)).mtimeMs / 1000);
-    ok(/^\d+(\.\d+)+$/.test(tag) && mtimeOf(tag) === mtime, file + ' 的 ?v= 已刷成当前 mtime（' + tag + ' vs 1.0.123.' + mtime + '）');
+    ok(/^\d+(\.\d+)+$/.test(tag) && mtimeOf(tag) === mtime, file + ' 的 ?v= 已刷成当前 mtime（' + tag + '）');
 });
 
 console.log('[11] 顶部模式栏：预览 / 调色之后多一颗「无损改图」');
@@ -206,11 +219,12 @@ ok(/losslessEditWatchTheme\(\);[\s\S]{0,700}losslessEditSyncTheme\(\);/.test(js)
     ok(empty.get('ai') === null && empty.get('orig') === null, '行为：无图时 URL 既不带 ai= 也不带 orig=');
 }
 
-console.log('[16] 缓存戳：?v= 与 mtime 完全一致（前缀 1.0.123）');
+console.log('[16] 缓存戳：?v= 与 mtime 完全一致（前缀 = 项目版本）');
 ['static/js/smart-canvas.js', 'static/css/smart-canvas.css'].forEach(file => {
     const tag = versionOf(html, file);
     const mtime = Math.floor(fs.statSync(path.join(root, file)).mtimeMs / 1000);
-    ok(tag === '1.0.123.' + mtime, file + ' 的 ?v= 等于 1.0.123.<mtime>（' + tag + '）');
+    const versionOk = projectVersion ? tag === projectVersion + '.' + mtime : /^\d+(\.\d+)+$/.test(tag);
+    ok(versionOk && mtimeOf(tag) === mtime, file + ' 的 ?v= 是「项目版本.mtime」（' + tag + '）');
 });
 
 console.log('[17] 选择器图片区：整体宫格（不再按节点分组成行）');
