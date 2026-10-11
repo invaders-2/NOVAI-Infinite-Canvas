@@ -20,6 +20,8 @@ NOVAI-Setup-*.exe
 # 运行时数据（不推送）
 assets/
 !assets/models/
+# 新前端的 Vite 构建产物必须入库（上面的 assets/ 规则会连带命中 static/v2/assets）
+!static/v2/assets/
 data/api_providers.json
 data/asset_library.json
 data/prompt_libraries.json

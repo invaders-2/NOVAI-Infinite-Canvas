@@ -25,6 +25,14 @@ const projectVersion = (() => {
     return '';
 })();
 
+/* 只守形状与项目版本：git 检出不保留 mtime，强求 ?v= 里的 mtime 等于当前文件 mtime 在 CI 上必然失败
+   （与 test_glide / test_gpt_chat_reasoning 的缓存串断言同一口径）。 */
+const versionTagOk = value => {
+    const text = String(value || '');
+    if(!/^\d+(\.\d+)+$/.test(text)) return false;
+    return projectVersion ? text.slice(0, text.lastIndexOf('.')) === projectVersion : true;
+};
+
 const js = read('static/js/smart-canvas.js');
 const html = read('static/smart-canvas.html');
 const css = read('static/css/smart-canvas.css');
@@ -156,11 +164,10 @@ console.log('[9] 打包件存在（另一执行岗产出的上游件）');
     ok(fs.existsSync(path.join(root, file)), '打包件存在：' + file);
 });
 
-console.log('[10] 缓存戳：?v= 与对应文件 mtime 一致');
+console.log('[10] 缓存戳：?v= 是「项目版本.mtime」形式');
 ['static/js/smart-canvas.js', 'static/css/smart-canvas.css'].forEach(file => {
     const tag = versionOf(html, file);
-    const mtime = Math.floor(fs.statSync(path.join(root, file)).mtimeMs / 1000);
-    ok(/^\d+(\.\d+)+$/.test(tag) && mtimeOf(tag) === mtime, file + ' 的 ?v= 已刷成当前 mtime（' + tag + '）');
+    ok(versionTagOk(tag), file + ' 的 ?v= 是「项目版本.mtime」形式（' + tag + '）');
 });
 
 console.log('[11] 顶部模式栏：预览 / 调色之后多一颗「无损改图」');
@@ -219,12 +226,10 @@ ok(/losslessEditWatchTheme\(\);[\s\S]{0,700}losslessEditSyncTheme\(\);/.test(js)
     ok(empty.get('ai') === null && empty.get('orig') === null, '行为：无图时 URL 既不带 ai= 也不带 orig=');
 }
 
-console.log('[16] 缓存戳：?v= 与 mtime 完全一致（前缀 = 项目版本）');
+console.log('[16] 缓存戳：?v= 是「项目版本.mtime」形式（二次确认）');
 ['static/js/smart-canvas.js', 'static/css/smart-canvas.css'].forEach(file => {
     const tag = versionOf(html, file);
-    const mtime = Math.floor(fs.statSync(path.join(root, file)).mtimeMs / 1000);
-    const versionOk = projectVersion ? tag === projectVersion + '.' + mtime : /^\d+(\.\d+)+$/.test(tag);
-    ok(versionOk && mtimeOf(tag) === mtime, file + ' 的 ?v= 是「项目版本.mtime」（' + tag + '）');
+    ok(versionTagOk(tag), file + ' 的 ?v= 是「项目版本.mtime」形式（' + tag + '）');
 });
 
 console.log('[17] 选择器图片区：整体宫格（不再按节点分组成行）');
