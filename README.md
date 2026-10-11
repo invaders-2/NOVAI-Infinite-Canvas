@@ -2,9 +2,19 @@
 
 > 自由地在无限画布上生成图像、视频，用节点串联工作流。内置 ModelScope 免费 API，开箱即用。
 >
-> **[English](README.en.md) · [官网](https://invaders-2.github.io/NOVAI-Infinite-Canvas/) · [帮助文档](https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html)**
+> **[官网](https://invaders-2.github.io/NOVAI-Infinite-Canvas/) · [下载](https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases) · [帮助文档](https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html) · [更新日志](#版本更新说明)**
+>
+> [![release](static/images/badges/release.svg)](https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases) ![platform](static/images/badges/platform.svg) ![quickstart](static/images/badges/quickstart.svg) ![README](static/images/badges/readme.svg)
+>
+> **简体中文** · [English](README.en.md)
+
+## 软件介绍
 
 NOVAI 是一款面向创作者的全能 AI 工作台。你可以在**无限画布**上拖拽、连线、组合各种 AI 能力——文生图、图生图、AI 视频生成、GPT 多模态对话——所有操作在一个界面中无缝衔接。画布里的 **AI 助手（Agent）** 听一句话就自己规划并动手：建节点、连线、跑生成、查任务，过程实时可见、结果可整体回滚。搭配 **Photoshop 面板**和 **Chrome 扩展**，素材采集与创作流程一气呵成。
+
+---
+
+## 软件界面截图
 
 ![首页](static/images/screenshots/home.png)
 
@@ -15,6 +25,25 @@ NOVAI 是一款面向创作者的全能 AI 工作台。你可以在**无限画�
 ![API 设置](static/images/screenshots/settings.png)
 
 ![资产管理](static/images/screenshots/assets.png)
+
+---
+
+## 功能介绍
+
+- **无限画布**：图像、视频、文本都是画布上的节点，可自由缩放、拖拽、连线 —— 不用在多个工具之间来回导文件。
+- **节点工作流**：把图像、视频、LLM 节点串成一条流水线，上游结果直接喂给下游 —— 重复的多步操作配一次、反复复用。
+- **生成自动落画布**：AI 生成的结果自动创建成节点 —— 省掉手动下载再导入。
+- **@ 引用素材**：输入框里 @ 一下就能把画布节点当作参考素材 —— 不用反复上传同一张图。
+- **智能画布 AI 助手（真 Agent）**：一句话说清目标，模型自己多轮规划并动手（建节点、连线、跑生成、查任务），过程实时可见、改动可整体回滚 —— 复杂任务不用自己一步步点。
+- **多维表格批量生产**：一张表驱动批量出图 / 出视频，逐行素材与提示词、逐行真实进度、可随时停止，一次批量只落一个结果节点 —— 批量生产可控、可停、不糊在一起。
+- **聊天式创作**：LLM 节点与 GPT 聊天支持多轮上下文、可选角色（默认「提示词优化」）、思考过程实时展示 —— 像跟人讨论一样把提示词打磨好。
+- **抠图**：默认走生图 API 绿幕抠图；「高质量抠图」用本地 RMBG-2.0 离线推理 + 边缘精修（首次使用下载约 349MB 模型）—— 出透明底素材，不依赖在线额度也能用。
+- **HD 高清放大**：本地 Real-ESRGAN 离线把图放大到 2K / 4K，接近目标分辨率的图自动改用高质量缩放（首次使用下载约 50MB 组件）—— 免费离线，不用把原图传到云端。
+- **人脸模糊**：一键模糊视频中的全部人脸（本地 YuNet 检测）—— 规避平台对真人出镜的审核。
+- **Lovart 设计代理**：填 Access Key / Secret Key 即可接入，支持图片与视频生成、素材上传、结果回传 —— 直接对接设计代理平台干活。
+- **插件与外部工具**：Photoshop 面板、Chrome 扩展，以及即梦 CLI 等命令行工具 —— 素材采集与本地创作流程连起来。
+- **多仓库更新与回滚**：GitHub / Gitee / ModelScope 三源检测更新，支持备份回滚 —— 国内网络也能更新，出问题能退回去。
+- **中文优化**：Qwen 生态深度集成 —— 中文提示词与中文文字渲染更贴合中文创作。
 
 ---
 
@@ -121,25 +150,6 @@ python main.py
 
 ---
 
-## 特色功能
-
-- 🧠 **智能画布 AI 助手（真 Agent）** — 一句话说清目标，模型自己多轮规划并动手：建节点、连线、跑生成、查任务；每一步实时可见，画布改动可整体回滚
-- 📊 **多维表格批量生产** — 一张表驱动批量出图 / 出视频：逐行素材与提示词、逐行真实进度、随时停止，一次批量只落一个结果节点
-- 🎭 **Lovart 设计代理** — 填 Access Key / Secret Key 即可接入，支持图片与视频生成、素材上传、结果回传
-- 💬 **聊天式创作** — LLM 节点与 GPT 聊天支持多轮上下文、可选角色（默认「提示词优化」）、思考过程实时展示
-- 🎨 **无限画布** — 自由缩放、拖拽、连线创作
-- ⚡ **节点工作流** — 图像/视频/LLM 节点串联
-- 🤖 **生成自动落画布** — AI 生成结果自动创建节点，无需手动导入
-- 💡 **快捷建议条** — 生成完成自动弹出「换衣服 / 换场景 / 加运镜」一键继续编辑
-- 🔍 **@ 引用素材** — 输入框 @ 一下即可把画布节点作为参考素材
-- ✂️ **本地高质量抠图** — RMBG-2.0 按需下载，离线免费抠图 + 边缘精修，失败可降级在线
-- 👤 **人脸模糊** — 一键模糊视频中全部人脸，规避平台真人审核（YuNet 检测）
-- 🔌 **插件系统** — Photoshop 面板、Chrome 扩展
-- 🌐 **多仓库更新** — GitHub / Gitee / ModelScope 三源
-- 🇨🇳 **中文优化** — Qwen 生态深度集成
-
----
-
 ## 人脸合规与换脸
 
 NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权的真人肖像**有严格的内容安全审核，参考素材必须走以下三条合规通道之一：
@@ -196,6 +206,8 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 - **自动更新三仓库通道**：GitHub Releases 为主源；国内网络检查失败时自动切换 ModelScope 镜像（`bllack/NOVAI-releases`）；Gitee Release 提供人工下载兜底。云端构建流水线（push `v*` 标签触发）会自动把安装包同步到三个仓库
 
 ---
+
+## 版本更新说明
 
 ### v1.0.124
 

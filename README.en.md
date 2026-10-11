@@ -2,9 +2,19 @@
 
 > Freely generate images and videos on an infinite canvas, connecting workflows with nodes. Built-in free ModelScope API, ready to use out of the box.
 >
-> **[中文](README.md) · [Website](https://invaders-2.github.io/NOVAI-Infinite-Canvas/) · [Docs](https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html)**
+> **[Website](https://invaders-2.github.io/NOVAI-Infinite-Canvas/) · [Download](https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases) · [Docs](https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html) · [Changelog](#changelog)**
+>
+> [![release](static/images/badges/release.svg)](https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases) ![platform](static/images/badges/platform.svg) ![quickstart](static/images/badges/quickstart.svg) ![README](static/images/badges/readme.svg)
+>
+> [中文](README.md) · **English**
+
+## Introduction
 
 NOVAI is an all-in-one AI workbench for creators. On an **infinite canvas** you can drag, connect, and combine various AI capabilities — text-to-image, image-to-image, AI video generation, GPT multimodal chat — all seamlessly in one interface. The canvas **AI assistant is a real Agent**: state a goal in one sentence and it plans and acts on its own — creating nodes, wiring them up, running generations, checking tasks — with every step visible and the whole run rollbackable. Paired with **Photoshop panels** and **Chrome extensions**, asset collection and creative workflows flow together.
+
+---
+
+## Screenshots
 
 ![Home](static/images/screenshots/home.png)
 
@@ -15,6 +25,25 @@ NOVAI is an all-in-one AI workbench for creators. On an **infinite canvas** you 
 ![API Settings](static/images/screenshots/settings.png)
 
 ![Asset Manager](static/images/screenshots/assets.png)
+
+---
+
+## Features
+
+- **Infinite Canvas** — images, videos and text are all nodes on the canvas; zoom, drag and connect freely — no more shuttling files between separate tools.
+- **Node workflows** — chain image, video and LLM nodes into one pipeline where upstream results feed downstream — configure a repetitive multi-step job once and reuse it.
+- **Auto-place on canvas** — generated results become nodes automatically — no manual download and import.
+- **@ reference** — type @ in the input box to use any canvas node as reference material — no re-uploading the same image.
+- **Smart Canvas AI assistant (real Agent)** — state a goal in one sentence and the model plans and acts over multiple rounds (create nodes, wire them up, run generations, check tasks), every step visible and the whole run rollbackable — you do not have to click through complex jobs yourself.
+- **Table-driven batch production** — one table drives batch image / video generation: per-row assets and prompts, real per-row progress, stop anytime, a single result node per batch — batch work stays controllable and does not blur together.
+- **Chat-style creation** — LLM nodes and GPT chat support multi-turn context, selectable personas (default "Prompt Optimizer") and a live thinking process — refine prompts the way you would in a conversation.
+- **Cutout** — the default path uses the image API (green-screen matting); "High-quality cutout" runs the local RMBG-2.0 model offline with edge refinement (about 349MB model download on first use) — transparent PNGs even without online quota.
+- **HD upscale** — local Real-ESRGAN upscales offline to 2K / 4K, and images already close to the target resolution fall back to high-quality resampling (about 50MB of components on first use) — free, offline, and your originals never leave the machine.
+- **Face blur** — one click blurs every face in a video (local YuNet detection) — helps avoid platform review issues with real people on camera.
+- **Lovart design agent** — connect with an Access Key / Secret Key for image and video generation, asset upload and result download — hand work off to a design agent platform.
+- **Plugins and external tools** — Photoshop panel, Chrome extension and CLI tools such as Jimeng CLI — connect asset capture with your local workflow.
+- **Multi-repo updates and rollback** — GitHub / Gitee / ModelScope update channels with backup and rollback — updates work on Chinese networks and you can always go back.
+- **Chinese-first** — deep Qwen ecosystem integration — Chinese prompts and Chinese text rendering suit Chinese creators.
 
 ---
 
@@ -120,22 +149,6 @@ Beyond the built-in free quota, "API Settings → Add platform" connects platfor
 Provider dropdowns only list platforms **with a configured key**; platforms without one never appear in generation nodes and are never chosen as the default.
 
 ---
-
-## Key Features
-
-- 🧠 **Smart Canvas AI assistant (real Agent)** — state a goal in one sentence and the model plans and acts over multiple rounds (create nodes, wire them up, run generations, check tasks); every step streams live and the whole run can be rolled back
-- 📊 **Table-driven batch production** — one table drives batch image/video generation: per-row assets and prompts, real per-row progress, stop anytime, and a single result node per batch
-- 🎭 **Lovart design agent** — connect with an Access Key / Secret Key for image and video generation, asset upload and result download
-- 💬 **Chat-style creation** — LLM nodes and GPT chat support multi-turn context, selectable personas (default "Prompt Optimizer") and a live thinking process
-- 🎨 **Infinite Canvas** — free zoom, drag, and connect for creation
-- ⚡ **Node Workflows** — image/video/LLM nodes connected in chains
-- 🤖 **Auto-Place on Canvas** — AI results auto-create nodes, no manual import
-- 💡 **Smart Suggestion Bar** — auto-popup "change outfit / change scene / add camera move" one-click continuation
-- 🔍 **@ Reference** — type @ in the input box to reference canvas nodes as source material
-- 👤 **Face Blur** — one-click blur all faces in a video to protect the privacy of people in the frame (YuNet detection)
-- 🔌 **Plugin System** — Photoshop panels, Chrome extensions
-- 🌐 **Multi-Repo Updates** — GitHub / Gitee / ModelScope three sources
-- 🇨🇳 **Chinese Optimized** — deep Qwen ecosystem integration
 
 ---
 
