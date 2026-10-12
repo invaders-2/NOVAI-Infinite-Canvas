@@ -154,11 +154,12 @@ body {
         <a href="#install">安装与运行</a>
         <a href="#overview">产品概览</a>
         <a href="#features">功能介绍</a>
+        <a href="#more-features">更多能力</a>
         <a href="#canvas">创建画布</a>
         <a href="#nodes">创建节点</a>
         <a href="#generate-image">生成图片</a>
         <a href="#generate-video">生成视频</a>
-        <a href="#gpt-chat">GPT 聊天</a>
+        <a href="#gpt-chat">GPT 对话</a>
         <a href="#api-protocols">AI 协议配置</a>
         <a href="#models">内置模型列表</a>
         <a href="#face-compliance">人脸合规与换脸</a>
@@ -178,15 +179,14 @@ body {
   <h3>三步上手</h3>
   <ol>
     <li><strong>下载安装</strong>：根据你的操作系统下载对应安装包，双击安装启动。</li>
-    <li><strong>配置 API</strong>：首次启动后进入「API 设置」页面。内置 ModelScope 免费 API 可直接使用，也可添加自己的 API Key。</li>
-    <li><strong>开始创作</strong>：打开「无限画布」，拖入节点、输入提示词即可生成图片或视频。</li>
+    <li><strong>配置 API</strong>：首次启动后进入「设置 → API 设置」。内置 ModelScope 免费额度可以直接用，也可以选一个平台填入自己的 Key。</li>
+    <li><strong>开始创作</strong>：在首页输入框里用一句话描述需求（或点一个快捷模板），也可以进「无限画布」自己摆节点、连线。</li>
   </ol>
 
   <div class="note">
-    <strong>提示</strong>：NOVAI 内置 ModelScope 免费 API，无需注册即可体验生图和对话功能。视频生成等高级功能需要配置对应平台的 API Key。
+    <strong>提示</strong>：NOVAI 内置 ModelScope 免费额度，无需注册即可体验生图与对话；视频等高级功能需要配置对应平台的 API Key。
   </div>
 
-  
   </section>
 
   <section class="doc-module" data-section-id="install">
@@ -215,20 +215,25 @@ python main.py</code></pre>
   <section class="doc-module" data-section-id="overview">
 <!-- ===== 产品概览 ===== -->
   <h2 id="overview">产品概览</h2>
-  <p>启动 NOVAI 后，你会看到如下主界面：</p>
+  <p>启动 NOVAI 后，你会看到如下首页：</p>
 
   <img class="doc-screenshot" src="docs-screenshots/01-home.png" alt="NOVAI 首页">
   <p class="img-caption">图 1：NOVAI 首页——上方是创作入口（一句话描述需求 + 快捷模板），下方是最近项目和模板库。</p>
 
-  <p>NOVAI 的核心区域包括：</p>
+  <h3>界面结构</h3>
   <ul>
-    <li><strong>无限画布</strong>：中央最大区域，支持缩放（Ctrl+滚轮）、平移（空格+拖拽），画布大小无限制。</li>
-    <li><strong>节点面板</strong>：左侧面板，列出所有可用的 AI 节点，包括图像生成、视频生成、GPT 对话、工具处理等类别。</li>
-    <li><strong>工具栏</strong>：顶部工具栏，包含画布控制（缩放、适应画布）、节点搜索、设置入口和导出功能。</li>
-    <li><strong>状态栏</strong>：底部显示当前 API 连接状态、队列中的任务数量和 GPU 使用情况。</li>
+    <li><strong>左侧导航栏</strong>：首页、在线生图、GPT 对话、无限画布、素材库，左下角是「设置」（带版本号）。</li>
+    <li><strong>首页</strong>：输入一句话描述需求，可以让画布 AI 助手（Agent）直接帮你搭好画布；下面是快捷模板（电商套图 / 海报设计 / 分镜故事板 / 人设三视图 / 产品精修 / 多角度商品图 / 视频接力 / 批量出图）、最近项目和模板库。</li>
+    <li><strong>无限画布</strong>：点进去先看到画布列表（搜索、排序、新建画布、最近编辑），打开某张画布才进入编辑器。</li>
+    <li><strong>画布编辑器</strong>：右上角是「导出 / 工作流 / 快捷键 / 日志 / 资产库」，底部是画布工具条（撤销、重做、适应画布、缩放），右下角是缩略图导航；选中节点会浮出节点工具条。</li>
+    <li><strong>素材库</strong>：素材 / 提示词库 / 工作流三个标签页，左侧按画布分类，右侧是选中素材的详情与生成信息。</li>
+    <li><strong>设置</strong>：通用、记忆、API 设置、工作流设置、数据备份、外观、关于（版本 / 更新 / 回滚）。</li>
   </ul>
 
-  
+  <div class="note">
+    <strong>界面版本</strong>：1.0.124 起默认使用新版界面（NOVAI 2.0）；想回到旧界面，可以在「设置 → 关于 → 旧版界面」里切换。
+  </div>
+
   </section>
 
   <section class="doc-module" data-section-id="features">
@@ -238,203 +243,236 @@ python main.py</code></pre>
   <h3>核心能力</h3>
   <table>
     <tr><th>功能</th><th>说明</th></tr>
-    <tr><td>文生图</td><td>通过提示词生成高质量图像，支持 SDXL、Flux、Midjourney 风格</td></tr>
-    <tr><td>图生图</td><td>上传参考图进行风格迁移、变体生成、局部重绘</td></tr>
-    <tr><td>图生视频</td><td>静态图生成动态视频，支持运镜控制和帧率设置</td></tr>
-    <tr><td>文生视频</td><td>通过文字描述直接生成短视频片段</td></tr>
-    <tr><td>GPT 多模态对话</td><td>支持文本、图片输入的多模态对话能力，可串联到工作流节点</td></tr>
-    <tr><td>工作流自动化</td><td>拖拽节点连线，构建自动化 AI 创作流水线</td></tr>
-    <tr><td>批量处理</td><td>一键批量生成，支持参数模板</td></tr>
-    <tr><td>历史记录</td><td>自动保存生成历史，支持回看和再编辑</td></tr>
+    <tr><td>文生图 / 图生图</td><td>提示词直接出图，或带参考图生成；内置 Qwen-Image、FLUX.2-klein、Z-Image 等模型</td></tr>
+    <tr><td>AI 视频生成</td><td>参考图 + 提示词生成视频，可设数量、比例、清晰度、是否带声音</td></tr>
+    <tr><td>GPT 多模态对话</td><td>文本 + 图片对话；画布内提示词节点支持多轮上下文、角色与思考过程</td></tr>
+    <tr><td>无限画布与节点</td><td>图片、视频、文本、提示词、多维表格等节点自由摆放、连线，搭出可复用的工作流</td></tr>
+    <tr><td>画布 AI 助手（Agent）</td><td>一句话说清目标，AI 自己规划并建节点、连线、跑生成；计划可先确认、改动可整体回滚</td></tr>
+    <tr><td>多维表格批量生成</td><td>一张表驱动批量出图 / 出视频，逐行素材与提示词、逐行真实进度、可随时停止</td></tr>
+    <tr><td>模板库</td><td>人像、电商套图、多角度、海报、修图、分镜、试穿、白底、社交封面、商品视频、视频接力等一键套用</td></tr>
+    <tr><td>图片编辑</td><td>调色（光线 / 颜色 / 曲线 / 细节 / 效果，可拖拽对比原图）、无损编辑，以及裁剪 / 扩图 / 重绘 / 擦除 / 打光 / 多角度 / 宫格 / 标注</td></tr>
+    <tr><td>抠图与高清放大</td><td>抠图（在线 API 绿幕，或本地 RMBG-2.0 高质量）；HD 高清放大（本地 Real-ESRGAN 放大到 2K / 4K）</td></tr>
+    <tr><td>素材库与数据备份</td><td>素材按画布分类管理；「设置 → 数据备份」可一键打包画布 / 素材 / 设置并导出</td></tr>
+    <tr><td>更新与回滚</td><td>GitHub / Gitee / ModelScope 三源检测更新，出问题可以回滚到更新前的备份</td></tr>
   </table>
 
-  
   </section>
+
+  <!-- ===== 更多能力 ===== -->
+  <section class="doc-module" data-section-id="more-features">
+  <h2 id="more-features">更多能力</h2>
+  <p>下面这些是 1.0.107–1.0.124 期间陆续加入的能力，按需要挑着用：</p>
+
+  <h3>模板库</h3>
+  <p>首页下方的「模板」区域提供人像、电商套图、多角度、海报、修图、分镜、试穿、白底、社交封面、商品视频、视频接力等模板，鼠标移上去点「用这个模板」即可生成一张带好节点的画布，改改提示词就能出图。</p>
+
+  <h3>数据备份与恢复</h3>
+  <p>「设置 → 数据备份」可以一键把画布、素材和设置打包导出（带容量统计与占用提示），换电脑时导回即可；更新失败时也可以用更新前自动生成的备份回滚。</p>
+
+  <h3>记忆</h3>
+  <p>「设置 → 记忆」用来管理长期记忆：你告诉过它的偏好、常用风格会存下来，并在对话与生成请求里自动带上，不用每次重复交代。</p>
+
+  <h3>调色与无损编辑</h3>
+  <p>选中图片节点 → 工具条「调色」：光线 / 颜色 / 曲线 / 细节 / 效果五组参数，可拖拽分割线对比原图，应用后生成一张新图（原图保留）。「无损编辑」则直接在原图上改颜色与局部效果，不重新生成。</p>
+
+  <h3>HD 高清放大</h3>
+  <p>图片节点工具条里的「HD 高清放大」用本地 Real-ESRGAN 离线放大到 2K / 4K：首次使用会自动下载约 50MB 组件，之后离线可用；本来就接近目标分辨率的图会自动改用高质量缩放，不硬跑 AI。</p>
+
+  <h3>抠图（两种）</h3>
+  <p>图片节点 →「抠图」默认走在线生图 API 的绿幕抠图，快但要用到你的 API 额度；「高质量抠图」用本地 RMBG-2.0 模型离线推理 + 边缘精修，首次使用需要下载约 349MB 模型。</p>
+
+  <h3>多维表格批量生成</h3>
+  <p>添加「多维表格」节点：每一行是一组素材 + 提示词，点运行就按行批量出图 / 出视频，进度逐行显示、随时可停，一次批量只落一个结果节点。</p>
+
+  <h3>画布 AI 助手（Agent）的计划模式</h3>
+  <p>让 Agent 干活前，它会先给出计划卡片和影响面，你确认后再执行；执行过程实时可见，跑完可以整体回滚。</p>
+
+  <h3>Lovart 设计代理</h3>
+  <p>在「设置 → API 设置」里填 Lovart 的 Access Key / Secret Key 即可接入，支持图片与视频生成、素材上传与结果回传。</p>
+
+  <h3>外部工具</h3>
+  <p>仓库自带 Photoshop 面板与 Chrome 扩展（素材采集），也支持即梦 CLI、Codex CLI、Antigravity CLI 等命令行工具接入。</p>
+
+  
 
   <section class="doc-module" data-section-id="canvas">
 <!-- ===== 创建画布 ===== -->
   <h2 id="canvas">创建画布</h2>
-  <p>点击左侧面板的「新建画布」按钮，或使用快捷键 <code>Ctrl+N</code>（macOS: <code>Cmd+N</code>）创建新的无限画布。</p>
+  <p>点左侧导航「无限画布」进入画布列表，点<strong>「新建画布」</strong>按钮（列表右上角或空状态里都有）开始，首页的「新建画布」卡片同理。</p>
 
   <img class="doc-screenshot" src="docs-screenshots/02-canvas.png" alt="NOVAI 无限画布">
   <p class="img-caption">图 2：无限画布——把图片、提示词、多维表格等节点自由摆布并连线，底部可缩放、适应画布。</p>
 
   <h3>画布操作</h3>
   <ul>
-    <li><strong>缩放</strong>：Ctrl + 滚轮（macOS: Cmd + 滚轮），缩放范围 10%~800%</li>
-    <li><strong>平移</strong>：空格键 + 鼠标拖拽，或鼠标中键拖拽</li>
-    <li><strong>适应画布</strong>：双击空白区域，自动将所有节点适配到当前视口</li>
-    <li><strong>框选</strong>：按住 Shift 拖拽可框选多个节点批量移动</li>
-    <li><strong>右键菜单</strong>：画布空白处右键可快速添加节点、粘贴或调整画布设置</li>
+    <li><strong>缩放</strong>：底部工具条的 − / +（也支持 Ctrl/Cmd + 滚轮）；点<strong>「适应画布」</strong>一键把所有节点收进视口</li>
+    <li><strong>选中与移动</strong>：单击节点选中，选中后浮出节点工具条；拖动节点摆放位置</li>
+    <li><strong>连线</strong>：从节点右侧的输出端口拖到另一个节点的输入端口</li>
+    <li><strong>加节点</strong>：在画布空白处<strong>双击</strong>，弹出添加菜单；素材也可以直接从桌面拖进画布</li>
+    <li><strong>缩略图导航</strong>：右下角的小地图显示全貌，点一下跳到对应位置</li>
+    <li><strong>其它</strong>：完整的快捷键列表看编辑器右上角的「快捷键」面板</li>
   </ul>
 
-  
   </section>
 
   <section class="doc-module" data-section-id="nodes">
 <!-- ===== 创建节点 ===== -->
   <h2 id="nodes">创建节点</h2>
-  <p>节点是 NOVAI 工作流的最小执行单元。每个节点代表一个 AI 能力或处理步骤。</p>
+  <p>节点是 NOVAI 工作流的最小单元：每个节点要么是一份素材，要么是一步 AI 处理。</p>
 
   <h3>添加节点</h3>
   <ol>
-    <li>从左侧节点面板拖拽任意节点到画布上</li>
-    <li>或双击画布空白区域，在弹出的搜索框中输入节点名称快速添加</li>
+    <li>在画布空白处<strong>双击</strong>，弹出菜单，选需要的节点类型</li>
+    <li>图片 / 视频素材也可以<strong>直接拖进画布</strong>，自动变成节点</li>
+    <li>选中播放中/已有的分组节点再双击，新节点会直接加进这个分组</li>
   </ol>
 
-  <h3>节点类型</h3>
+  <h3>常用节点</h3>
   <table>
-    <tr><th>类别</th><th>节点</th><th>说明</th></tr>
-    <tr><td>图像生成</td><td>SDXL / Flux / DALL-E</td><td>文生图和图生图模型</td></tr>
-    <tr><td>视频生成</td><td>Stable Video / Runway Gen</td><td>图生视频和文生视频</td></tr>
-    <tr><td>语言模型</td><td>GPT-4o / Claude / Gemini</td><td>多模态对话和文本生成</td></tr>
-    <tr><td>图像处理</td><td>Upscale / RemoveBG / Inpaint</td><td>图像后处理和编辑</td></tr>
-    <tr><td>输入/输出</td><td>Text Input / Image Load / File Save</td><td>数据输入和结果保存</td></tr>
-    <tr><td>逻辑控制</td><td>If / Loop / Batch</td><td>条件判断和循环控制</td></tr>
+    <tr><th>节点</th><th>用途</th></tr>
+    <tr><td>图片节点</td><td>放参考图或生成结果；工具条里可裁剪、扩图、重绘、擦除、抠图、高清放大、调色、无损编辑、标注、旋转、下载、导出 PSD</td></tr>
+    <tr><td>视频节点</td><td>放参考视频或生成结果，支持播放控制、做分镜表、人脸模糊</td></tr>
+    <tr><td>提示词节点（LLM）</td><td>写提示词、跑文本模型；支持多轮上下文、角色、思考过程、@ 引用上游素材</td></tr>
+    <tr><td>文本节点 / 标签节点</td><td>在画布上写说明文字、做视觉标记（底色 / 字号 / 圆点 / 图标可调）</td></tr>
+    <tr><td>多维表格节点</td><td>一张表驱动批量出图 / 出视频，逐行素材与提示词</td></tr>
+    <tr><td>分组</td><td>把多个节点收进一个可折叠分组，可以整组运行</td></tr>
   </table>
 
   <h3>连线规则</h3>
-  <p>节点左侧为<strong>输入端口</strong>，右侧为<strong>输出端口</strong>。从输出端口拖拽到另一个节点的输入端口即可建立连接。数据类型不匹配时连线会显示为红色虚线，运行时自动跳过该连接。</p>
+  <p>节点右侧是<strong>输出端口</strong>，左侧是<strong>输入端口</strong>，从一个节点的输出端口拖到另一个节点的输入端口即可建立连接。下游节点运行时可以直接拿上游结果；在节点的输入框里打 <code>@</code> 也能引用上游素材。</p>
 
-  
   </section>
 
   <section class="doc-module" data-section-id="generate-image">
 <!-- ===== 生成图片 ===== -->
   <h2 id="generate-image">生成图片</h2>
-  <p>NOVAI 支持多种图片生成模式，通过不同的节点组合实现灵活的图像创作流程。</p>
+  <p>NOVAI 有两条出图路径：想快点就在「在线生图」页直接生成；想把流程串起来就在画布上搭节点。</p>
 
-  <h3>文生图</h3>
+  <h3>方式一：在线生图页</h3>
   <ol>
-    <li>从左侧面板拖入「Text Input」节点，输入提示词</li>
-    <li>拖入「SDXL」或「Flux」节点</li>
-    <li>从 Text Input 的输出端连线到模型节点的输入端</li>
-    <li>右键点击模型节点选择「运行此节点」，或按 <code>Ctrl+Enter</code> 运行整个工作流</li>
+    <li>左侧导航点「在线生图」</li>
+    <li>左栏填<strong>提示词</strong>；需要参考图就放进 MAIN / AUX A / AUX B</li>
+    <li>选<strong>平台与模型</strong>，设置数量和尺寸（也可以按输入图的比例自动适配）</li>
+    <li>点「生成」，结果会出现在右侧「归档」里，可全选 / 删除所选 / 导出 / 管理</li>
   </ol>
 
   <img class="doc-screenshot" src="docs-screenshots/04-generate.png" alt="NOVAI 在线生图">
   <p class="img-caption">图 3：在线生图——左侧填提示词、加参考图、选模型与尺寸，右侧归档生成结果。</p>
 
+  <h3>方式二：在画布上搭流程</h3>
+  <ol>
+    <li>画布空白处双击，添加一个<strong>图片节点</strong>当结果位（需要参考图就先放参考图节点）</li>
+    <li>再添加一个<strong>提示词节点</strong>写提示词；要引用素材就在输入框里打 <code>@</code></li>
+    <li>把提示词节点连到图片节点，或直接选中图片节点在工具条里点生成</li>
+    <li>出图后可以接着做放大 / 抠图 / 当视频参考等下游处理</li>
+  </ol>
+
   <h3>提示词技巧</h3>
   <ul>
-    <li><strong>正面提示词</strong>：描述你想要的画面内容、风格、构图</li>
-    <li><strong>负面提示词</strong>：描述不想要出现的元素，如 "blurry, low quality, watermark"</li>
-    <li><strong>权重控制</strong>：使用 <code>(keyword:1.2)</code> 语法增强某个关键词的权重</li>
-    <li><strong>风格参考</strong>：在提示词中指定艺术风格，如 "oil painting"、"anime style"、"photorealistic"</li>
+    <li><strong>说清楚画面</strong>：主体 + 场景 + 光线 + 风格 + 构图，比堆关键词更有效</li>
+    <li><strong>中文优先</strong>：内置 Qwen-Image 系列对中文提示词和画面里的中文字支持最好</li>
+    <li><strong>让 AI 帮你写</strong>：提示词节点默认带「提示词优化」角色，一句话需求就能扩写成完整提示词</li>
+    <li><strong>带参考图更准</strong>：用 <code>@</code> 引用画布上的素材，或在在线生图页放 MAIN / AUX 参考图</li>
   </ul>
 
-  <div class="warn">
-    <strong>注意</strong>：生成高分辨率图片时建议先以较低分辨率快速生成预览，确认效果后再提升分辨率。大尺寸生成可能消耗较多 API 配额。
+  <div class="note">
+    <strong>提示</strong>：不同平台对尺寸、数量的限制不一样；先用小尺寸试效果，满意后再出大图，能省不少额度。
   </div>
 
-  
   </section>
 
   <section class="doc-module" data-section-id="generate-video">
 <!-- ===== 生成视频 ===== -->
   <h2 id="generate-video">生成视频</h2>
-  <p>视频生成需要先有一张参考图（可从前置节点传入），或直接使用文本描述生成。</p>
+  <p>视频生成通常需要一张参考图（可以来自画布上的图片节点），也可以只用文字描述。</p>
 
   <h3>图生视频步骤</h3>
   <ol>
-    <li>确保画布上已有一个图像输出节点（如 SDXL 生成的图片）</li>
-    <li>拖入「Stable Video」节点</li>
-    <li>将图像节点的输出端连线到视频节点的输入端</li>
-    <li>在视频节点参数面板中设置：帧数（默认 25 帧）、运动强度（1-10）、帧率（默认 24fps）</li>
-    <li>运行节点，生成的 MP4 会自动保存到输出目录</li>
+    <li>准备一张参考图（画布上的图片节点，或素材库里的图）</li>
+    <li>画布空白处双击，添加<strong>视频节点</strong>，把参考图拖给它（或在输入框里用 <code>@</code> 引用）</li>
+    <li>写提示词描述动作与镜头，设置数量、比例、清晰度、是否带声音；更多参数在「更多参数」面板里</li>
+    <li>点运行；生成中节点上会显示状态和耗时，完成后自动落回画布</li>
   </ol>
 
   <div class="note">
-    <strong>提示</strong>：视频生成耗时较长（通常 30 秒~3 分钟），建议先调低帧数和分辨率做快速测试，确认效果后再提升参数。
+    <strong>提示</strong>：视频生成耗时较长（常见几十秒到几分钟），建议先用较低清晰度试效果，满意后再出高清版本。
   </div>
 
-  
+  <h3>用参考视频做分镜表</h3>
+  <p>经典画布和智能画布都支持：按「每段秒数」（1–5 秒，默认 3 秒）把参考视频切成一段一行，每行只用自己的片段当视频参考——适合逐段控制画面与节奏。</p>
+
   </section>
 
   <section class="doc-module" data-section-id="gpt-chat">
 <!-- ===== GPT 聊天 ===== -->
-  <h2 id="gpt-chat">GPT 聊天</h2>
-  <p>NOVAI 内置 GPT 多模态对话节点，支持文本输入和图片输入，可用于创意构思、提示词优化、代码生成等场景。</p>
+  <h2 id="gpt-chat">GPT 对话</h2>
+  <p>「GPT 对话」是一个独立的聊天页，适合先把需求聊清楚、写文案、磨提示词；画布里的「提示词节点」则可以把对话直接接进生成流程。</p>
 
   <img class="doc-screenshot" src="docs-screenshots/03-chat.png" alt="NOVAI GPT 对话">
   <p class="img-caption">图 4：GPT 对话——从一句提示词开始，支持快捷入口、最近会话与图片输入。</p>
 
   <h3>使用方式</h3>
   <ol>
-    <li>拖入「GPT Chat」节点到画布</li>
-    <li>双击节点打开对话面板，直接输入消息并发送</li>
-    <li>支持上传图片作为对话上下文（点击输入框左侧的图片图标）</li>
-    <li>对话历史保存在节点内部，可导出为 Markdown 或 JSON</li>
+    <li>左侧导航点「GPT 对话」，直接在底部输入框说话；也可以点快捷入口（生成图片 / 写文案 / 写代码 / 读文档 / 查资料 / 头脑风暴）</li>
+    <li>顶部可切换「对话 / Agent / 图像」：对话是纯聊天，Agent 会让 AI 直接动手建画布、跑生成，图像模式适合围绕一张图来回改</li>
+    <li>输入框左侧的「+」可以加参考图；聊过的内容会进「最近会话」，随时切回继续</li>
   </ol>
 
-  <h3>在工作流中使用</h3>
-  <p>GPT Chat 节点支持与其他节点连线：</p>
+  <h3>在画布上使用</h3>
   <ul>
-    <li><strong>输入</strong>：可接收 Text Input 节点的文本，作为对话的系统提示或用户消息</li>
-    <li><strong>输出</strong>：对话结果可传递给下游节点，如将 GPT 生成的提示词直接输入到 SDXL 节点</li>
+    <li>画布空白处双击添加<strong>提示词节点</strong>：支持多轮上下文、角色（默认「提示词优化」）、思考过程实时展示</li>
+    <li><strong>输入</strong>：用 <code>@</code> 引用上游素材，或把上游节点连进来</li>
+    <li><strong>输出</strong>：把生成的提示词直接接到图片 / 视频节点去执行</li>
   </ul>
 
-  
   </section>
 
   <section class="doc-module" data-section-id="api-protocols">
 <!-- ===== AI 协议配置 ===== -->
   <h2 id="api-protocols">AI 协议配置</h2>
-  <p>NOVAI 支持 8 种 AI 服务协议，覆盖国内外主流 AI 平台。你可以在「设置 → API 配置」页面管理所有 API Key。</p>
+  <p>所有平台的 Key 都在「设置 → API 设置」里管理：内置的 ModelScope 免费额度开箱可用，也可以选一个平台填 Key，或点「一键添加」。</p>
 
   <img class="doc-screenshot" src="docs-screenshots/05-settings.png" alt="NOVAI API 设置">
   <p class="img-caption">图 5：设置 → API 设置——内置 ModelScope 免费额度，也可选一个平台填入 Key 开始生成。</p>
 
-  <h3>支持的协议</h3>
+  <h3>支持的接入方式</h3>
   <table>
-    <tr><th>协议</th><th>代表平台</th><th>适用模型</th></tr>
-    <tr><td>OpenAI Compatible</td><td>OpenAI / 智谱 / DeepSeek</td><td>GPT-4o, GPT-4, GLM</td></tr>
-    <tr><td>Anthropic</td><td>Claude</td><td>Claude 3.5 Sonnet, Opus</td></tr>
-    <tr><td>Gemini</td><td>Google AI</td><td>Gemini 2.0 Flash, Pro</td></tr>
-    <tr><td>ModelScope</td><td>阿里 ModelScope</td><td>SDXL, Qwen</td></tr>
-    <tr><td>Volcano Engine</td><td>火山引擎</td><td>Doubao, Seedream</td></tr>
-    <tr><td>Replicate</td><td>Replicate.com</td><td>Flux, SDXL</td></tr>
-    <tr><td>ComfyUI</td><td>本地 ComfyUI</td><td>自定义工作流</td></tr>
-    <tr><td>Custom HTTP</td><td>自建服务</td><td>任意兼容 OpenAI API 的服务</td></tr>
+    <tr><th>协议 / 类型</th><th>适合</th></tr>
+    <tr><td>OpenAI 兼容</td><td>各类中转与官方兼容接口（gpt-image、Nano Banana 等），以及本地 / 自建服务</td></tr>
+    <tr><td>异步协议</td><td>APIMart 这类异步出图平台</td></tr>
+    <tr><td>Gemini 原生</td><td>Google Gemini（图像走 /v1beta）</td></tr>
+    <tr><td>方舟 / Ark</td><td>火山引擎（豆包 Seedream 生图、Seedance 视频）</td></tr>
+    <tr><td>RunningHub</td><td>OpenAPI 工作流</td></tr>
+    <tr><td>命令行</td><td>即梦 CLI、OpenAI Codex CLI、Antigravity CLI</td></tr>
+    <tr><td>设计代理</td><td>Lovart（Access Key / Secret Key 签名接入）</td></tr>
+    <tr><td>ModelScope</td><td>内置免费额度（无需配置）</td></tr>
   </table>
-
-  <h3>内置免费 API</h3>
-  <p>NOVAI 内置了 ModelScope 的免费 API，无需任何配置即可使用基础的文生图和 GPT 对话功能。免费 API 有以下限制：</p>
-  <ul>
-    <li>图像生成：每天 100 次免费调用</li>
-    <li>GPT 对话：每分钟最多 10 次请求</li>
-    <li>不支持视频生成和高级模型</li>
-  </ul>
-  <p>如需解除限制，请在设置中添加自己的 API Key。</p>
+  <p>平台下拉里只会出现<strong>已经配好 Key</strong> 的供应商；没配 Key 的平台不会出现在生成节点里，也不会被当成默认平台。免费额度的具体限制由 ModelScope 侧决定，可能随时调整。</p>
 
   <div class="warn">
-    <strong>安全提醒</strong>：API Key 仅存储在本地电脑上，不会上传到任何服务器。切换设备时需要重新配置。
+    <strong>安全提醒</strong>：API Key 只保存在你本机的数据目录里，不会上传到任何服务器；换设备时需要重新配置。
   </div>
 
-  
   </section>
 
   <section class="doc-module" data-section-id="models">
 <!-- ===== 内置模型列表 ===== -->
   <h2 id="models">内置模型列表</h2>
-  <p>以下是 NOVAI 当前版本预设的模型节点清单，随版本更新会持续扩充：</p>
+  <p>NOVAI 内置 ModelScope 免费额度，开箱即用；模型会随版本更新持续扩充：</p>
 
   <table>
-    <tr><th>节点名称</th><th>类型</th><th>来源</th></tr>
-    <tr><td>SDXL 1.0</td><td>图像生成</td><td>ModelScope / Replicate</td></tr>
-    <tr><td>Flux.1 Dev</td><td>图像生成</td><td>Replicate</td></tr>
-    <tr><td>DALL-E 3</td><td>图像生成</td><td>OpenAI</td></tr>
-    <tr><td>Stable Video</td><td>视频生成</td><td>Replicate</td></tr>
-    <tr><td>Runway Gen-3</td><td>视频生成</td><td>Runway</td></tr>
-    <tr><td>GPT-4o</td><td>多模态对话</td><td>OpenAI / 智谱 / DeepSeek</td></tr>
-    <tr><td>Claude 3.5 Sonnet</td><td>文本对话</td><td>Anthropic</td></tr>
-    <tr><td>Gemini 2.0 Flash</td><td>多模态对话</td><td>Google AI</td></tr>
-    <tr><td>Upscale 4x</td><td>图像处理</td><td>内置</td></tr>
-    <tr><td>Remove Background</td><td>图像处理</td><td>内置</td></tr>
-    <tr><td>Inpaint</td><td>图像处理</td><td>内置</td></tr>
+    <tr><th>名称</th><th>类型</th><th>说明</th></tr>
+    <tr><td>Qwen3-235B</td><td>对话</td><td>通义千问旗舰，逻辑推理 / 写作</td></tr>
+    <tr><td>Qwen3-VL-235B</td><td>对话</td><td>多模态，可分析图片</td></tr>
+    <tr><td>Qwen-Image-2512</td><td>生图</td><td>中文文字渲染最优，海报 / Banner 首选</td></tr>
+    <tr><td>FLUX.2-klein-9B</td><td>生图</td><td>画面质感最好</td></tr>
+    <tr><td>Z-Image-Turbo</td><td>生图</td><td>1–2 秒快速出图</td></tr>
+    <tr><td>Qwen-Image-Edit-2511</td><td>改图</td><td>说话就能改图</td></tr>
+    <tr><td>agnes-video-v2.0</td><td>视频</td><td>免费视频生成</td></tr>
   </table>
 
-  
+  <p>除内置额度外，在「设置 → API 设置 → 新增平台」可以接入你自己的账号；模型名按平台各自维护，不会互相替换。</p>
+
   </section>
 
   <section class="doc-module" data-section-id="face-compliance">
@@ -533,20 +571,24 @@ python main.py</code></pre>
   <h3>Q: 为什么我的图片生成失败了？</h3>
   <p>常见原因：① API Key 无效或余额不足；② 网络连接问题；③ 提示词触发了内容安全过滤。请检查 API 设置中的连接测试结果，并尝试更换提示词。</p>
 
-  <h3>Q: macOS 提示"无法验证开发者"怎么办？</h3>
-  <p>前往 <strong>系统设置 → 隐私与安全性</strong>，在底部找到 NOVAI 的拦截记录，点击「仍要打开」。只需操作一次，后续启动不再提示。</p>
+  <h3>Q: macOS 提示"无法验证开发者"或"已损坏，无法打开"怎么办？</h3>
+  <p>这两个提示都是因为安装包<strong>没有 Apple 开发者签名</strong>，不是文件坏了。任选一种处理：右键点 <code>NOVAI.app</code> → 「打开」→ 再点「打开」；或者到 <strong>系统设置 → 隐私与安全性</strong> 点「仍要打开」；也可以直接在终端执行 <code>sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app</code>。</p>
+  <p>想先确认下载是否完整：<code>shasum -a 256 NOVAI-Setup-1.0.124.dmg</code> 与 Release 页上的 sha256 对照，或 <code>hdiutil verify NOVAI-Setup-1.0.124.dmg</code>。如果清掉隔离属性后仍报损坏，再补一步 <code>sudo codesign --force --deep --sign - /Applications/NOVAI.app</code>。</p>
 
-  <h3>Q: 如何分享我的工作流？</h3>
-  <p>右键点击画布空白区域，选择「导出工作流」即可保存为 <code>.novai</code> 文件。将此文件发送给其他人，对方通过「导入工作流」即可复现完全相同的节点和连线。</p>
+  <h3>Q: Windows 上点更新后提示失败怎么办？</h3>
+  <p>在线更新需要往安装目录写文件：如果 NOVAI 装在 <code>C:\Program Files</code> 这类需要管理员权限的目录，普通权限下会写不进去，界面会提示「安装目录不可写」。处理办法：以管理员身份运行 NOVAI 后再更新，或者到 <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases" target="_blank">GitHub Releases</a> 下载最新安装包覆盖安装（用户数据不会丢）。更新失败时也可以在「设置 → 关于」里回滚到更新前的备份。</p>
+
+  <h3>Q: 如何把我的画布分享给别人？</h3>
+  <p>画布编辑器右上角的「导出」可以把整张画布导出成 PNG 或 SVG（不受当前缩放影响，包含全部节点）；图片节点还能单独导出，支持 PSD 分层文件。NOVAI 目前没有「画布文件导入导出」这种格式，分享素材建议直接发导出的图片，或让对方用同一个模板库模板重建。</p>
 
   <h3>Q: 视频生成为什么这么慢？</h3>
-  <p>视频生成是计算密集型任务，耗时取决于帧数、分辨率和模型复杂度。建议先以较低参数测试，确认效果后再提升。</p>
+  <p>视频生成是计算密集型任务，耗时取决于时长、分辨率和模型。建议先用较低清晰度测试，确认效果后再提升参数。</p>
 
   <h3>Q: 支持离线使用吗？</h3>
-  <p>部分功能支持离线。如果你在本地部署了 ComfyUI 或 Ollama，可通过 Custom HTTP 协议连接到本地服务，实现完全离线运行。内置的图像处理节点（Upscale、RemoveBG）也可离线使用。</p>
+  <p>本地能力可以离线用：HD 高清放大（Real-ESRGAN）和「高质量抠图」（RMBG-2.0）都是本地推理，只是<strong>首次使用需要联网下载模型</strong>（约 50MB / 约 349MB），之后离线可用。云端模型（ModelScope、火山、OpenAI 等）以及你本地部署的 ComfyUI 工作流则需要对应网络或本地服务可达。</p>
 
   <h3>Q: 数据会传到云端吗？</h3>
-  <p>不会。NOVAI 是纯本地桌面应用，你的提示词、图片和工作流数据仅存储在你的电脑上。只有当调用云端 API（如 OpenAI、ModelScope）时，对应的请求数据才会发送到对应平台。</p>
+  <p>不会。NOVAI 是本地桌面应用，你的提示词、图片和工作流数据只存在你自己的电脑上。只有当调用云端 API（如 ModelScope、火山引擎）时，对应的请求数据才会发送到对应平台。</p>
 
   <h3>Q: 换脸 / 人脸编辑提示「包含真人身份 / 隐私信息」怎么办？</h3>
   <p>这是火山引擎的内容安全策略，不是代码错误。解决方法：① 目标脸改用 Seedream 5.0 lite 生成（信任产物 30 天内可直接用）；② 参考视频里的人脸先用 NOVAI 的「人脸模糊」处理；③ 网上下载的真人素材无法直接使用，需走真人授权流程（见上方「人脸合规与换脸」章节）。</p>
@@ -554,12 +596,22 @@ python main.py</code></pre>
   <h3>Q: 人脸模糊在哪？</h3>
   <p>智能画布中选中视频节点 → 上方工具栏「人脸模糊」按钮（人像图标）。点击后自动检测视频中全部人脸并高斯模糊，处理结果自动加入节点，原视频保留。</p>
 
-  
   </section>
 
   <section class="doc-module" data-section-id="changelog">
 <!-- ===== 更新日志 ===== -->
   <h2 id="changelog">更新日志</h2>
+
+  <h3>v1.0.124 (2026-10-11)</h3>
+  <ul>
+    <li>新版界面（NOVAI 2.0）逐页替换：外壳、画布列表、在线生图 / Z-Image、GPT 对话、设置弹窗都改用 Vue 重写；旧界面保留在「设置 → 关于 → 旧版界面」</li>
+    <li>新增：模板库；图片「调色」重做与「无损编辑」；「数据备份」与「记忆」面板</li>
+    <li>更新修复：Windows 版更新失败（安装目录不可写时给出明确提示、失败显示真实原因、新装默认装到用户可写目录）；macOS 安装包补 ad-hoc 签名，减少「已损坏」提示</li>
+    <li>界面：全局去掉线框、弹层改磨砂玻璃、设置页统一设计语言</li>
+    <li>其它：安装包不再内置大模型运行时，改为首次使用时按需下载</li>
+  </ul>
+  <p><strong>v1.0.107 – v1.0.123</strong> 的更新内容见 <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases" target="_blank">GitHub Releases</a>；产品内「设置 → 关于 → 更新」里也能看到每个版本的更新说明。</p>
+
 
   <h3>v1.0.106 (2026-08-11)</h3>
   <ul>
