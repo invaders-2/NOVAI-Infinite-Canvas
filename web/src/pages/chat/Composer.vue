@@ -1,13 +1,17 @@
 <script setup>
-// 输入框：附件条（图片缩略 / 文件卡片，最多 20 个，可拖入 / 粘贴 / 「+」选择）、自适应高度的文本框（Enter 发送、Shift+Enter 换行）、
+// 输入框：附件条（图片缩略 / 文件卡片，最多 20 个，可拖入 / 粘贴 / 「+」选择）、已挂载能力的 chip、
+// 自适应高度的文本框（Enter 发送、Shift+Enter 换行）、「智能体」「技能」入口、
 // 尺寸（Agent / 图像模式）、平台与模型、思考强度（推理模型）、发送 / 停止。
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import ChIcon from './ChIcon.vue';
 import SizePicker from './SizePicker.vue';
 import ModelPicker from './ModelPicker.vue';
 import ThinkPicker from './ThinkPicker.vue';
+import CapabilityChip from './agents/CapabilityChip.vue';
 import { S, thinkLevels } from './chatState.js';
 import { C, send, stop, uploadFiles, removeRef, isImageRef, attachmentName } from './session.js';
+import { CAP, openSquare, closeSquare, clearCapability } from './agents/capState.js';
+import { closeAllPops } from './usePop.js';
 import { t } from '../../lib/store.js';
 
 const emit = defineEmits(['preview']);
@@ -17,8 +21,17 @@ const fileIn = ref(null);
 const body = ref(null);
 const drag = ref(false);
 
-const canSend = computed(() => !!text.value.trim() && !C.busy);
+// 挂了能力时可以只带附件发送（能力自己会读文件）；普通对话仍要求有文字
+const canSend = computed(() => (!!text.value.trim() || (!!CAP.selected && C.refs.length > 0)) && !C.busy);
 const showThink = computed(() => !!(thinkLevels.value && thinkLevels.value.length));
+
+function toggleSquare(kind) {
+    closeAllPops();
+    if (CAP.square === kind) closeSquare();
+    else openSquare(kind);
+    nextTick(() => { if (ta.value) ta.value.focus(); });
+}
+function replaceCap() { if (CAP.selected) openSquare(CAP.selected.kind); }
 
 function grow() {
     const el = ta.value;
@@ -32,7 +45,7 @@ function onKey(e) {
 async function submit() {
     if (C.busy) { stop(); return; }
     const v = text.value;
-    if (!v.trim()) return;
+    if (!v.trim() && !(CAP.selected && C.refs.length)) return;
     text.value = '';
     nextTick(grow);
     await send(v);
@@ -63,6 +76,9 @@ onBeforeUnmount(() => window.removeEventListener('paste', onPaste));
 
 <template>
     <div ref="body" class="cmp" :class="{ drag }" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
+        <div v-if="CAP.selected" class="caps">
+            <CapabilityChip :cap="CAP.selected" @remove="clearCapability" @replace="replaceCap" />
+        </div>
         <TransitionGroup v-if="C.refs.length || C.uploading" tag="div" name="ref" class="refs">
             <div v-for="(r, i) in C.refs" :key="r.url + i" class="ref" :class="{ fl: !isImageRef(r) }" :title="attachmentName(r)">
                 <img v-if="isImageRef(r)" :src="r.url" alt="" @click="emit('preview', r.url)" />
@@ -75,6 +91,12 @@ onBeforeUnmount(() => window.removeEventListener('paste', onPaste));
         <div class="foot">
             <input ref="fileIn" class="file-in" type="file" multiple @change="pickFiles" />
             <button type="button" class="add" title="选择文件" aria-label="选择文件" @click="fileIn && fileIn.click()"><ChIcon name="plus" /></button>
+            <button type="button" class="cap-entry" :class="{ on: CAP.square === 'agent' }" title="智能体：选一个挂到输入框" aria-label="智能体" @click="toggleSquare('agent')">
+                <ChIcon name="sparkles" /><span>智能体</span>
+            </button>
+            <button type="button" class="cap-entry" :class="{ on: CAP.square === 'skill' }" title="技能：选一个挂到输入框" aria-label="技能" @click="toggleSquare('skill')">
+                <ChIcon name="wand2" /><span>技能</span>
+            </button>
             <SizePicker v-if="S.mode !== 'chat'" />
             <span class="grow"></span>
             <ModelPicker />
@@ -95,6 +117,7 @@ onBeforeUnmount(() => window.removeEventListener('paste', onPaste));
 .cmp.drag { background: var(--solid); box-shadow: var(--shadow-lift); }
 textarea { width: 100%; min-height: 48px; max-height: 40vh; padding: 2px 0; border: 0; outline: 0; resize: none; background: transparent; color: var(--ink); font: 400 14.5px/24px var(--font-sans); }
 textarea::placeholder { color: var(--ink-4); }
+.caps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px; }
 .refs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px; }
 .ref { position: relative; width: 48px; height: 48px; border-radius: 10px; background: var(--fill-1); }
 .ref img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; display: block; cursor: zoom-in; }
@@ -115,6 +138,11 @@ textarea::placeholder { color: var(--ink-4); }
 .add { width: 32px; height: 32px; flex: none; border: 0; border-radius: 99px; cursor: pointer; background: var(--fill-1); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; transition: background var(--duration-fast), color var(--duration-fast); }
 .add:hover { background: var(--fill-2); color: var(--ink); }
 .add .nv-i { width: 16px; height: 16px; }
+.cap-entry { height: 32px; flex: none; padding: 0 11px; border: 0; border-radius: 999px; cursor: pointer; background: transparent; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px;
+    font: 500 12px/1 var(--font-sans); white-space: nowrap; transition: background var(--duration-fast), color var(--duration-fast); }
+.cap-entry:hover { background: var(--fill-1); color: var(--ink); }
+.cap-entry.on { background: var(--fill-2); color: var(--ink); }
+.cap-entry .nv-i { width: 14px; height: 14px; }
 .send { position: relative; width: 34px; height: 34px; flex: none; margin-left: 4px; border: 0; border-radius: 99px; cursor: pointer; background: var(--accent); color: var(--on-accent);
     display: inline-flex; align-items: center; justify-content: center; transition: transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base), background var(--duration-fast); }
 .send:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--shadow-lift); }

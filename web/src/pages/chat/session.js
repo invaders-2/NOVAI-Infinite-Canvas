@@ -1,4 +1,5 @@
 // GPT 对话 · 会话：会话列表 / 打开 / 新建 / 删除、附件上传、发送（chat 流式 / agent 流式 / image 普通请求）、
+// 能力运行（挂上智能体 / 技能后发消息：会话作用域接口 + SSE 进度 → 对话里的一条助手消息）、
 // 流式事件（meta / reasoning / status / delta / done / error）、中断、重新生成。
 // 接口、请求体字段、localStorage key（gpt_chat_last_conversation_v1）与旧版完全一致。
 import { reactive, nextTick } from 'vue';
@@ -6,6 +7,8 @@ import { S, userId, uuid, chatModelForRequest, sizeOf, sizeOpts, saveSettings } 
 import { chatSizeFromPrompt } from './sizes.js';
 import { thoughtTraceEntries } from './thought.js';
 import { readSSE } from './sse.js';
+import { CAP, clearCapability } from './agents/capState.js';
+import { runCapability, getRun, streamRun, normalizeRun, normalizeArtifacts, isTerminal } from './agents/capabilityApi.js';
 import { t, toast } from '../../lib/store.js';
 
 const LAST_KEY = 'gpt_chat_last_conversation_v1';
@@ -111,7 +114,11 @@ export async function uploadFiles(files) {
         const r = await fetch('/api/ai/upload', { method: 'POST', body: form });
         if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || '上传失败');
         const data = await r.json();
-        C.refs.push(...(data.files || []));
+        (data.files || []).forEach((item, i) => {
+            // 能力运行走 multipart 上传原始文件，这里把选中的 File 留一份（对象展开后仍是原始 File）
+            const raw = list[i] || list.find(x => x.name === item.name);
+            C.refs.push(raw ? { ...item, file: raw } : item);
+        });
     } catch (e) {
         toast(e.message || '上传失败', { danger: true, icon: 'alert' });
     } finally {
@@ -148,7 +155,7 @@ function settle(th) {
 
 export function send(text, refsOverride) {
     if (C.busy) return Promise.resolve(false);
-    inflight = doSend(text, refsOverride);
+    inflight = CAP.selected ? doRunCapability(text) : doSend(text, refsOverride);
     return inflight;
 }
 async function doSend(text, refsOverride) {
@@ -261,6 +268,216 @@ async function readStream(res, live, onMeta) {
         }
     });
     live.streaming = false;
+}
+
+/* ───────── 能力运行（智能体 / 技能）：进度与结果就是对话里的一条助手消息 ───────── */
+function mergeArtifacts(a, b) {
+    const out = [];
+    const seen = new Set();
+    (a || []).concat(b || []).forEach(x => {
+        if (!x || !x.url || seen.has(x.url)) return;
+        seen.add(x.url);
+        out.push(x);
+    });
+    return out;
+}
+
+function upsertStep(msg, index, patch) {
+    const key = index == null ? '' : String(index);
+    const list = msg.steps.slice();
+    let at = -1;
+    for (let i = 0; i < list.length; i++) {
+        const cur = list[i];
+        if (key ? String(cur.index) === key : (cur.index == null && !cur.tool && patch.tool)) { at = i; break; }
+    }
+    if (at < 0) list.push(Object.assign({ index: index == null ? list.length : index, tool: '', status: 'pending', summary: '' }, patch));
+    else list[at] = Object.assign({}, list[at], patch);
+    msg.steps = list;
+}
+
+function stepSummary(ev) {
+    if (!ev) return '';
+    if (ev.ok === false) return String(ev.error || ev.message || '执行失败');
+    const parts = [];
+    if (ev.summary) parts.push(String(ev.summary));
+    if (ev.message) parts.push(String(ev.message));
+    if (!ev.summary && ev.description) parts.push(String(ev.description));
+    const r = ev.result && typeof ev.result === 'object' ? ev.result : null;
+    if (r) {
+        if (r.name) parts.push(String(r.name));
+        else if (r.value != null) parts.push(String(r.value));
+        if (r.row_count != null) parts.push(String(r.row_count) + ' 行');
+    }
+    return parts.join(' · ');
+}
+
+function applyPlan(msg, ev) {
+    const steps = Array.isArray(ev.steps) ? ev.steps : [];
+    steps.forEach((s, i) => {
+        const o = s && typeof s === 'object' ? s : {};
+        const idx = o.index == null ? i : o.index;
+        upsertStep(msg, idx, { tool: String(o.tool || ''), summary: String(o.description || o.label || o.tool || ('步骤 ' + (i + 1))) });
+    });
+}
+
+function pushArtifact(msg, a) {
+    const list = normalizeArtifacts([a], msg.run_id);
+    if (list.length) msg.artifacts = mergeArtifacts(msg.artifacts, list);
+}
+
+function applyRunToMessage(msg, run) {
+    if (!msg || !run) return;
+    if (run.status) msg.status = run.status;
+    if (run.steps && run.steps.length) msg.steps = run.steps;
+    if (run.artifacts && run.artifacts.length) msg.artifacts = mergeArtifacts(msg.artifacts, run.artifacts);
+    if (run.error) msg.error = run.error;
+    if (isTerminal(run.status)) msg.live = false;
+}
+
+async function pollRun(runId, live) {
+    const res = await getRun(runId);
+    if (!res.ok) return null;
+    applyRunToMessage(live, res.run);
+    return res.run;
+}
+
+// SSE 实时推进 + 轮询兜底（进度流不可用时仍能走完）
+function listenRun(runId, live, signal) {
+    let pollTimer = 0;
+    let listening = true;
+    const finish = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; } listening = false; };
+    const onEvent = (ev, name) => {
+        if (!ev || typeof ev !== 'object') return;
+        const type = String(name || ev.type || '').toLowerCase();
+        if (type === 'run_start') { if (!isTerminal(live.status)) live.status = 'running'; return; }
+        if (type === 'plan') { applyPlan(live, ev); return; }
+        if (type === 'step_start') {
+            upsertStep(live, ev.index, { tool: String(ev.tool || ''), status: 'running', summary: String(ev.description || ev.label || '') });
+            return;
+        }
+        if (type === 'step_result') {
+            upsertStep(live, ev.index, { tool: String(ev.tool || ''), status: ev.ok === false ? 'error' : 'done', summary: stepSummary(ev) });
+            return;
+        }
+        if (type === 'error') { live.status = 'failed'; live.error = String(ev.message || ev.detail || ev.error || '运行失败'); live.live = false; return; }
+        if (type === 'done') { applyRunToMessage(live, normalizeRun(ev)); finish(); return; }
+        // 兼容旧形状 / 画布同款事件体（带 run / run_id、status / steps / artifacts）
+        if (ev.run && typeof ev.run === 'object') applyRunToMessage(live, normalizeRun(ev.run));
+        else if (ev.run_id && (ev.status || ev.steps || ev.artifacts)) applyRunToMessage(live, normalizeRun(ev));
+        if (type === 'artifact') pushArtifact(live, ev.artifact || ev);
+    };
+    pollTimer = setInterval(() => { if (listening) pollRun(runId, live); }, 2500);
+    return streamRun(runId, onEvent, signal)
+        .catch(err => { if (err && err.name === 'AbortError') live.stopped = true; else live.sse_failed = true; })
+        .then(async () => {
+            if (listening) await pollRun(runId, live);
+            finish();
+            live.live = false;
+        });
+}
+
+// 服务端会话是唯一真相；服务端这条没带步骤 / 产物时才用本次真实观察到的事件补
+function mergeLiveInto(messages, snap) {
+    return (messages || []).map(m => {
+        if (!m || m.role !== 'assistant') return m;
+        const sameRun = snap.run_id && m.run_id === snap.run_id;
+        const sameId = snap.id && m.id === snap.id;
+        if (!sameRun && !sameId) return m;
+        return Object.assign({}, m, {
+            type: m.type || 'capability',
+            capability_id: m.capability_id || snap.capability_id,
+            capability_name: m.capability_name || snap.capability_name,
+            run_id: m.run_id || snap.run_id,
+            status: m.status || snap.status,
+            steps: (m.steps && m.steps.length) ? m.steps : snap.steps,
+            artifacts: mergeArtifacts(m.artifacts, snap.artifacts),
+            error: m.error || snap.error,
+            stopped: m.stopped || snap.stopped,
+        });
+    });
+}
+
+async function reloadConversation(id, snap) {
+    try {
+        const data = await fetch(`/api/conversations/${id}`, { headers: { 'X-User-ID': userId() } }).then(r => r.json());
+        if (!data || !data.conversation) return false;
+        setCurrent(data.conversation);
+        showMessages(mergeLiveInto(data.conversation.messages || [], snap), { keepPosition: true });
+        return true;
+    } catch (e) { return false; }
+}
+
+async function ensureConversation() {
+    if (C.current && C.current.id) return C.current.id;
+    try {
+        const data = await fetch('/api/conversations', { method: 'POST', headers: headers(), body: JSON.stringify({ title: '新对话' }) }).then(r => r.json());
+        if (data && data.conversation && data.conversation.id) { setCurrent(data.conversation); return data.conversation.id; }
+    } catch (e) {}
+    return '';
+}
+
+function capFiles() {
+    return C.refs.filter(r => r && (r.file || r.raw)).map(r => ({ file: r.file || r.raw, name: attachmentName(r) }));
+}
+
+async function doRunCapability(text) {
+    const cap = CAP.selected;
+    if (!cap) return false;
+    const message = String(text || '').trim();
+    const pendingRefs = C.refs.slice();
+    const files = capFiles();
+    if (!message && !files.length) return false;
+
+    const params = Object.assign({}, cap.params || {});
+    if (S.provider) params.provider = S.provider;
+    const model = chatModelForRequest();
+    if (model) params.model = model;
+
+    const convId = await ensureConversation();
+    if (!convId) { toast('新建对话失败，无法运行', { danger: true, icon: 'alert' }); return false; }
+
+    const userMsg = reactive({
+        _key: uuid(), role: 'user', content: message, attachments: pendingRefs,
+        capability_id: cap.id, capability_name: cap.name, created_at: Date.now(),
+    });
+    const live = reactive({
+        _key: uuid(), role: 'assistant', type: 'capability', live: true, created_at: Date.now(),
+        capability_id: cap.id, capability_name: cap.name, run_id: '', status: 'running',
+        steps: [], artifacts: [], content: '', error: '', stopped: false, sse_failed: false,
+    });
+    C.messages.push(userMsg, live);
+    C.refs = [];
+    clearCapability();
+    C.busy = true;
+    controller = new AbortController();
+    hooks.scroll(true);
+    try {
+        const res = await runCapability(convId, cap.id, files, params, message, controller.signal);
+        if (!res.ok) {
+            live.live = false;
+            if (res.aborted) { live.stopped = true; live.status = 'aborted'; }
+            else { live.status = 'failed'; live.error = res.error || '运行请求失败'; }
+            showMessages(C.messages.slice(), { keepPosition: true });
+            return false;
+        }
+        live.run_id = res.runId;
+        if (res.assistantMessageId) live.id = res.assistantMessageId;
+        if (res.userMessageId) userMsg.id = res.userMessageId;
+        await listenRun(res.runId, live, controller.signal);
+        const snap = {
+            id: live.id, run_id: live.run_id, capability_id: live.capability_id, capability_name: live.capability_name,
+            status: live.status, steps: live.steps.slice(), artifacts: live.artifacts.slice(), error: live.error, stopped: live.stopped,
+        };
+        // 结果留存走服务端会话（刷新后还在）；重拉失败时保留本地这条本次真实观察到的消息
+        const ok = await reloadConversation(convId, snap);
+        if (!ok) showMessages(C.messages.slice(), { keepPosition: true });
+        await loadConversations();
+    } finally {
+        C.busy = false;
+        controller = null;
+        hooks.scroll(false);
+    }
+    return true;
 }
 
 export function initSession() {

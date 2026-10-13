@@ -1,12 +1,15 @@
 <script setup>
-// 一条消息。用户：附件（图片缩略 / 文件卡片）+ 深色气泡 + 时间。
-// 助手：思考块 → Markdown 正文（图片消息为 agent_reply / 「生成完成」）→ 生成图网格（点击放大）→
+// 一条消息。用户：能力 chip（挂了智能体 / 技能时）+ 附件（图片缩略 / 文件卡片）+ 深色气泡 + 时间。
+// 助手：能力运行消息（type:'capability' → 状态 / 步骤 / 产物）或 思考块 → Markdown 正文 → 生成图网格 →
 //       徽标行（模型短名 · 图片实际像素 · 时间 · 复制 / 重新生成）。
 import { ref, computed, watch } from 'vue';
 import ChIcon from './ChIcon.vue';
 import MdView from './MdView.vue';
 import ThoughtBlock from './ThoughtBlock.vue';
+import CapabilityRun from './agents/CapabilityRun.vue';
 import { C, isImageRef, attachmentName, imageUrlsOf, regenerate, thoughtDurations } from './session.js';
+import { agentById } from './agents/capState.js';
+import { ICONS } from '../../lib/icons.js';
 import { thoughtTraceEntries } from './thought.js';
 import { copyText } from './copy.js';
 import { t, toast } from '../../lib/store.js';
@@ -17,6 +20,13 @@ const m = computed(() => props.msg);
 const isUser = computed(() => m.value.role === 'user');
 const images = computed(() => imageUrlsOf(m.value));
 const body = computed(() => (m.value.type === 'image' ? (m.value.agent_reply || t('chat.generated', '生成完成')) : (m.value.content || '')));
+const isCap = computed(() => m.value.type === 'capability');
+const capName = computed(() => m.value.capability_name || (agentById(m.value.capability_id) || {}).name || '能力');
+const capIcon = computed(() => {
+    const c = agentById(m.value.capability_id);
+    const k = String((c && c.icon) || '').trim();
+    return ICONS[k] ? k : 'sparkles';
+});
 
 const thought = computed(() => {
     if (m.value.thought) return m.value.thought;
@@ -47,6 +57,10 @@ const showFoot = computed(() => !isUser.value && !m.value.live);
 <template>
     <div class="row" :class="isUser ? 'u' : 'a'">
         <template v-if="isUser">
+            <span v-if="m.capability_id || m.capability_name" class="ucap">
+                <ChIcon :name="capIcon" />
+                <span>{{ capName }}</span>
+            </span>
             <div v-if="m.attachments && m.attachments.length" class="att">
                 <template v-for="(r, i) in m.attachments" :key="i">
                     <img v-if="isImageRef(r)" class="im" :src="r.url" :title="attachmentName(r)" alt="" @click="emit('preview', r.url)" />
@@ -57,10 +71,13 @@ const showFoot = computed(() => !isUser.value && !m.value.live);
             <span class="tm">{{ time }}</span>
         </template>
         <template v-else>
-            <ThoughtBlock v-if="thought" :thought="thought" />
-            <div v-if="m.pending" class="pend">{{ body }}</div>
-            <div v-else-if="m.error" class="err">{{ body }}</div>
-            <MdView v-else-if="body" :text="body" />
+            <CapabilityRun v-if="isCap" :msg="m" />
+            <template v-else>
+                <ThoughtBlock v-if="thought" :thought="thought" />
+                <div v-if="m.pending" class="pend">{{ body }}</div>
+                <div v-else-if="m.error" class="err">{{ body }}</div>
+                <MdView v-else-if="body" :text="body" />
+            </template>
             <div v-if="images.length" class="gen" :class="'n' + Math.min(images.length, 4)">
                 <button v-for="(u, i) in images" :key="u + i" type="button" class="gi" @click="emit('preview', u)">
                     <img :src="u" alt="" loading="lazy" />
@@ -73,7 +90,7 @@ const showFoot = computed(() => !isUser.value && !m.value.live);
                 <span v-if="m.stopped" class="stopped">已停止</span>
                 <span class="acts">
                     <button type="button" class="ib" title="复制" aria-label="复制" @click="copy"><ChIcon name="copy" /></button>
-                    <button type="button" class="ib" title="重新生成" aria-label="重新生成" :disabled="C.busy" @click="regenerate(m)"><ChIcon name="refresh" /></button>
+                    <button v-if="!isCap" type="button" class="ib" title="重新生成" aria-label="重新生成" :disabled="C.busy" @click="regenerate(m)"><ChIcon name="refresh" /></button>
                 </span>
             </div>
         </template>
@@ -85,6 +102,8 @@ const showFoot = computed(() => !isUser.value && !m.value.live);
 .row.u { align-items: flex-end; }
 .bu { max-width: min(540px, 86%); padding: 10px 14px; border-radius: 18px 18px 6px 18px; background: var(--accent); color: var(--on-accent); font: 400 13.5px/22px var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tm { font: 400 10.5px/1 var(--font-mono); color: var(--ink-4); letter-spacing: .03em; }
+.ucap { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--fill-1); color: var(--ink-2); font: 500 11.5px/1 var(--font-sans); }
+.ucap .nv-i { width: 13px; height: 13px; }
 .att { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: min(540px, 86%); }
 .att .im { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; cursor: zoom-in; background: var(--fill-1); transition: transform var(--duration-base) var(--ease-out); }
 .att .im:hover { transform: translateY(-1px); }
