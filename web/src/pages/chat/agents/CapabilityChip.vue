@@ -25,7 +25,12 @@ function charIcon() {
     const k = String((props.cap && props.cap.icon) || '').trim();
     return k && !ICONS[k] && k.length <= 2 ? k : '';
 }
-function kindText() { return props.cap.kind === 'skill' ? '技能' : '智能体'; }
+function kindText() {
+    const k = props.cap && props.cap.kind;
+    if (k === 'skill') return '技能';
+    if (k === 'generate-image') return 'AI生图';
+    return '智能体';
+}
 function boolOptions() { return [{ value: true, label: '是' }, { value: false, label: '否' }]; }
 function same(field, value) {
     const cur = props.cap.params[field.name];
@@ -101,7 +106,7 @@ function remove() {
                             </span>
                         </label>
                     </template>
-                    <div v-else class="pstate"><span>这个{{ kindText() }}无需参数，直接发送即可。</span></div>
+                    <div v-else class="pstate"><span>无需参数，直接发送即可。</span></div>
 
                     <div class="pfoot">
                         <button type="button" class="nv-btn sm ghost" @click="replace"><ChIcon name="refresh" />更换{{ kindText() }}</button>

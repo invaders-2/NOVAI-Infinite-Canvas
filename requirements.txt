@@ -11,3 +11,5 @@ qrcode>=7.4
 opencv-python-headless>=4.9
 onnxruntime>=1.17
 jsonschema>=4.0
+openpyxl>=3.1
+websockets>=12

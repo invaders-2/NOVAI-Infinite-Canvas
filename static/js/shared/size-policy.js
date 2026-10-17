@@ -12,10 +12,14 @@
         maxPixels: 0,
         minPixels: 0,
         multipleOf: 0,
+        minRatio: 0,
+        maxRatio: 0,
         options: [],
         prefer: 'ratio',
         autoSize: false,
         defaultLevel: '',
+        ratios: [],
+        resolutions: [],
         tiers: [
             { id: '1k', maxPixels: 1572864 },
             { id: '2k', maxPixels: 4194304 },
@@ -24,6 +28,14 @@
     };
     const MODES = ['free', 'bounds', 'enum'];
     const LEVELS = ['1k', '2k', '4k'];
+    // 供应商级覆盖（/api/ai/size-policy 下发的 ratios）用的比例词表：内部 key → 官方宽高比。
+    // 与 web 在线页 RATIOS/EXTRA_RATIOS、两套画布 SIZE_MAP 的键同源；未命中时按原 key 比对。
+    const RATIO_ID_LABELS = {
+        square: '1:1', portrait12: '1:2', landscape21: '2:1', story: '9:16', wide: '16:9',
+        portrait43: '3:4', landscape43: '4:3', landscape: '3:2', portrait: '2:3', landscape54: '5:4',
+        portrait45: '4:5', ultrawide: '21:9', ultratall: '9:21', landscape31: '3:1', portrait13: '1:3',
+        portrait14: '1:4', portrait18: '1:8', landscape41: '4:1', landscape81: '8:1',
+    };
 
     function defaultTiers(){
         return DEFAULT_POLICY.tiers.map(tier => ({ id: tier.id, maxPixels: tier.maxPixels }));
@@ -77,12 +89,18 @@
         if (LEVELS.indexOf(level) >= 0) policy.defaultLevel = level;
         const tiers = normalizeTiers(raw.tiers);
         if (tiers) policy.tiers = tiers;
+        policy.ratios = Array.isArray(raw.ratios)
+            ? raw.ratios.map(item => String(item == null ? '' : item).trim()).filter(Boolean) : [];
+        policy.resolutions = Array.isArray(raw.resolutions)
+            ? raw.resolutions.map(item => String(item == null ? '' : item).trim().toLowerCase()).filter(Boolean) : [];
         policy.hintOnly = !!raw.hintOnly;
         policy.autoSize = !!raw.autoSize;
         policy.maxEdge = positiveNumber(raw.maxEdge);
         policy.maxPixels = positiveNumber(raw.maxPixels);
         policy.minPixels = positiveNumber(raw.minPixels);
         policy.multipleOf = positiveNumber(raw.multipleOf);
+        policy.minRatio = positiveNumber(raw.minRatio);
+        policy.maxRatio = positiveNumber(raw.maxRatio);
         return policy;
     }
 
@@ -104,7 +122,12 @@
         return (key && table.models[key]) || table.default;
     }
 
-    function isEnum(model){ return policy(model).mode === 'enum'; }
+    // 吸附提示（smart-canvas/apiRatioSnap）以本判定为闸门：bounds 声明了比例范围时会夹比例，
+    // 同样会出现「实发比例 ≠ 选中比例」，必须算进去，否则超范围比例会被静默改掉。
+    function isEnum(model){
+        const current = policy(model);
+        return current.mode === 'enum' || (current.mode === 'bounds' && (current.minRatio > 0 || current.maxRatio > 0));
+    }
 
     function enumOptions(model){
         const current = policy(model);
@@ -121,7 +144,8 @@
     }
 
     function hasLimits(current){
-        return current.maxEdge > 0 || current.maxPixels > 0 || current.minPixels > 0;
+        return current.maxEdge > 0 || current.maxPixels > 0 || current.minPixels > 0
+            || current.minRatio > 0 || current.maxRatio > 0;
     }
 
     function alignDown(value, multiple){
@@ -134,13 +158,26 @@
         return Math.max(multiple, Math.ceil(value / multiple) * multiple);
     }
 
-    // 等比缩进 maxEdge / maxPixels，再按 multipleOf 对齐；不足下限时等比放大（与后端 normalize_gpt_image_2_size 同规则）。
+    // 比例先夹进 [minRatio, maxRatio]，再等比缩进 maxEdge / maxPixels，按 multipleOf 对齐；
+    // 对齐会再让比例越界（floor 把两边削得不一样），所以对齐后按 16 的倍数严格再夹一次；
+    // 最后不足 minPixels 时等比放大（与后端 registry._fit_size_within 同规则）。
     function fitWithin(pair, current){
+        let width = pair.width;
+        let height = pair.height;
+        if (current.maxRatio > 0 && width > height * current.maxRatio) width = height * current.maxRatio;
+        if (current.minRatio > 0 && width < height * current.minRatio) height = width / current.minRatio;
         let scale = 1;
-        if (current.maxEdge > 0) scale = Math.min(scale, current.maxEdge / Math.max(pair.width, pair.height));
-        if (current.maxPixels > 0) scale = Math.min(scale, Math.sqrt(current.maxPixels / (pair.width * pair.height)));
-        let width = alignDown(pair.width * scale, current.multipleOf);
-        let height = alignDown(pair.height * scale, current.multipleOf);
+        if (current.maxEdge > 0) scale = Math.min(scale, current.maxEdge / Math.max(width, height));
+        if (current.maxPixels > 0) scale = Math.min(scale, Math.sqrt(current.maxPixels / (width * height)));
+        const multiple = Math.max(1, current.multipleOf);
+        width = alignDown(width * scale, current.multipleOf);
+        height = alignDown(height * scale, current.multipleOf);
+        if (current.maxRatio > 0 && width > height * current.maxRatio) {
+            width = Math.max(multiple, Math.floor(height * current.maxRatio / multiple) * multiple);
+        }
+        if (current.minRatio > 0 && width < height * current.minRatio) {
+            height = Math.max(multiple, Math.floor(width / current.minRatio / multiple) * multiple);
+        }
         if (current.minPixels > 0 && width * height < current.minPixels) {
             const grow = Math.sqrt(current.minPixels / (width * height));
             width = alignUp(width * grow, current.multipleOf);
@@ -209,6 +246,27 @@
         return pickBest(pool, pair, current, tiers) || size;
     }
 
+    /* ── 供应商级覆盖：空数组 = 未声明 = 不过滤；只把接口下发的允许项合并到静态表之上 ── */
+    function hasRatioOverride(model){ return (policy(model).ratios || []).length > 0; }
+
+    function hasLevelOverride(model){ return (policy(model).resolutions || []).length > 0; }
+
+    function ratioAllowed(model, ratioKey){
+        const allowed = policy(model).ratios || [];
+        if (!allowed.length) return true;
+        const key = String(ratioKey == null ? '' : ratioKey).trim();
+        const label = RATIO_ID_LABELS[key];
+        return allowed.indexOf(key) >= 0 || (label ? allowed.indexOf(label) >= 0 : false);
+    }
+
+    function levelAllowed(model, level){
+        const allowed = policy(model).resolutions || [];
+        if (!allowed.length) return true;
+        return allowed.indexOf(String(level == null ? '' : level).trim().toLowerCase()) >= 0;
+    }
+
+    function allRatioKeys(){ return Object.keys(RATIO_ID_LABELS); }
+
     /* ── 对外 API ── */
     function load(){
         if (!pending) {
@@ -243,5 +301,6 @@
         return size;
     }
 
-    window.NovaSizePolicy = { load, policy, isEnum, enumOptions, constrain, fitSource };
+    window.NovaSizePolicy = { load, policy, isEnum, enumOptions, constrain, fitSource,
+        hasRatioOverride, hasLevelOverride, ratioAllowed, levelAllowed, allRatioKeys };
 })();

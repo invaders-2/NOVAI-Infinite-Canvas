@@ -380,7 +380,7 @@ function buildApplyFn(){
     const called = {close:0, render:0, save:0};
     const apply = new Function(
         'promptTemplateItems', 'promptTemplateSelectedId', 'promptTemplatePanel', 'promptTemplateText',
-        'nodes', 'closePromptTemplatePanel', 'render', 'scheduleSave',
+        'nodes', 'closePromptTemplatePanel', 'render', 'scheduleSave', 'syncPromptTemplateTargetInput',
         applySrc + '\nreturn applyPromptTemplateToNode;'
     )(
         () => [state.template],
@@ -390,7 +390,8 @@ function buildApplyFn(){
         state.nodes,
         () => { called.close += 1; },
         () => { called.render += 1; },
-        () => { called.save += 1; }
+        () => { called.save += 1; },
+        () => {}
     );
     return {apply: apply, state: state, called: called};
 }
@@ -422,11 +423,22 @@ const mediaScaleSrc = (js.match(/function mediaNodeDefaultScale\(node\)\{[\s\S]*
 const groupGridSrc = (js.match(/function groupImageGridLayout\([\s\S]*?\n\}/) || [])[0] || '';
 const fittedSrc = (js.match(/function fittedMediaGridLayout\([\s\S]*?\n\}/) || [])[0] || '';
 const imageLayoutSrc = (js.match(/function imageLayout\([\s\S]*?\n\}/) || [])[0] || '';
-ok(Boolean(gridConstSrc && scaleConstSrc && mediaScaleSrc && groupGridSrc && fittedSrc && imageLayoutSrc), '布局函数与常量都能从源码抠出来');
+/* 第 49 轮：格子按每张素材自己的比例，imageLayout 依赖这几个比例/高度小工具 */
+const mediaLayoutSizeSrc = (js.match(/function mediaLayoutSize\([\s\S]*?\n\}/) || [])[0] || '';
+const cellAspectSrc = (js.match(/function mediaCellAspect\([\s\S]*?\n\}/) || [])[0] || '';
+const pendingCellAspectSrc = (js.match(/function pendingCellAspect\([\s\S]*?\n\}/) || [])[0] || '';
+const rowHeightsSrc = (js.match(/function thumbGridRowHeights\([\s\S]*?\n\}/) || [])[0] || '';
+const rowsHeightSrc = (js.match(/function thumbGridRowsHeight\([\s\S]*?\n\}/) || [])[0] || '';
+const cellAspectsSrc = (js.match(/function mediaGridCellAspects\([\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(gridConstSrc && scaleConstSrc && mediaScaleSrc && groupGridSrc && fittedSrc && imageLayoutSrc
+    && mediaLayoutSizeSrc && cellAspectSrc && pendingCellAspectSrc && rowHeightsSrc && rowsHeightSrc && cellAspectsSrc), '布局函数与常量都能从源码抠出来');
 let imageLayoutFn = null;
 try {
     imageLayoutFn = new Function('pendingSlotsForNode',
-        scaleConstSrc + '\n' + gridConstSrc + '\n' + mediaScaleSrc + '\n' + groupGridSrc + '\n' + fittedSrc + '\n' + imageLayoutSrc
+        scaleConstSrc + '\n' + gridConstSrc + '\n' + mediaScaleSrc + '\n' + mediaLayoutSizeSrc + '\n' + cellAspectSrc + '\n'
+        + 'function pendingRequestBoxForNode(){ return null; }\n' + pendingCellAspectSrc + '\n' + rowsHeightSrc + '\n' + rowHeightsSrc + '\n'
+        + cellAspectsSrc + '\n' + groupGridSrc + '\n' + fittedSrc + '\n'
+        + 'function isSmartMediaNode(){ return false; }\nfunction smartGroupContainingNode(){ return null; }\n' + imageLayoutSrc
         + '\nreturn imageLayout;')(() => 0);
 } catch(e){ imageLayoutFn = null; }
 ok(typeof imageLayoutFn === 'function', 'imageLayout 可求值');
@@ -464,7 +476,8 @@ const resolveAgnes = evalResolve(AGNES_MODELS);
 eq(resolveAgnes('agnes-2.5-pro', 'agnes-ai'), 'agnes-2.5-pro', '列表内的非第一个模型原样保留');
 eq(resolveAgnes('某不在列表里的模型', 'agnes-ai'), '某不在列表里的模型', '不在列表里的用户模型也原样保留');
 eq(resolveAgnes('', 'agnes-ai'), 'agnes-2.0-flash', '空模型才回落到 provider 第一个');
-eq(evalResolve([])('', 'agnes-ai'), 'gpt-4o-mini', 'provider 无模型且未选模型时才用兜底 gpt-4o-mini');
+// 前端不该替用户写死模型名：provider 无列表且未选模型时返回空串，由后端按平台配置挑默认（main.py preferred_chat_model，5636-5645 / 5735）
+eq(evalResolve([])('', 'agnes-ai'), '', 'provider 无模型且未选模型时返回空串，交给后端按平台配置选默认模型');
 const chatModelOptionsSrc = (js.match(/function chatModelOptions\(selectedModel='', providerId=''\)\{[\s\S]*?\n\}/) || [])[0] || '';
 ok(Boolean(chatModelOptionsSrc), 'chatModelOptions 能从源码抠出来');
 // chatModelOptions 会按平台校正已选模型，校正函数也抠真实源码注入（它用到 window.NovaUtils 的记忆）

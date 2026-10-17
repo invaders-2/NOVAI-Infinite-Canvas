@@ -285,7 +285,7 @@ ok(/"smart\.promptLlmDefaultSystem"/.test(i18n) && /一段/.test(i18n), '默认�
 
 
 console.log('[12] 慢模型不再被 90 秒掐断，且超时提示是人话');
-ok(/Number\(options\.timeoutMs\) \|\| 180000/.test(js), '默认超时放宽到 180s（灵境/lovart 这类慢模型 90s 不够）');
+ok(/Number\(options\.timeoutMs\) \|\| 180000/.test(js), '默认超时放宽到 180s（慢模型 90s 不够）');
 ok(/error\?\.name === 'AbortError' \|\| controller\.signal\.aborted/.test(js), 'AbortError 单独识别（不再把英文原文丢给用户）');
 ok(/trf\('smart\.promptLlmTimeout'/.test(js), '超时用可读文案');
 ok(/"smart\.promptLlmTimeout"/.test(i18n) && /没返回/.test(i18n), '超时文案已登记 i18n');
@@ -387,6 +387,21 @@ ok(js.indexOf("btn.setAttribute('data-i18n-title', 'smart.optimizePrompt');") >=
 ok(optimizeFn.indexOf('callSmartCanvasLLM({llmProvider: provider, llmModel: model}, text, [], {') >= 0
     && optimizeFn.indexOf("systemPrompt: tr('smart.optimizePromptSystem')") >= 0 && optimizeFn.indexOf('noMedia:true') >= 0,
     '点击走现成的 callSmartCanvasLLM（非流式 /api/canvas-llm），system 用优化专用那条');
+/* 优化用的模型必须跟着用户在选择器上选的走：三处入口统一由一个取值函数决定 */
+const targetAt = js.indexOf('function promptOptimizeModelTarget(');
+const targetFn = targetAt < 0 ? '' : js.slice(targetAt, js.indexOf('\n}\n', targetAt) + 3);
+ok(optimizeFn.indexOf('const {provider, model} = promptOptimizeModelTarget(kind, node);') >= 0
+    && optimizeFn.indexOf('resolveChatModel(') < 0,
+    'optimizeEditorPrompt 统一从 promptOptimizeModelTarget(kind, node) 取 provider/model（入口自己不再解析模型）');
+ok(targetFn.indexOf("resolveChatProviderId(node?.llmProvider || '')") >= 0
+    && targetFn.indexOf("resolveChatModel(node?.llmModel || '', provider)") >= 0,
+    '节点绑了 LLM（节点模式 / 聊天模式 / 编辑栏正编辑文本生成节点）就用节点自己选的 llmProvider + llmModel');
+ok(targetFn.indexOf('resolveChatProviderId(chatProvider)') >= 0
+    && /correctedChatModelForProvider\(provider, chatModel\) \|\| chatModel/.test(targetFn),
+    '节点没绑 LLM 模型时读用户当前选的 chatProvider / chatModel：当前选择先过 correctedChatModelForProvider 原样保留，平台列表只做兜底，不取列表第一个顶替');
+const resolveModelFn = topLevelFunction(js, 'resolveChatModel');
+ok(resolveModelFn.indexOf('gpt-4o-mini') < 0 && /return model \|\| models\[0\] \|\| '';/.test(resolveModelFn),
+    "resolveChatModel 不再写死 'gpt-4o-mini'：平台没给模型列表就返回空串，让后端按平台配置挑默认模型");
 ok(js.indexOf('if(options.systemPrompt) body.system_prompt = String(options.systemPrompt);') >= 0,
     'callSmartCanvasLLM 支持自带 system_prompt（不借用聊天人设那条）');
 ok(optimizeFn.indexOf("btn.dataset.optimizing = '1';") >= 0 && optimizeFn.indexOf('btn.disabled = true;') >= 0

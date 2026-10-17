@@ -1900,69 +1900,6 @@ html.studio-theme-dark body .recommend-fill {
     max-width:130px;
 }
 
-.provider-card-banner .lingjing-icon {
-    height:24px;
-    max-width:132px;
-    object-fit:contain;
-}
-
-.lingjing-onboarding-info {
-    display:flex;
-    flex-direction:column;
-    gap:8px;
-    margin:0;
-    min-width:0;
-}
-
-.lingjing-model-tags,
-.lingjing-promo-tags {
-    display:flex;
-    flex-wrap:wrap;
-    gap:6px;
-}
-
-.lingjing-model-tags span,
-.lingjing-promo-tags span {
-    min-height:24px;
-    padding:0 9px;
-    border-radius:var(--radius-sm);
-    display:inline-flex;
-    align-items:center;
-    gap:5px;
-    font-size:10.5px;
-    line-height:1;
-    font-weight:850;
-    white-space:nowrap;
-    border:0;
-    background:var(--soft);
-}
-
-.lingjing-model-tags span {
-    background:var(--soft);
-    color:var(--text);
-}
-
-.lingjing-save-line {
-    display:grid;
-    grid-template-columns:minmax(220px, .95fr) 34px minmax(260px, 1.05fr);
-    align-items:end;
-    gap:12px;
-    justify-content:stretch;
-    margin-top:0;
-}
-
-.lingjing-save-line .lingjing-onboarding-info {
-    grid-column:1;
-    justify-self:start;
-}
-
-.lingjing-save-line .onboarding-save-btn {
-    grid-column:3;
-    align-self:end;
-    justify-self:end;
-    white-space:nowrap;
-}
-
 .provider-card-banner .provider-protocol-pill {
     margin:0 auto;
     height:16px;
@@ -5300,30 +5237,14 @@ html.studio-theme-dark body .recommend-tag.recommend-free-tag svg {
     }
 
     .onboarding-rh-linear-row,
-    .onboarding-ms-linear-row,
-    .lingjing-save-line {
+    .onboarding-ms-linear-row {
         grid-template-columns:1fr !important;
         align-items:stretch !important;
         gap:10px !important;
     }
 
-    .lingjing-save-line .lingjing-onboarding-info,
-    .lingjing-save-line .onboarding-save-btn {
-        grid-column:1 !important;
-        justify-self:stretch !important;
-    }
-
-    .lingjing-save-line .onboarding-save-btn,
     .onboarding-rh-save-all {
         width:100% !important;
-    }
-
-    .lingjing-model-tags span,
-    .lingjing-promo-tags span {
-        max-width:100%;
-        min-height:26px;
-        white-space:normal;
-        line-height:1.2;
     }
 
     .recommend-api-body,
@@ -5372,15 +5293,8 @@ html.studio-theme-dark body .recommend-tag.recommend-free-tag svg {
 }
 
 @media (max-width:480px) {
-    .lingjing-model-tags,
-    .lingjing-promo-tags,
     .recommend-tags {
         align-items:stretch;
-    }
-
-    .lingjing-model-tags span,
-    .lingjing-promo-tags span {
-        flex:1 1 100%;
     }
 
     .recommend-platform-head {
@@ -5509,29 +5423,6 @@ html.studio-theme-dark body .recommend-tag.recommend-free-tag svg {
         font-size:11px !important;
         line-height:1.5 !important;
     }
-}
-
-.onboarding-rh-save-line.lingjing-save-line {
-    display:grid !important;
-    grid-template-columns:minmax(220px, .95fr) 34px minmax(260px, 1.05fr) !important;
-    align-items:end !important;
-    gap:12px !important;
-    justify-content:stretch !important;
-    margin-top:0 !important;
-}
-
-.onboarding-rh-save-line.lingjing-save-line .lingjing-onboarding-info {
-    grid-column:1 !important;
-    justify-self:start !important;
-    width:100% !important;
-    min-width:0 !important;
-}
-
-.onboarding-rh-save-line.lingjing-save-line .onboarding-save-btn {
-    grid-column:3 !important;
-    justify-self:end !important;
-    width:auto !important;
-    min-width:92px !important;
 }
 
 /* 推荐 API 快捷设置：操作按钮换行到说明文字下方，避免挤出卡片底部框架 */
@@ -5688,21 +5579,6 @@ html.studio-theme-dark body .recommend-tag.recommend-free-tag svg {
         width:100% !important;
     }
 
-    .onboarding-rh-save-line.lingjing-save-line {
-        grid-template-columns:1fr !important;
-        align-items:stretch !important;
-        gap:10px !important;
-    }
-
-    .onboarding-rh-save-line.lingjing-save-line .lingjing-onboarding-info,
-    .onboarding-rh-save-line.lingjing-save-line .onboarding-save-btn {
-        grid-column:1 !important;
-        justify-self:stretch !important;
-    }
-
-    .onboarding-rh-save-line.lingjing-save-line .onboarding-save-btn {
-        width:100% !important;
-    }
 }
 
 /* ===== 推荐卡片快捷设置：文本下方保持左右引导（获取 Key -> 填写 Key） ===== */

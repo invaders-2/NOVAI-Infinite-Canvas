@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import re
 import shutil
@@ -18,6 +19,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
+from server.agents import store as agent_store
 from server.routes.deps import deps
 
 router = APIRouter(prefix="/api")
@@ -594,6 +596,96 @@ async def upload_asset_library_workflows(
 @router.get("/asset-library")
 async def get_asset_library():
     return {"library": deps.load_asset_library()}
+
+
+# ===== 智能体/技能产物（只读）：让资产库也能看到能力运行生成的文件 =====
+# 产物落在 {DATA_DIR}/agent_outputs/<run_id>/，运行记录在 {DATA_DIR}/agent_runs/<run_id>.json。
+# 这里只扫描、只返回：不写入资产库索引，既有接口的字段含义与行为都不变。
+
+_AGENT_ARTIFACT_KIND_BY_EXT = {
+    ".html": "html", ".htm": "html",
+    ".xlsx": "xlsx", ".xlsm": "xlsx", ".xls": "xlsx",
+    ".csv": "csv",
+    ".md": "markdown", ".markdown": "markdown",
+    ".txt": "text",
+    ".pdf": "pdf",
+    ".doc": "doc", ".docx": "doc",
+    ".json": "json",
+    ".zip": "zip",
+}
+
+
+def _agent_artifact_kind(name: str, declared: str = "") -> str:
+    ext = os.path.splitext(str(name or ""))[1].lower()
+    return _AGENT_ARTIFACT_KIND_BY_EXT.get(ext) or str(declared or "file")
+
+
+def _agent_run_record(runs_dir: str, run_id: str) -> Dict[str, Any]:
+    path = os.path.join(runs_dir, "%s.json" % run_id)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            record = json.load(f)
+    except Exception:
+        return {}
+    return record if isinstance(record, dict) else {}
+
+
+def _agent_artifact_item(run_id: str, name: str, path: str,
+                         declared_kind: str, record: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        size = os.path.getsize(path)
+        mtime_ms = int(os.path.getmtime(path) * 1000)
+    except OSError:
+        size, mtime_ms = 0, 0
+    try:
+        updated = float(record.get("updated_at") or record.get("created_at") or 0)
+    except (TypeError, ValueError):
+        updated = 0.0
+    source = str(record.get("capability_name") or record.get("capability_id") or "").strip()
+    return {
+        "id": "artifact:%s:%s" % (run_id, name),
+        "name": name,
+        "url": agent_store.artifact_url(run_id, name),
+        "kind": _agent_artifact_kind(name, declared_kind),
+        "size": size,
+        # 与资产库条目同口径：毫秒时间戳（asset_library 用 now_ms 写入）
+        "created_at": int(updated * 1000) if updated else mtime_ms,
+        "source": source or "智能体产物",
+        "category": source,
+        "run_id": run_id,
+    }
+
+
+@router.get("/asset-library/agent-artifacts")
+async def list_agent_artifacts():
+    data_dir = str(deps.DATA_DIR or "")
+    runs_dir = os.path.join(data_dir, "agent_runs")
+    outputs_dir = os.path.join(data_dir, "agent_outputs")
+    items: List[Dict[str, Any]] = []
+    if os.path.isdir(outputs_dir):
+        for run_id in sorted(os.listdir(outputs_dir)):
+            if run_id.startswith("."):
+                continue
+            run_dir = os.path.join(outputs_dir, run_id)
+            if not os.path.isdir(run_dir):
+                continue
+            record = _agent_run_record(runs_dir, run_id)
+            declared: Dict[str, str] = {}
+            for artifact in record.get("artifacts") or []:
+                if isinstance(artifact, dict) and artifact.get("name"):
+                    declared[str(artifact["name"])] = str(artifact.get("kind") or "")
+            for name in sorted(os.listdir(run_dir)):
+                path = os.path.join(run_dir, name)
+                # 产物接口按 safe_filename 定位文件，名字不规范的跳过，避免列出打不开的死链
+                if name.startswith(".") or not os.path.isfile(path):
+                    continue
+                if agent_store.safe_filename(name) != name:
+                    continue
+                items.append(_agent_artifact_item(run_id, name, path, declared.get(name, ""), record))
+    items.sort(key=lambda it: int(it.get("created_at") or 0), reverse=True)
+    return {"items": items, "count": len(items)}
 
 
 @router.get("/prompt-libraries")

@@ -1,0 +1,52 @@
+{
+  "advantage-money": {
+    "title": "优势找钱模型 · 使用教程",
+    "steps": [
+      {
+        "text": "在对话页点「技能」，选「优势找钱模型」。输入框顶部会换成它的表单行，右上角就是「查看教程」。",
+        "image": "/static/images/tutorial/composer-advantage-money.png"
+      },
+      {
+        "text": "点「上传表格」挂上商品的评价分析表（.xlsx / .xls / .csv，含评价内容、评分、好评差评标签等字段）；「商品」和「补充要求」选填。",
+        "image": "/static/images/tutorial/upload-table.png"
+      },
+      {
+        "text": "发送后能力先读取表格真实数据再做分析，完成后给出 HTML 分析报告与 Excel 数据表两张产物卡片，点开即可查看。",
+        "image": "/static/images/tutorial/run-result.png"
+      }
+    ]
+  },
+  "smart-selection": {
+    "title": "智能选款 · 使用教程",
+    "steps": [
+      {
+        "text": "在对话页点「智能体」→「智能选款」（或在「查看全部」里选），输入框顶部会换成它的表单行。",
+        "image": "/static/images/tutorial/composer-smart-selection.png"
+      },
+      {
+        "text": "点「上传表格」挂上生意参谋【商品-商品排行】导出的商品数据表（.xlsx / .xls / .csv）；「类目/商品」和「补充要求」选填。",
+        "image": "/static/images/tutorial/upload-table.png"
+      },
+      {
+        "text": "发送后能力读取真实数据并输出《智能选款报告》HTML，结果卡片在会话里可直接打开。",
+        "image": "/static/images/tutorial/run-result.png"
+      }
+    ]
+  },
+  "main-image-gen": {
+    "title": "主图生成 · 使用教程",
+    "steps": [
+      {
+        "text": "在对话页点「智能体」→「主图生成」，输入框顶部会换成它的表单行。",
+        "image": "/static/images/tutorial/composer-main-image-gen.png"
+      },
+      {
+        "text": "挂上 2~3 张商品参考图（正面/侧面/背面），并在「商品描述」里写清商品与核心卖点——这一项是必填。",
+        "image": "/static/images/tutorial/reference-image.png"
+      },
+      {
+        "text": "发送后按平台策略真实生成主图，图片作为产物回到会话，可点开放大或下载。"
+      }
+    ]
+  }
+}

@@ -6,16 +6,16 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>在线生图</title>
     <script>(function(){try{var u=new URLSearchParams(location.search).get('theme');var t=u||localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.124.1789606971"></script>
-    <script src="/static/vendor/js/lucide-subset.js?v=1.0.124.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.124.1790685706"></script>
-    <script src="/static/js/theme.js?v=1.0.124.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.124.1790560477"></script>
-    <script src="/static/js/shared/size-policy.js?v=1.0.124.1790560477"></script>
-    <script src="/static/js/i18n.js?v=1.0.124.1790130330"></script>
-    <script src="/static/js/image-preview.js?v=1.0.124.1789606971"></script>
-    <script src="/static/js/history-bulk-manager.js?v=1.0.124.1789606971"></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.124.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.125.1789606971"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=1.0.125.1789606971"></script>
+    <script src="/static/js/shared/icons.js?v=1.0.125.1791729997"></script>
+    <script src="/static/js/theme.js?v=1.0.125.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.125.1790560477"></script>
+    <script src="/static/js/shared/size-policy.js?v=1.0.125.1792185305"></script>
+    <script src="/static/js/i18n.js?v=1.0.125.1790130330"></script>
+    <script src="/static/js/image-preview.js?v=1.0.125.1789606971"></script>
+    <script src="/static/js/history-bulk-manager.js?v=1.0.125.1789606971"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.125.1789606971">
     <style>
         :root { --accent: #1c1c1e; --bg: #f9fafb; --card: #fff; --easing:cubic-bezier(0.4,0,0.2,1); }
         /* body 被 UI 缩放 transform 后底部可能露出 html 根区域，显式铺背景避免露出黑色底框 */
@@ -79,7 +79,7 @@
         .gallery-lightbox { background:rgba(255,255,255,.99); backdrop-filter:blur(33px) saturate(1.05); }
         @keyframes fadeIn { from{opacity:0} to{opacity:1} }
     </style>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.124.1790560477">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.125.1790560477">
     <style>
         html:not(.studio-theme-dark) body:not(.studio-theme-dark) #lightbox.gallery-lightbox {
             background: rgba(255,255,255,.99) !important;
@@ -87,7 +87,7 @@
             -webkit-backdrop-filter: blur(33px) saturate(1.05) !important;
         }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.124.1790560477">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.125.1790560477">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         body { background: var(--bg) !important; color: var(--text) !important; }
@@ -281,6 +281,16 @@ html.theme-dark .nv-card, html.studio-theme-dark .nv-card {
 .nv-ratio-ic.r-landscape43 { aspect-ratio: 4/3; }
 .nv-ratio-ic.r-story { aspect-ratio: 9/16; }
 .nv-ratio-ic.r-wide { aspect-ratio: 16/9; }
+.nv-ratio-ic.r-ultrawide { aspect-ratio: 21/9; }
+.nv-ratio-ic.r-ultratall { aspect-ratio: 9/21; }
+.nv-ratio-ic.r-landscape21 { aspect-ratio: 2/1; }
+.nv-ratio-ic.r-portrait12 { aspect-ratio: 1/2; }
+.nv-ratio-ic.r-landscape54 { aspect-ratio: 5/4; }
+.nv-ratio-ic.r-portrait45 { aspect-ratio: 4/5; }
+.nv-ratio-ic.r-portrait14 { aspect-ratio: 1/4; }
+.nv-ratio-ic.r-portrait18 { aspect-ratio: 1/8; }
+.nv-ratio-ic.r-landscape41 { aspect-ratio: 4/1; }
+.nv-ratio-ic.r-landscape81 { aspect-ratio: 8/1; }
 .nv-ratio-ic.r-custom, .nv-ratio-ic.r-empty { border-style: dashed; opacity: .55; }
 
 /* ═══ 方向 E · 动态光束边框（border-beam 风格，纯 CSS 零 JS） ═══ */
@@ -486,8 +496,11 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
                     <div class="size-row">
                         <label id="resolutionField" class="size-field">
                             <select id="resolutionSelect" class="size-select" onchange="setResolution(this.value)">
+                                <option value="0.5k">0.5K</option>
                                 <option value="1k" selected>1K</option>
+                                <option value="1.5k">1.5K</option>
                                 <option value="2k">2K</option>
+                                <option value="3k">3K</option>
                                 <option value="4k">4K</option>
                                 <option value="custom" data-i18n="online.customSize">自定义尺寸</option>
                             </select>
@@ -507,6 +520,18 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
                                 <option value="landscape43">4:3 横图</option>
                                 <option value="story" data-i18n="online.story">9:16 竖屏</option>
                                 <option value="wide" data-i18n="online.wide">16:9 宽屏</option>
+                                <option value="ultrawide">21:9 超宽</option>
+                                <option value="ultratall">9:21 超高</option>
+                                <option value="landscape21">2:1 长横</option>
+                                <option value="portrait12">1:2 长竖</option>
+                                <option value="landscape54">5:4 横图</option>
+                                <option value="portrait45">4:5 竖图</option>
+                                <option value="landscape31">3:1 长横</option>
+                                <option value="portrait13">1:3 长竖</option>
+                                <option value="portrait14">1:4 长竖</option>
+                                <option value="portrait18">1:8 长竖</option>
+                                <option value="landscape41">4:1 长横</option>
+                                <option value="landscape81">8:1 长横</option>
                                 <option value="custom" data-i18n="online.customRatio">自定义比例</option>
                             </select>
                             <span class="size-pair">
@@ -600,41 +625,139 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
         let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
         let allHistory = [], currentIndex = 0, currentResult = null, currentLightboxData = null, isLoading = false;
         const PAGE_SIZE = 24;
+        const GEMINI_OFFICIAL_14 = {
+            square: [['1024x1024','1k'], ['2048x2048','2k'], ['4096x4096','4k']],
+            portrait14: [['512x2048','1k'], ['1024x4096','2k'], ['2048x8192','4k']],
+            portrait18: [['384x3072','1k'], ['768x6144','2k'], ['1536x12288','4k']],
+            portrait: [['848x1264','1k'], ['1696x2528','2k'], ['3392x5056','4k']],
+            landscape: [['1264x848','1k'], ['2528x1696','2k'], ['5056x3392','4k']],
+            portrait43: [['896x1200','1k'], ['1792x2400','2k'], ['3584x4800','4k']],
+            landscape41: [['2048x512','1k'], ['4096x1024','2k'], ['8192x2048','4k']],
+            landscape43: [['1200x896','1k'], ['2400x1792','2k'], ['4800x3584','4k']],
+            portrait45: [['928x1152','1k'], ['1856x2304','2k'], ['3712x4608','4k']],
+            landscape54: [['1152x928','1k'], ['2304x1856','2k'], ['4608x3712','4k']],
+            landscape81: [['3072x384','1k'], ['6144x768','2k'], ['12288x1536','4k']],
+            story: [['768x1376','1k'], ['1536x2752','2k'], ['3072x5504','4k']],
+            wide: [['1376x768','1k'], ['2752x1536','2k'], ['5504x3072','4k']],
+            ultrawide: [['1584x672','1k'], ['3168x1344','2k'], ['6336x2688','4k']]
+        };
+        // Gemini 3.1 Flash Image 的 512px(0.5K) 像素（同文:4749-4874）
+        const GEMINI_HALF_K = {
+            square: '512x512', portrait14: '256x1024', portrait18: '192x1536', portrait: '424x632',
+            landscape: '632x424', portrait43: '448x600', landscape41: '1024x256', landscape43: '600x448',
+            portrait45: '464x576', landscape54: '576x464', landscape81: '1536x192', story: '384x688',
+            wide: '688x384', ultrawide: '792x168'
+        };
+        function geminiPreset(withHalfK) {
+            const out = {};
+            Object.keys(GEMINI_OFFICIAL_14).forEach(key => {
+                const tiers = GEMINI_OFFICIAL_14[key];
+                out[key] = withHalfK && GEMINI_HALF_K[key] ? [[GEMINI_HALF_K[key], '0.5k']].concat(tiers) : tiers.slice();
+            });
+            return out;
+        }
+
+        // 火山方舟 Seedream 官方「分辨率档位 × 宽高比」参考像素，
+        // 出处 /tmp/novai-official-docs/text/volcengine_ark_image_api.txt:152-209,292-349,361-401,413-470：
+        // 5.0 pro/flash=1K/1.5K/2K（无 3K）、5.0 lite=2K/3K/4K、4.5=2K/4K、4.0=1K/2K/4K；
+        // 官方方式 1 只列 1:1/4:3/3:4/16:9/9:16/3:2/2:3/21:9 八个比例。
+        const SEEDREAM_50_PRO_FLASH = {
+            square: [['1024x1024','1k'], ['1536x1536','1.5k'], ['2048x2048','2k']],
+            landscape43: [['1152x864','1k'], ['1792x1344','1.5k'], ['2368x1776','2k']],
+            portrait43: [['864x1152','1k'], ['1344x1792','1.5k'], ['1776x2368','2k']],
+            wide: [['1424x800','1k'], ['2048x1152','1.5k'], ['2816x1584','2k']],
+            story: [['800x1424','1k'], ['1152x2048','1.5k'], ['1584x2816','2k']],
+            landscape: [['1248x832','1k'], ['1872x1248','1.5k'], ['2496x1664','2k']],
+            portrait: [['832x1248','1k'], ['1248x1872','1.5k'], ['1664x2496','2k']],
+            ultrawide: [['1568x672','1k'], ['2352x1008','1.5k'], ['3136x1344','2k']]
+        };
+        const SEEDREAM_50_LITE = {
+            square: [['2048x2048','2k'], ['3072x3072','3k'], ['4096x4096','4k']],
+            landscape43: [['2304x1728','2k'], ['3456x2592','3k'], ['4704x3520','4k']],
+            portrait43: [['1728x2304','2k'], ['2592x3456','3k'], ['3520x4704','4k']],
+            wide: [['2848x1600','2k'], ['4096x2304','3k'], ['5504x3040','4k']],
+            story: [['1600x2848','2k'], ['2304x4096','3k'], ['3040x5504','4k']],
+            landscape: [['2496x1664','2k'], ['3744x2496','3k'], ['4992x3328','4k']],
+            portrait: [['1664x2496','2k'], ['2496x3744','3k'], ['3328x4992','4k']],
+            ultrawide: [['3136x1344','2k'], ['4704x2016','3k'], ['6240x2656','4k']]
+        };
+
         const SIZE_OPTIONS = {
             square: [
                 ['1024x1024', '1k'],
                 ['2048x2048', '2k'],
-                ['4096x4096', '4k']
+                ['2880x2880', '4k']
             ],
             portrait: [
                 ['1024x1536', '1k'],
                 ['1360x2048', '2k'],
-                ['2352x3520', '4k']
+                ['2336x3520', '4k']
             ],
             portrait43: [
-                ['1008x1344', '1k'],
+                ['768x1024', '1k'],
                 ['1536x2048', '2k'],
-                ['2448x3264', '4k']
+                ['2480x3312', '4k']
             ],
             landscape43: [
-                ['1344x1008', '1k'],
+                ['1024x768', '1k'],
                 ['2048x1536', '2k'],
-                ['3264x2448', '4k']
+                ['3312x2480', '4k']
             ],
             landscape: [
                 ['1536x1024', '1k'],
                 ['2048x1360', '2k'],
-                ['3520x2352', '4k']
+                ['3520x2336', '4k']
             ],
             story: [
-                ['720x1280', '1k'],
+                ['864x1536', '1k'],
                 ['1152x2048', '2k'],
                 ['2160x3840', '4k']
             ],
             wide: [
-                ['1280x720', '1k'],
+                ['1536x864', '1k'],
                 ['2048x1152', '2k'],
                 ['3840x2160', '4k']
+            ],
+            ultrawide: [
+                ['2016x864', '1k'],
+                ['2688x1152', '2k'],
+                ['3840x1648', '4k']
+            ],
+            ultratall: [
+                ['864x2016', '1k'],
+                ['1152x2688', '2k'],
+                ['1648x3840', '4k']
+            ],
+            portrait12: [
+                ['1024x2048', '1k'],
+                ['1344x2688', '2k'],
+                ['1920x3840', '4k']
+            ],
+            landscape21: [
+                ['2048x1024', '1k'],
+                ['2688x1344', '2k'],
+                ['3840x1920', '4k']
+            ],
+            landscape54: [
+                ['1280x1024', '1k'],
+                ['2560x2048', '2k'],
+                ['3216x2576', '4k']
+            ],
+            portrait45: [
+                ['1024x1280', '1k'],
+                ['2048x2560', '2k'],
+                ['2576x3216', '4k']
+            ],
+            // 官方 1k 另有一组非 16 对齐的等价像素（1881x836 / 887x1774），这里取 3:1 / 1:3 精确且 /16 的像素
+            landscape31: [
+                ['1536x512', '1k'],
+                ['3072x1024', '2k'],
+                ['3840x1280', '4k']
+            ],
+            portrait13: [
+                ['512x1536', '1k'],
+                ['1024x3072', '2k'],
+                ['1280x3840', '4k']
             ]
         };
 
@@ -643,9 +766,21 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
         const MODEL_SIZE_PRESETS = {
             // ── OpenAI ──
             'gpt-image-2': {
-                square: [['1024x1024','1k'], ['2048x2048','2k']],
-                portrait: [['1024x1536','1k']],
-                landscape: [['1536x1024','1k']]
+                square: [['1024x1024','1k'], ['2048x2048','2k'], ['2880x2880','4k']],
+                portrait: [['1024x1536','1k'], ['1360x2048','2k'], ['2336x3520','4k']],
+                portrait43: [['768x1024','1k'], ['1536x2048','2k'], ['2480x3312','4k']],
+                landscape43: [['1024x768','1k'], ['2048x1536','2k'], ['3312x2480','4k']],
+                landscape: [['1536x1024','1k'], ['2048x1360','2k'], ['3520x2336','4k']],
+                story: [['864x1536','1k'], ['1152x2048','2k'], ['2160x3840','4k']],
+                wide: [['1536x864','1k'], ['2048x1152','2k'], ['3840x2160','4k']],
+                ultrawide: [['2016x864','1k'], ['2688x1152','2k'], ['3840x1648','4k']],
+                ultratall: [['864x2016','1k'], ['1152x2688','2k'], ['1648x3840','4k']],
+                portrait12: [['1024x2048','1k'], ['1344x2688','2k'], ['1920x3840','4k']],
+                landscape21: [['2048x1024','1k'], ['2688x1344','2k'], ['3840x1920','4k']],
+                landscape54: [['1280x1024','1k'], ['2560x2048','2k'], ['3216x2576','4k']],
+                portrait45: [['1024x1280','1k'], ['2048x2560','2k'], ['2576x3216','4k']],
+                landscape31: [['1536x512','1k'], ['3072x1024','2k'], ['3840x1280','4k']],
+                portrait13: [['512x1536','1k'], ['1024x3072','2k'], ['1280x3840','4k']]
             },
             'gpt-image-1': {
                 square: [['1024x1024','1k']],
@@ -663,62 +798,38 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
                 landscape: [['768x512','1k']]
             },
 
-            // ── Nano Banana (Gemini 出图) ──
-            'nano-banana': {
-                square: [['1024x1024','1k'], ['2048x2048','2k'], ['4096x4096','4k']],
-                portrait: [['1024x1536','1k'], ['2048x3072','2k'], ['4096x6144','4k']],
-                portrait43: [['1024x1365','1k'], ['2048x2730','2k'], ['3072x4096','4k']],
-                landscape43: [['1365x1024','1k'], ['2730x2048','2k'], ['4096x3072','4k']],
-                landscape: [['1536x1024','1k'], ['3072x2048','2k'], ['6144x4096','4k']],
-                story: [['720x1280','1k'], ['1080x1920','2k'], ['2160x3840','4k']],
-                wide: [['1280x720','1k'], ['1920x1080','2k'], ['3840x2160','4k']]
-            },
-            'nano-banana-2': {
-                square: [['1024x1024','1k'], ['2048x2048','2k'], ['4096x4096','4k']],
-                portrait: [['1024x1536','1k'], ['2048x3072','2k'], ['4096x6144','4k']],
-                portrait43: [['1024x1365','1k'], ['2048x2730','2k'], ['3072x4096','4k']],
-                landscape43: [['1365x1024','1k'], ['2730x2048','2k'], ['4096x3072','4k']],
-                landscape: [['1536x1024','1k'], ['3072x2048','2k'], ['6144x4096','4k']],
-                story: [['720x1280','1k'], ['1080x1920','2k'], ['2160x3840','4k']],
-                wide: [['1280x720','1k'], ['1920x1080','2k'], ['3840x2160','4k']]
-            },
-            'nano-banana-pro': {
-                square: [['1024x1024','1k'], ['2048x2048','2k'], ['4096x4096','4k']],
-                portrait: [['1024x1536','1k'], ['2048x3072','2k'], ['4096x6144','4k']],
-                portrait43: [['1024x1365','1k'], ['2048x2730','2k'], ['3072x4096','4k']],
-                landscape43: [['1365x1024','1k'], ['2730x2048','2k'], ['4096x3072','4k']],
-                landscape: [['1536x1024','1k'], ['3072x2048','2k'], ['6144x4096','4k']],
-                story: [['720x1280','1k'], ['1080x1920','2k'], ['2160x3840','4k']],
-                wide: [['1280x720','1k'], ['1920x1080','2k'], ['3840x2160','4k']]
-            },
+            // ── Gemini 出图（nano-banana 系）──
+            // 官方 14 比例像素表（/tmp/novai-official-docs/text/gemini_image_generation.txt:4632-4738）；
+            // nano-banana-2 = Gemini 3.1 Flash Image，另有 0.5K（同文:4740-4874）
+            'nano-banana-pro': geminiPreset(false),
+            'nano-banana-2': geminiPreset(true),
+            'nano-banana': geminiPreset(false),
 
             // ── Seedream (火山引擎) ──
-            'seedream-5.0': {
-                square: [['2048x2048','2k'], ['3072x3072','3k']],
-                portrait: [['1536x2048','2k'], ['2304x3072','3k']],
-                portrait43: [['1536x2048','2k'], ['2304x3072','3k']],
-                landscape43: [['2048x1536','2k'], ['3072x2304','3k']],
-                landscape: [['2048x1536','2k'], ['3072x2304','3k']],
-                story: [['1152x2048','2k'], ['1728x3072','3k']],
-                wide: [['2048x1152','2k'], ['3072x1728','3k']]
-            },
+            // 官方逐模型档位（/tmp/novai-official-docs/text/volcengine_ark_image_api.txt:138-470）：
+            // 5.0 lite=2K/3K/4K、5.0 pro/flash=1K/1.5K/2K（无 3K）
+            'seedream-5.0-lite': SEEDREAM_50_LITE,
+            'seedream-5.0-pro': SEEDREAM_50_PRO_FLASH,
+            'seedream-5.0': SEEDREAM_50_PRO_FLASH,
             'seedream-4.5': {
                 square: [['2048x2048','2k'], ['4096x4096','4k']],
-                portrait: [['1536x2048','2k'], ['3072x4096','4k']],
-                portrait43: [['1536x2048','2k'], ['3072x4096','4k']],
-                landscape43: [['2048x1536','2k'], ['4096x3072','4k']],
-                landscape: [['2048x1536','2k'], ['4096x3072','4k']],
-                story: [['1152x2048','2k'], ['2304x4096','4k']],
-                wide: [['2048x1152','2k'], ['4096x2304','4k']]
+                landscape43: [['2304x1728','2k'], ['4704x3520','4k']],
+                portrait43: [['1728x2304','2k'], ['3520x4704','4k']],
+                wide: [['2848x1600','2k'], ['5504x3040','4k']],
+                story: [['1600x2848','2k'], ['3040x5504','4k']],
+                landscape: [['2496x1664','2k'], ['4992x3328','4k']],
+                portrait: [['1664x2496','2k'], ['3328x4992','4k']],
+                ultrawide: [['3136x1344','2k'], ['6240x2656','4k']]
             },
             'seedream-4.0': {
-                square: [['1024x1024','1k'], ['2048x2048','2k']],
-                portrait: [['832x1216','1k'], ['1664x2432','2k']],
-                portrait43: [['928x1216','1k'], ['1856x2432','2k']],
-                landscape43: [['1216x928','1k'], ['2432x1856','2k']],
-                landscape: [['1216x832','1k'], ['2432x1664','2k']],
-                story: [['768x1216','1k'], ['1536x2432','2k']],
-                wide: [['1216x768','1k'], ['2432x1536','2k']]
+                square: [['1024x1024','1k'], ['2048x2048','2k'], ['4096x4096','4k']],
+                landscape43: [['1152x864','1k'], ['2304x1728','2k'], ['4704x3520','4k']],
+                portrait43: [['864x1152','1k'], ['1728x2304','2k'], ['3520x4704','4k']],
+                wide: [['1280x720','1k'], ['2848x1600','2k'], ['5504x3040','4k']],
+                story: [['720x1280','1k'], ['1600x2848','2k'], ['3040x5504','4k']],
+                landscape: [['1248x832','1k'], ['2496x1664','2k'], ['4992x3328','4k']],
+                portrait: [['832x1248','1k'], ['1664x2496','2k'], ['3328x4992','4k']],
+                ultrawide: [['1512x648','1k'], ['3136x1344','2k'], ['6240x2656','4k']]
             },
             'seedream-3.0': {
                 square: [['1024x1024','1k'], ['2048x2048','2k']],
@@ -822,8 +933,50 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
             }
         };
 
+        // 真实模型名 → 预设 key（点号命名 + Lovart 的下划线命名），更具体的 key 必须排在通用 key 前
+        const MODEL_PRESET_ALIASES = [
+            ['nano_banana_2_lite', 'nano-banana-2'],
+            ['nano-banana-2-lite', 'nano-banana-2'],
+            ['nano_banana_pro', 'nano-banana-pro'],
+            ['nano-banana-pro', 'nano-banana-pro'],
+            ['gemini-3-pro-image', 'nano-banana-pro'],
+            ['nano_banana_2', 'nano-banana-2'],
+            ['nano-banana-2', 'nano-banana-2'],
+            ['gemini-3.1-flash-image', 'nano-banana-2'],
+            ['nano_banana', 'nano-banana'],
+            ['nano-banana', 'nano-banana'],
+            ['gemini-2.5-flash-image', 'nano-banana'],
+            ['seedream_v5_pro', 'seedream-5.0-pro'],
+            ['seedream-5.0-pro', 'seedream-5.0-pro'],
+            ['seedream-5-0-pro', 'seedream-5.0-pro'],
+            ['seedream_v5_lite', 'seedream-5.0-lite'],
+            ['seedream-5.0-lite', 'seedream-5.0-lite'],
+            ['seedream-5-0-lite', 'seedream-5.0-lite'],
+            ['seedream_v5_flash', 'seedream-5.0'],
+            ['seedream-5.0-flash', 'seedream-5.0'],
+            ['seedream-5-0-flash', 'seedream-5.0'],
+            ['seedream_v5', 'seedream-5.0'],
+            ['seedream-5.0', 'seedream-5.0'],
+            ['seedream-5-0', 'seedream-5.0'],
+            ['seedream_5', 'seedream-5.0'],
+            ['seedream-5', 'seedream-5.0'],
+            ['seedream_v4_5', 'seedream-4.5'],
+            ['seedream-4.5', 'seedream-4.5'],
+            ['seedream-4-5', 'seedream-4.5'],
+            ['seedream_v4', 'seedream-4.0'],
+            ['seedream-4.0', 'seedream-4.0'],
+            ['seedream-4-0', 'seedream-4.0'],
+            ['seedream_4', 'seedream-4.0'],
+            ['seedream-4', 'seedream-4.0'],
+            ['seedream_v3', 'seedream-3.0'],
+            ['seedream-3.0', 'seedream-3.0'],
+            ['seedream-3', 'seedream-3.0'],
+        ];
         function getSizeOptionsForModel(model) {
             const m = String(model || '').toLowerCase();
+            for (const [needle, key] of MODEL_PRESET_ALIASES) {
+                if (m.includes(needle) && MODEL_SIZE_PRESETS[key]) return MODEL_SIZE_PRESETS[key];
+            }
             for (const [key, sizes] of Object.entries(MODEL_SIZE_PRESETS)) {
                 if (m.includes(key)) return sizes;
             }
@@ -881,11 +1034,12 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
             // enum 模型用推导表（可能为空表），只有非 enum 模型才回落到写死的 presets
             return enumSizeOptions(selectedModel) || getSizeOptionsForModel(selectedModel);
         }
-        const RES_LONG_SIDE = { '1k': 1536, '2k': 2048, '4k': 3840 };
+        // 档位按官方补全：Gemini 3.1 Flash Image 的 512px(0.5K)、火山 Seedream 5.0 pro/flash 的 1.5K、5.0 lite 的 3K
+        const RES_LONG_SIDE = { '0.5k': 768, '1k': 1536, '1.5k': 1920, '2k': 2048, '3k': 3072, '4k': 3840 };
         // 与 resolutionSelect 的档位顺序一致，换档落点按它比较
-        const RES_LEVELS = ['1k', '2k', '4k'];
+        const RES_LEVELS = ['0.5k', '1k', '1.5k', '2k', '3k', '4k'];
         // 档位像素上限的唯一真值源是策略 tiers（shared/size-policy.js），这份常量只是策略取不到时的兜底
-        const RES_PIXEL_LIMIT_FALLBACK = { '1k': 1572864, '2k': 4194304, '4k': 8294400 };
+        const RES_PIXEL_LIMIT_FALLBACK = { '0.5k': 262144, '1k': 1572864, '1.5k': 3145728, '2k': 4194304, '3k': 9437184, '4k': 8294400 };
         function resPixelLimitFor(model){
             const limits = {};
             const tiers = NovaSizePolicy.policy(model).tiers;
@@ -1158,14 +1312,17 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
             if (!opts[ratio]) {
                 ratio = Object.keys(opts)[0] || 'square';
             }
-            // 所有模型统一口径：该 (比例, 档位) 没有合法尺寸就置灰并写明原因，绝不拿别的比例或别的档位顶替
+            // 所有模型统一口径：该模型完全没有的档位（如 gpt-image-2 的 0.5K/1.5K/3K）直接隐藏；
+            // 模型有、该比例没有的置灰并写明原因，绝不拿别的比例或别的档位顶替
             const usable = (opts[ratio] || []).map(([, level]) => level);
             const modelLevels = new Set();
             Object.keys(opts).forEach(key => (opts[key] || []).forEach(([, level]) => modelLevels.add(level)));
             Array.from(resolutionSelect.options).forEach(opt => {
                 if (opt.value === 'custom') return;
+                const supported = modelLevels.has(opt.value);
                 const enabled = usable.indexOf(opt.value) >= 0;
-                const label = String(opt.value).toUpperCase() + (enabled ? '' : '（' + (modelLevels.has(opt.value) ? '该比例无此档位' : '该模型无此档位') + '）');
+                opt.hidden = !supported;
+                const label = String(opt.value).toUpperCase() + (enabled ? '' : '（该比例无此档位）');
                 if (opt.disabled !== !enabled) opt.disabled = !enabled;
                 if (opt.textContent !== label) opt.textContent = label;
             });

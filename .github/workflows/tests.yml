@@ -55,7 +55,7 @@ jobs:
           python -m pip install fastapi pydantic requests httpx pillow python-multipart
 
       - name: Python unit tests
-        run: python -m unittest tests.test_lan_auth tests.test_asset_dedupe tests.test_lovart_provider_injection tests.test_video_segments tests.test_agent_image_size tests.test_agent_run_history tests.test_agent_run_plan_mode tests.test_update_write_guard
+        run: python -m unittest tests.test_lan_auth tests.test_asset_dedupe tests.test_lovart_provider_injection tests.test_video_segments tests.test_agent_image_size tests.test_agent_run_history tests.test_agent_run_plan_mode tests.test_update_write_guard tests.test_video_platform_official tests.test_gemini_image_endpoint tests.test_image_data_uri_persist
 
       - name: Compile main.py
         run: python -m py_compile main.py

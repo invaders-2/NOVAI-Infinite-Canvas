@@ -52,7 +52,7 @@
 | 6 | CLI 平台状态（Codex/Gemini/即梦） | 9 | 12391-12698 | `/api/codex/status` 12391、`/api/gemini-cli/status` 12460、`/api/jimeng/status|credit|login|query-media` 12527-12679 |
 | 7 | Provider / 配置管理 | 13 | 12698-13697 | `/api/config` 12698、`/api/providers` GET/PUT 12720-12724、`test-connection` 13227、`probe-async` 13340、`fetch-models` 13616-13623、storage/output-dir/classification-prompt |
 | 8 | 在线生图 / 任务 | 8 | 13697-14018 | `/api/online-image` 13697、`/api/image-task-query` 13701、`/api/canvas-image-tasks` POST/GET 13870-13888、`/api/canvas-comfy-tasks` 13923-13940、`/api/image-params` 14001 |
-| 9 | 视频生成 | 1（核心） | 14615-15146 | `/api/canvas-video` 14615（分发到即梦/RunningHub/APIMart/火山/玉玉/灵境/Agnes） |
+| 9 | 视频生成 | 1（核心） | 14615-15146 | `/api/canvas-video` 14615（分发到即梦/RunningHub/APIMart/火山/玉玉/Agnes） |
 | 10 | 画布 LLM / 会话 | 4 | 15146-15264 | `/api/canvas-llm` 15146、`/api/conversations` CRUD 15239-15254 |
 | 11 | 画布 / 项目 CRUD | 14 | 15264-15385, 16475-16525 | `/api/canvases` 15328、`meta` 15332-15343、`PUT/DELETE/restore/purge` 16475-16525、`/api/projects` 15273-15295、`/api/canvases/trash` 15324 |
 | 12 | 画布资产 / 工作流导入导出 | 6 | 15379-15671 | `/api/canvas-assets/check|download` 15395-15408、`/api/canvas-workflows/export|import|export-to-library` 15545-15671 |
@@ -101,7 +101,6 @@ POST /api/canvas-video (L14615) ★ 唯一视频分发入口
   ├─ jimeng     → generate_jimeng_video (L6147)：subprocess CLI（multimodal2video/frames2video/... + --poll 同步等待）
   ├─ runninghub → generate_runninghub_video (L10570)
   ├─ agnes      → generate_agnes_video (L14321)
-  ├─ lingjing   → generate_lingjing_openai_video
   ├─ yuli(veo)  → generate_yuli_openai_video
   └─ 默认(APIMart/火山/OpenAI 兼容) → 提交后循环轮询（asyncio.sleep + 状态检查，VIDEO_POLL_TIMEOUT）
 ```
@@ -237,7 +236,7 @@ POST /api/canvas-video (L14615) ★ 唯一视频分发入口
 ## 10. 附录：统计数字
 
 - main.py：19,914 行 / 916 KB；路由 185（184 HTTP + 1 WS）；函数/类定义 1,016
-- Provider 类型（判别函数覆盖）：OpenAI 兼容(comfly 默认)、ModelScope、RunningHub、火山引擎、即梦 CLI、Codex CLI、Gemini CLI（+ APIMart/玉玉/灵境/Agnes 为 OpenAI 兼容上的特征平台）
+- Provider 类型（判别函数覆盖）：OpenAI 兼容(comfly 默认)、ModelScope、RunningHub、火山引擎、即梦 CLI、Codex CLI、Gemini CLI（+ APIMart/玉玉/Agnes 为 OpenAI 兼容上的特征平台）
 - 注册表内置默认：3（modelscope/runninghub/volcengine）
 - 数据文件：data/canvases 11、conversations 若干、media_previews 73、api_providers 3、asset_library 1、prompt_libraries 1、projects 1
 - 前端：canvas.js ~14,800 行、smart-canvas.js ~18,092 行（双画布并行维护，均为前端状态驱动）

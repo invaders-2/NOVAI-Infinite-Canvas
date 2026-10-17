@@ -7,8 +7,6 @@
         "smart.engineMs": { zh: "Modelscope生成", en: "Modelscope" },
         "smart.engineComfy": { zh: "ComfyUI生成", en: "ComfyUI" },
         "smart.engineRh": { zh: "RunningHub", en: "RunningHub" },
-        "smart.kindImage": { zh: "图片", en: "Image" },
-        "smart.kindVideo": { zh: "视频", en: "Video" },
         "smart.promptPlaceholder": { zh: "描述你想生成或编辑的图片...", en: "Describe what you want to generate or edit..." },
         "smart.promptTemplateLibrary": { zh: "模板库", en: "Templates" },
         "smart.tplAll": { zh: "全部", en: "All" },
@@ -412,6 +410,14 @@
         "smart.promptLlmDefaultSystem": {
             zh: "只输出一段可直接复制的生图提示词。中文提问时用约100到160个汉字，只写中文；英文提问时只写精炼英文。准确描述画面主体、数量、颜色、材质、背景、构图和光线，不臆造看不到的细节。不要分析、标题、解释、列表、Markdown、引号或多余形容词。",
             en: "Output one concise, directly usable image generation prompt. For Chinese requests, write about 100 to 160 Chinese characters in Chinese only; for English requests, write one concise paragraph in English only. Describe the visible subject, count, color, material, background, composition, and lighting accurately. Do not invent unseen details or add analysis, headings, explanations, lists, Markdown, quotes, or filler."
+        },
+        "smart.tableBatchNoRows": {
+            zh: "表格里还没有数据行，先添加或生成分镜行",
+            en: "The table has no data rows yet — add a row or generate storyboard rows first"
+        },
+        "smart.llmTableEmpty": {
+            zh: "模型返回的表格是空的（没有数据行），先添加或生成分镜行",
+            en: "The model returned an empty table with no data rows — add a row or generate storyboard rows first"
         }
     });
 })();

@@ -717,6 +717,7 @@ body.smart-node-resize .smart-node-floating-menu,
 .world.canvas-scaled .image-node .smart-image-toolbar > .smart-tool-group > .smart-tool-menu,
 .world.canvas-scaled .image-node .smart-image-toolbar .smart-tool-submenu-panel,
 .world.canvas-scaled .image-node .node-inline-editor .nie-bar,
+.world.canvas-scaled .image-node .node-inline-editor .nie-outpaint-panel,
 .smart-popover.smart-tool-panel,
 .smart-popover.hd-upscale-panel { backdrop-filter:blur(44px) saturate(190%) !important; -webkit-backdrop-filter:blur(44px) saturate(190%) !important; }
 /* 分组之间的分隔只用这段空白，不画竖线 */
@@ -974,8 +975,10 @@ body.smart-node-resize .smart-node-floating-menu,
 .smart-tool-portal-host .smart-tool-submenu-panel { backdrop-filter:blur(44px) saturate(190%); -webkit-backdrop-filter:blur(44px) saturate(190%); }
 /* ── 元素编辑（对齐 LibLib 布局）：工具行浮在图片上方、输入行在图片下方 ── */
 .node-inline-editor .nie-bar.is-tools { top:auto; bottom:calc(100% + 8px); height:44px; padding:6px; gap:4px; border-radius:14px; max-width:none; transform-origin:50% 100%; flex-wrap:nowrap; }
-/* 工具行必须在图片之上：换行会把按钮甩到图片里、被 .node-body 盖成半透明幽灵 */
-.node-inline-editor { z-index:6; }
+/* 工具行必须在图片之上：换行会把按钮甩到图片里、被 .node-body 盖成半透明幽灵。
+   同时要压过节点自己的内容层（缩略图 hover z-index:1/2、.floating-node-actions:8）：
+   悬停操作部件在编辑期间虽然收起，内容占位块还在，框内的 chip 必须是最上层。 */
+.node-inline-editor { z-index:9; }
 .node-inline-editor .nie-bar { z-index:8; }
 .node-inline-editor .nie-bar.is-bottom { top:calc(100% + 8px); bottom:auto; transform-origin:50% 0; }
 /* 文字一律不许压成竖排；一行放不下就整条换行（flex-wrap 在基类上） */
@@ -998,8 +1001,16 @@ body.smart-node-resize .smart-node-floating-menu,
 .node-inline-editor .nie-pick-btn { height:26px; padding:0 10px; border:0; border-radius:8px; background:color-mix(in srgb, var(--text) 8%, transparent); color:var(--text); font-size:13px; line-height:1; font-weight:600; cursor:pointer; transition:background .14s ease; }
 .node-inline-editor .nie-pick-btn.is-primary { background:color-mix(in srgb, var(--text) 15%, transparent); }
 .node-inline-editor .nie-pick-btn:hover { background:color-mix(in srgb, var(--text) 18%, transparent); }
-/* 编辑态主工具条让位（LibLib 编辑态也不显示它） */
-.image-node:has(.node-inline-editor.is-element-edit) .smart-image-toolbar { opacity:0; pointer-events:none; }
+/* 节点内编辑（扩图 / 裁剪 / 涂抹 / 宫格 / 标注 / 元素编辑）期间：节点上方的图片工具条整条收起。
+   类挂在根元素上：工具条本体在节点里、它的下拉菜单被 portal 到 body，只有根元素能同时命中两者。 */
+html.nie-editing .smart-image-toolbar { display:none; }
+/* 节点内编辑期间：被编辑节点自身的悬停操作部件（右上角替换/删除那排、图片与缩略图右上角删除、空节点的删除行）
+   整块收起 —— 鼠标停在节点上时它们会浮到编辑层之上，压住目标框右上角的尺寸 chip。
+   用 :has(> .node-inline-editor) 只命中覆盖层所属的那个节点，画布上其它节点照旧悬停显示；
+   覆盖层一关选择器自然失效，不需要记状态，编辑途中节点 DOM 被重建也不会漏。 */
+html.nie-editing .image-node:has(> .node-inline-editor) .node-actions,
+html.nie-editing .image-node:has(> .node-inline-editor) .floating-node-actions,
+html.nie-editing .image-node:has(> .node-inline-editor) .mini-x { display:none; }
 /* 节点卡片顶部的编辑态模式标签 */
 .image-node .node-head .nie-mode-chip { margin-left:8px; padding:2px 8px; border-radius:6px; background:color-mix(in srgb, var(--text) 10%, transparent); color:var(--text); font-size:11px; font-weight:700; letter-spacing:.02em; }
 /* 元素编辑：点选/框选的点击标记 + 浮标（磨砂玻璃、无描边；转圈是图形，允许描边） */
@@ -1033,6 +1044,57 @@ body.smart-node-resize .smart-node-floating-menu,
 .node-inline-editor .nie-btn i, .node-inline-editor .nie-btn svg { width:16px; height:16px; stroke-width:2; }
 .node-inline-editor .nie-chip i, .node-inline-editor .nie-chip svg { width:16px; height:16px; stroke-width:2; }
 .image-node.dragging .node-inline-editor { opacity:0; pointer-events:none; }
+/* ── 扩图：目标框内的文件名 / 目标尺寸 chip + 右侧参数面板 ──
+   外框强调色一律用主题强调色 token --accent（亮色主题=墨色、暗色主题=近白），canvas 描边与 chip 共用同一个值；
+   目标框四周 8px 暗色边距（见 JS 的 NIE_OUTPAINT_MARGIN）：左右 22px = 8px 边距 + 14px 内缩，
+   顶部 32px 是为了避开节点右上角的悬停按钮（多图/删除那排）。 */
+.node-inline-editor .nie-op-chip { position:absolute; top:32px; z-index:4; display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 8px; border-radius:8px; background:color-mix(in srgb, var(--panel) 78%, transparent); backdrop-filter:blur(20px) saturate(180%); -webkit-backdrop-filter:blur(20px) saturate(180%); color:var(--accent); font-size:11px; font-weight:700; line-height:1; white-space:nowrap; pointer-events:none; }
+.theme-dark .node-inline-editor .nie-op-chip { background:color-mix(in srgb, var(--panel) 70%, transparent); }
+.node-inline-editor .nie-op-chip.is-file { left:22px; max-width:calc(50% - 28px); }
+.node-inline-editor .nie-op-chip.is-size { right:22px; }
+.node-inline-editor .nie-op-chip i, .node-inline-editor .nie-op-chip svg { width:12px; height:12px; stroke-width:2.2; flex:0 0 auto; }
+.node-inline-editor .nie-op-chip span { min-width:0; overflow:hidden; text-overflow:ellipsis; font-variant-numeric:tabular-nums; }
+/* 面板挂在 .node-inline-editor 里（#world 坐标系）：贴在被编辑节点右侧，随画布缩放等比放大缩小。
+   left/top/max-height 由 JS 的 positionNieOutpaintPanel 按本地像素写；下列尺寸也全用本地像素。 */
+.nie-outpaint-panel { position:absolute; left:0; top:0; z-index:12; width:280px; max-width:280px; padding:14px 12px; border-radius:14px; display:flex; flex-direction:column; gap:10px; overflow:hidden; font-size:12px; background:color-mix(in srgb, var(--panel) 78%, transparent); box-shadow:0 24px 56px var(--shadow), 0 4px 14px color-mix(in srgb, var(--shadow) 55%, transparent); backdrop-filter:blur(44px) saturate(190%); -webkit-backdrop-filter:blur(44px) saturate(190%); color:var(--text); }
+.theme-dark .nie-outpaint-panel { background:color-mix(in srgb, var(--panel) 70%, transparent); box-shadow:0 26px 60px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3); }
+/* 参数区是唯一的滚动容器；取消 / 生成不参与滚动、永远钉在面板底部 */
+.nie-outpaint-panel .nie-op-body { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; gap:8px; overflow-y:auto; overflow-x:hidden; scrollbar-width:thin; }
+.nie-outpaint-panel .nie-op-title { font-size:13px; font-weight:700; color:var(--text); }
+.nie-outpaint-panel .nie-op-field { display:flex; flex-direction:column; gap:6px; }
+.nie-outpaint-panel .nie-op-field.is-split { flex-direction:row; align-items:center; gap:10px; }
+.nie-outpaint-panel .nie-op-field.is-split .nie-op-label { flex:0 0 auto; }
+.nie-outpaint-panel .nie-op-label { color:var(--muted); font-weight:600; }
+.nie-outpaint-panel .nie-op-select { width:100%; height:30px; padding:0 10px; border:0; border-radius:10px; display:flex; align-items:center; justify-content:space-between; gap:8px; background:var(--card); color:var(--text); font-weight:600; cursor:default; }
+.nie-outpaint-panel .nie-op-field.is-split .nie-op-select { flex:1 1 auto; min-width:0; }
+.nie-outpaint-panel .nie-op-select i, .nie-outpaint-panel .nie-op-select svg { width:14px; height:14px; color:var(--muted); flex:0 0 auto; }
+.nie-outpaint-panel .nie-op-ratios { display:flex; flex-direction:column; gap:2px; margin-top:2px; }
+.nie-outpaint-panel .nie-op-ratio { width:100%; height:34px; padding:0 8px; border:0; border-radius:10px; display:flex; align-items:center; gap:10px; background:transparent; color:var(--muted); font-weight:600; text-align:left; cursor:pointer; transition:background .14s ease, color .14s ease; }
+.nie-outpaint-panel .nie-op-ratio:hover { background:color-mix(in srgb, var(--text) 6%, transparent); color:var(--text); }
+.nie-outpaint-panel .nie-op-ratio.is-active { background:color-mix(in srgb, var(--text) 6%, transparent); color:var(--text); font-weight:700; }
+.nie-outpaint-panel .nie-op-ratio-icon { flex:0 0 auto; width:22px; height:22px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; background:color-mix(in srgb, var(--text) 6%, transparent); color:var(--muted); }
+.nie-outpaint-panel .nie-op-ratio.is-active .nie-op-ratio-icon { background:var(--accent-subtle); color:var(--text); }
+/* 选中行行首的对勾：和画幅图标并存（未选中不出现） */
+.nie-outpaint-panel .nie-op-ratio .nie-op-ratio-check { display:none; flex:0 0 auto; width:14px; height:14px; stroke-width:2.4; }
+.nie-outpaint-panel .nie-op-ratio.is-active .nie-op-ratio-check { display:inline-flex; }
+.nie-outpaint-panel .nie-op-ratio-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 面板底部：取消（次级软底）+ 生成（实心强调色），等宽 32px、不画描边 */
+.nie-outpaint-panel .nie-op-actions { display:flex; align-items:center; gap:8px; margin-top:2px; }
+.nie-outpaint-panel .nie-op-action { flex:1 1 0; height:32px; border:0; border-radius:10px; display:inline-flex; align-items:center; justify-content:center; background:color-mix(in srgb, var(--text) 8%, transparent); color:var(--text); font-weight:600; cursor:pointer; transition:background .14s ease, color .14s ease; }
+.nie-outpaint-panel .nie-op-action:hover { background:color-mix(in srgb, var(--text) 12%, transparent); }
+.nie-outpaint-panel .nie-op-action.is-primary { background:var(--accent); color:var(--accent-text); }
+.nie-outpaint-panel .nie-op-action.is-primary:hover { background:var(--accent-hover); color:var(--accent-text); }
+/* 没有待补区域时「生成」置灰：换中性软底 + 降透明度；hover 保持同色，禁用不靠描边表达 */
+.nie-outpaint-panel .nie-op-action.is-primary:disabled,
+.nie-outpaint-panel .nie-op-action.is-primary:disabled:hover { background:var(--soft); color:var(--muted); opacity:.5; cursor:not-allowed; }
+.nie-outpaint-panel .nie-op-field.is-scale { position:relative; }
+.nie-outpaint-panel .nie-op-select.is-live { cursor:pointer; }
+.nie-outpaint-panel .nie-op-scale-menu { position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:6; padding:6px; border-radius:12px; background:rgba(255,255,255,.96); box-shadow:0 18px 40px var(--shadow), 0 4px 12px color-mix(in srgb, var(--shadow) 50%, transparent); backdrop-filter:blur(28px) saturate(180%); -webkit-backdrop-filter:blur(28px) saturate(180%); }
+.theme-dark .nie-outpaint-panel .nie-op-scale-menu { background:rgba(24,24,24,.95); }
+.nie-outpaint-panel .nie-op-scale-menu[hidden] { display:none; }
+.nie-outpaint-panel .nie-op-scale-option { width:100%; height:26px; padding:0 10px; border:0; border-radius:8px; display:flex; align-items:center; background:transparent; color:var(--text); font-weight:600; text-align:left; cursor:pointer; transition:background .14s ease; }
+.nie-outpaint-panel .nie-op-scale-option:hover { background:color-mix(in srgb, var(--text) 6%, transparent); }
+.nie-outpaint-panel .nie-op-scale-option.is-active { background:color-mix(in srgb, var(--text) 9%, transparent); font-weight:700; }
 .smart-tool-panel .stp-value { min-width:48px; text-align:right; font-style:normal; color:var(--text); font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }
 .node-count { min-width:22px; height:20px; padding:0 7px; border-radius:var(--radius-full); display:flex; align-items:center; justify-content:center; background:var(--soft); border:0; color:var(--muted); font-size:10px; font-weight:900; }
 .mini-x { width:26px; height:26px; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; color:var(--text-3); background:rgba(255,255,255,.92); border:0; opacity:1; cursor:pointer; backdrop-filter:blur(15px); transition:opacity .14s ease, transform .14s ease, background .14s ease, color .14s ease; }
@@ -1405,17 +1467,6 @@ body.svc-fullscreen-active { overflow:hidden; }
 .engine-select:hover { background-color:color-mix(in srgb, var(--strong) 10%, transparent); }
 .engine-select:focus { background-color:color-mix(in srgb, var(--strong) 10%, transparent); box-shadow:none; }
 .composer-head-hint { color:var(--faint); font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; margin-left:2px; }
-.kind-toggle { display:inline-flex; align-items:center; gap:2px; padding:2px; border-radius:var(--radius-full); background:var(--soft); --nv-glide-bg:var(--strong); }
-.kind-toggle button { height:20px; padding:0 8px; border-radius:var(--radius-full); border:0; background:transparent; color:var(--muted); font-size:11px; font-weight:500; display:inline-flex; align-items:center; gap:4px; cursor:pointer; transition:background .14s ease, color .14s ease; }
-.kind-toggle button i, .kind-toggle button svg { width:11px !important; height:11px !important; stroke-width:2; }
-.kind-toggle button:hover { color:var(--text); }
-/* 高亮底改由滑块（shared/glide.js）独家绘制：滑块要跟原胶囊同形同投影 */
-.kind-toggle .nv-glide-pill { border-radius:var(--radius-full); box-shadow:0 1px 4px var(--shadow); }
-.kind-toggle button.active { background:var(--strong); color:var(--strong-text); }
-/* 文字色必须跟着滑块走，不能跟着 .active：指针一悬停另一项，滑块滑走而 .active 留在原项，
-   那一项就成了「浅色轨道 + 白字」，整颗看不见。有选项被悬停时，其余项（含原选中项）退回灰字 */
-.kind-toggle.nv-glide-host:has(button:hover) button:not(:hover) { color:var(--muted); }
-.kind-toggle.nv-glide-host button:hover { color:var(--strong-text); }
 .image-mode-slot { flex:0 0 auto; min-height:24px; display:flex; justify-content:flex-end; align-items:center; }
 .image-mode-toggle { display:inline-flex; align-items:center; gap:2px; padding:2px; border-radius:var(--radius-full); background:var(--soft); }
 .image-mode-toggle button { height:20px; min-width:42px; padding:0 9px; border-radius:var(--radius-full); background:transparent; color:var(--muted); display:inline-flex; align-items:center; justify-content:center; font-size:11px; line-height:1; font-weight:650; transition:background .14s ease, color .14s ease; }
@@ -1876,6 +1927,8 @@ body.svc-fullscreen-active { overflow:hidden; }
 .ratio-icon.r-landscape43 { width:16px; height:12px; }
 .ratio-icon.r-wide { width:20px; height:11px; }
 .ratio-icon.r-story { width:11px; height:20px; }
+.ratio-icon.r-portrait54 { width:12px; height:15px; }
+.ratio-icon.r-landscape45 { width:15px; height:12px; }
 .ratio-icon.r-source { width:15px; height:13px; border-radius:3px; border-style:solid; }
 .ratio-icon.r-source::before { content:""; position:absolute; left:2px; top:2px; width:4px; height:4px; border-radius:var(--radius-full); background:currentColor; opacity:.65; }
 .ratio-icon.r-source::after { content:""; position:absolute; right:1px; bottom:1px; width:0; height:0; border-left:5px solid transparent; border-right:0; border-bottom:5px solid currentColor; opacity:.65; }

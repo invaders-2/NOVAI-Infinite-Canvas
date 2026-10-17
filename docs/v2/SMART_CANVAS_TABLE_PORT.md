@@ -706,7 +706,7 @@ render 的 class 也改成所有节点都带上（原来只有提示词节点）
 
 ### ③ 「视频选了原图比例，有的时候跟原图比例不一样」
 '原图比例' = `videoAspect: 'keep_ratio'`，前端**原样**发给后端；后端只是转发
-（`apimart_video_size` 转成 `adaptive`、`lingjing_video_aspect` 直接透传），上游多数不认这个值 →
+（`apimart_video_size` 转成 `adaptive` 这类归一），上游多数不认这个值 →
 落到各自的默认 16:9；agnes 那条更明显：`agnes_video_dimensions('adaptive')` 走 `.get()` 兜底成固定 1152×768。
 修复：发请求前把 `keep_ratio` 解析成**参考素材的真实比例**（`nearestVideoAspectForSize`，对数距离取最接近的
 受支持比例 16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9 / 9:21）：
@@ -786,12 +786,12 @@ render 的 class 也改成所有节点都带上（原来只有提示词节点）
 结果节点 = **520×347（比例 1.499 ≈ 3:2，即该行参考比例）**；旧代码会得到 351×313。
 
 ### 顺带查清的：上游本身能不能听比例
-- 灵境 MiniMax（`build_lingjing_minimax_video_body`）**根本不发比例字段** —— 官方
+- MiniMax 上游**根本不发比例字段** —— 官方
   `/v1/video_generation` 只有 `model` / `first_frame_image` / `prompt` / `duration` / `resolution`，
   视频比例完全由**首帧图**决定（图生视频）。所以「原图比例」对这类模型是通过「把这行的参考图当首帧」生效的；
   行里没有参考图（纯文字 / 只有参考视频）时它会用自己的默认比例，前端改不了。
 - 因此前端的「原图比例」解析（`applySourceRatioToVideoAspect`，取最接近的受支持比例）对 apimart /
-  灵境通用族 / agnes 这些**会发比例**的通路有效；对 MiniMax 只是不发而已（无害）。
+  agnes 这些**会发比例**的通路有效；对 MiniMax 只是不发而已（无害）。
 
 ### 验收
 - `tests/test_smart_canvas_table_wiring.js` 106/106（新增 [12] 节）；
@@ -906,3 +906,45 @@ CDP Profiler（5 个表格）显示两个大头：
 ### 验收
 - `tests/test_smart_canvas_table_wiring.js` 141/141（新增 [16] 节）；
 - `tests/test_table_node_dom.js` 376/376（改成验「点按钮只切开关、不开跑、重绘后保持选中」）；其余四套全绿。
+
+
+## 生成结果群组的比例 / 完整显示 / 自动排列 / 自动成组保持（2026-10-12 后续轮 49）
+
+用户报的四点（都落在「生成输入（smart-batch）」→ 下游「结果群组」（type=smart-image 多图节点，title=Group）这条链上）：
+
+### ① 批量生成、出视频（动效）时显示没有按比例
+第 48 轮把多图网格的格子改成「跟着每张图自己的比例」（`--thumb-aspect`），但只改了
+`thumbGridHtml` 与批量进度格 `batchRowSlotHtml`，**已出的产出**走的 `batchRowThumbHtml` 没给这个变量 ——
+批量结果群里的每一格都退回正方形，16:9 的图/竖版视频缩在方格里显示（进度格却是按行比例的，前后不一致）。
+修复：`batchRowThumbHtml` 用 `mediaCellAspect(img)` 写 `--thumb-aspect`，与进度格同一套口径。
+
+### ② 生成输入节点生成后，自动群组取消
+「自动成组」的判定是结果节点 `images.length > 1`（`render()` 的 `isGroup`、`appendBatchResultImages` 的标题）。
+`appendBatchResultImages` 原来整批一起走 `cleanHistoryImages`，而它是**按 kind|url 全批去重**：
+同一批里两行回了**同一个 url**（两行提示词/参考一样；上游「编辑无变化回源图」）时，第二行被丢掉 →
+结果节点只剩 1 张 → Group 标题和 group-node 形态当场消失。
+修复：`appendBatchResultImages` 改成**按行保留**（键 = `row:<行号>`；同一行内仍按 url 去重；
+没有行号的普通素材行为不变）。同时把本地/远端合并 `mergeSmartImageLists` 的去重键也带上行号 ——
+否则广播刷新 / 保存 409 冲突重载时同一个 url 又会被并成一张，群组再次消失。
+另外补了一处竞态：某一行失败时不再「立刻撤掉还没有图的结果节点」，而要等**这一批所有行都收尾**
+（`pending` 归零）才撤 —— 否则同一批还在跑的行手里是已经脱画的旧对象，产出会被静默丢掉。
+
+### ③ 群组无法完整显示图片/视频内容
+格子高度按每张图自己的比例算（第 48 轮），但节点高度/网格 `--thumb-max-height` 还按「正方形格子」估算：
+竖图那一行比预留高度高出一截 → 被 `max-height` 裁掉、或溢出节点框（实测 3 张图：内容 1252px 挤在 904px 的框里）。
+修复：`imageLayout` / `fittedMediaGridLayout` 用 `thumbGridRowHeights()` 按「每格高 = 格宽 / 该格比例，
+同一行取最高」算真实高度，返回 `visibleH`（可见行）与 `contentH`（全部行）；
+`thumbGridHtml` / `batchRowGridHtml` / 拖拽时的 `updateNodeElementDuringResize` 都用这两个值当 `--thumb-max-height`。
+
+### ④ 群组无法自动排列图片/视频
+同一处根因：行高按真实格子算之后，行序（先行后列，保持原顺序）、列数、8px 间距都不变，
+但内容不再互相压 / 不再被裁、也不出现「上一行竖图把下一行顶出框」。实测 2 图（16:9 + 9:16）
+与 3 图（含 1:1）都 0 溢出、0 重叠、scrollHeight === clientHeight。
+另外「分组（smart-group）」里只有一张图、且用户拉过分组框时，内框原来直接给成整个内框，
+而媒体是 `object-fit:cover` → 比例对不上就裁画面；现在 `smartGroupSingleInnerBox()` 按素材比例在内框里等比缩放。
+
+### 验收
+- 新增 `tests/test_smart_canvas_group_media_layout.js`（40 项：格子比例 / 行高 / max-height / 顺序 / 按行保留 / 单图内框）；
+- `node tests/run-all.js` 42/42 全绿（`test_smart_canvas_table_wiring.js` 的布局沙箱补上新助手函数）；
+- 浏览器实测（`NOVAI_DATA_DIR=/tmp/novai-testdata` 临时画布）：批量结果群 2 图按各自比例、节点框 0 溢出 0 重叠；
+  3 图群组内容高度与框一致；两行回同一 url 时结果节点仍是 `group-node`、2 格缩略图、0 个空占位格。

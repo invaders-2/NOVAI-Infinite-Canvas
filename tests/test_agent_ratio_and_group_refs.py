@@ -75,10 +75,22 @@ class AgentRatioMappingTests(unittest.TestCase):
             main._agent_ratio_setting("video", "7:5")
 
     def test_converted_key_resolves_the_frontend_size_map(self):
+        # 官方 size×resolution 映射表（APIMart gpt-image-2 generation）：
+        # 3:4@1K = 768x1024、16:9@1K = 1536x864、2:1@2K = 2688x1344。
         three_four = main._agent_ratio_setting("image", "3:4")
-        self.assertEqual(main._AGENT_SMART_SIZE_MAP[three_four]["1k"], "1008x1344")
+        self.assertEqual(main._AGENT_SMART_SIZE_MAP[three_four]["1k"], "768x1024")
         wide = main._agent_ratio_setting("image", "16:9")
-        self.assertEqual(main._AGENT_SMART_SIZE_MAP[wide]["1k"], "1280x720")
+        self.assertEqual(main._AGENT_SMART_SIZE_MAP[wide]["1k"], "1536x864")
+        two_one = main._agent_ratio_setting("image", "2:1")
+        self.assertEqual(main._AGENT_SMART_SIZE_MAP[two_one]["2k"], "2688x1344")
+        # 官方 15 比例补齐 3:1 / 1:3（1k 取 16 对齐的官方等价像素）
+        three_one = main._agent_ratio_setting("image", "3:1")
+        self.assertEqual(three_one, "landscape31")
+        self.assertEqual(main._AGENT_SMART_SIZE_MAP[three_one]["1k"], "1536x512")
+        one_three = main._agent_ratio_setting("image", "1:3")
+        self.assertEqual(one_three, "portrait13")
+        self.assertEqual(main._AGENT_SMART_SIZE_MAP[one_three]["1k"], "512x1536")
+        self.assertEqual(len(main._AGENT_SMART_SIZE_MAP), 15)
 
 
 class AgentApplySettingsNormalizationTests(unittest.TestCase):

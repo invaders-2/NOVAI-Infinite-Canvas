@@ -1,7 +1,6 @@
-# API 配置(含密钥)
-.env
-API/.env
-API/
+# API 配置(含密钥)。规则锚定项目根：macOS 大小写不敏感，写 API/ 会把 web/src/**/api/ 源码目录一起忽略掉
+/API/.env
+/API/
 
 # Python
 *.pyc
@@ -22,6 +21,8 @@ assets/
 !assets/models/
 # 新前端的 Vite 构建产物必须入库（上面的 assets/ 规则会连带命中 static/v2/assets）
 !static/v2/assets/
+# 新素材库源码目录也必须入库（上面的 assets/ 规则会连带命中 web/src/pages/assets）
+!web/src/pages/assets/
 data/api_providers.json
 data/asset_library.json
 data/prompt_libraries.json
@@ -95,6 +96,11 @@ novai_startup.log
 data/*.bak
 output/
 *.bak_minimax
+
+# 运行时数据目录 / 本地备份与预览稿（防止 git add -A 误提交用户数据）
+data/
+_claude_backup/
+_preview/
 # Electron 桌面端构建产物
 desktop/release/
 desktop/dist/

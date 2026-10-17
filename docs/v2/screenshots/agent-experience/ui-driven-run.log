@@ -1,0 +1,16 @@
+refs 1 name novai-review-sample.xlsx
+08:56:26 {"status":"running","run":"run_02483bc8eac34804","steps":0,"arts":0}
+08:56:30 {"status":"running","run":"run_02483bc8eac34804","steps":1,"arts":0}
+08:56:34 {"status":"running","run":"run_02483bc8eac34804","steps":1,"arts":0}
+08:56:38 {"status":"running","run":"run_02483bc8eac34804","steps":2,"arts":0}
+08:56:42 {"status":"running","run":"run_02483bc8eac34804","steps":2,"arts":0}
+08:56:46 {"status":"running","run":"run_02483bc8eac34804","steps":2,"arts":0}
+08:56:50 {"status":"running","run":"run_02483bc8eac34804","steps":2,"arts":0}
+08:56:54 {"status":"running","run":"run_02483bc8eac34804","steps":3,"arts":0}
+08:56:58 {"status":"running","run":"run_02483bc8eac34804","steps":3,"arts":1}
+08:57:02 {"status":"running","run":"run_02483bc8eac34804","steps":3,"arts":1}
+08:57:06 {"status":"running","run":"run_02483bc8eac34804","steps":3,"arts":1}
+08:57:10 {"status":"ok","run":"run_02483bc8eac34804","steps":3,"arts":1}
+FINAL {"status":"ok","run":"run_02483bc8eac34804","steps":["read_table读取商品评价表，获取列名、数据样例和统计信息","read_table读取评价表获取真实列名和统计数据","write_html_report生成评价分析HTML报告"],"arts":[{"name":"novai-review-analysis-report.html","label":"HTML 报告 · 新窗口打开"}]}
+AFTER_REFRESH {"status":"ok","steps":3,"arts":1}
+EXIT=0

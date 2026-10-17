@@ -1,0 +1,88 @@
+{
+  "generated_by": "server/integrations/openclaw_setup.py（真实 OpenClawInstallSession，命令用 env 覆盖模拟）",
+  "config_source": "/Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main/NOVAI-v16/config/openclaw.json",
+  "doctor_steps": [
+    {
+      "label": "1. 停止 Gateway",
+      "value": "openclaw gateway stop"
+    },
+    {
+      "label": "2. 修复并迁移数据",
+      "value": "openclaw doctor --fix"
+    },
+    {
+      "label": "3. 重新启动 Gateway",
+      "value": "openclaw gateway start"
+    }
+  ],
+  "outcomes": [
+    {
+      "label": "success",
+      "note": "脚本退出 0 且重新检测到可用 openclaw",
+      "exit_stream": [
+        "start",
+        "log",
+        "verify",
+        "done"
+      ],
+      "done_ok": true,
+      "done_code": "",
+      "done_outcome": "success",
+      "done_init_incomplete": false,
+      "done_message": "OpenClaw 已可用：2026.10.3",
+      "session_status": "done",
+      "session_outcome": "success",
+      "session_init_incomplete": false,
+      "session_error_code": "",
+      "detected_installed": true,
+      "detected_available": true,
+      "detected_version": "2026.10.3"
+    },
+    {
+      "label": "partial",
+      "note": "包已装但 doctor 以 EXIT=1 结束（实测场景）",
+      "exit_stream": [
+        "start",
+        "log",
+        "log",
+        "log",
+        "verify",
+        "done"
+      ],
+      "done_ok": false,
+      "done_code": "init_incomplete",
+      "done_outcome": "partial",
+      "done_init_incomplete": true,
+      "done_message": "包已安装，但初始化未完成：安装脚本已经把 OpenClaw 本体装到本机（实测 npm 包从 2026.6.9 升到 2026.10.3 成功），但收尾的 doctor 步骤失败并以 EXIT=1 结束（实测报 session-entry-state: schema-missing）；升级到新版本后 Gateway 也可能因旧 session store 需要迁移而起不来，提示要跑 openclaw doctor --fix。这不是「没装上」，请按下面顺序在终端手动收尾，然后回到这里重新检测（旧版本进程可能仍在运行，服务通常不会中断）",
+      "session_status": "failed",
+      "session_outcome": "partial",
+      "session_init_incomplete": true,
+      "session_error_code": "init_incomplete",
+      "detected_installed": true,
+      "detected_available": true,
+      "detected_version": "2026.10.3"
+    },
+    {
+      "label": "failed",
+      "note": "脚本失败且本机没有装上包",
+      "exit_stream": [
+        "start",
+        "log",
+        "verify",
+        "done"
+      ],
+      "done_ok": false,
+      "done_code": "",
+      "done_outcome": "failed",
+      "done_init_incomplete": false,
+      "done_message": "安装脚本退出码 1：npm ERR! boom",
+      "session_status": "failed",
+      "session_outcome": "failed",
+      "session_init_incomplete": false,
+      "session_error_code": "",
+      "detected_installed": false,
+      "detected_available": false,
+      "detected_version": ""
+    }
+  ]
+}

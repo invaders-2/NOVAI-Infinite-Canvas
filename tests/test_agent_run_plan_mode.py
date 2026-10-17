@@ -131,10 +131,10 @@ class AgentRunPlanModeTests(unittest.TestCase):
         self.assertEqual(plan["expected_output"], "两张 3:4 海报落到画布上")
         self.assertEqual(plan["impact"], {
             "generations": 2, "writes": 2, "models": ["generate_image_gpt_image_2_5_flare"],
-            "sizes": ["1008x1344"], "nodes": 1})
+            "sizes": ["768x1024"], "nodes": 1})
         self.assertIn("2 次真实生成", plan["summary"])
         self.assertIn("generate_image_gpt_image_2_5_flare", plan["summary"])
-        self.assertIn("1008x1344", plan["summary"])
+        self.assertIn("768x1024", plan["summary"])
 
         done = [data for name, data in events if name == "done"][0]
         self.assertEqual(done["status"], "ok")
@@ -338,7 +338,7 @@ class AgentPlanImpactTests(unittest.TestCase):
         impact = main.agent_plan_impact(steps)
         self.assertEqual(impact, {"generations": 3, "writes": 3,
                                   "models": ["generate_image_gpt_image_2_5_flare", "seedance-2.0"],
-                                  "sizes": ["1008x1344", "1024x1536"], "nodes": 1})
+                                  "sizes": ["768x1024", "1024x1536"], "nodes": 1})
 
     def test_generation_step_with_model_and_size(self):
         steps = [{"tool": "generate_image",

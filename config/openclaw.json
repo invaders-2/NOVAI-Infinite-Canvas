@@ -1,0 +1,96 @@
+{
+  "format": "novai-openclaw-setup/v1",
+  "comment": "OpenClaw 按需安装引导的配置：安装命令、下载地址、体积/联网/权限提示、Node 版本要求、Chrome 检测路径全部放这里；环境变量 NOVAI_OPENCLAW_SETUP_* / NOVAI_OPENCLAW_INSTALL_* / NOVAI_OPENCLAW_NODE_* / NOVAI_OPENCLAW_CHROME_* 可逐项覆盖。业务代码不得再写死这些值。",
+  "install": {
+    "command_unix": "curl -fsSL https://openclaw.ai/install.sh | bash",
+    "command_windows": "iwr -useb https://openclaw.ai/install.ps1 | iex",
+    "shell_unix": "/bin/bash",
+    "shell_windows": "powershell",
+    "script_url_unix": "https://openclaw.ai/install.sh",
+    "script_url_windows": "https://openclaw.ai/install.ps1",
+    "docs_url": "https://docs.openclaw.ai/start/getting-started",
+    "install_docs_url": "https://docs.openclaw.ai/install",
+    "windows_docs_url": "https://docs.openclaw.ai/platforms/windows",
+    "npm_command": "npx openclaw@latest",
+    "privilege_note": "实测（官方 install.sh）：本机 Node 达标（24.16.0+ 或 26.1.0+）时，安装全程不会触发 Homebrew，也不会进行任何系统权限操作（无需 sudo、不弹密码框）。只有本机 Node.js 未达要求时，安装脚本才会通过系统包管理器安装 Node（macOS 为 Homebrew），这一步可能需要管理员权限，且下载 / 安装 Node 可能耗时较长；Windows 上可能弹 UAC 授权框。",
+    "permission_hint": "安装需要管理员权限但没有拿到授权。请在弹出的系统密码框 / UAC 授权框里确认，或以管理员身份重新打开 NOVAI 后重试；也可以按下面的手动指引，在终端里自行执行安装命令（终端会正常提示输入密码）。",
+    "init_incomplete_title": "包已安装，但初始化未完成",
+    "init_incomplete_note": "安装脚本已经把 OpenClaw 本体装到本机（实测 npm 包从 2026.6.9 升到 2026.10.3 成功），但收尾的 doctor 步骤失败并以 EXIT=1 结束（实测报 session-entry-state: schema-missing）；升级到新版本后 Gateway 也可能因旧 session store 需要迁移而起不来，提示要跑 openclaw doctor --fix。这不是「没装上」，请按下面顺序在终端手动收尾，然后回到这里重新检测（旧版本进程可能仍在运行，服务通常不会中断）：",
+    "doctor_steps": [
+      { "label": "1. 停止 Gateway", "value": "openclaw gateway stop" },
+      { "label": "2. 修复并迁移数据", "value": "openclaw doctor --fix" },
+      { "label": "3. 重新启动 Gateway", "value": "openclaw gateway start" }
+    ],
+    "doctor_hint": "三条命令来自官方失败后的提示顺序；在终端执行完回到这里点「重新检测」。若仍不可用，再按「重试」或下面的手动安装指引处理。",
+    "permission_error_patterns": [
+      "permission denied",
+      "operation not permitted",
+      "not permitted",
+      "EACCES",
+      "EPERM",
+      "sudo: a password is required",
+      "no tty present",
+      "must be run as root",
+      "requires administrator",
+      "requires root",
+      "access is denied",
+      "are you root"
+    ],
+    "size_hint": "约 100–300 MB（含 Node 运行时与依赖包，视是否已有缓存和本机架构而定）",
+    "network_note": "安装过程需要联网：从 openclaw.ai 下载安装脚本，再从 npm registry 拉取 openclaw 及其依赖。",
+    "timeout_ms": 900000,
+    "verify_timeout_ms": 20000
+  },
+  "node": {
+    "required_min": "24.16.0",
+    "required_alt_min": "26.1.0",
+    "warning_title": "Node 不达标会改动系统 Node（系统级）",
+    "warning": "在 macOS 上，如果本机 Node 低于官方要求，官方安装脚本会调用 Homebrew 升级你系统里的 Node：实测 Node v22.22.3 时脚本进入 [1/4] 后打印 Node.js v22.22.3 found, upgrading to a supported version，接着 Installing Node.js via Homebrew。这是系统级改动，可能影响你本机其他依赖 Node 的项目。实测本机 Node 达标（v24.21.0）时完全没有触发 Homebrew，全程也不需要任何系统权限。本引导只如实告知，不代你降级或绕过。",
+    "note": "官方要求 Node.js 24.16+ 或 26.1+（推荐 Node 26）。本机 Node 低于要求时，官方安装脚本会一并处理 Node 与依赖；本引导只如实告知，不代为降级绕过。"
+  },
+  "gateway": {
+    "url": "ws://127.0.0.1:18789",
+    "host": "127.0.0.1",
+    "port": 18789,
+    "config_path": "~/.openclaw/openclaw.json"
+  },
+  "binary": {
+    "names": [
+      "openclaw"
+    ],
+    "version_timeout_ms": 5000
+  },
+  "chrome": {
+    "names": [
+      "google-chrome",
+      "google-chrome-stable",
+      "chromium",
+      "chromium-browser"
+    ],
+    "paths": {
+      "darwin": [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+        "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      ],
+      "win32": [
+        "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe",
+        "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe",
+        "%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe",
+        "%ProgramFiles%\\Chromium\\Application\\chrome.exe",
+        "%LOCALAPPDATA%\\Chromium\\Application\\chrome.exe"
+      ],
+      "linux": [
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/snap/bin/chromium",
+        "/opt/google/chrome/chrome"
+      ]
+    },
+    "note": "OpenClaw 的浏览器抓取 / 网页工具使用本机已安装的 Chrome/Chromium；官方安装脚本只处理 OpenClaw 与 Node，不会代为安装浏览器。",
+    "impact_note": "浏览器抓取功能将不可用（未检测到 Chrome），OpenClaw 安装脚本不会代为安装；OpenClaw 本体仍可正常安装与使用。"
+  }
+}

@@ -449,7 +449,7 @@ let remoteSyncBusy = false;
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
 let imageModels = ['gpt-image-2', 'nano-banana-pro'];
-let chatModels = ['gpt-4o-mini'];
+let chatModels = [];
 let videoModels = [];
 let msChatModels = [];
 let apiProviders = [];
@@ -549,21 +549,23 @@ function renderCanvasIcon(icon, size = 14) {
 }
 
 const SIZE_MAP = {
-    square: { '1k':'1024x1024', '2k':'2048x2048', '4k':'4096x4096' },
-    portrait: { '1k':'1024x1536', '2k':'1360x2048', '4k':'2352x3520' },
-    portrait43: { '1k':'1008x1344', '2k':'1536x2048', '4k':'2448x3264' },
-    landscape43: { '1k':'1344x1008', '2k':'2048x1536', '4k':'3264x2448' },
-    landscape: { '1k':'1536x1024', '2k':'2048x1360', '4k':'3520x2352' },
-    story: { '1k':'720x1280', '2k':'1152x2048', '4k':'2160x3840' },
-    wide: { '1k':'1280x720', '2k':'2048x1152', '4k':'3840x2160' },
-    ultrawide: { '1k':'1280x544', '2k':'2048x880', '4k':'3840x1648' },
-    ultratall: { '1k':'544x1280', '2k':'880x2048', '4k':'1648x3840' }
+    // 预置像素 = 官方 size×resolution 映射表（APIMart gpt-image-2 generation，15 比例 × 1k/2k/4k）；
+    // 带两组等价像素的 1k 格子取比例精确的第一组（第二组见 main.py APIMART_OFFICIAL_PIXELS）。
+    square: { '1k':'1024x1024', '2k':'2048x2048', '4k':'2880x2880' },
+    portrait: { '1k':'1024x1536', '2k':'1360x2048', '4k':'2336x3520' },
+    portrait43: { '1k':'768x1024', '2k':'1536x2048', '4k':'2480x3312' },
+    landscape43: { '1k':'1024x768', '2k':'2048x1536', '4k':'3312x2480' },
+    landscape: { '1k':'1536x1024', '2k':'2048x1360', '4k':'3520x2336' },
+    story: { '1k':'864x1536', '2k':'1152x2048', '4k':'2160x3840' },
+    wide: { '1k':'1536x864', '2k':'2048x1152', '4k':'3840x2160' },
+    ultrawide: { '1k':'2016x864', '2k':'2688x1152', '4k':'3840x1648' },
+    ultratall: { '1k':'864x2016', '2k':'1152x2688', '4k':'1648x3840' }
 };
-const API_RES_LEVELS = ['1k','2k','4k'];
+const API_RES_LEVELS = ['0.5k','1k','1.5k','2k','3k','4k'];
 const API_RATIO_LABELS = {square:'正方形', portrait:'竖图', portrait43:'竖图', landscape:'横图', landscape43:'横图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖'};
-const RES_LONG_SIDE = { '1k':1536, '2k':2048, '4k':3840 };
+const RES_LONG_SIDE = { '0.5k':768, '1k':1536, '1.5k':1920, '2k':2048, '3k':3072, '4k':3840 };
 // 档位像素上限的唯一真值源是策略 tiers（shared/size-policy.js），这份常量只是策略取不到时的兜底
-const RES_PIXEL_LIMIT_FALLBACK = { '1k':1572864, '2k':4194304, '4k':8294400 };
+const RES_PIXEL_LIMIT_FALLBACK = { '0.5k':262144, '1k':1572864, '1.5k':3145728, '2k':4194304, '3k':9437184, '4k':8294400 };
 function resPixelLimitFor(model){
     const limits = {};
     const tiers = sizePolicyFor(model).tiers;
@@ -602,7 +604,7 @@ const DEFAULT_VIDEO_MODELS = [
     'doubao-seedance-1-0-lite-t2v-250428',
     'doubao-seedance-1-0-lite-i2v-250428',
     // Agnes
-    'agnes-video-v2.0'
+    'agnes-video-2.5', 'agnes-video-2.5-flash'
 ];
 
 function uid(prefix='n'){ return window.NovaUtils ? NovaUtils.uid(prefix) : `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`; }
@@ -861,52 +863,187 @@ function sanitizeVideoNodeProviderModel(node){
     // 历史存档或换平台可能留下不属于当前平台的视频模型（渲染阶段不能弹提示），先静默归一。
     else correctVideoNodeModelForProvider(node);
 }
-// 视频模型支持的比例映射：键名按匹配优先级排列，model name 包含键名即命中
-// 未列出的模型默认支持全部比例
-const VIDEO_MODEL_ASPECT_RATIOS = {
-    // Seedance
-    'seedance': ['16:9', '9:16', '1:1'],
-    // Kling
-    'kling': ['16:9', '9:16', '1:1'],
-    // Veo
-    'veo-3': ['16:9', '9:16', '1:1'],
-    'veo-2': ['16:9', '9:16', '1:1'],
-    'veo': ['16:9', '9:16'],
-    // Sora
-    'sora': ['16:9', '9:16', '1:1'],
-    // Wan
-    'wan': ['16:9', '9:16', '1:1'],
-    // MiniMax / Hailuo
-    'minimax': ['16:9', '9:16', '1:1'],
-    'hailuo': ['16:9', '9:16', '1:1'],
-    // Luma Dream Machine
-    'ray2': ['16:9', '9:16', '1:1'],
-    'ray': ['16:9', '9:16', '1:1'],
-    'lumalabs': ['16:9', '9:16', '1:1'],
-    // Pika
-    'pika': ['16:9', '9:16', '1:1'],
-    // Runway Gen
-    'gen-4': ['16:9', '9:16', '1:1'],
-    'gen-3': ['16:9', '9:16', '1:1'],
-    'runway': ['16:9', '9:16', '1:1'],
-    // Agnes
-    'agnes': ['16:9', '9:16', '1:1'],
-    // Jimeng / 即梦
-    'jimeng': ['16:9', '9:16', '1:1'],
-    // Higgsfield
-    'higgsfield': ['16:9', '9:16', '1:1'],
-    // Pixverse
-    'pixverse': ['16:9', '9:16', '1:1'],
-    // OpenAI
-    'sora-2': ['16:9', '9:16', '1:1']
-};
-
-function getVideoAspectRatios(model) {
-    const m = String(model || '').toLowerCase();
-    for (const [key, ratios] of Object.entries(VIDEO_MODEL_ASPECT_RATIOS)) {
-        if (m.includes(key)) return ratios;
+// 官方「模型能力表」：一处声明每个模型族支持的视频宽高比/分辨率档/时长区间与图片分辨率档/比例集合。
+//   视频出处 /tmp/novai-video-docs（Ark create-video-generation-task-api、APIMart Seedance 2.0、
+//   APIMart Kling v3 / 3.0-turbo、APIMart VEO3.1、Agnes Video 2.5），与 main.py 的
+//   volcengine_video_resolution / volcengine_video_duration / apimart_video_duration /
+//   apimart_veo31_duration / agnes_video_seconds 同口径；
+//   图片出处 /tmp/novai-ratio-audit + /tmp/novai-official-docs（Gemini 0.5K、火山 1.5K/3K、Agnes 3K），
+//   比例集合取自 web/src/pages/online/sizeData.js 的逐模型预设键。
+// 两套画布各持一份同内容表（两个页面互不加载对方脚本），tests/test_canvas_preset_matrix.js 断言两页一致。
+// 键名按匹配优先级排列，model name 包含键名即命中；未列出的模型返回 null（按支持全部处理）。
+// 更具体的型号必须排在族名之前（seedance-2-5 / kling-3.0-turbo / veo-3.1 都排在各自族名前）。
+const GEMINI_RATIO_KEYS = ['square', 'portrait14', 'portrait18', 'portrait', 'landscape', 'portrait43',
+    'landscape41', 'landscape43', 'portrait45', 'landscape54', 'landscape81', 'story', 'wide', 'ultrawide'];
+const SEEDREAM_RATIO_KEYS = ['square', 'landscape43', 'portrait43', 'wide', 'story', 'landscape', 'portrait', 'ultrawide'];
+const MODEL_CAPABILITIES = [
+    // ── 视频：官方宽高比 + 官方分辨率档 + 官方时长区间 [min, max] ──
+    { match: 'seedance-2-5', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 30 },
+    { match: 'seedance_v2_5', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 30 },
+    { match: 'seedance_v2_0_fast', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 15 },
+    { match: 'seedance_v2_0_mini', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 15 },
+    { match: 'seedance_v1_0', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 2, durationMax: 12 },
+    { match: 'seedance-2-0-fast', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 15 },
+    { match: 'seedance-2-0-mini', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 15 },
+    { match: 'seedance-1-0', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 2, durationMax: 12 },
+    { match: 'seedance', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p', '4k'], durationMin: 4, durationMax: 15 },
+    { match: 'kling-3.0-turbo', aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p'], durationMin: 3, durationMax: 15 },
+    { match: 'kling-3-0-turbo', aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p'], durationMin: 3, durationMax: 15 },
+    { match: 'kling', aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p', '4k'], durationMin: 3, durationMax: 15 },
+    { match: 'veo-3.1', aspects: ['16:9', '9:16'], durationMin: 4, durationMax: 8 },
+    { match: 'veo3.1', aspects: ['16:9', '9:16'], durationMin: 4, durationMax: 8 },
+    { match: 'veo3_1', aspects: ['16:9', '9:16'], durationMin: 4, durationMax: 8 },
+    { match: 'veo-3', aspects: ['16:9', '9:16'] },
+    { match: 'veo-2', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'veo', aspects: ['16:9', '9:16'] },
+    { match: 'sora-2', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'sora', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'wan', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'minimax', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'hailuo', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'ray2', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'ray', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'lumalabs', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'pika', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'gen-4', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'gen-3', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'runway', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'agnes-video', aspects: ['16:9', '9:16', '4:3', '1:1', '3:4', '21:9'], durationMin: 4, durationMax: 12 },
+    { match: 'agnes', aspects: ['16:9', '9:16', '1:1'], durationMin: 4, durationMax: 12 },
+    { match: 'jimeng', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'higgsfield', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'pixverse', aspects: ['16:9', '9:16', '1:1'] },
+    // ── 图片：官方分辨率档位 + 官方比例集合（含下划线/连字符两种真实模型名写法）──
+    // preset 指向 MODEL_TIER_PIXELS 的键，用于 0.5K/1.5K/3K 这类 SIZE_MAP 没覆盖的官方档位像素。
+    { match: 'nano-banana-2', resLevels: ['0.5k', '1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS, preset: 'gemini-3.1-flash-image' },
+    { match: 'nano_banana_2', resLevels: ['0.5k', '1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS, preset: 'gemini-3.1-flash-image' },
+    { match: 'nano-banana', resLevels: ['1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS },
+    { match: 'nano_banana', resLevels: ['1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS },
+    { match: 'seedream-5.0-lite', resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-lite' },
+    { match: 'seedream-5-0-lite', resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-lite' },
+    { match: 'seedream_v5_lite', resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-lite' },
+    { match: 'seedream-5.0', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
+    { match: 'seedream-5-0', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
+    { match: 'seedream_v5', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
+    { match: 'seedream-5', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
+    { match: 'seedream-4.5', resLevels: ['2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream-4-5', resLevels: ['2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream_v4_5', resLevels: ['2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream-4.0', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream-4-0', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream_v4', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream-4', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'agnes-image', resLevels: ['1k', '2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'agnes-image' }
+];
+// 逐模型官方参考像素（只存 SIZE_MAP 没覆盖的档位：0.5K/1.5K/3K；1K/2K/4K 仍走 SIZE_MAP）。
+//   出处 web/src/pages/online/sizeData.js（Gemini 3.1 Flash Image 512px、Seedream 5.0 pro/lite 的
+//   1.5K/3K）与 main.py AGNES_OUTPUT_PIXELS（Agnes 3K），tests/test_canvas_preset_matrix.js 逐格校验。
+const MODEL_TIER_PIXELS = {
+    'gemini-3.1-flash-image': {
+        square: {'0.5k': '512x512'}, portrait14: {'0.5k': '256x1024'}, portrait18: {'0.5k': '192x1536'},
+        portrait: {'0.5k': '424x632'}, landscape: {'0.5k': '632x424'}, portrait43: {'0.5k': '448x600'},
+        landscape41: {'0.5k': '1024x256'}, landscape43: {'0.5k': '600x448'}, portrait45: {'0.5k': '464x576'},
+        landscape54: {'0.5k': '576x464'}, landscape81: {'0.5k': '1536x192'}, story: {'0.5k': '384x688'},
+        wide: {'0.5k': '688x384'}, ultrawide: {'0.5k': '792x168'}
+    },
+    'seedream-5.0-pro': {
+        square: {'1.5k': '1536x1536'}, landscape43: {'1.5k': '1792x1344'}, portrait43: {'1.5k': '1344x1792'},
+        wide: {'1.5k': '2048x1152'}, story: {'1.5k': '1152x2048'}, landscape: {'1.5k': '1872x1248'},
+        portrait: {'1.5k': '1248x1872'}, ultrawide: {'1.5k': '2352x1008'}
+    },
+    'seedream-5.0-lite': {
+        square: {'3k': '3072x3072'}, landscape43: {'3k': '3456x2592'}, portrait43: {'3k': '2592x3456'},
+        wide: {'3k': '4096x2304'}, story: {'3k': '2304x4096'}, landscape: {'3k': '3744x2496'},
+        portrait: {'3k': '2496x3744'}, ultrawide: {'3k': '4704x2016'}
+    },
+    'agnes-image': {
+        square: {'3k': '3072x3072'}, portrait43: {'3k': '2592x3456'}, landscape43: {'3k': '3456x2592'},
+        wide: {'3k': '3936x2208'}, story: {'3k': '2208x3936'}, portrait: {'3k': '2496x3744'},
+        landscape: {'3k': '3744x2496'}, ultrawide: {'3k': '4704x2016'}
     }
-    return null; // null = 支持全部
+};
+function modelCapabilityFor(model, field){
+    const m = String(model || '').toLowerCase();
+    for(const entry of MODEL_CAPABILITIES){
+        if(entry[field] === undefined || entry[field] === null) continue;
+        if(!m.includes(entry.match)) continue;
+        return Array.isArray(entry[field]) ? entry[field].slice() : entry[field];
+    }
+    return null;
+}
+function getVideoAspectRatios(model) {
+    return modelCapabilityFor(model, 'aspects'); // null = 支持全部
+}
+function videoResolutionsFor(model){
+    return modelCapabilityFor(model, 'videoResolutions'); // null = 支持全部
+}
+// 时长官方区间：null 表示没有该模型的官方区间（保留各画布原有上下限，不额外收窄）。
+function videoDurationRange(model){
+    const min = modelCapabilityFor(model, 'durationMin');
+    const max = modelCapabilityFor(model, 'durationMax');
+    return typeof min === 'number' && typeof max === 'number' && min <= max ? {min, max} : null;
+}
+function imageResLevelsFor(model){
+    const levels = modelCapabilityFor(model, 'resLevels') || ['1k', '2k', '4k'];
+    // 供应商级覆盖（/api/ai/size-policy 的 resolutions）合并到静态档位之上；未声明时原样返回
+    if(typeof NovaSizePolicy === 'undefined' || typeof NovaSizePolicy.levelAllowed !== 'function') return levels;
+    return levels.filter(level => NovaSizePolicy.levelAllowed(model, level));
+}
+function imageRatiosFor(model){
+    const declared = modelCapabilityFor(model, 'ratios'); // null = 该模型不限制比例（按支持全部处理）
+    if(typeof NovaSizePolicy === 'undefined' || typeof NovaSizePolicy.hasRatioOverride !== 'function'
+        || !NovaSizePolicy.hasRatioOverride(model)) return declared;
+    const universe = declared || (typeof NovaSizePolicy.allRatioKeys === 'function' ? NovaSizePolicy.allRatioKeys() : []);
+    return universe.filter(key => NovaSizePolicy.ratioAllowed(model, key));
+}
+function imageRatioSupported(model, ratioKey){
+    const ratios = imageRatiosFor(model);
+    return !ratios || ratios.indexOf(ratioKey) >= 0;
+}
+// 0.5K/1.5K/3K 的逐模型官方像素；SIZE_MAP 有该档位时优先走 SIZE_MAP（gpt-image-2 官方映射）。
+function modelTierPixelFor(model, ratioKey, level){
+    const preset = modelCapabilityFor(model, 'preset');
+    const cells = preset && MODEL_TIER_PIXELS[preset] && MODEL_TIER_PIXELS[preset][ratioKey];
+    return (cells && cells[level]) || '';
+}
+// 视频「原图比例」：Ark 只认 adaptive，智能画布在发请求前会把它按参考素材真实比例解析成具体比例，
+// 经典画布此前原样下发（上游各自回落默认）。这里做同语义解析，候选集只认该模型的官方宽高比。
+const VIDEO_ASPECT_SUPPORTED = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
+function videoAspectNumber(key){
+    const matched = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(String(key || ''));
+    const w = matched ? Number(matched[1]) : 0;
+    const h = matched ? Number(matched[2]) : 0;
+    return w > 0 && h > 0 ? w / h : 0;
+}
+// 参考素材比例 → 最接近的受支持比例；用对数距离，2:3 更像 3:4 还是 9:16 才判得准。
+function nearestVideoAspectForCanvasSize(width, height, candidates){
+    const w = Number(width) || 0;
+    const h = Number(height) || 0;
+    if(w <= 0 || h <= 0) return '';
+    const target = w / h;
+    let best = '';
+    let bestDiff = Infinity;
+    (candidates && candidates.length ? candidates : VIDEO_ASPECT_SUPPORTED).forEach(key => {
+        const aspect = videoAspectNumber(key);
+        if(!aspect) return;
+        const diff = Math.abs(Math.log(target / aspect));
+        if(diff < bestDiff){ bestDiff = diff; best = key; }
+    });
+    return best;
+}
+async function resolveVideoNodeAspectRatio(node, refs){
+    const current = node.aspectRatio || '16:9';
+    if(current !== 'keep_ratio') return current;
+    const allowed = getVideoAspectRatios(node.model);
+    const candidates = (allowed || VIDEO_ASPECT_SUPPORTED).filter(item => item !== 'adaptive' && item !== 'keep_ratio');
+    const ref = (refs || []).find(item => item && item.url);
+    if(!ref) return 'adaptive'; // 没有参考素材时退回 Ark 官方认的 adaptive，不再原样下发 keep_ratio
+    try {
+        const dims = await getImageDimensions(ref.url);
+        return nearestVideoAspectForCanvasSize(dims && dims.width, dims && dims.height, candidates) || 'adaptive';
+    } catch(_) {
+        return 'adaptive';
+    }
 }
 
 function videoModelOptions(selectedModel, providerId){
@@ -958,7 +1095,8 @@ function normalizedImageQuality(value){
 }
 function resolveChatModel(value, providerId=''){
     const providerModels = providerId ? providerChatModels(providerId) : [];
-    return value || providerModels[0] || allChatModels()[0] || chatModels[0] || 'gpt-4o-mini';
+    // 平台没配聊天模型时返回空串，交给后端按平台配置挑默认，前端不写死模型名
+    return value || providerModels[0] || allChatModels()[0] || chatModels[0] || '';
 }
 function showErrorModal(message, title=tr('canvas.generationFailed')){
     if(!errorModal || !errorMessage){
@@ -1124,19 +1262,21 @@ function ratioPartsFromDimensions(width, height){
 function apiSizeTier(width, height, model){
     const area = Number(width) * Number(height);
     const pixelLimit = resPixelLimitFor(model);
-    for(const level of API_RES_LEVELS){
+    const levels = imageResLevelsFor(model);
+    for(const level of levels){
         if(area <= pixelLimit[level]) return level;
     }
-    return API_RES_LEVELS[API_RES_LEVELS.length - 1];
+    return levels[levels.length - 1];
 }
 // 枚举模型的最高档没法从模型名推：按枚举里像素最多的一张反推
 function enumMaxSizeLevel(model){
     let level = '';
+    const levels = imageResLevelsFor(model);
     (sizePolicyFor(model).options || []).forEach(option => {
         const size = parseSizePair(option);
         if(!size) return;
         const tier = apiSizeTier(size.width, size.height, model);
-        if(API_RES_LEVELS.indexOf(tier) > API_RES_LEVELS.indexOf(level)) level = tier;
+        if(levels.indexOf(tier) > levels.indexOf(level)) level = tier;
     });
     return level;
 }
@@ -1152,17 +1292,32 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue = '', custom
         const parsed = parseRatioValue(customRatioValue);
         const longSide = RES_LONG_SIDE[resolutionKey] || 1024;
         if(parsed){
-            const pixelLimit = resPixelLimitFor(resolvedModel)[resolutionKey] || (longSide * longSide);
-            const rawWidth = parsed >= 1 ? longSide : Math.min(longSide * parsed, Math.sqrt(pixelLimit * parsed));
-            const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;
+            // 档位只定长边，短边按比例等比算：单独拿像素上限夹一条边会把比例改掉（56:75@4K 曾出成 2480x3840）。
+            const rawWidth = parsed >= 1 ? longSide : longSide * parsed;
+            const rawHeight = parsed >= 1 ? longSide / parsed : longSide;
             const width = Math.floor(rawWidth / 16) * 16;
             const height = Math.floor(rawHeight / 16) * 16;
+            // 比例算出来的游离尺寸交给策略收口：枚举模型吸附到合法值，free/hintOnly 原样放行。
             return NovaSizePolicy.constrain(`${Math.max(64, width)}x${Math.max(64, height)}`, resolvedModel);
         }
     }
     const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
-    const preset = SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
-    return NovaSizePolicy.constrain(preset, resolvedModel);
+    const ratioCells = SIZE_MAP[ratioKey] || SIZE_MAP.square;
+    // 预置像素表只覆盖 1k/2k/4k（APIMart gpt-image-2 官方映射）。0.5k/1.5k/3k 是 Gemini / 火山 /
+    // Agnes 的官方档位：优先取 MODEL_TIER_PIXELS 里逐模型的官方参考像素（与 web 在线生图同源），
+    // 表里没有才按该档位官方长边与这一比例等比换算，避免档位被静默吞成 1k。
+    let preset = ratioCells[resolutionKey] || modelTierPixelFor(resolvedModel, ratioKey, resolutionKey);
+    if(!preset){
+        const longSide = RES_LONG_SIDE[resolutionKey];
+        const nominal = parseSizeValue(ratioCells['1k'] || SIZE_MAP.square['1k']);
+        if(longSide && nominal){
+            const ratio = Number(nominal.width) / Number(nominal.height);
+            const rawWidth = ratio >= 1 ? longSide : longSide * ratio;
+            const rawHeight = ratio >= 1 ? longSide / ratio : longSide;
+            preset = `${Math.max(64, Math.floor(rawWidth / 16) * 16)}x${Math.max(64, Math.floor(rawHeight / 16) * 16)}`;
+        }
+    }
+    return NovaSizePolicy.constrain(preset || ratioCells['1k'] || SIZE_MAP.square['1k'], resolvedModel);
 }
 function apiRatioLabel(ratioValue){
     const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
@@ -1170,17 +1325,18 @@ function apiRatioLabel(ratioValue){
 }
 // 枚举模型的合法尺寸有限：高位档可能没有对应尺寸，换档只改标签不改清晰度，故提前禁用。
 function apiResolutionSupport(model, ratioValue, customRatioValue = ''){
-    if(!NovaSizePolicy.enumOptions(resolveImageModel(model))) return {levels:API_RES_LEVELS.slice(), supported:API_RES_LEVELS.slice(), notes:{}};
+    const levels = imageResLevelsFor(model);
+    if(!NovaSizePolicy.enumOptions(resolveImageModel(model))) return {levels, supported:levels.slice(), notes:{}};
     const trackTiers = (ratioValue !== 'custom' && ratioValue !== 'source') || parseRatioValue(customRatioValue) > 0;
     const supported = [];
     const notes = {};
-    API_RES_LEVELS.forEach(level => {
+    levels.forEach(level => {
         const previous = supported.length ? apiImageSize(ratioValue, supported[supported.length - 1], customRatioValue, '', model) : '';
         const size = apiImageSize(ratioValue, level, customRatioValue, '', model);
         if(trackTiers && previous && size === previous){ notes[level] = `等同 ${supported[supported.length - 1].toUpperCase()}`; return; }
         supported.push(level);
     });
-    return {levels:API_RES_LEVELS.slice(), supported, notes};
+    return {levels, supported, notes};
 }
 function apiResolutionNote(model, ratioValue, level, customRatioValue = ''){
     return apiResolutionSupport(model, ratioValue, customRatioValue).notes[level] || '';
@@ -1198,26 +1354,35 @@ function apiResolutionFixedNote(model, ratioValue, customRatioValue = ''){
 // 也不会让用户按更高清晰度多花点数）；只有完全没有更低档位时才往上取。
 function nearestApiResolution(model, ratioValue, level, customRatioValue = ''){
     const info = apiResolutionSupport(model, ratioValue, customRatioValue);
-    const index = info.levels.indexOf(level);
-    for(let i = (index < 0 ? info.levels.length - 1 : index); i >= 0; i--){
-        if(info.supported.includes(info.levels[i])) return info.levels[i];
+    // 档位可能不在该模型的可用集合里（换平台后历史值）：按全局档位顺序找不高于它的最高可用档，
+    // 找不到更低档才往上取，避免把 1.5K 静默抬到 4K。
+    const order = API_RES_LEVELS;
+    const index = order.indexOf(level);
+    for(let i = (index < 0 ? order.length - 1 : index); i >= 0; i--){
+        if(info.supported.includes(order[i])) return order[i];
     }
-    return info.supported.find(item => info.levels.indexOf(item) > index) || info.supported[0] || '1k';
+    return info.supported.find(item => order.indexOf(item) > index) || info.supported[0] || '1k';
 }
 function apiResolutionChangeNotice(model, ratioValue, level, target){
     return `${resolveImageModel(model)} 不支持 ${level.toUpperCase()} ${apiRatioLabel(ratioValue)}尺寸，已自动调整为 ${target.toUpperCase()}`;
 }
 // 换模型/换比例后档位可能失效：自动换到该模型可用的档位并提示，避免静默出低清图。
+// 用户显式选过的档位另记在 apiResolutionChoice：自动降档只改「当前比例下的有效档位」，
+// 不吞掉用户选择；比例切回原值时原档位若恢复合法就自动还原（否则会永久停在降档结果上）。
 function applyApiResolutionLimit(node){
     if(!node || API_RES_LEVELS.indexOf(node.resolution) < 0) return '';
     const model = resolveImageModel(node.model);
     const ratio = node.ratio || 'square';
     const customRatio = node.customRatio || '';
-    if(!apiResolutionNote(model, ratio, node.resolution, customRatio)) return '';
-    const target = nearestApiResolution(model, ratio, node.resolution, customRatio);
-    const notice = apiResolutionChangeNotice(model, ratio, node.resolution, target);
+    const requested = API_RES_LEVELS.indexOf(node.apiResolutionChoice) >= 0 ? node.apiResolutionChoice : node.resolution;
+    const unsupported = imageResLevelsFor(model).indexOf(requested) < 0;
+    const note = apiResolutionNote(model, ratio, requested, customRatio);
+    const downgraded = unsupported || Boolean(note);
+    const target = downgraded ? nearestApiResolution(model, ratio, requested, customRatio) : requested;
+    if(target === node.resolution) return '';
+    node.apiResolutionChoice = requested;
     node.resolution = target;
-    return notice;
+    return downgraded ? apiResolutionChangeNotice(model, ratio, requested, target) : '';
 }
 function notifyCanvasSize(text){
     if(!text) return;
@@ -8027,8 +8192,11 @@ function renderGeneratorBody(node){
             <div class="gen-settings-row api-size-row">
                 <select class="select-lite resolution compact-select" data-field="resolution">
                     <option value="auto">自动</option>
+                    <option value="0.5k">0.5K</option>
                     <option value="1k">1K</option>
+                    <option value="1.5k">1.5K</option>
                     <option value="2k">2K</option>
+                    <option value="3k">3K</option>
                     <option value="4k">4K</option>
                     <option value="custom">${tr('canvas.custom')}</option>
                 </select>
@@ -8186,19 +8354,34 @@ function renderGeneratorBody(node){
         const autoOption = resolutionSelect.querySelector('option[value="auto"]');
         if(autoOption) autoOption.disabled = !apiAllowsAutoSize(apiModel);
         const sizeSupport = apiResolutionSupport(apiModel, node.ratio || 'square', node.customRatio || '');
+        const modelLevels = imageResLevelsFor(apiModel);
         [...resolutionSelect.options].forEach(option => {
-            if(option.value !== '1k' && option.value !== '2k' && option.value !== '4k') return;
+            if(!API_RES_LEVELS.includes(option.value)) return;
+            // 该模型官方没有的档位（如 gpt-image-2 的 0.5K/1.5K/3K）直接隐藏；模型有、该比例没有的置灰
+            option.hidden = !modelLevels.includes(option.value);
             const note = sizeSupport.notes[option.value] || '';
-            option.disabled = Boolean(note);
+            option.disabled = option.hidden || Boolean(note);
             option.title = apiResolutionDisabledText(apiModel, node.ratio || 'square', option.value, node.customRatio || '');
             option.textContent = note ? `${option.value.toUpperCase()} · ${note}` : option.value.toUpperCase();
         });
         resolutionSelect.title = apiResolutionFixedNote(apiModel, node.ratio || 'square', node.customRatio || '');
-        const squareOption = ratioSelect.querySelector('option[value="square"]');
-        if(squareOption){
-            squareOption.disabled = false;
-            squareOption.title = '';
-        }
+        // 比例同样按模型官方集合过滤：模型没有的比例隐藏/置灰并写明原因；历史存档里当前选中的
+        // 不支持比例仍保留可见（但不允许重选），不静默改写 node.ratio。
+        const modelRatios = imageRatiosFor(apiModel);
+        [...ratioSelect.options].forEach(option => {
+            const value = option.value;
+            if(value === 'custom' || value === 'source'){
+                option.hidden = false;
+                option.disabled = false;
+                option.title = '';
+                return;
+            }
+            const supported = !modelRatios || modelRatios.includes(value);
+            const isCurrent = value === node.ratio;
+            option.hidden = !supported && !isCurrent;
+            option.disabled = !supported;
+            option.title = supported ? '' : apiModel + ' 官方不支持 ' + option.textContent + ' 比例';
+        });
         const ratioValue = node.ratio && [...ratioSelect.options].some(opt => opt.value === node.ratio) ? node.ratio : 'square';
         ratioSelect.value = ratioValue;
         resolutionSelect.value = node.resolution || defaultApiImageResolution(node.model);
@@ -8248,6 +8431,8 @@ function renderGeneratorBody(node){
         e.stopPropagation();
         node.resolution = e.target.value;
         node._apiResolutionUserSet = true;
+        // 用户手选的档位记下来（auto/custom 没有档位语义，清掉旧记忆）；自动降档不动它。
+        node.apiResolutionChoice = API_RES_LEVELS.indexOf(node.resolution) >= 0 ? node.resolution : '';
         if(node.resolution === 'custom') {
             node.ratio = '';
         } else if(node.resolution === 'auto') {
@@ -8290,6 +8475,7 @@ function renderGeneratorBody(node){
             node.customSize = node.customWidth && node.customHeight ? `${node.customWidth}x${node.customHeight}` : '';
             node.resolution = 'custom';
             node._apiResolutionUserSet = true;
+            node.apiResolutionChoice = '';
             node.ratio = '';
             syncSizeControls();
             scheduleSave();
@@ -8449,6 +8635,9 @@ function renderVideoBody(node){
     const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
     sanitizeVideoNodeProviderModel(node);
     node.model = node.model || 'veo3-fast';
+    const durationRange = videoDurationRange(node.model);
+    const durationMin = durationRange ? durationRange.min : 1;
+    const durationMax = durationRange ? durationRange.max : 60;
     wrap.innerHTML = `
         <div class="gen-scroll">
         <div class="prompt-list mb-3"></div>
@@ -8468,28 +8657,19 @@ function renderVideoBody(node){
             <div class="gen-settings-row">
                 <label class="field" style="flex:1">
                     <div class="setting-title">${tr('canvas.videoDuration')}</div>
-                    <input class="setting-input video-duration" type="number" min="1" max="60" step="1" value="${Number(node.duration || 5)}">
+                    <input class="setting-input video-duration" type="number" min="${durationMin}" max="${durationMax}" step="1" value="${Number(node.duration || 5)}"${durationRange ? ` title="${escapeHtml(node.model)} 官方时长 ${durationMin}-${durationMax} 秒"` : ''}>
                 </label>
                 <label class="field" style="flex:1">
                     <div class="setting-title">${tr('canvas.videoAspect')}</div>
                     <select class="select-lite video-aspect compact-select">
-                        ${(() => {
-                            const allRatios = [
-                                ['16:9','16:9'], ['9:16','9:16'], ['1:1','1:1'],
-                                ['4:3','4:3'], ['3:4','3:4'], ['21:9','21:9'], ['9:21','9:21']
-                            ];
-                            const allowed = getVideoAspectRatios(node.model);
-                            const current = node.aspectRatio || '16:9';
-                            let html = '';
-                            for (const [val, label] of allRatios) {
-                                const hidden = allowed && !allowed.includes(val) ? ' style="display:none"' : '';
-                                const sel = val === current ? ' selected' : '';
-                                html += `<option value="${val}"${hidden}${sel}>${label}</option>`;
-                            }
-                            html += `<option value="keep_ratio"${current==='keep_ratio'?' selected':''}>keep</option>`;
-                            html += `<option value="adaptive"${current==='adaptive'?' selected':''}>adapt</option>`;
-                            return html;
-                        })()}
+                        <option value="16:9">16:9</option>
+                        <option value="9:16">9:16</option>
+                        <option value="1:1">1:1</option>
+                        <option value="4:3">4:3</option>
+                        <option value="3:4">3:4</option>
+                        <option value="21:9">21:9</option>
+                        <option value="keep_ratio">keep</option>
+                        <option value="adaptive">adapt</option>
                     </select>
                 </label>
                 <label class="field" style="flex:1">
@@ -8499,7 +8679,7 @@ function renderVideoBody(node){
                         <option value="480p">480p</option>
                         <option value="720p">720p</option>
                         <option value="1080p">1080p</option>
-                        <option value="780P">780P</option>
+                        <option value="4k">4K</option>
                     </select>
                 </label>
             </div>
@@ -8533,6 +8713,44 @@ function renderVideoBody(node){
         input.onmousedown = e => e.stopPropagation();
         input.onclick = e => e.stopPropagation();
     });
+    // 视频侧按模型收窄：宽高比 / 分辨率只留官方集合，时长上下限跟着模型官方区间走。
+    // 历史存档里当前选中的值即使不在官方集合里也保持可见（不静默改写 node.*），只是不允许重选。
+    const syncVideoModelLimits = () => {
+        const allowedAspects = getVideoAspectRatios(node.model);
+        [...aspectSelect.options].forEach(option => {
+            const supported = option.value === 'keep_ratio' || !allowedAspects || allowedAspects.includes(option.value);
+            const isCurrent = option.value === (node.aspectRatio || '16:9');
+            option.hidden = !supported && !isCurrent;
+            option.disabled = !supported;
+            option.title = supported ? '' : node.model + ' 官方不支持 ' + option.textContent + ' 比例';
+        });
+        const allowedRes = videoResolutionsFor(node.model);
+        [...resolutionSelect.options].forEach(option => {
+            if(!option.value){ option.hidden = false; option.disabled = false; option.title = ''; return; }
+            const supported = !allowedRes || allowedRes.includes(option.value);
+            const isCurrent = option.value === (node.resolution || '');
+            option.hidden = !supported && !isCurrent;
+            option.disabled = !supported;
+            option.title = supported ? '' : node.model + ' 官方不支持 ' + option.textContent + ' 分辨率';
+        });
+        const range = videoDurationRange(node.model);
+        const min = range ? range.min : 1;
+        const max = range ? range.max : 60;
+        durationSelect.min = String(min);
+        durationSelect.max = String(max);
+        durationSelect.title = range ? node.model + ' 官方时长 ' + min + '-' + max + ' 秒' : '';
+    };
+    // 换模型/换平台后旧比例可能不在新模型官方集合里：落到官方集合的第一个具体比例，keep_ratio 保留。
+    const normalizeVideoModelChoice = () => {
+        syncVideoModelLimits();
+        const allowed = getVideoAspectRatios(node.model);
+        const current = node.aspectRatio || '16:9';
+        if(current !== 'keep_ratio' && allowed && !allowed.includes(current)){
+            node.aspectRatio = allowed.filter(item => item !== 'adaptive')[0] || '16:9';
+            aspectSelect.value = node.aspectRatio;
+        }
+    };
+    syncVideoModelLimits();
     providerSelect.onchange = e => {
         e.stopPropagation();
         node.apiProvider = e.target.value;
@@ -8542,16 +8760,7 @@ function renderVideoBody(node){
         const providerModelNotice = correctVideoNodeModelForProvider(node);
         window.NovaUtils?.rememberProviderVideoModel?.(node.apiProvider, node.model);
         modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
-        // Update aspect ratio options for new model
-        const allowed = getVideoAspectRatios(node.model);
-        aspectSelect.querySelectorAll('option').forEach(opt => {
-            if(opt.value === 'keep_ratio' || opt.value === 'adaptive') return;
-            opt.style.display = (!allowed || allowed.includes(opt.value)) ? '' : 'none';
-        });
-        if(allowed && !allowed.includes(aspectSelect.value)) {
-            aspectSelect.value = allowed[0] || '16:9';
-            node.aspectRatio = aspectSelect.value;
-        }
+        normalizeVideoModelChoice();
         scheduleSave();
         if(providerModelNotice) notifyCanvasSize(providerModelNotice);
     };
@@ -8559,20 +8768,23 @@ function renderVideoBody(node){
         e.stopPropagation();
         node.model = e.target.value;
         window.NovaUtils?.rememberProviderVideoModel?.(node.apiProvider, node.model);
-        // Update aspect ratio options for new model
-        const allowed = getVideoAspectRatios(node.model);
-        aspectSelect.querySelectorAll('option').forEach(opt => {
-            if(opt.value === 'keep_ratio' || opt.value === 'adaptive') return;
-            opt.style.display = (!allowed || allowed.includes(opt.value)) ? '' : 'none';
-        });
-        if(allowed && !allowed.includes(aspectSelect.value)) {
-            aspectSelect.value = allowed[0] || '16:9';
-            node.aspectRatio = aspectSelect.value;
-        }
+        normalizeVideoModelChoice();
         scheduleSave();
     };
-    durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(1, Math.min(60, Number(e.target.value || 5))); scheduleSave(); };
-    durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(60, Number(node.duration || 5)))); };
+    durationSelect.oninput = e => {
+        e.stopPropagation();
+        const range = videoDurationRange(node.model);
+        const min = range ? range.min : 1;
+        const max = range ? range.max : 60;
+        node.duration = Math.max(min, Math.min(max, Number(e.target.value || 5)));
+        scheduleSave();
+    };
+    durationSelect.onblur = e => {
+        const range = videoDurationRange(node.model);
+        const min = range ? range.min : 1;
+        const max = range ? range.max : 60;
+        e.target.value = String(Math.max(min, Math.min(max, Number(node.duration || 5))));
+    };
     aspectSelect.onchange = e => { e.stopPropagation(); node.aspectRatio = e.target.value; scheduleSave(); };
     resolutionSelect.onchange = e => { e.stopPropagation(); node.resolution = e.target.value; scheduleSave(); };
     wrap.querySelectorAll('[data-video-toggle]').forEach(btn => {
@@ -9504,6 +9716,7 @@ function bindRhModelControls(wrap, node, media){
             if(field === 'resolution'){
                 node.resolution = e.target.value || defaultApiImageResolution(node.model);
                 node._apiResolutionUserSet = true;
+                node.apiResolutionChoice = API_RES_LEVELS.indexOf(node.resolution) >= 0 ? node.resolution : '';
             } else if(field === 'ratio'){
                 node.ratio = e.target.value || 'square';
             } else if(field === 'quality'){
@@ -10694,12 +10907,24 @@ async function runVideoNode(nodeId, opts={}){
     if(!opts.cascade && !opts.batch){ node.running = true; refreshRunNodes(node, out); }
     else refreshRunNodes(node, out);
     try {
+        const aspectRatio = await resolveVideoNodeAspectRatio(node, refs);
+        /* 分镜表「时长(秒)」逐行驱动这一行视频的 duration：只覆盖本次提交、不回写 node.duration；
+           区间沿用经典画布时长输入框同一套 videoDurationRange()（MODEL_CAPABILITIES 官方区间），
+           行里没有时长就保持节点级。 */
+        let runDuration = Number(node.duration || 5);
+        const rowDuration = Number(rowOverride && rowOverride.duration);
+        if(Number.isFinite(rowDuration) && rowDuration > 0){
+            const durationRange = videoDurationRange(node.model);
+            const durationMin = durationRange ? durationRange.min : 1;
+            const durationMax = durationRange ? durationRange.max : 60;
+            runDuration = Math.max(durationMin, Math.min(durationMax, rowDuration));
+        }
         const body = {
             prompt,
             provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),
             model:node.model || 'veo3-fast',
-            duration:Number(node.duration || 5),
-            aspect_ratio:node.aspectRatio || '16:9',
+            duration:runDuration,
+            aspect_ratio:aspectRatio,
             resolution:node.resolution || '',
             images:refs,
             // 手动输入的网址是一段固定视频，按行批量时没有意义，会被本行素材覆盖

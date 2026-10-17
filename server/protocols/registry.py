@@ -251,6 +251,8 @@ DEFAULT_SIZE_POLICY: Dict[str, Any] = {
     "maxPixels": 0,
     "minPixels": 0,
     "multipleOf": 0,
+    "minRatio": 0,
+    "maxRatio": 0,
     "options": [],
     "prefer": "ratio",
     "autoSize": False,
@@ -275,6 +277,15 @@ def _size_int(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return number if number > 0 else 0
+
+
+def _size_ratio(value: Any) -> float:
+    """比例边界是浮点（如 1/3），不能走 _size_int。"""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return number if number > 0 else 0.0
 
 
 def _default_size_policy() -> Dict[str, Any]:
@@ -326,6 +337,9 @@ def _normalize_size_policy(block: Any) -> Dict[str, Any]:
     for key in ("maxEdge", "maxPixels", "minPixels", "multipleOf"):
         if key in block:
             policy[key] = _size_int(block.get(key))
+    for key in ("minRatio", "maxRatio"):
+        if key in block:
+            policy[key] = _size_ratio(block.get(key))
     return policy
 
 
@@ -352,6 +366,11 @@ def _size_family_block(model: str) -> Optional[dict]:
     for entry in load_protocols()["models"]:
         block = entry.get("size")
         if not isinstance(block, dict):
+            continue
+        # 带 provider_ids 的 size 块是「供应商专属声明」，只在该供应商的 _explicit_size_block 生效；
+        # 当作全局尺寸族会让别的供应商的同名模型也被套上它的档位。
+        match = entry.get("match") if isinstance(entry.get("match"), dict) else {}
+        if match.get("provider_ids"):
             continue
         hit = _model_pattern_hit_length(entry, model)
         if hit > best_length:
@@ -439,18 +458,32 @@ def _size_align(value: float, multiple: int, round_up: bool) -> int:
 
 
 def _fit_size_within(pair: Tuple[int, int], policy: Dict[str, Any]) -> str:
-    """等比缩进 maxEdge / maxPixels，按 multipleOf 对齐；不足 minPixels 再等比放大。"""
+    """比例先夹进 [minRatio, maxRatio]，再等比缩进 maxEdge / maxPixels，按 multipleOf 对齐，
+    对齐后按同一个倍数严格再夹一次；不足 minPixels 再等比放大。与 shared/size-policy.js 同规则。"""
     max_edge = _size_int(policy.get("maxEdge"))
     max_pixels = _size_int(policy.get("maxPixels"))
     min_pixels = _size_int(policy.get("minPixels"))
     multiple = _size_int(policy.get("multipleOf"))
+    min_ratio = _size_ratio(policy.get("minRatio"))
+    max_ratio = _size_ratio(policy.get("maxRatio"))
+    width = float(pair[0])
+    height = float(pair[1])
+    if max_ratio > 0 and width > height * max_ratio:
+        width = height * max_ratio
+    if min_ratio > 0 and width < height * min_ratio:
+        height = width / min_ratio
     scale = 1.0
     if max_edge > 0:
-        scale = min(scale, max_edge / max(pair))
+        scale = min(scale, max_edge / max(width, height))
     if max_pixels > 0:
-        scale = min(scale, math.sqrt(max_pixels / (pair[0] * pair[1])))
-    width = _size_align(pair[0] * scale, multiple, False)
-    height = _size_align(pair[1] * scale, multiple, False)
+        scale = min(scale, math.sqrt(max_pixels / (width * height)))
+    step = max(1, multiple)
+    width = _size_align(width * scale, multiple, False)
+    height = _size_align(height * scale, multiple, False)
+    if max_ratio > 0 and width > height * max_ratio:
+        width = max(step, int(math.floor(height * max_ratio / step)) * step)
+    if min_ratio > 0 and width < height * min_ratio:
+        height = max(step, int(math.floor(width / min_ratio / step)) * step)
     if min_pixels > 0 and width * height < min_pixels:
         grow = math.sqrt(min_pixels / max(1, width * height))
         width = _size_align(width * grow, multiple, True)
@@ -516,29 +549,132 @@ def constrain_size(provider: dict, model: str, size: str) -> str:
     policy = size_policy_for(provider or {}, str(model or ""))
     if policy.get("mode") == "enum":
         return _snap_enum_size(raw, pair, policy)
-    if policy.get("mode") == "bounds" or policy.get("maxEdge") or policy.get("maxPixels") or policy.get("minPixels"):
+    if (policy.get("mode") == "bounds" or policy.get("maxEdge") or policy.get("maxPixels")
+            or policy.get("minPixels") or policy.get("minRatio") or policy.get("maxRatio")):
         return _fit_size_within(pair, policy)
     return raw
+
+
+def _provider_size_overrides(provider: Any) -> Dict[str, dict]:
+    """供应商配置里的 size_overrides 声明：{模型名: {ratios, resolutions, maxEdge, maxPixels}}。
+
+    只做形状校验，坏声明直接跳过（与协议表同一约定：声明写坏不影响服务）。
+    ratios 是宽高比标签（如 "1:1" / "16:9"），resolutions 是档位 id（如 "1k"）。
+    """
+    raw = provider.get("size_overrides") if isinstance(provider, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, dict] = {}
+    for key, value in raw.items():
+        model = str(key or "").strip()
+        if not model or not isinstance(value, dict):
+            continue
+        override: Dict[str, Any] = {}
+        ratios = value.get("ratios")
+        if isinstance(ratios, list):
+            cleaned = []
+            for item in ratios:
+                text = str(item).strip()
+                if text and text not in cleaned:
+                    cleaned.append(text)
+            if cleaned:
+                override["ratios"] = cleaned
+        resolutions = value.get("resolutions")
+        if isinstance(resolutions, list):
+            cleaned = []
+            for item in resolutions:
+                text = str(item).strip().lower()
+                if text and text not in cleaned:
+                    cleaned.append(text)
+            if cleaned:
+                override["resolutions"] = cleaned
+        max_edge = _size_int(value.get("maxEdge"))
+        if max_edge:
+            override["maxEdge"] = max_edge
+        max_pixels = _size_int(value.get("maxPixels"))
+        if max_pixels:
+            override["maxPixels"] = max_pixels
+        if override:
+            out[model] = override
+    return out
+
+
+def normalize_size_overrides(value: Any) -> Dict[str, dict]:
+    """供应商配置 size_overrides 字段的规整入口（main.py 的 normalize_provider 复用同一套规则）。"""
+    return _provider_size_overrides({"size_overrides": value})
+
+
+def _apply_size_override(policy: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """把供应商声明盖到全局协议策略上；只加被声明的字段，未声明字段保持原样。"""
+    merged = dict(policy)
+    for key in ("ratios", "resolutions", "maxEdge", "maxPixels"):
+        if key in override:
+            merged[key] = list(override[key]) if isinstance(override[key], list) else override[key]
+    return merged
+
+
+def _merge_override_fields(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+    """同名模型出现在多个供应商时：比例/档位取交集，边界取更小值；未声明的一方不参与。"""
+    merged = dict(target)
+    target_ratios = list(target.get("ratios") or [])
+    source_ratios = list(source.get("ratios") or [])
+    if source_ratios:
+        merged["ratios"] = [item for item in target_ratios if item in set(source_ratios)] if target_ratios else source_ratios
+    target_res = [str(item).lower() for item in (target.get("resolutions") or [])]
+    source_res = [str(item).lower() for item in (source.get("resolutions") or [])]
+    if source_res:
+        merged["resolutions"] = [item for item in target_res if item in set(source_res)] if target_res else source_res
+    for key in ("maxEdge", "maxPixels"):
+        source_value = _size_int(source.get(key))
+        if source_value:
+            target_value = _size_int(target.get(key))
+            merged[key] = min(target_value, source_value) if target_value else source_value
+    return merged
+
+
+def _merge_size_policies(current: Dict[str, Any], policy: Dict[str, Any], any_override: bool) -> Dict[str, Any]:
+    """同名模型合并：先按 mode 严格度取基础策略（与旧行为一致），有覆盖时再并入覆盖字段。"""
+    if SIZE_MODE_RANK.get(policy["mode"], 0) > SIZE_MODE_RANK.get(current["mode"], 0):
+        base, other = policy, current
+    else:
+        base, other = current, policy
+    merged = dict(base)
+    if any_override:
+        merged = _merge_override_fields(merged, other)
+    return merged
 
 
 def size_policy_table(providers: Any) -> Dict[str, Any]:
     """前端一次性全量表（novai-size-policy/v1）：按模型名展开，前端不必自己映射供应商。
 
     providers 由调用方传入；只取 enabled 的平台，模型名重复时保留更严格的策略。
+    供应商声明了 size_overrides 的 (供应商, 模型) 把覆盖合并进该模型的策略：ratios /
+    resolutions / maxEdge / maxPixels 优先于全局协议表；未声明则与不带覆盖时逐字节一致。
     """
     models: Dict[str, Any] = {}
+    overridden: set = set()
     for provider in providers if isinstance(providers, list) else []:
         try:
             if not isinstance(provider, dict) or not provider.get("enabled", True):
                 continue
+            overrides = _provider_size_overrides(provider)
             for raw in provider.get("image_models") or []:
                 model = str(raw or "").strip()
                 if not model:
                     continue
                 policy = size_policy_for(provider, model)
+                override = overrides.get(model)
+                if override:
+                    policy = _apply_size_override(policy, override)
                 current = models.get(model)
-                if current is None or SIZE_MODE_RANK.get(policy["mode"], 0) > SIZE_MODE_RANK.get(current["mode"], 0):
+                if current is None:
                     models[model] = policy
+                    if override:
+                        overridden.add(model)
+                    continue
+                if override:
+                    overridden.add(model)
+                models[model] = _merge_size_policies(current, policy, model in overridden)
         except Exception:
             continue
     return {

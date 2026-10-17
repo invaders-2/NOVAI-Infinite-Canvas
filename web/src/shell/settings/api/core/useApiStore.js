@@ -15,6 +15,7 @@ import {
     applyRegistryPresets,
 } from './helpers.js';
 import { installNetwork } from './apiNetwork.js';
+import { refreshSizePolicy } from './sizePolicySync.js';
 
 // 与旧 broadcastStudioApiChange 一致：BroadcastChannel + 外壳转发给所有旧页面 iframe
 export function broadcastStudioApiChange(type = 'providers-changed') {
@@ -230,6 +231,7 @@ export function createApiStore() {
             const data = await fetch('/api/providers').then(r => r.json());
             applyRegistryPresets(data.registry_presets);
             S.providers = data.providers || [];
+            syncOverridesBaseline(S.providers);
             S.selectedId = (sortedProviders()[0] || {}).id || '';
             loadForm();
             S.view = 'recommend';     // 旧页面进入时默认展示推荐 API
@@ -247,6 +249,7 @@ export function createApiStore() {
             applyRegistryPresets(data.registry_presets);
             const keep = S.selectedId;
             S.providers = data.providers || [];
+            syncOverridesBaseline(S.providers);
             S.selectedId = S.providers.some(p => p.id === keep) ? keep : ((sortedProviders()[0] || {}).id || '');
             const view = S.view;
             loadForm();
@@ -275,6 +278,8 @@ export function createApiStore() {
             video_models: p.video_models || [],
             model_names: (p.model_names && typeof p.model_names === 'object') ? p.model_names : {},
             model_protocols: (p.model_protocols && typeof p.model_protocols === 'object') ? p.model_protocols : {},
+            // 能力覆盖：设置页的 SizeOverridesCard 里可视化编辑，保存时原样带回（字段与合并规则见 SIZE_OVERRIDES.md）
+            size_overrides: (p.size_overrides && typeof p.size_overrides === 'object') ? p.size_overrides : {},
             ms_loras: p.id === 'modelscope' ? (p.ms_loras || []) : [],
             ms_defaults_version: p.id === 'modelscope' ? (p.ms_defaults_version || 1) : 0,
             rh_apps: p.id === 'runninghub' ? (p.rh_apps || []) : [],
@@ -297,6 +302,13 @@ export function createApiStore() {
             clear_lovart_secret_key: lovart && p._clearLovartSecretKey === true,
         };
     }
+    // 能力覆盖（size_overrides）没变就不用多打一次 /api/ai/size-policy：
+    // 基线是「后端此刻存的」那一份，保存后跟它比才知道这次保存有没有改到覆盖
+    let overridesOnServer = '';
+    function overridesSnapshot(list) {
+        try { return JSON.stringify((list || []).map(p => [p.id, p.size_overrides || {}])); } catch (e) { return ''; }
+    }
+    function syncOverridesBaseline(list) { overridesOnServer = overridesSnapshot(list); }
     function normalizeBeforeSave(p) {
         p.id = normalizeId(p.id);
         applyLockedRecommendedProtocol(p);
@@ -348,9 +360,13 @@ export function createApiStore() {
             const data = await res.json();
             const view = S.view;
             S.providers = data.providers || S.providers;
+            const overridesChanged = !!overridesOnServer && overridesSnapshot(S.providers) !== overridesOnServer;
+            syncOverridesBaseline(S.providers);
             S.selectedId = (provider() || S.providers[0] || {}).id || '';
             loadForm();
             S.view = view;
+            // 能力覆盖改了：清掉前端尺寸策略缓存并重算，在线生图页的比例 / 档位马上跟着收窄
+            if (overridesChanged) await refreshSizePolicy();
             markClean();
             toast(t('api.saved', '保存成功'), { icon: 'check' });
             // 广播变更：画布等其他页面立即重新拉取最新平台 / 模型列表

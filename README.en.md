@@ -132,13 +132,13 @@ Built-in **ModelScope** free API, ready out of the box:
 | Image | FLUX.2-klein-9B | Best visual quality |
 | Image | Z-Image-Turbo | 1-2s fast generation |
 | Image | Qwen-Image-Edit-2511 | Edit images by talking |
-| Video | agnes-video-v2.0 | Free video generation |
+| Video | agnes-video-2.5 | Free video generation |
 
 Beyond the built-in free quota, "API Settings → Add platform" connects platforms from your own accounts. Model names are kept per platform and never swapped between them:
 
 | Protocol | Platforms |
 |----------|-----------|
-| OpenAI-compatible | Relays / official-compatible endpoints (gpt-image, Nano Banana, …); presets: Lingjing API, Agnes AI, EXELLOME, FHL, VIP-GPT |
+| OpenAI-compatible | Relays / official-compatible endpoints (gpt-image, Nano Banana, …); presets: Agnes AI, EXELLOME, FHL, VIP-GPT |
 | Async protocol | APIMart |
 | Native Gemini | Google Gemini (images via `/v1beta`) |
 | Ark | Volcengine (Doubao Seedream images, Seedance video) |
@@ -245,10 +245,8 @@ The app checks all three sources for the latest version on startup, pushes updat
 
 ### v1.0.116
 
-- **Lingjing API video routing**: Hailuo MiniMax, Kling, Vidu, Tongyi Wanxiang, Doubao Seedance, Luma, Runway and a generic unified format, routed automatically by model-name prefix
-- **Lingjing API protocol inference**: Gemini image models automatically use the native `/v1beta` protocol while the rest stay OpenAI-compatible — no more per-model protocol setup; model fetching also fills in Gemini models hidden by token-group filtering
 - **Agnes AI Video 2.5 / 2.5 Flash** video models (OpenAI Videos compatible protocol)
-- **Protocol tables** gained text/image/video entries for Lingjing and Agnes; `/api/ai/descriptor` now understands the video intent for both
+- **Protocol tables** gained text/image/video entries for Agnes; `/api/ai/descriptor` now understands the video intent for both
 - **Fix**: `gpt-image-1 / 1.5` failed on some relays (the request carried the removed top-level `response_format`); it is no longer sent, and retried once without it when the upstream rejects it
 - **Improvement**: generated images show their real pixel size (e.g. `gpt-image-2 · 1254×1254`) so downscaled output isn't mistaken for 2K/4K
 - **Fix**: the GPT chat model picker only lists configured platforms (enabled + key + models); built-in ModelScope default chat models are retired and cleaned out of existing configs

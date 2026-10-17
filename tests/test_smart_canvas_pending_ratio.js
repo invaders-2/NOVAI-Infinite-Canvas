@@ -59,6 +59,8 @@ const sandboxSrc = [
     'const EMPTY_UPLOAD_NODE_HEIGHT = 194;',
     'const tr = k => k;',
     'function isAudioMediaItem(){ return false; }',
+    'function isSmartMediaNode(){ return false; }',
+    'function smartGroupContainingNode(){ return null; }',
     'function mediaNodeDefaultScale(node){ const v = Number(node && node.scale); return Number.isFinite(v) && v > 0 ? v : MEDIA_NODE_DEFAULT_SCALE; }',
     'function pendingSlotsForNode(){ return 0; }',
     'function nodeRect(node){ return {x:0,y:0,width:0,height:0}; }',

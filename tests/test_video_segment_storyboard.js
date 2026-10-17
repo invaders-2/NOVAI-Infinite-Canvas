@@ -341,6 +341,22 @@ const sources = seg.sources(FIX.llm, FIX.groups);
     has(rows[1].prompt, '人物与穿搭参考 @图片2（模特/穿搭）', '行提示词里模特是 @图片2');
     has(rows[1].prompt, '替换为 @图片3、@图片4、@图片5、@图片6 的产品', '行提示词里 4 张产品图逐个列出');
     has(rows[1].prompt, '3–6s', '第 2 行写的是它自己的时间段');
+
+    /* 模型把同一张分镜表拆成两块返回：物化后的表格 + tableRowInputs 必须都是 3 行，
+       不能只有第一块那 1 行。 */
+    const F = String.fromCharCode(96, 96, 96);
+    const splitColumns = ['时长(秒)', '运镜', '画面描述'];
+    const splitPage1 = JSON.stringify({kind:'table', version:1, columns:splitColumns, rows:[['3', '缓慢推近', '第一段画面']]});
+    const splitPage2 = JSON.stringify({kind:'table', version:1, columns:splitColumns, rows:[['2.5', '高速跟拍', '第二段画面'], ['4', '环绕摇镜', '第三段画面']]});
+    const splitTable = M.parseTableOutput(F + 'json\n' + splitPage1 + '\n' + F + '\n' + F + 'json\n' + splitPage2 + '\n' + F);
+    eq(splitTable.rows.length, 3, '分块返回的分镜表：表格 3 行');
+    const splitNode = {id:'tblSplit', type:'table', table:splitTable, tableInputChannelCount:1, tableInputChannelModes:{}};
+    liveNodes.push(splitNode);
+    const splitRows = api.tableRowInputs(splitNode);
+    eq(splitRows.length, 3, '分块返回的分镜表 → tableRowInputs 也是 3 行');
+    eq(splitRows.map(row => row.rowNumber), [1, 2, 3], '分块返回的分镜表 → 行号连续');
+    eq(splitRows.map(row => row.text.split('\n').pop()), ['第一段画面', '第二段画面', '第三段画面'], '分块返回的分镜表 → 每行画面描述来自对应块');
+    eq(splitRows.map(row => row.prompt.indexOf(row.text) >= 0), [true, true, true], '每行提示词完整包含该行单元格');
 }
 
 /* ─────────────── 8. 静态断言：秒数下拉只在 list-video 显示 ─────────────── */
@@ -389,8 +405,14 @@ console.log('[9] runApiVideoGeneration：本行片段不被手动链接 / kind �
         'function manualSmartVideoLink(source){ return ((source || {}).videoTempShLinks || []).find(item => item && item.manual === true && item.url) || null; }',
         'function manualSmartMediaLinks(source){ return ((source || {}).videoTempShLinks || []).filter(item => item && item.manual === true && item.url); }',
         'async function fetch(url, options){ payload = {url, body: JSON.parse(options.body)}; return {ok:true, json: async () => ({urls:["out.mp4"]})}; }',
-        // runApiVideoGeneration 夹时长用的是 VIDEO_DURATION_MIN/MAX/DEFAULT（跟时长滑条同源），沙箱要一起抠出来
+        // runApiVideoGeneration 夹时长用的是逐模型官方区间（videoDurationBounds），沙箱要一起抠出来
         extractLine(smartSrc, 'VIDEO_DURATION_MIN'),
+        smartSrc.match(/const GEMINI_RATIO_KEYS = \[[^\]]*\];/)[0],
+        smartSrc.match(/const SEEDREAM_RATIO_KEYS = \[[^\]]*\];/)[0],
+        smartSrc.match(/const MODEL_CAPABILITIES = \[[\s\S]*?\n\];/)[0],
+        extractFn(smartSrc, 'modelCapabilityFor'),
+        extractFn(smartSrc, 'videoDurationRange'),
+        extractFn(smartSrc, 'videoDurationBounds'),
         extractLine(smartSrc, 'SMART_REFERENCE_IMAGE_MAX'),
         extractLine(smartSrc, 'smartOriginalMediaUrl'),
         extractFn(smartSrc, '_localSmartOriginalMediaUrl'),
@@ -480,6 +502,23 @@ console.log('[9] runApiVideoGeneration：本行片段不被手动链接 / kind �
             eq(M.parseSegmentShots('[{"index":"2","画面描述":"b","运镜":"跟拍","景别":"全景"}]').map(s => s.index), [2], '顶层数组 + 字符串 index 都认');
             eq(M.parseSegmentShots('\u0060\u0060\u0060json\n[{"index":1,"画面描述":"a"}]\n\u0060\u0060\u0060').length, 1, '带代码块的顶层数组也认');
             eq(M.parseSegmentShots('{"shots":[{"index":"3","description":"c","camera":"推","shotSize":"近景"}]}')[0]['景别'], '近景', '英文字段名也认');
+        }
+
+        /* 分块返回同一张分镜表：后续块的行不能丢（旧实现只解析第一块 → 3 行只剩 1 行） */
+        {
+            const F = String.fromCharCode(96, 96, 96);
+            const columns = ['时长(秒)', '运镜', '画面描述'];
+            const page1 = JSON.stringify({kind:'table', version:1, columns, rows:[['3', '缓慢推近', '第一段画面']]});
+            const page2 = JSON.stringify({kind:'table', version:1, columns, rows:[['2.5', '高速跟拍', '第二段画面'], ['4', '环绕摇镜', '第三段画面']]});
+            const split = '参考视频分镜表：\n' + F + 'json\n' + page1 + '\n' + F + '\n\n继续：\n' + F + 'json\n' + page2 + '\n' + F;
+            const table = M.parseTableOutput(split);
+            eq(table.rows.length, 3, '分块返回的分镜表：3 行全部读出（旧实现只读第一块 → 1 行）');
+            eq(table.rows.map(row => row[2]), ['第一段画面', '第二段画面', '第三段画面'], '分块返回：画面描述按块拼接');
+            eq(table.rows.map(row => row[0]), ['3', '2.5', '4'], '分块返回：时长来自对应行');
+            eq(table.rows.map(row => row[1]), ['缓慢推近', '高速跟拍', '环绕摇镜'], '分块返回：运镜来自对应行');
+            const shotsSplit = F + 'json\n' + JSON.stringify({shots:[{index:1,'画面描述':'a'},{index:2,'画面描述':'b'}]}) + '\n' + F
+                + '\n' + F + 'json\n' + JSON.stringify({shots:[{index:3,'画面描述':'c'}]}) + '\n' + F;
+            eq(M.parseSegmentShots(shotsSplit).map(shot => shot.index), [1, 2, 3], '分块返回的逐段描述：3 段全部读出');
         }
 
         /* ── [11]/[12] 超时兜底 + 解析失败补一次修复（跑真实的 runSmartLLMListMode 全链路） ── */

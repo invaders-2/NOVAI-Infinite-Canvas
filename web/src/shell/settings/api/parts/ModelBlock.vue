@@ -1,6 +1,6 @@
 <script setup>
 // 单个模型分组（生图 / 聊天 / 视频）：可编辑模型 ID、单模型协议覆盖、视频厂商标签、删除（可撤销）、搜索过滤
-import { computed, inject } from 'vue';
+import { computed, inject, nextTick, ref } from 'vue';
 import AIcon from './AIcon.vue';
 import { t } from '../../../../lib/store.js';
 import { modelListKey } from '../core/constants.js';
@@ -11,6 +11,8 @@ const store = inject('apiStore');
 const S = store.S;
 const it = store.item;
 
+const rootEl = ref(null);
+
 const rows = computed(() => {
     const p = it.value; if (!p) return [];
     const list = p[modelListKey(props.kind)] || [];
@@ -19,10 +21,13 @@ const rows = computed(() => {
     const map = (p.model_protocols && typeof p.model_protocols === 'object') ? p.model_protocols : {};
     return list.map((model, index) => {
         const label = modelDisplayName(model, p, S.fetched.names);
-        const current = String(map[String(model || '').trim()] || '').toLowerCase();
+        const raw = String(model || '').trim();
+        // 保存时 unique() 会丢掉空行、重复项只留第一个：提前标出来，别让用户填完才发现没存上
+        const dup = !!raw && list.findIndex(x => String(x || '').trim() === raw) !== index;
+        const current = String(map[raw] || '').toLowerCase();
         const auto = current ? '' : inferredModelProtocol(props.kind, model);
         return {
-            key: keys[index], index, model, label: label && label !== model ? label : '',
+            key: keys[index], index, model, raw, dup, label: label && label !== model ? label : '',
             hit: !q || `${model} ${label}`.toLowerCase().includes(q),
             proto: current,
             defaultLabel: auto ? `自动（${auto === 'gemini' ? 'Gemini' : 'OpenAI'}）` : '默认',
@@ -32,22 +37,34 @@ const rows = computed(() => {
 });
 const showProtocol = computed(() => providerSupportsModelProtocol(it.value));
 const searchEmpty = computed(() => S.modelSearch.trim() && rows.value.length && !rows.value.some(r => r.hit));
+
+// 手填模型：加一行并把光标放进去，少一次点击
+function add() {
+    store.addModel(props.kind);
+    nextTick(() => {
+        const inputs = rootEl.value ? rootEl.value.querySelectorAll('.mrow .id input') : [];
+        const last = inputs[inputs.length - 1];
+        if (last) last.focus();
+    });
+}
 </script>
 
 <template>
-    <section class="mblk">
+    <section ref="rootEl" class="mblk">
         <div class="hd">
             <div class="tx"><b>{{ title }}</b><span>{{ hint }}</span>
                 <span v-if="kind === 'image' && it && it.id === 'modelscope'" class="ex">{{ t('api.msModelExample', '模型名称示意：') }}<code>Tongyi-MAI/Z-Image-Turbo</code></span>
             </div>
-            <button type="button" class="nv-btn sm ghost add" @click="store.addModel(kind)"><AIcon name="plus" />{{ t('api.model', '模型') }}</button>
+            <button type="button" class="nv-btn sm ghost add" title="手动填写模型 ID，不依赖上游拉取" @click="add"><AIcon name="plus" />{{ t('api.customModel', '自定义模型') }}</button>
         </div>
         <TransitionGroup tag="div" name="mrow" class="rows">
             <div v-for="r in rows" v-show="r.hit" :key="r.key" class="mrow">
                 <label class="id">
                     <i v-if="r.label">{{ r.label }}</i>
-                    <input :value="r.model" spellcheck="false" :aria-label="title + ' ID'" @input="store.updateModel(kind, r.index, $event.target.value)">
+                    <input :value="r.model" spellcheck="false" :aria-label="title + ' ID'" placeholder="手动填写模型 ID" @input="store.updateModel(kind, r.index, $event.target.value)">
                 </label>
+                <span v-if="!r.raw" class="tag wait" title="保存时会丢掉空行">待填写</span>
+                <span v-else-if="r.dup" class="tag dup" title="与列表里靠前的模型重复，保存时只保留第一个">重复</span>
                 <template v-if="showProtocol">
                     <span v-if="kind === 'video'" class="vtag" title="视频按模型名自动分发到对应厂商接口，无需配置协议">{{ r.vendor }}</span>
                     <span v-else class="sel" title="该模型使用的协议，默认跟随平台全局协议">
@@ -86,6 +103,9 @@ const searchEmpty = computed(() => S.modelSearch.trim() && rows.value.length && 
 .sel select:hover, .sel select:focus-visible { background: var(--fill-2); color: var(--ink); }
 .sel .nv-i { position: absolute; right: 6px; width: 11px; height: 11px; color: var(--ink-3); pointer-events: none; }
 .vtag { height: 20px; padding: 0 7px; border-radius: 6px; background: var(--fill-1); font: 400 10.5px/20px var(--font-mono); color: var(--ink-2); flex: none; white-space: nowrap; }
+.tag { height: 20px; padding: 0 7px; border-radius: 6px; font: 400 10.5px/20px var(--font-sans); flex: none; white-space: nowrap; }
+.tag.wait { background: var(--fill-1); color: var(--ink-4); }
+.tag.dup { background: var(--danger-fill); color: var(--danger); }
 .del { width: 24px; height: 24px; border: 0; padding: 0; border-radius: 6px; background: transparent; color: var(--ink-3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; transition: background 120ms, color 120ms; }
 .del:hover { background: var(--danger-fill); color: var(--danger); }
 .del .nv-i { width: 13px; height: 13px; }

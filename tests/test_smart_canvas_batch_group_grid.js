@@ -47,6 +47,8 @@ const sandboxSrc = [
     'function imageNameBadgeHtml(){ return ""; }',
     'function imageResolutionBadgeHtml(){ return ""; }',
     'function mediaKindForItem(i){ return (i && i.kind) || "image"; }',
+    topLevelFunction(code, 'mediaLayoutSize'),
+    topLevelFunction(code, 'mediaCellAspect'),
     gridFn,
     topLevelFunction(code, 'batchRowThumbHtml'),
     topLevelFunction(code, 'batchRowSlotHtml'),

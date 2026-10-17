@@ -1,0 +1,6 @@
+data: {"type": "meta", "conversation": {"id": "3ffb4ce6c53c4bc3843db554ccac4c02", "title": "回复两个字：收到", "created_at": 1791881388077, "updated_at": 1791881388079, "messages": [{"id": "1d64ccdf6d7b4f63838ffe817cd851d6", "role": "user", "content": "回复两个字：收到", "created_at": 1791881388079, "attachments": [], "mode": "chat"}]}}
+
+data: {"type": "delta", "delta": "收到"}
+
+data: {"type": "done", "conversation": {"id": "3ffb4ce6c53c4bc3843db554ccac4c02", "title": "回复两个字：收到", "created_at": 1791881388077, "updated_at": 1791881394015, "messages": [{"id": "1d64ccdf6d7b4f63838ffe817cd851d6", "role": "user", "content": "回复两个字：收到", "created_at": 1791881388079, "attachments": [], "mode": "chat"}, {"id": "d5b254efd79e4e4ea6889485b53e21b1", "role": "assistant", "content": "收到", "created_at": 1791881394015, "model": "openclaw:main", "raw_usage": null, "backend": "openclaw"}]}, "message": {"id": "d5b254efd79e4e4ea6889485b53e21b1", "role": "assistant", "content": "收到", "created_at": 1791881394015, "model": "openclaw:main", "raw_usage": null, "backend": "openclaw"}}
+

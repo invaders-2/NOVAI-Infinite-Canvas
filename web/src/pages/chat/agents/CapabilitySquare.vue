@@ -6,7 +6,8 @@ import { ref, computed, onMounted } from 'vue';
 import ChIcon from '../ChIcon.vue';
 import { ICONS } from '../../../lib/icons.js';
 import { CAP, loadCapabilities, kindTitle, kindUnit, searchPlaceholder } from './capState.js';
-import { LIST as PLATFORMS, platformsOf, isPlatformTag } from './platforms.js';
+import { LIST as PLATFORMS, platformsOf, isPlatformTag, loadPlatforms } from './platforms.js';
+import OpenClawSetupBanner from './OpenClawSetupBanner.vue';
 
 const props = defineProps({ kind: { type: String, default: 'agent' } });
 const emit = defineEmits(['pick', 'close']);
@@ -57,7 +58,7 @@ function choosePlatform(p) {
     platform.value = p.id;
 }
 
-onMounted(() => { loadCapabilities(); });
+onMounted(() => { loadCapabilities(); loadPlatforms(); });
 </script>
 
 <template>
@@ -84,6 +85,8 @@ onMounted(() => { loadCapabilities(); });
             </button>
         </div>
 
+        <div class="oc-hint"><OpenClawSetupBanner /></div>
+
         <div class="body">
             <div v-if="CAP.loading && !CAP.loaded" class="state">
                 <span class="spin"></span>
@@ -107,7 +110,8 @@ onMounted(() => { loadCapabilities(); });
             </div>
             <div v-else class="grid" :data-cap-count="filtered.length">
                 <button v-for="a in filtered" :key="a.id" type="button" class="cc" :class="{ off: !a.available }"
-                    :disabled="!a.available" :data-cap-id="a.id" :data-available="a.available ? '1' : '0'" @click="pick(a)">
+                    :disabled="!a.available" :data-cap-id="a.id" :data-available="a.available ? '1' : '0'"
+                    :title="a.unavailable_reason || a.description" @click="pick(a)">
                     <span class="ic">
                         <ChIcon v-if="iconKey(a)" :name="iconKey(a)" />
                         <em v-else-if="charIcon(a)">{{ charIcon(a) }}</em>
@@ -154,6 +158,7 @@ onMounted(() => { loadCapabilities(); });
 .nv-chip em { font-style: normal; font: 400 10px/1 var(--font-mono); color: var(--ink-4); }
 .nv-chip:disabled { color: var(--ink-4); cursor: default; }
 .nv-chip:disabled .nv-i { opacity: .45; }
+.oc-hint { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 10px 0 0; }
 .body { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 8px 0 calc(var(--cmp-h, 120px) + 40px); }
 .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .cc { position: relative; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; padding: 14px; border: 0; border-radius: 16px; text-align: left; color: var(--ink); cursor: pointer;
@@ -181,6 +186,6 @@ onMounted(() => { loadCapabilities(); });
 .state .spin { color: var(--ink-4); }
 .state.err p { color: var(--danger); }
 @media (max-width: 1100px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 860px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hd, .pf, .body { width: calc(100% - 32px); } }
+@media (max-width: 860px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hd, .pf, .body, .oc-hint { width: calc(100% - 32px); } }
 @media (max-width: 560px) { .grid { grid-template-columns: minmax(0, 1fr); } .tt b { font-size: 15px; } }
 </style>

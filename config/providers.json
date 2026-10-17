@@ -1,50 +1,5 @@
 {
   "format": "novai-provider-registry/v1",
-  "comment": "供应商注册表：只放“默认值与识别信息”，不放任何密钥。密钥从 API/.env 读取，每个供应商一个变量（见 key_env）。改这里不会覆盖用户在 data/api_providers.json 里的实际配置。",
-  "providers": [
-    {
-      "id": "lingjing",
-      "name": "灵境API",
-      "base_url": "https://api.vectorengine.cn",
-      "protocol": "openai",
-      "image_request_mode": "openai",
-      "key_env": "API_PROVIDER_LINGJING_KEY",
-      "docs_url": "https://l0rmzfaruc.apifox.cn",
-      "register_url": "https://api.vectorengine.cn/register?aff=g1CT",
-      "auth": "bearer",
-      "auth_header_by_protocol": {
-        "gemini": "x-goog-api-key"
-      },
-      "base_url_aliases": [
-        "api.vectorengine.cn",
-        "vectorengine",
-        "apistudio.vip"
-      ],
-      "default_models": {
-        "image": [
-          "gemini-3-pro-image",
-          "gemini-3-pro-image-preview",
-          "gemini-3.1-flash-image",
-          "gemini-3.1-flash-image-preview",
-          "gemini-3.1-flash-lite-image",
-          "gemini-2.5-flash-image"
-        ],
-        "chat": [
-          "gemini-3.1-pro-preview",
-          "gemini-3-flash-preview",
-          "gemini-3.6-flash",
-          "gemini-3.5-flash"
-        ],
-        "video": []
-      },
-      "notes": [
-        "官方文档：https://l0rmzfaruc.apifox.cn（引言 / API 快速开始指南 / 代理接口调用地址 / API Key 额度查询服务）。",
-        "BASE_URL 文档给的三种写法：https://api.vectorengine.cn、.../v1、.../v1/chat/completions；本表用站点根地址，路径由代码拼接。",
-        "鉴权：Authorization: Bearer <API Key>（文档“发出请求”示例）；Content-Type: application/json。",
-        "聊天：POST /v1/chat/completions；OpenAI 兼容生图：POST /v1/images/generations、/v1/images/edits；列模型：GET /v1/models。",
-        "Gemini 原生图像：POST /v1beta/models/{model}:generateContent（文档条目 gemini-2.5-flash-image、gemini-3-pro-image-preview 控制宽高比+清晰度）。",
-        "GET /v1/models 按“令牌分组”过滤：同一 Key 下 Gemini 系列经常不返回，但可直连；default_models 只是给“拉取模型”补默认值，可自行删改。"
-      ]
-    }
-  ]
+  "comment": "供应商注册表：只放“默认值与识别信息”，不放任何密钥。密钥从 API/.env 读取，每个供应商一个变量（见 key_env）。改这里不会覆盖用户在 data/api_providers.json 里的实际配置。按供应商收窄生图比例/档位的 size_overrides 字段与可复制样例见 server/protocols/SIZE_OVERRIDES.md。",
+  "providers": []
 }

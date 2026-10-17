@@ -2,7 +2,7 @@
 
 覆盖：
   1. 比例推导复用 CHAT_RATIO_SIZE_OPTIONS，且 generate_image 的 ratio schema 与它同集合；
-  2. 显式 size / 比例推导值都要过 registry.constrain_size（enum 吸附，free 原样）；
+  2. 显式 size / 比例推导值都要过 registry.constrain_size（enum 吸附 / bounds 收敛，free 原样）；
   3. 工具返回值与预览里的 size 都是最终要下发的值；
   4. 真实生成执行整体打桩，只断言进入 Task Engine 的 payload。
 """
@@ -16,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
 
 
-def lingjing_provider():
+def openai_provider():
     return {
-        "id": "lingjing", "name": "灵境", "protocol": "openai", "enabled": True,
+        "id": "openai-compat", "name": "OpenAI 兼容", "protocol": "openai", "enabled": True,
         "base_url": "https://example.invalid/v1", "chat_models": ["test-chat"],
         "image_models": ["gpt-image-1", "gpt-image-1.5", "gpt-image-2", "gpt-image-2-c", "grok-imagine-image"],
     }
@@ -45,37 +45,42 @@ class AgentImageSizeTests(unittest.TestCase):
 
     def setUp(self):
         patcher = patch.object(main, "load_api_providers",
-                               return_value=[lingjing_provider(), lovart_provider(), unknown_provider()])
+                               return_value=[openai_provider(), lovart_provider(), unknown_provider()])
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    # 官方 APIMart 3:4@1K = 768x1024（text/apimart_gpt_image_2_generation_md.txt:404-421 映射表，3:4 行见 :410；
+    # 旧自表给 1008x1344，本轮按官方口径修正 CHAT_RATIO_SIZE_OPTIONS 后同步断言）
     def test_lovart_ratio_is_not_snapped(self):
         policy = main.nova_protocols.size_policy_for(lovart_provider(), "generate_image_gpt_image_2_5_flare")
         self.assertEqual(policy["mode"], "free")
-        self.assertEqual(main.agent_image_size("lovart", "generate_image_gpt_image_2_5_flare", "", "3:4"), "1008x1344")
+        self.assertEqual(main.agent_image_size("lovart", "generate_image_gpt_image_2_5_flare", "", "3:4"), "768x1024")
 
-    def test_lingjing_gpt_image_2_ratio_snaps_into_enum(self):
-        policy = main.nova_protocols.size_policy_for(lingjing_provider(), "gpt-image-2")
-        self.assertEqual(policy["mode"], "enum")
-        size = main.agent_image_size("lingjing", "gpt-image-2", "", "3:4")
-        self.assertEqual(size, "1024x1536")
-        self.assertIn(size, policy["options"])
+    def test_gpt_image_2_ratio_uses_official_bounds(self):
+        # 官方口径：gpt-image-2 支持任意 W×H（两边都被 16 整除、比例 1:3~3:1、上限 3840x2160），不再是固定枚举。
+        policy = main.nova_protocols.size_policy_for(openai_provider(), "gpt-image-2")
+        self.assertEqual(policy["mode"], "bounds")
+        self.assertAlmostEqual(policy["minRatio"], 1 / 3)
+        self.assertEqual(policy["maxRatio"], 3)
+        # 官方允许 3:4，按请求比例等比换算，不再吸成 2:3
+        self.assertEqual(main.agent_image_size("openai-compat", "gpt-image-2", "", "3:4"), "768x1024")
 
-    def test_lingjing_gpt_image_1_ratio_snaps_into_three_options(self):
-        policy = main.nova_protocols.size_policy_for(lingjing_provider(), "gpt-image-1")
+    def test_gpt_image_1_ratio_snaps_into_three_options(self):
+        policy = main.nova_protocols.size_policy_for(openai_provider(), "gpt-image-1")
         self.assertEqual(policy["options"], ["1024x1024", "1536x1024", "1024x1536"])
-        size = main.agent_image_size("lingjing", "gpt-image-1", "", "16:9")
+        size = main.agent_image_size("openai-compat", "gpt-image-1", "", "16:9")
         self.assertEqual(size, "1536x1024")
         self.assertIn(size, policy["options"])
 
     def test_explicit_size_snaps_only_where_policy_is_enum(self):
-        self.assertEqual(main.agent_image_size("lingjing", "gpt-image-2", "4096x4096"), "2048x2048")
+        # gpt-image-2 是 bounds：4096x4096 收敛到官方 4K 方图 2880x2880（不再吸成 2048x2048）
+        self.assertEqual(main.agent_image_size("openai-compat", "gpt-image-2", "4096x4096"), "2880x2880")
         self.assertEqual(main.agent_image_size("lovart", "generate_image_gpt_image_2_5_flare", "4096x4096"), "4096x4096")
 
     def test_unknown_model_stays_free(self):
         policy = main.nova_protocols.size_policy_for(unknown_provider(), "my-custom-image")
         self.assertEqual(policy["mode"], "free")
-        self.assertEqual(main.agent_image_size("my-provider", "my-custom-image", "", "3:4"), "1008x1344")
+        self.assertEqual(main.agent_image_size("my-provider", "my-custom-image", "", "3:4"), "768x1024")
         self.assertEqual(main.agent_image_size("my-provider", "my-custom-image", "1920x1080"), "1920x1080")
 
     def test_empty_size_and_unknown_ratio_fall_back_to_1024(self):
@@ -84,10 +89,10 @@ class AgentImageSizeTests(unittest.TestCase):
 
     def test_empty_model_uses_provider_default_model_policy(self):
         # 执行链里 model 为空会落到平台首个生图模型，策略必须用同一对 provider/model
-        provider = lingjing_provider()
+        provider = openai_provider()
         provider["image_models"] = ["gpt-image-1", "gpt-image-2"]
         with patch.object(main, "load_api_providers", return_value=[provider]):
-            self.assertEqual(main.agent_image_size("lingjing", "", "", "16:9"), "1536x1024")
+            self.assertEqual(main.agent_image_size("openai-compat", "", "", "16:9"), "1536x1024")
 
     def test_generate_image_ratio_schema_matches_ratio_table(self):
         ratio = main.AGENT_TOOLS["generate_image"]["schema"]["properties"]["ratio"]
@@ -114,7 +119,7 @@ class AgentImageExecutionTests(unittest.TestCase):
             return b"", {}
 
         self.patches = [
-            patch.object(main, "load_api_providers", return_value=[lingjing_provider(), lovart_provider(), unknown_provider()]),
+            patch.object(main, "load_api_providers", return_value=[openai_provider(), lovart_provider(), unknown_provider()]),
             # 平台解析要密钥；这里只验证尺寸策略，给假密钥即可
             patch.object(main, "provider_env_key_value", return_value="test-key"),
             patch.object(main, "lovart_access_key_value", return_value="ak-test"),
@@ -136,14 +141,14 @@ class AgentImageExecutionTests(unittest.TestCase):
 
     def test_generate_image_payload_and_result_use_snapped_size(self):
         norm = main._agent_tool_generate_image_validate({
-            "canvas_id": "c1", "prompt": "一只猫", "provider": "lingjing", "model": "gpt-image-2", "ratio": "3:4",
+            "canvas_id": "c1", "prompt": "一只猫", "provider": "openai-compat", "model": "gpt-image-2", "ratio": "3:4",
         })
-        self.assertEqual(norm["size"], "1024x1536")
+        self.assertEqual(norm["size"], "768x1024")
         result = asyncio.run(main._agent_tool_generate_image_run(norm))
-        self.assertEqual(self.payloads[0]["size"], "1024x1536")
-        self.assertEqual(result["size"], "1024x1536")
-        self.assertIn("1024x1536", result["message"])
-        self.assertIn("1024x1536", main._agent_tool_generate_image_preview(norm, {"id": "c1", "nodes": []}))
+        self.assertEqual(self.payloads[0]["size"], "768x1024")
+        self.assertEqual(result["size"], "768x1024")
+        self.assertIn("768x1024", result["message"])
+        self.assertIn("768x1024", main._agent_tool_generate_image_preview(norm, {"id": "c1", "nodes": []}))
 
     def test_lovart_generate_image_payload_keeps_ratio_size(self):
         norm = main._agent_tool_generate_image_validate({
@@ -151,19 +156,19 @@ class AgentImageExecutionTests(unittest.TestCase):
             "model": "generate_image_gpt_image_2_5_flare", "ratio": "3:4",
         })
         asyncio.run(main._agent_tool_generate_image_run(norm))
-        self.assertEqual(self.payloads[0]["size"], "1008x1344")
+        self.assertEqual(self.payloads[0]["size"], "768x1024")
         self.assertEqual(self.payloads[0]["provider_id"], "lovart")
 
     def test_run_generation_payload_and_preview_use_snapped_size(self):
         norm = main._agent_tool_run_generation_validate({
-            "canvas_id": "c1", "node_id": "n1", "provider": "lingjing", "model": "gpt-image-2", "size": "4096x4096",
+            "canvas_id": "c1", "node_id": "n1", "provider": "openai-compat", "model": "gpt-image-2", "size": "4096x4096",
         })
-        self.assertEqual(norm["size"], "2048x2048")
+        self.assertEqual(norm["size"], "2880x2880")
         result = asyncio.run(main._agent_tool_run_generation_run(norm))
-        self.assertEqual(self.payloads[0]["size"], "2048x2048")
-        self.assertEqual(result["size"], "2048x2048")
+        self.assertEqual(self.payloads[0]["size"], "2880x2880")
+        self.assertEqual(result["size"], "2880x2880")
         preview = main._agent_tool_run_generation_preview(norm, {"id": "c1", "nodes": []})
-        self.assertIn("2048x2048", preview)
+        self.assertIn("2880x2880", preview)
 
     def test_edit_image_action_uses_snapped_size(self):
         decision = AsyncMock(return_value={"action": "edit_image", "prompt": "改成 16:9 高清", "reply": ""})
@@ -173,8 +178,8 @@ class AgentImageExecutionTests(unittest.TestCase):
                 patch.object(main, "new_conversation", return_value={"messages": []}), \
                 patch.object(main, "save_conversation", return_value=None), \
                 patch.object(main, "latest_chat_image_refs", return_value=[{"url": "/assets/input/a.png"}]), \
-                patch.object(main, "pick_chat_image_provider", return_value=lingjing_provider()):
-            payload = main.ChatRequest(message="把这张图改成 16:9 高清", provider="lingjing", image_model="gpt-image-1")
+                patch.object(main, "pick_chat_image_provider", return_value=openai_provider()):
+            payload = main.ChatRequest(message="把这张图改成 16:9 高清", provider="openai-compat", image_model="gpt-image-1")
             response = asyncio.run(main.chat_agent(payload, None))
         self.assertEqual(self.generated_sizes[0][0], "1536x1024")
         self.assertEqual(response["message"]["size"], "1536x1024")
@@ -188,7 +193,7 @@ class AgentModelNotHardcodedTests(unittest.TestCase):
     """第 46 轮：模型一律来自 API 设置——自动时按清单挑，选了平台只用它的模型，清单外的模型换成清单里的。"""
 
     def setUp(self):
-        vid = dict(lingjing_provider(), video_models=["MiniMax-Hailuo-02"])
+        vid = dict(openai_provider(), video_models=["MiniMax-Hailuo-02"])
         for item in (patch.object(main, "load_api_providers", return_value=[unknown_provider(), vid, lovart_provider()]),
                      patch.object(main, "provider_env_key_value", return_value="test-key"),
                      patch.object(main, "lovart_access_key_value", return_value="ak-test"),
@@ -201,27 +206,27 @@ class AgentModelNotHardcodedTests(unittest.TestCase):
         return main._agent_resolve_media_target(args, field, picker)
 
     def test_selected_provider_only_uses_its_models(self):
-        self.assertEqual(self.resolve({"image_provider": "lingjing", "model": "gpt-image-2"})[:2], ("lingjing", "gpt-image-2"))
-        pid, model, note = self.resolve({"image_provider": "lingjing", "model": "my-custom-image"})
-        self.assertEqual((pid, model), ("lingjing", "gpt-image-1"))
+        self.assertEqual(self.resolve({"image_provider": "openai-compat", "model": "gpt-image-2"})[:2], ("openai-compat", "gpt-image-2"))
+        pid, model, note = self.resolve({"image_provider": "openai-compat", "model": "my-custom-image"})
+        self.assertEqual((pid, model), ("openai-compat", "gpt-image-1"))
         self.assertIn("没配置模型", note)
-        self.assertEqual(self.resolve({"image_provider": "lingjing"})[:2], ("lingjing", "gpt-image-1"))
+        self.assertEqual(self.resolve({"image_provider": "openai-compat"})[:2], ("openai-compat", "gpt-image-1"))
 
     def test_auto_follows_model_owner_and_never_invents(self):
         self.assertEqual(self.resolve({"model": "generate_image_gpt_image_2"})[:2], ("lovart", "generate_image_gpt_image_2"))
         # 模型名哪个平台都没配：落到平台清单里的模型，而不是原样下发或用代码默认值
-        pid, model, note = self.resolve({"provider": "lingjing", "model": "gemini-3-pro"})
-        self.assertEqual((pid, model), ("lingjing", "gpt-image-1"))
+        pid, model, note = self.resolve({"provider": "openai-compat", "model": "gemini-3-pro"})
+        self.assertEqual((pid, model), ("openai-compat", "gpt-image-1"))
         pid, model, _ = self.resolve({})
         self.assertIn(model, {"my-custom-image", "gpt-image-1", "generate_image_gpt_image_2_5_flare"})
 
     def test_video_ignores_selected_image_provider_without_video_models(self):
         pid, model, _ = self.resolve({"image_provider": "my-provider", "model": ""}, "video_models")
-        self.assertEqual((pid, model), ("lingjing", "MiniMax-Hailuo-02"))
+        self.assertEqual((pid, model), ("openai-compat", "MiniMax-Hailuo-02"))
 
     def test_prompt_lists_only_configured_models_and_marks_selection(self):
-        text = main._agent_run_media_platforms_text("lingjing")
-        self.assertIn("【用户选定】lingjing", text)
+        text = main._agent_run_media_platforms_text("openai-compat")
+        self.assertIn("【用户选定】openai-compat", text)
         self.assertIn("生图只用它的模型", text)
         auto = main._agent_run_media_platforms_text("")
         self.assertIn("没有指定平台（自动）", auto)

@@ -4,7 +4,7 @@
 import { reactive, computed } from 'vue';
 import { t, toast } from '../../lib/store.js';
 import { NovaSizePolicy } from './sizePolicy.js';
-import { normalizeSize, computeSize, matchSize, resolutionOptions, supportedRatios, RATIOS } from './onlineSizes.js';
+import { normalizeSize, computeSize, matchSize, resolutionOptions, supportedRatios } from './onlineSizes.js';
 import { imageProviders, providerById, providerModels, protocolOf, runningHubEntries, entryKey, modelsFromConfig, PROTOCOL_BADGE, QUALITY_PROTOCOLS } from './providers.js';
 import { fetchHistory } from './download.js';
 
@@ -117,10 +117,9 @@ export function fitToImage() {
 }
 export const ratioOptions = computed(() => {
     void S.policyTick;
-    const ok = new Set(supportedRatios(S.model).map(r => r.id));
     return [
         { value: '', label: t('online.emptyRatio', '比例为空'), shape: { w: 12, h: 12, dashed: true }, disabled: true },
-        ...RATIOS.filter(r => ok.has(r.id)).map(r => ({ value: r.id, label: r.i18n ? t(r.i18n, r.label) : r.label, shape: { w: r.w, h: r.h } })),
+        ...supportedRatios(S.model).map(r => ({ value: r.id, label: r.i18n ? t(r.i18n, r.label) : r.label, shape: { w: r.w, h: r.h } })),
         { value: 'custom', label: t('online.customRatio', '自定义比例'), shape: { w: 12, h: 12, dashed: true }, sep: true },
     ];
 });

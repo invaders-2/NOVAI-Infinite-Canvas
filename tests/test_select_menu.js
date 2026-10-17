@@ -92,7 +92,7 @@ function makeSelect(options, selectedIndex, opts){
     return select;
 }
 const OPTIONS = [
-    {value:'a', label:'灵境 API'},
+    {value:'a', label:'Agnes AI'},
     {value:'b', label:'ModelScope'},
     {value:'c', label:'OpenAI', disabled:true},
 ];
@@ -149,7 +149,7 @@ ok((listeners.mousedown || []).length > 0, 'install() 注册了 document 级 mou
     ok(menu.classList.contains('nd-menu'), '菜单 class = nd-menu');
     const rows = menu.querySelectorAll('.nd-option');
     eq(rows.length, 3, '三条选项');
-    eq(rows.map(r => r.textContent), ['灵境 API','ModelScope','OpenAI'], '选项文案');
+    eq(rows.map(r => r.textContent), ['Agnes AI','ModelScope','OpenAI'], '选项文案');
     eq(rows.map(r => r.dataset.value), ['a','b','c'], '选项值');
     eq(menu.querySelectorAll('.nd-option.active').map(r => r.dataset.value), ['b'], '当前值高亮');
     eq(rows[2].disabled, true, 'disabled 选项在弹层里也禁用');

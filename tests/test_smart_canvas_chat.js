@@ -212,6 +212,17 @@ const jsV = (html.match(/js\/smart-canvas\.js\?v=([0-9.]+)/) || [])[1];
 ok(Boolean(cssV) && versionTagOk(cssV) && mtimeOf(cssV) > 1789719097, 'smart-canvas.css 的 ?v= 已更新（' + cssV + '）');
 ok(Boolean(jsV) && versionTagOk(jsV) && mtimeOf(jsV) > 1789720396, 'smart-canvas.js 的 ?v= 已更新（' + jsV + '）');
 
+console.log('[9] 聊天模型名不写死：一个候选都没有时交给后端按平台配置挑默认');
+ok(!js.includes('gpt-4o-mini'), 'smart-canvas.js 全文不含 gpt-4o-mini');
+const currentChatSrc = (js.match(/function currentChatModel\(\)\{[^}]*\}/) || [])[0] || '';
+ok(currentChatSrc.length > 0 && !currentChatSrc.includes('gpt-4o-mini'), 'currentChatModel 函数体不含 gpt-4o-mini');
+ok(/return chatModel \|\| '';/.test(currentChatSrc), 'currentChatModel 没得选时返回空串（交给后端挑默认）');
+const initChatFn = (js.match(/function initChatModel\(\)\{([\s\S]*?)\n\}/) || [])[1] || '';
+ok(initChatFn.length > 0, '取到 initChatModel 函数体');
+ok(!initChatFn.includes('gpt-4o-mini'), 'initChatModel 函数体不含 gpt-4o-mini');
+ok(!/allModels\.push\(\{name:'/.test(initChatFn), "initChatModel 不再用 allModels.push({name:'...'}) 塞写死模型名的假候选");
+ok(initChatFn.includes("tr('canvas.noModelsHint')"), "initChatModel 空候选时占位提示用 tr('canvas.noModelsHint')");
+
 console.log('');
 if(fails.length){
     console.error('失败 ' + fails.length + ' 项：');

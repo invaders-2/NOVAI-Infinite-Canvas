@@ -11,7 +11,6 @@ export const MS_BUILTIN_IMAGE_MODELS = [
 export const MS_DEFAULT_BASE_URL = 'https://api-inference.modelscope.cn/v1';
 export const RH_DEFAULT_BASE_URL = 'https://www.runninghub.cn';
 export const LOVART_DEFAULT_BASE_URL = 'https://lgw.lovart.ai';
-export const LINGJING_REGISTER_URL = 'https://api.vectorengine.cn/register?aff=g1CT';
 export const VIP_GPT_DEFAULT_BASE_URL = 'https://www.vip-gpt.net';
 export const VIP_GPT_REGISTER_URL = 'https://www.vip-gpt.net/vip-gpt/register?aff=YGMS7BDKNY5Y';
 export const EXAMPLE_BASE_URL = 'https://api.example.com/v1';
@@ -79,12 +78,6 @@ export const ONBOARDING_GUIDES = {
         walletPrimaryUrl: 'https://www.runninghub.cn/enterprise-api/sharedApi?inviteCode=rh-v1331',
         walletSecondaryUrl: 'https://www.runninghub.ai/enterprise-api/sharedApi?inviteCode=rh-v1331',
     },
-    lingjing: {
-        titleKey: 'api.lingjingOnboardingTitle', title: '灵境 API 新手引导',
-        descKey: 'api.lingjingOnboardingDesc', desc: '还没有保存灵境 Key。',
-        primaryLabelKey: 'api.lingjingGetApi', primaryLabel: '获取API',
-        primaryUrl: LINGJING_REGISTER_URL,
-    },
 };
 
 // RunningHub「RH币 / 账户余额」Key 的获取链接（API Key 卡片里的 国内 / 国外 Key）
@@ -138,14 +131,6 @@ export const RECOMMENDED_APIS = [
         summaryKey: 'api.recommendApimartSummary', summary: '聚合多类型生成模型，适合希望用一套配置快速接入图像、视频和 LLM 的用户。',
     },
     {
-        // 请求地址 / 协议 / 图像·对话·视频模型清单来自供应商注册表（config/providers.json →
-        // 后端 /api/providers 的 registry_presets），卡片这里只放文案与标签。
-        id: 'lingjing', name: '灵境API', category: 'value',
-        tagKeys: ['api.tagImageModels', 'api.tagVideoModels', 'api.tagLlmModels'], icons: ['IMG', 'VID', 'LLM'],
-        summaryKey: 'api.recommendLingjingSummary', summary: '灵境 API 提供图像、视频和 LLM 模型接入，使用专属注册链接可享六折优惠，适合低成本接入多模型工作流。',
-        advantages: ['签到送积分', '六折专属优惠', '图像/视频/LLM 全覆盖'],
-    },
-    {
         id: 'modelscope', name: 'ModelScope', category: 'free', base_url: MS_DEFAULT_BASE_URL,
         protocol: 'openai', image_request_mode: 'openai',
         register_url: ONBOARDING_GUIDES.modelscope.secondaryUrl, register_url_cn: ONBOARDING_GUIDES.modelscope.primaryUrl,
@@ -163,7 +148,7 @@ export const RECOMMENDED_APIS = [
         perks: [{ key: 'api.recommendAgnesFree', label: '免费', free: true }],
         image_models: ['agnes-image-2.5-flash', 'agnes-image-2.1-flash', 'agnes-image-2.0-flash'],
         chat_models: ['agnes-3.0-flash', 'agnes-2.5-pro', 'agnes-2.5-pro-beta', 'agnes-2.5-flash', 'agnes-2.0-flash'],
-        video_models: ['agnes-video-2.5', 'agnes-video-2.5-flash', 'agnes-video-v2.0'],
+        video_models: ['agnes-video-2.5', 'agnes-video-2.5-flash'],
         model_protocols: {},
     },
 ];
@@ -190,7 +175,7 @@ export const RH_KNOWN_MODEL_LABELS = {
     'nano-banana-pro/text-to-image-official-stable': '全能图片Pro · 文生图 · 官方稳定版',
     'nano-banana-pro/image-to-image-official-stable': '全能图片Pro · 图生图 · 官方稳定版',
 };
-// 视频没有协议概念：按模型名前缀自动分发到各厂商接口（与后端 lingjing_video_family 一致）
+// 视频没有协议概念：按模型名前缀自动分发到各厂商接口
 export const VIDEO_VENDOR_RULES = [
     ['通义万象', /^(happyhorse-|wan2\.|wan-)/],
     ['豆包Seedance', /^(doubao-seedance|doubao-)/],

@@ -3,7 +3,7 @@
 全部用内存画布打桩（不起服务、不调模型、不发真实生成）：
   1. update_node 写进前端真正读取的 promptDraft* / runSettings，比例按前端的档位名存；
   2. 助手读得到用户写在节点里的提示词，上游提示词节点也算进生成提示词（不再报 empty_prompt）；
-  3. create_node 建视频节点 = smart-image + runSettings.apiKind=video；inputs 一步连好并维护 inputNodeIds；
+  3. create_node 建视频节点 = smart-video（老数据 smart-image+apiKind=video 也认）；inputs 一步连好并维护 inputNodeIds；
   4. 连线校验：类型不对、成环都拒绝，并说明原因；
   5. run_generation：节点已有图时新开结果节点，任务先登记到 pendingTasks 再入队；
   6. 写回：只认登记过的任务，结果追加不覆盖；失败写状态；
@@ -173,7 +173,7 @@ class CreateAndConnectTests(unittest.TestCase):
         self.assertTrue(r["ok"], r)
         nid = r["result"]["node_id"]
         node = self.mem.node(nid)
-        self.assertEqual(node["type"], "smart-image")
+        self.assertEqual(node["type"], "smart-video")
         self.assertEqual(node["runSettings"]["apiKind"], "video")
         self.assertEqual(node["promptDraftText"], "镜头缓慢推进")
         self.assertEqual(node["inputNodeIds"], ["p1", "i2"])
@@ -201,6 +201,41 @@ class CreateAndConnectTests(unittest.TestCase):
         gone = run_tool("disconnect_nodes", {"canvas_id": "c1", "from": "i2", "to": "i1"})
         self.assertTrue(gone["ok"], gone)
         self.assertEqual(self.mem.node("i1")["inputNodeIds"], ["p1"])
+
+    def test_smart_video_node_accepts_the_same_connections_as_smart_image(self):
+        made = run_tool("create_node", {"canvas_id": "c1", "type": "video", "title": "Video"})
+        self.assertTrue(made["ok"], made)
+        vid = made["result"]["node_id"]
+        self.assertEqual(self.mem.node(vid)["type"], "smart-video")
+        # 图片节点 / 分组 / 提示词 / 文本都能连进视频节点（与 smart-image 同规则）
+        for src in ("p1", "i2"):
+            r = run_tool("connect_nodes", {"canvas_id": "c1", "from": src, "to": vid})
+            self.assertTrue(r["ok"], r)
+        self.assertEqual(self.mem.node(vid)["inputNodeIds"], ["p1", "i2"])
+        # 视频节点也能作为上游连到图片节点
+        back = run_tool("connect_nodes", {"canvas_id": "c1", "from": vid, "to": "i1"})
+        self.assertTrue(back["ok"], back)
+        # 不认识的类型仍然拒绝
+        bad = run_tool("connect_nodes", {"canvas_id": "c1", "from": "l1", "to": vid})
+        self.assertFalse(bad["ok"])
+        self.assertIn("不能连到", bad["error"])
+
+    def test_smart_video_prompt_and_settings_use_media_fields(self):
+        made = run_tool("create_node", {"canvas_id": "c1", "type": "video", "prompt": "镜头拉近"})
+        vid = made["result"]["node_id"]
+        node = self.mem.node(vid)
+        self.assertEqual(main._agent_node_kind(node), "video")
+        self.assertEqual(node["promptDraftText"], "镜头拉近")
+        self.assertNotIn("text", node)
+        upd = run_tool("update_node", {"canvas_id": "c1", "node_id": vid,
+                                       "settings": {"ratio": "9:16", "duration": 8}})
+        self.assertTrue(upd["ok"], upd)
+        rs = self.mem.node(vid)["runSettings"]
+        self.assertEqual(rs["videoAspect"], "9:16")
+        self.assertEqual(rs["videoDuration"], 8)
+        summary = main._agent_canvas_summary(self.mem.load("c1"))
+        row = next(n for n in summary["nodes"] if n["id"] == vid)
+        self.assertEqual(row["kind"], "video")
 
     def test_create_node_with_bad_input_fails_without_leaving_half_workflow(self):
         before = len(self.mem.store["c1"]["nodes"])
@@ -912,10 +947,10 @@ class NativeToolCallTests(unittest.TestCase):
                                        "args": {"node_id": "图3", "settings": {"ratio": "16:9"}, "canvas_id": "c1"}}])
 
     def test_json_text_with_stray_newlines_from_platform(self):
-        """第 45 轮：灵境 gemini 把方案写在正文里，分片拼接插入了真实换行（用户截图原样）。"""
+        """第 45 轮：某平台 gemini 把方案写在正文里，分片拼接插入了真实换行（用户截图原样）。"""
         content = ('```json\n{\n  "intent": "提取图\n89的人物面部并生成真实质感的纯白背景三视图",\n  "steps": [\n    {\n      \n"tool": "generate_image",\n'
                    '      "args": {\n        "prompt": "从原图中提取\n人物面部主体，去除原背景及所有杂物",\n'
-                   '        "reference_urls": ["/assets/input/ai_ref_3b28b64cdbf4.jpg"], "provider": "lingjing", "model": "gemini-3-pro"\n      },\n'
+                   '        "reference_urls": ["/assets/input/ai_ref_3b28b64cdbf4.jpg"], "provider": "my-platform", "model": "gemini-3-pro"\n      },\n'
                    '      "description": "生成三视图"\n    }\n  ]\n}\n```')
         d = main._agent_decision_from_native({"choices": [{"message": {"content": content}}]}, "c1")
         self.assertEqual(d["intent"], "提取图89的人物面部并生成真实质感的纯白背景三视图")

@@ -176,7 +176,7 @@ POST /api/agent/plan|preview|apply|rollback → 全部 200，响应结构与改�
 
 ### 环境备注（与代码无关）
 
-* 环境里可用的对话 provider 只有 `agnes-ai` / `lingjing`（同一聚合账号）。其默认首选模型
+* 环境里可用的对话 provider 只有 `agnes-ai`（聚合账号）。其默认首选模型
   `agnes-2.0-flash` 常年报 "API rate limit for free users"，因此**不带 provider/model 的裸命令**
   会走到 `error(provider_http_error) → done(failed)`（如实报错，不伪造）；显式指定
   `{"provider":"agnes-ai","model":"agnes-2.5-pro"}` 即可完整跑通。

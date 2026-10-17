@@ -119,8 +119,6 @@ const MS_BUILTIN_IMAGE_MODELS = [
 const MS_DEFAULT_BASE_URL = 'https://api-inference.modelscope.cn/v1';
 const RH_DEFAULT_BASE_URL = 'https://www.runninghub.cn';
 const LOVART_DEFAULT_BASE_URL = 'https://lgw.lovart.ai';
-const LINGJING_DEFAULT_BASE_URL = 'https://api.vectorengine.cn';
-const LINGJING_REGISTER_URL = 'https://api.vectorengine.cn/register?aff=g1CT';
 const VIP_GPT_DEFAULT_BASE_URL = 'https://www.vip-gpt.net';
 const VIP_GPT_REGISTER_URL = 'https://www.vip-gpt.net/vip-gpt/register?aff=YGMS7BDKNY5Y';
 const EXAMPLE_BASE_URL = 'https://api.example.com/v1';
@@ -184,12 +182,6 @@ const ONBOARDING_GUIDES = {
         walletPrimaryUrl:'https://www.runninghub.cn/enterprise-api/sharedApi?inviteCode=rh-v1331',
         walletSecondaryUrl:'https://www.runninghub.ai/enterprise-api/sharedApi?inviteCode=rh-v1331'
     },
-    lingjing:{
-        titleKey:'api.lingjingOnboardingTitle',
-        descKey:'api.lingjingOnboardingDesc',
-        primaryLabelKey:'api.lingjingGetApi',
-        primaryUrl:LINGJING_REGISTER_URL
-    }
 };
 function applyCliProtocolDefaults(item, protocol){
     if(!item) return;
@@ -306,31 +298,6 @@ const RECOMMENDED_APIS = [
         advantages:['模型类型覆盖广', '适合多节点混合工作流', '异步协议适合长任务']
     },
     {
-        id:'lingjing',
-        name:'灵境API',
-        category:'value',
-        base_url:LINGJING_DEFAULT_BASE_URL,
-        protocol:'openai',
-        register_url:LINGJING_REGISTER_URL,
-        tagKeys:['api.tagImageModels','api.tagVideoModels','api.tagLlmModels'],
-        icons:['IMG','VID','LLM'],
-        summaryKey:'api.recommendLingjingSummary',
-        advantages:['签到送积分', '六折专属优惠', '图像/视频/LLM 全覆盖'],
-        // 添加平台时预填的默认模型列表（含逐模型协议覆盖）
-        // 图像：OpenAI 兼容走 /v1/images/*；Gemini 系列必须用 gemini 协议（/v1beta）。
-        // 灵境不同「分组」可用模型不同，默认分组通常没有 Gemini 系列；拉取模型后按实际删减即可。
-        image_models:['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1', 'gpt-image-2-c', 'grok-imagine-image', 'qwen-image-2.0-2026-03-03', 'qwen-image-edit-2509', 'z-image-turbo', 'wan2.7-image-pro', 'gemini-3-pro-image', 'gemini-3-pro-image-preview', 'gemini-3.1-flash-image', 'gemini-3.1-flash-image-preview', 'gemini-3.1-flash-lite-image'],
-        // 文本：Gemini 走灵境的 OpenAI 兼容 /v1/chat/completions（chat兼容格式），
-        // 所以不要给它们加 gemini 协议覆盖（gemini 协议只用于 Gemini 图像模型）。
-        chat_models:['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.4', 'claude-sonnet-5', 'claude-opus-4-8', 'grok-4.5', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview', 'gemini-3.6-flash'],
-        // 视频：veo 走 OpenAI /v1/videos；其余按模型前缀分发到灵境各自的厂商路径
-        // （通用统一格式 / 豆包 / 海螺 / 可灵 / Vidu / Luma / 通义万象 happyhorse）。
-        video_models:['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-02', 'kling-3.0-turbo', 'kling-video', 'viduq3-pro', 'viduq3-turbo', 'viduq2', 'vidu2.0', 'wan2.6-i2v', 'happyhorse-1.1-t2v', 'happyhorse-1.1-i2v', 'veo3.1-fast', 'veo3.1', 'sora-2', 'sora-2-pro', 'jimeng-video-3.0', 'doubao-seedance-1-5-pro-251215', 'ray-v2'],
-        // 协议自动推断：gemini-*-image* 自动走 gemini，其余跟随平台 openai；
-        // 这里留空即可，用户在设置里手动选择时会写进 model_protocols 作为显式覆盖。
-        model_protocols:{}
-    },
-    {
         id:'modelscope',
         name:'ModelScope',
         category:'free',
@@ -363,7 +330,7 @@ const RECOMMENDED_APIS = [
         advantages:['免费额度可用', '支持 Agnes 图像与视频接口', 'OpenAI 兼容地址配置简单'],
         image_models:['agnes-image-2.5-flash', 'agnes-image-2.1-flash', 'agnes-image-2.0-flash'],
         chat_models:['agnes-3.0-flash', 'agnes-2.5-pro', 'agnes-2.5-pro-beta', 'agnes-2.5-flash', 'agnes-2.0-flash'],
-        video_models:['agnes-video-2.5', 'agnes-video-2.5-flash', 'agnes-video-v2.0'],
+        video_models:['agnes-video-2.5', 'agnes-video-2.5-flash'],
         model_protocols:{}
     }
 ];
@@ -373,6 +340,37 @@ const RECOMMEND_GROUPS = [
     {key:'free', titleKey:'api.recommendGroupFree', icon:'gift'}
 ];
 const LOCKED_RECOMMENDED_PROTOCOL_IDS = new Set(['exellome', 'fhl']);
+/* 供应商注册表（后端 /api/providers 的 registry_presets）是请求地址 / 协议 / 模型清单的唯一真值源：
+   推荐卡片只保留文案与标签，配置项按 id 从注册表补进来（注册表不含密钥；密钥仍走 API/.env 的 key_env）。
+   注册表取不到时卡片照样能打开，由用户手填或用「拉取模型」补齐，不写死任何供应商默认值。 */
+let registryPresets = {};
+function registryPreset(id){
+    return registryPresets[String(id || '').trim().toLowerCase()] || null;
+}
+function applyPresetToRecommendedApi(api, entry){
+    if(!api || !entry) return;
+    if(entry.base_url) api.base_url = entry.base_url;
+    if(entry.protocol) api.protocol = entry.protocol;
+    if(entry.image_request_mode) api.image_request_mode = entry.image_request_mode;
+    if(entry.register_url) api.register_url = entry.register_url;
+    if(entry.docs_url) api.docs_url = entry.docs_url;
+    const models = entry.default_models || {};
+    ['image', 'chat', 'video'].forEach(kind => {
+        if(Array.isArray(models[kind])) api[kind + '_models'] = [...models[kind]];
+    });
+    const guide = ONBOARDING_GUIDES[String(entry.id || '').toLowerCase()];
+    if(guide && entry.register_url) guide.primaryUrl = entry.register_url;
+}
+function applyRegistryPresets(list){
+    const entries = Array.isArray(list) ? list : [];
+    entries.forEach(entry => {
+        const id = String(entry && entry.id || '').trim().toLowerCase();
+        if(!id) return;
+        registryPresets[id] = entry;
+        applyPresetToRecommendedApi(RECOMMENDED_APIS.find(api => String(api.id || '').toLowerCase() === id), entry);
+    });
+    if(entries.length && typeof syncRecommendView === 'function') syncRecommendView();
+}
 function lockedRecommendedApi(itemOrId){
     const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
     const name = typeof itemOrId === 'string' ? '' : itemOrId?.name;
@@ -918,10 +916,6 @@ function applyProviderOnboardingDefaults(id){
         item.video_models = unique(item.video_models || []);
         item.volcengine_project_name = item.volcengine_project_name || VOLCENGINE_DEFAULT_PROJECT_NAME;
         item.volcengine_region = item.volcengine_region || VOLCENGINE_DEFAULT_REGION;
-    } else if(id === 'lingjing'){
-        item.base_url = item.base_url || LINGJING_DEFAULT_BASE_URL;
-        item.protocol = item.protocol || 'openai';
-        item.image_request_mode = normalizeImageRequestMode(item.image_request_mode);
     } else if(id === 'jimeng'){
         item.base_url = '';
         item.protocol = 'jimeng';
@@ -3846,7 +3840,7 @@ function inferredModelProtocol(kind, model){
     if(kind === 'image' && looksLikeGeminiImageModel(model)) return 'gemini';
     return '';
 }
-// 视频没有协议概念：按模型名前缀自动分发到各厂商接口（与后端 lingjing_video_family 一致）。
+// 视频没有协议概念：按模型名前缀自动分发到各厂商接口。
 const VIDEO_VENDOR_RULES = [
     ['通义万象', /^(happyhorse-|wan2\.|wan-)/],
     ['豆包Seedance', /^(doubao-seedance|doubao-)/],
@@ -4312,6 +4306,7 @@ async function loadProviders(){
     try {
         const data = await fetch('/api/providers').then(r => r.json());
         providers = data.providers || [];
+        applyRegistryPresets(data.registry_presets);
         selectedId = sortedProviders()[0]?.id || '';
         renderEditor();
         openRecommendApi();
@@ -4402,6 +4397,8 @@ async function saveProviders(){
                 video_models:item.video_models || [],
                 model_names:(item.model_names && typeof item.model_names === 'object') ? item.model_names : {},
                 model_protocols:(item.model_protocols && typeof item.model_protocols === 'object') ? item.model_protocols : {},
+                // 页面不做可视化编辑，但保存时要原样带回，否则设置页保存一次就丢（SIZE_OVERRIDES.md）
+                size_overrides:(item.size_overrides && typeof item.size_overrides === 'object') ? item.size_overrides : {},
                 ms_loras:item.id === 'modelscope' ? (item.ms_loras || []) : [],
                 ms_defaults_version:item.id === 'modelscope' ? (item.ms_defaults_version || 1) : 0,
                 rh_apps:item.id === 'runninghub' ? (item.rh_apps || []) : [],

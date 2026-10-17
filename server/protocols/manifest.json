@@ -83,17 +83,32 @@
       "version": 1
     },
     {
-      "id": "lingjing-image",
+      "id": "lovart",
+      "kind": "provider",
+      "version": 1
+    },
+    {
+      "id": "lovart-gpt-image",
       "kind": "model",
       "version": 1
     },
     {
-      "id": "lingjing-chat",
+      "id": "lovart-image",
       "kind": "model",
       "version": 1
     },
     {
-      "id": "lingjing-video",
+      "id": "lovart-video",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "gpt-image-2-family",
+      "kind": "model",
+      "version": 1
+    },
+    {
+      "id": "gpt-image-1-family",
       "kind": "model",
       "version": 1
     },

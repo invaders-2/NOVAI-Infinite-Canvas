@@ -1,13 +1,16 @@
 // 尺寸数据与规则（原样移植自旧 gpt-chat.html：SIZE_OPTIONS / MODEL_SIZE_PRESETS / getSizeOptionsForModel /
 // normalizeChatCustomSize / chatSizeFromPrompt），纯函数，不依赖 window。
+// 7 个常用比例 × 1k/2k/4k；像素取官方 APIMart gpt-image-2 size×resolution 映射表的第一组
+// （/tmp/novai-official-docs/text/apimart_gpt_image_2_generation_md.txt:380-422），
+// 与 main.py 的 CHAT_RATIO_SIZE_OPTIONS 同值，一致性由 tests/test_chat_size_parity.js 守住。
 export const SIZE_OPTIONS = {
-    square: [['1024x1024','1k'], ['1536x1536','2k'], ['2048x2048','4k']],
-    portrait: [['720x1080','1k'], ['1024x1536','2k'], ['1365x2048','4k']],
-    portrait43: [['1008x1344','1k'], ['1536x2048','2k'], ['2448x3264','4k']],
-    landscape43: [['1344x1008','1k'], ['2048x1536','2k'], ['3264x2448','4k']],
-    landscape: [['1080x720','1k'], ['1536x1024','2k'], ['2048x1365','4k']],
-    story: [['720x1280','1k'], ['1080x1920','2k'], ['1440x2560','4k']],
-    wide: [['1280x720','1k'], ['1920x1080','2k'], ['2560x1440','4k']]
+    square: [['1024x1024','1k'], ['2048x2048','2k'], ['2880x2880','4k']],
+    portrait: [['1024x1536','1k'], ['1360x2048','2k'], ['2336x3520','4k']],
+    portrait43: [['768x1024','1k'], ['1536x2048','2k'], ['2480x3312','4k']],
+    landscape43: [['1024x768','1k'], ['2048x1536','2k'], ['3312x2480','4k']],
+    landscape: [['1536x1024','1k'], ['2048x1360','2k'], ['3520x2336','4k']],
+    story: [['864x1536','1k'], ['1152x2048','2k'], ['2160x3840','4k']],
+    wide: [['1536x864','1k'], ['2048x1152','2k'], ['3840x2160','4k']]
 };
 
 // 模型专用尺寸映射：根据模型自动匹配其 API 支持的尺寸
@@ -15,9 +18,13 @@ export const SIZE_OPTIONS = {
 export const MODEL_SIZE_PRESETS = {
     // ── OpenAI ──
     'gpt-image-2': {
-        square: [['1024x1024','1k'], ['2048x2048','2k']],
-        portrait: [['1024x1536','1k'], ['2160x3840','4k']],
-        landscape: [['1536x1024','1k'], ['2048x1152','2k'], ['3840x2160','4k']]
+        square: [['1024x1024','1k'], ['2048x2048','2k'], ['2880x2880','4k']],
+        portrait: [['1024x1536','1k'], ['1360x2048','2k'], ['2336x3520','4k']],
+        portrait43: [['768x1024','1k'], ['1536x2048','2k'], ['2480x3312','4k']],
+        landscape43: [['1024x768','1k'], ['2048x1536','2k'], ['3312x2480','4k']],
+        landscape: [['1536x1024','1k'], ['2048x1360','2k'], ['3520x2336','4k']],
+        story: [['864x1536','1k'], ['1152x2048','2k'], ['2160x3840','4k']],
+        wide: [['1536x864','1k'], ['2048x1152','2k'], ['3840x2160','4k']]
     },
     'gpt-image-1': {
         square: [['1024x1024','1k']],

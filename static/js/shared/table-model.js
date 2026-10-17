@@ -161,6 +161,35 @@
 
     function rowIndex(table, value){ return toIndex(value, '行序号', table.rows.length); }
 
+    /* 分镜表「时长(秒)」列：这一行的时长要真的当这一行视频的 duration 发出去，
+       不只是拼进提示词。列名认全/半角括号与常见写法；认不出来返回 -1（行为不变）。
+       只做全等匹配，「时间段(秒)」这类区间列不会被误认。 */
+    const DURATION_COLUMN_KEYS = ['时长(秒)', '时长(s)', '时长(seconds)', '时长(sec)', '时长/秒',
+        'duration(seconds)', 'duration(sec)', 'duration(s)', 'duration', '秒数', '时长'];
+    function durationColumnKey(value){
+        return String(value === null || value === undefined ? '' : value)
+            .toLowerCase().replace(/\s+/g, '').replace(/（/g, '(').replace(/）/g, ')');
+    }
+    function durationColumnIndex(columns){
+        const keys = (Array.isArray(columns) ? columns : []).map(durationColumnKey);
+        for(const alias of DURATION_COLUMN_KEYS){
+            const at = keys.indexOf(alias);
+            if(at >= 0) return at;
+        }
+        return -1;
+    }
+
+    /* 单元格里的时长：纯数字（可带 s / 秒 单位）才算；空、文字、区间一律 null，
+       让调用方回退到节点级 videoDuration。 */
+    const DURATION_CELL_RE = /^(\d+(?:\.\d+)?)\s*(?:s|sec|secs|second|seconds|秒)?$/i;
+    function cellDuration(value){
+        if(isMediaCell(value)) return null;
+        const matched = DURATION_CELL_RE.exec(cellText(value).trim());
+        if(!matched) return null;
+        const seconds = Number(matched[1]);
+        return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+    }
+
     const OPERATION_IDS = Object.keys(TABLE_OPERATIONS);
 
     /** 执行一个操作，返回新表格（DX OS: i6）。表头/行列越界抛错，其余静默截断。 */
@@ -629,36 +658,123 @@
         return Array.isArray(parsed) ? parsed : null;
     }
 
+    /* 模型返回里的**全部** JSON 数据块。
+       视频分镜表这类长输出经常被模型拆成几块（若干代码块，或几段并列的 JSON 对象）。
+       旧实现只认第一块 → 第一块里只有一行时，整张表就只剩第一行。
+       这里按「代码块优先；没有代码块再扫顶层 {...} / [...]」收集，解析失败的块跳过。 */
+    function extractJsonValues(text){
+        const source = String(text || '');
+        if(!source.trim()) return [];
+        const values = [];
+        const fenceRe = /```(?:json|JSON)?\s*([\s\S]*?)```/g;
+        let fenced;
+        while((fenced = fenceRe.exec(source))){
+            const body = String(fenced[1] || '').trim();
+            if(!body) continue;
+            const parsed = parseJsonLenient(body);
+            if(parsed !== null && parsed !== undefined) values.push(parsed);
+        }
+        if(values.length) return values;
+        /* 没有代码块：按顶层括号扫描（字符串里的括号不算），一段一段 parse。
+           多个对象/数组之间夹散文也能逐段取出来。 */
+        let start = -1;
+        const stack = [];
+        let inString = false;
+        let escaped = false;
+        for(let index = 0; index < source.length; index += 1){
+            const ch = source.charAt(index);
+            if(inString){
+                if(escaped){ escaped = false; continue; }
+                if(ch === '\\'){ escaped = true; continue; }
+                if(ch === '"') inString = false;
+                continue;
+            }
+            if(ch === '"'){ inString = true; continue; }
+            if(ch === '{' || ch === '['){
+                if(!stack.length) start = index;
+                stack.push(ch);
+                continue;
+            }
+            if(ch === '}' || ch === ']'){
+                if(!stack.length) continue;
+                const open = stack.pop();
+                if((open === '{' && ch !== '}') || (open === '[' && ch !== ']')){
+                    stack.length = 0;
+                    start = -1;
+                    continue;
+                }
+                if(stack.length || start < 0) continue;
+                const parsed = parseJsonLenient(source.slice(start, index + 1));
+                if(parsed !== null && parsed !== undefined) values.push(parsed);
+                start = -1;
+            }
+        }
+        return values;
+    }
+
+    /* 结构合法但整张表一个字都没有：实测模型偶发返回 [""] 这种空表，
+       放过去的话批量执行会拿着空提示词去生成。判格式不合规，交给修复遍。 */
+    function tableRowsAreEmpty(rows){
+        return !rows.length || rows.every(row => row.every(cell => !String(cell || '').trim()));
+    }
+
     /* a6(t)：校验模型返回的表格。
        LLM 侧上限比手工小得多（40 列 / 200 行），超了直接判格式不合规。
-       返回合法表格，不合法抛错（文案照搬规范）。 */
+       返回合法表格，不合法抛错（文案照搬规范）。
+       模型把一张表拆成多个数据块返回时，列结构相同的块按顺序合并行 ——
+       分镜表分页/分块输出不会再只剩第一块那一行。 */
     function parseTableOutput(text){
+        const blocks = extractJsonValues(text).filter(value => Boolean(value) && typeof value === 'object'
+            && !Array.isArray(value) && value.kind === TABLE_KIND && Number(value.version) === TABLE_VERSION
+            && Array.isArray(value.columns) && Array.isArray(value.rows));
+        if(blocks.length){
+            const primary = blocks[0];
+            if(primary.columns.length > LLM_MAX_COLUMNS) throw new Error(TABLE_PARSE_ERRORS.format);
+            if(!primary.columns.length) throw new Error(TABLE_PARSE_ERRORS.columns);
+            /* 先按原始列名校验：模型给了空白列名属于格式不合规，要报出来让修复遍处理。
+               手工建列时空列名会被兜底成「未命名列」，那是友好的；这里不能沿用那个兜底。 */
+            const rawColumns = primary.columns.map(name => cellText(name));
+            if(rawColumns.some(name => !String(name).trim())) throw new Error(TABLE_PARSE_ERRORS.columns);
+            const columns = normalizeColumns(rawColumns);
+            const rows = [];
+            blocks.forEach(block => {
+                /* 只有列结构相同的块才是同一张表的续页；不同结构的分块不合并，避免把两张表拼坏。 */
+                const blockColumns = normalizeColumns(block.columns.map(name => cellText(name)));
+                if(blockColumns.length !== columns.length || blockColumns.some((name, index) => name !== columns[index])) return;
+                if(block.rows.length > LLM_MAX_ROWS) throw new Error(TABLE_PARSE_ERRORS.format);
+                block.rows.forEach(row => {
+                    const list = Array.isArray(row) ? row : [];
+                    // 行按列数补齐
+                    rows.push(columns.map((name, index) => cellText(list[index])));
+                });
+            });
+            if(rows.length > LLM_MAX_ROWS) throw new Error(TABLE_PARSE_ERRORS.format);
+            if(tableRowsAreEmpty(rows)) throw new Error(TABLE_PARSE_ERRORS.empty);
+            const table = {kind:TABLE_KIND, version:TABLE_VERSION, columns, rows, selectedRows:[], mergedGroups:[]};
+            /* 生成遍可以顺带回一份「每一组怎么用」的回执（inputGroups）。
+               经典画布走 规划→生成 两遍，模式来自规划；智能画布只发一次请求，
+               没有规划遍 —— 模式就靠这份回执，否则多图组会一律落到「沿用」，
+               表现就是「一行只读一张白底图」（用户报的）。 */
+            const groups = blocks.map(block => block.inputGroups).find(Array.isArray);
+            if(groups) table.inputGroups = groups;
+            return table;
+        }
+        /* 不是表格结构（或旧格式）：走原来的单对象解析，报错/修复行为保持不变。 */
         const parsed = extractJsonObject(text);
         if(!parsed || typeof parsed !== 'object') throw new Error(TABLE_PARSE_ERRORS.format);
         if(parsed.kind !== TABLE_KIND || Number(parsed.version) !== TABLE_VERSION) throw new Error(TABLE_PARSE_ERRORS.format);
         if(!Array.isArray(parsed.columns) || !Array.isArray(parsed.rows)) throw new Error(TABLE_PARSE_ERRORS.format);
         if(parsed.columns.length > LLM_MAX_COLUMNS || parsed.rows.length > LLM_MAX_ROWS) throw new Error(TABLE_PARSE_ERRORS.format);
         if(!parsed.columns.length) throw new Error(TABLE_PARSE_ERRORS.columns);
-        /* 先按原始列名校验：模型给了空白列名属于格式不合规，要报出来让修复遍处理。
-           手工建列时空列名会被兜底成「未命名列」，那是友好的；这里不能沿用那个兜底。 */
-        const rawColumns = parsed.columns.map(name => cellText(name));
-        if(rawColumns.some(name => !String(name).trim())) throw new Error(TABLE_PARSE_ERRORS.columns);
-        const columns = normalizeColumns(rawColumns);
+        const legacyColumns = parsed.columns.map(name => cellText(name));
+        if(legacyColumns.some(name => !String(name).trim())) throw new Error(TABLE_PARSE_ERRORS.columns);
+        const columns = normalizeColumns(legacyColumns);
         const rows = parsed.rows.slice(0, LLM_MAX_ROWS).map(row => {
             const list = Array.isArray(row) ? row : [];
-            // 行按列数补齐
             return columns.map((name, index) => cellText(list[index]));
         });
-        /* 结构合法但整张表一个字都没有：实测模型偶发返回 [""] 这种空表，
-           放过去的话批量执行会拿着空提示词去生成。判格式不合规，交给修复遍。 */
-        if(!rows.length || rows.every(row => row.every(cell => !String(cell || '').trim()))){
-            throw new Error(TABLE_PARSE_ERRORS.empty);
-        }
+        if(tableRowsAreEmpty(rows)) throw new Error(TABLE_PARSE_ERRORS.empty);
         const table = {kind:TABLE_KIND, version:TABLE_VERSION, columns, rows, selectedRows:[], mergedGroups:[]};
-        /* 生成遍可以顺带回一份「每一组怎么用」的回执（inputGroups）。
-           经典画布走 规划→生成 两遍，模式来自规划；智能画布只发一次请求，
-           没有规划遍 —— 模式就靠这份回执，否则多图组会一律落到「沿用」，
-           表现就是「一行只读一张白底图」（用户报的）。 */
         if(Array.isArray(parsed.inputGroups)) table.inputGroups = parsed.inputGroups;
         return table;
     }
@@ -996,21 +1112,35 @@
     }
 
     function parseSegmentShots(text){
-        const parsed = extractJsonObject(text);
-        const list = (parsed && typeof parsed === 'object' && Array.isArray(parsed.shots))
-            ? parsed.shots
-            : extractJsonArray(text);
-        if(!Array.isArray(list)) return [];
-        return list.map((item, index) => {
+        /* 段数多时模型常把同一个 shots 拆成几块返回：把每一块的 shots 都收进来，
+           只认第一块会让后面几段全部落到兜底文案（分镜表看起来像只读了第一段）。 */
+        const rawList = [];
+        extractJsonValues(text).forEach(value => {
+            if(Array.isArray(value)) rawList.push(...value);
+            else if(value && typeof value === 'object' && Array.isArray(value.shots)) rawList.push(...value.shots);
+        });
+        if(!rawList.length){
+            const parsed = extractJsonObject(text);
+            const list = (parsed && typeof parsed === 'object' && Array.isArray(parsed.shots))
+                ? parsed.shots
+                : extractJsonArray(text);
+            if(!Array.isArray(list)) return [];
+            rawList.push(...list);
+        }
+        const byIndex = new Map();
+        rawList.forEach((item, index) => {
             const source = item && typeof item === 'object' ? item : {};
             const raw = Number(source.index);
-            return {
+            const shot = {
                 index: Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : index + 1,
                 '画面描述': cellText(shotField(source, ['画面描述', 'description', 'shot'])),
                 '运镜': cellText(shotField(source, ['运镜', 'camera'])),
                 '景别': cellText(shotField(source, ['景别', 'shotSize'])),
             };
-        }).sort((a, b) => a.index - b.index);
+            /* 多块合并：同一 index 重复出现时保留先出现的那条（补齐请求不会把已拿到的段改写）。 */
+            if(!byIndex.has(shot.index)) byIndex.set(shot.index, shot);
+        });
+        return Array.from(byIndex.values()).sort((a, b) => a.index - b.index);
     }
 
     /* 「参考用法」文案：@序号是**全局序号**，由调用方按通道 ordinalBase 算好传进来
@@ -1218,6 +1348,7 @@
         emptyTable, cellText, normalizeColumns, normalizeTable, cloneTable,
         MEDIA_CELL_KIND, mediaCell, isMediaCell,
         toIndex, columnIndex, rowIndex, applyOperation,
+        DURATION_COLUMN_KEYS, durationColumnIndex, cellDuration,
         rowHeight, nodeSize, describeOperation, requiresConfirmation,
     };
 });

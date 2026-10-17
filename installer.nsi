@@ -1,4 +1,4 @@
-﻿; NOVAI Windows 安装脚本 (NSIS 3.x)
+; NOVAI Windows 安装脚本 (NSIS 3.x)
 ; 用法: makensis installer.nsi
 
 Unicode true
@@ -10,7 +10,7 @@ Unicode true
 !define PRODUCT_DISPLAY "NOVAI 智能画布"
 ; 版本号：优先用命令行 -DPRODUCT_VERSION 传入，否则回退到写死的值
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "1.0.84"
+  !define PRODUCT_VERSION "1.0.125"
 !endif
 !define PRODUCT_PUBLISHER "NOVAI"
 !define PRODUCT_WEB_SITE "https://github.com/invaders-2/NOVAI"
@@ -83,6 +83,10 @@ Section "Install"
   ; 模块化后端（server/protocols 的协议表是 main.py 运行必需的数据文件）
   SetOutPath "$INSTDIR\server"
   File /r /x "*.pyc" /x "__pycache__" /x "test-*.png" /x "tmp_*.png" /x "*.log" /x ".env" "server\*.*"
+
+  ; 配置文件（OpenClaw 安装引导的命令 / 地址 / 版本要求都在 config/openclaw.json；不含任何密钥）
+  SetOutPath "$INSTDIR\config"
+  File /r /x "*.pyc" /x "__pycache__" /x "*.log" /x ".env" "config\*.*"
 
   SetOutPath "$INSTDIR"
 

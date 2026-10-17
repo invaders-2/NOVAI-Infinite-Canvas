@@ -1,7 +1,8 @@
 // 能力（智能体 / 技能）API 客户端：列表 / 详情 / 在会话里发起运行 / 运行详情 / SSE 进度。
 // 契约（冻结，字段名不改）：
-//   GET  /api/capabilities                -> {capabilities:[{id,kind,name,category,icon,description,tags,deliverables,enabled,available}]}
+//   GET  /api/capabilities                -> {capabilities:[{id,kind,name,category,icon,description,tags,deliverables,enabled,available,source_skill_code,skill_type,usage_count}]}
 //   GET  /api/capabilities/{id}           -> {capability:{...含 input_schema}}
+//   POST /api/skills/import  (JSON 技能定义) -> {skill:{...},created}（写进 data/skills/{id}.json）
 //   POST /api/conversations/{cid}/capabilities/{id}/run
 //        multipart: file(可多个) + params(JSON 字符串，可含 provider/model) -> {run_id,conversation_id,user_message_id,assistant_message_id}
 //   GET  /api/agents/runs/{run_id}        -> {run:{...,conversation_id,capability_id,capability_name,status,steps,artifacts}}
@@ -9,11 +10,28 @@
 //   GET  /api/agents/runs/{run_id}/files/{name}
 // 这里只做请求与字段归一化：失败一律返回 {ok:false,error}，不抛给组件、不伪造数据 —— 界面据此给空态 / 错误态。
 import { readSSE } from '../sse.js';
+import { userId } from '../chatState.js';
 
 const api = (() => {
     const KINDS = ['agent', 'skill'];
 
     function text(v) { return v == null ? '' : String(v); }
+    // 教程是可选的结构化字段 {title, steps:[{text, image}]}：标题或步骤缺一不可，否则视为未声明
+    function tutorialOf(a) {
+        const raw = a && a.tutorial;
+        if (!raw || typeof raw !== 'object') return null;
+        const title = text(raw.title).trim();
+        const steps = (Array.isArray(raw.steps) ? raw.steps : []).map(item => {
+            const o = item && typeof item === 'object' ? item : {};
+            const body = text(o.text).trim();
+            if (!body) return null;
+            const step = { text: body };
+            const image = text(o.image).trim();
+            if (image) step.image = image;
+            return step;
+        }).filter(Boolean);
+        return title && steps.length ? { title: title, steps: steps } : null;
+    }
     function strList(v) {
         const list = Array.isArray(v) ? v : (v ? [v] : []);
         return list.map(text).map(s => s.trim()).filter(Boolean);
@@ -96,6 +114,13 @@ const api = (() => {
             enabled: a.enabled !== false,
             available: a.available !== false,
             input_schema: a.input_schema || a.inputSchema || null,
+            usage_instruction: text(a.usage_instruction || a.usageInstruction),
+            skill_type: text(a.skill_type || a.skillType || a.source),
+            usage_count: Number(a.usage_count != null ? a.usage_count : (a.usageCount != null ? a.usageCount : a.currentUserUsageCount)) || 0,
+            tutorial: tutorialOf(a),
+            source_agent_id: Number(a.source_agent_id != null ? a.source_agent_id : a.sourceAgentId) || 0,
+            source_skill_code: text(a.source_skill_code || a.sourceSkillCode),
+            unavailable_reason: text(a.unavailable_reason || a.unavailableReason),
         };
     }
 
@@ -215,6 +240,24 @@ const api = (() => {
         return { ok: true, capabilities: list.map(normalizeCapability).filter(a => a.id && a.enabled) };
     }
 
+    // 导入技能：后端把定义写进 data/skills/{id}.json，校验失败返回可读原因
+    async function importSkill(data) {
+        if (!data || typeof data !== 'object') return { ok: false, error: '技能文件内容不正确' };
+        let res;
+        try {
+            res = await fetch('/api/skills/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify(data),
+            });
+        } catch (e) { return { ok: false, error: '无法连接能力服务' }; }
+        if (!res.ok) return failure('技能导入失败', res);
+        const body = await jsonBody(res);
+        const raw = body && body.skill;
+        if (!raw || typeof raw !== 'object') return { ok: false, error: '导入接口没有返回技能' };
+        return { ok: true, skill: normalizeCapability(raw), created: body.created !== false };
+    }
+
     async function getCapability(id) {
         if (!id) return { ok: false, error: '缺少能力 id' };
         let res;
@@ -227,11 +270,48 @@ const api = (() => {
         return { ok: true, capability: normalizeCapability(raw) };
     }
 
+    // 猜你想问：文案与能力指向由后端下发（可配置），前端只渲染
+    async function listSuggestions() {
+        let res;
+        try { res = await fetch('/api/capabilities/suggestions', { headers: { Accept: 'application/json' } }); }
+        catch (e) { return { ok: false, error: '无法连接能力服务' }; }
+        if (!res.ok) return { ok: false, error: '推荐问题加载失败（HTTP ' + res.status + '）' };
+        const data = await jsonBody(res);
+        const list = data && Array.isArray(data.suggestions) ? data.suggestions : null;
+        if (!list) return { ok: false, error: '推荐问题返回格式不正确' };
+        const out = [];
+        list.forEach(item => {
+            const o = item && typeof item === 'object' ? item : {};
+            const txt = text(o.text).trim();
+            if (!txt) return;
+            const cap = o.capability && typeof o.capability === 'object' ? o.capability : {};
+            out.push({
+                id: text(o.id || o.icon_type + '-' + out.length) || ('s' + out.length),
+                text: txt,
+                icon_type: text(o.icon_type || o.iconType),
+                available: o.available !== false,
+                capability: {
+                    type: text(cap.type),
+                    capabilityId: text(cap.capabilityId || cap.capability_id),
+                    agentId: Number(cap.agentId || cap.agent_id) || 0,
+                    skillCode: text(cap.skillCode || cap.skill_code),
+                    skillName: text(cap.skillName || cap.skill_name),
+                    cardType: Number(cap.cardType || cap.card_type) || 0,
+                },
+            });
+        });
+        return { ok: true, suggestions: out };
+    }
+
     // files: [{file|raw: File, name}]；params: {category/goal/product..., provider/model}
-    async function runCapability(conversationId, capabilityId, files, params, message, signal) {
+    async function runCapability(conversationId, capabilityId, files, params, message, signal, descriptor) {
         if (!conversationId) return { ok: false, error: '缺少会话 id' };
         if (!capabilityId) return { ok: false, error: '缺少能力 id' };
         const form = new FormData();
+        // 可选：sealseek 形态的 capability 描述符（type=agent/skill/...），原样带到后端留档
+        if (descriptor && typeof descriptor === 'object' && Object.keys(descriptor).length) {
+            form.append('capability', JSON.stringify(descriptor));
+        }
         (files || []).forEach(item => {
             const file = item && (item.file || item.raw || (typeof File !== 'undefined' && item instanceof File ? item : null));
             if (!file) return;
@@ -244,7 +324,7 @@ const api = (() => {
         form.append('params', JSON.stringify(payload));
         if (msg) form.append('message', msg);
         let res;
-        try { res = await fetch('/api/conversations/' + encodeURIComponent(conversationId) + '/capabilities/' + encodeURIComponent(capabilityId) + '/run', { method: 'POST', body: form, signal: signal }); }
+        try { res = await fetch('/api/conversations/' + encodeURIComponent(conversationId) + '/capabilities/' + encodeURIComponent(capabilityId) + '/run', { method: 'POST', body: form, signal: signal, headers: { 'X-User-ID': userId() } }); }
         catch (e) {
             if (e && e.name === 'AbortError') return { ok: false, aborted: true, error: '已停止' };
             return { ok: false, error: '无法连接能力服务' };
@@ -289,14 +369,14 @@ const api = (() => {
     }
 
     return {
-        listCapabilities, getCapability, runCapability, getRun, streamRun,
+        listCapabilities, getCapability, importSkill, listSuggestions, runCapability, getRun, streamRun,
         normalizeCapability, paramsOf, normalizeArtifacts, normalizeRun,
         isTerminal, isFailed, filesUrl,
     };
 })();
 
 export const {
-    listCapabilities, getCapability, runCapability, getRun, streamRun,
+    listCapabilities, getCapability, importSkill, listSuggestions, runCapability, getRun, streamRun,
     normalizeCapability, paramsOf, normalizeArtifacts, normalizeRun,
     isTerminal, isFailed, filesUrl,
 } = api;

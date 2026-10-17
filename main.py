@@ -39,10 +39,16 @@ from PIL import Image, ImageOps
 from io import BytesIO
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from fastapi.middleware.cors import CORSMiddleware
+
+# 智能体底座（注册表 / 通用文件工具 / 上下文提供者基类），无反向依赖 main
+from server.agents.context import AgentRunContext as _AgentRunContext
+from server.agents.tools import AGENT_FILE_TOOLS as _AGENT_FILE_TOOLS, AgentFileToolError as _AgentFileToolError
 
 # Windows 上 stdout/stderr 默认用本地代码页（英文系统为 cp1252），打印中文会抛
 # UnicodeEncodeError——后端启动阶段一行中文日志就能让 FastAPI 启动失败、整个后端起不来。
@@ -262,7 +268,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.86"
+APP_VERSION = "1.0.125"
 GITHUB_REPO_URL = "https://github.com/invaders-2/NOVAI-Infinite-Canvas"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/invaders-2/NOVAI-Infinite-Canvas/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/invaders-2/NOVAI-Infinite-Canvas/git/trees/main?recursive=1"
@@ -954,8 +960,15 @@ try:
     GEMINI_CLI_DEFAULT_TIMEOUT = max(30, min(3600, int(os.getenv("GEMINI_CLI_TIMEOUT", "900"))))
 except Exception:
     GEMINI_CLI_DEFAULT_TIMEOUT = 900
-AGNES_DEFAULT_VIDEO_MODELS = ["agnes-video-2.5", "agnes-video-2.5-flash", "agnes-video-v2.0"]
-# 灵境（以及未来新增供应商）的默认模型清单已移到 config/providers.json 的 default_models；
+# apihub.agnes-ai.com 的 /v1/models 当前只有 2.5 两档；agnes-video-v2.0 是旧名，
+# 按旧名请求会直接被网关判成 model_not_found（No available channel for model ...）。
+AGNES_DEFAULT_VIDEO_MODELS = ["agnes-video-2.5", "agnes-video-2.5-flash"]
+AGNES_VIDEO_MODEL_ALIASES = {
+    "agnes-video-v2.0": "agnes-video-2.5",
+    "agnes-video-2.0": "agnes-video-2.5",
+    "agnes-video-v2": "agnes-video-2.5",
+}
+# 各供应商的默认模型清单放在 config/providers.json 的 default_models；
 # 业务代码不再写死模型名，拉取模型时按注册表补默认值（见 apply_provider_registry_model_defaults）。
 JIMENG_LEGACY_IMAGE_MODELS = {
     "jimeng-image-2k",
@@ -1147,26 +1160,12 @@ RUNNINGHUB_DEFAULT_APPS = [
         "enabled": True,
     },
 ]
-RUNNINGHUB_DEFAULT_WORKFLOWS = [
-    {
-        "id": "2058554058318897153",
-        "workflowId": "2058554058318897153",
-        "title": "GPT-Image-2-图片编辑",
-        "note": "",
-        "thumbnail": "",
-        "enabled": True,
-        "optionalImageMode": "prune-workflow",
-    },
-    {
-        "id": "2058541134623891458",
-        "workflowId": "2058541134623891458",
-        "title": "NanoBanana-2-图片编辑",
-        "note": "",
-        "thumbnail": "",
-        "enabled": True,
-        "optionalImageMode": "prune-workflow",
-    },
-]
+# 这两个内置默认工作流在上游已失效（配置里只有 id、没有参数），打开画布预取必然 404。
+# 仅保留 id 用于清理老配置里遗留的空壳记录；用户自己配置过（带 fields/workflowJson）的同 id 工作流不受影响。
+RUNNINGHUB_LEGACY_DEFAULT_WORKFLOW_IDS = {
+    "2058541134623891458",
+    "2058554058318897153",
+}
 
 def ensure_runtime_config_files():
     """首次运行时提前创建配置目录，避免第一次保存 API Key 时才创建目录/文件。"""
@@ -1280,8 +1279,10 @@ MODELSCOPE_DEFAULT_LORAS = [
     },
 ]
 MODELSCOPE_DEFAULTS_VERSION = 4
-CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
-IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-2")
+# 全局兜底模型名只允许来自环境变量（CHAT_MODEL / IMAGE_MODEL）。未配置就是空串：
+# 需要模型时按「所选平台自己声明的 chat_models / image_models」解析，绝不跨平台套用一个写死的默认模型。
+CHAT_MODEL = os.getenv("CHAT_MODEL", "")
+IMAGE_MODEL = os.getenv("IMAGE_MODEL", "")
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "30"))
 AI_REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "1800"))
@@ -1327,9 +1328,17 @@ def friendly_validation_error(errors):
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    # 文件 part 落到 str Form 字段时 input 是 UploadFile（form 解析给的是 starlette 类），
+    # 直接 json 序列化会 TypeError 兜底成 500；这里把这类 input 收成字符串，保证校验失败始终返回 422。
+    try:
+        safe_errors = jsonable_encoder(errors, custom_encoder={UploadFile: str, StarletteUploadFile: str})
+    except Exception:
+        safe_errors = [{"type": item.get("type"), "loc": item.get("loc"), "msg": item.get("msg"),
+                        "input": str(item.get("input"))} for item in errors]
     return JSONResponse(
         status_code=422,
-        content={"detail": friendly_validation_error(exc.errors()), "errors": exc.errors()},
+        content={"detail": friendly_validation_error(errors), "errors": safe_errors},
     )
 
 def model_list(env_name, primary, defaults):
@@ -1350,8 +1359,8 @@ def reload_env_globals():
     MODELSCOPE_API_KEY = os.getenv("MODELSCOPE_API_KEY", "")
     AI_API_KEY = os.getenv("COMFLY_API_KEY", "")
     AI_BASE_URL = os.getenv("COMFLY_BASE_URL", "https://ai.comfly.chat").rstrip("/")
-    IMAGE_MODELS = model_list("IMAGE_MODELS", os.getenv("IMAGE_MODEL", IMAGE_MODEL), ["nano-banana-pro"])
-    CHAT_MODELS = model_list("CHAT_MODELS", os.getenv("CHAT_MODEL", CHAT_MODEL), ["gpt-4o-mini", "gemini-3.1-flash-image-preview-2k"])
+    IMAGE_MODELS = model_list("IMAGE_MODELS", os.getenv("IMAGE_MODEL", IMAGE_MODEL), [])
+    CHAT_MODELS = model_list("CHAT_MODELS", os.getenv("CHAT_MODEL", CHAT_MODEL), [])
     VIDEO_MODELS = model_list("VIDEO_MODELS", "veo3-fast", [
         "veo2", "veo2-fast", "veo2-pro",
         "veo3", "veo3-fast", "veo3-pro",
@@ -1373,8 +1382,8 @@ def reload_env_globals():
     ]
     MODELSCOPE_CHAT_MODELS = list(dict.fromkeys([*_configured]))
 
-CHAT_MODELS = model_list("CHAT_MODELS", CHAT_MODEL, ["gpt-4o-mini", "gemini-3.1-flash-image-preview-2k"])
-IMAGE_MODELS = model_list("IMAGE_MODELS", IMAGE_MODEL, ["nano-banana-pro"])
+CHAT_MODELS = model_list("CHAT_MODELS", CHAT_MODEL, [])
+IMAGE_MODELS = model_list("IMAGE_MODELS", IMAGE_MODEL, [])
 VIDEO_MODELS = model_list("VIDEO_MODELS", "veo3-fast", [
     # —— Veo 系列 ——
     "veo2", "veo2-fast", "veo2-pro",
@@ -1474,6 +1483,12 @@ def lovart_secret_key_value() -> str:
     env_key = lovart_secret_key_env()
     return os.getenv(env_key, "") or read_api_env_value(env_key)
 
+def provider_has_usable_key(provider) -> bool:
+    """供应商是否配齐了可用密钥：Lovart 用 AK/SK，其余走 key_env 命名约定。"""
+    if provider.get("id") == "lovart" or str(provider.get("protocol") or "").strip().lower() == "lovart":
+        return bool(lovart_access_key_value()) and bool(lovart_secret_key_value())
+    return bool(provider_env_key_value(provider.get("id") or ""))
+
 def volcengine_provider_api_key(explicit_key: str = "") -> str:
     explicit_key = str(explicit_key or "").strip()
     if explicit_key:
@@ -1532,7 +1547,7 @@ def default_api_providers():
             "ms_loras": [],
             "ms_defaults_version": 0,
             "rh_apps": RUNNINGHUB_DEFAULT_APPS,
-            "rh_workflows": RUNNINGHUB_DEFAULT_WORKFLOWS,
+            "rh_workflows": [],
         },
         {
             "id": "volcengine",
@@ -1610,7 +1625,9 @@ def merge_default_api_providers(providers, inject_missing=True):
             current["chat_models"] = model_list_from_values(current.get("chat_models") or [])
             current["video_models"] = model_list_from_values(current.get("video_models") or [])
             current["rh_apps"] = merge_runninghub_system_entries(rh_default.get("rh_apps") or [], current.get("rh_apps") or [], "app")
-            current["rh_workflows"] = merge_runninghub_system_entries(rh_default.get("rh_workflows") or [], current.get("rh_workflows") or [], "workflow")
+            current["rh_workflows"] = strip_runninghub_legacy_default_workflows(
+                merge_runninghub_system_entries(rh_default.get("rh_workflows") or [], current.get("rh_workflows") or [], "workflow")
+            )
     volc_default = next((d for d in default_api_providers() if d["id"] == "volcengine"), None)
     if volc_default:
         current = next((item for item in merged if item.get("id") == "volcengine"), None)
@@ -1858,6 +1875,18 @@ def merge_runninghub_system_entries(system_entries, user_entries, kind):
             merged.append(entry)
     return [entry for entry in merged if runninghub_entry_id(entry, kind) not in hidden_ids]
 
+def strip_runninghub_legacy_default_workflows(entries):
+    """清理历史内置默认工作流留下的空壳记录（只有 id、没有参数）；用户自己配置过的同 id 工作流保留。"""
+    kept = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        entry_id = runninghub_workflow_store_key(entry.get("workflowId") or entry.get("id"))
+        if entry_id in RUNNINGHUB_LEGACY_DEFAULT_WORKFLOW_IDS and not runninghub_workflow_config_has_payload(entry):
+            continue
+        kept.append(entry)
+    return kept
+
 def load_static_runninghub_provider():
     if not os.path.exists(STATIC_RUNNINGHUB_API_PROVIDERS_FILE):
         return None
@@ -1871,7 +1900,9 @@ def load_static_runninghub_provider():
             if isinstance(item, dict) and str(item.get("id") or "").strip().lower() == "runninghub":
                 provider = normalize_provider(item)
                 provider["rh_apps"] = apply_runninghub_system_thumbnails(provider.get("rh_apps") or [], "app")
-                provider["rh_workflows"] = apply_runninghub_system_thumbnails(provider.get("rh_workflows") or [], "workflow")
+                provider["rh_workflows"] = strip_runninghub_legacy_default_workflows(
+                    apply_runninghub_system_thumbnails(provider.get("rh_workflows") or [], "workflow")
+                )
                 return provider
     except Exception as e:
         print(f"加载 static RunningHub 配置失败: {e}")
@@ -1968,9 +1999,12 @@ def apply_locked_recommended_model_rules(base_url="", grouped=None):
     grouped["video"] = list(rule.get("video_models") or [])
     return grouped
 
-def provider_endpoint_url(provider, key, default_path):
+def provider_endpoint_url(provider, key, default_path, override=None):
     base_url = str((provider or {}).get("base_url") or AI_BASE_URL).strip().rstrip("/")
-    override = str((provider or {}).get(key) or "").strip()
+    if override is None:
+        override = str((provider or {}).get(key) or "").strip()
+    else:
+        override = str(override).strip()
     if override:
         if re.match(r"^https?://", override, re.I):
             return override.rstrip("/")
@@ -2000,6 +2034,17 @@ def runninghub_openapi_url(provider, path=""):
     path = path.lstrip("/")
     base = runninghub_openapi_base_url(provider)
     return f"{base}/{path}" if path else base
+
+def normalize_provider_size_overrides(value):
+    """供应商声明的生图尺寸覆盖（size_overrides）规整；规则与 server/protocols/registry.py 同源。"""
+    if not isinstance(value, dict) or not value:
+        return {}
+    try:
+        import server.protocols.registry as _registry
+        return _registry.normalize_size_overrides(value)
+    except Exception:
+        return {}
+
 
 def normalize_provider(item):
     provider_id = str(item.get("id") or "").strip().lower()
@@ -2043,7 +2088,7 @@ def normalize_provider(item):
     video_models = model_list_from_values(item.get("video_models") or [])
     if locked_rule and "video_models" in locked_rule:
         video_models = model_list_from_values(locked_rule.get("video_models") or [])
-    return {
+    provider = {
         "id": provider_id,
         "name": name,
         "base_url": base_url,
@@ -2053,6 +2098,7 @@ def normalize_provider(item):
         "image_edit_endpoint": image_edit_endpoint,
         "enabled": bool(item.get("enabled", True)),
         "primary": bool(item.get("primary", False)),
+        "image_model": str(item.get("image_model") or "").strip(),
         "image_models": model_list_from_values(item.get("image_models") or []),
         "chat_models": model_list_from_values(item.get("chat_models") or []),
         "video_models": video_models,
@@ -2070,6 +2116,10 @@ def normalize_provider(item):
         "max_concurrency": normalize_provider_max_concurrency(item.get("max_concurrency")),
         "use_proxy": normalize_provider_use_proxy(item.get("use_proxy")),
     }
+    size_overrides = normalize_provider_size_overrides(item.get("size_overrides"))
+    if size_overrides:
+        provider["size_overrides"] = size_overrides
+    return provider
 
 def normalize_provider_max_concurrency(value) -> int:
     """同一平台同时进行的生成任务数：0 表示不限（旧行为），上限 16。"""
@@ -2199,6 +2249,43 @@ def public_provider(provider):
 def public_api_providers():
     return [public_provider(p) for p in load_api_providers()]
 
+def provider_view_video_models(provider, models):
+    """下发视图里把视频模型名归一后去重（只影响 /api/config 的返回，不写回磁盘）。
+
+    apihub.agnes-ai.com 的 /v1/models 只有 agnes-video-2.5 / agnes-video-2.5-flash，
+    旧名 agnes-video-v2.0 与请求时 agnes_upstream_video_model 用同一张别名表；
+    别名表里只有视频模型名，所以这里也只处理 video_models。
+    自建/别家中转自己提供了旧名就原样下发，不替它做主。"""
+    values = list(models or [])
+    base_url = str((provider or {}).get("base_url") or "").strip().lower()
+    if "apihub.agnes-ai.com" not in base_url:
+        return values
+    normalized, seen = [], set()
+    for value in values:
+        name = str(value or "").strip()
+        if not name:
+            continue
+        real = AGNES_VIDEO_MODEL_ALIASES.get(name.lower(), name)
+        key = real.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(real)
+    return normalized or values
+
+# 注册表（config/providers.json）的只读下发：前端「推荐平台」卡片与「添加平台」预填都从这里取，
+# 供应商的地址 / 协议 / 模型清单不再各自在前端源码里抄一份。注册表本来就不含密钥，这里也不再补。
+REGISTRY_PRESET_FIELDS = ("id", "name", "base_url", "protocol", "image_request_mode", "auth",
+                          "docs_url", "register_url", "base_url_aliases", "default_models", "notes")
+
+def public_registry_presets() -> List[Dict[str, Any]]:
+    presets = []
+    for entry in load_provider_registry():
+        if not str(entry.get("id") or "").strip():
+            continue
+        presets.append({key: entry.get(key) for key in REGISTRY_PRESET_FIELDS if entry.get(key) not in (None, "")})
+    return presets
+
 def get_primary_provider_id(providers=None):
     """返回当前首选 provider 的 id；优先 primary=True 的，否则取第一个非 modelscope 的，再次取第一个。"""
     providers = providers if providers is not None else load_api_providers()
@@ -2206,13 +2293,8 @@ def get_primary_provider_id(providers=None):
     if primary:
         return primary["id"]
 
-    def has_usable_key(item):
-        if item.get("id") == "lovart" or str(item.get("protocol") or "").strip().lower() == "lovart":
-            return bool(lovart_access_key_value()) and bool(lovart_secret_key_value())
-        return bool(provider_env_key_value(item.get("id") or ""))
-
     # 自动补进来的平台（如 Lovart）可能还没配密钥，不能让它顶掉用户真正在用的平台
-    keyed = [p for p in providers if p.get("enabled", True) and has_usable_key(p)]
+    keyed = [p for p in providers if p.get("enabled", True) and provider_has_usable_key(p)]
     keyed_non_ms = next((p for p in keyed if p["id"] != "modelscope"), None) or (keyed[0] if keyed else None)
     if keyed_non_ms:
         return keyed_non_ms["id"]
@@ -4109,7 +4191,7 @@ async def task_run(task_id: str):
 
 async def task_provider_cancel(task: dict):
     """尽力而为的 provider 层取消（扩展点）。
-    当前接入平台（即梦 CLI/火山/APIMart/RunningHub/灵境/玉玉/Agnes）在现有代码中没有可复用的
+    当前接入平台（即梦 CLI/火山/APIMart/RunningHub/玉玉/Agnes）在现有代码中没有可复用的
     取消接口封装，此处不伪造调用；任务会通过 cancel_requested 状态在最近检查点停止。
     后续平台提供取消 API 时在此接入真实调用。"""
     provider_id = task.get("provider_id") or ""
@@ -4340,11 +4422,15 @@ class ApiProviderPayload(BaseModel):
     image_edit_endpoint: str = ""
     enabled: bool = True
     primary: bool = False
+    image_model: str = ""
     image_models: List[str] = []
     chat_models: List[str] = []
     video_models: List[str] = []
     model_names: Dict[str, Any] = {}
     model_protocols: Dict[str, str] = {}
+    # 供应商级生图尺寸覆盖（能力收窄）。前端不做可视化编辑，但保存时必须原样带回，
+    # 否则设置页保存一次就会把它抹掉（见 server/protocols/SIZE_OVERRIDES.md）。
+    size_overrides: Dict[str, Any] = {}
     ms_loras: List[Dict[str, Any]] = []
     ms_defaults_version: int = 0
     rh_apps: List[Dict[str, Any]] = []
@@ -4384,6 +4470,8 @@ class ChatRequest(BaseModel):
     provider: str = "comfly"
     ms_model: str = ""
     think_level: str = ""
+    # 可选：sealseek 形态的能力描述符（type=agent/skill/generate-image）。缺省不影响任何既有调用方。
+    capability: Dict[str, Any] = {}
 
 def chat_system_prompt(payload):
     """最终生效的 system prompt = 用户 system_prompt + 已启用记忆（服务端自动注入）。"""
@@ -4454,6 +4542,13 @@ class CanvasSaveRequest(BaseModel):
     settings: Dict[str, Any] = {}
     client_id: str = ""
     base_updated_at: int = 0
+
+
+class DeleteCanvasLogRequest(BaseModel):
+    log_id: str
+    delete_unreferenced_media: bool = False
+    reset_referencing_nodes: bool = False
+    base_updated_at: Optional[int] = None
 
 
 class CanvasWorkflowExportRequest(BaseModel):
@@ -5609,7 +5704,7 @@ def display_title(text):
     title = re.sub(r"\s+", " ", text or "").strip()
     return title[:24] or "新对话"
 
-def resolve_chat_provider(provider: str, model: str, ms_model: str):
+def resolve_chat_provider(provider: str, model: str, ms_model: str, require_model: bool = True):
     if provider == "modelscope":
         clean_token = modelscope_api_key()
         if not clean_token:
@@ -5628,8 +5723,16 @@ def resolve_chat_provider(provider: str, model: str, ms_model: str):
     base_root = (api_provider.get("base_url") or AI_BASE_URL).rstrip("/")
     if not base_root:
         raise HTTPException(status_code=400, detail=f"{api_provider.get('name') or api_provider['id']} 未配置 Base URL")
-    default_model = preferred_chat_model(api_provider)
-    mdl = selected_model(model, default_model)
+    if require_model:
+        mdl = selected_model(model, preferred_chat_model(api_provider))
+    elif model:
+        mdl = selected_model(model, "")
+    else:
+        # 只探测平台可达性时（生图/生视频平台常常没有 chat_models）不要求对话模型，取不到就留空
+        try:
+            mdl = preferred_chat_model(api_provider)
+        except HTTPException:
+            mdl = ""
     protocol = effective_protocol(api_provider, mdl)
     if protocol == "gemini":
         base = base_root if base_root.endswith("/v1beta") else base_root + "/v1beta"
@@ -5720,10 +5823,15 @@ def looks_like_vision_chat_model(model):
     return any(key in lc for key in vision_keys)
 
 def preferred_chat_model(provider):
-    values = [str(item or "").strip() for item in (provider.get("chat_models") or [CHAT_MODEL])]
+    """按平台自己声明的 chat_models 挑一个对话模型；没配就报明确错误，不套用别的平台的模型。"""
+    values = [str(item or "").strip() for item in (provider.get("chat_models") or [])]
     models = [item for item in values if item]
     if not models:
-        return CHAT_MODEL
+        raise HTTPException(
+            status_code=400,
+            detail="平台「%s」未配置对话模型：请在「设置 → API 设置」里为该平台填写对话模型（chat_models）后再选它。"
+                   % (provider.get("name") or provider.get("id") or "未命名"),
+        )
     if is_volcengine_provider(provider):
         endpoint_models = [item for item in models if item.lower().startswith("ep-")]
         if endpoint_models:
@@ -5733,10 +5841,58 @@ def preferred_chat_model(provider):
             return text_like_models[0]
     return models[0]
 
-def modelscope_size(value, fallback="1024x1024"):
+def preferred_image_model(provider, requested=""):
+    """按平台自己声明的 image_models 解析生图模型；用户显式指定则用显式的。
+    平台没配且用户没指定 → 明确报错，不跨平台套用全局默认模型。"""
+    explicit = str(requested or "").strip()
+    if explicit:
+        return selected_model(explicit, explicit)
+    models = [str(item or "").strip() for item in (provider.get("image_models") or []) if str(item or "").strip()]
+    if not models:
+        raise HTTPException(
+            status_code=400,
+            detail="平台「%s」未配置图片模型：请在「设置 → API 设置」里为该平台填写生图模型（image_models）后再用它生图。"
+                   % (provider.get("name") or provider.get("id") or "未命名"),
+        )
+    return models[0]
+
+# ModelScope 官方按模型给 size 像素区间（https://www.modelscope.cn/docs/model-service/API-Inference/intro）：
+#   SD 系列 [64x64, 2048x2048]、FLUX [64x64, 1024x1024]、Qwen-Image [64x64, 1664x1664]、
+#   Z-Image-Turbo [512x512, 2048x2048]。当前只校验 WxH 格式，这里补上区间收敛。
+MODELSCOPE_SIZE_RANGES = [
+    ("z-image", 512, 2048),
+    ("qwen-image", 64, 1664),
+    ("flux", 64, 1024),
+]
+MODELSCOPE_SIZE_DEFAULT_RANGE = (64, 2048)
+
+def modelscope_size_bounds(model=""):
+    name = str(model or "").strip().lower()
+    for key, low, high in MODELSCOPE_SIZE_RANGES:
+        if key in name:
+            return low, high
+    return MODELSCOPE_SIZE_DEFAULT_RANGE
+
+def modelscope_constrain_size(value, model=""):
+    """把 WxH 收敛进官方像素区间；无法解析（如 auto）返回 None，由调用方保留原值。"""
+    pair = parse_size_pair(str(value or "").strip().lower().replace("*", "x"))
+    if not pair[0] or not pair[1]:
+        return None
+    width, height = pair
+    low, high = modelscope_size_bounds(model)
+    if max(width, height) > high:
+        scale = high / max(width, height)
+        width = max(1, int(width * scale))
+        height = max(1, int(height * scale))
+    width = min(high, max(low, width))
+    height = min(high, max(low, height))
+    return f"{width}x{height}"
+
+def modelscope_size(value, fallback="1024x1024", model=""):
     size = str(value or fallback).strip().lower().replace("*", "x")
-    if re.fullmatch(r"\d{2,5}x\d{2,5}", size):
-        return size
+    constrained = modelscope_constrain_size(size, model)
+    if constrained:
+        return constrained
     raise HTTPException(status_code=400, detail=f"ModelScope size 格式不正确：{value or fallback}，应为 WxH，例如 1024x1024")
 
 def unwrap_apimart_response(raw):
@@ -7274,14 +7430,6 @@ def is_yuli_provider(provider):
     # 与通用 OpenAI /v1/videos/generations 不同，需单独识别。
     base_url = str((provider or {}).get("base_url") or "").lower()
     return "yuli.host" in base_url
-
-def is_lingjing_provider(provider):
-    """灵境（向量引擎中转站）：注册表（id 或 base_url 别名）命中即算；注册表缺失时退回别名匹配。"""
-    if str(provider_registry_entry(provider).get("id") or "").strip().lower() == "lingjing":
-        return True
-    base_url = str((provider or {}).get("base_url") or "").lower()
-    provider_id = str((provider or {}).get("id") or "").strip().lower()
-    return provider_id == "lingjing" or "vectorengine" in base_url or "apistudio.vip" in base_url
 
 def is_agnes_provider(provider, model=""):
     base_url = str((provider or {}).get("base_url") or "").lower()
@@ -10253,18 +10401,51 @@ def volcengine_content_role(role: str, kind: str = "image") -> Optional[str]:
     # 否则火山后端会误判为 r2v(参考图生视频)，导致 seedance/seedream 等生图模型失败。
     return None
 
-def volcengine_video_duration(duration) -> int:
+def legacy_video_resolution(value: str) -> str:
+    """老画布的私有档位 780P 官方没有，统一兼容映射为 720p，不允许原样下发上游。"""
+    text = str(value or "").strip()
+    return "720p" if text.lower() == "780p" else text
+
+def volcengine_video_duration(duration, model="") -> int:
+    # 官方 create-video-generation-task-api「duration 模型支持」：Seedance 2.5 [4,30]、
+    # 2.0 系列 [4,15]、1.0 pro / pro fast [2,12]；2.5 编辑任务的 -1 由下方
+    # ratio=adaptive / duration=-1 特例接管。
     try:
         value = int(duration)
     except Exception:
         value = 5
+    name = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
+    if "seedance-2-5" in name:
+        return max(4, min(30, value))
+    if "seedance-2-0" in name:
+        return max(4, min(15, value))
+    if "seedance-1-0" in name:
+        return max(2, min(12, value))
     return max(1, min(60, value))
 
-def volcengine_video_resolution(value: str) -> str:
+def volcengine_video_resolution(value: str, model: str = "") -> str:
     text = str(value or "").strip().lower()
-    aliases = {"": "", "auto": "", "480": "480p", "720": "720p", "1080": "1080p"}
+    aliases = {"": "", "auto": "", "480": "480p", "720": "720p", "1080": "1080p", "780p": "720p", "4k": "4k"}
     text = aliases.get(text, text)
-    return text if text in {"480p", "720p", "1080p"} else ""
+    if text not in {"480p", "720p", "1080p", "4k"}:
+        return ""
+    if text == "4k":
+        # 官方「resolution 模型支持」只有 Seedance 2.0（非 fast/mini）开放 4k；
+        # 其余模型收敛到最高可用档：2.5 / 1.0 pro 系 1080p，2.0 fast/mini 720p。
+        name = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
+        if "seedance-2-5" in name:
+            return "1080p"
+        if "seedance-2-0" in name and ("fast" in name or "mini" in name):
+            return "720p"
+        if "seedance-2-0" in name:
+            return "4k"
+        return "1080p"
+    return text
+
+def volcengine_video_ratio(aspect: str) -> str:
+    """Ark 官方 ratio 白名单没有旧画布保留字 keep_ratio/source，兼容映射为 adaptive。"""
+    value = str(aspect or "").strip()
+    return "adaptive" if value in {"keep_ratio", "source"} else value
 
 def is_volcengine_seedance2_model(model: str) -> bool:
     value = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
@@ -10899,11 +11080,18 @@ def apimart_video_reference_error(value: str) -> str:
         )
     return "APIMart 的 video_urls 只支持公网 http/https URL 或 asset:// 私域素材 URL。"
 
-def apimart_video_duration(duration) -> int:
+def apimart_video_duration(duration, model="") -> int:
+    # 官方区间：Seedance 2.0 4-15、seedance-1.0-pro(doubao) 2-12、Kling 3-15；
+    # 其它模型沿用原 4-15，VEO3.1 走 apimart_veo31_duration。
     try:
         value = int(duration)
     except Exception:
         value = 5
+    name = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
+    if "kling" in name:
+        return max(3, min(15, value))
+    if "seedance-1" in name:
+        return max(2, min(12, value))
     return max(4, min(15, value))
 
 def apimart_veo31_duration(duration) -> int:
@@ -11528,6 +11716,12 @@ async def upload_local_video_to_temp_sh(ref_url: str) -> Dict[str, str]:
     return await upload_local_video_to_cloud(ref_url, "auto")
 
 async def save_ai_image_to_output(image_data, prefix="online_", category="output"):
+    # 上游直接把图片以 data URI 返回（中转站常见）时按 base64 落盘；否则 httpx.get(data:...)
+    # 必然失败并被原样返回，任务结果里会塞进几百 KB 的 data URI，/assets/output/ 下没有文件。
+    value = str(image_data.get("value") or "")
+    if image_data.get("type") != "b64" and value.startswith("data:image/") and ";base64," in value:
+        header, encoded = value.split(";base64,", 1)
+        image_data = {"type": "b64", "value": encoded, "mime_type": header.replace("data:", "", 1) or "image/png"}
     filename = f"{prefix}{uuid.uuid4().hex[:10]}.png"
     path = output_path_for(filename, category)
     if image_data["type"] == "b64":
@@ -11563,6 +11757,238 @@ async def save_ai_image_to_output(image_data, prefix="online_", category="output
     except Exception as e:
         print(f"保存上游图片失败: {e}; url={value}")
         return value
+
+# --- 能力运行时的生图执行器（复用 NOVAI 既有生图链路） ---
+# server/agents/tools.py 的 image_generate 工具与 OpenClaw 能力运行的生图阶段都通过
+# deps 注入调用它；provider/model 一律来自 data/api_providers.json，不写死模型。
+
+_AGENT_IMAGE_REF_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+
+
+def _agent_image_reference_url(raw):
+    """把上传图片 / 本地路径转成生图链路能识别的 URL；不合法返回空串。"""
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    low = text.lower()
+    if low.startswith(("http://", "https://", "data:")):
+        return text
+    if text.startswith(("/output/", "/assets/")) and output_file_from_url(text):
+        return text
+    path = text if os.path.isabs(text) else os.path.abspath(text)
+    if not os.path.isfile(path):
+        return ""
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in _AGENT_IMAGE_REF_EXTS:
+        return ""
+    name = "agentref_%s%s" % (uuid.uuid4().hex[:10], ext)
+    target = output_path_for(name, "input")
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    shutil.copyfile(path, target)
+    return output_url_for(name, "input")
+
+
+_AGENT_IMAGE_DOWNLOAD_READ_TIMEOUT = 300.0
+
+
+def _agent_exc_reason(exc):
+    """异常文案：总是「类型名: 非空原因」，str 为空退到 repr。"""
+    reason = str(exc).strip()
+    if not reason:
+        reason = repr(exc).strip()
+    if not reason:
+        reason = "(无异常信息)"
+    return "%s: %s" % (type(exc).__name__, reason)
+
+
+def _agent_url_digest(url, limit=200):
+    """失败源 URL 摘要：只留 scheme://host/path，query 一律丢弃（可能含 api key/token/签名）。"""
+    try:
+        parsed = urllib.parse.urlparse(str(url or ""))
+        host = parsed.hostname or ""
+        if parsed.port:
+            host = "%s:%d" % (host, parsed.port)
+        summary = "%s://%s%s" % (parsed.scheme or "?", host, parsed.path or "")
+    except Exception:
+        summary = ""
+    if not summary or summary.endswith("://"):
+        summary = "(无 URL)"
+    return summary[:limit]
+
+
+async def _write_generated_image(image_data, path):
+    """把上游返回的图片（b64 / 本地受控 URL / http(s) URL）落盘；失败明确抛错。"""
+    if not isinstance(image_data, dict):
+        raise _AgentFileToolError("生图上游返回了无法识别的结果（不是图片数据）",
+                                  code="image_empty", status_code=502)
+    kind = str(image_data.get("type") or "")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if kind == "b64":
+        with open(path, "wb") as handle:
+            handle.write(base64.b64decode(image_data.get("value") or ""))
+        return
+    url = str(image_data.get("value") or "")
+    if url.startswith(("/output/", "/assets/")):
+        source = output_file_from_url(url)
+        if not source:
+            raise _AgentFileToolError("生图结果文件不存在：%s" % url, code="image_empty", status_code=502)
+        shutil.copyfile(source, path)
+        return
+    if url.startswith(("http://", "https://")):
+        url_digest = _agent_url_digest(url)
+        read_timeout = _AGENT_IMAGE_DOWNLOAD_READ_TIMEOUT
+        timeout = httpx.Timeout(connect=20.0, read=read_timeout, write=60.0, pool=20.0)
+        last_exc = None
+        for attempt in (1, 2):
+            try:
+                async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV,
+                                             timeout=timeout, follow_redirects=True) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    with open(path, "wb") as handle:
+                        handle.write(response.content)
+                return
+            except httpx.HTTPStatusError as exc:
+                raise _AgentFileToolError(
+                    "下载生图结果失败（image_download_failed，HTTP %s）：%s | 来源=%s"
+                    % (exc.response.status_code, _agent_exc_reason(exc), url_digest),
+                    code="image_download_failed", status_code=502)
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last_exc = exc
+            except OSError as exc:
+                raise _AgentFileToolError(
+                    "保存下载的生图结果失败（image_save_failed）：%s | 来源=%s"
+                    % (_agent_exc_reason(exc), url_digest),
+                    code="image_save_failed", status_code=502)
+            if attempt == 1:
+                log_net_error("能力生图 下载失败将重试 来源=%s" % url_digest, last_exc, url=url_digest)
+        if isinstance(last_exc, httpx.ReadTimeout):
+            raise _AgentFileToolError(
+                "下载生图结果读超时（image_download_timeout，read 超时 %s 秒，已重试 1 次）：%s | 来源=%s"
+                % (read_timeout, _agent_exc_reason(last_exc), url_digest),
+                code="image_download_timeout", status_code=502)
+        raise _AgentFileToolError(
+            "下载生图结果失败（image_download_failed，已重试 1 次）：%s | 来源=%s"
+            % (_agent_exc_reason(last_exc), url_digest),
+            code="image_download_failed", status_code=502)
+    raise _AgentFileToolError("生图上游返回了空的/非 URL 结果：%s" % (url[:200] or kind or "未知"),
+                              code="image_empty", status_code=502)
+
+
+async def capability_generate_image(spec):
+    """能力运行时生图：复用 generate_ai_image，产物落 run 产物目录并登记为受控产物。
+
+    spec: {prompt, size?, quality?, model?, provider?, reference_images?, count?, run_id, output_dir?, name_prefix?}
+    失败一律抛 _AgentFileToolError（未配置生图模型 / 上游失败 / 落盘失败），不静默降级。
+    """
+    from server.agents import store as agent_store
+
+    spec = spec if isinstance(spec, dict) else {}
+    prompt = str(spec.get("prompt") or "").strip()
+    if not prompt:
+        raise _AgentFileToolError("生图提示词不能为空", code="invalid_args")
+    run_id = str(spec.get("run_id") or "")
+    output_dir = str(spec.get("output_dir") or "") or agent_store.run_output_dir(run_id)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 缺省生图平台/模型也可以用环境变量兜底（NOVAI_AGENT_IMAGE_PROVIDER / _MODEL），
+    # 仍然不写死模型；没配就回到按 provider 声明的 image_models 自动解析。
+    spec_provider = str(spec.get("provider") or "").strip()
+    spec_model = str(spec.get("model") or "").strip()
+    env_provider = str(os.environ.get("NOVAI_AGENT_IMAGE_PROVIDER") or "").strip()
+    env_model = str(os.environ.get("NOVAI_AGENT_IMAGE_MODEL") or "").strip()
+    provider_arg = spec_provider or env_provider
+    model_arg = spec_model or env_model
+    if spec_provider or spec_model:
+        origin = "能力参数指定"
+    elif env_provider or env_model:
+        origin = "环境变量 %s/%s 指定" % (env_provider and "NOVAI_AGENT_IMAGE_PROVIDER" or "-",
+                                        env_model and "NOVAI_AGENT_IMAGE_MODEL" or "-")
+    else:
+        origin = "自动（能力参数与环境变量都没指定）"
+    trace = {"origin": origin}
+    provider_id, model_id, model_note = _agent_resolve_media_target(
+        {"provider": provider_arg, "image_provider": provider_arg, "model": model_arg},
+        "image_models", _agent_pick_image_provider, trace)
+    # 可验证信息：最终平台/模型 + 为什么选它 + 跳过了谁及原因（进 note、日志和失败文案）
+    selection_note = _agent_media_selection_note(provider_id, model_id, trace, model_note)
+    print("[Agent] 能力生图选定：%s" % selection_note, flush=True)
+    if not model_id:
+        raise _AgentFileToolError(
+            "未配置生图模型：请在「设置 → API 设置」里为生图平台「%s」填写生图模型"
+            "（image_model 单数，或 image_models 清单）后再生图。%s"
+            % (provider_id or "无", selection_note),
+            code="image_model_missing", status_code=400)
+    provider = get_api_provider(provider_id)
+    if not provider or provider.get("enabled") is False:
+        raise _AgentFileToolError("生图平台不可用：%s；%s" % (provider_id or "未配置", selection_note),
+                                  code="image_provider_missing", status_code=400)
+
+    size = agent_image_size(provider_id, model_id, str(spec.get("size") or ""),
+                            str(spec.get("ratio") or "")) or "1024x1024"
+    quality = str(spec.get("quality") or "").strip() or "auto"
+    refs = []
+    for raw in (spec.get("reference_images") or []):
+        url = _agent_image_reference_url(raw)
+        if url:
+            refs.append({"url": url, "kind": "image"})
+    try:
+        count = int(spec.get("count") or 1)
+    except (TypeError, ValueError):
+        count = 1
+    count = max(1, min(count, 4))
+    # 单次运行生图总预算（真实计费的安全阀）：NOVAI_AGENT_IMAGE_MAX，默认 4 张/次运行
+    try:
+        budget = max(0, int(os.environ.get("NOVAI_AGENT_IMAGE_MAX") or 4))
+    except (TypeError, ValueError):
+        budget = 4
+    if run_id and budget >= 0:
+        existing = 0
+        record = agent_store.load_run(run_id) or {}
+        for item in record.get("artifacts") or []:
+            if isinstance(item, dict) and str(item.get("kind") or "") == "image":
+                existing += 1
+        remaining = budget - existing
+        if remaining <= 0:
+            raise _AgentFileToolError(
+                "本次运行生图已达上限 %d 张（NOVAI_AGENT_IMAGE_MAX）：不再继续调用上游生图为避免重复计费。"
+                % budget,
+                code="image_budget_exhausted", status_code=429)
+        count = min(count, remaining)
+    prefix = agent_store.safe_filename(str(spec.get("name_prefix") or "生成图")) or "生成图"
+
+    images = []
+    for index in range(count):
+        try:
+            image_data, _raw = await generate_ai_image(prompt, size, quality, model_id, refs, provider_id)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            raise _AgentFileToolError("生图失败（%s）：%s" % (selection_note, detail),
+                                      code="image_upstream_failed", status_code=exc.status_code or 502)
+        except httpx.HTTPStatusError as exc:
+            body = exc.response.text or ""
+            detail = friendly_image_error_detail(body, size, model_id) or ("上游生图接口错误：" + body[:300])
+            raise _AgentFileToolError("生图失败（%s）：%s" % (selection_note, detail),
+                                      code="image_upstream_failed", status_code=exc.response.status_code)
+        except httpx.HTTPError as exc:
+            log_net_error("能力生图 网络/TLS错误 model=%s" % model_id, exc)
+            raise _AgentFileToolError("生图网络错误（%s）：%s" % (selection_note, exc),
+                                      code="image_upstream_failed", status_code=502)
+        name = agent_store.safe_filename("%s_%d.png" % (prefix, index + 1))
+        path = os.path.join(output_dir, name)
+        try:
+            await _write_generated_image(image_data, path)
+        except _AgentFileToolError:
+            raise
+        except Exception as exc:
+            raise _AgentFileToolError("保存生成的图片失败：%s" % _agent_exc_reason(exc),
+                                      code="image_save_failed", status_code=502)
+        item = agent_store.add_artifact(run_id, "image", name, path)
+        images.append({"name": name, "url": item.get("url"), "bytes": os.path.getsize(path)})
+
+    return {"provider": provider_id, "model": model_id, "size": size, "count": len(images),
+            "images": images, "model_note": selection_note, "references": len(refs)}
+
 
 def image_output_meta(url, source_item=None):
     meta = {"url": url, "kind": "image"}
@@ -11656,14 +12082,17 @@ def parse_size_pair(size):
         return 0, 0
     return int(match.group(1)), int(match.group(2))
 
+# 对话页 / Agent 生图比例表：7 个常用比例 × 1k/2k/4k，像素取官方 APIMart gpt-image-2
+# size×resolution 映射表的第一组（/tmp/novai-official-docs/text/apimart_gpt_image_2_generation_md.txt:380-422），
+# 与 web/src/pages/chat/sizes.js 的 SIZE_OPTIONS 同值（tests/test_chat_size_parity.js 守住）。
 CHAT_RATIO_SIZE_OPTIONS = {
-    "1:1": ("1024x1024", "1536x1536", "2048x2048"),
-    "2:3": ("720x1080", "1024x1536", "1365x2048"),
-    "3:2": ("1080x720", "1536x1024", "2048x1365"),
-    "3:4": ("1008x1344", "1536x2048", "2448x3264"),
-    "4:3": ("1344x1008", "2048x1536", "3264x2448"),
-    "9:16": ("720x1280", "1080x1920", "1440x2560"),
-    "16:9": ("1280x720", "1920x1080", "2560x1440"),
+    "1:1": ("1024x1024", "2048x2048", "2880x2880"),
+    "2:3": ("1024x1536", "1360x2048", "2336x3520"),
+    "3:2": ("1536x1024", "2048x1360", "3520x2336"),
+    "3:4": ("768x1024", "1536x2048", "2480x3312"),
+    "4:3": ("1024x768", "2048x1536", "3312x2480"),
+    "9:16": ("864x1536", "1152x2048", "2160x3840"),
+    "16:9": ("1536x864", "2048x1152", "3840x2160"),
 }
 
 def chat_prompt_size_override(message, current_size=""):
@@ -11816,10 +12245,7 @@ def normalize_gpt_image_2_size(size):
     width, height = parse_size_pair(size)
     if not width or not height:
         return size or "auto"
-    # 已在 GPT 支持范围内（长边≤3840 且 总像素≤约829万）的尺寸原样返回，不做任何改动。
-    if max(width, height) <= GPT_IMAGE2_MAX_EDGE and width * height <= GPT_IMAGE2_MAX_PIXELS:
-        return f"{width}x{height}"
-    # 超限时按比例等比缩小到 GPT 上限，保持原始宽高比（例如 4096x4096 → ~2864x2864，仍是 1:1）。
+    # 官方口径：两边都要能被 16 整除、比例落在 1:3~3:1；超限再等比缩到 3840x2160 / 829 万像素内。
     ratio = width / height
     if ratio > 3:
         width = height * 3
@@ -11832,6 +12258,11 @@ def normalize_gpt_image_2_size(size):
     )
     width = max(16, int((width * scale) // 16) * 16)
     height = max(16, int((height * scale) // 16) * 16)
+    # 16 对齐会把两边削得不一致，比例可能又越界，按 16 的倍数严格夹回官方范围。
+    if width > height * 3:
+        width = max(16, int((height * 3) // 16) * 16)
+    if width * 3 < height:
+        height = max(16, int((width * 3) // 16) * 16)
     if width * height < GPT_IMAGE2_MIN_PIXELS:
         grow = (GPT_IMAGE2_MIN_PIXELS / max(1, width * height)) ** 0.5
         width = int((width * grow + 15) // 16) * 16
@@ -11851,7 +12282,58 @@ def gpt_image_2_size_exceeds_supported(size):
     width, height = parse_size_pair(size)
     return bool(width and height and (max(width, height) > GPT_IMAGE2_MAX_EDGE or width * height > GPT_IMAGE2_MAX_PIXELS))
 
-def apimart_size_resolution(size):
+# APIMart 官方「size × resolution → 实际像素」映射表（docs.apimart.ai gpt-image-2 generation）。
+# 档位是独立参数，不能按长边/像素阈值反推：官方表里的像素一律还原成官方档位，表外像素才退回旧口径。
+APIMART_ASPECT_RATIOS = [
+    (1, 1, "1:1"), (3, 2, "3:2"), (2, 3, "2:3"), (4, 3, "4:3"), (3, 4, "3:4"),
+    (5, 4, "5:4"), (4, 5, "4:5"), (16, 9, "16:9"), (9, 16, "9:16"),
+    (2, 1, "2:1"), (1, 2, "1:2"), (3, 1, "3:1"), (1, 3, "1:3"),
+    (21, 9, "21:9"), (9, 21, "9:21"),
+]
+# 同一比例同一档位官方可能给两组等价像素（如 1:1 的 1k = 1024² 或 1254²），全部收录才能精确命中。
+APIMART_OFFICIAL_PIXELS = {
+    "1:1": {"1k": ((1024, 1024), (1254, 1254)), "2k": ((2048, 2048),), "4k": ((2880, 2880),)},
+    "3:2": {"1k": ((1536, 1024),), "2k": ((2048, 1360),), "4k": ((3520, 2336),)},
+    "2:3": {"1k": ((1024, 1536),), "2k": ((1360, 2048),), "4k": ((2336, 3520),)},
+    "4:3": {"1k": ((1024, 768),), "2k": ((2048, 1536),), "4k": ((3312, 2480),)},
+    "3:4": {"1k": ((768, 1024),), "2k": ((1536, 2048),), "4k": ((2480, 3312),)},
+    "5:4": {"1k": ((1280, 1024), (1448, 1086)), "2k": ((2560, 2048),), "4k": ((3216, 2576),)},
+    "4:5": {"1k": ((1024, 1280), (1122, 1402)), "2k": ((2048, 2560),), "4k": ((2576, 3216),)},
+    "16:9": {"1k": ((1536, 864), (1672, 941)), "2k": ((2048, 1152),), "4k": ((3840, 2160),)},
+    "9:16": {"1k": ((864, 1536), (941, 1672)), "2k": ((1152, 2048),), "4k": ((2160, 3840),)},
+    "2:1": {"1k": ((2048, 1024), (1774, 887)), "2k": ((2688, 1344),), "4k": ((3840, 1920),)},
+    "1:2": {"1k": ((1024, 2048), (887, 1774)), "2k": ((1344, 2688),), "4k": ((1920, 3840),)},
+    "3:1": {"1k": ((1881, 836), (1536, 512)), "2k": ((3072, 1024),), "4k": ((3840, 1280),)},
+    "1:3": {"1k": ((887, 1774), (512, 1536)), "2k": ((1024, 3072),), "4k": ((1280, 3840),)},
+    "21:9": {"1k": ((2016, 864), (1915, 821)), "2k": ((2688, 1152),), "4k": ((3840, 1648),)},
+    "9:21": {"1k": ((864, 2016), (821, 1915)), "2k": ((1152, 2688),), "4k": ((1648, 3840),)},
+}
+APIMART_RESOLUTION_LEVELS = ("1k", "2k", "4k")
+
+def apimart_closest_aspect_ratio(width, height):
+    ratio = width / height
+    return min(APIMART_ASPECT_RATIOS, key=lambda item: abs(ratio - item[0] / item[1]))[2]
+
+def apimart_resolution_from_long_edge(width, height):
+    """旧口径的长边 / 总像素阈值；只作为官方映射表之外的兜底。"""
+    long_edge = max(width, height)
+    pixels = width * height
+    if long_edge >= 3000 or pixels > 4_500_000:
+        return "4k"
+    if long_edge >= 1800 or pixels > 1_800_000:
+        return "2k"
+    return "1k"
+
+def apimart_official_size_cell(width, height):
+    """命中官方映射表返回 (比例, 档位)，否则 None。"""
+    for ratio, tiers in APIMART_OFFICIAL_PIXELS.items():
+        for level in APIMART_RESOLUTION_LEVELS:
+            if (width, height) in tiers.get(level, ()):
+                return ratio, level
+    return None
+
+def apimart_legacy_size_resolution(size):
+    """APIMart 旧口径（Gemini 直连链路继续沿用，本次修正不动它的档位映射）。"""
     width, height = parse_size_pair(size)
     if not width or not height:
         raw = str(size or "").strip().lower()
@@ -11860,23 +12342,16 @@ def apimart_size_resolution(size):
         if re.fullmatch(r"(auto|\d+\s*:\s*\d+)", raw):
             return raw.replace(" ", ""), "1k"
         return "1:1", "1k"
-    long_edge = max(width, height)
-    pixels = width * height
-    if long_edge >= 3000 or pixels > 4_500_000:
-        resolution = "4k"
-    elif long_edge >= 1800 or pixels > 1_800_000:
-        resolution = "2k"
-    else:
-        resolution = "1k"
-    common = [
-        (1, 1, "1:1"), (3, 2, "3:2"), (2, 3, "2:3"), (4, 3, "4:3"), (3, 4, "3:4"),
-        (5, 4, "5:4"), (4, 5, "4:5"), (16, 9, "16:9"), (9, 16, "9:16"),
-        (2, 1, "2:1"), (1, 2, "1:2"), (3, 1, "3:1"), (1, 3, "1:3"),
-        (21, 9, "21:9"), (9, 21, "9:21"),
-    ]
-    ratio = width / height
-    best = min(common, key=lambda item: abs(ratio - item[0] / item[1]))
-    return best[2], resolution
+    return apimart_closest_aspect_ratio(width, height), apimart_resolution_from_long_edge(width, height)
+
+def apimart_size_resolution(size):
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        return apimart_legacy_size_resolution(size)
+    cell = apimart_official_size_cell(width, height)
+    if cell:
+        return cell
+    return apimart_closest_aspect_ratio(width, height), apimart_resolution_from_long_edge(width, height)
 
 def apimart_image_model_lc(model=""):
     return str(model or "").strip().lower()
@@ -11895,60 +12370,83 @@ def apimart_image_resolution_for_model(model="", resolution="1K"):
     text = str(resolution or "1K").strip().upper()
     return text if text in {"0.5K", "1K", "2K", "4K"} else "1K"
 
-VOLCENGINE_MIN_PIXELS = 3_686_400
-VOLCENGINE_MIN_EDGE = 1536
-VOLCENGINE_MAX_EDGE = 4096
-VOLCENGINE_RATIO_CHOICES = [
-    (1, 1, "1:1"),
-    (4, 3, "4:3"),
-    (3, 4, "3:4"),
-    (16, 9, "16:9"),
-    (9, 16, "9:16"),
-    (21, 9, "21:9"),
-    (9, 21, "9:21"),
-    (3, 2, "3:2"),
-    (2, 3, "2:3"),
-    (5, 4, "5:4"),
-    (4, 5, "4:5"),
+# 火山方舟官方按模型给「总像素区间 + 档位」（https://ark.volcengine.com/region:cn-beijing/docs/image-generation-api）：
+#   5.0 pro/flash [921600, 4624220]，1K/1.5K/2K；5.0 lite [3686400, 16777216]，2K/3K/4K；
+#   4.5 [3686400, 16777216]，2K/4K；4.0 [921600, 16777216]，1K/2K/4K；宽高比一律 [1/16, 16]。
+# 官方只约束总像素与宽高比，没有最小/最大边限制（旧口径的 min 边 1536 / max 边 4096 已移除）。
+VOLCENGINE_RATIO_MIN = 1 / 16
+VOLCENGINE_RATIO_MAX = 16
+VOLCENGINE_TIER_SIDES = {"1k": 1024, "1.5k": 1536, "2k": 2048, "3k": 3072, "4k": 4096}
+VOLCENGINE_TIER_ORDER = ("1k", "1.5k", "2k", "3k", "4k")
+VOLCENGINE_SIZE_RULES = [
+    ("seedream-5-0-lite", 3_686_400, 16_777_216, ("2k", "3k", "4k")),
+    ("seedream-5-0-pro", 921_600, 4_624_220, ("1k", "1.5k", "2k")),
+    ("seedream-5-0-flash", 921_600, 4_624_220, ("1k", "1.5k", "2k")),
+    ("seedream-5-0", 921_600, 4_624_220, ("1k", "1.5k", "2k")),
+    ("seedream-4-5", 3_686_400, 16_777_216, ("2k", "4k")),
+    ("seedream-4-0", 921_600, 16_777_216, ("1k", "2k", "4k")),
 ]
+VOLCENGINE_DEFAULT_SIZE_RULE = (3_686_400, 16_777_216, ("1k", "2k", "4k"))
 
 def is_volcengine_seedream_model(model):
     value = str(model or "").strip().lower()
     return "seedream" in value or "doubao-seedream" in value
 
+def volcengine_size_rule(model=""):
+    """按模型名归一化后匹配官方规则；命中多个时列表顺序里更具体的（lite/pro/flash）在前。"""
+    name = re.sub(r"[^a-z0-9]+", "-", str(model or "").strip().lower())
+    for key, min_pixels, max_pixels, tiers in VOLCENGINE_SIZE_RULES:
+        if key in name:
+            return min_pixels, max_pixels, tiers
+    return VOLCENGINE_DEFAULT_SIZE_RULE
+
+def volcengine_tier_pixels(tier, model=""):
+    """方式1 档位 → 官方 1:1 参考像素；档位不被该模型支持时收敛到不超过它的最高档。"""
+    _min_pixels, _max_pixels, tiers = volcengine_size_rule(model)
+    value = str(tier or "").strip().lower()
+    if value in tiers:
+        side = VOLCENGINE_TIER_SIDES[value]
+    else:
+        index = VOLCENGINE_TIER_ORDER.index(value) if value in VOLCENGINE_TIER_ORDER else VOLCENGINE_TIER_ORDER.index("2k")
+        lower = [item for item in tiers if VOLCENGINE_TIER_ORDER.index(item) < index]
+        side = VOLCENGINE_TIER_SIDES[lower[-1] if lower else tiers[0]]
+    return f"{side}x{side}"
+
+def volcengine_size_within_area(width, height, min_pixels, max_pixels):
+    """官方方式2：同时满足总像素区间与宽高比；只做等比缩放 + 16 对齐，不再设边上限。"""
+    width = max(1, int(width))
+    height = max(1, int(height))
+    if width * height > max_pixels:
+        scale = (max_pixels / (width * height)) ** 0.5
+        width = max(64, int(width * scale // 16) * 16)
+        height = max(64, int(height * scale // 16) * 16)
+    if width * height < min_pixels:
+        grow = (min_pixels / max(1, width * height)) ** 0.5
+        width = max(64, int(math.ceil(width * grow / 16)) * 16)
+        height = max(64, int(math.ceil(height * grow / 16)) * 16)
+    # 16 对齐与放大可能把面积再次顶过上限，按上限严格回缩一次
+    if width * height > max_pixels:
+        scale = (max_pixels / (width * height)) ** 0.5
+        width = max(64, int(width * scale // 16) * 16)
+        height = max(64, int(height * scale // 16) * 16)
+    return f"{width}x{height}"
+
 def normalize_volcengine_size(size, model=""):
     width, height = parse_size_pair(size)
     raw = str(size or "").strip().lower()
     if not width or not height:
-        if raw == "4k":
-            return "4096x4096"
-        if raw == "2k":
-            return "2048x2048"
+        if raw in VOLCENGINE_TIER_SIDES:
+            return volcengine_tier_pixels(raw, model)
         return "2048x2048" if is_volcengine_seedream_model(model) else (size or "1024x1024")
     if not is_volcengine_seedream_model(model):
         return f"{width}x{height}"
     ratio = width / max(1, height)
-    best_ratio = min(VOLCENGINE_RATIO_CHOICES, key=lambda item: abs(ratio - item[0] / item[1]))
-    rw, rh = best_ratio[0], best_ratio[1]
-    scale = max(
-        (VOLCENGINE_MIN_PIXELS / max(1, rw * rh)) ** 0.5,
-        VOLCENGINE_MIN_EDGE / max(1, min(rw, rh)),
-    )
-    target_w = rw * scale
-    target_h = rh * scale
-    cap = min(1.0, VOLCENGINE_MAX_EDGE / max(target_w, target_h))
-    target_w *= cap
-    target_h *= cap
-    snapped_w = max(64, int(target_w // 16) * 16)
-    snapped_h = max(64, int(target_h // 16) * 16)
-    while snapped_w * snapped_h < VOLCENGINE_MIN_PIXELS:
-        if snapped_w <= snapped_h:
-            snapped_w += 16
-        else:
-            snapped_h += 16
-        if max(snapped_w, snapped_h) > VOLCENGINE_MAX_EDGE:
-            break
-    return f"{snapped_w}x{snapped_h}"
+    if ratio > VOLCENGINE_RATIO_MAX:
+        width = max(1, round(height * VOLCENGINE_RATIO_MAX))
+    elif ratio < VOLCENGINE_RATIO_MIN:
+        height = max(1, round(width / VOLCENGINE_RATIO_MIN))
+    min_pixels, max_pixels, _tiers = volcengine_size_rule(model)
+    return volcengine_size_within_area(width, height, min_pixels, max_pixels)
 
 def friendly_upstream_common_error(text):
     """生图 / 视频 / 聊天通用的上游错误翻译：超时、网关错误、余额不足。返回空串表示没识别出来。"""
@@ -12053,6 +12551,8 @@ async def generate_modelscope_provider_image(prompt, size, model, reference_imag
     clean_token = modelscope_api_key()
     if not clean_token:
         raise HTTPException(status_code=400, detail="未配置 ModelScope API Key，请在 API 设置中填写。")
+    resolved_model = selected_model(model, "Tongyi-MAI/Z-Image-Turbo")
+    size = modelscope_constrain_size(size, resolved_model) or size
     width, height = parse_size_pair(size)
     refs = []
     for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
@@ -12066,7 +12566,7 @@ async def generate_modelscope_provider_image(prompt, size, model, reference_imag
         "X-ModelScope-Async-Mode": "true",
     }
     payload = {
-        "model": selected_model(model, "Tongyi-MAI/Z-Image-Turbo"),
+        "model": resolved_model,
         "prompt": prompt.strip(),
     }
     if width and height:
@@ -12115,20 +12615,145 @@ def gemini_model_name(model):
     return value[len("models/"):] if value.startswith("models/") else value
 
 def gemini_endpoint_url(provider, model):
-    model_name = urllib.parse.quote(gemini_model_name(model), safe="")
-    return provider_endpoint_url(provider, "image_generation_endpoint", f"/v1beta/models/{model_name}:generateContent")
+    """Gemini 协议的端点必须配 Gemini 请求体。
 
-def gemini_image_config(size):
+    image_generation_endpoint 是 OpenAI 生图端口；模型被自动判定为 Gemini 协议时若沿用它，
+    Gemini 原生请求体会打到 /v1/images/generations（真实中转站返回 404 Images API is not supported）。
+    只有供应商本来就声明 protocol=gemini 时才允许用该字段覆盖自定义 Gemini 路径。
+    """
+    model_name = urllib.parse.quote(gemini_model_name(model), safe="")
+    override = None if provider_protocol(provider) == "gemini" else ""
+    return provider_endpoint_url(provider, "image_generation_endpoint",
+                                 f"/v1beta/models/{model_name}:generateContent", override=override)
+
+# Gemini 官方宽高比表（https://ai.google.dev/gemini-api/docs/image-generation）：
+# 14 个比例，不含 APIMart 的 2:1/1:2/3:1/1:3/9:21；3.1 Pro Image 只支持其中 10 个。
+GEMINI_ASPECT_RATIOS = [
+    (1, 1, "1:1"), (1, 4, "1:4"), (1, 8, "1:8"), (2, 3, "2:3"), (3, 2, "3:2"),
+    (3, 4, "3:4"), (4, 1, "4:1"), (4, 3, "4:3"), (4, 5, "4:5"), (5, 4, "5:4"),
+    (8, 1, "8:1"), (9, 16, "9:16"), (16, 9, "16:9"), (21, 9, "21:9"),
+]
+GEMINI_PRO_ASPECT_RATIOS = {"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"}
+GEMINI_TIER_LEVELS = ("0.5K", "1K", "2K", "4K")
+GEMINI_512_ALIASES = {"0.5K", "512"}
+
+def gemini_model_lc(model=""):
+    return gemini_model_name(model).strip().lower()
+
+def gemini_aspect_ratio_choices(model=""):
+    choices = list(GEMINI_ASPECT_RATIOS)
+    name = gemini_model_lc(model)
+    if "3.1-pro-image" in name or "3-pro-image" in name:
+        return [item for item in choices if item[2] in GEMINI_PRO_ASPECT_RATIOS]
+    return choices
+
+def gemini_image_size_choices(model=""):
+    """官方档位：3.1 Flash Image 多 0.5K；3.1 Flash Lite 仅 1K；2.5 Flash Image 单档。"""
+    name = gemini_model_lc(model)
+    if "flash-lite" in name or "2.5-flash-image" in name:
+        return ("1K",)
+    if "3.1-flash-image" in name:
+        return ("0.5K", "1K", "2K", "4K")
+    return ("1K", "2K", "4K")
+
+def gemini_closest_aspect_ratio(width, height, model=""):
+    ratio = width / max(1, height)
+    return min(gemini_aspect_ratio_choices(model), key=lambda item: abs(math.log(ratio / (item[0] / item[1]))))[2]
+
+def gemini_clamp_image_size(level, model=""):
+    choices = gemini_image_size_choices(model)
+    value = str(level or "").strip().upper()
+    if value in GEMINI_512_ALIASES:
+        value = "0.5K"
+    if value in choices:
+        return value
+    if value in GEMINI_TIER_LEVELS:
+        index = GEMINI_TIER_LEVELS.index(value)
+        lower = [item for item in choices if item in GEMINI_TIER_LEVELS and GEMINI_TIER_LEVELS.index(item) < index]
+        if lower:
+            return lower[-1]
+        if choices:
+            return choices[0]
+    return "1K" if "1K" in choices else (choices[0] if choices else "1K")
+
+def gemini_default_image_size(model=""):
+    choices = gemini_image_size_choices(model)
+    return "2K" if "2K" in choices else ("1K" if "1K" in choices else choices[0])
+
+def gemini_aspect_ratio_from_text(text, model=""):
+    match = re.fullmatch(r"(\d+)\s*:\s*(\d+)", str(text or "").strip())
+    if not match:
+        return "1:1"
+    known = {item[2] for item in gemini_aspect_ratio_choices(model)}
+    ratio = "%s:%s" % (int(match.group(1)), int(match.group(2)))
+    if ratio in known:
+        return ratio
+    return gemini_closest_aspect_ratio(int(match.group(1)), int(match.group(2)), model)
+
+def gemini_image_config(size, model=""):
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        raw = str(size or "").strip()
+        if raw.upper() in GEMINI_TIER_LEVELS or raw in GEMINI_512_ALIASES:
+            return {"aspectRatio": "1:1", "imageSize": gemini_clamp_image_size(raw, model)}
+        if re.fullmatch(r"\d+\s*:\s*\d+", raw):
+            return {"aspectRatio": gemini_aspect_ratio_from_text(raw, model), "imageSize": gemini_default_image_size(model)}
+        return {"aspectRatio": "1:1", "imageSize": gemini_default_image_size(model)}
+    ratio = gemini_closest_aspect_ratio(width, height, model)
+    level = apimart_resolution_from_long_edge(width, height).upper()
+    choices = gemini_image_size_choices(model)
+    if level == "1K" and "0.5K" in choices and width * height <= 512 * 512 * 2:
+        level = "0.5K"
+    return {"aspectRatio": ratio, "imageSize": gemini_clamp_image_size(level, model)}
+
+# Agnes 官方「档位 + 宽高比」（https://www.agnes-ai.cn/zh-Hans/docs/agnes-image-25-flash）：
+# size 用 1K/2K/3K/4K 档位（也兼容精确 WxH，但会被标准化），ratio 支持 8 个，输出像素见官方参考表。
+AGNES_ASPECT_RATIOS = [
+    (1, 1, "1:1"), (3, 4, "3:4"), (4, 3, "4:3"), (16, 9, "16:9"),
+    (9, 16, "9:16"), (2, 3, "2:3"), (3, 2, "3:2"), (21, 9, "21:9"),
+]
+AGNES_SIZE_TIERS = ("1K", "2K", "3K", "4K")
+AGNES_OUTPUT_PIXELS = {
+    "1:1": {"1K": (1024, 1024), "2K": (2048, 2048), "3K": (3072, 3072), "4K": (4096, 4096)},
+    "3:4": {"1K": (864, 1152), "2K": (1728, 2304), "3K": (2592, 3456), "4K": (3456, 4608)},
+    "4:3": {"1K": (1152, 864), "2K": (2304, 1728), "3K": (3456, 2592), "4K": (4608, 3456)},
+    "16:9": {"1K": (1312, 736), "2K": (2624, 1472), "3K": (3936, 2208), "4K": (5248, 2944)},
+    "9:16": {"1K": (736, 1312), "2K": (1472, 2624), "3K": (2208, 3936), "4K": (2944, 5248)},
+    "2:3": {"1K": (832, 1248), "2K": (1664, 2496), "3K": (2496, 3744), "4K": (3328, 4992)},
+    "3:2": {"1K": (1248, 832), "2K": (2496, 1664), "3K": (3744, 2496), "4K": (4992, 3328)},
+    "21:9": {"1K": (1568, 672), "2K": (3136, 1344), "3K": (4704, 2016), "4K": (6272, 2688)},
+}
+
+def is_agnes_image_model(model=""):
+    return str(model or "").strip().lower().startswith("agnes-image-")
+
+def agnes_closest_aspect_ratio(width, height):
+    ratio = width / max(1, height)
+    return min(AGNES_ASPECT_RATIOS, key=lambda item: abs(math.log(ratio / (item[0] / item[1]))))[2]
+
+def agnes_pixel_size(tier, ratio):
+    return AGNES_OUTPUT_PIXELS.get(ratio, AGNES_OUTPUT_PIXELS["1:1"]).get(tier)
+
+def agnes_closest_tier(width, height, ratio):
+    target = max(1, width * height)
+    def score(tier):
+        pixels = agnes_pixel_size(tier, ratio)
+        return abs(math.log((pixels[0] * pixels[1]) / target))
+    return min(AGNES_SIZE_TIERS, key=score)
+
+def agnes_image_config(size):
+    """把请求尺寸换算成官方「档位 + 比例」：返回 (size, ratio)。"""
     width, height = parse_size_pair(size)
     if not width or not height:
         raw = str(size or "").strip().upper()
-        if raw in {"1K", "2K", "4K"}:
-            return {"aspectRatio": "1:1", "imageSize": raw}
-        if re.fullmatch(r"\d+\s*:\s*\d+", raw):
-            return {"aspectRatio": raw.replace(" ", ""), "imageSize": "1K"}
-        return {"aspectRatio": "1:1", "imageSize": "2K"}
-    aspect_ratio, resolution = apimart_size_resolution(size)
-    return {"aspectRatio": aspect_ratio, "imageSize": resolution.upper()}
+        if raw in AGNES_SIZE_TIERS:
+            return raw, "1:1"
+        match = re.fullmatch(r"(\d+)\s*:\s*(\d+)", raw)
+        if match:
+            return "2K", agnes_closest_aspect_ratio(int(match.group(1)), int(match.group(2)))
+        return "2K", "1:1"
+    ratio = agnes_closest_aspect_ratio(width, height)
+    return agnes_closest_tier(width, height, ratio), ratio
 
 def gemini_reference_part(ref):
     value = reference_to_data_url(ref, max_size=1536)
@@ -12154,10 +12779,10 @@ async def generate_gemini_provider_image(prompt, size, model, reference_images=N
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
             "responseModalities": ["TEXT", "IMAGE"],
-            "imageConfig": gemini_image_config(size),
+            "imageConfig": gemini_image_config(size, model),
         },
     }
-    # 灵境等中转站连上游走本机代理，代理偶发抖动就是一次 ConnectTimeout，这里允许连接阶段重试
+    # 中转站连上游走本机代理，代理偶发抖动就是一次 ConnectTimeout，这里允许连接阶段重试
     retry_context = f"生图 provider={(provider or {}).get('id') or 'comfly'} model={model_name}"
     async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider), timeout=httpx.Timeout(connect=30.0, read=1800.0, write=120.0, pool=20.0)) as client:
         response = await with_connect_retries(
@@ -12766,7 +13391,7 @@ def lovart_image_requirements(size, requested_size=""):
     tier = lovart_size_tier(size)
     if not tier:
         return []
-    return [f"{tier} 分辨率（画面尺寸 {size}）"]
+    return [f"请按 {size} 输出（{tier} 档位）；若平台只能按自身档位出图，请保持该比例"]
 
 def lovart_video_requirements(payload):
     items = []
@@ -13303,17 +13928,44 @@ def runninghub_aspect_from_size(size, fallback="1:1"):
         return raw.replace(" ", "")
     return fallback
 
-def runninghub_resolution_from_size(size, fallback="2k"):
+# RunningHub 官方 workflow（seedream-v5-pro/text-to-image）的 resolution 枚举只有 1k/2k；
+# 不能再按长边推出官方没有的 4k。工作流 schema 明确列出枚举时以 schema 为准，未声明时只到 2k。
+RUNNINGHUB_IMAGE_RESOLUTION_LEVELS = ("1k", "2k")
+RUNNINGHUB_RESOLUTION_ORDER = ("1k", "2k", "4k")
+RUNNINGHUB_VIDEO_RESOLUTIONS = {"480p", "720p", "1080p", "native1080p"}
+
+def runninghub_clamp_resolution(level, options=None):
+    value = str(level or "").strip().lower()
+    allowed = [str(item).strip().lower() for item in (options or []) if str(item).strip()]
+    if not allowed:
+        allowed = list(RUNNINGHUB_IMAGE_RESOLUTION_LEVELS)
+    if value in allowed:
+        return value
+    if value in RUNNINGHUB_RESOLUTION_ORDER:
+        index = RUNNINGHUB_RESOLUTION_ORDER.index(value)
+        lower = [item for item in allowed if item in RUNNINGHUB_RESOLUTION_ORDER and RUNNINGHUB_RESOLUTION_ORDER.index(item) < index]
+        if lower:
+            return lower[-1]
+    return allowed[0]
+
+def runninghub_resolution_from_size(size, fallback="2k", options=None):
     width, height = parse_size_pair(size)
     if width and height:
         long_edge = max(width, height)
         if long_edge >= 3200:
-            return "4k"
-        if long_edge >= 1400:
-            return "2k"
-        return "1k"
-    raw = str(size or "").strip().lower()
-    return raw if raw in {"1k", "2k", "4k", "480p", "720p", "1080p", "native1080p"} else fallback
+            level = "4k"
+        elif long_edge >= 1400:
+            level = "2k"
+        else:
+            level = "1k"
+    else:
+        raw = str(size or "").strip().lower()
+        level = raw if raw in {"1k", "2k", "4k"} or raw in RUNNINGHUB_VIDEO_RESOLUTIONS else str(fallback or "")
+    if level in RUNNINGHUB_VIDEO_RESOLUTIONS:
+        return level
+    if not level:
+        return ""
+    return runninghub_clamp_resolution(level, options)
 
 def runninghub_size_for_aspect(aspect_ratio, fallback="1280x720"):
     ratio = str(aspect_ratio or "").strip()
@@ -13709,7 +14361,12 @@ async def generate_runninghub_entry_image(prompt, size, model, reference_images,
     use_wallet = False
     timeout = httpx.Timeout(connect=20.0, read=1800.0, write=240.0, pool=20.0)
     aspect = runninghub_aspect_from_size(size, "")
-    resolution = runninghub_resolution_from_size(size, "")
+    resolution_field = next((field for field in fields if "resolution" in {
+        str(field.get("fieldName") or "").strip().lower(),
+        str(field.get("fieldKey") or "").strip().lower(),
+        str(field.get("label") or "").strip().lower(),
+    }), None)
+    resolution = runninghub_resolution_from_size(size, "", runninghub_schema_options(resolution_field))
     width, height = parse_size_pair(size)
     def requested_size_field_value(field):
         names = {
@@ -13815,7 +14472,7 @@ async def generate_runninghub_provider_image(prompt, size, model, reference_imag
     endpoint = runninghub_task_endpoint(provider, model_def.get("endpoint") or model)
     params = model_def.get("params") if isinstance(model_def.get("params"), list) else []
     aspect = runninghub_aspect_from_size(size, "1:1")
-    resolution = runninghub_resolution_from_size(size, "2k")
+    resolution = runninghub_resolution_from_size(size, "2k", runninghub_schema_options(runninghub_schema_field(params, "resolution")))
     body = {"prompt": prompt}
     if runninghub_schema_field(params, "aspectRatio"):
         field = runninghub_schema_field(params, "aspectRatio")
@@ -13900,7 +14557,7 @@ async def generate_runninghub_video(payload, provider):
         body["duration"] = runninghub_schema_value(field, str(max(1, min(60, int(payload.duration or 5)))))
     if runninghub_schema_field(params, "resolution"):
         field = runninghub_schema_field(params, "resolution")
-        body["resolution"] = runninghub_schema_value(field, str(payload.resolution or "720p").lower())
+        body["resolution"] = runninghub_schema_value(field, legacy_video_resolution(payload.resolution or "720p").lower())
     if runninghub_schema_field(params, "generateAudio"):
         body["generateAudio"] = bool(payload.generate_audio)
     if runninghub_schema_field(params, "watermark"):
@@ -13948,6 +14605,10 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
 
 async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto"):
     provider = get_api_provider(provider_id)
+    if str(model or "").strip().lower().startswith("pixverse-image"):
+        # 拍我AI 的图片模版生成要 template_id + 参考图 id（专属接口 /openapi/v2/image/template/generate），
+        # 画布没有模版选择项，列在模型里也跑不了，直接说清楚而不是发出去撞运气。
+        raise HTTPException(status_code=400, detail="pixverse 图片模版生成需要模版 ID 和参考图 id（专属接口 /openapi/v2/image/template/generate），画布没有模版选项，先别选它。")
     background = normalize_image_background(background)
     # 原生透明只在真会下发 background 参数的 OpenAI /images/* 分支成立；keep 档上游没有对应参数，一律走提示词。
     native_background = background == "transparent" and image_supports_native_transparent_background(provider, model)
@@ -14059,6 +14720,11 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
             if image_refs:
                 extra_body["image"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
             body = {"model": model, "prompt": prompt, "size": size, "extra_body": extra_body}
+            # Agnes 官方口径是「档位 1K/2K/3K/4K + ratio 8 个比例」，不是任意 WxH（无原生支持的精确尺寸会被标准化）。
+            if is_agnes_image_model(model) or is_agnes_provider(provider):
+                agnes_size, agnes_ratio = agnes_image_config(size)
+                body["size"] = agnes_size
+                body["ratio"] = agnes_ratio
             response = await with_connect_retries(
                 lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body),
                 context=retry_context,
@@ -14718,7 +15384,7 @@ async def upload_image(files: List[UploadFile] = File(...)):
         if success_count > 0 and last_result:
             uploaded_files.append({"comfy_name": last_result.get("name", file.filename)})
         else:
-            raise HTTPException(status_code=500, detail="Failed to upload to any backend")
+            raise HTTPException(status_code=503, detail="Failed to upload to any backend")
 
     return {"files": uploaded_files}
 
@@ -16016,7 +16682,7 @@ async def analyze_image_subject(raw_url: str):
 
 
 async def _api_matting(raw_url: str, subject: str):
-    """API 抠图：复用生图编辑链路（灵境 gpt-image-2 优先 → Modelscope Qwen-Image-Edit 备选），动态不写死。"""
+    """API 抠图：复用生图编辑链路（Modelscope Qwen-Image-Edit），动态不写死。"""
     src_path = output_file_from_url(raw_url)
     from PIL import Image as PILImage
     try:
@@ -16034,8 +16700,6 @@ async def _api_matting(raw_url: str, subject: str):
         size = "1024x1024"
     prompt = _MATTING_EDIT_PROMPT.format(subject=subject) if subject else _MATTING_EDIT_PROMPT_NO_SUBJECT
     candidates = [
-        ("lingjing", "gemini-3.1-flash-image-preview"),
-        ("lingjing", "gpt-image-2"),
         ("modelscope", "Qwen/Qwen-Image-Edit"),
     ]
     last_err = ""
@@ -17705,6 +18369,9 @@ async def jimeng_query_media(payload: JimengQueryMediaRequest):
 async def ai_config():
     preferred_chat_model = next((m for m in CHAT_MODELS if m == "gpt-5.5"), CHAT_MODELS[0] if CHAT_MODELS else CHAT_MODEL)
     providers = public_api_providers()
+    # 只调整下发视图：磁盘上的 data/api_providers.json 保持用户原样
+    for provider in providers:
+        provider["video_models"] = provider_view_video_models(provider, provider.get("video_models"))
     return {
         "base_url": AI_BASE_URL,
         "chat_model": preferred_chat_model,
@@ -17734,7 +18401,8 @@ async def provider_registry():
 
 @app.get("/api/providers")
 async def api_providers():
-    return {"providers": public_api_providers()}
+    # registry_presets：注册表里的供应商识别信息与默认模型（不含密钥），前端推荐卡片按 id 取用
+    return {"providers": public_api_providers(), "registry_presets": public_registry_presets()}
 
 @app.put("/api/providers")
 async def save_providers(payload: List[ApiProviderPayload]):
@@ -17905,6 +18573,43 @@ async def api_set_output_dir(payload: OutputDirPayload):
     write_json_atomic(SETTINGS_FILE, cfg, ensure_ascii=False, indent=2)
 
     return {"output_dir": expanded, "effective_output_dir": expanded, "message": "输出目录已更新，重启后生效"}
+
+# ── 视频口播转写（ASR）平台与模型（设置 → 通用 用）──
+
+class AsrSettingsPayload(BaseModel):
+    provider: str = ""
+    model: str = ""
+
+@app.get("/api/settings/asr")
+async def api_get_asr_settings():
+    """当前生效的语音转写平台/模型；source = env | user | config | none（表示生效值来自哪一层）。"""
+    from server.integrations.video_sources import asr_settings_detail
+    return asr_settings_detail()
+
+@app.put("/api/settings/asr")
+async def api_set_asr_settings(payload: AsrSettingsPayload):
+    """设置视频口播转写用的平台与对话模型；两者都为空 = 关闭。只改写 settings.json 的 asr 键，其它键原样保留。"""
+    from server.integrations.video_sources import asr_settings_detail
+    provider = str(payload.provider or "").strip()
+    model = str(payload.model or "").strip()
+    item = None
+    if provider:
+        item = next((p for p in load_api_providers() if p.get("id") == provider), None)
+        if item is None:
+            raise HTTPException(status_code=400, detail="平台「%s」未配置：请先在「设置 → API 设置」里添加并保存该平台。" % provider)
+        if not item.get("enabled", True):
+            raise HTTPException(status_code=400, detail="平台「%s」已停用：请先在「设置 → API 设置」里启用它。" % (item.get("name") or provider))
+    if model:
+        if not provider:
+            raise HTTPException(status_code=400, detail="请先选择转写平台，再选择该平台的对话模型。")
+        chat_models = [str(m or "").strip() for m in (item.get("chat_models") or [])]
+        if model not in chat_models:
+            raise HTTPException(status_code=400, detail="模型「%s」不在平台「%s」的对话模型列表里：请先在「设置 → API 设置」里为该平台添加该模型。" % (model, item.get("name") or provider))
+    cfg = load_settings()
+    cfg["asr"] = {"provider": provider, "model": model}
+    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+    write_json_atomic(SETTINGS_FILE, cfg, ensure_ascii=False, indent=2)
+    return asr_settings_detail()
 
 # ── 存储用量与上限（设置页用）──
 
@@ -18247,7 +18952,7 @@ async def probe_openai_models_endpoint(client, base_url: str, api_key: str):
     if response.status_code < 300:
         grouped, ids = parse_upstream_models(raw, "openai") if isinstance(raw, dict) else ({"image": [], "chat": [], "video": []}, [])
         grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
-        grouped, ids = apply_lingjing_model_defaults(base_url, grouped, ids)
+        grouped, ids = apply_provider_registry_model_defaults(base_url, grouped, ids)
         grouped = apply_locked_recommended_model_rules(base_url, grouped)
         return True, {
             "status": response.status_code,
@@ -18333,12 +19038,12 @@ def apply_agnes_model_defaults(base_url, grouped, ids):
     grouped["video"] = sorted(set(grouped.get("video") or []))
     return grouped, ids
 
-def apply_lingjing_model_defaults(base_url, grouped, ids):
+def apply_provider_registry_model_defaults(base_url, grouped, ids):
     """把注册表里该供应商的默认模型补进 /v1/models 的结果里。
 
-    灵境的 /v1/models 是按令牌分组过滤的：Gemini 系列经常不返回，但用同一个 Key 可以直接
+    有些中转站的 /v1/models 会按令牌分组过滤模型：部分模型拿不到列表，但用同一个 Key 可以直接
     调用（文本走 /v1/chat/completions，图像走 /v1beta/models/{model}:generateContent）。
-    默认清单现在来自 config/providers.json 的 default_models（可自行增删），代码不写死模型名。"""
+    默认清单来自 config/providers.json 的 default_models（可自行增删），代码不写死模型名。"""
     provider = {"base_url": str(base_url or "").strip()}
     defaults = {kind: provider_registry_default_models(provider, kind) for kind in ("image", "chat", "video")}
     if not any(defaults.values()):
@@ -18483,7 +19188,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
             data = resp.json() if resp.text else {}
             grouped, ids = parse_upstream_models(data, protocol)
             grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
-            grouped, ids = apply_lingjing_model_defaults(base_url, grouped, ids)
+            grouped, ids = apply_provider_registry_model_defaults(base_url, grouped, ids)
             grouped = apply_locked_recommended_model_rules(base_url, grouped)
             if protocol == "volcengine" and not ids:
                 detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
@@ -18777,7 +19482,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
         raise HTTPException(status_code=502, detail=f"请求上游模型列表失败：{e}")
     grouped, ids = parse_upstream_models(raw, protocol)
     grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
-    grouped, ids = apply_lingjing_model_defaults(base_url, grouped, ids)
+    grouped, ids = apply_provider_registry_model_defaults(base_url, grouped, ids)
     grouped = apply_locked_recommended_model_rules(base_url, grouped)
     if protocol == "volcengine" and not ids:
         payload = volcengine_default_model_payload(raw=raw)
@@ -18874,8 +19579,7 @@ async def set_lovart_mode(payload: LovartModePayload):
 
 async def build_online_image_result(payload: OnlineImageRequest):
     provider = get_api_provider(payload.provider_id)
-    default_model = (provider.get("image_models") or [IMAGE_MODEL])[0]
-    model = selected_model(payload.model, default_model)
+    model = preferred_image_model(provider, payload.model)
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
     count = max(1, min(8, int(payload.n or 1)))
@@ -19271,6 +19975,7 @@ IMAGE_PARAM_RATIOS = [
     {"value": "9:16", "label": "9:16"},
     {"value": "2:3", "label": "2:3"},
     {"value": "3:2", "label": "3:2"},
+    {"value": "21:9", "label": "21:9"},
 ]
 IMAGE_PARAM_RESOLUTIONS = [
     {"value": "1k", "label": "1K"},
@@ -19428,8 +20133,6 @@ def looks_like_html_response(text: str) -> bool:
 def video_submit_url_candidates(provider, base_url):
     if is_agnes_provider(provider):
         return [f"{base_url}/v1/videos"]
-    if is_lingjing_provider(provider):
-        return [f"{base_url}/v1/videos"]
     if is_apimart_provider(provider):
         return [f"{base_url}/videos/generations" if base_url.endswith("/v1") else f"{base_url}/v1/videos/generations"]
     if is_volcengine_provider(provider):
@@ -19447,12 +20150,6 @@ def video_task_url_candidates(provider, base_url, task_id, submit_url=""):
         return [
             f"{base_url}/agnesapi?{urllib.parse.urlencode({'video_id': task_id})}",
             f"{base_url}/v1/videos/{quoted_id}",
-        ]
-    if is_lingjing_provider(provider):
-        quoted_id = urllib.parse.quote(str(task_id), safe="")
-        return [
-            f"{base_url}/v1/videos/{quoted_id}",
-            f"{base_url}/v1/video/query?{urllib.parse.urlencode({'id': task_id})}",
         ]
     if is_apimart_provider(provider):
         task_path = f"{base_url}/tasks/{task_id}" if base_url.endswith("/v1") else f"{base_url}/v1/tasks/{task_id}"
@@ -19560,6 +20257,28 @@ def apimart_video_size(size):
     allowed = {"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"}
     return value if value in allowed else "16:9"
 
+def apimart_video_resolution(resolution) -> str:
+    """APIMart Seedance 分辨率：Auto（空）走官方默认 720p，780P 私有档位兼容映射 720p，其余原样。"""
+    value = str(resolution or "").strip().lower()
+    aliases = {"": "720p", "auto": "720p", "780p": "720p", "480": "480p", "1080": "1080p"}
+    return aliases.get(value, value)
+
+def apimart_is_kling_model(model: str) -> bool:
+    name = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
+    return "kling" in name
+
+def apimart_kling_video_params(model: str, resolution) -> dict:
+    """APIMart Kling 分辨率字段取官方口径：v3 / o1 用 mode(std/pro/4k)，
+    3.0-turbo 仍用 resolution(720p/1080p)；入参沿用旧画布 resolution 字段（兼容读取）。"""
+    name = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
+    value = str(resolution or "").strip().lower()
+    if value == "780p":
+        value = "720p"
+    if "turbo" in name:
+        return {"resolution": "1080p" if value in {"1080p", "4k"} else "720p"}
+    mode = {"": "std", "auto": "std", "480p": "std", "720p": "std", "1080p": "pro", "4k": "4k"}.get(value, "std")
+    return {"mode": mode}
+
 def agnes_video_dimensions(aspect_ratio="", resolution=""):
     ratio = str(aspect_ratio or "16:9").strip()
     width, height = {
@@ -19605,7 +20324,8 @@ async def wait_for_agnes_video_task(client, provider, video_id, model):
     query_url = f"{base_url}/agnesapi?{urllib.parse.urlencode({'video_id': video_id, 'model_name': model})}"
     legacy_url = f"{base_url}/v1/videos/{urllib.parse.quote(str(video_id), safe='')}"
     deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
-    delay = 5.0
+    # 官方建议 1–2 秒查询一次；首个间隔 1.5s，之后仍按 1.35 倍退避 + 12s 封顶，避免长任务把上游打爆。
+    delay = 1.5
     last_payload = {}
     while time.monotonic() < deadline:
         await asyncio.sleep(delay)
@@ -19643,11 +20363,12 @@ def agnes_video_uses_openai_protocol(model):
     return str(model or "").strip().lower().startswith("agnes-video-2.5")
 
 def agnes_video_size_tier(resolution="", model=""):
-    """2.5 的 size 是档位（720P/1080P/1K/2K）；Flash 固定 720P。"""
+    """2.5 的 size 是档位（720P/1080P/1K/2K）；Flash 固定 720P。
+    UI 的 480p / 4k 不是官方档位：480p 收敛到 720P，4k 收敛到官方最高档 2K。"""
     if str(model or "").strip().lower().startswith("agnes-video-2.5-flash"):
         return "720P"
     value = str(resolution or "").strip().lower()
-    if "2k" in value:
+    if "2k" in value or value == "4k":
         return "2K"
     if "1k" in value:
         return "1K"
@@ -19663,6 +20384,20 @@ def agnes_video_seconds(duration):
         value = 5
     return str(max(4, min(12, value)))
 
+def agnes_video_aspect_ratio(aspect):
+    """Agnes 2.5 官方画幅白名单（21:9/16:9/4:3/1:1/3:4/9:16）；
+    非官方输入（keep_ratio/adaptive/auto/9:21 等）收敛到最接近的官方值。"""
+    value = str(aspect or "").strip()
+    if value in {"21:9", "16:9", "4:3", "1:1", "3:4", "9:16"}:
+        return value
+    if value == "9:21":
+        return "9:16"
+    return "16:9"
+
+def agnes_video_reference_image_limit(model):
+    """官方 reference 模式参考图上限按型号区分：2.5 标准版 8 张、Flash 5 张。"""
+    return 5 if str(model or "").strip().lower().startswith("agnes-video-2.5-flash") else 8
+
 def build_agnes_openai_video_body(payload, model, image_urls, image_roles):
     """构造 Agnes 2.5 的 OpenAI Videos 请求体（纯函数，不发网络请求）。"""
     body = {
@@ -19670,7 +20405,7 @@ def build_agnes_openai_video_body(payload, model, image_urls, image_roles):
         "prompt": str(payload.prompt or ""),
         "seconds": agnes_video_seconds(payload.duration),
         "size": agnes_video_size_tier(payload.resolution, model),
-        "aspect_ratio": str(payload.aspect_ratio or "16:9").strip() or "16:9",
+        "aspect_ratio": agnes_video_aspect_ratio(payload.aspect_ratio),
     }
     urls = [str(url) for url in (image_urls or []) if url]
     roles = [str(role or "").strip().lower() for role in (image_roles or [])]
@@ -19689,23 +20424,91 @@ def build_agnes_openai_video_body(payload, model, image_urls, image_roles):
             body["last_frame"] = last
         if "first_frame" not in body and "last_frame" not in body:
             body["mode"] = "reference"
-            body["images"] = urls[:5]
+            body["images"] = urls[:agnes_video_reference_image_limit(model)]
     elif urls:
         body["mode"] = "reference"
-        body["images"] = urls[:5]
+        body["images"] = urls[:agnes_video_reference_image_limit(model)]
     else:
         body["mode"] = "text"
     if payload.seed is not None:
         body["seed"] = payload.seed
     return body
 
+def agnes_upstream_video_model(provider, model):
+    """把历史遗留的 Agnes 视频模型名归一到上游真实存在的名字。
+
+    apihub.agnes-ai.com 的 /v1/models 只有 agnes-video-2.5 / agnes-video-2.5-flash，
+    旧名 agnes-video-v2.0 会被网关判成 model_not_found。只对官方 hub 归一：
+    自建/别家中转如果自己提供了 v2.0，就按原样发，不替它做主。"""
+    name = str(model or "").strip()
+    base_url = str((provider or {}).get("base_url") or "").strip().lower()
+    if "apihub.agnes-ai.com" not in base_url:
+        return name
+    mapped = AGNES_VIDEO_MODEL_ALIASES.get(name.lower(), "")
+    if mapped and mapped != name:
+        print(f"[agnes-video] 模型名归一：{name} → {mapped}（上游已无该模型）", flush=True)
+        return mapped
+    return name
+
+def agnes_video_error_detail(body, provider, model):
+    """把 Agnes 网关错误翻成能照着排查的中文提示。
+
+    网关（new-api / one-api 风格）在「该分组没有这个模型的通道」时回的是
+    {"error":{"code":"model_not_found","message":"No available channel for model ... (request id: ...)"}}，
+    原文甩到画布上没人看得懂；而且 request id 每次请求都不一样，批量 3 行会把同一个原因
+    数成「共 3 种原因」。展示文案里去掉 request id，完整 body 仍然打到服务端日志。"""
+    raw = str(body or "").strip()
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = None
+    code = ""
+    message = ""
+    if isinstance(data, dict):
+        error = data.get("error")
+        if isinstance(error, dict):
+            code = str(error.get("code") or "").strip()
+            message = str(error.get("message") or error.get("msg") or "").strip()
+        elif isinstance(error, str):
+            message = error.strip()
+        if not code:
+            code = str(data.get("code") or "").strip()
+        if not message:
+            message = str(data.get("message") or data.get("detail") or "").strip()
+    if not message:
+        message = raw
+    message = re.sub(r"\s*[（(]request id:[^)）]*[)）]", "", message).strip()
+    lowered = message.lower()
+    unavailable = (code == "model_not_found"
+                   or "no available channel" in lowered
+                   or "model_not_found" in raw.lower())
+    no_quota = (code == "insufficient_user_quota"
+                or "pre-consume quota" in lowered
+                or "insufficient quota" in lowered)
+    provider_name = str((provider or {}).get("name") or (provider or {}).get("id") or "Agnes")
+    if unavailable:
+        alternatives = "、".join(item for item in AGNES_DEFAULT_VIDEO_MODELS if item != model)
+        return (
+            f"Agnes 视频接口错误：供应商「{provider_name}」当前分组下没有模型 {model} 的可用通道。"
+            "请在供应商后台为该分组开通这个视频模型"
+            + (f"，或在画布上改选 {alternatives}" if alternatives else "")
+            + f"。上游原始信息：{message}"
+        )
+    if no_quota:
+        return (
+            f"Agnes 视频接口错误：供应商「{provider_name}」账户余额不足，本次生成无法扣费。"
+            f"请先到供应商后台充值再生成。上游原始信息：{message}"
+        )
+    return f"Agnes 视频接口错误：{message}"
+
 async def generate_agnes_video(client, payload, provider, base_url, requested_model):
-    model = selected_model(requested_model, "agnes-video-v2.0")
+    model = agnes_upstream_video_model(provider, selected_model(requested_model, "agnes-video-2.5"))
     is_openai_video = agnes_video_uses_openai_protocol(model)
-    # 2.5 reference 模式最多 5 张参考图；v2.0 仍只取前 4 张。
+    # 2.5 reference 模式参考图上限按型号区分（标准版 8 张、Flash 5 张）；v2.0 仍只取前 4 张。
     image_urls = []
     image_roles = []
-    for ref in (payload.images or [])[:(5 if is_openai_video else 4)]:
+    max_images = agnes_video_reference_image_limit(model) if is_openai_video else 4
+    for ref in (payload.images or [])[:max_images]:
         url = await agnes_video_image_url(ref)
         if url:
             image_urls.append(url)
@@ -19766,17 +20569,6 @@ def yuli_openai_size(aspect_ratio: str) -> str:
         return "9x16"
     return "16x9"
 
-def lingjing_openai_video_model(model: str) -> str:
-    value = str(model or "").strip() or "veo_3_1-fast"
-    lower = value.lower()
-    if lower.startswith("veo3.1"):
-        value = "veo_3_1" + value[len("veo3.1"):]
-    elif lower.startswith("veo3_1"):
-        value = "veo_3_1" + value[len("veo3_1"):]
-    if value.lower().endswith("-4k"):
-        value = value[:-2] + "4K"
-    return value
-
 def yuli_video_seconds(duration) -> str:
     try:
         value = int(duration)
@@ -19821,465 +20613,6 @@ async def yuli_fetch_reference_bytes(client, ref_url):
         ext = (mime.split("/")[-1] or "png").split("+")[0]
         return (f"input_reference.{ext}", raw, mime)
     return None
-
-async def generate_lingjing_openai_video(client, payload, provider, base_url, requested_model):
-    """灵境 API OpenAI 视频格式：POST /v1/videos，参考图走 multipart input_reference。"""
-    submit_url = f"{base_url}/v1/videos"
-    data = {
-        "model": lingjing_openai_video_model(selected_model(requested_model, "veo_3_1-fast")),
-        "prompt": str(payload.prompt or ""),
-        "seconds": yuli_video_seconds(payload.duration),
-        "size": yuli_openai_size(payload.aspect_ratio or payload.size),
-        "watermark": "true" if payload.watermark else "false",
-    }
-    files = []
-    for ref in (payload.images or [])[:3]:
-        ref_file = await yuli_fetch_reference_bytes(client, getattr(ref, "url", ""))
-        if ref_file:
-            files.append(("input_reference", ref_file))
-    headers = api_headers(json_body=False, provider=provider)
-    if files:
-        response = await client.post(submit_url, headers=headers, data=data, files=files)
-    else:
-        multipart_fields = [(key, (None, value)) for key, value in data.items()]
-        response = await client.post(submit_url, headers=headers, files=multipart_fields)
-    response.raise_for_status()
-    try:
-        raw = response.json()
-    except Exception as exc:
-        resp_text = (response.text or "")[:500]
-        raise HTTPException(status_code=502, detail=f"灵境 API 视频接口返回非 JSON 响应（状态 {response.status_code}）：{resp_text}") from exc
-    task_id = str(raw.get("id") or extract_task_id(raw) or raw.get("task_id") or "").strip()
-    result = raw
-    if task_id and not video_output_urls(raw):
-        result = await wait_for_video_task(client, provider, task_id, submit_url)
-    urls = video_output_urls(result)
-    if not urls:
-        raise HTTPException(status_code=502, detail=f"灵境 API 视频生成成功但没有返回视频：{result}")
-    local_urls = [await save_remote_video_to_output(url) for url in urls]
-    return {"videos": local_urls, "task_id": task_id, "raw": result}
-
-# ============================================================================
-# 灵境 API（向量引擎）视频厂商分发
-# 灵境把不同上游视频模型挂在各自路径下，请求体/查询路径都不同：
-#   unified  /v1/video/create + /v1/video/query?id=     即梦 / sora / veo 统一格式
-#   volc     /volc/v1/contents/generations/tasks        豆包 Seedance（方舟格式）
-#   minimax  /minimax/v1/video_generation               海螺
-#   kling    /kling/v1/videos/{text2video|image2video}  快手可灵
-#   luma     /luma/generations                          Luma
-#   runway   /runwayml/v1/image_to_video                Runway（必须有首帧图）
-#   vidu     /vidu-native/video/generations             Vidu
-# veo* 仍走既有的 OpenAI /v1/videos 路径（支持 seconds 时长）。
-# ============================================================================
-
-LINGJING_VIDEO_FAMILY_PREFIXES = (
-    # 通义万象（阿里百炼）：wan2.x / happyhorse 走 /alibailian/...
-    ("alibailian", ("happyhorse-", "wan2.", "wan-")),
-    ("volc", ("doubao-seedance", "doubao-")),
-    ("minimax", ("minimax-hailuo", "minimax")),
-    ("kling", ("kling",)),
-    ("luma", ("luma", "ray-")),
-    ("runway", ("runway", "gen3a_", "gen4_", "gen3a-turbo", "gen4-turbo")),
-    ("vidu", ("vidu", "tc-vidu")),
-    ("unified", ("jimeng-video", "jimeng-", "sora-", "sora2")),
-)
-LINGJING_VIDEO_OK_STATUSES = {"success", "succeeded", "succeed", "completed", "complete", "finished", "done", "ok", "ready"}
-LINGJING_VIDEO_FAIL_STATUSES = {"failed", "fail", "failure", "error", "canceled", "cancelled", "timeout", "expired"}
-
-
-def lingjing_video_family(model):
-    """按模型名前缀判定灵境视频厂商；veo* 返回空串（继续走 OpenAI /v1/videos）。"""
-    name = str(model or "").strip().lower()
-    for family, prefixes in LINGJING_VIDEO_FAMILY_PREFIXES:
-        if name.startswith(prefixes):
-            return family
-    return ""
-
-
-def lingjing_video_size_tier(resolution="", fallback="720P"):
-    value = str(resolution or "").strip().lower()
-    if "1080" in value:
-        return "1080P"
-    if "480" in value:
-        return "480P"
-    if "2k" in value:
-        return "2K"
-    if "1k" in value:
-        return "1K"
-    return fallback
-
-
-def lingjing_video_aspect(aspect_ratio="", fallback="16:9"):
-    value = str(aspect_ratio or "").strip()
-    return value or fallback
-
-
-def lingjing_video_duration(duration, fallback=5, minimum=1, maximum=12):
-    try:
-        value = int(duration)
-    except Exception:
-        value = fallback
-    return max(minimum, min(maximum, value))
-
-
-def lingjing_video_image_payload(payload, limit=4):
-    """灵境上游普遍接受 http(s) URL / data URL；本地素材优先转 data URL。"""
-    urls = []
-    roles = []
-    for ref in (payload.images or [])[:limit]:
-        url = str(getattr(ref, "url", "") or "").strip()
-        if not url:
-            continue
-        if not url.startswith(("http://", "https://", "data:")):
-            url = reference_to_data_url(ref.dict(), max_size=1536)
-        if not url:
-            continue
-        urls.append(url)
-        roles.append(str(getattr(ref, "role", "") or "").strip().lower())
-    return urls, roles
-
-
-def build_lingjing_unified_video_body(payload, model, images):
-    """灵境「视频统一格式」：POST /v1/video/create（veo / 即梦 / sora）。"""
-    name = str(model or "").strip().lower()
-    body = {"model": model, "prompt": str(payload.prompt or "")}
-    if name.startswith("sora"):
-        body.update({
-            "images": images,
-            "orientation": "portrait" if lingjing_video_aspect(payload.aspect_ratio).startswith("9:") else "landscape",
-            "size": "small",
-            "duration": lingjing_video_duration(payload.duration, 10, 4, 20),
-            "watermark": bool(payload.watermark),
-            "private": False,
-        })
-        return body
-    if name.startswith("jimeng"):
-        body.update({
-            "aspect_ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
-            "size": lingjing_video_size_tier(payload.resolution),
-            "images": images,
-        })
-        return body
-    body.update({
-        "images": images,
-        "enhance_prompt": any(ord(ch) > 127 for ch in str(payload.prompt or "")),
-        "enable_upsample": bool(payload.enable_upsample),
-        "aspect_ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
-    })
-    return body
-
-
-def build_lingjing_volc_video_body(payload, model, images, roles):
-    """豆包 Seedance 走火山方舟格式（灵境加 /volc 前缀）。"""
-    content = [{"type": "text", "text": str(payload.prompt or "")}]
-    for url, role in zip(images, roles):
-        item = {"type": "image_url", "image_url": {"url": url}}
-        role_name = str(role or "").strip().lower()
-        if role_name in {"first_frame", "last_frame", "reference_image"}:
-            item["role"] = role_name
-        content.append(item)
-    body = {
-        "model": model,
-        "content": content,
-        "ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
-        "resolution": lingjing_video_size_tier(payload.resolution),
-        "duration": lingjing_video_duration(payload.duration, 5, 2, 12),
-    }
-    if payload.watermark:
-        body["watermark"] = True
-    if payload.camerafixed:
-        body["camera_fixed"] = True
-    if payload.seed is not None:
-        body["seed"] = payload.seed
-    return body
-
-
-def build_lingjing_minimax_video_body(payload, model, images):
-    """海螺 MiniMax：POST /minimax/v1/video_generation（时长只支持 6 / 10）。"""
-    duration = lingjing_video_duration(payload.duration, 6, 1, 10)
-    body = {
-        "model": model,
-        "prompt": str(payload.prompt or ""),
-        "duration": 10 if duration >= 8 else 6,
-    }
-    if images:
-        body["first_frame_image"] = images[0]
-    if len(images) > 1:
-        body["last_frame_image"] = images[-1]
-    return body
-
-
-# 灵境模型广场用的是「公共名」，可灵上游只认自己的 model_name。
-# 实测：kling-3.0-turbo -> kling-v3；kling-video -> kling-v2-5-turbo。
-LINGJING_KLING_MODEL_ALIASES = {
-    "kling-3.0-turbo": "kling-v3",
-    "kling-video": "kling-v2-5-turbo",
-    "kling-omni-video": "kling-v3-omni",
-    "kling-motion-control": "kling-v2-5-turbo",
-    "kling-video-extend": "kling-v2-5-turbo",
-}
-
-
-def lingjing_kling_model_name(model):
-    name = str(model or "").strip()
-    return LINGJING_KLING_MODEL_ALIASES.get(name.lower(), name)
-
-
-def lingjing_kling_action(model):
-    """可灵的专用子接口（动作控制 / 延长 / omni 与普通文生、图生视频不同）。"""
-    name = str(model or "").strip().lower()
-    if name.endswith("omni-video"):
-        return "omni-video"
-    if name.endswith("motion-control"):
-        return "motion-control"
-    if name.endswith("video-extend"):
-        return "video-extend"
-    return ""
-
-
-def build_lingjing_kling_video_body(payload, model, images):
-    """快手可灵：POST /kling/v1/videos/{text2video|image2video}（duration 是字符串 5/10）。"""
-    body = {
-        "model_name": lingjing_kling_model_name(model),
-        "prompt": str(payload.prompt or ""),
-        "negative_prompt": "",
-        "cfg_scale": 0.5,
-        "mode": "std",
-        "aspect_ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
-        "duration": "10" if lingjing_video_duration(payload.duration, 5, 5, 10) >= 8 else "5",
-    }
-    if images:
-        body["image"] = images[0]
-        if len(images) > 1:
-            body["image_tail"] = images[1]
-    if payload.seed is not None:
-        body["seed"] = payload.seed
-    return body
-
-
-def build_lingjing_luma_video_body(payload, model, images):
-    """Luma：POST /luma/generations（时长只支持 5s）。"""
-    body = {
-        "user_prompt": str(payload.prompt or ""),
-        "model_name": model,
-        "expand_prompt": True,
-        "loop": False,
-        "resolution": "1080p" if "1080" in str(payload.resolution or "").lower() else "720p",
-        "duration": "5s",
-    }
-    if images:
-        body["image_url"] = images[0]
-    if len(images) > 1:
-        body["image_end_url"] = images[1]
-    return body
-
-
-def build_lingjing_runway_video_body(payload, model, images):
-    """Runway：POST /runwayml/v1/image_to_video，必须有首帧图。"""
-    if not images:
-        raise HTTPException(status_code=400, detail="Runway 视频需要一张首帧参考图（promptImage）。")
-    body = {
-        "model": model,
-        "promptImage": images[0],
-        "promptText": str(payload.prompt or ""),
-        "ratio": "1280:768" if lingjing_video_aspect(payload.aspect_ratio).startswith("16:") else "768:1280",
-        "duration": 10 if lingjing_video_duration(payload.duration, 5, 5, 10) >= 8 else 5,
-    }
-    if payload.seed is not None:
-        body["seed"] = payload.seed
-    return body
-
-
-def build_lingjing_vidu_video_body(payload, model, images):
-    """Vidu 官方：POST /ent/v2/{text2video|img2video|start-end2video}。
-    resolution 用小写档位（540p/720p/1080p），duration 按模型不同上限 16。"""
-    body = {
-        "model": model,
-        "prompt": str(payload.prompt or ""),
-        "duration": lingjing_video_duration(payload.duration, 5, 1, 16),
-        "aspect_ratio": lingjing_video_aspect(payload.aspect_ratio, "16:9"),
-        "resolution": lingjing_video_size_tier(payload.resolution, "720p").lower(),
-    }
-    if images:
-        body["images"] = images[:2]
-    if payload.seed is not None:
-        body["seed"] = str(payload.seed)
-    return body
-
-
-def build_lingjing_alibailian_video_body(payload, model, images):
-    """通义万象（阿里百炼）：POST /alibailian/api/v1/services/aigc/video-generation/video-synthesis。"""
-    inputs = {"prompt": str(payload.prompt or "")}
-    if images:
-        inputs["img_url"] = images[0]
-    parameters = {
-        "resolution": lingjing_video_size_tier(payload.resolution),
-        "prompt_extend": True,
-        "watermark": bool(payload.watermark),
-    }
-    duration = lingjing_video_duration(payload.duration, 0, 0, 12)
-    if duration:
-        parameters["duration"] = duration
-    if payload.seed is not None:
-        parameters["seed"] = payload.seed
-    return {"model": model, "input": inputs, "parameters": parameters}
-
-
-def lingjing_video_plan(provider, family, model, payload, images, roles):
-    """返回 (提交地址, 请求体, 查询子类型)。纯函数，便于单测。"""
-    base = video_api_root(provider)
-    if not base:
-        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
-    if family == "unified":
-        return f"{base}/v1/video/create", build_lingjing_unified_video_body(payload, model, images), ""
-    if family == "volc":
-        return f"{base}/volc/v1/contents/generations/tasks", build_lingjing_volc_video_body(payload, model, images, roles), ""
-    if family == "minimax":
-        return f"{base}/minimax/v1/video_generation", build_lingjing_minimax_video_body(payload, model, images), ""
-    if family == "kling":
-        kind = lingjing_kling_action(model) or ("image2video" if images else "text2video")
-        return f"{base}/kling/v1/videos/{kind}", build_lingjing_kling_video_body(payload, model, images), kind
-    if family == "luma":
-        return f"{base}/luma/generations", build_lingjing_luma_video_body(payload, model, images), ""
-    if family == "runway":
-        return f"{base}/runwayml/v1/image_to_video", build_lingjing_runway_video_body(payload, model, images), ""
-    if family == "vidu":
-        kind = "start-end2video" if len(images) > 1 else ("img2video" if images else "text2video")
-        return f"{base}/ent/v2/{kind}", build_lingjing_vidu_video_body(payload, model, images), kind
-    if family == "alibailian":
-        return f"{base}/alibailian/api/v1/services/aigc/video-generation/video-synthesis", build_lingjing_alibailian_video_body(payload, model, images), ""
-    raise HTTPException(status_code=400, detail=f"未知的灵境视频厂商：{family}")
-
-
-def lingjing_video_query_url(provider, family, task_id, subkind=""):
-    base = video_api_root(provider)
-    quoted = urllib.parse.quote(str(task_id), safe="")
-    if family == "unified":
-        return f"{base}/v1/video/query?{urllib.parse.urlencode({'id': task_id})}"
-    if family == "volc":
-        return f"{base}/volc/v1/contents/generations/tasks/{quoted}"
-    if family == "minimax":
-        return f"{base}/minimax/v1/query/video_generation?{urllib.parse.urlencode({'task_id': task_id})}"
-    if family == "kling":
-        return f"{base}/kling/v1/videos/{subkind or 'text2video'}/{quoted}"
-    if family == "luma":
-        return f"{base}/luma/generations/{quoted}"
-    if family == "runway":
-        return f"{base}/runwayml/v1/tasks/{quoted}"
-    if family == "vidu":
-        # Vidu 官方查询：/ent/v2/tasks/{id}/creations
-        return f"{base}/ent/v2/tasks/{quoted}/creations"
-    if family == "alibailian":
-        return f"{base}/alibailian/api/v1/tasks/{quoted}"
-    return f"{base}/v1/videos/{quoted}"
-
-
-def lingjing_video_status(raw):
-    if not isinstance(raw, dict):
-        return ""
-    nodes = [raw]
-    # data/detail/result：多数厂商；output：通义万象（task_status=RUNNING/SUCCEEDED）；
-    # Response：Vidu 官方（Status=FINISH/FAIL）。
-    for key in ("data", "detail", "result", "output", "Response"):
-        node = raw.get(key)
-        if isinstance(node, dict):
-            nodes.append(node)
-            inner = node.get("data")
-            if isinstance(inner, dict):
-                nodes.append(inner)
-    for node in nodes:
-        for key in ("status", "task_status", "state", "taskStatus"):
-            value = node.get(key)
-            if value:
-                return str(value).strip().lower()
-    return ""
-
-
-def _lingjing_collect_file_urls(node, urls, inside_output=False):
-    """只在 FileInfos / Creations 子树里取 url，避免把请求回显里的输入图当成结果。"""
-    if isinstance(node, dict):
-        for key, value in node.items():
-            now_inside = inside_output or str(key).lower() in {"fileinfos", "creations"}
-            if now_inside and isinstance(value, str) and value.startswith(("http://", "https://")):
-                urls.append(value)
-            elif isinstance(value, (dict, list)):
-                _lingjing_collect_file_urls(value, urls, now_inside)
-    elif isinstance(node, list):
-        for item in node:
-            _lingjing_collect_file_urls(item, urls, inside_output)
-
-
-def lingjing_video_output_urls(raw):
-    """在通用提取之外，补 MiniMax 的 file.download_url 与 Vidu 的 creations[].url / result_url。"""
-    urls = list(video_output_urls(raw))
-    if isinstance(raw, dict):
-        # MiniMax：file.download_url（实际挂在根节点，文档写的是 data.data.file）
-        candidates = [raw, raw.get("data")]
-        data = raw.get("data")
-        if isinstance(data, dict):
-            candidates.append(data.get("data"))
-        for node in candidates:
-            if not isinstance(node, dict):
-                continue
-            file_info = node.get("file")
-            if isinstance(file_info, dict):
-                for key in ("download_url", "backup_download_url"):
-                    value = str(file_info.get(key) or "").strip()
-                    if value.startswith(("http://", "https://")):
-                        urls.append(value)
-        # Vidu：根节点的 creations[].url / result_url；阿里百炼：FileInfos[].FileUrl
-        _lingjing_collect_file_urls(raw, urls)
-    deduped = []
-    for url in urls:
-        if url and url not in deduped:
-            deduped.append(url)
-    return deduped
-
-
-async def wait_for_lingjing_video_task(client, provider, family, task_id, model, subkind=""):
-    url = lingjing_video_query_url(provider, family, task_id, subkind)
-    deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
-    delay = 5.0
-    last_payload = {}
-    while time.monotonic() < deadline:
-        await asyncio.sleep(delay)
-        response = await client.get(url, headers=api_headers(provider=provider, model=model))
-        response.raise_for_status()
-        raw = response.json()
-        last_payload = raw
-        status = lingjing_video_status(raw)
-        urls = lingjing_video_output_urls(raw)
-        if urls and (not status or status in LINGJING_VIDEO_OK_STATUSES):
-            return raw
-        if status in LINGJING_VIDEO_FAIL_STATUSES:
-            raise HTTPException(status_code=502, detail=f"灵境视频任务失败（{status}）：{raw}")
-        delay = min(delay * 1.35, 12)
-    raise HTTPException(status_code=504, detail=f"灵境视频任务超时：{last_payload or task_id}")
-
-
-async def generate_lingjing_vendor_video(client, payload, provider, base_url, requested_model, family):
-    model = selected_model(requested_model, "veo3.1-fast")
-    image_limit = 2 if family in {"kling", "luma", "runway"} else 4
-    images, roles = lingjing_video_image_payload(payload, image_limit)
-    submit_url, body, subkind = lingjing_video_plan(provider, family, model, payload, images, roles)
-    response = await client.post(submit_url, headers=api_headers(provider=provider, model=model), json=body)
-    response.raise_for_status()
-    raw = response.json()
-    task_id = str(raw.get("id") or extract_task_id(raw) or raw.get("task_id") or "").strip()
-    if not task_id:
-        data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
-        task_id = str(data.get("task_id") or data.get("id") or "").strip()
-    if not task_id:
-        raise HTTPException(status_code=502, detail=f"灵境视频接口没有返回任务 ID：{raw}")
-    result = raw
-    if not lingjing_video_output_urls(raw):
-        result = await wait_for_lingjing_video_task(client, provider, family, task_id, model, subkind)
-    urls = lingjing_video_output_urls(result)
-    if not urls:
-        raise HTTPException(status_code=502, detail=f"灵境视频生成成功但没有返回视频：{result}")
-    local_urls = [await save_remote_video_to_output(url) for url in urls]
-    return {"videos": local_urls, "task_id": task_id, "raw": result}
-
 
 async def generate_yuli_openai_video(client, payload, provider, base_url, requested_model):
     """玉玉API veo3.1 走 OpenAI multipart 格式 /v1/videos，支持 seconds 时长控制。"""
@@ -20423,12 +20756,13 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
     is_apimart = is_apimart_provider(provider)
     is_volcengine = is_volcengine_provider(provider)
     is_yuli = is_yuli_provider(provider)
-    is_lingjing = is_lingjing_provider(provider)
     is_agnes = is_agnes_provider(provider, payload.model)
     volc_is_proxy = bool(is_volcengine and urllib.parse.urlparse(base_url).path.rstrip("/"))
     submit_urls = video_submit_url_candidates(provider, base_url)
     submit_url = submit_urls[0]
-    requested_model = selected_model(payload.model, "agnes-video-v2.0" if is_agnes else "veo3-fast")
+    requested_model = selected_model(payload.model, "agnes-video-2.5" if is_agnes else "veo3-fast")
+    if is_agnes:
+        requested_model = agnes_upstream_video_model(provider, requested_model)
     is_veo31 = is_apimart and is_apimart_veo31_model(requested_model)
     if is_agnes:
         try:
@@ -20436,23 +20770,11 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                 return await generate_agnes_video(agnes_client, payload, provider, base_url, requested_model)
         except httpx.HTTPStatusError as exc:
             text = exc.response.text
-            raise HTTPException(status_code=exc.response.status_code, detail=f"Agnes 视频接口错误：{text}") from exc
+            print(f"[agnes-video] 上游 {exc.response.status_code} model={requested_model} body={text[:1000]}", flush=True)
+            raise HTTPException(status_code=exc.response.status_code, detail=agnes_video_error_detail(text, provider, requested_model)) from exc
         except httpx.HTTPError as exc:
             log_net_error(f"视频(Agnes) 网络/TLS错误 model={requested_model}", exc)
             raise HTTPException(status_code=502, detail=f"请求 Agnes 视频接口失败：{exc}") from exc
-    if is_lingjing:
-        lingjing_family = lingjing_video_family(requested_model)
-        try:
-            async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider), timeout=VIDEO_POLL_TIMEOUT) as lingjing_client:
-                if lingjing_family:
-                    return await generate_lingjing_vendor_video(lingjing_client, payload, provider, base_url, requested_model, lingjing_family)
-                return await generate_lingjing_openai_video(lingjing_client, payload, provider, base_url, requested_model)
-        except httpx.HTTPStatusError as exc:
-            text = exc.response.text
-            raise HTTPException(status_code=exc.response.status_code, detail=f"灵境 API 视频接口错误：{text}") from exc
-        except httpx.HTTPError as exc:
-            log_net_error(f"视频(灵境) 网络/TLS错误 model={requested_model}", exc)
-            raise HTTPException(status_code=502, detail=f"请求灵境 API 视频接口失败：{exc}") from exc
     # 玉玉API veo3.1 走 OpenAI multipart 格式（支持 seconds 时长）；其余模型（doubao 等）
     # 沿用下方原生 /v1/video/create JSON 流程。
     if is_yuli and yuli_is_veo_openai_model(requested_model):
@@ -20544,13 +20866,17 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                     if model != "veo3.1-lite":
                         body["official_fallback"] = False
                 else:
+                    apimart_seedance_model = selected_model(payload.model, "doubao-seedance-2.0")
                     body = {
                         "prompt": payload.prompt,
-                        "model": selected_model(payload.model, "doubao-seedance-2.0"),
-                        "duration": apimart_video_duration(payload.duration),
+                        "model": apimart_seedance_model,
+                        "duration": apimart_video_duration(payload.duration, apimart_seedance_model),
                         "size": apimart_video_size(payload.aspect_ratio or payload.size),
-                        "resolution": payload.resolution or "480p",
                     }
+                    if apimart_is_kling_model(apimart_seedance_model):
+                        body.update(apimart_kling_video_params(apimart_seedance_model, payload.resolution))
+                    else:
+                        body["resolution"] = apimart_video_resolution(payload.resolution)
                     if image_with_roles and video_payload:
                         raise HTTPException(status_code=400, detail="APIMart Seedance 的 image_with_roles 不能和 video_urls 同时使用，请只保留图片首尾帧或参考视频其中一种。")
                     if image_with_roles:
@@ -20603,10 +20929,10 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                     }
                     # 火山方舟视频接口（含 Seedance 2.0 图生视频）均通过 body 的 duration 字段控制时长；
                     # 之前对 seedance-2.0 + 参考图的情况省略了 duration，导致接口回退到默认 5s。
-                    body["duration"] = volcengine_video_duration(payload.duration)
+                    body["duration"] = volcengine_video_duration(payload.duration, volc_model)
                     if payload.aspect_ratio:
-                        body["ratio"] = payload.aspect_ratio
-                    resolution = volcengine_video_resolution(payload.resolution)
+                        body["ratio"] = volcengine_video_ratio(payload.aspect_ratio)
+                    resolution = volcengine_video_resolution(payload.resolution, volc_model)
                     if resolution:
                         body["resolution"] = resolution
                     if payload.watermark:
@@ -20799,7 +21125,7 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                     if payload.size:
                         body["size"] = payload.size
                     if payload.resolution:
-                        body["resolution"] = payload.resolution
+                        body["resolution"] = legacy_video_resolution(payload.resolution)
                     if image_payload:
                         body["images"] = image_payload
                     if payload.videos:
@@ -21180,7 +21506,7 @@ async def canvas_llm_stream(payload: CanvasLLMRequest):
                         yield sse_event({"type": "error", "detail": friendly or f"上游接口错误：{body}"})
                         return
                     # 有些供应商/模型不吃 stream=true，直接回一整块 JSON：
-                    # 那就一次性当 delta 推下去 —— 否则前端要等到 idle 超时才报错（灵境 gpt-5.5 踩过）。
+                    # 那就一次性当 delta 推下去 —— 否则前端要等到 idle 超时才报错。
                     content_type = (response.headers.get("content-type") or "").lower()
                     if "text/event-stream" not in content_type:
                         raw_body = (await response.aread()).decode("utf-8", errors="ignore")
@@ -21253,6 +21579,17 @@ async def delete_conversation(conversation_id: str, request: Request, x_user_id:
     return {"ok": True}
 
 # --- 画布管理 ---
+
+@app.get("/api/debug-paths")
+async def debug_paths():
+    return {
+        "BASE_DIR": BASE_DIR,
+        "DATA_DIR": DATA_DIR,
+        "CANVAS_DIR": CANVAS_DIR,
+        "cwd": os.getcwd(),
+        "_DATA_ROOT": _DATA_ROOT,
+        "_DATA_DIR_OVERRIDE": _DATA_DIR_OVERRIDE,
+    }
 
 @app.get("/api/canvases")
 async def canvases():
@@ -22322,6 +22659,277 @@ async def update_canvas(canvas_id: str, payload: CanvasSaveRequest):
         asyncio.create_task(_agent_chain_advance(canvas_id))
     return {"canvas": canvas}
 
+
+def collect_local_media_urls(value):
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            for item in node.values():
+                walk(item)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+        elif isinstance(node, str):
+            text = node.strip()
+            if text.startswith(("/assets/", "/output/")):
+                found.append(text)
+
+    walk(value)
+    return found
+
+
+def _generated_media_mount_path(url):
+    if isinstance(url, dict):
+        url = url.get("url", "")
+    if not isinstance(url, str):
+        return None
+    text = url.strip()
+    if not text:
+        return None
+    clean = urllib.parse.unquote(text.split("?", 1)[0].split("#", 1)[0]).replace("\\", "/")
+    if clean.startswith("/assets/output/"):
+        root = OUTPUT_OUTPUT_DIR
+        rel = clean[len("/assets/output/"):]
+    elif clean.startswith("/output/"):
+        root = OUTPUT_DIR
+        rel = clean[len("/output/"):]
+    else:
+        return None
+    rel = rel.lstrip("/")
+    if not rel or any(part == ".." for part in rel.split("/")):
+        return None
+    raw_path = os.path.abspath(os.path.join(root, rel))
+    if not is_within_dir(raw_path, root):
+        return None
+    return raw_path, root
+
+
+def generated_media_path_from_url(url):
+    mount = _generated_media_mount_path(url)
+    if not mount:
+        return None
+    try:
+        return os.path.realpath(mount[0])
+    except OSError:
+        return None
+
+
+def prune_history_for_media_paths(paths):
+    if not paths or not os.path.isfile(HISTORY_FILE):
+        return
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except Exception:
+        return
+    if not isinstance(history, list):
+        return
+
+    def references(record):
+        for item_url in collect_local_media_urls(record):
+            resolved = generated_media_path_from_url(item_url)
+            if resolved and resolved in paths:
+                return True
+        return False
+
+    kept = [item for item in history if not references(item)]
+    if len(kept) == len(history):
+        return
+    with HISTORY_LOCK:
+        write_json_atomic(HISTORY_FILE, kept, ensure_ascii=False, indent=4)
+
+
+def _canvas_log_generated_refs(node):
+    refs = []
+    images = node.get("images")
+    if isinstance(images, list):
+        for item in images:
+            if isinstance(item, dict):
+                if item.get("loopInputPreview"):
+                    continue
+                item = item.get("url")
+            if isinstance(item, str) and item:
+                refs.append(item)
+    for key in ("generatedOutputs", "_pending"):
+        items = node.get(key)
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict):
+                    item = item.get("url")
+                if isinstance(item, str) and item:
+                    refs.append(item)
+    comparisons = node.get("imageComparisons")
+    if isinstance(comparisons, dict):
+        for item in comparisons.values():
+            if isinstance(item, dict):
+                item = item.get("url")
+            if isinstance(item, str) and item:
+                refs.append(item)
+    return refs
+
+
+def _same_media_target(left, right):
+    if left == right:
+        return True
+    left_path = generated_media_path_from_url(left)
+    right_path = generated_media_path_from_url(right)
+    return bool(left_path) and left_path == right_path
+
+
+def _reset_canvas_log_node(node):
+    images = node.get("images")
+    if isinstance(images, list):
+        node["images"] = [item for item in images
+                          if isinstance(item, dict) and item.get("loopInputPreview") is True]
+    if "generatedOutputs" in node:
+        node["generatedOutputs"] = []
+    if "_pending" in node:
+        node["_pending"] = []
+    if "imageComparisons" in node:
+        node["imageComparisons"] = {}
+    node["pending"] = 0
+    node["running"] = False
+    node.pop("runFinishedAt", None)
+
+
+def reset_canvas_log_result_nodes(canvas, media_urls):
+    reset_node_ids = []
+    reset_media_urls = []
+    nodes = canvas.get("nodes")
+    if not isinstance(nodes, list):
+        return reset_node_ids, reset_media_urls
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        refs = _canvas_log_generated_refs(node)
+        if not any(_same_media_target(ref, url) for ref in refs for url in media_urls):
+            continue
+        reset_media_urls.extend(refs)
+        _reset_canvas_log_node(node)
+        reset_node_ids.append(node.get("id"))
+    return reset_node_ids, reset_media_urls
+
+
+def _canvas_referenced_media_paths(canvas):
+    paths = set()
+    for item_url in collect_local_media_urls(canvas):
+        resolved = generated_media_path_from_url(item_url)
+        if resolved:
+            paths.add(resolved)
+    return paths
+
+
+async def delete_canvas_log(canvas_id, req):
+    canvas = load_canvas_any(canvas_id)
+    if canvas.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="画布已在回收站")
+    current_updated_at = int(canvas.get("updated_at") or 0)
+    if req.base_updated_at is not None and int(req.base_updated_at) != current_updated_at:
+        raise HTTPException(status_code=409, detail={
+            "message": "画布已被其他页面更新，已拒绝旧版本覆盖。",
+            "canvas": canvas,
+            "updated_at": current_updated_at,
+        })
+    logs = canvas.get("logs")
+    logs = logs if isinstance(logs, list) else []
+    target = None
+    remaining_logs = []
+    for entry in logs:
+        if isinstance(entry, dict) and entry.get("id") == req.log_id:
+            target = entry
+        else:
+            remaining_logs.append(entry)
+    if target is None:
+        raise HTTPException(status_code=404, detail="画布日志不存在")
+    delete_urls = []
+    seen_urls = set()
+
+    def remember_urls(candidates):
+        for item_url in candidates:
+            if item_url not in seen_urls:
+                seen_urls.add(item_url)
+                delete_urls.append(item_url)
+
+    remember_urls(collect_local_media_urls(target.get("outputs")))
+    reset_node_ids = []
+    if req.reset_referencing_nodes:
+        reset_node_ids, reset_media_urls = reset_canvas_log_result_nodes(canvas, delete_urls)
+        if req.delete_unreferenced_media:
+            remember_urls(reset_media_urls)
+    canvas["logs"] = remaining_logs
+    removed_files = []
+    removed_previews = 0
+    skipped_referenced = []
+    if req.delete_unreferenced_media:
+        other_referenced = set()
+        unreadable = False
+        own_path = os.path.abspath(canvas_path(canvas_id))
+        if os.path.isdir(CANVAS_DIR):
+            for filename in sorted(os.listdir(CANVAS_DIR)):
+                if not filename.endswith(".json"):
+                    continue
+                file_path = os.path.join(CANVAS_DIR, filename)
+                if os.path.abspath(file_path) == own_path:
+                    continue
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        other_canvas = json.load(f)
+                except Exception:
+                    unreadable = True
+                    continue
+                other_referenced |= _canvas_referenced_media_paths(other_canvas)
+        own_referenced = _canvas_referenced_media_paths(canvas)
+        removed_paths = set()
+        for item_url in delete_urls:
+            mount = _generated_media_mount_path(item_url)
+            if not mount:
+                continue
+            raw_path, mount_root = mount
+            resolved = os.path.realpath(raw_path)
+            if unreadable or resolved in other_referenced or resolved in own_referenced:
+                skipped_referenced.append(os.path.basename(raw_path))
+                continue
+            if resolved in removed_paths:
+                continue
+            if not os.path.isfile(raw_path) or not is_within_dir(raw_path, mount_root):
+                continue
+            try:
+                previews = list(media_preview_cache_paths(raw_path, 256))
+            except OSError:
+                previews = []
+            try:
+                os.remove(raw_path)
+            except OSError:
+                continue
+            removed_paths.add(resolved)
+            removed_files.append(os.path.basename(raw_path))
+            for preview in previews:
+                if not os.path.isfile(preview) or not is_within_dir(preview, MEDIA_PREVIEW_DIR):
+                    continue
+                try:
+                    os.remove(preview)
+                    removed_previews += 1
+                except OSError:
+                    pass
+        prune_history_for_media_paths(removed_paths)
+    canvas["updated_at"] = max(int(now_ms()), current_updated_at + 1)
+    with CANVAS_LOCK:
+        write_json_atomic(canvas_path(canvas_id), canvas, ensure_ascii=False, indent=2)
+    return {
+        "canvas": canvas,
+        "removed_files": removed_files,
+        "removed_previews": removed_previews,
+        "skipped_referenced": skipped_referenced,
+        "reset_node_ids": reset_node_ids,
+    }
+
+
+@app.post("/api/canvases/{canvas_id}/logs/delete")
+async def delete_canvas_log_api(canvas_id: str, req: DeleteCanvasLogRequest):
+    return await delete_canvas_log(canvas_id, req)
+
+
 @app.delete("/api/canvases/{canvas_id}")
 async def delete_canvas(canvas_id: str):
     canvas = load_canvas_any(canvas_id)
@@ -22418,6 +23026,8 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
         "attachments": refs,
         "mode": payload.mode,
     }
+    if payload.capability:
+        user_message["capability"] = dict(payload.capability)
     conversation["messages"].append(user_message)
     conversation["updated_at"] = now_ms()
     save_conversation(user_id, conversation)
@@ -22425,8 +23035,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
     if payload.mode == "image":
         image_provider_id = payload.provider if payload.provider not in {"modelscope"} else "comfly"
         provider = get_api_provider(image_provider_id)
-        default_model = (provider.get("image_models") or [IMAGE_MODEL])[0]
-        model = selected_model(payload.image_model or payload.model, default_model)
+        model = preferred_image_model(provider, payload.image_model or payload.model)
         image_size = chat_prompt_size_override(payload.message, payload.size) or payload.size
         try:
             image_data, raw = await generate_ai_image(payload.message, image_size, payload.quality, model, image_refs, provider["id"])
@@ -22584,8 +23193,7 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
 
     if action in {"generate_image", "edit_image"}:
         image_provider = pick_chat_image_provider(payload.image_provider or payload.provider, payload.provider)
-        default_model = (image_provider.get("image_models") or [IMAGE_MODEL])[0]
-        model = selected_model(payload.image_model or default_model, default_model)
+        model = preferred_image_model(image_provider, payload.image_model)
         prompt = decision.get("prompt") or payload.message
         prompt_size = chat_prompt_size_override(payload.message, payload.size) or chat_prompt_size_override(prompt, payload.size)
         image_size = agent_image_size(image_provider, model, prompt_size or inherited_size or payload.size, "")
@@ -22688,11 +23296,10 @@ async def chat_agent_stream(payload: ChatRequest, request: Request, x_user_id: s
         if action in {"generate_image", "edit_image"}:
             try:
                 image_provider = pick_chat_image_provider(payload.image_provider or payload.provider, payload.provider)
+                model = preferred_image_model(image_provider, payload.image_model)
             except HTTPException as exc:
                 yield sse_event({"type": "error", "detail": exc.detail})
                 return
-            default_model = (image_provider.get("image_models") or [IMAGE_MODEL])[0]
-            model = selected_model(payload.image_model or default_model, default_model)
             prompt = decision.get("prompt") or payload.message
             prompt_size = chat_prompt_size_override(payload.message, payload.size) or chat_prompt_size_override(prompt, payload.size)
             image_size = agent_image_size(image_provider, model, prompt_size or inherited_size or payload.size, "")
@@ -22781,9 +23388,19 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
         "attachments": refs,
         "mode": payload.mode,
     }
+    if payload.capability:
+        user_message["capability"] = dict(payload.capability)
     conversation["messages"].append(user_message)
     conversation["updated_at"] = now_ms()
     save_conversation(user_id, conversation)
+
+    # 默认走 OpenClaw；显式设置 NOVAI_CHAT_BACKEND=local 才降级回本地直连，SSE 事件两边完全一致
+    if (os.environ.get("NOVAI_CHAT_BACKEND", "openclaw") or "openclaw").strip().lower() == "openclaw":
+        from server.integrations.openclaw import stream_openclaw_chat
+        return StreamingResponse(
+            stream_openclaw_chat(payload, conversation, user_id, save_conversation),
+            media_type="text/event-stream",
+        )
 
     _codex_provider = get_api_provider(payload.provider)
     if is_codex_provider(_codex_provider):
@@ -23107,7 +23724,7 @@ async def generate_angle_cloud(req: CloudGenRequest):
         "image_url": [modelscope_image_url(url, max_size=1536) for url in req.image_urls]
     }
     if req.resolution:
-        payload["size"] = modelscope_size(req.resolution)
+        payload["size"] = modelscope_size(req.resolution, model=model)
     if req.loras is not None:
         payload["loras"] = req.loras
 
@@ -23196,7 +23813,7 @@ async def generate_cloud(req: CloudGenRequest):
     payload = {
         "model": "Tongyi-MAI/Z-Image-Turbo",
         "prompt": req.prompt.strip(),
-        "size": modelscope_size(req.resolution),
+        "size": modelscope_size(req.resolution, model="Tongyi-MAI/Z-Image-Turbo"),
         "n": 1
     }
     if req.loras is not None:
@@ -23288,11 +23905,11 @@ async def ms_generate(req: MsGenerateRequest):
         "prompt": req.prompt.strip(),
     }
     if req.width and req.height:
-        payload["width"] = req.width
-        payload["height"] = req.height
-        payload["size"] = modelscope_size(req.size or f"{req.width}x{req.height}")
+        constrained = modelscope_size(req.size or f"{req.width}x{req.height}", model=req.model)
+        payload["width"], payload["height"] = parse_size_pair(constrained)
+        payload["size"] = constrained
     elif req.size:
-        payload["size"] = modelscope_size(req.size)
+        payload["size"] = modelscope_size(req.size, model=req.model)
     if req.image_urls:
         payload["image_url"] = [modelscope_image_url(url, max_size=1536) for url in req.image_urls]
     if req.loras is not None:
@@ -25920,7 +26537,7 @@ def build_model_descriptor(provider: dict, model: str = "", intent: str = "image
     provider_entry = nova_protocols.provider_protocol(provider.get("protocol"))
     capabilities = _descriptor_capabilities(provider, model, entry)
     enabled = bool(provider.get("enabled", True))
-    has_key = bool(provider_env_key_value(provider_id))
+    has_key = provider_has_usable_key(provider)
 
     parameters = None
     if str(intent or "").startswith("image."):
@@ -26535,8 +27152,8 @@ def _agent_node_status(node):
 # ---------------------------------------------------------------------------
 # 节点字段适配层（2026-10-08 · 画布助手 P0）
 #   智能画布前端（static/js/smart-canvas.js）真实读取的字段：
-#   * 图片/视频生成节点 type=smart-image（老数据可能缺 type）：自身提示词在 promptDraftText/promptDraftHtml
-#     （跑过之后 runPrompt 记着上次用的提示词），生成参数在 runSettings（视频节点 = runSettings.apiKind='video'）；
+#   * 图片/视频生成节点 type=smart-image / smart-video（老数据可能缺 type，视频老数据靠 apiKind='video' 兜底）：
+#     自身提示词在 promptDraftText/promptDraftHtml（跑过之后 runPrompt 记着上次用的提示词），生成参数在 runSettings；
 #   * 提示词节点 smart-prompt / 文本节点 smart-text：正文在 text；
 #   * 连线 kind='input'，同时维护目标节点的 inputNodeIds（与前端 connectInputNode 一致）。
 #   助手对节点的读写一律走这里，不再直接写 node.text / node.params（那两个字段智能画布不读）。
@@ -26550,23 +27167,29 @@ _AGENT_SMART_RATIO_KEYS = {
     "1:1": "square", "2:3": "portrait", "3:2": "landscape", "3:4": "portrait43", "4:3": "landscape43",
     "9:16": "story", "16:9": "wide", "21:9": "ultrawide", "9:21": "ultratall", "1:2": "portrait12",
     "2:1": "landscape21", "5:4": "landscape54", "4:5": "portrait45",
+    "3:1": "landscape31", "1:3": "portrait13",
 }
 _AGENT_SMART_RATIO_LABELS = {value: key for key, value in _AGENT_SMART_RATIO_KEYS.items()}
 # 与前端 SIZE_MAP 同表（比例档 × 分辨率档 → 像素尺寸）；最终仍过 agent_image_size 的平台尺寸策略
 _AGENT_SMART_SIZE_MAP = {
-    "square": {"1k": "1024x1024", "2k": "2048x2048", "4k": "4096x4096"},
-    "portrait": {"1k": "1024x1536", "2k": "1360x2048", "4k": "2352x3520"},
-    "portrait43": {"1k": "1008x1344", "2k": "1536x2048", "4k": "2448x3264"},
-    "landscape43": {"1k": "1344x1008", "2k": "2048x1536", "4k": "3264x2448"},
-    "landscape": {"1k": "1536x1024", "2k": "2048x1360", "4k": "3520x2352"},
-    "story": {"1k": "720x1280", "2k": "1152x2048", "4k": "2160x3840"},
-    "wide": {"1k": "1280x720", "2k": "2048x1152", "4k": "3840x2160"},
-    "ultrawide": {"1k": "1280x544", "2k": "2048x880", "4k": "3840x1648"},
-    "ultratall": {"1k": "544x1280", "2k": "880x2048", "4k": "1648x3840"},
-    "portrait12": {"1k": "768x1536", "2k": "1024x2048", "4k": "1920x3840"},
-    "landscape21": {"1k": "1536x768", "2k": "2048x1024", "4k": "3840x1920"},
-    "landscape54": {"1k": "1536x1216", "2k": "2048x1632", "4k": "3840x3072"},
-    "portrait45": {"1k": "1216x1536", "2k": "1632x2048", "4k": "3072x3840"},
+    # 官方 size×resolution 映射表（APIMart gpt-image-2 generation，15 比例 × 1k/2k/4k）；
+    # 与 static/js/smart-canvas.js 的 SIZE_MAP、web/src/pages/online/sizeData.js 逐格一致，
+    # 由 tests/test_size_map_parity.js 守住。1k 有两组等价像素的格子取第一组，第二组见 APIMART_OFFICIAL_PIXELS。
+    "square": {"1k": "1024x1024", "2k": "2048x2048", "4k": "2880x2880"},
+    "portrait": {"1k": "1024x1536", "2k": "1360x2048", "4k": "2336x3520"},
+    "portrait43": {"1k": "768x1024", "2k": "1536x2048", "4k": "2480x3312"},
+    "landscape43": {"1k": "1024x768", "2k": "2048x1536", "4k": "3312x2480"},
+    "landscape": {"1k": "1536x1024", "2k": "2048x1360", "4k": "3520x2336"},
+    "story": {"1k": "864x1536", "2k": "1152x2048", "4k": "2160x3840"},
+    "wide": {"1k": "1536x864", "2k": "2048x1152", "4k": "3840x2160"},
+    "ultrawide": {"1k": "2016x864", "2k": "2688x1152", "4k": "3840x1648"},
+    "ultratall": {"1k": "864x2016", "2k": "1152x2688", "4k": "1648x3840"},
+    "portrait12": {"1k": "1024x2048", "2k": "1344x2688", "4k": "1920x3840"},
+    "landscape21": {"1k": "2048x1024", "2k": "2688x1344", "4k": "3840x1920"},
+    "landscape54": {"1k": "1280x1024", "2k": "2560x2048", "4k": "3216x2576"},
+    "portrait45": {"1k": "1024x1280", "2k": "2048x2560", "4k": "2576x3216"},
+    "landscape31": {"1k": "1536x512", "2k": "3072x1024", "4k": "3840x1280"},
+    "portrait13": {"1k": "512x1536", "2k": "1024x3072", "4k": "1280x3840"},
 }
 _AGENT_VIDEO_ASPECTS = ("adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9")
 _AGENT_AUTO_RATIOS = ("auto", "自动", "自适应")
@@ -26601,16 +27224,21 @@ _AGENT_VIDEO_SETTING_FIELDS = {"provider": "videoProvider", "model": "videoModel
                                "duration": "videoDuration", "resolution": "videoResolution",
                                "count": "videoCount", "audio": "videoGenerateAudio"}
 # 连线规则：目标类型 → 允许的上游类型（与前端可手动连出的组合一致；循环等复杂节点暂不让助手自动连）
+# 图片节点（smart-image）与视频节点（smart-video）同一套规则：都能被提示词/文本/分组连入，也能互相连
+_AGENT_SMART_MEDIA_TARGET_SOURCES = ("smart-prompt", "smart-text", "smart-image", "smart-video", "smart-group")
+_AGENT_SMART_PROMPT_TARGET_SOURCES = ("smart-prompt", "smart-text", "smart-image", "smart-video")
 _AGENT_SMART_CONNECT_RULES = {
-    "smart-image": ("smart-prompt", "smart-text", "smart-image", "smart-group"),
-    "smart-prompt": ("smart-prompt", "smart-text", "smart-image"),
+    "smart-image": _AGENT_SMART_MEDIA_TARGET_SOURCES,
+    "smart-video": _AGENT_SMART_MEDIA_TARGET_SOURCES,
+    "smart-prompt": _AGENT_SMART_PROMPT_TARGET_SOURCES,
     "smart-text": ("smart-prompt", "smart-text"),
-    "table": ("smart-image", "smart-group", "smart-prompt", "smart-text"),   # 参考图按行分配，提示词文字加在每行前面
+    "table": _AGENT_SMART_MEDIA_TARGET_SOURCES,   # 参考图按行分配，提示词文字加在每行前面
     "smart-batch": ("table",),                                             # 批量生成只吃表格
 }
 _AGENT_REF_LIMIT = 20
 _AGENT_TOMBSTONE_LIMIT = 300
-_AGENT_SMART_MEDIA_TYPES = ("smart-image", "smart-group", "smart-batch")
+_AGENT_SMART_MEDIA_TYPES = ("smart-image", "smart-video", "smart-group", "smart-batch")
+_AGENT_SMART_MEDIA_NODE_TYPES = ("smart-image", "smart-video")
 
 
 def _agent_is_smart_canvas(canvas):
@@ -27060,8 +27688,8 @@ def _agent_new_smart_node(kind, title="", prompt="", x=0, y=0):
     if kind == "text":
         return {"id": f"agent_{uuid.uuid4().hex[:16]}", "type": "smart-text", "x": x, "y": y,
                 "title": title or "Text", "text": str(prompt or ""), "created_at": now}
-    node = {"id": f"agent_{uuid.uuid4().hex[:16]}", "type": "smart-image", "x": x, "y": y,
-            "title": title or ("Video" if kind == "video" else "Image"), "images": [], "created_at": now}
+    node = {"id": f"agent_{uuid.uuid4().hex[:16]}", "type": "smart-video" if kind == "video" else "smart-image",
+            "x": x, "y": y, "title": title or ("Video" if kind == "video" else "Image"), "images": [], "created_at": now}
     if kind == "video":
         node["runSettings"] = {"engine": "api", "apiKind": "video"}
     if prompt:
@@ -27687,7 +28315,7 @@ def _agent_available_providers():
         if (p or {}).get("enabled") is False:
             continue
         try:
-            base, _, _ = resolve_chat_provider(pid, "", "")
+            base, _, _ = resolve_chat_provider(pid, "", "", require_model=False)
             if base:
                 ordered.append(pid)
         except HTTPException:
@@ -27696,25 +28324,64 @@ def _agent_available_providers():
     return [p for p in ordered if p != "comfly"] + [p for p in ordered if p == "comfly"]
 
 
-def _agent_pick_image_provider(preferred=""):
-    """生图 provider 自动探测：用户指定 > 动态可用平台（按用户配置顺序）> comfly。"""
+def _agent_provider_declares_image_models(provider):
+    """平台是否声明了生图模型：单数 image_model 或 image_models 清单（沿用 models 兜底）。"""
+    if not isinstance(provider, dict):
+        return False
+    if str(provider.get("image_model") or "").strip():
+        return True
+    return bool(_agent_declared_models(provider, "image_models")
+                or [str(i or "").strip() for i in (provider.get("models") or []) if str(i or "").strip()])
+
+
+def _agent_image_provider_candidates():
+    """按用户配置顺序（comfly 垫底）返回启用的平台；不要求密钥，供「是否声明生图模型」与兜底判定用。"""
+    ordered, seen = [], set()
+    for p in load_api_providers():
+        if not isinstance(p, dict) or p.get("enabled") is False:
+            continue
+        pid = str(p.get("id") or "").strip().lower()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        ordered.append((pid, p))
+    return [i for i in ordered if i[0] != "comfly"] + [i for i in ordered if i[0] == "comfly"]
+
+
+def _agent_pick_image_provider_detailed(preferred=""):
+    """生图平台选择 + 可验证依据：返回 (provider_id, reason, skipped)。
+    优先级：显式指定（可解析）>
+    配置顺序第一个「启用、声明生图模型、有可用密钥」> 兜底配置顺序第一个可用 > comfly。"""
     pref = str(preferred or "").strip().lower()
+    skipped = []
     if pref and pref != "comfly":
         try:
-            base, _, _ = resolve_chat_provider(pref, "", "")
+            base, _, _ = resolve_chat_provider(pref, "", "", require_model=False)
             if base:
-                return pref
+                return pref, "显式指定平台", skipped
         except HTTPException:
             pass
-    avail = _agent_available_providers()
-    for cand in avail:
-        # 生图优先选配置了 image_models 的平台
-        p = get_api_provider(cand)
-        if p and ((p.get("image_models") or []) or (p.get("models") or [])):
-            return cand
-    for cand in avail:
-        return cand
-    return "comfly"
+        skipped.append("%s（无可用密钥或 Base URL）" % pref)
+    keyed = set(_agent_available_providers())
+    candidates = _agent_image_provider_candidates()
+    for pid, p in candidates:
+        if not _agent_provider_declares_image_models(p):
+            skipped.append("%s（未声明生图模型）" % pid)
+            continue
+        if pid not in keyed:
+            skipped.append("%s（无可用密钥）" % pid)
+            continue
+        return pid, "用户配置顺序里第一个可用平台（有密钥且声明生图模型）", skipped
+    for pid, _p in candidates:
+        if pid in keyed:
+            return pid, "兜底：配置顺序第一个可用平台（没有平台声明生图模型）", skipped
+        skipped.append("%s（无可用密钥）" % pid)
+    return "comfly", "兜底 comfly（没有可用平台）", skipped
+
+
+def _agent_pick_image_provider(preferred=""):
+    """生图 provider 自动探测：用户指定 > 动态可用平台（按用户配置顺序）> comfly。"""
+    return _agent_pick_image_provider_detailed(preferred)[0]
 
 
 def _agent_declared_models(provider, model_field):
@@ -27737,11 +28404,13 @@ def _agent_media_provider_for_model(model, model_field):
             continue
         declared = _agent_declared_models(provider, model_field) + \
             [str(item or "").strip() for item in (provider.get("models") or [])]
+        if model_field == "image_models":
+            declared.append(str(provider.get("image_model") or "").strip())
         if target in {item.lower() for item in declared if item}:
             hits.append(pid)
     for pid in hits:
         try:
-            base, _, _ = resolve_chat_provider(pid, "", "")
+            base, _, _ = resolve_chat_provider(pid, "", "", require_model=False)
         except HTTPException:
             continue
         if base:
@@ -27764,8 +28433,12 @@ def _agent_provider_media_models(provider_id, model_field):
     except HTTPException:
         return None, []
     declared = _agent_declared_models(cfg, model_field)
-    if not declared and model_field == "image_models":
-        declared = [str(i or "").strip() for i in (cfg.get("models") or []) if str(i or "").strip()]
+    if model_field == "image_models":
+        single = str(cfg.get("image_model") or "").strip()
+        if single:
+            declared = [single] + [m for m in declared if m.lower() != single.lower()]
+        if not declared:
+            declared = [str(i or "").strip() for i in (cfg.get("models") or []) if str(i or "").strip()]
     return cfg, list(dict.fromkeys(declared))
 
 
@@ -27781,11 +28454,18 @@ def _agent_fit_media_model(provider_id, declared, model):
     return provider_id, declared[0], f"平台 {provider_id} 没配置模型 {model}，已改用它配置里的 {declared[0]}"
 
 
-def _agent_resolve_media_target(args, model_field, picker):
+def _agent_resolve_media_target(args, model_field, picker, trace=None):
     """定 generate_image / generate_video 最终下发的 (provider, model, note)。
     优先级：前端显式 image_provider（可解析）> 模型归属平台 > 现有自动探测；
     LLM 自写的 args.model 优先于前端缺省 image_model。前端平台不声明该模型时换成该平台默认模型，
-    换模型原因写进 note（进 digest + 打日志），不做静默改写。"""
+    换模型原因写进 note（进 digest + 打日志），不做静默改写。
+    trace 传入 dict 时回填 {source, reason, skipped}，用于把选择依据写进能力运行 note。"""
+    def _record(source, reason, skipped=None):
+        if isinstance(trace, dict):
+            trace["source"] = source
+            trace["reason"] = reason
+            trace["skipped"] = list(skipped or [])
+
     llm_model = str(args.get("model") or "").strip()
     llm_provider = str(args.get("provider") or "").strip().lower()
     explicit_provider = str(args.get("image_provider") or "").strip().lower()
@@ -27794,15 +28474,42 @@ def _agent_resolve_media_target(args, model_field, picker):
     if explicit_provider:
         cfg, declared = _agent_provider_media_models(explicit_provider, model_field)
         if cfg and declared:   # 界面上选定的平台（且有这类模型）：只能用它配置里的模型
+            _record("explicit", "显式指定平台 %s" % cfg["id"])
             return _agent_fit_media_model(cfg["id"], declared, llm_model or explicit_model)
     model = llm_model or explicit_model
     owner = _agent_media_provider_for_model(model, model_field)
     if owner:
+        _record("model_owner", "模型 %s 归属平台 %s" % (model, owner))
         return owner, model, ""
     cfg, declared = _agent_provider_media_models(llm_provider, model_field) if llm_provider else (None, [])
-    pid = cfg["id"] if cfg and declared else picker("")
+    if cfg and declared:
+        pid = cfg["id"]
+        _record("provider_arg", "参数指定平台 %s" % pid)
+    elif model_field == "image_models" and picker is _agent_pick_image_provider:
+        pid, reason, skipped = _agent_pick_image_provider_detailed("")
+        _record("auto", reason, skipped)
+    else:
+        pid = picker("")
+        _record("auto", "自动探测平台 %s" % pid)
     cfg, declared = _agent_provider_media_models(pid, model_field)
     return _agent_fit_media_model(pid, declared, model)
+
+
+def _agent_media_selection_note(provider_id, model_id, trace, note=""):
+    """能力运行可验证信息：最终平台 / 模型 / 选择依据 / 跳过了哪些平台及原因。"""
+    parts = ["平台 %s / 模型 %s" % (provider_id or "无", model_id or "无")]
+    origin = str((trace or {}).get("origin") or "").strip()
+    if origin:
+        parts.append("来源：%s" % origin)
+    reason = str((trace or {}).get("reason") or "").strip()
+    if reason:
+        parts.append("选择依据：%s" % reason)
+    if note:
+        parts.append(str(note))
+    skipped = [str(item) for item in ((trace or {}).get("skipped") or []) if str(item).strip()]
+    if skipped:
+        parts.append("跳过：" + "；".join(skipped))
+    return "；".join(parts)
 
 
 async def _agent_tool_generate_image_run_classic(args):
@@ -27908,7 +28615,7 @@ def _agent_pick_video_provider(preferred=""):
     pref = str(preferred or "").strip().lower()
     if pref and pref != "comfly":
         try:
-            base, _, _ = resolve_chat_provider(pref, "", "")
+            base, _, _ = resolve_chat_provider(pref, "", "", require_model=False)
             if base:
                 return pref
         except HTTPException:
@@ -28237,8 +28944,8 @@ async def _agent_start_node_generation(canvas_id, node_id, extra_refs=None, size
     if _agent_media_items(node):
         x, y, w, h = _agent_node_box(node)
         bx, by = _agent_free_position(canvas, x + w + 80, y, 300, 300)
-        branch = {"id": f"agent_{uuid.uuid4().hex[:16]}", "type": "smart-image", "x": bx, "y": by,
-                  "title": "Video" if kind == "video" else "Image", "images": [], "sourceNodeId": node_id,
+        branch = {"id": f"agent_{uuid.uuid4().hex[:16]}", "type": "smart-video" if kind == "video" else "smart-image",
+                  "x": bx, "y": by, "title": "Video" if kind == "video" else "Image", "images": [], "sourceNodeId": node_id,
                   "created_at": now_ms()}
         if isinstance(node.get("runSettings"), dict):
             branch["runSettings"] = json.loads(json.dumps(node["runSettings"]))
@@ -28711,8 +29418,8 @@ def _agent_attach_reference_nodes(canvas_id, target_id, urls, kind_hint="image")
             if src is None:
                 kind = "video" if (kind_hint == "video" or is_video_reference_value(url)) else "image"
                 x, y = _agent_free_position(canvas, tx - 720, ty + i * 340, 300, 300)
-                src = {"id": f"agent_{uuid.uuid4().hex[:16]}", "type": "smart-image", "x": x, "y": y,
-                       "title": "参考视频" if kind == "video" else "参考图", "titleLocked": True,
+                src = {"id": f"agent_{uuid.uuid4().hex[:16]}", "type": "smart-video" if kind == "video" else "smart-image",
+                       "x": x, "y": y, "title": "参考视频" if kind == "video" else "参考图", "titleLocked": True,
                        "images": [{"url": url, "name": url.rsplit("/", 1)[-1][:80] or "ref", "kind": kind}],
                        "created_at": now_ms()}
                 canvas.setdefault("nodes", []).append(src)
@@ -29606,7 +30313,7 @@ def _agent_template_read(item, extract=False):
 
 
 def _agent_template_roles(nodes, conns):
-    """把模板节点分成：素材位（没有上游、也不是生成节点的图片节点）、生成节点、第一层生成节点（上游里没有生成节点）。"""
+    """把模板节点分成：素材位（没有上游、也不是生成节点的图片/视频节点）、生成节点、第一层生成节点（上游里没有生成节点）。"""
     ids = {n["id"] for n in nodes}
     ups = {}
     for c in conns:
@@ -29614,7 +30321,7 @@ def _agent_template_roles(nodes, conns):
             ups.setdefault(c["to"], []).append(c["from"])
     gen, slots = [], []
     for n in nodes:
-        if _agent_node_type(n) != "smart-image":
+        if _agent_node_type(n) not in _AGENT_SMART_MEDIA_NODE_TYPES:
             continue
         rs = n.get("runSettings") if isinstance(n.get("runSettings"), dict) else {}
         is_gen = bool(ups.get(n["id"])) or bool(str(n.get("promptDraftText") or "").strip()) or bool(rs)
@@ -30080,8 +30787,8 @@ def _agent_chain_register(canvas_id, node_ids, label=""):
 
 
 def _agent_is_slot_node(canvas, node):
-    """空的素材位：图片节点，没有上游、没有自己的提示词、也没有素材。"""
-    if _agent_node_type(node) != "smart-image" or _agent_media_items(node):
+    """空的素材位：图片/视频节点，没有上游、没有自己的提示词、也没有素材。"""
+    if _agent_node_type(node) not in _AGENT_SMART_MEDIA_NODE_TYPES or _agent_media_items(node):
         return False
     return not _agent_upstream_ids(canvas, node.get("id")) and not _agent_node_own_prompt(node).strip()
 
@@ -30099,7 +30806,7 @@ def _agent_chain_readiness(canvas, node_id):
     by_id = _agent_nodes_by_id(canvas)
     for uid in _agent_upstream_ids(canvas, node_id):
         up = by_id.get(uid)
-        if up is None or _agent_node_type(up) != "smart-image":
+        if up is None or _agent_node_type(up) not in _AGENT_SMART_MEDIA_NODE_TYPES:
             continue
         if _agent_node_has_result(up):
             continue
@@ -30623,7 +31330,7 @@ def _agent_args_have_step_refs(args):
 
 async def agent_execute_step(tool_name, args):
     """执行单个工具步骤。返回统一结构 {ok, tool, result/error, code, ...}，绝不吞错误。"""
-    entry = AGENT_TOOLS.get(tool_name)
+    entry = AGENT_TOOLS.get(tool_name) or _AGENT_FILE_TOOLS.get(tool_name)
     if not entry:
         return {"ok": False, "tool": tool_name, "error": f"未知工具：{tool_name}",
                 "code": "unknown_tool", "status_code": 400}
@@ -30636,6 +31343,9 @@ async def agent_execute_step(tool_name, args):
         return {"ok": False, "tool": tool_name, "error": exc.message, "code": exc.code,
                 "status_code": exc.status_code, "warnings": exc.warnings,
                 "requires_force": exc.requires_force}
+    except _AgentFileToolError as exc:
+        return {"ok": False, "tool": tool_name, "error": exc.message, "code": exc.code,
+                "status_code": exc.status_code}
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         return {"ok": False, "tool": tool_name, "error": detail, "code": "http_error",
@@ -30836,7 +31546,7 @@ def _agent_run_media_platforms_text(selected_provider=""):
         if not pid:
             continue
         try:
-            base, _, _ = resolve_chat_provider(pid, "", "")
+            base, _, _ = resolve_chat_provider(pid, "", "", require_model=False)
         except HTTPException:
             continue
         if not base:
@@ -31653,12 +32363,12 @@ def _agent_run_history_text(history, max_items=30):
 
 
 def _agent_run_user_prompt(instruction, history, round_no, max_steps, steps_executed, last_error,
-                           mode="run", reference_hint=""):
+                           mode="run", reference_hint="", max_rounds=AGENT_RUN_MAX_ROUNDS):
     parts = [f"用户指令：{instruction}"]
     if reference_hint:
         # 确定性提示注入：模型可能忽略 system prompt，这里按本次真实参考图数量再钉一遍
         parts.append(reference_hint)
-    parts.append(f"进度：第 {round_no} 轮（最多 {AGENT_RUN_MAX_ROUNDS} 轮），已执行 {steps_executed}/{max_steps} 步。")
+    parts.append(f"进度：第 {round_no} 轮（最多 {max_rounds} 轮），已执行 {steps_executed}/{max_steps} 步。")
     if mode == "plan":
         parts.append("本次模式：plan（只出方案或直接回答，绝不执行任何工具）。需要动画布或花钱就返回 "
                      "{\"intent\": \"一句话意图\", \"steps\": [{\"tool\": \"工具名\", \"args\": {...}, "
@@ -31676,7 +32386,9 @@ def _agent_run_user_prompt(instruction, history, round_no, max_steps, steps_exec
     return "\n".join(parts)
 
 
-def _agent_run_normalize_steps(raw_steps):
+def _agent_run_normalize_steps(raw_steps, tools=None):
+    """收敛模型返回的 steps；tools 指定可用工具表（缺省=画布 AGENT_TOOLS）。"""
+    available = tools if isinstance(tools, dict) else AGENT_TOOLS
     steps, unknown = [], []
     if not isinstance(raw_steps, list):
         return steps, unknown
@@ -31685,7 +32397,7 @@ def _agent_run_normalize_steps(raw_steps):
             unknown.append("<非对象>")
             continue
         tool = str(item.get("tool") or "").strip()
-        if tool not in AGENT_TOOLS:
+        if tool not in available:
             unknown.append(tool or "<空>")
             continue
         args = item.get("args")
@@ -32555,6 +33267,57 @@ def _agent_run_resolve_chat(provider, model, ms_model):
                                f"（已尝试: {'、'.join(tried)}）")
 
 
+def _agent_auto_chat_model(provider_id):
+    """智能体自动挑模型的唯一来源：该 provider 自己声明的 chat_models（modelscope 用它自己的列表）。
+    解析不出返回空串，由调用方跳过——绝不把全局 CHAT_MODEL 塞给别的供应商，避免必然失败。"""
+    pid = str(provider_id or "").strip().lower()
+    if pid == "modelscope":
+        return MODELSCOPE_CHAT_MODELS[0] if MODELSCOPE_CHAT_MODELS else ""
+    try:
+        cfg = get_api_provider(pid)
+    except HTTPException:
+        return ""
+    if not (cfg.get("chat_models") or []):
+        return ""
+    return preferred_chat_model(cfg)
+
+
+def _agents_resolve_chat(provider, model, ms_model):
+    """智能体广场专用：按顺序挑一个 base 与非空 model 都可用的对话 provider。
+    用户没显式给模型时，只从该 provider 配置的 chat_models 里自动挑；挑不出就跳过，
+    全都不行时 400 并逐个说明原因，不静默回落到一个必然失败的模型。"""
+    tried, reasons = [], []
+    seen = set()
+    candidates = [provider] if provider and provider != "comfly" else []
+    candidates += _agent_available_providers()
+    for cand in candidates:
+        if cand in seen:
+            continue
+        seen.add(cand)
+        tried.append(cand)
+        explicit = model if (cand == provider and model) else ""
+        if not explicit:
+            explicit = _agent_auto_chat_model(cand)
+            if not explicit:
+                reasons.append(f"{cand} 未配置对话模型")
+                continue
+        try:
+            base, headers, mdl = resolve_chat_provider(cand, explicit,
+                                                       ms_model if cand == "modelscope" else "")
+        except HTTPException as exc:
+            reasons.append(f"{cand}：{exc.detail}")
+            continue
+        if not base or not mdl:
+            reasons.append(f"{cand} 未配置可用的对话模型")
+            continue
+        return {"provider": cand, "base": base, "headers": headers, "model": mdl,
+                "provider_cfg": get_api_provider(cand) if cand not in ("modelscope",) else {}}
+    detail = "；".join(reasons) if reasons else "无可用 provider"
+    raise HTTPException(status_code=400,
+                        detail=f"无法运行智能体（没有可用的对话模型）：{detail}"
+                               f"（已尝试: {'、'.join(tried)}）")
+
+
 async def _agent_run_chat(chat, messages):
     """单次非流式对话调用（与 plan 同一套 provider/请求风格）。"""
     try:
@@ -32623,10 +33386,11 @@ def _agent_native_enabled(chat):
     return str(protocol or "").lower() in _AGENT_NATIVE_PROTOCOLS
 
 
-def _agent_native_tool_defs():
+def _agent_native_tool_defs(tools=None):
     """AGENT_TOOLS → OpenAI tools：每个工具多一个可选 description（给用户看的话），canvas_id 不必填（系统补）。"""
+    available = tools if isinstance(tools, dict) else AGENT_TOOLS
     defs = []
-    for name, entry in AGENT_TOOLS.items():
+    for name, entry in available.items():
         schema = json.loads(json.dumps(entry.get("schema") or {"type": "object", "properties": {}}, ensure_ascii=False))
         schema.setdefault("type", "object")
         props = schema.setdefault("properties", {})
@@ -32664,8 +33428,9 @@ async def _agent_run_chat_raw(chat, messages, tools=None):
         raise AgentRunError(f"{type(exc).__name__}: {exc}", code="provider_error")
 
 
-def _agent_decision_from_native(raw, canvas_id):
+def _agent_decision_from_native(raw, canvas_id, tools=None):
     """把原生返回变成循环要的 decision：有 tool_calls → steps；只有文字 → 先当 JSON 认，认不出就是给用户的回复。"""
+    available = tools if isinstance(tools, dict) else AGENT_TOOLS
     choices = (raw or {}).get("choices") or []
     msg = (choices[0] or {}).get("message") if choices and isinstance(choices[0], dict) else {}
     msg = msg if isinstance(msg, dict) else {}
@@ -32685,7 +33450,7 @@ def _agent_decision_from_native(raw, canvas_id):
                 args = {}
         args = args if isinstance(args, dict) else {}
         description = str(args.pop("description", "") or "")[:300]
-        props = ((AGENT_TOOLS.get(name) or {}).get("schema") or {}).get("properties") or {}
+        props = ((available.get(name) or {}).get("schema") or {}).get("properties") or {}
         if "canvas_id" in props and not args.get("canvas_id"):
             args["canvas_id"] = canvas_id
         steps.append({"tool": name, "args": args, "description": description})
@@ -32701,7 +33466,7 @@ def _agent_decision_from_native(raw, canvas_id):
             if isinstance(data, dict) and any(k in data for k in ("steps", "done", "message", "intent")):
                 for st in data.get("steps") or []:
                     if isinstance(st, dict) and isinstance(st.get("args"), dict):
-                        props = ((AGENT_TOOLS.get(st.get("tool")) or {}).get("schema") or {}).get("properties") or {}
+                        props = ((available.get(st.get("tool")) or {}).get("schema") or {}).get("properties") or {}
                         if "canvas_id" in props and not st["args"].get("canvas_id"):
                             st["args"]["canvas_id"] = canvas_id
                 return data
@@ -32713,14 +33478,14 @@ def _agent_decision_from_native(raw, canvas_id):
     return {"done": True, "message": content, "native": True}
 
 
-async def _agent_run_decide(chat, system, user_content, canvas_id, tools_json_text=""):
+async def _agent_run_decide(chat, system, user_content, canvas_id, tools_json_text="", tools=None):
     """一轮决策：能用原生工具就用；带 tools 报错时用原来的 JSON 方式再问一次，问得通就记下这个模型不支持原生工具。"""
     if _agent_native_enabled(chat):
         native_system = (system.replace(tools_json_text, "（工具定义见函数调用列表）") if tools_json_text else system) + _AGENT_NATIVE_NOTE
         try:
             raw = await _agent_run_chat_raw(chat, [{"role": "system", "content": native_system},
-                                                   {"role": "user", "content": user_content}], tools=_agent_native_tool_defs())
-            return _agent_decision_from_native(raw, canvas_id)
+                                                   {"role": "user", "content": user_content}], tools=_agent_native_tool_defs(tools))
+            return _agent_decision_from_native(raw, canvas_id, tools)
         except AgentRunError as exc:
             # 原生这条路不通（平台不认 tools、或别的错）：用原来的 JSON 方式再问一次；
             # 再问能通、且原生那次是平台报错，才认定这个模型不支持原生工具
@@ -32773,9 +33538,179 @@ def _agent_run_persist_session(session, status, message, history, rounds, steps_
         print(f"[Agent] run {run_id} 会话持久化失败: {exc}")
 
 
+class _CanvasRunContext(_AgentRunContext):
+    """画布上下文提供者：逐项复用原有画布函数，保证画布 agent 行为零变更。"""
+
+    kind = "canvas"
+
+    def __init__(self, req):
+        canvas_id = str(req.get("canvas_id") or "")
+        super().__init__(canvas_id)
+        self.canvas_id = canvas_id
+        self.focus = req.get("focus") or {}
+        self.use_thread = bool(req.get("use_thread"))
+        self.image_provider = str(req.get("image_provider") or "").strip()
+        self.image_model = str(req.get("image_model") or "").strip()
+        self.vision_mode_direct = False
+
+    def load(self):
+        canvas = load_canvas(self.canvas_id)  # 404 校验
+        if _agent_is_smart_canvas(canvas) and _agent_ensure_aliases(json.loads(json.dumps(canvas))):
+            canvas, _ = _agent_mutate_canvas(self.canvas_id, lambda cv: None)  # 老画布第一次用助手：补齐编号
+        return canvas
+
+    def reload(self):
+        return _agent_run_load_canvas_soft(self.canvas_id)
+
+    def is_available(self, snapshot):
+        return isinstance(snapshot, dict)
+
+    def unavailable_message(self):
+        return "画布不可用（可能已被删除或移入回收站），运行已停止"
+
+    def collect_images(self, snapshot):
+        return _agent_run_collect_images(self.focus, snapshot) if _agent_is_smart_canvas(snapshot) else []
+
+    def pre_version(self, snapshot, run_id):
+        return _agent_snapshot(snapshot, note=f"agent run {run_id} 开始前")
+
+    def begin_run(self, snapshot, run_id, plan_mode):
+        if plan_mode:
+            return None
+        return _AGENT_SUPPRESS_STEP_SNAPSHOT.set(True)
+
+    def end_run(self, token):
+        if token is not None:
+            _AGENT_SUPPRESS_STEP_SNAPSHOT.reset(token)
+
+    def thread_load(self):
+        return agent_thread_load(self.canvas_id) if self.use_thread else {"messages": [], "recent": []}
+
+    def thread_history(self, thread):
+        return _agent_thread_history(thread)
+
+    def thread_append(self, records, touched):
+        if self.use_thread:
+            agent_thread_append(self.canvas_id, records, touched)
+
+    def run_start_extra(self):
+        return {"canvas_id": self.canvas_id}
+
+    def tools(self):
+        return AGENT_TOOLS
+
+    def tool_catalog(self):
+        return _agent_build_tools_catalog()
+
+    def build_system_prompt(self, snapshot, tools_json_text, history_text, vision_text=""):
+        focus_text = _agent_run_focus_text(self.focus, snapshot) + (
+            "\n最近改动的节点（新→旧，「刚才那张」优先指这里）：" + "、".join(self.recent_refs[:8])
+            if self.recent_refs else "")
+        if vision_text:
+            focus_text += "\n" + vision_text
+        if self.vision_mode_direct:
+            focus_text += "\n用户消息里附了图片（按「图片「编号」：」标注），据此理解画面内容。"
+        focus_text += _agent_memory_prompt(self.canvas_id)
+        return _AGENT_RUN_SYSTEM_PROMPT.format(
+            tools_json=tools_json_text,
+            media_platforms_text=_agent_run_media_platforms_text(self.image_provider),
+            canvas_summary=json.dumps(_agent_canvas_summary(
+                snapshot, priority_ids=(self.focus or {}).get("selected_node_ids")), ensure_ascii=False),
+            history_text=history_text,
+            focus_text=focus_text)
+
+    def steps_are_free(self, steps):
+        return _agent_steps_are_free(steps)
+
+    def confirmation_needed(self, steps, confirmed=False):
+        return agent_plan_confirmation_needed(steps, confirmed)
+
+    def confirm_reason(self, tool, args):
+        return _agent_run_confirm_reason(tool, args)
+
+    def step_units(self, tool, args):
+        return _agent_step_generation_units(tool, args, self.canvas_id)
+
+    def apply_step_defaults(self, tool, args, image_provider="", image_model=""):
+        if tool in ("generate_image", "generate_video"):
+            # 前端选定的平台/模型只作缺省值：LLM 自己写的 args 优先，最终值由 validate 定
+            for key, value in (("image_provider", image_provider), ("image_model", image_model)):
+                if value and not str(args.get(key) or "").strip():
+                    args[key] = value
+
+    def after_step(self, tool, args, result, units, before, after, undo_log):
+        ops = _agent_canvas_ops(before, after)
+        if ops:
+            _agent_undo_log_record(undo_log, before, after)
+        raw_result = result.get("result")
+        task_ids, units_used = [], 0
+        if isinstance(raw_result, dict):
+            task_ids = raw_result.get("task_ids") or ([raw_result["task_id"]] if raw_result.get("task_id") else [])
+            undo_log["task_ids"].extend(t for t in task_ids if t not in undo_log["task_ids"])
+            if units:
+                units_used = int(raw_result.get("generation_units") or len(task_ids) or units)
+        return {"ops": ops, "mutated": bool(ops), "task_ids": task_ids, "units": units_used}
+
+    def decorate_step_payload(self, payload, ops):
+        if ops:
+            payload["canvas_ops"] = ops
+        return payload
+
+    def new_session(self, instruction, focus, mode):
+        return _agent_new_session(self.canvas_id, instruction, "",
+                                  {"intent": "", "steps": [], "expected_output": ""})
+
+    def save_session(self, session):
+        agent_session_save(session)
+
+    def persist(self, session, status, message, history, rounds, steps_executed, mutated, run_id,
+                intent, instruction, focus, plan=None, used_units=0):
+        _agent_run_persist_session(session, status, message, history, rounds, steps_executed,
+                                   mutated, self.canvas_id, run_id, intent, instruction, focus,
+                                   plan=plan)
+
+    async def broadcast_if_mutated(self, mutated, run_id):
+        if not mutated:
+            return
+        try:
+            fresh = load_canvas(self.canvas_id)
+            await manager.broadcast_canvas_updated(self.canvas_id, int(fresh.get("updated_at") or now_ms()))
+        except Exception as exc:
+            print(f"[Agent] run {run_id} 画布变更广播失败（不影响结果）: {exc}")
+
+    def cancel_pending(self, undo_log):
+        # 用户点了停止 / 关了页面：这次运行提交的、还在排队没开始的生成任务一并取消（不会扣费）
+        for task_id in undo_log["task_ids"]:
+            task = task_get(task_id)
+            if task and task.get("status") == "queued":
+                task_set_status(task_id, "cancelled", error="助手运行已停止，排队中的任务已取消")
+                _agent_writeback_task_result(task_id, "video" if task.get("kind") == "video" else "image",
+                                             [], "助手运行已停止，任务已取消")
+
+    def action_lines(self, history, snapshot):
+        return _agent_action_lines(history, snapshot)
+
+    def touched_refs(self, undo_log, snapshot):
+        return _agent_touched_aliases(undo_log, snapshot)
+
+    def done_changes(self, undo_log, used_units):
+        return {"nodes_created": len(undo_log["created"]),
+                "nodes_modified": len(undo_log["modified"]),
+                "nodes_deleted": len(undo_log["deleted"]),
+                "connections": len(undo_log["conn_added"]) + len(undo_log["conn_removed"]),
+                "generations": used_units}
+
+    def done_extra(self, session, undo_log, plan_payload=None):
+        return {"session_id": (session or {}).get("session_id") or "",
+                "undoable": not _agent_undo_log_empty(undo_log)}
+
+
 async def _agent_run_producer(req, queue):
-    """真正的 agent 循环：执行步骤 → 结果回灌模型 → 下一轮，全程把事件塞进 queue。"""
-    canvas_id = req["canvas_id"]
+    """真正的 agent 循环（上下文无关）：执行步骤 → 结果回灌模型 → 下一轮，全程把事件塞进 queue。
+    画布与上传文件共用同一个循环，差异全部由 ctx（AgentRunContext）提供；
+    ctx 缺省时按画布上下文跑，行为与重构前一致。"""
+    ctx = req.get("context") or _CanvasRunContext(req)
+    context_id = ctx.context_id
     instruction = req["instruction"]
     focus = req["focus"]
     chat = req["chat"]
@@ -32786,14 +33721,13 @@ async def _agent_run_producer(req, queue):
     image_provider = str(req.get("image_provider") or "").strip()
     image_model = str(req.get("image_model") or "").strip()
     # 写操作闸门默认强开：只认 approved_steps（用户点了「执行」），进程内直调也拦得住；
-    # req 里的 enforce_write_confirmation 仍可传入，但已不能关闭闸门（仅为兼容旧调用保留）。
     # 用户点了「执行」：approved_steps 优先于 mode，跳过规划直接执行
     plan_mode = mode == "plan" and not approved_steps
 
     def emit(event, data):
         queue.put_nowait(_agent_sse_event(event, data))
 
-    run_id = f"run_{uuid.uuid4().hex[:16]}"
+    run_id = getattr(ctx, "run_id", "") or f"run_{uuid.uuid4().hex[:16]}"
     status, message, limit_reason = "failed", "", ""
     steps_executed, rounds = 0, 0
     no_progress_rounds = 0
@@ -32807,22 +33741,22 @@ async def _agent_run_producer(req, queue):
     undo_log = _agent_undo_log_new()
     pre_version = None
     # 用户批准过方案：批准的生成次数就是这次运行的花钱上限（后续轮次模型自己加的生成超出就停下来问）
-    budget_units = sum(_agent_step_generation_units(step.get("tool"), step.get("args") or {}, canvas_id)
+    budget_units = sum(ctx.step_units(step.get("tool"), step.get("args") or {})
                        for step in approved_steps) if approved_steps else None
     used_units = 0
     snapshot_token = None
+    tools_map = ctx.tools()
+    max_rounds = int(getattr(ctx, "max_rounds", AGENT_RUN_MAX_ROUNDS) or AGENT_RUN_MAX_ROUNDS)
 
     try:
-        first_canvas = load_canvas(canvas_id)  # 权威状态校验（并发删除时由下面的 snapshot 兜底）
-        if _agent_is_smart_canvas(first_canvas) and _agent_ensure_aliases(json.loads(json.dumps(first_canvas))):
-            first_canvas, _ = _agent_mutate_canvas(canvas_id, lambda cv: None)  # 老画布第一次用助手：补齐编号
-        use_thread = bool(req.get("use_thread"))
-        thread = agent_thread_load(canvas_id) if use_thread else {"messages": [], "recent": []}
+        first_snapshot = ctx.load()
+        thread = ctx.thread_load()
         if not chat_history:
-            chat_history = _agent_thread_history(thread)
+            chat_history = ctx.thread_history(thread)
         recent_refs = [r for r in (thread.get("recent") or []) if r]
-        # 看图：选中节点的图 + 用户附带的参考图。模型看得了就直接给图，看不了就先转文字说明
-        vision_images = _agent_run_collect_images(focus, first_canvas) if _agent_is_smart_canvas(first_canvas) else []
+        ctx.recent_refs = recent_refs
+        # 看图：选中节点的图 + 用户附带的参考图（文件上下文没有图，collect_images 返回空）
+        vision_images = ctx.collect_images(first_snapshot)
         vision_mode, vision_text = "", ""
         if vision_images:
             if _agent_model_maybe_vision(chat.get("model")) and _agent_chat_vision_key(chat) not in _AGENT_VISION_DENY:
@@ -32831,17 +33765,17 @@ async def _agent_run_producer(req, queue):
                                 "text": "已把" + "、".join(i["label"] for i in vision_images) + "直接给模型看"})
             else:
                 vision_mode, vision_text = await _agent_run_vision_setup(vision_images, chat, emit)
+        ctx.vision_mode_direct = (vision_mode == "direct")
         if not plan_mode:
-            pre_version = _agent_snapshot(first_canvas, note=f"agent run {run_id} 开始前")
-            snapshot_token = _AGENT_SUPPRESS_STEP_SNAPSHOT.set(True)
-        emit("run_start", {"run_id": run_id, "canvas_id": canvas_id,
-                           "model": chat["model"], "max_steps": max_steps})
-        session = _agent_new_session(canvas_id, instruction, "",
-                                     {"intent": "", "steps": [], "expected_output": ""})
+            pre_version = ctx.pre_version(first_snapshot, run_id)
+            snapshot_token = ctx.begin_run(first_snapshot, run_id, plan_mode)
+        emit("run_start", dict({"run_id": run_id, "model": chat["model"], "max_steps": max_steps},
+                               **ctx.run_start_extra()))
+        session = ctx.new_session(instruction, focus, mode)
         session.update({"run_id": run_id, "mode": mode, "focus": focus, "status": "running",
                         "rounds": 0, "steps_executed": 0, "started_at": time.time()})
-        agent_session_save(session)
-        print(f"[Agent] run {run_id} start canvas={canvas_id} provider={chat['provider']} "
+        ctx.save_session(session)
+        print(f"[Agent] run {run_id} start context={ctx.kind}:{context_id} provider={chat['provider']} "
               f"model={chat['model']} max_steps={max_steps}", flush=True)
 
         while True:
@@ -32849,51 +33783,46 @@ async def _agent_run_producer(req, queue):
                 status = "aborted"
                 limit_reason = f"已达到最大步数上限 {max_steps}，停止后续步骤"
                 break
-            if rounds >= AGENT_RUN_MAX_ROUNDS:
+            if rounds >= max_rounds:
                 status = "aborted"
-                limit_reason = f"已达到最大轮次上限 {AGENT_RUN_MAX_ROUNDS}，停止后续步骤"
+                limit_reason = f"已达到最大轮次上限 {max_rounds}，停止后续步骤"
                 break
             rounds += 1
             if rounds > 1:
                 emit("round_start", {"round": rounds})
-            snapshot = _agent_run_load_canvas_soft(canvas_id)
-            if not isinstance(snapshot, dict):
+            snapshot = ctx.reload()
+            if not ctx.is_available(snapshot):
                 status = "failed"
-                message = "画布不可用（可能已被删除或移入回收站），运行已停止"
-                emit("error", {"message": message, "code": "canvas_unavailable"})
+                message = ctx.unavailable_message()
+                emit("error", {"message": message, "code": "context_unavailable"})
                 break
             if rounds == 1 and approved_steps:
                 # 用户已点「执行」：跳过规划轮直接用这批步骤，模型只在后续轮次兜底
                 decision = {"steps": approved_steps}
             else:
-                tools_json_text = json.dumps(_agent_build_tools_catalog(), ensure_ascii=False)
-                system = _AGENT_RUN_SYSTEM_PROMPT.format(
-                    tools_json=tools_json_text,
-                    media_platforms_text=_agent_run_media_platforms_text(image_provider),
-                    canvas_summary=json.dumps(_agent_canvas_summary(
-                        snapshot, priority_ids=(focus or {}).get("selected_node_ids")), ensure_ascii=False),
-                    history_text=_agent_run_history_prompt(chat_history),
-                    focus_text=_agent_run_focus_text(focus, snapshot) + (
-                        "\n最近改动的节点（新→旧，「刚才那张」优先指这里）：" + "、".join(recent_refs[:8]) if recent_refs else "")
-                        + ("\n" + vision_text if vision_text else "")
-                        + ("\n用户消息里附了图片（按「图片「编号」：」标注），据此理解画面内容。" if vision_mode == "direct" else "")
-                        + _agent_memory_prompt(canvas_id))
+                tools_json_text = json.dumps(ctx.tool_catalog(), ensure_ascii=False)
+                system = ctx.build_system_prompt(snapshot, tools_json_text,
+                                                 _agent_run_history_prompt(chat_history), vision_text)
                 user_text = _agent_run_user_prompt(
                     instruction, history, rounds, max_steps, steps_executed, last_error, mode=mode,
-                    reference_hint=agent_plan_reference_hint((focus or {}).get("reference_images")))
+                    reference_hint=agent_plan_reference_hint((focus or {}).get("reference_images")),
+                    max_rounds=max_rounds)
                 try:
                     user_content = _agent_vision_user_content(user_text, vision_images) if vision_mode == "direct" else user_text
                     try:
-                        decision = await _agent_run_decide(chat, system, user_content, canvas_id, tools_json_text)
+                        decision = await _agent_run_decide(chat, system, user_content, context_id,
+                                                           tools_json_text, tools_map)
                     except AgentRunError as vexc:
                         if vision_mode != "direct" or vexc.code != "provider_http_error":
                             raise
                         # 这个模型一收到图就报错：记下来，改成文字说明再问一次
                         _AGENT_VISION_DENY.add(_agent_chat_vision_key(chat))
                         vision_mode, vision_text = await _agent_run_vision_setup(vision_images, chat, emit)
+                        ctx.vision_mode_direct = False
                         system = system.replace("\n用户消息里附了图片（按「图片「编号」：」标注），据此理解画面内容。", "") \
                             + ("\n" + vision_text if vision_text else "")
-                        decision = await _agent_run_decide(chat, system, user_text, canvas_id, tools_json_text)
+                        decision = await _agent_run_decide(chat, system, user_text, context_id,
+                                                           tools_json_text, tools_map)
                 except AgentRunError as exc:
                     last_error = exc.message
                     fail_notes.append(f"第 {rounds} 轮模型调用失败：{exc.message}")
@@ -32904,13 +33833,13 @@ async def _agent_run_producer(req, queue):
                         emit("error", {"message": exc.message, "code": exc.code})
                         break
                     continue
-            if plan_mode and _agent_steps_are_free(decision.get("steps")):
+            if plan_mode and ctx.steps_are_free(decision.get("steps")):
                 # 只出改写候选 / 只读：不改画布、不花钱，不用先出方案再确认一遍
                 plan_mode = False
                 mode = "run"
             if plan_mode:
                 # plan 模式只把第一轮方案发出去，绝不进入下面的执行分支
-                plan_steps, plan_unknown = _agent_run_normalize_steps(decision.get("steps"))
+                plan_steps, plan_unknown = _agent_run_normalize_steps(decision.get("steps"), tools_map)
                 if plan_unknown:
                     last_error = f"模型给出了不可用步骤：{'、'.join(plan_unknown[:5])}"
                     fail_notes.append(f"第 {rounds} 轮：{last_error}")
@@ -32948,7 +33877,7 @@ async def _agent_run_producer(req, queue):
             thought = str(decision.get("thought") or decision.get("intent") or "").strip()
             if thought:
                 intent = intent or thought[:200]
-            steps, unknown = _agent_run_normalize_steps(decision.get("steps"))
+            steps, unknown = _agent_run_normalize_steps(decision.get("steps"), tools_map)
             if unknown:
                 last_error = f"模型给出了不可用步骤：{'、'.join(unknown[:5])}"
                 fail_notes.append(f"第 {rounds} 轮：{last_error}")
@@ -32967,7 +33896,7 @@ async def _agent_run_producer(req, queue):
                                    "args": step["args"], "description": step["description"]})
             # 写操作 / 生成操作闸门（唯一收口）：没带 approved_steps（用户没点过执行）时绝不落盘，
             # 直接把整批步骤作为方案发出去等用户点「执行」；只读工具照旧执行。
-            gate = agent_plan_confirmation_needed(steps, confirmed=bool(approved_steps))
+            gate = ctx.confirmation_needed(steps, confirmed=bool(approved_steps))
             if gate["needed"]:
                 plan_payload = _agent_plan_event(intent or instruction[:60], steps,
                                                  extra={"requires_confirmation": True,
@@ -32985,12 +33914,8 @@ async def _agent_run_producer(req, queue):
                 index = plan_steps[offset]["index"]
                 tool = step["tool"]
                 resolved_args = _agent_resolve_step_refs(step["args"], results)
-                if tool in ("generate_image", "generate_video"):
-                    # 前端选定的平台/模型只作缺省值：LLM 自己写的 args 优先，最终值由 validate 定
-                    for key, value in (("image_provider", image_provider), ("image_model", image_model)):
-                        if value and not str(resolved_args.get(key) or "").strip():
-                            resolved_args[key] = value
-                description = step["description"] or AGENT_TOOLS[tool]["description"]
+                ctx.apply_step_defaults(tool, resolved_args, image_provider, image_model)
+                description = step["description"] or (tools_map.get(tool) or {}).get("description") or ""
                 signature = _agent_run_step_signature(tool, resolved_args)
                 if fail_counts.get(signature, 0) >= 2:
                     reason = "同一 tool+args 已连续失败 2 次，跳过该步"
@@ -33004,8 +33929,8 @@ async def _agent_run_producer(req, queue):
                     continue
                 # 用户刚在确认卡上点过「删除」：这一批步骤就是用户批准的，不再拦
                 confirmed_by_user = rounds == 1 and bool(approved_steps)
-                confirm_reason = "" if confirmed_by_user else _agent_run_confirm_reason(tool, resolved_args)
-                units = _agent_step_generation_units(tool, resolved_args, canvas_id)
+                confirm_reason = "" if confirmed_by_user else ctx.confirm_reason(tool, resolved_args)
+                units = ctx.step_units(tool, resolved_args)
                 confirm_kind = "delete" if confirm_reason else ""
                 if not confirm_reason and budget_units is not None and units and used_units + units > budget_units:
                     confirm_reason = (f"你批准的是 {budget_units} 次生成，已经用了 {used_units} 次，"
@@ -33023,28 +33948,26 @@ async def _agent_run_producer(req, queue):
                     continue
                 emit("step_start", {"index": index, "tool": tool, "args": resolved_args,
                                     "description": description})
-                before_canvas = _agent_run_load_canvas_soft(canvas_id)
-                result = await agent_execute_step(tool, resolved_args)
-                after_canvas = _agent_run_load_canvas_soft(canvas_id)
+                before_snapshot = ctx.reload()
+                with ctx.execution_scope():
+                    result = await agent_execute_step(tool, resolved_args)
+                after_snapshot = ctx.reload()
                 results.append(result)
                 if result.get("ok"):
                     steps_executed += 1
                     round_success += 1
-                    ops = _agent_canvas_ops(before_canvas, after_canvas)
-                    if ops:
+                    info = ctx.after_step(tool, resolved_args, result, units,
+                                          before_snapshot, after_snapshot, undo_log)
+                    if info.get("mutated"):
                         mutated = True
-                        _agent_undo_log_record(undo_log, before_canvas, after_canvas)
+                    if info.get("units"):
+                        used_units += int(info["units"])
                     raw_result = result.get("result")
-                    if isinstance(raw_result, dict):
-                        new_tasks = raw_result.get("task_ids") or ([raw_result["task_id"]] if raw_result.get("task_id") else [])
-                        undo_log["task_ids"].extend(t for t in new_tasks if t not in undo_log["task_ids"])
-                        if units:
-                            used_units += int(raw_result.get("generation_units") or len(new_tasks) or units)
                     payload = {"index": index, "tool": tool, "ok": True,
                                "result": raw_result if isinstance(raw_result, (dict, list)) else {"value": raw_result},
                                "message": result.get("message") or "执行成功"}
-                    if ops:
-                        payload["canvas_ops"] = ops
+                    payload = ctx.decorate_step_payload(payload, info.get("ops") or {})
+                    ctx.record_step(index, tool, description, True, result=raw_result)
                     emit("step_result", payload)
                     history.append({"index": index, "tool": tool, "args": resolved_args, "ok": True,
                                     "digest": _agent_run_digest_text(raw_result)})
@@ -33058,6 +33981,7 @@ async def _agent_run_producer(req, queue):
                     history.append({"index": index, "tool": tool, "args": resolved_args, "ok": False,
                                     "error": error_text, "code": code, "retryable": retryable})
                     last_error = f"第 {rounds} 轮第 {index} 步（{tool}）失败：{error_text}（code={code}）"
+                    ctx.record_step(index, tool, description, False, error=error_text)
                     emit("step_result", {"index": index, "tool": tool, "ok": False, "error": error_text,
                                          "code": code, "retryable": retryable})
             no_progress_rounds = no_progress_rounds + 1 if round_success == 0 else 0
@@ -33068,22 +33992,11 @@ async def _agent_run_producer(req, queue):
                     message += f"（最后失败：{last_error}）"
                 break
 
-        if mutated:
-            try:
-                fresh = load_canvas(canvas_id)
-                await manager.broadcast_canvas_updated(canvas_id, int(fresh.get("updated_at") or now_ms()))
-            except Exception as exc:
-                print(f"[Agent] run {run_id} 画布变更广播失败（不影响结果）: {exc}")
+        await ctx.broadcast_if_mutated(mutated, run_id)
     except asyncio.CancelledError:
         status = "aborted"
         message = "客户端断开连接，运行已取消"
-        # 用户点了停止 / 关了页面：这次运行提交的、还在排队没开始的生成任务一并取消（不会扣费）
-        for task_id in undo_log["task_ids"]:
-            task = task_get(task_id)
-            if task and task.get("status") == "queued":
-                task_set_status(task_id, "cancelled", error="助手运行已停止，排队中的任务已取消")
-                _agent_writeback_task_result(task_id, "video" if task.get("kind") == "video" else "image",
-                                             [], "助手运行已停止，任务已取消")
+        ctx.cancel_pending(undo_log)
         raise
     except HTTPException as exc:
         status = "failed"
@@ -33107,33 +34020,28 @@ async def _agent_run_producer(req, queue):
             final_message = " ".join(p for p in parts if p).strip() or \
                 f"Agent 运行结束：执行 {steps_executed} 步，共 {rounds} 轮"
             if snapshot_token is not None:
-                _AGENT_SUPPRESS_STEP_SNAPSHOT.reset(snapshot_token)
+                ctx.end_run(snapshot_token)
             if isinstance(session, dict):
                 session["undo_log"] = undo_log
                 session["pre_version"] = pre_version
-            emit("done", {"run_id": run_id, "status": status, "steps_executed": steps_executed,
-                          "rounds": rounds, "message": final_message[:2000],
-                          "session_id": (session or {}).get("session_id") or "",
-                          "undoable": not _agent_undo_log_empty(undo_log),
-                          "changes": {"nodes_created": len(undo_log["created"]),
-                                      "nodes_modified": len(undo_log["modified"]),
-                                      "nodes_deleted": len(undo_log["deleted"]),
-                                      "connections": len(undo_log["conn_added"]) + len(undo_log["conn_removed"]),
-                                      "generations": used_units}})
-            _agent_run_persist_session(session, status, final_message, history, rounds, steps_executed,
-                                       mutated, canvas_id, run_id, intent, instruction, focus,
-                                       plan=plan_payload)
+            done_payload = {"run_id": run_id, "status": status, "steps_executed": steps_executed,
+                            "rounds": rounds, "message": final_message[:2000],
+                            "changes": ctx.done_changes(undo_log, used_units)}
+            done_payload.update(ctx.done_extra(session, undo_log, plan_payload))
+            emit("done", done_payload)
+            ctx.persist(session, status, final_message, history, rounds, steps_executed,
+                        mutated, run_id, intent, instruction, focus, plan=plan_payload,
+                        used_units=used_units)
             try:
-                after_canvas_final = _agent_run_load_canvas_soft(canvas_id)
-                action_lines, step_refs = _agent_action_lines(history, after_canvas_final)
-                touched_refs = _agent_touched_aliases(undo_log, after_canvas_final) + step_refs
+                after_snapshot_final = ctx.reload()
+                action_lines, step_refs = ctx.action_lines(history, after_snapshot_final)
+                touched_refs = ctx.touched_refs(undo_log, after_snapshot_final) + step_refs
                 records = [] if approved_steps else [{"role": "user", "text": instruction}]
                 reply = final_message
                 if plan_payload:
                     reply = (plan_payload.get("summary") or final_message) + "（方案待确认）"
                 records.append({"role": "assistant", "text": reply, "run_id": run_id, "actions": action_lines})
-                if req.get("use_thread"):
-                    agent_thread_append(canvas_id, records, list(dict.fromkeys(touched_refs)))
+                ctx.thread_append(records, list(dict.fromkeys(touched_refs)))
             except Exception as exc:
                 print(f"[Agent] run {run_id} 写对话记录失败（不影响结果）: {exc}")
             print(f"[Agent] run {run_id} done status={status} steps={steps_executed} rounds={rounds} "
@@ -33300,6 +34208,51 @@ _deps.bind(
 from server.routes.assets import router as _assets_router
 app.include_router(_assets_router)
 
+# --- 智能体广场 + 技能目录：注册表 / 产物存储 / 通用文件工具上下文 / 路由 ---
+from server.agents import platforms as _platforms_registry
+from server.agents import registry as _agents_registry, store as _agents_store
+from server.skills import registry as _skills_registry
+_agents_registry.set_data_dir(DATA_DIR)
+_agents_store.set_data_dir(DATA_DIR)
+_skills_registry.set_data_dir(DATA_DIR)
+_platforms_registry.set_data_dir(DATA_DIR)
+_deps.bind(
+    AGENT_RUN_PRODUCER=_agent_run_producer,
+    # 能力运行时生图：server/agents/tools.py 的 image_generate 与 OpenClaw 生图阶段共用
+    AGENT_IMAGE_GENERATE=capability_generate_image,
+    # OpenClaw 能力后端复用同一条 SSE 分片格式，事件体完全一致
+    AGENT_SSE_EVENT=_agent_sse_event,
+    AGENT_RESOLVE_CHAT=_agents_resolve_chat,
+    AGENT_RUN_NORMALIZE_FOCUS=_agent_run_normalize_focus,
+    AGENT_RUN_NORMALIZE_HISTORY=_agent_run_normalize_history,
+    AGENT_RUN_MAX_STEPS_CAP=AGENT_RUN_MAX_STEPS_CAP,
+    # 会话作用域 run 复用 main.py 现成的对话存储，不另造一套
+    CONVERSATION_LOAD=load_conversation,
+    CONVERSATION_SAVE=save_conversation,
+    CONVERSATION_USER_ID=safe_user_id,
+)
+from server.routes.agents import router as _agents_router
+app.include_router(_agents_router)
+
+# --- OpenClaw 按需安装引导：检测 / 安装（SSE）/ 取消。命令与地址来自 config/openclaw.json ---
+from server.routes.openclaw_setup import router as _openclaw_setup_router
+app.include_router(_openclaw_setup_router)
+
+# --- OpenAI 兼容模型端点（/v1/models、/v1/chat/completions）：让 OpenClaw 把 NOVAI 当供应商 ---
+_deps.bind(
+    sse_event=sse_event,
+    load_api_providers=load_api_providers,
+    get_primary_provider_id=get_primary_provider_id,
+    resolve_chat_provider=resolve_chat_provider,
+    is_apimart_provider=is_apimart_provider,
+    text_delta_from_chat_chunk=text_delta_from_chat_chunk,
+    reasoning_delta_from_chat_chunk=reasoning_delta_from_chat_chunk,
+    text_from_chat_response=text_from_chat_response,
+    reasoning_from_chat_response=reasoning_from_chat_response,
+    unwrap_apimart_response=unwrap_apimart_response,
+)
+from server.routes.openai_compat import router as _openai_compat_router
+app.include_router(_openai_compat_router)
 
 
 @app.post("/api/native-save")

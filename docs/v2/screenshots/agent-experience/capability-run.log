@@ -1,0 +1,27 @@
+xlsx /tmp/novai-review-sample.xlsx 5370 bytes
+conversation dd96cd24765d4a54a8ae8d7822e8fc3b
+run start 200 {"run_id": "run_e39823058b55472e", "conversation_id": "dd96cd24765d4a54a8ae8d7822e8fc3b", "user_message_id": "d5cfe815a0d249aca5a9e004333c1818", "assistant_message_id": "0342ace529ff4c74a3c8a8418643d44a"}
+RUN_ID run_e39823058b55472e
+16:42:27 status=running steps=1 artifacts=0
+   step 0 read_table ok= True 读取评价样本表，查看列名、数据样例与统计信息
+16:43:17 status=running steps=2 artifacts=1
+   step 0 read_table ok= True 读取评价样本表，查看列名、数据样例与统计信息
+   step 1 write_html_report ok= True 生成 HTML 分析报告文件并登记到本次运行的产物；返回文件名与下载 URL。sections 是报告模块数组，每项 {
+   artifact html 评价分析报告.html /api/agents/runs/run_e39823058b55472e/files/%E8%AF%84%E4%BB%B7%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html
+16:44:07 status=running steps=3 artifacts=1
+   step 0 read_table ok= True 读取评价样本表，查看列名、数据样例与统计信息
+   step 1 write_html_report ok= True 生成 HTML 分析报告文件并登记到本次运行的产物；返回文件名与下载 URL。sections 是报告模块数组，每项 {
+   step 2 write_html_report ok= True 生成 HTML 分析报告文件并登记到本次运行的产物；返回文件名与下载 URL。sections 是报告模块数组，每项 {
+   artifact html 评价分析报告.html /api/agents/runs/run_e39823058b55472e/files/%E8%AF%84%E4%BB%B7%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html
+16:44:27 status=ok steps=3 artifacts=1
+   step 0 read_table ok= True 读取评价样本表，查看列名、数据样例与统计信息
+   step 1 write_html_report ok= True 生成 HTML 分析报告文件并登记到本次运行的产物；返回文件名与下载 URL。sections 是报告模块数组，每项 {
+   step 2 write_html_report ok= True 生成 HTML 分析报告文件并登记到本次运行的产物；返回文件名与下载 URL。sections 是报告模块数组，每项 {
+   artifact html 评价分析报告.html /api/agents/runs/run_e39823058b55472e/files/%E8%AF%84%E4%BB%B7%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html
+FINAL_RUN {"run_id": "run_e39823058b55472e", "agent_id": "review-analysis", "status": "ok", "steps": [{"index": 0, "tool": "read_table", "description": "读取评价样本表，查看列名、数据样例与统计信息", "ok": true, "row_count": 6, "columns": ["评价内容", "评分", "标签", "SKU", "日期"], "sheets": ["评价明细"]}, {"index": 1, "tool": "write_html_report", "description": "生成 HTML 分析报告文件并登记到本次运行的产物；返回文件名与下载 URL。sections 是报告模块数组，每项 {title, subtitle?, body?, items?, table?{columns,rows}}；也可以直接给 html（完整 HTML 字符串）。左侧菜单由服务端按 sections 渲染。", "ok": true, "kind": "html", "name": "评价分析报告.html", "url": "/api/agents/runs/run_e39823058b55472e/files/%E8%AF%84%E4%BB%B7%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html", "bytes": 4548}, {"index": 2, "tool": "write_html_report", "description": "生成 HTML 分析报告文件并登记到本次运行的产物；返回文件名与下载 URL。sections 是报告模块数组，每项 {title, subtitle?, body?, items?, table?{columns,rows}}；也可以直接给 html（完整 HTML 字符串）。左侧菜单由服务端按 sections 渲染。", "ok": true, "kind": "html", "name": "评价分析报告.html", "url": "/api/agents/runs/run_e39823058b55472e/files/%E8%AF%84%E4%BB%B7%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html", "bytes": 5840}], "artifacts": [{"kind": "html", "name": "评价分析报告.html", "url": "/api/agents/runs/run_e39823058b55472e/files/%E8%AF%84%E4%BB%B7%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html"}], "error": "", "created_at": 1791880942.4562051, "updated_at": 1791881065.145782, "conversation_id": "dd96cd24765d4a54a8ae8d7822e8fc3b", "capability_id": "review-analysis", "capability_name": "评价分析"}
+CONV_ID dd96cd24765d4a54a8ae8d7822e8fc3b
+MESSAGE_COUNT 2
+MSG user None cap= review-analysis status= None steps= 0 arts= 0 capdesc= {"type": "agent", "capabilityId": "review-analysis", "agentId": 1, "name": "评价分析"}
+MSG assistant capability cap= review-analysis status= ok steps= 3 arts= 1 capdesc= {}
+   ART html 评价分析报告.html /api/agents/runs/run_e39823058b55472e/files/%E8%AF%84%E4%BB%B7%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html
+EXIT=0

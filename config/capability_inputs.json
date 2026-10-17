@@ -1,0 +1,10 @@
+{
+  "comment": "能力运行的可选输入解析配置。video.asr 用于视频口播转写：provider/model 必须是 NOVAI 已配置的平台与模型（走 resolve_chat_provider，含密钥）。留空 = 不启用，能力运行会如实报告「不可用」。可被环境变量 NOVAI_ASR_PROVIDER / NOVAI_ASR_MODEL 覆盖。",
+  "video": {
+    "asr": {
+      "provider": "",
+      "model": ""
+    },
+    "frame_count": 8
+  }
+}

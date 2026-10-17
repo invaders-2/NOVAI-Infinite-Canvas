@@ -353,6 +353,35 @@ eq(M.TABLE_PARSE_ERRORS.format, '模型没有返回统一的多维表格格式',
 eq(M.TABLE_PARSE_ERRORS.columns, '模型返回的表格列名不完整', '列名错误文案与规范一致');
 eq(M.LLM_REPAIR_MAX_TOKENS, 8192, '修复重试的 max_tokens');
 
+// 多数据块（分页 / 分块）输出：后续块的行不能丢
+{
+  const F = FENCE;
+  const columns = ['时长(秒)', '运镜', '画面描述'];
+  const page1 = JSON.stringify({kind:'table', version:1, columns, rows:[['3', '缓慢推近', '第一段']]});
+  const page2 = JSON.stringify({kind:'table', version:1, columns, rows:[['2.5', '高速跟拍', '第二段'], ['4', '环绕摇镜', '第三段']]});
+  const splitByFence = '这是视频分镜表：\n' + F + 'json\n' + page1 + '\n' + F + '\n\n继续：\n' + F + 'json\n' + page2 + '\n' + F;
+  const merged = M.parseTableOutput(splitByFence);
+  eq(merged.columns, columns, '多块：列结构取第一块');
+  eq(merged.rows.length, 3, '多块：3 行全部读出来（旧实现只有第一块的 1 行）');
+  eq(merged.rows.map(row => row[2]), ['第一段', '第二段', '第三段'], '多块：行顺序按块拼接');
+  eq(merged.rows.map(row => row[0]), ['3', '2.5', '4'], '多块：每行时长来自对应块');
+  eq(merged.rows.map(row => row[1]), ['缓慢推近', '高速跟拍', '环绕摇镜'], '多块：每行运镜来自对应块');
+  eq(M.parseTableOutput(F + 'json\n' + page1 + '\n' + F).rows.length, 1, '单块行为不变：只有它自己的 1 行');
+  let noFenceRows = 0;
+  try { noFenceRows = M.parseTableOutput(page1 + '\n' + page2).rows.length; } catch(error){ /* 旧实现直接解析失败 */ }
+  eq(noFenceRows, 3, '没有代码块、并列多个 JSON 对象也能合并');
+  const other = JSON.stringify({kind:'table', version:1, columns:['别的列'], rows:[['x']]});
+  let otherRows = 0;
+  try { otherRows = M.parseTableOutput(page1 + '\n' + other).rows.length; } catch(error){ /* 旧实现直接解析失败 */ }
+  eq(otherRows, 1, '列结构不同的块不硬拼（避免拼坏另一张表）');
+
+  const shots1 = JSON.stringify({shots:[{index:1, '画面描述':'a'}, {index:2, '画面描述':'b'}]});
+  const shots2 = JSON.stringify({shots:[{index:3, '画面描述':'c'}]});
+  const shotsText = F + 'json\n' + shots1 + '\n' + F + '\n' + F + 'json\n' + shots2 + '\n' + F;
+  eq(M.parseSegmentShots(shotsText).map(shot => shot.index), [1, 2, 3], '多块：逐段描述 3 段全部读出来');
+  eq(M.parseSegmentShots(shotsText).map(shot => shot['画面描述']), ['a', 'b', 'c'], '多块：逐段描述按块拼接');
+}
+
 // CR：修复提示词
 ok(M.buildRepairPrompt('坏结果').indexOf(M.TABLE_REPAIR_INSTRUCTION) === 0, '修复提示词以指令开头');
 ok(M.buildRepairPrompt('坏结果').indexOf('坏结果') > 0, '修复提示词带上原结果');

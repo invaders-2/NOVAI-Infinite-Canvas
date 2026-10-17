@@ -1,11 +1,12 @@
 <script setup>
-// 平台详情：页头（未保存 / 首选 / 删除 / 保存 / 测试连接）+ 新手引导卡 或 概览便当格 + RunningHub 应用与工作流 + 模型列表
+// 平台详情：页头（未保存 / 首选 / 删除 / 保存 / 测试连接）+ 新手引导卡 或 概览便当格 + RunningHub 应用与工作流 + 模型列表 + 能力覆盖
 import { computed, inject } from 'vue';
 import AIcon from './AIcon.vue';
 import ApiHead from './ApiHead.vue';
 import OverviewBento from './OverviewBento.vue';
 import OnboardingCard from './OnboardingCard.vue';
 import ModelsSection from './ModelsSection.vue';
+import SizeOverridesCard from './SizeOverridesCard.vue';
 import ModelPicker from './ModelPicker.vue';
 import RunningHubPanel from '../RunningHubPanel.vue';
 import { t } from '../../../../lib/store.js';
@@ -52,6 +53,7 @@ const unsaved = computed(() => S.dirty || S.childDirty);
             <!-- RH 两把 Key 在概览的 API Key 卡里，这里只渲染「应用与工作流」 -->
             <RunningHubPanel v-if="fl.isRh" :key="'rh' + it.id" section="entries" :provider="it" :providers="S.providers" :save="store.save" @dirty="emitChild.dirty" @save="store.save()" />
             <ModelsSection />
+            <SizeOverridesCard />
         </template>
         <ModelPicker />
     </div>

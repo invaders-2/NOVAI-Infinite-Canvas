@@ -75,6 +75,7 @@ const sandboxSrc = [
     'function mediaLayoutSize(){ return {width:0, height:0}; }',
     'function mediaNodeDefaultScale(){ return 1; }',
     'function cleanHistoryImages(list){ return list; }',
+    extractFn(code, 'nonPreviewOutputImages'),
     'function stripImageGenerationMeta(item){ return item; }',
     'async function generateUrlsForCurrentSettings(){ generateCalls += 1; return {urls: nextUrls.slice()}; }',
     extractFn(code, 'appendBatchResultImages'),

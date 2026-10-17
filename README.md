@@ -132,13 +132,13 @@ python main.py
 | 生图 | FLUX.2-klein-9B | 画面质感最好 |
 | 生图 | Z-Image-Turbo | 1-2 秒快速出图 |
 | 生图 | Qwen-Image-Edit-2511 | 说话就能改图 |
-| 视频 | agnes-video-v2.0 | 免费视频生成 |
+| 视频 | agnes-video-2.5 | 免费视频生成 |
 
 除内置免费额度外，「API 设置 → 新增平台」可以接入你自己账号的平台，模型名按平台各自维护、不会互相替换：
 
 | 协议 | 平台 |
 |------|------|
-| OpenAI 兼容 | 各类中转 / 官方兼容接口（gpt-image、Nano Banana 等）；预置推荐：灵境 API、Agnes AI、EXELLOME、FHL、VIP-GPT |
+| OpenAI 兼容 | 各类中转 / 官方兼容接口（gpt-image、Nano Banana 等）；预置推荐：Agnes AI、EXELLOME、FHL、VIP-GPT |
 | 异步协议 | APIMart |
 | Gemini 原生 | Google Gemini（图像走 `/v1beta`） |
 | 方舟 / Ark | 火山引擎（豆包 Seedream 生图、Seedance 视频） |
@@ -266,10 +266,8 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 
 ### v1.0.116
 
-- **灵境 API 新增视频厂商分发**：海螺 MiniMax、可灵 Kling、Vidu、通义万象、豆包 Seedance、Luma、Runway、通用统一格式，按模型名前缀自动路由
-- **灵境 API 协议自动推断**：Gemini 图像模型自动走原生 `/v1beta`，其余沿用 OpenAI 兼容，不再逐个模型手配协议；拉取模型时自动补齐被令牌分组过滤掉的 Gemini 模型
 - **Agnes AI 新增 Video 2.5 / 2.5 Flash** 视频模型（OpenAI Videos 兼容协议）
-- **协议表**新增灵境 / Agnes 的文本、图像、视频条目，`/api/ai/descriptor` 能识别这两个平台的 video 意图
+- **协议表**新增 Agnes 的文本、图像、视频条目，`/api/ai/descriptor` 能识别这两个平台的 video 意图
 - **修复**：`gpt-image-1 / 1.5` 在部分中转无法出图（请求体带了新版官方接口已移除的 `response_format`，现不再发送，上游明确报错时自动去掉重试一次）
 - **改进**：生成图片下方标注真实像素尺寸（如 `gpt-image-2 · 1254×1254`），避免把上游降采样误判成 2K / 4K
 - **修复**：GPT 聊天模型选择器只显示「已配置好」的平台（平台启用 + 已填 Key + 有模型列表）；停用 ModelScope 内置默认聊天模型并从老配置里清理

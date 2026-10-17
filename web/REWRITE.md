@@ -152,7 +152,7 @@
 - 备份：_claude_backup/20261009-round44-before
 
 ### 第 45 轮：真实模型把方案写成 JSON 文字时认不出（2026-10-09）
-- 现象：灵境 gemini-3.1-pro-preview 不走 tool_calls，把方案写在正文 ```json 里，且平台拼接分片时在字符串中间插入真实换行（「提取图\n89」），json.loads 报错 → 整段 JSON 当回复显示，节点没建。
+- 现象：某平台 gemini-3.1-pro-preview 不走 tool_calls，把方案写在正文 ```json 里，且平台拼接分片时在字符串中间插入真实换行（「提取图\n89」），json.loads 报错 → 整段 JSON 当回复显示，节点没建。
 - 修复：`_agent_json_loads` 容错解析（字符串里的真实换行一定是拼接带进来的，去掉后再解析；转义的 \n 不受影响），方案解析、单轮解析、tool_calls 参数、AI 规划都改用它；正文里的方案补上 canvas_id。
 - 明显是方案（含 "steps" + "tool" 或以 ```json 开头）却仍解析不了时，不再当回复原样显示，改按 JSON 方式重问一次。
 - 测试：test_agent_canvas_p0 新增 2 条（用户截图原样内容），4 个 agent 测试文件 113 条全过；真实模型同一句话已能出方案卡。

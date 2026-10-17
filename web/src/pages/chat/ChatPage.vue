@@ -11,10 +11,12 @@ import HistoryPop from './HistoryPop.vue';
 import SystemPromptPop from './SystemPromptPop.vue';
 import ImagePreview from './ImagePreview.vue';
 import CapabilitySquare from './agents/CapabilitySquare.vue';
+import OpenClawInstallModal from './agents/OpenClawInstallModal.vue';
 import { S, setMode, loadConfig, normalizeSize } from './chatState.js';
 import { C, newConversation, initSession, loadConversations } from './session.js';
 import { loadPersonas, loadMemories, syncPersonaState } from './library.js';
-import { CAP, openSquare, closeSquare, selectCapability } from './agents/capState.js';
+import { CAP, openSquare, closeSquare, closePanel, selectCapability } from './agents/capState.js';
+import { ensureStatus } from './agents/openclawSetup.js';
 import { closeAllPops } from './usePop.js';
 import { state, t } from '../../lib/store.js';
 
@@ -31,7 +33,7 @@ const sysOpen = ref(false);
 const preview = ref('');
 const active = computed(() => state.active === 'gpt-chat');
 // 切到别的页面时收起所有弹层（输入框弹层 / 看图 Teleport 在 body 上，不随 v-show 隐藏）
-watch(active, v => { if (!v) { closeAllPops(); histOpen.value = false; sysOpen.value = false; closeSquare(); preview.value = ''; } });
+watch(active, v => { if (!v) { closeAllPops(); histOpen.value = false; sysOpen.value = false; closeSquare(); closePanel(); preview.value = ''; } });
 
 const title = computed(() => {
     const tt = C.current && C.current.title;
@@ -43,6 +45,8 @@ function openAgents() {
     histOpen.value = false;
     sysOpen.value = false;
     closeAllPops();
+    // 用到 OpenClaw 的地方才探测一次（不在应用启动时探测，避免拖慢启动）
+    ensureStatus(false);
     if (CAP.square === 'agent') closeSquare();
     else openSquare('agent');
 }
@@ -72,6 +76,7 @@ function onKey(e) {
     histOpen.value = false;
     sysOpen.value = false;
     closeSquare();
+    closePanel();
 }
 
 // 设置里改了 API 平台 → 重新拉配置（BroadcastChannel，外壳也可能转发成 window message）
@@ -142,6 +147,7 @@ onBeforeUnmount(() => {
         </div>
 
         <ImagePreview :url="preview" @close="preview = ''" />
+        <OpenClawInstallModal />
     </div>
 </template>
 

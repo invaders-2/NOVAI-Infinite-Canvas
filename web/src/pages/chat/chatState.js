@@ -4,6 +4,7 @@
 import { reactive, computed } from 'vue';
 import { RATIO_KEYS, LEVELS, getSizeOptionsForModel, normalizeChatCustomSize, sizeFor, RATIO_LABELS } from './sizes.js';
 import { getThinkLevels } from './thought.js';
+import { pruneGenImage } from './agents/genImageState.js';
 
 export const CHAT_SETTINGS_KEY = 'gpt_chat_settings_v1';
 export const THINK_KEY = 'gpt_chat_think_level';
@@ -105,8 +106,11 @@ export function providerName(id, kind = pickerKind.value) {
     return p ? (p.name || p.id) : '未配置平台';
 }
 export function shortModelName(v) { return String(v || '').split('/').pop().split(':')[0] || 'Model'; }
-// 对话请求里的 model 字段（modelscope 走 ms_model）
-export function chatModelForRequest() { return S.provider === 'modelscope' ? (S.msModel || S.activeChatModel) : S.activeChatModel; }
+// 对话请求里的 model 字段（modelscope 走 ms_model）；用户没选过就回退到当前平台配置的第一个对话模型（与 ModelPicker 同一数据源）
+export function chatModelForRequest() {
+    const picked = S.provider === 'modelscope' ? (S.msModel || S.activeChatModel) : S.activeChatModel;
+    return picked || modelsOf(S.provider, 'chat')[0] || '';
+}
 
 // 旧 renderProviderControls 的状态部分：当前作用域的平台 / 模型不在列表里就回落到第一个
 export function normalizeProviderControls() {
@@ -150,6 +154,8 @@ export async function loadConfig() {
         S.config = cfg;
         S.apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
         validateSavedProviderState();
+        // 生图模型选择跨刷新保留，但只在配置真正到手后才判定失效，避免加载中误清
+        pruneGenImage(providersOf('image'));
         normalizeProviderControls();
         syncThinkToModel();
         normalizeSize();

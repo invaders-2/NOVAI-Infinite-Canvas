@@ -21,11 +21,19 @@ const isUser = computed(() => m.value.role === 'user');
 const images = computed(() => imageUrlsOf(m.value));
 const body = computed(() => (m.value.type === 'image' ? (m.value.agent_reply || t('chat.generated', '生成完成')) : (m.value.content || '')));
 const isCap = computed(() => m.value.type === 'capability');
-const capName = computed(() => m.value.capability_name || (agentById(m.value.capability_id) || {}).name || '能力');
+const capName = computed(() => {
+    if (m.value.capability_name) return m.value.capability_name;
+    const known = (agentById(m.value.capability_id) || {}).name;
+    if (known) return known;
+    const type = m.value.capability && m.value.capability.type;
+    return type === 'generate-image' ? 'AI生图' : (m.value.capability_id || '能力');
+});
 const capIcon = computed(() => {
     const c = agentById(m.value.capability_id);
     const k = String((c && c.icon) || '').trim();
-    return ICONS[k] ? k : 'sparkles';
+    if (ICONS[k]) return k;
+    if (m.value.capability && m.value.capability.type === 'generate-image') return 'image';
+    return 'sparkles';
 });
 
 const thought = computed(() => {
@@ -57,7 +65,7 @@ const showFoot = computed(() => !isUser.value && !m.value.live);
 <template>
     <div class="row" :class="isUser ? 'u' : 'a'">
         <template v-if="isUser">
-            <span v-if="m.capability_id || m.capability_name" class="ucap">
+            <span v-if="m.capability_id || m.capability_name || m.capability" class="ucap">
                 <ChIcon :name="capIcon" />
                 <span>{{ capName }}</span>
             </span>

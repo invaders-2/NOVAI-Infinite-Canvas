@@ -1,0 +1,1444 @@
+[
+  {
+    "id": "blue-ocean",
+    "name": "蓝海探测",
+    "category": "市场选款",
+    "icon": "🌊",
+    "description": "寻找蓝海商品池，发掘趋势机会",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "rank_table",
+          "label": "类目商品排行表",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "增长潜力榜 / 综合实力榜 / 头部精选榜 / 稳定表现榜的商品排行数据（可多工作表）"
+        }
+      ],
+      "params": [
+        {
+          "name": "category",
+          "label": "类目/商品",
+          "type": "string",
+          "required": false,
+          "description": "分析对象类目或商品；不填则按表格内容推断"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        },
+        {
+          "name": "url",
+          "label": "网页地址（可选，替代上传表格）",
+          "type": "url",
+          "required": false,
+          "description": "直接给商品/评价/榜单页面的网址，由 OpenClaw 浏览器抓取真实页面数据后再分析"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "蓝海探测分析报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n读取类目商品排行数据，完成结构化提取、趋势分析与蓝海机会判断，输出可直接用于选品的蓝海品类分析报告。\n\n# 输入\n用户上传的类目商品排行表，通常包含四个榜单（增长潜力榜 / 综合实力榜 / 头部精选榜 / 稳定表现榜），字段可能含排名、商品标题、店铺、平台、商品ID、关键词、四周排名轨迹、四周支付买家数与访客数轨迹、各类指数。\n\n# 工作流\n1. 用 read_table 读取全部工作表，先看清真实列名与行数。\n2. 结构化整理四榜商品全集，并统计关键词频次、平台分布、指数分布。\n3. 交叉分析四榜：判断品类分化还是头部固化，识别新势力品与守成品。\n4. 按细分品类聚合，计算品数、平均增长潜力、上升品占比，形成品类趋势强度排序。\n5. 从价格带、竞争强度、关键词垄断度、上升轨迹四个角度判断蓝海窗口。\n6. 输出蓝海机会池与可落地的选品方向建议。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：类目全景、四榜结构分析、蓝海机会判断、选品与布局建议。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 3
+  },
+  {
+    "id": "keyword-demand",
+    "name": "关键词需求分析",
+    "category": "市场选款",
+    "icon": "🔎",
+    "description": "分析目标商品/市场的关键词需求",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "keyword_table",
+          "label": "近7/30天关键词排行榜",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "类目关键词排行数据（搜索词、搜索人气、点击率、转化率、在线商品数等）"
+        }
+      ],
+      "params": [
+        {
+          "name": "targetMarket",
+          "label": "目标商品/市场",
+          "type": "string",
+          "required": true,
+          "description": "想分析的目标商品或市场，例如塑料砧板"
+        },
+        {
+          "name": "category",
+          "label": "类目/商品",
+          "type": "string",
+          "required": false,
+          "description": "分析对象类目或商品；不填则按表格内容推断"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        },
+        {
+          "name": "url",
+          "label": "网页地址（可选，替代上传表格）",
+          "type": "url",
+          "required": false,
+          "description": "直接给商品/评价/榜单页面的网址，由 OpenClaw 浏览器抓取真实页面数据后再分析"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "关键词需求分析报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n围绕目标商品/市场，拆解关键词需求结构，识别高需求低供给词、高转化精准词与空白机会，输出投放与标题布局建议。\n\n# 输入\n用户上传的近 7/30 天关键词排行榜表格，以及参数里的目标商品/市场。\n\n# 工作流\n1. 用 read_table 读取关键词表，标准化搜索人气、点击率、支付转化率等数值字段。\n2. 计算需求占比、转化效率，判断供需平衡 / 供给不足 / 供给过剩。\n3. 筛选高点击率 + 高转化率的精准词，作为重点投放与标题布局词。\n4. 定位搜索热度高但转化偏弱的关键词，分析承接不足的落差。\n5. 识别供给不足的空白机会需求，给出切入方向。\n6. 汇总机会词池，输出标题布局、投放优先级与卖点优化建议。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：需求结构分析、高转化精准词、高需求低转化词、空白机会需求、投放与标题建议。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 8
+  },
+  {
+    "id": "keyword-insight",
+    "name": "关键词洞察",
+    "category": "市场选款",
+    "icon": "🧠",
+    "description": "必争词榜、蓝海词榜、意向词榜",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "keyword_7d",
+          "label": "近7天关键词表格",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "近 7 天类目关键词排行数据"
+        }
+      ],
+      "params": [
+        {
+          "name": "category",
+          "label": "类目/商品",
+          "type": "string",
+          "required": false,
+          "description": "分析对象类目或商品；不填则按表格内容推断"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "关键词洞察报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n从近 7 天关键词排行数据中划分必争词、蓝海词、意向词三类榜单，给出关键词布局策略。\n\n# 输入\n用户上传的近 7 天关键词排行表格。\n\n# 工作流\n1. 用 read_table 读取关键词表并统一数值口径。\n2. 按搜索热度、点击率、转化率、在线商品数划分三类词榜：必争词（高热度高转化）、蓝海词（需求明确但供给少）、意向词（转化意向强、竞争温和）。\n3. 逐榜给出代表词、数据依据与使用场景。\n4. 输出关键词布局与投放节奏建议。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：必争词榜、蓝海词榜、意向词榜、关键词布局策略。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 5,
+    "suggestions": [
+      {
+        "text": "帮我找到行业必争蓝海词💡",
+        "icon_type": "hot"
+      }
+    ]
+  },
+  {
+    "id": "search-main-image",
+    "name": "搜索主图分析",
+    "category": "产品调研",
+    "icon": "🖼",
+    "description": "32个维度剖析竞品主图，智能生成效果图",
+    "tags": [
+      "淘宝天猫",
+      "1688",
+      "京东"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "product_images",
+          "label": "商品/竞品主图",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "商品与竞品主图图片（需图像识别）",
+          "type": "image"
+        }
+      ],
+      "params": [
+        {
+          "name": "channel",
+          "label": "平台",
+          "type": "string",
+          "required": true,
+          "description": "淘宝天猫 / 京东 / 1688 / 拼多多 / 抖音 / 小红书"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "image",
+        "name": "搜索主图优化效果图",
+        "label": "主图分析报告 + 优化效果图"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已打通图片输入 + 生图链路）\n- 输入：用户上传的商品/参考图片，本次运行会给出它们的绝对路径与字段 name。\n- 参考图：上传图片就是商品参考图；生图时必须保留参考图中的商品颜色、形态、LOGO 与关键细节，不得改色改形。\n- 生图动作：需要出图时调用 image_generate（prompt 必填；reference_images 填上传图片的 name 或绝对路径；size/model/provider 可选；count 默认 1）。\n  若「本次输入」里已经列出「已由 NOVAI 生成的图片」，这些就是本次交付图，直接使用，不要再重复生成。\n- 交付动作：图片由生图链路直接落进本次运行产物目录（已登记为受控产物）；需要分析结论时用 write_html_report 写 HTML。\n- 图片或字段不足时如实标注「数据不足」，不得编造结论或图片。\n\n# 目标\n对上传的商品/竞品主图做结构化拆解（32 个维度），输出主图分析报告，并按结论生成优化效果图。\n\n# 工作流\n1. 逐张识别每张主图：主体物位置、构图方式、层次关系、主色调、辅助色、色彩对比、色彩情绪、产品占比、展示角度、展示数量、细节呈现、标题文字、促销信息、卖点文案、文字位置、文字占比、背景类型、背景颜色、简洁程度、氛围营造、装饰元素、图标标识、边框修饰、特效处理、使用场景、人物元素、生活化元素、场景道具、图片清晰度、光影处理、精致程度、专业度。\n2. 把每张图的结构化结果整理成表（write_html_report 的 table：columns 为上述维度，rows 为每张图）。\n3. 对比各图的共性与差异，指出可复用的高效表达与当前短板，给出可执行优化建议。\n4. 用 image_generate 生成 1 张按优化建议改进的效果图（reference_images 用上传图）。\n\n# 输出格式\n文件交付：HTML 分析报告（模块：主图拆解表、共性差异、优化建议、效果图）；效果图由生图链路产出。\n",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 4,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "review-analysis",
+    "name": "评价分析",
+    "category": "产品调研",
+    "icon": "⭐",
+    "description": "分析竞品评价趋势、需求、场景、人群",
+    "tags": [
+      "淘宝天猫",
+      "拼多多",
+      "抖音电商",
+      "京东"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "review_table",
+          "label": "评价表格",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "商品评价汇总表，含评价内容、评分、好评差评标签、SKU、日期等字段"
+        }
+      ],
+      "params": [
+        {
+          "name": "productName",
+          "label": "商品名称",
+          "type": "string",
+          "required": false,
+          "description": "分析对象商品名；不填则按表格内容推断"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        },
+        {
+          "name": "url",
+          "label": "网页地址（可选，替代上传表格）",
+          "type": "url",
+          "required": false,
+          "description": "直接给商品/评价/榜单页面的网址，由 OpenClaw 浏览器抓取真实页面数据后再分析"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "评价分析报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n对商品评价做全量结构化抽取，分析需求、场景、人群与情绪趋势，输出竞品评价分析报告。\n\n# 输入\n用户上传的商品评价表格（可含多列：评价内容、评分、标签、SKU、日期、追评等）。\n\n# 工作流\n1. 用 read_table 读取评价表，统一评分与标签口径。\n2. 分析评价总量、评分分布、时间趋势与好评率。\n3. 从评价内容里归类需求维度、使用场景与人群标签，统计频次。\n4. 分析情绪倾向，提炼高频认可点与主要不满点。\n5. 输出评价驱动的卖点承接与改进建议。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：评价总览、需求与场景分析、人群与情绪分析、差评归因、改进建议。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 1
+  },
+  {
+    "id": "qa-analysis",
+    "name": "问大家分析",
+    "category": "产品调研",
+    "icon": "❓",
+    "description": "分析竞品问大家，预判买家关注点",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "qa_table",
+          "label": "问大家表格",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "商品问大家数据，含问题、回答、点赞数等字段"
+        }
+      ],
+      "params": [
+        {
+          "name": "productName",
+          "label": "商品名称",
+          "type": "string",
+          "required": false,
+          "description": "分析对象商品名；不填则按表格内容推断"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "问大家分析报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n对商品问大家数据做结构化提取，预判买家关注点，输出关注点清单与承接建议。\n\n# 输入\n用户上传的问大家表格（问题、回答、点赞/热度等字段）。\n\n# 工作流\n1. 用 read_table 读取问大家数据，统一热度口径。\n2. 归纳高频问题主题：材质、尺寸、效果、物流、售后、价格等。\n3. 统计各主题热度，识别买家最担心的点与尚未被回答充分的点。\n4. 输出可用于详情页与客服话术的承接建议。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：问题总览、高频关注点、未满足需求、卖点与转化建议。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 2
+  },
+  {
+    "id": "title-creation",
+    "name": "标题制作",
+    "category": "视觉营销",
+    "icon": "🏷",
+    "description": "生成新品期、成长期、成熟期标题",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "keyword_table",
+          "label": "近7/30天关键词排行榜",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "类目关键词排行数据"
+        }
+      ],
+      "params": [
+        {
+          "name": "productName",
+          "label": "商品",
+          "type": "string",
+          "required": false,
+          "description": "商品描述或核心卖点；不填则按表格内容推断"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "标题制作报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n基于关键词排行数据，分别为新品期、成长期、成熟期产出可用标题与选词依据。\n\n# 输入\n用户上传的关键词排行表格与商品描述。\n\n# 工作流\n1. 用 read_table 读取关键词表，筛出高人气、高点击、高转化的候选词。\n2. 按词性与意图给候选词分类（品类词、属性词、场景词、人群词、长尾词）。\n3. 分别组装新品期（长尾精准）、成长期（属性+场景放量）、成熟期（核心大词卡位）三组标题。\n4. 给出每组标题的选词依据与替换词库。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：候选关键词池、新品期标题、成长期标题、成熟期标题、选词说明。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 12
+  },
+  {
+    "id": "main-image-plan",
+    "name": "主图策划",
+    "category": "视觉营销",
+    "icon": "📝",
+    "description": "生成5张商品主图的设计策划",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [],
+      "params": [
+        {
+          "name": "reportUrls",
+          "label": "报告链接",
+          "type": "string",
+          "required": false,
+          "description": "评价分析 / 问大家分析的报告链接或产物文件：支持本产物链接 /api/agents/runs/<run_id>/files/<name>、http(s) 链接，或本地文件路径（HTML / xlsx 均可）"
+        },
+        {
+          "name": "userNeeds",
+          "label": "用户需求表达",
+          "type": "string",
+          "required": true,
+          "description": "人群、场景、卖点等需求描述"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "主图策划案.html",
+        "label": "主图设计策划"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已接报告链接/文件解析）\n- 输入：用户在「报告链接」里给的上一轮产物（评价分析 / 问大家分析报告，HTML 或 xlsx），\n  NOVAI 会先解析成文本贴在「已解析的报告链接 / 报告文件内容」块里；直接用这些真实内容，不要重新下载。\n- 用户需求表达（人群、场景、卖点）作为策划约束。\n- 交付动作：用 write 工具把完整 HTML 报告写进产物目录；交付文件就是本轮产物。\n- 报告解析失败或字段缺失时如实写「数据不足」，不得编造报告里的结论。\n\n# 目标\n产出 5 张商品主图的设计策划：每张承担什么角色、画什么、放什么文案、给谁看。\n\n# 工作流\n1. 从报告抽取：高频需求点、使用场景、人群标签、主要不满与顾虑、买家最常问的问题。\n2. 把卖点按「可信度 × 差异度」排序，选出能靠画面直接证明的 5 个主张。\n3. 为 5 张主图分别定角色：主图（品类+核心卖点+利益点）、场景代入、细节/材质证明、\n   对比或参数、信任背书/促销。\n4. 每张给出：画面构图、主体与道具、背景与配色、信息层级、主文案（≤12 字）、副文案、角标。\n5. 标注每张的依据（来自报告里的哪条数据）。\n\n# 输出格式\n文件交付：HTML 策划案，固定覆盖：需求洞察摘要、卖点排序、5 张主图逐张策划、文案清单、数据依据与局限。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 9,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "main-image-gen",
+    "name": "主图生成",
+    "category": "视觉营销",
+    "icon": "🎨",
+    "description": "智能生成1套商品主图",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "product_images",
+          "label": "商品参考图",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "商品正面/侧面/背面图，2~3 张",
+          "type": "image"
+        }
+      ],
+      "params": [
+        {
+          "name": "ratio",
+          "label": "图片比例",
+          "type": "string",
+          "required": false,
+          "description": "1:1 或 3:4"
+        },
+        {
+          "name": "productSellPoint",
+          "label": "商品描述",
+          "type": "string",
+          "required": true,
+          "description": "商品描述与核心卖点"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "image",
+        "name": "商品主图",
+        "label": "商品主图"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已打通图片输入 + 生图链路）\n- 输入：用户上传的商品/参考图片，本次运行会给出它们的绝对路径与字段 name。\n- 参考图：上传图片就是商品参考图；生图时必须保留参考图中的商品颜色、形态、LOGO 与关键细节，不得改色改形。\n- 生图动作：需要出图时调用 image_generate（prompt 必填；reference_images 填上传图片的 name 或绝对路径；size/model/provider 可选；count 默认 1）。\n  若「本次输入」里已经列出「已由 NOVAI 生成的图片」，这些就是本次交付图，直接使用，不要再重复生成。\n- 交付动作：图片由生图链路直接落进本次运行产物目录（已登记为受控产物）；需要分析结论时用 write_html_report 写 HTML。\n- 图片或字段不足时如实标注「数据不足」，不得编造结论或图片。\n\n# 目标\n按商品参考图与核心卖点，生成 1 套商品主图（默认 1 张；用户给了 image_count 再按数量生成）。\n\n# 工作流\n1. 复述参考图中商品的颜色、形态、材质与关键细节（这是生图一致性的锚点）。\n2. 写一条中文主图提示词：先写不少于 60 字的商品描述，再写场景/光线/构图与卖点表达；不要出现文字水印。\n3. 调用 image_generate，reference_images 填上传的商品图，size 可按用户给的 ratio（1:1 或 3:4）。\n4. 如生成多张，保持商品主体、场景与光线一致，只变化机位与卖点表达。\n5. 用一句话说明交付了几张、每张的用途。\n\n# 输出格式\n文件交付：商品主图若干张（生图链路直接落产物目录）。\n",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 11,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "brand-main-image-gen",
+    "name": "品牌级主图生成",
+    "category": "视觉营销",
+    "icon": "💎",
+    "description": "生成品牌级视觉表达主图",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多",
+      "小红书",
+      "1688",
+      "京东",
+      "私域"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "product_images",
+          "label": "商品参考图",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "商品多角度图，2~3 张",
+          "type": "image"
+        }
+      ],
+      "params": [
+        {
+          "name": "ratio",
+          "label": "图片比例",
+          "type": "string",
+          "required": false,
+          "description": "1:1 或 3:4"
+        },
+        {
+          "name": "productDescription",
+          "label": "商品描述",
+          "type": "string",
+          "required": true,
+          "description": "商品描述"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "image",
+        "name": "品牌级主图",
+        "label": "品牌级主图"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已打通图片输入 + 生图链路）\n- 输入：用户上传的商品/参考图片，本次运行会给出它们的绝对路径与字段 name。\n- 参考图：上传图片就是商品参考图；生图时必须保留参考图中的商品颜色、形态、LOGO 与关键细节，不得改色改形。\n- 生图动作：需要出图时调用 image_generate（prompt 必填；reference_images 填上传图片的 name 或绝对路径；size/model/provider 可选；count 默认 1）。\n  若「本次输入」里已经列出「已由 NOVAI 生成的图片」，这些就是本次交付图，直接使用，不要再重复生成。\n- 交付动作：图片由生图链路直接落进本次运行产物目录（已登记为受控产物）；需要分析结论时用 write_html_report 写 HTML。\n- 图片或字段不足时如实标注「数据不足」，不得编造结论或图片。\n\n# 目标\n在保证商品一致性的前提下，生成品牌级视觉表达的主图（统一色板、留白、质感与光影）。\n\n# 工作流\n1. 从商品描述与参考图提炼品牌调性：主色、辅助色、材质质感、光影风格、留白比例。\n2. 写中文提示词：商品描述放最前（不少于 60 字），随后是品牌级版面与氛围要求，禁止文字水印。\n3. 调用 image_generate（reference_images 用上传商品图）生成主图；多张时保持品牌视觉一致。\n4. 用一句话说明品牌视觉要点与交付数量。\n\n# 输出格式\n文件交付：品牌级主图（生图链路直接落产物目录）。\n",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 29,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "styled-main-image-gen",
+    "name": "风格化主图生成",
+    "category": "视觉营销",
+    "icon": "🖌",
+    "description": "按店铺其他商品风格创作主图/详情页",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "小红书",
+      "拼多多",
+      "1688",
+      "京东",
+      "私域"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "reference_images",
+          "label": "风格参考图",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "想要提取风格的图片",
+          "type": "image"
+        },
+        {
+          "name": "product_images",
+          "label": "商品图",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "商品图",
+          "type": "image"
+        }
+      ],
+      "params": [
+        {
+          "name": "ratio",
+          "label": "图片比例",
+          "type": "string",
+          "required": false,
+          "description": "1:1 / 3:4 / 9:16"
+        },
+        {
+          "name": "productDescription",
+          "label": "商品描述",
+          "type": "string",
+          "required": true,
+          "description": "商品描述"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "image",
+        "name": "风格化主图",
+        "label": "风格化主图"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已打通图片输入 + 生图链路）\n- 输入：用户上传的商品/参考图片，本次运行会给出它们的绝对路径与字段 name。\n- 参考图：上传图片就是商品参考图；生图时必须保留参考图中的商品颜色、形态、LOGO 与关键细节，不得改色改形。\n- 生图动作：需要出图时调用 image_generate（prompt 必填；reference_images 填上传图片的 name 或绝对路径；size/model/provider 可选；count 默认 1）。\n  若「本次输入」里已经列出「已由 NOVAI 生成的图片」，这些就是本次交付图，直接使用，不要再重复生成。\n- 交付动作：图片由生图链路直接落进本次运行产物目录（已登记为受控产物）；需要分析结论时用 write_html_report 写 HTML。\n- 图片或字段不足时如实标注「数据不足」，不得编造结论或图片。\n\n# 目标\n提取风格参考图的视觉风格（配色、构图、光影、氛围、材质），融合到自己的商品图上，生成风格化主图。\n\n# 工作流\n1. 分别识别两张图的特征：风格参考图的配色/构图/光影/氛围；商品图的颜色/形态/材质/关键细节。\n2. 写中文提示词：先完整复述商品外观，再明确「使用风格参考图的配色与光影氛围，但保留商品本身」。\n3. 调用 image_generate，reference_images 同时填风格图与商品图。\n4. 用一句话说明风格提取了哪些要素、交付了几张。\n\n# 输出格式\n文件交付：风格化主图（生图链路直接落产物目录）。\n",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 30,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "detail-plan",
+    "name": "详情页策划",
+    "category": "视觉营销",
+    "icon": "📐",
+    "description": "生成一套详情页的设计策划",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [],
+      "params": [
+        {
+          "name": "reportUrls",
+          "label": "报告链接",
+          "type": "string",
+          "required": false,
+          "description": "评价分析 / 问大家分析的报告链接或产物文件：支持本产物链接 /api/agents/runs/<run_id>/files/<name>、http(s) 链接，或本地文件路径（HTML / xlsx 均可）"
+        },
+        {
+          "name": "userNeeds",
+          "label": "用户需求表达",
+          "type": "string",
+          "required": true,
+          "description": "人群、场景、卖点等需求描述"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "详情页策划案.html",
+        "label": "详情页设计策划"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已接报告链接/文件解析）\n- 输入：报告链接 / 报告文件（评价分析、问大家分析，HTML 或 xlsx）由 NOVAI 先解析成文本并贴出；\n  直接用，不要重新下载。\n- 用户需求表达作为策划约束。\n- 交付动作：用 write 工具把完整 HTML 写进产物目录。\n- 解析失败或字段缺失如实写「数据不足」。\n\n# 目标\n基于评价与问大家的真实关注点，生成一套详情页的板块顺序与每屏设计策划。\n\n# 工作流\n1. 从报告抽取：需求维度、使用场景、人群、顾虑、问大家高频问题与卖家回答倾向。\n2. 把「用户下单前必须被回答的问题」按决策顺序排序（是什么 → 为什么好 → 怎么用 → 凭什么信 → 怎么买）。\n3. 产出详情页板块（建议 8-12 屏）：每屏目的、标题、主画面、文案要点、证据素材。\n4. 标注每屏承接的原始关注点；报告没覆盖的模块标注为「通用模块（无报告数据）」。\n\n# 输出格式\n文件交付：HTML 策划案，覆盖：关注点洞察、详情页结构总览、逐屏策划、文案要点、数据依据与局限。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 6,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "brand-detail-plan",
+    "name": "品牌级详情页策划",
+    "category": "视觉营销",
+    "icon": "🏆",
+    "description": "8层推导策略，生成品牌级详情页策划",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [],
+      "params": [
+        {
+          "name": "reportUrls",
+          "label": "报告链接",
+          "type": "string",
+          "required": false,
+          "description": "评价分析 / 问大家分析的报告链接或产物文件：支持本产物链接 /api/agents/runs/<run_id>/files/<name>、http(s) 链接，或本地文件路径（HTML / xlsx 均可）"
+        },
+        {
+          "name": "brandInfo",
+          "label": "品牌资料",
+          "type": "string",
+          "required": true,
+          "description": "品牌定位、人群与调性"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "品牌级详情页策划案.html",
+        "label": "品牌级详情页策划"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已接报告链接/文件解析）\n- 输入：报告链接 / 报告文件由 NOVAI 先解析成文本并贴出；品牌资料（定位、人群、调性）来自用户参数。\n- 交付动作：用 write 工具把完整 HTML 写进产物目录。\n- 解析失败或字段缺失如实写「数据不足」。\n\n# 目标\n用 8 层推导把品牌定位落到一套详情页策划，兼顾品牌调性与转化。\n\n# 工作流（8 层推导，每层写清结论与依据）\n1. 品牌层：定位、核心价值观、调性关键词。\n2. 人群层：目标人群与未被满足的需求（来自报告）。\n3. 竞争层：与同类品牌的差异点。\n4. 价值层：把品牌价值翻译成消费者能感知的利益点。\n5. 证据层：材质、工艺、认证、服务等可展示证据。\n6. 场景层：使用场景与情绪峰值。\n7. 视觉层：色彩、字体、版式、摄影风格与品牌一致性要求。\n8. 转化层：详情页板块顺序与每屏的决策任务。\n第 8 层之后给出逐屏策划与文案。\n\n# 输出格式\n文件交付：HTML，覆盖：8 层推导（每层结论+依据）、逐屏策划、品牌视觉规范、数据依据与局限。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 17,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "detail-gen",
+    "name": "详情页生成",
+    "category": "视觉营销",
+    "icon": "🧾",
+    "description": "智能生成1套商品详情页",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "product_images",
+          "label": "商品参考图",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "商品正面/侧面/背面图，2~3 张",
+          "type": "image"
+        }
+      ],
+      "params": [
+        {
+          "name": "productSellPoint",
+          "label": "商品描述",
+          "type": "string",
+          "required": true,
+          "description": "商品描述与核心卖点"
+        },
+        {
+          "name": "productDetailSegments",
+          "label": "详情页策划报告链接",
+          "type": "string",
+          "required": true,
+          "description": "详情页策划案链接（本期未接）"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "image",
+        "name": "商品详情页",
+        "label": "详情页图片"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已打通图片输入 + 生图链路）\n- 输入：用户上传的商品/参考图片，本次运行会给出它们的绝对路径与字段 name。\n- 参考图：上传图片就是商品参考图；生图时必须保留参考图中的商品颜色、形态、LOGO 与关键细节，不得改色改形。\n- 生图动作：需要出图时调用 image_generate（prompt 必填；reference_images 填上传图片的 name 或绝对路径；size/model/provider 可选；count 默认 1）。\n  若「本次输入」里已经列出「已由 NOVAI 生成的图片」，这些就是本次交付图，直接使用，不要再重复生成。\n- 交付动作：图片由生图链路直接落进本次运行产物目录（已登记为受控产物）；需要分析结论时用 write_html_report 写 HTML。\n- 图片或字段不足时如实标注「数据不足」，不得编造结论或图片。\n\n# 目标\n基于商品参考图与卖点，生成详情页图片组，并输出详情页结构说明 HTML。\n\n# 工作流\n1. 规划详情页模块顺序：首屏主图、核心卖点、细节特写、使用场景、规格/信任背书。\n2. 为每个模块写中文提示词（商品描述在前，保留参考图外观），调用 image_generate 出图。\n3. 用 write_html_report 把每个模块的用途、图片文件名与要点整理成报告（table）。\n4. 用一句话说明交付了哪些图片与模块。\n\n# 输出格式\n文件交付：详情页图片（生图链路落产物目录）+ HTML 结构说明报告（write_html_report）。\n",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 10,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "buyer-show-gen",
+    "name": "买家秀生成",
+    "category": "视觉营销",
+    "icon": "📸",
+    "description": "智能生成8张写实买家秀图片",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "imageFiles",
+          "label": "商品图片",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "商品图片，1~5 张",
+          "type": "image"
+        }
+      ],
+      "params": [
+        {
+          "name": "productDesc",
+          "label": "商品描述",
+          "type": "string",
+          "required": true,
+          "description": "商品描述"
+        },
+        {
+          "name": "crowd",
+          "label": "目标人群",
+          "type": "string",
+          "required": false,
+          "description": "目标人群"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "image",
+        "name": "买家秀图片",
+        "label": "买家秀图片"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已打通图片输入 + 生图链路）\n- 输入：用户上传的商品/参考图片，本次运行会给出它们的绝对路径与字段 name。\n- 参考图：上传图片就是商品参考图；生图时必须保留参考图中的商品颜色、形态、LOGO 与关键细节，不得改色改形。\n- 生图动作：需要出图时调用 image_generate（prompt 必填；reference_images 填上传图片的 name 或绝对路径；size/model/provider 可选；count 默认 1）。\n  若「本次输入」里已经列出「已由 NOVAI 生成的图片」，这些就是本次交付图，直接使用，不要再重复生成。\n- 交付动作：图片由生图链路直接落进本次运行产物目录（已登记为受控产物）；需要分析结论时用 write_html_report 写 HTML。\n- 图片或字段不足时如实标注「数据不足」，不得编造结论或图片。\n\n# 目标\n围绕商品与目标人群，生成真实感的买家秀图片、口语化文案与一一对应的图片提示词，并整理成 HTML。\n\n# 工作流\n1. 从商品图与商品描述提炼核心卖点、使用场景与人群关注点。\n2. 写 3 段口语化买家秀文案（短句、接近真实买家反馈）。\n3. 为每段文案写一条中文图片提示词（120–250 字，先商品描述，再同一场景/光线/风格；三条提示词的场景锚点段逐字一致，只改机位与使用状态；不出现文字水印）。\n4. 逐条调用 image_generate（reference_images 用上传商品图），保持商品一致、场景一致。\n5. 用 write_html_report 把「序号 / 文案 / 提示词 / 图片文件名」整理成表，图片未生成成功时如实标注「该组图片未生成」。\n\n# 输出格式\n文件交付：买家秀图片（生图链路落产物目录）+ HTML 图文报告（write_html_report）。\n",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 7,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "viral-image-teardown",
+    "name": "爆款主图拆解",
+    "category": "视觉营销",
+    "icon": "🔍",
+    "description": "拆解爆款主图逻辑，生成同类型风格参考",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "hitProductImages",
+          "label": "爆款商品主图",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "想要拆解的爆款主图，最多 5 张",
+          "type": "image"
+        },
+        {
+          "name": "productImages",
+          "label": "我的商品参考图",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "自己的商品参考图，最多 5 张",
+          "type": "image"
+        }
+      ],
+      "params": [
+        {
+          "name": "productDescription",
+          "label": "商品描述",
+          "type": "string",
+          "required": true,
+          "description": "商品的简单描述"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "image",
+        "name": "同风格参考主图",
+        "label": "拆解报告 + 参考主图"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已打通图片输入 + 生图链路）\n- 输入：用户上传的商品/参考图片，本次运行会给出它们的绝对路径与字段 name。\n- 参考图：上传图片就是商品参考图；生图时必须保留参考图中的商品颜色、形态、LOGO 与关键细节，不得改色改形。\n- 生图动作：需要出图时调用 image_generate（prompt 必填；reference_images 填上传图片的 name 或绝对路径；size/model/provider 可选；count 默认 1）。\n  若「本次输入」里已经列出「已由 NOVAI 生成的图片」，这些就是本次交付图，直接使用，不要再重复生成。\n- 交付动作：图片由生图链路直接落进本次运行产物目录（已登记为受控产物）；需要分析结论时用 write_html_report 写 HTML。\n- 图片或字段不足时如实标注「数据不足」，不得编造结论或图片。\n\n# 目标\n拆解爆款主图的表达逻辑，总结可复用风格要点，并用自己商品图生成同风格的参考主图。\n\n# 工作流\n1. 逐张拆解爆款主图：主体与构图、色彩与光影、文字与促销信息、氛围与场景、卖点表达方式。\n2. 对比自己的商品图，指出可复用的风格要素与不可照搬之处。\n3. 写中文提示词，调用 image_generate（reference_images 用我的商品参考图）生成同风格参考主图。\n4. 用 write_html_report 输出拆解报告（table：爆款图 / 维度 / 表达方式 / 可复用点），并附生成图文件名。\n\n# 输出格式\n文件交付：拆解 HTML 报告 + 同风格参考主图。\n",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 28,
+    "unavailable_reason": "",
+    "suggestions": [
+      {
+        "text": "一键拆解爆款主图",
+        "icon_type": "new"
+      }
+    ]
+  },
+  {
+    "id": "smart-selection",
+    "name": "智能选款",
+    "category": "运营推广",
+    "icon": "🎯",
+    "description": "按店内商品表现与关键词选潜力商品",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "promo_table",
+          "label": "商品推广数据表",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "生意参谋【商品-商品排行】导出的商品数据（访客、支付买家数、支付金额、加购、收藏等）"
+        }
+      ],
+      "params": [
+        {
+          "name": "category",
+          "label": "类目/商品",
+          "type": "string",
+          "required": false,
+          "description": "分析对象类目或商品；不填则按表格内容推断"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "智能选款报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n从店内商品推广数据里筛出有放量潜力的商品，给出分层选款结论与推广建议。\n\n# 输入\n用户上传的商品推广数据表（商品维度：访客数、支付买家数、支付金额、转化率、加购收藏等）。\n\n# 工作流\n1. 用 read_table 读取推广数据表并统一数值口径。\n2. 计算各商品的转化率、客单与流量利用效率。\n3. 结合访客规模与转化表现给商品分层：主推、观察、淘汰。\n4. 识别高访客低转化（承接问题）与低访客高转化（可放量）两类机会。\n5. 输出重点选款清单与对应推广动作。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：商品总览、潜力分层、重点选款、承接问题商品、推广建议。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 13
+  },
+  {
+    "id": "promotion-analysis",
+    "name": "推广分析",
+    "category": "运营推广",
+    "icon": "📣",
+    "description": "不同推广渠道数据对比（点击率、转化率、ROI）",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "promo_table",
+          "label": "推广数据表",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "阿里妈妈万相台【报表-商品报表】等推广数据（花费、展现、点击、成交、ROI）"
+        }
+      ],
+      "params": [
+        {
+          "name": "period",
+          "label": "统计周期",
+          "type": "string",
+          "required": false,
+          "description": "例如近 7 天 / 近 30 天"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "推广分析报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n对比不同推广渠道与商品的点击率、转化率、ROI，识别低效投放并给出预算调整建议。\n\n# 输入\n用户上传的推广数据表（渠道维度或商品维度：花费、展现量、点击量、成交金额、ROI 等）。\n\n# 工作流\n1. 用 read_table 读取推广表，统一花费、成交与 ROI 的计算口径。\n2. 计算点击率、转化率、投入产出比，并按渠道/商品汇总。\n3. 对比各渠道效率差异，识别高花费低产出的低效项。\n4. 输出预算倾斜与投放结构调整建议。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：推广总览、渠道效率对比、低效项识别、预算调整建议。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 15,
+    "suggestions": [
+      {
+        "text": "我的推广投产比为什么上不去？",
+        "icon_type": "hot"
+      }
+    ]
+  },
+  {
+    "id": "region-diagnosis",
+    "name": "地域诊断",
+    "category": "运营推广",
+    "icon": "🗺",
+    "description": "精准排区提投产",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "region_table",
+          "label": "地域推广数据表",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "阿里妈妈万相台【报表-地域报表】数据（省份/城市、花费、点击、成交、ROI）"
+        }
+      ],
+      "params": [
+        {
+          "name": "period",
+          "label": "统计周期",
+          "type": "string",
+          "required": false,
+          "description": "例如近 7 天 / 近 30 天"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "地域诊断报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n诊断地域推广数据，找出高投产地区与亏损地区，输出地域投放排区建议。\n\n# 输入\n用户上传的地域推广数据表（地区、花费、展现、点击、成交金额、ROI 等）。\n\n# 工作流\n1. 用 read_table 读取地域表，统一地区与指标口径。\n2. 按地区汇总花费、成交与 ROI，排序找头部与尾部。\n3. 识别高投产可加投地区、低投产需排区地区与数据量不足无法判断地区。\n4. 输出地域投放排区与加投建议。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：地域总览、高投产地区、低效地区、排区与加投建议。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 22
+  },
+  {
+    "id": "crowd-diagnosis",
+    "name": "人群诊断",
+    "category": "运营推广",
+    "icon": "👥",
+    "description": "精准锁客提转化",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "crowd_table",
+          "label": "人群推广数据表",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "阿里妈妈万相台【报表-人群报表】数据（人群包、花费、点击、成交、ROI）"
+        }
+      ],
+      "params": [
+        {
+          "name": "period",
+          "label": "统计周期",
+          "type": "string",
+          "required": false,
+          "description": "例如近 7 天 / 近 30 天"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "人群诊断报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n诊断人群推广数据，找出高转化人群与低效人群，输出锁定人群与投放建议。\n\n# 输入\n用户上传的人群推广数据表（人群包/人群标签、花费、展现、点击、成交金额、ROI 等）。\n\n# 工作流\n1. 用 read_table 读取人群表，统一人群命名与指标口径。\n2. 按人群汇总花费、成交与 ROI，计算转化效率。\n3. 识别高转化可加投人群、低效需缩减人群与样本不足人群。\n4. 结合转化与客单，输出拉新、复购与收割三类人群的组合建议。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取上传表格，拿到真实列名、行数与数据样例后再分析。\n- 全部结论必须来自表格真实数据，不得编造；字段缺失时在报告里标注「数据不足」。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n- read_table 整个运行最多读 3 次；拿到数据后立刻写报告，不要反复读同一张表。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：人群总览、高转化人群、低效人群、拉新复购收割建议。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 23
+  },
+  {
+    "id": "video-script-teardown",
+    "name": "视频脚本拆解",
+    "category": "内容生成",
+    "icon": "🎬",
+    "description": "自动解析视频结构与脚本逻辑",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "videoFile",
+          "label": "视频文件",
+          "required": false,
+          "accept": [
+            ".mp4",
+            ".mov",
+            ".m4v",
+            ".webm"
+          ],
+          "description": "想分析的视频文件（NOVAI 抽元数据 + 关键帧 + 音轨口播转写）"
+        }
+      ],
+      "params": [
+        {
+          "name": "videoLink",
+          "label": "视频链接",
+          "type": "string",
+          "required": false,
+          "description": "视频分享链接（抖音等反爬平台可能只拿到页面公开文案，拿不到就如实写「数据不足」）"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "视频脚本拆解.html",
+        "label": "结构化脚本拆解"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已接视频解析，实测）\n- 视频文件：NOVAI 用 ffprobe/ffmpeg 抽元数据与关键帧，并抽音轨做口播转写；\n  关键帧是真实图片（用 read 工具查看），口播台词只以「音频口播转写」为准。\n- 视频链接：NOVAI 先抓页面公开文案；抓不到时用 browser 打开链接继续抓；\n  仍然拿不到就在报告里写「数据不足」，不得编造台词与画面。\n- 交付动作：用 write 工具把完整 HTML 写进产物目录。\n\n# 目标\n把一条参考视频拆成可视化脚本结构：分镜、时长、画面、台词/字幕、卖点落点与节奏。\n\n# 工作流\n1. 读视频元数据（时长/分辨率/帧率）与关键帧，判断镜头数与节奏（单镜时长≈总时长/关键帧段数）。\n2. 逐帧描述画面：主体、场景、景别、动作、字幕/贴纸。\n3. 把口播转写按语义切分，与画面段落对齐；转写不可用时该列写「数据不足」。\n4. 归纳脚本结构：钩子（前 3 秒）、卖点展开、信任证明、行动号召。\n5. 输出可复用的脚本模板。\n\n# 输出格式\n文件交付：HTML，覆盖：视频概览与数据来源、分镜表（镜号/时间/画面/台词/卖点）、结构与节奏分析、可复用模板、数据局限。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 24,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "video-script-imitation",
+    "name": "视频脚本仿写",
+    "category": "内容生成",
+    "icon": "🎭",
+    "description": "结合自己产品仿写脚本",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "videoFile",
+          "label": "视频文件",
+          "required": false,
+          "accept": [
+            ".mp4",
+            ".mov",
+            ".m4v",
+            ".webm"
+          ],
+          "description": "参考视频文件（NOVAI 抽元数据 + 关键帧 + 音轨口播转写）"
+        }
+      ],
+      "params": [
+        {
+          "name": "videoLink",
+          "label": "视频链接",
+          "type": "string",
+          "required": false,
+          "description": "参考视频链接（抖音等反爬平台可能只拿到页面公开文案，拿不到就如实写「数据不足」）"
+        },
+        {
+          "name": "videoType",
+          "label": "视频类型",
+          "type": "string",
+          "required": false,
+          "description": "电商头图类/卖点展示类/开箱测评类/对比种草类"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "视频脚本仿写.html",
+        "label": "仿写脚本"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 已接视频解析，实测）\n- 参考视频文件：NOVAI 抽元数据 + 关键帧 + 音轨口播转写；参考视频链接同样尽力抓页面文案。\n- 用户自己的商品信息（商品描述、卖点、videoType）作为仿写约束。\n- 交付动作：用 write 工具把完整 HTML 写进产物目录。\n- 拿不到参考视频内容时如实写「数据不足」，不得照抄不存在的脚本。\n\n# 目标\n保留参考视频的脚本结构，替换成自己的产品与卖点，产出可直接拍摄的仿写脚本。\n\n# 工作流\n1. 拆解参考视频：结构（钩子/冲突/证明/CTA）、节奏、镜头数与时长分配、台词风格。\n2. 明确自己商品：品类、核心卖点、目标人群、可用素材与拍摄条件。\n3. 逐镜仿写：镜号、时长、景别机位、画面内容、台词/字幕、卖点落点；保留原结构但替换内容。\n4. 给出与原视频的差异说明（哪些结构必须保留、哪些内容必须不同）与拍摄注意事项。\n\n# 输出格式\n文件交付：HTML，覆盖：参考视频结构拆解、仿写定位、分镜表、台词字幕、拍摄注意事项、数据依据与局限。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 25,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "live-script-optimize",
+    "name": "直播话术优化",
+    "category": "内容生成",
+    "icon": "🎤",
+    "description": "AI拆解直播话术结构，生成优化方案",
+    "tags": [
+      "抖音电商",
+      "淘宝天猫",
+      "拼多多",
+      "私域"
+    ],
+    "input_schema": {
+      "files": [],
+      "params": [
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向，例如重点看逼单环节"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "直播话术优化报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n拆解直播话术的结构与节奏，定位开场、留人、讲品、逼单、承接各环节的问题，输出可直接使用的优化方案。\n\n# 输入\n用户在输入框里粘贴的直播话术文本，或上传的话术表格（含话术段落、时长、转化数据等字段）。\n\n# 工作流\n1. 通读话术，按直播节奏切分段落（开场留人 / 产品讲解 / 痛点放大 / 信任背书 / 逼单成交 / 承接复购）。\n2. 逐段标注话术目标、结构特征、情绪强度与转化钩子，找出缺失环节与冗余表达。\n3. 定位高风险表述（绝对化用语、承诺性表述、违规词），给出合规替换建议。\n4. 输出优化后的话术框架与逐段改写示例，并给出主播执行要点。\n\n# 必要工具调用约定\n- 有上传文件时必须先调用 read_table 读取真实内容；没有文件时以用户粘贴的话术文本为唯一输入，不得编造原始话术。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：话术结构拆解、各环节问题诊断、合规风险提示、优化后话术框架、主播执行要点。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 31
+  },
+  {
+    "id": "video-script-gen",
+    "name": "视频脚本生成",
+    "category": "内容生成",
+    "icon": "🎞",
+    "description": "生成高转化商品视频脚本",
+    "tags": [
+      "淘宝天猫",
+      "抖音电商",
+      "拼多多"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "product_images",
+          "label": "商品白底参考图",
+          "required": true,
+          "accept": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp"
+          ],
+          "description": "商品正面/侧面/背面图，3~5 张",
+          "type": "image"
+        }
+      ],
+      "params": [
+        {
+          "name": "videoType",
+          "label": "视频类型",
+          "type": "string",
+          "required": false,
+          "description": "电商头图类/卖点展示类/开箱测评类/对比种草类"
+        },
+        {
+          "name": "productDescription",
+          "label": "商品描述",
+          "type": "string",
+          "required": true,
+          "description": "商品描述与核心卖点"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "视频脚本.html",
+        "label": "视频脚本"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 支持图片输入）\n- 输入：用户上传的商品白底参考图（本次运行会给出绝对路径与字段 name），请用 read 工具查看图片，依据商品真实外观写脚本，不得编造商品特征。\n- 交付动作：用 write_html_report 输出 HTML 脚本；交付文件就是本轮产物。\n\n# 目标\n依据商品图片与核心卖点，产出可直接拍摄的短视频脚本（分镜、台词、画面、时长、卖点）。\n\n# 工作流\n1. 查看商品图，记录商品类别、外观特征与可展示卖点。\n2. 结合用户给的商品描述与视频类型（电商头图类/卖点展示类/开箱测评类/对比种草类）确定脚本结构与总时长。\n3. 逐镜写：镜号、时长、景别与机位、画面内容、台词/字幕、卖点落点。\n4. 用 write_html_report 输出，table 覆盖全部镜头，body 写整体节奏与拍摄注意事项。\n\n# 输出格式\n文件交付：HTML 视频脚本报告，固定覆盖以下模块：脚本定位、分镜表、台词与字幕、拍摄注意事项。\n",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 26,
+    "unavailable_reason": ""
+  },
+  {
+    "id": "tax-risk-diagnosis",
+    "name": "税务风险诊断",
+    "category": "财税风控",
+    "icon": "🧾",
+    "description": "智能诊断企业财税风险",
+    "tags": [
+      "财税"
+    ],
+    "input_schema": {
+      "files": [
+        {
+          "name": "finance_table",
+          "label": "财税数据表",
+          "required": true,
+          "accept": [
+            ".xlsx",
+            ".xls",
+            ".csv"
+          ],
+          "description": "企业财税数据表，含收入、成本、费用、税负、发票等字段"
+        }
+      ],
+      "params": [
+        {
+          "name": "category",
+          "label": "类目/商品",
+          "type": "string",
+          "required": false,
+          "description": "分析对象类目或商品；不填则按表格内容推断"
+        },
+        {
+          "name": "goal",
+          "label": "补充要求",
+          "type": "string",
+          "required": false,
+          "description": "额外想强调的方向"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "税务风险诊断报告.html",
+        "label": "HTML 分析报告"
+      }
+    ],
+    "skill_prompt": "# 本期运行形态（NOVAI 只做壳）\n- 数据来源：用户在本轮对话里手动上传的表格（xlsx / csv）。不接第三方电商 API、不使用浏览器插件。\n- 读取动作：先用 read_table 读取上传表格（真实列名、行数、数据样例与数值统计）再分析，不得编造数据。\n- 交付动作：用 write_html_report 生成 HTML 报告（sections 结构化模块）；交付文件就是本轮产物。\n- 字段不足时在报告里如实标注「数据不足」。\n\n# 目标\n基于企业财税数据表，识别税务风险点、测算风险敞口并给出合规整改建议。\n\n# 输入\n用户上传的财税数据表（收入、成本、费用、税负、进销项发票、社保公积金等字段）。\n\n# 工作流\n1. 用 read_table 读取财税数据表，统一金额与税率口径。\n2. 计算增值税负率、所得税贡献率、毛利率与费用率，与常见合理区间对比。\n3. 识别发票、成本列支、收入确认、社保个税等维度的异常信号并给出风险等级。\n4. 输出风险清单、风险敞口估算与整改优先级。\n\n# 必要工具调用约定\n- 必须先调用 read_table 读取真实数据，不得编造任何指标。\n- 必须调用 write_html_report，用 sections 写出报告，不得用纯文本代替文件。\n\n# 输出格式\n文件交付：HTML 分析报告，固定覆盖以下模块：财税数据总览、税负指标分析、风险点清单、风险敞口、整改建议。",
+    "enabled": true,
+    "available": true,
+    "source_agent_id": 27
+  },
+  {
+    "id": "traffic-channel",
+    "name": "流量渠道",
+    "category": "运营推广",
+    "icon": "🚦",
+    "description": "下载竞品流量渠道数据，与自店对比",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [],
+      "params": [
+        {
+          "name": "productUrl",
+          "label": "商品链接",
+          "type": "string",
+          "required": true,
+          "description": "竞品商品链接（本期未接）"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "流量渠道对比.html",
+        "label": "流量渠道对比报告"
+      }
+    ],
+    "skill_prompt": "",
+    "enabled": true,
+    "available": false,
+    "source_agent_id": 14,
+    "unavailable_reason": "sealseek 侧标记为即将上线（isHoverEnable=0），本期不接第三方数据下载"
+  },
+  {
+    "id": "product-diagnosis",
+    "name": "商品诊断",
+    "category": "运营推广",
+    "icon": "🩺",
+    "description": "针对单品的商品诊断",
+    "tags": [
+      "淘宝天猫"
+    ],
+    "input_schema": {
+      "files": [],
+      "params": [
+        {
+          "name": "productUrl",
+          "label": "商品链接",
+          "type": "string",
+          "required": true,
+          "description": "单品链接（本期未接）"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "html",
+        "name": "商品诊断报告.html",
+        "label": "商品诊断报告"
+      }
+    ],
+    "skill_prompt": "",
+    "enabled": true,
+    "available": false,
+    "source_agent_id": 16,
+    "unavailable_reason": "sealseek 侧标记为即将上线（isHoverEnable=0），本期不接第三方数据下载"
+  }
+]

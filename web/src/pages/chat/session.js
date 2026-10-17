@@ -3,11 +3,12 @@
 // 流式事件（meta / reasoning / status / delta / done / error）、中断、重新生成。
 // 接口、请求体字段、localStorage key（gpt_chat_last_conversation_v1）与旧版完全一致。
 import { reactive, nextTick } from 'vue';
-import { S, userId, uuid, chatModelForRequest, sizeOf, sizeOpts, saveSettings } from './chatState.js';
+import { S, userId, uuid, chatModelForRequest, providersOf, sizeOf, sizeOpts, saveSettings } from './chatState.js';
 import { chatSizeFromPrompt } from './sizes.js';
 import { thoughtTraceEntries } from './thought.js';
 import { readSSE } from './sse.js';
-import { CAP, clearCapability } from './agents/capState.js';
+import { CAP, clearCapability, descriptorOf, isGenerateImage, wantsGeneratedImage } from './agents/capState.js';
+import { genImagePair } from './agents/genImageState.js';
 import { runCapability, getRun, streamRun, normalizeRun, normalizeArtifacts, isTerminal } from './agents/capabilityApi.js';
 import { t, toast } from '../../lib/store.js';
 
@@ -155,13 +156,18 @@ function settle(th) {
 
 export function send(text, refsOverride) {
     if (C.busy) return Promise.resolve(false);
-    inflight = CAP.selected ? doRunCapability(text) : doSend(text, refsOverride);
+    // AI 生图走既有图像模式（/api/chat mode=image）；agent / skill 走会话作用域能力运行
+    const runCap = CAP.selected && !isGenerateImage(CAP.selected);
+    inflight = runCap ? doRunCapability(text) : doSend(text, refsOverride);
     return inflight;
 }
 async function doSend(text, refsOverride) {
     const message = String(text || '').trim();
     if (!message || C.busy) return false;
     const mode = S.mode;
+    // capability 描述符要在清除挂载前取；AI 生图用完即卸（与能力运行一致）
+    const capDescriptor = descriptorOf(CAP.selected);
+    if (capDescriptor && capDescriptor.type === 'generate-image') clearCapability();
     const requestedSize = chatSizeFromPrompt(message, sizeOf(), S.chatResolution, sizeOpts.value);
     const pendingRefs = refsOverride ? refsOverride.slice() : C.refs.slice();
     if (!refsOverride) C.refs = [];
@@ -180,6 +186,7 @@ async function doSend(text, refsOverride) {
     hooks.scroll(true);
 
     const base = { conversation_id: C.current.id || '', message, system_prompt: String(S.systemPrompt || '').trim(), reference_images: pendingRefs, think_level: S.thinkLevel };
+    if (capDescriptor) base.capability = capDescriptor;
     const chatModel = chatModelForRequest();
     const msModel = S.provider === 'modelscope' ? chatModel : '';
     try {
@@ -432,6 +439,12 @@ async function doRunCapability(text) {
     if (S.provider) params.provider = S.provider;
     const model = chatModelForRequest();
     if (model) params.model = model;
+    // 生图类能力：用户在输入框顶部选过「生图模型」才带上 image_provider / image_model（后端最高优先级）；
+    // 没选、或选过的模型已从平台配置里失效，都不发这两个字段，后端按既有规则自动选平台与模型
+    if (wantsGeneratedImage(cap)) {
+        const picked = genImagePair(providersOf('image'));
+        if (picked) { params.image_provider = picked.provider; params.image_model = picked.model; }
+    }
 
     const convId = await ensureConversation();
     if (!convId) { toast('新建对话失败，无法运行', { danger: true, icon: 'alert' }); return false; }
@@ -452,7 +465,7 @@ async function doRunCapability(text) {
     controller = new AbortController();
     hooks.scroll(true);
     try {
-        const res = await runCapability(convId, cap.id, files, params, message, controller.signal);
+        const res = await runCapability(convId, cap.id, files, params, message, controller.signal, descriptorOf(cap));
         if (!res.ok) {
             live.live = false;
             if (res.aborted) { live.stopped = true; live.status = 'aborted'; }

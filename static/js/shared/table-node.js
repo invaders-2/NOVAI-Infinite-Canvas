@@ -670,6 +670,8 @@ function setTableCellMedia(node, row, column, value){
 /* 存媒体的节点类型：经典画布的 output、智能画布的 smart-image 都是把素材放在 images 数组里，
    形状一致 → 一起按输出节点展开。 */
 const TABLE_OUTPUT_LIKE_TYPES = ['output', 'smart-image'];
+/* smart-video 与 smart-image 同构（媒体都在 images 数组），同样按输出节点展开。 */
+TABLE_OUTPUT_LIKE_TYPES.push('smart-video');
 
 function tableSourceItems(source, byId){
     if(!source) return [];
@@ -881,6 +883,9 @@ function stripTrimmedMentions(model, prompt, trimmedOrdinals){
 
 function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId){
     // 每个通道的条目在全局输入清单里的起始序号
+    /* 「时长(秒)」列：这一行的时长要当这一行视频的 duration 发出去（不只是拼进提示词）。
+       行里没有/不是纯数字时 duration = null，批量那边回退节点级 videoDuration。 */
+    const durationColumn = model.durationColumnIndex(state.columns);
     const ordinalBase = [];
     let running = 0;
     channels.forEach(channel => {
@@ -955,6 +960,7 @@ function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId
         const prompt = withRowReferenceList(model, rewritten.text, media);
         return {
             rowNumber: rowIndex + 1,
+            duration: durationColumn >= 0 ? model.cellDuration(row[durationColumn]) : null,
             channelItems,
             entries: channelItems.map(list => list[0] || null),
             media,
@@ -1562,6 +1568,8 @@ async function runTableBatch(genId, options={}){
     const runnable = model.batchRowsToRun(rows, {manual: selection.manual, startRow, selectedRows: selection.selectedRows});
     if(!runnable.length){
         if(selection.manual) say('请先勾选至少一行再独立运行');
+        /* 0 行时「起始行超出范围」是句废话（表格本来就是空的）：直接说表里没有数据行。 */
+        else if(!rows.length) say(tr('smart.tableBatchNoRows'));
         else if(startRow > rows.length) say('起始行超出表格范围，当前共 ' + rows.length + ' 行');
         else {
             const inRange = rows.filter(row => row.rowNumber >= startRow
@@ -1646,11 +1654,12 @@ async function runTableBatch(genId, options={}){
             if(!row) throw new Error('第 ' + entry.rowNumber + ' 行已不存在');
             model.journalMarkRow(journal, entry.rowNumber, 'running', entry.requestId || '');
             scheduleSave();
-            // 一行一次生成：提示词与参考图都按这一行覆盖。
-            // 视频节点走 runVideoNode，图像节点走 runGenerator，其余设置（模型/时长/比例）沿用节点自身。
+            // 一行一次生成：提示词、参考图与「时长(秒)」都按这一行覆盖。
+            // 视频节点走 runVideoNode，图像节点走 runGenerator，其余设置（模型/比例）沿用节点自身；
+            // duration 只对视频分支生效（图像分支不读它），没有值时那边保持节点级 videoDuration。
             await tableBatchRunner(gen)(genId, {
                 batch: true,
-                rowOverride: {prompt: row.prompt, refs: tableRowRefs(row)},
+                rowOverride: {prompt: row.prompt, refs: tableRowRefs(row), duration: row.duration},
                 /* batchRowNumbers：本轮真正要跑的行号（顺序固定），结果节点按它建
                    逐行状态，进度框不再拿并发数猜谁在跑。同一批每个 worker 拿到同一份。 */
                 runContext: {tableId: table.id, rowNumber: entry.rowNumber, batchRunId: runId,

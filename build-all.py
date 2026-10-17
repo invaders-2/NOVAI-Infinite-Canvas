@@ -99,7 +99,7 @@ def copy_assets():
         "*.pyc", "__pycache__",
         "test-*.png", "tmp_*.png", "*.log", ".env",
     )
-    for folder in ["static", "server", "tools", "packages"]:
+    for folder in ["static", "server", "tools", "packages", "config"]:
         src = os.path.join(ROOT, folder)
         dst = os.path.join(DIST_DESKTOP, folder)
         if os.path.isdir(dst):

@@ -3,6 +3,7 @@
 import { SIZE_OPTIONS, MODEL_SIZE_PRESETS } from './sizeData.js';
 import { NovaSizePolicy } from './sizePolicy.js';
 
+// 比例 key 必须与 sizeData.js 的 SIZE_OPTIONS 键一一对应（官方 APIMart gpt-image-2 的 15 个预置比例）
 export const RATIOS = [
     { id: 'square', i18n: 'online.square', label: '1:1 方图', w: 12, h: 12 },
     { id: 'portrait', i18n: 'online.portrait', label: '2:3 竖图', w: 9, h: 13 },
@@ -11,18 +12,82 @@ export const RATIOS = [
     { id: 'landscape43', label: '4:3 横图', w: 13, h: 10 },
     { id: 'story', i18n: 'online.story', label: '9:16 竖屏', w: 8, h: 14 },
     { id: 'wide', i18n: 'online.wide', label: '16:9 宽屏', w: 14, h: 8 },
+    { id: 'ultrawide', label: '21:9 超宽', w: 14, h: 6 },
+    { id: 'ultratall', label: '9:21 超高', w: 6, h: 14 },
+    { id: 'landscape21', label: '2:1 长横', w: 14, h: 7 },
+    { id: 'portrait12', label: '1:2 长竖', w: 7, h: 14 },
+    { id: 'landscape54', label: '5:4 横图', w: 12, h: 10 },
+    { id: 'portrait45', label: '4:5 竖图', w: 10, h: 12 },
+    { id: 'landscape31', label: '3:1 长横', w: 12, h: 4 },
+    { id: 'portrait13', label: '1:3 长竖', w: 4, h: 12 },
 ];
-export const RES_LONG_SIDE = { '1k': 1536, '2k': 2048, '4k': 3840 };
-export const RES_LEVELS = ['1k', '2k', '4k'];
-const RES_PIXEL_LIMIT_FALLBACK = { '1k': 1572864, '2k': 4194304, '4k': 8294400 };
+// Gemini 官方 14 比例里不在上面 15 键表内的 4 个（1:4/1:8/4:1/8:1，官方表见
+// /tmp/novai-official-docs/text/gemini_image_generation.txt:4642-4738）。只被 Gemini 系预设引用，
+// supportedRatios 按预设过滤，所以不会污染其它模型的比例下拉。
+export const EXTRA_RATIOS = [
+    { id: 'portrait14', label: '1:4 长竖', w: 4, h: 14 },
+    { id: 'portrait18', label: '1:8 长竖', w: 3, h: 16 },
+    { id: 'landscape41', label: '4:1 长横', w: 14, h: 4 },
+    { id: 'landscape81', label: '8:1 长横', w: 16, h: 3 },
+];
+// 档位按官方补全：Gemini 3.1 Flash Image 的 512px(0.5K)、火山 Seedream 5.0 pro/flash 的 1.5K、
+// 5.0 lite 的 3K（text/gemini_image_generation.txt:1517-1520,4632+；text/volcengine_ark_image_api.txt:138-470）。
+export const RES_LONG_SIDE = { '0.5k': 768, '1k': 1536, '1.5k': 1920, '2k': 2048, '3k': 3072, '4k': 3840 };
+export const RES_LEVELS = ['0.5k', '1k', '1.5k', '2k', '3k', '4k'];
+const RES_PIXEL_LIMIT_FALLBACK = { '0.5k': 262144, '1k': 1572864, '1.5k': 3145728, '2k': 4194304, '3k': 9437184, '4k': 8294400 };
 
 export function parseSizeValue(value) {
     const match = String(value || '').trim().match(/^(\d+)\s*[xX*]\s*(\d+)$/);
     return match ? { width: match[1], height: match[2] } : null;
 }
 
+// 真实模型名 → 预设 key。模型 ID 既有 "nano-banana-pro" 这种点号命名，也有 Lovart 的
+// "generate_image_nano_banana_pro" / "generate_image_seedream_v5_pro" 下划线命名；
+// 顺序敏感：pro/lite 必须排在通用 key 之前，否则会被子串匹配吞掉。
+const MODEL_PRESET_ALIASES = [
+    ['nano_banana_2_lite', 'nano-banana-2'],
+    ['nano-banana-2-lite', 'nano-banana-2'],
+    ['nano_banana_pro', 'nano-banana-pro'],
+    ['nano-banana-pro', 'nano-banana-pro'],
+    ['gemini-3-pro-image', 'nano-banana-pro'],
+    ['nano_banana_2', 'nano-banana-2'],
+    ['nano-banana-2', 'nano-banana-2'],
+    ['gemini-3.1-flash-image', 'nano-banana-2'],
+    ['nano_banana', 'nano-banana'],
+    ['nano-banana', 'nano-banana'],
+    ['gemini-2.5-flash-image', 'nano-banana'],
+    ['seedream_v5_pro', 'seedream-5.0-pro'],
+    ['seedream-5.0-pro', 'seedream-5.0-pro'],
+    ['seedream-5-0-pro', 'seedream-5.0-pro'],
+    ['seedream_v5_lite', 'seedream-5.0-lite'],
+    ['seedream-5.0-lite', 'seedream-5.0-lite'],
+    ['seedream-5-0-lite', 'seedream-5.0-lite'],
+    ['seedream_v5_flash', 'seedream-5.0'],
+    ['seedream-5.0-flash', 'seedream-5.0'],
+    ['seedream-5-0-flash', 'seedream-5.0'],
+    ['seedream_v5', 'seedream-5.0'],
+    ['seedream-5.0', 'seedream-5.0'],
+    ['seedream-5-0', 'seedream-5.0'],
+    ['seedream_5', 'seedream-5.0'],
+    ['seedream-5', 'seedream-5.0'],
+    ['seedream_v4_5', 'seedream-4.5'],
+    ['seedream-4.5', 'seedream-4.5'],
+    ['seedream-4-5', 'seedream-4.5'],
+    ['seedream_v4', 'seedream-4.0'],
+    ['seedream-4.0', 'seedream-4.0'],
+    ['seedream-4-0', 'seedream-4.0'],
+    ['seedream_4', 'seedream-4.0'],
+    ['seedream-4', 'seedream-4.0'],
+    ['seedream_v3', 'seedream-3.0'],
+    ['seedream-3.0', 'seedream-3.0'],
+    ['seedream-3', 'seedream-3.0'],
+];
+
 export function getSizeOptionsForModel(model) {
     const m = String(model || '').toLowerCase();
+    for (const [needle, key] of MODEL_PRESET_ALIASES) {
+        if (m.includes(needle) && MODEL_SIZE_PRESETS[key]) return MODEL_SIZE_PRESETS[key];
+    }
     for (const [key, sizes] of Object.entries(MODEL_SIZE_PRESETS)) {
         if (m.includes(key)) return sizes;
     }
@@ -68,8 +133,24 @@ export function enumSizeOptions(model) {
     return result;
 }
 
+// 供应商级覆盖：把 /api/ai/size-policy 下发的 ratios / resolutions 合并到静态预设之上。
+// 未声明 = 原样返回同一对象（默认行为与既有对象身份断言逐字节一致）。
+function applyPolicyFilter(preset, model) {
+    if (!preset) return preset;
+    const ratioRestrict = typeof NovaSizePolicy.hasRatioOverride === 'function' && NovaSizePolicy.hasRatioOverride(model);
+    const levelRestrict = typeof NovaSizePolicy.hasLevelOverride === 'function' && NovaSizePolicy.hasLevelOverride(model);
+    if (!ratioRestrict && !levelRestrict) return preset;
+    const out = {};
+    Object.keys(preset).forEach(key => {
+        if (ratioRestrict && !NovaSizePolicy.ratioAllowed(model, key)) return;
+        const cells = (preset[key] || []).filter(item => !levelRestrict || NovaSizePolicy.levelAllowed(model, item[1]));
+        if (cells.length) out[key] = cells;
+    });
+    return Object.keys(out).length ? out : preset;
+}
+
 // enum 模型用推导表（可能为空表），只有非 enum 模型才回落到写死的 presets
-export function currentSizeOptions(model) { return enumSizeOptions(model) || getSizeOptionsForModel(model); }
+export function currentSizeOptions(model) { return applyPolicyFilter(enumSizeOptions(model) || getSizeOptionsForModel(model), model); }
 
 export function resPixelLimitFor(model) {
     const limits = {};
@@ -130,13 +211,14 @@ export function resolutionOptions(model, ratio) {
     const opts = currentSizeOptions(model);
     const usable = usableLevels(opts, ratio);
     const levels = modelLevelsOf(opts);
-    return RES_LEVELS.map(level => {
+    // 该模型完全没有的档位（如 gpt-image-2 的 0.5K/1.5K/3K）直接隐藏；模型有、该比例没有的置灰
+    return RES_LEVELS.filter(level => levels.has(level)).map(level => {
         const enabled = usable.indexOf(level) >= 0;
-        return { value: level, label: level.toUpperCase() + (enabled ? '' : '（' + (levels.has(level) ? '该比例无此档位' : '该模型无此档位') + '）'), disabled: !enabled };
+        return { value: level, label: level.toUpperCase() + (enabled ? '' : '（该比例无此档位）'), disabled: !enabled };
     });
 }
 
-export function supportedRatios(model) { const opts = currentSizeOptions(model); return RATIOS.filter(r => !!opts[r.id]); }
+export function supportedRatios(model) { const opts = currentSizeOptions(model); return [...RATIOS, ...EXTRA_RATIOS].filter(r => !!opts[r.id]); }
 
 function constrainSize(size, model) { return size ? NovaSizePolicy.constrain(size, model) : size; }
 

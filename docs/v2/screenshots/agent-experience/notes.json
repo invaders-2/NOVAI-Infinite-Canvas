@@ -1,0 +1,18 @@
+[
+  "suggestions_row=5",
+  "suggest_texts=[\"帮我找到行业必争蓝海词💡\",\"一键拆解爆款主图\",\"我的推广投产比为什么上不去？\",\"技能：帮我生成真实的买家秀图文\",\"AI生图：给我的商品生成2张不同风格的场景图\"]",
+  "toolbar=[\"智能体\",\"技能\",\"AI生图\"]",
+  "has_cap_message=1",
+  "artifacts_in_dom=1",
+  "popover_open=true",
+  "popover_platforms=[{\"t\":\"全部平台\",\"dis\":false},{\"t\":\"淘宝天猫\",\"dis\":false},{\"t\":\"抖音电商\",\"dis\":false},{\"t\":\"拼多多\",\"dis\":false},{\"t\":\"1688\",\"dis\":false},{\"t\":\"小红书\",\"dis\":false},{\"t\":\"京东\",\"dis\":false},{\"t\":\"财税\",\"dis\":false},{\"t\":\"亚马逊\",\"dis\":true},{\"t\":\"私域\",\"dis\":false}]",
+  "popover_agents=27",
+  "grid_cards=27",
+  "grid_platforms=10",
+  "grid_soon=[\"亚马逊即将上线\"]",
+  "skill_cards=16",
+  "cap_form={\"name\":\"评价分析\",\"prompt\":\"评价表格：商品评价汇总表，含评价内容、评分、好评差评标签、SKU、日期等字段\",\"star\":true,\"btns\":[\"上传表格\"]}",
+  "picked_skill=\"💪优势找钱模型系统技能基于商品评价分析\"",
+  "ai_image_chip=\"AI生图\"",
+  "captured_requests=[{\"url\":\"http://127.0.0.1:3331/api/conversations/dd96cd24765d4a54a8ae8d7822e8fc3b/capabilities/advantage-money/run\",\"post\":\"------WebKitFormBoundaryYpUTVduewGurEJaV\\r\\nContent-Disposition: form-data; name=\\\"capability\\\"\\r\\n\\r\\n{\\\"type\\\":\\\"skill\\\",\\\"capabilityId\\\":\\\"advantage-money\\\",\\\"skillCode\\\":\\\"6f3d9696-2241-4a0e-824d-9ce629000bc6\\\",\\\"skillName\\\":\\\"优势找钱模型\\\"}\\r\\n------WebKitFormBoundaryYpUTVduewGurEJaV\\r\\nContent-Disposition: form-data; name=\\\"params\\\"\\r\\n\\r\\n{\\\"product\\\":\\\"\\\",\\\"goal\\\":\\\"\\\",\\\"provider\\\":\\\"volcengine\\\",\\\"model\\\":\\\"deepseek-v4-1-flash-260910\\\",\\\"messa\"},{\"url\":\"http://127.0.0.1:3331/api/chat\",\"post\":\"{\\\"conversation_id\\\":\\\"dd96cd24765d4a54a8ae8d7822e8fc3b\\\",\\\"message\\\":\\\"给我的商品生成2张不同风格的场景图\\\",\\\"system_prompt\\\":\\\"\\\",\\\"reference_images\\\":[],\\\"think_level\\\":\\\"mid\\\",\\\"capability\\\":{\\\"type\\\":\\\"generate-image\\\",\\\"cardType\\\":3},\\\"mode\\\":\\\"image\\\",\\\"size\\\":\\\"1024x1024\\\",\\\"model\\\":\\\"deepseek-v4-1-flash-260910\\\",\\\"image_model\\\":\\\"agnes-image-2.0-flash\\\",\\\"provider\\\":\\\"agnes-ai\\\"}\"}]"
+]

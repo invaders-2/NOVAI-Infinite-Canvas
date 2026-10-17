@@ -1,0 +1,12 @@
+[
+  {
+    "url": "http://127.0.0.1:3331/api/conversations/dd96cd24765d4a54a8ae8d7822e8fc3b/capabilities/advantage-money/run",
+    "method": "POST",
+    "postData": "------WebKitFormBoundaryYpUTVduewGurEJaV\r\nContent-Disposition: form-data; name=\"capability\"\r\n\r\n{\"type\":\"skill\",\"capabilityId\":\"advantage-money\",\"skillCode\":\"6f3d9696-2241-4a0e-824d-9ce629000bc6\",\"skillName\":\"优势找钱模型\"}\r\n------WebKitFormBoundaryYpUTVduewGurEJaV\r\nContent-Disposition: form-data; name=\"params\"\r\n\r\n{\"product\":\"\",\"goal\":\"\",\"provider\":\"volcengine\",\"model\":\"deepseek-v4-1-flash-260910\",\"message\":\"请分析这份评价表\"}\r\n------WebKitFormBoundaryYpUTVduewGurEJaV\r\nContent-Disposition: form-data; name=\"message\"\r\n\r\n请分析这份评价表\r\n------WebKitFormBoundaryYpUTVduewGurEJaV--\r\n"
+  },
+  {
+    "url": "http://127.0.0.1:3331/api/chat",
+    "method": "POST",
+    "postData": "{\"conversation_id\":\"dd96cd24765d4a54a8ae8d7822e8fc3b\",\"message\":\"给我的商品生成2张不同风格的场景图\",\"system_prompt\":\"\",\"reference_images\":[],\"think_level\":\"mid\",\"capability\":{\"type\":\"generate-image\",\"cardType\":3},\"mode\":\"image\",\"size\":\"1024x1024\",\"model\":\"deepseek-v4-1-flash-260910\",\"image_model\":\"agnes-image-2.0-flash\",\"provider\":\"agnes-ai\"}"
+  }
+]

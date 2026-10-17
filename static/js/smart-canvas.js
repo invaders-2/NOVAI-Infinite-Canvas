@@ -26,7 +26,6 @@ const dynamicParams = document.getElementById('dynamicParams');
 const runBtn = document.getElementById('runBtn');
 const cascadeRunBtn = document.getElementById('cascadeRunBtn');
 const fileInput = document.getElementById('fileInput');
-const apiKindToggle = document.getElementById('apiKindToggle');
 const inputThumbsRow = document.getElementById('inputThumbsRow');
 const SMART_UPLOAD_MAX = 20;
 const SMART_REFERENCE_IMAGE_MAX = 20;
@@ -455,25 +454,31 @@ const MS_GEN_MODELS = {
     custom: { label:tr('smart.custom') || '自定义', modelId:'', acceptsImage:true, endpoint:'/api/ms/generate' }
 };
 const SIZE_MAP = {
-    square: {'1k':'1024x1024','2k':'2048x2048','4k':'4096x4096'},
-    portrait: {'1k':'1024x1536','2k':'1360x2048','4k':'2352x3520'},
-    portrait43: {'1k':'1008x1344','2k':'1536x2048','4k':'2448x3264'},
-    landscape43: {'1k':'1344x1008','2k':'2048x1536','4k':'3264x2448'},
-    landscape: {'1k':'1536x1024','2k':'2048x1360','4k':'3520x2352'},
-    story: {'1k':'720x1280','2k':'1152x2048','4k':'2160x3840'},
-    wide: {'1k':'1280x720','2k':'2048x1152','4k':'3840x2160'},
-    ultrawide: {'1k':'1280x544','2k':'2048x880','4k':'3840x1648'},
-    ultratall: {'1k':'544x1280','2k':'880x2048','4k':'1648x3840'},
-    portrait12: {'1k':'768x1536','2k':'1024x2048','4k':'1920x3840'},
-    landscape21: {'1k':'1536x768','2k':'2048x1024','4k':'3840x1920'},
-    landscape54: {'1k':'1536x1216','2k':'2048x1632','4k':'3840x3072'},
-    portrait45: {'1k':'1216x1536','2k':'1632x2048','4k':'3072x3840'}
+    // 预置像素 = 官方 size×resolution 映射表（APIMart gpt-image-2 generation，15 比例 × 1k/2k/4k）；
+    // 带两组等价像素的 1k 格子取比例精确的第一组（第二组见 main.py APIMART_OFFICIAL_PIXELS）。
+    square: {'1k':'1024x1024','2k':'2048x2048','4k':'2880x2880'},
+    portrait: {'1k':'1024x1536','2k':'1360x2048','4k':'2336x3520'},
+    portrait43: {'1k':'768x1024','2k':'1536x2048','4k':'2480x3312'},
+    landscape43: {'1k':'1024x768','2k':'2048x1536','4k':'3312x2480'},
+    landscape: {'1k':'1536x1024','2k':'2048x1360','4k':'3520x2336'},
+    story: {'1k':'864x1536','2k':'1152x2048','4k':'2160x3840'},
+    wide: {'1k':'1536x864','2k':'2048x1152','4k':'3840x2160'},
+    ultrawide: {'1k':'2016x864','2k':'2688x1152','4k':'3840x1648'},
+    ultratall: {'1k':'864x2016','2k':'1152x2688','4k':'1648x3840'},
+    portrait12: {'1k':'1024x2048','2k':'1344x2688','4k':'1920x3840'},
+    landscape21: {'1k':'2048x1024','2k':'2688x1344','4k':'3840x1920'},
+    landscape54: {'1k':'1280x1024','2k':'2560x2048','4k':'3216x2576'},
+    portrait45: {'1k':'1024x1280','2k':'2048x2560','4k':'2576x3216'},
+    // 官方 1k 还列了一组非 16 对齐的等价像素（1881x836 / 887x1774），gpt-image-2 的 bounds
+    // 策略（边长 /16）会把它们吸附掉；这里取官方另一组 3:1 / 1:3 精确且 /16 的像素。
+    landscape31: {'1k':'1536x512','2k':'3072x1024','4k':'3840x1280'},
+    portrait13: {'1k':'512x1536','2k':'1024x3072','4k':'1280x3840'}
 };
-const API_RES_LEVELS = ['1k','2k','4k'];
-const API_RATIO_LABELS = {square:'正方形', portrait:'竖图', portrait43:'竖图', landscape:'横图', landscape43:'横图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖', portrait12:'竖图', landscape21:'横图', landscape54:'横图', portrait45:'竖图'};
-const RES_LONG_SIDE = { '1k':1536, '2k':2048, '4k':3840 };
+const API_RES_LEVELS = ['0.5k','1k','1.5k','2k','3k','4k'];
+const API_RATIO_LABELS = {square:'正方形', portrait:'竖图', portrait43:'竖图', landscape:'横图', landscape43:'横图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖', portrait12:'竖图', landscape21:'横图', landscape54:'横图', portrait45:'竖图', landscape31:'横图', portrait13:'竖图'};
+const RES_LONG_SIDE = { '0.5k':768, '1k':1536, '1.5k':1920, '2k':2048, '3k':3072, '4k':3840 };
 // 档位像素上限的唯一真值源是策略 tiers（shared/size-policy.js），这份常量只是策略取不到时的兜底
-const RES_PIXEL_LIMIT_FALLBACK = { '1k':1572864, '2k':4194304, '4k':8294400 };
+const RES_PIXEL_LIMIT_FALLBACK = { '0.5k':262144, '1k':1572864, '1.5k':3145728, '2k':4194304, '3k':9437184, '4k':8294400 };
 function resPixelLimitFor(model){
     const limits = {};
     const tiers = NovaSizePolicy.policy(model).tiers;
@@ -484,6 +489,149 @@ function resPixelLimitFor(model){
     });
     API_RES_LEVELS.forEach(level => { if(!limits[level]) limits[level] = RES_PIXEL_LIMIT_FALLBACK[level]; });
     return limits;
+}
+// 官方「模型能力表」：一处声明每个模型族支持的视频宽高比/分辨率档/时长区间与图片分辨率档/比例集合。
+//   视频出处 /tmp/novai-video-docs（Ark create-video-generation-task-api、APIMart Seedance 2.0、
+//   APIMart Kling v3 / 3.0-turbo、APIMart VEO3.1、Agnes Video 2.5），与 main.py 的
+//   volcengine_video_resolution / volcengine_video_duration / apimart_video_duration /
+//   apimart_veo31_duration / agnes_video_seconds 同口径；
+//   图片出处 /tmp/novai-ratio-audit + /tmp/novai-official-docs（Gemini 0.5K、火山 1.5K/3K、Agnes 3K），
+//   比例集合取自 web/src/pages/online/sizeData.js 的逐模型预设键。
+// 两套画布各持一份同内容表（两个页面互不加载对方脚本），tests/test_canvas_preset_matrix.js 断言两页一致。
+// 键名按匹配优先级排列，model name 包含键名即命中；未列出的模型返回 null（按支持全部处理）。
+// 更具体的型号必须排在族名之前（seedance-2-5 / kling-3.0-turbo / veo-3.1 都排在各自族名前）。
+const GEMINI_RATIO_KEYS = ['square', 'portrait14', 'portrait18', 'portrait', 'landscape', 'portrait43',
+    'landscape41', 'landscape43', 'portrait45', 'landscape54', 'landscape81', 'story', 'wide', 'ultrawide'];
+const SEEDREAM_RATIO_KEYS = ['square', 'landscape43', 'portrait43', 'wide', 'story', 'landscape', 'portrait', 'ultrawide'];
+const MODEL_CAPABILITIES = [
+    // ── 视频：官方宽高比 + 官方分辨率档 + 官方时长区间 [min, max] ──
+    { match: 'seedance-2-5', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 30 },
+    { match: 'seedance_v2_5', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 30 },
+    { match: 'seedance_v2_0_fast', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 15 },
+    { match: 'seedance_v2_0_mini', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 15 },
+    { match: 'seedance_v1_0', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 2, durationMax: 12 },
+    { match: 'seedance-2-0-fast', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 15 },
+    { match: 'seedance-2-0-mini', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 15 },
+    { match: 'seedance-1-0', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 2, durationMax: 12 },
+    { match: 'seedance', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p', '4k'], durationMin: 4, durationMax: 15 },
+    { match: 'kling-3.0-turbo', aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p'], durationMin: 3, durationMax: 15 },
+    { match: 'kling-3-0-turbo', aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p'], durationMin: 3, durationMax: 15 },
+    { match: 'kling', aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p', '4k'], durationMin: 3, durationMax: 15 },
+    { match: 'veo-3.1', aspects: ['16:9', '9:16'], durationMin: 4, durationMax: 8 },
+    { match: 'veo3.1', aspects: ['16:9', '9:16'], durationMin: 4, durationMax: 8 },
+    { match: 'veo3_1', aspects: ['16:9', '9:16'], durationMin: 4, durationMax: 8 },
+    { match: 'veo-3', aspects: ['16:9', '9:16'] },
+    { match: 'veo-2', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'veo', aspects: ['16:9', '9:16'] },
+    { match: 'sora-2', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'sora', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'wan', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'minimax', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'hailuo', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'ray2', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'ray', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'lumalabs', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'pika', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'gen-4', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'gen-3', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'runway', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'agnes-video', aspects: ['16:9', '9:16', '4:3', '1:1', '3:4', '21:9'], durationMin: 4, durationMax: 12 },
+    { match: 'agnes', aspects: ['16:9', '9:16', '1:1'], durationMin: 4, durationMax: 12 },
+    { match: 'jimeng', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'higgsfield', aspects: ['16:9', '9:16', '1:1'] },
+    { match: 'pixverse', aspects: ['16:9', '9:16', '1:1'] },
+    // ── 图片：官方分辨率档位 + 官方比例集合（含下划线/连字符两种真实模型名写法）──
+    // preset 指向 MODEL_TIER_PIXELS 的键，用于 0.5K/1.5K/3K 这类 SIZE_MAP 没覆盖的官方档位像素。
+    { match: 'nano-banana-2', resLevels: ['0.5k', '1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS, preset: 'gemini-3.1-flash-image' },
+    { match: 'nano_banana_2', resLevels: ['0.5k', '1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS, preset: 'gemini-3.1-flash-image' },
+    { match: 'nano-banana', resLevels: ['1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS },
+    { match: 'nano_banana', resLevels: ['1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS },
+    { match: 'seedream-5.0-lite', resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-lite' },
+    { match: 'seedream-5-0-lite', resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-lite' },
+    { match: 'seedream_v5_lite', resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-lite' },
+    { match: 'seedream-5.0', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
+    { match: 'seedream-5-0', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
+    { match: 'seedream_v5', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
+    { match: 'seedream-5', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
+    { match: 'seedream-4.5', resLevels: ['2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream-4-5', resLevels: ['2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream_v4_5', resLevels: ['2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream-4.0', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream-4-0', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream_v4', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'seedream-4', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'agnes-image', resLevels: ['1k', '2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'agnes-image' }
+];
+// 逐模型官方参考像素（只存 SIZE_MAP 没覆盖的档位：0.5K/1.5K/3K；1K/2K/4K 仍走 SIZE_MAP）。
+//   出处 web/src/pages/online/sizeData.js（Gemini 3.1 Flash Image 512px、Seedream 5.0 pro/lite 的
+//   1.5K/3K）与 main.py AGNES_OUTPUT_PIXELS（Agnes 3K），tests/test_canvas_preset_matrix.js 逐格校验。
+const MODEL_TIER_PIXELS = {
+    'gemini-3.1-flash-image': {
+        square: {'0.5k': '512x512'}, portrait14: {'0.5k': '256x1024'}, portrait18: {'0.5k': '192x1536'},
+        portrait: {'0.5k': '424x632'}, landscape: {'0.5k': '632x424'}, portrait43: {'0.5k': '448x600'},
+        landscape41: {'0.5k': '1024x256'}, landscape43: {'0.5k': '600x448'}, portrait45: {'0.5k': '464x576'},
+        landscape54: {'0.5k': '576x464'}, landscape81: {'0.5k': '1536x192'}, story: {'0.5k': '384x688'},
+        wide: {'0.5k': '688x384'}, ultrawide: {'0.5k': '792x168'}
+    },
+    'seedream-5.0-pro': {
+        square: {'1.5k': '1536x1536'}, landscape43: {'1.5k': '1792x1344'}, portrait43: {'1.5k': '1344x1792'},
+        wide: {'1.5k': '2048x1152'}, story: {'1.5k': '1152x2048'}, landscape: {'1.5k': '1872x1248'},
+        portrait: {'1.5k': '1248x1872'}, ultrawide: {'1.5k': '2352x1008'}
+    },
+    'seedream-5.0-lite': {
+        square: {'3k': '3072x3072'}, landscape43: {'3k': '3456x2592'}, portrait43: {'3k': '2592x3456'},
+        wide: {'3k': '4096x2304'}, story: {'3k': '2304x4096'}, landscape: {'3k': '3744x2496'},
+        portrait: {'3k': '2496x3744'}, ultrawide: {'3k': '4704x2016'}
+    },
+    'agnes-image': {
+        square: {'3k': '3072x3072'}, portrait43: {'3k': '2592x3456'}, landscape43: {'3k': '3456x2592'},
+        wide: {'3k': '3936x2208'}, story: {'3k': '2208x3936'}, portrait: {'3k': '2496x3744'},
+        landscape: {'3k': '3744x2496'}, ultrawide: {'3k': '4704x2016'}
+    }
+};
+function modelCapabilityFor(model, field){
+    const m = String(model || '').toLowerCase();
+    for(const entry of MODEL_CAPABILITIES){
+        if(entry[field] === undefined || entry[field] === null) continue;
+        if(!m.includes(entry.match)) continue;
+        return Array.isArray(entry[field]) ? entry[field].slice() : entry[field];
+    }
+    return null;
+}
+function getVideoAspectRatios(model){
+    return modelCapabilityFor(model, 'aspects'); // null = 支持全部
+}
+function videoResolutionsFor(model){
+    return modelCapabilityFor(model, 'videoResolutions'); // null = 支持全部
+}
+// 时长官方区间：null 表示没有该模型的官方区间（保留各画布原有上下限，不额外收窄）。
+function videoDurationRange(model){
+    const min = modelCapabilityFor(model, 'durationMin');
+    const max = modelCapabilityFor(model, 'durationMax');
+    return typeof min === 'number' && typeof max === 'number' && min <= max ? {min, max} : null;
+}
+function imageResLevelsFor(model){
+    const levels = modelCapabilityFor(model, 'resLevels') || ['1k', '2k', '4k'];
+    // 供应商级覆盖（/api/ai/size-policy 的 resolutions）合并到静态档位之上；未声明时原样返回
+    if(typeof NovaSizePolicy === 'undefined' || typeof NovaSizePolicy.levelAllowed !== 'function') return levels;
+    return levels.filter(level => NovaSizePolicy.levelAllowed(model, level));
+}
+function imageRatiosFor(model){
+    const declared = modelCapabilityFor(model, 'ratios'); // null = 该模型不限制比例（按支持全部处理）
+    if(typeof NovaSizePolicy === 'undefined' || typeof NovaSizePolicy.hasRatioOverride !== 'function'
+        || !NovaSizePolicy.hasRatioOverride(model)) return declared;
+    const universe = declared || (typeof NovaSizePolicy.allRatioKeys === 'function' ? NovaSizePolicy.allRatioKeys() : []);
+    return universe.filter(key => NovaSizePolicy.ratioAllowed(model, key));
+}
+function imageRatioSupported(model, ratioKey){
+    const ratios = imageRatiosFor(model);
+    return !ratios || ratios.indexOf(ratioKey) >= 0;
+}
+// 0.5K/1.5K/3K 的逐模型官方像素；SIZE_MAP 有该档位时优先走 SIZE_MAP（gpt-image-2 官方映射）。
+function modelTierPixelFor(model, ratioKey, level){
+    const preset = modelCapabilityFor(model, 'preset');
+    const cells = preset && MODEL_TIER_PIXELS[preset] && MODEL_TIER_PIXELS[preset][ratioKey];
+    return (cells && cells[level]) || '';
 }
 // Clipboard helpers: delegate to NovaUtils
 function copyTextWithCopyEvent(value){ return window.NovaUtils?.copyTextWithCopyEvent?.(value) ?? _localCopyTextWithCopyEvent(value); }
@@ -972,19 +1120,21 @@ function smartLoopRoundSettings(runSettings, ctx=smartLoopContext){
 function apiSizeTier(width, height, model){
     const area = Number(width) * Number(height);
     const pixelLimit = resPixelLimitFor(model);
-    for(const level of API_RES_LEVELS){
+    const levels = imageResLevelsFor(model);
+    for(const level of levels){
         if(area <= pixelLimit[level]) return level;
     }
-    return API_RES_LEVELS[API_RES_LEVELS.length - 1];
+    return levels[levels.length - 1];
 }
 // 枚举档位不能从模型名推：按服务端枚举里像素最多的一张反推最高档
 function enumMaxSizeLevel(model){
     let level = '';
+    const levels = imageResLevelsFor(model);
     (NovaSizePolicy.policy(model).options || []).forEach(option => {
         const size = parseSizeValue(option);
         if(!size) return;
         const tier = apiSizeTier(Number(size.width), Number(size.height), model);
-        if(API_RES_LEVELS.indexOf(tier) > API_RES_LEVELS.indexOf(level)) level = tier;
+        if(levels.indexOf(tier) > levels.indexOf(level)) level = tier;
     });
     return level;
 }
@@ -1520,6 +1670,14 @@ function clearVolcengineSelectionOutsideVolcengine(target=settings){
 function isSmartImageNode(node){
     return Boolean(node && (node.type === 'smart-image' || !node.type));
 }
+/* 视频生成节点：结构与图片节点同构（媒体都在 images 数组里），只是类型独立、参数按类型分流。 */
+function isSmartVideoNode(node){
+    return Boolean(node && node.type === 'smart-video');
+}
+/* 两类媒体节点都适用：分组/落点/级联/会话等大量逻辑只关心「是不是媒体节点」，与图片还是视频无关。 */
+function isSmartMediaNode(node){
+    return Boolean(isSmartImageNode(node) || isSmartVideoNode(node));
+}
 function isSmartGroupNode(node){
     return Boolean(node && node.type === 'smart-group');
 }
@@ -1591,10 +1749,10 @@ function smartLabelTextColor(node){
    点节点 → 编辑器出现；点空白处 → 编辑器消失）。
    批量生成节点也走这套，用户在编辑器里配平台/模型/尺寸/张数，再按节点里的「批量生成」跑。 */
 function isSmartRunnableNode(node){
-    return Boolean(isSmartImageNode(node) || isSmartGroupNode(node) || isSmartBatchNode(node));
+    return Boolean(isSmartMediaNode(node) || isSmartGroupNode(node) || isSmartBatchNode(node));
 }
 function isHistoryGroupNode(node){
-    return Boolean(isSmartImageNode(node) && (node.isHistoryGroup || node.historyFor));
+    return Boolean(isSmartMediaNode(node) && (node.isHistoryGroup || node.historyFor));
 }
 function normalizeSmartImageMode(mode){
     return 'self';
@@ -1603,11 +1761,29 @@ function smartImageMode(node){
     return 'self';
 }
 function setSmartImageMode(node, mode){
-    if(!isSmartImageNode(node)) return;
+    if(!isSmartMediaNode(node)) return;
     delete node.imageMode;
 }
 function smartImageUsesWorkflowInput(node, ctx=smartLoopContext){
-    return Boolean(isSmartImageNode(node) && ctx?.forceWorkflow);
+    return Boolean(isSmartMediaNode(node) && ctx?.forceWorkflow);
+}
+/* 老画布迁移依据：节点当下的产出/素材是不是视频。
+   有素材时以素材为准（有图且都不是视频 → 仍是图片节点，避免把残留的 apiKind=video 误迁移）；
+   空节点（没有素材也没有产出）只认 runSettings.apiKind=video —— 用户手动把空节点切成视频的用法要保留。 */
+function smartNodeCarriesVideo(node){
+    if(!node || typeof node !== 'object') return false;
+    if(node.outputKind === 'video') return true;
+    const items = (node.images || []).filter(item => item && (item.url || item.kind));
+    if(items.some(isVideoMediaItem)) return true;
+    if(items.length) return false;
+    return String(node.runSettings?.apiKind || '') === 'video';
+}
+/* 类型与内容对齐：结果 kind 已知时按 kind 定类型（只对媒体节点生效，分组/表格/文本节点原样不动）。 */
+function applySmartMediaTypeForKind(node, kind){
+    if(!node || !isSmartMediaNode(node)) return node;
+    if(kind === 'video') node.type = 'smart-video';
+    else if(kind === 'image') node.type = 'smart-image';
+    return node;
 }
 function normalizeLegacySmartNode(node){
     if(!node || typeof node !== 'object') return node;
@@ -1632,11 +1808,15 @@ function normalizeLegacySmartNode(node){
         delete normalized.inputImage;
         delete normalized.steps;
         delete normalized.resultGrouping;
+        if(smartNodeCarriesVideo(normalized)) normalized.type = 'smart-video';
         return normalized;
     }
     if(!node.type) node.type = 'smart-image';
-    if(node.type === 'smart-image') delete node.imageMode;
+    if(node.type === 'smart-image' || node.type === 'smart-video') delete node.imageMode;
     if(node.type === 'smart-image' && node.historyFor) node.isHistoryGroup = true;
+    /* 老画布兼容：内容或产出为视频的 smart-image 迁成独立的 smart-video。
+       只改 type，id/x/y/scale/w/h/runSettings/连线等字段原样保留。 */
+    if(node.type === 'smart-image' && smartNodeCarriesVideo(node)) node.type = 'smart-video';
 
     return node;
 }
@@ -1726,11 +1906,11 @@ function stripOutpaintDisplaySettings(settingsObj, node=null){
 }
 function smartSettingsForNode(node){
     const nodeSettings = stripOutpaintDisplaySettings(node?.runSettings || {}, node);
-    /* 节点上已经有素材时，生成模式必须跟着素材走：上传进来的图片节点不能继承"上一次视频模式"的参数
-       ——继承后会被 persistActiveSmartSettings 写进节点，后端据此把节点编号判成"视频N"（多图群组同一条链）。
-       空节点没有素材可依据，仍沿用当前模式（用户手动把空节点切成视频的用法不变）。 */
+    /* 生成模式由节点类型决定：图片节点只出图片参数、视频节点只出视频参数，两类互不串。
+       分组/批量节点没有类型，退回按素材内容判断；没有素材时沿用节点自己记下的模式。 */
     const mediaItems = (node?.images || []).filter(img => img?.url);
-    const mediaApiKind = mediaItems.length ? (mediaItems.some(isVideoMediaItem) ? 'video' : 'image') : '';
+    const contentKind = mediaItems.length ? (mediaItems.some(isVideoMediaItem) ? 'video' : 'image') : '';
+    const mediaApiKind = isSmartVideoNode(node) ? 'video' : isSmartImageNode(node) ? 'image' : contentKind;
     const recentModeKey = mediaApiKind
         ? smartSettingsModeKey({engine:(canvasDefaultSmartSettings || initialSmartSettings || settings).engine, apiKind:mediaApiKind})
         : '';
@@ -1997,7 +2177,7 @@ function scaleSmartGroupMemberToZoom(group, member, zoom){
     const r = nodeRect(member);
     member.w = Math.max(40, Math.round((Number(r.width) || 0) * zoom));
     member.h = Math.max(40, Math.round((Number(r.height) || 0) * zoom));
-    if(isSmartImageNode(member)) member.scale = 1;
+    if(isSmartMediaNode(member)) member.scale = 1;
 }
 // 把指向 fromId 的连线/输入引用改接到 toId（吸收图片入组后保留“来源 → 分组”的连线），并去重去自环。
 function rerouteSmartConnections(fromId, toId){
@@ -2015,18 +2195,19 @@ function rerouteSmartConnections(fromId, toId){
 }
 // 把一张图片节点的图片吸收进分组（收进卡片内的缩略图网格），然后删除该图片节点。
 function absorbImageNodeIntoSmartGroup(group, child){
-    const add = (child.images || []).map(img => stripImageGenerationMeta({...img}));
+    const add = (child.images || []).map(img => stripImageGenerationMeta(cloneMediaItem(img)));
     if(!add.length) return false;
     group.images = [...(group.images || []), ...add];
-    // 清掉显式尺寸，让缩略图网格按图片数自动整理排列（“放入图片自动整理”）。
-    delete group.w; delete group.h;
+    // 清掉显式尺寸，让缩略图网格按图片数自动整理排列（“放入图片自动整理”）；
+    // 用户手动拖过缩放把手的分组保留 w/h，收图不该把框跳回自适应大小。
+    if(!group.sizeUserSet){ delete group.w; delete group.h; }
     rerouteSmartConnections(child.id, group.id);
     nodes = nodes.filter(n => n.id !== child.id);
     nodes.forEach(g => { if(isSmartGroupNode(g) && Array.isArray(g.items)) g.items = g.items.filter(id => id !== child.id); });
     return true;
 }
 function smartImageMustRemainGroupMember(child){
-    if(!isSmartImageNode(child)) return false;
+    if(!isSmartMediaNode(child)) return false;
     if(!(child.images || []).some(image => image?.url)) return true;
     if((canvas?.connections || []).some(connection => connection.from === child.id || connection.to === child.id)) return true;
     if(Array.isArray(child.inputNodeIds) && child.inputNodeIds.length) return true;
@@ -2040,9 +2221,9 @@ function addNodeToSmartGroup(group, child){
     const zoom = smartGroupZoom(group);
     if(isSmartGroupNode(child)){
         // 把一个分组拖进另一个分组：吸收它的图片到本组网格，把它的非图片成员并入本组，然后删除被拖分组本体。
-        const mergedImages = (child.images || []).map(img => stripImageGenerationMeta({...img}));
+        const mergedImages = (child.images || []).map(img => stripImageGenerationMeta(cloneMediaItem(img)));
         group.images = [...(group.images || []), ...mergedImages];
-        if(mergedImages.length){ delete group.w; delete group.h; }
+        if(mergedImages.length && !group.sizeUserSet){ delete group.w; delete group.h; }
         const childMemberIds = smartGroupMembers(child)
             .map(m => m.id)
             .filter(id => id !== group.id && !items.includes(id));
@@ -2057,7 +2238,7 @@ function addNodeToSmartGroup(group, child){
         return true;
     }
     // 纯静态媒体仍沿用缩略图吸收；工作流节点、生成位和有连线图片必须保留真实 ID。
-    if(isSmartImageNode(child) && !smartImageMustRemainGroupMember(child)) return absorbImageNodeIntoSmartGroup(group, child);
+    if(isSmartMediaNode(child) && !smartImageMustRemainGroupMember(child)) return absorbImageNodeIntoSmartGroup(group, child);
     if(items.includes(child.id)) return false;
     group.items = [...items, child.id];
     scaleSmartGroupMemberToZoom(group, child, zoom);
@@ -2087,7 +2268,7 @@ function smartGroupImageRefs(group){
         if(item?.url) refs.push({nodeId:group.id, index, source:img, item});
     });
     const members = smartGroupMembers(group)
-        .filter(isSmartImageNode)
+        .filter(isSmartMediaNode)
         .slice()
         .sort((a, b) => {
             const ra = nodeRect(a), rb = nodeRect(b);
@@ -2115,13 +2296,29 @@ function smartGroupCardImageRefs(group){
 // 组内以「真实图片节点」形式存在的成员（有图、非分组），按阅读顺序（先行后列）排序。
 function smartGroupMemberImageNodes(group){
     return smartGroupMembers(group)
-        .filter(node => isSmartImageNode(node) && (node.images || []).some(img => img?.url))
+        .filter(node => isSmartMediaNode(node) && (node.images || []).some(img => img?.url))
         .sort((a, b) => {
             const ra = nodeRect(a), rb = nodeRect(b);
             const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
             if(Math.abs(dy) > 24) return dy;
             return (Number(ra.x) || 0) - (Number(rb.x) || 0);
         });
+}
+/* 分组卡片里「单张媒体」的可用内框：在给定内框内按素材自己的比例等比缩放（图片/视频都不裁切）。
+   量不到素材尺寸时退回整个内框（保持老行为）。 */
+function smartGroupSingleInnerBox(item, availW, availH){
+    const boxW = Math.max(24, Math.round(Number(availW) || 24));
+    const boxH = Math.max(24, Math.round(Number(availH) || 24));
+    const size = mediaLayoutSize(item);
+    const mediaW = size.width;
+    const mediaH = size.height;
+    if(!(mediaW > 0 && mediaH > 0)) return {width:boxW, height:boxH};
+    const fit = Math.min(boxW / mediaW, boxH / mediaH);
+    if(!(fit > 0) || !Number.isFinite(fit)) return {width:boxW, height:boxH};
+    return {
+        width:Math.max(24, Math.round(mediaW * fit)),
+        height:Math.max(24, Math.round(mediaH * fit))
+    };
 }
 function smartGroupThumbLayout(node){
     const refs = smartGroupCardImageRefs(node);
@@ -2145,6 +2342,10 @@ function smartGroupThumbLayout(node){
     if(count === 1){
         // 单图分组：一张图撑满卡片（保持老样子）
         if(hasExplicit){
+            /* 分组框是用户拉的，但图片必须**完整可见**：按素材自己的比例在内边距里等比缩放，
+               不能把 innerW/innerH 直接给成整个内框 —— 媒体元素是 object-fit:cover，
+               比例对不上就会把画面裁掉（用户报的「群组里图片显示不全」）。 */
+            const fit = smartGroupSingleInnerBox(refs[0].item, boxW - outerPad, boxH - outerPad - summarySpace);
             return {
                 refs,
                 compactMembers,
@@ -2156,8 +2357,8 @@ function smartGroupThumbLayout(node){
                 height:boxH,
                 thumb:Math.round(96 * scale),
                 single:true,
-                innerW:Math.max(24, Math.round(boxW - outerPad)),
-                innerH:Math.max(24, Math.round(boxH - outerPad - summarySpace))
+                innerW:fit.width,
+                innerH:fit.height
             };
         }
         const single = singleImageLayout(refs[0].item, {}, scale);
@@ -2211,7 +2412,8 @@ function smartGroupThumbLayout(node){
             const offsetY = Math.max(0, Math.round((innerH - Math.min(chosen.gridH, innerH)) / 2));
             return {refs, compactMembers, memberImages, cols:chosen.cols, rows:chosen.rows, visibleRows:chosen.rows, thumb:chosen.thumb, thumbH:chosen.thumbH, gridH:chosen.gridH, contentOffsetY:offsetY, width:boxW, height:boxH};
         }
-        const fitted = groupImageGridLayout(count, Math.max(72, innerW), Math.max(56, innerH), 100000, 0, gap, maxVisibleRows);
+        // 常规格子（≥24px）都放不下时，允许格子继续收窄到 1px，保证重载后的缩略图网格也在容器内。
+        const fitted = groupImageGridLayout(count, Math.max(72, innerW), Math.max(56, innerH), 100000, 0, gap, maxVisibleRows, 1);
         return {...fitted, refs, compactMembers, memberImages, thumbH:fitted.thumb, width:boxW, height:boxH};
     }
     const thumb = Math.round(MEDIA_GROUP_THUMB_BASE * scale);
@@ -2296,11 +2498,99 @@ function snapSmartGroupDragBatch(group, draggedNodes, primaryNode){
 }
 // 把分组内的成员整理成整齐的网格（先行后列保持当前阅读顺序），列数尽量接近正方形，
 // 每个成员在所属单元格内居中；最后把分组框尺寸收敛到正好包住所有成员。
+/* 拖动分组缩放把手时的成员整理：分组框由手势决定，**不再**按内容收紧；
+   把组内真实成员（提示词 / 图片节点）排成网格，并整体等比缩放到框内，成员都落在框里。
+   与 arrangeSmartGroupMembers 的自然网格分支共用「列宽/行高 + 单元格居中」口径，
+   只是多一个统一的 fit 系数把整块内容塞进当前框。 */
+function arrangeSmartGroupMembersInFrame(group, options={}){
+    if(!isSmartGroupNode(group)) return false;
+    const ordered = [...smartGroupCompactMembers(group), ...smartGroupMemberImageNodes(group)];
+    if(!ordered.length) return false;
+    if(!options.skipUndo) pushUndo();
+    const boxW = Math.max(SMART_GROUP_MIN_WIDTH, Math.round(Number(group.w) || 0));
+    const boxH = Math.max(SMART_GROUP_MIN_HEIGHT, Math.round(Number(group.h) || 0));
+    group.w = boxW;
+    group.h = boxH;
+    const pad = SMART_GROUP_ARRANGE_PADDING;
+    const gap = SMART_GROUP_ARRANGE_GAP;
+    const headerH = SMART_GROUP_ARRANGE_HEADER;
+    const innerW = Math.max(24, boxW - pad * 2);
+    const innerH = Math.max(24, boxH - headerH - pad * 2);
+    const sizes = ordered.map(member => {
+        const r = nodeRect(member);
+        return {node:member, w:Math.max(1, Number(r.width) || 120), h:Math.max(1, Number(r.height) || 120)};
+    });
+    const count = sizes.length;
+    const cols = Math.max(1, Math.min(count, Math.round(Math.sqrt(count)) || 1));
+    const rows = Math.ceil(count / cols);
+    const colW = new Array(cols).fill(0);
+    const rowH = new Array(rows).fill(0);
+    sizes.forEach((s, i) => {
+        const c = i % cols, r = Math.floor(i / cols);
+        colW[c] = Math.max(colW[c], s.w);
+        rowH[r] = Math.max(rowH[r], s.h);
+    });
+    const contentW = colW.reduce((a, b) => a + b, 0) + gap * (cols - 1);
+    const contentH = rowH.reduce((a, b) => a + b, 0) + gap * (rows - 1);
+    // 放大沿用 SMART_GROUP_MAX_MEMBER_ZOOM 的上限，缩小不设固定下限：格子与间隙按同一个 fit 收窄，
+    // 框小到放不下时成员跟着缩进框里，而不是像 Math.max(40) 那样把整块网格顶出内框。
+    const fit = Math.min(SMART_GROUP_MAX_MEMBER_ZOOM, innerW / Math.max(1, contentW), innerH / Math.max(1, contentH));
+    const cellW = colW.map(w => Math.max(1, Math.floor(w * fit)));
+    const cellH = rowH.map(h => Math.max(1, Math.floor(h * fit)));
+    let totalW = cellW.reduce((a, b) => a + b, 0);
+    let totalH = cellH.reduce((a, b) => a + b, 0);
+    const gapScale = Math.min(1, fit);
+    const gapX = Math.max(0, Math.min(Math.floor(gap * gapScale), Math.floor(Math.max(0, innerW - totalW) / Math.max(1, cols - 1))));
+    const gapY = Math.max(0, Math.min(Math.floor(gap * gapScale), Math.floor(Math.max(0, innerH - totalH) / Math.max(1, rows - 1))));
+    // 格宽取整 + 整数格定位后，成员一定不会越出内框、也不会压到隔壁格。
+    // max(1) 在极端比例下可能多占几像素，从最宽的格依次扣掉。
+    const budgetW = innerW - gapX * (cols - 1);
+    while(totalW > budgetW){
+        let widest = -1;
+        for(let c = 0; c < cols; c += 1){ if(cellW[c] > 1 && (widest < 0 || cellW[c] > cellW[widest])) widest = c; }
+        if(widest < 0) break;
+        cellW[widest] -= 1;
+        totalW -= 1;
+    }
+    const budgetH = innerH - gapY * (rows - 1);
+    while(totalH > budgetH){
+        let tallest = -1;
+        for(let r = 0; r < rows; r += 1){ if(cellH[r] > 1 && (tallest < 0 || cellH[r] > cellH[tallest])) tallest = r; }
+        if(tallest < 0) break;
+        cellH[tallest] -= 1;
+        totalH -= 1;
+    }
+    const gridW = totalW + gapX * (cols - 1);
+    const gridH = totalH + gapY * (rows - 1);
+    const colX = [];
+    let accX = 0;
+    for(let c = 0; c < cols; c++){ colX[c] = accX; accX += cellW[c] + gapX; }
+    const rowY = [];
+    let accY = 0;
+    for(let r = 0; r < rows; r++){ rowY[r] = accY; accY += cellH[r] + gapY; }
+    const originX = (Number(group.x) || 0) + pad + Math.max(0, Math.round((innerW - gridW) / 2));
+    const originY = (Number(group.y) || 0) + headerH + pad + Math.max(0, Math.round((innerH - gridH) / 2));
+    sizes.forEach((s, i) => {
+        const c = i % cols, r = Math.floor(i / cols);
+        const w = Math.min(cellW[c], Math.max(1, Math.floor(s.w * fit)));
+        const h = Math.min(cellH[r], Math.max(1, Math.floor(s.h * fit)));
+        s.node.x = originX + colX[c] + Math.floor((cellW[c] - w) / 2);
+        s.node.y = originY + rowY[r] + Math.floor((cellH[r] - h) / 2);
+        s.node.w = w;
+        s.node.h = h;
+        if(isSmartMediaNode(s.node)) s.node.scale = 1;
+    });
+    if(group._memberZoom !== undefined) group._memberZoom = 1;
+    if(options.syncDom) syncSmartGroupMemberElements(group);
+    return true;
+}
 function arrangeSmartGroupMembers(group, options={}){
     if(!isSmartGroupNode(group)) return false;
     // 只有当卡片真的会画出缩略图时才走「缩略图网格」这条路；组里只有真实图片节点时
     // 交给下面的自然尺寸网格去排，否则会因为 layout 为空而直接 return、图片节点永远排不整齐。
     const hasThumbImages = smartGroupCardImageRefs(group).length > 0;
+    // 拖分组把手时传 frame：框已被手势定好，只把真实成员排进框内，不再按内容把框收回去。
+    if(options.frame && !hasThumbImages) return arrangeSmartGroupMembersInFrame(group, options);
     if(hasThumbImages){
         const compactMembers = smartGroupCompactMembers(group);
         if(!options.skipUndo) pushUndo();
@@ -2308,8 +2598,8 @@ function arrangeSmartGroupMembers(group, options={}){
         if(!layout) return true;
         const refs = layout.refs || [];
         const memberImages = layout.memberImages || smartGroupMemberImageNodes(group);
-        const thumb = Math.max(24, Math.round(Number(layout.thumb) || 96));
-        const thumbH = Math.max(24, Math.round(Number(layout.thumbH) || thumb));
+        const thumb = Math.max(1, Math.round(Number(layout.thumb) || 96));
+        const thumbH = Math.max(1, Math.round(Number(layout.thumbH) || thumb));
         const gap = 8;
         const cols = Math.max(1, Number(layout.cols) || 1);
         const gridW = cols * thumb + Math.max(0, cols - 1) * gap;
@@ -2356,7 +2646,7 @@ function arrangeSmartGroupMembers(group, options={}){
     // 归一化图片成员尺寸：清掉入组缩放写入的 w/h，回到自然尺寸。否则反复拖出/拖入会越缩越小，
     // 且“整理”无法恢复——这是用户反馈的“拖出再拖入图片变小、整理也救不回来”的根因。
     ordered.forEach(node => {
-        if(isSmartImageNode(node)){
+        if(isSmartMediaNode(node)){
             delete node.w;
             delete node.h;
         }
@@ -2404,6 +2694,118 @@ function mediaLayoutSize(img){
     const height = Number(img?.natural_h || img?.height || img?.h || img?.layout_h || img?.preview_h || 0);
     return width > 0 && height > 0 ? {width, height} : {width:0, height:0};
 }
+/* 缩略图格子自己的宽高比（量不到就当正方形）。第 48 轮起多图/结果群组的格子按每张图自己的比例走，
+   所以容器高度、可见高度、拖拽时的尺寸同步必须都用这一套口径算 —— 只看格子宽度按正方形预留高度，
+   最后一行（或竖图那一行）就会比预留的高出一截，被 max-height 裁掉、看起来就是「群组显示不全」。 */
+function mediaCellAspect(img, fallback=1){
+    const size = mediaLayoutSize(img);
+    const width = size.width;
+    const height = size.height;
+    /* 格子比例收进可排布区间：1:10 这种极端图会让一格高到把整块网格顶出节点框。
+       夹到 [0.25, 4] 后，极端图在格子里等比居中（object-fit:contain 不裁切），布局也不会撑破。 */
+    const minCellAspect = 0.25, maxCellAspect = 4;
+    if(width > 0 && height > 0){
+        const aspect = width / height;
+        if(Number.isFinite(aspect) && aspect > 0) return Math.min(maxCellAspect, Math.max(minCellAspect, aspect));
+    }
+    const fallbackAspect = Number(fallback);
+    if(!Number.isFinite(fallbackAspect) || fallbackAspect <= 0) return 1;
+    return Math.min(maxCellAspect, Math.max(minCellAspect, fallbackAspect));
+}
+/* 还没出图的格子用什么比例：本次请求比例优先，批量按行算出的比例兜底，都没有才退回正方形。 */
+function pendingCellAspect(node){
+    const box = node ? pendingRequestBoxForNode(node) : null;
+    const aspect = box && Number(box.h) > 0
+        ? Number(box.w) / Number(box.h)
+        : (Number(node && node.batchRowAspect) > 0 ? Number(node.batchRowAspect) : 1);
+    /* 和 mediaCellAspect 同一区间：占位格也要跟着真实格子一起被夹住，否则极端请求比例会把占位格顶出节点。 */
+    return Math.min(4, Math.max(0.25, Number.isFinite(aspect) ? aspect : 1));
+}
+/* 缩略图网格的真实高度：格子宽度固定，每格高 = 宽度 / 该格比例，同一行取最高的一格。
+   返回每一行的高度，由调用方决定「全部行」还是「可见行」的总高。 */
+function thumbGridRowHeights(aspects, cols, thumb, gap=8){
+    const list = Array.isArray(aspects) ? aspects : [];
+    const width = Math.max(1, Math.round(Number(cols) || 1));
+    const cellW = Math.max(24, Math.round(Number(thumb) || 96));
+    const cellGap = Math.max(0, Number(gap) || 0);
+    const rowHeights = [];
+    for(let index = 0; index < list.length; index += width){
+        let rowH = 24;
+        for(let cell = index; cell < Math.min(index + width, list.length); cell += 1){
+            const raw = Number(list[cell]);
+            const aspect = Number.isFinite(raw) && raw > 0 ? raw : 1;
+            rowH = Math.max(rowH, Math.round(cellW / aspect));
+        }
+        rowHeights.push(rowH);
+    }
+    return {rowHeights, contentH:thumbGridRowsHeight(rowHeights, rowHeights.length, cellGap)};
+}
+function thumbGridRowsHeight(rowHeights, rows, gap=8){
+    const list = Array.isArray(rowHeights) ? rowHeights.slice(0, Math.max(0, Number(rows) || 0)) : [];
+    return list.reduce((total, h) => total + h, 0) + Math.max(0, list.length - 1) * Math.max(0, Number(gap) || 0);
+}
+/* 多图节点这一屏要排的格子比例：已出的按素材自己，没出的按本次请求/按行比例。 */
+function mediaGridCellAspects(node, images, total){
+    const list = (images || []).map(img => mediaCellAspect(img));
+    const pending = Math.max(0, Math.round(Number(total) || 0) - list.length);
+    for(let i = 0; i < pending; i += 1) list.push(pendingCellAspect(node));
+    return list;
+}
+/* 缩略图格子自己的宽高比（量不到就当正方形）。第 48 轮起多图/结果群组的格子按每张图自己的比例走，
+   所以容器高度、可见高度、拖拽时的尺寸同步必须都用这一套口径算 —— 只看格子宽度按正方形预留高度，
+   最后一行（或竖图那一行）就会比预留的高出一截，被 max-height 裁掉、看起来就是「群组显示不全」。 */
+function mediaCellAspect(img, fallback=1){
+    const size = mediaLayoutSize(img);
+    const width = size.width;
+    const height = size.height;
+    /* 格子比例收进可排布区间：1:10 这种极端图会让一格高到把整块网格顶出节点框。
+       夹到 [0.25, 4] 后，极端图在格子里等比居中（object-fit:contain 不裁切），布局也不会撑破。 */
+    const minCellAspect = 0.25, maxCellAspect = 4;
+    if(width > 0 && height > 0){
+        const aspect = width / height;
+        if(Number.isFinite(aspect) && aspect > 0) return Math.min(maxCellAspect, Math.max(minCellAspect, aspect));
+    }
+    const fallbackAspect = Number(fallback);
+    if(!Number.isFinite(fallbackAspect) || fallbackAspect <= 0) return 1;
+    return Math.min(maxCellAspect, Math.max(minCellAspect, fallbackAspect));
+}
+/* 还没出图的格子用什么比例：本次请求比例优先，批量按行算出的比例兜底，都没有才退回正方形。 */
+function pendingCellAspect(node){
+    const box = node ? pendingRequestBoxForNode(node) : null;
+    const aspect = box && Number(box.h) > 0
+        ? Number(box.w) / Number(box.h)
+        : (Number(node && node.batchRowAspect) > 0 ? Number(node.batchRowAspect) : 1);
+    /* 和 mediaCellAspect 同一区间：占位格也要跟着真实格子一起被夹住，否则极端请求比例会把占位格顶出节点。 */
+    return Math.min(4, Math.max(0.25, Number.isFinite(aspect) ? aspect : 1));
+}
+/* 缩略图网格的真实高度：格子宽度固定，每格高 = 宽度 / 该格比例，同一行取最高的一格。
+   返回每一行的高度，由调用方决定「全部行」还是「可见行」的总高。 */
+function thumbGridRowHeights(aspects, cols, thumb, gap=8){
+    const list = Array.isArray(aspects) ? aspects : [];
+    const width = Math.max(1, Math.round(Number(cols) || 1));
+    const cellW = Math.max(24, Math.round(Number(thumb) || 96));
+    const cellGap = Math.max(0, Number(gap) || 0);
+    const rowHeights = [];
+    for(let index = 0; index < list.length; index += width){
+        let rowH = 24;
+        for(let cell = index; cell < Math.min(index + width, list.length); cell += 1){
+            rowH = Math.max(rowH, Math.round(cellW / mediaCellAspect({}, list[cell])));
+        }
+        rowHeights.push(rowH);
+    }
+    return {rowHeights, contentH:thumbGridRowsHeight(rowHeights, rowHeights.length, cellGap)};
+}
+function thumbGridRowsHeight(rowHeights, rows, gap=8){
+    const list = Array.isArray(rowHeights) ? rowHeights.slice(0, Math.max(0, Number(rows) || 0)) : [];
+    return list.reduce((total, h) => total + h, 0) + Math.max(0, list.length - 1) * Math.max(0, Number(gap) || 0);
+}
+/* 多图节点这一屏要排的格子比例：已出的按素材自己，没出的按本次请求/按行比例。 */
+function mediaGridCellAspects(node, images, total){
+    const list = (images || []).map(img => mediaCellAspect(img));
+    const pending = Math.max(0, Math.round(Number(total) || 0) - list.length);
+    for(let i = 0; i < pending; i += 1) list.push(pendingCellAspect(node));
+    return list;
+}
 function copyMediaSizeFields(source, target={}){
     if(!source || typeof source !== 'object') return target;
     ['natural_w','natural_h','width','height','w','h','layout_w','layout_h'].forEach(key => {
@@ -2440,7 +2842,7 @@ function singleImageLayout(image, node, scale){
     }
     return {cols:1, rows:1, width:Math.round(260*scale), height:Math.round(180*scale), thumb:Math.round(96*scale), single:true};
 }
-function groupImageGridLayout(count, explicitW, explicitH, maxThumb, pad=32, gap=8, maxVisibleRows=MEDIA_GROUP_MAX_VISIBLE_ROWS){
+function groupImageGridLayout(count, explicitW, explicitH, maxThumb, pad=32, gap=8, maxVisibleRows=MEDIA_GROUP_MAX_VISIBLE_ROWS, minThumb=28){
     let best = null;
     for(let cols = 1; cols <= count; cols++){
         const rows = Math.ceil(count / cols);
@@ -2449,8 +2851,8 @@ function groupImageGridLayout(count, explicitW, explicitH, maxThumb, pad=32, gap
         const availableH = explicitH - pad - (visibleRows - 1) * gap;
         if(availableW <= 0 || availableH <= 0) continue;
         const rawThumb = Math.floor(Math.min(availableW / cols, availableH / visibleRows));
-        const fittedThumb = Math.max(28, Math.min(maxThumb, rawThumb));
-        const fits = rawThumb >= 28;
+        const fittedThumb = Math.max(minThumb, Math.min(maxThumb, rawThumb));
+        const fits = rawThumb >= minThumb;
         const usedW = cols * fittedThumb + (cols - 1) * gap + pad;
         const usedH = visibleRows * fittedThumb + (visibleRows - 1) * gap + pad;
         const spareW = Math.max(0, explicitW - usedW);
@@ -2477,7 +2879,7 @@ function groupImageGridLayout(count, explicitW, explicitH, maxThumb, pad=32, gap
     }
     const fallbackCols = Math.min(count, 2);
     const fallbackRows = Math.ceil(count / fallbackCols);
-    return best || {cols:fallbackCols, rows:fallbackRows, visibleRows:Math.min(Math.max(1, maxVisibleRows), fallbackRows), thumb:28};
+    return best || {cols:fallbackCols, rows:fallbackRows, visibleRows:Math.min(Math.max(1, maxVisibleRows), fallbackRows), thumb:minThumb};
 }
 function smartNodeInputThumbRows(count){
     return count ? Math.ceil(Math.min(10, count) / 5) : 0;
@@ -2676,6 +3078,13 @@ function imageLayout(images, scale=1, node=null){
         if(groupThumbLayout) return groupThumbLayout;
         return {cols:1, rows:1, ...smartGroupLayoutSize(node), thumb:96, single:true};
     }
+    /* 分组里的真实图片成员：尺寸完全听成员自己的 w/h。极小框排出来的成员可能只有几十甚至几像素，
+       若按素材自然尺寸重算，DOM 会重新顶破分组框（singleImageLayout 只认 >24 的显式尺寸）。 */
+    if(isSmartMediaNode(node) && smartGroupContainingNode(node.id) && (node.images || []).filter(img => img?.url).length <= 1){
+        const memberW = Math.round(Number(node.w) || 0);
+        const memberH = Math.round(Number(node.h) || 0);
+        if(memberW > 0 && memberH > 0) return {cols:1, rows:1, width:memberW, height:memberH, thumb:96, single:true};
+    }
     if(node?.type === 'smart-prompt') return {cols:1, rows:1, ...promptNodeLayoutSize(node), thumb:96, single:true};
     if(node?.type === 'smart-loop'){
         const explicitW = Number(node.w);
@@ -2728,7 +3137,7 @@ function imageLayout(images, scale=1, node=null){
         };
     }
     const count = (images || []).length;
-    const s = node?.type === 'smart-image' || !node?.type ? mediaNodeDefaultScale(node) : (Number.isFinite(scale) && scale > 0 ? scale : 1);
+    const s = (node?.type === 'smart-image' || node?.type === 'smart-video' || !node?.type) ? mediaNodeDefaultScale(node) : (Number.isFinite(scale) && scale > 0 ? scale : 1);
     /* 逐行进度框：结果节点按本轮真实行号建格，格子数就是行数（一张还没出也要占满） */
     const batchOrderLen = Array.isArray(node?.batchRowOrder) ? node.batchRowOrder.length : 0;
     if(count === 0 && batchOrderLen > 1){
@@ -2740,10 +3149,14 @@ function imageLayout(images, scale=1, node=null){
         const PAD = 32;
         const explicitW = Number(node?.w);
         const explicitH = Number(node?.h);
+        /* 一张都还没出：格子按本次请求/按行的比例铺（和真正渲染出来的进度格同一套比例） */
+        const aspects = mediaGridCellAspects(node, [], batchOrderLen);
         if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
-            return fittedMediaGridLayout(node, batchOrderLen, explicitW, explicitH, thumb, PAD);
+            return fittedMediaGridLayout(node, batchOrderLen, explicitW, explicitH, thumb, PAD, aspects);
         }
-        return {cols, rows, visibleRows, width:Math.max(Math.round(226*s), cols * cell + PAD), height:visibleRows * cell - 8 + PAD, thumb};
+        const rowHeights = thumbGridRowHeights(aspects, cols, thumb);
+        const visibleH = thumbGridRowsHeight(rowHeights.rowHeights, visibleRows);
+        return {cols, rows, visibleRows, width:Math.max(Math.round(226*s), cols * cell + PAD), height:visibleH + PAD, thumb, visibleH, contentH:rowHeights.contentH};
     }
     if(count === 0){
         const explicitW = Number(node?.w);
@@ -2783,38 +3196,81 @@ function imageLayout(images, scale=1, node=null){
         // 手动拖过尺寸：宫格也按框铺满全部行（缩略图缩小到塞得下，下限 28），不再只露 3 行
         const manual = Boolean(node?.sizeUserSet);
         const visibleRows = manual ? rows : Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, rows);
+        const aspects = mediaGridCellAspects(node, images, Math.max(gridCount, cols * rows));
         if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
             const fittedThumb = Math.max(28, Math.floor(Math.min((explicitW - PAD - (cols - 1) * 8) / cols, (explicitH - PAD - (visibleRows - 1) * 8) / visibleRows)));
+            let thumb = fittedThumb;
+            let rowHeights = thumbGridRowHeights(aspects, cols, thumb);
+            /* 手动拖过尺寸的宫格框是固定的：竖图那一行会比按正方形预留的高，整块网格会顶出框。
+               这里只缩格子宽度（列数 / 行序 / 8px 间距都不动），直到全部行都落进框内。 */
+            if(manual){
+                const innerH = Math.max(24, Math.round(explicitH) - PAD);
+                const minThumb = 6;
+                for(let guard = 0; guard < 24 && rowHeights.contentH > innerH && thumb > minThumb; guard += 1){
+                    const scaled = Math.floor(thumb * innerH / rowHeights.contentH);
+                    thumb = Math.max(minThumb, Math.min(thumb - 1, scaled));
+                    rowHeights = thumbGridRowHeights(aspects, cols, thumb);
+                }
+            }
+            const visibleH = thumbGridRowsHeight(rowHeights.rowHeights, visibleRows);
             return {cols, rows, visibleRows, width:Math.round(explicitW),
-                height:manual ? Math.round(explicitH) : visibleRows * (fittedThumb + 8) - 8 + PAD, thumb:fittedThumb};
+                height:manual ? Math.round(explicitH) : visibleH + PAD, thumb, visibleH, contentH:rowHeights.contentH};
         }
-        return {cols, rows, visibleRows, width:Math.max(Math.round(226*s), cols * cell + PAD), height:visibleRows * cell - 8 + PAD, thumb};
+        const rowHeights = thumbGridRowHeights(aspects, cols, thumb);
+        const visibleH = thumbGridRowsHeight(rowHeights.rowHeights, visibleRows);
+        return {cols, rows, visibleRows, width:Math.max(Math.round(226*s), cols * cell + PAD), height:visibleH + PAD, thumb, visibleH, contentH:rowHeights.contentH};
     }
     const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(gridCount))));
     const rows = Math.ceil(gridCount / cols);
     const visibleRows = Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, rows);
+    /* 格子比例 = 每张素材自己的比例（还没出的按本次请求 / 按行比例）。节点高度按这些格子真实占的高度算，
+       否则竖图那一行会比「按正方形预留的高度」高出一截而被 max-height 裁掉 —— 用户看到的就是「群组显示不全」。 */
+    const aspects = mediaGridCellAspects(node, images, gridCount);
     if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
-        return fittedMediaGridLayout(node, gridCount, explicitW, explicitH, thumb, PAD);
+        return fittedMediaGridLayout(node, gridCount, explicitW, explicitH, thumb, PAD, aspects);
     }
+    const rowHeights = thumbGridRowHeights(aspects, cols, thumb);
+    const visibleH = thumbGridRowsHeight(rowHeights.rowHeights, visibleRows);
     const width = Math.max(Math.round(226*s), cols * cell + PAD);
-    const height = visibleRows * cell - 8 + PAD;
-    return {cols, rows, visibleRows, width, height, thumb};
+    const height = visibleH + PAD;
+    return {cols, rows, visibleRows, width, height, thumb, visibleH, contentH:rowHeights.contentH};
 }
 /* 多图节点给定显式尺寸时的拟合：
    - 没手动拖过（node.sizeUserSet 假）：按内容收紧，缩略图放大不超过 thumb（原来的行为）。
    - 手动拖过：框完全听用户的 —— 高度就是他拖的高度、缩略图解除放大上限。
      原来无论拖多高，高度都被「缩略图上限 × 可见行数」卡死（4 张图固定 488px），
      表现就是「结果群组往下拉不动」（用户报的）。 */
-function fittedMediaGridLayout(node, count, explicitW, explicitH, maxThumb, PAD){
+function fittedMediaGridLayout(node, count, explicitW, explicitH, maxThumb, PAD, aspects=null){
     const manual = Boolean(node && node.sizeUserSet);
     const fitted = groupImageGridLayout(count, explicitW, explicitH, manual ? 100000 : maxThumb, PAD, 8, manual ? count : MEDIA_GROUP_MAX_VISIBLE_ROWS);
+    const cellAspects = Array.isArray(aspects) && aspects.length ? aspects : new Array(Math.max(1, count)).fill(1);
+    /* 格子高度按每张素材自己的比例算（同一行取最高的一格）。没拿到比例就当正方形，等价于原来的算法。 */
+    let thumb = fitted.thumb;
+    let rowHeights = thumbGridRowHeights(cellAspects, fitted.cols, thumb);
+    /* 手动拖过尺寸的框是固定的：比例差异大时，按正方形拟合出的缩略图会让整块网格高于框。
+       这里把缩略图整体等比缩小，直到**全部行**都落进框内（列数 / 行序 / 8px 间距都不变）。 */
+    if(manual){
+        const innerH = Math.max(24, Math.round(explicitH) - PAD);
+        /* 极端比例（如 1:10）下，即使缩到 24px 宽，一格也可能高过整个内框；下限放到 6px，
+           继续等比收窄缩略图，保证全部行都落进框里。 */
+        const minThumb = 6;
+        for(let guard = 0; guard < 24 && rowHeights.contentH > innerH && thumb > minThumb; guard += 1){
+            const scaled = Math.floor(thumb * innerH / rowHeights.contentH);
+            thumb = Math.max(minThumb, Math.min(thumb - 1, scaled));
+            rowHeights = thumbGridRowHeights(cellAspects, fitted.cols, thumb);
+        }
+    }
+    const visibleRows = manual ? fitted.rows : fitted.visibleRows;
+    const visibleH = thumbGridRowsHeight(rowHeights.rowHeights, visibleRows);
     return {
         cols:fitted.cols,
         rows:fitted.rows,
-        visibleRows:fitted.visibleRows,
+        visibleRows,
         width:Math.round(explicitW),
-        height:manual ? Math.round(explicitH) : fitted.visibleRows * (fitted.thumb + 8) - 8 + PAD,
-        thumb:fitted.thumb
+        height:manual ? Math.round(explicitH) : visibleH + PAD,
+        thumb,
+        visibleH,
+        contentH:rowHeights.contentH
     };
 }
 function smartLoopCount(node){
@@ -3093,6 +3549,8 @@ function applyViewport(){
     }
     /* 图片节点工具条比节点宽时按窗口夹取：平移/缩放后节点屏幕位置变了，夹取量要重算 */
     syncSmartImageToolbarBounds();
+    /* 扩图参数面板挂在节点里、随画布缩放，窗口夹取量同样要按新缩放重算 */
+    if(smartNodeOverlay?.mode === 'outpaint'){ positionNieOutpaintPanel(smartNodeOverlay); syncNieOutpaintSize(smartNodeOverlay); }
     /* 子面板按屏幕坐标定位，画布缩放/平移会把编辑栏连同锚点一起挪走 */
     closeSizeCustomSubmenu();
 }
@@ -3447,7 +3905,8 @@ function providerChatModels(providerId){
 }
 function resolveChatModel(model='', providerId=''){
     const models = providerChatModels(resolveChatProviderId(providerId));
-    return model || models[0] || 'gpt-4o-mini';
+    /* 平台没给模型列表时返回空串，交给后端按平台配置挑默认模型：前端不该替用户写死一个模型名 */
+    return model || models[0] || '';
 }
 // 换平台后旧平台的对话模型名在新平台不存在（如 Lovart 的 lovart-agent，发出去上游必报模型不存在）：
 // 优先用该平台上一次用过的对话模型，没有记忆再用列表第一个；模型本身对新平台合法时保持不动；平台没给列表时不动。
@@ -3689,14 +4148,21 @@ function renderVideoModelControl(models){
     </div>`;
 }
 const VIDEO_DURATION_MIN = 4, VIDEO_DURATION_MAX = 15, VIDEO_DURATION_DEFAULT = 5;
+// 时长上下限跟当前视频模型的官方区间走（Kling 3-15、Seedance 各代 4-30/4-15/2-12、Agnes 4-12、
+// VEO3.1 4-8）；没有官方区间的模型沿用画布原有的 4-15。
+function videoDurationBounds(model){
+    return videoDurationRange(model === undefined ? settings.videoModel : model) || {min: VIDEO_DURATION_MIN, max: VIDEO_DURATION_MAX};
+}
 function videoDurationValue(){
-    return Math.max(VIDEO_DURATION_MIN, Math.min(VIDEO_DURATION_MAX, Math.round(Number(settings.videoDuration) || VIDEO_DURATION_DEFAULT)));
+    const range = videoDurationBounds();
+    return Math.max(range.min, Math.min(range.max, Math.round(Number(settings.videoDuration) || VIDEO_DURATION_DEFAULT)));
 }
 /* 时长弹层：滑条与右侧数值框共用一条更新路径。videoDuration 在 setDynamicSetting 的 layoutKeys 里，
    走通用 data-param 绑定会 renderDynamicParams()、把正开着的弹层连滑条一起重建，所以这里只写设置 +
    就地刷新滑条/数值框/药丸文案，再 persist + scheduleSave。 */
 function applyVideoDuration(raw, control){
-    const v = Math.max(VIDEO_DURATION_MIN, Math.min(VIDEO_DURATION_MAX, Math.round(Number(raw) || videoDurationValue())));
+    const range = videoDurationBounds();
+    const v = Math.max(range.min, Math.min(range.max, Math.round(Number(raw) || videoDurationValue())));
     settings.videoDuration = v;
     const ctrl = control || dynamicParams?.querySelector('.video-settings-control');
     if(ctrl){
@@ -3715,14 +4181,22 @@ function applyVideoDuration(raw, control){
 function videoCountValue(){
     return Math.max(1, Math.min(5, Math.round(Number(settings.videoCount) || 1)));
 }
-function videoAspectOptions(){
-    return [
+// 宽高比 / 分辨率按当前视频模型的官方集合过滤；model 省略时看 settings.videoModel。
+// keep_ratio 是画布保留字（发请求前按模型解析），任何模型都保留。
+function videoAspectOptions(model){
+    const all = [
         ['16:9','16:9'], ['9:16','9:16'], ['1:1','1:1'], ['4:3','4:3'], ['3:4','3:4'],
-        ['21:9','21:9'], ['9:21','9:21'], ['keep_ratio', tr('smart.videoAspectKeep')], ['adaptive', tr('smart.videoAspectAdaptive')]
+        ['21:9','21:9'], ['keep_ratio', tr('smart.videoAspectKeep')], ['adaptive', tr('smart.videoAspectAdaptive')]
     ];
+    const allowed = getVideoAspectRatios(model === undefined ? settings.videoModel : model);
+    if(!allowed) return all;
+    return all.filter(([value]) => value === 'keep_ratio' || allowed.indexOf(value) >= 0);
 }
-function videoResolutionOptions(){
-    return [['', tr('smart.videoResAuto')], ['480p','480P'], ['720p','720P'], ['1080p','1080P'], ['4k','4K']];
+function videoResolutionOptions(model){
+    const all = [['', tr('smart.videoResAuto')], ['480p','480P'], ['720p','720P'], ['1080p','1080P'], ['4k','4K']];
+    const allowed = videoResolutionsFor(model === undefined ? settings.videoModel : model);
+    if(!allowed) return all;
+    return all.filter(([value]) => !value || allowed.indexOf(value) >= 0);
 }
 /* 药丸摘要：比例 · 清晰度 · 时长 · 数量。拉滑条 / 点开关都要就地刷新，所以抽成函数共用。 */
 function videoSettingsSummary(){
@@ -3738,11 +4212,19 @@ function videoResolutionLabel(value){
     return hit ? hit[1] : (value || tr('smart.videoResAuto'));
 }
 function renderVideoSettingsControl(){
-    const aspectOptions = videoAspectOptions();
+    const aspectAllowed = getVideoAspectRatios(settings.videoModel);
+    const resAllowed = videoResolutionsFor(settings.videoModel);
     const aspectValue = settings.videoAspect || '16:9';
-    const resOptions = videoResolutionOptions();
     const resValue = settings.videoResolution || '';
+    // 历史存档里当前选中的比例/分辨率即使不在模型官方集合里也用置灰格保留下来，不静默改写。
+    const aspectOptions = videoAspectOptions();
+    if(aspectValue && aspectValue !== 'keep_ratio' && !aspectOptions.some(([v]) => v === aspectValue)){
+        aspectOptions.push([aspectValue, aspectValue]);
+    }
+    const resOptions = videoResolutionOptions();
+    if(resValue && !resOptions.some(([v]) => v === resValue)) resOptions.push([resValue, resValue]);
     const dur = videoDurationValue();
+    const durationBounds = videoDurationBounds();
     const count = videoCountValue();
     const audioOn = Boolean(settings.videoGenerateAudio);
     const unit = tr('smart.videoCountUnit');
@@ -3754,21 +4236,27 @@ function renderVideoSettingsControl(){
                 <div class="size-ratio-grid">
                     ${aspectOptions.map(([v, l]) => {
                         const [gw, gh] = (v === 'keep_ratio' || v === 'adaptive') ? [16, 16] : ratioGlyphSize(v);
-                        return `<button type="button" class="size-ratio-tile ${v === aspectValue ? 'active' : ''}" data-smart-param="videoAspect" data-smart-value="${escapeHtml(v)}"><span class="size-ratio-glyph" style="--glyph-w:${gw}px;--glyph-h:${gh}px"><i></i></span><span class="size-ratio-label">${escapeHtml(l)}</span></button>`;
+                        const unsupported = v !== 'keep_ratio' && aspectAllowed && !aspectAllowed.includes(v);
+                        const title = unsupported ? `${settings.videoModel} 官方不支持 ${v} 比例` : '';
+                        return `<button type="button" class="size-ratio-tile ${v === aspectValue ? 'active' : ''}" data-smart-param="videoAspect" data-smart-value="${escapeHtml(v)}" ${unsupported ? 'disabled style="opacity:.4"' : ''} title="${escapeHtml(title)}"><span class="size-ratio-glyph" style="--glyph-w:${gw}px;--glyph-h:${gh}px"><i></i></span><span class="size-ratio-label">${escapeHtml(l)}</span></button>`;
                     }).join('')}
                 </div>
             </div>
             <div class="size-section">
                 <div class="size-section-title">${escapeHtml(tr('smart.clarity'))}</div>
                 <div class="size-level-row" style="grid-template-columns:repeat(2, minmax(0,1fr))">
-                    ${resOptions.map(([v, l]) => `<button type="button" class="${v === resValue ? 'active' : ''}" data-smart-param="videoResolution" data-smart-value="${escapeHtml(v)}"><b>${escapeHtml(l)}</b></button>`).join('')}
+                    ${resOptions.map(([v, l]) => {
+                        const unsupported = Boolean(v) && resAllowed && !resAllowed.includes(v);
+                        const title = unsupported ? `${settings.videoModel} 官方不支持 ${v} 分辨率` : '';
+                        return `<button type="button" class="${v === resValue ? 'active' : ''}" data-smart-param="videoResolution" data-smart-value="${escapeHtml(v)}" ${unsupported ? 'disabled style="opacity:.4"' : ''} title="${escapeHtml(title)}"><b>${escapeHtml(l)}</b></button>`;
+                    }).join('')}
                 </div>
             </div>
             <div class="size-section">
                 <div class="size-section-title">${escapeHtml(tr('smart.videoDuration'))}</div>
                 <div class="dur-slider-row">
-                    <input type="range" class="smart-range dur-slider" min="${VIDEO_DURATION_MIN}" max="${VIDEO_DURATION_MAX}" step="1" value="${dur}" data-video-duration-range aria-label="${escapeHtml(tr('smart.videoDuration'))}">
-                    <label class="dur-value"><input type="number" min="${VIDEO_DURATION_MIN}" max="${VIDEO_DURATION_MAX}" step="1" value="${dur}" data-video-duration-value aria-label="${escapeHtml(tr('smart.videoDuration'))}"><span>s</span></label>
+                    <input type="range" class="smart-range dur-slider" min="${durationBounds.min}" max="${durationBounds.max}" step="1" value="${dur}" data-video-duration-range aria-label="${escapeHtml(tr('smart.videoDuration'))}" title="${escapeHtml(settings.videoModel ? settings.videoModel + ' 官方时长 ' + durationBounds.min + '-' + durationBounds.max + ' 秒' : '')}">
+                    <label class="dur-value"><input type="number" min="${durationBounds.min}" max="${durationBounds.max}" step="1" value="${dur}" data-video-duration-value aria-label="${escapeHtml(tr('smart.videoDuration'))}" title="${escapeHtml(settings.videoModel ? settings.videoModel + ' 官方时长 ' + durationBounds.min + '-' + durationBounds.max + ' 秒' : '')}"><span>s</span></label>
                 </div>
             </div>
             <div class="size-section">
@@ -3868,26 +4356,90 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSi
         }
     }
     const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
-    const preset = SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
-    return NovaSizePolicy.constrain(preset, model);
+    const ratioCells = SIZE_MAP[ratioKey] || SIZE_MAP.square;
+    // 预置像素表只覆盖 1k/2k/4k（APIMart gpt-image-2 官方映射）。0.5k/1.5k/3k 是 Gemini / 火山 /
+    // Agnes 的官方档位：优先取 MODEL_TIER_PIXELS 里逐模型的官方参考像素（与 web 在线生图同源），
+    // 表里没有才按该档位官方长边与这一比例等比换算，避免档位被静默吞成 1k。
+    let preset = ratioCells[resolutionKey] || modelTierPixelFor(model, ratioKey, resolutionKey);
+    if(!preset){
+        const longSide = RES_LONG_SIDE[resolutionKey];
+        const nominal = parseSizeValue(ratioCells['1k'] || SIZE_MAP.square['1k']);
+        if(longSide && nominal){
+            const ratio = Number(nominal.width) / Number(nominal.height);
+            const rawWidth = ratio >= 1 ? longSide : longSide * ratio;
+            const rawHeight = ratio >= 1 ? longSide / ratio : longSide;
+            preset = `${Math.max(64, Math.floor(rawWidth / 16) * 16)}x${Math.max(64, Math.floor(rawHeight / 16) * 16)}`;
+        }
+    }
+    return NovaSizePolicy.constrain(preset || ratioCells['1k'] || SIZE_MAP.square['1k'], model);
 }
 function apiRatioLabel(ratioValue){
     const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
     return API_RATIO_LABELS[ratioValue] || API_RATIO_LABELS[ratioKey] || ratioKey;
 }
+// 用户选中的比例文字（枚举吸附提示要靠它说清「你选的是哪个比例」）。
+function apiRatioText(ratioValue, customRatioValue=''){
+    const map = {square:'1:1', portrait12:'1:2', landscape21:'2:1', portrait:'2:3', landscape:'3:2', portrait43:'3:4', landscape43:'4:3', landscape54:'5:4', portrait45:'4:5', story:'9:16', wide:'16:9', ultrawide:'21:9', ultratall:'9:21', landscape31:'3:1', portrait13:'1:3'};
+    if(ratioValue === 'custom' || ratioValue === 'source') return String(customRatioValue || '') || tr('smart.custom');
+    return map[ratioValue] || '1:1';
+}
+// 枚举平台把用户选的比例吸附到了哪里：比例一致 / 非 enum / auto 都返回 null。
+// 有值时界面必须把它标出来，否则会出现「显示 21:9、实际提交 3:2」这种悄悄改比例。
+function apiRatioSnap(model, ratioValue, resolutionValue, customRatioValue='', customSizeValue=''){
+    if(!NovaSizePolicy.isEnum(model)) return null;
+    if(resolutionValue === 'auto') return null;
+    if(resolutionValue !== 'custom' && API_RES_LEVELS.indexOf(resolutionValue) < 0) return null;
+    const requested = resolutionValue === 'custom' ? parseSizeValue(customSizeValue) : null;
+    const userRatio = requested
+        ? Number(requested.width) / Number(requested.height)
+        : parseRatioValue(apiRatioText(ratioValue, customRatioValue));
+    if(!(userRatio > 0)) return null;
+    const parsed = parseSizeValue(apiImageSize(ratioValue, resolutionValue, customRatioValue, customSizeValue, model));
+    if(!parsed) return null;
+    const width = Number(parsed.width);
+    const height = Number(parsed.height);
+    if(!(width > 0) || !(height > 0)) return null;
+    if(Math.abs(Math.log((width / height) / userRatio)) <= 0.01) return null;
+    const divisor = gcdInt(width, height);
+    return {size:width + 'x' + height, ratio:Math.round(width / divisor) + ':' + Math.round(height / divisor)};
+}
+function apiRatioSnapNotice(model, ratioValue, resolutionValue, customRatioValue='', customSizeValue=''){
+    const snap = apiRatioSnap(model, ratioValue, resolutionValue, customRatioValue, customSizeValue);
+    if(!snap) return '';
+    const requested = resolutionValue === 'custom'
+        ? String(customSizeValue || '').replace(/[xX]/, '×')
+        : apiRatioText(ratioValue, customRatioValue);
+    return model + ' 不支持 ' + requested + '，已按最接近的 ' + snap.ratio + ' 生成';
+}
+function apiRatioSnapNote(model, ratioValue, resolutionValue, customRatioValue='', customSizeValue=''){
+    const snap = apiRatioSnap(model, ratioValue, resolutionValue, customRatioValue, customSizeValue);
+    if(!snap) return '';
+    return apiRatioSnapNotice(model, ratioValue, resolutionValue, customRatioValue, customSizeValue) + '（' + snap.size.replace(/[xX]/, '×') + '）';
+}
+// 当前设置下（仅 API 生图）的比例吸附；视频/其它引擎一律不参与，行为保持不变。
+function apiRatioSnapForCurrentSettings(prefix=''){
+    const apiImageMode = !prefix && settings.engine === 'api' && (settings.apiKind || 'image') !== 'video';
+    if(!apiImageMode) return null;
+    return apiRatioSnap(settings.model, settings.ratio, settings.resolution, settings.customRatio, settings.customSize);
+}
+function apiRatioSnapNoticeForCurrentSettings(){
+    const snap = apiRatioSnapForCurrentSettings('');
+    return snap ? apiRatioSnapNotice(settings.model, settings.ratio, settings.resolution, settings.customRatio, settings.customSize) : '';
+}
 // 枚举模型的合法尺寸有限：高位档可能没有对应尺寸，换档只改标签不改清晰度，故提前禁用。
 function apiResolutionSupport(model, ratioValue, customRatioValue=''){
-    if(!NovaSizePolicy.enumOptions(model)) return {levels:API_RES_LEVELS.slice(), supported:API_RES_LEVELS.slice(), notes:{}};
+    const levels = imageResLevelsFor(model);
+    if(!NovaSizePolicy.enumOptions(model)) return {levels, supported:levels.slice(), notes:{}};
     const trackTiers = (ratioValue !== 'custom' && ratioValue !== 'source') || parseRatioValue(customRatioValue) > 0;
     const supported = [];
     const notes = {};
-    API_RES_LEVELS.forEach(level => {
+    levels.forEach(level => {
         const previous = supported.length ? apiImageSize(ratioValue, supported[supported.length - 1], customRatioValue, '', model) : '';
         const size = apiImageSize(ratioValue, level, customRatioValue, '', model);
         if(trackTiers && previous && size === previous){ notes[level] = `等同 ${supported[supported.length - 1].toUpperCase()}`; return; }
         supported.push(level);
     });
-    return {levels:API_RES_LEVELS.slice(), supported, notes};
+    return {levels, supported, notes};
 }
 function apiResolutionNote(model, ratioValue, level, customRatioValue=''){
     return apiResolutionSupport(model, ratioValue, customRatioValue).notes[level] || '';
@@ -3905,26 +4457,35 @@ function apiResolutionFixedNote(model, ratioValue, customRatioValue=''){
 // 也不会让用户按更高清晰度多花点数）；只有完全没有更低档位时才往上取。
 function nearestApiResolution(model, ratioValue, level, customRatioValue=''){
     const info = apiResolutionSupport(model, ratioValue, customRatioValue);
-    const index = info.levels.indexOf(level);
-    for(let i = (index < 0 ? info.levels.length - 1 : index); i >= 0; i--){
-        if(info.supported.includes(info.levels[i])) return info.levels[i];
+    // 档位可能不在该模型的可用集合里（换平台后历史值）：按全局档位顺序找不高于它的最高可用档，
+    // 找不到更低档才往上取，避免把 1.5K 静默抬到 4K。
+    const order = API_RES_LEVELS;
+    const index = order.indexOf(level);
+    for(let i = (index < 0 ? order.length - 1 : index); i >= 0; i--){
+        if(info.supported.includes(order[i])) return order[i];
     }
-    return info.supported.find(item => info.levels.indexOf(item) > index) || info.supported[0] || '1k';
+    return info.supported.find(item => order.indexOf(item) > index) || info.supported[0] || '1k';
 }
 function apiResolutionChangeNotice(model, ratioValue, level, target){
     return `${model} 不支持 ${level.toUpperCase()} ${apiRatioLabel(ratioValue)}尺寸，已自动调整为 ${target.toUpperCase()}`;
 }
 // 换模型/换比例后档位可能失效：自动换到该模型可用的档位并提示，避免静默出低清图。
+// 用户显式选过的档位另记在 apiResolutionChoice：自动降档只改「当前比例下的有效档位」，
+// 不吞掉用户选择；比例切回原值时原档位若恢复合法就自动还原（否则会永久停在降档结果上）。
 function applySmartApiResolutionLimit(){
     if(settings.engine !== 'api' || (settings.apiKind || 'image') === 'video') return '';
     if(API_RES_LEVELS.indexOf(settings.resolution) < 0) return '';
     const ratio = settings.ratio || 'square';
     const customRatio = settings.customRatio || '';
-    if(!apiResolutionNote(settings.model, ratio, settings.resolution, customRatio)) return '';
-    const target = nearestApiResolution(settings.model, ratio, settings.resolution, customRatio);
-    const notice = apiResolutionChangeNotice(settings.model, ratio, settings.resolution, target);
+    const requested = API_RES_LEVELS.indexOf(settings.apiResolutionChoice) >= 0 ? settings.apiResolutionChoice : settings.resolution;
+    const unsupported = imageResLevelsFor(settings.model).indexOf(requested) < 0;
+    const note = apiResolutionNote(settings.model, ratio, requested, customRatio);
+    const downgraded = unsupported || Boolean(note);
+    const target = downgraded ? nearestApiResolution(settings.model, ratio, requested, customRatio) : requested;
+    if(target === settings.resolution) return '';
+    settings.apiResolutionChoice = requested;
     settings.resolution = target;
-    return notice;
+    return downgraded ? apiResolutionChangeNotice(settings.model, ratio, requested, target) : '';
 }
 function normalizeApiSizeSettings(prefix=''){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
@@ -4040,7 +4601,6 @@ function renderDynamicParams(){
     settings.background = ['auto','keep','transparent'].includes(settings.background) ? settings.background : 'auto';
     clearVolcengineSelectionOutsideVolcengine(settings);
     engineSelect.value = settings.engine;
-    syncApiKindToggleVisibility();
     if(settings.engine === 'api'){
         if(settings.apiKind === 'video') renderApiVideoParams();
         else renderApiParams();
@@ -4380,22 +4940,6 @@ function renderComfyWorkflowControl(){
         </div>
     </div>`;
 }
-function renderSizeControls(prefix='', includeSource=false){
-    const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
-    const resKey = prefix ? `${prefix}Resolution` : 'resolution';
-    const ratios = [
-        ['square','1:1'], ['portrait','2:3'], ['landscape','3:2'], ['portrait43','3:4'], ['landscape43','4:3'], ['story','9:16'], ['wide','16:9'], ['ultrawide','21:9'], ['ultratall','9:21'],
-        ...(includeSource ? [['source', tr('canvas.adaptiveRatio') || '适配比例']] : []),
-        ['custom', tr('canvas.custom') || '自定义']
-    ];
-    const resolutionOptions = (!prefix && settings.engine === 'api') ? ['auto','1k','2k','4k','custom'] : ['1k','2k','4k','custom'];
-    return `<select data-param="${resKey}">
-            ${resolutionOptions.map(v => optionHtml(v, v === 'auto' ? '自动' : (v === 'custom' ? (tr('canvas.custom') || '自定义') : v.toUpperCase()), settings[resKey] || (prefix ? '1k' : defaultSmartApiResolution(settings.model)))).join('')}
-        </select>
-        <select data-param="${ratioKey}" ${settings[resKey] === 'custom' || settings[resKey] === 'auto' ? 'disabled' : ''}>
-            ${ratios.map(([v,l]) => `<option value="${escapeHtml(v)}" ${v === (settings[ratioKey] || 'square') ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('')}
-        </select>`;
-}
 function ratioLabel(prefix=''){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
     const customKey = prefix ? `${prefix}CustomRatio` : 'customRatio';
@@ -4474,6 +5018,8 @@ function ratioIconClass(value){
     if(value === 'landscape') return 'r-landscape';
     if(value === 'landscape43') return 'r-landscape43';
     if(value === 'wide' || value === 'ultrawide') return 'r-wide';
+    if(value === 'portrait54') return 'r-portrait54';
+    if(value === 'landscape45') return 'r-landscape45';
     if(value === 'story' || value === 'ultratall') return 'r-story';
     if(value === 'source') return 'r-source';
     if(value === 'custom') return 'r-custom';
@@ -4530,40 +5076,6 @@ function renderMsCustomModelPill(){
         </div>
     </div>`;
 }
-function renderRatioControl(prefix='', includeSource=false){
-    const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
-    const resKey = prefix ? `${prefix}Resolution` : 'resolution';
-    const ratios = [
-        ['square','1:1'], ['portrait','2:3'], ['landscape','3:2'], ['portrait43','3:4'], ['landscape43','4:3'],
-        ['story','9:16'], ['wide','16:9'], ['ultrawide','21:9'], ['ultratall','9:21'],
-        ...(includeSource ? [['source', tr('smart.imageRatio')]] : []),
-        ['custom', tr('smart.custom')]
-    ];
-    return `<div class="smart-control ratio-control">
-        <button class="smart-pill" type="button"><i data-lucide="scan"></i><span>${escapeHtml(ratioLabel(prefix))}</span></button>
-        <div class="smart-popover">
-            <div class="smart-popover-title">${escapeHtml(tr('smart.ratio'))}</div>
-            <div class="ratio-grid">
-                ${ratios.map(([value, label]) => `<button type="button" class="ratio-option ${value === (settings[ratioKey] || 'square') ? 'active' : ''}" data-smart-param="${ratioKey}" data-smart-value="${escapeHtml(value)}"><span class="ratio-icon ${ratioIconClass(value)}"></span><span>${escapeHtml(label)}</span></button>`).join('')}
-            </div>
-        </div>
-    </div>`;
-}
-function renderResolutionControl(prefix=''){
-    const resKey = prefix ? `${prefix}Resolution` : 'resolution';
-    const options = (!prefix && settings.engine === 'api') ? ['auto','1k','2k','4k','custom'] : ['1k','2k','4k','custom'];
-    const current = settings[resKey] || ((!prefix && settings.engine === 'api') ? defaultSmartApiResolution(settings.model) : '1k');
-    const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && apiAllowsAuto(settings.model);
-    return `<div class="smart-control resolution-control">
-        <button class="smart-pill" type="button"><i data-lucide="monitor"></i><span>${escapeHtml(resolutionLabel(prefix))}</span></button>
-        <div class="smart-popover compact-popover">
-            <div class="smart-popover-title">${escapeHtml(tr('smart.resolution'))}</div>
-            <div class="seg-row">
-                ${options.map(value => `<button type="button" class="${value === current ? 'active' : ''}" data-smart-param="${resKey}" data-smart-value="${value}" ${value === 'auto' && !allowAuto ? 'disabled' : ''}>${value === 'auto' ? '自动' : (value === 'custom' ? escapeHtml(tr('smart.custom')) : value.toUpperCase())}</button>`).join('')}
-            </div>
-        </div>
-    </div>`;
-}
 function sizePickerScope(prefix=''){
     const resKey = prefix ? `${prefix}Resolution` : 'resolution';
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
@@ -4579,17 +5091,20 @@ function sizePickerDefaultResolution(prefix=''){
 function sizePickerLabel(prefix=''){
     const scope = sizePickerScope(prefix);
     if(scope === 'auto') return '自动';
+    // 枚举平台把比例吸附成别的比例时，标签必须跟着实发值走，不能只显示用户点的那格。
+    const snap = apiRatioSnapForCurrentSettings(prefix);
+    const snapSuffix = snap ? ` · 已吸附为 ${snap.ratio}` : '';
     if(scope === 'custom'){
         const resKey = prefix ? `${prefix}Resolution` : 'resolution';
         const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
         const resText = resolutionLabel(prefix);
         const ratioText = ratioLabel(prefix);
-        if(settings[resKey] === 'custom' && settings[ratioKey] === 'custom') return `自定义 · ${resText} · ${ratioText}`;
-        if(settings[resKey] === 'custom') return `自定义 · ${resText}`;
-        if(settings[ratioKey] === 'custom') return `自定义 · ${ratioText} · ${resText}`;
-        return `自定义 · ${resText}`;
+        if(settings[resKey] === 'custom' && settings[ratioKey] === 'custom') return `自定义 · ${resText} · ${ratioText}${snapSuffix}`;
+        if(settings[resKey] === 'custom') return `自定义 · ${resText}${snapSuffix}`;
+        if(settings[ratioKey] === 'custom') return `自定义 · ${ratioText} · ${resText}${snapSuffix}`;
+        return `自定义 · ${resText}${snapSuffix}`;
     }
-    return `${ratioLabel(prefix)} · ${resolutionLabel(prefix)}`;
+    return `${ratioLabel(prefix)} · ${resolutionLabel(prefix)}${snapSuffix}`;
 }
 /* 比例文字 → 小方框像素：长边 16px、短边按比例、最小 5px。尺寸弹窗与视频画幅弹层共用，
    复制两份迟早漂移。 */
@@ -4604,7 +5119,8 @@ function renderSizePickerControl(prefix='', includeSource=false){
     const customRatioKey = prefix ? `${prefix}CustomRatio` : 'customRatio';
     if(settings[ratioKey] === 'source') applySourceRatioToSettings(prefix);
     const scope = sizePickerScope(prefix);
-    const options = (!prefix && settings.engine === 'api') ? ['auto','1k','2k','4k'] : ['1k','2k','4k'];
+    const modelResLevels = imageResLevelsFor(settings.model);
+    const options = (!prefix && settings.engine === 'api') ? ['auto', ...modelResLevels] : modelResLevels;
     const currentRes = settings[resKey] || ((!prefix && settings.engine === 'api') ? defaultSmartApiResolution(settings.model) : '1k');
     const currentRatio = settings[ratioKey] || 'square';
     const currentBackground = settings.background || 'auto';
@@ -4614,7 +5130,7 @@ function renderSizePickerControl(prefix='', includeSource=false){
     const ratioTiles = [
         ['square','1:1'], ['portrait12','1:2'], ['landscape21','2:1'], ['story','9:16'], ['wide','16:9'],
         ['portrait43','3:4'], ['landscape43','4:3'], ['landscape','3:2'], ['portrait','2:3'], ['landscape54','5:4'],
-        ['portrait45','4:5'], ['ultrawide','21:9'], ['ultratall','9:21']
+        ['portrait45','4:5'], ['ultrawide','21:9'], ['ultratall','9:21'], ['landscape31','3:1'], ['portrait13','1:3']
     ].map(([value, label]) => {
         const [glyphW, glyphH] = ratioGlyphSize(label);
         return {value, label, sub:'', glyphW, glyphH};
@@ -4625,9 +5141,17 @@ function renderSizePickerControl(prefix='', includeSource=false){
         ratioTiles.push({value:'source', label:tr('smart.adaptRatio'), sub:sourceRatio || tr('smart.imageRatio'), glyphW, glyphH});
     }
     ratioTiles.push({value:'custom', label:tr('smart.custom'), sub:customSizeText(prefix), glyphW:16, glyphH:16});
+    // 比例按模型官方集合过滤：模型没有的隐藏；历史存档里当前选中的不支持比例保留并置灰给原因，不静默改写。
+    const modelRatios = imageRatiosFor(settings.model);
+    const visibleRatioTiles = ratioTiles.filter(tile => {
+        if(tile.value === 'custom' || tile.value === 'source') return true;
+        if(!modelRatios || modelRatios.includes(tile.value)) return true;
+        return tile.value === currentRatio;
+    });
     const apiSizeScope = !prefix && settings.engine === 'api' && (settings.apiKind || 'image') !== 'video';
     const resSupport = apiSizeScope ? apiResolutionSupport(settings.model, currentRatio, currentCustomRatio) : {notes:{}};
     const resFixNote = apiSizeScope ? apiResolutionFixedNote(settings.model, currentRatio, currentCustomRatio) : '';
+    const ratioSnapNote = apiSizeScope ? apiRatioSnapNote(settings.model, currentRatio, currentRes, currentCustomRatio, settings.customSize || '') : '';
     return `<div class="smart-control size-picker-control ${scope === 'auto' ? 'auto-mode' : ''} ${scope === 'custom' ? 'custom-mode' : ''}">
         <button class="smart-pill size-picker-pill" type="button"><i data-lucide="scan-line"></i><span class="size-picker-label"><span class="size-picker-type">尺寸</span><span class="size-picker-dot"></span><span class="size-picker-value">${escapeHtml(sizePickerLabel(prefix))}</span></span></button>
         <div class="smart-popover size-picker-popover">
@@ -4644,6 +5168,7 @@ function renderSizePickerControl(prefix='', includeSource=false){
                         }).join('')}
                     </div>
                     ${resFixNote ? `<div class="size-picker-note"><span>${escapeHtml(resFixNote)}</span></div>` : ''}
+                    ${ratioSnapNote ? `<div class="size-picker-note"><span>${escapeHtml(ratioSnapNote)}</span></div>` : ''}
                 </div>
                 <div class="size-section">
                     <div class="size-section-title">${escapeHtml(tr('smart.background'))}</div>
@@ -4654,11 +5179,13 @@ function renderSizePickerControl(prefix='', includeSource=false){
                 <div class="size-section">
                     <div class="size-section-title">${escapeHtml(tr('smart.ratio'))}</div>
                     <div class="size-ratio-grid">
-                        ${ratioTiles.map(tile => {
+                        ${visibleRatioTiles.map(tile => {
                             const isCustomTile = tile.value === 'custom';
+                            const unsupported = !isCustomTile && tile.value !== 'source' && modelRatios && !modelRatios.includes(tile.value);
                             const active = isCustomTile ? settings[resKey] === 'custom' : settings[ratioKey] === tile.value;
                             const bind = isCustomTile ? `data-size-custom-size="1" data-size-prefix="${escapeHtml(prefix)}"` : `data-smart-param="${ratioKey}" data-smart-value="${escapeHtml(tile.value)}"`;
-                            return `<button type="button" class="size-ratio-tile ${active ? 'active' : ''}" ${bind} title="${escapeHtml(API_RATIO_LABELS[tile.value] || '')}"><span class="size-ratio-glyph" style="--glyph-w:${tile.glyphW}px;--glyph-h:${tile.glyphH}px"><i></i></span><span class="size-ratio-label">${escapeHtml(tile.label)}</span>${tile.sub ? `<small class="size-ratio-sub">${escapeHtml(tile.sub)}</small>` : ''}</button>`;
+                            const title = unsupported ? `${settings.model} 官方不支持 ${API_RATIO_LABELS[tile.value] || tile.value} 比例` : (API_RATIO_LABELS[tile.value] || '');
+                            return `<button type="button" class="size-ratio-tile ${active ? 'active' : ''}" ${bind} ${unsupported ? 'disabled style="opacity:.4"' : ''} title="${escapeHtml(title)}"><span class="size-ratio-glyph" style="--glyph-w:${tile.glyphW}px;--glyph-h:${tile.glyphH}px"><i></i></span><span class="size-ratio-label">${escapeHtml(tile.label)}</span>${tile.sub ? `<small class="size-ratio-sub">${escapeHtml(tile.sub)}</small>` : ''}</button>`;
                         }).join('')}
                     </div>
                 </div>
@@ -5376,6 +5903,8 @@ function setDynamicSetting(key, value){
     normalizeSmartVideoModeSettings(settings, key === 'videoUseFrameRoles');
     if(key === 'comfyMode') applyRecentSmartSettingsForCurrentMode();
     if(key === 'resolution'){
+        // 用户手选的档位记下来（auto/custom 没有档位语义，清掉旧记忆）；自动降档不动它。
+        settings.apiResolutionChoice = API_RES_LEVELS.indexOf(settings.resolution) >= 0 ? settings.resolution : '';
         if(settings.resolution === 'custom') settings.ratio = '';
         else if(!settings.ratio) settings.ratio = 'square';
     }
@@ -5407,10 +5936,15 @@ function setDynamicSetting(key, value){
     const videoProviderModelNotice = key === 'videoProvider' ? correctVideoModelForProvider() : '';
     if(key === 'model' || key === 'provider_id' || key === 'ratio'){
         const sizeNotice = applySmartApiResolutionLimit();
-        const notice = [providerModelNotice, sizeNotice].filter(Boolean).join(' · ');
+        const ratioNotice = apiRatioSnapNoticeForCurrentSettings();
+        const notice = [providerModelNotice, sizeNotice, ratioNotice].filter(Boolean).join(' · ');
         if(notice) toast(notice, '!');
     } else if(videoProviderModelNotice){
         toast(videoProviderModelNotice, '!');
+    } else if(['resolution','customRatio','customRatioWidth','customRatioHeight','customWidth','customHeight'].indexOf(key) >= 0){
+        // 换档位/自定义尺寸同样可能触发新的比例吸附，提示口径与换比例一致。
+        const ratioNotice = apiRatioSnapNoticeForCurrentSettings();
+        if(ratioNotice) toast(ratioNotice, '!');
     }
     if(key === 'msCustomWidth' || key === 'msCustomHeight'){
         settings.msCustomSize = settings.msCustomWidth && settings.msCustomHeight ? `${settings.msCustomWidth}x${settings.msCustomHeight}` : '';
@@ -5897,9 +6431,6 @@ function wireSmartParamsGlide(root){
 function wireStaticMenuGlide(){
     attachGlideHost(createMenu, {item: '.menu-btn'});
     attachGlideHost(smartExportMenu, {item: '.smart-export-item'});
-    /* 图片/视频 开关是静态 DOM（smart-canvas.html），初始化接一次线就够；
-       它在非 API 引擎下 display:none，显形之后靠 syncApiKindToggleVisibility 补 refresh。 */
-    attachGlideHost(apiKindToggle, {item: 'button', orientation: 'horizontal'});
 }
 function renderSlashItems(items, target, isRoot){
     target.innerHTML = items.map(buildItemHtml).join('');
@@ -5953,7 +6484,13 @@ function initChatModel(){
     allModels = own.length ? own : allModels.filter(function(m, i){
         return allModels.findIndex(function(x){ return x.name === m.name; }) === i;
     });
-    if(!allModels.length) allModels.push({name:'gpt-4o-mini', provider:'openai'});
+    /* 平台没给模型列表时不要塞写死的假候选：下拉只留一条占位提示，空模型交给后端按平台配置挑默认 */
+    if(!allModels.length){
+        chatModelSelect.innerHTML = '<option value="">' + escapeHtml(tr('canvas.noModelsHint')) + '</option>';
+        chatModel = '';
+        chatProvider = resolveChatProviderId();
+        return;
+    }
     // 优先恢复用户上次选择的模型（localStorage 记忆），否则取第一个
     var savedModel = localStorage.getItem('smart_chat_model') || '';
     var savedProvider = localStorage.getItem('smart_chat_provider') || '';
@@ -6024,7 +6561,7 @@ function refreshChatModels(){
     initAgentImageProvider();
     initChatModel();
 }
-function currentChatModel(){ return chatModel || 'gpt-4o-mini'; }
+function currentChatModel(){ return chatModel || ''; }
 /* 助手新建纯文本节点放哪：视口中心；那儿已经有节点就往下让开，别叠成一摞 */
 function assistantTextNodePosition(){
     const center = viewportCenter();
@@ -6080,7 +6617,8 @@ function executeChatActions(actions){
             if(m) fromId = createdIds[parseInt(m[1])] || fromId;
             m = toId.match(/^\{(\d+)\}$/);
             if(m) toId = createdIds[parseInt(m[1])] || toId;
-            if(fromId && toId) addConnection(fromId, toId, a.kind || 'flow');
+            /* 助手 connect 的语义就是「上游输入给下游」，默认落成 input（以前默认 flow，下游读不到） */
+            if(fromId && toId) addConnection(fromId, toId, a.kind || 'input');
         }
     });
     render();
@@ -7134,7 +7672,14 @@ function applyAgentCanvasOps(ops){
         var typing = typingId === p.id;
         Object.keys(set).forEach(function(k){
             if(typing && PROMPT_KEYS.indexOf(k) !== -1){ keptTyping = true; return; }
-            try { node[k] = JSON.parse(JSON.stringify(set[k])); } catch(e){ node[k] = set[k]; }
+            try { node[k] = JSON.parse(JSON.stringify(set[k])); } catch(e){
+                const fallback = smartBaseClone(set[k]);
+                if(fallback === null && set[k] !== null){
+                    console.warn('applyAgentCanvasOps: 字段无法深拷贝，跳过以避免跨节点共享:', k);
+                    return;
+                }
+                node[k] = fallback;
+            }
         });
         unset.forEach(function(k){
             if(typing && PROMPT_KEYS.indexOf(k) !== -1){ keptTyping = true; return; }
@@ -7174,7 +7719,7 @@ function applyAgentCanvasOps(ops){
         render();
         if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
         // 助手登记的生成任务：节点上立刻显示进度，并由前端自己轮询收尾
-        if(typeof resumeSmartPendingTasks === 'function') resumeSmartPendingTasks();
+        if(typeof resumeSmartPendingTasks === 'function') resumeSmartPendingTasks().catch(error => console.error('[smart-canvas] 待处理任务恢复入口失败', error));
     }
     return changed;
 }
@@ -9603,13 +10148,30 @@ function applyPromptTemplateToNode(mode='positive'){
     const text = promptTemplateText(template, mode);
     if(node.llmEnabled === true){
         node.llmInstruction = text;
+        node.llmInstructionHtml = '';
     } else {
         node.text = text;
     }
     node.promptPresetId = template.builtin ? '' : template.sourceId || '';
     closePromptTemplatePanel();
     render();
+    syncPromptTemplateTargetInput(node);
     scheduleSave();
+}
+/* 套用模板后，编辑栏里那个正在编辑的文本框也要一起刷新。
+   只改 node.text / llmInstruction 的话，节点正文变了、输入框还停在旧内容（看着像没应用上）。 */
+function syncPromptTemplateTargetInput(node){
+    if(!node || !isSmartPromptNode(node) || activeComposerNode()?.id !== node.id) return;
+    if(node.llmEnabled){
+        const editor = document.getElementById('composerConsoleHost')?.querySelector('.prompt-llm-instruction');
+        if(editor){
+            editor.textContent = node.llmInstruction || '';
+            node.llmInstructionHtml = editor.innerHTML;
+        }
+    } else {
+        setPromptText(node.text || '');
+    }
+    schedulePromptNodeAutoHeights();
 }
 async function saveCurrentPromptAsTemplate(){
     const library = activePromptLibrary();
@@ -9879,7 +10441,8 @@ function localAssetFolderCategories(){
             id: node.id || (node.path ? node.path : '__root__'),
             name: node.name || (node.path ? node.path.split('/').pop() : '全部上传'),
             type: 'image',
-            items: (isRoot ? (localAssetLibrary.items || []) : (node.items || [])).filter(item => assetMediaKind(item) === 'image'),
+            // 本地素材库同时列出图片与视频：视频节点入口要能从素材库把视频拖进画布。
+            items: (isRoot ? (localAssetLibrary.items || []) : (node.items || [])).filter(item => ['image', 'video'].includes(assetMediaKind(item))),
             readonly: true,
             source: 'local',
         });
@@ -9958,19 +10521,29 @@ let canvasSyncInFlight = false;
 let canvasSyncTimer = null;
 let canvasMetaPollTimer = null;
 let connectionLayerRaf = 0;
+/* 本地 / 远端两份素材合并（广播刷新、保存冲突重载）。去重键带上行号：
+   批量结果群组里两行可能回同一个 url（编辑无变化回源图），只按 url 去重会把整批压成一张 ——
+   合并一次「自动群组」就被取消了（用户报的「生成输入节点生成后，自动群组取消」）。
+   没有行号的普通素材仍然按 url 去重，行为不变。 */
 function mergeSmartImageLists(localImgs, remoteImgs){
     const out = [];
     const seen = new Set();
-    (localImgs || []).forEach(img => {
+    const keyOf = img => {
         const u = img && img.url;
-        if(u && seen.has(u)) return;
-        if(u) seen.add(u);
+        if(!u) return '';
+        const rowNumber = Number(img.rowNumber) || 0;
+        return rowNumber > 0 ? ('row:' + rowNumber + '|' + u) : u;
+    };
+    (localImgs || []).forEach(img => {
+        const key = keyOf(img);
+        if(key && seen.has(key)) return;
+        if(key) seen.add(key);
         out.push(img);
     });
     (remoteImgs || []).forEach(img => {
-        const u = img && img.url;
-        if(!u || seen.has(u)) return;
-        seen.add(u);
+        const key = keyOf(img);
+        if(!key || seen.has(key)) return;
+        seen.add(key);
         out.push(img);
     });
     return out;
@@ -10103,7 +10676,7 @@ function recoverStuckLoopOutputsFromLogs(){
     const used = usedCanvasOutputUrls();
     let changed = false;
     const slots = (nodes || [])
-        .filter(node => node && isSmartImageNode(node) && !isHistoryGroupNode(node))
+        .filter(node => node && isSmartMediaNode(node) && !isHistoryGroupNode(node))
         .filter(node => (node.loopSourceId || node.loopRootId || Number.isFinite(Number(node.loopSlotIndex))) && !smartNodeHasDisplayResult(node))
         .filter(node => (node.pending || node.running || node.queued) && !smartPendingTasks(node).length)
         .sort((a, b) => (Number(a.loopSlotIndex || 0) - Number(b.loopSlotIndex || 0)) || (Number(a.y || 0) - Number(b.y || 0)));
@@ -10242,6 +10815,14 @@ let smartServerBaseNodes = new Map();
 let smartServerBaseConns = new Set();
 function smartBaseConnKey(c){ return `${c?.from}->${c?.to}:${c?.kind || 'flow'}`; }
 function smartBaseClone(value){ try { return JSON.parse(JSON.stringify(value)); } catch(e){ return null; } }
+/* 媒体项进节点前统一深拷贝：asset_uris/adjust/canvas_meta 等内嵌对象不能与来源节点或素材注册表共享引用。 */
+function cloneMediaItem(item){
+    if(!item || typeof item !== 'object') return item;
+    const copy = smartBaseClone(item);
+    if(copy && typeof copy === 'object') return copy;
+    console.warn('cloneMediaItem: 深拷贝失败，退回浅拷贝', item);
+    return {...item};
+}
 function setSmartServerBase(rawNodes, rawConns){
     smartServerBaseNodes = new Map();
     (Array.isArray(rawNodes) ? rawNodes : []).forEach(n => {
@@ -10352,7 +10933,7 @@ function applyMergedServerCanvas(serverCanvas){
     render();
     if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
     if(cleanedState || recoveredLoopOutputs) scheduleSave();
-    resumeSmartPendingTasks();
+    resumeSmartPendingTasks().catch(error => console.error('[smart-canvas] 待处理任务恢复入口失败', error));
     resumeJimengPendingNodes();
     return true;
 }
@@ -10918,7 +11499,7 @@ function migrateSmartGroupImageMembers(){
     nodes.filter(isSmartGroupNode).forEach(group => {
         const imageMemberIds = (Array.isArray(group.items) ? group.items : [])
             .map(id => nodes.find(n => n.id === id))
-            .filter(m => m && isSmartImageNode(m) && (m.images || []).some(img => img?.url) && !smartImageMustRemainGroupMember(m))
+            .filter(m => m && isSmartMediaNode(m) && (m.images || []).some(img => img?.url) && !smartImageMustRemainGroupMember(m))
             .map(m => m.id);
         imageMemberIds.forEach(id => {
             const member = nodes.find(n => n.id === id);
@@ -11016,7 +11597,7 @@ async function loadCanvas(){
         canvas.nodes = nodes;
         lastSavedContentSig = (cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers)
             ? '' : canvasContentSignature(canvasForStorage());
-        resumeSmartPendingTasks();
+        resumeSmartPendingTasks().catch(error => console.error('[smart-canvas] 待处理任务恢复入口失败', error));
         resumeJimengPendingNodes();
         startCanvasMetaPoll();
     } catch(e) { toast(tr('smart.toastCanvasFail')); }
@@ -11155,8 +11736,10 @@ function inheritNodeMetaFromImage(node){
 function createNode(x, y, images=[], options={}){
     if(!options.skipUndo) pushUndo();
     // V2 Phase 2: 素材首次进入画布时分配 asset_id
-    const nodeImages = (images || []).map(img => ensureSmartImageAssetId({...img}));
-    const node = {id:uid('smart'), type:'smart-image', x, y, title:nodeImages.length > 1 ? 'Group' : nodeImages.length ? 'Image' : tr('smart.createImportNode'), images:nodeImages, created_at:Date.now()};
+    const nodeImages = (images || []).map(img => ensureSmartImageAssetId(cloneMediaItem(img)));
+    // 传入素材清一色是视频时建成视频节点；显式 options.type 优先（视频接力 / 首页视频种子）。
+    const nodeType = options.type || (nodeImages.length && nodeImages.every(isVideoMediaItem) ? 'smart-video' : 'smart-image');
+    const node = {id:uid('smart'), type:nodeType, x, y, title:nodeImages.length > 1 ? 'Group' : nodeImages.length ? 'Image' : tr('smart.createImportNode'), images:nodeImages, created_at:Date.now()};
     node.scale = nodeImages.length > 1 ? MEDIA_GROUP_DEFAULT_SCALE : mediaNodeDefaultScale(node);
     inheritNodeMetaFromImage(node);
     nodes.push(node);
@@ -11188,15 +11771,6 @@ function createPromptNode(x, y, options={}){
         reverse:false,
         created_at:Date.now()
     };
-    nodes.push(node);
-    if(options.select !== false) selectedId = node.id;
-    render();
-    scheduleSave();
-    return node;
-}
-function createLoopNode(x, y, options={}){
-    if(!options.skipUndo) pushUndo();
-    const node = {id:uid('loop'), type:'smart-loop', x, y, w:340, h:168, title:'Loop', count:1, mode:'serial', showPrompt:false, imageInput:false, loopStart:1, imageBatchSize:1, variablePrompt:'', created_at:Date.now()};
     nodes.push(node);
     if(options.select !== false) selectedId = node.id;
     render();
@@ -11647,9 +12221,14 @@ function updateNodeElementDuringResize(node){
             grid.style.setProperty('--thumb-size', `${layout.thumb}px`);
             // imageLayout 已按「手动尺寸铺满全部 / 自适应封顶」算好可见行数，这里直接用，不能再夹一次
             const visibleRows = Math.max(1, Number(layout.visibleRows || layout.rows || 1));
-            const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
+            const fallbackMaxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
+            // 格子按每张素材自己的比例走，可见高度要用布局算出来的真实高度；拖拽/缩放时同步也不能退回正方形口径
+            const maxHeight = node?.sizeUserSet
+                ? (Number(layout.contentH) > 0 ? Math.round(Number(layout.contentH)) : fallbackMaxHeight)
+                : (Number(layout.visibleH) > 0 ? Math.round(Number(layout.visibleH)) : fallbackMaxHeight);
             grid.style.setProperty('--thumb-max-height', `${maxHeight}px`);
             grid.querySelectorAll('.thumb-item').forEach((itemEl, index) => {
+                if(imgs[index]) itemEl.style.setProperty('--thumb-aspect', `${mediaCellAspect(imgs[index])}`);
                 applyThumbDisplaySizeToElement(itemEl, imgs[index], layout.thumb);
             });
         }
@@ -12831,8 +13410,8 @@ function llmRunStatusHtml(node){
 function dispatchPromptNodeRun(node){
     const tableModel = window.NovaTableModel;
     const mode = tableModel ? tableModel.llmOutputModeChoice(node.llmOutputMode) : 'text';
-    if(mode === 'list' || mode === 'list-video') runSmartLLMListMode(node);
-    else runPromptLLMNode(node.id);
+    if(mode === 'list' || mode === 'list-video') runSmartLLMListMode(node).catch(error => logSmartRunEntryFailure('列表生成', error));
+    else runPromptLLMNode(node.id).catch(error => logSmartRunEntryFailure('提示词节点运行', error));
 }
 /* 运行按钮的三态（运行 / 停止 / 重试）只在这里判：渲染取图标文案、点击取行为，都读它，避免两处各写一套。
    取消或失败之后不额外加按钮 —— 运行按钮自己变成「重试」（老板要的）。 */
@@ -13105,7 +13684,7 @@ function smartGroupBodyHtml(node){
         }
         // 组内有真实图片节点时铺满整个框，行数不截断（否则格子会被 max-height 裁掉）。
         const visibleRows = Math.max(1, Number(groupThumbLayout.visibleRows || groupThumbLayout.rows || 1));
-        const groupCellH = Math.max(24, Math.round(Number(groupThumbLayout.thumbH) || Number(groupThumbLayout.thumb) || 96));
+        const groupCellH = Math.max(1, Math.round(Number(groupThumbLayout.thumbH) || Number(groupThumbLayout.thumb) || 96));
         // 网格在框内垂直居中：上下留白对称（图片比例和分组框比例不一致时的余量）
         const contentOffsetY = Math.max(0, Math.round(Number(groupThumbLayout.contentOffsetY) || 0));
         const maxHeight = Math.max(44, visibleRows * groupCellH + Math.max(0, visibleRows - 1) * 8);
@@ -13607,11 +14186,15 @@ function nodeBodyHtml(node, layout){
 function thumbGridHtml(node, imgs, layout, pendingSlots = 0, failedSlots = 0){
     const layoutVisibleRows = Math.max(1, Number(layout.visibleRows || layout.rows || 1));
     const visibleRows = node?.sizeUserSet ? layoutVisibleRows : Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, layoutVisibleRows));
-    const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
     const thumb = Number(layout.thumb || 96);
-    const aspectOf = img => { const size = mediaLayoutSize(img); return size.width > 0 && size.height > 0 ? size.width / size.height : 1; };
-    const pendingAspect = (() => { const box = pendingRequestBoxForNode(node); return box && box.h > 0 ? box.w / box.h : 1; })();
-    const thumbs = imgs.map((img, i) => `<div class="thumb-item has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === i ? 'image-selected' : ''}" style="--thumb-aspect:${aspectOf(img)}" data-image-index="${i}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${i}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`).join('');
+    /* 可见高度按格子的真实高度来（格子跟着每张图自己的比例，不再是正方形）：
+       用户手动拖过尺寸时整框都能用，否则只留 imageLayout 算好的可见行。 */
+    const fallbackMaxHeight = visibleRows * thumb + Math.max(0, visibleRows - 1) * 8;
+    const maxHeight = node?.sizeUserSet
+        ? (Number(layout.contentH) > 0 ? Math.round(Number(layout.contentH)) : fallbackMaxHeight)
+        : (Number(layout.visibleH) > 0 ? Math.round(Number(layout.visibleH)) : fallbackMaxHeight);
+    const pendingAspect = pendingCellAspect(node);
+    const thumbs = imgs.map((img, i) => `<div class="thumb-item has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === i ? 'image-selected' : ''}" style="--thumb-aspect:${mediaCellAspect(img)}" data-image-index="${i}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${i}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`).join('');
     const kinds = batchPendingSlotKinds(node, pendingSlots);
     const slots = Array.from({length:kinds.running}).map(() => `<div class="loading-cell pending-thumb" data-pending-slot="1" title="${escapeHtml(tr('smart.hintPending'))}" style="width:${thumb}px;aspect-ratio:${pendingAspect}"></div>`).join('')
         + Array.from({length:kinds.queued}).map(() => `<div class="loading-cell pending-thumb is-queued" data-pending-queued="1" title="排队中" style="width:${thumb}px;aspect-ratio:${pendingAspect}"></div>`).join('')
@@ -13864,7 +14447,7 @@ function smartToolOverflowMenuHtml(node, canEditImage){
 }
 
 function smartNodeToolbarHtml(node){
-    const isImageNode = node?.type === 'smart-image' || !node?.type;
+    const isImageNode = isSmartMediaNode(node);
     const images = node?.images || [];
     if(!isImageNode || !images.some(img => img?.url)) return '';
     const item = imageForDisplay(images[smartNodeToolbarImageIndex(node)] || images.find(img => img?.url));
@@ -14088,6 +14671,26 @@ function closeAllSmartToolPortals(){
         const menu = host.querySelector('.smart-tool-menu');
         if(menu) unportalSmartToolMenu(menu); else host.remove();
     });
+}
+/* 进入节点内编辑前把已展开的工具条菜单收掉：菜单 portal 到 body，
+   残留的 is-open 会在编辑结束后看起来「自己弹开」。 */
+function dismissSmartToolbarMenus(){
+    document.querySelectorAll('.smart-image-toolbar .smart-tool-group.is-open').forEach(group => {
+        group.classList.remove('is-open');
+        group.querySelector('[data-smart-tool-toggle]')?.setAttribute('aria-expanded', 'false');
+    });
+    document.querySelectorAll('.smart-image-toolbar .smart-tool-row.is-open').forEach(row => row.classList.remove('is-open'));
+    document.querySelectorAll('.smart-image-toolbar').forEach(bar => {
+        bar.classList.remove('is-menu-open');
+        bar.__smartMenuHold = false;
+        const nodeEl = bar.closest('.image-node');
+        if(nodeEl) nodeEl.style.zIndex = '';
+        /* 补一次 pointerleave：标签展开态（.smart-node-menu-expanded）不会因为工具条被隐藏而自己收 */
+        try {
+            if(typeof PointerEvent === 'function' && !bar.matches(':hover')) bar.dispatchEvent(new PointerEvent('pointerleave'));
+        } catch(_) {}
+    });
+    closeAllSmartToolPortals();
 }
 /* 视口缩放/平移、窗口 resize 之后重新贴回锚点（菜单是 fixed 的，不跟节点走） */
 function syncSmartToolPortals(){
@@ -14316,6 +14919,8 @@ function openDownloadToolPanel(node, index){
    类型锁：目标素材是图片就只能换图片、是视频就只能换视频；候选里有一个不匹配就整体拒绝、零写入。 */
 function replaceSmartNodeMedia(node, items){
     if(!node) return false;
+    /* 源码抽取式测试（tests/test_smart_canvas_replace_media.js）不注入 cloneMediaItem，缺失时退回不拷贝；正式运行一定有。 */
+    const cloneItem = typeof cloneMediaItem === 'function' ? cloneMediaItem : (item => item);
     const candidates = [...(items || [])].filter(item => item?.url);
     if(!candidates.length) return false;
     const targetKind = mediaKindForItem(imageForDisplay(node.images?.[smartNodeToolbarImageIndex(node)]));
@@ -14324,7 +14929,7 @@ function replaceSmartNodeMedia(node, items){
         return false;
     }
     pushUndo();
-    node.images = candidates.map(item => ensureSmartImageAssetId({...item, kind:mediaKindForItem(item)}));
+    node.images = candidates.map(item => ensureSmartImageAssetId({...cloneItem(item), kind:mediaKindForItem(item)}));
     node.title = uploadTitleForItems(node.images, node.title || 'Image');
     render();
     scheduleSave();
@@ -14498,7 +15103,7 @@ async function smartEraseTextForPsd(node, index, maskCanvas, maskName){
     const maskFile = blob ? await uploadCroppedBlob(blob, maskName) : null;
     if(!maskFile) throw new Error('文字掩码上传失败');
     const runSettings = smartSettingsForNode(node) || settings || {};
-    /* 按原图比例要尺寸：默认档位是 4096x4096 方图，抹字结果跟原图比例差太远，往 PSD 上贴会明显变形 */
+    /* 按原图比例要尺寸：默认档位是 2880x2880 方图，抹字结果跟原图比例差太远，往 PSD 上贴会明显变形 */
     const request = {...runSettings, count:1, ratio:'source', sourceWidth:maskCanvas.width, sourceHeight:maskCanvas.height};
     if(!request.provider_id || !request.model) throw new Error('没有可用的图片供应商/模型');
     const out = await runApiGeneration('移除画面中所有文字，并用周围背景、纹理与光影自然补全，不要留下痕迹或重复内容。', [
@@ -14957,7 +15562,7 @@ function initSmartImageToolbar(root){
         root.querySelectorAll(BAR).forEach(bar => closeMenus(bar));
         closeAllSmartToolPortals();
     });
-    window.addEventListener('resize', () => { syncSmartToolPortals(); if(smartNodeOverlay) fitNieBars(smartNodeOverlay); });
+    window.addEventListener('resize', () => { syncSmartToolPortals(); if(smartNodeOverlay){ fitNieBars(smartNodeOverlay); if(smartNodeOverlay.mode === 'outpaint'){ positionNieOutpaintPanel(smartNodeOverlay); syncNieOutpaintSize(smartNodeOverlay); } } });
 }
 /* 图片节点工具栏的展开态（对齐 Spectrum UI 的 Expandable Action Bar）：指针进入整条 bar 就让所有标签一起展开，
    高亮底只跟随当前悬停的那个按钮。展开态是容器级的 class，这里只负责增删它和滑块几何。
@@ -15424,7 +16029,6 @@ function stpBindRanges(panel, state, onChange){
 }
 /* ── 共用的跑图入口：拼好的指令 + 参考图 → 现有 provider 图生图管线 ── */
 async function runSmartToolbarGeneration(node, index, prompt, refs, options={}){
-    const target = options.targetNode || node;
     const base = options.settings || smartSettingsForNode(node) || settings || {};
     const providerId = base.provider_id || settings?.provider_id || '';
     const model = base.model || settings?.model || '';
@@ -15432,6 +16036,9 @@ async function runSmartToolbarGeneration(node, index, prompt, refs, options={}){
     const request = {...base, provider_id:providerId, model, count:1, ...(options.override || {})};
     const source = imageForDisplay(node?.images?.[index]);
     const payload = imageRefsOnly((refs && refs.length ? refs : [source]).filter(Boolean));
+    /* 工具栏生成类动作：产物落独立新节点，源节点图片/标题/尺寸一律不动。
+       图层分离等已经指定 targetNode 的调用沿用指定节点（见 layerSplitSmartNodeImage）。 */
+    const target = options.targetNode || createPendingOutputFromSource(node, 1, snapshotRunMeta(prompt, node.id, prompt, payload), {connectSource:false, selectOutput:true, refs:payload});
     if(options.resultTags) target.__resultTags = options.resultTags;
     target.running = true;
     render();
@@ -16104,11 +16711,21 @@ function syncComposerSuppressed(){
     const busy = Boolean(smartNodeOverlay || smartToolPanelEl || hdUpscalePanel);
     composerEl.classList.toggle('is-suppressed', busy);
 }
+/* 节点内编辑期间收起节点上方的图片工具条：类挂到根元素 ——
+   工具条本体在节点里、下拉菜单被 portal 到 body，只有根元素能同时命中两者。 */
+function syncNieEditingState(){
+    document.documentElement.classList.toggle('nie-editing', Boolean(smartNodeOverlay));
+}
 function closeSmartNodeOverlay(){
-    const part = smartNodeOverlay?.part;
-    try { smartNodeOverlay?.listeners?.abort(); } catch(_) {}
-    smartNodeOverlay?.el?.remove();
+    const overlay = smartNodeOverlay;
+    const part = overlay?.part;
+    /* 扩图把节点自己的图片藏起来了（遮罩上重画一张），关层原样恢复，别影响其它模式 */
+    try { if(overlay?.hiddenImg) overlay.hiddenImg.style.visibility = overlay.prevVisibility || ''; } catch(_) {}
+    try { overlay?.listeners?.abort(); } catch(_) {}
+    overlay?.outpaintPanel?.remove();
+    overlay?.el?.remove();
     smartNodeOverlay = null;
+    syncNieEditingState();
     /* 退出编辑态：节点卡片顶部的模式标签跟着消失 */
     part?.nodeEl?.querySelectorAll('.nie-mode-chip').forEach(el => el.remove());
     syncComposerSuppressed();
@@ -16208,10 +16825,6 @@ function smartNodeOverlayBarHtml(mode, options){
         return '<div class="nie-chips" data-nie-ratio>' + ratios.map(pair => nieChipHtml('ratio', pair[0], pair[1], pair[0] === 'free')).join('') + '</div>'
             + '<span class="nie-spacer"></span><button type="button" class="nie-btn" data-nie-cancel>取消</button><button type="button" class="nie-btn nie-run-btn" data-nie-apply title="确认裁剪" aria-label="确认裁剪"><i data-lucide="arrow-up"></i></button>';
     }
-    if(mode === 'outpaint'){
-        return '<span class="nie-count" data-nie-size></span>'
-            + '<span class="nie-spacer"></span><button type="button" class="nie-btn" data-nie-cancel>取消</button><button type="button" class="nie-btn nie-run-btn" data-nie-apply title="运行" aria-label="运行"><i data-lucide="arrow-up"></i></button>';
-    }
     if(mode === 'grid'){
         const join = Boolean(options.join);
         return '<div class="nie-chips" data-nie-orient>' + nieChipHtml('orient', 'h', '水平', true) + nieChipHtml('orient', 'v', '垂直', false) + '</div>'
@@ -16293,22 +16906,29 @@ async function openSmartNodeOverlay(node, index, mode, options={}){
     const el = document.createElement('div');
     el.className = 'node-inline-editor';
     el.dataset.smartNodeOverlay = mode;
-    const barHtml = smartNodeOverlayBarHtml(mode, options);
+    /* 扩图的操作条在右侧面板底部（取消 / 生成），节点下方不再有 bar；其余模式保留 */
+    const barHtml = mode === 'outpaint' ? '' : smartNodeOverlayBarHtml(mode, options);
     /* 元素编辑按 LibLib：工具行浮在图片上方、输入行在图片下方，所以这里是两条 bar */
     el.innerHTML = '<canvas class="nie-canvas"></canvas>'
         + (options.tools ? '<div class="nie-bar is-tools">' + smartNodeOverlayToolsBarHtml(options) + '</div>' : '')
-        + '<div class="nie-bar' + (options.tools ? ' is-bottom' : '') + '">' + barHtml + '</div>';
+        + (barHtml ? '<div class="nie-bar' + (options.tools ? ' is-bottom' : '') + '">' + barHtml + '</div>' : '')
+        + (mode === 'outpaint' ? nieOutpaintFrameHtml() : '');
     el.addEventListener('pointerdown', event => event.stopPropagation());
     el.addEventListener('mousedown', event => event.stopPropagation());
     el.addEventListener('click', event => event.stopPropagation());
     part.nodeEl.appendChild(el);
     if(options.tools) el.classList.add('is-element-edit');
+    if(mode === 'outpaint'){
+        const fileNameEl = el.querySelector('[data-nie-file-name]');
+        if(fileNameEl) fileNameEl.textContent = item?.name || '未命名图片';
+    }
     const canvas = el.querySelector('.nie-canvas');
     const bar = el.querySelector('.nie-bar');
     const overlay = {
         nodeId:node.id, index, mode, options, el, canvas, bar, img, mapping, box, part,
         ratio:'free', orient:'h', lines:{h:[], v:[]}, brush:Number(options.brush) || 24,
-        pad:{l:0, t:0, r:0, b:0}, ops:0, undoStack:[], lastLine:'h',
+        pad:{l:0, t:0, r:0, b:0}, imgScale:1, ops:0, undoStack:[], lastLine:'h',
+        frameX:0, frameY:0, imgX:0, imgY:0,
         crop:{x:Math.round(box.width * 0.08), y:Math.round(box.height * 0.08), w:Math.round(box.width * 0.84), h:Math.round(box.height * 0.84)},
         /* 覆盖层自己的快照/撤销（标注用；涂抹那条走 maskCtx 的自有历史） */
         snapshot(){
@@ -16325,6 +16945,12 @@ async function openSmartNodeOverlay(node, index, mode, options={}){
             return true;
         }
     };
+    /* 扩图：节点自己的 <img> 藏起来，遮罩上重画一张，避免原图透出来变成「幽灵」 */
+    if(mode === 'outpaint' && part.imgEl){
+        overlay.hiddenImg = part.imgEl;
+        overlay.prevVisibility = part.imgEl.style.visibility || '';
+        part.imgEl.style.visibility = 'hidden';
+    }
     if(mode === 'grid'){
         if(options.group){
             /* 默认排布按图片数量自动定（和拼接台 gridJoinAutoDims 同一套），用户再拖线微调 */
@@ -16339,6 +16965,8 @@ async function openSmartNodeOverlay(node, index, mode, options={}){
         }
     }
     smartNodeOverlay = overlay;
+    syncNieEditingState();
+    dismissSmartToolbarMenus();
     syncNieModeChip(overlay, Boolean(options.tools));
     layoutSmartNodeOverlay(overlay);
     if(mode === 'mask'){
@@ -16362,13 +16990,16 @@ async function openSmartNodeOverlay(node, index, mode, options={}){
         el.appendChild(ring);
         overlay.brushRing = ring;
     }
+    /* document 级监听（Esc / 面板下拉收起）统一挂在这颗 AbortController 上，关层一起解绑 */
+    overlay.listeners = new AbortController();
     bindSmartNodeOverlay(overlay);
     paintSmartNodeOverlay(overlay);
-    if(mode === 'outpaint') syncNieOutpaintSize(overlay);
+    if(mode === 'outpaint'){
+        syncNieOutpaintSize(overlay);
+        overlay.outpaintPanel = mountNieOutpaintPanel(overlay);
+    }
     syncComposerSuppressed();
-    /* Esc 关掉节点内编辑层（和浮层面板、下拉菜单一致）。
-       监听挂在 overlay 自己的 AbortController 上，关层时一起解绑——以前每打开一次就多一个永不移除的 document 监听。 */
-    overlay.listeners = new AbortController();
+    /* Esc 关掉节点内编辑层（和浮层面板、下拉菜单一致）。 */
     document.addEventListener('keydown', event => {
         if(event.key !== 'Escape' || smartNodeOverlay !== overlay) return;
         closeSmartNodeOverlay();
@@ -16376,7 +17007,7 @@ async function openSmartNodeOverlay(node, index, mode, options={}){
     refreshIcons();
     return overlay;
 }
-/* 覆盖层的位置：涂抹/裁剪/宫格 = 图片渲染盒；扩图 = 渲染盒再往外长出 pad（可以超出节点边界） */
+/* 覆盖层的位置：涂抹/裁剪/宫格 = 图片渲染盒；扩图 = 渲染盒 + frameX/frameY（可以超出节点边界） */
 /* 节点内操作条（.nie-bar / 元素编辑工具行）不许超出节点宽度：
    自然宽度超了就整条按 k = clamp(节点宽/自然宽, 0.5, 1) 等比缩；k 压到 0.5 仍越过窗口就整体平移夹进窗口。
    控件放不下靠 flex-wrap 换行，文字一律 nowrap（不许压成竖排）。 */
@@ -16414,15 +17045,18 @@ function fitNieBars(overlay){
         if(chipW > chipCap) chip.style.setProperty('--nie-chip-fit', Math.max(0.6, chipCap / chipW).toFixed(4));
     }
 }
+/* 扩图目标框四周留出的暗色边距：8 个把手居中压在框线上还要完整可见，画布得再往外多留这一圈（框内 chip 的定位见 CSS .nie-op-chip） */
+const NIE_OUTPAINT_MARGIN = 12;
 function layoutSmartNodeOverlay(overlay){
     const el = overlay.el;
     const box = overlay.box;
-    const pad = overlay.pad;
     const mode = overlay.mode;
-    const left = mode === 'outpaint' ? box.left - pad.l : box.left;
-    const top = mode === 'outpaint' ? box.top - pad.t : box.top;
-    const width = mode === 'outpaint' ? box.width + pad.l + pad.r : box.width;
-    const height = mode === 'outpaint' ? box.height + pad.t + pad.b : box.height;
+    const margin = mode === 'outpaint' ? NIE_OUTPAINT_MARGIN : 0;
+    const size = mode === 'outpaint' ? nieOutpaintCanvasSize(overlay) : {cw:box.width, ch:box.height};
+    const left = mode === 'outpaint' ? box.left + overlay.frameX - margin : box.left;
+    const top = mode === 'outpaint' ? box.top + overlay.frameY - margin : box.top;
+    const width = mode === 'outpaint' ? size.cw + margin * 2 : box.width;
+    const height = mode === 'outpaint' ? size.ch + margin * 2 : box.height;
     el.style.left = left + 'px';
     el.style.top = top + 'px';
     el.style.width = width + 'px';
@@ -16435,6 +17069,7 @@ function layoutSmartNodeOverlay(overlay){
     overlay.ctx = overlay.canvas.getContext('2d');
     overlay.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     fitNieBars(overlay);
+    if(mode === 'outpaint') positionNieOutpaintPanel(overlay);
 }
 function nieLocalPoint(overlay, event){
     const rect = overlay.canvas.getBoundingClientRect();
@@ -16476,43 +17111,48 @@ function paintSmartNodeOverlay(overlay){
         return;
     }
     if(mode === 'outpaint'){
-        const pad = overlay.pad;
-        const x0 = pad.l, y0 = pad.t;
-        const totalW = x0 + box.width + pad.r;
-        const totalH = y0 + box.height + pad.b;
+        const margin = NIE_OUTPAINT_MARGIN;
+        const scale = nieOutpaintScale(overlay);
+        const mapping = overlay.mapping;
+        const size = nieOutpaintCanvasSize(overlay);
         ctx.fillStyle = 'rgba(0,0,0,.42)';
         ctx.fillRect(-10000, -10000, 20000, 20000);
-        /* 原图那块保持原样（透明） */
-        ctx.clearRect(x0, y0, box.width, box.height);
-        /* 3×3 构图辅助线：按「扩展后的整块画布」三等分，随拖动实时更新 */
-        ctx.strokeStyle = 'rgba(255,255,255,.38)';
+        /* 原图始终画在遮罩上：落点 = 画布左上角 + imgX/imgY，尺寸随缩放 S；超出画布的部分裁掉。
+           节点自己的 <img> 打开扩图时已隐藏，所以不会透出重影。 */
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(margin, margin, size.cw, size.ch);
+        ctx.clip();
+        ctx.drawImage(overlay.img, mapping.sx, mapping.sy, mapping.sw, mapping.sh, margin + overlay.imgX, margin + overlay.imgY, box.width * scale, box.height * scale);
+        ctx.restore();
+        /* 3×3 构图辅助线：铺满整个目标画布，随拖动实时更新 */
+        ctx.strokeStyle = 'rgba(255,255,255,.34)';
         ctx.lineWidth = 1;
         for(let i = 1; i < 3; i++){
             ctx.beginPath();
-            ctx.moveTo(totalW * i / 3, 0);
-            ctx.lineTo(totalW * i / 3, totalH);
+            ctx.moveTo(margin + size.cw * i / 3, margin);
+            ctx.lineTo(margin + size.cw * i / 3, margin + size.ch);
             ctx.stroke();
             ctx.beginPath();
-            ctx.moveTo(0, totalH * i / 3);
-            ctx.lineTo(totalW, totalH * i / 3);
+            ctx.moveTo(margin, margin + size.ch * i / 3);
+            ctx.lineTo(margin + size.cw, margin + size.ch * i / 3);
             ctx.stroke();
         }
-        /* 原图边界：虚线 */
-        ctx.strokeStyle = 'rgba(255,255,255,.92)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 5]);
-        ctx.strokeRect(x0, y0, box.width, box.height);
+        /* 目标画布外框：主题强调色的半透明短虚线 + 半透明把手 —— 压在遮罩底上仍看得清，但没有发光 */
+        const accent = nieOutpaintAccent(overlay);
+        ctx.save();
+        ctx.strokeStyle = nieOutpaintAccentAlpha(accent, 0.55);
+        ctx.lineWidth = 1.8;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(margin, margin, size.cw, size.ch);
         ctx.setLineDash([]);
-        /* 四条边 + 四个角各一个把手（拖它们往外扩） */
-        const midX = x0 + box.width / 2, midY = y0 + box.height / 2;
-        ctx.fillStyle = 'rgba(255,255,255,.95)';
-        [[x0, y0], [x0 + box.width, y0], [x0, y0 + box.height], [x0 + box.width, y0 + box.height]].forEach(pair => {
-            ctx.fillRect(pair[0] - 5, pair[1] - 5, 10, 10);
+        /* 8 个方块把手：四角 + 四边中点，居中压在框线上 */
+        ctx.fillStyle = nieOutpaintAccentAlpha(accent, 0.72);
+        const midX = margin + size.cw / 2, midY = margin + size.ch / 2;
+        [[margin, margin], [margin + size.cw, margin], [margin, margin + size.ch], [margin + size.cw, margin + size.ch], [midX, margin], [midX, margin + size.ch], [margin, midY], [margin + size.cw, midY]].forEach(point => {
+            nieFillHandle(ctx, point[0], point[1]);
         });
-        ctx.fillRect(midX - 9, y0 - 3, 18, 6);
-        ctx.fillRect(midX - 9, y0 + box.height - 3, 18, 6);
-        ctx.fillRect(x0 - 3, midY - 9, 6, 18);
-        ctx.fillRect(x0 + box.width - 3, midY - 9, 6, 18);
+        ctx.restore();
         return;
     }
     if(mode === 'grid'){
@@ -16986,41 +17626,400 @@ async function applyNieGridJoin(overlay){
     smartToolPlaceNode(group, [{url:file.url, name:file.name, kind:'image', mime:'image/png', natural_w:canvasEl.width, natural_h:canvasEl.height}], 'Grid Join');
     toast('已拼接 ' + entries.length + ' 张（' + rows + '×' + cols + '）');
 }
-/* 扩图：目标尺寸读数（原图像素 + 当前 pad 换算回原图坐标） */
-function syncNieOutpaintSize(overlay){
-    const el = overlay.bar.querySelector('[data-nie-size]');
-    if(!el) return;
-    const mapping = overlay.mapping;
-    const pad = overlay.pad;
-    const width = Math.round(mapping.natW + (pad.l + pad.r) / mapping.cover);
-    const height = Math.round(mapping.natH + (pad.t + pad.b) / mapping.cover);
-    el.textContent = width + '×' + height;
+/* 扩图几何：frameX/frameY = 目标画布左上角相对节点渲染盒的偏移（负数 = 往左/上长）；
+   imgX/imgY = 图片左上角相对画布左上角的偏移。pad 语义不变：pad.l = imgX、pad.r = cw - imgX - box.width*S，
+   cw/ch 由 pad 反推，所以读数、比例、导出公式的口径都没变。 */
+function nieOutpaintCanvasSize(overlay){
+    const scale = nieOutpaintScale(overlay);
+    return {
+        cw: overlay.pad.l + overlay.box.width * scale + overlay.pad.r,
+        ch: overlay.pad.t + overlay.box.height * scale + overlay.pad.b
+    };
 }
-/* 扩图的 8 个把手命中（四条边 + 四个角），坐标是覆盖层画布坐标系 */
-function nieOutpaintZone(overlay, point){
-    const pad = overlay.pad;
+/* 由 imgX/imgY 反推 pad（cw/ch 由调用方给出并保持不变）。 */
+function syncNieOutpaintPad(overlay, cw, ch){
+    const scale = nieOutpaintScale(overlay);
+    overlay.pad.l = overlay.imgX;
+    overlay.pad.r = cw - overlay.imgX - overlay.box.width * scale;
+    overlay.pad.t = overlay.imgY;
+    overlay.pad.b = ch - overlay.imgY - overlay.box.height * scale;
+}
+/* 扩图：目标尺寸读数（原图像素 + 当前 pad 换算回原图坐标），显示在目标框内右上角的 chip 上 */
+function syncNieOutpaintSize(overlay){
+    syncNieOutpaintApplyState(overlay);
+    const el = overlay.el.querySelector('[data-nie-size]');
+    if(!el) return;
+    const cover = overlay.mapping.cover || 1;
+    const size = nieOutpaintCanvasSize(overlay);
+    el.textContent = Math.max(1, Math.round(size.cw / cover)) + '×' + Math.max(1, Math.round(size.ch / cover));
+    positionNieOutpaintSizeChip(overlay, el);
+}
+/* 「生成」按钮可用性：目标框与图片还完全重合（四边 pad 全 0）时没有待补区域 → 置灰。
+   口径与 applyNieOutpaint 开头的兜底判定一致；所有几何路径都汇聚到 syncNieOutpaintSize，所以在这里同步。 */
+function syncNieOutpaintApplyState(overlay){
+    const button = overlay?.outpaintPanel?.querySelector('[data-nie-op-apply]');
+    if(!button) return;
+    const pad = overlay.pad || {};
+    const disabled = pad.l === 0 && pad.t === 0 && pad.r === 0 && pad.b === 0;
+    button.disabled = disabled;
+    button.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+}
+/* 覆盖层屏幕坐标 → 本地像素的缩放系数（#world 的 transform 缩放）。 */
+function nieOverlayZoom(overlay){
+    const el = overlay?.el;
+    if(!el || !el.offsetWidth) return 1;
+    const rect = el.getBoundingClientRect();
+    return rect.width ? rect.width / el.offsetWidth : 1;
+}
+/* 扩图参数面板的落点：面板挂在覆盖层里（#world 坐标系），贴在被编辑节点的右侧、与节点顶部对齐，
+   间隙按本地像素给 —— 画布缩放时面板和 .nie-bar 一样整体等比缩放。
+   节点太靠右（右侧放不下）就翻到节点左侧；翻完仍顶到窗口边就整体平移夹回窗口。
+   纵向高度按「窗口可用高度 ÷ 当前缩放」换算成本地上限，100%~214% 缩放下标题与底部按钮都在窗口里。 */
+const NIE_OUTPAINT_PANEL_GAP = 14;
+const NIE_OUTPAINT_PANEL_FRAME = 12;
+/* 底部要避开屏幕空间的缩放工具条（fixed、z-index 26）：量它顶边作为屏幕像素的底部安全边距 */
+function nieOutpaintPanelBottomInset(){
+    const bar = document.getElementById('canvasZoomBar');
+    if(!bar) return NIE_OUTPAINT_PANEL_FRAME;
+    const rect = bar.getBoundingClientRect();
+    if(!rect.height) return NIE_OUTPAINT_PANEL_FRAME;
+    return Math.min(window.innerHeight * 0.6, Math.max(NIE_OUTPAINT_PANEL_FRAME, window.innerHeight - rect.top + 8));
+}
+function positionNieOutpaintPanel(overlay){
+    const panel = overlay?.outpaintPanel;
+    const el = overlay?.el;
+    const nodeEl = overlay?.part?.nodeEl;
+    if(!panel || !el || !nodeEl || !panel.isConnected || !nodeEl.offsetWidth) return;
+    const zoom = nieOverlayZoom(overlay);
+    if(!(zoom > 0)) return;
+    const winW = window.innerWidth, winH = window.innerHeight;
+    const bottomInset = nieOutpaintPanelBottomInset();
+    const maxH = Math.max(240, Math.floor((winH - NIE_OUTPAINT_PANEL_FRAME - bottomInset) / zoom));
+    let metrics = overlay.opPanelMetrics;
+    if(!metrics || metrics.panel !== panel || metrics.zoom !== zoom || metrics.winW !== winW || metrics.winH !== winH || metrics.maxH !== maxH){
+        panel.style.maxHeight = maxH + 'px';
+        metrics = overlay.opPanelMetrics = {panel, zoom, winW, winH, maxH, width:panel.offsetWidth, height:panel.offsetHeight};
+    }
+    const pw = metrics.width, ph = metrics.height;
+    const host = el.getBoundingClientRect();
+    const elLeft = parseFloat(el.style.left) || 0;
+    const elTop = parseFloat(el.style.top) || 0;
+    const nodeLeft = -elLeft;
+    const nodeRight = nodeEl.offsetWidth - elLeft;
+    const nodeTop = -elTop;
+    let side = 'right';
+    let localLeft = nodeRight + NIE_OUTPAINT_PANEL_GAP;
+    if(host.left + (localLeft + pw) * zoom > winW - NIE_OUTPAINT_PANEL_FRAME){
+        side = 'left';
+        localLeft = nodeLeft - NIE_OUTPAINT_PANEL_GAP - pw;
+    }
+    const screenLeft = host.left + localLeft * zoom;
+    if(screenLeft < NIE_OUTPAINT_PANEL_FRAME) localLeft += (NIE_OUTPAINT_PANEL_FRAME - screenLeft) / zoom;
+    else if(screenLeft + pw * zoom > winW - NIE_OUTPAINT_PANEL_FRAME) localLeft -= (screenLeft + pw * zoom - (winW - NIE_OUTPAINT_PANEL_FRAME)) / zoom;
+    let localTop = nodeTop;
+    const screenTop = host.top + localTop * zoom;
+    if(screenTop < NIE_OUTPAINT_PANEL_FRAME) localTop += (NIE_OUTPAINT_PANEL_FRAME - screenTop) / zoom;
+    else if(screenTop + ph * zoom > winH - bottomInset) localTop -= (screenTop + ph * zoom - (winH - bottomInset)) / zoom;
+    panel.style.left = localLeft.toFixed(2) + 'px';
+    panel.style.top = localTop.toFixed(2) + 'px';
+    panel.dataset.nieOpSide = side;
+}
+/* chip 的横向落点：自然位置贴目标框右上角（22px 内缩），但右边界不能越过右侧面板左边界 / 视口右边界，
+   左边界不能越过覆盖层左边界 —— 框往右拖宽时读数会被面板盖住甚至跑出屏幕，所以每次同步都重算。
+   面板现在和 chip 同处覆盖层的本地坐标系，整段按本地像素算，不再换算屏幕坐标。 */
+const NIE_OUTPAINT_CHIP_INSET = 22;
+const NIE_OUTPAINT_CHIP_GAP = 8;
+function positionNieOutpaintSizeChip(overlay, el){
+    const chip = el.closest('.nie-op-chip') || el;
+    const host = overlay.el.getBoundingClientRect();
+    if(!host.width) return;
+    const zoom = nieOverlayZoom(overlay);
+    const chipW = chip.offsetWidth;
+    let rightLimit = (window.innerWidth - host.left) / zoom - NIE_OUTPAINT_CHIP_GAP;
+    const panel = overlay.outpaintPanel;
+    if(panel?.isConnected && panel.parentElement === overlay.el && panel.dataset.nieOpSide !== 'left'){
+        const panelLeft = parseFloat(panel.style.left);
+        if(Number.isFinite(panelLeft)) rightLimit = Math.min(rightLimit, panelLeft - NIE_OUTPAINT_CHIP_GAP);
+    }
+    const leftLimit = NIE_OUTPAINT_CHIP_GAP;
+    const natural = overlay.el.offsetWidth - NIE_OUTPAINT_CHIP_INSET - chipW;
+    const maxLeft = rightLimit - chipW;
+    const localLeft = maxLeft >= leftLimit ? Math.min(Math.max(natural, leftLimit), maxLeft) : leftLimit;
+    chip.style.right = 'auto';
+    chip.style.left = localLeft.toFixed(2) + 'px';
+}
+/* 只读内省：自动化验证要核对 pad / 缩放 / 画布尺寸这些几何读数（不新增任何可见元素）。 */
+window.__smartOutpaintState = () => {
+    const overlay = smartNodeOverlay;
+    if(!overlay || overlay.mode !== 'outpaint') return null;
+    const cover = overlay.mapping.cover || 1;
+    const size = nieOutpaintCanvasSize(overlay);
+    const cw = size.cw;
+    const ch = size.ch;
+    return {
+        pad:{...overlay.pad},
+        frameX:overlay.frameX, frameY:overlay.frameY,
+        imgX:overlay.imgX, imgY:overlay.imgY,
+        imgNodeX:overlay.frameX + overlay.imgX, imgNodeY:overlay.frameY + overlay.imgY,
+        imgScale:nieOutpaintScale(overlay),
+        cw, ch,
+        outW:Math.max(1, Math.round(cw / cover)),
+        outH:Math.max(1, Math.round(ch / cover)),
+        box:{width:overlay.box.width, height:overlay.box.height},
+        cover,
+        natW:overlay.mapping.natW,
+        natH:overlay.mapping.natH,
+        opRatio:overlay.opRatio || '',
+        panelVisible:Boolean(overlay.outpaintPanel)
+    };
+};
+/* 扩图外框的强调色：直接用主题强调色 token --accent（亮色主题=墨色、暗色主题=近白），
+   canvas 与 chip 共用同一个值、跟着主题自动切换。 */
+function nieOutpaintAccent(overlay){
+    try {
+        const value = getComputedStyle(overlay.el).getPropertyValue('--accent').trim();
+        if(value) return value;
+    } catch(_) {}
+    return '#171717';
+}
+/* 主题强调色压在 42% 黑遮罩上不透明会太抢：转成半透明 rgba 用（框 55%、把手 72%）。 */
+function nieOutpaintAccentAlpha(color, alpha){
+    const hex = String(color || '').trim().match(/^#([0-9a-f]{3,8})$/i);
+    if(hex){
+        let body = hex[1];
+        if(body.length === 3 || body.length === 4) body = body.split('').map(ch => ch + ch).join('');
+        const r = parseInt(body.slice(0, 2), 16);
+        const g = parseInt(body.slice(2, 4), 16);
+        const b = parseInt(body.slice(4, 6), 16);
+        if([r, g, b].every(value => Number.isFinite(value))) return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
+    }
+    const rgb = String(color || '').trim().match(/^rgba?\(([^)]+)\)$/i);
+    if(rgb){
+        const parts = rgb[1].split(/[\s,\/]+/).filter(Boolean);
+        if(parts.length >= 3) return 'rgba(' + parts[0] + ', ' + parts[1] + ', ' + parts[2] + ', ' + alpha + ')';
+    }
+    return String(color || '');
+}
+/* 图片缩放倍率（0.5 / 0.75 / 1 / 1.5 / 2 / 3），非法值回落 1 */
+function nieOutpaintScale(overlay){
+    const value = Number(overlay?.imgScale);
+    return value > 0 ? value : 1;
+}
+/* 方块把手：约 8px、圆角 2px、实心，中心压在框线上 */
+function nieFillHandle(ctx, x, y){
+    const size = 10, radius = 2;
+    const left = x - size / 2, top = y - size / 2;
+    ctx.beginPath();
+    ctx.moveTo(left + radius, top);
+    ctx.arcTo(left + size, top, left + size, top + size, radius);
+    ctx.arcTo(left + size, top + size, left, top + size, radius);
+    ctx.arcTo(left, top + size, left, top, radius);
+    ctx.arcTo(left, top, left + size, top, radius);
+    ctx.closePath();
+    ctx.fill();
+}
+/* 框内左上角：源图文件名 chip；框内右上角：目标尺寸 chip（沿用 data-nie-size） */
+function nieOutpaintFrameHtml(){
+    return '<div class="nie-op-chip is-file"><i data-lucide="image"></i><span data-nie-file-name></span></div>'
+        + '<div class="nie-op-chip is-size"><span data-nie-size></span></div>';
+}
+const NIE_OUTPAINT_SCALES = [0.5, 0.75, 1, 1.5, 2, 3];
+function nieOutpaintScaleLabel(value){
+    return String(value) + 'x';
+}
+const NIE_OUTPAINT_RATIOS = [
+    ['source', '原始比例', 'source'],
+    ['1:1', '1:1', 'square'],
+    ['3:4', '3:4', 'portrait43'],
+    ['2:3', '2:3', 'portrait'],
+    ['9:16', '9:16', 'story'],
+    ['4:3', '4:3', 'landscape43'],
+    ['3:2', '3:2', 'landscape'],
+    ['16:9', '16:9', 'wide'],
+    ['4:5', '4:5', 'portrait54'],
+    ['5:4', '5:4', 'landscape45']
+];
+function nieOutpaintPanelHtml(){
+    const rows = NIE_OUTPAINT_RATIOS.map(pair => '<button type="button" class="nie-op-ratio" data-nie-op-ratio="' + escapeAttr(pair[0]) + '" role="listitem"><i data-lucide="check" class="nie-op-ratio-check"></i><span class="nie-op-ratio-icon"><span class="ratio-icon ' + ratioIconClass(pair[2]) + '"></span></span><span class="nie-op-ratio-label">' + escapeHtml(pair[1]) + '</span></button>').join('');
+    const scaleRows = NIE_OUTPAINT_SCALES.map(value => '<button type="button" class="nie-op-scale-option" data-nie-op-scale-value="' + value + '" role="option">' + nieOutpaintScaleLabel(value) + '</button>').join('');
+    /* 「缩放比例」是接上的下拉；「预设」本轮仍是展示位 */
+    /* 参数区独立滚动，取消 / 生成固定在面板底部（长内容 / 短屏下按钮始终可见） */
+    return '<div class="nie-op-body">'
+        + '<div class="nie-op-title">扩图</div>'
+        + '<div class="nie-op-field is-scale"><span class="nie-op-label">缩放比例</span><button type="button" class="nie-op-select is-live" data-nie-op-scale aria-haspopup="listbox" aria-expanded="false"><span data-nie-op-scale-label>1x</span><i data-lucide="chevron-down"></i></button><div class="nie-op-scale-menu" data-nie-op-scale-menu role="listbox" hidden>' + scaleRows + '</div></div>'
+        + '<div class="nie-op-field is-split"><span class="nie-op-label">预设</span><button type="button" class="nie-op-select" data-nie-op-preset aria-haspopup="listbox"><span>通用</span><i data-lucide="chevron-down"></i></button></div>'
+        + '<div class="nie-op-ratios" data-nie-op-ratios role="list">' + rows + '</div>'
+        + '</div>'
+        + '<div class="nie-op-actions"><button type="button" class="nie-op-action" data-nie-op-cancel>取消</button><button type="button" class="nie-op-action is-primary" data-nie-op-apply>生成</button></div>';
+}
+function syncNieOutpaintRatioActive(overlay){
+    const panel = overlay.outpaintPanel;
+    if(!panel) return;
+    panel.querySelectorAll('[data-nie-op-ratio]').forEach(button => {
+        button.classList.toggle('is-active', Boolean(overlay.opRatio) && button.dataset.nieOpRatio === overlay.opRatio);
+    });
+}
+/* 比例行只改画布比例，绝不回退已拖出来的边：newW = max(cw, ch*ratio)、newH = max(ch, cw/ratio)，
+   新增的宽/高按当前图片位置居中分配（pad.l/r 各加一半），图片在画布里的相对位置不跳。 */
+function applyNieOutpaintRatio(overlay, value){
+    const size = nieOutpaintCanvasSize(overlay);
+    const cw = size.cw;
+    const ch = size.ch;
+    let ratio = 0;
+    if(value === 'source') ratio = overlay.mapping.natW / overlay.mapping.natH;
+    else {
+        const pair = String(value || '').split(':');
+        const wide = Number(pair[0]), tall = Number(pair[1]);
+        if(wide > 0 && tall > 0) ratio = wide / tall;
+    }
+    if(!ratio) return;
+    let newW = Math.max(cw, ch * ratio);
+    let newH = Math.max(ch, cw / ratio);
+    /* 渲染盒宽高带亚像素误差（例如 359.99998），按比例回算会留下 1e-5 量级的 pad，
+       让「没有待补区域」判不准；不到半像素的增长直接归零，pad 才能干净地回到全 0。 */
+    if(newW - cw < 0.5) newW = cw;
+    if(newH - ch < 0.5) newH = ch;
+    const growX = (newW - cw) / 2;
+    const growY = (newH - ch) / 2;
+    /* 画布居中长出去：画布往左/上挪，图片相对画布也往右/下挪同样的量 → 图片在屏幕上不动 */
+    overlay.frameX -= growX;
+    overlay.frameY -= growY;
+    overlay.imgX += growX;
+    overlay.imgY += growY;
+    syncNieOutpaintPad(overlay, newW, newH);
+    overlay.opRatio = value;
+    layoutSmartNodeOverlay(overlay);
+    paintSmartNodeOverlay(overlay);
+    syncNieOutpaintSize(overlay);
+    syncNieOutpaintRatioActive(overlay);
+}
+function syncNieOutpaintScale(overlay){
+    const panel = overlay.outpaintPanel;
+    if(!panel) return;
+    const scale = nieOutpaintScale(overlay);
+    const label = panel.querySelector('[data-nie-op-scale-label]');
+    if(label) label.textContent = nieOutpaintScaleLabel(scale);
+    panel.querySelectorAll('[data-nie-op-scale-value]').forEach(button => {
+        const active = Number(button.dataset.nieOpScaleValue) === scale;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+}
+function setNieOutpaintScaleMenu(overlay, open){
+    const panel = overlay?.outpaintPanel;
+    const menu = panel?.querySelector('[data-nie-op-scale-menu]');
+    const button = panel?.querySelector('[data-nie-op-scale]');
+    if(!menu || !button) return;
+    menu.hidden = !open;
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function toggleNieOutpaintScaleMenu(overlay){
+    const menu = overlay?.outpaintPanel?.querySelector('[data-nie-op-scale-menu]');
+    if(!menu) return;
+    setNieOutpaintScaleMenu(overlay, menu.hidden);
+}
+/* 以图片中心为锚点缩放：中心 = imgX + 图片尺寸/2，缩放前后保持不动；frameX/frameY 与画布 cw/ch 都不变。 */
+function applyNieOutpaintScale(overlay, value){
+    const next = Number(value);
+    const current = nieOutpaintScale(overlay);
+    if(!(next > 0) || next === current) return;
     const box = overlay.box;
-    const x0 = pad.l, y0 = pad.t, x1 = pad.l + box.width, y1 = pad.t + box.height;
+    const size = nieOutpaintCanvasSize(overlay);
+    overlay.imgX -= box.width * (next - current) / 2;
+    overlay.imgY -= box.height * (next - current) / 2;
+    overlay.imgScale = next;
+    syncNieOutpaintPad(overlay, size.cw, size.ch);
+    layoutSmartNodeOverlay(overlay);
+    paintSmartNodeOverlay(overlay);
+    syncNieOutpaintSize(overlay);
+    syncNieOutpaintScale(overlay);
+}
+/* 扩图参数面板：挂在覆盖层元素里（#world 坐标系），贴在被编辑节点旁边、随画布缩放一起缩放；
+   关层时由 closeSmartNodeOverlay 移除覆盖层一并带走，不再 portal 到 body。 */
+function mountNieOutpaintPanel(overlay){
+    const panel = document.createElement('aside');
+    panel.className = 'nie-outpaint-panel';
+    panel.dataset.nieOpPanel = '';
+    panel.innerHTML = nieOutpaintPanelHtml();
+    panel.addEventListener('pointerdown', event => event.stopPropagation());
+    panel.addEventListener('mousedown', event => event.stopPropagation());
+    panel.addEventListener('click', event => event.stopPropagation());
+    panel.querySelectorAll('[data-nie-op-ratio]').forEach(button => button.addEventListener('click', event => {
+        event.preventDefault();
+        applyNieOutpaintRatio(overlay, button.dataset.nieOpRatio);
+    }));
+    panel.querySelector('[data-nie-op-scale]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleNieOutpaintScaleMenu(overlay);
+    });
+    panel.querySelectorAll('[data-nie-op-scale-value]').forEach(button => button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        applyNieOutpaintScale(overlay, button.dataset.nieOpScaleValue);
+        setNieOutpaintScaleMenu(overlay, false);
+    }));
+    /* 取消 / 生成：取消关覆盖层，生成走原来的 applyNieOutpaint */
+    panel.querySelector('[data-nie-op-cancel]')?.addEventListener('click', event => {
+        event.preventDefault();
+        closeSmartNodeOverlay();
+    });
+    panel.querySelector('[data-nie-op-apply]')?.addEventListener('click', async event => {
+        event.preventDefault();
+        await applyNieOutpaint(overlay);
+    });
+    /* 点面板别处 / 点面板外都收起缩放下拉（监听挂在覆盖层的 AbortController 上，关层自动解绑） */
+    document.addEventListener('pointerdown', event => {
+        if(event.target.closest?.('[data-nie-op-scale-menu]') || event.target.closest?.('[data-nie-op-scale]')) return;
+        setNieOutpaintScaleMenu(overlay, false);
+    }, {capture:true, signal:overlay.listeners.signal});
+    overlay.el.appendChild(panel);
+    overlay.outpaintPanel = panel;
+    overlay.opRatio = overlay.opRatio || '';
+    syncNieOutpaintRatioActive(overlay);
+    syncNieOutpaintScale(overlay);
+    positionNieOutpaintPanel(overlay);
+    /* 面板出现后 chip 的右边界以面板左边界为准，重算一次 */
+    syncNieOutpaintSize(overlay);
+    refreshIcons();
+    return panel;
+}
+/* 扩图命中：外边界 16px 内是 8 个把手；框内空白是「平移图片」。
+   画布总尺寸 cw/ch 不变，平移等价于 imgX += dx（pad.l 跟着走、pad.r 反向补）。 */
+function nieOutpaintZone(overlay, point){
+    const size = nieOutpaintCanvasSize(overlay);
+    const margin = NIE_OUTPAINT_MARGIN;
+    const x0 = margin, y0 = margin;
+    const x1 = margin + size.cw;
+    const y1 = margin + size.ch;
     const tol = 16;
-    if(point.x < x0 - tol || point.x > x1 + tol || point.y < y0 - tol || point.y > y1 + tol) return '';
-    const left = Math.abs(point.x - x0) <= tol, right = Math.abs(point.x - x1) <= tol;
-    const top = Math.abs(point.y - y0) <= tol, bottom = Math.abs(point.y - y1) <= tol;
-    if(left && top) return 'nw';
-    if(right && top) return 'ne';
-    if(left && bottom) return 'sw';
-    if(right && bottom) return 'se';
-    if(left) return 'w';
-    if(right) return 'e';
-    if(top) return 'n';
-    if(bottom) return 's';
-    return '';
+    if(point.x >= x0 - tol && point.x <= x1 + tol && point.y >= y0 - tol && point.y <= y1 + tol){
+        const left = Math.abs(point.x - x0) <= tol, right = Math.abs(point.x - x1) <= tol;
+        const top = Math.abs(point.y - y0) <= tol, bottom = Math.abs(point.y - y1) <= tol;
+        if(left && top) return 'nw';
+        if(right && top) return 'ne';
+        if(left && bottom) return 'sw';
+        if(right && bottom) return 'se';
+        if(left) return 'w';
+        if(right) return 'e';
+        if(top) return 'n';
+        if(bottom) return 's';
+    }
+    const inside = point.x >= x0 && point.x <= x1 && point.y >= y0 && point.y <= y1;
+    return inside ? 'move' : '';
 }
 function nieOutpaintCursor(zone){
     if(!zone) return 'default';
+    if(zone === 'move') return 'grab';
     if(zone === 'nw' || zone === 'se') return 'nwse-resize';
     if(zone === 'ne' || zone === 'sw') return 'nesw-resize';
     if(zone === 'n' || zone === 's') return 'ns-resize';
     return 'ew-resize';
+}
+/* 平移图片时 pad 的活动范围：图片比画布小就夹在画布里；比画布大就只限制到画布被铺满。 */
+function nieOutpaintPanBounds(total, image){
+    const slack = total - image;
+    return {min:Math.min(0, slack), max:Math.max(0, slack)};
 }
 function bindSmartNodeOverlay(overlay){
     const canvas = overlay.canvas;
@@ -17140,12 +18139,6 @@ function bindSmartNodeOverlay(overlay){
             await applyNieCrop(overlay);
         });
     }
-    if(mode === 'outpaint'){
-        overlay.el.querySelector('[data-nie-apply]')?.addEventListener('click', async event => {
-            event.preventDefault();
-            await applyNieOutpaint(overlay);
-        });
-    }
     if(mode === 'grid'){
         chipGroup('[data-nie-orient]', value => { overlay.orient = value; });
         chipGroup('[data-nie-gridpreset]', value => {
@@ -17225,9 +18218,16 @@ function bindSmartNodeOverlay(overlay){
         }
         if(mode === 'outpaint'){
             const zone = nieOutpaintZone(overlay, point);
-            if(!zone) return;   /* 只在把手附近生效，拖画面本身不会误改尺寸 */
-            drag = {kind:'pad', zone, from:point, start:{...overlay.pad}};
-            canvas.style.cursor = nieOutpaintCursor(zone);
+            if(!zone) return;   /* 只在目标框内生效，框外拖动不会误改几何 */
+            drag = {kind:zone === 'move' ? 'move' : 'pad', zone, from:point, start:{...overlay.pad}, startFrame:{x:overlay.frameX, y:overlay.frameY}};
+            /* 把手拖动时画布跟着往对应方向长/缩，继续用覆盖层局部坐标会自我抵消（拖 120 只走一半）；
+               平移时局部坐标也会自我累加。统一改用指针的屏幕位移 ÷ 起始屏幕/本地比例。 */
+            {
+                const rect = canvas.getBoundingClientRect();
+                drag.startClient = {x:event.clientX, y:event.clientY};
+                drag.screenPerLocal = rect.width / Math.max(1, canvas.offsetWidth);
+            }
+            canvas.style.cursor = zone === 'move' ? 'grabbing' : nieOutpaintCursor(zone);
             canvas.setPointerCapture?.(event.pointerId);
             return;
         }
@@ -17284,16 +18284,54 @@ function bindSmartNodeOverlay(overlay){
             return;
         }
         if(drag.kind === 'pad'){
-            const dx = point.x - drag.from.x;
-            const dy = point.y - drag.from.y;
+            const k = drag.screenPerLocal > 0 ? drag.screenPerLocal : 1;
+            const dx = drag.startClient ? (event.clientX - drag.startClient.x) / k : point.x - drag.from.x;
+            const dy = drag.startClient ? (event.clientY - drag.startClient.y) / k : point.y - drag.from.y;
             const start = drag.start;
             const zone = drag.zone || '';
-            overlay.pad = {
+            /* 一旦自由拖动就回落到「自由」：取消比例行高亮 */
+            if(overlay.opRatio){
+                overlay.opRatio = '';
+                syncNieOutpaintRatioActive(overlay);
+            }
+            const nextPad = {
                 l:zone.indexOf('w') >= 0 ? Math.max(0, Math.round(start.l - dx)) : start.l,
                 t:zone.indexOf('n') >= 0 ? Math.max(0, Math.round(start.t - dy)) : start.t,
                 r:zone.indexOf('e') >= 0 ? Math.max(0, Math.round(start.r + dx)) : start.r,
                 b:zone.indexOf('s') >= 0 ? Math.max(0, Math.round(start.b + dy)) : start.b
             };
+            /* 左/上把手往外长：画布同步往左/上扩（frame 反向移动），图片在屏幕上原地不动 */
+            const startFrame = drag.startFrame || {x:overlay.frameX, y:overlay.frameY};
+            overlay.frameX = startFrame.x - (nextPad.l - start.l);
+            overlay.frameY = startFrame.y - (nextPad.t - start.t);
+            overlay.pad = nextPad;
+            overlay.imgX = nextPad.l;
+            overlay.imgY = nextPad.t;
+            layoutSmartNodeOverlay(overlay);
+            paintSmartNodeOverlay(overlay);
+            syncNieOutpaintSize(overlay);
+            return;
+        }
+        if(drag.kind === 'move'){
+            const start = drag.start;
+            const scale = nieOutpaintScale(overlay);
+            const k = drag.screenPerLocal > 0 ? drag.screenPerLocal : 1;
+            const dxLocal = (event.clientX - drag.startClient.x) / k;
+            const dyLocal = (event.clientY - drag.startClient.y) / k;
+            const cw = start.l + box.width * scale + start.r;
+            const ch = start.t + box.height * scale + start.b;
+            const boundsX = nieOutpaintPanBounds(cw, box.width * scale);
+            const boundsY = nieOutpaintPanBounds(ch, box.height * scale);
+            const imgX = Math.round(Math.min(boundsX.max, Math.max(boundsX.min, start.l + dxLocal)));
+            const imgY = Math.round(Math.min(boundsY.max, Math.max(boundsY.min, start.t + dyLocal)));
+            if(overlay.opRatio){
+                overlay.opRatio = '';
+                syncNieOutpaintRatioActive(overlay);
+            }
+            /* 画布（frameX/frameY）与总尺寸都不动：图片在画布里平移，pad 随之增减 */
+            overlay.imgX = imgX;
+            overlay.imgY = imgY;
+            syncNieOutpaintPad(overlay, cw, ch);
             layoutSmartNodeOverlay(overlay);
             paintSmartNodeOverlay(overlay);
             syncNieOutpaintSize(overlay);
@@ -17339,7 +18377,11 @@ function bindSmartNodeOverlay(overlay){
         }
         drag = null;
         try { canvas.releasePointerCapture?.(event?.pointerId); } catch(_) {}
-        canvas.style.cursor = mode === 'crop' ? 'crosshair' : 'default';
+        if(mode === 'outpaint' && event){
+            canvas.style.cursor = nieOutpaintCursor(nieOutpaintZone(overlay, nieLocalPoint(overlay, event)));
+        } else {
+            canvas.style.cursor = mode === 'crop' ? 'crosshair' : 'default';
+        }
     };
     canvas.addEventListener('pointerup', finish);
     canvas.addEventListener('pointercancel', finish);
@@ -17378,19 +18420,24 @@ async function applyNieOutpaint(overlay){
     const node = nodes.find(item => item.id === overlay.nodeId);
     if(!node) return;
     const pad = overlay.pad;
-    if(!pad.l && !pad.t && !pad.r && !pad.b){ toast('先把边往外拖一点'); return; }
+    const scale = nieOutpaintScale(overlay);
+    if(!pad.l && !pad.t && !pad.r && !pad.b && scale === 1){ toast('先把边往外拖一点'); return; }
     const mapping = overlay.mapping;
-    const dx = Math.round(pad.l / mapping.cover);
-    const dy = Math.round(pad.t / mapping.cover);
-    const outW = mapping.natW + dx + Math.round(pad.r / mapping.cover);
-    const outH = mapping.natH + dy + Math.round(pad.b / mapping.cover);
+    const cover = mapping.cover || 1;
+    const size = nieOutpaintCanvasSize(overlay);
+    const outW = Math.max(1, Math.round(size.cw / cover));
+    const outH = Math.max(1, Math.round(size.ch / cover));
+    const dx = Math.round(overlay.imgX / cover);
+    const dy = Math.round(overlay.imgY / cover);
+    const drawW = Math.max(1, Math.round(mapping.sw * scale));
+    const drawH = Math.max(1, Math.round(mapping.sh * scale));
     const canvasEl = document.createElement('canvas');
     canvasEl.width = outW;
     canvasEl.height = outH;
     const ctx = canvasEl.getContext('2d');
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#808080';
     ctx.fillRect(0, 0, outW, outH);
-    ctx.drawImage(overlay.img, 0, 0, mapping.natW, mapping.natH, dx, dy, mapping.natW, mapping.natH);
+    ctx.drawImage(overlay.img, mapping.sx, mapping.sy, mapping.sw, mapping.sh, dx, dy, drawW, drawH);
     const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
     const item = imageForDisplay(node.images?.[overlay.index]);
     const base = safeExportFileName((item?.name || 'image').replace(/\.[^.]+$/, ''), 'image');
@@ -17398,7 +18445,7 @@ async function applyNieOutpaint(overlay){
     if(!file){ toast('扩图失败'); return; }
     closeSmartNodeOverlay();
     const padded = {url:file.url, name:file.name, kind:'image', mime:'image/png', natural_w:outW, natural_h:outH};
-    runSmartToolbarGeneration(node, overlay.index, 'Remove white area and fill the scene', [padded], {override:{resolution:'custom', ratio:'', customRatio:'', customWidth:outW, customHeight:outH, customSize:`${outW}x${outH}`}});
+    runSmartToolbarGeneration(node, overlay.index, `向外扩图：图中灰色边框区域是需要补全的新增画面，请只补全灰色区域，使其与原图在透视、光线、色调和材质上无缝衔接；灰色区域以外的全部原始像素（主体、背景、构图）必须保持完全不变，不要重新生成整张画面、不要替换主体、不要改变原有背景。请按 ${outW}×${outH} 输出；若平台只能按自身档位出图，请保持该比例。`, [padded], {override:{resolution:'custom', ratio:'', customRatio:'', customWidth:outW, customHeight:outH, customSize:`${outW}x${outH}`}});
 }
 async function applyNieGridSplit(overlay){
     const node = nodes.find(item => item.id === overlay.nodeId);
@@ -17441,6 +18488,13 @@ function remountSmartNodeOverlay(){
     if(part.nodeEl.contains(overlay.el)) return;
     part.nodeEl.appendChild(overlay.el);
     overlay.part = part;
+    /* 节点 DOM 被重建过（render），扩图的新 <img> 要重新藏起来，别让原图透出来 */
+    if(overlay.mode === 'outpaint' && part.imgEl){
+        overlay.hiddenImg = part.imgEl;
+        part.imgEl.style.visibility = 'hidden';
+    }
+    /* 节点换了位置 / 尺寸后，面板和尺寸 chip 重新贴回去 */
+    if(overlay.mode === 'outpaint'){ positionNieOutpaintPanel(overlay); syncNieOutpaintSize(overlay); }
 }
 function runSmartNodeToolbarAction(nodeId, action){
     const node = nodes.find(n => n.id === nodeId);
@@ -18298,7 +19352,7 @@ function runSmartGroupToolbarAction(nodeId, action){
         runCascadeTargetList(smartGroupRunnableCascadeTargets(group), {
             emptyText:'分组里没有可运行的链路结尾图片节点',
             doneText:'分组已运行 '
-        });
+        }).catch(error => logSmartRunEntryFailure('分组一键运行', error));
         return;
     }
     // 图片已收进分组（group.images），预览/下载/拼接直接复用单节点机器（分组就是一个多图容器）。
@@ -18557,7 +19611,7 @@ function render(){
         const isLoop = node.type === 'smart-loop';
         const isSmartGroup = node.type === 'smart-group';
         const isCompactMember = isSmartGroupCompactMember(node);
-        const isImageNode = node.type === 'smart-image' || !node.type;
+        const isImageNode = isSmartMediaNode(node);
         const isJimengPending = Boolean(node.jimengPending && node.jimengPending.submitId && imgs.length === 0);
         const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending && !isJimengPending);
         const isEmpty = isImageNode && imgs.length === 0 && !node.pending && !isQueued && !isJimengPending;
@@ -18674,7 +19728,7 @@ function render(){
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
         const isLoop = node.type === 'smart-loop';
-        const isImageNode = node.type === 'smart-image' || !node.type;
+        const isImageNode = isSmartMediaNode(node);
         const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending);
         const isEmpty = isImageNode && imgs.length === 0 && !node.pending && !isQueued;
         const isGroup = isImageNode && imgs.length > 1;
@@ -18995,7 +20049,7 @@ function bindPromptNodeControls(el, node){
             if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
                 e.preventDefault();
                 e.stopPropagation();
-                runSmartPromptChat(node);
+                runSmartPromptChat(node).catch(error => logSmartRunEntryFailure('提示词聊天运行', error));
             }
         };
     }
@@ -19055,7 +20109,7 @@ function bindPromptNodeControls(el, node){
     const chatSendEl = el.querySelector('.llm-chat-send');
     if(chatSendEl){
         chatSendEl.addEventListener('mousedown', e => e.stopPropagation());
-        chatSendEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runSmartPromptChat(node); };
+        chatSendEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runSmartPromptChat(node).catch(error => logSmartRunEntryFailure('提示词聊天运行', error)); };
     }
     /* 「优化提示词」：节点模式 INPUT / 聊天输入框各一颗，靠 data-optimize-prompt 区分目标框 */
     el.querySelectorAll('[data-optimize-prompt]').forEach(btn => {
@@ -19418,6 +20472,25 @@ function pickMediaForSmartNode(nodeId){
     input.multiple = true;
     input.onchange = () => {
         if(input.files?.length) handleFiles(input.files, nodeId);
+        input.remove();
+    };
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    input.style.top = '-9999px';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.click();
+}
+// 「图片节点 / 视频节点」建好后立刻本地上传：选择器只收对应类型（kind='video' 时只收视频）。
+function pickLocalMediaForNode(nodeId, kind){
+    if(!nodeId) return;
+    const video = kind === 'video';
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = video ? 'video/*' : 'image/*';
+    input.multiple = true;
+    input.onchange = () => {
+        if(input.files?.length) handleFiles(input.files, nodeId, {mediaKind:video ? 'video' : 'image'});
         input.remove();
     };
     input.style.position = 'fixed';
@@ -19819,23 +20892,6 @@ function bindNodeEvents(){
                     startH = el.offsetHeight || startH;
                 }
                 resizeState = {id, startX:e.clientX, startY:e.clientY, startW, startH, manualPrompt};
-                // 分组缩放：记录本次手势开始时所有成员的位置/尺寸快照与起始缩放，缩放过程按相对快照的比例实时计算，
-                // 整体等比缩放+重排。用快照而非持久基准，移动成员后再缩放也不会回退到旧位置。
-                if(isSmartGroupNode(node)){
-                    resizeState.startZoom = smartGroupZoom(node);
-                    const gx0 = Number(node.x) || 0, gy0 = Number(node.y) || 0;
-                    let maxR = gx0, maxB = gy0, hasM = false;
-                    resizeState.members = smartGroupMembers(node).map(m => {
-                        const r = nodeRect(m);
-                        const sx = Number(m.x) || 0, sy = Number(m.y) || 0, sw = Number(r.width) || 0, sh = Number(r.height) || 0;
-                        hasM = true; maxR = Math.max(maxR, sx + sw); maxB = Math.max(maxB, sy + sh);
-                        return {id:m.id, sx, sy, sw, sh, isImage:isSmartImageNode(m)};
-                    });
-                    // 记录“贴合内容时的框尺寸”作为缩放映射基准（而不是当前可能含留白的框宽），
-                    // 这样从放大很多的框往回缩时，框是线性跟随手柄缩小、而不是一下子跳到内容边缘。
-                    resizeState.contentFitW = hasM ? Math.max(1, maxR - gx0 + 16) : (rect.width || 1);
-                    resizeState.contentFitH = hasM ? Math.max(1, maxB - gy0 + 16) : (rect.height || 1);
-                }
                 document.body.classList.add('smart-node-resize');
                 capturePendingUndo();
             });
@@ -19954,12 +21010,12 @@ function canAutoConnectDraggedNode(sourceNode, targetNode){
     if(!sourceNode || !targetNode || sourceNode.id === targetNode.id) return false;
     if(isHistoryGroupNode(sourceNode) || isHistoryGroupNode(targetNode)) return false;
     if(isSmartGroupNode(targetNode)) return false;
-    if(isSmartImageNode(sourceNode)) return isSmartImageNode(targetNode) || targetNode.type === 'smart-loop' || targetNode.type === 'smart-prompt' || targetNode.type === 'smart-text';
-    if(sourceNode.type === 'smart-prompt') return isSmartImageNode(targetNode) || targetNode.type === 'smart-loop' || targetNode.type === 'smart-text';
+    if(isSmartImageNode(sourceNode) || isSmartVideoNode(sourceNode)) return isSmartImageNode(targetNode) || isSmartVideoNode(targetNode) || targetNode.type === 'smart-loop' || targetNode.type === 'smart-prompt' || targetNode.type === 'smart-text';
+    if(sourceNode.type === 'smart-prompt') return isSmartImageNode(targetNode) || isSmartVideoNode(targetNode) || targetNode.type === 'smart-loop' || targetNode.type === 'smart-text';
     /* 纯文本节点上下游都能连：拖到生成/提示词/循环/文本节点上都自动接上 */
-    if(sourceNode.type === 'smart-text') return isSmartImageNode(targetNode) || targetNode.type === 'smart-loop' || targetNode.type === 'smart-prompt' || targetNode.type === 'smart-text';
-    if(sourceNode.type === 'smart-loop') return isSmartImageNode(targetNode) || targetNode.type === 'smart-text';
-    if(sourceNode.type === 'smart-group') return isSmartImageNode(targetNode) || targetNode.type === 'smart-loop' || targetNode.type === 'smart-text';
+    if(sourceNode.type === 'smart-text') return isSmartImageNode(targetNode) || isSmartVideoNode(targetNode) || targetNode.type === 'smart-loop' || targetNode.type === 'smart-prompt' || targetNode.type === 'smart-text';
+    if(sourceNode.type === 'smart-loop') return isSmartImageNode(targetNode) || isSmartVideoNode(targetNode) || targetNode.type === 'smart-text';
+    if(sourceNode.type === 'smart-group') return isSmartImageNode(targetNode) || isSmartVideoNode(targetNode) || targetNode.type === 'smart-loop' || targetNode.type === 'smart-text';
     return false;
 }
 function restoreDraggedNodePosition(){
@@ -20013,7 +21069,7 @@ function deleteNode(id){
 }
 function clearNodeMediaBeforeDelete(id){
     const node = nodes.find(n => n.id === id);
-    if(!node || (node.type && node.type !== 'smart-image')) return false;
+    if(!node || !isSmartMediaNode(node)) return false;
     const hadMedia = Boolean((node.images || []).length || node.pending);
     if(!hadMedia) return false;
     pushUndo();
@@ -22642,7 +23698,7 @@ async function applyImageOutpaint(){
     const canvasEl = document.createElement('canvas');
     canvasEl.width = outW; canvasEl.height = outH;
     const ctx = canvasEl.getContext('2d');
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#808080';
     ctx.fillRect(0, 0, outW, outH);
     ctx.drawImage(img, dx, dy, img.naturalWidth, img.naturalHeight);
     const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
@@ -22650,7 +23706,7 @@ async function applyImageOutpaint(){
     const file = blob ? await uploadCroppedBlob(blob, `${base}_outpaint.png`) : null;
     if(file && replaceEditedImage(file)){
         applyOutpaintSizeToSmartParams(outW, outH);
-        setPromptDraftForNode(node, 'Remove white area and fill the scene');
+        setPromptDraftForNode(node, `向外扩图：图中灰色边框区域是需要补全的新增画面，请只补全灰色区域，使其与原图在透视、光线、色调和材质上无缝衔接；灰色区域以外的全部原始像素（主体、背景、构图）必须保持完全不变，不要重新生成整张画面、不要替换主体、不要改变原有背景。请按 ${outW}×${outH} 输出；若平台只能按自身档位出图，请保持该比例。`);
         promptInput.dataset.preserveDraftOnce = '1';
         closeImageEditor();
         render();
@@ -22942,14 +23998,43 @@ function composerViewportFrame(){
         baseY: rendered.top - (parseFloat(composer.style.top) || 0) * ratio
     };
 }
+/* 右下角这颗固定的浮动按钮（画布对话助手 / 版本历史）z-index:89，编辑栏只有 30：
+   编辑栏被窗口右边夹住时，它的「运行」按钮正好落在浮动按钮底下，点运行实际打开的是对话面板
+   （实测 1680×963 / 1440×900 / 1280×720 都能复现）。层级不能反压 —— 压过去对话按钮就点不到了，
+   所以两个都得留在可点区域：让编辑栏横向让开浮动按钮所在的那条竖带。 */
+const COMPOSER_FLOAT_AVOID_IDS = ['chatToggleBtn', 'versionHistoryBtn'];
+const COMPOSER_FLOAT_AVOID_GAP = 8;
+function floatingComposerObstacles(){
+    return COMPOSER_FLOAT_AVOID_IDS
+        .map(id => document.getElementById(id))
+        .filter(el => el && el.getClientRects().length)
+        .map(el => el.getBoundingClientRect())
+        .filter(box => box.width > 0 && box.height > 0);
+}
+/* 只算横向：竖直位置是「贴着节点」算出来的，动它会脱离锚点；横向让一格不影响阅读。 */
+function composerLeftClearOfFloatingButtons(left, top, width, height){
+    const gap = COMPOSER_FLOAT_AVOID_GAP;
+    let safe = left;
+    floatingComposerObstacles().forEach(box => {
+        const vertical = top < box.bottom + gap && top + height > box.top - gap;
+        const horizontal = safe < box.right + gap && safe + width > box.left - gap;
+        if(vertical && horizontal) safe = Math.min(safe, box.left - gap - width);
+    });
+    return Math.max(8, safe);
+}
 /* 编辑栏内容稍后才撑高（缩略图/动态参数行）：撑出窗口时只把编辑栏自己往回收，绝不再推画布。 */
 function clampComposerIntoWindow(){
     if(!composer.classList.contains('open')) return;
-    const {rendered, ratio} = composerViewportFrame();
+    const {rendered, ratio, baseX} = composerViewportFrame();
     const overflow = rendered.bottom - (window.innerHeight - 8);
-    if(overflow <= 0) return;
-    const top = Math.max(8, (parseFloat(composer.style.top) || 0) - overflow / ratio);
-    composer.style.top = `${top}px`;
+    if(overflow > 0){
+        const top = Math.max(8, (parseFloat(composer.style.top) || 0) - overflow / ratio);
+        composer.style.top = `${top}px`;
+    }
+    /* 往上收完可能正好钻到右下角浮动按钮底下（对话按钮层级更高）：横向再让一次。 */
+    const settled = composer.getBoundingClientRect();
+    const safeLeft = composerLeftClearOfFloatingButtons(settled.left, settled.top, settled.width, settled.height);
+    if(safeLeft !== settled.left) composer.style.left = `${(safeLeft - baseX) / ratio}px`;
 }
 if(typeof ResizeObserver === 'function') new ResizeObserver(clampComposerIntoWindow).observe(composer);
 function positionComposerForNode(node){
@@ -23001,8 +24086,10 @@ function positionComposerForNode(node){
             if(visualTop + rendered.height > bottomLimit) visualTop = Math.max(8, bottomLimit - rendered.height);
         }
     }
-    const left = Math.max(8, Math.min(Math.max(8, window.innerWidth - rendered.width - 8), visualLeft));
+    const clampedLeft = Math.max(8, Math.min(Math.max(8, window.innerWidth - rendered.width - 8), visualLeft));
     const top = Math.max(8, Math.min(visualTop, Math.max(8, window.innerHeight - rendered.height - 8)));
+    /* 收进窗口后可能正好压在右下角浮动按钮上：横向让开，保证「运行」点得到、对话按钮也点得到。 */
+    const left = composerLeftClearOfFloatingButtons(clampedLeft, top, rendered.width, rendered.height);
     composer.style.left = `${(left - baseX) / ratio}px`;
     composer.style.top = `${(top - baseY) / ratio}px`;
 }
@@ -23776,27 +24863,33 @@ function appendImagesToSmartNode(uploaded, targetId='', opts={}){
     if(!images.length) return null;
     const targetGroup = nodes.find(n => n.id === targetId && isSmartGroupNode(n));
     let node = targetGroup ? null : (nodes.find(n => n.id === targetId) || selectedNode());
-    if(node && !isSmartImageNode(node)) node = null;
+    if(node && !isSmartMediaNode(node)) node = null;
     if(opts.forceNew) node = null;
+    let createdNew = false;
     if(!node){
         const groupRect = targetGroup ? nodeRect(targetGroup) : null;
         const center = opts.point || (groupRect ? {x:groupRect.x + groupRect.width / 2, y:groupRect.y + groupRect.height / 2} : viewportCenter());
+        // 菜单「图片节点 / 视频节点」先按目标类型建好空节点，再落文件；否则 createNode 只会建 smart-image。
+        const newType = opts.type || (opts.mediaKind === 'video' ? 'smart-video' : 'smart-image');
         undoSuppressed = true;
-        node = createImageNodeAt(center, []);
+        node = createImageNodeAt(center, [], {type:newType});
         undoSuppressed = false;
+        createdNew = true;
     }
     const previousCount = (node.images || []).length;
     // V2 Phase 2: 素材首次进入画布时分配 asset_id
     node.images = [...(node.images || []), ...images.map(file => ensureSmartImageAssetId({...file, kind:file.kind || mediaKindForItem(file)}))];
+    if(createdNew) applySmartMediaTypeForKind(node, node.images.every(isVideoMediaItem) ? 'video' : 'image');
+    /* 用户手动拖过缩放把手的节点保留 w/h：追加素材算「内容变化」，不该把已经拉好的尺寸丢掉
+       （否则多图群组节点加一张图就跳回自适应大小）。 */
     if(node.images.length > 1){
         node.title = uploadTitleForItems(node.images, 'Group');
         if(previousCount <= 1 && (!Number.isFinite(Number(node.scale)) || Number(node.scale) === MEDIA_NODE_DEFAULT_SCALE || Number(node.scale) === MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE)){
             node.scale = MEDIA_GROUP_DEFAULT_SCALE;
         }
-        delete node.w;
-        delete node.h;
+        if(!node.sizeUserSet){ delete node.w; delete node.h; }
     }
-    if(node.images.length === 1){ node.title = uploadTitleForItems(node.images, node.title || 'Image'); delete node.w; delete node.h; }
+    if(node.images.length === 1){ node.title = uploadTitleForItems(node.images, node.title || 'Image'); if(!node.sizeUserSet){ delete node.w; delete node.h; } }
     if(targetGroup) addNodeToSmartGroup(targetGroup, node);
     selectedId = node.id;
     render();
@@ -24132,7 +25225,7 @@ function connectInputNode(fromId, toId){
     if(to.type === 'smart-loop'){
         const groupImages = isSmartGroupNode(from) ? imagesForNode(from).filter(img => img?.url) : [];
         const groupPrompts = isSmartGroupNode(from) ? promptTextItemsForNode(from).filter(Boolean) : [];
-        const looksImage = isSmartImageNode(from) || groupImages.length > 0 || (from.type === 'smart-loop' && from.imageInput);
+        const looksImage = isSmartMediaNode(from) || groupImages.length > 0 || (from.type === 'smart-loop' && from.imageInput);
         const looksPrompt = from.type === 'smart-prompt' || from.type === 'smart-text' || groupPrompts.length > 0 || (from.type === 'smart-loop' && from.showPrompt);
         if(looksImage && !to.imageInput) to.imageInput = true;
         if(looksPrompt && !to.showPrompt) to.showPrompt = true;
@@ -24158,7 +25251,10 @@ function upstreamNodesForKinds(node, kinds=['input']){
     return [...ids].map(id => nodes.find(n => n.id === id)).filter(Boolean);
 }
 function inputNodesFor(node){
-    return upstreamNodesForKinds(node, ['input']);
+    /* 画布上的连线有两种 kind：用户在端口上拖出来的是 input，「+」新建下游 / AI 助手 connect 出来的是 flow。
+       两者都是「上游喂给下游」，消费端（提示词、参考图、表格输入）必须都认 —— 只认 input 时，
+       flow 线画得出来但下游当没连（用户报的「线能连得上，下游识别不到」）。 */
+    return upstreamNodesForKinds(node, ['input', 'flow']);
 }
 function workflowInputNodesFor(node){
     return upstreamNodesForKinds(node, ['input', 'flow']);
@@ -25005,7 +26101,7 @@ function nextOutputPositionForSource(sourceNode, pendingBox, options={}){
     const gap = 28;
     const outputs = outgoingConnectionsFor(sourceNode, ['input','flow'])
         .map(conn => nodes.find(n => n.id === conn.to))
-        .filter(n => isSmartImageNode(n))
+        .filter(n => isSmartMediaNode(n))
         .map(n => nodeRect(n))
         .filter(rect => Math.abs((rect.x || 0) - x) < Math.max(320, (pendingBox?.w || 260) + 120))
         .sort((a, b) => (a.y || 0) - (b.y || 0));
@@ -25022,7 +26118,7 @@ function createPendingOutputFromSource(sourceNode, expectedCount, meta, options=
     const pos = nextOutputPositionForSource(sourceNode, pendingBox);
     const output = {
         id:uid('smart'),
-        type:'smart-image',
+        type:options.kind === 'video' ? 'smart-video' : 'smart-image',
         x:pos.x,
         y:pos.y,
         title:'Image',
@@ -25048,7 +26144,7 @@ function createParallelLoopOutputNode(templateNode, sourceNode, roundIndex, roun
     const rect = nodeRect(templateNode);
     const output = cloneSmartNode(templateNode, 0, 0);
     output.id = uid('smart');
-    output.type = 'smart-image';
+    output.type = isSmartVideoNode(templateNode) ? 'smart-video' : 'smart-image';
     output.x = (Number(templateNode.x) || 0) + (Number(rect.width) || 260) + 80;
     output.y = (Number(templateNode.y) || 0) + roundOffset * ((Number(rect.height) || 180) + 28);
     output.title = `Image ${roundIndex}`;
@@ -25078,7 +26174,7 @@ function createParallelLoopOutputNode(templateNode, sourceNode, roundIndex, roun
 function loopOutputSlotsForRoot(rootNode){
     if(!rootNode?.id) return [];
     return downstreamNodesForId(rootNode.id)
-        .filter(n => isSmartImageNode(n) && !isHistoryGroupNode(n))
+        .filter(n => isSmartMediaNode(n) && !isHistoryGroupNode(n))
         .sort((a, b) => {
             const ax = Number(a.x) || 0, bx = Number(b.x) || 0;
             if(ax !== bx) return ax - bx;
@@ -25109,7 +26205,7 @@ function createLoopOutputSlot(rootNode, roundIndex, roundOffset=0, options={}){
     const rootRect = nodeRect(rootNode);
     const output = cloneSmartNode(rootNode, 0, 0);
     output.id = uid('smart');
-    output.type = 'smart-image';
+    output.type = isSmartVideoNode(rootNode) ? 'smart-video' : 'smart-image';
     output.x = (Number(rootNode.x) || 0) + (Number(rootRect.width) || 260) + 80;
     output.title = `Image ${roundIndex}`;
     output.images = [];
@@ -25160,7 +26256,7 @@ function extractCurrentImagesToSource(node, meta=null){
     const newX = (node.x || 0) - Math.max(280, r.width + 60);
     const source = {
         id: uid('smart'),
-        type: 'smart-image',
+        type: smartNodeCarriesVideo(node) ? 'smart-video' : 'smart-image',
         x: newX,
         y: node.y || 0,
         title: imgs.length > 1 ? 'Group' : 'Image',
@@ -25192,6 +26288,7 @@ function finalizePendingNode(pendingNode, urls, meta, kind='image'){
     pendingNode.images = imgs;
     markSmartNodeComplete(pendingNode, meta);
     pendingNode.outputKind = kind;
+    applySmartMediaTypeForKind(pendingNode, kind);
     if(imgs.length > 1) pendingNode.title = kind === 'video' ? 'Videos' : kind === 'audio' ? 'Audios' : kind === 'text' ? 'Texts' : 'Group';
     else pendingNode.title = kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : kind === 'text' ? 'Text' : kind === 'file' ? 'File' : 'Image';
     pendingNode.scale = mediaNodeDefaultScale(pendingNode);
@@ -25256,6 +26353,7 @@ function autoPlaceGeneratedNode(meta, urls){
     const node = createImageNodeAt(point, []);
     undoSuppressed = false;
     node.images = mediaUrls.map((url, i) => ({url, name:meta.title || `output-${i + 1}.${ext}`, kind, generatedResult:true}));
+    applySmartMediaTypeForKind(node, kind);
     node.title = meta.title || (kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : 'Image');
     delete node.w;
     delete node.h;
@@ -25292,7 +26390,7 @@ function autoPlaceGeneratedNode(meta, urls){
 }
 function restoreFromExtraction(node, extracted){
     if(!node || !extracted) return;
-    node.images = extracted.images.slice();
+    node.images = (extracted.images || []).map(img => cloneMediaItem(img));
     if(Number.isFinite(Number(extracted.w))) node.w = extracted.w;
     if(Number.isFinite(Number(extracted.h))) node.h = extracted.h;
     nodes = nodes.filter(n => n.id !== extracted.id);
@@ -25308,7 +26406,7 @@ if(typeof window !== 'undefined'){
 }
 function restoreSourceVisualState(node, state){
     if(!node || !state) return;
-    node.images = (state.images || []).map(img => ({...img}));
+    node.images = (state.images || []).map(img => cloneMediaItem(img));
     node.title = state.title || (node.images.length > 1 ? 'Group' : 'Image');
     ['w','h','scale','outputKind'].forEach(key => {
         if(state[key] === undefined) delete node[key];
@@ -25323,6 +26421,7 @@ function finishLoopTargetPreviewState(node){
         node.title = node.images.length > 1 ? 'Group' : 'Image';
         node.scale = node.images.length > 1 ? MEDIA_GROUP_DEFAULT_SCALE : MEDIA_NODE_DEFAULT_SCALE;
         node.outputKind = mediaKindForUrls(node.images || [], (node.images || []).some(isVideoMediaItem) ? 'video' : 'image');
+        applySmartMediaTypeForKind(node, node.outputKind);
         delete node.w;
         delete node.h;
     }
@@ -25338,7 +26437,7 @@ function refsForDirectLoopRound(loopNode, loopIndex, total){
         }));
 }
 function showDirectLoopRoundPreview(loopNode, target, refs, loopIndex, total){
-    if(!loopNode?.imageInput || !isSmartImageNode(target)) return false;
+    if(!loopNode?.imageInput || !isSmartMediaNode(target)) return false;
     const cleanRefs = (refs || []).filter(ref => ref?.url);
     if(!cleanRefs.length) return false;
     const preview = cleanRefs.map((ref, index) => stripImageGenerationMeta({
@@ -25365,6 +26464,7 @@ function showDirectLoopRoundPreview(loopNode, target, refs, loopIndex, total){
         kind:ref.kind || ''
     })).filter(ref => ref.url);
     target.outputKind = mediaKindForUrls(preview, preview.some(isVideoMediaItem) ? 'video' : 'image');
+    applySmartMediaTypeForKind(target, target.outputKind);
     target.scale = preview.length > 1 ? MEDIA_GROUP_DEFAULT_SCALE : MEDIA_NODE_DEFAULT_SCALE;
     target.title = total > 1 ? `Image ${loopIndex}/${total}` : (target.title || 'Image');
     delete target.w;
@@ -25375,7 +26475,7 @@ function showDirectLoopRoundPreview(loopNode, target, refs, loopIndex, total){
 function directImageInputsFor(node){
     const upstream = smartImageUsesWorkflowInput(node) ? workflowInputNodesFor(node) : inputNodesFor(node);
     return upstream
-        .filter(n => isSmartImageNode(n) && !isHistoryGroupNode(n) && (n.images || []).some(img => img?.url))
+        .filter(n => isSmartMediaNode(n) && !isHistoryGroupNode(n) && (n.images || []).some(img => img?.url))
         .sort((a, b) => {
             const ax = Number(a.x) || 0, bx = Number(b.x) || 0;
             if(ax !== bx) return bx - ax;
@@ -25385,7 +26485,7 @@ function directImageInputsFor(node){
 function directImageInputsForKinds(node, kinds=['input']){
     const upstream = upstreamNodesForKinds(node, kinds);
     return upstream
-        .filter(n => isSmartImageNode(n) && !isHistoryGroupNode(n) && (n.images || []).some(img => img?.url))
+        .filter(n => isSmartMediaNode(n) && !isHistoryGroupNode(n) && (n.images || []).some(img => img?.url))
         .sort((a, b) => {
             const ax = Number(a.x) || 0, bx = Number(b.x) || 0;
             if(ax !== bx) return bx - ax;
@@ -25400,13 +26500,13 @@ function primaryImageInputFor(node, options={}){
     const inputs = options.includeFlow ? upstreamNodesForKinds(node, ['input', 'flow']) : (smartImageUsesWorkflowInput(node) ? workflowInputNodesFor(node) : inputNodesFor(node));
     const loop = inputs.find(n => n?.type === 'smart-loop');
     if(loop?.imageInput){
-        const upstream = upstreamNodesForKinds(loop, options.includeFlow ? ['input', 'flow'] : ['input']).find(n => isSmartImageNode(n) && (n.images || []).some(img => img?.url));
+        const upstream = upstreamNodesForKinds(loop, options.includeFlow ? ['input', 'flow'] : ['input']).find(n => isSmartMediaNode(n) && (n.images || []).some(img => img?.url));
         if(upstream) return upstream;
     }
     return null;
 }
 function hasDownstreamImageNode(node){
-    return downstreamNodesForId(node?.id).some(n => isSmartImageNode(n) && !isHistoryGroupNode(n));
+    return downstreamNodesForId(node?.id).some(n => isSmartMediaNode(n) && !isHistoryGroupNode(n));
 }
 function isGeneratedOutputForNode(sourceNode, targetNode){
     return Boolean(sourceNode?.id && targetNode?.sourceNodeId === sourceNode.id);
@@ -25419,7 +26519,7 @@ function hasDownstreamWorkflowImageNode(node){
 }
 function smartImageChainTo(nodeId, options={}){
     const tail = nodes.find(n => n.id === nodeId);
-    if(!isSmartImageNode(tail) || isHistoryGroupNode(tail)) return [];
+    if(!isSmartMediaNode(tail) || isHistoryGroupNode(tail)) return [];
     const chain = [];
     const seen = new Set();
     let cur = tail;
@@ -25483,7 +26583,7 @@ function downstreamImageTargetsFor(node){
     return (canvas?.connections || [])
         .filter(conn => conn.from === node.id && ['input','flow'].includes(conn.kind || 'flow'))
         .map(conn => nodes.find(n => n.id === conn.to))
-        .filter(n => isSmartImageNode(n) && !isHistoryGroupNode(n))
+        .filter(n => isSmartMediaNode(n) && !isHistoryGroupNode(n))
         .sort((a, b) => {
             const ax = Number(a.x) || 0, bx = Number(b.x) || 0;
             if(ax !== bx) return ax - bx;
@@ -25495,7 +26595,7 @@ function downstreamCascadeTargetsFor(node){
     return (canvas?.connections || [])
         .filter(conn => conn.from === node.id && ['input','flow'].includes(conn.kind || 'flow'))
         .map(conn => nodes.find(n => n.id === conn.to))
-        .filter(n => n && !isHistoryGroupNode(n) && (isSmartImageNode(n) || n.type === 'smart-loop'))
+        .filter(n => n && !isHistoryGroupNode(n) && (isSmartMediaNode(n) || n.type === 'smart-loop'))
         .sort((a, b) => {
             const ax = Number(a.x) || 0, bx = Number(b.x) || 0;
             if(ax !== bx) return ax - bx;
@@ -25508,7 +26608,7 @@ function directLoopRunTargets(loop){
         .filter(node => !hasDownstreamWorkflowImageNode(node));
 }
 function smartCascadeGraphForTail(tail){
-    const path = smartImageChainTo(tail?.id, {includeFlow:true}).filter(n => isSmartImageNode(n) && !isHistoryGroupNode(n));
+    const path = smartImageChainTo(tail?.id, {includeFlow:true}).filter(n => isSmartMediaNode(n) && !isHistoryGroupNode(n));
     if(!path.length) return {root:null, path:[], edges:[], children:new Map()};
     const loop = resolveSmartCascadeLoop(tail?.id);
     const loopRoots = loop?.node?.id ? downstreamImageTargetsFor(loop.node) : [];
@@ -25543,7 +26643,7 @@ function cascadeTailForLoop(loopId){
     const directImages = downstreamImageTargetsFor({id:loopId});
     const directIds = new Set(directImages.map(n => n.id));
     const candidates = downstreamNodesForId(loopId)
-        .filter(n => isSmartImageNode(n))
+        .filter(n => isSmartMediaNode(n))
         .filter(n => !isHistoryGroupNode(n))
         .filter(n => canRunSmartCascade(n));
     if(!candidates.length) return null;
@@ -25557,7 +26657,7 @@ function cascadeTailForLoop(loopId){
     })[0];
 }
 function canRunSmartCascade(node){
-    if(!isSmartImageNode(node) || isHistoryGroupNode(node)) return false;
+    if(!isSmartMediaNode(node) || isHistoryGroupNode(node)) return false;
     const graph = smartCascadeGraphForTail(node);
     const loop = resolveSmartCascadeLoop(node.id);
     if(loop && isDirectLoopTargetRun(loop, node, graph)) return true;
@@ -25650,7 +26750,7 @@ function nonPreviewOutputImages(images=[]){
 function cleanHistoryImages(images=[]){
     const seen = new Set();
     return nonPreviewOutputImages(images)
-        .map(img => stripImageGenerationMeta({...img}))
+        .map(img => stripImageGenerationMeta(cloneMediaItem(img)))
         .filter(img => {
             const key = `${img.kind || ''}|${img.url || ''}`;
             if(seen.has(key)) return false;
@@ -25697,7 +26797,7 @@ function ensureHistoryGroupForNode(node){
         const r = nodeRect(node);
         group = {
             id:uid('smart'),
-            type:'smart-image',
+            type:smartNodeCarriesVideo(node) ? 'smart-video' : 'smart-image',
             x:Math.round(Number(node.x || 0)),
             y:Math.round(Number(node.y || 0) + r.height + 56),
             title:'历史分组',
@@ -25709,7 +26809,7 @@ function ensureHistoryGroupForNode(node){
         };
         nodes.push(group);
     }
-    group.type = 'smart-image';
+    group.type = smartNodeCarriesVideo(node) ? 'smart-video' : 'smart-image';
     group.title = '历史分组';
     group.isHistoryGroup = true;
     group.historyFor = node.id;
@@ -25731,6 +26831,7 @@ function replaceOutputsToNodeWithHistory(node, additions, kind='image', meta=nul
         history.images = archived;
         history.title = '历史分组';
         history.outputKind = kind;
+        applySmartMediaTypeForKind(history, kind);
         history.scale = MEDIA_GROUP_DEFAULT_SCALE;
         delete history.w;
         delete history.h;
@@ -25738,6 +26839,7 @@ function replaceOutputsToNodeWithHistory(node, additions, kind='image', meta=nul
     node.images = next;
     markSmartNodeComplete(node, meta);
     node.outputKind = kind;
+    applySmartMediaTypeForKind(node, kind);
     node.title = cascadeOutputTitle(kind, node.images.length);
     node.scale = node.images.length > 1 ? MEDIA_GROUP_DEFAULT_SCALE : MEDIA_NODE_DEFAULT_SCALE;
     delete node.w;
@@ -25765,6 +26867,7 @@ function appendOutputsToNode(node, additions, kind='image', options={}){
     node.images = [...existing, ...next];
     markSmartNodeComplete(node);
     node.outputKind = kind;
+    applySmartMediaTypeForKind(node, kind);
     node.title = node.images.length > 1 ? (kind === 'video' ? 'Videos' : kind === 'audio' ? 'Audios' : kind === 'text' ? 'Texts' : 'Group') : (kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : kind === 'text' ? 'Text' : kind === 'file' ? 'File' : 'Image');
     delete node.w;
     delete node.h;
@@ -25786,6 +26889,7 @@ function appendLoopOutputsToNode(node, additions, kind='image', ctx=smartLoopCon
             history.images = cleanHistoryImages([...existing, ...(history.images || [])]);
             history.title = '历史分组';
             history.outputKind = kind;
+            applySmartMediaTypeForKind(history, kind);
             history.scale = MEDIA_GROUP_DEFAULT_SCALE;
             delete history.w;
             delete history.h;
@@ -26178,7 +27282,9 @@ async function runLoopRoundIntoSlot(loopNode, rootNode, outputSlot, loopIndex, c
         const logKind = isApiLikeEngine(runSettings.engine) && runSettings.apiKind === 'video' ? 'video' : 'image';
         const runLog = smartRunSnapshot(rootNode, prompt, request.refs || [], logKind);
         const runLogStart = nowMs();
-        const expectedCount = isApiLikeEngine(runSettings.engine) && runSettings.apiKind !== 'video'
+        const expectedCount = isApiLikeEngine(runSettings.engine) && runSettings.apiKind === 'video'
+            ? Math.max(1, Math.min(5, Math.round(Number(runSettings.videoCount || 1))))
+            : isApiLikeEngine(runSettings.engine) && runSettings.apiKind !== 'video'
             ? Math.max(1, Math.min(8, Number(runSettings.count || 1)))
             : 1;
         outputSlot.queued = false;
@@ -26421,8 +27527,8 @@ async function runSmartCascade(targetNode=null){
             const runBranch = async (source, incomingRefs=[]) => {
                 throwIfSmartCascadeStopRequested(runState);
                 let targets = graph.children.get(source.id) || [];
-                const loopPrompts = isSmartImageNode(source) ? upstreamLoopPromptNodesFor(source) : [];
-                const sourceLoopPrompts = isSmartImageNode(source) ? relayLoopPromptNodesForTarget(source) : [];
+                const loopPrompts = isSmartMediaNode(source) ? upstreamLoopPromptNodesFor(source) : [];
+                const sourceLoopPrompts = isSmartMediaNode(source) ? relayLoopPromptNodesForTarget(source) : [];
                 if(runState.runPath && sourceLoopPrompts.length && source?.id){
                     sourceLoopPrompts.forEach(loopNode => {
                         runState.runPath.states[`${loopNode.id}->${source.id}`] = 'done';
@@ -26448,14 +27554,14 @@ async function runSmartCascade(targetNode=null){
                     let outputs = [];
                     const targetChildren = (graph.children.get(target.id) || []).filter(child => child && child.type !== 'smart-loop');
                     const targetIsLeaf = target.type !== 'smart-loop' && targetChildren.length === 0;
-                    const relayLoops = isSmartImageNode(source) && isSmartImageNode(target)
+                    const relayLoops = isSmartMediaNode(source) && isSmartMediaNode(target)
                         ? relayLoopPromptNodesForEdge(source, target)
                         : [];
-                    const stepCtx = relayLoops.length && isSmartImageNode(target)
+                    const stepCtx = relayLoops.length && isSmartMediaNode(target)
                         ? {...(ctx || {}), appendLoopOutputs:Boolean(ctx?.nodeId && targetIsLeaf), relayPromptNodeIds:[...new Set([...(ctx?.relayPromptNodeIds || []), ...relayLoops.map(n => n.id)])]}
                         : {...(ctx || {}), appendLoopOutputs:Boolean(ctx?.nodeId && targetIsLeaf)};
                     try {
-                        if(runState.runPath && relayLoops.length && source?.id && isSmartImageNode(target)){
+                        if(runState.runPath && relayLoops.length && source?.id && isSmartMediaNode(target)){
                             relayLoops.forEach(loopNode => {
                                 runState.runPath.states[`${loopNode.id}->${source.id}`] = 'done';
                             });
@@ -26555,7 +27661,7 @@ function runSmartCascadeFromLoop(loopId){
     selectedId = tail.id;
     selectedIds = [];
     selectedImage = {nodeId:'', index:-1};
-    runSmartCascade(tail);
+    runSmartCascade(tail).catch(error => logSmartRunEntryFailure('循环一键运行', error));
 }
 async function runGeneration(){
     const node = selectedNode();
@@ -26602,7 +27708,9 @@ async function runGeneration(){
     const runLog = smartRunSnapshot(node, prompt, refs, logKind);
     rememberRecentSmartSettings(settings, node);
     const runLogStart = nowMs();
-    const expectedCount = settings.engine === 'runninghub'
+    const expectedCount = isApiLikeEngine(settings.engine) && settings.apiKind === 'video'
+        ? Math.max(1, Math.min(5, Math.round(Number(settings.videoCount || 1))))
+        : settings.engine === 'runninghub'
         ? 1
         : settings.engine === 'comfy'
         ? (settings.comfyMode === 'text' || settings.comfyMode === 'enhance' || settings.comfyMode === 'edit' || settings.comfyMode === 'custom' ? 1 : 1)
@@ -26610,7 +27718,7 @@ async function runGeneration(){
     const apiConcurrentRun = isApiLikeEngine(settings.engine) || settings.engine === 'runninghub' || settings.engine === 'modelscope' || settings.engine === 'comfy';
     const nodeHasImages = isSmartGroupNode(node) ? imagesForNode(node).some(img => img?.url) : (node.images || []).some(img => img?.url);
     const workflowModeRun = smartImageUsesWorkflowInput(node, smartLoopContext);
-    const sourceVisualState = isSmartImageNode(node) && nodeHasImages && !workflowModeRun ? {
+    const sourceVisualState = isSmartMediaNode(node) && nodeHasImages && !workflowModeRun ? {
         images:(node.images || []).map(img => ({...img})),
         title:node.title,
         w:node.w,
@@ -26625,7 +27733,7 @@ async function runGeneration(){
     const shouldCreateBranchOutput = groupRun || (nodeHasImages && !workflowModeRun);
     const pendingMeta = shouldCreateBranchOutput ? stripRunInputMeta(meta) : meta;
     undoSuppressed = true;
-    if(shouldCreateBranchOutput) branchNode = createPendingOutputFromSource(node, expectedCount, pendingMeta, {connectSource:false, selectOutput:true, refs});
+    if(shouldCreateBranchOutput) branchNode = createPendingOutputFromSource(node, expectedCount, pendingMeta, {connectSource:false, selectOutput:true, refs, kind:logKind});
     undoSuppressed = false;
     const pendingNode = branchNode || node;
     /* 有图节点重跑时真正在跑的是新开的下游占位节点：把停止上下文指回用户选中的源节点。 */
@@ -27033,7 +28141,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings, node=nu
             prompt,
             provider_id: runSettings.videoProvider || 'comfly',
             model: runSettings.videoModel || 'veo3-fast',
-            duration: Math.max(VIDEO_DURATION_MIN, Math.min(VIDEO_DURATION_MAX, Number(runSettings.videoDuration) || VIDEO_DURATION_DEFAULT)),
+            duration: (() => { const b = videoDurationBounds(runSettings.videoModel); return Math.max(b.min, Math.min(b.max, Number(runSettings.videoDuration) || VIDEO_DURATION_DEFAULT)); })(),
             aspect_ratio: runSettings.videoAspect || '16:9',
             resolution: runSettings.videoResolution || '',
             images: refImages,
@@ -27444,7 +28552,7 @@ function startJimengPoll(node){
         } finally {
             activeJimengPolls.delete(submitId);
         }
-    })();
+    })().catch(error => console.error('[smart-canvas] 即梦任务轮询失败', error));
 }
 function resumeJimengPendingNodes(){
     nodes.filter(n => n && n.jimengPending && n.jimengPending.submitId).forEach(n => {
@@ -27600,10 +28708,33 @@ async function resumeSmartPendingNode(node, logContext={}){
         throw failures[0];
     }
 }
+/* 失败任务恢复是 fire-and-forget：没有调用方 await，被拒绝的 Promise 会变成浏览器的
+   未捕获拒绝（pageerror）。这里按节点各自兜住；内层只在带 run 上下文时写生成日志，
+   这条路径没有 run，所以在这里补一条失败日志。 */
+function reportSmartPendingResumeFailure(node, error){
+    if(error && error.smartGenerationStopped) return;
+    const message = (error && error.message) || tr('smart.errRunFailed');
+    try {
+        addSmartGenerationLog({
+            run:{nodeId:node?.id || '', nodeType:node?.type || 'smart-image', prompt:node?.prompt || ''},
+            outputs:[],
+            runMs:0,
+            error:message
+        });
+    } catch(logError) {
+        console.error('[smart-canvas] 待处理任务失败日志写入失败', logError);
+    }
+    console.error('[smart-canvas] 待处理任务恢复失败', error);
+}
+/* 生成 / 运行入口同样是 fire-and-forget：没人接的拒绝会变成浏览器未捕获拒绝（pageerror）。
+   用户提示由入口内部的 catch 负责，这里只做兜底记录，避免重复弹提示。 */
+function logSmartRunEntryFailure(entry, error){
+    console.error('[smart-canvas] ' + entry + '失败', error);
+}
 function resumeSmartPendingTasks(){
-    nodes.filter(node => smartPendingTasks(node).length).forEach(node => {
-        resumeSmartPendingNode(node);
-    });
+    return Promise.all(nodes.filter(node => smartPendingTasks(node).length).map(node =>
+        resumeSmartPendingNode(node).catch(error => reportSmartPendingResumeFailure(node, error))
+    ));
 }
 function updateSelectionBox(event){
     if(!selectionState) return;
@@ -27686,7 +28817,7 @@ function ungroupNode(groupId){
                 const size = thumbDisplaySize(img, cell);
                 const x = Math.round(Number(group.x || 0) + pad + col * (cell + gap) + Math.max(0, (cell - size.width) / 2));
                 const y = Math.round(Number(group.y || 0) + pad + row * (cell + gap) + Math.max(0, (cell - size.height) / 2));
-                const node = {id:uid('smart'), type:'smart-image', x, y, w:size.width, h:size.height, title:'Image', images:[stripImageGenerationMeta({...img})], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
+                const node = {id:uid('smart'), type:mediaKindForItem(img) === 'video' ? 'smart-video' : 'smart-image', x, y, w:size.width, h:size.height, title:'Image', images:[stripImageGenerationMeta(cloneMediaItem(img))], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
                 inheritNodeMetaFromImage(node);
                 clearDetachedRunInputRefs(node);
                 return node;
@@ -27720,13 +28851,13 @@ function ungroupNode(groupId){
         const y = Math.round(Number(group.y || 0) + pad + row * (cell + gap) + Math.max(0, (cell - size.height) / 2));
         const node = {
             id:uid('smart'),
-            type:'smart-image',
+            type:mediaKindForItem(img) === 'video' ? 'smart-video' : 'smart-image',
             x,
             y,
             w:size.width,
             h:size.height,
             title:'Image',
-            images:[stripImageGenerationMeta({...img})],
+            images:[stripImageGenerationMeta(cloneMediaItem(img))],
             scale:MEDIA_NODE_DEFAULT_SCALE,
             created_at:Date.now()
         };
@@ -27754,7 +28885,7 @@ function mergeImageNodesIntoGroup(sourceId, targetId){
     const target = nodes.find(n => n.id === targetId);
     if(!source || !target || source.id === target.id) return false;
     if(!(source.images || []).length || !(target.images || []).length) return false;
-    const sourceImages = (source.images || []).map(img => stripImageGenerationMeta({...img}));
+    const sourceImages = (source.images || []).map(img => stripImageGenerationMeta(cloneMediaItem(img)));
     target.images = [...(target.images || []).map(img => stripImageGenerationMeta(img)), ...sourceImages];
     target.title = 'Group';
     if(!Number.isFinite(Number(target.scale)) || Number(target.scale) === MEDIA_NODE_DEFAULT_SCALE) target.scale = MEDIA_GROUP_DEFAULT_SCALE;
@@ -27922,7 +29053,7 @@ function mountSmartBatchNodes(){
         /* 兜底：这一批已经结束（_batchRunning=false）但结果节点还挂着 pending，
            把它收尾，别在画布上留一张永远转圈的卡片（比如中途停止/整批异常）。 */
         if(!node._batchRunning){
-            nodes.filter(item => isSmartImageNode(item) && Number(item.pending || 0) > 0
+            nodes.filter(item => isSmartMediaNode(item) && Number(item.pending || 0) > 0
                 && (canvas?.connections || []).some(conn => conn.from === node.id && conn.to === item.id))
                 .forEach(item => {
                     item.pending = 0;
@@ -28208,6 +29339,7 @@ function createNodeFromMenu(type){
     else if(type === 'label') created = createSmartLabelNode(p.x - 75, p.y - 19);
     else if(type === 'table') created = createSmartTableNode(p.x - 260, p.y - 60);
     else if(type === 'batch') created = createSmartBatchNode(p.x - 210, p.y - 60);
+    else if(type === 'video') created = createImageNodeAt(p, [], {type:'smart-video'});
     else created = createImageNodeAt(p);
     if(!created) return created;
     if(type !== 'group'){
@@ -28225,6 +29357,8 @@ function createNodeFromMenu(type){
             scheduleSave();
         }
     }
+    // 「图片节点 / 视频节点」：节点已按类型建好，接着打开只收对应类型的本地上传选择器。
+    if(created && (type === 'image' || type === 'video')) pickLocalMediaForNode(created.id, type);
     return created;
 }
 shell.addEventListener('mousedown', e => {
@@ -28326,7 +29460,7 @@ smartRunSelectedBtn?.addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();
     if(smartRunSelectedRunning){ smartRunSelectedAbort = true; requestSmartCascadeStop(); return; }
-    runSelectedNodesCascade();
+    runSelectedNodesCascade().catch(error => logSmartRunEntryFailure('框选运行', error));
 });
 smartArrangeBtn?.addEventListener('click', e => {
     e.preventDefault();
@@ -28622,7 +29756,7 @@ function isMediaAspectLockedNode(node){
            - 图片 / 结果群组靠它让布局完全按用户拖的尺寸算（多图节点解除缩略图放大上限、
              高度听用户的，否则会被网格算死 → 「往下拉不动」）。
            单击把手不触发（避免只是点一下就锁死自适应）。 */
-        const manualSizable = resizeState.manualPrompt || isSmartImageNode(node) || isSmartTextNode(node) || !node.type;
+        const manualSizable = resizeState.manualPrompt || isSmartMediaNode(node) || isSmartGroupNode(node) || isSmartTextNode(node) || !node.type;
         if(manualSizable && !node.sizeUserSet && (Math.abs(dx) > 2 || Math.abs(dy) > 2)){
             node.sizeUserSet = true;
             world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`)?.classList.add('size-user-set');
@@ -28630,7 +29764,7 @@ function isMediaAspectLockedNode(node){
         const minW = node.type === 'smart-prompt' ? 260 : node.type === 'smart-text' ? 180 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
         // LLM 模式的提示词节点下限要高一些：tabs/供应商行/Input、Output 区/药丸行都是固定高度，太矮会压掉运行按钮
         const minH = node.type === 'smart-prompt' ? (node.llmEnabled ? promptNodeManualMinHeight(node) : 170) : node.type === 'smart-text' ? 110 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
-        if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
+        if(node.type === 'smart-group' && smartGroupCardImageRefs(node).some(ref => ref.item?.url)){
             // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
             // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。
             // 图片分组也是媒体容器：等比缩放（多图比例取手势起始的渲染比例），格子按新尺寸重排，缩略图不会裁歪。
@@ -28643,48 +29777,14 @@ function isMediaAspectLockedNode(node){
             return;
         }
         if(node.type === 'smart-group'){
-            // 分组当“画布中的画布”：拖手柄按宽度方向算出统一缩放比例，组内所有成员（图片+提示词）按相对手势
-            // 起点的快照整体缩放+重排，然后把分组框自动收紧到成员的包围盒——盒子始终贴合内容，右侧不会留空白。
-            const startZoom = resizeState.startZoom || 1;
-            // 目标框宽 = 手柄拖出的框宽；缩放映射以“贴合内容的框宽”为基准，保证两个阶段都线性跟随手柄、衔接连续。
-            const targetW = resizeState.startW + dx;
-            const fitBase = resizeState.contentFitW || resizeState.startW || 1;
-            const desiredZoom = startZoom * (targetW / fitBase);
-            // 成员缩放上限 SMART_GROUP_MAX_MEMBER_ZOOM（默认 1=原始尺寸）：到上限就不再放大成员，改为让分组框继续扩大。
-            const effectiveZoom = Math.max(0.2, Math.min(SMART_GROUP_MAX_MEMBER_ZOOM, desiredZoom));
-            const memberRatio = effectiveZoom / startZoom;
-            const capped = desiredZoom > SMART_GROUP_MAX_MEMBER_ZOOM;
-            node._memberZoom = effectiveZoom;
-            const gx = Number(node.x) || 0, gy = Number(node.y) || 0;
-            const SMART_GROUP_PAD = 16;
-            let maxRight = gx, maxBottom = gy, hasMember = false;
-            (resizeState.members || []).forEach(snap => {
-                const member = nodes.find(n => n.id === snap.id);
-                if(!member) return;
-                hasMember = true;
-                member.x = gx + (snap.sx - gx) * memberRatio;
-                member.y = gy + (snap.sy - gy) * memberRatio;
-                member.w = Math.max(40, Math.round(snap.sw * memberRatio));
-                member.h = Math.max(40, Math.round(snap.sh * memberRatio));
-                if(snap.isImage) member.scale = 1;
-                maxRight = Math.max(maxRight, member.x + member.w);
-                maxBottom = Math.max(maxBottom, member.y + member.h);
-                const memberEl = world.querySelector(`.image-node[data-id="${CSS.escape(member.id)}"]`);
-                if(memberEl){
-                    memberEl.style.left = `${member.x}px`;
-                    memberEl.style.top = `${member.y}px`;
-                }
-                updateNodeElementDuringResize(member);
-            });
-            if(capped || !hasMember){
-                // 成员已到上限（或空分组）：分组框随手柄继续扩大，成员不再放大。
-                node.w = Math.max(minW, Math.round(resizeState.startW + dx));
-                node.h = Math.max(minH, Math.round(resizeState.startH + dy));
-            } else {
-                // 未到上限：分组框收紧到成员包围盒，贴合内容无空白。
-                node.w = Math.max(minW, Math.round(maxRight - gx + SMART_GROUP_PAD));
-                node.h = Math.max(minH, Math.round(maxBottom - gy + SMART_GROUP_PAD));
-            }
+            /* 真实成员分组（组内只有提示词 / 带连线的图片节点，没有卡片缩略图）：
+               框自由跟手柄（宽高各自独立），随后把成员排进框内。
+               旧实现按成员包围盒把框收紧回来 —— 用户拖大拖小都被立刻弹回内容尺寸，
+               表现就是「分组节点无法自定义拖动大小」（老板报的根因）。 */
+            node.w = Math.max(minW, Math.round(resizeState.startW + dx));
+            node.h = Math.max(minH, Math.round(resizeState.startH + dy));
+            node._memberZoom = 1;
+            arrangeSmartGroupMembers(node, {skipUndo:true, syncDom:true, frame:true});
             node.scale = 1;
             updateNodeElementDuringResize(node);
             return;
@@ -29279,7 +30379,6 @@ window.addEventListener('blur', () => {
 engineSelect.onchange = () => {
     settings.engine = engineSelect.value;
     applyRecentSmartSettingsForCurrentMode();
-    syncApiKindToggleVisibility();
     // 换引擎＝换平台：切到火山引擎时先按火山列表校正图片/视频模型，再渲染参数面板。
     const providerModelNotice = correctVolcengineEngineSelection();
     renderDynamicParams();
@@ -29287,30 +30386,6 @@ engineSelect.onchange = () => {
     scheduleSave();
     if(providerModelNotice) toast(providerModelNotice, '!');
 };
-function syncApiKindToggleVisibility(){
-    if(!apiKindToggle) return;
-    /* 藏在 display:none 里时滑块量不到尺寸（rect 全 0，只能先隐藏），显形后必须补一次 refresh，否则选中项没有底 */
-    const wasHidden = apiKindToggle.style.display === 'none';
-    apiKindToggle.style.display = isApiLikeEngine(settings.engine) ? 'inline-flex' : 'none';
-    apiKindToggle.querySelectorAll('[data-kind]').forEach(btn => btn.classList.toggle('active', btn.dataset.kind === (settings.apiKind || 'image')));
-    if(wasHidden) refreshGlideHost(apiKindToggle);
-}
-if(apiKindToggle){
-    apiKindToggle.querySelectorAll('[data-kind]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            const kind = btn.dataset.kind;
-            if(kind === settings.apiKind) return;
-            settings.apiKind = kind;
-            applyRecentSmartSettingsForCurrentMode();
-            syncApiKindToggleVisibility();
-            renderDynamicParams();
-            persistActiveSmartSettings();
-            scheduleSave();
-        };
-    });
-}
 let promptResizeState = null;
 const promptResize = document.getElementById('promptResize');
 if(promptResize){
@@ -29328,7 +30403,7 @@ runBtn.onclick = () => {
     const node = selectedNode();
     if(smartGenerationStopRequestedFor(node)) return;
     if(smartNodeRunActive(node)){ requestSmartGenerationStop(node); return; }
-    runGeneration();
+    runGeneration().catch(error => logSmartRunEntryFailure('生成', error));
 };
 cascadeRunBtn.onclick = () => {
     const node = selectedNode();
@@ -29337,7 +30412,7 @@ cascadeRunBtn.onclick = () => {
         requestSmartCascadeStop(loopId);
         return;
     }
-    runSmartCascade();
+    runSmartCascade().catch(error => logSmartRunEntryFailure('一键运行', error));
 };
 fileInput.onchange = () => {
     const groupPoint = pendingGroupUploadPoint;
@@ -30357,16 +31432,11 @@ window.onload = async () => {
     if(window.StudioI18n) window.StudioI18n.apply();
     registerZoomBarIcons();
     if(window.lucide) lucide.createIcons();
-    /* 图片/视频 图标是静态的，但 lucide 的 createIcons 每次都会把带 data-lucide 的 <svg> 整颗换掉；
-       换节点＝子节点变更，滑块会当成「内容重写」直接跳位（实测编辑栏悬停时 6 次/秒），滑不过去。
-       这两颗图标内容永不变，去掉标记即可，图标本身还在。 */
-    apiKindToggle?.querySelectorAll('svg[data-lucide]').forEach(svg => svg.removeAttribute('data-lucide'));
     updateZoomBarLevel();
     connectAssetLibrarySyncSocket();
     await loadConfig();
     await loadAssetLibrary();
     await loadCanvas();
-    syncApiKindToggleVisibility();
     render();
     try { consumeHomeCanvasSeed(); } catch(e) { console.warn('[home-seed]', e); }
 };
@@ -31325,7 +32395,7 @@ async function rowSourceRatio(refs){
     return null;
 }
 /* 上游支持（或至少认）的视频比例。用户选「原图比例」时从这里挑最接近参考素材的那个。 */
-const VIDEO_ASPECT_SUPPORTED = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', '9:21'];
+const VIDEO_ASPECT_SUPPORTED = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
 function videoAspectNumber(key){
     const matched = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(String(key || ''));
     const w = matched ? Number(matched[1]) : 0;
@@ -31498,13 +32568,22 @@ function batchRowGridHtml(node, imgs, layout, order){
     const cols = Number(layout.cols) > 0 ? Number(layout.cols) : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(total))));
     const layoutVisibleRows = Math.max(1, Number(layout.visibleRows || layout.rows) || Math.ceil(total / cols));
     const visibleRows = node?.sizeUserSet ? layoutVisibleRows : Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, layoutVisibleRows));
-    const maxHeight = visibleRows * thumb + Math.max(0, visibleRows - 1) * 8;
+    /* 和普通多图网格同一套口径：格子跟着每张产出自己的比例，可见高度按格子真实高度算。
+       手动拖过尺寸时整框都能用；否则只留 imageLayout 算好的可见行。 */
+    const fallbackMaxHeight = visibleRows * thumb + Math.max(0, visibleRows - 1) * 8;
+    const maxHeight = node?.sizeUserSet
+        ? (Number(layout.contentH) > 0 ? Math.round(Number(layout.contentH)) : fallbackMaxHeight)
+        : (Number(layout.visibleH) > 0 ? Math.round(Number(layout.visibleH)) : fallbackMaxHeight);
     return '<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:' + cols + '; --thumb-size:' + thumb + 'px; --thumb-max-height:' + maxHeight + 'px">' + rowCells.join('') + '</div>';
 }
 function batchRowThumbHtml(node, img, index){
     const selected = selectedImage.nodeId === node.id && selectedImage.index === index ? 'image-selected' : '';
     const signature = escapeAttr(mediaKindForItem(img) + ':' + (img && img.url ? img.url : ''));
-    return '<div class="thumb-item has-outside-image-name ' + selected + '" data-image-index="' + index + '" data-media-signature="' + signature + '">'
+    /* 已出的产出也按素材自己的比例占格：以前这里没给 --thumb-aspect，格子一律正方形，
+       视频/竖图缩在方格里显示（用户报的「批量生成动效显示没有按比例」）。
+       进度格 batchRowSlotHtml 一直用的是该行比例，两者现在同一套口径。 */
+    const aspect = mediaCellAspect(img);
+    return '<div class="thumb-item has-outside-image-name ' + selected + '" style="--thumb-aspect:' + aspect + '" data-image-index="' + index + '" data-media-signature="' + signature + '">'
         + thumbMediaHtml(img) + imageNameBadgeHtml(img, {outside:true}) + imageResolutionBadgeHtml(img)
         + '<button class="mini-x image-delete" type="button" data-image-index="' + index + '" title="' + escapeHtml(tr('smart.deleteImage')) + '"><i data-lucide="trash-2"></i></button></div>';
 }
@@ -31556,10 +32635,27 @@ function setBatchRowState(node, rowNumber, state){
 function appendBatchResultImages(outputNode, additions, meta, kind){
     const live = liveSmartNode(outputNode);
     if(!live) return null;
-    live.images = cleanHistoryImages([...(live.images || []), ...additions]);
+    /* 逐行保留产出：同一张图可能来自不同行，不能被按 url 去重并成一张（行号进 key） */
+    const seenKeys = new Set();
+    live.images = nonPreviewOutputImages([...(live.images || []), ...(additions || [])])
+        .filter(img => {
+            const url = String(img?.url || '');
+            if(!url) return false;
+            const rowNumber = Number(img?.rowNumber) || 0;
+            const key = rowNumber > 0 ? ('row:' + rowNumber + '|' + url) : url;
+            if(seenKeys.has(key)) return false;
+            seenKeys.add(key);
+            return true;
+        })
+        .map(img => stripImageGenerationMeta({...img}));
     live.pending = Math.max(0, Number(live.pending || 0) - 1);
     live.batchRunLanded = Math.max(0, Number(live.batchRunLanded) || 0) + Math.max(1, (additions || []).length);
     live.outputKind = kind;
+    // 结果节点类型跟着产出 kind 走（此处内联判断：该函数会被测试单独抠出来跑，不能依赖外部新 helper）
+    if(live.type === 'smart-image' || live.type === 'smart-video' || !live.type){
+        if(kind === 'video') live.type = 'smart-video';
+        else if(kind === 'image') live.type = 'smart-image';
+    }
     live.title = live.images.length > 1
         ? (kind === 'video' ? 'Videos' : 'Group')
         : (kind === 'video' ? 'Video' : 'Image');
@@ -31614,6 +32710,21 @@ async function tableRunOneRow(nodeId, options, forceVideo){
     const rowNumber = runContext.rowNumber || 0;
     if(!prompt && !refs.length) throw new Error('第 ' + (rowNumber || '?') + ' 行既没有提示词也没有素材');
     const kind = forceVideo || runSettings.apiKind === 'video' ? 'video' : 'image';
+    /* 分镜表「时长(秒)」→ 这一次视频请求的 duration。只写进本次 runSettings（不回写 settings、
+       不写回节点），区间沿用 videoDurationBounds()（MODEL_CAPABILITIES 里各模型的官方区间，
+       跟节点级时长滑条同一套）：越界收敛到边界；行里没有时长就保持节点级 videoDuration。
+       图像分支不读 duration，这里也不碰它。 */
+    const rowDuration = Number(row.duration);
+    if(kind === 'video' && Number.isFinite(rowDuration) && rowDuration > 0){
+        const bounds = videoDurationBounds(runSettings.videoModel);
+        const clamped = Math.max(bounds.min, Math.min(bounds.max, rowDuration));
+        if(clamped !== rowDuration){
+            console.warn('[table-duration] 第 ' + (rowNumber || '?') + ' 行时长 ' + rowDuration + ' 秒超出 '
+                + (runSettings.videoModel || '当前模型') + ' 官方区间 ' + bounds.min + '-' + bounds.max
+                + ' 秒，已收敛到 ' + clamped + ' 秒');
+        }
+        runSettings = Object.assign({}, runSettings, {videoDuration: clamped});
+    }
     const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
     const runId = String(runContext.batchRunId || '') || node.id;
     /* out.urls 的元素可能是字符串，也可能是 {url, kind}（resultMediaUrls 两种都返回过），
@@ -31898,15 +33009,22 @@ function promptOptimizeEditor(kind, node){
     const el = promptNodeUiRoot(node.id)?.querySelector(kind === 'chat' ? '.llm-chat-input' : '.prompt-llm-instruction');
     return el ? { el, text: llmEditorPlainText(el, node) } : null;
 }
+function promptOptimizeModelTarget(kind, node){
+    if(kind !== 'composer' || node?.llmProvider || node?.llmModel){
+        const provider = resolveChatProviderId(node?.llmProvider || '');
+        return { provider, model: resolveChatModel(node?.llmModel || '', provider) };
+    }
+    const provider = resolveChatProviderId(chatProvider);
+    const model = correctedChatModelForProvider(provider, chatModel) || chatModel || resolveChatModel('', provider);
+    return { provider, model };
+}
 async function optimizeEditorPrompt(kind, node, btn){
     if(btn?.dataset.optimizing === '1') return;
     const editor = promptOptimizeEditor(kind, node);
     if(!editor) return;
     const text = String(editor.text || '').trim();
     if(!text){ toast(tr('smart.optimizeEmpty')); return; }
-    /* 编辑栏那个没绑节点模型，用现有的默认 chat 供应商/模型解析 */
-    const provider = kind === 'composer' ? (chatProvider || resolveChatProviderId()) : resolveChatProviderId(node?.llmProvider || '');
-    const model = kind === 'composer' ? resolveChatModel('', provider) : resolveChatModel(node?.llmModel || '', provider);
+    const {provider, model} = promptOptimizeModelTarget(kind, node);
     const prevHtml = btn ? btn.innerHTML : '';
     if(btn){
         btn.dataset.optimizing = '1';
@@ -32349,7 +33467,8 @@ async function runSmartLLMTableMode(node, requirement, groups, inputs, targetKin
         const answer = await callSmartLLMText(node, model.buildListGeneratePrompt(requirement, inputs, groups, null, {targetKind}));
         try { table = model.parseTableOutput(answer); } catch(error){ table = null; }
     }
-    if(!table) throw new Error('模型没有返回可用的表格');
+    /* 空表是最常见的失败形态：说清楚「表是空的」，别让用户以为是模型没答。 */
+    if(!table) throw new Error(tr('smart.llmTableEmpty'));
     const created = materializeLlmTableNode(node, table, groups, api);
     if(created) connectSmartBatchAfter(created);
     toast(targetKind === 'video' ? '已生成视频分镜表' : '已生成多维表格');
@@ -32602,6 +33721,7 @@ function ensureTableApi(){
         <div class="smart-empty-guide-title">从这里开始</div>
         <div class="smart-empty-guide-sub">拖入或粘贴图片，或选一个起点</div>
         <button class="menu-btn" type="button" data-empty-create="image"><i data-lucide="image-plus"></i><span>图片节点（上传或生成）</span></button>
+        <button class="menu-btn" type="button" data-empty-create="video"><i data-lucide="video"></i><span>视频节点（上传或生成）</span></button>
         <button class="menu-btn" type="button" data-empty-create="prompt"><i data-lucide="text-cursor-input"></i><span>文本生成</span></button>
         <button class="menu-btn" type="button" data-empty-create="table"><i data-lucide="table"></i><span>多维表格批量生成</span></button>
         <button class="menu-btn" type="button" data-empty-create="chat"><i data-lucide="message-square"></i><span>交给画布助手</span></button>
@@ -32626,7 +33746,7 @@ function ensureTableApi(){
 })();
 /* ═══ 第 7 轮：视频后期 —— 尾帧接力 / 首帧成图 / 拼接选中视频 ═══ */
 function smartVideoItemOfNode(node){
-    if(!node || !(node.type === 'smart-image' || !node.type)) return null;
+    if(!node || !isSmartMediaNode(node)) return null;
     const list = (node.images || []).filter(img => img?.url);
     if(list.length !== 1) return null;
     const item = imageForDisplay(list[0]);
@@ -32656,6 +33776,7 @@ async function frameImageFromVideoNode(node, index, which='first', options={}){
         if(options.relay){
             /* 接力：新节点沿用这段视频的生成参数（视频模式、模型、时长…），写一句下一段的描述就能直接生成 */
             const base = smartSettingsForNode(node);
+            created.type = 'smart-video';
             created.runSettings = settingsForStorage({...base, apiKind:'video'});
             created.runPrompt = '';
             created.relayFromNodeId = node.id;
@@ -32789,14 +33910,14 @@ async function rerunSmartNode(node){
         : Math.max(1, Math.min(8, Number(info.settings.count || 1)));
     pushUndo();
     undoSuppressed = true;
-    const out = createPendingOutputFromSource(source, expected, meta, {connectSource:false, selectOutput:false, refs});
+    const out = createPendingOutputFromSource(source, expected, meta, {connectSource:false, selectOutput:false, refs, kind:info.kind});
     undoSuppressed = false;
     if(source === node){
         const conn = (canvas.connections || []).find(c => c.from === node.id && c.to === out.id);
         if(conn) conn.kind = 'history';
     }
     selectedId = node.id;
-    const runLog = {nodeId:out.id, nodeType:'smart-image', kind:info.kind, settings:info.settings, prompt:info.prompt,
+    const runLog = {nodeId:out.id, nodeType:out.type, kind:info.kind, settings:info.settings, prompt:info.prompt,
         refs:refs.map(ref => ({url:ref.url, name:ref.name || 'image', kind:ref.kind || ''})),
         size:info.kind === 'image' ? sizeForRun(info.settings) : ''};
     const start = nowMs();
@@ -33424,6 +34545,7 @@ function buildHomeSeedNode(spec, x, y){
         node.promptDraftHtml = escapeHtml(text);
         node.promptDraftTouched = Boolean(text);
         node.runSettings = homeSeedRunSettings(spec);
+        if(spec.video) node.type = 'smart-video';
     }
     return node;
 }
