@@ -2,7 +2,8 @@
 /* 创建菜单回归（A）：
    A1. 右键菜单第一项从「上传」改为「图片节点」（smart-image，线性 image 图标），新增「视频节点」
        （smart-video，线性 video 图标），不再有「上传」项；
-   A2. 两个入口都打开只收对应类型的本地上传选择器，选完文件落成对应类型；
+   A2. 两个入口只建空的 smart-image / smart-video 节点，不再打开本地上传选择器；
+       上传仍走拖入画布 / 节点自身的上传按钮；
    A3. 素材库拖素材到画布按真实类型落节点（本地素材库要能列出视频；壳层 drop 用 createNode 的类型判定）；
    A4. 空画布引导菜单同步加「视频节点」。
    跑法：node tests/test_smart_canvas_create_menu.js */
@@ -36,14 +37,14 @@ ok(/data-lucide="video"/.test(menuBlock) && /<span>视频节点<\/span>/.test(me
 ok(!/data-lucide="upload-cloud"/.test(menuBlock) && !/<span>上传<\/span>/.test(menuBlock), '删除了「上传」这一项');
 ok((menuBlock.match(/data-create-type=/g) || []).length === 8, '菜单还是 8 项（原 7 项：删上传、加视频）');
 
-console.log('[2] createNodeFromMenu：图片/视频入口');
+console.log('[2] createNodeFromMenu：图片/视频入口只建空节点');
 const cnfm = topLevelFunction(js, 'createNodeFromMenu');
 ok(/type === 'video'/.test(cnfm), 'createNodeFromMenu 认得 video');
 ok(/createImageNodeAt\(p, \[\], \{type:'smart-video'\}\)/.test(cnfm), 'video 入口建 smart-video 空节点');
-ok(/pickLocalMediaForNode\(created\.id, type\)/.test(cnfm), 'image/video 入口随后打开本地上传选择器');
-const pick = topLevelFunction(js, 'pickLocalMediaForNode');
-ok(/accept = video \? 'video\/\*' : 'image\/\*'/.test(pick), '选择器按类型限收：video/* 或 image/*');
-ok(/mediaKind:video \? 'video' : 'image'/.test(pick), '上传时带上 mediaKind，落成对应类型');
+ok(!/pickLocalMediaForNode|pickMediaForSmartNode|createElement\('input'\)/.test(cnfm), 'image/video 入口不再打开本地上传选择器');
+ok(!/pickLocalMediaForNode/.test(js), '删除创建节点专用的 pickLocalMediaForNode');
+ok(/pickMediaForSmartNode\(id\)/.test(js), '节点自身的上传按钮保留（仍可打开选择器）');
+ok(/async function handleFiles/.test(js), '拖拽 / 粘贴上传入口保留');
 
 console.log('[3] 上传落点类型 + 素材库拖拽类型');
 const append = topLevelFunction(js, 'appendImagesToSmartNode');

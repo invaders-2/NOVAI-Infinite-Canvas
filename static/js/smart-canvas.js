@@ -20481,25 +20481,6 @@ function pickMediaForSmartNode(nodeId){
     document.body.appendChild(input);
     input.click();
 }
-// 「图片节点 / 视频节点」建好后立刻本地上传：选择器只收对应类型（kind='video' 时只收视频）。
-function pickLocalMediaForNode(nodeId, kind){
-    if(!nodeId) return;
-    const video = kind === 'video';
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = video ? 'video/*' : 'image/*';
-    input.multiple = true;
-    input.onchange = () => {
-        if(input.files?.length) handleFiles(input.files, nodeId, {mediaKind:video ? 'video' : 'image'});
-        input.remove();
-    };
-    input.style.position = 'fixed';
-    input.style.left = '-9999px';
-    input.style.top = '-9999px';
-    input.style.opacity = '0';
-    document.body.appendChild(input);
-    input.click();
-}
 // 分组自定义名称输入框：直接在卡片信息行里改名。
 // 输入过程中只写 model + scheduleSave（不 render），否则会重建 DOM、光标丢失；
 // 鼠标事件全部 stopPropagation，避免点标题被当成「选中节点 / 双击建节点 / 开始拖拽」。
@@ -29357,8 +29338,7 @@ function createNodeFromMenu(type){
             scheduleSave();
         }
     }
-    // 「图片节点 / 视频节点」：节点已按类型建好，接着打开只收对应类型的本地上传选择器。
-    if(created && (type === 'image' || type === 'video')) pickLocalMediaForNode(created.id, type);
+    // 「图片节点 / 视频节点」只建空节点；上传走拖入画布或节点自身的上传按钮。
     return created;
 }
 shell.addEventListener('mousedown', e => {
