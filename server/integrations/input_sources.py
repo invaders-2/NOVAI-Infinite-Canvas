@@ -17,9 +17,21 @@ import json
 import os
 import re
 import tempfile
-from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
+
+try:
+    from html.parser import HTMLParser
+except ImportError:  # 旧版桌面运行时（<=1.0.124）未冻结 html.parser，走下面的正则降级
+    class HTMLParser:  # type: ignore[no-redef]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def feed(self, data: str) -> None:
+            raise RuntimeError("html.parser 不可用")
+
+        def close(self) -> None:
+            pass
 
 from server.agents import store
 from server.agents import tools as agent_tools
@@ -213,13 +225,35 @@ class _HTMLTextExtractor(HTMLParser):
         return "\n".join(lines)[:max_chars]
 
 
+def _fallback_html_to_text(raw: str, max_chars: int = 18000) -> str:
+    """旧运行时没有 html.parser 时的降级：剥掉脚本/样式与标签，保留可读文本。"""
+    text = re.sub(
+        r"(?is)<!--.*?-->|<(script|style|noscript|svg|template|nav|iframe)\b[^>]*>.*?</\1\s*>",
+        " ",
+        str(raw or ""),
+    )
+    text = re.sub(
+        r"(?i)<br\s*/?>|</(?:p|div|li|tr|h[1-6]|table|section|article|header|footer|blockquote|pre)\s*>",
+        "\n",
+        text,
+    )
+    text = re.sub(r"<[^>]+>", " ", text)
+    try:
+        import html as _html
+        text = _html.unescape(text)
+    except Exception:
+        pass
+    lines = [re.sub(r"[ \t\u00a0]+", " ", line).strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)[:max_chars]
+
+
 def html_to_text(raw: str, max_chars: int = 18000) -> str:
     parser = _HTMLTextExtractor()
     try:
         parser.feed(str(raw or ""))
         parser.close()
     except Exception:
-        return re.sub(r"<[^>]+>", " ", str(raw or ""))[:max_chars]
+        return _fallback_html_to_text(raw, max_chars)
     return parser.text(max_chars)
 
 

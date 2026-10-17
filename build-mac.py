@@ -81,6 +81,8 @@ def build_app():
         "fastapi", "aiofiles", "pydantic", "python_multipart", "httpx", "PIL",
         "webview", "webview.platforms.cocoa",
         "requests", "qrcode", "pystray", "pystray._darwin",
+        # 外置 main.py / server/ 会随在线更新替换，运行环境必须提前带齐它们可能新引入的模块
+        "html.parser", "openpyxl",
     ]
 
     cmd_parts = [

@@ -209,8 +209,13 @@ def main():
     except ImportError as e:
         log(f"Import FAILED: {e}")
         import tkinter.messagebox as mb
-        mb.showerror("启动失败",
-                     f"无法加载 main.py\n\n请确认 {app_dir}\\main.py 存在且完整。\n\n错误: {e}")
+        main_path = os.path.join(app_dir, "main.py")
+        message = (
+            f"无法加载 main.py\n\n请确认 {main_path} 存在且完整。\n\n错误: {e}"
+        )
+        if "No module named" in str(e):
+            message += "\n\n程序文件与安装包版本不匹配（在线更新不会替换内置运行环境），请重新下载最新完整安装包覆盖安装。"
+        mb.showerror("启动失败", message)
         sys.exit(1)
 
     PORT = 3000

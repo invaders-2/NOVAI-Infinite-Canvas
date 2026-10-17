@@ -7,32 +7,32 @@
     <title data-i18n="smart.title">智能画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.125.1792178439">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.125.1790560477">
-    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.125.1791729997">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.125.1789606971">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.126.1792178439">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.126.1790560477">
+    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.126.1791729997">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.126.1789606971">
     <!-- NOVAI 2.0 外观统一层：配色 / 状态色 / 字重对齐新前端，放在 glide.css 前面（glide.css 按约定必须最后），其余样式表之后 -->
-    <link rel="stylesheet" href="/static/css/nv2-skin.css?v=1.0.125.1791729997">
-    <link rel="stylesheet" href="/static/css/image-adjust.css?v=1.0.125.1791729997">
-    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.125.1789742566">
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.125.1789606971"></script>
-    <script defer src="/static/vendor/js/html-to-image.js?v=1.0.125.1789615756"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.125.1791729997"></script>
-    <script src="/static/js/theme.js?v=1.0.125.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.125.1790560477"></script>
-    <script src="/static/js/shared/size-policy.js?v=1.0.125.1792185305"></script>
-    <script src="/static/js/shared/media.js?v=1.0.125.1789606971"></script>
-    <script src="/static/js/shared/psd-writer.js?v=1.0.125.1790560477"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.125.1789606971"></script>
-    <script src="/static/js/shared/workflow-utils.js?v=1.0.125.1789606971"></script>
-    <script src="/static/js/shared/node-registry.js?v=1.0.125.1789606971"></script>
-    <script src="/static/js/shared/table-model.js?v=1.0.125.1792228719"></script>
-    <script src="/static/js/shared/table-node.js?v=1.0.125.1792228719"></script>
-    <script src="/static/js/shared/dropdown.js?v=1.0.125.1789746233"></script>
-    <script src="/static/js/shared/glide.js?v=1.0.125.1789742748"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.125.1789845865"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.125.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.125.1790130330"></script>
+    <link rel="stylesheet" href="/static/css/nv2-skin.css?v=1.0.126.1791729997">
+    <link rel="stylesheet" href="/static/css/image-adjust.css?v=1.0.126.1791729997">
+    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.126.1789742566">
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.126.1789606971"></script>
+    <script defer src="/static/vendor/js/html-to-image.js?v=1.0.126.1789615756"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.126.1791729997"></script>
+    <script src="/static/js/theme.js?v=1.0.126.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.126.1790560477"></script>
+    <script src="/static/js/shared/size-policy.js?v=1.0.126.1792185305"></script>
+    <script src="/static/js/shared/media.js?v=1.0.126.1789606971"></script>
+    <script src="/static/js/shared/psd-writer.js?v=1.0.126.1790560477"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.126.1789606971"></script>
+    <script src="/static/js/shared/workflow-utils.js?v=1.0.126.1789606971"></script>
+    <script src="/static/js/shared/node-registry.js?v=1.0.126.1789606971"></script>
+    <script src="/static/js/shared/table-model.js?v=1.0.126.1792228719"></script>
+    <script src="/static/js/shared/table-node.js?v=1.0.126.1792228719"></script>
+    <script src="/static/js/shared/dropdown.js?v=1.0.126.1789746233"></script>
+    <script src="/static/js/shared/glide.js?v=1.0.126.1789742748"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.126.1789845865"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.126.1789606971"></script>
+    <script src="/static/js/i18n.js?v=1.0.126.1790130330"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -746,8 +746,8 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
         </div>
         <div id="versionList" class="version-list"></div>
     </div>
-    <script defer src="/static/js/image-adjust-engine.js?v=1.0.125.1791729997"></script>
-    <script defer src="/static/js/image-adjust-editor.js?v=1.0.125.1791729997"></script>
-    <script defer src="/static/js/smart-canvas.js?v=1.0.125.1792228719"></script>
+    <script defer src="/static/js/image-adjust-engine.js?v=1.0.126.1791729997"></script>
+    <script defer src="/static/js/image-adjust-editor.js?v=1.0.126.1791729997"></script>
+    <script defer src="/static/js/smart-canvas.js?v=1.0.126.1792228719"></script>
 </body>
 </html>

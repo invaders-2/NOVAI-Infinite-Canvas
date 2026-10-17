@@ -56,6 +56,8 @@ def build_exe():
         "requests",
         "pystray", "pystray._win32", "pystray._util", "six",  # 系统托盘
         "qrcode", "qrcode.main", "qrcode.constants", "qrcode.util",  # 局域网二维码
+        # 外置 main.py / server/ 会随在线更新替换，运行环境必须提前带齐它们可能新引入的模块
+        "html.parser", "openpyxl",
     ]
 
     cmd_parts = [
