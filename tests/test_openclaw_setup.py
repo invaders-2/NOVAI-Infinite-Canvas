@@ -10,6 +10,7 @@
   - 确认后执行 → 实时回传日志 → 自动重新检测验证，整条链真跑（用假 openclaw 二进制，不装任何东西）
   - 权限提示 / 权限失败识别与手动指引只来自配置（env 可覆盖）
   - Chrome/Chromium 检测：配置文件路径 + 环境变量覆盖，找不到时只如实标记、不阻断
+  - 桌面启动的短 PATH：openclaw 的 `#!/usr/bin/env node` 要能找到 ~/.openclaw/tools/node/bin 的 Node
 
 跑法：/usr/bin/python3 tests/test_openclaw_setup.py
 """
@@ -53,12 +54,38 @@ def env(**values):
         s._ACTIVE = None
 
 
+def make_executable(path):
+    os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
 def make_fake_openclaw(folder, version="9.9.9"):
     path = os.path.join(folder, "openclaw")
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("#!/bin/sh\necho \"OpenClaw %s (test)\"\n" % version)
-    os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    return path
+    return make_executable(path)
+
+
+def make_fake_node(folder, node_version="26.12.0", openclaw_version="9.9.9"):
+    """假 node：被 openclaw 脚本调用时打印 openclaw 版本，--version 时打印 node 版本。"""
+    path = os.path.join(folder, "node")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(
+            "#!/bin/sh\n"
+            "case \"$1\" in\n"
+            "  *openclaw*) echo \"OpenClaw %s (test)\" ;;\n"
+            "  *) echo \"v%s\" ;;\n"
+            "esac\n" % (openclaw_version, node_version)
+        )
+    return make_executable(path)
+
+
+def make_env_node_openclaw(folder):
+    """和真实安装一样，靠 `#!/usr/bin/env node` 找 node 的 openclaw 脚本。"""
+    path = os.path.join(folder, "openclaw")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("#!/usr/bin/env node\n")
+    return make_executable(path)
 
 
 class TestConfigDriven(unittest.TestCase):
@@ -222,6 +249,64 @@ class TestDetection(unittest.TestCase):
     def test_cancel_without_active_session(self):
         s._ACTIVE = None
         self.assertFalse(s.cancel_install())
+
+
+class TestGuiShortPath(unittest.TestCase):
+    """桌面（Finder / LaunchAgent）启动时 PATH 只有 /usr/bin:/bin:/usr/sbin:/sbin：
+    openclaw 的 `#!/usr/bin/env node` 会找不到 node，检测恒为不可用。"""
+
+    MINIMAL_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+    def test_default_bin_dirs_put_openclaw_node_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = os.path.join(tmp, "home")
+            os.makedirs(home)
+            with env(HOME=home):
+                dirs = s._default_bin_dirs()
+            self.assertEqual(os.path.join(home, ".openclaw", "tools", "node", "bin"), dirs[0])
+
+    def test_install_environ_preserves_bin_dirs_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = os.path.join(tmp, "home")
+            os.makedirs(home)
+            with env(HOME=home, PATH=self.MINIMAL_PATH):
+                cfg = s.load_config()[0]
+                dirs = s.bin_dirs(cfg)
+                parts = s.install_environ(cfg)["PATH"].split(os.pathsep)
+            self.assertEqual(dirs, parts[:len(dirs)])
+            self.assertEqual(self.MINIMAL_PATH, os.pathsep.join(parts[len(dirs):]))
+
+    def test_run_capture_passes_env(self):
+        marker = "novai-env-probe-4f1c"
+        code, out = s._run_capture(
+            ["/bin/sh", "-c", 'printf "%s" "$NOVAI_OC_TEST_ENV"'],
+            5.0,
+            env={"PATH": self.MINIMAL_PATH, "NOVAI_OC_TEST_ENV": marker},
+        )
+        self.assertEqual(0, code)
+        self.assertEqual(marker, out)
+        _, inherited = s._run_capture(["/bin/sh", "-c", 'printf "%s" "$NOVAI_OC_TEST_ENV"'], 5.0)
+        self.assertEqual("", inherited)
+
+    def test_detect_finds_node_for_shebang_under_gui_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = os.path.join(tmp, "home")
+            node_dir = os.path.join(home, ".openclaw", "tools", "node", "bin")
+            local_bin = os.path.join(home, ".local", "bin")
+            os.makedirs(node_dir)
+            os.makedirs(local_bin)
+            make_fake_node(node_dir, node_version="26.12.0", openclaw_version="2026.10.4")
+            make_env_node_openclaw(local_bin)
+            with env(HOME=home, PATH=self.MINIMAL_PATH,
+                     NOVAI_OPENCLAW_BIN=None, NOVAI_OPENCLAW_BIN_DIRS=None,
+                     NOVAI_OPENCLAW_SETUP_CONFIG=None):
+                data = s.detect(force=True)
+            self.assertTrue(data["installed"], data["errors"])
+            self.assertTrue(data["available"], data["errors"])
+            self.assertEqual("2026.10.4", data["version"])
+            self.assertEqual([], data["errors"])
+            self.assertEqual(os.path.join(node_dir, "node"), data["node"]["path"])
+            self.assertTrue(data["node"]["satisfies"])
 
 
 class TestInstallSession(unittest.TestCase):

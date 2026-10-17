@@ -1,14 +1,23 @@
 {
-  "version": "1.0.126",
-  "updated_at": "2026-10-18T01:39:48+08:00",
+  "version": "1.0.127",
+  "updated_at": "2026-10-18T03:08:05+08:00",
   "items": [
-    { "type": "fix", "text": "修复 1.0.125 在 macOS 上启动即崩的问题（报错 No module named 'html.parser'）：1.0.124 及更早版本的机器内置运行环境缺少这个标准库模块，新版外置代码一导入整个后端就起不来。" },
-    { "type": "fix", "text": "老运行时兼容：html.parser 缺失时自动降级为内置文本提取（剥标签、去脚本/样式、还原实体），报告与网页链接照常解析出可读文本，不再影响启动。" },
-    { "type": "improvement", "text": "启动失败提示更明确：程序文件与安装包版本不匹配时，直接提示「在线更新不会替换内置运行环境，请重新下载最新完整安装包覆盖安装」。" },
-    { "type": "improvement", "text": "新安装包的内置运行环境补入 html.parser 与 openpyxl，外置代码再引入这类常用模块不会再出现「装了新代码却启动不了」。" },
-    { "type": "improvement", "text": "macOS 用户注意：本次必须下载完整 dmg 覆盖安装，应用内更新无法替换内置运行环境；Windows 用传统 exe 或 Electron 安装包均可。" }
+    { "type": "fix", "text": "修复内置 OpenClaw 在桌面启动时显示「不可用」的问题：macOS 从 Finder / 登录项启动的 NOVAI 进程 PATH 很短（只有 /usr/bin:/bin:/usr/sbin:/sbin），openclaw 的 #!/usr/bin/env node 找不到 Node；检测与安装现在都会带上 OpenClaw 自带的用户态 Node 目录。" },
+    { "type": "fix", "text": "Node 识别更准：优先使用 ~/.openclaw/tools/node/bin 里的用户态 Node，系统 Node 版本不够时不再误报「Node 不满足要求」。" },
+    { "type": "improvement", "text": "已安装 1.0.126 的用户直接在应用内更新即可，无需重新下载安装包；Node 与 Gateway 已就绪的机器更新后就能看到 OpenClaw 可用。" }
   ],
   "history": [
+    {
+      "version": "1.0.126",
+      "updated_at": "2026-10-18T01:39:48+08:00",
+      "items": [
+        { "type": "fix", "text": "修复 1.0.125 在 macOS 上启动即崩的问题（报错 No module named 'html.parser'）：1.0.124 及更早版本的机器内置运行环境缺少这个标准库模块，新版外置代码一导入整个后端就起不来。" },
+        { "type": "fix", "text": "老运行时兼容：html.parser 缺失时自动降级为内置文本提取（剥标签、去脚本/样式、还原实体），报告与网页链接照常解析出可读文本，不再影响启动。" },
+        { "type": "improvement", "text": "启动失败提示更明确：程序文件与安装包版本不匹配时，直接提示「在线更新不会替换内置运行环境，请重新下载最新完整安装包覆盖安装」。" },
+        { "type": "improvement", "text": "新安装包的内置运行环境补入 html.parser 与 openpyxl，外置代码再引入这类常用模块不会再出现「装了新代码却启动不了」。" },
+        { "type": "improvement", "text": "macOS 用户注意：本次必须下载完整 dmg 覆盖安装，应用内更新无法替换内置运行环境；Windows 用传统 exe 或 Electron 安装包均可。" }
+      ]
+    },
     {
       "version": "1.0.125",
       "updated_at": "2026-10-18T01:10:36+08:00",

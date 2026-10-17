@@ -209,6 +209,12 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 
 ## 版本更新说明
 
+### v1.0.127
+
+- **修复 OpenClaw 在桌面启动时显示「不可用」**：macOS 从 Finder / 登录项启动的 NOVAI 进程 PATH 很短（只有 `/usr/bin:/bin:/usr/sbin:/sbin`），`openclaw` 的 `#!/usr/bin/env node` 找不到 Node；检测与安装现在都会带上 OpenClaw 自带的用户态 Node 目录，已装好 Node 与 Gateway 的机器更新后即可用
+- **Node 识别更准**：优先使用 `~/.openclaw/tools/node/bin` 里的用户态 Node，系统 Node 版本不够时不再误报「Node 不满足要求」
+- **无需重装**：已安装 1.0.126 的用户直接在应用内更新即可
+
 ### v1.0.126
 
 - **热修复：修复 1.0.125 在 macOS 上启动即崩**（`No module named 'html.parser'`）——1.0.124 及更早版本的机器内置运行环境缺少该模块，新版外置代码一导入后端就起不来；现在缺失时自动降级为内置文本提取，报告与网页链接解析照常工作

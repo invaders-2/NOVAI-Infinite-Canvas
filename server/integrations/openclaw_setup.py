@@ -132,6 +132,8 @@ def _default_bin_dirs() -> List[str]:
     # macOS GUI 启动的 Electron 拿不到登录 shell 的 PATH，常见的 npm 全局 bin 目录要主动找。
     # 这份目录清单放配置文件（binary.extra_dirs），这里只是结构缺省，可用 NOVAI_OPENCLAW_BIN_DIRS 覆盖。
     return [
+        # OpenClaw 安装脚本自带的用户态 Node（桌面启动时系统 PATH 里没有它）
+        os.path.join(os.path.expanduser("~"), ".openclaw", "tools", "node", "bin"),
         os.path.join(os.path.expanduser("~"), ".npm-global", "bin"),
         os.path.join(os.path.expanduser("~"), ".local", "bin"),
         "/usr/local/bin",
@@ -357,13 +359,14 @@ def permission_failure(config: Dict[str, Any], logs: List[str]) -> str:
     return ""
 
 
-def _run_capture(argv: List[str], timeout: float) -> Tuple[int, str]:
+def _run_capture(argv: List[str], timeout: float, env: Optional[Dict[str, str]] = None) -> Tuple[int, str]:
     try:
         proc = subprocess.run(
             argv,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             timeout=timeout,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return -1, str(exc)
@@ -371,10 +374,10 @@ def _run_capture(argv: List[str], timeout: float) -> Tuple[int, str]:
     return int(proc.returncode), text.strip()
 
 
-def probe_binary(path: str, timeout: float) -> Dict[str, Any]:
+def probe_binary(path: str, timeout: float, env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     if not path:
         return {"ok": False, "raw": "", "version": "", "error": "未找到可执行文件"}
-    code, out = _run_capture([path, "--version"], timeout)
+    code, out = _run_capture([path, "--version"], timeout, env=env)
     if code != 0:
         return {"ok": False, "raw": out, "version": "", "error": out or ("退出码 %s" % code)}
     version = parse_version(out)
@@ -581,7 +584,7 @@ def detect(force: bool = False) -> Dict[str, Any]:
         version_timeout = 5.0
 
     binary_path, searched = find_binary(config)
-    probed = probe_binary(binary_path, version_timeout)
+    probed = probe_binary(binary_path, version_timeout, env=install_environ(config))
     if binary_path and not probed.get("ok"):
         errors.append("openclaw 可执行文件存在但 --version 失败：%s" % probed.get("error"))
 
@@ -631,7 +634,8 @@ def install_environ(config: Dict[str, Any]) -> Dict[str, str]:
     env = dict(os.environ)
     current = env.get("PATH") or ""
     parts = [p for p in current.split(os.pathsep) if p]
-    for folder in bin_dirs(config):
+    # 倒序插入 → 最终 PATH 保持 bin_dirs 的顺序（首个目录优先级最高）
+    for folder in reversed(bin_dirs(config)):
         if folder and folder not in parts:
             parts.insert(0, folder)
     env["PATH"] = os.pathsep.join(parts)

@@ -188,6 +188,12 @@ The app checks all three sources for the latest version on startup, pushes updat
 
 ## Changelog
 
+### v1.0.127
+
+- **Fixed OpenClaw showing "unavailable" when NOVAI is launched from the desktop**: on macOS a Finder / login-item launch gives the process a very short PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), so the `#!/usr/bin/env node` shebang in `openclaw` could not find Node; detection and the installer now include OpenClaw's bundled user-level Node directory, so machines with Node and the Gateway already set up work right after updating
+- **More accurate Node detection**: the Node under `~/.openclaw/tools/node/bin` is preferred, so an older system Node no longer produces a false "Node does not satisfy requirements" warning
+- **No reinstall needed**: users on 1.0.126 can update in-app
+
 ### v1.0.126
 
 - **Hotfix: 1.0.125 crashed on launch on macOS** (`No module named 'html.parser'`) — machines still on the 1.0.124 or older frozen runtime were missing the module, and the new external code took the whole backend down on import; a missing `html.parser` now falls back to a built-in text extractor, so report and web-link parsing keep working
