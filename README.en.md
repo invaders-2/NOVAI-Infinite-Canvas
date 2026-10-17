@@ -188,6 +188,17 @@ The app checks all three sources for the latest version on startup, pushes updat
 
 ## Changelog
 
+### v1.0.125
+
+- **Image and video sizes / ratios follow the official specs**: presets, ratios and duration limits are aligned with each platform's docs, and unsupported picks are called out in the dropdown instead of failing at generation time
+- **Editor split by node type**: image nodes expose only image parameters and video nodes only video parameters; the new-node menu gains "Image node" and "Video node" entries
+- **Right-click image / video nodes**: duplicate, copy, generate another, pick, download, add to group and delete without opening the node first
+- **Group drag and scale**: drag a whole group and scale it proportionally, members are laid out in a grid and never clipped even when tiny; align / distribute tidies the canvas in one click
+- **Asset library type filter**: browse by image / video / audio instead of paging through everything
+- **Storyboard tables with multiple rows and per-row duration**: reference videos are cut per row using the seconds set on that row
+- **Agent capability overview**: built-in skills, skill import and the OpenClaw setup guide in one place, so you can see what the current platform supports
+- **Fixes**: Agnes video model aliases are normalised to 2.5 / 2.5-flash with official ratios and 1K–4K tiers; Lovart only counts as configured when both Access Key and Secret Key are set; the Run button on generation / video nodes is no longer pushed out of view; Chinese and English strings are back in sync
+
 ### v1.0.124
 
 - **New front end (NOVAI 2.0), page by page**: the shell, canvas list, online image / Z-Image, GPT chat and the whole settings modal (general / API / workflow / backup / appearance / about) are rewritten in Vue; the previous UI stays available from the "Legacy UI" entry
