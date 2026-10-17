@@ -188,6 +188,14 @@ The app checks all three sources for the latest version on startup, pushes updat
 
 ## Changelog
 
+### v1.0.126
+
+- **Hotfix: 1.0.125 crashed on launch on macOS** (`No module named 'html.parser'`) — machines still on the 1.0.124 or older frozen runtime were missing the module, and the new external code took the whole backend down on import; a missing `html.parser` now falls back to a built-in text extractor, so report and web-link parsing keep working
+- **Older runtime compatibility**: in-app updates only replace external files, not the bundled runtime, so a missing module no longer stops the backend from starting
+- **Clearer startup errors**: when program files and the installer version do not match, the app now tells you to download the latest full installer and install it over the old one
+- **Bundled dependencies**: new installers include `html.parser` and `openpyxl` in the frozen runtime
+- **macOS users**: you must download and install the full dmg over the existing app — the in-app updater cannot fix this; on Windows either the classic exe or the Electron installer works
+
 ### v1.0.125
 
 - **Image and video sizes / ratios follow the official specs**: presets, ratios and duration limits are aligned with each platform's docs, and unsupported picks are called out in the dropdown instead of failing at generation time
