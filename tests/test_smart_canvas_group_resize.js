@@ -58,6 +58,8 @@ const sandboxSrc = [
     'function smartGroupMembers(g){const ids=Array.isArray(g.items)?g.items:[];return ids.map(id=>nodes.find(n=>n.id===id)).filter(m=>m&&!isSmartGroupNode(m));}',
     'function smartGroupCompactMembers(g){return smartGroupMembers(g).filter(m=>m.type==="smart-prompt"||m.type==="smart-loop");}',
     'function smartGroupMemberImageNodes(g){return smartGroupMembers(g).filter(m=>isSmartMediaNode(m)&&(m.images||[]).some(i=>i&&i.url));}',
+    'function smartGroupReadingRowTolerance(a,b){const ra=nodeRect(a),rb=nodeRect(b);const minH=Math.min(Number(ra.height)||0,Number(rb.height)||0);return Math.max(2,Math.min(24,minH*0.5));}',
+    'function smartGroupReadingOrder(a,b){const ra=nodeRect(a),rb=nodeRect(b);const dy=(Number(ra.y)||0)-(Number(rb.y)||0);if(Math.abs(dy)>smartGroupReadingRowTolerance(a,b))return dy;return (Number(ra.x)||0)-(Number(rb.x)||0);}',
     'function nodeRect(n){return {x:Number(n.x)||0,y:Number(n.y)||0,width:Number(n.w)||Number(n.rectW)||120,height:Number(n.h)||Number(n.rectH)||120};}',
     'function syncSmartGroupMemberElements(){}',
     'function pushUndo(){}',

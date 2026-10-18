@@ -45,7 +45,7 @@ ok(/分组里的真实图片成员/.test(js) && /smartGroupContainingNode\(node\
 
 console.log('[2] 行为：真实函数在沙盒里跑确定性矩阵');
 const constNames = ['SMART_GROUP_MIN_WIDTH','SMART_GROUP_MIN_HEIGHT','SMART_GROUP_DEFAULT_WIDTH','SMART_GROUP_DEFAULT_HEIGHT','SMART_GROUP_ARRANGE_PADDING','SMART_GROUP_ARRANGE_GAP','SMART_GROUP_ARRANGE_HEADER','SMART_GROUP_MAX_MEMBER_ZOOM','MEDIA_GROUP_THUMB_BASE','MEDIA_GROUP_DEFAULT_SCALE','SMART_GROUP_MAX_VISIBLE_ROWS','MEDIA_NODE_DEFAULT_SCALE','MEDIA_GROUP_MAX_VISIBLE_ROWS'];
-const fnNames = ['smartGroupMembers','smartGroupCompactMembers','smartGroupMemberImageNodes','smartGroupCardImageRefs','mediaLayoutSize','mediaNodeDefaultScale','isAudioMediaItem','smartGroupSingleInnerBox','singleImageLayout','groupImageGridLayout','smartGroupThumbLayout','arrangeSmartGroupMembersInFrame'];
+const fnNames = ['smartGroupMembers','smartGroupCompactMembers','smartGroupMemberImageNodes','smartGroupCardImageRefs','mediaLayoutSize','mediaNodeDefaultScale','isAudioMediaItem','smartGroupSingleInnerBox','singleImageLayout','groupImageGridLayout','smartGroupThumbLayout','arrangeSmartGroupMembersInFrame','smartGroupReadingRowTolerance','smartGroupReadingOrder'];
 let src = constNames.map(c => constant(js, c)).filter(Boolean).join('\n') + '\n';
 src += 'let nodes=[];let canvas={connections:[]};\n';
 src += 'function nodeRect(n){return {x:Number(n.x)||0,y:Number(n.y)||0,width:(n.w!==undefined&&n.w!==null)?Number(n.w):120,height:(n.h!==undefined&&n.h!==null)?Number(n.h):120};}\n';

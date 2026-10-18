@@ -723,6 +723,8 @@ body.canvas-port-linking .port { opacity:1; pointer-events:auto; }
 .port.out { right:-40px; }
 .node > .port { top:50%; }
 .group-node,.promptGroup-node { min-width:260px; background:rgba(255,255,255,.96); border:0; box-shadow:0 16px 42px rgba(0,0,0,.08); z-index:0; }
+/* 手动拖过把手的群组听 node.w/h：否则 CSS 的 260px 下限会让框卡住、把手不跟手。 */
+.group-node.sized { min-width:0; }
 .group-node .node-head,.promptGroup-node .node-head { background:var(--surface); }
 .llm-node { width:420px; }
 .llm-body { display:flex; flex-direction:column; gap:10px; min-height:0; }

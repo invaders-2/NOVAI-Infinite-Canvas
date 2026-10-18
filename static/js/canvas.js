@@ -14438,7 +14438,7 @@ function onNodeResize(e){
         el.style.height = `${resizeNode.node.h}px`;
     }
     // 群组：拉伸时按新框实时重排组内成员——分组框就是布局的输入（和智能画布一致）
-    if(resizeNode.node.type === 'group') arrangeCanvasGroupMembers(resizeNode.node);
+    if(resizeNode.node.type === 'group') arrangeCanvasGroupMembers(resizeNode.node, {fitBox:true});
     scheduleLinksRender();
     renderSelectionHub();
     scheduleMinimapRender();
@@ -14816,13 +14816,35 @@ function syncCanvasNodeBox(node){
 //   1) 分组框是布局的输入——格子宽度先横向铺满，高度由成员里最大的宽高比反推；
 //   2) 高度超出框 = 这一行放太多，换更多列；
 //   3) 在「横向仍然铺满（≥90% 宽）」的候选里挑格子面积最大的，余量留在上下并居中。
+/* 手动拖把手时的兜底排布：框已经被手势定死，成员必须缩进框里（不再把分组撑大）。
+   格子最小 1px；框不够放 gap 时把间距收窄到 0，保证零越界、零重叠。 */
+function canvasGroupTightLayout(count, innerW, innerH, gap){
+    let best = null;
+    const maxCols = Math.max(1, Math.min(count, 24));
+    for(let cols = 1; cols <= maxCols; cols += 1){
+        const rows = Math.ceil(count / cols);
+        const gapX = cols > 1 ? Math.min(gap, Math.max(0, Math.floor((innerW - cols) / (cols - 1)))) : 0;
+        const gapY = rows > 1 ? Math.min(gap, Math.max(0, Math.floor((innerH - rows) / (rows - 1)))) : 0;
+        const w = Math.floor((innerW - (cols - 1) * gapX) / cols);
+        const h = Math.floor((innerH - (rows - 1) * gapY) / rows);
+        if(w < 1 || h < 1) continue;
+        const score = Math.min(w, h) * 100000 + w * h;
+        if(!best || score > best.score){
+            best = {cols:cols, rows:rows, w:w, h:h, gapX:gapX, gapY:gapY, score:score,
+                gridW:cols * w + (cols - 1) * gapX, gridH:rows * h + (rows - 1) * gapY};
+        }
+    }
+    return best;
+}
 function arrangeCanvasGroupMembers(group, options={}){
     if(!group || group.type !== 'group') return false;
     const members = (group.items || []).map(id => nodes.find(node => node.id === id)).filter(Boolean);
     if(!members.length) return false;
     const gap = 24, pad = 24, top = 64;
-    const boxW = Math.max(220, Math.round(Number(group.w) || 420));
-    const boxH = Math.max(180, Math.round(Number(group.h) || 280));
+    /* fitBox：拖把手的过程中框由手势决定，必须按真实框排（不再套 220x180 的下限，
+       否则缩到比下限还小时成员会排到框外）。 */
+    const boxW = options.fitBox ? Math.max(1, Math.round(Number(group.w) || 0)) : Math.max(220, Math.round(Number(group.w) || 420));
+    const boxH = options.fitBox ? Math.max(1, Math.round(Number(group.h) || 0)) : Math.max(180, Math.round(Number(group.h) || 280));
     const innerW = Math.max(0, boxW - pad * 2);
     const innerH = Math.max(0, boxH - top - pad);
     // 阅读顺序（先行后列），保证反复整理结果稳定
@@ -14843,7 +14865,9 @@ function arrangeCanvasGroupMembers(group, options={}){
         const hByHeight = Math.floor((innerH - (rows - 1) * gap) / rows);
         const w = Math.min(wByWidth, Math.round(hByHeight * refAspect));
         const h = Math.floor(w / refAspect);
-        if(w < 48 || h < 48) continue;
+        /* 手动拖把手时框已被手势定死：格子允许缩到 8px，不因为「放不下 48px 格子」把框撑回去。 */
+        const minCell = options.fitBox ? 8 : 48;
+        if(w < minCell || h < minCell) continue;
         const gridW = cols * w + (cols - 1) * gap;
         const gridH = rows * h + (rows - 1) * gap;
         if(gridW > innerW || gridH > innerH) continue;
@@ -14852,6 +14876,8 @@ function arrangeCanvasGroupMembers(group, options={}){
     const wide = cands.filter(cand => cand.fill >= 0.9);
     const pool = (wide.length ? wide : cands).slice().sort((a, b) => b.score - a.score);
     let chosen = pool[0] || null;
+    // 拖把手时放不下也要塞进框里：用收窄间距的兜底排布，绝不把分组撑回去。
+    if(!chosen && options.fitBox) chosen = canvasGroupTightLayout(count, innerW, innerH, gap);
     if(!chosen){
         // 框小到一列都放不下：单列排开，然后把分组撑到刚好装下。
         // （格子不能小于 .node 的 min-width:220，硬塞只会让成员互相压住。）
@@ -14871,11 +14897,13 @@ function arrangeCanvasGroupMembers(group, options={}){
     const offsetY = Math.max(0, Math.round((innerH - chosen.gridH) / 2));
     const originX = Number(group.x) + pad + Math.max(0, Math.round((innerW - chosen.gridW) / 2));
     const originY = Number(group.y) + top + offsetY;
+    const gapX = Number.isFinite(chosen.gapX) ? chosen.gapX : gap;
+    const gapY = Number.isFinite(chosen.gapY) ? chosen.gapY : gap;
     ordered.forEach((member, index) => {
         const col = index % chosen.cols;
         const row = Math.floor(index / chosen.cols);
-        member.x = Math.round(originX + col * (chosen.w + gap));
-        member.y = Math.round(originY + row * (chosen.h + gap));
+        member.x = Math.round(originX + col * (chosen.w + gapX));
+        member.y = Math.round(originY + row * (chosen.h + gapY));
         member.w = chosen.w;
         member.h = chosen.h;
         if(options.syncDom !== false) syncCanvasNodeBox(member);

@@ -2148,6 +2148,14 @@ function smartGroupLayoutSize(node){
         height:Math.round(height)
     };
 }
+/* 分组把手自由改宽高：宽高各自跟手（只拉宽 → 只变宽、只拉高 → 只变高），各自夹最小尺寸。
+   以前图片分组走 resizeBoxWithAspect（拿单一缩放倍数推另一边），拖一个方向另一维会跟着联动。 */
+function smartGroupFreeResizeBox(startW, startH, dx, dy, minW, minH){
+    return {
+        w:Math.max(minW, Math.round((Number(startW) || 0) + dx)),
+        h:Math.max(minH, Math.round((Number(startH) || 0) + dy))
+    };
+}
 function smartGroupMembers(node){
     if(!isSmartGroupNode(node)) return [];
     const ids = Array.isArray(node.items) ? node.items : [];
@@ -2257,6 +2265,19 @@ function smartGroupScopeId(nodeId){
     const node = nodes.find(n => n.id === nodeId);
     return isSmartGroupNode(node) ? node.id : '';
 }
+/* 分组阅读顺序：先行后列。行判定容差取「较矮成员高度的一半」（最多 24px）——
+   格子被拖到很小时，固定 24px 会把相邻两行并成一行，反复整理时成员顺序来回跳（不错乱的前提）。 */
+function smartGroupReadingRowTolerance(a, b){
+    const ra = nodeRect(a), rb = nodeRect(b);
+    const minH = Math.min(Number(ra.height) || 0, Number(rb.height) || 0);
+    return Math.max(2, Math.min(24, minH * 0.5));
+}
+function smartGroupReadingOrder(a, b){
+    const ra = nodeRect(a), rb = nodeRect(b);
+    const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
+    if(Math.abs(dy) > smartGroupReadingRowTolerance(a, b)) return dy;
+    return (Number(ra.x) || 0) - (Number(rb.x) || 0);
+}
 // 汇总分组内所有图片成员的图片，按阅读顺序（先行后列：成员当前 y 再 x）排成一维序列。
 // 返回 [{nodeId, index, source, item}]——source 是成员节点里真实的图片对象（写回自然尺寸用），
 // item 是 imageForDisplay 后的展示对象。预览左右切换、批量下载、宫格拼接都以它为数据源。
@@ -2270,12 +2291,7 @@ function smartGroupImageRefs(group){
     const members = smartGroupMembers(group)
         .filter(isSmartMediaNode)
         .slice()
-        .sort((a, b) => {
-            const ra = nodeRect(a), rb = nodeRect(b);
-            const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
-            if(Math.abs(dy) > 24) return dy;
-            return (Number(ra.x) || 0) - (Number(rb.x) || 0);
-        });
+        .sort(smartGroupReadingOrder);
     members.forEach(node => {
         (node.images || []).forEach((img, index) => {
             const item = imageForDisplay(img);
@@ -2297,12 +2313,7 @@ function smartGroupCardImageRefs(group){
 function smartGroupMemberImageNodes(group){
     return smartGroupMembers(group)
         .filter(node => isSmartMediaNode(node) && (node.images || []).some(img => img?.url))
-        .sort((a, b) => {
-            const ra = nodeRect(a), rb = nodeRect(b);
-            const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
-            if(Math.abs(dy) > 24) return dy;
-            return (Number(ra.x) || 0) - (Number(rb.x) || 0);
-        });
+        .sort(smartGroupReadingOrder);
 }
 /* 分组卡片里「单张媒体」的可用内框：在给定内框内按素材自己的比例等比缩放（图片/视频都不裁切）。
    量不到素材尺寸时退回整个内框（保持老行为）。 */
@@ -2622,12 +2633,7 @@ function arrangeSmartGroupMembers(group, options={}){
             member.h = thumbH;
             member.scale = 1;
         };
-        const ordered = compactMembers.slice().sort((a, b) => {
-            const ra = nodeRect(a), rb = nodeRect(b);
-            const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
-            if(Math.abs(dy) > 24) return dy;
-            return (Number(ra.x) || 0) - (Number(rb.x) || 0);
-        });
+        const ordered = compactMembers.slice().sort(smartGroupReadingOrder);
         ordered.forEach((member, memberIndex) => placeCell(member, refs.length + memberIndex));
         memberImages.forEach((member, imageIndex) => placeCell(member, refs.length + ordered.length + imageIndex));
         if(group._memberZoom !== undefined) group._memberZoom = 1;
@@ -2637,12 +2643,7 @@ function arrangeSmartGroupMembers(group, options={}){
     const members = smartGroupMembers(group);
     if(!members.length) return false;
     if(!options.skipUndo) pushUndo();
-    const ordered = members.slice().sort((a, b) => {
-        const ra = nodeRect(a), rb = nodeRect(b);
-        const dy = (Number(ra.y) || 0) - (Number(rb.y) || 0);
-        if(Math.abs(dy) > 24) return dy;
-        return (Number(ra.x) || 0) - (Number(rb.x) || 0);
-    });
+    const ordered = members.slice().sort(smartGroupReadingOrder);
     // 归一化图片成员尺寸：清掉入组缩放写入的 w/h，回到自然尺寸。否则反复拖出/拖入会越缩越小，
     // 且“整理”无法恢复——这是用户反馈的“拖出再拖入图片变小、整理也救不回来”的根因。
     ordered.forEach(node => {
@@ -12219,9 +12220,16 @@ function updateNodeElementDuringResize(node){
         if(grid){
             grid.style.setProperty('--thumb-cols', layout.cols);
             grid.style.setProperty('--thumb-size', `${layout.thumb}px`);
+            /* 分组的格子宽高可以不同（格高 by 素材比例），拖动把手时必须同步格高和居中偏移，
+               否则缩略图会沿用上一次渲染的高度，拖的过程中溢出/留空（松手 render 才修好）。 */
+            const groupCellH = isSmartGroupNode(node) ? Math.max(1, Math.round(Number(layout.thumbH) || Number(layout.thumb) || 96)) : 0;
+            if(groupCellH){
+                grid.style.setProperty('--group-thumb-h', `${groupCellH}px`);
+                grid.style.marginTop = `${Math.max(0, Math.round(Number(layout.contentOffsetY) || 0))}px`;
+            }
             // imageLayout 已按「手动尺寸铺满全部 / 自适应封顶」算好可见行数，这里直接用，不能再夹一次
             const visibleRows = Math.max(1, Number(layout.visibleRows || layout.rows || 1));
-            const fallbackMaxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
+            const fallbackMaxHeight = visibleRows * Number(groupCellH || layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
             // 格子按每张素材自己的比例走，可见高度要用布局算出来的真实高度；拖拽/缩放时同步也不能退回正方形口径
             const maxHeight = node?.sizeUserSet
                 ? (Number(layout.contentH) > 0 ? Math.round(Number(layout.contentH)) : fallbackMaxHeight)
@@ -29744,25 +29752,14 @@ function isMediaAspectLockedNode(node){
         const minW = node.type === 'smart-prompt' ? 260 : node.type === 'smart-text' ? 180 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
         // LLM 模式的提示词节点下限要高一些：tabs/供应商行/Input、Output 区/药丸行都是固定高度，太矮会压掉运行按钮
         const minH = node.type === 'smart-prompt' ? (node.llmEnabled ? promptNodeManualMinHeight(node) : 170) : node.type === 'smart-text' ? 110 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
-        if(node.type === 'smart-group' && smartGroupCardImageRefs(node).some(ref => ref.item?.url)){
-            // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
-            // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。
-            // 图片分组也是媒体容器：等比缩放（多图比例取手势起始的渲染比例），格子按新尺寸重排，缩略图不会裁歪。
-            const sized = resizeBoxWithAspect(node, resizeState, dx, dy, minW, minH);
+        if(node.type === 'smart-group'){
+            /* 分组框的宽高各自跟手：只拉宽就只变宽、只拉高就只变高，不再按单一缩放倍数等比联动。
+               图片分组（卡片缩略图）和真实成员分组走同一条路：框定好后按新框重排内容——
+               卡片缩略图网格 + 组内图片/视频节点都由 arrangeSmartGroupMembers 按新尺寸重新落格。
+               frame 模式只对纯真实成员生效：框由手势决定，不按内容包围盒收回去。 */
+            const sized = smartGroupFreeResizeBox(resizeState.startW, resizeState.startH, dx, dy, minW, minH);
             node.w = sized.w;
             node.h = sized.h;
-            // 组内布局跟着分组尺寸走：按新框重算格子，卡片缩略图和组内图片节点一起重排。
-            arrangeSmartGroupMembers(node, {skipUndo:true, syncDom:true});
-            updateNodeElementDuringResize(node);
-            return;
-        }
-        if(node.type === 'smart-group'){
-            /* 真实成员分组（组内只有提示词 / 带连线的图片节点，没有卡片缩略图）：
-               框自由跟手柄（宽高各自独立），随后把成员排进框内。
-               旧实现按成员包围盒把框收紧回来 —— 用户拖大拖小都被立刻弹回内容尺寸，
-               表现就是「分组节点无法自定义拖动大小」（老板报的根因）。 */
-            node.w = Math.max(minW, Math.round(resizeState.startW + dx));
-            node.h = Math.max(minH, Math.round(resizeState.startH + dy));
             node._memberZoom = 1;
             arrangeSmartGroupMembers(node, {skipUndo:true, syncDom:true, frame:true});
             node.scale = 1;
