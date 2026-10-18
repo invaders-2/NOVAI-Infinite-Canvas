@@ -3241,35 +3241,82 @@ function imageLayout(images, scale=1, node=null){
    - 手动拖过：框完全听用户的 —— 高度就是他拖的高度、缩略图解除放大上限。
      原来无论拖多高，高度都被「缩略图上限 × 可见行数」卡死（4 张图固定 488px），
      表现就是「结果群组往下拉不动」（用户报的）。 */
+/* 手动尺寸的多图 / 结果群组网格：框由用户的把手定死，格子必须整体落进框里。
+   逐列数试排：格宽同时受框宽、行高（每张按自己的比例）和间距约束；框很小时把间距收窄，
+   还不够就继续缩格（允许亚像素），绝不把框撑回去。评分先比格宽，再比行数（少一点更好读）。 */
+function fitManualMediaGridLayout(count, explicitW, explicitH, aspects, pad=32, gap=8){
+    const total = Math.max(1, Math.round(Number(count) || 1));
+    const list = Array.from({length:total}, (_, index) => {
+        const raw = Array.isArray(aspects) ? Number(aspects[index]) : NaN;
+        return Math.min(4, Math.max(0.25, Number.isFinite(raw) && raw > 0 ? raw : 1));
+    });
+    const innerW = Math.max(1, Math.round(Number(explicitW) || 0) - pad);
+    const innerH = Math.max(1, Math.round(Number(explicitH) || 0) - pad);
+    const maxGap = Math.max(0, Number(gap) || 0);
+    let best = null;
+    for(let cols = 1; cols <= total; cols += 1){
+        const rows = Math.ceil(total / cols);
+        const gapX = cols > 1 ? Math.min(maxGap, Math.max(0, Math.floor((innerW - cols) / (cols - 1)))) : 0;
+        const gapY = rows > 1 ? Math.min(maxGap, Math.max(0, Math.floor((innerH - rows) / (rows - 1)))) : 0;
+        const widthThumb = (innerW - (cols - 1) * gapX) / cols;
+        if(!(widthThumb > 0)) continue;
+        let invSum = 0;
+        for(let start = 0; start < total; start += cols){
+            let minAspect = 4;
+            for(let i = start; i < Math.min(start + cols, total); i += 1) minAspect = Math.min(minAspect, list[i]);
+            invSum += 1 / Math.max(0.25, minAspect);
+        }
+        const heightThumb = (innerH - (rows - 1) * gapY) / invSum;
+        const thumb = Math.min(widthThumb, heightThumb);
+        if(!(thumb > 0)) continue;
+        /* 保留两位小数：CSS 取整后也不能顶破框。 */
+        const cellW = Math.floor(thumb * 100) / 100;
+        const contentH = cellW * invSum + (rows - 1) * gapY;
+        const gridW = cols * cellW + (cols - 1) * gapX;
+        if(gridW > innerW + 0.01 || contentH > innerH + 0.01) continue;
+        const better = !best || cellW > best.thumb + 0.001
+            || (Math.abs(cellW - best.thumb) <= 0.001 && rows < best.rows);
+        if(better) best = {cols, rows, thumb:cellW, contentH, gridW, gapX, gapY};
+    }
+    if(!best){
+        let invSum = 0;
+        list.forEach(aspect => { invSum += 1 / Math.max(0.25, aspect); });
+        const thumb = Math.max(0.01, Math.min(innerW / total, innerH / invSum));
+        best = {cols:total, rows:1, thumb, contentH:thumb * invSum, gridW:total * thumb, gapX:0, gapY:0};
+    }
+    return {cols:best.cols, rows:best.rows, thumb:best.thumb, gapX:best.gapX, gapY:best.gapY,
+        contentH:Math.min(innerH, best.contentH)};
+}
 function fittedMediaGridLayout(node, count, explicitW, explicitH, maxThumb, PAD, aspects=null){
     const manual = Boolean(node && node.sizeUserSet);
-    const fitted = groupImageGridLayout(count, explicitW, explicitH, manual ? 100000 : maxThumb, PAD, 8, manual ? count : MEDIA_GROUP_MAX_VISIBLE_ROWS);
     const cellAspects = Array.isArray(aspects) && aspects.length ? aspects : new Array(Math.max(1, count)).fill(1);
-    /* 格子高度按每张素材自己的比例算（同一行取最高的一格）。没拿到比例就当正方形，等价于原来的算法。 */
-    let thumb = fitted.thumb;
-    let rowHeights = thumbGridRowHeights(cellAspects, fitted.cols, thumb);
-    /* 手动拖过尺寸的框是固定的：比例差异大时，按正方形拟合出的缩略图会让整块网格高于框。
-       这里把缩略图整体等比缩小，直到**全部行**都落进框内（列数 / 行序 / 8px 间距都不变）。 */
     if(manual){
-        const innerH = Math.max(24, Math.round(explicitH) - PAD);
-        /* 极端比例（如 1:10）下，即使缩到 24px 宽，一格也可能高过整个内框；下限放到 6px，
-           继续等比收窄缩略图，保证全部行都落进框里。 */
-        const minThumb = 6;
-        for(let guard = 0; guard < 24 && rowHeights.contentH > innerH && thumb > minThumb; guard += 1){
-            const scaled = Math.floor(thumb * innerH / rowHeights.contentH);
-            thumb = Math.max(minThumb, Math.min(thumb - 1, scaled));
-            rowHeights = thumbGridRowHeights(cellAspects, fitted.cols, thumb);
-        }
+        const fit = fitManualMediaGridLayout(count, explicitW, explicitH, cellAspects, PAD);
+        return {
+            cols:fit.cols,
+            rows:fit.rows,
+            visibleRows:fit.rows,
+            width:Math.round(explicitW),
+            height:Math.round(explicitH),
+            thumb:fit.thumb,
+            visibleH:fit.contentH,
+            contentH:fit.contentH,
+            gapX:fit.gapX,
+            gapY:fit.gapY
+        };
     }
-    const visibleRows = manual ? fitted.rows : fitted.visibleRows;
+    const fitted = groupImageGridLayout(count, explicitW, explicitH, maxThumb, PAD, 8, MEDIA_GROUP_MAX_VISIBLE_ROWS);
+    /* 格子高度按每张素材自己的比例算（同一行取最高的一格）。没拿到比例就当正方形，等价于原来的算法。 */
+    const rowHeights = thumbGridRowHeights(cellAspects, fitted.cols, fitted.thumb);
+    const visibleRows = fitted.visibleRows;
     const visibleH = thumbGridRowsHeight(rowHeights.rowHeights, visibleRows);
     return {
         cols:fitted.cols,
         rows:fitted.rows,
         visibleRows,
         width:Math.round(explicitW),
-        height:manual ? Math.round(explicitH) : visibleH + PAD,
-        thumb,
+        height:visibleH + PAD,
+        thumb:fitted.thumb,
         visibleH,
         contentH:rowHeights.contentH
     };
@@ -12220,6 +12267,10 @@ function updateNodeElementDuringResize(node){
         if(grid){
             grid.style.setProperty('--thumb-cols', layout.cols);
             grid.style.setProperty('--thumb-size', `${layout.thumb}px`);
+            const gridGapX = Number.isFinite(Number(layout.gapX)) ? Number(layout.gapX) : 8;
+            const gridGapY = Number.isFinite(Number(layout.gapY)) ? Number(layout.gapY) : 8;
+            grid.style.setProperty('--thumb-gap-x', `${gridGapX}px`);
+            grid.style.setProperty('--thumb-gap-y', `${gridGapY}px`);
             /* 分组的格子宽高可以不同（格高 by 素材比例），拖动把手时必须同步格高和居中偏移，
                否则缩略图会沿用上一次渲染的高度，拖的过程中溢出/留空（松手 render 才修好）。 */
             const groupCellH = isSmartGroupNode(node) ? Math.max(1, Math.round(Number(layout.thumbH) || Number(layout.thumb) || 96)) : 0;
@@ -12229,7 +12280,7 @@ function updateNodeElementDuringResize(node){
             }
             // imageLayout 已按「手动尺寸铺满全部 / 自适应封顶」算好可见行数，这里直接用，不能再夹一次
             const visibleRows = Math.max(1, Number(layout.visibleRows || layout.rows || 1));
-            const fallbackMaxHeight = visibleRows * Number(groupCellH || layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
+            const fallbackMaxHeight = visibleRows * Number(groupCellH || layout.thumb || 96) + Math.max(0, visibleRows - 1) * gridGapY;
             // 格子按每张素材自己的比例走，可见高度要用布局算出来的真实高度；拖拽/缩放时同步也不能退回正方形口径
             const maxHeight = node?.sizeUserSet
                 ? (Number(layout.contentH) > 0 ? Math.round(Number(layout.contentH)) : fallbackMaxHeight)
@@ -14207,7 +14258,9 @@ function thumbGridHtml(node, imgs, layout, pendingSlots = 0, failedSlots = 0){
     const slots = Array.from({length:kinds.running}).map(() => `<div class="loading-cell pending-thumb" data-pending-slot="1" title="${escapeHtml(tr('smart.hintPending'))}" style="width:${thumb}px;aspect-ratio:${pendingAspect}"></div>`).join('')
         + Array.from({length:kinds.queued}).map(() => `<div class="loading-cell pending-thumb is-queued" data-pending-queued="1" title="排队中" style="width:${thumb}px;aspect-ratio:${pendingAspect}"></div>`).join('')
         + Array.from({length:Math.max(0, failedSlots)}).map(() => `<div class="loading-cell pending-thumb is-failed" data-pending-failed="1" title="这一行生成失败" style="width:${thumb}px;aspect-ratio:${pendingAspect}"></div>`).join('');
-    return `<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${layout.cols}; --thumb-size:${thumb}px; --thumb-max-height:${maxHeight}px">${thumbs}${slots}</div>`;
+    const gapX = Number.isFinite(Number(layout.gapX)) ? Number(layout.gapX) : 8;
+    const gapY = Number.isFinite(Number(layout.gapY)) ? Number(layout.gapY) : 8;
+    return `<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${layout.cols}; --thumb-size:${thumb}px; --thumb-gap-x:${gapX}px; --thumb-gap-y:${gapY}px; --thumb-max-height:${maxHeight}px">${thumbs}${slots}</div>`;
 }
 function jimengPendingBodyHtml(node, layout){
     const jp = node.jimengPending || {};
@@ -29766,6 +29819,23 @@ function isMediaAspectLockedNode(node){
             updateNodeElementDuringResize(node);
             return;
         }
+        /* 多图 / 多视频 / 批量结果群组：格子里不止一张素材时，框的宽高各自跟手（和分组把手同一套），
+           内部网格由 imageLayout 的 manual 分支按新框重排。单图 / 单视频仍走下面的等比缩放（Boss 硬规则）。 */
+        const mediaItems = (node.images || []).filter(item => item && item.url);
+        const hasGridSplit = mediaItems.some(item => item?.grid?.type === 'grid-split');
+        const freeGridResize = isSmartMediaNode(node) && !hasGridSplit && (
+            mediaItems.length > 1
+            || pendingSlotsForNode(node) > 1
+            || (Array.isArray(node.batchRowOrder) && node.batchRowOrder.length > 1)
+        );
+        if(freeGridResize){
+            const sized = smartGroupFreeResizeBox(resizeState.startW, resizeState.startH, dx, dy, minW, minH);
+            node.w = sized.w;
+            node.h = sized.h;
+            node.scale = 1;
+            updateNodeElementDuringResize(node);
+            return;
+        }
         const singleVideoItem = (node.images || []).length === 1 && isVideoMediaItem((node.images || [])[0]);
         if(singleVideoItem || isMediaAspectLockedNode(node)){
             // 视频 / 图片节点：按素材原始宽高比等比缩放，避免 object-fit:cover 把画面裁剪变形
@@ -32551,7 +32621,9 @@ function batchRowGridHtml(node, imgs, layout, order){
     const maxHeight = node?.sizeUserSet
         ? (Number(layout.contentH) > 0 ? Math.round(Number(layout.contentH)) : fallbackMaxHeight)
         : (Number(layout.visibleH) > 0 ? Math.round(Number(layout.visibleH)) : fallbackMaxHeight);
-    return '<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:' + cols + '; --thumb-size:' + thumb + 'px; --thumb-max-height:' + maxHeight + 'px">' + rowCells.join('') + '</div>';
+    const gapX = Number.isFinite(Number(layout.gapX)) ? Number(layout.gapX) : 8;
+    const gapY = Number.isFinite(Number(layout.gapY)) ? Number(layout.gapY) : 8;
+    return '<div class="thumb-grid" data-thumb-scroll="1" style="--thumb-cols:' + cols + '; --thumb-size:' + thumb + 'px; --thumb-gap-x:' + gapX + 'px; --thumb-gap-y:' + gapY + 'px; --thumb-max-height:' + maxHeight + 'px">' + rowCells.join('') + '</div>';
 }
 function batchRowThumbHtml(node, img, index){
     const selected = selectedImage.nodeId === node.id && selectedImage.index === index ? 'image-selected' : '';

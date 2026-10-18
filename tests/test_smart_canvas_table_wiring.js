@@ -99,7 +99,7 @@ ok(!/downstream\[0\] \|\| nodes\.find\(n => n\.type === 'smart-batch'\)/.test(js
 ok(/node\?\.type === 'table' \|\| node\?\.type === 'smart-batch'/.test(js), '表格/批量节点布局直接听 node.w/h（不再被自身的产出图网格算死）');
 // ④ 生成结果群组能自定义往下拉
 ok(js.includes('function fittedMediaGridLayout('), '多图节点手动尺寸走 fittedMediaGridLayout');
-ok(/manual \? 100000 : maxThumb/.test(js), '手动尺寸解除缩略图放大上限（往下拉会真的变大）');
+ok(/if\(manual\)\{[\s\S]{0,220}?fitManualMediaGridLayout/.test(js) && !/manual \? 100000 : maxThumb/.test(js), '手动尺寸按框重新拟合（缩略图不再被 maxThumb 封顶）');
 ok(js.includes('manualSizable') && /manualSizable && !node\.sizeUserSet/.test(js), '真拖动之后才标记手动尺寸（单击把手不锁死）');
 ok(/\$\{node\.sizeUserSet \? 'size-user-set' : ''\}/.test(js), '手动尺寸类重新渲染后仍保留');
 
@@ -422,6 +422,7 @@ const scaleConstSrc = (js.match(/const MEDIA_NODE_DEFAULT_SCALE = \d+;\s*\nconst
 const mediaScaleSrc = (js.match(/function mediaNodeDefaultScale\(node\)\{[\s\S]*?\n\}/) || [])[0] || '';
 const groupGridSrc = (js.match(/function groupImageGridLayout\([\s\S]*?\n\}/) || [])[0] || '';
 const fittedSrc = (js.match(/function fittedMediaGridLayout\([\s\S]*?\n\}/) || [])[0] || '';
+const manualFitSrc = (js.match(/function fitManualMediaGridLayout\([\s\S]*?\n\}/) || [])[0] || '';
 const imageLayoutSrc = (js.match(/function imageLayout\([\s\S]*?\n\}/) || [])[0] || '';
 /* 第 49 轮：格子按每张素材自己的比例，imageLayout 依赖这几个比例/高度小工具 */
 const mediaLayoutSizeSrc = (js.match(/function mediaLayoutSize\([\s\S]*?\n\}/) || [])[0] || '';
@@ -430,14 +431,14 @@ const pendingCellAspectSrc = (js.match(/function pendingCellAspect\([\s\S]*?\n\}
 const rowHeightsSrc = (js.match(/function thumbGridRowHeights\([\s\S]*?\n\}/) || [])[0] || '';
 const rowsHeightSrc = (js.match(/function thumbGridRowsHeight\([\s\S]*?\n\}/) || [])[0] || '';
 const cellAspectsSrc = (js.match(/function mediaGridCellAspects\([\s\S]*?\n\}/) || [])[0] || '';
-ok(Boolean(gridConstSrc && scaleConstSrc && mediaScaleSrc && groupGridSrc && fittedSrc && imageLayoutSrc
+ok(Boolean(gridConstSrc && scaleConstSrc && mediaScaleSrc && groupGridSrc && fittedSrc && manualFitSrc && imageLayoutSrc
     && mediaLayoutSizeSrc && cellAspectSrc && pendingCellAspectSrc && rowHeightsSrc && rowsHeightSrc && cellAspectsSrc), '布局函数与常量都能从源码抠出来');
 let imageLayoutFn = null;
 try {
     imageLayoutFn = new Function('pendingSlotsForNode',
         scaleConstSrc + '\n' + gridConstSrc + '\n' + mediaScaleSrc + '\n' + mediaLayoutSizeSrc + '\n' + cellAspectSrc + '\n'
         + 'function pendingRequestBoxForNode(){ return null; }\n' + pendingCellAspectSrc + '\n' + rowsHeightSrc + '\n' + rowHeightsSrc + '\n'
-        + cellAspectsSrc + '\n' + groupGridSrc + '\n' + fittedSrc + '\n'
+        + cellAspectsSrc + '\n' + groupGridSrc + '\n' + manualFitSrc + '\n' + fittedSrc + '\n'
         + 'function isSmartMediaNode(){ return false; }\nfunction smartGroupContainingNode(){ return null; }\n' + imageLayoutSrc
         + '\nreturn imageLayout;')(() => 0);
 } catch(e){ imageLayoutFn = null; }

@@ -1208,7 +1208,7 @@ body.svc-fullscreen-active { overflow:hidden; }
 .media-thumb.file-thumb { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; background:var(--soft); color:var(--muted); text-align:center; padding:5px; }
 .media-thumb.file-thumb span { max-width:86%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; font-weight:800; }
 .media-thumb.file-thumb i,.media-thumb.file-thumb svg { width:18px; height:18px; }
-.thumb-grid { display:grid; grid-template-columns:repeat(var(--thumb-cols, 2), var(--thumb-size, 96px)); gap:8px; justify-content:center; align-content:start; max-width:100%; max-height:var(--thumb-max-height, 304px); overflow-y:auto; overflow-x:hidden; padding-right:2px; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent; }
+.thumb-grid { display:grid; grid-template-columns:repeat(var(--thumb-cols, 2), var(--thumb-size, 96px)); column-gap:var(--thumb-gap-x, 8px); row-gap:var(--thumb-gap-y, 8px); justify-content:center; align-content:start; max-width:100%; max-height:var(--thumb-max-height, 304px); overflow-y:auto; overflow-x:hidden; padding-right:2px; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent; }
 .thumb-grid::-webkit-scrollbar { width:4px; }
 .thumb-grid::-webkit-scrollbar-track { background:transparent; }
 .thumb-grid::-webkit-scrollbar-thumb { background:var(--scrollbar); border-radius:var(--radius-full); }
