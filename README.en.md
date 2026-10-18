@@ -188,6 +188,13 @@ The app checks all three sources for the latest version on startup, pushes updat
 
 ## Changelog
 
+### v1.0.128
+
+- **No upload dialog when creating nodes**: new image / video nodes start empty instead of opening the file picker; pick or drop media when you actually need it
+- **Groups resize freely**: group nodes are no longer locked to aspect ratio — drag width and height independently, and media inside reflows to the new box
+- **Multi-image nodes and batch-result groups scale freely**: scaling a multi-image node or a batch-result group reflows the media automatically, with no clipping or overlap
+- **How to update**: users on 1.0.127 can update in-app; this release only changes external static / Python files, not the bundled runtime, and new downloads include all fixes
+
 ### v1.0.127
 
 - **Fixed OpenClaw showing "unavailable" when NOVAI is launched from the desktop**: on macOS a Finder / login-item launch gives the process a very short PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), so the `#!/usr/bin/env node` shebang in `openclaw` could not find Node; detection and the installer now include OpenClaw's bundled user-level Node directory, so machines with Node and the Gateway already set up work right after updating

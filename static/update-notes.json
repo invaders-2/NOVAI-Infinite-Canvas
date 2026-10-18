@@ -1,12 +1,22 @@
 {
-  "version": "1.0.127",
-  "updated_at": "2026-10-18T03:08:05+08:00",
+  "version": "1.0.128",
+  "updated_at": "2026-10-18T15:35:28+08:00",
   "items": [
-    { "type": "fix", "text": "修复内置 OpenClaw 在桌面启动时显示「不可用」的问题：macOS 从 Finder / 登录项启动的 NOVAI 进程 PATH 很短（只有 /usr/bin:/bin:/usr/sbin:/sbin），openclaw 的 #!/usr/bin/env node 找不到 Node；检测与安装现在都会带上 OpenClaw 自带的用户态 Node 目录。" },
-    { "type": "fix", "text": "Node 识别更准：优先使用 ~/.openclaw/tools/node/bin 里的用户态 Node，系统 Node 版本不够时不再误报「Node 不满足要求」。" },
-    { "type": "improvement", "text": "已安装 1.0.126 的用户直接在应用内更新即可，无需重新下载安装包；Node 与 Gateway 已就绪的机器更新后就能看到 OpenClaw 可用。" }
+    { "type": "fix", "text": "新建图片 / 视频节点后不再自动弹出上传选择框：先得到空白节点，需要素材时再手动选择或拖入，不会打断连续建节点的操作。" },
+    { "type": "feature", "text": "群组节点支持自由拉宽、拉高：不再锁定等比，横向纵向可单独拉伸，组内图片 / 视频按新尺寸自动重排。" },
+    { "type": "feature", "text": "多图节点与批量生成结果群组同样支持自由缩放：缩放后组内媒体自动重排，不裁切、不重叠。" },
+    { "type": "improvement", "text": "已安装 1.0.127 的用户直接在应用内更新即可；本次只改外置 static 与 Python 文件，不涉及内置运行时，新用户下载安装包即含全部修复。" }
   ],
   "history": [
+    {
+      "version": "1.0.127",
+      "updated_at": "2026-10-18T03:08:05+08:00",
+      "items": [
+        { "type": "fix", "text": "修复内置 OpenClaw 在桌面启动时显示「不可用」的问题：macOS 从 Finder / 登录项启动的 NOVAI 进程 PATH 很短（只有 /usr/bin:/bin:/usr/sbin:/sbin），openclaw 的 #!/usr/bin/env node 找不到 Node；检测与安装现在都会带上 OpenClaw 自带的用户态 Node 目录。" },
+        { "type": "fix", "text": "Node 识别更准：优先使用 ~/.openclaw/tools/node/bin 里的用户态 Node，系统 Node 版本不够时不再误报「Node 不满足要求」。" },
+        { "type": "improvement", "text": "已安装 1.0.126 的用户直接在应用内更新即可，无需重新下载安装包；Node 与 Gateway 已就绪的机器更新后就能看到 OpenClaw 可用。" }
+      ]
+    },
     {
       "version": "1.0.126",
       "updated_at": "2026-10-18T01:39:48+08:00",
