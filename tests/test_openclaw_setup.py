@@ -31,6 +31,7 @@ from server.integrations import openclaw_setup as s  # noqa: E402
 
 OFFICIAL_UNIX = "curl -fsSL https://openclaw.ai/install.sh | bash"
 OFFICIAL_WIN = "iwr -useb https://openclaw.ai/install.ps1 | iex"
+OS_NAME = os.name
 
 
 @contextmanager
@@ -431,6 +432,143 @@ class TestInstallSession(unittest.TestCase):
                 self.assertEqual("failed", done["outcome"])
                 self.assertEqual("failed", session.outcome)
                 self.assertFalse(session.init_incomplete)
+
+
+@contextmanager
+def windows(appdata="/tmp/novai-fake-win-appdata"):
+    """在 mac/linux 上模拟 Windows：os.name=nt + APPDATA/LOCALAPPDATA/PATHEXT/PATH。
+    路径分隔符仍是本机的，所以这里只验证「目录清单与扩展名展开」的拼装逻辑，真机行为要靠 Windows 复验。"""
+    saved_sep = os.pathsep
+    saved = {k: os.environ.get(k) for k in ("APPDATA", "LOCALAPPDATA", "PATHEXT", "PATH")}
+    os.environ.pop("NOVAI_OPENCLAW_BIN", None)
+    s.invalidate_cache()
+    ap = lambda *parts: os.path.join(appdata, *parts)
+    os.name = "nt"
+    os.pathsep = ";"
+    os.environ["APPDATA"] = ap("Roaming")
+    os.environ["LOCALAPPDATA"] = ap("Local")
+    os.environ["PATHEXT"] = ".COM;.EXE;.BAT;.CMD"
+    os.environ["PATH"] = os.pathsep.join([ap("Roaming", "npm"),
+                                          ap("Local", "OpenClaw", "deps", "portable-node")])
+    try:
+        yield appdata
+    finally:
+        os.name = OS_NAME
+        os.pathsep = saved_sep
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        s.invalidate_cache()
+
+
+def only_windows_dirs(config, appdata):
+    """只留 Windows 私有目录，排除本机 npm 全局自带的 node 干扰。"""
+    config = dict(config)
+    config["binary"] = dict(config.get("binary") or {})
+    config["binary"]["extra_dirs"] = [d for d in s.bin_dirs(config) if d.startswith(appdata)]
+    return config
+
+
+def write_file(path, text):
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return make_executable(path)
+
+
+@contextmanager
+def no_which():
+    """屏蔽 shutil.which：模拟 Windows 时 os.name 是假的，which 仍按 POSIX 查本机 PATH 会串味。"""
+    saved = s.shutil.which
+    s.shutil.which = lambda name: None
+    try:
+        yield
+    finally:
+        s.shutil.which = saved
+
+
+class TestWindowsResolution(unittest.TestCase):
+    """Windows 上 openclaw 是 openclaw.cmd、node 是 node.exe，且装在 %APPDATA%\npm 等目录。"""
+
+    def test_default_bin_dirs_are_windows_dirs(self):
+        with windows() as ap:
+            dirs = s._default_bin_dirs()
+        self.assertEqual(os.path.join(ap, "Roaming", "npm"), dirs[0])
+        self.assertIn(os.path.join(ap, "Roaming", "npm", "node_modules", ".bin"), dirs)
+        self.assertIn(os.path.join(ap, "Local", "OpenClaw", "deps", "portable-node"), dirs)
+        for mac_dir in (".openclaw", ".npm-global", ".local", "/usr/local/bin", "/opt/homebrew/bin"):
+            self.assertFalse([d for d in dirs if mac_dir in d], "Windows 下不该出现 mac 路径：%s" % mac_dir)
+
+    def test_default_bin_dirs_unchanged_on_unix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = os.path.join(tmp, "home")
+            os.makedirs(home)
+            with env(HOME=home):
+                dirs = s._default_bin_dirs()
+        self.assertEqual([
+            os.path.join(home, ".openclaw", "tools", "node", "bin"),
+            os.path.join(home, ".npm-global", "bin"),
+            os.path.join(home, ".local", "bin"),
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+        ], dirs, "mac/linux 清单一个都不许变")
+
+    def test_exec_names_expand_pathext(self):
+        with windows():
+            self.assertEqual(["openclaw", "openclaw.com", "openclaw.exe", "openclaw.bat", "openclaw.cmd"],
+                             s._exec_names("openclaw"))
+        self.assertEqual(["openclaw"], s._exec_names("openclaw"), "非 Windows 只探测原名字")
+
+    def test_exec_names_defaults_when_pathext_missing(self):
+        with windows():
+            os.environ.pop("PATHEXT", None)
+            self.assertIn("openclaw.cmd", s._exec_names("openclaw"))
+            self.assertIn("openclaw.exe", s._exec_names("openclaw"))
+
+    def test_find_binary_hits_openclaw_cmd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            npm_dir = os.path.join(tmp, "Roaming", "npm")
+            os.makedirs(npm_dir)
+            cmd = write_file(os.path.join(npm_dir, "openclaw.cmd"), "#!/bin/sh\n")
+            with no_which():
+                with windows(appdata=tmp):
+                    os.environ["PATH"] = os.path.join(tmp, "empty")
+                    path, searched = s.find_binary(only_windows_dirs(s.load_config()[0], tmp))
+            self.assertEqual(cmd, path, "应命中 openclaw.cmd，而不是拼无扩展名的 openclaw")
+            self.assertIn(cmd, searched)
+
+    def test_find_binary_prefers_cmd_over_ps1(self):
+        """PATH 上同时有 openclaw.ps1 / openclaw.cmd 时，命中可执行的 .cmd，不按目录顺序乱来。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            npm_dir = os.path.join(tmp, "Roaming", "npm")
+            os.makedirs(npm_dir)
+            write_file(os.path.join(npm_dir, "openclaw.ps1"), "# ps1\n")
+            cmd = write_file(os.path.join(npm_dir, "openclaw.cmd"), "#!/bin/sh\n")
+            with no_which():
+                with windows(appdata=tmp):
+                    os.environ["PATH"] = os.path.join(tmp, "empty")
+                    path, _ = s.find_binary(only_windows_dirs(s.load_config()[0], tmp))
+            self.assertEqual(cmd, path)
+
+    def test_probe_node_finds_node_exe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            node_dir = os.path.join(tmp, "Local", "OpenClaw", "deps", "portable-node")
+            os.makedirs(node_dir)
+            exe = write_file(os.path.join(node_dir, "node.exe"), "#!/bin/sh\n")
+            with no_which():
+                with windows(appdata=tmp):
+                    os.environ["PATH"] = os.path.join(tmp, "empty")
+                    config = only_windows_dirs(s.load_config()[0], tmp)
+                    probe = s.probe_node(config)
+            # mac 上假 node.exe 跑不出 --version，这里只验证路径命中（版本判定在 Windows 真机复验）
+            self.assertEqual(exe, probe["path"], "应命中 node.exe")
+
+    def test_platform_name_reported_for_windows(self):
+        from server.integrations import openclaw as oc
+        with windows():
+            self.assertEqual("win32", oc._platform_name())
+        self.assertEqual("darwin" if sys.platform == "darwin" else "linux", oc._platform_name())
 
 
 async def _collect(session):

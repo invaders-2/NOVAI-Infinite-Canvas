@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import time
 import uuid
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
@@ -40,6 +41,13 @@ BACKEND_CLIENT_MODE = "backend"
 MAX_PAYLOAD_BYTES = 25 * 1024 * 1024
 SESSION_KEY_SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 DEFAULT_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".openclaw", "openclaw.json")
+
+
+def _platform_name() -> str:
+    """握手上报的平台名，与 Node 的 process.platform 口径一致（win32/darwin/linux）。"""
+    if os.name == "nt":
+        return "win32"
+    return sys.platform if sys.platform == "darwin" else "linux"
 
 
 class OpenClawError(Exception):
@@ -441,7 +449,7 @@ class OpenClawGatewayClient(object):
             "client": {
                 "id": BACKEND_CLIENT_ID,
                 "version": "novai-openclaw/1.0",
-                "platform": "darwin",
+                "platform": _platform_name(),
                 "mode": BACKEND_CLIENT_MODE,
             },
             "role": "operator",

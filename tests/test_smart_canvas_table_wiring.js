@@ -367,10 +367,12 @@ ok(/\.prompt-node-llm \.llm-chat-input \{ height:56px; resize:none; \}/.test(can
 console.log('[23] 提示词模板「应用」落点：LLM 节点写 llmInstruction，普通节点写 text');
 // 把 applyPromptTemplateToNode 抠出来用 mock 实跑，验真正写哪个字段（不是只看字符串）
 const applySrc = (js.match(/function applyPromptTemplateToNode\(mode='positive'\)\{[\s\S]*?\n\}/) || [])[0] || '';
-ok(Boolean(applySrc), '找得到 applyPromptTemplateToNode');
-ok(/if\(node\.llmEnabled === true\)\{/.test(applySrc), '节点分支按 node.llmEnabled 分流');
-ok(applySrc.includes('node.llmInstruction = text;'), 'LLM 分支写 llmInstruction');
-ok(applySrc.includes('node.text = text;'), '非 LLM 分支仍写 text');
+const applyTextSrc = (js.match(/function applyPromptTextToCanvas\(text, options=\{\}\)\{[\s\S]*?\n\}/) || [])[0] || '';
+ok(Boolean(applySrc) && Boolean(applyTextSrc), '找得到 applyPromptTemplateToNode + applyPromptTextToCanvas');
+ok(/if\(node\.llmEnabled === true\)\{/.test(applyTextSrc), '节点分支按 node.llmEnabled 分流');
+ok(applyTextSrc.includes('node.llmInstruction = value;'), 'LLM 分支写 llmInstruction');
+ok(applyTextSrc.includes('node.text = value;'), '非 LLM 分支仍写 text');
+ok(/applyPromptTextToCanvas\(promptTemplateText\(template, mode\)/.test(applySrc), '本地模板复用同一段应用逻辑');
 ok(js.includes('class="prompt-node-control prompt-llm-instruction"'), 'INPUT 框存在');
 ok(/escapeHtml\(node\.llmInstruction \|\| ''\)/.test(js), 'INPUT 框 value 渲染自 node.llmInstruction');
 ok(/instructionEl\.oninput = \(\) => \{\s*node\.llmInstruction = llmEditorPlainText\(instructionEl, node\);/.test(js), 'INPUT 框手动输入也写 llmInstruction（contenteditable 版：chip 还原成 图N）');
@@ -381,7 +383,8 @@ function buildApplyFn(){
     const apply = new Function(
         'promptTemplateItems', 'promptTemplateSelectedId', 'promptTemplatePanel', 'promptTemplateText',
         'nodes', 'closePromptTemplatePanel', 'render', 'scheduleSave', 'syncPromptTemplateTargetInput',
-        applySrc + '\nreturn applyPromptTemplateToNode;'
+        'setPromptText', 'promptInput', 'savePromptDraftForCurrent', 'renderInputThumbsRow', 'selectedNode',
+        applyTextSrc + '\n' + applySrc + '\nreturn applyPromptTemplateToNode;'
     )(
         () => [state.template],
         't1',
@@ -391,7 +394,12 @@ function buildApplyFn(){
         () => { called.close += 1; },
         () => { called.render += 1; },
         () => { called.save += 1; },
-        () => {}
+        () => {},
+        () => {},
+        {dataset:{}},
+        () => {},
+        () => {},
+        () => null
     );
     return {apply: apply, state: state, called: called};
 }

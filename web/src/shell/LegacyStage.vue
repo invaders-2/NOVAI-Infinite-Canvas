@@ -44,15 +44,24 @@ function ensure() {
 }
 // 画布页：左侧导航浮在画布上，告诉画布左边要让出多少
 // 同旧外壳 syncCanvasSidebarInset：按侧栏实际右边缘算画布左侧要让出的宽度
+function canvasEditorOpen() {
+    return state.active === 'canvas' && state.canvasOpen;
+}
 function syncInset() {
     const el = frameEl('canvas');
-    const sb = document.querySelector('.sidebar');
-    if (!el || !sb) return;
+    if (!el) return;
     const s = Number(getComputedStyle(document.documentElement).getPropertyValue("--studio-ui-scale")) || 1;
-    const inset = Math.max(16, Math.round(sb.getBoundingClientRect().right - el.getBoundingClientRect().left + 34));
+    let inset = 0;
+    // 画布编辑态外壳会隐藏左侧导航（App.vue 的 hideSidebar = isCanvas），画布不再给导航留白
+    if (!canvasEditorOpen()) {
+        const sb = document.querySelector('.sidebar');
+        if (sb) inset = Math.max(16, Math.round(sb.getBoundingClientRect().right - el.getBoundingClientRect().left + 34));
+    }
     try { el.contentDocument && el.contentDocument.documentElement.style.setProperty('--studio-sidebar-inset', (inset / s) + 'px'); } catch (e) {}
 }
 watch(() => [state.pinned, state.canvasOpen, state.active], () => nextTick(() => setTimeout(syncInset, 320)));
+// 进出画布编辑态：导航在 180ms 内收起/展开，立刻改一次让画布控件跟手，过渡结束再对一次
+watch(canvasEditorOpen, () => nextTick(() => { syncInset(); setTimeout(syncInset, 240); }));
 // 旧页面（首页、素材库）会直接改 frame-canvas 的 src 打开画布：一改就切到「编辑器」状态并显示骨架
 function watchCanvasSrc() {
     const el = frameEl('canvas');

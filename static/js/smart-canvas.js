@@ -1338,6 +1338,7 @@ function closeSmartSidePanels(except=''){
     if(except !== 'log') closeSmartCanvasLog();
     if(except !== 'shortcuts') closeSmartCanvasShortcuts();
     if(except !== 'export') closeSmartExportMenu();
+    if(except !== 'source-browser') window.__novaSourceBrowser?.close();
 }
 function closeSmartExportMenu(){
     smartExportMenu?.classList.remove('open');
@@ -10148,6 +10149,8 @@ async function openPromptTemplatePanel(nodeId='', templateId='', options={}){
     if(!promptTemplatePanel) return;
     const target = options.target === 'composer' ? 'composer' : 'node';
     promptTemplatePanel.dataset.target = target;
+    /* 位置跟随来源：左栏入口显式传 placement:'left'，节点/输入框等画布内入口默认右侧 */
+    promptTemplatePanel.dataset.placement = options.placement === 'left' ? 'left' : 'right';
     promptTemplatePanel.dataset.nodeId = nodeId || '';
     if(promptTemplatePanel.parentElement !== shell) shell.appendChild(promptTemplatePanel);
     if(templateId) promptTemplateSelectedId = templateId;
@@ -10178,12 +10181,12 @@ function closePromptTemplatePanel(){
     syncComposerTemplateButton();
     render();
 }
-function applyPromptTemplateToNode(mode='positive'){
-    const template = promptTemplateItems().find(item => item.id === promptTemplateSelectedId);
-    if(!template) return;
+/* 套用任意提示词正文到当前目标（composer / 选中节点）：在线库和本地模板共用这一段真实逻辑 */
+function applyPromptTextToCanvas(text, options={}){
+    const value = String(text || '');
+    if(!value) return;
     if(promptTemplatePanel?.dataset.target === 'composer'){
-        const text = promptTemplateText(template, mode);
-        setPromptText(text);
+        setPromptText(value);
         delete promptInput.dataset.preserveDraftOnce;
         savePromptDraftForCurrent();
         renderInputThumbsRow(selectedNode());
@@ -10193,18 +10196,22 @@ function applyPromptTemplateToNode(mode='positive'){
     }
     const node = nodes.find(n => n.id === promptTemplatePanel?.dataset.nodeId);
     if(!node) return;
-    const text = promptTemplateText(template, mode);
     if(node.llmEnabled === true){
-        node.llmInstruction = text;
+        node.llmInstruction = value;
         node.llmInstructionHtml = '';
     } else {
-        node.text = text;
+        node.text = value;
     }
-    node.promptPresetId = template.builtin ? '' : template.sourceId || '';
+    node.promptPresetId = options.presetId || '';
     closePromptTemplatePanel();
     render();
     syncPromptTemplateTargetInput(node);
     scheduleSave();
+}
+function applyPromptTemplateToNode(mode='positive'){
+    const template = promptTemplateItems().find(item => item.id === promptTemplateSelectedId);
+    if(!template) return;
+    applyPromptTextToCanvas(promptTemplateText(template, mode), {presetId: template.builtin ? '' : template.sourceId || ''});
 }
 /* 套用模板后，编辑栏里那个正在编辑的文本框也要一起刷新。
    只改 node.text / llmInstruction 的话，节点正文变了、输入框还停在旧内容（看着像没应用上）。 */
@@ -21024,7 +21031,7 @@ function bindNodeEvents(){
         el.ondrop = async e => {
             e.preventDefault();
             e.stopPropagation();
-            const payload = await resolveSmartImageDropPayload(e.dataTransfer);
+            const payload = await mergeGuestDropPayload(await resolveSmartImageDropPayload(e.dataTransfer));
             if(payload.type === 'none') return;
             await handleSmartImageDropPayload(payload, id);
         };
@@ -24786,9 +24793,10 @@ function smartDropTextFragments(value){
     const text = String(value || '').trim();
     if(!text) return [];
     const fragments = [];
-    if(/<img|<a\s/i.test(text)){
+    if(/<img|<a\s|<video|<source/i.test(text)){
         const doc = new DOMParser().parseFromString(text, 'text/html');
-        doc.querySelectorAll('img[src],a[href]').forEach(el => fragments.push(el.getAttribute('src') || el.getAttribute('href') || ''));
+        /* 视频拖拽常带 <video src> / <source src>；poster 是封面图，不算视频候选 */
+        doc.querySelectorAll('img[src],a[href],video[src],source[src]').forEach(el => fragments.push(el.getAttribute('src') || el.getAttribute('href') || ''));
     }
     text.split(/\r?\n/).forEach(line => {
         const item = line.trim();
@@ -24848,13 +24856,65 @@ function smartImageNameFromUrl(url){
         return 'image';
     }
 }
+/* 拖拽 URL 的主路径 key：抹掉 Pinterest 尺寸段、花瓣 _736x/_fw 等尺寸后缀，用于判断两枚 URL 是否同一张图 */
+function smartPrimaryPathKey(url){
+    const text = String(url || '').trim();
+    if(!text) return '';
+    try {
+        const parsed = new URL(text);
+        let path = parsed.pathname.toLowerCase();
+        path = path.replace(/\/(?:\d{1,4}x\d{0,4}|originals)\//g, '/');
+        path = path.replace(/_(?:\d+x\d*|fw\d*|sq\d*)(?=\.[a-z0-9]+$)/gi, '');
+        path = path.replace(/[!@].*$/, '');
+        return parsed.hostname.toLowerCase() + path.replace(/\/+$/, '');
+    } catch(_) {
+        return text.split(/[?#]/)[0].toLowerCase();
+    }
+}
+/* uri-list 指向哪张就用哪张；candidates 里只有同主路径的高清版才允许替换 */
+function smartChooseGuestImageCandidate(uriSource, imageCandidates){
+    const list = (Array.isArray(imageCandidates) ? imageCandidates : []).map(value => String(value || '').trim()).filter(Boolean);
+    const source = String(uriSource || '').trim();
+    if(!source) return { url:list[0] || '', matched:'', key:'' };
+    const key = smartPrimaryPathKey(source);
+    const matched = key ? (list.find(candidate => smartPrimaryPathKey(candidate) === key) || '') : '';
+    return { url:matched || source, matched, key };
+}
+/* 主进程预取结果：只有 ok 且带 dataUrl 才算命中；失败/缺字段一律回退原链 */
+function smartPrefetchDropHit(prefetched){
+    if(!prefetched || prefetched.ok === false || !prefetched.dataUrl) return null;
+    return {
+        url:String(prefetched.url || ''),
+        dataUrl:String(prefetched.dataUrl),
+        contentType:String(prefetched.contentType || ''),
+        size:Number(prefetched.size) || 0,
+        originalUrl:String(prefetched.originalUrl || prefetched.original_url || '')
+    };
+}
+/* import-urls 200 但 count=0 / items 为空，等于下载失败；返回明确原因供兜底链继续 */
+function smartImportUrlsEmptyResult(data){
+    const files = Array.isArray(data && data.files) ? data.files.filter(file => file && file.url) : [];
+    if(files.length) return { empty:false, count0:false, reason:'' };
+    const items = Array.isArray(data && data.items) ? data.items : [];
+    const count = Number(data && data.count);
+    const count0 = count === 0 || !items.length;
+    const itemReason = items.map(item => item && item.error).filter(Boolean)[0] || '';
+    return {
+        empty:true,
+        count0,
+        reason: count0 ? '图片来源下载失败，请重试' : (itemReason || '图片来源下载失败，请重试')
+    };
+}
 function smartImageDropPayload(dataTransfer){
     const files = smartImageFilesFromDataTransfer(dataTransfer);
     if(files.length) return {type:'files', files};
     const localPaths = smartLocalImagePathsFromDataTransfer(dataTransfer);
     if(localPaths.length) return {type:'localPaths', localPaths};
-    const url = smartDropTextCandidates(dataTransfer).find(isRemoteSmartImageDropValue) || '';
-    if(url) return {type:'url', url};
+    /* 外部拖拽常同时带页面链接、图片直链和视频直链：候选都留着，由落图逻辑按「视频 > 图片 > 其它」试 */
+    const urls = uniqueSmartDropValues(smartDropTextCandidates(dataTransfer).filter(isRemoteSmartImageDropValue));
+    let uriList = '';
+    try { uriList = String(dataTransfer.getData('text/uri-list') || '').trim(); } catch(_) {}
+    if(urls.length) return {type:'url', url:urls[0], urls, uriList, types: smartDropDataTypes(dataTransfer)};
     return {type:'none'};
 }
 async function resolveSmartImageDropPayload(dataTransfer){
@@ -24862,6 +24922,65 @@ async function resolveSmartImageDropPayload(dataTransfer){
     if(payload.type !== 'none') return payload;
     const files = await uploadFilesFromDataTransfer(dataTransfer);
     return files.length ? {type:'files', files} : payload;
+}
+/* dataTransfer 什么都没给（视频拖拽常见）：回读主进程记下的内嵌页面 drag 记录，凑一个 url payload */
+async function guestDropFallbackPayload(){
+    try {
+        const api = window.pywebview && window.pywebview.api;
+        if(!api || typeof api.get_last_guest_drag !== 'function') return {type:'none'};
+        const guest = await api.get_last_guest_drag();
+        const drag = guest && guest.ok !== false && guest.drag && typeof guest.drag === 'object' ? guest.drag : null;
+        if(!drag) return {type:'none'};
+        window.__novaLastGuestDragAt = Date.now();
+        const target = drag.target && typeof drag.target === 'object' ? drag.target : drag;
+        const tag = String(target.tag || drag.tagName || drag.tag || '').toUpperCase();
+        const imageCandidates = Array.isArray(drag.imageCandidates) ? drag.imageCandidates.map(v => String(v || '').trim()).filter(Boolean) : [];
+        const videoCandidates = Array.isArray(drag.videoCandidates) ? drag.videoCandidates.map(v => String(v || '').trim()).filter(Boolean) : [];
+        const mediaUrl = String(drag.mediaUrl || '').trim();
+        const src = String(target.src || drag.src || '').trim();
+        const best = imageCandidates[0] || videoCandidates[0] || mediaUrl || src || '';
+        const unique = Array.from(new Set([].concat(
+            imageCandidates, videoCandidates,
+            mediaUrl ? [mediaUrl] : [],
+            src ? [src] : [],
+            Array.isArray(drag.videoUrls) ? drag.videoUrls : [],
+            Array.isArray(drag.urls) ? drag.urls : [],
+            String(drag.url || '').trim() ? [String(drag.url).trim()] : []
+        ).map(v => String(v || '').trim()).filter(Boolean)));
+        console.log('[source-browser][drop] guestDropFallback tag=' + (tag || '?') + ' candidates=' + unique.length + ' best=' + best.slice(0, 120));
+        if(!best) return {type:'none'};
+        return {type:'url', url:best, urls:unique, uriList:String(drag.uriList || ''), imageCandidates, videoCandidates, fromGuest:true, types:Array.isArray(drag.types) ? drag.types : []};
+    } catch(error){
+        console.log('[source-browser][drop] guestDropFallback error:', error && error.message ? error.message : String(error));
+        return {type:'none'};
+    }
+}
+
+/* 内嵌浏览器打开 / 30 秒内刚拖过：优先用主进程记录的高清候选，dataTransfer 里的缩略图 URL 只作兜底 */
+function shouldPreferGuestDrop(){
+    try {
+        if(window.__novaSourceBrowser && typeof window.__novaSourceBrowser.isOpen === 'function' && window.__novaSourceBrowser.isOpen()) return true;
+    } catch(_) {}
+    return Boolean(window.__novaLastGuestDragAt && Date.now() - window.__novaLastGuestDragAt < 30000);
+}
+
+async function mergeGuestDropPayload(payload){
+    if(!shouldPreferGuestDrop()) return payload;
+    const guest = await guestDropFallbackPayload();
+    if(!guest || guest.type === 'none' || !guest.url) return payload;
+    if(payload.type !== 'url' || !payload.url) return guest;
+    const urls = uniqueSmartDropValues([].concat(guest.urls || [], [guest.url], payload.url, payload.urls || []));
+    console.log('[source-browser][drop] mergeGuest candidates=' + urls.length + ' best=' + String(guest.url).slice(0, 120));
+    return {
+        type: 'url',
+        url: guest.url,
+        urls,
+        uriList: String(payload.uriList || guest.uriList || ''),
+        imageCandidates: guest.imageCandidates,
+        videoCandidates: guest.videoCandidates,
+        fromGuest: true,
+        types: Array.isArray(payload.types) ? payload.types : (Array.isArray(guest.types) ? guest.types : [])
+    };
 }
 function hasSmartImageDropData(dataTransfer){
     if(!dataTransfer) return false;
@@ -24988,8 +25107,625 @@ async function handleSmartImageDropPayload(payload, targetId='', opts={}){
             if(!opts.skipUndo) pushUndo();
             appendImagesToSmartNode(await importSmartLocalImages(payload.localPaths), targetId, opts);
         } else if(payload.type === 'url') {
+            /* 外部拖拽给的是 text/uri-list / text/html，候选里常混着「页面链接」「图片直链」「视频直链」：
+               优先级 视频 > 图片 > 其它，逐个落地到本地素材目录（站点时效签名 + 代理间歇 567 会让节点裂图）；
+               单个候选失败重试一次（约 400ms）；候选其实是页面（后端报 text/html）时，
+               改调 import-from-page 用内嵌浏览器已加载的 HTML 解析图片；
+               最后都失败再用主进程在内嵌页面上下文里带登录态取字节，走 base64 通道落地（视频也走这条）。 */
+            const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|avif|bmp)(?:[?#]|$)/i;
+            const VIDEO_EXT_RE = /\.(mp4|webm|mov|m4v|avi|mkv)(?:[?#]|$)/i;
+            const MEDIA_HOST_RE = /(^|\.)(pinimg\.com|huabanimg\.com|huaban\.com|xhscdn\.com)$/i;
+            const KNOWN_VIDEO_HOST_RE = /(^|\.)(v\d*\.pinimg\.com|video\.pinimg\.com|v\d*\.xhscdn\.com|sns-video[^.]*\.xhscdn\.com)$/i;
+            const PAGE_PATH_RE = /^\/(?:pins?|explore|discovery|search|users?|boards?|topics?|notes?)(?:\/|$)/i;
+            const looksLikeVideoUrl = url => {
+                const text = String(url || '').trim();
+                if(!text) return false;
+                if(/^data:video\//i.test(text)) return true;
+                const clean = text.split(/[?#]/, 1)[0];
+                if(VIDEO_EXT_RE.test(clean)) return true;
+                try {
+                    const parsed = new URL(text);
+                    if(!/^https?:$/i.test(parsed.protocol)) return false;
+                    if(KNOWN_VIDEO_HOST_RE.test(parsed.hostname)) return true;
+                    return /(?:^|\/)(?:video|videos|vod)(?:\/|$)/i.test(parsed.pathname || '');
+                } catch(_) {
+                    return false;
+                }
+            };
+            /* 像媒体：图片/视频扩展名、data: 内联图，或三站图片域名下「不是页面路由」的长路径 */
+            const looksLikeMediaUrl = url => {
+                const text = String(url || '').trim();
+                if(!text) return false;
+                if(/^data:(?:image|video)\//i.test(text)) return true;
+                const clean = text.split(/[?#]/, 1)[0];
+                if(IMAGE_EXT_RE.test(clean) || VIDEO_EXT_RE.test(clean)) return true;
+                try {
+                    const parsed = new URL(text);
+                    if(!/^https?:$/i.test(parsed.protocol) || !MEDIA_HOST_RE.test(parsed.hostname)) return false;
+                    const path = parsed.pathname || '/';
+                    const last = path.split('/').filter(Boolean).pop() || '';
+                    if(!last || PAGE_PATH_RE.test(path)) return false;
+                    return /\.[a-z0-9]{2,5}$/i.test(last) || /[0-9a-f]{16,}/i.test(last) || path.startsWith('/originals/');
+                } catch(_) {
+                    return false;
+                }
+            };
+            const dropLog = (...args) => console.log('[source-browser][drop]', ...args);
+            const mergeUnique = list => Array.from(new Set((list || []).map(url => String(url || '').trim()).filter(Boolean)));
+            /* electron 拖拽开始预取图片字节：命中就直接走 import-urls 的 data 通道 */
+            let guestBytesPrefetch = null;
+            try {
+                const prefetchApi = window.pywebview && window.pywebview.api;
+                if(prefetchApi && typeof prefetchApi.guest_drag_bytes === 'function'){
+                    const prefetched = await prefetchApi.guest_drag_bytes();
+                    guestBytesPrefetch = smartPrefetchDropHit(prefetched);
+                    const prefetchUrl = String(prefetched && prefetched.url || '');
+                    const prefetchSize = Number(prefetched && prefetched.size) || 0;
+                    dropLog('guest_drag_bytes:', 'bytes=' + prefetchSize + ' url=' + prefetchUrl, guestBytesPrefetch ? 'hit' : 'miss');
+                }
+            } catch(error){
+                guestBytesPrefetch = null;
+                dropLog('guest_drag_bytes error:', error && error.message ? String(error.message) : String(error));
+            }
+            /* srcset 取描述符最大的一项（宽度/倍率越大越清晰），不是第一项 */
+            const bestSrcsetUrl = value => {
+                const items = String(value || '').split(',').map(part => part.trim()).filter(Boolean);
+                let bestUrl = '';
+                let bestScore = -1;
+                items.forEach(item => {
+                    const pieces = item.split(/\s+/);
+                    const url = pieces[0] || '';
+                    if(!url) return;
+                    const descriptor = String(pieces[1] || '').toLowerCase();
+                    const match = descriptor.match(/^([\d.]+)([wx])$/);
+                    const score = match ? parseFloat(match[1]) : 1;
+                    if(Number.isFinite(score) && score > bestScore){
+                        bestScore = score;
+                        bestUrl = url;
+                    }
+                });
+                return bestUrl;
+            };
+            /* 候选归一化：花瓣系 CDN 去掉缩略图参数、Pinterest 把 /736x/ 这类尺寸段换成 /originals/（只对 http(s)） */
+            const normalizeCandidateUrl = url => {
+                const text = String(url || '').trim();
+                if(!/^https?:\/\//i.test(text)) return text;
+                try {
+                    const parsed = new URL(text);
+                    const host = parsed.hostname.toLowerCase();
+                    let changed = false;
+                    const params = parsed.searchParams;
+                    if(/(^|\.)(huaban\.com|huabanimg\.com|hbimg\.cn)$/i.test(host)){
+                        /* 花瓣：尺寸段统一 originals，去掉 _fw/_sq 等缩略后缀 */
+                        const nextPath = parsed.pathname
+                            .replace(/\/(?:236x|474x|736x|\d{2,4}x(?:\d{2,4})?)\//gi, '/originals/')
+                            .replace(/_(?:fw|sq)\d*(?=\/|$|\.)/gi, '');
+                        if(nextPath !== parsed.pathname){ parsed.pathname = nextPath; changed = true; }
+                    } else if(/(^|\.)pinimg\.com$/i.test(host)){
+                        const nextPath = parsed.pathname.replace(/\/(?:\d{1,4}x(?:\d{1,4})?)\//g, '/originals/');
+                        if(nextPath !== parsed.pathname){ parsed.pathname = nextPath; changed = true; }
+                    }
+                    /* 其它站点：去掉明显的缩略尺寸/质量参数（保留签名等其它参数） */
+                    ['w','h','width','height','quality','q','resize','thumb','thumbnail','fit','crop'].forEach(key => {
+                        if(params.has(key)){ params.delete(key); changed = true; }
+                    });
+                    if(params.has('x-oss-process') || params.has('imageView2')){
+                        params.delete('x-oss-process');
+                        params.delete('imageView2');
+                        changed = true;
+                    }
+                    if(changed){
+                        const query = params.toString();
+                        parsed.search = query ? ('?' + query) : '';
+                        const normalized = parsed.toString();
+                        dropLog('normalize:', text.slice(0, 200), '=>', normalized.slice(0, 200));
+                        return normalized;
+                    }
+                } catch(_) {}
+                return text;
+            };
+            const payloadUriList = String(payload.uriList || '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
+            const payloadUriSource = payloadUriList[0] || '';
+            /* 从内嵌页面拖拽带来的 html 里抠候选：img/video/source 的 src、a 的 href（poster 不算） */
+            const guestHtmlSources = html => {
+                const text = String(html || '').trim();
+                const all = [];
+                const videoSources = [];
+                if(!text) return { all, videoSources };
+                if(typeof DOMParser === 'function'){
+                    try {
+                        const doc = new DOMParser().parseFromString(text, 'text/html');
+                        doc.querySelectorAll('img,video,source,a').forEach(el => {
+                            if(el.tagName === 'A'){
+                                const href = String(el.getAttribute('href') || '').trim();
+                                if(href) all.push(href);
+                                return;
+                            }
+                            const dataOriginal = String(el.getAttribute('data-original') || el.getAttribute('data-src') || '').trim();
+                            const sized = bestSrcsetUrl(el.getAttribute('srcset'));
+                            const src = String(el.getAttribute('src') || '').trim();
+                            [dataOriginal, sized, src].forEach(value => {
+                                if(!value) return;
+                                all.push(value);
+                                if(el.tagName === 'VIDEO' || el.tagName === 'SOURCE') videoSources.push(value);
+                            });
+                        });
+                        return { all, videoSources };
+                    } catch(_) {}
+                }
+                /* 没有 DOMParser（单测/降级环境）时用正则兜底 */
+                const tagRe = /<(img|video|source|a)\b[^>]*(?:\ssrc|\shref)\s*=\s*["']([^"']+)["'][^>]*>/gi;
+                let match;
+                while((match = tagRe.exec(text))){
+                    const value = String(match[2] || '').trim();
+                    if(!value) continue;
+                    all.push(value);
+                    const tag = match[1].toLowerCase();
+                    if(tag === 'video' || tag === 'source') videoSources.push(value);
+                }
+                return { all, videoSources };
+            };
+            /* 最可靠的数据源：主进程记下的最后一次内嵌页面拖拽（60s 内有效，带真实 src/srcset/html） */
+            const guestPriorityImage = [];
+            const guestPriorityVideo = [];
+            const guestParsed = [];
+            let guestPageUrl = '';   /* 内嵌页面地址：fetch_source_url 当 Referer 用 */
+            const guestApi = window.pywebview && window.pywebview.api;
+            if(guestApi && typeof guestApi.get_last_guest_drag === 'function'){
+                try {
+                    const guest = await guestApi.get_last_guest_drag();
+                    const drag = guest && guest.ok !== false && guest.drag && typeof guest.drag === 'object' ? guest.drag : null;
+                    if(drag){
+                        /* 兼容两种 drag 结构：{target:{tag,src,srcset,dataSrc}} 和主进程 preload 的扁平字段
+                           {tagName,src,srcset,dataSrc,currentSrc,mediaUrl,...} */
+                        const target = drag.target && typeof drag.target === 'object' ? drag.target : drag;
+                        const tag = String(target.tag || drag.tagName || drag.tag || '').toUpperCase();
+                        const rawSrc = String(target.src || drag.src || '').trim();
+                        const rawSrcset = target.srcset || drag.srcset || '';
+                        const rawDataSrc = String(target.dataSrc || drag.dataSrc || '').trim();
+                        const currentSrc = String(drag.currentSrc || '').trim();
+                        const mediaUrl = String(drag.mediaUrl || '').trim();
+                        const imageCandidates = (Array.isArray(drag.imageCandidates) ? drag.imageCandidates : []).map(v => String(v || '').trim()).filter(Boolean);
+                        const videoCandidates = (Array.isArray(drag.videoCandidates) ? drag.videoCandidates : []).map(v => String(v || '').trim()).filter(Boolean);
+                        const uriList = payloadUriList.length ? payloadUriList : String(drag.uriList || '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
+                        const uriSource = uriList[0] || '';
+                        const uriChoice = smartChooseGuestImageCandidate(uriSource, imageCandidates);
+                        const uriMatchedImage = uriChoice.matched || '';
+                        const firstSrc = tag === 'IMG'
+                            ? (uriSource ? uriChoice.url : (imageCandidates[0] || rawDataSrc || bestSrcsetUrl(rawSrcset) || rawSrc || currentSrc || mediaUrl))
+                            : (videoCandidates[0] || rawSrc || currentSrc);
+                        dropLog('guestDrag target=' + (tag || '?') + ' src=' + String(firstSrc || '').slice(0, 200));
+                        if(tag === 'IMG'){
+                            if(uriSource){
+                                /* uri-list 指向哪张就用哪张；有同主路径高清候选就优先它，绝不拿 candidates[0] 覆盖另一张图 */
+                                if(uriMatchedImage){
+                                    guestPriorityImage.push(firstSrc, ...imageCandidates.filter(candidate => smartPrimaryPathKey(candidate) === uriChoice.key));
+                                    dropLog('guestDrag uri-match:', 'uri=' + uriSource.slice(0, 160), '=>', String(firstSrc).slice(0, 160));
+                                } else {
+                                    guestPriorityImage.push(firstSrc);
+                                    dropLog('guestDrag uri-only:', String(firstSrc).slice(0, 200));
+                                }
+                            } else {
+                                guestPriorityImage.push(...imageCandidates, ...(firstSrc ? [firstSrc] : []));
+                            }
+                        }
+                        if(tag === 'VIDEO') guestPriorityVideo.push(...videoCandidates, ...(firstSrc ? [firstSrc] : []));
+                        if(tag === 'VIDEO' && firstSrc) guestPriorityVideo.push(firstSrc);
+                        if(tag === 'VIDEO'){
+                            /* videoUrls 是主进程从拖拽元素/页面里收集到的全部视频地址；mediaUrl 也一并算视频候选 */
+                            const videoUrls = Array.isArray(drag.videoUrls) ? drag.videoUrls : [];
+                            videoUrls.forEach(url => {
+                                const value = String(url || '').trim();
+                                if(value) guestPriorityVideo.push(value);
+                            });
+                            const mediaUrl = String(drag.mediaUrl || '').trim();
+                            if(mediaUrl) guestPriorityVideo.push(mediaUrl);
+                            dropLog('guestDrag videoUrls=' + videoUrls.length + ' mediaUrl=' + (mediaUrl ? 'yes' : 'no'));
+                        }
+                        guestPageUrl = String(drag.pageUrl || '').trim();
+                        const parsed = guestHtmlSources(drag.html);
+                        parsed.videoSources.forEach(url => guestPriorityVideo.push(url));
+                        guestParsed.push(...parsed.all, ...uriList);
+                    }
+                } catch(error){
+                    dropLog('guestDrag error:', error && error.message ? error.message : String(error));
+                }
+            }
+            const payloadCandidateList = Array.isArray(payload.urls) && payload.urls.length ? payload.urls : [payload.url];
+            const payloadCandidates = payloadUriSource
+                ? [payloadUriSource].concat(payloadCandidateList.filter(url => String(url || '').trim() !== payloadUriSource))
+                : payloadCandidateList;
+            /* 所有候选先归一化（去缩略图参数 / 尺寸段换 originals），再去重排序 */
+            const normalizeList = list => mergeUnique((list || []).map(normalizeCandidateUrl));
+            const guestImageNorm = normalizeList(guestPriorityImage);
+            const guestVideoNorm = normalizeList(guestPriorityVideo);
+            let candidates = mergeUnique([].concat(guestImageNorm, guestVideoNorm, normalizeList(payloadCandidates), normalizeList(guestParsed)));
+            if(!candidates.length) return;
+            const forcedImage = new Set(guestImageNorm);
+            const forcedVideo = new Set(guestVideoNorm);
+            const isVideoCandidate = url => !forcedImage.has(url) && (forcedVideo.has(url) || looksLikeVideoUrl(url));
+            /* 小红书/Pinterest 的 CDN 图常没有扩展名、还带 !nc_n_xxx 后缀：按主机直接认成 image */
+            const isCdnImageCandidate = url => {
+                try {
+                    const host = new URL(url).hostname.toLowerCase();
+                    if(/^(?:sns-webpic[^.]*|sns-img[^.]*)\.xhscdn\.com$/i.test(host)) return true;
+                    if(/^ci\.xiaohongshu\.com$/i.test(host)) return true;
+                    return /(^|\.)(pinimg\.com|huabanimg\.com|hbimg\.cn)$/i.test(host);
+                } catch(_) { return false; }
+            };
+            /* 页面：三站主站 + 内容/搜索路由；page 候选排到最后再兜底 */
+            const isPageCandidate = url => {
+                try {
+                    const parsed = new URL(url);
+                    if(!/(^|\.)(xiaohongshu\.com|pinterest\.com|huaban\.com)$/i.test(parsed.hostname)) return false;
+                    return /(?:^|\/)(?:explore|discovery|pins?|boards?|search)(?:\/|$)/i.test(parsed.pathname || '');
+                } catch(_) { return false; }
+            };
+            const isImageCandidate = url => !isVideoCandidate(url) && (forcedImage.has(url) || isCdnImageCandidate(url) || (!isPageCandidate(url) && looksLikeMediaUrl(url)));
+            const isBlobUrl = url => /^blob:/i.test(String(url || ''));
+            const isM3u8Url = url => /\.m3u8(?:[?#]|$)/i.test(String(url || ''));
+            const buildOrdered = () => {
+                const lead = guestImageNorm.slice();
+                const videos = mergeUnique(candidates.filter(isVideoCandidate));
+                const images = mergeUnique(candidates.filter(url => isImageCandidate(url) && !forcedImage.has(url)));
+                const pages = mergeUnique(candidates.filter(isPageCandidate));
+                const others = mergeUnique(candidates.filter(url => !isVideoCandidate(url) && !isImageCandidate(url) && !isPageCandidate(url)));
+                const ordered = mergeUnique([].concat(lead, videos, images, others, pages));
+                const tierOf = url => forcedImage.has(url) ? 'image' : (isVideoCandidate(url) ? 'video' : (isImageCandidate(url) ? 'image' : (isPageCandidate(url) ? 'page' : 'other')));
+                return { videos, images, pages, others, ordered, tierOf };
+            };
+            let tierState = buildOrdered();
+            dropLog('types:', (Array.isArray(payload.types) ? payload.types : []).join(',') || '(none)');
+            tierState.ordered.forEach((url, index) => dropLog('candidate[' + index + '](' + tierState.tierOf(url) + '):', String(url).slice(0, 200)));
+            dropLog('tiers:', 'videos=' + tierState.videos.length, 'images=' + tierState.images.length, 'pages=' + tierState.pages.length, 'others=' + tierState.others.length);
+            toast('正在把素材保存到本地…');
+            let files = [];
+            let lastError = '';
+            let downloadFailed = false;
+            let pageLikeUrl = '';
+            const DROP_FETCH_BYTES_MAX = 30 * 1024 * 1024;
+            /* 三个通道拿到的字节都走 import-urls 的 base64 通道落地 */
+            const importFetchedData = async (fetched, candidate, channel) => {
+                dropLog(channel + ':', fetched ? {ok:fetched.ok, status:fetched.status, error:fetched.error, contentType:fetched.contentType, size:fetched.size} : null);
+                if(!fetched || fetched.ok === false || !fetched.dataUrl){
+                    const status = fetched && fetched.status ? fetched.status : 0;
+                    const reason = fetched && fetched.error ? String(fetched.error) : '';
+                    lastError = '从内嵌浏览器取素材失败' + (status ? '（HTTP ' + status + '）' : '') + (reason ? '：' + reason : '');
+                    return [];
+                }
+                try {
+                    const response = await fetch('/api/local-assets/import-urls', {
+                        method:'POST',
+                        headers:{'Content-Type':'application/json'},
+                        body:JSON.stringify({
+                            folder:localAssetFolderPath(),
+                            items:[{
+                                data:fetched.dataUrl,
+                                content_type:String(fetched.contentType || ''),
+                                name:smartImageNameFromUrl(candidate)
+                            }]
+                        })
+                    });
+                    if(!response.ok){
+                        lastError = await smartResponseErrorMessage(response, lastError || tr('smart.toastUploadFail'));
+                        dropLog(channel + ' import-urls HTTP', response.status, lastError);
+                        return [];
+                    }
+                    const data = await response.json();
+                    const saved = (data.files || []).filter(file => file && file.url);
+                    const reason = (data.items || []).map(item => item && item.error).filter(Boolean)[0] || '';
+                    dropLog(channel + ' import-urls', response.status, saved.length ? ('ok files=' + saved.length) : ('fail: ' + reason));
+                    if(!saved.length && reason) lastError = reason;
+                    return saved;
+                } catch(error){
+                    lastError = error && error.message ? String(error.message) : lastError;
+                    dropLog(channel + ' import-urls error:', lastError);
+                    return [];
+                }
+            };
+            /* 预取命中：先用中等尺寸秒出节点，再后台换原图；原图失败不影响已出的节点 */
+            const upgradePrefetchedOriginal = async (nodeId, mediumUrls, originalUrl) => {
+                const api = window.pywebview && window.pywebview.api;
+                if(!api || typeof api.guest_drag_original !== 'function') return;
+                try {
+                    const fetched = await api.guest_drag_original();
+                    const hit = smartPrefetchDropHit(fetched);
+                    if(!hit || !hit.dataUrl){
+                        dropLog('original upgrade failed: no dataUrl');
+                        return;
+                    }
+                    const highFiles = await importFetchedData(hit, hit.url || originalUrl, 'original-bytes');
+                    if(!highFiles.length){
+                        dropLog('original upgrade failed: import-urls');
+                        return;
+                    }
+                    const node = nodes.find(entry => entry.id === nodeId);
+                    if(!node || !Array.isArray(node.images) || !node.images.length){
+                        dropLog('original upgrade failed: node missing');
+                        return;
+                    }
+                    const mediumSet = new Set(mediumUrls || []);
+                    let targetIndex = node.images.findIndex(img => mediumSet.has(img.url));
+                    if(targetIndex < 0 && node.images.length === 1) targetIndex = 0;
+                    if(targetIndex < 0){
+                        dropLog('original upgrade failed: medium image not found');
+                        return;
+                    }
+                    const previous = node.images[targetIndex];
+                    const high = highFiles[0];
+                    const geometry = { x: node.x, y: node.y, w: node.w, h: node.h, scale: node.scale, rotation: node.rotation };
+                    node.images[targetIndex] = ensureSmartImageAssetId({
+                        ...previous,
+                        ...high,
+                        url: high.url,
+                        name: high.name || previous.name,
+                        kind: 'image',
+                        natural_w: Number(high.natural_w) || previous.natural_w,
+                        natural_h: Number(high.natural_h) || previous.natural_h
+                    });
+                    render();
+                    node.x = geometry.x;
+                    node.y = geometry.y;
+                    node.w = geometry.w;
+                    node.h = geometry.h;
+                    node.scale = geometry.scale;
+                    node.rotation = geometry.rotation;
+                    if(isNodeSelected(node.id)) updateComposer();
+                    scheduleSave();
+                    dropLog('original upgrade done node=' + node.id + ' url=' + high.url);
+                } catch(error){
+                    dropLog('original upgrade failed:', error && error.message ? String(error.message) : String(error));
+                }
+            };
+            if(guestBytesPrefetch){
+                const prefetchedCandidate = String(guestBytesPrefetch.url || payload.url || '');
+                const prefetchedFiles = await importFetchedData(guestBytesPrefetch, prefetchedCandidate, 'prefetch-bytes');
+                if(prefetchedFiles.length){
+                    if(!opts.skipUndo) pushUndo();
+                    const createdNode = appendImagesToSmartNode(prefetchedFiles.map(file => ({
+                        url:file.url,
+                        name:file.name || smartImageNameFromUrl(file.url),
+                        kind:file.kind === 'video' ? 'video' : 'image',
+                        natural_w:Number(file.natural_w) || 0,
+                        natural_h:Number(file.natural_h) || 0
+                    })), targetId, opts);
+                    if(createdNode){
+                        dropLog('medium hit bytes=' + guestBytesPrefetch.size + ' node=' + createdNode.id);
+                        const originalUrl = String(guestBytesPrefetch.originalUrl || '');
+                        if(originalUrl) upgradePrefetchedOriginal(createdNode.id, prefetchedFiles.map(file => file.url), originalUrl);
+                    }
+                    return;
+                }
+                dropLog('prefetch-bytes fallback: import-urls data failed, continue normal chain');
+            }
+            /* 通道 2：内嵌浏览器页面上下文里 fetch（blob 也能取） */
+            const importFromFetchedBytes = async candidate => {
+                const api = window.pywebview && window.pywebview.api;
+                if(!api || typeof api.get_source_view_fetch_bytes !== 'function') return [];
+                /* blob: 也要走：fetch 在主进程的页面上下文里执行，能取到 blob（取到后同样走 base64 通道） */
+                if(!/^(?:https?:|blob:)/i.test(candidate)) return [];
+                let fetched = null;
+                try {
+                    fetched = await api.get_source_view_fetch_bytes({ url:candidate, maxBytes:DROP_FETCH_BYTES_MAX });
+                    if(!fetched) fetched = await api.get_source_view_fetch_bytes(candidate, DROP_FETCH_BYTES_MAX);
+                } catch(error){
+                    try { fetched = await api.get_source_view_fetch_bytes(candidate, DROP_FETCH_BYTES_MAX); } catch(_) { fetched = null; }
+                }
+                return importFetchedData(fetched, candidate, 'fetch-bytes');
+            };
+            /* 通道 3：主进程 session.fetch（带 Referer/cookie，不受 CORS），只给视频网络地址用 */
+            const importFromFetchedUrl = async candidate => {
+                const api = window.pywebview && window.pywebview.api;
+                if(!api || typeof api.fetch_source_url !== 'function') return [];
+                if(!/^https?:\/\//i.test(candidate)) return [];
+                let fetched = null;
+                try {
+                    fetched = await api.fetch_source_url({ url:candidate, referer:guestPageUrl || '' });
+                    if(!fetched) fetched = await api.fetch_source_url(candidate);
+                } catch(error){
+                    try { fetched = await api.fetch_source_url(candidate); } catch(_) { fetched = null; }
+                }
+                return importFetchedData(fetched, candidate, 'fetch-url');
+            };
+            /* 最近媒体请求列表：blob 场景兜底用，只取视频。
+               新版 items 每条带 kind（'video'|'image'|'other'），只认 kind==='video'（小红书视频地址可能没后缀）；
+               旧版没有 kind 时才退回扩展名 .mp4/.m3u8/.m4s/.ts 兜底。 */
+            const fetchRecentMedia = async () => {
+                const api = window.pywebview && window.pywebview.api;
+                if(!api || typeof api.get_recent_source_media !== 'function') return [];
+                try {
+                    const result = await api.get_recent_source_media();
+                    const list = result && (result.media || result.urls || result.items || result.list);
+                    const entries = Array.isArray(list) ? list : [];
+                    const isLegacyVideoUrl = url => /\.(?:mp4|m3u8|m4s|ts)(?:[?#]|$)/i.test(String(url || ''));
+                    const picked = [];
+                    entries.forEach(entry => {
+                        const obj = entry && typeof entry === 'object' ? entry : null;
+                        const url = String(obj ? (obj.url || obj.src || obj.mediaUrl || '') : (entry || '')).trim();
+                        if(!url) return;
+                        const hasKind = Boolean(obj && typeof obj.kind === 'string' && obj.kind.trim());
+                        const kind = hasKind ? obj.kind.trim().toLowerCase() : 'legacy';
+                        const isVideo = hasKind ? kind === 'video' : isLegacyVideoUrl(url);
+                        if(isVideo) picked.push({ url, kind });
+                    });
+                    const urls = mergeUnique(picked.map(item => item.url));
+                    dropLog('recentMedia=' + entries.length + ' (video=' + urls.length + ')');
+                    picked.forEach(item => dropLog('recentMedia item(' + item.kind + '):', String(item.url).slice(0, 160)));
+                    return urls;
+                } catch(error){
+                    dropLog('recentMedia error:', error && error.message ? error.message : String(error));
+                    return [];
+                }
+            };
+            let triedCandidates = new Set();
+            const tryCandidate = async candidate => {
+                const inlineData = /^data:/i.test(candidate) ? candidate : '';
+                let attemptError = '';
+                let importOk = false;
+                for(let attempt = 0; attempt < 2 && !files.length; attempt += 1){
+                    if(attempt) await new Promise(resolve => setTimeout(resolve, 400));
+                    try {
+                        const response = await fetch('/api/local-assets/import-urls', {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body:JSON.stringify({
+                                folder:localAssetFolderPath(),
+                                items:[{
+                                    url:candidate,
+                                    name:inlineData ? 'inline-media' : smartImageNameFromUrl(candidate),
+                                    ...(inlineData ? {data:inlineData} : {})
+                                }]
+                            })
+                        });
+                        if(!response.ok){
+                            attemptError = await smartResponseErrorMessage(response, tr('smart.toastUploadFail'));
+                            dropLog('import-urls HTTP', response.status, response.statusText || '', attemptError);
+                            continue;
+                        }
+                        const data = await response.json();
+                        files = (data.files || []).filter(file => file && file.url);
+                        if(!files.length){
+                            const emptyResult = smartImportUrlsEmptyResult(data);
+                            attemptError = emptyResult.reason;
+                            if(emptyResult.count0){
+                                downloadFailed = true;
+                                dropLog('import-urls count0', response.status, String(candidate).slice(0, 160));
+                            }
+                        }
+                        dropLog('import-urls', response.status, files.length ? ('ok files=' + files.length) : ('fail: ' + attemptError));
+                        if(files.length) importOk = true;
+                    } catch(error){
+                        attemptError = error && error.message ? String(error.message) : tr('smart.toastUploadFail');
+                        dropLog('import-urls error:', attemptError);
+                    }
+                }
+                const trail = ['import-urls:' + (importOk ? 'ok' : 'fail')];
+                if(files.length){
+                    dropLog('channels:', String(candidate).slice(0, 160), trail.concat('done').join(' > '));
+                    return true;
+                }
+                lastError = attemptError || lastError;
+                if(!pageLikeUrl && /text\/html|不是图片或视频资源|not an image or video/i.test(attemptError)) pageLikeUrl = candidate;
+                const fromBytes = await importFromFetchedBytes(candidate);
+                trail.push('fetch-bytes:' + (fromBytes.length ? 'ok' : 'fail'));
+                if(!fromBytes.length) dropLog('fetch-bytes fail', String(candidate).slice(0, 160));
+                if(fromBytes.length){
+                    files = fromBytes;
+                    dropLog('channels:', String(candidate).slice(0, 160), trail.join(' > '));
+                    return true;
+                }
+                if(isVideoCandidate(candidate) && /^https?:\/\//i.test(candidate)){
+                    const fromUrl = await importFromFetchedUrl(candidate);
+                    trail.push('fetch-url:' + (fromUrl.length ? 'ok' : 'fail'));
+                    if(!fromUrl.length) dropLog('fetch-url fail', String(candidate).slice(0, 160));
+                    if(fromUrl.length){
+                        files = fromUrl;
+                        dropLog('channels:', String(candidate).slice(0, 160), trail.join(' > '));
+                        return true;
+                    }
+                }
+                dropLog('channels:', String(candidate).slice(0, 160), trail.join(' > '));
+                return false;
+            };
+            const runMediaPass = async () => {
+                for(const candidate of tierState.ordered){
+                    if(files.length) break;
+                    if(isPageCandidate(candidate) || triedCandidates.has(candidate)) continue;
+                    triedCandidates.add(candidate);
+                    if(isM3u8Url(candidate)){
+                        /* 后端暂不支持 m3u8 落地：直接跳过，不弹错 */
+                        dropLog('skip m3u8:', String(candidate).slice(0, 200));
+                        continue;
+                    }
+                    if(await tryCandidate(candidate)) break;
+                }
+            };
+            const blobInCandidates = candidates.some(isBlobUrl);
+            if(blobInCandidates && candidates.every(isBlobUrl)){
+                /* 候选全是 blob：直接问主进程要最近媒体请求里的视频地址 */
+                const recent = await fetchRecentMedia();
+                if(recent.length){
+                    candidates = mergeUnique([].concat(recent, candidates));
+                    tierState = buildOrdered();
+                    dropLog('tiers(after recentMedia):', 'videos=' + tierState.videos.length, 'images=' + tierState.images.length, 'pages=' + tierState.pages.length, 'others=' + tierState.others.length);
+                }
+            }
+            await runMediaPass();
+            /* blob 候选失败：最近媒体请求里找 .mp4/.m3u8/.m4s/.ts 再试一轮 */
+            if(!files.length && blobInCandidates){
+                const recent = await fetchRecentMedia();
+                if(recent.length){
+                    candidates = mergeUnique([].concat(recent, candidates));
+                    tierState = buildOrdered();
+                    dropLog('tiers(after recentMedia):', 'videos=' + tierState.videos.length, 'images=' + tierState.images.length, 'pages=' + tierState.pages.length, 'others=' + tierState.others.length);
+                    await runMediaPass();
+                }
+            }
+            /* 所有媒体候选都试完之后，页面兜底只做一次（页面链接交给内嵌浏览器已加载的 HTML 解析） */
+            if(!files.length){
+                const pageTarget = tierState.pages[0] || pageLikeUrl || '';
+                if(pageTarget){
+                    const untried = tierState.pages.filter(url => url !== pageTarget);
+                    dropLog('page fallback target:', String(pageTarget).slice(0, 200), 'untried:', untried.map(url => String(url).slice(0, 200)));
+                    toast('正在从页面里找图片…');
+                    let pageHtml = '';
+                    let pageBaseUrl = '';
+                    try {
+                        const api = window.pywebview && window.pywebview.api;
+                        if(api && typeof api.get_source_view_page_html === 'function'){
+                            const page = await api.get_source_view_page_html();
+                            if(page && typeof page.html === 'string' && page.html.trim()){
+                                pageHtml = page.html;
+                                pageBaseUrl = String(page.url || '').trim() || pageTarget;
+                            }
+                        }
+                    } catch(error){
+                        console.debug('[source-browser] 读取内嵌页面 HTML 失败：' + (error && error.message ? error.message : error));
+                    }
+                    try {
+                        const pageBody = pageHtml
+                            ? {url:pageTarget, html:pageHtml, base_url:pageBaseUrl, folder:localAssetFolderPath()}
+                            : {url:pageTarget, folder:localAssetFolderPath()};
+                        const response = await fetch('/api/local-assets/import-from-page', {
+                            method:'POST',
+                            headers:{'Content-Type':'application/json'},
+                            body:JSON.stringify(pageBody)
+                        });
+                        if(response.ok){
+                            const data = await response.json();
+                            files = (data.files || []).filter(file => file && file.url);
+                            const reason = data.error || data.detail || (data.items || []).map(item => item && item.error).filter(Boolean)[0];
+                            if(!files.length && reason) lastError = reason;
+                            dropLog('import-from-page', response.status, files.length ? ('ok files=' + files.length) : ('fail: ' + (reason || '')));
+                        } else {
+                            lastError = await smartResponseErrorMessage(response, lastError || tr('smart.toastUploadFail'));
+                            dropLog('import-from-page HTTP', response.status, lastError);
+                        }
+                    } catch(error){
+                        lastError = error && error.message ? String(error.message) : lastError;
+                        dropLog('import-from-page error:', lastError);
+                    }
+                    if(!files.length && !pageHtml){
+                        /* 没拿到已加载的 HTML，服务端抓页面多半被反爬拦：给用户一个能操作的提示 */
+                        const reason = String(lastError || '');
+                        if(!reason || /反爬|blocked|405|422|forbidden|验证页|打开页面失败|超时/i.test(reason)){
+                            lastError = '页面被反爬拦截，试试直接拖图片';
+                        }
+                    }
+                }
+            }
+            if(!files.length){
+                toast(downloadFailed ? tr('smart.toastImageDownloadFail', '图片来源下载失败，请重试') : (lastError || tr('smart.toastImageDownloadFail', '图片来源下载失败，请重试')));
+                return;
+            }
             if(!opts.skipUndo) pushUndo();
-            appendImagesToSmartNode([{url:payload.url, name:smartImageNameFromUrl(payload.url), kind:'image'}], targetId, opts);
+            appendImagesToSmartNode(files.map(file => ({
+                url:file.url,
+                name:file.name || smartImageNameFromUrl(file.url),
+                kind:file.kind === 'video' ? 'video' : 'image',
+                natural_w:Number(file.natural_w) || 0,
+                natural_h:Number(file.natural_h) || 0
+            })), targetId, opts);
         }
     } catch(e) {
         toast(e.message || tr('smart.toastUploadFail'));
@@ -30303,7 +31039,9 @@ shell.ondrop = async e => {
             return;
         } catch {}
     }
-    const payload = await resolveSmartImageDropPayload(e.dataTransfer);
+    let payload = await resolveSmartImageDropPayload(e.dataTransfer);
+    /* 内嵌浏览器拖拽：主进程记录的高清候选优先，dataTransfer 缩略图 URL 追加兜底 */
+    payload = await mergeGuestDropPayload(payload);
     if(payload.type === 'none') return;
     await handleSmartImageDropPayload(payload, '', {point:p, forceNew:true});
 };
@@ -31491,6 +32229,7 @@ window.applyGridJoinPreset = applyGridJoinPreset;
 window.applyGridPreset = applyGridPreset;
 window.applyImageEdit = applyImageEdit;
 window.backToCanvasList = backToCanvasList;
+window.openCreateMenu = openCreateMenu;   /* 左侧竖栏「+」复用双击菜单的建节点入口 */
 window.clearEditDrawing = clearEditDrawing;
 window.clearGridCustomLines = clearGridCustomLines;
 window.closeCanvasVersionsPanel = closeCanvasVersionsPanel;
@@ -31508,6 +32247,8 @@ window.navigatePreviewImage = navigatePreviewImage;
 window.openCanvasVersionsPanel = openCanvasVersionsPanel;
 window.openSmartCanvasLog = openSmartCanvasLog;
 window.openSmartCanvasShortcuts = openSmartCanvasShortcuts;
+window.openPromptTemplatePanel = openPromptTemplatePanel;   /* 左栏模板库按钮用：显式传 placement:'left' */
+window.applyPromptTextToCanvas = applyPromptTextToCanvas;   /* 在线提示词库「应用到画布」复用同一段正向提示词落点逻辑 */
 window.redoEditDrawing = redoEditDrawing;
 window.resetGridJoinLayout = resetGridJoinLayout;
 window.restoreCanvasVersion = restoreCanvasVersion;
@@ -31539,6 +32280,7 @@ window.zoomBarFitAll = zoomBarFitAll;
 window.zoomBarReset = zoomBarReset;
 window.zoomBarZoomIn = zoomBarZoomIn;
 window.zoomBarZoomOut = zoomBarZoomOut;
+window.zoomBarSetScale = zoomBarApplyScale;   /* 左下缩放滑杆用 */
 /* 底部栏的创建 / 撤销 / 恢复入口：创建走和双击菜单完全相同的 createNodeFromMenu，只是落点固定在视口中央 */
 window.zoomBarCreate = function(type){
     closeCreateMenu();
@@ -33767,23 +34509,27 @@ function ensureTableApi(){
     guide.id = 'smartEmptyGuide';
     guide.className = 'smart-empty-guide';
     guide.innerHTML = `
-        <div class="smart-empty-guide-title">从这里开始</div>
-        <div class="smart-empty-guide-sub">拖入或粘贴图片，或选一个起点</div>
-        <button class="menu-btn" type="button" data-empty-create="image"><i data-lucide="image-plus"></i><span>图片节点（上传或生成）</span></button>
-        <button class="menu-btn" type="button" data-empty-create="video"><i data-lucide="video"></i><span>视频节点（上传或生成）</span></button>
-        <button class="menu-btn" type="button" data-empty-create="prompt"><i data-lucide="text-cursor-input"></i><span>文本生成</span></button>
-        <button class="menu-btn" type="button" data-empty-create="table"><i data-lucide="table"></i><span>多维表格批量生成</span></button>
-        <button class="menu-btn" type="button" data-empty-create="chat"><i data-lucide="message-square"></i><span>交给画布助手</span></button>
-        <div class="smart-empty-guide-hint">随时双击空白处打开创建菜单</div>`;
+        <div class="smart-empty-guide-hint"><span class="smart-empty-keycap"><i data-lucide="mouse-pointer-click"></i>双击</span><span class="smart-empty-hint-text">画布自由生成，或查看模板</span></div>
+        <div class="smart-empty-guide-pills">
+            <button class="smart-empty-pill" type="button" data-empty-action="video"><i data-lucide="video"></i><span>文字生视频</span></button>
+            <button class="smart-empty-pill" type="button" data-empty-action="background"><i data-lucide="image"></i><span>图片换背景</span></button>
+            <button class="smart-empty-pill" type="button" data-empty-action="firstframe"><i data-lucide="image-plus"></i><span>首帧生成视频</span></button>
+            <button class="smart-empty-pill" type="button" data-empty-action="audio"><i data-lucide="play"></i><span>音频生视频</span></button>
+            <button class="smart-empty-pill" type="button" data-empty-action="template"><i data-lucide="layers"></i><span>模板</span></button>
+        </div>`;
     document.body.appendChild(guide);
     guide.addEventListener('mousedown', e => e.stopPropagation());
     guide.addEventListener('click', e => {
-        const btn = e.target.closest('[data-empty-create]');
+        const btn = e.target.closest('[data-empty-action]');
         if(!btn) return;
         e.stopPropagation();
-        const type = btn.dataset.emptyCreate;
-        if(type === 'chat'){ if(!document.getElementById('chatModal')?.classList.contains('open')) toggleChatPanel(); return; }
-        window.zoomBarCreate(type);
+        const action = btn.dataset.emptyAction;
+        if(action === 'video' || action === 'firstframe' || action === 'audio'){ window.zoomBarCreate('video'); return; }
+        if(action === 'background'){ window.zoomBarCreate('image'); return; }
+        if(action === 'template'){
+            const templateBtn = document.getElementById('composerTemplateBtn');
+            if(templateBtn) templateBtn.click();
+        }
     });
     const sync = () => {
         const empty = !!canvas && !nodes.some(n => n.id !== SMART_LOG_PREVIEW_NODE_ID);
@@ -34339,6 +35085,7 @@ function cullOffscreenNodes(){
     });
 }
 window.__smartCullOffscreenNodes = cullOffscreenNodes;
+window.__novaCloseSmartSidePanels = closeSmartSidePanels;
 /* 画布助手端到端测试用的只读窥视口 + 两个动作（apply ops / 保存），不改任何行为。 */
 window.__smartAgentTestHooks = {
     node: id => { const n = nodes.find(x => x.id === id); return n ? JSON.parse(JSON.stringify(n)) : null; },

@@ -129,8 +129,19 @@ def _pick(cfg_value: Any, env_name: str, fallback: Any) -> Tuple[Any, str]:
 
 
 def _default_bin_dirs() -> List[str]:
-    # macOS GUI 启动的 Electron 拿不到登录 shell 的 PATH，常见的 npm 全局 bin 目录要主动找。
+    # GUI 启动的 Electron 拿不到登录 shell 的 PATH，常见的 npm 全局 bin 目录要主动找。
     # 这份目录清单放配置文件（binary.extra_dirs），这里只是结构缺省，可用 NOVAI_OPENCLAW_BIN_DIRS 覆盖。
+    if os.name == "nt":
+        # 官方 install.ps1：openclaw.cmd 落在 npm 全局目录，私有 Node 落在 OpenClaw deps 目录
+        appdata = _expand(os.environ.get("APPDATA") or "")
+        localappdata = _expand(os.environ.get("LOCALAPPDATA") or "")
+        dirs: List[str] = []
+        if appdata:
+            dirs.append(os.path.join(appdata, "npm"))
+            dirs.append(os.path.join(appdata, "npm", "node_modules", ".bin"))
+        if localappdata:
+            dirs.append(os.path.join(localappdata, "OpenClaw", "deps", "portable-node"))
+        return dirs
     return [
         # OpenClaw 安装脚本自带的用户态 Node（桌面启动时系统 PATH 里没有它）
         os.path.join(os.path.expanduser("~"), ".openclaw", "tools", "node", "bin"),
@@ -139,6 +150,19 @@ def _default_bin_dirs() -> List[str]:
         "/usr/local/bin",
         "/opt/homebrew/bin",
     ]
+
+
+def _exec_names(name: str) -> List[str]:
+    # Windows 上 npm 全局装的是 openclaw.cmd（还有 .ps1/.exe），os.path.isfile 拼无扩展名永远 False
+    if os.name != "nt":
+        return [name]
+    if os.path.splitext(name)[1]:
+        return [name]
+    # PATHEXT 永远用 ";" 分隔，不受 os.pathsep 影响
+    exts = [e.strip().lower() for e in (os.environ.get("PATHEXT") or "").split(";") if e.strip()]
+    if not exts:
+        exts = [".com", ".exe", ".bat", ".cmd"]
+    return [name] + [name + ext for ext in exts]
 
 
 def bin_dirs(config: Dict[str, Any]) -> List[str]:
@@ -178,10 +202,10 @@ def find_binary(config: Dict[str, Any]) -> Tuple[str, List[str]]:
         if found:
             return found, searched + [found]
         for folder in bin_dirs(config):
-            candidate = os.path.join(folder, name)
-            searched.append(candidate)
-            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return candidate, searched
+            for candidate in [os.path.join(folder, n) for n in _exec_names(name)]:
+                searched.append(candidate)
+                if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                    return candidate, searched
     return "", searched
 
 
@@ -393,8 +417,12 @@ def probe_node(config: Dict[str, Any]) -> Dict[str, Any]:
     path = shutil.which("node") or ""
     if not path:
         for folder in bin_dirs(config):
-            candidate = os.path.join(folder, "node")
-            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            candidate = next(
+                (c for c in [os.path.join(folder, n) for n in _exec_names("node")]
+                 if os.path.isfile(c) and os.access(c, os.X_OK)),
+                "",
+            )
+            if candidate:
                 path = candidate
                 break
     raw = ""

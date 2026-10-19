@@ -55,8 +55,8 @@ const createNode = topLevelFunction(js, 'createNode');
 ok(/nodeImages\.every\(isVideoMediaItem\) \? 'smart-video' : 'smart-image'/.test(createNode), '壳层 drop 走 createNode：清一色视频建 smart-video');
 
 console.log('[4] 空画布引导菜单');
-ok(/data-empty-create="video"/.test(js) && /视频节点（上传或生成）/.test(js), '空画布引导加了「视频节点」入口');
-ok(/window\.zoomBarCreate\(type\)/.test(js), '引导按钮复用 zoomBarCreate → createNodeFromMenu');
+ok(/data-empty-action="video"/.test(js) && /文字生视频/.test(js), '空画布引导保留视频入口（文字生视频）');
+ok(/window\.zoomBarCreate\('video'\)/.test(js), '引导胶囊复用 zoomBarCreate → createNodeFromMenu');
 
 console.log('');
 console.log('创建菜单回归：' + pass + ' 项通过' + (fails.length ? ('，失败 ' + fails.length + ' 项') : ''));

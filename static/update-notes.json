@@ -1,13 +1,28 @@
 {
-  "version": "1.0.128",
-  "updated_at": "2026-10-18T15:35:28+08:00",
+  "version": "1.0.129",
+  "updated_at": "2026-10-19T14:08:42+08:00",
   "items": [
-    { "type": "fix", "text": "新建图片 / 视频节点后不再自动弹出上传选择框：先得到空白节点，需要素材时再手动选择或拖入，不会打断连续建节点的操作。" },
-    { "type": "feature", "text": "群组节点支持自由拉宽、拉高：不再锁定等比，横向纵向可单独拉伸，组内图片 / 视频按新尺寸自动重排。" },
-    { "type": "feature", "text": "多图节点与批量生成结果群组同样支持自由缩放：缩放后组内媒体自动重排，不裁切、不重叠。" },
-    { "type": "improvement", "text": "已安装 1.0.127 的用户直接在应用内更新即可；本次只改外置 static 与 Python 文件，不涉及内置运行时，新用户下载安装包即含全部修复。" }
+    { "type": "fix", "text": "修复 Windows 上 OpenClaw 一直显示「不可用」：检测与安装查找的目录清单原来只有 macOS 路径，Windows 上 openclaw.cmd 所在的 %APPDATA%\\npm 和 OpenClaw 自带的 Node（%LOCALAPPDATA%\\OpenClaw\\deps\\portable-node）完全没包含在内，现在按平台分别查找对应目录。" },
+    { "type": "fix", "text": "修复 Windows 上找不到 openclaw 程序：以前只按无扩展名的 openclaw 查找，Windows 上实际是 openclaw.cmd / node.exe，现在按系统 PATHEXT 展开扩展名逐个探测。" },
+    { "type": "fix", "text": "修复从桌面快捷方式启动时后端 PATH 里没有 Node 与 npm 全局目录的问题：后端进程启动时会主动补上这两个目录，OpenClaw 不再因为找不到 Node 而判定不可用。" },
+    { "type": "fix", "text": "修复 OpenClaw 握手时把平台固定上报为 macOS：现在按实际系统上报平台，检测与安装按正确的平台路径执行。" },
+    { "type": "fix", "text": "修复 Lovart 的「使用代理」开关不生效：之前固定走系统代理，设置里选直连也无效，现在与其它平台一致按开关执行。" },
+    { "type": "fix", "text": "修复 Lovart 请求头把来源固定写成 macOS：现在按实际系统上报。" },
+    { "type": "feature", "text": "画布新增网页链接导入素材：把网页链接作为素材来源导入画布使用。" },
+    { "type": "feature", "text": "新增在线提示词库：可直接浏览在线提示词并取用。" },
+    { "type": "improvement", "text": "前端构建产物更新，随本版一起发布。" }
   ],
   "history": [
+    {
+      "version": "1.0.128",
+      "updated_at": "2026-10-18T15:35:28+08:00",
+      "items": [
+        { "type": "fix", "text": "新建图片 / 视频节点后不再自动弹出上传选择框：先得到空白节点，需要素材时再手动选择或拖入，不会打断连续建节点的操作。" },
+        { "type": "feature", "text": "群组节点支持自由拉宽、拉高：不再锁定等比，横向纵向可单独拉伸，组内图片 / 视频按新尺寸自动重排。" },
+        { "type": "feature", "text": "多图节点与批量生成结果群组同样支持自由缩放：缩放后组内媒体自动重排，不裁切、不重叠。" },
+        { "type": "improvement", "text": "已安装 1.0.127 的用户直接在应用内更新即可；本次只改外置 static 与 Python 文件，不涉及内置运行时，新用户下载安装包即含全部修复。" }
+      ]
+    },
     {
       "version": "1.0.127",
       "updated_at": "2026-10-18T03:08:05+08:00",

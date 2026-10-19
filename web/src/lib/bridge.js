@@ -12,6 +12,15 @@ export function frameEl(id) { return document.getElementById('frame-' + id); }
 function allFrames() { return Array.from(document.querySelectorAll('iframe')); }
 function post(frame, data) { try { frame && frame.contentWindow && frame.contentWindow.postMessage(data, '*'); } catch (e) {} }
 
+// 回给画布 iframe 当前视口尺寸（素材浏览器面板切左右布局时要用）
+function replyViewport(source) {
+    const target = source && typeof source.postMessage === 'function' ? source : null;
+    if (!target) return;
+    try {
+        target.postMessage({ type: 'novai:viewport', width: window.innerWidth, height: window.innerHeight }, '*');
+    } catch (e) {}
+}
+
 export function syncFrame(frame) {
     const theme = window.StudioTheme ? window.StudioTheme.get() : state.theme;
     post(frame, { type: 'studio-theme', theme });
@@ -80,6 +89,19 @@ function onMessage(event) {
     }
     if (d.type === 'settings-iframe-overlay') {
         listeners.overlay.forEach(fn => fn(!!d.open, event.source));
+        return;
+    }
+    // 画布里的素材浏览器面板开合：打开时外壳隐藏左侧导航、画布铺满；只在画布页生效
+    if (d.type === 'novai:source-browser-panel') {
+        const onCanvas = state.active === 'canvas' && state.canvasOpen;
+        state.sourcePanelOpen = onCanvas ? !!d.open : false;
+        replyViewport(event.source);
+        // 侧栏淡出 180ms，落定后再回一次最终视口
+        setTimeout(() => replyViewport(event.source), 260);
+        return;
+    }
+    if (d.type === 'novai:request-viewport') {
+        replyViewport(event.source);
         return;
     }
     forwardStudioApiChange(d);

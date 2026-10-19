@@ -268,7 +268,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.128"
+APP_VERSION = "1.0.129"
 GITHUB_REPO_URL = "https://github.com/invaders-2/NOVAI-Infinite-Canvas"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/invaders-2/NOVAI-Infinite-Canvas/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/invaders-2/NOVAI-Infinite-Canvas/git/trees/main?recursive=1"
@@ -988,6 +988,7 @@ VOLCENGINE_DEFAULT_REGION = "cn-beijing"
 LOVART_DEFAULT_BASE_URL = "https://lgw.lovart.ai"
 LOVART_OPENAPI_PREFIX = "/v1/openapi"
 LOVART_OPENAPI_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LovartAgentSkill/1.0"
+_LOVART_OPENAPI_USER_AGENT_WINDOWS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LovartAgentSkill/1.0"
 LOVART_ARTIFACT_USER_AGENT = "Mozilla/5.0"
 LOVART_ARTIFACT_REFERER = "https://www.lovart.ai/"
 LOVART_CHAT_POLL_INTERVAL = 3
@@ -12809,9 +12810,12 @@ def lovart_base_url(provider=None):
     base_url = str((provider or {}).get("base_url") or LOVART_DEFAULT_BASE_URL).strip().rstrip("/")
     return base_url or LOVART_DEFAULT_BASE_URL
 
-def lovart_http_client(timeout):
-    # Lovart 服务在海外且被 Cloudflare 挡直连，必须跟随系统代理
-    return httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=True, timeout=timeout)
+def lovart_http_client(provider, timeout):
+    return httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider), timeout=timeout)
+
+def lovart_openapi_user_agent():
+    # 上游可能按 UA 做来源校验，报 Mac 串会露馅
+    return _LOVART_OPENAPI_USER_AGENT_WINDOWS if sys.platform.startswith("win") else LOVART_OPENAPI_USER_AGENT
 
 def lovart_api_path(path: str) -> str:
     text = str(path or "").strip()
@@ -12836,7 +12840,7 @@ def lovart_signed_headers(method: str, path: str, access_key: str, secret_key: s
         "X-Signed-Path": path,
         "Content-Type": "application/json",
         "Accept": "*/*",
-        "User-Agent": LOVART_OPENAPI_USER_AGENT,
+        "User-Agent": lovart_openapi_user_agent(),
     }
     if method == "POST":
         headers["Idempotency-Key"] = uuid.uuid4().hex
@@ -13296,7 +13300,7 @@ async def lovart_chat_text(payload, history_messages=None):
     mode = lovart_chat_mode(payload)
     links = []
     try:
-        async with lovart_http_client(httpx.Timeout(connect=20.0, read=180.0, write=180.0, pool=20.0)) as client:
+        async with lovart_http_client(provider, httpx.Timeout(connect=20.0, read=180.0, write=180.0, pool=20.0)) as client:
             project_id = await lovart_ensure_project_id(client, provider)
             attachments = await lovart_attachment_urls(client, provider, lovart_chat_image_refs(payload))
             body = {"prompt": prompt, "project_id": project_id, "mode": mode}
@@ -13415,7 +13419,7 @@ async def generate_lovart_provider_image(prompt, size, model, reference_images=N
     effective_size = lovart_effective_image_size(model, size)
     prompt = lovart_prompt_with_requirements(prompt, lovart_image_requirements(effective_size, size))
     timeout = httpx.Timeout(connect=20.0, read=180.0, write=180.0, pool=20.0)
-    async with lovart_http_client(timeout) as client:
+    async with lovart_http_client(provider, timeout) as client:
         local_urls, raw = await lovart_run_generation(client, provider, prompt, model, "IMAGE", reference_images)
     return {"type": "url", "value": local_urls[0]}, raw
 
@@ -13426,7 +13430,7 @@ async def generate_lovart_video(payload, provider=None):
     refs = image_references(refs)
     prompt = lovart_prompt_with_requirements(getattr(payload, "prompt", ""), lovart_video_requirements(payload))
     timeout = httpx.Timeout(connect=20.0, read=180.0, write=180.0, pool=20.0)
-    async with lovart_http_client(timeout) as client:
+    async with lovart_http_client(provider, timeout) as client:
         local_urls, raw = await lovart_run_generation(client, provider, prompt, model, "VIDEO", refs)
     return {**{"videos": local_urls, "task_id": raw.get("thread_id"), "raw": raw}, **build_canvas_meta(local_urls, payload, "video")}
 
@@ -19112,9 +19116,9 @@ async def test_provider_connection(payload: TestConnectionPayload):
             "raw": payload_models.get("raw"),
         }
     if protocol == "lovart":
-        provider = {"id": payload.provider_id or "lovart", "name": "Lovart", "base_url": (payload.base_url or LOVART_DEFAULT_BASE_URL).strip().rstrip("/"), "protocol": "lovart"}
+        provider = {"id": payload.provider_id or "lovart", "name": "Lovart", "base_url": (payload.base_url or LOVART_DEFAULT_BASE_URL).strip().rstrip("/"), "protocol": "lovart", "use_proxy": payload.use_proxy}
         try:
-            async with lovart_http_client(20) as client:
+            async with lovart_http_client(provider, 20) as client:
                 data = await lovart_request(
                     client, provider, "POST", "/mode/query", body={},
                     access_key=str(payload.api_key or "").strip() or str(getattr(payload, "lovart_access_key", "") or "").strip(),
@@ -19545,7 +19549,7 @@ async def set_lovart_mode(payload: LovartModePayload):
     # unlimited=true 是排队模式（不消耗积分），false 是快速模式（消耗积分）
     unlimited = bool(payload.unlimited)
     try:
-        async with lovart_http_client(20) as client:
+        async with lovart_http_client(provider, 20) as client:
             await lovart_request(client, provider, "POST", "/mode/set", body={"unlimited": unlimited}, access_key=access_key, secret_key=secret_key)
             data = await lovart_request(client, provider, "POST", "/mode/query", body={}, access_key=access_key, secret_key=secret_key)
     except httpx.HTTPError as exc:
@@ -34207,6 +34211,14 @@ _deps.bind(
 )
 from server.routes.assets import router as _assets_router
 app.include_router(_assets_router)
+
+# --- 页面链接导入：解析 og:image / 最大 <img> 后复用 import-urls 的落盘链路 ---
+from server.routes.page_import import router as _page_import_router
+app.include_router(_page_import_router)
+
+# --- 在线提示词库（aishort 社区）：一次抓全 12 页再本地搜索/分页，12h 磁盘缓存 ---
+from server.routes.prompt_library import router as _prompt_library_router
+app.include_router(_prompt_library_router)
 
 # --- 智能体广场 + 技能目录：注册表 / 产物存储 / 通用文件工具上下文 / 路由 ---
 from server.agents import platforms as _platforms_registry

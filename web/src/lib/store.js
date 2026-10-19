@@ -31,6 +31,7 @@ export const state = reactive({
     visited: {},            // 已经加载过的 legacy 页面（iframe 懒加载）
     frameSrc: {},           // 某页 iframe 被指到别的地址（例如直接打开某张画布）
     canvasOpen: false,      // 画布页当前是否打开了某张画布（否则显示 Vue 画布列表）
+    sourcePanelOpen: false, // 画布里的素材浏览器面板是否打开（打开时外壳隐藏左侧导航）
     pinned: read(PINNED_KEY) === '1',
     theme: document.documentElement.classList.contains('theme-dark') ? 'dark' : 'light',
     lang: (window.StudioI18n && window.StudioI18n.lang && window.StudioI18n.lang()) || 'zh',

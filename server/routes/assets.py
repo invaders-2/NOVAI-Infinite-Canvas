@@ -207,6 +207,57 @@ class AssetRegisterRequest(BaseModel):
     created_at: int = 0
 
 
+# --- import-urls 的类型兜底：CDN 不给正确 Content-Type 时按文件头魔数识别 ---
+# 花瓣等图床的"原图"地址常常返回 application/octet-stream 且路径没有扩展名，
+# 这时按魔数识别成图片/视频再落盘；识别不出才走原来的报错文案。
+
+_MEDIA_SNIFF_BYTES = 64
+# ftyp 的 major brand：这些归 mp4（M4V/3gp 也属 mp4 家族），qt 归 mov
+_MP4_FTYP_BRANDS = (
+    b"isom", b"iso2", b"iso3", b"iso4", b"iso5", b"iso6", b"mp41", b"mp42",
+    b"avc1", b"dash", b"mmp4", b"MSNV", b"M4V ", b"M4VH", b"M4VP", b"f4v ",
+    b"3gp4", b"3gp5", b"3g2a", b"3g2b",
+)
+
+
+def _sniff_media_ext(head):
+    """按文件头识别媒体格式，返回 (kind, ext)；识别不出返回 None。
+
+    图片复用 deps._sniff_image_ext_bytes（png/jpg/webp/gif/bmp），这里再补 avif；
+    视频认 mp4/ftyp、mov/ftyp-qt、webm/EBML 头。
+    """
+    head = head or b""
+    image_ext = deps._sniff_image_ext_bytes(head)
+    if image_ext:
+        return "image", image_ext
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        brand = head[8:12]
+        if brand in (b"avif", b"avis"):
+            return "image", ".avif"
+        if brand == b"qt  ":
+            return "video", ".mov"
+        if brand in _MP4_FTYP_BRANDS or brand.startswith(b"3g"):
+            return "video", ".mp4"
+        return None
+    if head[:4] == b"\x1aE\xdf\xa3" and b"webm" in head[:_MEDIA_SNIFF_BYTES].lower():
+        return "video", ".webm"
+    return None
+
+
+def _resolve_media_kind_ext(name_path, content_type, content):
+    """决定落盘的 (kind, ext)：先按 Content-Type/扩展名，认不出再按文件头魔数。"""
+    kind, ext = deps._local_upload_kind_ext(name_path, content_type)
+    if kind not in ("image", "video"):
+        sniffed = _sniff_media_ext((content or b"")[:_MEDIA_SNIFF_BYTES])
+        if sniffed:
+            return sniffed
+    if kind == "image":
+        real = deps._sniff_image_ext_bytes((content or b"")[:16])
+        if real and not (real == ".jpg" and ext == ".jpeg"):
+            ext = real
+    return kind, ext
+
+
 # --- 素材 handler（自 main.py 迁入，函数体照抄，模块级符号改为 deps.XXX） ---
 
 # ===== local-assets 族 =====
@@ -275,11 +326,8 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
                     content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
                     content = response.content
                     name_path = urllib.parse.urlparse(src_url).path
-                kind, ext = deps._local_upload_kind_ext(name_path, content_type)
-                if kind == "image":
-                    real = deps._sniff_image_ext_bytes(content[:16])   # 以真实内容为准，避免 webp 被叫成 .png 等
-                    if real and not (real == ".jpg" and ext == ".jpeg"):
-                        ext = real
+                # Content-Type 认不出时按魔数兜底（花瓣原图常返回 application/octet-stream）
+                kind, ext = _resolve_media_kind_ext(name_path, content_type, content)
                 if kind not in ("image", "video"):
                     raise HTTPException(status_code=400, detail=f"不是图片或视频资源：{content_type or src_url}")
                 if not content:

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import Titlebar from './shell/Titlebar.vue';
 import Sidebar from './shell/Sidebar.vue';
 import LegacyStage from './shell/LegacyStage.vue';
@@ -17,6 +17,10 @@ import { initUpdates, openUpdateModal } from './lib/update.js';
 import { state } from './lib/store.js';
 
 const isCanvas = computed(() => state.active === 'canvas' && state.canvasOpen);
+// 画布编辑态：始终隐藏左侧导航，让画布真正铺满（素材面板打开只是其中一种情况）；退出画布自动恢复
+const hideSidebar = computed(() => isCanvas.value);
+// 离开画布时清掉素材面板标记，避免再次进入时残留状态
+watch(isCanvas, on => { if (!on) state.sourcePanelOpen = false; });
 function openSettings(tab) { state.settingsTab = typeof tab === 'string' ? tab : 'general'; state.settingsOpen = true; }
 
 const intro = ref((() => { try { return localStorage.getItem('novai-visited') ? '' : 'welcome'; } catch (e) { return ''; } })());
@@ -27,7 +31,7 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="shell" :class="['desk-' + (state.desktop || 'web'), { 'route-canvas': isCanvas, pinned: state.pinned }]">
+    <div class="shell" :class="['desk-' + (state.desktop || 'web'), { 'route-canvas': isCanvas, 'sidebar-hidden': hideSidebar, pinned: state.pinned }]">
         <Titlebar @open-settings="openSettings" />
         <div class="body">
             <Sidebar @open-settings="openSettings" @open-update="openUpdateModal" />
@@ -58,6 +62,12 @@ onMounted(() => {
 .route-canvas .body { padding: 0; }
 .route-canvas .stage { position: absolute; inset: 0; margin: 0; border-radius: 0; box-shadow: none; }
 .route-canvas :deep(.sidebar) { margin: 15px 0 15px 15px; height: calc(100% - 30px); }
+/* 画布编辑态：左侧导航平滑收起（约 180ms），画布铺满整宽；退出画布（回列表）自动恢复 */
+.route-canvas.sidebar-hidden :deep(.sidebar) {
+    width: 0; min-width: 0; max-width: 0; margin: 0; padding-left: 0; padding-right: 0;
+    opacity: 0; transform: translateX(-12px); pointer-events: none;
+    transition: width .18s ease-out, min-width .18s ease-out, max-width .18s ease-out, margin .18s ease-out, opacity .18s ease-out, transform .18s ease-out;
+}
 </style>
 
 <style>

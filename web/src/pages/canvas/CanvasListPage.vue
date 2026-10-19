@@ -544,7 +544,7 @@ onBeforeUnmount(() => {
 .cl-card:hover .cl-prev { box-shadow: var(--shadow-lift); transform: translateY(-2px); }
 .cl-card:hover .cl-prev img { transform: scale(1.03); }
 .cl-prev:active { transform: scale(.99) !important; }
-.cl-blank { display: flex; align-items: center; justify-content: center; color: var(--ink-4); }
+.cl-blank { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--ink-4); }
 .cl-prev .nv-badge { position: absolute; left: 10px; top: 10px; }
 .cl-more-wrap { position: absolute; right: 8px; top: 8px; z-index: 2; }
 .cl-more { width: 28px; height: 28px; border: 0; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #fff; background: rgba(10,10,10,.36);
