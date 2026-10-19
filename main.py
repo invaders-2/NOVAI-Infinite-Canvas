@@ -268,7 +268,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.129"
+APP_VERSION = "1.0.130"
 GITHUB_REPO_URL = "https://github.com/invaders-2/NOVAI-Infinite-Canvas"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/invaders-2/NOVAI-Infinite-Canvas/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/invaders-2/NOVAI-Infinite-Canvas/git/trees/main?recursive=1"
@@ -12810,8 +12810,13 @@ def lovart_base_url(provider=None):
     base_url = str((provider or {}).get("base_url") or LOVART_DEFAULT_BASE_URL).strip().rstrip("/")
     return base_url or LOVART_DEFAULT_BASE_URL
 
+def lovart_trust_env(provider) -> bool:
+    # Lovart 网关在海外且被 Cloudflare 挡直连：默认必须走系统代理，实测直连只会 ConnectError
+    mode = normalize_provider_use_proxy((provider or {}).get("use_proxy") if isinstance(provider, dict) else None)
+    return mode != "off"
+
 def lovart_http_client(provider, timeout):
-    return httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider), timeout=timeout)
+    return httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=lovart_trust_env(provider), timeout=timeout)
 
 def lovart_openapi_user_agent():
     # 上游可能按 UA 做来源校验，报 Mac 串会露馅
