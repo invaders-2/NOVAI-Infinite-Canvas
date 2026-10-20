@@ -20,6 +20,8 @@ let backendProc = null;
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
+// 主动停后端（更新重启/正常退出）期间不把退出当崩溃报错；每次 startBackend 都会复位。
+let backendStopExpected = false;
 let backendLog = [];
 let dataDir = '';
 
@@ -172,6 +174,7 @@ function looksLikeNovaiBackend(port) {
 // ---------- 启动后端 ----------
 function startBackend(port) {
   return new Promise(async (resolve, reject) => {
+    backendStopExpected = false;
     const mainPy = resolveMainPy();
     const binary = resolveBackendBinary();
 
@@ -223,8 +226,10 @@ function startBackend(port) {
       backendProc = spawn(binary, ['--port', String(port)], { cwd, env: backendEnv, stdio: ['ignore', 'pipe', 'pipe'] });
       backendProc.stdout.on('data', logBackend);
       backendProc.stderr.on('data', logBackend);
-      backendProc.on('exit', (code) => {
-        if (app.isPackaged && code !== 0) {
+      backendProc.on('exit', (code, signal) => {
+        clog('boot', 'bundled 后端进程退出，code = ' + code + ', signal = ' + signal);
+        if (backendStopExpected || isQuitting) return;
+        if (app.isPackaged && code !== 0 && code !== null) {
           dialog.showErrorBox("NOVAI 后端异常退出", "后端进程已退出（code " + code + "）。日志：" + (logFile || "") + (backendLog.length ? String.fromCharCode(10) + backendLog.slice(-12).join(String.fromCharCode(10)) : ""));
         }
       });
@@ -242,9 +247,10 @@ function startBackend(port) {
     backendProc = spawn(pythonCmd, args, { cwd, env: backendEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     backendProc.stdout.on('data', logBackend);
     backendProc.stderr.on('data', logBackend);
-    backendProc.on('exit', (code) => {
-      clog('boot', '后端进程退出，code = ' + code);
-      if (app.isPackaged && code !== 0) {
+    backendProc.on('exit', (code, signal) => {
+      clog('boot', '后端进程退出，code = ' + code + ', signal = ' + signal);
+      if (backendStopExpected || isQuitting) return;
+      if (app.isPackaged && code !== 0 && code !== null) {
         dialog.showErrorBox('NOVAI 后端异常退出', 'Python 后端未能启动，请确认已安装 Python 3.10+ 及依赖。');
       }
     });
@@ -255,6 +261,7 @@ function startBackend(port) {
 
 // ---------- 清理 ----------
 function shutdownBackend() {
+  backendStopExpected = true;
   if (backendProc && !backendProc.killed) {
     try { backendProc.kill(); } catch (_) {}
   }
@@ -266,6 +273,7 @@ function stopBackendForUpdate(timeoutMs) {
   return new Promise((resolve) => {
     const proc = backendProc;
     if (!proc || proc.killed || !proc.pid) return resolve();
+    backendStopExpected = true;
     let settled = false;
     let timer = null;
     const finish = () => {
