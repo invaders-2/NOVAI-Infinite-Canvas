@@ -40,10 +40,10 @@ onMounted(loadBackups);
             <SetRow label="检查更新" desc="从当前选择的更新源检查是否有新版本">
                 <button type="button" class="nv-btn sm" :disabled="upd.checking" @click="checkForUpdates(true)"><span v-if="upd.checking" class="spin sm"></span><NvIcon v-else name="refresh" />检查更新</button>
             </SetRow>
-            <SetRow label="一键更新" desc="先测试连通性、选下载源，更新前自动备份，完成后后端自动重启">
+            <SetRow label="一键更新" desc="更新前自动备份，完成后软件自动重启">
                 <button type="button" class="nv-btn sm" :class="{ primary: hasUpdate() }" @click="openUpdateModal"><NvIcon name="arrowup" />{{ hasUpdate() ? '更新到 ' + versionLabel(upd.remote) : '一键更新' }}</button>
             </SetRow>
-            <NvProgress v-if="upd.running && upd.progress" class="prog" :stage="stageText(upd.progress)" :percent="Number(upd.progress.percent) || 0" :error="upd.progress.stage === 'error'" :detail="upd.progress.stage === 'downloading' && upd.progress.current_file ? '当前文件：' + upd.progress.current_file : ''" />
+            <NvProgress v-if="upd.running && upd.progress" class="prog" :stage="stageText(upd.progress)" :percent="Number(upd.progress.percent) || 0" :error="upd.progress.stage === 'error'" />
         </SetCard>
         <SetCard title="回滚" desc="每次一键更新前都会备份旧文件；更新后出问题可以还原到其中一份，后端会自动重启。">
             <div v-if="backups === null" class="empty">读取中…</div>

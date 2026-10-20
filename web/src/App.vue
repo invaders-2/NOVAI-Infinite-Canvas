@@ -11,6 +11,7 @@ import ZImagePage from './pages/online/ZImagePage.vue';
 import ChatPage from './pages/chat/ChatPage.vue';
 import AssetsPage from './pages/assets/AssetsPage.vue';
 import UpdateModal from './shell/UpdateModal.vue';
+import UpdateDone from './shell/UpdateDone.vue';
 import UpdateReminder from './shell/UpdateReminder.vue';
 import Welcome from './shell/Welcome.vue';
 import { initUpdates, openUpdateModal } from './lib/update.js';
@@ -46,6 +47,7 @@ onMounted(() => {
         </div>
         <SettingsModal @quickstart="intro = 'quickstart'" />
         <UpdateModal />
+        <UpdateDone />
         <UpdateReminder />
         <Welcome :mode="intro" @close="intro = ''" />
         <ToastHost />

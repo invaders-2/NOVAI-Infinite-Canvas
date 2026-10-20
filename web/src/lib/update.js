@@ -1,21 +1,16 @@
-// 版本与更新：检查新版本（后端优先，浏览器兜底）、三个下载源的连通性测试、一键更新进度、更新回滚。
-// 逻辑与旧 index.html 一致，只是把状态收进一个 reactive 对象，界面各处共用。
+// 版本与更新：检查新版本（后端优先，浏览器兜底）、一键更新进度与自动重启、重启后的更新日志。
+// 界面只展示「版本 + 更新内容 + 进度」；HTTP 状态码、异常名这类技术细节只进 console。
 import { reactive } from 'vue';
 import { state, toast } from './store.js';
 
 const SOURCE_KEY = 'studio_update_source';
 const DISMISSED_KEY = 'novai.update.dismissedVersion';
+/* 更新成功、重启之前写入目标版本；重启后据此弹一次「已更新到 vX.Y.Z」 */
+const UPDATED_TO_KEY = 'novai.updatedTo';
 const PROJECT_URL = 'https://github.com/invaders-2/NOVAI-Infinite-Canvas';
 
 function readLS(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 function writeLS(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-
-export const SOURCES = [
-    { id: 'modelscope', title: 'ModelScope 下载源', desc: 'ModelScope API / raw 文件，国内网络推荐，无需代理。' },
-    { id: 'gitee', title: 'Gitee 下载源', desc: 'Gitee API / raw 文件，国内网络推荐，无需代理。' },
-    { id: 'github', title: 'GitHub 下载源', desc: 'GitHub API / raw 文件 / GitHub 网页，Google 仅作外网参考。' },
-];
-export const SOURCE_LABEL = { github: 'GitHub', gitee: 'Gitee', modelscope: 'ModelScope' };
 
 export const upd = reactive({
     info: { version: '', repo_url: PROJECT_URL },
@@ -25,13 +20,12 @@ export const upd = reactive({
     modalOpen: false,
     reminder: '',          // 右下角提醒的版本
     checking: false,
-    testing: false,
-    conn: null,            // { results, sources, ok, backend_missing }
-    live: null,            // 测试中的逐条结果
     running: false,
     progress: null,        // { stage, percent, current_file, files_done, files_total }
-    summary: { kind: 'warn', title: '建议先测试连通性', text: '测试会检测 GitHub / Gitee 连通性。' },
+    phase: 'idle',         // idle | running | restarting | done | error
+    error: '',             // 给用户看的一句人话
 });
+export const updDone = reactive({ open: false, version: '', notes: null });
 let abortCtl = null;
 
 export function versionLabel(v, mode = 'full') {
@@ -55,13 +49,13 @@ export const hasUpdate = () => !!(upd.remote && state.version && compareVersions
 export function setSource(s) {
     upd.source = ['github', 'gitee', 'modelscope'].includes(s) ? s : 'github';
     writeLS(SOURCE_KEY, upd.source);
-    refreshSummary();
 }
 
 async function loadInfo() {
     const info = await fetch('/api/app-info', { cache: 'no-store' }).then(r => r.json()).catch(() => ({}));
     upd.info = { ...upd.info, ...info };
     state.version = String(upd.info.version || '').trim();
+    return !!state.version;
 }
 
 export async function checkForUpdates(manual = false) {
@@ -103,10 +97,11 @@ export async function checkForUpdates(manual = false) {
         if (manual) {
             if (found) { toast(`发现新版本 ${versionLabel(best.version)}，点击查看更新`, { icon: 'arrowup', onClick: openUpdateModal }); openUpdateModal(); }
             else if (reachable) toast(`已是最新版本（${versionLabel(current)}）`, { icon: 'check' });
-            else toast('无法连接更新源，请检查网络或代理后重试', { danger: true, icon: 'alert' });
+            else toast('暂时连不上更新服务器，稍后再试', { danger: true, icon: 'alert' });
         }
     } catch (e) {
-        if (manual) toast('检测更新失败：' + String((e && e.message) || e).slice(0, 120), { danger: true, icon: 'alert' });
+        console.error('[update] 检查更新失败：', e);
+        if (manual) toast('暂时连不上更新服务器，稍后再试', { danger: true, icon: 'alert' });
     } finally {
         upd.checking = false;
     }
@@ -120,120 +115,13 @@ function maybeRemind(v) {
 export function dismissReminder() { if (upd.reminder) writeLS(DISMISSED_KEY, upd.reminder); upd.reminder = ''; }
 
 export function openUpdateModal() {
-    upd.conn = null; upd.live = null;
-    refreshSummary();
+    if (!upd.running) { upd.phase = 'idle'; upd.error = ''; }
     upd.modalOpen = true;
     fetch('/api/changelog').then(r => (r.ok ? r.json() : null)).then(d => { if (d && Array.isArray(d.items) && d.items.length) upd.notes = d; }).catch(() => {});
 }
 export function closeUpdateModal() {
     if (upd.running) { try { abortCtl && abortCtl.abort(); } catch (e) {} }
     upd.modalOpen = false;
-}
-
-/* ───────── 连通性 ───────── */
-export function targets() {
-    const s = upd.info.sources || {}, gh = s.github || {}, ge = s.gitee || {}, ms = s.modelscope || {};
-    return [
-        { name: 'ModelScope 更新列表', url: ms.tree_url || 'https://modelscope.cn/api/v1/models/bllack/NOVAI-releases/repo?Revision=master&FilePath=static/update-notes.json', source: 'modelscope', required: true },
-        { name: 'ModelScope 版本文件', url: ms.version_url || 'https://modelscope.cn/api/v1/models/bllack/NOVAI-releases/repo?Revision=master&FilePath=VERSION', source: 'modelscope', required: true },
-        { name: 'ModelScope 主页', url: 'https://modelscope.cn/models/bllack/NOVAI-releases', source: 'modelscope' },
-        { name: 'Gitee 更新列表', url: ge.tree_url || 'https://gitee.com/api/v5/repos/invaders/novai/git/trees/main?recursive=1', source: 'gitee', required: true },
-        { name: 'Gitee 版本文件', url: ge.version_url || 'https://gitee.com/invaders/novai/raw/main/VERSION', source: 'gitee', required: true },
-        { name: 'Gitee 主页', url: 'https://gitee.com/', source: 'gitee' },
-        { name: 'GitHub 更新列表', url: gh.tree_url || upd.info.tree_url || 'https://api.github.com/repos/invaders-2/NOVAI-Infinite-Canvas/git/trees/main?recursive=1', source: 'github', required: true },
-        { name: 'GitHub 版本文件', url: gh.version_url || upd.info.version_url || 'https://raw.githubusercontent.com/invaders-2/NOVAI-Infinite-Canvas/main/VERSION', source: 'github', required: true },
-        { name: 'GitHub 主页', url: 'https://github.com/', source: 'github' },
-        { name: 'Google 连通性', url: 'https://www.google.com/generate_204', source: 'reference' },
-    ];
-}
-export function rowsFor(source) {
-    const all = upd.live || (upd.conn && upd.conn.results) || targets().map(t => ({ ...t, untouched: true }));
-    return all.filter(i => i.source === source || (source === 'github' && i.source === 'reference'));
-}
-export function statusLabel(i) {
-    if (i.untouched) return '待测试';
-    if (i.pending) return '检测中…';
-    if (i.ok) return `正常 · ${i.elapsed_ms || 0}ms`;
-    if (i.timed_out) return '失败 · 超时';
-    if (i.status) return `HTTP ${i.status}`;
-    return '失败';
-}
-function stats(source, results) {
-    const items = (results || []).filter(i => i.source === source);
-    const req = items.filter(i => i.required);
-    return { ok: req.length ? req.every(i => i.ok) : false, done: items.filter(i => !i.pending && !i.untouched).length, total: items.length };
-}
-export function sourceBadge(source) {
-    if (upd.live) { const s = stats(source, upd.live); if (s.done < s.total) return { state: '', text: `检测中 ${s.done}/${s.total}` }; return { state: s.ok ? 'ok' : 'bad', text: s.ok ? '可用' : '不可用' }; }
-    if (!upd.conn) return { state: '', text: '待测试' };
-    const s = stats(source, upd.conn.results);
-    return { state: s.ok ? 'ok' : 'bad', text: s.ok ? '可用' : '不可用' };
-}
-function best(conn) {
-    const s = conn.sources || {};
-    if (s.modelscope && s.modelscope.ok) return 'modelscope';
-    if (s.gitee && s.gitee.ok) return 'gitee';
-    return 'github';
-}
-function summarize(kind, title, text) { upd.summary = { kind, title, text }; }
-export function refreshSummary() {
-    const name = SOURCE_LABEL[upd.source] || 'GitHub';
-    const c = upd.conn;
-    if (upd.running) return;
-    if (!c) return summarize('warn', '建议先测试连通性', '测试会检测 ModelScope / Gitee / GitHub 的连通性，并自动选出可用的下载源。');
-    if (c.backend_missing) return summarize('fail', '需要重启后端', '当前页面已经更新，但后端仍是旧版本，所以找不到连通性测试接口。请重启服务后再试。');
-    const ok = (c.sources || {})[upd.source] ? c.sources[upd.source].ok : (upd.source === 'github' && c.ok);
-    if (ok) {
-        const google = (c.results || []).find(i => i.name === 'Google 连通性');
-        const fastest = (c.results || []).filter(i => i.source === upd.source && i.ok).sort((a, b) => (a.elapsed_ms || 1e6) - (b.elapsed_ms || 1e6))[0];
-        return summarize(google && google.ok ? 'ok' : 'warn', `${name} 下载源可用`, fastest ? `${name} 可访问，最快节点约 ${fastest.elapsed_ms || 0}ms，可以开始更新。` : `${name} 更新节点可用，可以开始更新。`);
-    }
-    summarize('fail', `${name} 下载源不可用`, `当前网络无法访问 ${name} 必需节点。请切换下载源，或检查代理、DNS 后重试。`);
-}
-export async function testConnectivity() {
-    if (upd.testing) return;
-    upd.testing = true; upd.conn = null;
-    const ts = targets();
-    upd.live = ts.map(t => ({ ...t, pending: true }));
-    let backendMissing = false;
-    summarize('warn', '正在测试连通性', '正在逐条检测各节点，结果实时显示。');
-    const apply = (name, patch) => { const i = upd.live.findIndex(x => x.name === name); if (i >= 0) upd.live[i] = { ...upd.live[i], pending: false, ...patch }; };
-    const probe = async t => {
-        const ac = new AbortController();
-        const killer = setTimeout(() => ac.abort(), 6000);
-        try {
-            const res = await fetch(`/api/update-connectivity/probe?name=${encodeURIComponent(t.name)}`, { cache: 'no-store', signal: ac.signal });
-            const data = await res.json().catch(() => ({}));
-            if (res.status === 404 && (data.detail === 'Not Found' || data.detail === undefined)) { backendMissing = true; return; }
-            if (res.ok) apply(t.name, { ok: !!data.ok, status: data.status || 0, elapsed_ms: data.elapsed_ms || 0, error: data.error || '', timed_out: !!data.timed_out });
-            else apply(t.name, { ok: false, error: data.detail || '失败' });
-        } catch (e) {
-            apply(t.name, e && e.name === 'AbortError' ? { ok: false, timed_out: true, error: '连接超时（超过 5s）' } : { ok: false, error: '无法连接' });
-        } finally { clearTimeout(killer); }
-    };
-    try {
-        await Promise.all(ts.map(probe));
-        if (backendMissing) {
-            try {
-                const res = await fetch('/api/update-connectivity', { cache: 'no-store' });
-                const data = await res.json().catch(() => ({}));
-                if (res.ok && Array.isArray(data.results)) { upd.conn = data; upd.live = null; setSource(best(data)); return; }
-            } catch (e) {}
-            const msg = '后端还没有加载新的连通性测试接口。请重启服务后再测试。';
-            upd.conn = { ok: false, backend_missing: true, results: ts.map(t => ({ ...t, ok: false, elapsed_ms: 0, error: msg })) };
-            upd.live = null;
-            return;
-        }
-        const results = upd.live.map(({ pending, untouched, ...rest }) => rest);
-        const sources = {};
-        for (const s of ['github', 'gitee', 'modelscope']) { const req = results.filter(i => i.source === s && i.required); sources[s] = { ok: req.length > 0 && req.every(i => i.ok) }; }
-        upd.conn = { results, sources, ok: sources.github.ok };
-        upd.live = null;
-        setSource(best(upd.conn));
-    } finally {
-        upd.testing = false;
-        refreshSummary();
-    }
 }
 
 /* ───────── 一键更新 ───────── */
@@ -250,10 +138,10 @@ async function poll() {
         if (!d.running && ['done', 'error', 'restarting'].includes(d.stage)) stopPoll();
     } catch (e) {}
 }
+/* 进度只说人话：具体在传哪个文件对用户没意义 */
 export function stageText(p) {
     const s = (p && p.stage) || '';
-    const done = Number((p && p.files_done) || 0), total = Number((p && p.files_total) || 0);
-    return ({ downloading: total > 0 ? `下载中 ${done}/${total} 个文件` : '下载中…', backup: '备份中', applying: '应用中', restarting: '重启中', done: '更新完成', error: '更新失败' })[s] || '准备更新';
+    return ({ downloading: '下载中', backup: '正在备份', applying: '正在安装', restarting: '正在重启', done: '更新完成', error: '更新失败' })[s] || '正在准备';
 }
 async function waitAndReload() {
     const deadline = Date.now() + 90000;
@@ -265,27 +153,51 @@ async function waitAndReload() {
 }
 export async function startUpdate() {
     if (upd.running) return;
-    const name = SOURCE_LABEL[upd.source] || 'GitHub';
     upd.running = true;
-    summarize('warn', '正在更新', `正在从 ${name} 下载文件，并创建本地备份。`);
+    upd.phase = 'running';
+    upd.error = '';
     stopPoll(); upd.progress = { stage: '', percent: 0 }; poll(); pollTimer = setInterval(poll, 1000);
     abortCtl = new AbortController();
     const killer = setTimeout(() => abortCtl.abort(), 300000);
     try {
         const res = await fetch('/api/update-from-github', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ auto_restart: true, restart_delay: 3, source: upd.source, fallback: true }), signal: abortCtl.signal });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.detail || '更新失败');
+        if (!res.ok) throw new Error((data && data.detail) || `HTTP ${res.status}`);
         if (data.update_notes) upd.notes = data.update_notes;
-        const fb = data.fallback_used ? `（${name} 不可用，已自动切换到 ${data.source_label || 'GitHub'}）` : '';
-        summarize('ok', '更新完成', (data.restart_scheduled ? `已更新 ${data.count || 0} 个文件。后端将在约 3 秒后自动重启，本页面会在恢复后自动刷新。` : `已更新 ${data.count || 0} 个文件。请重启后端，然后刷新页面。`) + fb);
+        /* 重启后要弹的更新日志：版本从响应里取，取不到用检查到的远端版本 */
+        const target = String(data.version || state.remoteVersion || upd.remote || '').trim();
+        if (target) writeLS(UPDATED_TO_KEY, target);
         upd.remote = ''; state.remoteVersion = '';
         if (data.version) state.version = data.version;
+        upd.phase = data.restart_scheduled ? 'restarting' : 'done';
         if (data.restart_scheduled) waitAndReload();
     } catch (e) {
-        summarize('fail', '更新失败', e && e.name === 'AbortError' ? '更新超时。请切换下载源或检查网络后重试。' : (/fetch|network/i.test(String(e && e.message)) ? '无法连接当前选择的更新源。请检查网络、代理或 DNS 后重试。' : String((e && e.message) || '更新失败')));
+        console.error('[update] 更新失败：', e);
+        upd.phase = 'error';
+        upd.error = '更新失败，请检查网络后重试';
     } finally {
         clearTimeout(killer); abortCtl = null; stopPoll(); upd.running = false;
     }
+}
+
+/* ───────── 重启后的「已更新到 vX.Y.Z」 ───────── */
+/* 标记与当前版本对不上（用户又换了版本）就静默清掉，不打扰用户 */
+export async function checkUpdateDone() {
+    const target = readLS(UPDATED_TO_KEY);
+    if (!target) return;
+    if (!state.version) await loadInfo();
+    if (!state.version) return;   // 拿不到当前版本就先留着标记，下次启动再判断
+    if (compareVersions(target, state.version) !== 0) { writeLS(UPDATED_TO_KEY, ''); return; }
+    updDone.version = target;
+    updDone.notes = (upd.notes && Array.isArray(upd.notes.items) && upd.notes.items.length) ? upd.notes : null;
+    updDone.open = true;
+    if (!updDone.notes) {
+        fetch('/api/changelog').then(r => (r.ok ? r.json() : null)).then(d => { if (d && Array.isArray(d.items) && d.items.length) updDone.notes = d; }).catch(() => {});
+    }
+}
+export function closeUpdateDone() {
+    updDone.open = false;
+    writeLS(UPDATED_TO_KEY, '');
 }
 
 /* ───────── 回滚（旧版只有函数没有按钮，这里补上入口） ───────── */
@@ -306,4 +218,5 @@ export function initUpdates() {
     try { s = JSON.parse(localStorage.getItem('studio_general_settings') || '{}') || {}; } catch (e) {}
     if (s.autoCheckUpdate !== false) checkForUpdates(false);
     else loadInfo();
+    checkUpdateDone();
 }
