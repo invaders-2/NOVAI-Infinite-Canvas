@@ -151,12 +151,67 @@ function pickAsrPlatform(id) {
 }
 function pickAsrModel(model) { if (asr.provider && model) saveAsr(asr.provider, model); }
 
+/* 提示词优化（图片/视频节点）：纯前端偏好，不走后端 —— 画布 iframe 同源共享 localStorage，
+   画布的调用链是同步函数，等不了接口。存储 {"provider":"","model":""}，空串表示自动。 */
+const PROMPT_OPTIMIZE_KEY = 'novai_prompt_optimize';
+const promptOptimize = reactive({ provider: '', model: '' });
+const promptOptimizeProviders = ref([]);
+const promptOptimizePlatforms = computed(() => promptOptimizeProviders.value
+    .filter(p => p && p.enabled !== false && (p.chat_models || []).length)
+    .map(p => ({ id: p.id, name: p.name || p.id, chat_models: p.chat_models || [] })));
+const promptOptimizeModelOptions = computed(() => {
+    const p = promptOptimizePlatforms.value.find(x => x.id === promptOptimize.provider);
+    return p ? p.chat_models.slice() : [];
+});
+const promptOptimizeStatus = computed(() => promptOptimize.provider
+    ? { label: '手动指定', cls: 'manual' }
+    : { label: '自动', cls: 'auto' });
+const promptOptimizeStatusText = computed(() => promptOptimize.provider
+    ? '图片/视频节点的「优化提示词」使用上面选定的平台与模型。'
+    : '图片/视频节点的「优化提示词」跟随当前可用的第一个平台。');
+function loadPromptOptimize() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(PROMPT_OPTIMIZE_KEY) || '{}') || {};
+        promptOptimize.provider = String(saved.provider || '');
+        promptOptimize.model = String(saved.model || '');
+    } catch (e) { promptOptimize.provider = ''; promptOptimize.model = ''; }
+}
+function savePromptOptimize() {
+    try { localStorage.setItem(PROMPT_OPTIMIZE_KEY, JSON.stringify({ provider: promptOptimize.provider || '', model: promptOptimize.model || '' })); } catch (e) {}
+}
+async function refreshPromptOptimize() {
+    try {
+        const r = await fetch('/api/providers');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        promptOptimizeProviders.value = (d && d.providers) || [];
+    } catch (e) { promptOptimizeProviders.value = []; return; }
+    /* 平台被删/停用/清空对话模型后画布本来就会回退，这里同步落回「自动」，免得下拉框空着一个值 */
+    if (promptOptimize.provider && !promptOptimizePlatforms.value.some(p => p.id === promptOptimize.provider)) {
+        promptOptimize.provider = '';
+        promptOptimize.model = '';
+        savePromptOptimize();
+    }
+}
+function pickPromptOptimizePlatform(id) {
+    const p = promptOptimizePlatforms.value.find(x => x.id === id);
+    promptOptimize.provider = id || '';
+    promptOptimize.model = id ? (((p && p.chat_models.includes(promptOptimize.model) && promptOptimize.model) || (p && p.chat_models[0])) || '') : '';
+    savePromptOptimize();
+}
+function pickPromptOptimizeModel(model) {
+    promptOptimize.model = model || '';
+    savePromptOptimize();
+}
+
 const SOURCES = [{ value: 'github', label: 'GitHub' }, { value: 'gitee', label: 'Gitee' }, { value: 'modelscope', label: '国内镜像' }];
 
 onMounted(() => {
     load();
     refreshStorage();
     refreshAsr();
+    loadPromptOptimize();
+    refreshPromptOptimize();
     const a = pyApi();
     if (a && a.get_data_dir) a.get_data_dir().then(p => { if (p) dataDir.value = p; }).catch(() => {});
 });
@@ -217,6 +272,29 @@ onMounted(() => {
                 <span class="asr-badge" :class="asr.source">{{ asrSource.label }}</span>
             </SetRow>
         </SetCard>
+        <SetCard title="提示词优化" desc="图片/视频节点上的「优化提示词」用哪个平台与模型；选「自动」则跟随当前可用的第一个平台。">
+            <SetRow label="优化平台" desc="只列出已启用且含对话模型的平台">
+                <span class="asr-sel">
+                    <select :value="promptOptimize.provider" aria-label="提示词优化平台" @change="pickPromptOptimizePlatform($event.target.value)">
+                        <option value="">自动</option>
+                        <option v-for="p in promptOptimizePlatforms" :key="p.id" :value="p.id">{{ p.name }}</option>
+                    </select>
+                    <NvIcon name="chev" />
+                </span>
+            </SetRow>
+            <SetRow label="优化模型" desc="该平台的对话模型；换平台时自动切到第一个可用模型">
+                <span class="asr-sel">
+                    <select :value="promptOptimize.model" :disabled="!promptOptimize.provider" aria-label="提示词优化模型" @change="pickPromptOptimizeModel($event.target.value)">
+                        <option value="" disabled>请选择模型</option>
+                        <option v-for="m in promptOptimizeModelOptions" :key="m" :value="m">{{ m }}</option>
+                    </select>
+                    <NvIcon name="chev" />
+                </span>
+            </SetRow>
+            <SetRow label="当前生效" :desc="promptOptimizeStatusText">
+                <span class="opt-badge" :class="promptOptimizeStatus.cls">{{ promptOptimizeStatus.label }}</span>
+            </SetRow>
+        </SetCard>
         <SetCard title="更新" desc="启动时是否检查新版本，以及从哪个源下载更新。">
             <SetRow label="启动时自动检查更新" desc="关闭后启动不再自动检查；「关于」里的手动检查不受影响"><NvSwitch :model-value="g.autoCheckUpdate" label="启动时自动检查更新" @update:model-value="save('autoCheckUpdate', $event)" /></SetRow>
             <SetRow label="更新源" desc="与更新弹窗里的来源选择保持同步"><NvPills :model-value="upd.source" :options="SOURCES" label="更新源" @update:model-value="setSource" /></SetRow>
@@ -235,9 +313,10 @@ onMounted(() => {
 .asr-sel select:hover:not(:disabled), .asr-sel select:focus-visible { background: var(--fill-2); }
 .asr-sel select:disabled { color: var(--ink-4); cursor: default; }
 .asr-sel .nv-i { position: absolute; right: 9px; width: 12px; height: 12px; color: var(--ink-3); pointer-events: none; }
-.asr-badge { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 8px; background: var(--solid); font: 400 11.5px/1 var(--font-sans); color: var(--ink-2); }
-.asr-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); }
+.asr-badge, .opt-badge { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 8px; background: var(--solid); font: 400 11.5px/1 var(--font-sans); color: var(--ink-2); }
+.asr-badge::before, .opt-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); }
 .asr-badge.user::before { background: var(--accent); }
 .asr-badge.env::before { background: var(--danger); }
 .asr-badge.config::before { background: var(--ink-3); }
+.opt-badge.manual::before { background: var(--accent); }
 </style>

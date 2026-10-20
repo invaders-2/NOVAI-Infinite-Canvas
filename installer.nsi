@@ -10,7 +10,7 @@ Unicode true
 !define PRODUCT_DISPLAY "NOVAI 智能画布"
 ; 版本号：优先用命令行 -DPRODUCT_VERSION 传入，否则回退到写死的值
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "1.0.130"
+  !define PRODUCT_VERSION "1.0.131"
 !endif
 !define PRODUCT_PUBLISHER "NOVAI"
 !define PRODUCT_WEB_SITE "https://github.com/invaders-2/NOVAI"

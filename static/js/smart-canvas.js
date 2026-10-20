@@ -33800,8 +33800,26 @@ function promptOptimizeEditor(kind, node){
     const el = promptNodeUiRoot(node.id)?.querySelector(kind === 'chat' ? '.llm-chat-input' : '.prompt-llm-instruction');
     return el ? { el, text: llmEditorPlainText(el, node) } : null;
 }
+/* 设置页「提示词优化」存的全局偏好；图片/视频节点没有自己的模型选择，只能用它。
+   画布的调用链是同步函数，所以走 localStorage（与设置页同源），配置无效就返回 null 走原有兜底。 */
+const PROMPT_OPTIMIZE_PREF_KEY = 'novai_prompt_optimize';
+function promptOptimizePreferredTarget(){
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(PROMPT_OPTIMIZE_PREF_KEY) || 'null'); } catch(e) { return null; }
+    const provider = String(saved?.provider || '').trim();
+    if(!provider || !chatApiProviders().some(p => p.id === provider)) return null;
+    const model = String(saved?.model || '').trim();
+    /* 平台后来下架了这个模型的话，原样发出去上游必报模型不存在，退回该平台自己声明的模型 */
+    return { provider, model: model && providerChatModels(provider).includes(model) ? model : resolveChatModel('', provider) };
+}
 function promptOptimizeModelTarget(kind, node){
-    if(kind !== 'composer' || node?.llmProvider || node?.llmModel){
+    /* 节点自己选了平台/模型（LLM 节点、编辑栏正编辑的文本生成节点）优先级最高，不被全局偏好覆盖 */
+    const nodeBound = !!(node?.llmProvider || node?.llmModel);
+    if(!nodeBound){
+        const preferred = promptOptimizePreferredTarget();
+        if(preferred) return preferred;
+    }
+    if(kind !== 'composer' || nodeBound){
         const provider = resolveChatProviderId(node?.llmProvider || '');
         return { provider, model: resolveChatModel(node?.llmModel || '', provider) };
     }
