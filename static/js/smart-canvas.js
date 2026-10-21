@@ -4,6 +4,8 @@
 // 使用安全的 fallback 包装器，避免 NovaUtils 未定义时整个 IIFE 崩溃
 var tr = function(key) { return window.NovaUtils ? NovaUtils.tr(key) : (window.StudioI18n ? window.StudioI18n.t(key) : key); };
 var trf = function(key) { var args = Array.prototype.slice.call(arguments); return window.NovaUtils ? NovaUtils.trf.apply(NovaUtils, args) : (window.StudioI18n ? window.StudioI18n.t(key) : key); };
+/* 新文案还没登记进 i18n 词典时落到中文默认（StudioI18n.t 找不到 key 会原样返回 key）。 */
+var trd = function(key, fallback) { var text = tr(key); return text && text !== key ? text : fallback; };
 var uid = function() { return window.NovaUtils ? NovaUtils.uid() : 'uid_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); };
 var escapeHtml = function(str) { return window.NovaUtils ? NovaUtils.escapeHtml(str) : String(str || '').replace(/[&<>"']/g, function(s) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]; }); };
 var escapeAttr = function(str) { return window.NovaUtils ? NovaUtils.escapeAttr(str) : escapeHtml(str).replace(/`/g, '&#96;'); };
@@ -445,6 +447,18 @@ let settings = {
     enhanceUpscaleRes:2048,
     editUpscale:false,
     editUpscaleRes:2048,
+    audioProvider:'',
+    audioModel:'',
+    audioCustom:false,
+    audioInstrumental:false,
+    audioDuration:30,
+    audioLength:0,
+    audioBpm:0,
+    audioTitle:'',
+    audioStyle:'',
+    audioFormat:'',
+    audioVoice:'alloy',
+    audioSpeed:1,
     promptH:124
 };
 const MS_GEN_MODELS = {
@@ -1603,10 +1617,15 @@ const RECENT_SMART_SETTINGS_KEY = 'smart_canvas_recent_run_settings_v1';
 const initialSmartSettings = cloneSmartSettings(settings);
 let canvasDefaultSmartSettings = cloneSmartSettings(settings);
 let recentSmartSettingsByMode = {};
+/* 参数记忆按「生成类型」分槽：音频参数不能和图片参数互相覆盖（同一平台两套模型完全不同）。 */
+function smartSettingsApiKindKey(source=settings){
+    const kind = String(source?.apiKind || '');
+    return kind === 'video' || kind === 'audio' ? kind : 'image';
+}
 function smartSettingsModeKey(source=settings){
     const engine = ['api','volcengine','modelscope','comfy','runninghub'].includes(source?.engine) ? source.engine : 'api';
-    if(engine === 'api') return `api:${source?.apiKind === 'video' ? 'video' : 'image'}`;
-    if(engine === 'volcengine') return `volcengine:${source?.apiKind === 'video' ? 'video' : 'image'}`;
+    if(engine === 'api') return `api:${smartSettingsApiKindKey(source)}`;
+    if(engine === 'volcengine') return `volcengine:${smartSettingsApiKindKey(source)}`;
     if(engine === 'comfy') return `comfy:${['text','enhance','edit','custom'].includes(source?.comfyMode) ? source.comfyMode : 'text'}`;
     if(engine === 'runninghub') return 'runninghub';
     return 'modelscope';
@@ -1675,9 +1694,13 @@ function isSmartImageNode(node){
 function isSmartVideoNode(node){
     return Boolean(node && node.type === 'smart-video');
 }
-/* 两类媒体节点都适用：分组/落点/级联/会话等大量逻辑只关心「是不是媒体节点」，与图片还是视频无关。 */
+/* 音频生成节点：卡片里装的是音频素材（<audio> 播放器），参数与图片/视频完全分流。 */
+function isSmartAudioNode(node){
+    return Boolean(node && node.type === 'smart-audio');
+}
+/* 三类媒体节点都适用：分组/落点/级联/会话等大量逻辑只关心「是不是媒体节点」，与图片/视频/音频无关。 */
 function isSmartMediaNode(node){
-    return Boolean(isSmartImageNode(node) || isSmartVideoNode(node));
+    return Boolean(isSmartImageNode(node) || isSmartVideoNode(node) || isSmartAudioNode(node));
 }
 function isSmartGroupNode(node){
     return Boolean(node && node.type === 'smart-group');
@@ -1783,6 +1806,7 @@ function smartNodeCarriesVideo(node){
 function applySmartMediaTypeForKind(node, kind){
     if(!node || !isSmartMediaNode(node)) return node;
     if(kind === 'video') node.type = 'smart-video';
+    else if(kind === 'audio') node.type = 'smart-audio';
     else if(kind === 'image') node.type = 'smart-image';
     return node;
 }
@@ -1912,8 +1936,10 @@ function smartSettingsForNode(node){
     const mediaItems = (node?.images || []).filter(img => img?.url);
     const contentKind = mediaItems.length ? (mediaItems.some(isVideoMediaItem) ? 'video' : 'image') : '';
     const mediaApiKind = isSmartVideoNode(node) ? 'video' : isSmartImageNode(node) ? 'image' : contentKind;
-    const recentModeKey = mediaApiKind
-        ? smartSettingsModeKey({engine:(canvasDefaultSmartSettings || initialSmartSettings || settings).engine, apiKind:mediaApiKind})
+    /* 音频节点同样由类型决定参数域：audio（生成走 /api/canvas-audio，参数不再和图片/视频互串） */
+    const audioApiKind = isSmartAudioNode(node) ? 'audio' : mediaApiKind;
+    const recentModeKey = audioApiKind
+        ? smartSettingsModeKey({engine:(canvasDefaultSmartSettings || initialSmartSettings || settings).engine, apiKind:audioApiKind})
         : '';
     const recentSettings = Object.keys(nodeSettings).length ? {} : recentSmartSettingsForMode(recentModeKey);
     const base = {
@@ -1922,6 +1948,7 @@ function smartSettingsForNode(node){
         ...nodeSettings
     };
     if(mediaApiKind && isApiLikeEngine(base.engine)) base.apiKind = mediaApiKind;
+    if(isSmartAudioNode(node) && isApiLikeEngine(base.engine)) base.apiKind = 'audio';
     normalizeSmartVideoModeSettings(base, true);
     return withOutpaintDisplaySettings(node, base);
 }
@@ -2119,6 +2146,29 @@ const MEDIA_GROUP_MAX_VISIBLE_ROWS = 3;
 const SMART_GROUP_MAX_VISIBLE_ROWS = 4;
 const EMPTY_UPLOAD_NODE_WIDTH = 316;
 const EMPTY_UPLOAD_NODE_HEIGHT = 194;
+/* 音频结果态：整张卡片就是播放器（波形 + 播放头 + 时间胶囊 + 上一首/播放/下一首），见 smartAudioPlayerHtml。
+   空节点不在这里定尺寸：它和图片/视频空节点共用 EMPTY_UPLOAD_NODE_WIDTH/HEIGHT。 */
+const SMART_AUDIO_PLAYER_WIDTH = 420;
+const SMART_AUDIO_PLAYER_HEIGHT = 244;
+/* 波形：一根根细竖条（条宽 2px、缝 2px 不变 —— 连绵感靠压低波峰 + 静音段留细线 + 圆角端点，不靠把缝压小）。
+   条数按卡片宽度落在 64–96 根之间。
+   解码后先算出 512 段包络缓存起来，换宽度只重新分箱、不重新解码。
+   包络是「响度」不是频谱：每段取峰值和 RMS 的混合，再按 95 分位归一化、做一次动态范围拉伸
+   （CONTRAST > 1 → 小声的段压得更低、大声的段保住高度，起伏更像这首歌本身）。 */
+const AUDIO_WAVE_BAR_WIDTH = 2;
+const AUDIO_WAVE_BAR_GAP = 2;
+const AUDIO_WAVE_BARS_MIN = 64;
+const AUDIO_WAVE_BARS_MAX = 96;
+const AUDIO_WAVE_BUCKETS = 512;
+const AUDIO_WAVE_MIN_BAR_HEIGHT = 3;
+const AUDIO_WAVE_PEAK_PERCENTILE = 0.95;
+const AUDIO_WAVE_MAX_BAR_RATIO = 0.92;
+const AUDIO_WAVE_CARD_MAX_RATIO = 0.38;
+const AUDIO_WAVE_PEAK_WEIGHT = 0.72;
+const AUDIO_WAVE_CONTRAST = 1.22;
+const AUDIO_ENVELOPE_CACHE_MAX = 24;
+/* 波形区底部留给「当前/总时长」胶囊的一条（胶囊 CSS 高 22px + 顶部小三角，竖条不会压到它上面） */
+const AUDIO_TIME_CAPSULE_ZONE = 30;
 const SMART_TEXT_NODE_WIDTH = 316;
 const SMART_TEXT_NODE_HEIGHT = 194;
 const SMART_GROUP_DEFAULT_WIDTH = 340;
@@ -3138,8 +3188,27 @@ function imageLayout(images, scale=1, node=null){
             single:true
         };
     }
+    /* 音频节点：空节点跟图片/视频空节点同一个尺寸（EMPTY_UPLOAD_NODE_*，连提示文字的纵坐标都一致）；
+       有音频后整张卡片是播放器（波形 + 播放头 + 控制键），尺寸按播放器自己的比例定
+       （多首不改变卡片大小，靠上一首/下一首切）。 */
+    if(node?.type === 'smart-audio'){
+        const audioCount = (images || []).length;
+        const explicitW = Number(node.w);
+        const explicitH = Number(node.h);
+        const hasExplicit = Number.isFinite(explicitW) && explicitW > 24 && Number.isFinite(explicitH) && explicitH > 24;
+        const fallbackW = audioCount ? SMART_AUDIO_PLAYER_WIDTH : EMPTY_UPLOAD_NODE_WIDTH;
+        const fallbackH = audioCount ? SMART_AUDIO_PLAYER_HEIGHT : EMPTY_UPLOAD_NODE_HEIGHT;
+        return {
+            cols:1,
+            rows:1,
+            width:Math.round(hasExplicit ? explicitW : fallbackW),
+            height:Math.round(hasExplicit ? explicitH : fallbackH),
+            thumb:96,
+            single:true
+        };
+    }
     const count = (images || []).length;
-    const s = (node?.type === 'smart-image' || node?.type === 'smart-video' || !node?.type) ? mediaNodeDefaultScale(node) : (Number.isFinite(scale) && scale > 0 ? scale : 1);
+    const s = (node?.type === 'smart-image' || node?.type === 'smart-video' || node?.type === 'smart-audio' || !node?.type) ? mediaNodeDefaultScale(node) : (Number.isFinite(scale) && scale > 0 ? scale : 1);
     /* 逐行进度框：结果节点按本轮真实行号建格，格子数就是行数（一张还没出也要占满） */
     const batchOrderLen = Array.isArray(node?.batchRowOrder) ? node.batchRowOrder.length : 0;
     if(count === 0 && batchOrderLen > 1){
@@ -3996,7 +4065,7 @@ function videoProviderPlatform(providerId){
     const p = (apiProviders || []).find(x => x.id === providerId);
     const proto = String(p?.protocol || '').toLowerCase();
     const base = String(p?.base_url || '').toLowerCase();
-    if(proto === 'apimart' || base.includes('apimart.ai')) return 'apimart';
+    if(proto === 'apimart' || base.includes('apimart.ai') || base.includes('apib.ai')) return 'apimart';
     if(proto === 'volcengine' || providerId === 'volcengine') return 'volcengine';
     return '';
 }
@@ -4643,7 +4712,22 @@ function renderDynamicParams(){
     if(!dynamicParams) return;
     /* 参数栏整块重建，子面板的锚点节点随之消失，必须一起收 */
     closeSizeCustomSubmenu();
+    /* 弹层打开状态要在重建前记住：音频分支提前 return，以前漏了这步，
+       点「灵感/自定义」「纯音乐/带人声」这种会触发重渲染的选项时弹层会自己收起来，别的节点不会。 */
     const keepOpen = openControlState();
+    /* 音频节点走自己的一整套参数（平台/模型来自 audio_models），不碰图片/视频那套 apiKind 归一 */
+    if(isSmartAudioNode(selectedNode())){
+        renderAudioParams();
+        bindDynamicParams();
+        updatePromptPlaceholder();
+        persistActiveSmartSettings();
+        /* 视频节点留下的「更多参数」停靠面板要跟着收，不能挂着上一条视频的开关 */
+        syncVideoMoreDock();
+        if(window.lucide) lucide.createIcons();
+        wireSmartParamsGlide(dynamicParams);
+        restoreOpenControl(keepOpen);
+        return;
+    }
     const scrollState = dynamicParamsScrollSnapshot();
     settings.engine = ['api','volcengine','modelscope','comfy','runninghub'].includes(settings.engine) ? settings.engine : 'api';
     settings.apiKind = settings.apiKind === 'video' ? 'video' : 'image';
@@ -4792,6 +4876,373 @@ function renderApiVideoParams(){
         ${renderVideoSettingsControl()}
         ${renderVideoMoreParamsControl()}
     `;
+}
+/* ═══ 音频生成参数（Audio 节点专用）═══════════════════════════════════
+   与图片/视频完全分流：平台与模型来自 providers[].audio_models（enabled / has_key 与视频同一口径），
+   参数按模型家族门控：suno → 灵感/自定义、纯音乐、时长、格式、风格、标题；
+   flowmusic → 目标时长、BPM；tts → 音色、语速、格式。
+   音乐走 POST /api/canvas-audio，语音合成走 POST /api/canvas-tts。 */
+const AUDIO_SUNO_DURATION_MIN = 10;
+const AUDIO_SUNO_DURATION_MAX = 360;
+const AUDIO_SUNO_DURATION_DEFAULT = 30;
+const AUDIO_FORMATS = ['', 'mp3', 'm4a', 'wav'];
+const AUDIO_TTS_MAX_CHARS = 4096;
+const AUDIO_TTS_SPEED_MIN = 0.25;
+const AUDIO_TTS_SPEED_MAX = 4;
+const AUDIO_TTS_SPEED_DEFAULT = 1;
+const AUDIO_TTS_VOICES = [
+    {value:'alloy', key:'smart.audioVoiceAlloy', fallback:'中性'},
+    {value:'echo', key:'smart.audioVoiceEcho', fallback:'男声·沉稳'},
+    {value:'fable', key:'smart.audioVoiceFable', fallback:'英式叙述'},
+    {value:'onyx', key:'smart.audioVoiceOnyx', fallback:'男声·深沉'},
+    {value:'nova', key:'smart.audioVoiceNova', fallback:'女声·活力'},
+    {value:'shimmer', key:'smart.audioVoiceShimmer', fallback:'女声·温柔'}
+];
+const AUDIO_TTS_FORMATS = ['wav', 'opus', 'aac', 'flac'];
+function audioProviders(){
+    return (apiProviders || []).filter(p => p.enabled !== false && p.has_key !== false && (p.audio_models || []).length);
+}
+function audioProviderById(providerId){
+    return audioProviders().find(p => p.id === providerId) || audioProviders()[0] || null;
+}
+function providerAudioModels(providerId){
+    const provider = audioProviders().find(p => p.id === providerId);
+    return [...new Set(provider?.audio_models || [])].filter(model => !isUnsupportedAudioModel(model));
+}
+/* 与视频模型同一口径：换平台后旧平台的音频模型名在新平台不存在时，静默回落到新平台列表的第一个 */
+function correctedAudioModelForProvider(providerId, currentModel){
+    const models = providerAudioModels(providerId).map(model => String(model || '').trim()).filter(Boolean);
+    const current = String(currentModel || '').trim();
+    if(!models.length || models.includes(current)) return current;
+    return models[0];
+}
+function audioModelFamily(model){
+    const name = String(model === undefined ? settings.audioModel : model || '').toLowerCase();
+    /* 语音转写（whisper）与对话音频（gpt-audio / *-preview）不是音频生成模型，进音频节点只会报错 */
+    if(name.includes('whisper') || name.includes('transcribe') || name.includes('preview')
+        || name.includes('gpt-audio') || name.includes('gpt-4o-audio')) return 'unsupported';
+    if(name.includes('tts') || name.includes('speech') || name.includes('voice')) return 'tts';
+    if(name.includes('suno')) return 'suno';
+    if(name.includes('flowmusic')) return 'flowmusic';
+    return 'generic';
+}
+function isUnsupportedAudioModel(model){
+    return audioModelFamily(model) === 'unsupported';
+}
+function audioModelUnsupportedText(){
+    return trd('smart.audioModelUnsupported', '该模型不支持音频节点生成，请换一个音乐或 TTS 模型');
+}
+function audioDurationValue(){
+    const raw = Math.round(Number(settings.audioDuration) || 0);
+    return raw > 0 ? Math.max(AUDIO_SUNO_DURATION_MIN, Math.min(AUDIO_SUNO_DURATION_MAX, raw)) : 0;
+}
+function audioLengthValue(){
+    const raw = Math.round(Number(settings.audioLength) || 0);
+    return raw > 0 ? raw : 0;
+}
+function audioBpmValue(){
+    const raw = Math.round(Number(settings.audioBpm) || 0);
+    return raw > 0 ? raw : 0;
+}
+function audioFormatValue(){
+    const value = String(settings.audioFormat || '');
+    return AUDIO_FORMATS.includes(value) ? value : '';
+}
+function audioTtsVoiceValue(){
+    const value = String(settings.audioVoice || '').toLowerCase();
+    return AUDIO_TTS_VOICES.some(item => item.value === value) ? value : 'alloy';
+}
+function audioTtsVoiceLabel(){
+    const voice = audioTtsVoiceValue();
+    const item = AUDIO_TTS_VOICES.find(entry => entry.value === voice);
+    return item ? trd(item.key, item.fallback) : voice;
+}
+function audioTtsSpeedValue(){
+    const raw = Number(settings.audioSpeed);
+    if(!Number.isFinite(raw)) return AUDIO_TTS_SPEED_DEFAULT;
+    return Math.max(AUDIO_TTS_SPEED_MIN, Math.min(AUDIO_TTS_SPEED_MAX, Math.round(raw * 100) / 100));
+}
+function audioTtsSpeedLabel(value){
+    const speed = value === undefined ? audioTtsSpeedValue() : Number(value);
+    return String(Math.round(speed * 100) / 100) + 'x';
+}
+function audioTtsFormatValue(){
+    const value = String(settings.audioFormat || '').toLowerCase();
+    return AUDIO_TTS_FORMATS.includes(value) ? value : 'wav';
+}
+/* 药丸上的摘要：「灵感 · 纯音乐 · 30s」这一行 */
+function audioSettingsSummary(){
+    const family = audioModelFamily();
+    const parts = [];
+    if(family === 'unsupported') return trd('smart.audioUnsupportedShort', '不支持生成');
+    if(family === 'tts'){
+        parts.push(audioTtsVoiceLabel());
+        parts.push(audioTtsSpeedLabel());
+        parts.push(audioTtsFormatValue().toUpperCase());
+        return parts.join(' · ');
+    }
+    if(family === 'suno'){
+        parts.push(settings.audioCustom ? trd('smart.audioModeCustom', '自定义') : trd('smart.audioModeInspire', '灵感'));
+        if(settings.audioInstrumental) parts.push(trd('smart.audioInstrumentalOn', '纯音乐'));
+        const duration = audioDurationValue();
+        parts.push(duration ? `${duration}s` : trd('smart.audioAuto', '自适应'));
+    } else {
+        const length = audioLengthValue();
+        parts.push(length ? `${length}s` : trd('smart.audioAuto', '自适应'));
+        const bpm = audioBpmValue();
+        if(bpm) parts.push(`${bpm} BPM`);
+    }
+    return parts.join(' · ');
+}
+function renderAudioProviderControl(providers){
+    const current = providers.find(p => p.id === settings.audioProvider) || providers[0];
+    return `<div class="smart-control provider-control">
+        <button class="smart-pill" type="button"><span class="sub">${escapeHtml(current?.name || settings.audioProvider || tr('smart.platform'))}</span><i data-lucide="chevron-down" class="pill-caret"></i></button>
+        <div class="smart-popover compact-popover">
+            <div class="model-list">
+                ${providers.map(p => `<button type="button" class="direct-option ${p.id === settings.audioProvider ? 'active' : ''}" data-smart-param="audioProvider" data-smart-value="${escapeAttr(p.id)}"><span>${escapeHtml(p.name || p.id)}</span></button>`).join('')}
+            </div>
+        </div>
+    </div>`;
+}
+function renderAudioModelControl(models){
+    const list = [...new Set([settings.audioModel, ...(models || [])].filter(Boolean))].filter(model => !isUnsupportedAudioModel(model));
+    return `<div class="smart-control model-control">
+        <button class="smart-pill" type="button"><span class="sub">${escapeHtml(settings.audioModel || trd('smart.audioModel', '音频模型'))}</span><i data-lucide="chevron-down" class="pill-caret"></i></button>
+        <div class="smart-popover compact-popover">
+            <div class="model-list">
+                ${list.map(model => `<button type="button" class="direct-option ${model === settings.audioModel ? 'active' : ''}" data-smart-param="audioModel" data-smart-value="${escapeAttr(model)}"><span>${escapeHtml(model)}</span></button>`).join('') || `<div class="muted-note">${escapeHtml(trd('smart.audioNoModelForPlatform', '这个平台还没有音频模型'))}</div>`}
+            </div>
+        </div>
+    </div>`;
+}
+function renderAudioTextRow(key, label, placeholder){
+    return `<div class="size-section">
+        <div class="size-section-title">${escapeHtml(label)}</div>
+        <input class="audio-field-input" type="text" data-audio-text="${escapeAttr(key)}" value="${escapeAttr(settings[key] || '')}" placeholder="${escapeAttr(placeholder || '')}" aria-label="${escapeAttr(label)}">
+    </div>`;
+}
+function renderAudioNumberRow(key, label, min, max){
+    const value = Math.round(Number(settings[key]) || 0);
+    return `<div class="size-section">
+        <div class="size-section-title">${escapeHtml(label)}</div>
+        <input class="audio-field-input" type="number" min="${min}" max="${max}" step="1" data-audio-number="${escapeAttr(key)}" value="${value > 0 ? value : ''}" placeholder="${escapeAttr(trd('smart.audioAuto', '自适应'))}" aria-label="${escapeAttr(label)}">
+    </div>`;
+}
+function renderAudioSettingsControl(){
+    const family = audioModelFamily();
+    const sections = [];
+    if(family === 'unsupported'){
+        sections.push(`<div class="size-section">
+            <div class="muted-note">${escapeHtml(audioModelUnsupportedText())}</div>
+        </div>`);
+    } else if(family === 'tts'){
+        const speed = audioTtsSpeedValue();
+        const promptChars = Array.from(String(promptPlainText() || '').trim()).length;
+        const limitText = trd('smart.audioTtsLimit', '单次最多 {n} 字').replace('{n}', String(AUDIO_TTS_MAX_CHARS));
+        sections.push(`<div class="size-section">
+            <div class="size-section-title">${escapeHtml(trd('smart.audioTtsText', '朗读文本'))}</div>
+            <div class="muted-note" data-tts-limit>${escapeHtml(limitText)} · ${escapeHtml(trd('smart.audioTtsCurrent', '当前'))} <span data-tts-prompt-count>${promptChars}</span></div>
+        </div>`);
+        sections.push(`<div class="size-section">
+            <div class="size-section-title">${escapeHtml(trd('smart.audioVoice', '音色'))}</div>
+            <div class="size-level-row" style="grid-template-columns:repeat(3, minmax(0,1fr))">
+                ${AUDIO_TTS_VOICES.map(voice => `<button type="button" class="${audioTtsVoiceValue() === voice.value ? 'active' : ''}" data-smart-param="audioVoice" data-smart-value="${escapeAttr(voice.value)}">${escapeHtml(trd(voice.key, voice.fallback))}</button>`).join('')}
+            </div>
+        </div>`);
+        sections.push(`<div class="size-section">
+            <div class="size-section-title">${escapeHtml(trd('smart.audioTtsSpeed', '语速'))}</div>
+            <div class="dur-slider-row">
+                <input type="range" class="smart-range dur-slider" min="${AUDIO_TTS_SPEED_MIN}" max="${AUDIO_TTS_SPEED_MAX}" step="0.05" value="${speed}" data-audio-speed-range aria-label="${escapeAttr(trd('smart.audioTtsSpeed', '语速'))}">
+                <label class="dur-value tts-speed-value"><input type="number" min="${AUDIO_TTS_SPEED_MIN}" max="${AUDIO_TTS_SPEED_MAX}" step="0.05" value="${speed}" data-audio-speed-value aria-label="${escapeAttr(trd('smart.audioTtsSpeed', '语速'))}"><span>x</span></label>
+            </div>
+        </div>`);
+        sections.push(`<div class="size-section">
+            <div class="size-section-title">${escapeHtml(trd('smart.audioFormat', '格式'))}</div>
+            <div class="size-level-row" style="grid-template-columns:repeat(4, minmax(0,1fr))">
+                ${AUDIO_TTS_FORMATS.map(format => `<button type="button" class="${audioTtsFormatValue() === format ? 'active' : ''}" data-smart-param="audioFormat" data-smart-value="${escapeAttr(format)}">${escapeHtml(format.toUpperCase())}</button>`).join('')}
+            </div>
+        </div>`);
+    } else if(family === 'suno'){
+        const duration = audioDurationValue();
+        sections.push(`<div class="size-section">
+            <div class="size-section-title">${escapeHtml(trd('smart.audioMode', '模式'))}</div>
+            <div class="size-level-row" style="grid-template-columns:repeat(2, minmax(0,1fr))">
+                <button type="button" class="${settings.audioCustom ? '' : 'active'}" data-toggle-param="audioCustom" data-toggle-set="0">${escapeHtml(trd('smart.audioModeInspire', '灵感'))}</button>
+                <button type="button" class="${settings.audioCustom ? 'active' : ''}" data-toggle-param="audioCustom" data-toggle-set="1">${escapeHtml(trd('smart.audioModeCustom', '自定义'))}</button>
+            </div>
+        </div>`);
+        sections.push(`<div class="size-section">
+            <div class="size-section-title">${escapeHtml(trd('smart.audioInstrumental', '纯音乐'))}</div>
+            <div class="size-level-row" style="grid-template-columns:repeat(2, minmax(0,1fr))">
+                <button type="button" class="${settings.audioInstrumental ? 'active' : ''}" data-toggle-param="audioInstrumental" data-toggle-set="1">${escapeHtml(trd('smart.audioInstrumentalOn', '纯音乐'))}</button>
+                <button type="button" class="${settings.audioInstrumental ? '' : 'active'}" data-toggle-param="audioInstrumental" data-toggle-set="0">${escapeHtml(trd('smart.audioInstrumentalOff', '带人声'))}</button>
+            </div>
+        </div>`);
+        sections.push(`<div class="size-section">
+            <div class="size-section-title">${escapeHtml(trd('smart.audioDuration', '时长'))}</div>
+            <div class="dur-slider-row">
+                <input type="range" class="smart-range dur-slider" min="${AUDIO_SUNO_DURATION_MIN}" max="${AUDIO_SUNO_DURATION_MAX}" step="5" value="${duration || AUDIO_SUNO_DURATION_DEFAULT}" data-audio-duration-range aria-label="${escapeAttr(trd('smart.audioDuration', '时长'))}">
+                <label class="dur-value"><input type="number" min="${AUDIO_SUNO_DURATION_MIN}" max="${AUDIO_SUNO_DURATION_MAX}" step="1" value="${duration || ''}" placeholder="${escapeAttr(trd('smart.audioAuto', '自适应'))}" data-audio-duration-value aria-label="${escapeAttr(trd('smart.audioDuration', '时长'))}"><span>s</span></label>
+            </div>
+            <div class="size-level-row" style="grid-template-columns:repeat(3, minmax(0,1fr))">
+                <button type="button" class="${duration ? '' : 'active'}" data-smart-param="audioDuration" data-smart-value="0">${escapeHtml(trd('smart.audioAuto', '自适应'))}</button>
+                <button type="button" class="${duration === 30 ? 'active' : ''}" data-smart-param="audioDuration" data-smart-value="30">30s</button>
+                <button type="button" class="${duration === 60 ? 'active' : ''}" data-smart-param="audioDuration" data-smart-value="60">60s</button>
+            </div>
+        </div>`);
+        sections.push(renderAudioTextRow('audioStyle', trd('smart.audioStyle', '风格'), trd('smart.audioStylePlaceholder', '例如：city pop、lo-fi、电影配乐')));
+        sections.push(renderAudioTextRow('audioTitle', trd('smart.audioTitle', '标题'), trd('smart.audioTitlePlaceholder', '可选，给这首歌起个名字')));
+        sections.push(`<div class="size-section">
+            <div class="size-section-title">${escapeHtml(trd('smart.audioFormat', '格式'))}</div>
+            <div class="size-level-row" style="grid-template-columns:repeat(4, minmax(0,1fr))">
+                ${AUDIO_FORMATS.map(format => `<button type="button" class="${audioFormatValue() === format ? 'active' : ''}" data-smart-param="audioFormat" data-smart-value="${escapeAttr(format)}">${escapeHtml(format ? format.toUpperCase() : trd('smart.audioFormatDefault', '默认'))}</button>`).join('')}
+            </div>
+        </div>`);
+    } else {
+        sections.push(renderAudioNumberRow('audioLength', trd('smart.audioLength', '目标时长（秒）'), 0, 360));
+        sections.push(renderAudioNumberRow('audioBpm', trd('smart.audioBpm', 'BPM'), 0, 300));
+    }
+    return `<div class="smart-control audio-settings-control">
+        <button class="smart-pill" type="button" aria-label="${escapeAttr(trd('smart.settings', '设置'))}"><i data-lucide="sliders-horizontal"></i><span class="sub">${escapeHtml(audioSettingsSummary())}</span><i data-lucide="chevron-down" class="pill-caret"></i></button>
+        <div class="smart-popover audio-settings-popover">
+            ${sections.join('')}
+        </div>
+    </div>`;
+}
+function renderAudioParams(){
+    const providers = audioProviders();
+    if(!providers.length){
+        dynamicParams.innerHTML = `<div class="muted-note">${escapeHtml(trd('smart.audioNoProvider', '还没有可用的音频模型：到「设置 → API 设置」给平台填上音频模型（如 suno、flowmusic、xxx-tts）后再回来。'))}</div>`;
+        return;
+    }
+    if(!settings.audioProvider || !providers.some(p => p.id === settings.audioProvider)) settings.audioProvider = providers[0].id;
+    const models = providerAudioModels(settings.audioProvider);
+    if(!settings.audioModel) settings.audioModel = models[0] || '';
+    if(models.length) settings.audioModel = correctedAudioModelForProvider(settings.audioProvider, settings.audioModel);
+    if(audioModelFamily() === 'tts'){
+        if(!AUDIO_TTS_FORMATS.includes(String(settings.audioFormat || '').toLowerCase())) settings.audioFormat = '';
+    } else if(!AUDIO_FORMATS.includes(String(settings.audioFormat || ''))){
+        settings.audioFormat = '';
+    }
+    dynamicParams.innerHTML = `
+        ${renderAudioProviderControl(providers)}
+        ${renderAudioModelControl(models)}
+        ${renderAudioSettingsControl()}
+    `;
+    bindAudioParams();
+}
+/* 音频弹层里的滑条 / 数值框 / 文本框：只写设置 + 就地刷新药丸摘要，不整块重渲染
+   （重渲染会把用户正开着的弹层连锚点一起收掉，拖滑条时尤其明显）。 */
+function bindAudioParams(){
+    if(!dynamicParams) return;
+    const syncSummary = () => {
+        const label = dynamicParams.querySelector('.audio-settings-control .smart-pill .sub');
+        if(label) label.textContent = audioSettingsSummary();
+    };
+    const commitDuration = raw => {
+        const wanted = Math.round(Number(raw) || 0);
+        settings.audioDuration = wanted > 0 ? Math.max(AUDIO_SUNO_DURATION_MIN, Math.min(AUDIO_SUNO_DURATION_MAX, wanted)) : 0;
+        const ctrl = dynamicParams.querySelector('.audio-settings-control');
+        if(ctrl){
+            const range = ctrl.querySelector('[data-audio-duration-range]');
+            const box = ctrl.querySelector('[data-audio-duration-value]');
+            const nextValue = String(settings.audioDuration || AUDIO_SUNO_DURATION_DEFAULT);
+            if(range && range.value !== nextValue) range.value = nextValue;
+            if(box && box.value !== String(settings.audioDuration || '')) box.value = String(settings.audioDuration || '');
+        }
+        syncSummary();
+        persistActiveSmartSettings();
+        scheduleSave();
+    };
+    dynamicParams.querySelectorAll('[data-audio-duration-range]').forEach(range => {
+        range.oninput = range.onchange = event => {
+            event?.stopPropagation?.();
+            commitDuration(range.value);
+        };
+        range.onclick = event => event.stopPropagation();
+    });
+    dynamicParams.querySelectorAll('[data-audio-duration-value]').forEach(box => {
+        box.oninput = event => {
+            event?.stopPropagation?.();
+            if(box.value === '') return;
+            commitDuration(box.value);
+        };
+        box.onchange = event => {
+            event?.stopPropagation?.();
+            commitDuration(box.value);
+        };
+        box.onclick = event => event.stopPropagation();
+    });
+    const commitSpeed = (raw, source) => {
+        const wanted = Number(raw);
+        settings.audioSpeed = Number.isFinite(wanted)
+            ? Math.max(AUDIO_TTS_SPEED_MIN, Math.min(AUDIO_TTS_SPEED_MAX, Math.round(wanted * 100) / 100))
+            : AUDIO_TTS_SPEED_DEFAULT;
+        const ctrl = dynamicParams.querySelector('.audio-settings-control');
+        if(ctrl){
+            const range = ctrl.querySelector('[data-audio-speed-range]');
+            const box = ctrl.querySelector('[data-audio-speed-value]');
+            if(range && Number(range.value) !== settings.audioSpeed) range.value = String(settings.audioSpeed);
+            if(box && source !== 'box' && Number(box.value) !== settings.audioSpeed) box.value = String(settings.audioSpeed);
+        }
+        syncSummary();
+        persistActiveSmartSettings();
+        scheduleSave();
+    };
+    dynamicParams.querySelectorAll('[data-audio-speed-range]').forEach(range => {
+        range.oninput = range.onchange = event => {
+            event?.stopPropagation?.();
+            commitSpeed(range.value, 'range');
+        };
+        range.onclick = event => event.stopPropagation();
+    });
+    dynamicParams.querySelectorAll('[data-audio-speed-value]').forEach(box => {
+        box.oninput = event => {
+            event?.stopPropagation?.();
+            if(box.value === '') return;
+            commitSpeed(box.value, 'box');
+        };
+        box.onchange = event => {
+            event?.stopPropagation?.();
+            commitSpeed(box.value, 'box');
+            if(box.value !== String(settings.audioSpeed)) box.value = String(settings.audioSpeed);
+        };
+        box.onclick = event => event.stopPropagation();
+    });
+    /* TTS 的 4096 字上限提示跟着输入实时更新（面板是内联节点，不是整块重渲染） */
+    const ttsCount = dynamicParams.querySelector('[data-tts-prompt-count]');
+    if(dynamicParams._ttsCountHandler){
+        promptInput.removeEventListener('input', dynamicParams._ttsCountHandler);
+        dynamicParams._ttsCountHandler = null;
+    }
+    if(ttsCount){
+        dynamicParams._ttsCountHandler = () => {
+            const target = dynamicParams.querySelector('[data-tts-prompt-count]');
+            if(target) target.textContent = String(Array.from(String(promptPlainText() || '').trim()).length);
+        };
+        promptInput.addEventListener('input', dynamicParams._ttsCountHandler);
+    }
+    dynamicParams.querySelectorAll('[data-audio-text]').forEach(input => {
+        input.oninput = input.onchange = event => {
+            event?.stopPropagation?.();
+            settings[input.dataset.audioText] = input.value;
+            persistActiveSmartSettings();
+            scheduleSave();
+        };
+        input.onclick = event => event.stopPropagation();
+    });
+    dynamicParams.querySelectorAll('[data-audio-number]').forEach(input => {
+        input.oninput = input.onchange = event => {
+            event?.stopPropagation?.();
+            const value = Math.round(Number(input.value) || 0);
+            settings[input.dataset.audioNumber] = value > 0 ? value : 0;
+            syncSummary();
+            persistActiveSmartSettings();
+            scheduleSave();
+        };
+        input.onclick = event => event.stopPropagation();
+    });
 }
 function renderVolcengineParams(){
     const provider = volcengineProvider();
@@ -5566,6 +6017,11 @@ function rhDefaultPromptSuggestion(){
 }
 function updatePromptPlaceholder(){
     if(!promptInput) return;
+    /* 音频节点：描述/歌词走同一个输入框，占位文案换成音频场景的 */
+    if(isSmartAudioNode(selectedNode())){
+        promptInput.dataset.placeholder = trd('smart.audioPromptPlaceholder', '描述你想要生成的任何内容');
+        return;
+    }
     const suggestion = rhDefaultPromptSuggestion();
     promptInput.dataset.placeholder = suggestion || tr('smart.promptPlaceholder');
 }
@@ -5942,8 +6398,8 @@ function smartComfyRandomValue(field){
     return Math.floor(value);
 }
 function setDynamicSetting(key, value){
-    const numericKeys = new Set(['count','width','height','videoDuration','videoCount','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight']);
-    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','videoCount','comfyMode','comfyWorkflow','quality','background','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType']);
+    const numericKeys = new Set(['count','width','height','videoDuration','videoCount','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight','audioDuration','audioLength','audioBpm','audioSpeed']);
+    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','videoCount','comfyMode','comfyWorkflow','quality','background','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType','audioProvider','audioModel','audioFormat','audioVoice','audioDuration']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
     if(key === 'model' && settings.model && settings.provider_id) window.NovaUtils?.rememberProviderModel?.(settings.provider_id, settings.model);
     if(key === 'videoModel' && settings.videoModel && settings.videoProvider) window.NovaUtils?.rememberProviderVideoModel?.(settings.videoProvider, settings.videoModel);
@@ -6464,8 +6920,8 @@ const GLIDE_OPTION_GROUPS = [
     ['.seg-row', 'button'],              // 质量、图片分辨率（自动/1K/2K/4K/自定义）
     ['.count-grid', '.count-cell'],      // 数量
     ['.ratio-grid', '.ratio-option'],    // 图片比例
-    ['.size-ratio-grid', '.size-ratio-tile'],   // 视频画幅 / 视频设置面板的比例段
-    ['.video-settings-popover .size-level-row:not(.video-audio-row)', 'button'],   // 设置面板的清晰度 / 数量段（生成音频段自绘底，不能接滑块）
+    /* 视频「参数设置」弹层里的比例 / 清晰度 / 数量段不接滑块：外观跟音频参数弹层同一套
+       （悬停 8% / 选中 12% 软底），滑块那片底色会把选项自己的软底压成透明，两套对不上。 */
     ['.duration-grid', '.duration-option'],   // 视频时长
     ['.model-list', '.direct-option']    // 平台 / 模型 / 视频分辨率
 ];
@@ -11794,7 +12250,7 @@ function createNode(x, y, images=[], options={}){
     const nodeImages = (images || []).map(img => ensureSmartImageAssetId(cloneMediaItem(img)));
     // 传入素材清一色是视频时建成视频节点；显式 options.type 优先（视频接力 / 首页视频种子）。
     const nodeType = options.type || (nodeImages.length && nodeImages.every(isVideoMediaItem) ? 'smart-video' : 'smart-image');
-    const node = {id:uid('smart'), type:nodeType, x, y, title:nodeImages.length > 1 ? 'Group' : nodeImages.length ? 'Image' : tr('smart.createImportNode'), images:nodeImages, created_at:Date.now()};
+    const node = {id:uid('smart'), type:nodeType, x, y, title:options.title || (nodeImages.length > 1 ? 'Group' : nodeImages.length ? 'Image' : tr('smart.createImportNode')), images:nodeImages, created_at:Date.now()};
     node.scale = nodeImages.length > 1 ? MEDIA_GROUP_DEFAULT_SCALE : mediaNodeDefaultScale(node);
     inheritNodeMetaFromImage(node);
     nodes.push(node);
@@ -12633,6 +13089,7 @@ function restoreMediaPlaybackStates(states){
 function smartRunTaskLabel(run){
     const s = run?.settings || {};
     if(run?.kind === 'video') return s.videoModel || 'Video';
+    if(run?.kind === 'audio') return s.audioModel || 'Audio';
     if(s.engine === 'comfy'){
         if(s.comfyMode === 'custom') return s.comfyWorkflow || 'ComfyUI';
         const labels = {text:tr('canvas.comfyModeText') || '文生图', enhance:tr('canvas.comfyModeEnhance') || '图片增强', edit:tr('canvas.comfyModeEdit') || '图片编辑'};
@@ -12773,6 +13230,7 @@ function smartRunPlatformLabel(run){
     if(s.engine === 'comfy') return 'ComfyUI';
     if(s.engine === 'modelscope') return 'Modelscope';
     if(run?.kind === 'video') return videoProviderById(s.videoProvider || '')?.name || s.videoProvider || 'Video';
+    if(run?.kind === 'audio') return audioProviderById(s.audioProvider || '')?.name || s.audioProvider || 'Audio';
     return apiProviderById(s.provider_id || '')?.name || s.provider_id || 'API';
 }
 function smartRunRequestMeta(run){
@@ -12780,6 +13238,7 @@ function smartRunRequestMeta(run){
     if(s.engine === 'comfy') return {workflow_json:s.comfyWorkflow || '', mode:s.comfyMode || 'text'};
     if(s.engine === 'modelscope') return {backend:'Modelscope', model:s.msgenModel || '', custom_model:s.msCustomModel || ''};
     if(run?.kind === 'video') return {provider_id:s.videoProvider || '', model:s.videoModel || '', duration:s.videoDuration || '', aspect_ratio:s.videoAspect || '', resolution:s.videoResolution || ''};
+    if(run?.kind === 'audio') return {provider_id:s.audioProvider || '', model:s.audioModel || '', duration:s.audioDuration || '', length:s.audioLength || '', bpm:s.audioBpm || '', format:s.audioFormat || '', instrumental:Boolean(s.audioInstrumental)};
     return {provider_id:s.provider_id || '', model:s.model || '', size:run?.size || '', quality:s.quality || '', n:s.count || 1};
 }
 function smartRunSnapshot(node, prompt, refs=[], kind='image'){
@@ -14200,6 +14659,1881 @@ function smartLabelBodyHtml(node){
         <span class="smart-label-text">${escapeHtml(node.text)}</span>
     </div>`;
 }
+/* 空音频节点里的音符图标：lucide 子集没有 music，用同规格内联 SVG —— viewBox 24 / stroke-width 2 /
+   currentColor / 圆头圆角，和 lucide 的摄像机（video）图标同一视觉；尺寸由 .smart-empty-icon 统一给 22px。 */
+const SMART_AUDIO_EMPTY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>';
+/* ── 音频播放器（结果态）─────────────────────────────────────────────
+   整张卡片就是播放器：中间波形（细竖条，真实音频峰值）+ 细蓝色播放头，底部 上一首 / 播放 / 下一首。
+   没有文件名、没有时长文字、也没有原生 <audio controls> 的样子 —— 音源是挂在 body 上的隐藏 audio。 */
+const SMART_AUDIO_PLAY_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.4 5.2 18.2 12 8.4 18.8Z" fill="currentColor" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/></svg>';
+const SMART_AUDIO_PAUSE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7.6" y="5.4" width="3.6" height="13.2" rx="1.8" fill="currentColor"/><rect x="12.8" y="5.4" width="3.6" height="13.2" rx="1.8" fill="currentColor"/></svg>';
+const SMART_AUDIO_PREV_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6.2 10.4 12 19 17.8Z"/><path d="M5.5 5.5v13"/></svg>';
+const SMART_AUDIO_NEXT_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6.2 13.6 12 5 17.8Z"/><path d="M18.5 5.5v13"/></svg>';
+
+function smartAudioActiveIndex(node){
+    const count = (node?.images || []).length;
+    if(!count) return 0;
+    const index = Math.round(Number(node.audioActiveIndex) || 0);
+    return Math.max(0, Math.min(count - 1, Number.isFinite(index) ? index : 0));
+}
+function smartAudioActiveItem(node){
+    const items = (node?.images || []).map(imageForDisplay);
+    return items[smartAudioActiveIndex(node)] || items[0] || null;
+}
+/* 播放头的横向位置：比例 × 波形宽，两端各留 1px 不贴死（纯函数，测试直接跑真实实现）。
+   时间胶囊的中心**永远等于这个值**（translateX(headX) + translateX(-50%)），不为“不溢出”做任何夹边，
+   所以胶囊顶上的三角恒指播放头；贴边时胶囊允许溢出卡片。 */
+function smartAudioHeadX(ratio, trackWidth){
+    const track = Math.max(0, Number(trackWidth) || 0);
+    const bounded = Math.min(1, Math.max(0, Number(ratio) || 0));
+    return Math.max(1, Math.min(Math.max(1, track - 1), bounded * track));
+}
+/* mm:ss 补零；超过 1 分钟照常进位，超过 1 小时分钟数继续往上加（60:00） */
+function formatAudioClock(seconds){
+    const value = Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes = Math.floor(value / 60);
+    const rest = value % 60;
+    return String(minutes).padStart(2, '0') + ':' + String(rest).padStart(2, '0');
+}
+function smartAudioClockLabel(current, duration){
+    return formatAudioClock(current) + '/' + formatAudioClock(duration);
+}
+function smartAudioPlayerHtml(node, imgs){
+    const index = smartAudioActiveIndex(node);
+    const count = (imgs || []).length;
+    const label = trd('smart.audioPlay', '播放');
+    return `<div class="audio-player" data-audio-player="1" data-audio-node="${escapeAttr(node.id)}" data-audio-count="${count}" data-audio-index="${index}">
+        <div class="audio-player-wave" data-audio-wave="1">
+            <canvas class="audio-player-canvas" data-audio-canvas="1" aria-hidden="true"></canvas>
+            <div class="audio-player-played" data-audio-played="1" aria-hidden="true"><canvas class="audio-player-canvas" data-audio-played-canvas="1"></canvas></div>
+            <span class="audio-player-head" data-audio-head="1" aria-hidden="true"><i class="audio-player-head-tri"></i></span>
+            <span class="audio-player-time" data-audio-time="1" aria-hidden="true"><span data-audio-time-text="1">${smartAudioClockLabel(0, 0)}</span></span>
+            ${smartAudioTrimOverlayHtml(node)}
+            ${smartAudioSplitOverlayHtml(node)}
+        </div>
+        <div class="audio-player-controls">
+            <button type="button" class="audio-player-skip is-prev" data-audio-prev="1" title="${escapeAttr(trd('smart.audioPrev', '上一首'))}" aria-label="${escapeAttr(trd('smart.audioPrev', '上一首'))}" ${count < 2 ? 'disabled' : ''}>${SMART_AUDIO_PREV_SVG}</button>
+            <button type="button" class="audio-player-toggle" data-audio-toggle="1" data-audio-playing="0" title="${escapeAttr(label)}" aria-label="${escapeAttr(label)}">${SMART_AUDIO_PLAY_SVG}</button>
+            <button type="button" class="audio-player-skip is-next" data-audio-next="1" title="${escapeAttr(trd('smart.audioNext', '下一首'))}" aria-label="${escapeAttr(trd('smart.audioNext', '下一首'))}" ${count < 2 ? 'disabled' : ''}>${SMART_AUDIO_NEXT_SVG}</button>
+        </div>
+    </div>`;
+}
+/* ── 波形数据：真实峰值（decodeAudioData）+ 解码失败的低振幅占位 ────────
+   每个 URL 的包络只算一次（512 段，0..1），换卡片宽度只重新分箱，不重复解码。 */
+const smartAudioEnvelopeCache = new Map();
+const smartAudioEnvelopePending = new Map();
+function smartAudioEnvelopeFromChannel(channel){
+    const buckets = AUDIO_WAVE_BUCKETS;
+    const out = new Array(buckets).fill(0);
+    const size = Math.max(1, Math.floor(channel.length / buckets));
+    for(let b = 0; b < buckets; b += 1){
+        const start = b * size;
+        const end = Math.min(channel.length, start + size);
+        let peak = 0;
+        let energy = 0;
+        for(let i = start; i < end; i += 1){
+            const value = channel[i] < 0 ? -channel[i] : channel[i];
+            if(value > peak) peak = value;
+            energy += value * value;
+        }
+        /* 响度包络：峰值管「这一段的尖」，RMS 管「这一段的整体能量」，混合后比只看峰值更贴听感 */
+        const rms = end > start ? Math.sqrt(energy / (end - start)) : 0;
+        out[b] = peak * AUDIO_WAVE_PEAK_WEIGHT + rms * (1 - AUDIO_WAVE_PEAK_WEIGHT);
+    }
+    /* 用 95 分位当参考值：单点尖峰不会把整条波形压扁 */
+    const sorted = out.slice().sort((a, b) => a - b);
+    const reference = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * AUDIO_WAVE_PEAK_PERCENTILE))] || 0;
+    if(!(reference > 0)) return out.map(() => 0);
+    /* 动态范围拉伸：CONTRAST > 1 时小声的段被压低、大声的段保住高度，起伏更明显（仍是响度，不是频谱） */
+    return out.map(value => {
+        const normalized = Math.max(0, Math.min(1, value / reference));
+        return Math.pow(normalized, AUDIO_WAVE_CONTRAST);
+    });
+}
+/* 同一 URL 永远画出同一条占位波形（远端 CORS / 编码不支持时用），振幅压在 0.12–0.38 */
+function smartAudioFallbackEnvelope(url){
+    let state = 2166136261;
+    const text = String(url || '');
+    for(let i = 0; i < text.length; i += 1){ state ^= text.charCodeAt(i); state = Math.imul(state, 16777619); }
+    const out = new Array(AUDIO_WAVE_BUCKETS);
+    let seed = state >>> 0;
+    const rand = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+    for(let i = 0; i < out.length; i += 1){
+        const shape = 0.5 + 0.5 * Math.sin(i * 0.09 + (state % 17));
+        out[i] = 0.12 + 0.26 * shape * (0.55 + 0.45 * rand());
+    }
+    return out;
+}
+function smartAudioEnvelopeFor(url){
+    if(!url) return Promise.resolve(smartAudioFallbackEnvelope(''));
+    const cached = smartAudioEnvelopeCache.get(url);
+    if(cached) return Promise.resolve(cached);
+    if(smartAudioEnvelopePending.has(url)) return smartAudioEnvelopePending.get(url);
+    const job = (async () => {
+        try {
+            const Ctor = window.AudioContext || window.webkitAudioContext;
+            if(!Ctor) throw new Error('no-audio-context');
+            const response = await fetch(url, {credentials:'same-origin'});
+            if(!response.ok) throw new Error('fetch-failed');
+            const buffer = await response.arrayBuffer();
+            const ctx = new Ctor();
+            const decoded = await ctx.decodeAudioData(buffer);
+            const envelope = smartAudioEnvelopeFromChannel(decoded.getChannelData(0));
+            try { ctx.close(); } catch(_) {}
+            return envelope;
+        } catch(_) {
+            return smartAudioFallbackEnvelope(url);
+        }
+    })();
+    smartAudioEnvelopePending.set(url, job);
+    return job.then(envelope => {
+        smartAudioEnvelopePending.delete(url);
+        if(smartAudioEnvelopeCache.size >= AUDIO_ENVELOPE_CACHE_MAX){
+            const oldest = smartAudioEnvelopeCache.keys().next();
+            if(!oldest.done) smartAudioEnvelopeCache.delete(oldest.value);
+        }
+        smartAudioEnvelopeCache.set(url, envelope);
+        return envelope;
+    });
+}
+function smartAudioEnsureEnvelope(node, entry){
+    const url = smartAudioActiveItem(node)?.url || '';
+    if(!url){ entry.envelopeKey = ''; entry.envelope = null; return; }
+    /* envelopeKey 只由本函数写，记录「哪个 URL 已经认领过包络」：
+       render 每轮进来命中同一 URL 就直返，不重复 fetch+decode；换素材/切歌 URL 变了才重取。 */
+    if(entry.envelopeKey === url) return;
+    entry.envelopeKey = url;
+    const cached = smartAudioEnvelopeCache.get(url);
+    entry.envelope = cached || null;
+    if(cached){ smartAudioDrawWave(node, entry, true); return; }
+    smartAudioEnvelopeFor(url).then(envelope => {
+        if(entry.envelopeKey !== url) return;
+        if(smartAudioPool.get(node.id) !== entry) return;
+        entry.envelope = envelope;
+        smartAudioDrawWave(node, entry, true);
+    });
+}
+/* 波形绘制：签名（url + 尺寸 + 颜色）没变就跳过 —— render() 每轮都会调 mount，不能每轮重画 canvas */
+function smartAudioDrawWave(node, entry, force){
+    const ui = entry?.ui;
+    if(!node || !ui?.canvas || !ui?.wave) return;
+    const width = Math.round(ui.wave.clientWidth || 0);
+    const height = Math.round(ui.wave.clientHeight || 0);
+    if(width < 24 || height < 24) return;
+    const barColor = (getComputedStyle(ui.wave).getPropertyValue('--audio-bar') || '').trim() || 'rgba(255,255,255,.6)';
+    const url = smartAudioActiveItem(node)?.url || '';
+    const signature = url + '|' + width + 'x' + height + '|' + barColor;
+    if(!force && entry.waveSignature === signature) return;
+    entry.waveSignature = signature;
+    const canvas = ui.canvas;
+    const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    const ctx = canvas.getContext('2d');
+    if(!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    const bars = Math.max(AUDIO_WAVE_BARS_MIN, Math.min(AUDIO_WAVE_BARS_MAX, Math.round(width / (AUDIO_WAVE_BAR_WIDTH + AUDIO_WAVE_BAR_GAP))));
+    const step = width / bars;
+    /* 波形最大高度按「卡片高度的 38%」封顶，最响的条也不贴满波形区；
+       再受波形区自身高度约束（底部那一条留给时间胶囊，竖条不会压到它上面） */
+    const cardHeight = Math.round(ui.root?.clientHeight || 0) || height;
+    const barAreaHeight = Math.max(24, height - AUDIO_TIME_CAPSULE_ZONE);
+    const maxHeight = Math.max(12, Math.min(barAreaHeight * AUDIO_WAVE_MAX_BAR_RATIO, cardHeight * AUDIO_WAVE_CARD_MAX_RATIO));
+    const envelope = entry.envelope || smartAudioFallbackEnvelope(url);
+    ctx.fillStyle = barColor;
+    for(let i = 0; i < bars; i += 1){
+        const start = Math.floor(i / bars * envelope.length);
+        const end = Math.max(start + 1, Math.floor((i + 1) / bars * envelope.length));
+        let peak = 0;
+        for(let k = start; k < end; k += 1){ if(envelope[k] > peak) peak = envelope[k]; }
+        const barHeight = Math.max(AUDIO_WAVE_MIN_BAR_HEIGHT, Math.round(peak * maxHeight));
+        const x = Math.round(i * step + (step - AUDIO_WAVE_BAR_WIDTH) / 2);
+        const y = Math.round((barAreaHeight - barHeight) / 2);
+        ctx.beginPath();
+        if(typeof ctx.roundRect === 'function') ctx.roundRect(x, y, AUDIO_WAVE_BAR_WIDTH, barHeight, AUDIO_WAVE_BAR_WIDTH / 2);
+        else ctx.rect(x, y, AUDIO_WAVE_BAR_WIDTH, barHeight);
+        ctx.fill();
+    }
+    smartAudioPaintPlayedLayer(entry, canvas);
+    entry.waveBars = bars;
+    entry.metrics = {width, height, barAreaHeight};
+    canvas.dataset.audioBars = String(bars);
+    smartAudioPaintHead(node.id, entry);
+}
+/* 已播放层：同一份像素复制到叠在上面的那层 canvas，外层按播放进度裁宽度 ——
+   每帧只改一个 width，不重画整条波形。深浅只靠 CSS 透明度：底层压暗=未播放，上层原色=已播放。 */
+function smartAudioPaintPlayedLayer(entry, canvas){
+    const target = entry?.ui?.playedCanvas;
+    if(!target || !canvas) return;
+    target.width = canvas.width;
+    target.height = canvas.height;
+    target.style.width = canvas.style.width;
+    target.style.height = canvas.style.height;
+    const ctx = target.getContext('2d');
+    if(!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, target.width, target.height);
+    ctx.drawImage(canvas, 0, 0);
+}
+/* 已播放高亮的裁剪宽度：比例 × 波形宽（0 = 一条不亮，1 = 整条亮；纯函数，便于单测） */
+function smartAudioPlayedWidth(ratio, trackWidth){
+    const track = Math.max(0, Number(trackWidth) || 0);
+    const bounded = Math.min(1, Math.max(0, Number(ratio) || 0));
+    return bounded * track;
+}
+/* ── 播放器运行时 ─────────────────────────────────────────────────────
+   音源是挂在 body 上的隐藏 audio（节点 DOM 每轮渲染可能重建，播放不能跟着断）。
+   同一画布同一时间只允许一个音频在播，播新的先暂停旧的。 */
+let smartAudioPoolHost = null;
+let smartAudioRafId = 0;
+let smartAudioThemeBound = false;
+/* 按住波形拖动 seek 的会话（{nodeId, pointerId}）：点未选中节点会先选中 + render 重建波形 DOM，
+   新元素上的闭包 seeking 恒为 false，只有模块级会话能把「同一根手指的同一次拖动」串起来 */
+let smartAudioSeekSession = null;
+/* 拖出节点再松手时波形收不到 pointerup，窗口层兜一次：否则会话残留会让鼠标一划过波形就 seek */
+window.addEventListener('pointerup', () => { smartAudioSeekSession = null; });
+window.addEventListener('pointercancel', () => { smartAudioSeekSession = null; });
+const smartAudioPool = new Map();
+function smartAudioPoolFor(node){
+    let entry = smartAudioPool.get(node.id);
+    if(entry) return entry;
+    if(!smartAudioPoolHost){
+        smartAudioPoolHost = document.createElement('div');
+        smartAudioPoolHost.id = 'smartAudioPool';
+        smartAudioPoolHost.setAttribute('aria-hidden', 'true');
+        smartAudioPoolHost.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;';
+        document.body.appendChild(smartAudioPoolHost);
+    }
+    const el = document.createElement('audio');
+    el.preload = 'metadata';
+    el.setAttribute('data-audio-source', '1');
+    smartAudioPoolHost.appendChild(el);
+    entry = {el, url:'', envelope:null, envelopeKey:'', waveSignature:'', waveBars:0, ui:null};
+    el.addEventListener('ended', () => smartAudioHandleEnded(node.id));
+    el.addEventListener('loadedmetadata', () => smartAudioSyncUi(node.id));
+    el.addEventListener('durationchange', () => smartAudioSyncUi(node.id));
+    el.addEventListener('play', () => smartAudioSyncUi(node.id));
+    el.addEventListener('pause', () => smartAudioSyncUi(node.id));
+    smartAudioPool.set(node.id, entry);
+    return entry;
+}
+function smartAudioSelectNode(node){
+    if(!node) return;
+    if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
+    hideRunTimerForNode(node);
+    selectedId = node.id;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
+    syncChatContext();
+    render();
+}
+/* 每帧只做两件便宜事：播放头 + 时间胶囊的 transform（不读布局、不改文本）。
+   时间文本只在「整秒」变化时改一次 —— 播放中每秒一次，暂停/seek/切歌由 syncUi 立即对齐。 */
+function smartAudioPaintHead(nodeId, entry){
+    const target = entry || smartAudioPool.get(nodeId);
+    const ui = target?.ui;
+    if(!ui?.head || !ui?.wave || !target?.el) return;
+    const duration = Number(target.el.duration);
+    const current = Number(target.el.currentTime) || 0;
+    const width = target.metrics?.width || ui.wave.clientWidth || 0;
+    const ratio = Number.isFinite(duration) && duration > 0 ? Math.min(1, Math.max(0, current / duration)) : 0;
+    const x = smartAudioHeadX(ratio, width);
+    /* 2px 竖线以 x 为中心（贴 left:0 再左移半根线宽），这样「播放头 x」就是线的中心，
+       胶囊中心也用同一个 x —— 三角正好压在线上 */
+    ui.head.style.transform = 'translateX(' + (x - 1).toFixed(1) + 'px)';
+    ui.head.dataset.audioRatio = ratio.toFixed(4);
+    ui.head.dataset.audioX = x.toFixed(1);
+    /* 已播放段高亮：跟播放头同一个比例，只改叠加层的宽度 */
+    if(ui.played){
+        ui.played.style.width = smartAudioPlayedWidth(ratio, width).toFixed(1) + 'px';
+        ui.played.dataset.audioPlayedRatio = ratio.toFixed(4);
+    }
+    const capsule = ui.time;
+    if(!capsule) return;
+    /* 胶囊中心恒等于播放头 x：同一个 x 直接写进 transform（-50% 让胶囊以自身中心对齐），
+       不再按胶囊宽度夹边 —— 三角永远指着播放头，贴边时胶囊允许溢出卡片。 */
+    capsule.style.transform = 'translateX(' + x.toFixed(1) + 'px) translateX(-50%)';
+    capsule.dataset.audioX = x.toFixed(1);
+    capsule.dataset.audioCenter = x.toFixed(1);
+    const seconds = Math.max(0, Math.floor(current));
+    /* 总时长至少显示 1 秒：0.999s 的截取结果按 floor 会算成 0，胶囊变成 00:00/00:00 */
+    const total = Number.isFinite(duration) && duration > 0 ? Math.max(1, Math.floor(duration)) : 0;
+    const key = seconds + '/' + total;
+    if(capsule.dataset.audioClock !== key){
+        capsule.dataset.audioClock = key;
+        (ui.timeText || capsule.firstElementChild || capsule).textContent = smartAudioClockLabel(seconds, total);
+    }
+}
+function smartAudioSyncUi(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    const entry = smartAudioPool.get(nodeId);
+    if(!node) return;
+    const ui = entry?.ui;
+    if(ui?.toggle){
+        const playing = Boolean(entry && !entry.el.paused && !entry.el.ended);
+        if(ui.toggle.dataset.audioPlaying !== (playing ? '1' : '0')){
+            ui.toggle.dataset.audioPlaying = playing ? '1' : '0';
+            ui.toggle.innerHTML = playing ? SMART_AUDIO_PAUSE_SVG : SMART_AUDIO_PLAY_SVG;
+        }
+        const label = playing ? trd('smart.audioPause', '暂停') : trd('smart.audioPlay', '播放');
+        ui.toggle.setAttribute('title', label);
+        ui.toggle.setAttribute('aria-label', label);
+    }
+    const count = (node.images || []).length;
+    if(ui?.root){
+        ui.root.dataset.audioCount = String(count);
+        ui.root.dataset.audioIndex = String(smartAudioActiveIndex(node));
+        ui.root.classList.toggle('is-multi', count > 1);
+    }
+    [ui?.prev, ui?.next].forEach(button => { if(button) button.disabled = count < 2; });
+    if(entry) smartAudioPaintHead(nodeId, entry);
+    if(smartAudioTrim && smartAudioTrim.nodeId === nodeId){
+        smartAudioSyncTrimDuration(node);
+        paintSmartAudioTrim(nodeId);
+        smartAudioSyncTrimReadout();
+    }
+}
+function smartAudioStartRaf(){
+    if(smartAudioRafId) return;
+    const tick = () => {
+        smartAudioRafId = 0;
+        let playing = false;
+        smartAudioPool.forEach((entry, nodeId) => {
+            if(entry.el.paused) return;
+            playing = true;
+            smartAudioPaintHead(nodeId, entry);
+        });
+        if(playing) smartAudioRafId = requestAnimationFrame(tick);
+    };
+    smartAudioRafId = requestAnimationFrame(tick);
+}
+function smartAudioStopRaf(){
+    if(!smartAudioRafId) return;
+    cancelAnimationFrame(smartAudioRafId);
+    smartAudioRafId = 0;
+}
+function smartAudioPauseOthers(exceptNodeId){
+    smartAudioPool.forEach((entry, nodeId) => {
+        if(nodeId === exceptNodeId || entry.el.paused) return;
+        try { entry.el.pause(); } catch(_) {}
+        smartAudioSyncUi(nodeId);
+    });
+}
+function smartAudioPlay(node){
+    const entry = smartAudioPoolFor(node);
+    if(!entry.url) return;
+    smartAudioPauseOthers(node.id);
+    const el = entry.el;
+    const duration = Number(el.duration);
+    if(el.ended || (Number.isFinite(duration) && duration > 0 && el.currentTime >= duration - 0.05)) el.currentTime = 0;
+    let promise = null;
+    try { promise = el.play(); } catch(_) { promise = null; }
+    if(promise?.catch) promise.catch(() => {
+        toast(trd('smart.audioPlayFailed', '这段音频没法播放（地址或格式不可用）'));
+        smartAudioSyncUi(node.id);
+    });
+    smartAudioStartRaf();
+    smartAudioSyncUi(node.id);
+}
+function smartAudioPause(node){
+    const entry = smartAudioPool.get(node.id);
+    if(!entry) return;
+    try { entry.el.pause(); } catch(_) {}
+    smartAudioSyncUi(node.id);
+    smartAudioPaintHead(node.id, entry);
+}
+function smartAudioToggle(node){
+    const entry = smartAudioPoolFor(node);
+    if(!entry.url) return;
+    if(entry.el.paused) smartAudioPlay(node);
+    else smartAudioPause(node);
+}
+function smartAudioHandleEnded(nodeId){
+    const entry = smartAudioPool.get(nodeId);
+    if(!entry) return;
+    /* 播完停在末尾（播放头留最右），再点播放才回到开头 —— 不自动循环 */
+    smartAudioPaintHead(nodeId, entry);
+    smartAudioSyncUi(nodeId);
+    const anyPlaying = Array.from(smartAudioPool.values()).some(item => !item.el.paused);
+    if(!anyPlaying) smartAudioStopRaf();
+}
+function smartAudioSeekRatio(node, ratio){
+    const entry = smartAudioPoolFor(node);
+    if(!entry.url) return;
+    const duration = Number(entry.el.duration);
+    const bounded = Math.min(1, Math.max(0, Number(ratio) || 0));
+    if(Number.isFinite(duration) && duration > 0){
+        const next = Math.min(duration, bounded * duration);
+        try { entry.el.currentTime = next; } catch(_) {}
+    }
+    smartAudioPaintHead(node.id, entry);
+}
+function smartAudioEnsureSource(node){
+    const entry = smartAudioPoolFor(node);
+    const url = smartAudioActiveItem(node)?.url || '';
+    if(entry.url === url) return entry;
+    const wasPlaying = Boolean(entry.url) && !entry.el.paused;
+    entry.url = url;
+    /* 这里只失效旧包络，包络的取用/缓存/去重全归 smartAudioEnsureEnvelope：
+       若在这里顺手把 envelopeKey 写成 url，ensureEnvelope 的闸门会被提前关死，波形永远只剩占位 */
+    entry.envelope = null;
+    entry.waveSignature = '';
+    if(url) entry.el.src = url;
+    else entry.el.removeAttribute('src');
+    try { entry.el.load(); } catch(_) {}
+    smartAudioPaintHead(node.id, entry);
+    if(wasPlaying && url) smartAudioPlay(node);
+    return entry;
+}
+/* 上一首 / 下一首：切 node.images 里的多首；正在播就继续播新的一首 */
+function smartAudioStep(nodeId, delta){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || !isSmartAudioNode(node)) return;
+    const count = (node.images || []).length;
+    if(count < 2) return;
+    const entry = smartAudioPoolFor(node);
+    smartAudioSeekSession = null;
+    const wasPlaying = !entry.el.paused;
+    node.audioActiveIndex = (smartAudioActiveIndex(node) + delta + count) % count;
+    scheduleSave();
+    smartAudioEnsureSource(node);
+    smartAudioEnsureEnvelope(node, entry);
+    smartAudioDrawWave(node, entry, true);
+    if(wasPlaying && entry.el.paused) smartAudioPlay(node);
+    smartAudioSyncUi(nodeId);
+    render();
+}
+function bindSmartAudioPlayer(root, nodeId){
+    const wave = root.querySelector('[data-audio-wave]');
+    const toggle = root.querySelector('[data-audio-toggle]');
+    const prev = root.querySelector('[data-audio-prev]');
+    const next = root.querySelector('[data-audio-next]');
+    const nodeFor = () => nodes.find(n => n.id === nodeId) || null;
+    /* seek 必须用「当下文档里」的波形：点未选中节点会先选中 + render 重建 DOM，
+       闭包里的 wave 已经脱离文档、宽度为 0，用它算比例会直接丢失这一次 seek */
+    const liveWave = () => {
+        const el = world?.querySelector('[data-audio-player][data-audio-node="' + nodeId + '"] [data-audio-wave]');
+        return el && el.isConnected ? el : null;
+    };
+    const seekFromEvent = event => {
+        const node = nodeFor();
+        if(!node || smartAudioTrimFor(node)) return;
+        const fromEvent = event?.target?.closest?.('[data-audio-wave]') || null;
+        const fromEventRect = fromEvent?.isConnected ? fromEvent.getBoundingClientRect() : null;
+        const waveEl = fromEventRect?.width ? fromEvent : liveWave();
+        const rect = waveEl?.getBoundingClientRect();
+        if(!rect?.width) return;
+        smartAudioSeekRatio(node, (event.clientX - rect.left) / rect.width);
+    };
+    /* render 重建波形后闭包 seeking 恒为 false，同一次拖动靠模块级会话认领 */
+    const seekingHere = event => Boolean(smartAudioSeekSession) && smartAudioSeekSession.nodeId === nodeId
+        && smartAudioSeekSession.pointerId === event.pointerId;
+    let seeking = false;
+    if(wave){
+        wave.addEventListener('pointerdown', event => {
+            if(event.pointerType === 'mouse' && event.button !== 0) return;
+            const activeNode = nodeFor();
+            if(activeNode && smartAudioTrimFor(activeNode)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            seeking = true;
+            smartAudioSeekSession = {nodeId, pointerId: event.pointerId};
+            try { wave.setPointerCapture?.(event.pointerId); } catch(_) {}
+            const node = nodeFor();
+            if(node){
+                smartAudioSelectNode(node);
+                if(!smartAudioPool.get(node.id)?.el.paused) smartAudioStartRaf();
+            }
+            seekFromEvent(event);
+        });
+        wave.addEventListener('pointermove', event => {
+            if(!seeking && !seekingHere(event)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            seekFromEvent(event);
+        });
+        const endSeek = event => {
+            if(!seeking && !seekingHere(event)) return;
+            seeking = false;
+            if(seekingHere(event)) smartAudioSeekSession = null;
+            try { wave.releasePointerCapture?.(event.pointerId); } catch(_) {}
+        };
+        wave.addEventListener('pointerup', endSeek);
+        wave.addEventListener('pointercancel', endSeek);
+        /* 波形区用来 seek，不让节点的拖动/选中接管；卡片空白与控制键仍按原逻辑 */
+        wave.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation(); });
+        wave.addEventListener('click', event => event.stopPropagation());
+        wave.addEventListener('dblclick', event => event.stopPropagation());
+    }
+    const bindButton = (button, handler) => {
+        if(!button) return;
+        button.addEventListener('mousedown', event => event.stopPropagation());
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const node = nodeFor();
+            if(node) handler(node);
+        });
+    };
+    bindButton(toggle, node => smartAudioToggle(node));
+    bindButton(prev, node => smartAudioStep(node.id, -1));
+    bindButton(next, node => smartAudioStep(node.id, 1));
+    bindSmartAudioTrim(root, nodeId);
+}
+function smartAudioPrunePool(){
+    smartAudioPool.forEach((entry, nodeId) => {
+        const node = nodes.find(n => n.id === nodeId);
+        if(node && isSmartAudioNode(node) && (node.images || []).length) return;
+        try { entry.el.pause(); } catch(_) {}
+        entry.el.removeAttribute('src');
+        try { entry.el.load(); } catch(_) {}
+        entry.el.remove();
+        entry.ui?.wave?.__audioResizeObserver?.disconnect?.();
+        if(smartAudioSeekSession && smartAudioSeekSession.nodeId === nodeId) smartAudioSeekSession = null;
+        smartAudioPool.delete(nodeId);
+        smartAudioStopRaf();
+    });
+    if(!smartAudioPool.size && smartAudioPoolHost){
+        smartAudioPoolHost.remove();
+        smartAudioPoolHost = null;
+    }
+}
+function smartAudioBindTheme(){
+    if(smartAudioThemeBound) return;
+    smartAudioThemeBound = true;
+    window.addEventListener('studio-theme-change', () => {
+        smartAudioPool.forEach((entry, nodeId) => {
+            const node = nodes.find(n => n.id === nodeId);
+            if(node && entry.ui) smartAudioDrawWave(node, entry, true);
+        });
+    });
+}
+/* 每次 render 收尾：接上 DOM、确保音源、画波形、同步播放态 */
+function mountSmartAudioPlayers(){
+    if(!world) return;
+    smartAudioBindTheme();
+    world.querySelectorAll('[data-audio-player]').forEach(el => {
+        const nodeId = el.dataset.audioNode || '';
+        const node = nodes.find(n => n.id === nodeId);
+        if(!node || !isSmartAudioNode(node)) return;
+        const entry = smartAudioPoolFor(node);
+        const wave = el.querySelector('[data-audio-wave]');
+        entry.ui = {
+            root: el,
+            wave,
+            canvas: el.querySelector('[data-audio-canvas]'),
+            played: el.querySelector('[data-audio-played]'),
+            playedCanvas: el.querySelector('[data-audio-played-canvas]'),
+            head: el.querySelector('[data-audio-head]'),
+            time: el.querySelector('[data-audio-time]'),
+            timeText: el.querySelector('[data-audio-time-text]'),
+            toggle: el.querySelector('[data-audio-toggle]'),
+            prev: el.querySelector('[data-audio-prev]'),
+            next: el.querySelector('[data-audio-next]')
+        };
+        if(el.dataset.audioBound !== '1'){
+            el.dataset.audioBound = '1';
+            bindSmartAudioPlayer(el, nodeId);
+        }
+        smartAudioEnsureSource(node);
+        smartAudioEnsureEnvelope(node, entry);
+        smartAudioDrawWave(node, entry);
+        if(wave && !wave.__audioResizeObserver && typeof ResizeObserver === 'function'){
+            const observer = new ResizeObserver(() => {
+                const live = nodes.find(n => n.id === nodeId);
+                const liveEntry = smartAudioPool.get(nodeId);
+                if(!live || !liveEntry) return;
+                smartAudioDrawWave(live, liveEntry, true);
+            });
+            observer.observe(wave);
+            wave.__audioResizeObserver = observer;
+        }
+        smartAudioSyncUi(nodeId);
+        smartAudioSyncTrimDuration(node);
+        paintSmartAudioTrim(nodeId);
+        smartAudioSyncTrimReadout();
+    });
+    smartAudioPrunePool();
+}
+
+/* ── 音频编辑：截取 / 变速（纯前端本地处理）────────────────────────────────
+   只处理当前播放的那一首（smartAudioActiveItem）。链路：fetch → decodeAudioData →
+   切片 / 线性重采样 → 16bit WAV → /api/ai/upload → 右侧派生节点 + 'history' 连线；
+   原节点与 node.images 的数据结构都不改。 */
+const SMART_AUDIO_EDIT_MIN_SEC = 0.5;
+const SMART_AUDIO_EDIT_MAX_BYTES = 50 * 1024 * 1024;
+const SMART_AUDIO_SPEED_MIN = 0.1;
+const SMART_AUDIO_SPEED_MAX = 4;
+const SMART_AUDIO_SPEED_STEPS = [0.1, 0.5, 1, 1.5, 2, 3, 4];
+const SMART_AUDIO_SPEED_SNAP_MOVE = 0.15;
+const SMART_AUDIO_SPEED_SNAP_END = 0.35;
+let smartAudioTrim = null;
+let smartAudioSpeed = null;
+let smartAudioEditToken = 0;
+
+function smartAudioEditClamp(value, min, max){
+    const n = Number(value);
+    if(!Number.isFinite(n)) return min;
+    return Math.min(max, Math.max(min, n));
+}
+/* 默认选区：0 ~ min(时长, max(0.5, 时长/3)) */
+function smartAudioTrimDefaultRange(duration){
+    const total = Number(duration);
+    if(!(total > 0)) return {start:0, end:0};
+    return {start:0, end:Math.min(total, Math.max(SMART_AUDIO_EDIT_MIN_SEC, total / 3))};
+}
+/* 选区夹取：不越界、start < end、至少 0.5s（音频本身短于 0.5s 时就是整段） */
+function smartAudioTrimClampRange(start, end, duration){
+    const total = Math.max(0, Number(duration) || 0);
+    if(!(total > 0)) return {start:0, end:0};
+    let a = smartAudioEditClamp(start, 0, total);
+    let b = smartAudioEditClamp(end, 0, total);
+    if(b < a){ const swap = a; a = b; b = swap; }
+    const minSpan = Math.min(SMART_AUDIO_EDIT_MIN_SEC, total);
+    if(b - a < minSpan){
+        b = Math.min(total, a + minSpan);
+        a = Math.max(0, b - minSpan);
+    }
+    return {start:a, end:b};
+}
+function smartAudioTrimPercent(seconds, duration){
+    const total = Number(duration) || 0;
+    if(!(total > 0)) return 0;
+    return smartAudioEditClamp((Number(seconds) || 0) / total * 100, 0, 100);
+}
+function smartAudioTrimRangeLabel(){
+    if(!smartAudioTrim) return formatAudioClock(0) + ' - ' + formatAudioClock(0);
+    return formatAudioClock(smartAudioTrim.start) + ' - ' + formatAudioClock(smartAudioTrim.end);
+}
+function smartAudioItemDurationSec(item){
+    const value = Number(item?.durationSec ?? item?.duration_sec ?? item?.duration);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+}
+function smartAudioTrimFor(node){
+    return node && smartAudioTrim && smartAudioTrim.nodeId === node.id ? smartAudioTrim : null;
+}
+function smartAudioTrimDurationFor(node){
+    const live = Number(smartAudioPool.get(node?.id)?.el?.duration);
+    if(Number.isFinite(live) && live > 0) return live;
+    return smartAudioItemDurationSec(smartAudioActiveItem(node));
+}
+function smartAudioSpeedClamp(value){
+    const n = Number(value);
+    if(!Number.isFinite(n)) return 1;
+    return Math.round(smartAudioEditClamp(n, SMART_AUDIO_SPEED_MIN, SMART_AUDIO_SPEED_MAX) * 100) / 100;
+}
+/* 档位吸附：离最近档位不超过 tolerance 才吸过去（拖动 0.15 / 松手 0.35） */
+function smartAudioSnapSpeed(value, tolerance){
+    const rate = smartAudioSpeedClamp(value);
+    const limit = Number.isFinite(Number(tolerance)) ? Number(tolerance) : SMART_AUDIO_SPEED_SNAP_MOVE;
+    let snapped = rate;
+    let closest = Infinity;
+    for(const step of SMART_AUDIO_SPEED_STEPS){
+        const gap = Math.abs(rate - step);
+        if(gap < closest){ closest = gap; snapped = step; }
+    }
+    return closest <= limit ? smartAudioSpeedClamp(snapped) : rate;
+}
+/* 文件名 / 节点名里的速度写法：1.50 → 1.5，2.00 → 2（例：旁白_1.5x） */
+function smartAudioSpeedLabel(rate){
+    return String(Number(smartAudioSpeedClamp(rate).toFixed(2)));
+}
+function smartAudioSpeedText(rate){
+    return smartAudioSpeedClamp(rate).toFixed(2);
+}
+function smartAudioSpeedFromText(text){
+    const match = String(text == null ? '' : text).replace(',', '.').match(/-?\d+(?:\.\d+)?/);
+    if(!match) return null;
+    return smartAudioSpeedClamp(Number(match[0]));
+}
+function smartAudioSpeedIsUnity(rate){
+    return smartAudioSpeedClamp(rate) === 1;
+}
+function smartAudioSpeedRefPercent(){
+    return (1 - SMART_AUDIO_SPEED_MIN) / (SMART_AUDIO_SPEED_MAX - SMART_AUDIO_SPEED_MIN) * 100;
+}
+/* 文件名里的音频扩展名：只认已知后缀，别把「旁白 v1.2」这种名字里的 .2 也当扩展名 */
+const SMART_AUDIO_FILE_EXT_RE = /\.(mp3|wav|m4a|aac|ogg|flac|mp4|mov|webm)$/i;
+/* 节点标题不带扩展名（media.name 仍保留 .wav，方便下载/回传时认出真实文件） */
+function smartAudioDisplayTitle(title){
+    return String(title == null ? '' : title).replace(SMART_AUDIO_FILE_EXT_RE, '').trim();
+}
+/* 派生节点命名：{原名}_{截取 | 1.5x}；原名去掉扩展名，空名回落到「音频」 */
+function smartAudioDerivedBaseName(item, node){
+    const raw = String(item?.name || fileNameFromUrl(item?.url || '') || node?.title || '').trim();
+    return smartAudioDisplayTitle(raw) || trd('smart.kindAudio', '音频');
+}
+function smartAudioDerivedTitle(item, node, mode, rate){
+    const suffix = mode === 'speed' ? smartAudioSpeedLabel(rate) + 'x' : trd('smart.audioTrimSuffix', '截取');
+    return smartAudioDisplayTitle(smartAudioDerivedBaseName(item, node) + '_' + suffix);
+}
+function smartAudioWriteAscii(bytes, offset, text){
+    for(let i = 0; i < text.length; i += 1) bytes[offset + i] = text.charCodeAt(i);
+}
+/* 44 字节标准 PCM WAV 头（RIFF / WAVE / fmt / data），单声道与多声道共用一套公式 */
+function smartAudioWavHeader(frames, sampleRate, channels){
+    const channelCount = Math.max(1, Math.round(Number(channels) || 1));
+    const rate = Math.max(1, Math.round(Number(sampleRate) || 44100));
+    const dataBytes = Math.max(0, Math.round(Number(frames) || 0)) * channelCount * 2;
+    const bytes = new Uint8Array(44);
+    const view = new DataView(bytes.buffer);
+    smartAudioWriteAscii(bytes, 0, 'RIFF');
+    view.setUint32(4, 36 + dataBytes, true);
+    smartAudioWriteAscii(bytes, 8, 'WAVE');
+    smartAudioWriteAscii(bytes, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channelCount, true);
+    view.setUint32(24, rate, true);
+    view.setUint32(28, rate * channelCount * 2, true);
+    view.setUint16(32, channelCount * 2, true);
+    view.setUint16(34, 16, true);
+    smartAudioWriteAscii(bytes, 36, 'data');
+    view.setUint32(40, dataBytes, true);
+    return bytes;
+}
+function smartAudioWavBytes(channels, sampleRate){
+    const list = Array.isArray(channels) ? channels : (channels ? [channels] : []);
+    const channelCount = Math.max(1, list.length);
+    let frames = 0;
+    list.forEach(channel => {
+        const length = Number(channel?.length) || 0;
+        if(length > frames) frames = length;
+    });
+    const output = new Uint8Array(44 + frames * channelCount * 2);
+    output.set(smartAudioWavHeader(frames, sampleRate, channelCount), 0);
+    const view = new DataView(output.buffer);
+    let offset = 44;
+    for(let i = 0; i < frames; i += 1){
+        for(let c = 0; c < channelCount; c += 1){
+            const sample = Number(list[c]?.[i]) || 0;
+            const clamped = Math.max(-1, Math.min(1, sample));
+            view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+            offset += 2;
+        }
+    }
+    return output;
+}
+function smartAudioSliceChannels(channels, sampleRate, startSec, endSec){
+    const rate = Math.max(1, Math.round(Number(sampleRate) || 44100));
+    const total = Number(channels?.[0]?.length) || 0;
+    const from = Math.min(total, Math.max(0, Math.floor((Number(startSec) || 0) * rate)));
+    const to = Math.min(total, Math.max(from, Math.ceil((Number(endSec) || 0) * rate)));
+    return (channels || []).map(channel => {
+        const out = new Float32Array(Math.max(0, to - from));
+        for(let i = 0; i < out.length; i += 1) out[i] = Number(channel?.[from + i]) || 0;
+        return out;
+    });
+}
+/* 变速 = 改采样点数：输出 = 输入 / rate，线性插值读源波形（简单、稳定、可变调） */
+function smartAudioResampleChannels(channels, rate){
+    const speed = smartAudioSpeedClamp(rate);
+    if(speed === 1) return (channels || []).map(channel => channel);
+    return (channels || []).map(channel => {
+        const inputLength = Number(channel?.length) || 0;
+        const outputLength = Math.max(1, Math.floor(inputLength / speed));
+        const out = new Float32Array(outputLength);
+        for(let i = 0; i < outputLength; i += 1){
+            const position = i * speed;
+            const index = Math.floor(position);
+            const next = Math.min(inputLength - 1, index + 1);
+            const part = position - index;
+            const a = Number(channel?.[index]) || 0;
+            const b = Number(channel?.[next]) || 0;
+            out[i] = a + (b - a) * part;
+        }
+        return out;
+    });
+}
+function smartAudioTrimOverlayHtml(node){
+    const state = smartAudioTrimFor(node);
+    if(!state) return '';
+    const duration = state.duration || 0;
+    const startPct = duration > 0 ? smartAudioTrimPercent(state.start, duration) : 0;
+    const endPct = duration > 0 ? smartAudioTrimPercent(state.end, duration) : 100;
+    const span = Math.max(0, state.end - state.start);
+    return `<div class="audio-trim" data-audio-trim="1">
+            <span class="audio-trim-mask is-start" data-audio-trim-mask="start" style="width:${startPct.toFixed(2)}%" aria-hidden="true"></span>
+            <span class="audio-trim-mask is-end" data-audio-trim-mask="end" style="left:${endPct.toFixed(2)}%" aria-hidden="true"></span>
+            <span class="audio-trim-box" data-audio-trim-box="1" style="left:${startPct.toFixed(2)}%;width:${Math.max(0, endPct - startPct).toFixed(2)}%">
+                <span class="audio-trim-dur" data-audio-trim-dur="1">${span.toFixed(2)}s</span>
+                <span class="audio-trim-handle is-start" data-audio-trim-handle="start" aria-hidden="true"></span>
+                <span class="audio-trim-handle is-end" data-audio-trim-handle="end" aria-hidden="true"></span>
+            </span>
+        </div>`;
+}
+function paintSmartAudioTrim(nodeId){
+    const state = smartAudioTrim && smartAudioTrim.nodeId === nodeId ? smartAudioTrim : null;
+    const root = smartAudioPool.get(nodeId)?.ui?.root;
+    if(!state || !root) return;
+    const duration = state.duration || 0;
+    const startPct = duration > 0 ? smartAudioTrimPercent(state.start, duration) : 0;
+    const endPct = duration > 0 ? smartAudioTrimPercent(state.end, duration) : 100;
+    const box = root.querySelector('[data-audio-trim-box]');
+    const maskStart = root.querySelector('[data-audio-trim-mask="start"]');
+    const maskEnd = root.querySelector('[data-audio-trim-mask="end"]');
+    const label = root.querySelector('[data-audio-trim-dur]');
+    if(box){
+        box.style.left = startPct.toFixed(2) + '%';
+        box.style.width = Math.max(0, endPct - startPct).toFixed(2) + '%';
+    }
+    if(maskStart) maskStart.style.width = startPct.toFixed(2) + '%';
+    if(maskEnd) maskEnd.style.left = endPct.toFixed(2) + '%';
+    if(label) label.textContent = Math.max(0, state.end - state.start).toFixed(2) + 's';
+}
+function smartAudioSyncTrimDuration(node){
+    if(!smartAudioTrim || !node || smartAudioTrim.nodeId !== node.id) return false;
+    const live = Number(smartAudioPool.get(node.id)?.el?.duration);
+    const total = Number.isFinite(live) && live > 0 ? live : (smartAudioTrim.duration || smartAudioItemDurationSec(smartAudioActiveItem(node)));
+    if(!(total > 0)) return false;
+    if(Math.abs(total - smartAudioTrim.duration) < 0.0001) return false;
+    smartAudioTrim.duration = total;
+    const range = smartAudioTrim.userSet
+        ? smartAudioTrimClampRange(smartAudioTrim.start, smartAudioTrim.end, total)
+        : smartAudioTrimDefaultRange(total);
+    smartAudioTrim.start = range.start;
+    smartAudioTrim.end = range.end;
+    paintSmartAudioTrim(node.id);
+    smartAudioSyncTrimReadout();
+    return true;
+}
+function smartAudioSyncTrimReadout(){
+    const panel = smartToolPanelEl;
+    if(!smartAudioTrim || !panel || panel.dataset.smartToolPanel !== 'audio-trim') return;
+    const range = panel.querySelector('[data-aep-range]');
+    if(range) range.textContent = smartAudioTrimRangeLabel();
+}
+/* 波形选区：遮罩 + 白框 + 两端把手；拖把手改单边、拖框整体平移、点空白重新拉选区 */
+function bindSmartAudioTrim(root, nodeId){
+    const overlay = root?.querySelector('[data-audio-trim]');
+    const wave = root?.querySelector('[data-audio-wave]');
+    if(!overlay || !wave || overlay.dataset.audioTrimBound === '1') return;
+    overlay.dataset.audioTrimBound = '1';
+    let drag = null;
+    const stateFor = () => (smartAudioTrim && smartAudioTrim.nodeId === nodeId ? smartAudioTrim : null);
+    const timeOf = event => {
+        const rect = wave.getBoundingClientRect();
+        const state = stateFor();
+        if(!rect.width || !state?.duration) return 0;
+        return smartAudioEditClamp((event.clientX - rect.left) / rect.width, 0, 1) * state.duration;
+    };
+    const begin = (event, mode) => {
+        const state = stateFor();
+        if(!state) return;
+        event.preventDefault();
+        event.stopPropagation();
+        try { overlay.setPointerCapture?.(event.pointerId); } catch(_) {}
+        const time = timeOf(event);
+        drag = {mode, pointerId:event.pointerId, anchor:time, grab:time - state.start, width:state.end - state.start};
+        if(mode === 'new'){
+            state.userSet = true;
+            state.start = time;
+            state.end = time;
+        }
+        paintSmartAudioTrim(nodeId);
+    };
+    overlay.addEventListener('pointerdown', event => {
+        if(event.pointerType === 'mouse' && event.button !== 0) return;
+        const handle = event.target.closest?.('[data-audio-trim-handle]');
+        if(handle){ begin(event, handle.dataset.audioTrimHandle === 'start' ? 'start' : 'end'); return; }
+        if(event.target.closest?.('[data-audio-trim-box]')){ begin(event, 'move'); return; }
+        begin(event, 'new');
+    });
+    overlay.addEventListener('pointermove', event => {
+        if(!drag) return;
+        const state = stateFor();
+        if(!state) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const time = timeOf(event);
+        let range = {start:state.start, end:state.end};
+        if(drag.mode === 'start'){
+            range = smartAudioTrimClampRange(time, state.end, state.duration);
+        } else if(drag.mode === 'end'){
+            range = smartAudioTrimClampRange(state.start, time, state.duration);
+        } else if(drag.mode === 'move'){
+            const start = smartAudioEditClamp(time - drag.grab, 0, Math.max(0, state.duration - drag.width));
+            range = {start, end:Math.min(state.duration, start + drag.width)};
+        } else {
+            range = smartAudioTrimClampRange(Math.min(drag.anchor, time), Math.max(drag.anchor, time), state.duration);
+        }
+        state.userSet = true;
+        state.start = range.start;
+        state.end = range.end;
+        paintSmartAudioTrim(nodeId);
+        smartAudioSyncTrimReadout();
+    });
+    const endDrag = event => {
+        if(!drag) return;
+        drag = null;
+        try { overlay.releasePointerCapture?.(event.pointerId); } catch(_) {}
+        const state = stateFor();
+        if(state){
+            const range = smartAudioTrimClampRange(state.start, state.end, state.duration);
+            state.start = range.start;
+            state.end = range.end;
+            paintSmartAudioTrim(nodeId);
+            smartAudioSyncTrimReadout();
+        }
+    };
+    overlay.addEventListener('pointerup', endDrag);
+    overlay.addEventListener('pointercancel', endDrag);
+    overlay.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation(); });
+    overlay.addEventListener('click', event => event.stopPropagation());
+}
+function smartAudioRunContent(label, icon){
+    return '<i data-lucide="' + escapeAttr(icon) + '"></i><span>' + escapeHtml(label) + '</span>';
+}
+function smartAudioCloseButtonHtml(){
+    const label = trd('smart.audioClose', '关闭');
+    return '<button type="button" class="aep-close" data-aep-close title="' + escapeAttr(label) + '" aria-label="' + escapeAttr(label) + '"><i data-lucide="x"></i></button>';
+}
+function smartAudioTrimPanelHtml(){
+    return '<div class="aep aep-trim" data-audio-edit="trim">'
+        + '<div class="aep-bar">'
+        + smartAudioCloseButtonHtml()
+        + '<span class="aep-title">' + escapeHtml(trd('smart.audioTrim', '截取')) + '</span>'
+        + '<span class="aep-range" data-aep-range>' + escapeHtml(smartAudioTrimRangeLabel()) + '</span>'
+        + '<button type="button" class="stp-btn is-primary aep-run" data-aep-run>' + smartAudioRunContent(trd('smart.audioGenerate', '生成'), 'scissors') + '</button>'
+        + '</div></div>';
+}
+function smartAudioSpeedPanelHtml(){
+    const rate = smartAudioSpeedClamp(smartAudioSpeed?.rate ?? 1);
+    const refPercent = smartAudioSpeedRefPercent();
+    return '<div class="aep aep-speed" data-audio-edit="speed">'
+        + '<div class="aep-bar">'
+        + smartAudioCloseButtonHtml()
+        + '<span class="aep-title">' + escapeHtml(trd('smart.audioSpeed', '变速')) + '</span>'
+        + '</div>'
+        + '<div class="aep-speed-row">'
+        + '<span class="aep-bound">0.1x</span>'
+        + '<div class="aep-track">'
+        + '<span class="aep-ref" data-aep-ref="1" style="left:' + refPercent.toFixed(2) + '%" aria-hidden="true"></span>'
+        + '<input type="range" min="0.1" max="4" step="0.01" value="' + rate.toFixed(2) + '" data-aep-rate-range aria-label="' + escapeAttr(trd('smart.audioSpeed', '变速')) + '">'
+        + '</div>'
+        + '<span class="aep-bound">4.0x</span>'
+        + '</div>'
+        + '<div class="aep-foot">'
+        + '<div class="aep-stepper">'
+        + '<input type="text" inputmode="decimal" value="' + rate.toFixed(2) + '" data-aep-rate-input aria-label="' + escapeAttr(trd('smart.audioRate', '速度')) + '">'
+        + '<button type="button" class="aep-step" data-aep-rate-step="up" title="' + escapeAttr(trd('smart.audioSpeedUp', '加速 0.1x')) + '" aria-label="' + escapeAttr(trd('smart.audioSpeedUp', '加速 0.1x')) + '"><i data-lucide="chevron-up"></i></button>'
+        + '<button type="button" class="aep-step" data-aep-rate-step="down" title="' + escapeAttr(trd('smart.audioSpeedDown', '减速 0.1x')) + '" aria-label="' + escapeAttr(trd('smart.audioSpeedDown', '减速 0.1x')) + '"><i data-lucide="chevron-down"></i></button>'
+        + '</div>'
+        + '<button type="button" class="stp-btn is-primary aep-run" data-aep-run>' + smartAudioRunContent(trd('smart.audioConfirm', '确认'), 'check') + '</button>'
+        + '</div></div>';
+}
+function smartAudioSetBusy(button, busy, label, icon){
+    if(!button) return;
+    button.disabled = Boolean(busy);
+    button.classList.toggle('is-busy', Boolean(busy));
+    button.innerHTML = busy
+        ? smartAudioRunContent(trd('smart.audioEditBusy', '处理中…'), 'loader-circle')
+        : smartAudioRunContent(label, icon);
+    refreshIcons();
+}
+function bindSmartAudioTrimPanel(panel, nodeId){
+    const run = panel.querySelector('[data-aep-run]');
+    panel.querySelector('[data-aep-close]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeSmartToolPanel();
+    });
+    run?.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if(run.disabled) return;
+        const node = nodes.find(item => item.id === nodeId);
+        if(!node || !smartAudioTrim || smartAudioTrim.nodeId !== node.id) return;
+        const range = smartAudioTrimClampRange(smartAudioTrim.start, smartAudioTrim.end, smartAudioTrim.duration);
+        smartAudioSetBusy(run, true, trd('smart.audioGenerate', '生成'), 'scissors');
+        const created = await runSmartAudioEdit(node, 'trim', {start:range.start, end:range.end});
+        if(created){ closeSmartToolPanel(); return; }
+        smartAudioSetBusy(run, false, trd('smart.audioGenerate', '生成'), 'scissors');
+        smartAudioSyncTrimReadout();
+    });
+    smartAudioSyncTrimReadout();
+}
+function bindSmartAudioSpeedPanel(panel, nodeId){
+    const range = panel.querySelector('[data-aep-rate-range]');
+    const input = panel.querySelector('[data-aep-rate-input]');
+    const run = panel.querySelector('[data-aep-run]');
+    const runLabel = trd('smart.audioConfirm', '确认');
+    let committed = smartAudioSpeedClamp(smartAudioSpeed?.rate ?? 1);
+    const paint = value => {
+        const rate = smartAudioSpeedClamp(value);
+        committed = rate;
+        if(smartAudioSpeed) smartAudioSpeed.rate = rate;
+        if(range && range.value !== smartAudioSpeedText(rate)) range.value = smartAudioSpeedText(rate);
+        if(input) input.value = rate.toFixed(2);
+        return rate;
+    };
+    if(range){
+        /* 只在指针真的在拖时才吸附：键盘方向键（0.01 一档）走原值，否则从 1.00 按 → 永远被吸回 1.00 */
+        let pointerAt = 0;
+        const pointerActive = () => pointerAt > 0 && Date.now() - pointerAt < 600;
+        range.addEventListener('pointerdown', () => { pointerAt = Date.now(); });
+        range.addEventListener('pointermove', () => { if(pointerAt) pointerAt = Date.now(); });
+        range.addEventListener('input', () => {
+            const raw = Number(range.value);
+            paint(pointerActive() ? smartAudioSnapSpeed(raw, SMART_AUDIO_SPEED_SNAP_MOVE) : smartAudioSpeedClamp(raw));
+        });
+        range.addEventListener('change', () => {
+            const raw = Number(range.value);
+            paint(pointerActive() ? smartAudioSnapSpeed(raw, SMART_AUDIO_SPEED_SNAP_END) : smartAudioSpeedClamp(raw));
+        });
+    }
+    const commitInput = () => {
+        const parsed = smartAudioSpeedFromText(input?.value);
+        paint(parsed == null ? committed : parsed);
+    };
+    input?.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if(event.key === 'ArrowUp' || event.key === 'ArrowDown'){
+            event.preventDefault();
+            paint(committed + (event.key === 'ArrowUp' ? 0.1 : -0.1));
+        } else if(event.key === 'Enter'){
+            event.preventDefault();
+            commitInput();
+        } else if(event.key === 'Escape'){
+            event.preventDefault();
+            paint(committed);
+            input.blur();
+        }
+    });
+    input?.addEventListener('blur', commitInput);
+    panel.querySelectorAll('[data-aep-rate-step]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            paint(committed + (button.dataset.aepRateStep === 'up' ? 0.1 : -0.1));
+        });
+    });
+    panel.querySelector('[data-aep-close]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeSmartToolPanel();
+    });
+    run?.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if(run.disabled) return;
+        const node = nodes.find(item => item.id === nodeId);
+        if(!node) return;
+        const rate = smartAudioSpeedClamp(committed);
+        /* 1x = 原样：直接关掉，不发请求也不落节点 */
+        if(smartAudioSpeedIsUnity(rate)){ closeSmartToolPanel(); return; }
+        smartAudioSetBusy(run, true, runLabel, 'check');
+        const created = await runSmartAudioEdit(node, 'speed', {rate});
+        if(created){ closeSmartToolPanel(); return; }
+        smartAudioSetBusy(run, false, runLabel, 'check');
+    });
+    paint(committed);
+}
+function smartAudioEditPanelOpen(id, nodeId){
+    return Boolean(smartToolPanelEl && smartToolPanelEl.dataset.smartToolPanel === id && smartToolPanelEl.dataset.smartToolNode === nodeId);
+}
+function openSmartAudioTrimPanel(node){
+    if(!node) return;
+    if(!smartAudioActiveItem(node)?.url){ toast(trd('smart.audioNoAudio', '这个节点没有可用的音频')); return; }
+    if(smartAudioEditPanelOpen('audio-trim', node.id)){ closeSmartToolPanel(); return; }
+    smartAudioEditToken += 1;
+    const token = smartAudioEditToken;
+    smartAudioSpeed = null;
+    smartAudioSplit = null;
+    const duration = smartAudioTrimDurationFor(node);
+    const range = duration > 0 ? smartAudioTrimDefaultRange(duration) : {start:0, end:0};
+    smartAudioTrim = {nodeId:node.id, start:range.start, end:range.end, duration, userSet:false};
+    smartAudioPause(node);
+    render();
+    const panel = openSmartToolPanel({
+        id:'audio-trim',
+        key:'trim',
+        nodeId:node.id,
+        icon:'scissors',
+        title:trd('smart.audioTrim', '截取'),
+        head:false,
+        className:'audio-edit-panel',
+        placement:'below-node',
+        persist:true,
+        body:smartAudioTrimPanelHtml(),
+        onClose:() => { if(token === smartAudioEditToken) smartAudioEditReset(); },
+        mount:panel => bindSmartAudioTrimPanel(panel, node.id)
+    });
+    /* 抓不到工具条锚点时面板开不出来：别留下一个没有出口的选区态 */
+    if(!panel) smartAudioEditReset();
+}
+function openSmartAudioSpeedPanel(node){
+    if(!node) return;
+    if(!smartAudioActiveItem(node)?.url){ toast(trd('smart.audioNoAudio', '这个节点没有可用的音频')); return; }
+    if(smartAudioEditPanelOpen('audio-speed', node.id)){ closeSmartToolPanel(); return; }
+    smartAudioEditToken += 1;
+    const token = smartAudioEditToken;
+    const hadTrim = Boolean(smartAudioTrim) || Boolean(smartAudioSplit);
+    smartAudioTrim = null;
+    smartAudioSplit = null;
+    smartAudioSpeed = {nodeId:node.id, rate:1};
+    if(hadTrim) render();
+    const panel = openSmartToolPanel({
+        id:'audio-speed',
+        key:'speed',
+        nodeId:node.id,
+        icon:'timer',
+        title:trd('smart.audioSpeed', '变速'),
+        head:false,
+        className:'audio-edit-panel',
+        placement:'below-node',
+        persist:true,
+        body:smartAudioSpeedPanelHtml(),
+        onClose:() => { if(token === smartAudioEditToken) smartAudioEditReset(); },
+        mount:panel => bindSmartAudioSpeedPanel(panel, node.id)
+    });
+    if(!panel) smartAudioEditReset();
+}
+function smartAudioEditReset(){
+    const trimNodeId = smartAudioTrim?.nodeId || '';
+    const speedNodeId = smartAudioSpeed?.nodeId || '';
+    const changed = Boolean(smartAudioTrim || smartAudioSpeed);
+    smartAudioTrim = null;
+    smartAudioSpeed = null;
+    if(!changed) return;
+    const nodeId = trimNodeId || speedNodeId;
+    if(nodeId && nodes.some(item => item.id === nodeId)) render();
+}
+async function smartAudioDecodeItem(item){
+    const url = String(item?.url || '');
+    if(!url) throw new Error(trd('smart.audioNoAudio', '这个节点没有可用的音频'));
+    const response = await fetch(url, {credentials:'same-origin'});
+    if(!response.ok) throw new Error(trd('smart.audioReadFail', '音频读取失败'));
+    const buffer = await response.arrayBuffer();
+    if(!buffer.byteLength) throw new Error(trd('smart.audioReadFail', '音频读取失败'));
+    if(buffer.byteLength > SMART_AUDIO_EDIT_MAX_BYTES) throw new Error(trd('smart.audioTooLarge', '音频超过 50MB，无法处理'));
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if(!Ctor) throw new Error(trd('smart.audioDecodeFail', '音频解码失败（格式可能不支持）'));
+    const ctx = new Ctor();
+    try {
+        return await ctx.decodeAudioData(buffer);
+    } catch(_) {
+        throw new Error(trd('smart.audioDecodeFail', '音频解码失败（格式可能不支持）'));
+    } finally {
+        try { ctx.close(); } catch(_) {}
+    }
+}
+function smartAudioChannelsOf(buffer){
+    const count = Math.max(1, Number(buffer?.numberOfChannels) || 1);
+    const list = [];
+    for(let i = 0; i < count; i += 1) list.push(buffer.getChannelData(i));
+    return list;
+}
+async function runSmartAudioEdit(node, mode, options = {}){
+    if(!node || node.__audioEditBusy) return null;
+    const item = smartAudioActiveItem(node);
+    if(!item?.url){ toast(trd('smart.audioNoAudio', '这个节点没有可用的音频')); return null; }
+    node.__audioEditBusy = true;
+    try {
+        const decoded = await smartAudioDecodeItem(item);
+        const sampleRate = Math.max(1, Math.round(Number(decoded?.sampleRate) || 44100));
+        const totalDuration = Number(decoded?.duration) || 0;
+        if(!(totalDuration > 0)) throw new Error(trd('smart.audioDecodeFail', '音频解码失败（格式可能不支持）'));
+        const sourceChannels = smartAudioChannelsOf(decoded);
+        let channels = sourceChannels;
+        let outputDuration = totalDuration;
+        if(mode === 'trim'){
+            const range = smartAudioTrimClampRange(options.start, options.end, totalDuration);
+            const span = range.end - range.start;
+            const minSpan = Math.min(SMART_AUDIO_EDIT_MIN_SEC, totalDuration);
+            if(!(span >= minSpan - 0.001)) throw new Error(trd('smart.audioTrimTooShort', '选区太短，至少要 0.5 秒'));
+            channels = smartAudioSliceChannels(sourceChannels, sampleRate, range.start, range.end);
+            outputDuration = span;
+        } else {
+            const rate = smartAudioSpeedClamp(options.rate);
+            if(smartAudioSpeedIsUnity(rate)) return null;
+            channels = smartAudioResampleChannels(sourceChannels, rate);
+            outputDuration = totalDuration / rate;
+        }
+        const wav = smartAudioWavBytes(channels, sampleRate);
+        if(!(wav.byteLength > 44)) throw new Error(trd('smart.audioEditFailed', '音频处理失败'));
+        if(wav.byteLength > SMART_AUDIO_EDIT_MAX_BYTES) throw new Error(trd('smart.audioTooLarge', '音频超过 50MB，无法处理'));
+        const title = smartAudioDerivedTitle(item, node, mode, options.rate);
+        const file = new File([wav], title + '.wav', {type:'audio/wav'});
+        const uploaded = await uploadFiles([file]);
+        const first = uploaded?.[0];
+        if(!first?.url) throw new Error(trd('smart.audioUploadFail', '处理结果上传失败'));
+        const media = {
+            url:first.url,
+            name:first.name || (title + '.wav'),
+            kind:'audio',
+            mime:first.mime || 'audio/wav',
+            durationSec:Math.max(0.01, Math.round(outputDuration * 100) / 100)
+        };
+        const created = placeSmartAudioDerivedNode(node, media, {
+            title,
+            mode,
+            rate:mode === 'speed' ? smartAudioSpeedClamp(options.rate) : null,
+            start:mode === 'trim' ? options.start : null,
+            end:mode === 'trim' ? options.end : null,
+            sourceUrl:item.url,
+            sourceName:item.name || ''
+        });
+        toast(mode === 'trim'
+            ? trd('smart.audioTrimDone', '已生成截取音频')
+            : trd('smart.audioSpeedDone', '已生成变速音频'));
+        return created;
+    } catch(error) {
+        toast(String(error?.message || error || trd('smart.audioEditFailed', '音频处理失败')).slice(0, 160));
+        return null;
+    } finally {
+        delete node.__audioEditBusy;
+    }
+}
+function placeSmartAudioDerivedNode(sourceNode, media, info = {}){
+    pushUndo();
+    const point = freeSpotRightOf(sourceNode, media);
+    const created = createImageNodeAt(point, [media], {select:true, skipUndo:true, type:'smart-audio', title:info.title});
+    /* 节点标题永远不带扩展名（media.name 保留 .wav）：{原名}_截取 / {原名}_1.5x */
+    created.title = smartAudioDisplayTitle(info.title) || created.title;
+    created.outputKind = 'audio';
+    created.derivedFrom = sourceNode.id;
+    created.audioEdit = {
+        mode:info.mode === 'speed' ? 'speed' : 'trim',
+        ...(info.mode === 'speed' ? {rate:info.rate} : {start:info.start, end:info.end}),
+        sourceNodeId:sourceNode.id,
+        sourceUrl:info.sourceUrl || '',
+        sourceName:info.sourceName || ''
+    };
+    addConnection(sourceNode.id, created.id, 'history');
+    selectedId = created.id;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    render();
+    scheduleSave();
+    centerViewportOnWorldPoint({x:point.x, y:point.y});
+    return created;
+}
+
+/* ── 音频切分：智能（语义）/ 自定义（自然语言指令）──────────────────────────
+   流程：解码拿真实时长 → 请求 /api/canvas-audio-split 让模型给时间段 → 波形上预览 →
+   用户确认后本地切片成 N 个音频节点并放进同一个分组。
+   模型不可用 / 返回为空 / 解析失败 → 本地静音检测兜底（仍进预览让用户确认）。
+   ────────────────────────────────────────────────────────────────────────── */
+const SMART_AUDIO_SPLIT_MIN_SEC = 0.5;
+const SMART_AUDIO_SPLIT_MAX_SEGMENTS = 12;
+const SMART_AUDIO_SPLIT_MIN_TOTAL_SEC = 1;
+const SMART_AUDIO_SPLIT_RMS_WINDOW_SEC = 0.02;
+const SMART_AUDIO_SPLIT_SILENCE_MIN_SEC = 0.35;
+const SMART_AUDIO_SPLIT_SILENCE_RATIO = 0.12;
+let smartAudioSplit = null;
+function smartAudioSplitMode(value){
+    return String(value == null ? '' : value).toLowerCase() === 'custom' ? 'custom' : 'smart';
+}
+function smartAudioSplitMaxSegments(value){
+    const count = Math.round(Number(value));
+    if(!Number.isFinite(count)) return SMART_AUDIO_SPLIT_MAX_SEGMENTS;
+    return Math.max(1, Math.min(SMART_AUDIO_SPLIT_MAX_SEGMENTS, count));
+}
+function smartAudioSplitFor(node){
+    return node && smartAudioSplit && smartAudioSplit.nodeId === node.id ? smartAudioSplit : null;
+}
+function smartAudioSplitReset(){
+    const nodeId = smartAudioSplit ? smartAudioSplit.nodeId : '';
+    if(!smartAudioSplit) return;
+    smartAudioSplit = null;
+    if(nodeId && nodes.some(item => item.id === nodeId)) render();
+}
+/* 前端也洗一遍模型结果：夹到 [0, 总时长] → 丢弃 < 0.5s → 升序 → 重叠合并 → 最多 12 段。
+   和后端 audio_split_clean_segments 同一套口径（后端是权威，这里防的是网络/缓存里的脏数据）。 */
+function smartAudioSplitNormalizeSegments(entries, duration, maxSegments){
+    const total = Math.max(0, Number(duration) || 0);
+    const limit = smartAudioSplitMaxSegments(maxSegments);
+    const minSpan = SMART_AUDIO_SPLIT_MIN_SEC;
+    const list = [];
+    (Array.isArray(entries) ? entries : []).forEach(entry => {
+        const start = Number(entry ? entry.start : NaN);
+        const end = Number(entry ? entry.end : NaN);
+        if(!Number.isFinite(start) || !Number.isFinite(end)) return;
+        const low = Math.min(start, end);
+        const high = Math.max(start, end);
+        const from = Math.min(total, Math.max(0, low));
+        const to = Math.min(total, Math.max(0, high));
+        if(to - from < minSpan - 1e-9) return;
+        list.push([from, to]);
+    });
+    list.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+    const merged = [];
+    list.forEach(item => {
+        const last = merged[merged.length - 1];
+        if(last && item[0] < last[1] - 1e-9) last[1] = Math.max(last[1], item[1]);
+        else merged.push([item[0], item[1]]);
+    });
+    return merged
+        .filter(item => item[1] - item[0] >= minSpan - 1e-9)
+        .slice(0, limit)
+        .map(item => ({start:Math.round(item[0] * 1000) / 1000, end:Math.round(item[1] * 1000) / 1000}));
+}
+/* 20ms 窗口 RMS（多声道取平均能量）：本地静音切分的输入 */
+function smartAudioSplitRmsWindows(channels, sampleRate){
+    const list = (Array.isArray(channels) ? channels : []).filter(channel => channel && Number(channel.length) > 0);
+    const rate = Math.max(1, Math.round(Number(sampleRate) || 44100));
+    const size = Math.max(1, Math.round(rate * SMART_AUDIO_SPLIT_RMS_WINDOW_SEC));
+    let total = 0;
+    list.forEach(channel => { total = Math.max(total, Number(channel.length) || 0); });
+    const count = Math.max(1, Math.ceil(total / size));
+    const rms = new Array(count).fill(0);
+    for(let index = 0; index < count; index += 1){
+        const from = index * size;
+        const to = Math.min(total, from + size);
+        let energy = 0;
+        let samples = 0;
+        list.forEach(channel => {
+            const length = Math.min(to, Number(channel.length) || 0);
+            for(let i = from; i < length; i += 1){
+                const value = Number(channel[i]) || 0;
+                energy += value * value;
+                samples += 1;
+            }
+        });
+        rms[index] = samples > 0 ? Math.sqrt(energy / samples) : 0;
+    }
+    return {rms, windowSec:size / rate};
+}
+/* 兜底等分：每段不短于 0.5s，最多 maxSegments 段 */
+function smartAudioSplitEvenSegments(duration, maxSegments){
+    const total = Math.max(0, Number(duration) || 0);
+    const limit = smartAudioSplitMaxSegments(maxSegments);
+    if(!(total > 0)) return [];
+    const count = Math.max(1, Math.min(limit, Math.floor(total / SMART_AUDIO_SPLIT_MIN_SEC + 1e-6)));
+    const step = total / count;
+    const segments = [];
+    for(let index = 0; index < count; index += 1){
+        segments.push({start:index * step, end:index === count - 1 ? total : (index + 1) * step});
+    }
+    return smartAudioSplitNormalizeSegments(segments, total, limit);
+}
+/* 本地静音切分（模型不可用时的兜底）：连续静音 >= 350ms 的位置取中点当切点；
+   静音段太多就优先选最长的几段，找不到可用切点就等分。 */
+function smartAudioSplitLocalSegments(channels, sampleRate, duration, maxSegments){
+    const total = Math.max(0, Number(duration) || 0);
+    const limit = smartAudioSplitMaxSegments(maxSegments);
+    if(!(total > 0)) return [];
+    const spans = smartAudioSplitRmsWindows(channels, sampleRate);
+    const rms = spans.rms || [];
+    const windowSec = Number(spans.windowSec) || SMART_AUDIO_SPLIT_RMS_WINDOW_SEC;
+    const peak = rms.reduce((max, value) => (value > max ? value : max), 0);
+    const threshold = Math.max(0.004, peak * SMART_AUDIO_SPLIT_SILENCE_RATIO);
+    const minWindows = Math.max(1, Math.round(SMART_AUDIO_SPLIT_SILENCE_MIN_SEC / windowSec));
+    const runs = [];
+    let runStart = -1;
+    for(let index = 0; index <= rms.length; index += 1){
+        const silent = index < rms.length && rms[index] <= threshold;
+        if(silent){
+            if(runStart < 0) runStart = index;
+            continue;
+        }
+        if(runStart >= 0){
+            const length = index - runStart;
+            if(length >= minWindows) runs.push({start:runStart, end:index, length});
+            runStart = -1;
+        }
+    }
+    runs.sort((a, b) => (b.length - a.length) || (a.start - b.start));
+    const cuts = runs
+        .slice(0, Math.max(1, limit - 1))
+        .map(run => ((run.start + run.end) / 2) * windowSec)
+        .filter(cut => cut > SMART_AUDIO_SPLIT_MIN_SEC && cut < total - SMART_AUDIO_SPLIT_MIN_SEC)
+        .sort((a, b) => a - b);
+    if(!cuts.length) return smartAudioSplitEvenSegments(total, limit);
+    const bounds = [0].concat(cuts, [total]);
+    const segments = [];
+    for(let index = 0; index < bounds.length - 1; index += 1){
+        segments.push({start:bounds[index], end:bounds[index + 1]});
+    }
+    const merged = [];
+    segments.forEach(segment => {
+        const last = merged[merged.length - 1];
+        if(last && segment.end - segment.start < SMART_AUDIO_SPLIT_MIN_SEC - 1e-9) last.end = segment.end;
+        else merged.push({start:segment.start, end:segment.end});
+    });
+    if(merged.length > 1 && merged[0].end - merged[0].start < SMART_AUDIO_SPLIT_MIN_SEC - 1e-9){
+        merged[1].start = merged[0].start;
+        merged.shift();
+    }
+    if(merged.length <= 1) return smartAudioSplitEvenSegments(total, limit);
+    return smartAudioSplitNormalizeSegments(merged, total, limit);
+}
+/* 波形上的分段预览：每段一块半透明高亮 + 段序号，块与块之间的空隙留在压暗层上 */
+function smartAudioSplitOverlayHtml(node){
+    const state = smartAudioSplitFor(node);
+    if(!state || state.status !== 'preview' || !(state.segments || []).length) return '';
+    const duration = Number(state.duration) || 0;
+    const blocks = state.segments.map((segment, index) => {
+        const left = smartAudioTrimPercent(segment.start, duration);
+        const width = Math.max(0.4, smartAudioTrimPercent(segment.end, duration) - left);
+        return '<span class="audio-split-segment" data-audio-split-segment="' + (index + 1) + '" style="left:'
+            + left.toFixed(2) + '%;width:' + width.toFixed(2) + '%">'
+            + '<em class="audio-split-index">' + (index + 1) + '</em></span>';
+    }).join('');
+    return '<div class="audio-split" data-audio-split="1">' + blocks + '</div>';
+}
+function smartAudioSplitSummaryLabel(state){
+    const segments = (state && state.segments) || [];
+    const seconds = segments.reduce((sum, segment) => sum + Math.max(0, segment.end - segment.start), 0);
+    return trd('smart.audioSplitSummary', '识别到 {n} 段 · 共 {s} 秒')
+        .replace('{n}', String(segments.length))
+        .replace('{s}', seconds.toFixed(1));
+}
+function smartAudioSplitSourceLabel(state){
+    return state && state.source === 'local'
+        ? trd('smart.audioSplitLocalBadge', '本地切分（模型不可用）')
+        : trd('smart.audioSplitLlmBadge', '模型切分');
+}
+function smartAudioSplitTitle(state){
+    return state && state.mode === 'custom'
+        ? trd('smart.audioSplitCustom', '自定义切分')
+        : trd('smart.audioSplitSmart', '智能切分');
+}
+function smartAudioSplitBusyHtml(){
+    return '<div class="aep-split-status is-busy"><i data-lucide="loader-circle"></i><span>'
+        + escapeHtml(trd('smart.audioSplitBusy', '正在理解语义并计算切点…')) + '</span></div>';
+}
+function smartAudioSplitFormHtml(){
+    return '<div class="aep aep-split" data-audio-edit="split">'
+        + '<div class="aep-bar">' + smartAudioCloseButtonHtml()
+        + '<span class="aep-title">' + escapeHtml(trd('smart.audioSplitCustom', '自定义切分')) + '</span>'
+        + '</div>'
+        + '<textarea class="aep-split-input" data-aep-split-input rows="3" placeholder="'
+        + escapeAttr(trd('smart.audioSplitPlaceholder', '请输入所需要截取的内容，例如"截取0-2秒"、"删除10-15秒"、"在第5秒和第12秒处切开"、"分别截取0-3秒和8-12秒"')) + '"></textarea>'
+        + '<div class="aep-foot">'
+        + '<button type="button" class="stp-btn" data-aep-split-cancel>' + escapeHtml(trd('smart.audioSplitCancel', '取消')) + '</button>'
+        + '<span class="stp-spacer"></span>'
+        + '<button type="button" class="stp-btn is-primary aep-run" data-aep-split-run>' + smartAudioRunContent(trd('smart.audioSplitConfirm', '确认切分'), 'split') + '</button>'
+        + '</div></div>';
+}
+function smartAudioSplitPreviewHtml(){
+    const state = smartAudioSplit || {};
+    const busy = Boolean(state.busy);
+    const segments = state.segments || [];
+    const chips = segments.map((segment, index) => '<span class="aep-split-chip"><b>' + (index + 1) + '</b>'
+        + Number(segment.start).toFixed(1) + '–' + Number(segment.end).toFixed(1) + 's</span>').join('');
+    const applyLabel = busy
+        ? trd('smart.audioEditBusy', '处理中…')
+        : trd('smart.audioSplitGenerate', '生成 {n} 段').replace('{n}', String(segments.length));
+    return '<div class="aep aep-split" data-audio-edit="split">'
+        + '<div class="aep-bar">' + smartAudioCloseButtonHtml()
+        + '<span class="aep-title">' + escapeHtml(smartAudioSplitTitle(state)) + '</span>'
+        + '<span class="aep-range" data-aep-split-summary>' + escapeHtml(smartAudioSplitSummaryLabel(state)) + '</span>'
+        + '</div>'
+        + '<div class="aep-split-meta">'
+        + '<span class="aep-split-badge' + (state.source === 'local' ? ' is-local' : '') + '">' + escapeHtml(smartAudioSplitSourceLabel(state)) + '</span>'
+        + (state.note ? '<span class="aep-split-note" title="' + escapeAttr(state.note) + '">' + escapeHtml(state.note) + '</span>' : '')
+        + '</div>'
+        + '<div class="aep-split-segments">' + chips + '</div>'
+        + '<div class="aep-foot">'
+        + '<button type="button" class="stp-btn" data-aep-split-retry' + (busy ? ' disabled' : '') + '>' + smartAudioRunContent(trd('smart.audioSplitRetry', '重新解析'), 'refresh-cw') + '</button>'
+        + '<span class="stp-spacer"></span>'
+        + '<button type="button" class="stp-btn" data-aep-split-cancel' + (busy ? ' disabled' : '') + '>' + escapeHtml(trd('smart.audioSplitCancel', '取消')) + '</button>'
+        + '<button type="button" class="stp-btn is-primary aep-run' + (busy ? ' is-busy' : '') + '" data-aep-split-apply' + (busy ? ' disabled' : '') + '>' + smartAudioRunContent(applyLabel, busy ? 'loader-circle' : 'split') + '</button>'
+        + '</div></div>';
+}
+function smartAudioSplitPanelHtml(){
+    const state = smartAudioSplit;
+    if(!state) return '';
+    if(state.status === 'form') return smartAudioSplitFormHtml();
+    if(state.status === 'preview') return smartAudioSplitPreviewHtml();
+    const retry = '<button type="button" class="stp-btn" data-aep-split-retry>' + smartAudioRunContent(trd('smart.audioSplitRetry', '重新解析'), 'refresh-cw') + '</button>';
+    const cancel = '<button type="button" class="stp-btn" data-aep-split-cancel>' + escapeHtml(trd('smart.audioSplitCancel', '取消')) + '</button>';
+    return '<div class="aep aep-split" data-audio-edit="split">'
+        + '<div class="aep-bar">' + smartAudioCloseButtonHtml()
+        + '<span class="aep-title">' + escapeHtml(smartAudioSplitTitle(state)) + '</span>'
+        + '</div>'
+        + (state.status === 'error'
+            ? '<div class="aep-split-status is-error"><span>' + escapeHtml(state.error || trd('smart.audioSplitFail', '切分失败')) + '</span></div>'
+                + '<div class="aep-foot">' + retry + '<span class="stp-spacer"></span>' + cancel + '</div>'
+            : smartAudioSplitBusyHtml())
+        + '</div>';
+}
+function smartAudioSplitRenderPanel(){
+    const panel = smartToolPanelEl;
+    if(!panel || panel.dataset.smartToolPanel !== 'audio-split') return;
+    panel.innerHTML = smartAudioSplitPanelHtml();
+    bindSmartAudioSplitPanel(panel, smartAudioSplit ? smartAudioSplit.nodeId : '');
+    refreshIcons();
+}
+/* provider 默认交给后端按它自己的优先级选（apimart + 第一个 chat model），不要用界面当前的
+   chat 平台抢着指定：真机回归里前端写死了 volcengine，把后端的 apimart 策略整个绕过了。
+   只有节点上明确存过 LLM 平台/模型（用户偏好）时才把它带上。 */
+function smartAudioSplitPreferredProvider(node){
+    const providerId = String(node?.llmProvider || '').trim();
+    const model = String(node?.llmModel || '').trim();
+    if(!providerId && !model) return {providerId:'', model:''};
+    return {providerId:providerId, model:model};
+}
+/* 模型请求：后端负责 provider/model 兜底与结果清洗；这里只带「真实解码时长 + 指令」 */
+async function smartAudioSplitAskModel(node, mode, text, duration){
+    const preferred = smartAudioSplitPreferredProvider(node);
+    const providerId = preferred.providerId;
+    const model = preferred.model;
+    const response = await fetch('/api/canvas-audio-split', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            provider_id:providerId,
+            model:model,
+            text:String(text == null ? '' : text),
+            duration_sec:duration,
+            max_segments:SMART_AUDIO_SPLIT_MAX_SEGMENTS,
+            mode:smartAudioSplitMode(mode)
+        })
+    });
+    if(!response.ok){
+        let detail = '';
+        try {
+            const data = await response.json();
+            detail = String(data && data.detail ? data.detail : '');
+        } catch(_) {}
+        throw new Error(detail || trd('smart.audioSplitRequestFail', '切分请求失败（HTTP {code}）').replace('{code}', String(response.status)));
+    }
+    const data = await response.json();
+    const segments = smartAudioSplitNormalizeSegments(data ? data.segments : [], duration, SMART_AUDIO_SPLIT_MAX_SEGMENTS);
+    if(!segments.length) throw new Error(trd('smart.audioSplitEmpty', '模型没有给出可用的时间段'));
+    return {segments, note:String(data && data.note ? data.note : ''), source:'llm'};
+}
+/* 解析入口：解码真实时长 → 问模型 → 失败自动退本地静音切分 → 进预览态 */
+async function smartAudioSplitRequest(node, options){
+    const state = smartAudioSplitFor(node);
+    if(!node || !state || state.busy) return null;
+    const mode = smartAudioSplitMode(options && options.mode != null ? options.mode : state.mode);
+    const text = String(options && options.text != null ? options.text : (state.text || '')).trim();
+    state.mode = mode;
+    state.text = text;
+    state.busy = true;
+    state.status = 'busy';
+    state.segments = [];
+    state.note = '';
+    state.source = '';
+    state.error = '';
+    smartAudioSplitRenderPanel();
+    try {
+        const decoded = await smartAudioDecodeItem(smartAudioActiveItem(node));
+        const duration = Number(decoded && decoded.duration) || 0;
+        if(!(duration > 0)) throw new Error(trd('smart.audioDecodeFail', '音频解码失败（格式可能不支持）'));
+        if(duration < SMART_AUDIO_SPLIT_MIN_TOTAL_SEC){
+            toast(trd('smart.audioSplitTooShort', '音频太短（不足 1 秒），不支持切分'));
+            closeSmartToolPanel();
+            return null;
+        }
+        state.duration = duration;
+        state.sampleRate = Math.max(1, Math.round(Number(decoded.sampleRate) || 44100));
+        state.channels = smartAudioChannelsOf(decoded);
+        const result = await smartAudioSplitAskModel(node, mode, text, duration);
+        state.busy = false;
+        state.status = 'preview';
+        state.segments = result.segments;
+        state.note = result.note;
+        state.source = result.source;
+        render();
+        smartAudioSplitRenderPanel();
+        return result;
+    } catch(error) {
+        const message = String(error && error.message ? error.message : (error || trd('smart.audioSplitFail', '切分失败')));
+        const localSegments = Number(state.duration) > 0
+            ? smartAudioSplitLocalSegments(state.channels, state.sampleRate, state.duration, SMART_AUDIO_SPLIT_MAX_SEGMENTS)
+            : [];
+        state.busy = false;
+        if(localSegments.length){
+            state.status = 'preview';
+            state.segments = localSegments;
+            state.note = message;
+            state.source = 'local';
+            render();
+            smartAudioSplitRenderPanel();
+            toast(trd('smart.audioSplitFallback', '模型不可用，已按本地静音检测切分'));
+            return {segments:localSegments, note:message, source:'local', error:message};
+        }
+        state.status = 'error';
+        state.segments = [];
+        state.error = message;
+        smartAudioSplitRenderPanel();
+        toast(message.slice(0, 160));
+        return null;
+    }
+}
+/* 每段的位置：原节点右侧起横向排开（3 列），遇到已有节点就往下错开 */
+function smartAudioSplitSpot(sourceNode, index, media){
+    const rect = nodeRect(sourceNode);
+    const layout = imageLayout([media], 1, {type:'smart-audio', images:[media]});
+    const width = Math.max(120, Math.round(Number(layout.width) || SMART_AUDIO_PLAYER_WIDTH));
+    const height = Math.max(80, Math.round(Number(layout.height) || SMART_AUDIO_PLAYER_HEIGHT));
+    const gap = 28;
+    const columns = 3;
+    const left = rect.x + rect.width + 120;
+    let x = left + (index % columns) * (width + gap);
+    let y = rect.y + Math.floor(index / columns) * (height + gap);
+    const taken = (px, py) => nodes.some(item => {
+        const box = nodeRect(item);
+        return px < box.x + box.width + 16 && px + width + 16 > box.x && py < box.y + box.height + 16 && py + height + 16 > box.y;
+    });
+    for(let attempt = 0; attempt < 24 && taken(x, y); attempt += 1) y += height + gap;
+    return {x:x + width / 2, y:y + height / 2};
+}
+/* 分组：框住全部新节点 → 逐个入组（节点带 history 连线，会保留真实 ID 而不是被吸收成缩略图） */
+function smartAudioSplitGroup(node, created, mode){
+    if(!created.length) return null;
+    const rects = created.map(nodeRect);
+    const minX = Math.min.apply(null, rects.map(rect => rect.x));
+    const minY = Math.min.apply(null, rects.map(rect => rect.y));
+    const maxX = Math.max.apply(null, rects.map(rect => rect.x + rect.width));
+    const maxY = Math.max.apply(null, rects.map(rect => rect.y + rect.height));
+    const group = createSmartGroupNode(Math.round(minX - 18), Math.round(minY - 44), {select:false, skipUndo:true});
+    group.w = Math.max(340, Math.round(maxX - minX + 36));
+    group.h = Math.max(220, Math.round(maxY - minY + 72));
+    group.title = mode === 'custom' ? trd('smart.audioSplitCustom', '自定义切分') : trd('smart.audioSplitSmart', '智能切分');
+    const connections = (canvas && canvas.connections) || [];
+    created.forEach(child => {
+        /* 纯媒体成员若没有连线/输入/生成态，addNodeToSmartGroup 会把它吸收成分组缩略图并删掉节点。
+           切分出来的节点都带 history 连线，先确认它会被当作真实成员再入组，保证 N 个节点独立可播。 */
+        const keepsRealNode = connections.some(entry => entry.from === child.id || entry.to === child.id)
+            || (Array.isArray(child.inputNodeIds) && child.inputNodeIds.length > 0)
+            || Boolean(child.pending || child.queued || child.sourceNodeId);
+        if(keepsRealNode) addNodeToSmartGroup(group, child);
+    });
+    arrangeSmartGroupMembers(group, {skipUndo:true});
+    return group;
+}
+/* 落盘：每段 slice → 16bit WAV → 上传 → 建 smart-audio 节点 + history 连线；整批只 pushUndo 一次 */
+async function smartAudioSplitCreateNodes(node, segments, mode){
+    const state = smartAudioSplitFor(node);
+    const item = smartAudioActiveItem(node);
+    const baseName = smartAudioDerivedBaseName(item, node);
+    const channels = (state && state.channels) || [];
+    const sampleRate = Math.max(1, Math.round(Number(state && state.sampleRate) || 44100));
+    pushUndo();
+    const created = [];
+    let failed = null;
+    for(let index = 0; index < segments.length; index += 1){
+        const segment = segments[index];
+        try {
+            const sliced = smartAudioSliceChannels(channels, sampleRate, segment.start, segment.end);
+            const wav = smartAudioWavBytes(sliced, sampleRate);
+            if(!(wav.byteLength > 44)) throw new Error(trd('smart.audioEditFailed', '音频处理失败'));
+            if(wav.byteLength > SMART_AUDIO_EDIT_MAX_BYTES) throw new Error(trd('smart.audioTooLarge', '音频超过 50MB，无法处理'));
+            const title = baseName + '_' + (index + 1);
+            const file = new File([wav], title + '.wav', {type:'audio/wav'});
+            const uploaded = await uploadFiles([file]);
+            const first = uploaded && uploaded[0];
+            if(!first || !first.url) throw new Error(trd('smart.audioUploadFail', '处理结果上传失败'));
+            const media = {
+                url:first.url,
+                name:first.name || (title + '.wav'),
+                kind:'audio',
+                mime:first.mime || 'audio/wav',
+                durationSec:Math.max(0.01, Math.round((segment.end - segment.start) * 100) / 100)
+            };
+            const spot = smartAudioSplitSpot(node, created.length, media);
+            const child = createImageNodeAt(spot, [media], {select:false, skipUndo:true, type:'smart-audio', title});
+            child.title = smartAudioDisplayTitle(title) || child.title;
+            child.outputKind = 'audio';
+            child.derivedFrom = node.id;
+            child.audioSplit = {
+                mode:mode,
+                index:index + 1,
+                start:segment.start,
+                end:segment.end,
+                sourceNodeId:node.id,
+                sourceUrl:item ? (item.url || '') : '',
+                sourceName:item ? (item.name || '') : ''
+            };
+            addConnection(node.id, child.id, 'history');
+            created.push(child);
+        } catch(error) {
+            failed = error;
+            break;
+        }
+    }
+    if(!created.length) throw failed || new Error(trd('smart.audioSplitFail', '切分失败'));
+    const group = smartAudioSplitGroup(node, created, mode);
+    selectedId = created[0].id;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    render();
+    scheduleSave();
+    const rect = nodeRect(created[0]);
+    centerViewportOnWorldPoint({x:rect.x + rect.width / 2, y:rect.y + rect.height / 2});
+    toast(trd('smart.audioSplitDone', '已生成 {n} 段音频').replace('{n}', String(created.length)));
+    return {group:group, created:created, failed:failed};
+}
+async function smartAudioSplitApply(node){
+    const state = smartAudioSplitFor(node);
+    if(!node || !state || state.busy || state.status !== 'preview' || !(state.segments || []).length) return null;
+    if(node.__audioSplitApplyBusy) return null;
+    node.__audioSplitApplyBusy = true;
+    state.busy = true;
+    smartAudioSplitRenderPanel();
+    try {
+        if(!Array.isArray(state.channels) || !state.channels.length || !(Number(state.sampleRate) > 0) || !(Number(state.duration) > 0)){
+            const decoded = await smartAudioDecodeItem(smartAudioActiveItem(node));
+            state.sampleRate = Math.max(1, Math.round(Number(decoded && decoded.sampleRate) || 44100));
+            state.duration = Number(decoded && decoded.duration) || 0;
+            state.channels = smartAudioChannelsOf(decoded);
+        }
+        const result = await smartAudioSplitCreateNodes(node, state.segments.slice(), state.mode);
+        smartAudioEditToken += 1;
+        closeSmartToolPanel();
+        smartAudioSplit = null;
+        render();
+        if(result && result.failed) toast(String(result.failed.message || result.failed).slice(0, 160));
+        return result;
+    } catch(error) {
+        state.busy = false;
+        smartAudioSplitRenderPanel();
+        toast(String(error && error.message ? error.message : (error || trd('smart.audioSplitFail', '切分失败'))).slice(0, 160));
+        return null;
+    } finally {
+        delete node.__audioSplitApplyBusy;
+    }
+}
+function bindSmartAudioSplitPanel(panel, nodeId){
+    if(!panel) return;
+    const node = nodes.find(item => item.id === nodeId);
+    const state = smartAudioSplitFor(node);
+    panel.querySelector('[data-aep-close]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        closeSmartToolPanel();
+    });
+    panel.querySelectorAll('[data-aep-split-cancel]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if(button.disabled) return;
+            closeSmartToolPanel();
+        });
+    });
+    const input = panel.querySelector('[data-aep-split-input]');
+    const run = panel.querySelector('[data-aep-split-run]');
+    const submit = async () => {
+        if(!node || panel.dataset.splitSubmitting === '1') return;
+        const text = String(input ? input.value : '').trim();
+        if(!text){
+            toast(trd('smart.audioSplitNeedText', '请先输入要怎么切分'));
+            return;
+        }
+        panel.dataset.splitSubmitting = '1';
+        if(run){
+            run.disabled = true;
+            run.classList.add('is-busy');
+            run.innerHTML = smartAudioRunContent(trd('smart.audioEditBusy', '处理中…'), 'loader-circle');
+            refreshIcons();
+        }
+        try {
+            await smartAudioSplitRequest(node, {mode:'custom', text:text});
+        } finally {
+            delete panel.dataset.splitSubmitting;
+            if(run && run.isConnected){
+                run.disabled = false;
+                run.classList.remove('is-busy');
+                run.innerHTML = smartAudioRunContent(trd('smart.audioSplitConfirm', '确认切分'), 'split');
+                refreshIcons();
+            }
+        }
+    };
+    if(input){
+        input.addEventListener('mousedown', event => event.stopPropagation());
+        input.addEventListener('keydown', event => {
+            event.stopPropagation();
+            if(event.key === 'Escape'){
+                event.preventDefault();
+                closeSmartToolPanel();
+                return;
+            }
+            if(event.key === 'Enter' && (event.metaKey || event.ctrlKey)){
+                event.preventDefault();
+                submit();
+            }
+        });
+        try { input.focus(); } catch(_) {}
+    }
+    run?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        submit();
+    });
+    panel.querySelectorAll('[data-aep-split-retry]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if(button.disabled || !node) return;
+            const current = smartAudioSplitFor(node) || state || {};
+            smartAudioSplitRequest(node, {mode:current.mode || 'smart', text:current.text || ''});
+        });
+    });
+    panel.querySelectorAll('[data-aep-split-apply]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if(button.disabled || !node) return;
+            smartAudioSplitApply(node);
+        });
+    });
+}
+function openSmartAudioSplitPanel(node, mode){
+    if(!node) return null;
+    if(!smartAudioActiveItem(node)?.url){
+        toast(trd('smart.audioNoAudio', '这个节点没有可用的音频'));
+        return null;
+    }
+    const nextMode = smartAudioSplitMode(mode);
+    if(smartAudioEditPanelOpen('audio-split', node.id) && smartAudioSplit && smartAudioSplit.mode === nextMode){
+        closeSmartToolPanel();
+        return null;
+    }
+    smartAudioEditToken += 1;
+    const token = smartAudioEditToken;
+    const hadTrim = Boolean(smartAudioTrim);
+    const hadSpeed = Boolean(smartAudioSpeed);
+    smartAudioTrim = null;
+    smartAudioSpeed = null;
+    smartAudioPause(node);
+    smartAudioSplit = {
+        nodeId:node.id,
+        mode:nextMode,
+        status:nextMode === 'smart' ? 'busy' : 'form',
+        busy:false,
+        text:'',
+        segments:[],
+        duration:0,
+        sampleRate:0,
+        channels:null,
+        note:'',
+        source:'',
+        error:''
+    };
+    if(hadTrim || hadSpeed) render();
+    const panel = openSmartToolPanel({
+        id:'audio-split',
+        key:nextMode === 'smart' ? 'split-smart' : 'split-custom',
+        anchor:nextMode === 'smart' ? 'split-smart' : 'split-custom',
+        nodeId:node.id,
+        icon:nextMode === 'smart' ? 'wand-sparkles' : 'split',
+        title:smartAudioSplitTitle(smartAudioSplit),
+        head:false,
+        className:'audio-edit-panel audio-split-panel',
+        placement:'below-node',
+        persist:true,
+        body:smartAudioSplitPanelHtml(),
+        onClose:() => { if(token === smartAudioEditToken) smartAudioSplitReset(); },
+        mount:panelEl => bindSmartAudioSplitPanel(panelEl, node.id)
+    });
+    if(!panel){
+        smartAudioSplitReset();
+        return null;
+    }
+    if(nextMode === 'smart') smartAudioSplitRequest(node, {mode:'smart', text:''});
+    return panel;
+}
+
 function nodeBodyHtml(node, layout){
     // 多维表格：表格模块返回的是 DOM 元素（不是 HTML 串），这里留个壳，挂载后再塞进去
     if(node.type === 'table') return '<div class="table-node-host" data-table-host="1"></div>';
@@ -14209,7 +16543,10 @@ function nodeBodyHtml(node, layout){
     if(node.type === 'smart-loop') return smartLoopBodyHtml(node);
     if(node.type === 'smart-text') return smartTextBodyHtml(node);
     if(node.type === 'smart-label') return smartLabelBodyHtml(node);
+    /* 音频节点：有音频素材就是播放器卡片（混进非音频素材时不抢，交给下面共用的媒体卡片）；
+       没有素材时和图片/视频一样走文件末尾那张共用空卡（不另起一套样式）。 */
     const imgs = (node.images || []).map(imageForDisplay);
+    if(isSmartAudioNode(node) && imgs.length && imgs.every(isAudioMediaItem)) return smartAudioPlayerHtml(node, imgs);
     if(node.jimengPending && node.jimengPending.submitId && imgs.length === 0){
         return jimengPendingBodyHtml(node, layout);
     }
@@ -14242,8 +16579,13 @@ function nodeBodyHtml(node, layout){
        只渲染图片的话，第一张一落地进度框就被顶掉（用户报的「另外还没生成的看不到进度」）。 */
     if(imgs.length > 1 || (imgs.length && (pendingSlots || failedSlots))) return thumbGridHtml(node, imgs, layout, pendingSlots, failedSlots);
     if(imgs[0]) return `${genStageOutHtml(node)}<div class="image-wrap has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === 0 ? 'image-selected' : ''}" data-image-index="0" data-media-signature="${escapeAttr(`${mediaKindForItem(imgs[0])}:${imgs[0]?.url || ''}`)}" style="--node-img-w:${layout.width}px;--node-img-h:${layout.height}px">${singleMediaHtml(imgs[0], layout.width, layout.height)}${imageNameBadgeHtml(imgs[0], {outside:true})}${imageResolutionBadgeHtml(imgs[0])}<button class="mini-x image-delete" type="button" data-image-index="0" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`;
+    /* 空媒体节点（图片 / 视频 / 音频）共用这一张空卡：居中线性图标 + 同一句上传提示。
+       只有图标按类型换：图片 image、视频 video、音频是内联音符 SVG（lucide 子集里没有 music）。
+       type 缺失的老节点仍按图片节点处理。 */
+    const emptyIcon = isSmartVideoNode(node) ? 'video' : 'image';
+    const emptyIconHtml = isSmartAudioNode(node) ? SMART_AUDIO_EMPTY_ICON_SVG : `<i data-lucide="${emptyIcon}"></i>`;
     return `<div class="node-drop" data-upload-action="files">
-        <span class="smart-empty-icon"><i data-lucide="upload-cloud"></i></span>
+        <span class="smart-empty-icon">${emptyIconHtml}</span>
         <span class="upload-node-sub">拖拽 / 粘贴 / 点击上传</span>
     </div>`;
 }
@@ -14305,6 +16647,8 @@ function smartNodeToolbarImageIndex(node){
         const index = Number(selectedImage.index);
         if(Number.isFinite(index) && index >= 0 && index < images.length) return index;
     }
+    /* 音频节点：工具条认当前播放的那一首（「下载」下的是正在听的那首） */
+    if(isSmartAudioNode(node)) return smartAudioActiveIndex(node);
     return 0;
 }
 /* lucide 图标集里没有 hd：内联用户提供的 iconfont HD 角标（1024 视窗、纯 fill，颜色走 currentColor）。
@@ -14530,6 +16874,17 @@ function smartNodeToolbarHtml(node){
     /* 入口顺序对齐参考画布：人像质感调节▾ · 全景 · 多角度 · 打光 · 九宫格▾ ｜ 裁剪▾ · 元素编辑 · 图层分离 · 宫格切分▾ ｜
        标注 · 旋转 · 下载 · 预览（+ 我们保留的调色；视频节点多一颗人脸模糊）。 */
     smartToolLazyMenuBuilders.clear();
+    /* 音频节点：图片编辑工具一个都用不上，只留本地音频编辑（截取 / 变速）+ 切分 + 下载 */
+    if(kind === 'audio'){
+        return `<div class="smart-node-floating-menu smart-image-toolbar smart-audio-toolbar" data-smart-image-menu="1">
+        ${plainButton('trim', 'scissors', trd('smart.audioTrim', '截取'), trd('smart.audioTrimTip', '截取这一段音频'), true)}
+        ${plainButton('speed', 'timer', trd('smart.audioSpeed', '变速'), trd('smart.audioSpeedTip', '调整播放速度（0.1x–4.0x）'), true)}
+        ${plainButton('split-smart', 'wand-sparkles', trd('smart.audioSplitSmart', '智能切分'), trd('smart.audioSplitSmartTip', '用模型按语义 / 对话停顿自动切分'), true)}
+        ${plainButton('split-custom', 'split', trd('smart.audioSplitCustom', '自定义切分'), trd('smart.audioSplitCustomTip', '用自然语言描述要保留 / 删除 / 切开的段落'), true)}
+        ${sep}
+        ${plainButton('download', 'download', trd('smart.audioDownload', '下载'), trd('smart.audioDownloadTip', '下载这段音频'), true)}
+    </div>`;
+    }
     /* 视频节点：图片编辑工具全是灰的，单独给一条视频工具条（预览截帧 / 尾帧接力 / 人脸模糊 / 下载） */
     if(kind === 'video'){
         return `<div class="smart-node-floating-menu smart-image-toolbar smart-video-toolbar" data-smart-image-menu="1">
@@ -15913,6 +18268,7 @@ let smartToolPanelMenu = null;
 let smartToolPanelButton = null;
 let smartToolPanelRaf = 0;
 let smartToolPanelOutsideBound = false;
+let smartToolPanelOnClose = null;
 function closeSmartToolPanel(){
     cancelAnimationFrame(smartToolPanelRaf);
     smartToolPanelRaf = 0;
@@ -15922,6 +18278,12 @@ function closeSmartToolPanel(){
     const menu = smartToolPanelMenu;
     smartToolPanelMenu = null;
     smartToolPanelButton = null;
+    const onClose = smartToolPanelOnClose;
+    smartToolPanelOnClose = null;
+    /* 面板自己的收尾（音频编辑要把波形选区态一起退掉）：先清完面板引用再回调，回调里可以安全 render */
+    if(typeof onClose === 'function'){
+        try { onClose(); } catch(error) { console.error('[smart-tool-panel]', error); }
+    }
     if(!menu) return;
     menu.__smartMenuHold = false;
     try {
@@ -15950,12 +18312,17 @@ function alignSmartToolPanel(panel, menu, button){
     const width = panel.offsetWidth;
     const height = panel.offsetHeight;
     const maxLeft = Math.max(8, window.innerWidth - 8 - width);
-    const left = Math.min(Math.max(buttonRect.left + buttonRect.width / 2 - width / 2, 8), maxLeft);
+    /* 音频编辑面板要压在节点下方：波形选区在节点上半部分，面板盖上去就看不见了 */
+    const nodeRect = panel.dataset.smartToolPlacement === 'below-node'
+        ? menu.closest('.image-node')?.getBoundingClientRect()
+        : null;
+    const centerX = nodeRect ? nodeRect.left + nodeRect.width / 2 : buttonRect.left + buttonRect.width / 2;
+    const left = Math.min(Math.max(centerX - width / 2, 8), maxLeft);
     const nextLeft = left.toFixed(2) + 'px';
     if(panel.style.marginLeft !== nextLeft) panel.style.marginLeft = nextLeft;
-    let top = menuRect.bottom + 8;
+    let top = (nodeRect ? nodeRect.bottom + 12 : menuRect.bottom + 8);
     if(top + height > window.innerHeight - 8){
-        const above = menuRect.top - 8 - height;
+        const above = (nodeRect ? nodeRect.top - 12 : menuRect.top - 8) - height;
         top = above >= 8 ? above : Math.max(8, window.innerHeight - 8 - height);
     }
     const nextTop = top.toFixed(2) + 'px';
@@ -16007,6 +18374,8 @@ function bindSmartToolPanelOutside(){
     document.addEventListener('mousedown', event => {
         if(!smartToolPanelEl) return;
         if(event.target.closest?.('[data-smart-tool-panel]')) return;
+        /* 音频编辑面板是常驻的：点波形选区要在节点里操作，不能被「点外面收起」吃掉 */
+        if(smartToolPanelEl.dataset.smartToolPersist === '1') return;
         /* 工具条上的 mousedown 在捕获阶段就被吃掉了、走不到这里：点条上的按钮由那个动作自己决定开关 */
         closeSmartToolPanel();
     });
@@ -16027,17 +18396,22 @@ function openSmartToolPanel(config){
     closeSmartToolPanel();
     if(toggling) return null;
     const panel = document.createElement('div');
-    panel.className = 'smart-popover smart-tool-panel';
+    panel.className = 'smart-popover smart-tool-panel' + (config.className ? ' ' + config.className : '');
     panel.dataset.smartToolPanel = config.id;
     panel.dataset.smartToolNode = config.nodeId;
     panel.dataset.smartToolAnchor = config.anchor || config.key || '';
-    panel.innerHTML = `<div class="stp-head"><i data-lucide="${escapeAttr(config.icon || 'sparkles')}"></i><span class="stp-title">${escapeHtml(config.title || '')}</span>${config.sub ? `<span class="stp-sub">${escapeHtml(config.sub)}</span>` : ''}</div>${config.body || ''}`;
+    if(config.placement) panel.dataset.smartToolPlacement = config.placement;
+    if(config.persist) panel.dataset.smartToolPersist = '1';
+    /* head:false 的面板自己排版标题行（音频编辑：× 关闭 | 截取 | 选区 | 生成 压成一行） */
+    const headHtml = config.head === false ? '' : `<div class="stp-head"><i data-lucide="${escapeAttr(config.icon || 'sparkles')}"></i><span class="stp-title">${escapeHtml(config.title || '')}</span>${config.sub ? `<span class="stp-sub">${escapeHtml(config.sub)}</span>` : ''}</div>`;
+    panel.innerHTML = headHtml + (config.body || '');
     panel.addEventListener('mousedown', event => event.stopPropagation());
     panel.addEventListener('click', event => event.stopPropagation());
     document.body.appendChild(panel);
     smartToolPanelEl = panel;
     smartToolPanelMenu = menu;
     smartToolPanelButton = button;
+    smartToolPanelOnClose = typeof config.onClose === 'function' ? config.onClose : null;
     menu.__smartMenuHold = true;
     syncComposerSuppressed();
     bindSmartToolPanelOutside();
@@ -18576,6 +20950,13 @@ function runSmartNodeToolbarAction(nodeId, action){
     selectedImage = {nodeId, index};
     /* 分组按钮的文案 = 刚选中的子工具：先切文案和图标，动作继续走各自原来的路径 */
     syncSmartToolbarPick(node, action);
+    /* 音频编辑面板是常驻的（允许在波形上拉选区），点其它动作时手动收起 */
+    const audioPanelActions = ['trim', 'speed', 'split-smart', 'split-custom'];
+    if(smartToolPanelEl?.dataset.smartToolPersist === '1' && !audioPanelActions.includes(action)) closeSmartToolPanel();
+    if(action === 'trim'){ openSmartAudioTrimPanel(node); return; }
+    if(action === 'speed'){ openSmartAudioSpeedPanel(node); return; }
+    if(action === 'split-smart'){ openSmartAudioSplitPanel(node, 'smart'); return; }
+    if(action === 'split-custom'){ openSmartAudioSplitPanel(node, 'custom'); return; }
     if(action === 'replace'){
         /* 悬浮入口挂在节点左上、不在工具条里：先确保节点是选中态（面板要靠工具条当锚点） */
         if(!smartToolToolbar(node.id)) render();
@@ -19628,7 +22009,8 @@ function restorePromptNodeChatUiState(state){
    编号由服务器分配，前端只显示；用户和画布助手都用它指代节点。 */
 function nodeAliasText(node){
     var a = String(node?.alias || '');
-    return /^(图|视频|提示词|文本|组)\d{1,4}$/.test(a) ? a : '';
+    /* 编号由服务器分配（图1 / 视频2 / …）；音频也按同一套显示，服务器发「音频N」就能直接露出来 */
+    return /^(图|视频|音频|提示词|文本|组)\d{1,4}$/.test(a) ? a : '';
 }
 function nodeAliasHtml(node){
     var a = nodeAliasText(node);
@@ -19670,7 +22052,7 @@ function render(){
         .map(node => {
         const imgs = node.images || [];
         // 分组名是用户输入，直接进 innerHTML 会变成注入点（node-head 平时 display:none，但 DOM 已经建出来了）。
-        const title = node.type === 'table' ? '多维表格' : node.type === 'smart-batch' ? '生成输入' : node.type === 'smart-group' ? escapeHtml(smartGroupDisplayTitle(node)) : node.type === 'smart-text' ? '文本' : node.type === 'smart-label' ? '标签' : node.type === 'smart-prompt' ? '文本生成' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.type === 'table' ? '多维表格' : node.type === 'smart-batch' ? '生成输入' : node.type === 'smart-group' ? escapeHtml(smartGroupDisplayTitle(node)) : node.type === 'smart-text' ? '文本' : node.type === 'smart-label' ? '标签' : node.type === 'smart-prompt' ? '文本生成' : node.type === 'smart-loop' ? 'Loop' : isSmartAudioNode(node) ? escapeHtml(node.title || tr('smart.kindAudio')) : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -19684,7 +22066,8 @@ function render(){
         const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending && !isJimengPending);
         const isEmpty = isImageNode && imgs.length === 0 && !node.pending && !isQueued && !isJimengPending;
         const isHistory = isHistoryGroupNode(node);
-        const isGroup = isImageNode && imgs.length > 1;
+        /* 音频节点的多首靠上一首/下一首切，不是图组：不能套 group-node 那套 16px 内边距 + 半透明白底 */
+        const isGroup = isImageNode && imgs.length > 1 && !isSmartAudioNode(node);
         const isPending = ((pendingSlotsForNode(node) > 0 || isQueued || isJimengPending) && imgs.length === 0);
         const body = nodeBodyHtml(node, layout);
         /* 单图生成中：卡片上方顶一行「图像生成 + 计时」，卡内那份计时同时让位 */
@@ -19757,6 +22140,7 @@ function render(){
     mountSmartBatchNodes();
     mountSmartLabelNodes();
     mountGenStage();
+    mountSmartAudioPlayers();
     applyFreshMediaReveal();
     restoreMediaPlaybackStates(mediaStates);
     bindNodeEvents();
@@ -24289,6 +26673,8 @@ function updateComposer(){
         return;
     }
     composer.classList.toggle('open', !!node);
+    /* 音频节点：编辑栏顶部那颗「引擎/平台」下拉是图片/视频那套，对音频没意义 → 整条 head 收起 */
+    composer.classList.toggle('audio-node-mode', isSmartAudioNode(node));
     /* 「文本生成」节点：控制台整块搬到编辑栏里（模板库/分隔符/LLM 药丸 + INPUT/OUTPUT/运行）。
        纯文本模式（没开 LLM）时编辑栏里只放文本框；开了 LLM 就整个控制台接管，生成类控件都收起来。 */
     if(isSmartPromptNode(node)){
@@ -27054,6 +29440,18 @@ function extractCurrentImagesToSource(node, meta=null){
     delete node.h;
     return source;
 }
+/* 后端把图片尺寸吸附到模型边界时会在结果里带一句 size_notice（中文）：原样 toast 出来，
+   不能静默改尺寸（用户要看得见「要的是 4K、实际给了 2K」）。同一句 8 秒内只提示一次，
+   并发多张的任务不会把提示刷满屏。 */
+let lastImageSizeNotice = {text:'', at:0};
+function toastImageSizeNotice(result){
+    const notice = typeof result?.size_notice === 'string' ? result.size_notice.trim() : '';
+    if(!notice) return;
+    const at = nowMs();
+    if(notice === lastImageSizeNotice.text && at - lastImageSizeNotice.at < 8000) return;
+    lastImageSizeNotice = {text:notice, at};
+    toast(notice.slice(0, 180), '!');
+}
 function finalizePendingNode(pendingNode, urls, meta, kind='image'){
     if(!pendingNode) return;
     pendingNode = liveSmartNode(pendingNode);
@@ -27067,8 +29465,8 @@ function finalizePendingNode(pendingNode, urls, meta, kind='image'){
     markSmartNodeComplete(pendingNode, meta);
     pendingNode.outputKind = kind;
     applySmartMediaTypeForKind(pendingNode, kind);
-    if(imgs.length > 1) pendingNode.title = kind === 'video' ? 'Videos' : kind === 'audio' ? 'Audios' : kind === 'text' ? 'Texts' : 'Group';
-    else pendingNode.title = kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : kind === 'text' ? 'Text' : kind === 'file' ? 'File' : 'Image';
+    if(imgs.length > 1) pendingNode.title = kind === 'video' ? 'Videos' : kind === 'audio' ? tr('smart.kindAudio') : kind === 'text' ? 'Texts' : 'Group';
+    else pendingNode.title = kind === 'video' ? 'Video' : kind === 'audio' ? tr('smart.kindAudio') : kind === 'text' ? 'Text' : kind === 'file' ? 'File' : 'Image';
     pendingNode.scale = mediaNodeDefaultScale(pendingNode);
     delete pendingNode.w;
     delete pendingNode.h;
@@ -27132,7 +29530,7 @@ function autoPlaceGeneratedNode(meta, urls){
     undoSuppressed = false;
     node.images = mediaUrls.map((url, i) => ({url, name:meta.title || `output-${i + 1}.${ext}`, kind, generatedResult:true}));
     applySmartMediaTypeForKind(node, kind);
-    node.title = meta.title || (kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : 'Image');
+    node.title = meta.title || (kind === 'video' ? 'Video' : kind === 'audio' ? tr('smart.kindAudio') : 'Image');
     delete node.w;
     delete node.h;
     node.scale = mediaNodeDefaultScale(node);
@@ -27864,6 +30262,7 @@ async function generateUrlsForCurrentSettings(node, prompt, refs, runSettings=se
         const taskIds = Array.isArray(taskResult?.taskIds) ? taskResult.taskIds : [];
         if(taskIds.length){
             const settled = await Promise.all(taskIds.map(taskId => pollSmartCanvasTask(taskId, node)));
+            settled.forEach(toastImageSizeNotice);
             const urls = settled.flatMap(result => resultMediaUrls(result?.image_items?.length ? result.image_items : (result?.images?.length ? result.images : result))).filter(Boolean);
             return {urls, kind:mediaKindForUrls(urls, 'image')};
         }
@@ -28441,6 +30840,186 @@ function runSmartCascadeFromLoop(loopId){
     selectedImage = {nodeId:'', index:-1};
     runSmartCascade(tail).catch(error => logSmartRunEntryFailure('循环一键运行', error));
 }
+/* ═══ 音频生成：POST /api/canvas-audio（音乐）/ /api/canvas-tts（语音）══════
+   一次只跑一个任务（音乐生成动辄几十秒到几分钟）。停止走画布现有的停止机制
+   （requestSmartGenerationStop 打标记），这里在等待期间轮询标记并 abort 掉请求。
+   成功：有音频素材的节点直接落位（有素材时新开一个下游音频节点，保留历史）；
+   上游给了 canvas_meta 就按既有自动落位逻辑平移视口 + 提示。 */
+function audioGenerationPayload(prompt, runSettings){
+    const family = audioModelFamily(runSettings.audioModel);
+    const payload = {
+        provider_id:runSettings.audioProvider || '',
+        model:runSettings.audioModel || '',
+        prompt,
+        custom:false,
+        instrumental:false,
+        title:'',
+        style:'',
+        duration:0,
+        bpm:0,
+        length:0,
+        audio_format:''
+    };
+    if(family === 'suno'){
+        payload.custom = Boolean(runSettings.audioCustom);
+        payload.instrumental = Boolean(runSettings.audioInstrumental);
+        payload.title = String(runSettings.audioTitle || '').trim();
+        payload.style = String(runSettings.audioStyle || '').trim();
+        payload.duration = audioDurationValue();
+        payload.audio_format = audioFormatValue();
+    } else {
+        payload.length = audioLengthValue();
+        payload.bpm = audioBpmValue();
+    }
+    return payload;
+}
+/* TTS 家族单独一套提交体：/api/canvas-tts 认 input / voice / response_format / speed */
+function audioTtsPayload(prompt){
+    return {
+        provider_id:String(settings.audioProvider || ''),
+        model:String(settings.audioModel || ''),
+        input:String(prompt || ''),
+        voice:audioTtsVoiceValue(),
+        response_format:audioTtsFormatValue(),
+        speed:audioTtsSpeedValue()
+    };
+}
+function audioResultItems(data){
+    const urls = resultMediaUrls({audios:(data && data.audios) || []});
+    return urls.map((item, index) => {
+        const url = typeof item === 'string' ? item : item?.url || '';
+        if(!url) return null;
+        const name = (typeof item === 'object' && item.name) || fileNameFromUrl(url) || `audio-${index + 1}.mp3`;
+        return copyMediaSizeFields(item, {url, name, kind:'audio', generatedResult:true});
+    }).filter(Boolean);
+}
+function placeAudioResult(node, audios, canvasMeta){
+    /* 上游没给名字（或只给了 Untitled / Audio 这种占位）时回落到项目里的中文种类名 */
+    const upstreamTitle = String(canvasMeta?.title || '').trim();
+    const title = upstreamTitle && !/^(untitled|audio)$/i.test(upstreamTitle) ? upstreamTitle : tr('smart.kindAudio');
+    const live = liveSmartNode(node);
+    const hasMedia = Boolean(live && (live.images || []).some(img => img?.url));
+    let target = live;
+    pushUndo();
+    if(hasMedia && live){
+        /* 节点里已经有音频：新结果放到右边单独一个节点，原来的留作历史（与视频「再来一条」同一心智） */
+        const point = freeSpotRightOf(live, audios[0]);
+        target = createImageNodeAt(point, audios, {select:true, skipUndo:true, type:'smart-audio', title});
+        addConnection(live.id, target.id, 'history');
+    } else if(live){
+        live.images = cleanHistoryImages([...(live.images || []), ...audios]);
+        live.title = title;
+        live.outputKind = 'audio';
+        applySmartMediaTypeForKind(live, 'audio');
+        markSmartNodeComplete(live, null);
+        delete live.w;
+        delete live.h;
+        live.scale = mediaNodeDefaultScale(live);
+    }
+    if(!target) return null;
+    selectedId = target.id;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    render();
+    scheduleSave();
+    if(canvasMeta && canvasMeta.auto_place === true){
+        afterVideoAutoPlace(target, audios, canvasMeta);
+    } else {
+        toast(trd('smart.audioGenerated', '已生成音频'));
+    }
+    return target;
+}
+async function runSmartAudioGeneration(node, prompt, refs){
+    if(!node || smartNodeInFlight(node)) return;
+    const runSettings = settings;
+    /* 平台可能刚被删掉 Key / 停用（参数记忆里还留着它）：发请求前按当前配置再校验一次，
+       否则界面显示「没有可用的音频模型」却还是把旧平台发出去了。 */
+    const provider = audioProviders().find(item => item.id === runSettings.audioProvider);
+    if(!provider || !runSettings.audioModel){
+        toast(trd('smart.audioNeedModel', '先选一个音频模型（设置 → API 里给平台配置音频模型）'));
+        return;
+    }
+    const family = audioModelFamily(runSettings.audioModel);
+    if(family === 'unsupported'){
+        toast(audioModelUnsupportedText());
+        return;
+    }
+    if(!prompt){
+        toast(trd('smart.audioNeedPrompt', '先写一句想生成什么'));
+        return;
+    }
+    const tts = family === 'tts';
+    if(tts && Array.from(String(prompt)).length > AUDIO_TTS_MAX_CHARS){
+        toast(trd('smart.audioTtsTooLong', '文本超过 {n} 字，请缩短后再生成').replace('{n}', String(AUDIO_TTS_MAX_CHARS)));
+        return;
+    }
+    const payload = tts ? audioTtsPayload(prompt) : audioGenerationPayload(prompt, runSettings);
+    const meta = snapshotRunMeta(prompt, node.id, promptPlainText() || prompt, refs);
+    const runLog = smartRunSnapshot(node, prompt, refs, 'audio');
+    const runLogStart = nowMs();
+    pushUndo();
+    node.running = true;
+    /* pending=1 与图片/视频节点一致：空卡片换成那条扫光玻璃，卡片上方出「音频生成 + 计时」 */
+    node.pending = 1;
+    node.runStartedAt = nowMs();
+    delete node.runFinishedAt;
+    delete node.runElapsedMs;
+    node.runTimerHidden = false;
+    node.outputKind = 'audio';
+    attachRunMeta(node, meta);
+    syncRunButtonState();
+    render();
+    scheduleSave();
+    /* 音乐生成要跑几十秒到几分钟：把节点记成「可停止」，点停止时中止这次请求 */
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const stopWatcher = setInterval(() => {
+        if(smartGenerationStopRequestedFor(node) && controller && !controller.signal.aborted) controller.abort();
+    }, 500);
+    try {
+        const response = await fetch(tts ? '/api/canvas-tts' : '/api/canvas-audio', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(payload),
+            signal:controller ? controller.signal : undefined
+        });
+        if(!response.ok) throw new Error(await smartResponseErrorMessage(response, tr('smart.errRunFailed')));
+        const data = await response.json().catch(() => ({}));
+        throwIfSmartGenerationStopped(node);
+        const audios = audioResultItems(data);
+        if(!audios.length) throw new Error(trd('smart.audioNoOutput', '接口没有返回音频'));
+        const canvasMeta = data && data.canvas_meta ? data.canvas_meta : {};
+        node.running = false;
+        const target = placeAudioResult(node, audios, canvasMeta);
+        addSmartGenerationLog({run:runLog, outputs:audios, runMs:nowMs() - runLogStart});
+        clearPromptInput({preserveDraft:true});
+        syncRunButtonState();
+        scheduleSave();
+        if(target && target.id !== node.id){
+            centerViewportOnWorldPoint({x:(target.x || 0) + 160, y:(target.y || 0) + 120});
+        }
+        return target;
+    } catch(error) {
+        const stopped = Boolean(error?.smartGenerationStopped) || error?.name === 'AbortError' || smartGenerationStopRequestedFor(node);
+        node.running = false;
+        node.pending = 0;
+        if(!(node.images || []).some(img => img?.url)){
+            delete node.w;
+            delete node.h;
+        }
+        if(stopped){
+            toast(trd('smart.audioStopped', '已停止生成'));
+        } else {
+            addSmartGenerationLog({run:runLog, outputs:[], runMs:nowMs() - runLogStart, error:error?.message || String(error)});
+            toast(String(error?.message || tr('smart.errRunFailed')).slice(0, 160));
+        }
+        syncRunButtonState();
+        render();
+        scheduleSave();
+        return null;
+    } finally {
+        clearInterval(stopWatcher);
+    }
+}
 async function runGeneration(){
     const node = selectedNode();
     /* 批量生成节点：编辑器里那颗「运行」= 跑整批（它自己没有 images，
@@ -28466,6 +31045,12 @@ async function runGeneration(){
     if(!prompt && smartRunNeedsPrompt(settings)){
         settings = previousSettings;
         toast(tr('smart.toastNeedPrompt'));
+        return;
+    }
+    /* 音频节点走自己的生成链路（/api/canvas-audio 或 /api/canvas-tts），不进图片任务/视频那两条分支 */
+    if(isSmartAudioNode(node)){
+        await runSmartAudioGeneration(node, prompt, refs);
+        settings = previousSettings;
         return;
     }
     const outpaintSize = node?.outpaintSize && Number(node.outpaintSize.width) > 0 && Number(node.outpaintSize.height) > 0
@@ -29427,6 +32012,7 @@ async function resumeSmartPendingNode(node, logContext={}){
         if(task.failed && task.recoverTaskId) return;
         try {
             const result = await pollSmartCanvasTask(task.taskId);
+            if((task.kind || 'image') === 'image') toastImageSizeNotice(result);
             finalizeSmartPendingTask(node, task.taskId, resultMediaUrls(result?.image_items?.length ? result.image_items : (result?.images?.length ? result.images : result)), task.kind || 'image');
             syncRunButtonState();
             render();
@@ -30118,6 +32704,8 @@ function createNodeFromMenu(type){
     else if(type === 'table') created = createSmartTableNode(p.x - 260, p.y - 60);
     else if(type === 'batch') created = createSmartBatchNode(p.x - 210, p.y - 60);
     else if(type === 'video') created = createImageNodeAt(p, [], {type:'smart-video'});
+    /* 标题沿用项目规则：中文种类名（图片/视频节点用的是「上传节点」，音频用「音频」），不再是英文 Audio */
+    else if(type === 'audio') created = createImageNodeAt(p, [], {type:'smart-audio', title:tr('smart.kindAudio')});
     else created = createImageNodeAt(p);
     if(!created) return created;
     if(type !== 'group'){
@@ -34691,6 +37279,8 @@ window.concatSelectedVideos = concatSelectedVideos;
 /* 只支持 API 类引擎（API 平台 / 火山）出的图片和视频：它们的请求完全由节点上记下的提示词、参考图、参数决定 */
 function smartRerunInfo(node){
     if(!node || !node.runSettings || !node.runAt) return null;
+    /* 音频节点不参与「再来一张/再来一条」：那条链路按 apiKind 走图片/视频任务，重跑会把音频当图片发出去 */
+    if(isSmartAudioNode(node) || node.runSettings.apiKind === 'audio') return null;
     const prompt = String(node.runModelPrompt || node.runPrompt || '').trim();
     const s = node.runSettings;
     if(!isApiLikeEngine(s.engine)) return null;

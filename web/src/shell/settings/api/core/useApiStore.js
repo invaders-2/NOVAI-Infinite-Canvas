@@ -276,6 +276,7 @@ export function createApiStore() {
             image_models: p.image_models || [],
             chat_models: p.chat_models || [],
             video_models: p.video_models || [],
+            audio_models: p.audio_models || [],
             model_names: (p.model_names && typeof p.model_names === 'object') ? p.model_names : {},
             model_protocols: (p.model_protocols && typeof p.model_protocols === 'object') ? p.model_protocols : {},
             // 能力覆盖：设置页的 SizeOverridesCard 里可视化编辑，保存时原样带回（字段与合并规则见 SIZE_OVERRIDES.md）
@@ -327,9 +328,10 @@ export function createApiStore() {
         p.image_models = unique(p.image_models || []);
         p.chat_models = unique(p.chat_models || []);
         p.video_models = unique(p.video_models || []);
+        p.audio_models = unique(p.audio_models || []);
         const src = (p.model_names && typeof p.model_names === 'object') ? p.model_names : {};
         const names = {};
-        [...p.image_models, ...p.chat_models, ...p.video_models].forEach(m => {
+        [...p.image_models, ...p.chat_models, ...p.video_models, ...p.audio_models].forEach(m => {
             const raw = String(m || '').trim();
             const label = String(src[raw] || modelDisplayName(raw, p, S.fetched.names) || '').trim();
             if (raw && label && label !== raw) names[raw] = label;
@@ -439,7 +441,7 @@ export function createApiStore() {
         syncEditor();
         let id = 'custom-api', i = 2;
         while (S.providers.some(p => p.id === id)) id = `custom-api-${i++}`;
-        S.providers.push({ id, name: 'API', base_url: '', protocol: 'openai', image_request_mode: 'openai', image_edit_route: 'general', image_generation_endpoint: '', image_edit_endpoint: '', enabled: true, primary: false, image_models: [], chat_models: [], video_models: [], has_key: false, key_preview: '' });
+        S.providers.push({ id, name: 'API', base_url: '', protocol: 'openai', image_request_mode: 'openai', image_edit_route: 'general', image_generation_endpoint: '', image_edit_endpoint: '', enabled: true, primary: false, image_models: [], chat_models: [], video_models: [], audio_models: [], has_key: false, key_preview: '' });
         resetFetched();
         S.selectedId = id;
         loadForm();
@@ -459,7 +461,7 @@ export function createApiStore() {
         syncEditor();
         let it = S.providers.find(p => p.id === preset.id) || S.providers.find(p => String(p.protocol || '').toLowerCase() === preset.protocol);
         if (!it) {
-            S.providers.push({ id: preset.id, name: preset.name, base_url: '', protocol: preset.protocol, image_request_mode: 'openai', image_edit_route: 'general', image_generation_endpoint: '', image_edit_endpoint: '', enabled: true, primary: false, image_models: [], chat_models: [], video_models: [], model_protocols: {}, has_key: false, key_preview: '' });
+            S.providers.push({ id: preset.id, name: preset.name, base_url: '', protocol: preset.protocol, image_request_mode: 'openai', image_edit_route: 'general', image_generation_endpoint: '', image_edit_endpoint: '', enabled: true, primary: false, image_models: [], chat_models: [], video_models: [], audio_models: [], model_protocols: {}, has_key: false, key_preview: '' });
             it = S.providers[S.providers.length - 1];
         }
         it.id = preset.id;
@@ -537,7 +539,7 @@ export function createApiStore() {
         // 重命名时迁移该模型的协议覆盖 / 展示名
         if (it.model_protocols && typeof it.model_protocols === 'object' && Object.prototype.hasOwnProperty.call(it.model_protocols, oldName)) {
             const proto = it.model_protocols[oldName];
-            const elsewhere = ['image_models', 'chat_models', 'video_models'].some(k => Array.isArray(it[k]) && it[k].some((m, i) => !(k === key && i === index) && String(m || '').trim() === oldName));
+            const elsewhere = ['image_models', 'chat_models', 'video_models', 'audio_models'].some(k => Array.isArray(it[k]) && it[k].some((m, i) => !(k === key && i === index) && String(m || '').trim() === oldName));
             if (!elsewhere) delete it.model_protocols[oldName];
             if (newName) it.model_protocols[newName] = proto;
         }
@@ -578,11 +580,11 @@ export function createApiStore() {
         if (id && snap.protocol !== undefined) { it.model_protocols = it.model_protocols || {}; it.model_protocols[id] = snap.protocol; }
         if (id && snap.name !== undefined) { it.model_names = it.model_names || {}; it.model_names[id] = snap.name; }
     }
-    function applyPicker(image, chat, video, names) {
+    function applyPicker(image, chat, video, names, audio = []) {
         const it = provider(); if (!it) return;
-        it.image_models = image; it.chat_models = chat; it.video_models = video; it.model_names = names;
+        it.image_models = image; it.chat_models = chat; it.video_models = video; it.audio_models = audio; it.model_names = names;
         S.pickerOpen = false;
-        toast(`已应用 · 生图 ${image.length} / LLM ${chat.length} / 视频 ${video.length}，点保存生效`, { icon: 'check' });
+        toast(`已应用 · 生图 ${image.length} / LLM ${chat.length} / 视频 ${video.length} / 音频 ${audio.length}，点保存生效`, { icon: 'check' });
     }
     /* ── ModelScope LoRA ── */
     function addLora() {

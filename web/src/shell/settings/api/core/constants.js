@@ -128,6 +128,7 @@ export const RECOMMENDED_APIS = [
         name: 'APIMART', category: 'allround', base_url: 'https://api.apimart.ai', protocol: 'apimart',
         register_url: 'https://apimart.ai/zh/register?aff=1uyAbb', register_url_cn: 'https://apib.ai/register?aff=1uyAbb',
         tagKeys: ['api.tagImageModels', 'api.tagVideoModels', 'api.tagLlmModels', 'api.tagSeedance'], icons: ['IMG', 'VID', 'LLM'],
+        audio_models: ['suno', 'flowmusic'],
         summaryKey: 'api.recommendApimartSummary', summary: '聚合多类型生成模型，适合希望用一套配置快速接入图像、视频和 LLM 的用户。',
     },
     {
@@ -191,5 +192,6 @@ export const MODEL_KINDS = [
     { kind: 'image', key: 'image_models', titleKey: 'api.imageModels', title: '生图模型', hintKey: 'api.imageHint', hint: '在线生图和无限画布 API 生成使用' },
     { kind: 'chat', key: 'chat_models', titleKey: 'api.chatModels', title: '聊天模型', hintKey: 'api.chatHint', hint: 'GPT 对话和 LLM 节点使用' },
     { kind: 'video', key: 'video_models', titleKey: 'api.videoModels', title: '视频模型', hintKey: 'api.videoHint', hint: '无限画布视频生成节点使用' },
+    { kind: 'audio', key: 'audio_models', titleKey: 'api.audioModels', title: '音频模型', hintKey: 'api.audioHint', hint: '画布音频节点使用（Suno / FlowMusic）' },
 ];
-export function modelListKey(kind) { return kind === 'image' ? 'image_models' : kind === 'video' ? 'video_models' : 'chat_models'; }
+export function modelListKey(kind) { return kind === 'image' ? 'image_models' : kind === 'video' ? 'video_models' : kind === 'audio' ? 'audio_models' : 'chat_models'; }

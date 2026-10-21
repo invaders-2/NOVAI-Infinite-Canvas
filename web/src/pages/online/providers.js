@@ -41,7 +41,7 @@ export function protocolOf(p) {
     if (proto === 'jimeng' || pid === 'jimeng') return 'jimeng';
     if (proto === 'volcengine' || pid === 'volcengine') return 'volcengine';
     if (proto === 'gemini') return 'gemini';
-    if (proto === 'apimart' || base.includes('apimart.ai')) return 'apimart';
+    if (proto === 'apimart' || base.includes('apimart.ai') || base.includes('apib.ai')) return 'apimart';
     return 'api';
 }
 

@@ -3,6 +3,7 @@
     const LEGACY_KEY = 'canvas_theme';
     const SCALE_KEY = 'studio_ui_scale_mode';
     const SCALE_OPTIONS = ['auto', '60', '65', '70', '75', '80', '85', '90', '95', '100', '115', '125', '140'];
+    const SCALE_STEPS = SCALE_OPTIONS.filter(item => item !== 'auto').map(item => Number(item) / 100);
 
     function currentTheme(){
         return localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY) || 'light';
@@ -136,16 +137,23 @@
         const viewportWidth = Math.max(320, Number(window.innerWidth || 0));
         const viewportHeight = Math.max(320, Number(window.innerHeight || 0));
         const compactRatio = Math.min(viewportWidth / 1500, viewportHeight / 940);
+        // 自动缩放只能落在整数档位：非整数 transform:scale 会让文字先按 1× 光栅化再缩放，
+        // 字形落在非整数像素上就发虚，Windows 常见 dpr=1 没有高密度屏补偿，比 Mac 明显。
         if(compactRatio < 1) {
-            return Math.max(0.68, Math.min(1, compactRatio));
+            // 接近设计基准（≥0.9）直接不缩放；更小的窗口取「不大于 compactRatio 的最大档位」，避免缩不够导致溢出
+            if(compactRatio >= 0.9) return 1;
+            const smaller = SCALE_STEPS.filter(value => value < 1);
+            const fit = smaller.filter(value => value <= compactRatio + 1e-9).pop();
+            return fit || smaller[0];
         }
         const screenLong = Math.max(window.screen?.width || 0, window.screen?.height || 0);
         const viewportLong = Math.max(viewportWidth, viewportHeight);
         const longEdge = Math.max(screenLong, viewportLong);
+        // 触发条件（dpr / 长边阈值）保持不变，放大值同样只取档位，避免大屏也发虚
         if(dpr >= 1.35) return 1;
-        if(longEdge >= 3600) return 1.22;
-        if(longEdge >= 3000) return 1.16;
-        if(longEdge >= 2500 && dpr <= 1.15) return 1.1;
+        if(longEdge >= 3600) return 1.4;
+        if(longEdge >= 3000) return 1.25;
+        if(longEdge >= 2500 && dpr <= 1.15) return 1.15;
         return 1;
     }
 

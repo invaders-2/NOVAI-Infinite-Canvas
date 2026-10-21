@@ -26,7 +26,7 @@ export function installNetwork(api) {
     function setFetched(data) {
         S.fetched = {
             all: Array.isArray(data && data.all) ? data.all : [],
-            suggestion: { image: new Set((data && data.image_models) || []), chat: new Set((data && data.chat_models) || []), video: new Set((data && data.video_models) || []) },
+            suggestion: { image: new Set((data && data.image_models) || []), chat: new Set((data && data.chat_models) || []), video: new Set((data && data.video_models) || []), audio: new Set((data && data.audio_models) || []) },
             names: (data && data.model_names && typeof data.model_names === 'object') ? { ...data.model_names } : {},
         };
     }
@@ -55,7 +55,7 @@ export function installNetwork(api) {
         }
         if (detected === 'runninghub') {
             it.base_url = it.base_url || RH_DEFAULT_BASE_URL;
-            ['image_models', 'chat_models', 'video_models'].forEach(k => { it[k] = unique(it[k] || []); });
+            ['image_models', 'chat_models', 'video_models', 'audio_models'].forEach(k => { it[k] = unique(it[k] || []); });
         }
         applyCliProtocolDefaults(it, detected);
         setProtocol(detected);
@@ -133,7 +133,7 @@ export function installNetwork(api) {
                 // 存入选择器状态并启用「选择模型」，但不自动弹出
                 S.fetched = {
                     all: data.all || [],
-                    suggestion: { image: new Set(data.image_models || []), chat: new Set(data.chat_models || []), video: new Set(data.video_models || []) },
+                    suggestion: { image: new Set(data.image_models || []), chat: new Set(data.chat_models || []), video: new Set(data.video_models || []), audio: new Set(data.audio_models || []) },
                     names: S.fetched.names || {},
                 };
                 if (!isLovart) S.pickerReady = true;
@@ -200,8 +200,8 @@ export function installNetwork(api) {
             if (detected && detected !== String(f.protocol || '').toLowerCase()) applyDetectedProtocol(detected);
             if (data.image_request_mode) applyDetectedImageRequestMode(data.image_request_mode);
             S.pickerReady = true;
-            const im = (data.image_models || []).length, ch = (data.chat_models || []).length, vi = (data.video_models || []).length;
-            S.fetchHint = { kind: 'ok', text: `已从上游拉取 ${data.total} 个模型（图像 ${im} / 对话 ${ch} / 视频 ${vi}），点「选择模型」勾选后应用。` };
+            const im = (data.image_models || []).length, ch = (data.chat_models || []).length, vi = (data.video_models || []).length, au = (data.audio_models || []).length;
+            S.fetchHint = { kind: 'ok', text: `已从上游拉取 ${data.total} 个模型（图像 ${im} / 对话 ${ch} / 视频 ${vi} / 音频 ${au}），点「选择模型」勾选后应用。` };
             if (rhContext || detected === 'runninghub' || it.id === 'runninghub') S.fetchHint.text += runninghubModelSourceNote(data);
             else if (detected === 'volcengine' || isVolcengineProvider(it)) S.fetchHint.text += ' 已识别方舟协议，火山聊天建议改填 ep-... 接入点。';
             if (normalizeImageRequestMode(f.imageMode || it.image_request_mode) === 'openai-json') S.fetchHint.text += ' 图片接口已设为 OpenAI JSON。';
@@ -228,7 +228,8 @@ export function installNetwork(api) {
             it.image_request_mode = normalizeImageRequestMode(apiDef.image_request_mode || it.image_request_mode);
             it.image_edit_route = normalizeImageEditRoute(apiDef.image_edit_route || it.image_edit_route);
             if (Array.isArray(apiDef.video_models)) it.video_models = [...apiDef.video_models];
-            if (apiDef.empty_models_on_save) { it.image_models = []; it.chat_models = []; it.video_models = []; it.model_protocols = {}; }
+            if (Array.isArray(apiDef.audio_models)) it.audio_models = [...apiDef.audio_models];
+            if (apiDef.empty_models_on_save) { it.image_models = []; it.chat_models = []; it.video_models = []; it.audio_models = []; it.model_protocols = {}; }
             return it;
         }
         const baseId = normalizeId(apiDef.id || apiDef.name) || 'custom-api';
@@ -243,6 +244,7 @@ export function installNetwork(api) {
             image_models: empty ? [] : (Array.isArray(apiDef.image_models) ? [...apiDef.image_models] : []),
             chat_models: empty ? [] : (Array.isArray(apiDef.chat_models) ? [...apiDef.chat_models] : []),
             video_models: empty ? [] : (Array.isArray(apiDef.video_models) ? [...apiDef.video_models] : []),
+            audio_models: empty ? [] : (Array.isArray(apiDef.audio_models) ? [...apiDef.audio_models] : []),
             model_protocols: empty ? {} : ((apiDef.model_protocols && typeof apiDef.model_protocols === 'object') ? { ...apiDef.model_protocols } : {}),
             has_key: false, key_preview: '',
         });

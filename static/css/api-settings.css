@@ -285,7 +285,7 @@ body.studio-theme-dark .picker-overlay { background:rgba(0,0,0,.68); }
 .picker-row.has-sel { background:rgba(28, 28, 28, .04); }
 body.studio-theme-dark .picker-row.has-sel { background:rgba(255,255,255,.04); }
 .picker-checkbox { width:18px; height:18px; border:0; border-radius:5px; display:flex; align-items:center; justify-content:center; background:var(--soft); flex:0 0 auto; color:var(--bg); transition:all .15s ease; }
-.picker-row:hover .picker-checkbox { background:var(--card); }
+.picker-row:hover .picker-checkbox:not(.checked) { background:var(--card); }
 .picker-checkbox.checked { background:var(--text); color:var(--bg); }
 body.studio-theme-dark .picker-checkbox.checked { background:var(--surface-2); color:var(--text); }
 .picker-checkbox svg { width:12px; height:12px; opacity:0; }
@@ -321,6 +321,8 @@ body.show-ms .ms-hint { display:block; }
 body.show-runninghub .runninghub-hint { display:block; }
 .runninghub-hint a { color:var(--text); font-weight:800; text-decoration:underline; text-underline-offset:3px; }
 .apimart-hint { display:none; margin-top:8px; color:var(--muted); font-size:11.5px; line-height:1.65; font-weight:600; }
+.apimart-base-switch { display:flex; align-items:center; gap:6px; margin-top:6px; flex-wrap:wrap; }
+.apimart-base-switch .api-undo-btn { height:26px; padding:0 10px; font-size:11px; }
 body.show-apimart-domestic-hint .apimart-hint { display:block; }
 .volcengine-hint { display:none; margin-top:8px; color:var(--muted); font-size:11.5px; line-height:1.65; font-weight:600; }
 body.show-volcengine-standalone .volcengine-hint { display:block; }

@@ -120,7 +120,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 </template>
 
 <style scoped>
-.scrim { position: fixed; inset: 0; z-index: 2200; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; padding: 16px; }
+/* 全屏 backdrop-filter 在 Electron/macOS 上会逐帧重采样下层（表现为闪烁），提独立合成层隔离；transform 不影响 flex 居中 */
+.scrim { position: fixed; inset: 0; z-index: 2200; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; padding: 16px; transform: translateZ(0); will-change: transform; isolation: isolate; }
 .smodal { position: relative; width: min(1180px, calc(100vw - 32px)); height: min(800px, calc(100vh - 32px)); display: flex; border-radius: 22px; background: var(--solid); box-shadow: var(--shadow-dialog); overflow: hidden; }
 /* 内嵌页打开浮层时，整块设置界面一起压暗，避免只有 iframe 那块变暗 */
 .smodal.veiled::after { content: ""; position: absolute; inset: 0; background: var(--scrim); pointer-events: none; z-index: 1; }

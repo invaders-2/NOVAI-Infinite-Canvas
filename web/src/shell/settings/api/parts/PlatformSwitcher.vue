@@ -19,7 +19,7 @@ const GROUP_LABEL = { builtin: '内置平台', custom: '自定义', cli: '本机
 const FIXED_PILL = { modelscope: 'OpenAI', runninghub: 'RH', volcengine: 'Ark' };
 function pill(p) { return FIXED_PILL[p.id] || (p.id === 'runninghub' ? 'RH' : String(p.protocol || 'openai').toUpperCase()); }
 function meta(p) {
-    const n = (p.image_models || []).length + (p.chat_models || []).length + (p.video_models || []).length;
+    const n = (p.image_models || []).length + (p.chat_models || []).length + (p.video_models || []).length + (p.audio_models || []).length;
     if (!hasUsableKey(p)) return '未配置 Key';
     return n ? `${n} 个模型` : '尚无模型';
 }

@@ -10,7 +10,7 @@ const LABELS = { apimart: 'APIMart', volcengine: '火山引擎' };
 export function providerPlatform(p) {
     const proto = String(p?.protocol || '').toLowerCase();
     const base = String(p?.base_url || '').toLowerCase();
-    if (proto === 'apimart' || base.includes('apimart.ai')) return 'apimart';
+    if (proto === 'apimart' || base.includes('apimart.ai') || base.includes('apib.ai')) return 'apimart';
     if (proto === 'volcengine') return 'volcengine';
     return '';
 }

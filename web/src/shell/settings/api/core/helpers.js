@@ -246,7 +246,7 @@ export function inferVideoVendor(model) {
 }
 export function modelStillUsed(item, name) {
     if (!item || !name) return false;
-    return ['image_models', 'chat_models', 'video_models'].some(k => Array.isArray(item[k]) && item[k].includes(name));
+    return ['image_models', 'chat_models', 'video_models', 'audio_models'].some(k => Array.isArray(item[k]) && item[k].includes(name));
 }
 
 /* —— RunningHub 应用 / 工作流条目规整（保存时用，与旧 normalizeRhEntries 一致） —— */

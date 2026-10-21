@@ -14,6 +14,7 @@ const api = {
   close: () => ipcRenderer.invoke('novai:window', { action: 'close' }),
   quit_app: () => ipcRenderer.invoke('novai:window', { action: 'quit' }),
   start_window_drag: () => ipcRenderer.invoke('novai:window', { action: 'start-drag' }),
+  end_window_drag: () => ipcRenderer.invoke('novai:window', { action: 'end-drag' }),
   begin_frameless_resize: (dir) => ipcRenderer.invoke('novai:window', { action: 'begin-resize', dir }),
   update_frameless_resize: (dx, dy) => ipcRenderer.invoke('novai:window', { action: 'update-resize', dx, dy }),
   end_frameless_resize: () => ipcRenderer.invoke('novai:window', { action: 'end-resize' }),

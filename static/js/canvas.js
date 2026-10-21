@@ -721,7 +721,7 @@ function midjourneyApiProviders(){
     return (apiProviders || [])
         .filter(provider => provider.enabled !== false && provider.has_key !== false && (
             String(provider.protocol || '').toLowerCase() === 'apimart'
-            || /(^|\.)apimart\.ai(?:\/|$)/i.test(String(provider.base_url || ''))
+            || /(^|\.)(?:apimart|apib)\.ai(?:\/|$)/i.test(String(provider.base_url || ''))
         ));
 }
 function resolveMidjourneyProviderId(id){

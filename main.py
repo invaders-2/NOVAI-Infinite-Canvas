@@ -2087,6 +2087,7 @@ def normalize_provider(item):
         protocol = locked_rule["protocol"]
         image_request_mode = locked_rule["image_request_mode"]
     video_models = model_list_from_values(item.get("video_models") or [])
+    audio_models = model_list_from_values(item.get("audio_models") or [])
     if locked_rule and "video_models" in locked_rule:
         video_models = model_list_from_values(locked_rule.get("video_models") or [])
     provider = {
@@ -2103,6 +2104,7 @@ def normalize_provider(item):
         "image_models": model_list_from_values(item.get("image_models") or []),
         "chat_models": model_list_from_values(item.get("chat_models") or []),
         "video_models": video_models,
+        "audio_models": audio_models,
         "model_names": normalize_model_names(item.get("model_names")),
         "model_protocols": normalize_model_protocols(item.get("model_protocols")),
         "ms_loras": normalize_ms_loras(item.get("ms_loras") or []),
@@ -2199,6 +2201,7 @@ def public_provider(provider):
     key = provider_env_key_value(provider["id"])
     item = {
         **provider,
+        "audio_models": provider.get("audio_models") or [],
         "has_key": bool(key),
         "key_preview": mask_secret(key),
         "key_env": provider_key_env(provider["id"]),
@@ -4427,6 +4430,7 @@ class ApiProviderPayload(BaseModel):
     image_models: List[str] = []
     chat_models: List[str] = []
     video_models: List[str] = []
+    audio_models: List[str] = []
     model_names: Dict[str, Any] = {}
     model_protocols: Dict[str, str] = {}
     # 供应商级生图尺寸覆盖（能力收窄）。前端不做可视化编辑，但保存时必须原样带回，
@@ -6543,7 +6547,12 @@ def effective_protocol(provider, model=""):
 
 def is_apimart_provider(provider):
     base_url = str((provider or {}).get("base_url") or "").lower()
-    return provider_protocol(provider) == "apimart" or "apimart.ai" in base_url
+    return provider_protocol(provider) == "apimart" or "apimart.ai" in base_url or "apib.ai" in base_url
+
+def is_apimart_models_host(base_url):
+    """模型列表接口只按主机判定（调用方不一定带 provider dict）。"""
+    value = str(base_url or "").strip().lower()
+    return "apimart.ai" in value or "apib.ai" in value
 
 def is_fhl_provider(provider):
     base_url = str((provider or {}).get("base_url") or "").strip().lower()
@@ -12357,20 +12366,211 @@ def apimart_size_resolution(size):
 def apimart_image_model_lc(model=""):
     return str(model or "").strip().lower()
 
-def apimart_image_resolution_for_model(model="", resolution="1K"):
-    """APIMart 文档：Lite 与 Gemini 2.5 Nano Banana 系列仅支持 1K。
-    若模型不支持更高分辨率，强制回落到 1K，避免后端做异常降级导致偏色/质量异常。"""
-    value = apimart_image_model_lc(model)
-    if "lite" in value or value in {
-        "nano-banana",
-        "nano-banana-ext",
-        "gemini-2.5-flash-image-preview",
-        "gemini-2.5-flash-image-preview-official",
-    }:
-        return "1K"
-    text = str(resolution or "1K").strip().upper()
-    return text if text in {"0.5K", "1K", "2K", "4K"} else "1K"
+def apimart_size_notice(requested_ratio, final_ratio, requested_resolution, final_resolution):
+    """比例/分辨率被按模型能力收敛时，给用户一句可读说明；没收敛返回空串。"""
+    notices = []
+    requested = str(requested_resolution or "").strip().upper()
+    final = str(final_resolution or "").strip().upper()
+    if requested and final and requested != final:
+        req_rank = APIMART_IMAGE_RESOLUTION_RANK.get(requested)
+        fin_rank = APIMART_IMAGE_RESOLUTION_RANK.get(final)
+        if req_rank is not None and fin_rank is not None:
+            if fin_rank < req_rank:
+                notices.append(f"该模型最高支持 {final}，已按 {final} 生成（原请求 {requested}）")
+            else:
+                notices.append(f"该模型最低支持 {final}，已按 {final} 生成（原请求 {requested}）")
+    ratio_before = str(requested_ratio or "").strip()
+    ratio_after = str(final_ratio or "").strip()
+    if ratio_before and ratio_after and ratio_before.lower() != ratio_after.lower():
+        notices.append(f"该模型不支持 {ratio_before}，已用 {ratio_after} 生成")
+    return "；".join(notices)
 
+def apimart_image_resolution_for_model(model="", resolution="1K"):
+    """按官方文档逐模型收敛分辨率档位：请求档位超过模型上限时降到该模型最高档，
+    不做「静默降级成 1K」；表里没有的模型保持原有白名单透传。"""
+    text = str(resolution or "1K").strip().upper()
+    if text not in {"0.5K", "1K", "2K", "3K", "4K"}:
+        text = "1K"
+    caps = apimart_image_model_caps(model)
+    if not caps:
+        return text if text in {"0.5K", "1K", "2K", "4K"} else "1K"
+    return apimart_clamp_image_resolution(text, caps.get("resolutions"))
+
+def is_apimart_official_image_model(model=""):
+    value = re.sub(r"[^a-z0-9]+", "-", str(model or "").strip().lower()).strip("-")
+    return value.endswith("-official") or value == "nano-banana-pro"
+
+# 官方文档逐模型给出 size 允许比例 / resolution 允许档位 / n 上限 / mask_url 与 base64 参考图支持；
+# 表里只收文档明确写死的集合，任意比例（如 mai-image 的 1:4~4:1）留空表示不收敛。
+APIMART_IMAGE_MODEL_CAPS = {
+    "gpt-image-2": {
+        "ratios": ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": True, "base64_refs": True, "official_fallback": True,
+    },
+    "gpt-image-2-5": {
+        "ratios": ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": True, "base64_refs": True, "official_fallback": False,
+    },
+    "gpt-image-2-5-ext": {
+        "ratios": ("auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "gpt-image-1": {
+        "ratios": ("1:1", "3:2", "2:3"), "resolutions": ("1K",), "n_max": 4,
+        "mask_url": True, "base64_refs": False, "official_fallback": False,
+    },
+    "gemini-2-5-flash-image-preview": {
+        "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"),
+        "resolutions": ("1K",), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": True,
+    },
+    "nano-banana": {
+        "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"),
+        "resolutions": ("1K",), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": True,
+    },
+    "gemini-3-pro-image-preview": {
+        "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": True,
+    },
+    "nano-banana-pro": {
+        "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": True,
+    },
+    "gemini-3-1-flash-image-preview": {
+        "ratios": ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"),
+        "resolutions": ("0.5K", "1K", "2K", "4K"), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": True,
+    },
+    "gemini-3-1-flash-lite-image": {
+        "ratios": ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"),
+        "resolutions": ("1K",), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": True,
+    },
+    "nano-banana-lite": {
+        "ratios": ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"),
+        "resolutions": ("1K",), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": True,
+    },
+    "gemini-nano-banana-2-1": {
+        "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": False, "base64_refs": True, "official_fallback": True,
+    },
+    "imagen-4-0-apimart": {
+        "ratios": ("1:1", "4:3", "3:4", "16:9", "9:16"), "resolutions": ("1K",), "n_max": 1,
+        "mask_url": False, "base64_refs": False, "official_fallback": False,
+    },
+    "mai-image-2-6": {
+        "ratios": (), "resolutions": ("1K", "2K"), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": False,
+    },
+    "qwen-image-2-0": {
+        "ratios": ("1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"), "resolutions": ("1K", "2K"), "n_max": 6,
+        "mask_url": False, "base64_refs": False, "official_fallback": False,
+    },
+    "qwen-image-3-0": {
+        "ratios": ("1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"), "resolutions": ("1K", "2K"), "n_max": 6,
+        "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "seedream-4-0": {
+        "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "2:1", "1:2", "21:9", "9:21"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 15, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "seedream-4-5": {
+        "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "2:1", "1:2", "21:9", "9:21"),
+        "resolutions": ("2K", "4K"), "n_max": 15, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "seedream-5-0-flash": {
+        "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "2:1", "1:2", "21:9"),
+        "resolutions": ("1K", "1.5K", "2K"), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "seedream-5-0-pro": {
+        "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "2:1", "1:2", "21:9"),
+        "resolutions": ("1K", "1.5K", "2K"), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "seedream-5-0-lite": {
+        "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "2:1", "1:2", "21:9"),
+        "resolutions": ("2K", "3K", "4K"), "n_max": 15, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "flux-2": {
+        "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "9:21"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "flux-3-image": {
+        "ratios": ("auto", "21:9", "2:1", "16:9", "3:2", "7:5", "4:3", "5:4", "1:1", "4:5", "3:4", "5:7", "2:3", "9:16", "1:2", "9:21"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": False,
+    },
+    "flux-kontext": {
+        "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "9:21"),
+        "resolutions": ("1K",), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "grok-imagine-2-0": {
+        "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9"),
+        "resolutions": ("1K", "2K"), "n_max": 12, "mask_url": True, "base64_refs": True, "official_fallback": False,
+    },
+    "grok-imagine": {
+        "ratios": ("1:1", "16:9", "9:16", "3:2", "2:3"),
+        "resolutions": ("1K", "2K"), "n_max": 10, "mask_url": False, "base64_refs": False, "official_fallback": False,
+    },
+    "wan2-7-image-pro": {
+        "ratios": ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "wan2-7-image": {
+        "ratios": ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"),
+        "resolutions": ("1K", "2K"), "n_max": 4, "mask_url": False, "base64_refs": True, "official_fallback": False,
+    },
+    "z-image-turbo": {
+        "ratios": ("1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"),
+        "resolutions": ("1K", "2K"), "n_max": 1, "mask_url": False, "base64_refs": False, "official_fallback": False,
+    },
+}
+
+def apimart_image_caps_key(model=""):
+    return re.sub(r"[^a-z0-9]+", "-", str(model or "").strip().lower()).strip("-")
+
+def apimart_image_model_caps(model=""):
+    name = apimart_image_caps_key(model)
+    if not name:
+        return None
+    for key in sorted(APIMART_IMAGE_MODEL_CAPS, key=len, reverse=True):
+        if key in name:
+            return APIMART_IMAGE_MODEL_CAPS[key]
+    return None
+
+APIMART_IMAGE_RESOLUTION_RANK = {"0.5K": 0.5, "1K": 1.0, "1.5K": 1.5, "2K": 2.0, "3K": 3.0, "4K": 4.0}
+
+def apimart_clamp_image_resolution(value, allowed):
+    levels = [str(item).strip().upper() for item in (allowed or ()) if str(item).strip()]
+    if not levels:
+        return value
+    text = str(value or "").strip().upper()
+    if text in levels:
+        return text
+    target = APIMART_IMAGE_RESOLUTION_RANK.get(text, 1.0)
+    return min(levels, key=lambda item: (abs(APIMART_IMAGE_RESOLUTION_RANK.get(item, 1.0) - target),
+                                         APIMART_IMAGE_RESOLUTION_RANK.get(item, 1.0)))
+
+def apimart_ratio_number(text):
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*[:x]\s*(\d+(?:\.\d+)?)", str(text or "").strip().lower())
+    if not match:
+        return None
+    try:
+        return float(match.group(1)) / float(match.group(2))
+    except ZeroDivisionError:
+        return None
+
+def apimart_clamp_ratio(ratio, allowed):
+    """把比例收敛到模型允许集合里最接近的一个（按数值比，不按字符串字典序）。"""
+    levels = [str(item).strip().lower() for item in (allowed or ()) if str(item).strip()]
+    if not levels:
+        return ratio
+    value = str(ratio or "").strip().lower().replace(" ", "")
+    if value in levels:
+        return value
+    if value == "auto" or not value:
+        return "1:1" if "1:1" in levels else levels[0]
+    target = apimart_ratio_number(value)
+    if target is None:
+        return "1:1" if "1:1" in levels else levels[0]
+    candidates = [item for item in levels if apimart_ratio_number(item)]
+    if not candidates:
+        return "1:1" if "1:1" in levels else levels[0]
+    return min(candidates, key=lambda item: abs(apimart_ratio_number(item) - target))
 # 火山方舟官方按模型给「总像素区间 + 档位」（https://ark.volcengine.com/region:cn-beijing/docs/image-generation-api）：
 #   5.0 pro/flash [921600, 4624220]，1K/1.5K/2K；5.0 lite [3686400, 16777216]，2K/3K/4K；
 #   4.5 [3686400, 16777216]，2K/4K；4.0 [921600, 16777216]，1K/2K/4K；宽高比一律 [1/16, 16]。
@@ -13755,7 +13955,7 @@ async def fetch_runninghub_llm_models(provider=None):
                     errors.append(f"{url}: HTTP {resp.status_code} {resp.text[:180]}")
                     continue
                 raw = resp.json() if resp.text else {}
-                grouped, ids = parse_upstream_models(raw, "openai")
+                grouped, ids, _meta = parse_upstream_models(raw, "openai")
                 if ids:
                     return [runninghub_registry_model_from_id(mid, "chat") for mid in ids], {"source": url, "count": len(ids)}
                 errors.append(f"{url}: empty")
@@ -14608,11 +14808,11 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {**{"videos": local_urls, "task_id": task_id, "raw": result}, **build_canvas_meta(local_urls, payload, "video")}
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto"):
+async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None):
     async with provider_slot(get_api_provider(provider_id)):
-        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background)
+        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out)
 
-async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto"):
+async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None):
     provider = get_api_provider(provider_id)
     if str(model or "").strip().lower().startswith("pixverse-image"):
         # 拍我AI 的图片模版生成要 template_id + 参考图 id（专属接口 /openapi/v2/image/template/generate），
@@ -14740,20 +14940,47 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
             )
         elif is_apimart:
             apimart_size, resolution = apimart_size_resolution(size)
-            # Nano Banana / Lite 等模型仅支持 1K，强制回落避免后端异常降级导致偏色
+            # 官方文档逐模型限定 size 比例与 resolution 档位（Lite / Nano Banana 只有 1K），
+            # 超档按文档上限收敛，避免上游静默降级
+            apimart_requested_ratio = apimart_size
+            apimart_requested_resolution = resolution
+            apimart_caps = apimart_image_model_caps(model)
+            if apimart_caps:
+                apimart_size = apimart_clamp_ratio(apimart_size, apimart_caps.get("ratios"))
             resolution = apimart_image_resolution_for_model(model, resolution)
+            if size_notice_out is not None:
+                apimart_notice = apimart_size_notice(
+                    apimart_requested_ratio, apimart_size, apimart_requested_resolution, resolution)
+                if apimart_notice:
+                    size_notice_out["size_notice"] = apimart_notice
             # APIMart 的 GPT-Image-2 图生图仍走 /images/generations，
             # 通过 image_urls 传参考图，不使用 OpenAI multipart /images/edits。
+            apimart_official = is_apimart_official_image_model(model)
             body = {
                 "model": model,
                 "prompt": prompt,
                 "n": 1,
                 "size": apimart_size,
                 "resolution": resolution,
-                "official_fallback": False,
             }
+            # 官方渠道文档明确写「使用官方渠道时不能使用 official_fallback」，且参考图只收公网 URL
+            if not apimart_official:
+                body["official_fallback"] = False
             if image_refs:
-                body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                if apimart_official:
+                    official_urls = []
+                    for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
+                        up_url = await upload_image_for_apimart(client, provider, ref.get("url", ""))
+                        if not str(up_url or "").strip().lower().startswith(("http://", "https://")):
+                            reason = up_url[4:] if isinstance(up_url, str) and up_url.startswith("ERR:") else "上传后未返回公网 http/https 图片 URL"
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"官方渠道参考图必须上传成公网可访问的图片 URL：{invalid_video_image_preview(ref.get('url', ''))}\n原因：{reason}",
+                            )
+                        official_urls.append(up_url)
+                    body["image_urls"] = official_urls
+                else:
+                    body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
             response = await with_connect_retries(
                 lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body),
                 context=retry_context,
@@ -18865,7 +19092,12 @@ def upstream_models_url(base_url: str, protocol: str):
         return f"{base_url}/models" if base_url.endswith("/api/v3") else f"{base_url}/api/v3/models"
     if protocol == "runninghub":
         return runninghub_openapi_url({"base_url": base_url}, "models")
-    return f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
+    url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
+    # APIMart 文档：expand=category 给每个模型附带 category（向后兼容，旧格式不变），
+    # 其它 OpenAI 兼容站不认这个参数，只对 APIMart 主机携带
+    if protocol == "apimart" or is_apimart_models_host(base_url):
+        return f"{url}?expand=category"
+    return url
 
 def upstream_model_headers(api_key: str, protocol: str):
     if protocol == "gemini":
@@ -18959,18 +19191,20 @@ async def probe_openai_models_endpoint(client, base_url: str, api_key: str):
     if looks_like_html_response(response.text):
         return False, {"status": response.status_code, "message": "OpenAI /v1/models 返回网页 HTML，请检查请求地址是否为 API Base URL", "raw": raw}
     if response.status_code < 300:
-        grouped, ids = parse_upstream_models(raw, "openai") if isinstance(raw, dict) else ({"image": [], "chat": [], "video": []}, [])
+        grouped, ids, meta = parse_upstream_models(raw, "openai") if isinstance(raw, dict) else ({"image": [], "chat": [], "video": [], "audio": []}, [], {})
         grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
         grouped, ids = apply_provider_registry_model_defaults(base_url, grouped, ids)
         grouped = apply_locked_recommended_model_rules(base_url, grouped)
+        skipped_note = upstream_models_skipped_note(meta)
         return True, {
             "status": response.status_code,
-            "message": f"OpenAI 兼容模型列表端点可用{f'，找到 {len(ids)} 个模型' if ids else ''}",
+            "message": f"OpenAI 兼容模型列表端点可用{f'，找到 {len(ids)} 个模型' if ids else ''}{f'（{skipped_note}）' if skipped_note else ''}",
             "raw": raw,
             "model_count": len(ids),
             "image_models": grouped["image"],
             "chat_models": grouped["chat"],
             "video_models": grouped["video"],
+            "audio_models": grouped["audio"],
             "all": ids,
         }
     if 400 <= response.status_code < 500:
@@ -19008,30 +19242,50 @@ def classify_upstream_model(mid):
         return "image"
     return "chat"
 
+APIMART_MODEL_CATEGORIES = ("chat", "image", "video", "audio", "unknown")
+
 def parse_upstream_models(raw, protocol="openai"):
     items = raw.get("data") if isinstance(raw, dict) else None
     if not items and isinstance(raw, dict):
         items = raw.get("models") or raw.get("list") or []
     if not isinstance(items, list):
         items = []
+    grouped = {"image": [], "chat": [], "video": [], "audio": []}
     ids = []
+    meta_counts = {"guessed_unknown": 0}
     for it in items:
+        category = ""
         if isinstance(it, str):
             mid = it
         elif isinstance(it, dict):
             mid = it.get("id") or it.get("name") or it.get("model")
+            category = str(it.get("category") or "").strip().lower()
         else:
             mid = ""
-        if mid:
-            mid = str(mid)
-            if protocol == "gemini" and mid.startswith("models/"):
-                mid = mid[len("models/"):]
-            ids.append(mid)
+        if not mid:
+            continue
+        mid = str(mid)
+        if protocol == "gemini" and mid.startswith("models/"):
+            mid = mid[len("models/"):]
+        # 带 expand=category 时以上游分类为准（audio 也收，画布音频节点用）；
+        # unknown 只是「平台暂未收录分类元数据」，模型本身可用，按名称猜测归类；
+        # 没有 category 的旧格式同样走启发式
+        if category in grouped:
+            grouped[category].append(mid)
+        else:
+            if category == "unknown":
+                meta_counts["guessed_unknown"] += 1
+            grouped[classify_upstream_model(mid)].append(mid)
+        ids.append(mid)
+    for key in grouped:
+        grouped[key] = sorted(set(grouped[key]))
     ids = sorted(set(ids))
-    grouped = {"image": [], "chat": [], "video": []}
-    for mid in ids:
-        grouped[classify_upstream_model(mid)].append(mid)
-    return grouped, ids
+    meta = {"guessed_unknown": meta_counts["guessed_unknown"]}
+    return grouped, ids, meta
+
+def upstream_models_skipped_note(meta):
+    guessed = int((meta or {}).get("guessed_unknown") or 0)
+    return f"未知分类 {guessed} 个已按名称归类" if guessed else ""
 
 def apply_agnes_model_defaults(base_url, grouped, ids):
     if "apihub.agnes-ai.com" not in str(base_url or "").strip().lower():
@@ -19054,7 +19308,7 @@ def apply_provider_registry_model_defaults(base_url, grouped, ids):
     调用（文本走 /v1/chat/completions，图像走 /v1beta/models/{model}:generateContent）。
     默认清单来自 config/providers.json 的 default_models（可自行增删），代码不写死模型名。"""
     provider = {"base_url": str(base_url or "").strip()}
-    defaults = {kind: provider_registry_default_models(provider, kind) for kind in ("image", "chat", "video")}
+    defaults = {kind: provider_registry_default_models(provider, kind) for kind in ("image", "chat", "video", "audio")}
     if not any(defaults.values()):
         return grouped, ids
     grouped = {key: list(value or []) for key, value in (grouped or {}).items()}
@@ -19195,7 +19449,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
                         return volcengine_default_model_payload(status=probe.get("status") or resp.status_code, message=message, raw={"models_error": resp.text[:300], **(probe.get("raw") or {})})
                 return {"ok": False, "status": resp.status_code, "message": resp.text[:300]}
             data = resp.json() if resp.text else {}
-            grouped, ids = parse_upstream_models(data, protocol)
+            grouped, ids, meta = parse_upstream_models(data, protocol)
             grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
             grouped, ids = apply_provider_registry_model_defaults(base_url, grouped, ids)
             grouped = apply_locked_recommended_model_rules(base_url, grouped)
@@ -19203,6 +19457,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
                 detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
                 if detected:
                     return volcengine_default_model_payload(status=resp.status_code, raw=data)
+            skipped_note = upstream_models_skipped_note(meta)
             return {
                 "ok": True,
                 "status": resp.status_code,
@@ -19210,8 +19465,11 @@ async def test_provider_connection(payload: TestConnectionPayload):
                 "image_models": grouped["image"],
                 "chat_models": grouped["chat"],
                 "video_models": grouped["video"],
+                "audio_models": grouped["audio"],
                 "all": ids,
                 "image_request_mode": detect_image_request_mode(base_url, ids) or normalize_image_request_mode(getattr(payload, "image_request_mode", "")),
+                "skipped": meta,
+                "message": f"已连通，找到 {len(ids)} 个模型（图像 {len(grouped['image'])} / 对话 {len(grouped['chat'])} / 视频 {len(grouped['video'])} / 音频 {len(grouped['audio'])}）{f'（{skipped_note}）' if skipped_note else ''}",
             }
     except httpx.HTTPError as e:
         if protocol == "volcengine":
@@ -19223,7 +19481,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
                         return volcengine_default_model_payload(status=probe.get("status") or 0, message=message, raw={"models_error": str(e)[:300], **(probe.get("raw") or {})})
             except Exception:
                 pass
-        return {"ok": False, "status": 0, "message": str(e)[:300]}
+        return {"ok": False, "status": 0, "message": (str(e) or f"连接上游失败（{type(e).__name__}），请检查请求地址与网络")[:300]}
 
 @app.post("/api/providers/probe-async")
 async def probe_async_endpoint(payload: TestConnectionPayload):
@@ -19365,6 +19623,7 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
                 "image_models": openai_probe.get("image_models") or [],
                 "chat_models": openai_probe.get("chat_models") or [],
                 "video_models": openai_probe.get("video_models") or [],
+                "audio_models": openai_probe.get("audio_models") or [],
                 "all": openai_probe.get("all") or [],
                 "image_request_mode": detect_image_request_mode(base_url, openai_probe.get("all") or []) or normalize_image_request_mode(getattr(payload, "image_request_mode", "")),
             }
@@ -19489,7 +19748,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
             except Exception:
                 pass
         raise HTTPException(status_code=502, detail=f"请求上游模型列表失败：{e}")
-    grouped, ids = parse_upstream_models(raw, protocol)
+    grouped, ids, meta = parse_upstream_models(raw, protocol)
     grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
     grouped, ids = apply_provider_registry_model_defaults(base_url, grouped, ids)
     grouped = apply_locked_recommended_model_rules(base_url, grouped)
@@ -19504,13 +19763,17 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
             "message": payload["message"],
             "raw": payload["raw"],
         }
+    skipped_note = upstream_models_skipped_note(meta)
     return {
         "total": len(ids),
         "image_models": grouped["image"],
         "chat_models": grouped["chat"],
         "video_models": grouped["video"],
+        "audio_models": grouped["audio"],
         "all": ids,
         "image_request_mode": detect_image_request_mode(base_url, ids) or normalize_image_request_mode(image_request_mode),
+        "skipped": meta,
+        "message": f"找到 {len(ids)} 个模型（图像 {len(grouped['image'])} / 对话 {len(grouped['chat'])} / 视频 {len(grouped['video'])} / 音频 {len(grouped['audio'])}）{f'（{skipped_note}）' if skipped_note else ''}",
     }
 
 @app.post("/api/providers/fetch-models")
@@ -19593,7 +19856,8 @@ async def build_online_image_result(payload: OnlineImageRequest):
     image_refs = image_references(refs)
     count = max(1, min(8, int(payload.n or 1)))
     async def generate_one():
-        image_data, raw_item = await generate_ai_image(payload.prompt, payload.size, payload.quality, model, image_refs, provider["id"], payload.background)
+        notice = {}
+        image_data, raw_item = await generate_ai_image(payload.prompt, payload.size, payload.quality, model, image_refs, provider["id"], payload.background, notice)
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
@@ -19605,7 +19869,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
             if local_url:
                 local_urls.append(local_url)
                 local_items.append(image_output_meta(local_url, item))
-        return local_urls, local_items, raw_item
+        return local_urls, local_items, raw_item, notice
     try:
         generated = await asyncio.gather(*(generate_one() for _ in range(count)))
     except httpx.HTTPStatusError as exc:
@@ -19620,9 +19884,10 @@ async def build_online_image_result(payload: OnlineImageRequest):
         suffix = f"（已重试 {retried} 次）" if retried else ""
         raise HTTPException(status_code=502, detail=f"请求上游生图接口失败{suffix}：{exc}") from exc
 
-    local_urls = [url for urls, _items, _raw in generated for url in (urls or []) if url]
-    local_items = [item for _urls, items, _raw in generated for item in (items or []) if item.get("url")]
+    local_urls = [url for urls, _items, _raw, _notice in generated for url in (urls or []) if url]
+    local_items = [item for _urls, items, _raw, _notice in generated for item in (items or []) if item.get("url")]
     raw = generated[0][2] if generated else {}
+    size_notice = next((notice.get("size_notice") for *_rest, notice in generated if notice.get("size_notice")), "")
     if not local_urls:
         provider_name = provider.get("name") or provider["id"]
         raw_text = json.dumps(raw, ensure_ascii=False)[:800] if isinstance(raw, (dict, list)) else str(raw)[:800]
@@ -19641,6 +19906,8 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "background": normalize_image_background(payload.background), "n": count, "reference_images": refs},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
+    if size_notice:
+        result["size_notice"] = size_notice
     save_to_history(result)
     if GLOBAL_LOOP:
         asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
@@ -19876,6 +20143,762 @@ def _agent_result_video_urls(result):
                 elif isinstance(it, dict) and it.get("url"):
                     urls.append(it["url"])
     return urls
+
+
+class CanvasAudioRequest(BaseModel):
+    provider_id: str = "comfly"
+    model: str = "suno"
+    prompt: str = ""
+    custom: bool = False
+    instrumental: bool = False
+    title: str = ""
+    style: str = ""
+    duration: Optional[int] = None
+    bpm: Optional[int] = None
+    length: Optional[int] = None
+    audio_format: str = ""
+
+
+class CanvasTTSRequest(BaseModel):
+    provider_id: str = "comfly"
+    model: str = "gpt-4o-mini-tts"
+    input: str = ""
+    voice: str = "alloy"
+    response_format: str = "wav"
+    speed: float = 1.0
+
+
+APIMART_SUNO_VERSION = "v6"
+APIMART_MUSIC_FIRST_DELAY = 3.0
+APIMART_MUSIC_POLL_INTERVAL = 5.0
+APIMART_MUSIC_TIMEOUT = 900.0
+APIMART_MUSIC_SUCCESS_STATUSES = {"COMPLETED", "COMPLETE", "SUCCESS", "SUCCEEDED", "SUCCEED", "DONE", "FINISHED", "OK", "READY"}
+APIMART_MUSIC_FAILED_STATUSES = {"FAILED", "FAILURE", "FAIL", "ERROR", "ERRORED", "CANCELED", "CANCELLED", "TIMEOUT", "REJECTED", "EXPIRED"}
+APIMART_AUDIO_EXTS = {".mp3", ".m4a", ".wav", ".aac", ".ogg", ".flac"}
+APIMART_TTS_DEFAULT_MODEL = "gpt-4o-mini-tts"
+APIMART_TTS_MAX_INPUT = 4096
+APIMART_TTS_VOICES = ("alloy", "echo", "fable", "onyx", "nova", "shimmer")
+APIMART_TTS_FORMATS = ("wav", "opus", "aac", "flac", "pcm")
+APIMART_TTS_FORMAT_EXTS = {"wav": ".wav", "opus": ".opus", "aac": ".aac", "flac": ".flac", "pcm": ".pcm"}
+APIMART_TTS_SPEED_MIN = 0.25
+APIMART_TTS_SPEED_MAX = 4.0
+
+
+def apimart_audio_submit_body(model, payload):
+    """按上游音乐接口的字段口径组装提交体（suno / flowmusic / 通用兜底）。"""
+    name = str(model or "").strip().lower()
+    prompt = str(getattr(payload, "prompt", "") or "").strip()
+    title = str(getattr(payload, "title", "") or "").strip()
+    style = str(getattr(payload, "style", "") or "").strip()
+    audio_format = str(getattr(payload, "audio_format", "") or "").strip()
+    if "suno" in name:
+        body = {"model": "suno", "version": APIMART_SUNO_VERSION, "custom": bool(getattr(payload, "custom", False))}
+        if prompt:
+            body["prompt"] = prompt
+        if title:
+            body["title"] = title
+        if style:
+            body["style"] = style
+        if getattr(payload, "instrumental", False):
+            body["instrumental"] = True
+        if getattr(payload, "duration", None):
+            body["duration"] = int(payload.duration)
+        if audio_format:
+            body["audio_format"] = audio_format
+        return body
+    if "flowmusic" in name:
+        body = {"model": "flowmusic", "sound_prompt": prompt}
+        if title:
+            body["title"] = title
+        if getattr(payload, "bpm", None):
+            body["bpm"] = int(payload.bpm)
+        if getattr(payload, "length", None):
+            body["length"] = int(payload.length)
+        return body
+    # 未知音频模型：只发文档里最通用的 model + prompt，错误按上游原文展示
+    body = {"model": model}
+    if prompt:
+        body["prompt"] = prompt
+    if title:
+        body["title"] = title
+    return body
+
+
+def apimart_music_url(base_url, path):
+    base = str(base_url or "").strip().rstrip("/")
+    return f"{base}{path}" if base.endswith("/v1") else f"{base}/v1{path}"
+
+
+def apimart_music_task_url(base_url, task_id):
+    quoted = urllib.parse.quote(str(task_id or "").strip(), safe="")
+    return f"{apimart_music_url(base_url, '/music/tasks/' + quoted)}?language=zh"
+
+
+def apimart_music_data(raw):
+    if not isinstance(raw, dict):
+        return {}
+    data = raw.get("data")
+    if isinstance(data, list):
+        data = next((item for item in data if isinstance(item, dict)), {})
+    if isinstance(data, dict):
+        return data
+    return raw
+
+
+def apimart_music_task_id(raw):
+    data = apimart_music_data(raw)
+    return str(data.get("task_id") or data.get("id") or (raw.get("task_id") if isinstance(raw, dict) else "") or "").strip()
+
+
+def apimart_music_items(raw):
+    data = apimart_music_data(raw)
+    result = data.get("result") if isinstance(data.get("result"), dict) else {}
+    music = result.get("music")
+    return [item for item in (music or []) if isinstance(item, dict)]
+
+
+def apimart_music_audio_urls(raw):
+    urls = []
+    for item in apimart_music_items(raw):
+        for key in ("audio_url", "wav_url", "url", "audioUrl"):
+            value = item.get(key)
+            candidates = value if isinstance(value, list) else ([value] if isinstance(value, str) else [])
+            for candidate in candidates:
+                text = str(candidate or "").strip()
+                if text.startswith(("http://", "https://")) and text not in urls:
+                    urls.append(text)
+            if any(str(c or "").strip().startswith(("http://", "https://")) for c in candidates):
+                break
+    return urls
+
+
+APIMART_MUSIC_PLACEHOLDER_TITLES = {"untitled", "untitled track", "audio"}
+
+def apimart_music_title(raw, payload=None, fallback="Audio"):
+    # 上游没给标题时会回 "Untitled"；画布节点标签是「Audio」，别把英文占位标题带出去
+    for item in apimart_music_items(raw):
+        title = str(item.get("title") or "").strip()
+        if title and title.lower() not in APIMART_MUSIC_PLACEHOLDER_TITLES:
+            return title
+    title = str(getattr(payload, "title", "") or "").strip()
+    return title or fallback
+
+
+def apimart_music_cost(raw):
+    """上游任务 data 里有 cost / credits_cost 就带出来，没有就返回空 dict（Boss 要看实际花费）。"""
+    data = apimart_music_data(raw)
+    cost = {}
+    for key in ("cost", "credits_cost"):
+        value = data.get(key)
+        if value not in (None, ""):
+            cost[key] = value
+    return cost
+
+
+def apimart_music_fail_reason(raw):
+    data = apimart_music_data(raw)
+    error = data.get("error") if isinstance(data.get("error"), dict) else {}
+    return str(data.get("fail_reason") or data.get("message") or error.get("message")
+               or (raw.get("message") if isinstance(raw, dict) else "") or "音频任务失败")
+
+
+def apimart_audio_error_text(response):
+    try:
+        raw = response.json()
+    except Exception:
+        raw = None
+    if isinstance(raw, dict):
+        error = raw.get("error") if isinstance(raw.get("error"), dict) else {}
+        message = error.get("message") or raw.get("message")
+        if message:
+            return str(message)[:300]
+    return (getattr(response, "text", "") or "")[:300]
+
+
+def apimart_tts_speed(value):
+    """语速夹到官方区间 0.25–4.0；非法值回落 1.0。"""
+    try:
+        speed = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    if not math.isfinite(speed):
+        return 1.0
+    return max(APIMART_TTS_SPEED_MIN, min(APIMART_TTS_SPEED_MAX, round(speed, 2)))
+
+
+def apimart_tts_input(payload):
+    text = str(getattr(payload, "input", "") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="要朗读的文本不能为空。")
+    if len(text) > APIMART_TTS_MAX_INPUT:
+        raise HTTPException(status_code=400, detail=f"文本太长：最多 {APIMART_TTS_MAX_INPUT} 字，当前 {len(text)} 字。")
+    return text
+
+
+def apimart_tts_voice(value):
+    voice = str(value or "").strip().lower() or "alloy"
+    if voice not in APIMART_TTS_VOICES:
+        raise HTTPException(status_code=400, detail=f"不支持的音色：{voice}。可选：{'、'.join(APIMART_TTS_VOICES)}")
+    return voice
+
+
+def apimart_tts_format(value):
+    fmt = str(value or "").strip().lower() or "wav"
+    if fmt not in APIMART_TTS_FORMATS:
+        raise HTTPException(status_code=400, detail=f"不支持的音频格式：{fmt}。可选：{'、'.join(APIMART_TTS_FORMATS)}")
+    return fmt
+
+
+def apimart_tts_submit_body(payload):
+    """按 APIMart /v1/audio/speech 官方字段组装提交体。"""
+    text = apimart_tts_input(payload)
+    voice = apimart_tts_voice(getattr(payload, "voice", ""))
+    fmt = apimart_tts_format(getattr(payload, "response_format", ""))
+    model = str(getattr(payload, "model", "") or "").strip() or APIMART_TTS_DEFAULT_MODEL
+    speed = apimart_tts_speed(getattr(payload, "speed", 1.0))
+    return {"model": model, "input": text, "voice": voice, "response_format": fmt, "speed": speed}
+
+
+def apimart_tts_extension(fmt, content_type=""):
+    """落盘扩展名：先认上游 Content-Type，认不出再按请求的 response_format。"""
+    type_text = str(content_type or "").lower()
+    if "mpeg" in type_text or "mp3" in type_text:
+        return ".mp3"
+    if "wav" in type_text or "wave" in type_text:
+        return ".wav"
+    if "opus" in type_text:
+        return ".opus"
+    if "aac" in type_text or "m4a" in type_text or "mp4" in type_text:
+        return ".aac"
+    if "flac" in type_text:
+        return ".flac"
+    if "ogg" in type_text:
+        return ".ogg"
+    if "pcm" in type_text or "l16" in type_text:
+        return ".pcm"
+    return APIMART_TTS_FORMAT_EXTS.get(fmt, ".wav")
+
+
+def apimart_tts_title(text, fallback="语音"):
+    first = " ".join(str(text or "").split())
+    if not first:
+        return fallback
+    return first[:20] + ("…" if len(first) > 20 else "")
+
+
+def normalize_streaming_wav_bytes(content):
+    """把流式 WAV 的未知长度（0xFFFFFFFF / 0）改写为真实长度。
+
+    APIMart TTS 返回的 WAV 头里 RIFF/data 两个 size 都是 0xFFFFFFFF：浏览器能播，
+    但 wave 等解析器会把时长算成几万秒。只修这一种情况，合法 WAV 原样返回（幂等）。
+    """
+    data = bytes(content or b"")
+    if len(data) < 12 or data[0:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return data
+    total = len(data)
+    riff_size = int.from_bytes(data[4:8], "little")
+    data_offset = -1
+    pos = 12
+    while pos + 8 <= total:
+        chunk_id = data[pos:pos + 4]
+        chunk_size = int.from_bytes(data[pos + 4:pos + 8], "little")
+        if chunk_id == b"data":
+            data_offset = pos
+            break
+        next_pos = pos + 8 + chunk_size + (chunk_size & 1)
+        if chunk_size in (0, 0xFFFFFFFF) or next_pos <= pos:
+            break
+        pos = next_pos
+    if data_offset < 0 and total >= 44 and data[36:40] == b"data":
+        data_offset = 36
+    if data_offset < 0:
+        return data
+    data_size = int.from_bytes(data[data_offset + 4:data_offset + 8], "little")
+    patch_riff = riff_size in (0, 0xFFFFFFFF)
+    patch_data = data_size in (0, 0xFFFFFFFF)
+    if not patch_riff and not patch_data:
+        return data
+    out = bytearray(data)
+    if patch_riff:
+        out[4:8] = max(0, total - 8).to_bytes(4, "little")
+    if patch_data:
+        out[data_offset + 4:data_offset + 8] = max(0, total - data_offset - 8).to_bytes(4, "little")
+    return bytes(out)
+
+
+def save_tts_audio_to_output(content, ext=".wav", prefix="tts_"):
+    """把二进制语音写进输出目录，返回本地 /assets/output/ 地址。"""
+    if str(ext or "").lower() == ".wav":
+        content = normalize_streaming_wav_bytes(content)
+    filename = f"{prefix}{uuid.uuid4().hex[:10]}{ext}"
+    path = output_path_for(filename)
+    with open(path, "wb") as f:
+        f.write(content)
+    if os.path.getsize(path) <= 0:
+        raise HTTPException(status_code=502, detail="语音接口返回了空音频。")
+    return output_url_for(filename)
+
+
+async def apimart_wait_music_task(client, provider, base_url, task_id):
+    url = apimart_music_task_url(base_url, task_id)
+    deadline = time.monotonic() + APIMART_MUSIC_TIMEOUT
+    delay = APIMART_MUSIC_FIRST_DELAY
+    last_payload = {}
+    while time.monotonic() < deadline:
+        await asyncio.sleep(min(delay, max(0.0, deadline - time.monotonic())))
+        delay = APIMART_MUSIC_POLL_INTERVAL
+        response = await client.get(url, headers=api_headers(provider=provider))
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=f"查询音频任务失败：{apimart_audio_error_text(response)}")
+        try:
+            raw = response.json()
+        except ValueError:
+            raw = {"message": response.text[:300]}
+        last_payload = raw
+        data = apimart_music_data(raw)
+        status = str(data.get("status") or "").upper()
+        if status in APIMART_MUSIC_SUCCESS_STATUSES:
+            return raw
+        if status in APIMART_MUSIC_FAILED_STATUSES:
+            raise HTTPException(status_code=502, detail=f"音频任务失败：{apimart_music_fail_reason(raw)}")
+        if apimart_music_audio_urls(raw) and status not in APIMART_MUSIC_FAILED_STATUSES:
+            return raw
+    raise HTTPException(status_code=504, detail=f"音频任务超时（已等待 {int(APIMART_MUSIC_TIMEOUT)} 秒），task_id={task_id}")
+
+
+def audio_extension_for_url(url):
+    ext = os.path.splitext(urllib.parse.urlparse(str(url or "")).path)[1].lower()
+    return ext if ext in APIMART_AUDIO_EXTS else ""
+
+
+async def save_remote_audio_to_output(url, prefix="audio_"):
+    """下载上游音频到输出目录，返回本地 /assets/output/ 地址；失败抛 HTTPException。"""
+    value = str(url or "").strip()
+    if value.startswith(("/output/", "/assets/")):
+        return value
+    ext = audio_extension_for_url(value) or ".mp3"
+    filename = f"{prefix}{uuid.uuid4().hex[:10]}{ext}"
+    path = output_path_for(filename)
+    try:
+        timeout = httpx.Timeout(connect=20.0, read=300.0, write=60.0, pool=20.0)
+        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(value)
+            response.raise_for_status()
+            content_type = (response.headers.get("Content-Type") or "").lower()
+            if "mpeg" in content_type or "mp3" in content_type:
+                ext = ".mp3"
+            elif "mp4" in content_type or "m4a" in content_type or "aac" in content_type:
+                ext = ".m4a"
+            elif "wav" in content_type or "x-wav" in content_type:
+                ext = ".wav"
+            elif "ogg" in content_type:
+                ext = ".ogg"
+            if ext != os.path.splitext(filename)[1].lower():
+                filename = f"{prefix}{uuid.uuid4().hex[:10]}{ext}"
+                path = output_path_for(filename)
+            with open(path, "wb") as f:
+                f.write(response.content)
+            if os.path.getsize(path) <= 0:
+                raise RuntimeError("empty audio response")
+            return output_url_for(filename)
+    except Exception as exc:
+        print(f"保存上游音频失败: {exc}; url={value}")
+        raise HTTPException(status_code=502, detail=f"保存音频失败：{exc}") from exc
+
+
+async def generate_canvas_audio(payload: CanvasAudioRequest):
+    provider = get_api_provider(payload.provider_id)
+    if not is_apimart_provider(provider):
+        raise HTTPException(status_code=400, detail="音频节点目前只支持 APIMart 协议的平台，请在 API 设置里把平台协议改成 APIMart。")
+    base_url = str(provider.get("base_url") or "").strip().rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    model = str(payload.model or "").strip() or "suno"
+    body = apimart_audio_submit_body(model, payload)
+    submit_url = apimart_music_url(base_url, "/music/generations")
+    timeout = httpx.Timeout(connect=20.0, read=180.0, write=60.0, pool=20.0)
+    try:
+        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider), timeout=timeout, follow_redirects=True) as client:
+            response = await client.post(submit_url, headers=api_headers(provider=provider), json=body)
+            if response.status_code >= 400:
+                raise HTTPException(status_code=response.status_code, detail=f"音频提交失败：{apimart_audio_error_text(response)}")
+            try:
+                raw = response.json()
+            except ValueError as exc:
+                raise HTTPException(status_code=502, detail=f"音频接口返回了非 JSON 内容：{response.text[:300]}") from exc
+            task_id = apimart_music_task_id(raw)
+            if not task_id:
+                preview = json.dumps(raw, ensure_ascii=False)[:300] if isinstance(raw, (dict, list)) else str(raw)[:300]
+                raise HTTPException(status_code=502, detail=f"音频接口没有返回任务 ID：{preview}")
+            result = await apimart_wait_music_task(client, provider, base_url, task_id)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=f"音频接口错误：{apimart_audio_error_text(exc.response)}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"请求音频接口失败：{type(exc).__name__}: {exc}") from exc
+    urls = apimart_music_audio_urls(result)
+    if not urls:
+        preview = json.dumps(result, ensure_ascii=False)[:300] if isinstance(result, (dict, list)) else str(result)[:300]
+        raise HTTPException(status_code=502, detail=f"音频任务完成但没有返回音频地址：{preview}")
+    audios = [await save_remote_audio_to_output(url) for url in urls[:4]]
+    title = apimart_music_title(result, payload)
+    cost = apimart_music_cost(result)
+    first = audios[0]
+    response = {
+        "audios": audios,
+        "task_id": task_id,
+        "model": model,
+        "canvas_meta": {"node_type": "audio", "title": title, "media_url": first, "auto_place": True},
+    }
+    response.update(cost)
+    return response
+
+
+@app.post("/api/canvas-audio")
+async def canvas_audio(payload: CanvasAudioRequest):
+    return await generate_canvas_audio(payload)
+
+async def generate_canvas_tts(payload: CanvasTTSRequest):
+    provider = get_api_provider(payload.provider_id)
+    if not is_apimart_provider(provider):
+        raise HTTPException(status_code=400, detail="语音合成只支持 APIMart 协议的平台，请在 API 设置里把平台协议改成 APIMart。")
+    base_url = str(provider.get("base_url") or "").strip().rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    body = apimart_tts_submit_body(payload)
+    url = apimart_music_url(base_url, "/audio/speech")
+    timeout = httpx.Timeout(connect=20.0, read=300.0, write=60.0, pool=20.0)
+    try:
+        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider), timeout=timeout, follow_redirects=True) as client:
+            upstream = await client.post(url, headers=api_headers(provider=provider), json=body)
+            if upstream.status_code >= 400:
+                raise HTTPException(status_code=upstream.status_code, detail=f"语音合成失败：{apimart_audio_error_text(upstream)}")
+            content_type = str(upstream.headers.get("Content-Type") or "")
+            content = upstream.content or b""
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail=f"语音合成超时（上游 {int(timeout.read)} 秒内没有返回音频），请缩短文本后重试。") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"请求语音接口失败：{type(exc).__name__}: {exc}") from exc
+    if not content:
+        raise HTTPException(status_code=502, detail="语音接口返回了空内容。")
+    if "json" in content_type.lower() or "text/" in content_type.lower():
+        preview = content[:300].decode("utf-8", "replace")
+        raise HTTPException(status_code=502, detail=f"语音接口没有返回音频：{preview}")
+    fmt = body["response_format"]
+    ext = apimart_tts_extension(fmt, content_type)
+    try:
+        local_url = save_tts_audio_to_output(content, ext=ext)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"保存语音失败：{exc}") from exc
+    result = {
+        "audios": [local_url],
+        "model": body["model"],
+        "voice": body["voice"],
+        "response_format": fmt,
+        "speed": body["speed"],
+        "characters": len(body["input"]),
+        "canvas_meta": {"node_type": "audio", "title": apimart_tts_title(body["input"]), "media_url": local_url, "auto_place": True},
+    }
+    if fmt == "pcm":
+        result["notice"] = "PCM 是裸音频流，浏览器不能直接播放；需要可播放文件请改用 wav / opus / aac / flac。"
+    return result
+
+
+@app.post("/api/canvas-tts")
+async def canvas_tts(payload: CanvasTTSRequest):
+    return await generate_canvas_tts(payload)
+
+# ── 音频智能切分：自然语言 / 语义 → 时间段 ────────────────────────────────────
+# 前端拿到时间段只做「预览 + 确认」，真正的切片在浏览器本地完成；这里只负责让模型把
+# 自然语言变成 [start, end] 列表，并把模型输出清洗成一定能落地的区间。
+AUDIO_SPLIT_MIN_SEC = 0.5
+AUDIO_SPLIT_MAX_SEGMENTS = 12
+AUDIO_SPLIT_MODES = ("smart", "custom")
+AUDIO_SPLIT_READ_TIMEOUT = 120.0
+# 切分只要模型吐一小段 JSON：优先便宜快的小模型（字符串精确匹配，不做模糊）。
+# 顺序即优先级；都不在该平台的 chat_models 里，才退回平台第一个对话模型。
+AUDIO_SPLIT_PREFERRED_MODELS = (
+    "gemini-3.1-flash-lite-preview",
+    "gpt-4o-mini",
+    "gemini-3.5-flash-lite",
+    "deepseek-v4.1-flash",
+)
+
+
+class CanvasAudioSplitRequest(BaseModel):
+    provider_id: str = ""
+    model: str = ""
+    text: str = ""
+    duration_sec: float = 0.0
+    max_segments: int = AUDIO_SPLIT_MAX_SEGMENTS
+    mode: str = "smart"
+
+
+def audio_split_duration(value):
+    """总时长（秒）：必须是有限正数，否则 400。前端只会拿解码后的真实时长来问。"""
+    try:
+        duration = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="音频时长不合法：需要大于 0 的秒数。") from None
+    if not math.isfinite(duration) or duration <= 0:
+        raise HTTPException(status_code=400, detail="音频时长不合法：需要大于 0 的秒数。")
+    if duration > 24 * 3600:
+        raise HTTPException(status_code=400, detail="音频时长超出可处理范围（最长 24 小时）。")
+    return duration
+
+
+def audio_split_max_segments(value):
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return AUDIO_SPLIT_MAX_SEGMENTS
+    return max(1, min(AUDIO_SPLIT_MAX_SEGMENTS, count))
+
+
+def audio_split_mode(value):
+    mode = str(value or "").strip().lower()
+    return mode if mode in AUDIO_SPLIT_MODES else "smart"
+
+
+def audio_split_chat_models(provider):
+    return [str(item or "").strip() for item in ((provider or {}).get("chat_models") or []) if str(item or "").strip()]
+
+
+def audio_split_preferred_model(provider):
+    """按偏好顺序挑一个便宜的对话模型；都不在列表里就返回空串（由调用方退回第一个）。"""
+    models = audio_split_chat_models(provider)
+    return next((name for name in AUDIO_SPLIT_PREFERRED_MODELS if name in models), "")
+
+
+def audio_split_resolve_provider(providers, provider_id="", model=""):
+    """挑平台和模型（纯函数，便于单测）：
+
+    - 请求里给了 provider_id 就用它，必须存在且 enabled，否则 400；
+    - 没给就优先挑 chat_models 非空的，apimart 更优先（它就是本项目的音频/文本默认通道）；
+    - model 没给就先按 AUDIO_SPLIT_PREFERRED_MODELS 的偏好顺序找便宜快的小模型，
+      一个都不在列表里才退回该平台第一个对话模型（preferred_chat_model 里还有平台差异规则）。
+    """
+    items = [p for p in (providers or []) if isinstance(p, dict) and str(p.get("id") or "").strip()]
+    requested = str(provider_id or "").strip().lower()
+    if requested:
+        provider = next((p for p in items if str(p.get("id") or "").strip().lower() == requested), None)
+        if provider is None:
+            raise HTTPException(status_code=400, detail=f"未找到 API 平台：{requested}。请先在「设置 → API 设置」里添加并保存。")
+        if not provider.get("enabled", True):
+            raise HTTPException(status_code=400, detail=f"API 平台已禁用：{provider.get('name') or requested}")
+    else:
+        enabled = [p for p in items if p.get("enabled", True)]
+        with_chat = [p for p in enabled if audio_split_chat_models(p)]
+        apimart_first = [p for p in with_chat if is_apimart_provider(p)]
+        provider = next(iter(apimart_first or with_chat or enabled), None)
+        if provider is None:
+            raise HTTPException(status_code=400, detail="没有可用的 API 平台：请先在「设置 → API 设置」里配置平台和对话模型。")
+    chosen = str(model or "").strip()
+    if not chosen:
+        if not audio_split_chat_models(provider):
+            raise HTTPException(
+                status_code=400,
+                detail="平台「%s」没有配置对话模型（chat_models），无法用模型切分音频。"
+                       % (provider.get("name") or provider.get("id") or "未命名"),
+            )
+        chosen = audio_split_preferred_model(provider) or preferred_chat_model(provider)
+    return provider, chosen
+
+
+def audio_split_system_prompt(mode, duration, max_segments, text=""):
+    """硬约束系统提示词：只让模型吐 JSON，把边界/最短/排序/不重叠/段数全部写死。"""
+    total = float(duration)
+    lines = [
+        "你是音频切分助手。只输出一个 JSON 对象，不要解释，不要 Markdown 代码块。",
+        '输出格式：{"segments":[{"start":0.0,"end":3.2}],"note":"一句话说明"}',
+        f"这段音频总时长 {total:.2f} 秒。",
+        "硬约束（违反任何一条结果都不可用）：",
+        f"1. start / end 的单位是秒，必须满足 0 <= start < end <= {total:.2f}；",
+        f"2. 每段时长必须 >= {AUDIO_SPLIT_MIN_SEC} 秒；",
+        f"3. 最少 1 段、最多 {max_segments} 段；",
+        "4. 按 start 从小到大排列，段与段之间不能重叠；",
+        "5. 只输出 JSON，不能有任何额外文字。",
+    ]
+    instruction = " ".join(str(text or "").split())
+    if audio_split_mode(mode) == "custom":
+        lines.append("用户指令（必须完整覆盖它要求的操作，例如删除/保留某段、在第几秒处切开）：")
+        lines.append(instruction or "按自然语义把音频切开。")
+    else:
+        lines.append("切分要求：按语义和对话停顿自然切分，每段是一句话或一个完整语义单元；句间停顿处优先作为切点。")
+    return "\n".join(lines)
+
+
+def audio_split_user_text(mode, duration, max_segments, text=""):
+    total = float(duration)
+    instruction = " ".join(str(text or "").split())
+    if audio_split_mode(mode) == "custom" and instruction:
+        return f"音频总时长 {total:.2f} 秒，最多 {max_segments} 段。用户指令：{instruction}"
+    return f"音频总时长 {total:.2f} 秒，最多 {max_segments} 段，请按语义/对话停顿自然切分。"
+
+
+def audio_split_chat_body(model, system_prompt, user_text):
+    """OpenAI 兼容 chat 提交体。
+
+    必须带 stream=false：APIMart 默认按 SSE 流式返回，不显式关掉拿到的是
+    「data: {...}」文本块，response.json() 直接解析失败。
+    """
+    return {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_text},
+        ],
+        "stream": False,
+    }
+
+
+# 各平台 base_url 的版本段写法差很多：APIMart 没有版本段（https://api.apimart.ai），
+# Volcengine 是 /api/v3，Agnes / ModelScope 是 /v1，还有 /v1beta、/openai/v1、/v4 这些。
+# 以前统一套 apimart_music_url（只认 /v1）会把 /api/v3 拼成 /api/v3/v1/chat/completions → 上游 404。
+AUDIO_SPLIT_VERSION_SUFFIX_RE = re.compile(r"/(?:api|openai)/v[0-9]+(?:beta)?$|/v[0-9]+(?:beta)?$", re.I)
+
+
+def audio_split_chat_url(base_url):
+    """平台 base_url → chat/completions 完整地址。
+
+    - 已经带完整 /chat/completions：原样返回；
+    - base 以版本段结尾（/v1、/v1beta、/v3、/v4、/api/v1、/api/v3、/openai/v1 …）：直接拼 /chat/completions；
+    - 其它（APIMart 这类没有版本段的）：拼 /v1/chat/completions。
+    """
+    base = str(base_url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if base.lower().endswith("/chat/completions"):
+        return base
+    if AUDIO_SPLIT_VERSION_SUFFIX_RE.search(base):
+        return base + "/chat/completions"
+    return base + "/v1/chat/completions"
+
+
+def audio_split_extract_json(text):
+    """从模型回复里掏 JSON：去掉 ``` 代码块，再取第一个 { 到最后一个 }。"""
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    if "```" in raw:
+        raw = re.sub(r"```[A-Za-z0-9_-]*", "", raw).replace("```", "")
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(raw[start:end + 1])
+    except (TypeError, ValueError):
+        return None
+
+
+def audio_split_clean_segments(entries, duration, max_segments=AUDIO_SPLIT_MAX_SEGMENTS):
+    """把模型给的时间段洗成能直接切片的区间：
+
+    夹到 [0, duration] → 丢弃 < 0.5s → 按 start 升序 → 重叠合并 → 最多 max_segments 段。
+    返回 [{"start":float,"end":float}]（三位小数，避免下游出现 3.0000000000000004）。
+    """
+    total = max(0.0, float(duration))
+    limit = audio_split_max_segments(max_segments)
+    min_span = AUDIO_SPLIT_MIN_SEC
+    cleaned = []
+    for entry in (entries or []):
+        if not isinstance(entry, dict):
+            continue
+        try:
+            start = float(entry.get("start"))
+            end = float(entry.get("end"))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(start) or not math.isfinite(end):
+            continue
+        if end < start:
+            start, end = end, start
+        start = min(total, max(0.0, start))
+        end = min(total, max(0.0, end))
+        if end - start < min_span - 1e-9:
+            continue
+        cleaned.append([start, end])
+    cleaned.sort(key=lambda item: (item[0], item[1]))
+    merged = []
+    for start, end in cleaned:
+        if merged and start < merged[-1][1] - 1e-9:
+            if end > merged[-1][1]:
+                merged[-1][1] = end
+        else:
+            merged.append([start, end])
+    merged = [item for item in merged if item[1] - item[0] >= min_span - 1e-9]
+    return [{"start": round(item[0], 3), "end": round(item[1], 3)} for item in merged[:limit]]
+
+
+def audio_split_parse_segments(content, duration, max_segments=AUDIO_SPLIT_MAX_SEGMENTS):
+    """模型回复 → 清洗后的时间段；结构不对 / 清洗后为空都抛 502（前端会退本地兜底）。"""
+    raw = audio_split_extract_json(content)
+    if not isinstance(raw, dict) or not isinstance(raw.get("segments"), list):
+        preview = str(content or "").strip()[:120]
+        raise HTTPException(status_code=502, detail=f"模型没有返回可解析的切分结果：{preview or '空内容'}")
+    segments = audio_split_clean_segments(raw.get("segments"), duration, max_segments)
+    if not segments:
+        raise HTTPException(status_code=502, detail="模型返回的时间段都不可用（越界或短于 0.5 秒），请重试或改用本地切分。")
+    note = str(raw.get("note") or "").strip()[:200]
+    return segments, note
+
+
+async def generate_canvas_audio_split(payload: CanvasAudioSplitRequest):
+    duration = audio_split_duration(payload.duration_sec)
+    limit = audio_split_max_segments(payload.max_segments)
+    mode = audio_split_mode(payload.mode)
+    provider, model = audio_split_resolve_provider(load_api_providers(), payload.provider_id, payload.model)
+    url = audio_split_chat_url(provider.get("base_url") or "")
+    if not url:
+        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    body = audio_split_chat_body(
+        model,
+        audio_split_system_prompt(mode, duration, limit, getattr(payload, "text", "")),
+        audio_split_user_text(mode, duration, limit, getattr(payload, "text", "")),
+    )
+    timeout = httpx.Timeout(connect=20.0, read=AUDIO_SPLIT_READ_TIMEOUT, write=60.0, pool=20.0)
+    try:
+        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider), timeout=timeout, follow_redirects=True) as client:
+            upstream = await client.post(url, headers=api_headers(provider=provider, model=model), json=body)
+            if upstream.status_code >= 400:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"智能切分失败：上游返回 {upstream.status_code} {apimart_audio_error_text(upstream)}",
+                )
+            try:
+                raw = upstream.json()
+            except ValueError as exc:
+                raise HTTPException(status_code=502, detail=f"智能切分失败：上游返回了非 JSON 内容：{(upstream.text or '')[:200]}") from exc
+    except HTTPException:
+        raise
+    except httpx.TimeoutException as exc:
+        raise HTTPException(
+            status_code=504,
+            detail=f"智能切分超时（上游 {int(AUDIO_SPLIT_READ_TIMEOUT)} 秒内没有返回），可以重试或改用本地切分。",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"请求智能切分接口失败：{type(exc).__name__}: {exc}") from exc
+    content = text_from_chat_response(raw) if isinstance(raw, dict) else ""
+    if not str(content or "").strip():
+        raise HTTPException(status_code=502, detail="智能切分失败：模型返回了空内容。")
+    segments, note = audio_split_parse_segments(content, duration, limit)
+    data = unwrap_apimart_response(raw) if isinstance(raw, dict) else {}
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    return {
+        "segments": segments,
+        "note": note,
+        "source": "llm",
+        "provider": str(provider.get("id") or ""),
+        "model": model,
+        "usage": usage,
+    }
+
+
+@app.post("/api/canvas-audio-split")
+async def canvas_audio_split(payload: CanvasAudioSplitRequest):
+    return await generate_canvas_audio_split(payload)
 
 
 TASK_RUNNERS["run_canvas_image_task"] = run_canvas_image_task
@@ -20275,6 +21298,354 @@ def apimart_video_resolution(resolution) -> str:
 def apimart_is_kling_model(model: str) -> bool:
     name = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
     return "kling" in name
+
+APIMART_VIDEO_MODEL_CAPS = {
+    "seedance-2-0": {
+        "duration": (4, 15), "ratio_key": "size",
+        "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p", "4k"),
+        "generate_audio": True, "watermark": False, "seed": True,
+        "image_with_roles": True, "video_urls": True, "audio_urls": True,
+    },
+    "seedance-1-5-pro": {
+        "duration": (4, 12), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p"),
+        "generate_audio": False, "watermark": False, "seed": True,
+        "image_with_roles": True, "video_urls": False, "audio_urls": False,
+    },
+    "seedance-1-0-pro": {
+        "duration": (2, 12), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p"),
+        "generate_audio": False, "watermark": False, "seed": True,
+        "image_with_roles": True, "video_urls": False, "audio_urls": False,
+    },
+    "seedance-2-5": {
+        "duration": (4, 30), "ratio_key": "size",
+        "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p", "2k", "4k"),
+        "generate_audio": True, "watermark": True, "seed": True,
+        "image_with_roles": True, "video_urls": True, "audio_urls": True,
+    },
+    "kling-v3-omni": {
+        "duration": (3, 15), "ratio_key": "aspect_ratio", "ratios": ("16:9", "1:1", "9:16"),
+        "resolution_key": "mode", "resolutions": ("std", "pro", "4k"),
+        "generate_audio": False, "watermark": True, "seed": False,
+        "image_with_roles": True, "video_urls": False, "audio_urls": False,
+    },
+    "kling-v3": {
+        "duration": (3, 15), "ratio_key": "aspect_ratio", "ratios": ("16:9", "1:1", "9:16"),
+        "resolution_key": "mode", "resolutions": ("std", "pro", "4k"),
+        "generate_audio": False, "watermark": True, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "kling-video-o1": {
+        "durations": (5, 10), "ratio_key": "aspect_ratio", "ratios": ("16:9", "1:1", "9:16"),
+        "resolution_key": "mode", "resolutions": ("std", "pro"),
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": True, "video_urls": False, "audio_urls": False,
+    },
+    "kling-3-0-turbo": {
+        "duration": (3, 15), "ratio_key": "aspect_ratio", "ratios": ("16:9", "1:1", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720p", "1080p"),
+        "generate_audio": False, "watermark": True, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "kling-v2-6": {
+        "durations": (5, 10), "ratio_key": "aspect_ratio", "ratios": ("16:9", "1:1", "9:16"),
+        "resolution_key": "mode", "resolutions": ("std", "pro"),
+        "generate_audio": False, "watermark": True, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "minimax-h3-max": {
+        "duration": (4, 15), "ratio_key": "aspect_ratio",
+        "ratios": ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("480P", "768P", "1080P"),
+        "generate_audio": False, "watermark": True, "seed": False,
+        "image_with_roles": True, "video_urls": True, "audio_urls": True,
+    },
+    "minimax-h3": {
+        "duration": (4, 15), "ratio_key": "aspect_ratio",
+        "ratios": ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("768P", "2K"),
+        "resolution_aliases": {"480p": "768P", "720p": "768P", "1080p": "2K", "480P": "768P", "720P": "768P", "1080P": "2K"},
+        "generate_audio": False, "watermark": True, "seed": False,
+        "image_with_roles": True, "video_urls": True, "audio_urls": True,
+    },
+    "minimax-hailuo-2-3": {
+        "durations": (6, 10), "ratio_key": None, "ratios": (),
+        "resolution_key": "resolution", "resolutions": ("768p", "1080p"),
+        "resolution_aliases": {"480p": "768p", "540p": "768p", "720p": "768p"},
+        "generate_audio": False, "watermark": True, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "minimax-hailuo": {
+        "durations": (5, 10), "ratio_key": None, "ratios": (),
+        "resolution_key": "resolution", "resolutions": ("512p", "768p", "1080p"),
+        "resolution_aliases": {"480p": "512p", "540p": "512p", "720p": "768p"},
+        "generate_audio": False, "watermark": True, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "wan2-5": {
+        "durations": (5, 10), "ratio_key": "size",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p"),
+        "generate_audio": False, "watermark": True, "seed": True,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "wan2-6": {
+        "durations": (5, 10, 15), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720p", "1080p"),
+        "generate_audio": False, "watermark": True, "seed": True,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "wan2-7-videoedit": {
+        "duration": (0, 10), "ratio_key": "size",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720P", "1080P"),
+        "resolution_aliases": {"480p": "720P", "720p": "720P", "1080p": "1080P", "4k": "1080P"},
+        "generate_audio": False, "watermark": True, "seed": True,
+        "image_with_roles": False, "video_urls": True, "audio_urls": False,
+    },
+    "wan2-7-r2v": {
+        "duration": (2, 15), "ratio_key": "size",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720P", "1080P"),
+        "resolution_aliases": {"480p": "720P", "720p": "720P", "1080p": "1080P", "4k": "1080P"},
+        "generate_audio": False, "watermark": True, "seed": True,
+        "image_with_roles": True, "video_urls": True, "audio_urls": False,
+    },
+    "wan2-7": {
+        "duration": (2, 15), "ratio_key": "size",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720P", "1080P"),
+        "resolution_aliases": {"480p": "720P", "720p": "720P", "1080p": "1080P", "4k": "1080P"},
+        "generate_audio": False, "watermark": True, "seed": True,
+        "image_with_roles": True, "video_urls": True, "audio_urls": False,
+    },
+    "wan3-0-video": {
+        "duration": (2, 30), "ratio_key": "size",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("480P", "720P", "1080P"),
+        "resolution_aliases": {"720p": "720P", "1080p": "1080P", "4k": "1080P"},
+        "generate_audio": False, "watermark": True, "seed": True,
+        "image_with_roles": True, "video_urls": True, "audio_urls": True,
+    },
+    "viduq3-mix": {
+        "duration": (1, 16), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("540p", "720p", "1080p"),
+        "resolution_aliases": {"480p": "540p"},
+        "generate_audio": False, "watermark": False, "seed": True,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "viduq3-pro": {
+        "duration": (1, 16), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("540p", "720p", "1080p"),
+        "resolution_aliases": {"480p": "540p"},
+        "generate_audio": False, "watermark": False, "seed": True,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "viduq3": {
+        "duration": (3, 16), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("540p", "720p", "1080p"),
+        "resolution_aliases": {"480p": "540p"},
+        "generate_audio": False, "watermark": False, "seed": True,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "viduq4-preview": {
+        "duration": (3, 16), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("540p", "720p", "1080p", "2K", "4K"),
+        "resolution_aliases": {"480p": "540p"},
+        "generate_audio": False, "watermark": False, "seed": True,
+        "image_with_roles": True, "video_urls": False, "audio_urls": True,
+    },
+    "pixverse-v6": {
+        "duration": (1, 15), "ratio_key": "size",
+        "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9"),
+        "resolution_key": "resolution", "resolutions": ("360p", "540p", "720p", "1080p"),
+        "resolution_aliases": {"480p": "540p"},
+        "generate_audio": False, "watermark": True, "seed": True,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "flux-3-video": {
+        "duration": (5, 20), "ratio_key": "aspect_ratio",
+        "ratios": ("21:9", "2:1", "16:9", "4:3", "1:1", "3:4", "9:16", "auto"),
+        "resolution_key": "resolution", "resolutions": ("hd", "fhd"),
+        "resolution_aliases": {"480p": "hd", "512p": "hd", "720p": "hd", "1080p": "fhd", "4k": "fhd"},
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": False, "video_urls": True, "audio_urls": False,
+    },
+    "happyhorse-1-1": {
+        "duration": (3, 15), "ratio_key": "size",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720P", "1080P"),
+        "resolution_aliases": {"480p": "720P", "720p": "720P", "1080p": "1080P", "4k": "1080P"},
+        "generate_audio": False, "watermark": True, "seed": True,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "happyhorse-1-0": {
+        "duration": (3, 15), "ratio_key": "size",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720P", "1080P"),
+        "resolution_aliases": {"480p": "720P", "720p": "720P", "1080p": "1080P", "4k": "1080P"},
+        "generate_audio": False, "watermark": True, "seed": True,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "skyreels-v4": {
+        "duration": (3, 15), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p"),
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "grok-imagine-1-5-video": {
+        "duration": (6, 15), "ratio_key": "aspect_ratio",
+        "ratios": ("auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p"),
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "grok-imagine-video": {
+        "duration": (6, 15), "ratio_key": "aspect_ratio",
+        "ratios": ("auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p"),
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
+    "gemini-omni-1-1-flash-ext": {
+        "durations": (4, 6, 8, 10), "ratio_key": "aspect_ratio", "ratios": ("16:9", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("360p", "720p", "1080p", "4k"),
+        "resolution_aliases": {"480p": "360p"},
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": False, "video_urls": True, "audio_urls": False,
+    },
+    "gemini-omni-1-1-flash": {
+        "durations": None, "ratio_key": "aspect_ratio", "ratios": ("16:9", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("360p", "720p", "1080p", "4k"),
+        "resolution_aliases": {"2160p": "4k", "480p": "360p"},
+        "generate_audio": True, "watermark": False, "seed": False,
+        "image_with_roles": True, "video_urls": True, "audio_urls": False,
+    },
+    "gemini-omni-flash-preview": {
+        "durations": None, "ratio_key": "aspect_ratio", "ratios": ("16:9", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720p",),
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": False, "video_urls": True, "audio_urls": False,
+    },
+}
+
+# 真机 /v1/models 里该模型的 id 是文档目录名 Omni-Flash-Ext（不是文档示例的 gemini-omni-1.1-flash-ext），
+# 两个 id 都指向同一套文档参数
+APIMART_VIDEO_MODEL_CAPS["omni-flash-ext"] = APIMART_VIDEO_MODEL_CAPS["gemini-omni-1-1-flash-ext"]
+
+APIMART_VIDEO_RESOLUTION_RANK = {
+    "360p": 360, "480p": 480, "512p": 512, "540p": 540, "720p": 720, "768p": 768,
+    "1080p": 1080, "1440p": 1440, "2k": 1440, "2048p": 2048, "4k": 2160, "2160p": 2160,
+    "hd": 720, "fhd": 1080,
+}
+
+def apimart_video_normalized_name(model):
+    return re.sub(r"[^a-z0-9]+", "-", str(model or "").strip().lower()).strip("-")
+
+def apimart_video_model_caps(model):
+    name = apimart_video_normalized_name(model)
+    if not name:
+        return None
+    for key in sorted(APIMART_VIDEO_MODEL_CAPS, key=len, reverse=True):
+        if key in name:
+            return APIMART_VIDEO_MODEL_CAPS[key]
+    return None
+
+def apimart_video_closest_resolution(value, levels):
+    target = APIMART_VIDEO_RESOLUTION_RANK.get(str(value or "").strip().lower())
+    if target is None:
+        return str(levels[0])
+    return min(levels, key=lambda item: (abs(APIMART_VIDEO_RESOLUTION_RANK.get(str(item).strip().lower(), 0) - target),
+                                         APIMART_VIDEO_RESOLUTION_RANK.get(str(item).strip().lower(), 0)))
+
+def apimart_video_duration_value(model, duration, caps=None):
+    caps = caps if caps is not None else apimart_video_model_caps(model)
+    if caps is None:
+        return apimart_video_duration(duration, model)
+    if not caps.get("durations"):
+        if "durations" in caps:
+            return None
+        low, high = caps.get("duration") or (4, 15)
+        try:
+            value = int(duration)
+        except Exception:
+            value = 5
+        return max(low, min(high, value))
+    try:
+        value = int(duration)
+    except Exception:
+        value = 5
+    return min(caps["durations"], key=lambda item: abs(int(item) - value))
+
+def apimart_video_resolution_value(model, resolution, caps):
+    key = caps.get("resolution_key")
+    levels = caps.get("resolutions") or ()
+    if not key or not levels:
+        return None
+    if key == "mode":
+        mode = apimart_kling_video_params(model, resolution).get("mode", "std")
+        if mode in levels:
+            return mode
+        order = {"std": 0, "pro": 1, "4k": 2}
+        target = order.get(mode, 0)
+        return min(levels, key=lambda item: abs(order.get(item, 0) - target))
+    value = str(resolution or "").strip()
+    aliases = caps.get("resolution_aliases") or {}
+    mapped = aliases.get(value.lower(), aliases.get(value, value))
+    lowered = {str(item).strip().lower(): item for item in levels}
+    if str(mapped).strip().lower() in lowered:
+        return lowered[str(mapped).strip().lower()]
+    if not value or value.lower() == "auto":
+        for preferred in ("720p", "768p", "hd", "720P", "768P"):
+            if preferred.lower() in lowered:
+                return lowered[preferred.lower()]
+        return str(levels[0])
+    return apimart_video_closest_resolution(value, levels)
+
+def apimart_video_ratio_value(ratio, caps):
+    key = caps.get("ratio_key")
+    levels = caps.get("ratios") or ()
+    if not key:
+        return None, None
+    if not levels:
+        return key, ratio
+    value = str(ratio or "").strip().lower()
+    if value == "keep_ratio":
+        return key, ("adaptive" if "adaptive" in levels else apimart_clamp_ratio("1:1", levels))
+    if value in [str(item).strip().lower() for item in levels]:
+        return key, value
+    return key, apimart_clamp_ratio(value or "16:9", levels)
+
+def apimart_video_body_params(model, duration, ratio, resolution):
+    """按官方文档把画布入参收敛成该模型认的字段；文档未收录的模型保持旧的 size + resolution 口径。"""
+    caps = apimart_video_model_caps(model)
+    if caps is None:
+        return {
+            "duration": apimart_video_duration(duration, model),
+            "ratio_key": "size",
+            "ratio_value": apimart_video_size(ratio),
+            "resolution_key": "resolution",
+            "resolution_value": apimart_video_resolution(resolution),
+        }
+    ratio_key, ratio_value = apimart_video_ratio_value(ratio, caps)
+    return {
+        "duration": apimart_video_duration_value(model, duration, caps),
+        "ratio_key": ratio_key,
+        "ratio_value": ratio_value,
+        "resolution_key": caps.get("resolution_key"),
+        "resolution_value": apimart_video_resolution_value(model, resolution, caps),
+    }
 
 def apimart_kling_video_params(model: str, resolution) -> dict:
     """APIMart Kling 分辨率字段取官方口径：v3 / o1 用 mode(std/pro/4k)，
@@ -20876,16 +22247,17 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         body["official_fallback"] = False
                 else:
                     apimart_seedance_model = selected_model(payload.model, "doubao-seedance-2.0")
-                    body = {
-                        "prompt": payload.prompt,
-                        "model": apimart_seedance_model,
-                        "duration": apimart_video_duration(payload.duration, apimart_seedance_model),
-                        "size": apimart_video_size(payload.aspect_ratio or payload.size),
-                    }
-                    if apimart_is_kling_model(apimart_seedance_model):
-                        body.update(apimart_kling_video_params(apimart_seedance_model, payload.resolution))
-                    else:
-                        body["resolution"] = apimart_video_resolution(payload.resolution)
+                    apimart_video_caps = apimart_video_model_caps(apimart_seedance_model)
+                    video_params = apimart_video_body_params(
+                        apimart_seedance_model, payload.duration,
+                        payload.aspect_ratio or payload.size, payload.resolution)
+                    body = {"prompt": payload.prompt, "model": apimart_seedance_model}
+                    if video_params.get("duration") is not None:
+                        body["duration"] = video_params["duration"]
+                    if video_params.get("ratio_key"):
+                        body[video_params["ratio_key"]] = video_params["ratio_value"]
+                    if video_params.get("resolution_key") and video_params.get("resolution_value"):
+                        body[video_params["resolution_key"]] = video_params["resolution_value"]
                     if image_with_roles and video_payload:
                         raise HTTPException(status_code=400, detail="APIMart Seedance 的 image_with_roles 不能和 video_urls 同时使用，请只保留图片首尾帧或参考视频其中一种。")
                     if image_with_roles:
@@ -20916,11 +22288,11 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         body["prompt"] = apply_trusted_asset_prompt_index(
                             body["prompt"], img_count, len(video_payload), len(audio_payload)
                         )
-                    if payload.seed is not None:
+                    if payload.seed is not None and (apimart_video_caps is None or apimart_video_caps.get("seed")):
                         body["seed"] = payload.seed
                     if payload.return_last_frame:
                         body["return_last_frame"] = True
-                    if payload.generate_audio:
+                    if payload.generate_audio and (apimart_video_caps is None or apimart_video_caps.get("generate_audio")):
                         body["generate_audio"] = True
             else:
                 # 非 APIMart：data URL 方式（OpenAI / ComflyAI 接口）
@@ -25880,8 +27252,7 @@ def apimart_midjourney_provider(provider_id: str):
     provider = get_api_provider_exact(provider_id)
     if not is_apimart_provider(provider):
         raise HTTPException(status_code=400, detail="Midjourney 节点仅支持已配置为 APIMart 协议的平台。")
-    # This also validates the configured key, while all MJ requests below keep
-    # using APIMart's official host instead of inheriting a custom image URL.
+    # This also validates the configured key.
     api_headers(provider=provider)
     return provider
 
@@ -25978,11 +27349,17 @@ async def midjourney_modal_mask_url(reference):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"无法读取 Midjourney 遮罩图片：{exc}") from exc
 
+def apimart_api_base(provider):
+    base_url = str((provider or {}).get("base_url") or "").strip().rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[:-len("/v1")].rstrip("/")
+    return base_url or APIMART_MIDJOURNEY_API_ROOT
+
 async def apimart_midjourney_request(provider, path, body):
     timeout = httpx.Timeout(connect=20.0, read=180.0, write=120.0, pool=20.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         response = await client.post(
-            f"{APIMART_MIDJOURNEY_API_ROOT}{path}",
+            f"{apimart_api_base(provider)}{path}",
             headers=api_headers(provider=provider),
             json=body,
         )
@@ -26004,7 +27381,7 @@ async def midjourney_result(provider, task_id: str):
     timeout = httpx.Timeout(connect=20.0, read=180.0, write=60.0, pool=20.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         response = await client.get(
-            f"{APIMART_MIDJOURNEY_API_ROOT}/v1/midjourney/{urllib.parse.quote(safe_task_id, safe='')}",
+            f"{apimart_api_base(provider)}/v1/midjourney/{urllib.parse.quote(safe_task_id, safe='')}",
             headers=api_headers(provider=provider),
         )
     try:
@@ -27288,6 +28665,8 @@ def _agent_node_kind(node):
         return "image"
     if t in ("video", "smart-video"):
         return "video"
+    if t == "smart-audio":
+        return "audio"
     if t == "image":
         return "image"
     if t == "smart-group":
@@ -32820,9 +34199,9 @@ async def agent_undo_run(payload: AgentUndoRequest):
 # 编号按种类各自递增、删除不回收（canvas.alias_counters 记着每类用到了几号）。
 # ---------------------------------------------------------------------------
 
-_AGENT_ALIAS_PREFIX = {"image": "图", "video": "视频", "prompt": "提示词", "text": "文本", "group": "组",
+_AGENT_ALIAS_PREFIX = {"image": "图", "video": "视频", "audio": "音频", "prompt": "提示词", "text": "文本", "group": "组",
                        "table": "表格", "batch": "批量"}
-_AGENT_ALIAS_RE = re.compile(r"^@?\s*(图|视频|提示词|文本|组|表格|批量)\s*(\d{1,4})\s*号?$")
+_AGENT_ALIAS_RE = re.compile(r"^@?\s*(图|视频|音频|提示词|文本|组|表格|批量)\s*(\d{1,4})\s*号?$")
 
 
 def _agent_alias_prefix(node):

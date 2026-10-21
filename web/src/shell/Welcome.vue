@@ -77,7 +77,8 @@ function done(go) {
 .feat b { font: 500 14px/20px var(--font-sans); }
 .feat span { font: 400 12px/18px var(--font-sans); color: var(--ink-3); }
 .acts { margin-top: 44px; display: flex; gap: 10px; }
-.scrim { position: fixed; inset: 0; z-index: 2600; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; padding: 24px; }
+/* 全屏 backdrop-filter 在 Electron/macOS 上会逐帧重采样下层（表现为闪烁），提独立合成层隔离；transform 不影响 flex 居中 */
+.scrim { position: fixed; inset: 0; z-index: 2600; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; padding: 24px; transform: translateZ(0); will-change: transform; isolation: isolate; }
 .qs { width: min(480px, 100%); padding: 28px; border-radius: 20px; background: var(--solid); box-shadow: var(--shadow-dialog); }
 .qs h3 { margin: 0; font: 500 18px/26px var(--font-sans); }
 .qs > p { margin: 4px 0 20px; font: 400 12.5px/19px var(--font-sans); color: var(--ink-3); }

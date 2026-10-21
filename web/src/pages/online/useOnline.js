@@ -196,6 +196,7 @@ export async function submit() {
         const result = await r.json();
         S.result = result;
         addHistory(result, true);
+        if (result && result.size_notice) setNotice(result.size_notice);
     } catch (err) {
         toast((err && err.message) || '生成失败', { danger: true, icon: 'alert' });
     } finally { S.generating = false; }

@@ -1,5 +1,5 @@
 <script setup>
-// 「从上游拉取的模型清单」弹窗：每个模型只归一类（已配置 > 上游建议 > 默认聊天），勾选 = 纳入该分类；应用后覆盖三组模型列表
+// 「从上游拉取的模型清单」弹窗：每个模型只归一类（已配置 > 上游建议 > 默认聊天），勾选 = 纳入该分类；应用后覆盖四组模型列表
 import { ref, reactive, computed, inject, watch } from 'vue';
 import AIcon from './AIcon.vue';
 import ApiModal from './ApiModal.vue';
@@ -15,15 +15,15 @@ const cat = ref('all');
 watch(() => S.pickerOpen, open => {
     if (!open) return;
     const p = it.value; if (!p) return;
-    const ex = { image: new Set(p.image_models || []), chat: new Set(p.chat_models || []), video: new Set(p.video_models || []) };
+    const ex = { image: new Set(p.image_models || []), chat: new Set(p.chat_models || []), video: new Set(p.video_models || []), audio: new Set(p.audio_models || []) };
     const sug = S.fetched.suggestion || {};
-    const all = new Set([...S.fetched.all, ...(p.image_models || []), ...(p.chat_models || []), ...(p.video_models || [])]);
+    const all = new Set([...S.fetched.all, ...(p.image_models || []), ...(p.chat_models || []), ...(p.video_models || []), ...(p.audio_models || [])]);
     const category = {}, selected = {};
     all.forEach(id => {
-        category[id] = ex.image.has(id) ? 'image' : ex.video.has(id) ? 'video' : ex.chat.has(id) ? 'chat'
-            : (sug.image && sug.image.has(id)) ? 'image' : (sug.video && sug.video.has(id)) ? 'video' : 'chat';
+        category[id] = ex.image.has(id) ? 'image' : ex.video.has(id) ? 'video' : ex.audio.has(id) ? 'audio' : ex.chat.has(id) ? 'chat'
+            : (sug.image && sug.image.has(id)) ? 'image' : (sug.video && sug.video.has(id)) ? 'video' : (sug.audio && sug.audio.has(id)) ? 'audio' : 'chat';
         // 已在配置里的默认勾选；新拉的不勾选，让用户主动选
-        selected[id] = ex.image.has(id) || ex.chat.has(id) || ex.video.has(id);
+        selected[id] = ex.image.has(id) || ex.chat.has(id) || ex.video.has(id) || ex.audio.has(id);
     });
     st.category = category; st.selected = selected;
     filter.value = ''; cat.value = 'all';
@@ -31,8 +31,8 @@ watch(() => S.pickerOpen, open => {
 
 const ids = computed(() => Object.keys(st.category).sort());
 const stats = computed(() => {
-    const totals = { all: ids.value.length, image: 0, chat: 0, video: 0 };
-    const sel = { all: 0, image: 0, chat: 0, video: 0 };
+    const totals = { all: ids.value.length, image: 0, chat: 0, video: 0, audio: 0 };
+    const sel = { all: 0, image: 0, chat: 0, video: 0, audio: 0 };
     ids.value.forEach(id => { const c = st.category[id]; totals[c]++; if (st.selected[id]) { sel[c]++; sel.all++; } });
     return { totals, sel };
 });
@@ -44,20 +44,20 @@ const list = computed(() => {
         return { id, label: label || id, sub: label && label !== id ? id : '', badge: modelBadge(id, label, p) };
     }).filter(r => (!q || r.id.toLowerCase().includes(q) || r.label.toLowerCase().includes(q)) && (cat.value === 'all' || st.category[r.id] === cat.value));
 });
-const TABS = [{ k: 'all', label: '全部' }, { k: 'image', label: '生图' }, { k: 'chat', label: 'LLM' }, { k: 'video', label: '视频' }];
+const TABS = [{ k: 'all', label: '全部' }, { k: 'image', label: '生图' }, { k: 'chat', label: 'LLM' }, { k: 'video', label: '视频' }, { k: 'audio', label: '音频' }];
 function toggle(id) { st.selected[id] = !st.selected[id]; }
 function close() { S.pickerOpen = false; }
 function apply() {
     const p = it.value; if (!p) return;
-    const image = [], chat = [], video = [], names = {};
+    const image = [], chat = [], video = [], audio = [], names = {};
     Object.entries(st.selected).forEach(([id, on]) => {
         if (!on) return;
         const c = st.category[id];
-        if (c === 'image') image.push(id); else if (c === 'video') video.push(id); else chat.push(id);
+        if (c === 'image') image.push(id); else if (c === 'video') video.push(id); else if (c === 'audio') audio.push(id); else chat.push(id);
         const label = modelDisplayName(id, p, S.fetched.names);
         if (label && label !== id) names[id] = label;
     });
-    store.applyPicker(image, chat, video, names);
+    store.applyPicker(image, chat, video, names, audio);
 }
 </script>
 
@@ -87,6 +87,7 @@ function apply() {
                 <span class="chip" :class="{ empty: !stats.sel.image }">生图 {{ stats.sel.image }}</span>
                 <span class="chip" :class="{ empty: !stats.sel.chat }">LLM {{ stats.sel.chat }}</span>
                 <span class="chip" :class="{ empty: !stats.sel.video }">视频 {{ stats.sel.video }}</span>
+                <span class="chip" :class="{ empty: !stats.sel.audio }">音频 {{ stats.sel.audio }}</span>
                 <span class="un">未选 {{ stats.totals.all - stats.sel.all }}</span>
             </div>
             <div class="ft">

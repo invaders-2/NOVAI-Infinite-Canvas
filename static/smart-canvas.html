@@ -7,7 +7,7 @@
     <title data-i18n="smart.title">智能画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{/* 画布页默认深色悬浮外观；用户显式选过浅色时沿用其选择 */var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"dark";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.132.1792375299">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.132.1792561685">
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.132.1790560477">
     <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.132.1791729997">
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.132.1789606971">
@@ -18,7 +18,7 @@
     <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.132.1789606971"></script>
     <script defer src="/static/vendor/js/html-to-image.js?v=1.0.132.1789615756"></script>
     <script defer src="/static/js/shared/icons.js?v=1.0.132.1792330467"></script>
-    <script src="/static/js/theme.js?v=1.0.132.1789606971"></script>
+    <script src="/static/js/theme.js?v=1.0.132.1792474521"></script>
     <script src="/static/js/shared/utils.js?v=1.0.132.1790560477"></script>
     <script src="/static/js/shared/size-policy.js?v=1.0.132.1792185305"></script>
     <script src="/static/js/shared/media.js?v=1.0.132.1789606971"></script>
@@ -285,6 +285,7 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
             <button type="button" class="canvas-add-item" data-add-kind="prompt"><span class="canvas-add-icon"><i data-lucide="text-cursor-input"></i></span><span class="canvas-add-text"><strong>文本</strong><em>脚本、广告词、品牌文案</em></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
             <button type="button" class="canvas-add-item" data-add-kind="image"><span class="canvas-add-icon"><i data-lucide="image"></i></span><span class="canvas-add-text"><strong>图片</strong><em>上传或生成图片节点</em></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
             <button type="button" class="canvas-add-item" data-add-kind="video"><span class="canvas-add-icon"><i data-lucide="video"></i></span><span class="canvas-add-text"><strong>视频</strong><em>上传或生成视频节点</em></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
+            <button type="button" class="canvas-add-item" data-add-kind="audio"><span class="canvas-add-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></span><span class="canvas-add-text"><strong>音频</strong><em>生成音乐或音效</em></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
             <div class="canvas-add-section-title">辅助工具</div>
             <button type="button" class="canvas-add-item" data-add-kind="table"><span class="canvas-add-icon"><i data-lucide="table"></i></span><span class="canvas-add-text"><strong>多维表格</strong></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
             <button type="button" class="canvas-add-item" data-add-kind="group"><span class="canvas-add-icon"><i data-lucide="group"></i></span><span class="canvas-add-text"><strong>分组</strong></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
@@ -914,6 +915,6 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
     <script defer src="/static/js/canvas-rail.js?v=1.0.132.1792338362"></script>
     <script defer src="/static/js/online-prompt-library.js?v=1.0.132.1792337992"></script>
     <script defer src="/static/js/source-browser.js?v=1.0.132.1792373520"></script>
-    <script defer src="/static/js/smart-canvas.js?v=1.0.132.1792459881"></script>
+    <script defer src="/static/js/smart-canvas.js?v=1.0.132.1792561283"></script>
 </body>
 </html>

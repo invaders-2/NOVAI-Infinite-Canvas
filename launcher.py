@@ -326,6 +326,53 @@ def main():
     try:
         import webview
 
+        def _find_main_hwnd(retries=8, delay=0.05):
+            """取主窗口 HWND：先 pywebview window.native，再按 PID 用 EnumWindows 回退。
+
+            与 _enable_frameless_resize 同一套两级回退；窗口刚创建时 native 可能还没就绪，
+            所以带重试。两级都取不到返回 None。"""
+            import ctypes
+            import time
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+
+            for _ in range(retries):
+                try:
+                    wins = webview.windows
+                    if wins:
+                        native = getattr(wins[0], 'native', None)
+                        if native:
+                            return int(native.Handle.ToInt32())
+                except Exception:
+                    pass
+                time.sleep(delay)
+
+            # ── 回退：按当前进程 PID 找可见顶层窗口（比 native.Handle/GetForegroundWindow 可靠）──
+            kernel32 = ctypes.windll.kernel32
+            pid = kernel32.GetCurrentProcessId()
+            found = [None]
+
+            @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+            def enum_cb(hwnd, _lp):
+                proc_id = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+                if proc_id.value == pid and user32.IsWindowVisible(hwnd):
+                    cls = ctypes.create_unicode_buffer(256)
+                    user32.GetClassNameW(hwnd, cls, 256)
+                    if "ConsoleWindowClass" not in cls.value and "#32770" not in cls.value:
+                        found[0] = hwnd
+                        return False
+                return True
+
+            for attempt in range(retries):
+                found[0] = None
+                user32.EnumWindows(enum_cb, 0)
+                if found[0]:
+                    return found[0]
+                log(f"_find_main_hwnd: EnumWindows retry {attempt + 1}/{retries}")
+                time.sleep(delay)
+            return None
+
         # ===== 窗口控制 API ====
         class Api:
             def __init__(self):
@@ -597,14 +644,10 @@ def main():
                     from ctypes import wintypes
                     user32 = ctypes.windll.user32
 
-                    wins = webview.windows
-                    if not wins:
+                    hwnd = _find_main_hwnd()
+                    if not hwnd:
+                        log("_start_windows_drag: 未取到主窗口 hwnd（native / EnumWindows 均失败），本次拖动未生效")
                         return
-                    w = wins[0]
-                    native = getattr(w, 'native', None)
-                    if native is None:
-                        return
-                    hwnd = int(native.Handle.ToInt32())
 
                     # 64 位兼容：SendMessageW 返回 LRESULT，句柄/参数均按指针宽传递，
                     # 防止 64 位 hwnd 被 ctypes 默认的 c_int 截断（同 _enable_frameless_resize 写法）
@@ -616,6 +659,7 @@ def main():
                     HTCAPTION = 2
                     user32.ReleaseCapture()
                     user32.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
+                    log(f"_start_windows_drag: hwnd={hwnd} 已发送 WM_NCLBUTTONDOWN/HTCAPTION")
                 except Exception as e:
                     log(f"_start_windows_drag error: {e}")
 

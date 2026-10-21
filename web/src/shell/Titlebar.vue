@@ -24,7 +24,15 @@ function dragStart(e) {
     // macOS 红绿灯区域留给原生按钮（与 launcher.py 灯位常数一致）
     if (state.desktop === 'mac' && e.clientX >= 1 && e.clientX <= 65 && e.clientY >= 14 && e.clientY <= 38) return;
     const a = pyApi();
-    if (a && typeof a.start_window_drag === 'function') { e.preventDefault(); try { a.start_window_drag(); } catch (err) {} }
+    if (a && typeof a.start_window_drag === 'function') {
+        e.preventDefault();
+        try { a.start_window_drag(); } catch (err) {}
+        // Electron 主进程靠定时器跟随光标，必须 mouseup 收尾，否则松手后窗口还会继续跟
+        if (typeof a.end_window_drag === 'function') {
+            const stop = () => { window.removeEventListener('mouseup', stop); try { a.end_window_drag(); } catch (err) {} };
+            window.addEventListener('mouseup', stop);
+        }
+    }
 }
 
 // Windows 无边框：WebView2 吞掉边框命中，用 8px 边缘条 + 拖动期遮罩 + js_api 桥缩放

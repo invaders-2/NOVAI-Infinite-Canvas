@@ -442,11 +442,19 @@ class VideoDispatchSourceTests(unittest.TestCase):
         self.assertIn("body[\"duration\"] = volcengine_video_duration(payload.duration, volc_model)", source)
 
     def test_apimart_seedance_body_uses_normalizers(self):
+        # 文档依据（docs.apimart.ai/cn/api-reference/videos/*）：24 个模型用 aspect_ratio、13 个用 size，
+        # duration 区间与分辨率字段各模型不同，所以 body 改为 apimart_video_body_params 表驱动；
+        # 断言保留「必须走归一化、不能直写」的口径，未知模型仍回落到旧的 size + resolution 归一化函数。
         source = self._source()
         self.assertIn("apimart_seedance_model = selected_model(payload.model, \"doubao-seedance-2.0\")", source)
-        self.assertIn("apimart_video_duration(payload.duration, apimart_seedance_model)", source)
-        self.assertIn("body.update(apimart_kling_video_params(apimart_seedance_model, payload.resolution))", source)
-        self.assertIn('body["resolution"] = apimart_video_resolution(payload.resolution)', source)
+        self.assertIn("video_params = apimart_video_body_params(", source)
+        self.assertIn('body[video_params["ratio_key"]] = video_params["ratio_value"]', source)
+        self.assertIn('body[video_params["resolution_key"]] = video_params["resolution_value"]', source)
+        self.assertIn("def apimart_video_body_params(", source)
+        self.assertIn("apimart_video_duration(duration, model)", source)
+        self.assertIn("apimart_video_size(ratio)", source)
+        self.assertIn("apimart_video_resolution(resolution)", source)
+        self.assertIn("apimart_kling_video_params(model, resolution)", source)
 
     def test_raw_resolution_paths_use_alias(self):
         source = self._source()

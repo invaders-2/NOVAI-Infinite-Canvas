@@ -64,7 +64,8 @@ function onScrim(e) { if (e.target === e.currentTarget) closeUpdateModal(); }
 </template>
 
 <style scoped>
-.scrim { position: fixed; inset: 0; z-index: 2500; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; padding: 24px; }
+/* 全屏 backdrop-filter 在 Electron/macOS 上会逐帧重采样下层（表现为闪烁），提独立合成层隔离；transform 不影响 flex 居中 */
+.scrim { position: fixed; inset: 0; z-index: 2500; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; padding: 24px; transform: translateZ(0); will-change: transform; isolation: isolate; }
 .um { width: min(560px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; border-radius: 20px; background: var(--solid); box-shadow: var(--shadow-dialog); overflow: hidden; }
 .um-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 24px 8px; }
 .um-h h3 { margin: 0; font: 500 17px/24px var(--font-sans); letter-spacing: -.01em; }

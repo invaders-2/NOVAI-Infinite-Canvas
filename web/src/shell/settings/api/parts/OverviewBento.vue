@@ -36,13 +36,20 @@ function step(dir) {
     store.setMaxConc(CONCURRENCY_STEPS[idx]);
 }
 
+const APIMART_BASE_CN = 'https://apib.ai';
+const APIMART_BASE_OFFICIAL = 'https://api.apimart.ai';
+function applyApimartBase(base) { S.form.base = base; }
+
 const idPreview = computed(() => {
     const p = it.value; if (!p) return '—';
     return BUILTIN_IDS.has(p.id) ? p.id : deriveIdFromName(S.form.name, p.id, S.providers);
 });
 const showMode = computed(() => !fl.value.imageModeLocked);
 const showProxy = computed(() => !fl.value.isCli);
-const isApimart = computed(() => String(S.form.base || (it.value && it.value.base_url) || '').toLowerCase().includes('apimart.ai'));
+const isApimart = computed(() => {
+    const base = String(S.form.base || (it.value && it.value.base_url) || '').toLowerCase();
+    return base.includes('apimart.ai') || base.includes('apib.ai');
+});
 const apimartHint = computed(() => isApimart.value && !!((it.value && it.value.has_key) || S.form.key.trim()));
 /* 平台专属面板（同事负责的组件）：显示条件与旧 renderEditor 一致 */
 const cliKind = computed(() => fl.value.isJimeng ? 'jimeng' : fl.value.isCodex ? 'codex' : fl.value.isGeminiCli ? 'gemini' : '');
@@ -102,7 +109,13 @@ watch(() => S.focusName, () => nextTick(() => { if (nameEl.value) nameEl.value.f
                 <span>{{ t('api.msGlobalEndpoint', '国外使用请求地址：') }}<code>https://api-inference.modelscope.ai/v1</code></span>
             </div>
             <div v-if="fl.isRh" class="hints"><span>国外地址：<code>https://www.runninghub.ai</code></span></div>
-            <div v-if="apimartHint" class="hints"><span>国内请求地址：<code>https://apib.ai</code></span></div>
+            <div v-if="apimartHint" class="hints">
+                <span>国内请求地址：<code>https://apib.ai</code></span>
+                <div class="bases">
+                    <button type="button" class="basebtn" @click="applyApimartBase(APIMART_BASE_CN)">用国内地址</button>
+                    <button type="button" class="basebtn" @click="applyApimartBase(APIMART_BASE_OFFICIAL)">用官方地址</button>
+                </div>
+            </div>
             <div class="idl">{{ t('api.platformIdShown', '平台 ID') }}：<code>{{ idPreview }}</code></div>
         </div>
 
@@ -195,6 +208,9 @@ watch(() => S.focusName, () => nextTick(() => { if (nameEl.value) nameEl.value.f
 .inp:disabled { color: var(--ink-3); background: var(--fill-1); cursor: not-allowed; }
 .inp::placeholder { color: var(--ink-4); }
 .hints { display: flex; flex-direction: column; gap: 2px; font: 400 11.5px/17px var(--font-sans); color: var(--ink-3); }
+.bases { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.basebtn { height: 24px; padding: 0 10px; border: 0; border-radius: 99px; background: var(--solid); font: 400 11px/1 var(--font-sans); color: var(--ink-2); cursor: pointer; transition: background 120ms, color 120ms; }
+.basebtn:hover { background: var(--fill-2); color: var(--ink); }
 code { font: 400 11px/1 var(--font-mono); color: var(--ink-2); }
 .idl { font: 400 11px/15px var(--font-sans); color: var(--ink-3); }
 .idl code { color: var(--ink); }

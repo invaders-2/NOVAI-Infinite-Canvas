@@ -1,5 +1,5 @@
 <script setup>
-// 模型列表：拉取模型 / 选择模型、拉取结果提示、分类页签（带滑块）+ 搜索、生图 / 聊天 / 视频三组，ModelScope 附 LoRA 管理
+// 模型列表：拉取模型 / 选择模型、拉取结果提示、分类页签（带滑块）+ 搜索、生图 / 聊天 / 视频 / 音频四组，ModelScope 附 LoRA 管理
 import { computed, inject, ref, watch, nextTick, onMounted } from 'vue';
 import AIcon from './AIcon.vue';
 import ModelBlock from './ModelBlock.vue';
@@ -17,11 +17,11 @@ const glide = useGlide(tabsEl, 'button');
 
 const counts = computed(() => {
     const p = it.value || {};
-    const c = { image: (p.image_models || []).length, chat: (p.chat_models || []).length, video: (p.video_models || []).length };
-    c.all = c.image + c.chat + c.video;
+    const c = { image: (p.image_models || []).length, chat: (p.chat_models || []).length, video: (p.video_models || []).length, audio: (p.audio_models || []).length };
+    c.all = c.image + c.chat + c.video + c.audio;
     return c;
 });
-const TABS = [{ k: 'all', label: '全部' }, { k: 'image', label: '图像' }, { k: 'chat', label: '对话' }, { k: 'video', label: '视频' }];
+const TABS = [{ k: 'all', label: '全部' }, { k: 'image', label: '图像' }, { k: 'chat', label: '对话' }, { k: 'video', label: '视频' }, { k: 'audio', label: '音频' }];
 const blocks = computed(() => MODEL_KINDS.filter(b => S.modelGroup === 'all' || S.modelGroup === b.kind));
 function pickTab(k) { S.modelGroup = k; }
 watch(() => [S.modelGroup, counts.value.all], () => nextTick(glide.refresh));
@@ -33,7 +33,7 @@ onMounted(() => nextTick(glide.refresh));
         <div class="tb">
             <div class="tt">
                 <b>{{ t('api.modelsTitle', '模型列表') }}</b>
-                <span>{{ t('api.modelsDesc', '从上游 API 自动拉取所有可用模型并按类型分类（image / chat / video）') }}</span>
+                <span>{{ t('api.modelsDesc', '从上游 API 自动拉取所有可用模型并按类型分类（image / chat / video / audio）') }}</span>
             </div>
             <div class="ta">
                 <button type="button" class="nv-btn sm primary" :disabled="fl.isLovart || S.fetching" :title="fl.isLovart ? 'Lovart 使用内置工具清单，不支持拉取模型' : ''" @click="store.fetchModels()">

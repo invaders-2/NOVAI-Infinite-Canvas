@@ -16,12 +16,12 @@
     <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.132.1789606971"></script>
     <script src="/static/vendor/js/lucide-subset.js?v=1.0.132.1789606971"></script>
     <script src="/static/js/shared/icons.js?v=1.0.132.1792330467"></script>
-    <script src="/static/js/theme.js?v=1.0.132.1789606971"></script>
+    <script src="/static/js/theme.js?v=1.0.132.1792474521"></script>
     <script src="/static/js/shared/utils.js?v=1.0.132.1790560477"></script>
     <script src="/static/js/shared/morph-button.js?v=1.0.132.1789845865"></script>
     <script src="/static/js/i18n.js?v=1.0.132.1790130330"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=1.0.132.1790560477">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=1.0.132.1792165887">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=1.0.132.1792547253">
 
 <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.132.1789606971">
 <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.132.1790560477">
@@ -1280,7 +1280,7 @@ html.settings-embed body:not(#settings-embed-scope) .content-head { position: st
 input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
 .ios-slider, .toggle-track { transition: all 0.2s cubic-bezier(0.22,0.61,0.36,1); }
 </style>
-<link rel="stylesheet" href="/static/css/api-settings-v2.css?v=1.0.132.1791729997">
+<link rel="stylesheet" href="/static/css/api-settings-v2.css?v=1.0.132.1792546412">
 </head>
 <body>
     <div class="page">
@@ -1441,6 +1441,10 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                 </div>
                                 <div class="apimart-hint">
                                     <span class="ms-line">国内请求地址：<span class="inline-code">https://apib.ai</span></span>
+                                    <span class="apimart-base-switch">
+                                        <button class="api-undo-btn" type="button" onclick="applyApimartBase('https://apib.ai')">用国内地址</button>
+                                        <button class="api-undo-btn" type="button" onclick="applyApimartBase('https://api.apimart.ai')">用官方地址</button>
+                                    </span>
                                 </div>
                             </label>
                         </div>
@@ -1632,7 +1636,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                         <div class="models-toolbar-main">
                             <div>
                                 <div class="block-title" data-i18n="api.modelsTitle">模型列表</div>
-                                <div class="block-desc" data-i18n="api.modelsDesc">从上游 API 自动拉取所有可用模型并按类型分类（image / chat / video）</div>
+                                <div class="block-desc" data-i18n="api.modelsDesc">从上游 API 自动拉取所有可用模型并按类型分类（image / chat / video / audio）</div>
                             </div>
                             <div class="models-toolbar-actions">
                                 <button id="fetchModelsBtn" class="action-btn primary-btn" type="button" onclick="fetchModels()">
@@ -1651,6 +1655,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                 <button class="model-cat-tab" data-cat="image" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('image')">图像 <span class="cat-count" id="catCountImage">0</span></button>
                                 <button class="model-cat-tab" data-cat="chat" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('chat')">对话 <span class="cat-count" id="catCountChat">0</span></button>
                                 <button class="model-cat-tab" data-cat="video" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('video')">视频 <span class="cat-count" id="catCountVideo">0</span></button>
+                                <button class="model-cat-tab" data-cat="audio" role="tab" aria-selected="false" type="button" onclick="selectModelGroup('audio')">音频 <span class="cat-count" id="catCountAudio">0</span></button>
                             </div>
                             <label class="field-frame model-search-frame" title="按模型 ID 或显示名筛选">
                                 <i data-lucide="search" class="w-3.5 h-3.5"></i>
@@ -1693,6 +1698,17 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                                 <button class="ghost-btn" type="button" onclick="addModel('video')"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span data-i18n="api.model">模型</span></button>
                             </div>
                             <div id="videoModelList" class="model-list"></div>
+                        </section>
+
+                        <section class="block" id="audioModelBlock">
+                            <div class="block-head">
+                                <div>
+                                    <div class="block-title" data-i18n="api.audioModels">音频模型</div>
+                                    <div class="block-desc" data-i18n="api.audioHint">画布音频节点使用（Suno / FlowMusic）</div>
+                                </div>
+                                <button class="ghost-btn" type="button" onclick="addModel('audio')"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span data-i18n="api.model">模型</span></button>
+                            </div>
+                            <div id="audioModelList" class="model-list"></div>
                         </section>
 
                         <section id="msLoraBlock" class="block ms-lora-block">
@@ -1801,6 +1817,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                     <button class="picker-cat-tab" data-cat="image" onclick="selectPickerCat('image')">生图 <span class="cat-count">0</span></button>
                     <button class="picker-cat-tab" data-cat="chat" onclick="selectPickerCat('chat')">LLM <span class="cat-count">0</span></button>
                     <button class="picker-cat-tab" data-cat="video" onclick="selectPickerCat('video')">视频 <span class="cat-count">0</span></button>
+                    <button class="picker-cat-tab" data-cat="audio" onclick="selectPickerCat('audio')">音频 <span class="cat-count">0</span></button>
                 </div>
             </div>
             <div id="pickerList" class="picker-body"></div>
@@ -1809,6 +1826,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
                 <span id="sumImage" class="picker-sum-chip picker-sum-chip-empty">生图 0</span>
                 <span id="sumChat" class="picker-sum-chip picker-sum-chip-empty">聊天 0</span>
                 <span id="sumVideo" class="picker-sum-chip picker-sum-chip-empty">视频 0</span>
+                <span id="sumAudio" class="picker-sum-chip picker-sum-chip-empty">音频 0</span>
                 <span id="sumUnsel" style="margin-left:auto;color:var(--faint)">未选 0</span>
             </div>
             <div class="picker-foot">
@@ -1939,7 +1957,7 @@ input[type="checkbox"].toggle-switch { transition: all 0.2s cubic-bezier(0.22,0.
         </div>
     </div>
 
-    <script src="/static/js/api-settings.js?v=1.0.132.1792224476"></script>
+    <script src="/static/js/api-settings.js?v=1.0.132.1792546302"></script>
     <script>
         // 保存类按钮多为动态渲染（推荐卡片/新手引导/RH 编辑器），渲染后需要重扫
         (function () {

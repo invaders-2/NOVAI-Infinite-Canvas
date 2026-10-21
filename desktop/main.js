@@ -6,7 +6,7 @@
 //  4. 退出时确保结束后端进程，避免残留占用端口
 //  5. iframe 子页面注入迷你桥（postMessage 转发），前端零改动获得完整桌面能力
 
-const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu } = require('electron');
+const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
@@ -2026,6 +2026,8 @@ function registerIpc() {
         mainWindow.hide();
         break;
       case 'quit': isQuitting = true; app.quit(); break;
+      case 'start-drag': startWindowDrag(); break;
+      case 'end-drag': stopWindowDrag(); break;
       default: break;
     }
     return true;
@@ -2284,10 +2286,39 @@ function installWebviewSecurityPolicy() {
   });
 }
 
+// ---------- 窗口拖动（Windows 自绘标题栏兜底） ----------
+// 自绘标题栏的 -webkit-app-region: drag 在部分 Windows 环境下不生效，
+// 前端 mousedown 同时会桥到这里按光标差量挪窗口，保证标题栏一定拖得动。
+let dragTimer = null;
+let dragAnchor = null;
+function stopWindowDrag() {
+  if (dragTimer) { clearInterval(dragTimer); dragTimer = null; }
+  dragAnchor = null;
+}
+function startWindowDrag() {
+  stopWindowDrag();
+  // mac/linux 有原生标题栏且 app-region 可用，保持原有行为不接管拖动
+  if (process.platform !== 'win32') return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  // 最大化时窗口位置由系统摆放，跟随会抖飞，直接忽略本次拖动
+  if (mainWindow.isMaximized()) { clog('win', '最大化状态下忽略标题栏拖动'); return; }
+  const point = screen.getCursorScreenPoint();
+  const [winX, winY] = mainWindow.getPosition();
+  dragAnchor = { mouseX: point.x, mouseY: point.y, winX: winX, winY: winY };
+  dragTimer = setInterval(() => {
+    if (!dragAnchor || !mainWindow || mainWindow.isDestroyed()) { stopWindowDrag(); return; }
+    const cur = screen.getCursorScreenPoint();
+    mainWindow.setPosition(
+      Math.round(dragAnchor.winX + cur.x - dragAnchor.mouseX),
+      Math.round(dragAnchor.winY + cur.y - dragAnchor.mouseY)
+    );
+  }, 16);
+}
+
 // ---------- 窗口 ----------
 function createWindow(url) {
   clog('win', '创建窗口，加载 ' + url);
-  const useFrameless = process.platform === 'win32';
+  const isWindows = process.platform === 'win32';
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -2296,8 +2327,9 @@ function createWindow(url) {
     title: 'NOVAI — 无限画布',
     backgroundColor: '#0f1115',
     autoHideMenuBar: true,
-    frame: !useFrameless,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    // Windows 自绘标题栏走官方路径：titleBarStyle 'hidden' 下 -webkit-app-region: drag 才可靠，
+    // 且不画系统标题栏（frame:false 在部分 Windows 环境下 drag 区域会失效）。
+    titleBarStyle: isWindows ? 'hidden' : (process.platform === 'darwin' ? 'hiddenInset' : 'default'),
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -2335,6 +2367,8 @@ function createWindow(url) {
 
   mainWindow.on('show', () => clog('win', '窗口已显示'));
   mainWindow.on('hide', () => clog('win', '窗口已隐藏'));
+  mainWindow.on('blur', stopWindowDrag);
+  mainWindow.on('maximize', stopWindowDrag);
 
   mainWindow.webContents.setWindowOpenHandler(({ url: target }) => {
     if (target && target.startsWith('http')) shell.openExternal(target);

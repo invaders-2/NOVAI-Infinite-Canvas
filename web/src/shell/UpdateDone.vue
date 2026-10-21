@@ -32,7 +32,8 @@ const title = computed(() => (updDone.version ? '已更新到 ' + versionLabel(u
 </template>
 
 <style scoped>
-.scrim { position: fixed; inset: 0; z-index: 2500; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; padding: 24px; }
+/* 全屏 backdrop-filter 在 Electron/macOS 上会逐帧重采样下层（表现为闪烁），提独立合成层隔离；transform 不影响 flex 居中 */
+.scrim { position: fixed; inset: 0; z-index: 2500; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; padding: 24px; transform: translateZ(0); will-change: transform; isolation: isolate; }
 .ud { width: min(520px, 100%); max-height: calc(100vh - 48px); display: flex; flex-direction: column; border-radius: 20px; background: var(--solid); box-shadow: var(--shadow-dialog); overflow: hidden; }
 .ud-h { display: flex; align-items: center; gap: 14px; padding: 24px 24px 6px; }
 .mark { width: 36px; height: 36px; border-radius: 50%; background: var(--fill-1); display: flex; align-items: center; justify-content: center; flex: none; }

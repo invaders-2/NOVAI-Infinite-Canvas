@@ -130,7 +130,7 @@ html body:not(#_v2a):not(#_v2b) #modelsHead #openPickerBtn { background: var(--v
 html body:not(#_v2a):not(#_v2b) #modelsHead #openPickerBtn:disabled { color: var(--text-3, var(--faint)) !important; }
 html body:not(#_v2a):not(#_v2b) #modelsHead .model-cat-tabs { background: var(--v2-soft) !important; }
 html body:not(#_v2a):not(#_v2b) #modelsHead .model-search-frame { background: var(--surface, #fff) !important; border-radius: 13px !important; }
-html body:not(#_v2a):not(#_v2b) #modelGrid.model-grid { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 12px !important; margin: -14px 0 0 !important; padding: 0 18px 18px !important; border-radius: 0 0 22px 22px !important; background: var(--v2-tile) !important; }
+html body:not(#_v2a):not(#_v2b) #modelGrid.model-grid { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 12px !important; margin: -14px 0 0 !important; padding: 0 18px 18px !important; border-radius: 0 0 22px 22px !important; background: var(--v2-tile) !important; }
 html body:not(#_v2a):not(#_v2b) #modelGrid.model-grid.single-cat { grid-template-columns: minmax(0, 1fr) !important; }
 html body:not(#_v2a):not(#_v2b) #modelGrid > .block { flex-direction: column !important; gap: 10px !important; min-width: 0 !important; margin: 0 !important; padding: 14px !important; border-radius: 18px !important; background: var(--surface, #fff) !important; box-shadow: none !important; }
 html body:not(#_v2a):not(#_v2b) #modelGrid > .ms-lora-block { grid-column: 1 / -1 !important; }
