@@ -103,8 +103,34 @@ class ApimartImageBranchSourceTests(unittest.TestCase):
         self.assertIn('startswith(("http://", "https://"))', APIMART_IMAGE_BRANCH)
         self.assertIn('body["image_urls"] = official_urls', APIMART_IMAGE_BRANCH)
 
-    def test_extension_channel_keeps_data_uri(self):
-        self.assertIn("reference_to_data_url(ref, max_size=1536)", APIMART_IMAGE_BRANCH)
+    def test_extension_channel_skips_upload_when_data_uri_fits(self):
+        self.assertIn("await apimart_image_reference_inputs(", APIMART_IMAGE_BRANCH)
+        helper = function_source(MAIN_SOURCE, "apimart_image_reference_inputs")
+        self.assertIn("reference_to_data_url(ref, max_size=1536)", helper)
+        self.assertIn("apimart_json_body_bytes(body, direct) <= APIMART_JSON_BODY_BUDGET", helper)
+        self.assertLess(helper.index("apimart_json_body_bytes"), helper.index("upload_image_for_apimart"))
+
+    def test_extension_channel_compresses_then_uploads_and_falls_back(self):
+        helper = function_source(MAIN_SOURCE, "apimart_image_reference_inputs")
+        self.assertIn("apimart_reference_data_urls(refs, body)", helper)
+        self.assertIn("upload_image_for_apimart(client, provider, url)", helper)
+        self.assertIn("return compressed", helper)
+        fallback = function_source(MAIN_SOURCE, "apimart_reference_data_urls")
+        self.assertIn("apimart_reference_fallback_data_url(ref, max_size, quality)", fallback)
+        self.assertIn("APIMART_JSON_BODY_BUDGET", fallback)
+        single = function_source(MAIN_SOURCE, "apimart_reference_fallback_data_url")
+        self.assertIn("reference_to_jpeg_data_url(ref, max_size, quality)", single)
+        self.assertIn('reference_to_data_url({"url": source})', single)
+
+    def test_gateway_rejecting_remote_urls_retries_with_data_uri(self):
+        self.assertIn("apimart_image_url_rejected(response.text)", APIMART_IMAGE_BRANCH)
+        self.assertIn("apimart_reference_data_urls(image_refs[:ONLINE_IMAGE_REFERENCE_MAX], body)",
+                      APIMART_IMAGE_BRANCH)
+        self.assertEqual(APIMART_IMAGE_BRANCH.count("/v1/images/generations"), 0)
+        self.assertEqual(
+            APIMART_IMAGE_BRANCH.count(
+                "lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)"),
+            2)
 
 
 class ApimartMidjourneyBaseSourceTests(unittest.TestCase):

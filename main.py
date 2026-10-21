@@ -1302,6 +1302,8 @@ VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "4000"))
 LLM_MESSAGE_MAX_LENGTH = int(os.getenv("LLM_MESSAGE_MAX_LENGTH", "20000"))
 CHAT_ATTACHMENT_MAX = int(os.getenv("CHAT_ATTACHMENT_MAX", "20"))
 ONLINE_IMAGE_REFERENCE_MAX = int(os.getenv("ONLINE_IMAGE_REFERENCE_MAX", "20"))
+# apib.ai 这类中转站的 nginx 只放行 1MB 请求体，留 100KB 余量给 prompt/模型名和 JSON 结构
+APIMART_JSON_BODY_BUDGET = int(os.getenv("APIMART_JSON_BODY_BUDGET", str(900 * 1024)))
 
 FIELD_LABELS = {
     "prompt": "提示词",
@@ -10117,6 +10119,89 @@ def reference_to_data_url(ref, max_size=None):
         encoded = base64.b64encode(f.read()).decode("ascii")
     return f"data:{content_type_for_path(path)};base64,{encoded}"
 
+def reference_to_jpeg_data_url(ref, max_size, quality=88):
+    """把参考图按最长边/质量压成 JPEG data URL；APIMart 网关限 1MB 请求体，RGBA 存 PNG 会比 JPEG 大数倍。"""
+    url = str(ref.get("url", "") if isinstance(ref, dict) else ref or "")
+    path = output_file_from_url(url)
+    if not path:
+        return url if url.startswith(("data:", "http://", "https://", "asset://")) else ""
+    try:
+        with Image.open(path) as img:
+            img.load()
+            if max(img.size) > max_size:
+                img.thumbnail((max_size, max_size), Image.LANCZOS)
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                base = img.convert("RGBA")
+                background = Image.new("RGB", base.size, (255, 255, 255))
+                background.paste(base, mask=base.split()[-1])
+                target = background
+            else:
+                target = img.convert("RGB")
+            buf = BytesIO()
+            target.save(buf, format="JPEG", quality=quality, optimize=True)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        print(f"APIMart 参考图压缩失败 {url}: {e}")
+        return ""
+
+def apimart_fallback_compression_ladder(count):
+    """按参考图张数决定起始清晰度，再逐级降尺寸/质量，供回退 data URL 使用。"""
+    start = 1536 if count <= 1 else 1280 if count <= 3 else 1024 if count <= 5 else 768
+    ladder = []
+    size = start
+    quality = 88
+    while True:
+        ladder.append((size, quality))
+        if size <= 320:
+            return ladder
+        size = max(320, int(size * 0.8))
+        quality = max(45, quality - 8)
+
+def apimart_json_body_bytes(body, image_urls):
+    """精确量出真正要发出去的 JSON 体积（APIMart 网关按字节限流，不是按图片张数）。"""
+    candidate = dict(body, image_urls=image_urls)
+    return len(json.dumps(candidate, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+def apimart_reference_fallback_data_url(ref, max_size, quality):
+    """单张参考图的压缩结果；压不动时退回原图而不是丢弃，保证 prompt 里「图N」编号不错位。"""
+    url = reference_to_jpeg_data_url(ref, max_size, quality)
+    if url:
+        return url
+    source = str(ref.get("url", "") if isinstance(ref, dict) else ref or "").strip()
+    if output_file_from_url(source):
+        raw = ""
+        try:
+            raw = reference_to_data_url({"url": source})
+        except Exception as e:
+            print(f"APIMart 参考图读取失败：{invalid_video_image_preview(source)} {e}")
+        if raw.startswith("data:image/"):
+            print(f"APIMart 参考图压不成 JPEG，改用原图 data URL（体积可能超出预算）：{invalid_video_image_preview(source)}")
+            return raw
+    if source.startswith(("data:image/", "http://", "https://", "asset://")):
+        return source
+    raise HTTPException(
+        status_code=400,
+        detail=f"参考图读取失败，无法送达上游：{invalid_video_image_preview(source) or '空地址'}。请重新选择参考图后重试。",
+    )
+
+def apimart_reference_data_urls(refs, body, budget_bytes=None):
+    """把参考图压成 data URL，逐级压缩直到整个 JSON 请求体低于预算；张数与顺序与 refs 一致。"""
+    budget = APIMART_JSON_BODY_BUDGET if budget_bytes is None else budget_bytes
+    urls = []
+    for max_size, quality in apimart_fallback_compression_ladder(len(refs)):
+        urls = [apimart_reference_fallback_data_url(ref, max_size, quality) for ref in refs]
+        total = apimart_json_body_bytes(body, urls)
+        if total <= budget:
+            print(f"APIMart 参考图回退压缩：{len(urls)} 张，max_size={max_size} quality={quality}，请求体 {total} 字节")
+            return urls
+    print(f"APIMart 参考图回退压缩：{len(urls)} 张压到最小仍超过预算 {budget} 字节，按最小档发送")
+    return urls
+
+def apimart_image_url_rejected(text):
+    """上游 4xx/5xx 里点名 url/download/fetch/image，多半是它取不到我们给的外部图片 URL。"""
+    lower_text = str(text or "").lower()
+    return any(token in lower_text for token in ("url", "download", "fetch", "image"))
+
 def is_image_reference(ref):
     if not isinstance(ref, dict):
         return False
@@ -10377,6 +10462,22 @@ def volcengine_media_reference_url(value, max_image_size=1536):
     if value.startswith("/output/") or value.startswith("/assets/"):
         return reference_to_data_url({"url": value}, max_size=max_image_size)
     return value
+
+async def volcengine_audio_reference_url(value, max_image_size=None):
+    """火山参考音频：优先云端上传换公网链接（与参考视频同一通道），上传失败再回退内联 data URL。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith(("http://", "https://", "asset://")):
+        return text
+    try:
+        uploaded = await upload_local_video_to_cloud(text)
+        url = str((uploaded or {}).get("url") or "").strip()
+        if url.startswith(("http://", "https://")):
+            return url
+    except Exception as e:
+        print(f"火山参考音频云上传失败，回退 data URL：{e}")
+    return volcengine_media_reference_url(text, max_image_size=max_image_size)
 
 def looks_like_image_media_url(value: str) -> bool:
     text = str(value or "").strip().lower()
@@ -11316,9 +11417,46 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
             return f"ERR:上传异常 {e}"
     return "ERR:不支持的图片来源（仅支持 http/https/asset/data 或本地 /output/ /assets/ 路径）"
 
+async def apimart_image_reference_inputs(client, provider, refs, body):
+    """直发 data URL 放得下就走原路径、不上传；超预算时先压小再上传压缩图，换公网 URL 保住多图画质。"""
+    direct = [reference_to_data_url(ref, max_size=1536) for ref in refs]
+    if apimart_json_body_bytes(body, direct) <= APIMART_JSON_BODY_BUDGET:
+        return direct
+    compressed = apimart_reference_data_urls(refs, body)
+    uploaded = []
+    for url in compressed:
+        try:
+            up_url = await upload_image_for_apimart(client, provider, url)
+        except Exception as e:
+            print(f"APIMart 参考图上传异常，改用压缩 data URL：{invalid_video_image_preview(url)} {e}")
+            return compressed
+        if not str(up_url or "").strip().lower().startswith(("http://", "https://")):
+            print(f"APIMart 参考图上传不可用，改用压缩 data URL：{invalid_video_image_preview(url)} {up_url}")
+            return compressed
+        uploaded.append(up_url)
+    return uploaded
+
+async def apimart_cloud_media_fallback(ref_url: str, reason: str) -> str:
+    """APIMart 没有可用的音视频上传端点时，退回公开网盘换 http(s) 链接。"""
+    try:
+        uploaded = await upload_local_video_to_cloud(ref_url)
+    except HTTPException as exc:
+        print(f"APIMart 参考素材云上传失败：{exc.detail}")
+        return (f"ERR:APIMart 上传入口不可用（{reason}），云上传也失败：{exc.detail}。"
+                "请检查网络后重试，或配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL 把本地素材暴露成公网地址。")
+    except Exception as exc:
+        print(f"APIMart 参考素材云上传异常：{exc}")
+        return (f"ERR:APIMart 上传入口不可用（{reason}），云上传异常：{exc}。"
+                "请检查网络后重试，或配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL 把本地素材暴露成公网地址。")
+    url = str((uploaded or {}).get("url") or "").strip()
+    if valid_apimart_video_image_input(url):
+        return url
+    return (f"ERR:APIMart 上传入口不可用（{reason}），云上传未返回可用的公网链接。"
+            "请检查网络后重试，或配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL。")
+
 async def upload_video_for_apimart(client, provider, ref_url: str) -> str:
     """尽力把本地参考视频转换为 APIMart 可接受的 http/https 或 asset:// URL。
-    文档只公开了图片上传；如果视频上传端点不可用，会回退到 PUBLIC_BASE_URL 方案。"""
+    文档只公开了图片上传；上传端点不可用时回退云端网盘换公网链接，再退回 PUBLIC_BASE_URL 方案。"""
     ref_url = str(ref_url or "").strip()
     if not ref_url:
         return "ERR:空地址"
@@ -11336,7 +11474,7 @@ async def upload_video_for_apimart(client, provider, ref_url: str) -> str:
     if not ct.startswith("video/"):
         return "ERR:参考视频不是可识别的视频文件"
     if str(os.getenv("APIMART_TRY_VIDEO_UPLOAD") or "").strip().lower() not in {"1", "true", "yes", "on"}:
-        return f"ERR:{apimart_video_reference_error(ref_url)}"
+        return await apimart_cloud_media_fallback(ref_url, "APIMART_TRY_VIDEO_UPLOAD 未开启")
     base_url = video_api_root(provider)
     filename, content, content_type = apimart_upload_raw_file_payload(path)
     upload_paths = ("/v1/uploads/videos", "/v1/uploads/files", "/v1/uploads/images")
@@ -11359,12 +11497,12 @@ async def upload_video_for_apimart(client, provider, ref_url: str) -> str:
         except Exception as e:
             last_error = f"{upload_path} 异常：{e}"
             print(f"APIMart 视频上传异常: {last_error}")
-    return f"ERR:APIMart 未提供可用的视频文件上传入口（{last_error}）。请配置 PUBLIC_BASE_URL，或使用公网 http/https / asset:// 视频地址。"
+    return await apimart_cloud_media_fallback(ref_url, last_error or "上传端点返回 404")
 
 async def upload_audio_for_apimart(client, provider, ref_url: str) -> str:
     """把本地参考音频转换为 APIMart 可接受的 http/https 或 asset:// URL。
-    优先用公网地址（PUBLIC_BASE_URL），否则尝试上传到 APIMart 文件端点。
-    返回值以 "ERR:" 开头表示失败原因。"""
+    优先用公网地址（PUBLIC_BASE_URL），否则尝试上传到 APIMart 文件端点；
+    端点不可用时回退云端网盘（temp.sh）换链接。返回值以 "ERR:" 开头表示失败原因。"""
     ref_url = str(ref_url or "").strip()
     if not ref_url:
         return "ERR:空地址"
@@ -11412,7 +11550,9 @@ async def upload_audio_for_apimart(client, provider, ref_url: str) -> str:
             last_error = f"{upload_path} 返回 {resp.status_code}: {resp.text[:200]}"
         except Exception as exc:
             last_error = f"{upload_path} 异常：{exc}"
-    return f"ERR:APIMart 未提供可用的音频文件上传入口（{last_error}）。请配置 PUBLIC_BASE_URL，或使用公网 http/https / asset:// 音频地址。"
+    if ref_url.startswith(("/output/", "/assets/")):
+        return await apimart_cloud_media_fallback(ref_url, last_error or "上传端点返回 404")
+    return f"ERR:APIMart 未提供可用的音频文件上传入口（{last_error}）。请使用公网 http/https / asset:// 音频地址。"
 
 async def upload_media_for_apimart(client, provider, ref_url: str, kind: str) -> str:
     """按 kind 分派到对应的 APIMart 上传器，拿回上游可用的 http/https/asset:// URL。"""
@@ -11641,20 +11781,20 @@ def volcengine_public_asset_url(url: str) -> str:
         return public
     return "ERR:火山要求素材是公网可访问的 http/https URL；本地画布文件需配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL 暴露为公网地址。"
 
-def local_media_path_for_cloud_upload(ref_url: str, allowed_prefixes=("image/", "video/")) -> str:
+def local_media_path_for_cloud_upload(ref_url: str, allowed_prefixes=("image/", "video/", "audio/")) -> str:
     ref_url = str(ref_url or "").strip()
     if not ref_url:
         raise HTTPException(status_code=400, detail="没有可上传的媒体文件")
     if ref_url.startswith("http://") or ref_url.startswith("https://"):
         return ""
     if not (ref_url.startswith("/output/") or ref_url.startswith("/assets/")):
-        raise HTTPException(status_code=400, detail="云端上传只支持画布里的本地图片或视频文件")
+        raise HTTPException(status_code=400, detail="云端上传只支持画布里的本地图片、视频或音频文件")
     path = output_file_from_url(ref_url)
     if not path:
         raise HTTPException(status_code=404, detail="本地媒体文件不存在或已被删除")
     ct = content_type_for_path(path)
     if not any(ct.startswith(prefix) for prefix in allowed_prefixes):
-        raise HTTPException(status_code=400, detail="请选择图片或视频文件再上传云端")
+        raise HTTPException(status_code=400, detail="请选择图片、视频或音频文件再上传云端")
     max_bytes = int(os.getenv("TEMP_SH_MAX_BYTES", str(4 * 1024 * 1024 * 1024)))
     size = os.path.getsize(path)
     if size > max_bytes:
@@ -11704,20 +11844,103 @@ async def upload_video_to_temp_sh(path: str, source_url: str) -> Dict[str, str]:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Temp.sh 上传异常：{exc}") from exc
 
+async def upload_video_to_uguu(path: str, source_url: str) -> Dict[str, str]:
+    """uguu.se：POST multipart（字段名 files[]）直接回纯文本直链，GET 拿到的就是文件字节。
+    实测 mp3/mp4 都是 200 + 正确 Content-Type + 原始大小，约保留 3 小时。"""
+    upload_url = os.getenv("UGUU_UPLOAD_URL", "https://uguu.se/upload.php?output=text").strip() or "https://uguu.se/upload.php?output=text"
+    ct = content_type_for_path(path)
+    try:
+        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=httpx.Timeout(connect=20.0, read=600.0, write=600.0, pool=20.0), follow_redirects=True) as client:
+            with open(path, "rb") as fh:
+                files = {"files[]": (os.path.basename(path), fh, ct)}
+                response = await client.post(upload_url, files=files)
+        if not response.is_success:
+            raise HTTPException(status_code=response.status_code, detail=f"uguu 上传失败：{response.text[:300]}")
+        lines = response.text.strip().splitlines()
+        direct_url = lines[0].strip() if lines else ""
+        if not re.match(r"^https?://", direct_url, re.I):
+            raise HTTPException(status_code=502, detail=f"uguu 返回了无法识别的链接：{response.text[:300]}")
+        return {"url": direct_url, "source": source_url, "name": os.path.basename(path),
+                "expires": os.getenv("UGUU_EXPIRES", "3h"), "service": "uguu"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"uguu 上传异常：{exc}") from exc
+
+# 只读前几 KB 就够判断「这是文件还是 HTML 查看页」，不必把整个视频拉下来
+CLOUD_MEDIA_VERIFY_READ_BYTES = int(os.getenv("CLOUD_MEDIA_VERIFY_READ_BYTES", str(16 * 1024)))
+
+async def verify_cloud_media_direct_url(url: str) -> Dict[str, Any]:
+    """真发一次 GET，确认这个链接能直接读到文件：状态 200、Content-Type 不含 text/html、实际字节 > 0。
+
+    temp.sh 的链接 GET 只回 HTML 查看页（POST 才回文件字节），上游按 GET 下载必然失败，
+    所以「上传成功」必须以此校验为准，通不过就换下一个通道。"""
+    check: Dict[str, Any] = {"ok": False, "status": 0, "content_type": "", "bytes": 0, "reason": ""}
+    if not str(url or "").strip():
+        check["reason"] = "上传通道没有返回链接"
+        return check
+    head = b""
+    try:
+        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=httpx.Timeout(connect=20.0, read=120.0, write=60.0, pool=20.0), follow_redirects=True) as client:
+            async with client.stream("GET", str(url)) as response:
+                check["status"] = response.status_code
+                check["content_type"] = str(response.headers.get("content-type") or "")
+                if response.status_code == 200:
+                    async for chunk in response.aiter_bytes():
+                        if not chunk:
+                            continue
+                        head += chunk
+                        if len(head) >= CLOUD_MEDIA_VERIFY_READ_BYTES:
+                            break
+    except Exception as exc:
+        check["reason"] = f"GET 请求异常：{exc}"
+        return check
+    check["bytes"] = len(head)
+    if check["status"] != 200:
+        check["reason"] = f"GET 返回 HTTP {check['status']}"
+    elif "text/html" in check["content_type"].lower():
+        check["reason"] = f"GET 返回的是 HTML 查看页（Content-Type: {check['content_type'] or '空'}）"
+    elif looks_like_html_response(head.decode("utf-8", "ignore")):
+        check["reason"] = "GET 返回的正文是 HTML 页面"
+    elif check["bytes"] <= 0:
+        check["reason"] = "GET 读到 0 字节"
+    else:
+        check["ok"] = True
+    return check
+
+async def upload_cloud_media_verified(label: str, uploader, path: str, source_url: str) -> Dict[str, str]:
+    """跑一个通道的上传，再对它给的链接做真实 GET 直读校验；不过关就抛错让上层换通道。"""
+    uploaded = await uploader(path, source_url)
+    check = await verify_cloud_media_direct_url(str(uploaded.get("url") or ""))
+    print(f"云端上传 {label}：{uploaded.get('url')} → GET {check['status']} {check['content_type'] or '空'} {check['bytes']} 字节"
+          + ("" if check["ok"] else f"，校验失败：{check['reason']}"))
+    if not check["ok"]:
+        raise HTTPException(status_code=502, detail=f"{label} 上传后 GET 直读校验失败：{check['reason']}（{uploaded.get('url')}）")
+    return uploaded
+
 async def upload_local_video_to_cloud(ref_url: str, service: str = "auto") -> Dict[str, str]:
     ref_url = str(ref_url or "").strip()
     if ref_url.startswith("http://") or ref_url.startswith("https://"):
         return {"url": ref_url, "source": ref_url, "service": "existing"}
     path = local_media_path_for_cloud_upload(ref_url)
-    service = str(service or os.getenv("CLOUD_VIDEO_UPLOAD_SERVICE", "auto") or "auto").strip().lower()
+    service = str(service or "auto").strip().lower()
+    if service in {"", "auto"}:
+        service = str(os.getenv("CLOUD_MEDIA_UPLOAD_SERVICE") or os.getenv("CLOUD_VIDEO_UPLOAD_SERVICE") or "auto").strip().lower()
+    if service in {"uguu", "uguu.se"}:
+        return await upload_cloud_media_verified("uguu", upload_video_to_uguu, path, ref_url)
     if service in {"litterbox", "catbox"}:
-        return await upload_video_to_litterbox(path, ref_url)
+        return await upload_cloud_media_verified("Litterbox", upload_video_to_litterbox, path, ref_url)
     if service in {"temp", "temp.sh", "tempsh"}:
-        return await upload_video_to_temp_sh(path, ref_url)
+        return await upload_cloud_media_verified("Temp.sh", upload_video_to_temp_sh, path, ref_url)
+    channels = [("uguu", upload_video_to_uguu, "uguu")]
+    if not content_type_for_path(path).startswith("audio/"):
+        # 音频不放 Litterbox：实测它不收音频（412），别浪费一次必然失败的请求
+        channels.append(("litterbox", upload_video_to_litterbox, "Litterbox"))
+    channels.append(("temp.sh", upload_video_to_temp_sh, "Temp.sh"))
     errors = []
-    for name, func in (("litterbox", upload_video_to_litterbox), ("temp.sh", upload_video_to_temp_sh)):
+    for name, func, label in channels:
         try:
-            return await func(path, ref_url)
+            return await upload_cloud_media_verified(label, func, path, ref_url)
         except HTTPException as exc:
             errors.append(f"{name}: {exc.detail}")
     raise HTTPException(status_code=502, detail="云端上传失败：" + "；".join(errors))
@@ -12666,6 +12889,12 @@ def friendly_upstream_common_error(text):
 def friendly_image_error_detail(text, size="", model=""):
     text = str(text or "")
     lower_text = text.lower()
+    if re.search(r"\b413\b", lower_text) or "payload too large" in lower_text or "entity too large" in lower_text:
+        return ("上游平台拒收了这次请求：参考图太多或太大，超过了它单个请求 1MB 的体积上限（413）。"
+                "这是上游网关的限制，不是本机出错。请减少参考图数量，或换更小的参考图后重试。")
+    if looks_like_html_response(text):
+        return ("上游返回的是网关的 HTML 错误页，不是生图接口的正常响应（常见于中转站网关临时故障或请求被拦）。"
+                "请稍后重试；若反复出现，减少参考图数量或换更小的参考图。")
     if is_gpt_image_2_model(model) and gpt_image_2_size_exceeds_supported(size):
         return gpt_image_2_size_error_message(size)
     mentions_size = any(token in lower_text for token in ["size", "resolution", "dimension"])
@@ -14966,6 +15195,7 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
             # 官方渠道文档明确写「使用官方渠道时不能使用 official_fallback」，且参考图只收公网 URL
             if not apimart_official:
                 body["official_fallback"] = False
+            apimart_remote_inputs = False
             if image_refs:
                 if apimart_official:
                     official_urls = []
@@ -14980,11 +15210,22 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
                         official_urls.append(up_url)
                     body["image_urls"] = official_urls
                 else:
-                    body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+                    apimart_inputs = await apimart_image_reference_inputs(
+                        client, provider, image_refs[:ONLINE_IMAGE_REFERENCE_MAX], body)
+                    body["image_urls"] = apimart_inputs
+                    apimart_remote_inputs = bool(apimart_inputs) and all(
+                        str(url).startswith(("http://", "https://")) for url in apimart_inputs)
             response = await with_connect_retries(
                 lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body),
                 context=retry_context,
             )
+            if apimart_remote_inputs and response.status_code >= 400 and apimart_image_url_rejected(response.text):
+                print(f"APIMart 中转站可能取不到外部图片 URL（{response.status_code}），改用压缩 data URL 重试一次：{response.text[:200]}")
+                body["image_urls"] = apimart_reference_data_urls(image_refs[:ONLINE_IMAGE_REFERENCE_MAX], body)
+                response = await with_connect_retries(
+                    lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body),
+                    context=retry_context,
+                )
         elif is_gpt2 and not image_refs and not mask_refs:
             body = {"model": model, "prompt": prompt, "size": size}
             if quality:
@@ -15624,6 +15865,75 @@ async def upload_image(files: List[UploadFile] = File(...)):
 
     return {"files": uploaded_files}
 
+UPLOAD_IMAGE_HARD_MAX_BYTES = 200 * 1024 * 1024
+UPLOAD_OTHER_MAX_BYTES = 50 * 1024 * 1024
+# 超过这个体积的图片先压小再存：画布无损改图会把整张合成图传上来，直接卡 50MB 用户只会看到「图片出不来」
+UPLOAD_IMAGE_COMPRESS_TARGET_BYTES = 50 * 1024 * 1024
+UPLOAD_IMAGE_SHRINK_SIDES = (8192, 6144, 4096, 2048)
+
+def upload_size_mb(size_bytes) -> str:
+    return f"{float(size_bytes) / 1024.0 / 1024.0:.1f}MB"
+
+def encode_upload_image_bytes(img, image_format: str) -> bytes:
+    """JPEG 没有透明通道，压平到白底再编码（和参考图转 JPEG 的处理一致），避免透明区域变黑。"""
+    buf = BytesIO()
+    if image_format == "JPEG":
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            base = img.convert("RGBA")
+            background = Image.new("RGB", base.size, (255, 255, 255))
+            background.paste(base, mask=base.split()[-1])
+            target = background
+        else:
+            target = img.convert("RGB")
+        target.save(buf, format="JPEG", quality=92, optimize=True)
+    else:
+        target = img if img.mode in ("1", "L", "LA", "P", "RGB", "RGBA") else img.convert("RGBA")
+        target.save(buf, format="PNG")
+    return buf.getvalue()
+
+def compress_oversized_image(content: bytes, ext: str, target_bytes: int) -> Tuple[bytes, str, Dict[str, Any]]:
+    """把超过 target_bytes 的图片压到目标以内：先保尺寸转 JPEG q92；带透明先试 PNG（不丢透明），
+    PNG 放不下再按 8192/6144/4096/2048 缩最长边（且 JPEG 兜底）。压到最小仍超限就抛 413 说明实际体积。"""
+    original_bytes = len(content)
+    original_dim = (0, 0)
+    smallest = original_bytes
+    smallest_dim = original_dim
+    try:
+        with Image.open(BytesIO(content)) as img:
+            img.load()
+            img = ImageOps.exif_transpose(img) if hasattr(ImageOps, "exif_transpose") else img
+            original_dim = img.size
+            smallest_dim = original_dim
+            has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+            formats = ["PNG", "JPEG"] if has_alpha else ["JPEG"]
+            for image_format in formats:
+                for max_side in (0, *UPLOAD_IMAGE_SHRINK_SIDES):
+                    frame = img
+                    if max_side and max(img.size) > max_side:
+                        frame = img.copy()
+                        frame.thumbnail((max_side, max_side), Image.LANCZOS)
+                    data = encode_upload_image_bytes(frame, image_format)
+                    if len(data) < smallest:
+                        smallest = len(data)
+                        smallest_dim = frame.size
+                    if len(data) <= target_bytes:
+                        return data, (".png" if image_format == "PNG" else ".jpg"), {
+                            "before": original_bytes, "after": len(data),
+                            "from_size": original_dim, "to_size": frame.size,
+                            "format": image_format,
+                        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=413, detail=(
+            f"图片压缩失败（{exc}）。请先在本地把原图缩小到 50MB 以内"
+            "（建议长边不超过 6144 像素、存为 JPEG）再上传。")) from exc
+    raise HTTPException(status_code=413, detail=(
+        f"原图 {upload_size_mb(original_bytes)}（{original_dim[0]}x{original_dim[1]}），"
+        f"压缩后仍有 {upload_size_mb(smallest)}（{smallest_dim[0]}x{smallest_dim[1]}），"
+        f"仍超过单文件 {upload_size_mb(target_bytes)} 上限，无法上传。请先把原图缩小"
+        "（建议长边不超过 6144 像素，或另存为 JPEG）后重试。"))
+
 @app.post("/api/ai/upload")
 async def upload_ai_reference(files: List[UploadFile] = File(...)):
     uploaded = []
@@ -15631,13 +15941,10 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
     video_exts = {".mp4", ".webm", ".mov", ".m4v", ".flv"}
     audio_exts = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
     doc_exts = {".pdf", ".txt", ".md", ".markdown", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".json", ".zip", ".yaml", ".yml", ".log"}
-    max_upload_bytes = 50 * 1024 * 1024
     for file in files:
         content = await file.read()
         if not content:
             continue
-        if len(content) > max_upload_bytes:
-            raise HTTPException(status_code=413, detail=f"{file.filename or '文件'} 超过 50MB，无法上传")
         ext = os.path.splitext(file.filename or "")[1].lower()
         content_type = (file.content_type or "").lower()
         kind = "image"
@@ -15661,6 +15968,21 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
             kind = "file"
             if not ext:
                 ext = ".bin"
+        display_name = file.filename or "文件"
+        if kind == "image":
+            if len(content) > UPLOAD_IMAGE_HARD_MAX_BYTES:
+                raise HTTPException(status_code=413, detail=(
+                    f"{display_name} 有 {upload_size_mb(len(content))}，超过图片单文件 "
+                    f"{upload_size_mb(UPLOAD_IMAGE_HARD_MAX_BYTES)} 上限，无法上传。"
+                    "请先缩小原图（建议长边不超过 6144 像素，或另存为 JPEG）后重试。"))
+            if len(content) > UPLOAD_IMAGE_COMPRESS_TARGET_BYTES:
+                original_bytes = len(content)
+                content, ext, info = compress_oversized_image(content, ext, UPLOAD_IMAGE_COMPRESS_TARGET_BYTES)
+                print(f"上传图片 {display_name} 超过 {upload_size_mb(UPLOAD_IMAGE_COMPRESS_TARGET_BYTES)}，已压缩："
+                      f"{upload_size_mb(original_bytes)} → {upload_size_mb(len(content))}，"
+                      f"{info['from_size'][0]}x{info['from_size'][1]} → {info['to_size'][0]}x{info['to_size'][1]}，{info['format']}")
+        elif len(content) > UPLOAD_OTHER_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=f"{display_name} 超过 50MB，无法上传")
         filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
         # 内容哈希去重：同一张图重复上传只保留一份物理文件（命中优先硬链，否则复用已有 URL）
         url = store_uploaded_bytes(content, filename, "input", file.filename or filename)
@@ -22442,7 +22764,7 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                                 status_code=400,
                                 detail=f"参考音频时长 {duration:.2f} 秒超出范围：方舟 Seedance 参考音频要求在 1.8 ~ 15.2 秒之间，请裁剪后再插入。"
                             )
-                        audio_url = volcengine_media_reference_url(url, max_image_size=None)
+                        audio_url = await volcengine_audio_reference_url(url, max_image_size=None)
                         if not audio_url:
                             continue
                         body["content"].append({

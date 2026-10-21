@@ -4,7 +4,11 @@
 main 的真实函数。断言口径来自官方文档：
   * 官方渠道（模型名以 -official 结尾，含别名 nano-banana-pro）参考图必须先 POST /v1/uploads/images
     换成公网 http(s) URL 再放进 image_urls，且不能携带 official_fallback；
-  * 扩展渠道参考图直接 base64 data URI，可携带 official_fallback=false；
+  * 扩展渠道参考图能直接塞进 900KB JSON 时不碰 /v1/uploads/images（与旧行为一致）；
+    塞不下才先压成小 JPEG、再逐张 POST /v1/uploads/images 换公网 URL，上传任一张失败则整体
+    回退到压缩 base64 data URI，整个 JSON 请求体必须低于上游 1MB 网关限制；
+  * 扩展渠道允许 official_fallback=false；用 URL 发图后上游 4xx 且抱怨 url/image 时改用压缩
+    data URI 重试一次；
   * Midjourney 提交/查询主机跟随 provider.base_url，不再固定 api.apimart.ai。
 """
 import asyncio
@@ -16,6 +20,7 @@ import tempfile
 import threading
 import unittest
 import zlib
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import sys
@@ -29,6 +34,10 @@ TASK_VIDEO = "task_mock_video"
 TASK_AUDIO = "task_mock_audio"
 MP4_BYTES = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 32
 MP3_BYTES = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\x00" * 32
+REAL_REF_NAMES = (
+    "ai_ref_e65b943fab3f.jpg", "ai_ref_213dab10a028.jpg", "ai_ref_aa2b54d457db.jpg",
+    "ai_ref_8d80f2bc741f.jpg", "ai_ref_cf80171a80d0.jpg",
+)
 
 
 def _png_8x8():
@@ -73,8 +82,10 @@ class _MockHandler(BaseHTTPRequestHandler):
                 "method": self.command,
                 "path": self.path.split("?", 1)[0],
                 "host": self.headers.get("Host") or "",
+                "bytes": len(body),
                 "body": parsed,
             })
+        return parsed
 
     def _send(self, status, payload=None, raw=None, content_type="application/json"):
         data = raw if raw is not None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -86,11 +97,20 @@ class _MockHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
-        self._record(self._read_body())
+        entry = self._record(self._read_body())
         if path == "/v1/uploads/images":
+            status = int(getattr(self.server, "upload_status", 200) or 200)
+            if status != 200:
+                self._send(status, {"error": "mock upload failure"})
+                return
             self._send(200, {"url": self._base() + "/files/uploaded.png", "filename": "uploaded.png",
                              "content_type": "image/png", "bytes": 123, "created_at": 1893456000})
         elif path == "/v1/images/generations":
+            urls = ((entry or {}).get("image_urls") or []) if isinstance(entry, dict) else []
+            rejects_remote = getattr(self.server, "reject_remote_image_urls", False)
+            if rejects_remote and any(str(url).startswith(("http://", "https://")) for url in urls):
+                self._send(400, {"error": "failed to download image url: image unavailable"})
+                return
             self._send(200, {"code": 200, "data": [{"status": "submitted", "task_id": TASK_IMAGE}]})
         elif path == "/v1/midjourney/generations":
             self._send(200, {"code": 200, "data": {"task_id": TASK_MIDJOURNEY, "status": "SUBMITTED"}})
@@ -146,9 +166,19 @@ class ApimartMockUpstreamTests(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="novai-apimart-mock-")
         cls.assets = os.path.join(cls.tmp, "assets")
         cls.output_dir = os.path.join(cls.assets, "output")
+        cls.input_dir = os.path.join(cls.assets, "input")
         os.makedirs(cls.output_dir, exist_ok=True)
+        os.makedirs(cls.input_dir, exist_ok=True)
         with open(os.path.join(cls.output_dir, "ref.png"), "wb") as f:
             f.write(_png_8x8())
+        cls.real_refs = []
+        for name in REAL_REF_NAMES:
+            src = os.path.join(os.path.expanduser("~/NOVAI/assets/input"), name)
+            if not os.path.isfile(src):
+                cls.real_refs = []
+                break
+            shutil.copyfile(src, os.path.join(cls.input_dir, name))
+            cls.real_refs.append("/assets/input/" + name)
         provider_file = os.path.join(cls.tmp, "api_providers.json")
         with open(provider_file, "w", encoding="utf-8") as f:
             json.dump([{
@@ -197,6 +227,8 @@ class ApimartMockUpstreamTests(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def setUp(self):
+        self.server.upload_status = 200
+        self.server.reject_remote_image_urls = False
         with self.server.log_lock:
             self.server.requests.clear()
 
@@ -209,14 +241,20 @@ class ApimartMockUpstreamTests(unittest.TestCase):
         self.assertTrue(url.startswith("/assets/output/"), url)
         self.assertTrue(os.path.isfile(os.path.join(self.output_dir, url.split("/assets/output/", 1)[1])), url)
 
-    def generate_image(self, model):
+    def generate_image(self, model, refs=None):
+        refs = [{"url": "/assets/output/ref.png", "kind": "image"}] if refs is None else refs
+
         async def run():
             image_data, _raw = await main._generate_ai_image_unlimited(
                 prompt="mock", size="1024x1024", quality="", model=model,
-                reference_images=[{"url": "/assets/output/ref.png", "kind": "image"}],
-                provider_id=self.provider_id)
+                reference_images=refs, provider_id=self.provider_id)
             return image_data, await main.save_ai_image_to_output(image_data, prefix="mock_")
         return asyncio.run(run())
+
+    def real_reference_refs(self):
+        if len(self.real_refs) != 5:
+            self.skipTest("缺少 ~/NOVAI/assets/input 下的 5 张真实参考图，跳过真实体积验证")
+        return [{"url": url, "kind": "image"} for url in self.real_refs]
 
     def test_official_channel_uploads_reference_before_generating(self):
         image_data, local_url = self.generate_image("gpt-image-2-official")
@@ -237,17 +275,147 @@ class ApimartMockUpstreamTests(unittest.TestCase):
         self.assertGreaterEqual(sum(1 for item in entries if item["path"] == "/v1/tasks/" + TASK_IMAGE), 1)
         self.assert_local_output(local_url)
 
-    def test_extension_channel_keeps_base64_and_official_fallback(self):
+    def test_extension_channel_small_request_skips_upload(self):
         _image_data, local_url = self.generate_image("gpt-image-2")
         entries = self.requests()
         self.assertFalse([item for item in entries if item["path"] == "/v1/uploads/images"], entries)
-        generates = [item for item in entries if item["method"] == "POST" and item["path"] == "/v1/images/generations"]
+        generates = [index for index, item in enumerate(entries)
+                     if item["method"] == "POST" and item["path"] == "/v1/images/generations"]
         self.assertEqual(len(generates), 1, entries)
-        body = generates[0]["body"]
+        entry = entries[generates[0]]
+        body = entry["body"]
         self.assertIs(body.get("official_fallback"), False)
         urls = body.get("image_urls") or []
-        self.assertTrue(urls and all(str(url).startswith("data:image/") for url in urls), urls)
+        self.assertEqual(len(urls), 1, urls)
+        self.assertTrue(str(urls[0]).startswith("data:image/"), str(urls[0])[:48])
+        self.assertLessEqual(entry["bytes"], main.APIMART_JSON_BODY_BUDGET, entry["bytes"])
         self.assert_local_output(local_url)
+
+    def test_reference_to_jpeg_data_url_flattens_rgba(self):
+        url = main.reference_to_jpeg_data_url({"url": "/assets/output/ref.png"}, 512, 88)
+        self.assertTrue(str(url).startswith("data:image/jpeg;base64,"), str(url)[:48])
+        self.assertLess(len(url), 4096, len(url))
+
+    def test_extension_channel_uploads_five_real_references_under_1mb(self):
+        refs = self.real_reference_refs()
+        _image_data, local_url = self.generate_image("gemini-3-pro-image-preview", refs=refs)
+        entries = self.requests()
+        uploads = [index for index, item in enumerate(entries)
+                   if item["method"] == "POST" and item["path"] == "/v1/uploads/images"]
+        generates = [index for index, item in enumerate(entries)
+                     if item["method"] == "POST" and item["path"] == "/v1/images/generations"]
+        self.assertEqual(len(uploads), 5, entries[:4])
+        self.assertEqual(len(generates), 1, entries[-3:])
+        entry = entries[generates[0]]
+        urls = entry["body"].get("image_urls") or []
+        self.assertEqual(len(urls), 5, urls)
+        self.assertTrue(all(str(url).startswith(("http://", "https://")) for url in urls), urls)
+        self.assertFalse(any("base64" in str(url) for url in urls), urls)
+        self.assertLess(entry["bytes"], 1024 * 1024, entry["bytes"])
+        upload_bytes = [entries[index]["bytes"] for index in uploads]
+        self.assertTrue(all(size < 1024 * 1024 for size in upload_bytes), upload_bytes)
+        print("\n[上传成功] 5 张真实参考图：每张 multipart %s 字节，images 请求体 %d 字节"
+              % (upload_bytes, entry["bytes"]))
+        self.assert_local_output(local_url)
+
+    def test_extension_channel_falls_back_to_compressed_data_urls_under_1mb(self):
+        refs = self.real_reference_refs()
+        self.server.upload_status = 500
+        _image_data, local_url = self.generate_image("gemini-3-pro-image-preview", refs=refs)
+        entries = self.requests()
+        uploads = [item for item in entries if item["method"] == "POST" and item["path"] == "/v1/uploads/images"]
+        generates = [index for index, item in enumerate(entries)
+                     if item["method"] == "POST" and item["path"] == "/v1/images/generations"]
+        self.assertGreaterEqual(len(uploads), 1, "参考图应先尝试上传")
+        self.assertEqual(len(generates), 1, entries[-3:])
+        self.assertLess(entries.index(uploads[0]), generates[0], "先尝试上传，失败后才回退")
+        self.assertLess(uploads[0]["bytes"], 1024 * 1024, uploads[0]["bytes"])
+        entry = entries[generates[0]]
+        urls = entry["body"].get("image_urls") or []
+        self.assertEqual(len(urls), 5, urls)
+        self.assertTrue(all(str(url).startswith("data:image/jpeg;base64,") for url in urls),
+                        [str(url)[:32] for url in urls])
+        self.assertLess(entry["bytes"], 1024 * 1024, entry["bytes"])
+        self.assertLessEqual(entry["bytes"], main.APIMART_JSON_BODY_BUDGET, entry["bytes"])
+        decoded = [len(url.split(";base64,", 1)[1]) * 3 // 4 for url in urls]
+        print("\n[回退压缩] 5 张真实参考图：每张 JPEG %s 字节，data URL 合计 %d 字节，images 请求体 %d 字节"
+              % (decoded, sum(len(url) for url in urls), entry["bytes"]))
+        self.assert_local_output(local_url)
+
+    def test_extension_channel_retries_data_urls_when_remote_urls_rejected(self):
+        refs = self.real_reference_refs()
+        self.server.reject_remote_image_urls = True
+        _image_data, local_url = self.generate_image("gemini-3-pro-image-preview", refs=refs)
+        entries = self.requests()
+        uploads = [item for item in entries if item["method"] == "POST" and item["path"] == "/v1/uploads/images"]
+        generates = [index for index, item in enumerate(entries)
+                     if item["method"] == "POST" and item["path"] == "/v1/images/generations"]
+        self.assertEqual(len(uploads), 5, entries[:6])
+        self.assertEqual(len(generates), 2, entries[-3:])
+        first_urls = entries[generates[0]]["body"].get("image_urls") or []
+        self.assertTrue(all(str(url).startswith(("http://", "https://")) for url in first_urls), first_urls)
+        entry = entries[generates[1]]
+        urls = entry["body"].get("image_urls") or []
+        self.assertEqual(len(urls), 5, urls)
+        self.assertTrue(all(str(url).startswith("data:image/jpeg;base64,") for url in urls),
+                        [str(url)[:32] for url in urls])
+        self.assertLessEqual(entry["bytes"], main.APIMART_JSON_BODY_BUDGET, entry["bytes"])
+        self.assert_local_output(local_url)
+
+    def test_compression_failure_keeps_reference_order(self):
+        refs = [{"url": "/assets/output/ref.png", "kind": "image"},
+                {"url": self.real_reference_refs()[1]["url"], "kind": "image"},
+                {"url": "/assets/output/ref.png", "kind": "image"}]
+        original = main.reference_to_jpeg_data_url
+        broken = refs[1]["url"]
+
+        def fake(ref, max_size, quality=88):
+            if ref.get("url") == broken:
+                return ""
+            return original(ref, max_size, quality)
+
+        with mock.patch.object(main, "reference_to_jpeg_data_url", fake), \
+                mock.patch.object(main, "apimart_fallback_compression_ladder", lambda count: [(512, 80)]):
+            urls = main.apimart_reference_data_urls(refs, {"model": "m", "prompt": "p"})
+        self.assertEqual(len(urls), 3)
+        self.assertTrue(urls[0].startswith("data:image/jpeg;base64,"), urls[0][:32])
+        self.assertTrue(urls[1].startswith("data:image/jpeg;base64,"), urls[1][:32])
+        self.assertGreater(len(urls[1]), 1_000_000, "压缩失败的那张必须退回原图而不是被丢掉")
+        self.assertTrue(urls[2].startswith("data:image/jpeg;base64,"), urls[2][:32])
+        self.assertGreater(main.apimart_json_body_bytes({"model": "m", "prompt": "p"}, urls),
+                           main.APIMART_JSON_BODY_BUDGET)
+
+    def test_unreadable_reference_raises_clear_error(self):
+        with mock.patch.object(main, "apimart_fallback_compression_ladder", lambda count: [(512, 80)]):
+            with self.assertRaises(main.HTTPException) as caught:
+                main.apimart_reference_data_urls([{"url": "/assets/output/missing.png"}], {"prompt": "p"})
+        self.assertIn("参考图读取失败", caught.exception.detail)
+
+    def test_image_url_rejected_matches_gateway_complaints(self):
+        self.assertTrue(main.apimart_image_url_rejected("failed to download image url"))
+        self.assertTrue(main.apimart_image_url_rejected("Invalid image_url: fetch error"))
+        self.assertFalse(main.apimart_image_url_rejected("rate limit exceeded"))
+
+    def test_friendly_error_for_nginx_413_html(self):
+        html = ("<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n"
+                "<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n"
+                "</body>\r\n</html>\r\n")
+        detail = main.friendly_image_error_detail(html, "1312x2048", "gemini-3-pro-image-preview")
+        self.assertIn("1MB", detail)
+        self.assertIn("参考图", detail)
+        self.assertIn("不是本机", detail)
+        self.assertNotIn("<html", detail)
+        self.assertNotIn("Request Entity Too Large", detail)
+        plain = main.friendly_image_error_detail("413 Payload Too Large", "1312x2048", "gemini-3-pro-image-preview")
+        self.assertIn("1MB", plain)
+
+    def test_friendly_error_for_generic_gateway_html(self):
+        detail = main.friendly_image_error_detail(
+            "<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>")
+        self.assertTrue(detail)
+        self.assertIn("网关", detail)
+        self.assertNotIn("<", detail)
+        self.assertNotIn("Bad Gateway", detail)
 
     def test_midjourney_follows_provider_base_url(self):
         provider = main.get_api_provider(self.provider_id)

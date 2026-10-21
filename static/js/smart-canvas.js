@@ -26068,11 +26068,34 @@ function resizeCropFromDrag(dx, dy){
     cropState.w = Math.round(next.w);
     cropState.h = Math.round(next.h);
 }
+/* 后端 413/400 一般带 detail（中文说明）；响应不是 JSON 时至少把 HTTP 状态带出来，别只报「上传失败」 */
+function aiUploadErrorDetail(payload, status){
+    const raw = payload && typeof payload === 'object'
+        ? (payload.detail !== undefined ? payload.detail : (payload.error !== undefined ? payload.error : payload.message))
+        : null;
+    let text = '';
+    if(typeof raw === 'string') text = raw.trim();
+    else if(raw && typeof raw === 'object'){
+        try { text = JSON.stringify(raw); } catch(e) { text = ''; }
+    }
+    if(!text) text = status ? ('HTTP ' + status) : '响应无法解析';
+    return text;
+}
+let lastAiUploadError = '';
 async function uploadCroppedBlob(blob, name){
+    lastAiUploadError = '';
     const form = new FormData();
     form.append('files', blob, name);
-    const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r => r.json());
-    return data.files?.[0];
+    const response = await fetch('/api/ai/upload', {method:'POST', body:form});
+    let data = null;
+    try { data = await response.json(); } catch(e) { data = null; }
+    const file = (data && Array.isArray(data.files)) ? data.files[0] : null;
+    if(!response.ok || !file){
+        lastAiUploadError = aiUploadErrorDetail(data, response.status);
+        console.error('上传图片失败：', name, response.status, lastAiUploadError);
+        return undefined;
+    }
+    return file;
 }
 async function uploadImageBlobs(blobs){
     const form = new FormData();
@@ -35350,6 +35373,102 @@ function losslessEditRequestResult(timeoutMs=15000){
         if(!losslessEditPost('request-result')) finish(reject, new Error('无损改图面板还没准备好'));
     });
 }
+/* ── 无损改图上传前的体积/尺寸保护 ──
+   合成图动辄几十上百 MB，直接 POST 会被后端体积上限挡掉（413），用户只看到「图片出不来」。
+   这里先降到 45MB 以内再传，并避开浏览器 canvas 的画布上限。 */
+const LOSSLESS_EDIT_MAX_UPLOAD_BYTES = 45 * 1024 * 1024;
+const CANVAS_MAX_SIDE = 16384;
+const CANVAS_MAX_PIXELS = 260000000;
+/* 单边 >16384 或面积 >2.6 亿像素时 canvas.toBlob 会直接回 null，先等比降采样 */
+function fitWithinCanvasLimits(width, height){
+    const w = Math.round(Number(width) || 0);
+    const h = Math.round(Number(height) || 0);
+    if(!(w > 0) || !(h > 0)) return {width:0, height:0, scale:1};
+    const scale = Math.min(1, CANVAS_MAX_SIDE / Math.max(w, h), Math.sqrt(CANVAS_MAX_PIXELS / (w * h)));
+    if(!(scale < 1)) return {width:w, height:h, scale:1};
+    /* 向下取整：round 会把面积顶出上限一点点，toBlob 仍可能回 null */
+    return {width:Math.max(1, Math.floor(w * scale)), height:Math.max(1, Math.floor(h * scale)), scale:scale};
+}
+function scaleToMaxSide(width, height, maxSide){
+    const w = Math.max(1, Math.round(Number(width) || 0));
+    const h = Math.max(1, Math.round(Number(height) || 0));
+    if(!maxSide || Math.max(w, h) <= maxSide) return {width:w, height:h};
+    const scale = maxSide / Math.max(w, h);
+    return {width:Math.max(1, Math.round(w * scale)), height:Math.max(1, Math.round(h * scale))};
+}
+/* 有透明先留 PNG（不丢透明），压不下来再用白底 JPEG；无透明直接保尺寸转 JPEG q95 */
+function losslessEditCompressSteps(hasAlpha){
+    const sides = [8192, 6144, 4096, 3072, 2048];
+    const steps = [];
+    if(hasAlpha){
+        [0].concat(sides).forEach(maxSide => steps.push({format:'image/png', maxSide:maxSide}));
+        [0].concat(sides).forEach(maxSide => steps.push({format:'image/jpeg', quality:0.95, maxSide:maxSide, flatten:true}));
+    } else {
+        [0].concat(sides).forEach(maxSide => steps.push({format:'image/jpeg', quality:0.95, maxSide:maxSide}));
+    }
+    return steps;
+}
+/* objectURL 要等 canvas 编码完再释放：有些浏览器在 load 之后就 revoke 会让 drawImage 画不出来 */
+function losslessEditLoadImage(blob){
+    return new Promise(resolve => {
+        if(typeof Image === 'undefined' || typeof URL === 'undefined' || !URL.createObjectURL){ resolve({img:null, release:() => {}}); return; }
+        const url = URL.createObjectURL(blob);
+        const release = () => { try { URL.revokeObjectURL(url); } catch(e) {} };
+        const img = new Image();
+        img.onload = () => resolve({img:img, release:release});
+        img.onerror = () => resolve({img:null, release:release});
+        img.src = url;
+    });
+}
+/* 只看一张 64px 缩略图的 alpha：漏判时 JPEG 走白底压平，和后端压缩的处理一致 */
+function losslessEditBlobHasAlpha(img, width, height){
+    const w = Math.max(1, Math.min(64, Math.round(width)));
+    const h = Math.max(1, Math.min(64, Math.round(height * (w / Math.max(1, width)))));
+    const canvasEl = document.createElement('canvas');
+    canvasEl.width = w; canvasEl.height = h;
+    const ctx = canvasEl.getContext('2d', {willReadFrequently:true});
+    if(!ctx) return false;
+    try {
+        ctx.drawImage(img, 0, 0, w, h);
+        const data = ctx.getImageData(0, 0, w, h).data;
+        for(let i = 3; i < data.length; i += 4) if(data[i] < 255) return true;
+    } catch(e) { return false; }
+    return false;
+}
+function losslessEditDrawToBlob(img, width, height, step){
+    const canvasEl = document.createElement('canvas');
+    canvasEl.width = width; canvasEl.height = height;
+    const ctx = canvasEl.getContext('2d');
+    if(!ctx) return Promise.resolve(null);
+    if(step.flatten){ ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height); }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, width, height);
+    return new Promise(resolve => canvasEl.toBlob(resolve, step.format, step.quality));
+}
+/* 按阶梯重编码，第一份 <= maxBytes 的即采用；全都压不下来返回 null（交回原图，由后端压缩兜底） */
+async function losslessEditCompressBlob(blob, name, maxBytes){
+    const loaded = await losslessEditLoadImage(blob);
+    const img = loaded.img;
+    if(!img || !img.naturalWidth || !img.naturalHeight){ loaded.release(); return null; }
+    try {
+        const limit = fitWithinCanvasLimits(img.naturalWidth, img.naturalHeight);
+        const hasAlpha = losslessEditBlobHasAlpha(img, limit.width, limit.height);
+        const base = String(name || 'image').replace(/\.[^.]+$/, '');
+        for(const step of losslessEditCompressSteps(hasAlpha)){
+            const size = step.maxSide ? scaleToMaxSide(limit.width, limit.height, step.maxSide) : limit;
+            const out = await losslessEditDrawToBlob(img, size.width, size.height, step);
+            if(!out || !out.size) continue;
+            if(out.size <= maxBytes){
+                return {blob:out, name:base + (step.format === 'image/jpeg' ? '.jpg' : '.png'),
+                        width:size.width, height:size.height, format:step.format};
+            }
+        }
+        return null;
+    } finally {
+        loaded.release();
+    }
+}
 async function applyLosslessEdit(){
     const {node, image} = currentEditImage();
     if(!node) return;
@@ -35361,10 +35480,24 @@ async function applyLosslessEdit(){
         const blob = losslessEditDataUrlToBlob(result.dataUrl);
         if(!blob) throw new Error('工具没有回传有效的图片');
         const base = safeExportFileName((downloadNameForMediaItem(image, 'image') || image?.name || 'image').replace(/\.[^.]+$/, ''), 'image');
-        const file = await window.losslessEdit.upload(blob, base + '_lossless.png');
-        if(!file) throw new Error('图片上传失败，未能生成无损改图节点');
+        let uploadBlob = blob;
+        let uploadName = base + '_lossless.png';
+        let compressedNote = '';
+        if(blob.size > LOSSLESS_EDIT_MAX_UPLOAD_BYTES){
+            const compressed = await losslessEditCompressBlob(blob, uploadName, LOSSLESS_EDIT_MAX_UPLOAD_BYTES);
+            if(compressed && compressed.blob && compressed.blob.size <= LOSSLESS_EDIT_MAX_UPLOAD_BYTES){
+                uploadBlob = compressed.blob;
+                uploadName = compressed.name;
+                compressedNote = '原图较大，已自动压缩后应用';
+            }
+        }
+        const file = await window.losslessEdit.upload(uploadBlob, uploadName);
+        if(!file) throw new Error(lastAiUploadError
+            ? ('图片上传失败：' + lastAiUploadError)
+            : '图片上传失败，未能生成无损改图节点');
         await window.losslessEdit.addResult(file, false, {kind:'image', natural_w:Number(result.width) || 0, natural_h:Number(result.height) || 0});
         window.losslessEdit.finish();
+        if(compressedNote) toast(compressedNote);
     } catch(err) {
         /* 用户已经离开这个模式/关掉弹窗时不必再报错，其余失败一律出声 */
         if(imageEditMode === 'lossless' && imageEditModal.classList.contains('open')){
