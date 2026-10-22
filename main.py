@@ -10116,8 +10116,43 @@ def reference_to_data_url(ref, max_size=None):
         except Exception as e:
             print(f"reference resize failed, fallback to raw: {e}")
     with open(path, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode("ascii")
-    return f"data:{content_type_for_path(path)};base64,{encoded}"
+        raw = f.read()
+    mime = content_type_for_path(path)
+    if mime.startswith(("image/", "video/", "audio/")):
+        encoded = base64.b64encode(raw).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
+    # .heic/.avif/.tif 这类扩展名 content_type_for_path 只给 application/octet-stream，
+    # 这种 data URL 上游一律拒收；按真实字节再让 Pillow 认一次，认不出返回空串让调用方兜底
+    jpeg = image_bytes_to_jpeg_data_url(raw, max_size)
+    if jpeg:
+        return jpeg
+    print(f"参考图不是可识别的图片，返回空地址：{str(path)[:120]}")
+    return ""
+
+def pil_image_to_jpeg_data_url(img, max_size=None, quality=88):
+    """PIL 图像压成 JPEG data URL；透明区域铺白，避免上游把 RGBA 存成超大 PNG。"""
+    img.load()
+    if max_size and max(img.size) > max_size:
+        img.thumbnail((max_size, max_size), Image.LANCZOS)
+    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+        base = img.convert("RGBA")
+        background = Image.new("RGB", base.size, (255, 255, 255))
+        background.paste(base, mask=base.split()[-1])
+        target = background
+    else:
+        target = img.convert("RGB")
+    buf = BytesIO()
+    target.save(buf, format="JPEG", quality=quality, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+def image_bytes_to_jpeg_data_url(data, max_size=1536, quality=88):
+    """内存里的图片字节 → JPEG data URL；Pillow 认不出（非图片/损坏/缺解码器）返回空串。"""
+    try:
+        with Image.open(BytesIO(data)) as img:
+            return pil_image_to_jpeg_data_url(img, max_size, quality)
+    except Exception as e:
+        print(f"参考图字节无法按图片解码：{e}")
+        return ""
 
 def reference_to_jpeg_data_url(ref, max_size, quality=88):
     """把参考图按最长边/质量压成 JPEG data URL；APIMart 网关限 1MB 请求体，RGBA 存 PNG 会比 JPEG 大数倍。"""
@@ -10127,19 +10162,7 @@ def reference_to_jpeg_data_url(ref, max_size, quality=88):
         return url if url.startswith(("data:", "http://", "https://", "asset://")) else ""
     try:
         with Image.open(path) as img:
-            img.load()
-            if max(img.size) > max_size:
-                img.thumbnail((max_size, max_size), Image.LANCZOS)
-            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-                base = img.convert("RGBA")
-                background = Image.new("RGB", base.size, (255, 255, 255))
-                background.paste(base, mask=base.split()[-1])
-                target = background
-            else:
-                target = img.convert("RGB")
-            buf = BytesIO()
-            target.save(buf, format="JPEG", quality=quality, optimize=True)
-        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+            return pil_image_to_jpeg_data_url(img, max_size, quality)
     except Exception as e:
         print(f"APIMart 参考图压缩失败 {url}: {e}")
         return ""
@@ -10196,6 +10219,84 @@ def apimart_reference_data_urls(refs, body, budget_bytes=None):
             return urls
     print(f"APIMart 参考图回退压缩：{len(urls)} 张压到最小仍超过预算 {budget} 字节，按最小档发送")
     return urls
+
+APIMART_IMAGE_URL_PREVIEW_CHARS = 60
+
+def apimart_image_url_valid(value):
+    """上游 image_urls 只认公网 http(s) 或 image base64 data URI。"""
+    text = str(value or "").strip()
+    return text.startswith(("http://", "https://", "data:image/"))
+
+def apimart_image_url_preview(value, limit=APIMART_IMAGE_URL_PREVIEW_CHARS):
+    text = str(value or "")
+    if text.startswith("data:"):
+        return (text.split(";base64,", 1)[0] + ";base64,...")[:limit]
+    return text[:limit] or "空地址"
+
+def apimart_local_reference_url(*values):
+    for value in values:
+        text = str(value or "").strip()
+        if text.startswith(("/output/", "/assets/")) and output_file_from_url(text):
+            return text
+    return ""
+
+def apimart_data_url_to_jpeg(value, max_size=1536, quality=88):
+    """data: 但 mime 不是 image/* 时按字节转 JPEG；缺 base64 段或解码失败返回空串。"""
+    text = str(value or "").strip()
+    if ";base64," not in text:
+        return ""
+    try:
+        raw = base64.b64decode(text.split(";base64,", 1)[1])
+    except Exception as e:
+        print(f"APIMart 参考图 data URL 解码失败：{e}")
+        return ""
+    return image_bytes_to_jpeg_data_url(raw, max_size, quality)
+
+def sanitize_apimart_image_urls(image_urls, refs=None):
+    """发送前统一收口：把本地路径 / data:非图片 / 其它非法值转成上游认的 data:image，
+    转不出来直接 400 不出网。refs 与 image_urls 按同一顺序一一对应（调用方已同样截断）。"""
+    refs = refs or []
+    values = list(image_urls or [])
+    illegal = []
+    first_failed = None
+    for index, value in enumerate(values):
+        if apimart_image_url_valid(value):
+            continue
+        ref = refs[index] if index < len(refs) and isinstance(refs[index], dict) else {}
+        source = str(value or "").strip() or str(ref.get("url") or "").strip()
+        repaired = ""
+        if source.startswith("data:"):
+            repaired = apimart_data_url_to_jpeg(source)
+        else:
+            local = apimart_local_reference_url(source, ref.get("url"))
+            if local:
+                repaired = reference_to_jpeg_data_url({"url": local}, 1536, 88)
+                repaired = repaired if repaired.startswith("data:image/") else ""
+        if not repaired and apimart_image_url_valid(ref.get("url")):
+            repaired = str(ref.get("url")).strip()
+        illegal.append((index, value, source, repaired))
+        if repaired:
+            values[index] = repaired
+        elif first_failed is None:
+            first_failed = (index, source)
+    if not illegal:
+        print(f"APIMart image_urls 发送前校验：{len(values)} 张全部合法")
+        return values
+    repaired_parts = [f"第 {index + 1} 张 {apimart_image_url_preview(old)} → data:image"
+                      for index, old, _source, repaired in illegal if repaired]
+    failed_parts = [f"第 {index + 1} 张 {apimart_image_url_preview(source, 120)}"
+                    for index, _old, source, repaired in illegal if not repaired]
+    print("APIMart image_urls 发送前校验："
+          + ("修复 " + "；".join(repaired_parts) if repaired_parts else "无修复")
+          + (f"；仍非法：{'；'.join(failed_parts)}" if failed_parts else ""))
+    if first_failed:
+        index, source = first_failed
+        raise HTTPException(
+            status_code=400,
+            detail=(f"第 {index + 1} 张参考图（来源 {apimart_image_url_preview(source, 120)}）"
+                    "格式不支持或文件不存在，请另存为 JPG/PNG 后重试。"),
+        )
+    return values
 
 def apimart_image_url_rejected(text):
     """上游 4xx/5xx 里点名 url/download/fetch/image，多半是它取不到我们给的外部图片 URL。"""
@@ -15215,6 +15316,8 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
                     body["image_urls"] = apimart_inputs
                     apimart_remote_inputs = bool(apimart_inputs) and all(
                         str(url).startswith(("http://", "https://")) for url in apimart_inputs)
+                body["image_urls"] = sanitize_apimart_image_urls(
+                    body["image_urls"], image_refs[:ONLINE_IMAGE_REFERENCE_MAX])
             response = await with_connect_retries(
                 lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body),
                 context=retry_context,
@@ -15222,6 +15325,8 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
             if apimart_remote_inputs and response.status_code >= 400 and apimart_image_url_rejected(response.text):
                 print(f"APIMart 中转站可能取不到外部图片 URL（{response.status_code}），改用压缩 data URL 重试一次：{response.text[:200]}")
                 body["image_urls"] = apimart_reference_data_urls(image_refs[:ONLINE_IMAGE_REFERENCE_MAX], body)
+                body["image_urls"] = sanitize_apimart_image_urls(
+                    body["image_urls"], image_refs[:ONLINE_IMAGE_REFERENCE_MAX])
                 response = await with_connect_retries(
                     lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body),
                     context=retry_context,
