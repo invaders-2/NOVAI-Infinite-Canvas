@@ -99,6 +99,14 @@ contextBridge.exposeInMainWorld('pywebview', {
   api,
 });
 
+// ---------- 桌面版更新 ----------
+// 网页端「一键更新」走后端自更新 + 后端自重启，Electron 会把这次退出当成崩溃弹「后端异常退出」；
+// 桌面版统一交给主进程的 electron-updater，前端只负责转交点击。
+contextBridge.exposeInMainWorld('novaiUpdater', {
+  checkNow: () => ipcRenderer.invoke('novai:update-check'),
+  downloadAndInstall: () => ipcRenderer.invoke('novai:update-install'),
+});
+
 // 低层桥：iframe 子页面注入脚本通过 window.parent.postMessage 转发到这里
 contextBridge.exposeInMainWorld('__novaiBridge', {
   invoke: (method, payload) => ipcRenderer.invoke('novai:' + method, payload),

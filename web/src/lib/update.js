@@ -12,6 +12,12 @@ const PROJECT_URL = 'https://github.com/invaders-2/NOVAI-Infinite-Canvas';
 function readLS(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 function writeLS(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
+// Electron 桌面版才注入：更新由主进程的 electron-updater 负责，不能走后端自更新（后端自重启会被当成崩溃）
+function desktopUpdater() {
+    const u = typeof window !== 'undefined' ? window.novaiUpdater : null;
+    return u && typeof u.downloadAndInstall === 'function' ? u : null;
+}
+
 export const upd = reactive({
     info: { version: '', repo_url: PROJECT_URL },
     remote: '',            // 最新版本（有更新时）
@@ -153,6 +159,24 @@ async function waitAndReload() {
 }
 export async function startUpdate() {
     if (upd.running) return;
+    /* 桌面版：只把点击转交 electron-updater，不调 /api/update-from-github、
+       不轮询后端进度、也不写「已更新」标记（重启由主进程 quitAndInstall 负责）。 */
+    const desktop = desktopUpdater();
+    if (desktop) {
+        upd.error = '';
+        try {
+            const res = await desktop.downloadAndInstall();
+            if (res && res.supported === false) {
+                toast('当前桌面版不支持自动更新，请到发布页下载安装包覆盖安装', { danger: true, icon: 'alert' });
+            } else {
+                toast('已转交桌面版更新，请按弹窗提示操作', { icon: 'arrowup' });
+            }
+        } catch (e) {
+            console.error('[update] 转交桌面版更新失败：', e);
+            toast('桌面版更新暂时不可用，请稍后重试', { danger: true, icon: 'alert' });
+        }
+        return;
+    }
     upd.running = true;
     upd.phase = 'running';
     upd.error = '';
@@ -206,7 +230,9 @@ export async function listUpdateBackups() {
     return d.backups || [];
 }
 export async function rollback(name) {
-    const res = await fetch('/api/update-rollback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, auto_restart: true, restart_delay: 3 }) });
+    /* 桌面版不让后端自重启（同样会被主进程当成崩溃），还原后提示用户重开应用 */
+    const autoRestart = !desktopUpdater();
+    const res = await fetch('/api/update-rollback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, auto_restart: autoRestart, restart_delay: 3 }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || '回滚失败');
     if (data.restart_scheduled) waitAndReload();

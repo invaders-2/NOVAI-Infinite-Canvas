@@ -12,6 +12,8 @@ const emit = defineEmits(['quickstart']);
 const backups = ref(null);
 const pick = ref('');
 const rolling = ref(false);
+// 桌面版由 Electron 管更新流程，回滚后不能让后端自重启（会被主进程当成崩溃）
+const desktopUpdate = !!window.novaiUpdater;
 async function loadBackups() {
     try { backups.value = await listUpdateBackups(); } catch (e) { backups.value = []; }
 }
@@ -20,7 +22,10 @@ async function doRollback() {
     rolling.value = true;
     try {
         const d = await rollback(pick.value);
-        toast(`已还原 ${d.count || 0} 个文件，后端正在重启`, { icon: 'check', duration: 5000 });
+        toast(d.restart_scheduled
+            ? `已还原 ${d.count || 0} 个文件，后端正在重启`
+            : `已还原 ${d.count || 0} 个文件，请退出并重新打开 NOVAI 生效`,
+            { icon: 'check', duration: 5000 });
     } catch (e) { toast('回滚失败：' + e.message, { danger: true, icon: 'alert' }); }
     rolling.value = false;
 }
@@ -57,7 +62,7 @@ onMounted(loadBackups);
                 </label>
                 <div class="acts">
                     <button type="button" class="nv-btn sm danger" :disabled="rolling" @click="doRollback">{{ pick ? '还原到这份备份' : '选择一份备份' }}</button>
-                    <span v-if="pick" class="hint">还原后后端会自动重启，本页会在恢复后刷新</span>
+                    <span v-if="pick" class="hint">{{ desktopUpdate ? '还原后请退出并重新打开 NOVAI 生效' : '还原后后端会自动重启，本页会在恢复后刷新' }}</span>
                 </div>
             </template>
         </SetCard>

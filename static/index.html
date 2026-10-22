@@ -5989,6 +5989,38 @@
 
         async function confirmProjectUpdate() {
             const isEn = window.StudioI18n?.lang?.() === 'en';
+            // Electron 桌面版：更新交给主进程的 electron-updater。
+            // 走后端自更新会让后端自重启，Electron 主进程会误报「后端异常退出（code 1）」。
+            if(window.novaiUpdater && typeof window.novaiUpdater.downloadAndInstall === 'function') {
+                setUpdateSummary(
+                    'warn',
+                    isEn ? 'Desktop update handed over' : '已转交桌面版更新',
+                    isEn
+                        ? 'The desktop app handles the update. Follow the system dialog.'
+                        : '更新由桌面版接管，请按系统弹窗的提示操作。'
+                );
+                try {
+                    const res = await window.novaiUpdater.downloadAndInstall();
+                    if(res && res.supported === false) {
+                        setUpdateSummary(
+                            'fail',
+                            isEn ? 'Auto update unavailable' : '自动更新不可用',
+                            isEn
+                                ? 'Download the latest installer from the release page and install it over this version. Your data stays.'
+                                : '请到发布页下载最新安装包覆盖安装（用户数据不会丢失）。'
+                        );
+                    }
+                } catch(e) {
+                    setUpdateSummary(
+                        'fail',
+                        isEn ? 'Auto update unavailable' : '自动更新不可用',
+                        isEn
+                            ? 'Download the latest installer from the release page and install it over this version. Your data stays.'
+                            : '请到发布页下载最新安装包覆盖安装（用户数据不会丢失）。'
+                    );
+                }
+                return;
+            }
             const btn = document.getElementById('update-now-btn') || document.getElementById('settings-update-now-btn');
             const text = document.getElementById('update-now-text') || document.getElementById('settings-update-now-text');
             const settingsBtn = document.getElementById('settings-update-now-btn');
@@ -6075,6 +6107,8 @@
         }
         async function rollbackProjectUpdate() {
             const isEn = window.StudioI18n?.lang?.() === 'en';
+            // 桌面版不让后端自重启（会被 Electron 主进程当成后端崩溃），还原后提示重开应用
+            const isDesktop = !!(window.novaiUpdater && typeof window.novaiUpdater.downloadAndInstall === 'function');
             try {
                 const list = await fetch('/api/update-backups').then(r => r.json());
                 const backups = list.backups || [];
@@ -6091,17 +6125,23 @@
                 const idx = Number(answer) - 1;
                 if(!(idx >= 0 && idx < backups.length)) return;
                 const target = backups[idx];
-                if(!confirm(isEn ? `Restore "${target.name}"? Backend will restart.` : `要还原 "${target.name}" 吗？后端会自动重启。`)) return;
+                if(!confirm(isEn
+                    ? (isDesktop ? `Restore "${target.name}"? Quit and reopen NOVAI afterwards.` : `Restore "${target.name}"? Backend will restart.`)
+                    : (isDesktop ? `要还原 "${target.name}" 吗？还原后请退出并重新打开 NOVAI。` : `要还原 "${target.name}" 吗？后端会自动重启。`))) return;
                 const res = await fetch('/api/update-rollback', {
                     method:'POST',
                     headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({ name:target.name, auto_restart:true, restart_delay:3 })
+                    body:JSON.stringify({ name:target.name, auto_restart:!isDesktop, restart_delay:3 })
                 });
                 const data = await res.json().catch(() => ({}));
                 if(!res.ok) throw new Error(data.detail || (isEn ? 'Rollback failed' : '回滚失败'));
                 alert(isEn
-                    ? `Restored ${data.count || 0} files. Backend is restarting.`
-                    : `已还原 ${data.count || 0} 个文件。后端正在重启。`);
+                    ? (isDesktop
+                        ? `Restored ${data.count || 0} files. Quit and reopen NOVAI to apply.`
+                        : `Restored ${data.count || 0} files. Backend is restarting.`)
+                    : (isDesktop
+                        ? `已还原 ${data.count || 0} 个文件。请退出并重新打开 NOVAI 生效。`
+                        : `已还原 ${data.count || 0} 个文件。后端正在重启。`));
                 if(data.restart_scheduled) waitForBackendAndReload();
             } catch(e) {
                 alert((isEn ? 'Rollback failed: ' : '回滚失败：') + describeNetworkError(e, isEn));

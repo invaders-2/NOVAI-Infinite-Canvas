@@ -399,6 +399,11 @@ const IFRAME_SHIM = `(function(){
       get_source_browser_state: function(){ return call('source-view', {action:'state'}); },
     }
   };
+  // 桌面版更新桥：iframe 里的页面也能转交给主进程的 electron-updater
+  window.novaiUpdater = {
+    checkNow: function(){ return call('update-check'); },
+    downloadAndInstall: function(){ return call('update-install'); }
+  };
   try { window.dispatchEvent(new Event('pywebviewready')); } catch(_) {}
 })();`;
 
@@ -2122,10 +2127,143 @@ function registerIpc() {
   });
   // 兼容旧前端：原来的伴生窗口通道内部转到 source-view。
   ipcMain.handle('novai:source-browser', (e, payload) => handleSourceViewAction(payload));
+
+  // 网页端「一键更新」在桌面版转交到这里（见 preload 的 window.novaiUpdater）。
+  registerUpdaterIpc();
 }
 
 // ---------- 自动更新 ----------
 let autoUpdater = null;
+// idle | checking | available | downloading | downloaded
+// 原生对话框和网页端「一键更新」共用这一份状态，避免重复检查 / 重复下载 / 重复弹窗。
+let updateStage = 'idle';
+let pendingUpdateInfo = null;
+let availablePromptOpen = false;
+let installPromptOpen = false;
+// 手动触发的检查结束（且没新版本）时要给用户一句反馈；启动自动检查不打扰
+let manualUpdateCheck = false;
+
+function updaterSupported() {
+  return !!(app.isPackaged && autoUpdater);
+}
+
+// 「发现新版本」确认框：确认后开始下载
+function showUpdateAvailablePrompt(info) {
+  const current = app.getVersion();
+  const next = info && info.version;
+  if (!next || next === current) return;
+  if (availablePromptOpen) return;
+  availablePromptOpen = true;
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: '发现新版本',
+    message: `NOVAI 有新版本可用：v${next}（当前 v${current}）`,
+    detail: '是否现在下载并安装？下载完成后需重启应用。',
+    buttons: ['立即更新', '稍后'],
+    defaultId: 0,
+    cancelId: 1,
+  }).then(({ response }) => {
+    availablePromptOpen = false;
+    if (response !== 0) return;
+    updateStage = 'downloading';
+    try { autoUpdater.downloadUpdate(); } catch (err) { clog('updater', '下载更新包失败: ' + (err && err.message || err)); }
+  }).catch(() => { availablePromptOpen = false; });
+}
+
+// 「更新已就绪」确认框：确认后先停后端再安装（Windows 安装程序要覆盖被占用的文件）
+function showUpdateInstallPrompt() {
+  if (installPromptOpen) return;
+  installPromptOpen = true;
+  if (process.platform === 'darwin') {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '更新已就绪',
+      message: '新版本已下载完成，但 macOS 未签名构建不支持自动安装，请手动下载安装包覆盖安装（数据不会丢失）。',
+      buttons: ['打开发布页', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(({ response }) => {
+      installPromptOpen = false;
+      if (response === 0) shell.openExternal('https://gitee.com/invaders/novai/releases');
+    }).catch(() => { installPromptOpen = false; });
+    return;
+  }
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: '更新已就绪',
+    message: '新版本已下载完成，是否立即重启安装？',
+    buttons: ['立即重启', '稍后'],
+    defaultId: 0,
+    cancelId: 1,
+  }).then(({ response }) => {
+    installPromptOpen = false;
+    if (response === 0) {
+      stopBackendForUpdate().then(() => autoUpdater.quitAndInstall());
+    }
+  }).catch(() => { installPromptOpen = false; });
+}
+
+// 网页端「一键更新」在桌面版转交到这里：只复用 electron-updater 流程。
+// 绝不能回落到后端 /api/update-from-github——那会让后端自重启，主进程会当成后端崩溃弹窗。
+function registerUpdaterIpc() {
+  ipcMain.handle('novai:update-check', async () => {
+    if (!updaterSupported()) return { ok: false, supported: false, reason: 'unavailable' };
+    // 已经下好：只补一次「立即重启」确认，绝不再下一次
+    if (updateStage === 'downloaded') {
+      showUpdateInstallPrompt();
+      return { ok: true, supported: true, stage: updateStage };
+    }
+    if (updateStage === 'downloading') return { ok: true, supported: true, stage: updateStage };
+    if (updateStage === 'checking') return { ok: true, supported: true, stage: updateStage };
+    if (updateStage === 'available') {
+      showUpdateAvailablePrompt(pendingUpdateInfo);
+      return { ok: true, supported: true, stage: updateStage };
+    }
+    manualUpdateCheck = true;
+    updateStage = 'checking';
+    try {
+      autoUpdater.checkForUpdates();
+    } catch (err) {
+      manualUpdateCheck = false;
+      updateStage = 'idle';
+      return { ok: false, supported: true, reason: String(err && err.message || err) };
+    }
+    return { ok: true, supported: true, stage: 'checking' };
+  });
+
+  ipcMain.handle('novai:update-install', async () => {
+    if (!updaterSupported()) return { ok: false, supported: false, reason: 'unavailable' };
+    if (updateStage === 'downloaded') {
+      showUpdateInstallPrompt();
+      return { ok: true, supported: true, stage: updateStage };
+    }
+    if (updateStage === 'downloading') return { ok: true, supported: true, stage: updateStage };
+    if (updateStage === 'checking') return { ok: true, supported: true, stage: updateStage };
+    // 之前已经查到新版本（用户在原生弹窗里选了「稍后」）：这次点击就是确认，直接下载
+    if (updateStage === 'available') {
+      updateStage = 'downloading';
+      try {
+        autoUpdater.downloadUpdate();
+      } catch (err) {
+        updateStage = 'available';
+        return { ok: false, supported: true, reason: String(err && err.message || err) };
+      }
+      return { ok: true, supported: true, stage: 'downloading' };
+    }
+    // 还没查过：先检查，查到后走 update-available 的原生确认框，确认后下载
+    manualUpdateCheck = true;
+    updateStage = 'checking';
+    try {
+      autoUpdater.checkForUpdates();
+    } catch (err) {
+      manualUpdateCheck = false;
+      updateStage = 'idle';
+      return { ok: false, supported: true, reason: String(err && err.message || err) };
+    }
+    return { ok: true, supported: true, stage: 'checking' };
+  });
+}
+
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
   try {
@@ -2133,7 +2271,7 @@ function setupAutoUpdate() {
     if (!autoUpdater) return;
   } catch (_) { return; }
   autoUpdater.autoDownload = false;
-  let updateStage = 'checking';
+  updateStage = 'checking';
   // 测试版（版本号含 -，如 1.0.112-beta.1）允许接收 prerelease 更新；正式版只看正式 Release。
   autoUpdater.allowPrerelease = app.getVersion().includes('-');
   // 国内用户访问 GitHub Releases 常被阻断：检查失败时自动切换到该
@@ -2141,72 +2279,60 @@ function setupAutoUpdate() {
   // electron-release/ 目录。
   const MIRROR_UPDATE_URL = 'https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/electron-release';
   let switchedToMirror = false;
-  autoUpdater.on('update-available', (info) => {
-    updateStage = 'available';
-    const current = app.getVersion();
-    const next = info && info.version;
-    if (!next || next === current) return;
+  autoUpdater.on('checking-for-update', () => { updateStage = 'checking'; });
+  autoUpdater.on('update-not-available', () => {
+    updateStage = 'idle';
+    // 只有用户主动点「一键更新」才提示「已是最新版本」，启动时的自动检查保持安静
+    if (!manualUpdateCheck) return;
+    manualUpdateCheck = false;
+    if (!mainWindow) return;
     dialog.showMessageBox(mainWindow, {
       type: 'info',
-      title: '发现新版本',
-      message: `NOVAI 有新版本可用：v${next}（当前 v${current}）`,
-      detail: '是否现在下载并安装？下载完成后需重启应用。',
-      buttons: ['立即更新', '稍后'],
-      defaultId: 0,
-      cancelId: 1,
-    }).then(({ response }) => {
-      if (response === 0) autoUpdater.downloadUpdate();
+      title: '已是最新版本',
+      message: '当前已是最新版本 v' + app.getVersion(),
     }).catch(() => {});
+  });
+  autoUpdater.on('update-available', (info) => {
+    manualUpdateCheck = false;
+    const next = info && info.version;
+    // 版本号相同（镜像/缓存回放）不算更新，否则会一直停在 available 让「立即更新」重复下载
+    if (!next || next === app.getVersion()) { updateStage = 'idle'; return; }
+    updateStage = 'available';
+    pendingUpdateInfo = info;
+    showUpdateAvailablePrompt(info);
   });
   autoUpdater.on('download-progress', () => { updateStage = 'downloading'; });
   autoUpdater.on('update-downloaded', () => {
     updateStage = 'downloaded';
-    if (process.platform === 'darwin') {
-      dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: '更新已就绪',
-        message: '新版本已下载完成，但 macOS 未签名构建不支持自动安装，请手动下载安装包覆盖安装（数据不会丢失）。',
-        buttons: ['打开发布页', '稍后'],
-        defaultId: 0,
-        cancelId: 1,
-      }).then(({ response }) => {
-        if (response === 0) shell.openExternal('https://gitee.com/invaders/novai/releases');
-      }).catch(() => {});
-      return;
-    }
-    dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: '更新已就绪',
-      message: '新版本已下载完成，是否立即重启安装？',
-      buttons: ['立即重启', '稍后'],
-      defaultId: 0,
-      cancelId: 1,
-    }).then(({ response }) => {
-      if (response === 0) {
-        stopBackendForUpdate().then(() => autoUpdater.quitAndInstall());
-      }
-    }).catch(() => {});
+    manualUpdateCheck = false;
+    showUpdateInstallPrompt();
   });
   autoUpdater.on('error', (err) => {
-    const stageLabel = { checking: '检查更新', available: '检查更新', downloading: '下载更新包', downloaded: '安装更新' }[updateStage] || '检查更新';
+    // 后面还要按失败阶段选文案，先把阶段存下来（错误处理里会复位状态）
+    const failedStage = updateStage;
+    const stageLabel = { checking: '检查更新', available: '检查更新', downloading: '下载更新包', downloaded: '安装更新' }[failedStage] || '检查更新';
     clog('updater', '[' + stageLabel + '] 更新失败: ' + (err && err.message || err));
     // GitHub 不通时切换到国内镜像重试一次（仅切换一次，避免死循环）；安装阶段重试下载没有意义
-    if (!switchedToMirror && updateStage !== 'downloaded') {
+    if (!switchedToMirror && failedStage !== 'downloaded') {
       switchedToMirror = true;
       try {
         autoUpdater.setFeedURL({ provider: 'generic', url: MIRROR_UPDATE_URL });
         clog('updater', '已切换到国内镜像更新源: ' + MIRROR_UPDATE_URL);
+        updateStage = 'checking';
         autoUpdater.checkForUpdates();
         return;
       } catch (e) {
         clog('updater', '镜像更新源切换失败: ' + (e && e.message || e));
       }
     }
+    // 最终失败后允许用户再次触发检查/下载（安装阶段失败除外，包已下好）
+    if (failedStage !== 'downloaded') updateStage = 'idle';
+    manualUpdateCheck = false;
     // 镜像也失败，或 macOS 未签名构建无法自动安装（Squirrel 要求签名）→
     // 引导手动下载覆盖安装，数据目录独立不受影响。
     if (!mainWindow) return;
     const rawError = String(err && err.message || err);
-    if (updateStage === 'downloaded') {
+    if (failedStage === 'downloaded') {
       dialog.showMessageBox(mainWindow, {
         type: 'info',
         title: '自动更新未能安装',
