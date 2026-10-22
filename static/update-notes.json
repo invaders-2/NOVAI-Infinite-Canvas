@@ -1,10 +1,17 @@
 {
-  "version": "1.0.135",
-  "updated_at": "2026-10-22T09:43:33+08:00",
+  "version": "1.0.136",
+  "updated_at": "2026-10-22T10:27:37+08:00",
   "items": [
-    { "type": "fix", "text": "修复部分 Windows 电脑上生图失败并提示「Invalid format for image_urls... Only http/https URL or data:image base64 are supported」的问题：参考图格式异常或本地素材路径失效时，会先自动转成可用格式；确实无法转换时直接提示是第几张参考图、什么问题，不再把上游英文报错原样抛给用户。" }
+    { "type": "fix", "text": "修复桌面版点「一键更新」时可能弹出「NOVAI 后端异常退出」的问题：桌面版现在把更新交给 App 自带的更新流程（弹窗下载、重启安装），不再让后端自己下载后重启，更新完也不会再误报后端崩溃。" }
   ],
   "history": [
+    {
+      "version": "1.0.135",
+      "updated_at": "2026-10-22T09:43:33+08:00",
+      "items": [
+        { "type": "fix", "text": "修复部分 Windows 电脑上生图失败并提示「Invalid format for image_urls... Only http/https URL or data:image base64 are supported」的问题：参考图格式异常或本地素材路径失效时，会先自动转成可用格式；确实无法转换时直接提示是第几张参考图、什么问题，不再把上游英文报错原样抛给用户。" }
+      ]
+    },
     {
       "version": "1.0.134",
       "updated_at": "2026-10-21T17:19:23+08:00",
