@@ -7781,3 +7781,20 @@ html.studio-theme-dark .nv-mcp-brand-logo { filter: invert(1); }
 }
 .nv-mcp-launch:hover::after { opacity: 1; transform: translateY(0); }
 
+
+/* 真实品牌标记：本地 SVG 作为 mask，着色用 currentColor / 品牌色，不请求外网 */
+.nv-brand-mark {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    background: currentColor;
+    -webkit-mask: var(--brand-image) center / contain no-repeat;
+    mask: var(--brand-image) center / contain no-repeat;
+}
+.nv-brand-mark.is-claude { --brand-image: url('/static/images/brands/anthropic.svg'); background: #D97757; }
+.nv-brand-mark.is-openai { --brand-image: url('/static/images/brands/openai.svg'); background: currentColor; }
+.nv-brand-mark.is-workbuddy { --brand-image: url('/static/images/brands/workbuddy.svg'); background: #22c55e; }
+.nv-mcp-agent-ico .nv-brand-mark, .nv-mcp-list-ico .nv-brand-mark { width: 16px; height: 16px; }
+.nv-mcp-avatar .nv-brand-mark { width: 52px; height: 52px; }
+

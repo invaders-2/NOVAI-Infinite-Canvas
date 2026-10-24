@@ -38840,11 +38840,11 @@ function ensureTableApi(){
     var infoPromise = null;
     var activeAgent = 'claude';
     var AGENT_LOGOS = {
-        claude: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-label="Claude" role="img"><path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9M7.5 4.2l9 15.6M16.5 4.2l-9 15.6"/></svg>',
-        chatgpt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-label="ChatGPT" role="img"><path d="M12 3.2a4 4 0 0 1 3.4 6M20.5 12a4 4 0 0 1-6.8 2.8M12 20.8a4 4 0 0 1-3.4-6M3.5 12a4 4 0 0 1 6.8-2.8"/><path d="M8.6 5.2h5.8M17.8 8.6v5.8M15.4 18.8H9.6M6.2 15.4V9.6"/></svg>',
-        codex: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-label="Codex" role="img"><path d="m12 3 7.8 4.5v9L12 21l-7.8-4.5v-9z"/><path d="m8 9 4-2.2L16 9v4l-4 2.2L8 13z"/></svg>',
-        workbuddy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-label="WorkBuddy" role="img"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/><path d="M15.5 6.5l2 2"/></svg>',
-        novai: '<svg viewBox="0 0 24 24" fill="currentColor" aria-label="NOVAI" role="img"><path d="M4 19V5h4.2l7.6 9.2V5H20v14h-4.2L8.2 9.8V19z"/></svg>',
+        claude: '<span class="nv-brand-mark is-claude" role="img" aria-label="Claude"></span>',
+        chatgpt: '<span class="nv-brand-mark is-openai" role="img" aria-label="ChatGPT"></span>',
+        codex: '<span class="nv-brand-mark is-openai" role="img" aria-label="Codex"></span>',
+        workbuddy: '<span class="nv-brand-mark is-workbuddy" role="img" aria-label="WorkBuddy"></span>',
+        novai: '<img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="20" height="20">',
         more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-label="更多 Agent" role="img"><rect x="4" y="4" width="6" height="6" rx="1.2"/><rect x="14" y="4" width="6" height="6" rx="1.2"/><rect x="4" y="14" width="6" height="6" rx="1.2"/><rect x="14" y="14" width="6" height="6" rx="1.2"/></svg>'
     };
     function logoOf(agent){ return AGENT_LOGOS[agent] || AGENT_LOGOS.more; }
