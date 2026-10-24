@@ -8,7 +8,16 @@ import {
 } from "@/components/ai-elements/prompt-input"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { ArrowUpIcon, ChevronDownIcon, SparklesIcon, SquareIcon, XIcon } from "lucide-react"
+import {
+	ArrowUpIcon,
+	ChevronDownIcon,
+	ImageUpIcon,
+	MousePointerSquareDashedIcon,
+	PlusIcon,
+	SparklesIcon,
+	SquareIcon,
+	XIcon,
+} from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { formatTokens } from "./format"
 import type { AssistantStore } from "./store"
@@ -23,6 +32,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 	const [text, setText] = useState("")
 	const [skillOpen, setSkillOpen] = useState(false)
+	const [addOpen, setAddOpen] = useState(false)
 	const activeSkill = useMemo(() => {
 		const found = env.skills.find((skill) => skill.id === env.selectedSkillId)
 		if (found) return found
@@ -79,6 +89,26 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 		if (textareaRef.current) textareaRef.current.value = ""
 		setText("")
 	}
+
+	const modelGroups = useMemo(() => {
+		const groups: { provider: string; providerName: string; models: string[] }[] = []
+		for (const option of env.chatModels) {
+			let group = groups.find((item) => item.provider === option.provider)
+			if (!group) {
+				group = { provider: option.provider, providerName: option.providerName || option.provider, models: [] }
+				groups.push(group)
+			}
+			if (!group.models.includes(option.value)) group.models.push(option.value)
+		}
+		const current = env.chatProvider + "\n" + env.chatModel
+		const hasCurrent = env.chatModels.some(
+			(option) => option.provider === env.chatProvider && option.value === env.chatModel,
+		)
+		if (env.chatModel && !hasCurrent) {
+			groups.unshift({ provider: env.chatProvider, providerName: env.chatProvider || "当前", models: [env.chatModel] })
+		}
+		return { groups, current }
+	}, [env.chatModels, env.chatModel, env.chatProvider])
 
 	const contextText = (() => {
 		const usage = env.contextUsage
@@ -188,20 +218,64 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 								</div>
 							)}
 						</div>
-						<button
-							aria-pressed={env.planConfirm}
-							className={cn("nvca-pill-btn", env.planConfirm && "is-on")}
-							onClick={() => store.togglePlanConfirm()}
-							title={
-								env.planConfirm
-									? "写操作先出方案，点「开始」才动画布 / 消耗额度"
-									: "关闭后只有聊天和只读动作直接执行；写操作服务端仍会先出方案"
-							}
-							type="button"
-						>
-							<span className={cn("nvca-dot", env.planConfirm && "is-on")} />
-							<span>写操作先确认</span>
-						</button>
+						<div className="nvca-add-wrap">
+							<button
+								aria-expanded={addOpen}
+								className={cn("nvca-pill-btn", addOpen && "is-on")}
+								onClick={() => setAddOpen((open) => !open)}
+								title="把画布节点或素材加进本轮上下文"
+								type="button"
+							>
+								<PlusIcon className="nvca-i-sm" />
+								<span>添加</span>
+							</button>
+							{addOpen ? (
+								<div className="nvca-add-menu" role="menu">
+									<button
+										onClick={() => {
+											setAddOpen(false)
+											store.addSelectedRefs()
+										}}
+										role="menuitem"
+										type="button"
+									>
+										<MousePointerSquareDashedIcon className="nvca-i-sm" />
+										<span>引用选中的画布节点</span>
+									</button>
+									<button
+										onClick={() => {
+											setAddOpen(false)
+											store.pickUpload()
+										}}
+										role="menuitem"
+										type="button"
+									>
+										<ImageUpIcon className="nvca-i-sm" />
+										<span>上传素材（图片 / 视频）</span>
+									</button>
+								</div>
+							) : null}
+						</div>
+						<div className="nvca-seg" role="group" aria-label="运行确认方式">
+							<button
+								aria-pressed={!env.planConfirm}
+								className={cn("nvca-seg-btn", !env.planConfirm && "is-on")}
+								onClick={() => store.setPlanConfirm(false)}
+								title="自动：聊天 / 只读步骤直接执行；写操作服务端仍会先出方案"
+								type="button"
+							>
+								自动
+							</button>
+							<button
+								aria-pressed={env.planConfirm}
+								className={cn("nvca-seg-btn", env.planConfirm && "is-on")}
+								onClick={() => store.setPlanConfirm(true)}
+								title="手动确认：每轮先出方案，点「开始」才执行"
+								type="button"
+							>
+								手动确认
+							</button>
+						</div>
 						{contextText && (
 							<span className="nvca-context" title="上下文占用为估算值">
 								{contextText}
@@ -209,6 +283,41 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 						)}
 					</PromptInputTools>
 					<div className="nvca-prompt-actions">
+						<select
+							aria-label="对话模型"
+							className="nvca-select nvca-model-select"
+							onChange={(event) => {
+								const [provider, model] = event.currentTarget.value.split("\n")
+								store.setChatModel(model || "", provider || "")
+							}}
+							title="对话模型（来自 /api/config 的 chat_models）"
+							value={modelGroups.current}
+						>
+							{modelGroups.groups.length === 0 ? <option value="\n">默认模型</option> : null}
+							{modelGroups.groups.map((group) => (
+								<optgroup key={group.provider || group.providerName} label={group.providerName}>
+									{group.models.map((model) => (
+										<option key={group.provider + ":" + model} value={group.provider + "\n" + model}>
+											{model}
+										</option>
+									))}
+								</optgroup>
+							))}
+						</select>
+						{env.imageProviders.length > 0 ? (
+							<select
+								aria-label="生图平台"
+								className="nvca-select nvca-image-select"
+								onChange={(event) => store.setImageProvider(event.currentTarget.value)}
+								title="生图平台（空 = 自动跟随模型）"
+								value={env.imageProvider}
+							>
+								<option value="">生图自动</option>
+								{env.imageProviders.map((provider) => (
+									<option key={provider.value} value={provider.value}>{provider.label}</option>
+								))}
+							</select>
+						) : null}
 						{env.running && text.trim() ? (
 							<button className="nvca-steer-btn" onClick={handleSteer} title="把这句插给正在跑的这轮，下一轮生效" type="button">
 								打断并发送
@@ -221,6 +330,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 										<button
 											aria-label={env.running ? "停止" : "发送"}
 											className={cn("nvca-send-btn", env.running && "is-running")}
+											disabled={!env.running && !text.trim()}
 											onClick={() => {
 												if (env.running) {
 													store.abort()

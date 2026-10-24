@@ -81,6 +81,26 @@ export interface SkillChip {
 	description?: string
 }
 
+export interface ChatModelOption {
+	value: string
+	provider: string
+	providerName: string
+}
+
+export interface ImageProviderOption {
+	value: string
+	label: string
+}
+
+export interface ComposerState {
+	models: ChatModelOption[]
+	model: string
+	provider: string
+	imageProviders: ImageProviderOption[]
+	imageProvider: string
+	planConfirm: boolean
+}
+
 export interface ArtifactItem {
 	id: string
 	kind: "image" | "video"
@@ -113,6 +133,13 @@ export interface CanvasAssistantHostApi {
 	clearSkill(): void
 	removeRef(id: string): void
 	clearRefs(): void
+	setChatModel(model: string, provider: string): void
+	setImageProvider(value: string): void
+	setPlanConfirm(on: boolean): void
+	/** 把画布当前选中的节点加进本轮引用，返回引用条数量（0 = 没有选中节点/同步失败） */
+	addSelectedRefs(): Promise<number>
+	/** 打开旧面板的素材上传（图片/视频），上传后同样以引用条形式进入本轮上下文 */
+	pickUpload(): void
 	planAction(action: "run" | "cancel" | "adjust"): void
 	confirmAction?(yes: boolean): void
 	togglePlanConfirm(on: boolean): void
@@ -135,6 +162,7 @@ export interface CanvasAssistantHandle {
 	notifySteer(text: string, status: string): void
 	notifySystem(text: string, kind?: "info" | "warn" | "error"): void
 	notifyRunSummary(text: string): void
+	setComposerState(state: ComposerState): void
 	clearHistory(): void
 	/** 外部（桥接层/应用市场种子）触发的自动发送；resolve 表示是否已进入官方 run 通路 */
 	seedAutoSend(input: { text: string; skillRef?: string }): Promise<boolean>

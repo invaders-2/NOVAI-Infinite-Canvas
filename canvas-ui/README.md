@@ -84,3 +84,10 @@ planAction / confirmAction / togglePlanConfirm / openHistory / openNode / toast`
 - 发送失败：resolve(false)，微应用里出现可见系统消息，提示词留在输入框。
 - `skillRef="store:<id>"`（应用市场技能）不在能力列表里，桥接层会在下一次 `/api/agent/run` 请求体注入 `skill_ref`。
 - 打开画布时的种子（`novai_canvas_seed:<canvasId>`，`autoSend:true`）由桥接层接管：先抓内存副本，再把落盘种子的 agent/autoSend 摘掉，避免旧面板重复发送；节点等字段保持不动。
+
+## Composer 三件套（对齐旧面板）
+
+- **＋ 添加**：引用当前画布选中的节点（Cmd/框选多选点一次即可补齐），或上传图片/视频素材；两者都进「本轮引用」chips，随消息写入 `focus.references` / `focus.reference_images`。
+- **模型 / 生图平台**：对话模型来自 `/api/config` 的 `chat_models`（按平台分组），默认取旧面板当前选择；切换会同步旧面板的 `#chatModelSelect`，请求体 `provider/model` 真实变化。生图平台为空 = 自动跟随模型，对应 `image_provider`。
+- **自动 / 手动确认**：两段式开关，写 `smart_agent_plan_confirm`；自动 → `mode:"run"`（只读/聊天直接跑，写操作服务端仍先出方案），手动确认 → `mode:"plan"`。
+- Enter 发送 / Shift+Enter 换行 / 空文本禁用发送 / 运行中按钮变停止。

@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.136.1792860231';
+    var ASSET_VERSION = '1.0.136.1792860762';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -530,6 +530,120 @@
             return false;
         }).catch(function () { return false; });
     }
+    function pushComposerState() {
+        if (!mountedHandle || typeof mountedHandle.setComposerState !== 'function') return;
+        loadConfigProviders().then(function (providers) {
+            var select = document.getElementById('chatModelSelect');
+            var current = select && select.selectedOptions ? select.selectedOptions[0] : null;
+            var models = [];
+            (providers || []).forEach(function (provider) {
+                if (!provider || provider.enabled === false) return;
+                (provider.chat_models || []).forEach(function (model) {
+                    var value = String(model || '').trim();
+                    if (!value) return;
+                    models.push({
+                        value: value,
+                        provider: String(provider.id || ''),
+                        providerName: String(provider.name || provider.id || '')
+                    });
+                });
+            });
+            /* /api/config 没有列出的自定义平台，用旧下拉里已有的项兜底 */
+            if (select) {
+                Array.prototype.slice.call(select.options).forEach(function (option) {
+                    if (!option.value) return;
+                    var providerId = String(option.getAttribute('data-provider') || '');
+                    var exists = models.some(function (item) {
+                        return item.value === option.value && item.provider === providerId;
+                    });
+                    if (!exists) {
+                        models.push({ value: option.value, provider: providerId, providerName: providerId || '当前' });
+                    }
+                });
+            }
+            var providerSelect = document.getElementById('agentImageProviderSelect');
+            var imageProviders = providerSelect
+                ? Array.prototype.slice.call(providerSelect.options).filter(function (option) { return option.value; }).map(function (option) {
+                    return { value: option.value, label: textOf(option) || option.value };
+                })
+                : [];
+            var planConfirm = true;
+            try { planConfirm = typeof window.agentPlanConfirmEnabled === 'function' ? !!window.agentPlanConfirmEnabled() : true; } catch (e) {}
+            mountedHandle.setComposerState({
+                models: models,
+                model: select ? String(select.value || '') : '',
+                provider: current ? String(current.getAttribute('data-provider') || '') : '',
+                imageProviders: imageProviders,
+                imageProvider: providerSelect ? String(providerSelect.value || '') : '',
+                planConfirm: planConfirm
+            });
+        });
+    }
+    function setChatModel(model, provider) {
+        var select = document.getElementById('chatModelSelect');
+        if (!select) return;
+        var want = String(model || '');
+        var providerId = String(provider || '');
+        if (!want) return;
+        var option = null;
+        Array.prototype.slice.call(select.options).forEach(function (item) {
+            if (item.value !== want) return;
+            if (providerId && String(item.getAttribute('data-provider') || '') !== providerId) return;
+            option = item;
+        });
+        if (!option) {
+            option = document.createElement('option');
+            option.value = want;
+            option.textContent = want;
+            if (providerId) option.setAttribute('data-provider', providerId);
+            select.appendChild(option);
+        }
+        select.selectedIndex = Array.prototype.indexOf.call(select.options, option);
+        try { select.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+        log('composer', 'model ' + providerId + '/' + want);
+        pushComposerState();
+    }
+    function setImageProvider(value) {
+        var select = document.getElementById('agentImageProviderSelect');
+        if (!select) return;
+        var want = String(value || '');
+        if (want && !Array.prototype.slice.call(select.options).some(function (option) { return option.value === want; })) return;
+        select.value = want;
+        try { select.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+        log('composer', 'image provider ' + (want || 'auto'));
+        pushComposerState();
+    }
+    function addSelectedRefs() {
+        pushRefs();
+        var count = $all('#chatContext .chat-ctx-chip').length;
+        if (count) return Promise.resolve(count);
+        var selected = $all('.image-node.selected');
+        if (!selected.length) return Promise.resolve(0);
+        var chat = document.getElementById('chatModal');
+        if (!chat || typeof window.toggleChatPanel !== 'function') return Promise.resolve(0);
+        /* 画布 Cmd+框选只更新 selectedIds，不会调 syncChatContext；关再开一次面板会走
+           toggleChatPanel 里的同步逻辑，把选中的节点全部灌进引用条（不改旧代码）。 */
+        var settle = function () {
+            pushRefs();
+            return $all('#chatContext .chat-ctx-chip').length;
+        };
+        return new Promise(function (resolve) {
+            if (chat.classList.contains('open')) {
+                window.toggleChatPanel();
+                window.setTimeout(function () {
+                    window.toggleChatPanel();
+                    window.setTimeout(function () { resolve(settle()); }, 160);
+                }, 40);
+            } else {
+                window.toggleChatPanel();
+                window.setTimeout(function () { resolve(settle()); }, 200);
+            }
+        });
+    }
+    function pickUpload() {
+        var btn = document.getElementById('chatUploadBtn');
+        if (btn) btn.click();
+    }
     function selectSkill(id) {
         var want = String(id || '');
         if (!want) return Promise.resolve(false);
@@ -632,6 +746,10 @@
         steer: steer,
         selectSkill: selectSkill,
         applySkillRef: applySkillRef,
+        setChatModel: setChatModel,
+        setImageProvider: setImageProvider,
+        addSelectedRefs: addSelectedRefs,
+        pickUpload: pickUpload,
         clearSkill: clearSkill,
         removeRef: removeRefById,
         clearRefs: function () {
@@ -645,6 +763,7 @@
             try { current = typeof window.agentPlanConfirmEnabled === 'function' ? !!window.agentPlanConfirmEnabled() : true; } catch (e) {}
             if (current !== !!on && typeof window.toggleAgentPlanConfirm === 'function') window.toggleAgentPlanConfirm();
             pushPlanConfirm();
+            pushComposerState();
         },
         openHistory: function () {
             var btn = $('.chat-history-btn');
@@ -811,6 +930,9 @@
         ['mousedown', 'pointerdown', 'dblclick', 'wheel', 'contextmenu', 'touchstart'].forEach(function (type) {
             root.addEventListener(type, function (event) { event.stopPropagation(); }, true);
         });
+        /* click 用冒泡阶段挡：canvas 的 shell.onclick 会「点空白清选中」，不清的话点一下 composer
+           就会把选中的节点取消、引用 chips 跟着消失；冒泡阶段 stopPropagation 不影响同节点上的 React 委托。 */
+        root.addEventListener('click', function (event) { event.stopPropagation(); }, false);
     }
 
     function boot() {
@@ -850,6 +972,8 @@
                 pushContextUsage();
                 syncRunningFromLegacy();
                 pushSkillState();
+                pushComposerState();
+                observeComposerSelects();
                 loadSkills();
                 /* 必须先让历史回来再触发自动发送，否则历史 setHistory 会把刚推入的用户消息覆盖掉 */
                 loadHistory().then(function () {
@@ -874,6 +998,16 @@
                 }
                 console.error('[canvas-assistant] 微应用加载失败，已回退旧面板', error);
             });
+    }
+
+    function observeComposerSelects() {
+        var modelSelect = document.getElementById('chatModelSelect');
+        var providerSelect = document.getElementById('agentImageProviderSelect');
+        [modelSelect, providerSelect].forEach(function (select) {
+            if (!select) return;
+            select.addEventListener('change', pushComposerState);
+            new MutationObserver(pushComposerState).observe(select, { childList: true });
+        });
     }
 
     function loadSkills() {

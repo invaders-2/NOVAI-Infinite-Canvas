@@ -752,12 +752,87 @@ body.studio-theme-dark,
 .nvca-textarea:focus-visible { outline: none; box-shadow: none; }
 .nvca-prompt-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+  row-gap: 4px;
   width: 100%;
   padding: 4px 0 0;
 }
+.nvca-add-wrap { position: relative; }
+.nvca-add-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 41;
+  min-width: 216px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px;
+  border-radius: 12px;
+  background: var(--nvca-solid);
+  box-shadow: var(--nvca-shadow-pop);
+  animation: nvca-pop 0.16s var(--nvca-ease) both;
+}
+.nvca-add-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 11.5px;
+  color: var(--nvca-ink);
+}
+.nvca-add-menu button:hover { background: var(--nvca-fill-1); }
+.nvca-seg {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--nvca-fill-1);
+}
+.nvca-seg-btn {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--nvca-ink-3);
+  transition: background 0.14s var(--nvca-ease), color 0.14s var(--nvca-ease);
+}
+.nvca-seg-btn:hover { color: var(--nvca-ink); }
+.nvca-seg-btn.is-on {
+  background: var(--nvca-solid);
+  color: var(--nvca-ink);
+  font-weight: 500;
+  box-shadow: var(--nvca-shadow-float);
+}
+.nvca-select {
+  height: 26px;
+  max-width: 132px;
+  padding: 0 20px 0 8px;
+  border: 0;
+  border-radius: 999px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: transparent;
+  background-image: var(--select-caret);
+  background-position: calc(100% - 7px) 50%;
+  background-size: 9px 9px;
+  background-repeat: no-repeat;
+  color: var(--nvca-ink-2);
+  font-size: 10.5px;
+  outline: none;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  transition: background-color 0.14s var(--nvca-ease), color 0.14s var(--nvca-ease);
+}
+.nvca-select:hover,
+.nvca-select:focus { background-color: var(--nvca-fill-1); color: var(--nvca-ink); }
+.nvca-image-select { max-width: 100px; }
+.nvca-send-btn:disabled { opacity: 0.45; cursor: default; transform: none; box-shadow: none; }
 .nvca-prompt-tools { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
 .nvca-pill-btn {
   display: inline-flex;

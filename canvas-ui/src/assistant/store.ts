@@ -1,5 +1,8 @@
 import type {
 	ArtifactItem,
+	ChatModelOption,
+	ComposerState,
+	ImageProviderOption,
 	CanvasAssistantHandle,
 	CanvasAssistantHostApi,
 	ContextUsage,
@@ -19,6 +22,11 @@ export interface EnvState {
 	skills: SkillChip[]
 	selectedSkillId: string | null
 	selectedSkillName: string
+	chatModels: ChatModelOption[]
+	chatModel: string
+	chatProvider: string
+	imageProviders: ImageProviderOption[]
+	imageProvider: string
 	contextUsage: ContextUsage | null
 	artifacts: ArtifactItem[]
 	steerPending: boolean
@@ -42,6 +50,11 @@ export interface AssistantStore {
 	steer(text: string): void
 	chooseSkill(id: string): void
 	clearSkill(): void
+	setChatModel(model: string, provider: string): void
+	setImageProvider(value: string): void
+	setPlanConfirm(on: boolean): void
+	addSelectedRefs(): Promise<number>
+	pickUpload(): void
 	removeRef(id: string): void
 	clearRefs(): void
 	planAction(action: "run" | "cancel" | "adjust"): void
@@ -86,6 +99,11 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		skills: [],
 		selectedSkillId: null,
 		selectedSkillName: "",
+		chatModels: [],
+		chatModel: "",
+		chatProvider: "",
+		imageProviders: [],
+		imageProvider: "",
 		contextUsage: null,
 		artifacts: [],
 		steerPending: false,
@@ -244,6 +262,37 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		},
 		clearSkill() {
 			store.chooseSkill("")
+		},
+		setChatModel(model, provider) {
+			env.chatModel = String(model || "")
+			env.chatProvider = String(provider || "")
+			try { api.setChatModel(env.chatModel, env.chatProvider) } catch {}
+			emit()
+		},
+		setImageProvider(value) {
+			env.imageProvider = String(value || "")
+			try { api.setImageProvider(env.imageProvider) } catch {}
+			emit()
+		},
+		setPlanConfirm(on) {
+			env.planConfirm = Boolean(on)
+			try { api.togglePlanConfirm(env.planConfirm) } catch {}
+			emit()
+		},
+		addSelectedRefs() {
+			return Promise.resolve()
+				.then(() => api.addSelectedRefs())
+				.then((count) => {
+					pushNotice(count > 0 ? "已引用 " + count + " 个画布节点" : "先在画布上选中要引用的节点")
+					return count
+				})
+				.catch(() => {
+					pushNotice("引用节点失败")
+					return 0
+				})
+		},
+		pickUpload() {
+			try { api.pickUpload() } catch {}
 		},
 		removeRef(id) {
 			env.refs = env.refs.filter((ref) => String(ref.id) !== String(id))
@@ -447,6 +496,16 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		},
 		seedAutoSend(input) {
 			return store.seedAutoSend(input)
+		},
+		setComposerState(next) {
+			if (!next || typeof next !== "object") return
+			env.chatModels = Array.isArray(next.models) ? next.models : []
+			env.chatModel = String(next.model || "")
+			env.chatProvider = String(next.provider || "")
+			env.imageProviders = Array.isArray(next.imageProviders) ? next.imageProviders : []
+			env.imageProvider = String(next.imageProvider || "")
+			env.planConfirm = Boolean(next.planConfirm)
+			emit()
 		},
 		destroy() {
 			store.destroy()
