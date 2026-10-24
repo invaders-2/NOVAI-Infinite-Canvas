@@ -129,3 +129,49 @@ export const deriveRun = (message: Message): DerivedRun => {
 	}
 	return run
 }
+
+export const formatBytes = (bytes: number): string => {
+	const value = Number(bytes)
+	if (!Number.isFinite(value) || value <= 0) return "0 B"
+	if (value < 1024) return Math.round(value) + " B"
+	if (value < 1024 * 1024) return (value / 1024).toFixed(value < 10240 ? 1 : 0) + " KB"
+	return (value / (1024 * 1024)).toFixed(1) + " MB"
+}
+
+export const formatRelative = (seconds: number): string => {
+	const value = Number(seconds)
+	if (!Number.isFinite(value) || value <= 0) return ""
+	const diff = Math.max(0, Date.now() / 1000 - value)
+	if (diff < 60) return "刚刚"
+	if (diff < 3600) return Math.floor(diff / 60) + " 分钟前"
+	if (diff < 86400) return Math.floor(diff / 3600) + " 小时前"
+	if (diff < 86400 * 30) return Math.floor(diff / 86400) + " 天前"
+	return new Date(value * 1000).toLocaleDateString("zh-CN")
+}
+
+export const ARTIFACT_GROUPS: { kind: string; label: string }[] = [
+	{ kind: "html", label: "HTML 报告" },
+	{ kind: "xlsx", label: "Excel 表格" },
+	{ kind: "csv", label: "CSV 数据" },
+	{ kind: "md", label: "文档" },
+	{ kind: "image", label: "图片" },
+]
+
+export const SECTION_LABELS: Record<string, string> = {
+	role: "角色设定",
+	canvas: "画布快照",
+	files: "上传文件",
+	tools: "工具清单",
+	history: "历史对话",
+	skill_index: "技能索引",
+	skill_manual: "技能手册",
+	store_skill_manual: "商店技能手册",
+}
+
+export const sectionLabel = (raw: string): string => {
+	const key = String(raw || "")
+	if (SECTION_LABELS[key]) return SECTION_LABELS[key]
+	if (key.startsWith("skill_manual:")) return "技能手册 · " + key.slice("skill_manual:".length)
+	if (key.startsWith("store_skill_manual:")) return "商店技能手册 · " + key.slice("store_skill_manual:".length)
+	return key || "其他"
+}

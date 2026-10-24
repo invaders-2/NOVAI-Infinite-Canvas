@@ -58,6 +58,8 @@ export interface Message {
 	status: string
 	activeWorkMs: number
 	createdAt: number
+	/** 该轮 run 的 id：运行卡底部「上下文」调试入口用，历史消息没有 */
+	runId?: string
 	plan?: PlanData
 	planState?: "pending" | "running" | "applied" | "cancelled" | "adjusted" | "aborted" | ""
 	systemKind?: "info" | "warn" | "error"

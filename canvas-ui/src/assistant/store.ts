@@ -8,6 +8,7 @@ import type {
 	SkillChip,
 	StreamEvent,
 } from "./types"
+import { canvasId } from "./api"
 import { applyEvent, createSession, isTerminal, workMs } from "./session"
 
 export interface EnvState {
@@ -21,6 +22,10 @@ export interface EnvState {
 	artifacts: ArtifactItem[]
 	steerPending: boolean
 	notice: string
+	/** 产物有变化（artifact_updated / 本轮结束）时自增，产物面板据此重拉 */
+	artifactRefresh: number
+	/** 线程列表可能变化（本轮结束 / 清空对话）时自增 */
+	threadRefresh: number
 }
 
 export interface AssistantStore {
@@ -42,6 +47,7 @@ export interface AssistantStore {
 	openHistory(): void
 	openNode(id: string): void
 	clearHistory(): void
+	reloadHistory(): void
 	destroy(): void
 }
 
@@ -80,6 +86,8 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		artifacts: [],
 		steerPending: false,
 		notice: "",
+		artifactRefresh: 0,
+		threadRefresh: 0,
 	}
 	const listeners = new Set<() => void>()
 	let version = 0
@@ -243,7 +251,23 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			state.contextUsage = null
 			env.artifacts = []
 			env.running = false
+			env.threadRefresh += 1
 			emit()
+		},
+		reloadHistory() {
+			if (!canvasId) return
+			fetch("/api/agent/thread/" + encodeURIComponent(canvasId) + "?limit=60", { headers: { Accept: "application/json" } })
+				.then((response) => (response.ok ? response.json() : null))
+				.then((data) => {
+					if (!data || !Array.isArray(data.messages)) return
+					state.messages = data.messages.map((item: { role?: string; text?: string }) =>
+						historyMessage(String(item.role || "assistant"), String(item.text || "")),
+					)
+					state.streamingMessageId = null
+					env.artifacts = []
+					emit()
+				})
+				.catch(() => {})
 		},
 		destroy() {
 			destroyed = true
@@ -259,8 +283,12 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 				env.running = true
 				env.artifacts = []
 			}
+			if (type === "artifact_updated" || type === "done" || type === "error") {
+				env.artifactRefresh += 1
+			}
 			if (type === "done" || type === "error") {
 				env.running = false
+				env.threadRefresh += 1
 				if (type === "done" && !isTerminal(state.streamState)) state.streamState = "completed"
 				state.messages.forEach((message) => {
 					if (message.planState === "running") {

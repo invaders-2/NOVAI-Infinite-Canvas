@@ -216,6 +216,7 @@ export const applyEvent = (state: SessionState, event: StreamEvent): SessionStat
 		assistant.status = "streaming"
 		state.streamState = "streaming"
 		state.runId = String(data.run_id || data.runId || "")
+		assistant.runId = state.runId
 		const baseline = state.runActivity && state.runActivity.frozen ? Number(state.runActivity.frozenMs) || 0 : 0
 		state.runActivity = { startedAt: now(), frozenMs: baseline, frozen: false }
 		state.pendingConfirmation = null

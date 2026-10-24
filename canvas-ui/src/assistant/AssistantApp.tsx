@@ -7,6 +7,7 @@ import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task"
 import { cn } from "@/lib/utils"
 import {
 	ChevronDownIcon,
+	GaugeIcon,
 	ImageIcon,
 	ListChecksIcon,
 	PlayIcon,
@@ -15,6 +16,8 @@ import {
 } from "lucide-react"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Composer } from "./Composer"
+import { ModelContextDialog } from "./ModelContextDialog"
+import { ThreadBar } from "./ThreadBar"
 import { deriveRun, formatTokens, formatWorkMs, statusLabel, toolIconKey, toolLabel } from "./format"
 import { ToolIcon } from "./icons"
 import type { AssistantStore } from "./store"
@@ -54,6 +57,7 @@ export const AssistantApp = ({ store }: AssistantAppProps) => {
 
 	return (
 		<div className="nvca-root">
+			<ThreadBar store={store} />
 			<Conversation className="nvca-conversation">
 				<ConversationContent className="nvca-conversation-content">
 					{messages.length === 0 ? (
@@ -149,6 +153,7 @@ const RunTurn = ({
 	store: AssistantStore
 }) => {
 	useTicker(streaming)
+	const [contextOpen, setContextOpen] = useState(false)
 	const run = deriveRun(message)
 	const { state } = store
 	const pending = state.pendingConfirmation as { kind?: string; tool?: string; description?: string; units?: number; reason?: string } | null
@@ -270,6 +275,19 @@ const RunTurn = ({
 			) : null}
 
 			{pending && pending.kind !== "plan" ? <ConfirmationHint pending={pending} store={store} /> : null}
+
+			{message.runId ? (
+				<div className="nvca-run-tools">
+					<button className="nvca-link-btn" onClick={() => setContextOpen(true)} title="查看这轮发给模型的上下文规模" type="button">
+						<GaugeIcon className="nvca-i-xs" />
+						上下文
+					</button>
+				</div>
+			) : null}
+
+			{contextOpen && message.runId ? (
+				<ModelContextDialog runId={message.runId} onClose={() => setContextOpen(false)} />
+			) : null}
 		</div>
 	)
 }
