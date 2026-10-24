@@ -217,5 +217,142 @@ class CanvasPurgeTests(unittest.TestCase):
         self.assertFalse(os.path.isfile(thread_file(canvas_id)))
 
 
+class ThreadRenameTests(unittest.TestCase):
+
+    def setUp(self):
+        self.canvas_id = new_canvas("rename 画布")
+        seed_messages(self.canvas_id, 1)
+        self.thread_id = CLIENT.get("/api/agent/threads",
+                                    params={"canvas_id": self.canvas_id}).json()["threads"][0]["id"]
+
+    def _rename(self, title, thread_id=None, canvas_id=None):
+        return CLIENT.post("/api/agent/threads/rename", json={
+            "canvas_id": canvas_id if canvas_id is not None else self.canvas_id,
+            "thread_id": thread_id if thread_id is not None else self.thread_id,
+            "title": title,
+        })
+
+    def test_rename_updates_title(self):
+        resp = self._rename("  新标题  ")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json(), {"ok": True,
+                                       "thread": {"id": self.thread_id, "title": "新标题"}})
+        rows = CLIENT.get("/api/agent/threads", params={"canvas_id": self.canvas_id}).json()["threads"]
+        self.assertEqual(rows[0]["title"], "新标题")
+
+    def test_empty_title_is_400(self):
+        resp = self._rename("   ")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["detail"], "标题不能为空")
+
+    def test_too_long_title_is_400(self):
+        resp = self._rename("字" * 61)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("标题过长（最多 60 字）", resp.json()["detail"])
+
+    def test_unknown_thread_is_404(self):
+        resp = self._rename("x", thread_id="no-such-thread")
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("线程不存在", resp.json()["detail"])
+
+    def test_unknown_canvas_is_404(self):
+        resp = self._rename("x", canvas_id="no-such-canvas")
+        self.assertEqual(resp.status_code, 404)
+
+
+class ThreadDeleteTests(unittest.TestCase):
+
+    def setUp(self):
+        self.canvas_id = new_canvas("delete 画布")
+        seed_messages(self.canvas_id, 1)
+        self.base_id = CLIENT.get("/api/agent/threads",
+                                  params={"canvas_id": self.canvas_id}).json()["threads"][0]["id"]
+
+    def _fork_from(self, message_index=0):
+        payload = {"canvas_id": self.canvas_id, "thread_id": self.base_id,
+                   "message_index": message_index}
+        resp = CLIENT.post("/api/agent/threads/fork", json=payload)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        return resp.json()["thread"]["id"]
+
+    def _switch(self, thread_id):
+        return CLIENT.post("/api/agent/threads/switch",
+                           json={"canvas_id": self.canvas_id, "thread_id": thread_id})
+
+    def _delete(self, thread_id, canvas_id=None):
+        return CLIENT.delete("/api/agent/threads/%s" % thread_id,
+                             params={"canvas_id": canvas_id if canvas_id is not None else self.canvas_id})
+
+    def test_delete_removes_thread(self):
+        forked = self._fork_from()
+        resp = self._delete(forked)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertEqual(body["deleted"], forked)
+        rows = CLIENT.get("/api/agent/threads", params={"canvas_id": self.canvas_id}).json()["threads"]
+        self.assertEqual([item["id"] for item in rows], [self.base_id])
+
+    def test_delete_active_switches_to_newest_remaining(self):
+        forked2 = self._fork_from()
+        forked3 = self._fork_from()
+        with main._AGENT_THREAD_LOCK:
+            doc = main._agent_thread_doc_load(self.canvas_id)
+            for thread in doc["threads"]:
+                if thread["id"] == self.base_id:
+                    thread["created_at"] = 100.0
+                elif thread["id"] == forked2:
+                    thread["created_at"] = 300.0
+                elif thread["id"] == forked3:
+                    thread["created_at"] = 400.0
+            doc["active_id"] = forked2
+            main._agent_thread_doc_save(self.canvas_id, doc)
+        resp = self._delete(forked2)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertEqual(body["deleted"], forked2)
+        self.assertEqual(body["active_id"], forked3)
+        rows = CLIENT.get("/api/agent/threads", params={"canvas_id": self.canvas_id}).json()
+        self.assertEqual(rows["active_id"], forked3)
+
+    def test_delete_inactive_keeps_active(self):
+        forked = self._fork_from()
+        self._switch(forked)
+        resp = self._delete(self.base_id)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["active_id"], forked)
+
+    def test_last_thread_is_400(self):
+        resp = self._delete(self.base_id)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("至少保留一条对话", resp.json()["detail"])
+
+    def test_unknown_thread_is_404(self):
+        resp = self._delete("no-such-thread")
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("线程不存在", resp.json()["detail"])
+
+    def test_unknown_canvas_is_404(self):
+        resp = self._delete(self.base_id, canvas_id="no-such-canvas")
+        self.assertEqual(resp.status_code, 404)
+
+
+class ThreadConcurrencyTests(unittest.TestCase):
+
+    def test_sequential_renames_last_wins(self):
+        canvas_id = new_canvas("concurrency 画布")
+        seed_messages(canvas_id, 1)
+        thread_id = CLIENT.get("/api/agent/threads",
+                               params={"canvas_id": canvas_id}).json()["threads"][0]["id"]
+        for title in ("第一次改名", "第二次改名"):
+            resp = CLIENT.post("/api/agent/threads/rename", json={
+                "canvas_id": canvas_id, "thread_id": thread_id, "title": title})
+            self.assertEqual(resp.status_code, 200, resp.text)
+        rows = CLIENT.get("/api/agent/threads", params={"canvas_id": canvas_id}).json()["threads"]
+        self.assertEqual(rows[0]["title"], "第二次改名")
+        with open(thread_file(canvas_id), "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        self.assertEqual(doc["threads"][0]["title"], "第二次改名")
+
+
 if __name__ == "__main__":
     unittest.main()

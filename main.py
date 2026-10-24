@@ -36218,6 +36218,13 @@ class AgentThreadSwitchRequest(BaseModel):
     thread_id: str = Field("", max_length=64)
 
 
+class AgentThreadRenameRequest(BaseModel):
+    canvas_id: str
+    thread_id: str = Field("", max_length=64)
+    # 上限放宽到 200，具体长度校验在接口里做（要返回 400 而不是 pydantic 422）
+    title: str = Field("", max_length=200)
+
+
 def _agent_thread_list_row(thread):
     return {"id": thread.get("id"), "title": thread.get("title"),
             "created_at": thread.get("created_at"),
@@ -36302,6 +36309,54 @@ async def agent_artifact_file(name: str):
     if not path:
         raise HTTPException(status_code=404, detail="产物不存在：%s" % raw)
     return FileResponse(path, filename=raw)
+
+
+@app.post("/api/agent/threads/rename")
+async def agent_threads_rename(payload: AgentThreadRenameRequest, request: Request):
+    """重命名线程（1..60 字，去首尾空白）。"""
+    canvas_id = str(payload.canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    require_canvas_access(load_canvas(canvas_id), request, "view")
+    title = str(payload.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="标题不能为空")
+    if len(title) > 60:
+        raise HTTPException(status_code=400, detail="标题过长（最多 60 字）")
+    with _AGENT_THREAD_LOCK:
+        doc = _agent_thread_doc_load(canvas_id)
+        thread = _agent_thread_find(doc, payload.thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="线程不存在")
+        thread["title"] = title
+        _agent_thread_doc_save(canvas_id, doc)
+    return {"ok": True, "thread": {"id": thread["id"], "title": thread["title"]}}
+
+
+@app.delete("/api/agent/threads/{thread_id}")
+async def agent_threads_delete(thread_id: str, request: Request, canvas_id: str = ""):
+    """删除线程；不允许删最后一条；删掉 active 时自动切到剩余里创建时间最新的一条。"""
+    canvas_id = str(canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    require_canvas_access(load_canvas(canvas_id), request, "view")
+    with _AGENT_THREAD_LOCK:
+        doc = _agent_thread_doc_load(canvas_id)
+        thread = _agent_thread_find(doc, thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="线程不存在")
+        threads = doc.get("threads") or []
+        if len(threads) <= 1:
+            raise HTTPException(status_code=400, detail="至少保留一条对话")
+        doc["threads"] = [item for item in threads if item.get("id") != thread["id"]]
+        active_id = str(doc.get("active_id") or "")
+        if active_id == thread["id"]:
+            remaining = sorted(doc["threads"],
+                               key=lambda item: float(item.get("created_at") or 0), reverse=True)
+            active_id = str(remaining[0]["id"]) if remaining else ""
+            doc["active_id"] = active_id
+        _agent_thread_doc_save(canvas_id, doc)
+    return {"ok": True, "deleted": thread["id"], "active_id": active_id}
 
 
 @app.delete("/api/agent/thread/{canvas_id}")

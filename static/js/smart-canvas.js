@@ -7712,19 +7712,18 @@ function createChatMsgEl(role){
     var bubble = document.createElement('div');
     bubble.className = 'chat-bubble';
     div.appendChild(bubble);
-    if(role === 'assistant'){
-        var branch = document.createElement('button');
-        branch.type = 'button';
-        branch.className = 'chat-branch-btn';
-        branch.title = '从此处分支';
-        branch.setAttribute('aria-label', '从此处分支');
-        branch.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8.2 6h7.6M6 8.2v2.6a3 3 0 0 0 3 3h1.8M18 8.2v2.6a3 3 0 0 1-3 3h-1.8"/></svg><span>从此处分支</span>';
-        div.appendChild(branch);
-    }
+    var actions = document.createElement('div');
+    actions.className = 'chat-msg-actions';
+    actions.innerHTML = '<button type="button" class="chat-msg-act" data-chat-act="copy" title="复制这条消息">复制</button>' +
+        (role === 'user' ? '<button type="button" class="chat-msg-act" data-chat-act="edit" title="编辑后重发" hidden>编辑</button>' : '') +
+        (role === 'assistant' ? '<button type="button" class="chat-msg-act" data-chat-act="retry" title="重试上一条消息" hidden>重试</button>' : '') +
+        (role === 'assistant' ? '<button type="button" class="chat-msg-act" data-chat-act="branch" title="从此处分支"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8.2 6h7.6M6 8.2v2.6a3 3 0 0 0 3 3h1.8M18 8.2v2.6a3 3 0 0 1-3 3h-1.8"/></svg>从此处分支</button>' : '');
+    div.appendChild(actions);
     return {div:div, bubble:bubble};
 }
 function addChatMessage(role, text, images){
     chatMessages.push({role:role, text:text, images:images||[]});
+    setTimeout(syncChatMessageActions, 0);
     removeChatWelcome();
     chatTypewriterStop(true);
     var parts = createChatMsgEl(role);
@@ -7926,6 +7925,7 @@ async function loadAgentThreadOnce(){
             box.appendChild(parts.div);
         });
         box.scrollTop = box.scrollHeight;
+        syncChatMessageActions();
     } catch(e){}
     loadAgentThreads();
 }
@@ -7934,13 +7934,14 @@ async function loadAgentThreadOnce(){
 function closeAgentThreadMenu(){
     var menu = document.getElementById('chatThreadMenu');
     var btn = document.getElementById('chatThreadBtn');
-    if(menu) menu.hidden = true;
+    if(menu){ menu.hidden = true; menu.classList.remove('has-thread-actions'); }
     if(btn) btn.setAttribute('aria-expanded', 'false');
 }
 function renderAgentThreadSwitcher(){
     var nameEl = document.getElementById('chatThreadName');
     var menu = document.getElementById('chatThreadMenu');
     if(!nameEl || !menu) return;
+    menu.classList.remove('has-thread-actions');
     var threads = agentThreadState.threads || [];
     var active = null;
     for(var i = 0; i < threads.length; i++){
@@ -7954,21 +7955,138 @@ function renderAgentThreadSwitcher(){
         menu.innerHTML = '<div class="chat-thread-empty">还没有线程，发一条消息就会创建。</div>';
         return;
     }
+    var onlyOne = threads.length <= 1;
     menu.innerHTML = threads.map(function(thread){
         var isOn = String(thread.id) === String(agentThreadState.activeId);
         var count = Number(thread.message_count) || 0;
-        return '<button type="button" class="chat-thread-item' + (isOn ? ' active' : '') + '" data-thread-id="' + escapeAttr(String(thread.id)) + '">' +
-            '<span class="chat-thread-item-name">' + escapeHtml(String(thread.title || '对话')) + '</span>' +
-            '<span class="chat-thread-count">' + count + ' 条</span>' +
-            (isOn ? '<span class="chat-thread-check">✓</span>' : '') +
-            '</button>';
+        return '<div class="chat-thread-row' + (isOn ? ' active' : '') + '" data-thread-row="' + escapeAttr(String(thread.id)) + '">' +
+            '<button type="button" class="chat-thread-main" data-thread-id="' + escapeAttr(String(thread.id)) + '">' +
+                '<span class="chat-thread-item-name">' + escapeHtml(String(thread.title || '对话')) + '</span>' +
+                '<span class="chat-thread-count">' + count + ' 条</span>' +
+                (isOn ? '<span class="chat-thread-check">✓</span>' : '') +
+            '</button>' +
+            '<button type="button" class="chat-thread-more" title="更多操作" aria-label="更多操作">⋯</button>' +
+            '<div class="chat-thread-actions" hidden>' +
+                '<button type="button" data-thread-act="rename">重命名</button>' +
+                '<button type="button" data-thread-act="delete"' + (onlyOne ? ' disabled title="至少保留一条对话"' : '') + '>删除</button>' +
+            '</div>' +
+        '</div>';
     }).join('');
-    Array.prototype.forEach.call(menu.querySelectorAll('[data-thread-id]'), function(item){
-        item.addEventListener('click', function(event){
+    Array.prototype.forEach.call(menu.querySelectorAll('[data-thread-row]'), function(row){
+        var threadId = row.getAttribute('data-thread-row');
+        var thread = (agentThreadState.threads || []).find(function(t){ return String(t.id) === String(threadId); }) || { id: threadId, title: '' };
+        var main = row.querySelector('.chat-thread-main');
+        var more = row.querySelector('.chat-thread-more');
+        var actions = row.querySelector('.chat-thread-actions');
+        if(main) main.addEventListener('click', function(event){
             event.stopPropagation();
-            switchAgentThread(item.getAttribute('data-thread-id'));
+            switchAgentThread(threadId);
+        });
+        if(more) more.addEventListener('click', function(event){
+            event.preventDefault(); event.stopPropagation();
+            var open = actions.hidden;
+            Array.prototype.forEach.call(menu.querySelectorAll('.chat-thread-actions'), function(el){ el.hidden = true; });
+            actions.hidden = !open;
+            menu.classList.toggle('has-thread-actions', open);
+        });
+        row.querySelectorAll('[data-thread-act]').forEach(function(btn){
+            btn.addEventListener('click', function(event){
+                event.preventDefault(); event.stopPropagation();
+                actions.hidden = true;
+                menu.classList.remove('has-thread-actions');
+                if(btn.getAttribute('data-thread-act') === 'rename') startThreadRename(row, thread);
+                else if(btn.getAttribute('data-thread-act') === 'delete' && !btn.disabled) openThreadDeleteConfirm(thread);
+            });
         });
     });
+}
+function startThreadRename(row, thread){
+    if(!row || !thread || !thread.id) return;
+    var main = row.querySelector('.chat-thread-main');
+    var name = row.querySelector('.chat-thread-item-name');
+    if(!main || !name || main.querySelector('.chat-thread-name-input')) return;
+    name.style.display = 'none';
+    var input = document.createElement('input');
+    input.className = 'chat-thread-name-input';
+    input.type = 'text';
+    input.maxLength = 60;
+    input.value = String(thread.title || '');
+    main.appendChild(input);
+    input.focus();
+    input.select();
+    var finished = false;
+    function finish(save){
+        if(finished) return;
+        finished = true;
+        var value = String(input.value || '').trim();
+        if(!save || !value || value === String(thread.title || '')){
+            if(save && !value){ toast('标题不能为空'); finished = false; input.focus(); return; }
+            renderAgentThreadSwitcher();
+            return;
+        }
+        fetch('/api/agent/threads/rename', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ canvas_id: canvasId, thread_id: String(thread.id), title: value })
+        }).then(function(res){
+            return res.json().catch(function(){ return {}; }).then(function(data){
+                if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+                toast('已重命名对话');
+                return loadAgentThreads();
+            });
+        }).catch(function(error){
+            toast((error && error.message) || '重命名失败', { danger: true, icon: 'alert' });
+            renderAgentThreadSwitcher();
+        });
+    }
+    input.addEventListener('click', function(event){ event.stopPropagation(); });
+    input.addEventListener('mousedown', function(event){ event.stopPropagation(); });
+    input.addEventListener('keydown', function(event){
+        event.stopPropagation();
+        if(event.key === 'Enter'){ event.preventDefault(); finish(true); }
+        else if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
+    });
+}
+function openThreadDeleteConfirm(thread){
+    if(!thread || !thread.id) return;
+    var root = document.getElementById('chatThreadDeleteConfirm');
+    if(!root){
+        root = document.createElement('div');
+        root.id = 'chatThreadDeleteConfirm';
+        root.className = 'chat-thread-confirm-root';
+        root.hidden = true;
+        root.innerHTML = '<div class="chat-thread-confirm-scrim" data-thread-confirm-close></div>' +
+            '<div class="chat-thread-confirm" role="dialog" aria-modal="true"><h3 id="chatThreadDeleteTitle">删除对话？</h3>' +
+            '<p>该对话的历史将一并删除，不可恢复</p>' +
+            '<div class="chat-thread-confirm-actions"><button type="button" class="chat-thread-confirm-cancel" data-thread-confirm-close>取消</button><button type="button" class="chat-thread-confirm-delete" id="chatThreadDeleteOk">删除</button></div></div>';
+        document.body.appendChild(root);
+        root.addEventListener('click', function(event){
+            if(event.target.closest('[data-thread-confirm-close]')){ event.preventDefault(); root.hidden = true; return; }
+            if(event.target.closest('#chatThreadDeleteOk')){ event.preventDefault(); confirmThreadDelete(); }
+        });
+        document.addEventListener('keydown', function(event){ if(event.key === 'Escape' && !root.hidden) root.hidden = true; });
+    }
+    root._thread = thread;
+    var title = document.getElementById('chatThreadDeleteTitle');
+    if(title) title.textContent = '删除对话「' + String(thread.title || '对话') + '」？';
+    root.hidden = false;
+}
+async function confirmThreadDelete(){
+    var root = document.getElementById('chatThreadDeleteConfirm');
+    var thread = root && root._thread;
+    if(!thread || !canvasId) return;
+    root.hidden = true;
+    try {
+        var res = await fetch('/api/agent/threads/' + encodeURIComponent(String(thread.id)) + '?canvas_id=' + encodeURIComponent(canvasId), { method: 'DELETE' });
+        var data = await res.json().catch(function(){ return {}; });
+        if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+        agentThreadState.activeId = String(data.active_id || '');
+        await loadAgentThreads();
+        await reloadThreadMessagesView();
+        toast('已删除对话');
+    } catch(error){
+        toast((error && error.message) || '删除失败', { danger: true, icon: 'alert' });
+    }
 }
 async function loadAgentThreads(){
     if(!canvasId) return;
@@ -8001,6 +8119,7 @@ function renderThreadMessagesView(msgs){
         box.appendChild(parts.div);
     });
     box.scrollTop = box.scrollHeight;
+    syncChatMessageActions();
 }
 async function reloadThreadMessagesView(){
     if(!canvasId) return;
@@ -8057,6 +8176,27 @@ async function forkAgentMessage(msgEl){
         toast('已从第 ' + (index + 1) + ' 条分支');
     } catch(e){ toast((e && e.message) || '分支失败', {danger:true, icon:'alert'}); }
 }
+function chatMessageText(el){
+    var bubble = el && el.querySelector('.chat-bubble');
+    return bubble ? String(bubble.innerText || '').trim() : '';
+}
+function syncChatMessageActions(){
+    var box = document.getElementById('chatMessages');
+    if(!box) return;
+    var list = Array.prototype.slice.call(box.querySelectorAll('.chat-msg.user, .chat-msg.assistant'));
+    var lastUser = null, lastAssistant = null;
+    list.forEach(function(el){ if(el.classList.contains('user')) lastUser = el; else lastAssistant = el; });
+    list.forEach(function(el){
+        var edit = el.querySelector('[data-chat-act="edit"]');
+        var retry = el.querySelector('[data-chat-act="retry"]');
+        if(edit) edit.hidden = el !== lastUser;
+        if(retry){
+            var card = el.querySelector('.agent-plan-card');
+            var runningCard = !!(card && card._run && !card._run.finished);
+            retry.hidden = el !== lastAssistant || runningCard || !!agentRunAbort || !!chatSending;
+        }
+    });
+}
 function initAgentThreadsUi(){
     var head = document.querySelector('#chatModal .chat-head-text');
     var host = document.querySelector('#canvasAssistantPanel .canvas-assistant-head-left');
@@ -8100,11 +8240,43 @@ function initAgentThreadsUi(){
     });
     var box = document.getElementById('chatMessages');
     if(box) box.addEventListener('click', function(event){
-        var branch = event.target.closest('.chat-branch-btn');
-        if(!branch) return;
+        var action = event.target.closest('.chat-msg-act');
+        if(!action) return;
         event.preventDefault();
         event.stopPropagation();
-        forkAgentMessage(branch.closest('.chat-msg'));
+        var msg = action.closest('.chat-msg');
+        if(!msg) return;
+        var kind = action.getAttribute('data-chat-act');
+        if(kind === 'branch'){ forkAgentMessage(msg); return; }
+        if(kind === 'copy'){
+            copyTextToClipboard(chatMessageText(msg)).then(function(ok){
+                if(!ok){ toast('复制失败，请手动选择', {danger:true, icon:'alert'}); return; }
+                var before = action.textContent;
+                action.textContent = '✓';
+                action.classList.add('is-copied');
+                setTimeout(function(){ action.textContent = before; action.classList.remove('is-copied'); }, 1200);
+            });
+            return;
+        }
+        if(kind === 'edit'){
+            var input = document.getElementById('chatInput');
+            if(!input) return;
+            input.value = chatMessageText(msg);
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 100) + 'px';
+            input.focus();
+            return;
+        }
+        if(kind === 'retry'){
+            var prev = msg.previousElementSibling;
+            while(prev && !prev.classList.contains('user')) prev = prev.previousElementSibling;
+            if(!prev){ toast('找不到上一条用户消息'); return; }
+            if(agentRunAbort || chatSending) return;
+            var inp = document.getElementById('chatInput');
+            if(!inp) return;
+            inp.value = chatMessageText(prev);
+            sendChatMessage();
+        }
     });
     renderAgentThreadSwitcher();
 }
@@ -8786,20 +8958,104 @@ function initCanvasContextUsage(){
     el.id = 'canvasContextUsage';
     el.className = 'canvas-context-usage';
     el.hidden = true;
-    el.style.cssText = 'font-size:10.5px;line-height:1;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums;margin-left:2px;';
+    el.style.cssText = 'font-size:10.5px;line-height:1;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums;margin-left:2px;cursor:pointer;';
     el.title = '上下文占用为估算值（system + user 文本，不含图片）；模型窗口未配置时只显示绝对 token 数。';
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    el.addEventListener('click', function(event){ event.stopPropagation(); toggleCanvasContextPopover(); });
+    el.addEventListener('keydown', function(event){ if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); toggleCanvasContextPopover(); } });
+    el.__contextBound = true;
     row.appendChild(el);
     canvasContextUsageEl = el;
     return el;
 }
+var canvasContextPopover = null;
+function closeCanvasContextPopover(){
+    if(canvasContextPopover) canvasContextPopover.hidden = true;
+}
+function renderCanvasContextPopover(){
+    var usage = agentSession ? agentSession.contextUsage : null;
+    if(!canvasContextPopover) return;
+    var used = usage && typeof usage.used_tokens === 'number' ? usage.used_tokens : null;
+    var max = usage && typeof usage.max_tokens === 'number' && usage.max_tokens > 0 ? usage.max_tokens : null;
+    var pct = null;
+    if(max && used !== null) pct = Math.max(0, Math.min(100, (used / max) * 100));
+    else if(usage && typeof usage.percentage === 'number' && isFinite(usage.percentage)) pct = Math.max(0, Math.min(100, usage.percentage));
+    var main = canvasContextPopover.querySelector('.canvas-context-main');
+    var bar = canvasContextPopover.querySelector('.canvas-context-bar');
+    var fill = canvasContextPopover.querySelector('.canvas-context-bar i');
+    var note = canvasContextPopover.querySelector('.canvas-context-note');
+    if(main){
+        main.textContent = used !== null
+            ? ('已用 ' + formatTokens(used) + ' tokens' + (max ? (' / 上限 ' + formatTokens(max)) : ' · 未设置上限'))
+            : '暂无上下文数据';
+    }
+    if(bar){
+        bar.hidden = !max;
+        if(fill) fill.style.width = (pct != null ? pct : 0) + '%';
+    }
+    if(note) note.textContent = max ? (Math.round(pct || 0) + '% · 按字符估算，不等于计费口径') : '未设置上限 · 按字符估算，不等于计费口径';
+}
+function positionCanvasContextPopover(){
+    var el = canvasContextUsageEl;
+    if(!el || !canvasContextPopover) return;
+    var r = el.getBoundingClientRect();
+    var p = canvasContextPopover.getBoundingClientRect();
+    var left = Math.max(12, Math.min(r.left, window.innerWidth - p.width - 12));
+    var top = Math.max(12, r.top - p.height - 8);
+    canvasContextPopover.style.left = left + 'px';
+    canvasContextPopover.style.top = top + 'px';
+}
+function openCanvasContextPopover(){
+    var usage = agentSession ? agentSession.contextUsage : null;
+    if(!usage) return;
+    if(!canvasContextPopover){
+        canvasContextPopover = document.createElement('div');
+        canvasContextPopover.id = 'canvasContextPopover';
+        canvasContextPopover.className = 'canvas-context-popover';
+        canvasContextPopover.hidden = true;
+        canvasContextPopover.innerHTML = '<div class="canvas-context-title">上下文占用</div>' +
+            '<div class="canvas-context-main"></div>' +
+            '<div class="canvas-context-bar"><i></i></div>' +
+            '<div class="canvas-context-note"></div>';
+        document.body.appendChild(canvasContextPopover);
+        canvasContextPopover.addEventListener('click', function(event){ event.stopPropagation(); });
+        document.addEventListener('click', function(event){
+            if(canvasContextPopover.hidden) return;
+            if(event.target === canvasContextUsageEl || canvasContextPopover.contains(event.target)) return;
+            closeCanvasContextPopover();
+        });
+        document.addEventListener('keydown', function(event){ if(event.key === 'Escape') closeCanvasContextPopover(); });
+        window.addEventListener('resize', function(){ if(!canvasContextPopover.hidden) positionCanvasContextPopover(); });
+    }
+    renderCanvasContextPopover();
+    canvasContextPopover.hidden = false;
+    requestAnimationFrame(positionCanvasContextPopover);
+}
+function toggleCanvasContextPopover(){
+    if(!canvasContextPopover || canvasContextPopover.hidden) openCanvasContextPopover();
+    else closeCanvasContextPopover();
+}
+function bindCanvasContextUsage(el){
+    if(!el || el.__contextBound) return;
+    el.__contextBound = true;
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    el.addEventListener('click', function(event){ event.stopPropagation(); toggleCanvasContextPopover(); });
+    el.addEventListener('keydown', function(event){ if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); toggleCanvasContextPopover(); } });
+}
 function updateCanvasContextUsage(){
-    var el = canvasContextUsageEl || initCanvasContextUsage();
+    var el = document.getElementById('canvasContextUsage');
+    if(!el) el = initCanvasContextUsage();
     if(!el) return;
-    var text = '';
-    try { text = formatContextUsage(agentSession ? agentSession.contextUsage : null); } catch(e){ text = ''; }
-    if(el.textContent === text && el.hidden === !text) return;
+    canvasContextUsageEl = el;
+    bindCanvasContextUsage(el);
+    var text = formatContextUsage(agentSession ? agentSession.contextUsage : null);
+    if(el.textContent === text && el.hidden === !text) { if(!text) closeCanvasContextPopover(); return; }
     el.hidden = !text;
     el.textContent = text;
+    if(!text) closeCanvasContextPopover();
+    else if(canvasContextPopover && !canvasContextPopover.hidden) renderCanvasContextPopover();
 }
 /* ── 卡片底部的 part 摘要：只读 agentSession.messages 里的 parts，不另起状态 ── */
 function agentRunPartLines(message){
@@ -10195,6 +10451,7 @@ async function sendChatMessage(){
     parts.div.dataset.threadIndex = String(threadBase + 1);
     appendRunThinking(parts.bubble, '正在规划…');
     document.getElementById('chatMessages').appendChild(parts.div);
+    syncChatMessageActions();
     parts.div.scrollIntoView({behavior:'smooth',block:'end'});
     try {
         // 流式 Agent 优先：/api/agent/run 可用 → SSE 边跑边落图；
@@ -10224,6 +10481,8 @@ async function sendChatMessage(){
         /* 计时 key 用完即删：不清的话下一轮发送会接着上一轮的秒数往下走 */
         thoughtLineStarts.delete('agent');
         agentThreadState.messages.push({role:'user', text:text}, {role:'assistant', text:''});
+        updateCanvasContextUsage();
+        syncChatMessageActions();
         loadAgentThreads();
     }
     return sendOk;
