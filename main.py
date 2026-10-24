@@ -36359,6 +36359,63 @@ async def agent_threads_delete(thread_id: str, request: Request, canvas_id: str 
     return {"ok": True, "deleted": thread["id"], "active_id": active_id}
 
 
+@app.get("/api/agent/canvases/{canvas_id}/artifacts")
+async def agent_canvas_artifacts(canvas_id: str, request: Request):
+    """画布级产物清单：扫描 DATA_DIR 下的产物目录，跨多次 run 汇总（只读）。"""
+    canvas_id = str(canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    require_canvas_access(load_canvas(canvas_id), request, "view")
+    items = _agent_artifact_scan()
+    truncated = len(items) > AGENT_ARTIFACTS_LIST_LIMIT
+    files = items[:AGENT_ARTIFACTS_LIST_LIMIT]
+    counts: Dict[str, int] = {}
+    for item in files:
+        kind = str(item.get("kind") or "")
+        counts[kind] = counts.get(kind, 0) + 1
+    return {"canvas_id": canvas_id, "files": files, "counts": counts, "truncated": truncated}
+
+
+@app.get("/api/agent/runs/{run_id}/model-context")
+async def agent_run_model_context(run_id: str, request: Request):
+    """该 run 实际发给模型的上下文摘要（调试用，不返回提示词原文）。run 过期即 404。"""
+    bus = _agent_run_bus_get(run_id)
+    _agent_require_run_access(bus, request, "view")
+    debug = bus.get("model_debug") if isinstance(bus.get("model_debug"), dict) else {}
+    if not debug:
+        # 老 run 没有 debug 快照：从总线事件里能捞多少给多少，捞不到的字段给 null
+        usage = None
+        start_data: Dict[str, Any] = {}
+        for item in reversed(bus.get("events") or []):
+            name = str(item.get("name") or "")
+            if name == "context_usage" and usage is None and isinstance(item.get("data"), dict):
+                usage = item["data"]
+            if name == "run_start" and isinstance(item.get("data"), dict):
+                start_data = item["data"]
+        debug = {"model": start_data.get("model"),
+                 "estimated_tokens": (usage or {}).get("used_tokens"),
+                 "context_max": (usage or {}).get("max_tokens"),
+                 "percentage": (usage or {}).get("percentage")}
+
+    def pick(key):
+        value = debug.get(key)
+        return value if value is not None else None
+
+    return {
+        "run_id": str(run_id or ""),
+        "model": pick("model"),
+        "system_prompt_chars": pick("system_prompt_chars"),
+        "system_prompt_sections": pick("system_prompt_sections"),
+        "tool_count": pick("tool_count"),
+        "tool_names": pick("tool_names"),
+        "history_chars": pick("history_chars"),
+        "instruction_chars": pick("instruction_chars"),
+        "estimated_tokens": pick("estimated_tokens"),
+        "context_max": pick("context_max"),
+        "percentage": pick("percentage"),
+    }
+
+
 @app.delete("/api/agent/thread/{canvas_id}")
 async def agent_thread_clear(canvas_id: str):
     """「新对话」：清掉这张画布的对话记录（画布本身不动）。"""
@@ -37505,6 +37562,62 @@ def _agent_step_artifacts(result):
     return found
 
 
+AGENT_ARTIFACTS_LIST_LIMIT = 200
+
+
+def _agent_artifact_scan() -> List[Dict[str, Any]]:
+    """扫描 DATA_DIR 下的产物目录，按 (kind, name) 去重（同名取 mtime 最新），返回 mtime 倒序列表。"""
+    latest: Dict[Any, Dict[str, Any]] = {}
+    for root in (os.path.join(DATA_DIR, "agent_outputs"), os.path.join(DATA_DIR, "agent_runs"),
+                 os.path.join(DATA_DIR, "agent_files")):
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _dirs, filenames in os.walk(root):
+            for filename in filenames:
+                ext = os.path.splitext(filename)[1].lower()
+                kind = AGENT_ARTIFACT_EXTS.get(ext)
+                if not kind:
+                    continue
+                path = os.path.join(dirpath, filename)
+                try:
+                    mtime = os.path.getmtime(path)
+                    size = os.path.getsize(path)
+                except OSError:
+                    continue
+                rel_parts = os.path.relpath(path, root).split(os.sep)
+                run_id = rel_parts[0] if len(rel_parts) > 1 else ""
+                item = {"name": filename, "kind": kind, "size": int(size),
+                        "mtime": int(mtime), "url": _agent_artifact_url(filename),
+                        "run_id": run_id if re.match(r"^run[_-]", run_id or "") else run_id}
+                key = (kind, filename)
+                if key not in latest or item["mtime"] >= latest[key]["mtime"]:
+                    latest[key] = item
+    return sorted(latest.values(), key=lambda entry: entry["mtime"], reverse=True)
+
+
+def _agent_model_sections(ctx, tools_json_text: str, history_text: str,
+                          system_prompt: str) -> List[str]:
+    """从实际发给模型的 system prompt 里判定包含哪些段（不保存原文）。"""
+    sections = ["role"]
+    if "当前画布快照摘要" in system_prompt:
+        sections.append("canvas")
+    elif "本次运行的输入" in system_prompt:
+        sections.append("files")
+    if tools_json_text.strip():
+        sections.append("tools")
+    if str(history_text or "").strip():
+        sections.append("history")
+    if "【技能索引】" in system_prompt:
+        sections.append("skill_index")
+    if "【本次运行的技能】" in system_prompt:
+        skill_id = str(getattr(ctx, "skill_id", "") or "").strip()
+        sections.append("skill_manual:%s" % skill_id if skill_id else "skill_manual")
+    if "【技能执行手册】" in system_prompt:
+        ref = str(getattr(ctx, "skill_ref", "") or "").strip()
+        sections.append("store_skill_manual:%s" % ref if ref else "store_skill_manual")
+    return sections
+
+
 def _agent_collect_artifacts(step_artifacts, ctx):
     """合并「步骤结果里的产物」与上下文登记的产物，统一成稳定形状并按 (kind,name) 去重。"""
     merged = []
@@ -37659,6 +37772,29 @@ async def _agent_run_producer(req, queue, bus=None):
                     "source": "estimate",
                     "round": rounds,
                 })
+                if bus is not None:
+                    # 调试用上下文摘要（不存提示词原文）：/api/agent/runs/{run_id}/model-context
+                    try:
+                        tool_names = [str(name) for name in (tools_map or {}).keys()]
+                        history_prompt = _agent_run_history_prompt(chat_history)
+                        bus["model_debug"] = {
+                            "model": str((chat or {}).get("model") or ""),
+                            "system_prompt_chars": len(system),
+                            "system_prompt_sections": _agent_model_sections(ctx, tools_json_text,
+                                                                            history_prompt, system),
+                            "tool_count": len(tool_names),
+                            "tool_names": tool_names,
+                            "history_chars": len(history_prompt or ""),
+                            "instruction_chars": len(instruction or ""),
+                            "estimated_tokens": int(context_used or 0),
+                            # 拿不到上下文窗口就给 null，不拿 0 冒充
+                            "context_max": int(context_max) if context_max else None,
+                            "percentage": (round(context_used * 100.0 / context_max, 1)
+                                           if context_max else None),
+                            "round": rounds,
+                        }
+                    except Exception:
+                        pass
                 try:
                     user_content = _agent_vision_user_content(user_text, vision_images) if vision_mode == "direct" else user_text
                     try:

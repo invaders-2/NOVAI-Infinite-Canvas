@@ -247,5 +247,79 @@ class CanvasRunArtifactTests(unittest.TestCase):
                 self.assertTrue("文件名" in result["error"] or "扩展名" in result["error"])
 
 
+class CanvasArtifactsListTests(unittest.TestCase):
+    """GET /api/agent/canvases/{canvas_id}/artifacts：跨 run 汇总、同名取最新、白名单、200 上限。"""
+
+    def setUp(self):
+        self.canvas_id = main.new_canvas("产物清单画布", kind="smart")["id"]
+        self.created = []
+
+    def tearDown(self):
+        for path in self.created:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    def _write(self, rel_path, content=b"x", mtime=None):
+        path = os.path.join(main.DATA_DIR, rel_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(content)
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+        self.created.append(path)
+        return path
+
+    def _get(self):
+        return CLIENT.get("/api/agent/canvases/%s/artifacts" % self.canvas_id)
+
+    def test_merges_runs_and_keeps_latest_same_name(self):
+        import time as _time
+        stamp = int(_time.time())
+        stem = "list-report-%d" % stamp
+        self._write("agent_outputs/run_old/%s.html" % stem, b"old", mtime=stamp + 10)
+        self._write("agent_outputs/run_new/%s.html" % stem, b"newer", mtime=stamp + 20)
+        xlsx_name = "list-data-%d.xlsx" % stamp
+        self._write("agent_outputs/run_new/%s" % xlsx_name, b"xlsx", mtime=stamp + 15)
+        md_name = "list-notes-%d.md" % stamp
+        self._write("agent_files/%s" % md_name, b"# notes", mtime=stamp + 12)
+        self._write("agent_files/skip-%d.exe" % stamp, b"exe", mtime=stamp + 30)
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertEqual(body["canvas_id"], self.canvas_id)
+        self.assertIsInstance(body["truncated"], bool)
+        by_name = {item["name"]: item for item in body["files"]}
+        html_name = "%s.html" % stem
+        self.assertIn(html_name, by_name)
+        self.assertEqual(by_name[html_name]["mtime"], stamp + 20)
+        self.assertEqual(by_name[html_name]["run_id"], "run_new")
+        self.assertEqual(by_name[html_name]["kind"], "html")
+        self.assertEqual(by_name[html_name]["url"], "/api/agent/files/%s" % html_name)
+        self.assertGreater(by_name[html_name]["size"], 0)
+        self.assertIn(xlsx_name, by_name)
+        self.assertIn(md_name, by_name)
+        self.assertNotIn("skip-%d.exe" % stamp, by_name)     # 扩展名白名单
+        self.assertGreaterEqual(body["counts"].get("html", 0), 1)
+        self.assertGreaterEqual(body["counts"].get("xlsx", 0), 1)
+        self.assertGreaterEqual(body["counts"].get("md", 0), 1)
+
+    def test_limit_200_sets_truncated(self):
+        import time as _time
+        now = int(_time.time())
+        for index in range(205):
+            self._write("agent_outputs/run_limit/bulk-%03d.md" % index, b"x",
+                        mtime=now + 100 + index)
+        body = self._get().json()
+        self.assertEqual(len(body["files"]), 200)
+        self.assertTrue(body["truncated"])
+        self.assertEqual(len([f for f in body["files"] if f["name"].startswith("bulk-")]), 200)
+
+    def test_unknown_canvas_is_404(self):
+        resp = CLIENT.get("/api/agent/canvases/no-such-canvas/artifacts")
+        self.assertEqual(resp.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()
