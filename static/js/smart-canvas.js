@@ -38833,43 +38833,85 @@ function ensureTableApi(){
     setTimeout(sync, 1200);
     refreshIcons();
 })();
-/* ── 画布空状态：MCP 接入入口卡（数据来自 /api/mcp/connect-info） ─────────────
-   卡片是 fixed overlay，出现/消失不参与画布布局，不会让空状态模板区抖动。 */
-(function mountMcpEntryCard(){
-    if(document.getElementById('novaiMcpEntry')) return;
-    var DISMISS_KEY = 'novai_mcp_entry_dismissed';
+/* ── 画布右上角：MCP 接入（TapNow 形态：常驻 icon + 锚定卡片 + 二级 Agent 弹窗） ── */
+(function mountMcpConnect(){
+    if(document.getElementById('novaiMcpLaunch')) return;
     var info = null;
-    var dismissed = false;
-    try { dismissed = localStorage.getItem(DISMISS_KEY) === '1'; } catch(e) {}
+    var infoPromise = null;
+    var activeAgent = 'claude';
+    var agents = {
+        claude: { name: 'Claude', icon: '✳', title: '在 Claude 里继续这个项目', desc: '打开 Claude 并预填一段提示词，通过 MCP 把它连到 NOVAI 并交接当前项目。首次使用时 Claude 会引导你添加连接器。' },
+        chatgpt: { name: 'ChatGPT', icon: '◉', title: '在 ChatGPT 里继续这个项目', desc: 'ChatGPT 的连接器需要公网 HTTPS 地址，本机 127.0.0.1 不可达。请复制 HTTP 地址后在支持公网连接器的环境中添加。' },
+        workbuddy: { name: 'WorkBuddy', icon: 'W', title: '在 WorkBuddy 里继续这个项目', desc: '复制 NOVAI MCP 配置，粘贴到 WorkBuddy 的 MCP 设置中即可使用画布工具。' },
+        more: { name: '更多 Agent', icon: '⌘', title: '在其他 Agent 里继续这个项目', desc: '复制 NOVAI MCP 配置，粘贴到任意支持 MCP 的 Agent 中即可使用画布工具。' }
+    };
 
-    var card = document.createElement('section');
-    card.id = 'novaiMcpEntry';
-    card.className = 'nv-mcp-entry';
-    card.setAttribute('aria-label', 'MCP 接入');
-    card.innerHTML =
-        '<button type="button" class="nv-mcp-entry-close" aria-label="关闭 MCP 接入入口" title="关闭">×</button>' +
-        '<div class="nv-mcp-entry-body">' +
-            '<div class="nv-mcp-entry-kicker">MCP · 开放接入</div>' +
-            '<h3 class="nv-mcp-entry-title">让你的 Agent 直接调用 NOVAI 创作</h3>' +
-            '<p class="nv-mcp-entry-sub">连接 NOVAI 的 MCP，让你的 Agent 直接使用画布工具。</p>' +
-            '<div class="nv-mcp-entry-actions">' +
-                '<button type="button" class="nv-mcp-entry-btn is-primary" data-mcp-act="claude">添加到 Claude</button>' +
-                '<button type="button" class="nv-mcp-entry-btn" data-mcp-act="codex">添加到 Codex</button>' +
-                '<button type="button" class="nv-mcp-entry-btn" data-mcp-act="url">复制 MCP 地址</button>' +
-            '</div>' +
+    var launch = document.createElement('button');
+    launch.id = 'novaiMcpLaunch';
+    launch.className = 'nv-mcp-launch';
+    launch.type = 'button';
+    launch.title = '在 Agent 中打开';
+    launch.setAttribute('aria-label', '在 Agent 中打开');
+    launch.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg>';
+    document.body.appendChild(launch);
+
+    var panel = document.createElement('section');
+    panel.id = 'novaiMcpPanel';
+    panel.className = 'nv-mcp-panel';
+    panel.hidden = true;
+    panel.setAttribute('aria-label', 'MCP 接入');
+    panel.innerHTML =
+        '<div class="nv-mcp-panel-head">' +
+            '<div class="nv-mcp-panel-heading"><span class="nv-mcp-kicker">MCP · 开放接入</span>' +
+            '<h3>让你的 Agent 直接调用 NOVAI 创作</h3>' +
+            '<p>连接 NOVAI 的 MCP，让你的 Agent 直接使用画布工具。</p></div>' +
+            '<button type="button" class="nv-mcp-panel-close" aria-label="关闭" title="关闭">×</button>' +
         '</div>' +
-        '<div class="nv-mcp-entry-foot"><span>在其他 Agent 中使用</span><span class="nv-mcp-entry-dot">·</span><button type="button" class="nv-mcp-entry-link" data-mcp-act="docs">MCP 文档</button></div>';
-    document.body.appendChild(card);
+        '<div class="nv-mcp-agent-buttons">' +
+            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="claude"><span class="nv-mcp-agent-ico is-claude">✳</span>添加到 Claude</button>' +
+            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="codex"><span class="nv-mcp-agent-ico is-codex">X</span>添加到 Codex</button>' +
+            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="workbuddy"><span class="nv-mcp-agent-ico is-workbuddy">W</span>添加到 WorkBuddy</button>' +
+        '</div>' +
+        '<div class="nv-mcp-panel-foot">' +
+            '<div class="nv-mcp-foot-row"><span>在其他 Agent 中使用 NOVAI MCP</span><button type="button" class="nv-mcp-link" data-panel-docs>MCP 文档</button></div>' +
+            '<div class="nv-mcp-server-row"><code class="nv-mcp-server-summary"></code><button type="button" class="nv-mcp-copy-btn" data-panel-copy>复制</button></div>' +
+        '</div>';
+    document.body.appendChild(panel);
+
+    var modal = document.createElement('div');
+    modal.id = 'novaiMcpModal';
+    modal.className = 'nv-mcp-modal-root';
+    modal.hidden = true;
+    modal.innerHTML =
+        '<div class="nv-mcp-modal-scrim" data-modal-close></div>' +
+        '<div class="nv-mcp-modal" role="dialog" aria-modal="true" aria-labelledby="nvMcpModalTitle">' +
+            '<aside class="nv-mcp-modal-list">' +
+                '<h3>在 Agent 中打开</h3>' +
+                '<button type="button" data-modal-agent="claude"><span class="nv-mcp-list-ico is-claude">✳</span>Claude</button>' +
+                '<button type="button" data-modal-agent="chatgpt"><span class="nv-mcp-list-ico is-chatgpt">◉</span>ChatGPT</button>' +
+                '<button type="button" data-modal-agent="workbuddy"><span class="nv-mcp-list-ico is-workbuddy">W</span>WorkBuddy</button>' +
+                '<button type="button" data-modal-agent="more"><span class="nv-mcp-list-ico is-more">⌘</span>更多 Agent</button>' +
+            '</aside>' +
+            '<section class="nv-mcp-modal-main">' +
+                '<button type="button" class="nv-mcp-modal-close" aria-label="关闭" title="关闭" data-modal-close>×</button>' +
+                '<div class="nv-mcp-modal-hero"><span class="nv-mcp-avatar is-novai">N</span><span class="nv-mcp-hero-arrow">↔</span><span class="nv-mcp-avatar" id="nvMcpAgentAvatar">✳</span></div>' +
+                '<h3 id="nvMcpModalTitle">在 Claude 里继续这个项目</h3>' +
+                '<p id="nvMcpModalDesc"></p>' +
+                '<pre class="nv-mcp-prompt" id="nvMcpPrompt" hidden></pre>' +
+                '<div class="nv-mcp-modal-actions" id="nvMcpModalActions"></div>' +
+            '</section>' +
+        '</div>';
+    document.body.appendChild(modal);
 
     var docs = document.createElement('div');
     docs.className = 'nv-mcp-doc-root';
     docs.hidden = true;
     docs.innerHTML =
-        '<div class="nv-mcp-doc-scrim" data-mcp-doc-close></div>' +
+        '<div class="nv-mcp-doc-scrim" data-doc-close></div>' +
         '<div class="nv-mcp-doc" role="dialog" aria-modal="true" aria-labelledby="nvMcpDocTitle">' +
-            '<div class="nv-mcp-doc-head"><h3 id="nvMcpDocTitle">在 Agent 里接入 NOVAI MCP</h3><button type="button" class="nv-mcp-doc-close" aria-label="关闭" data-mcp-doc-close>×</button></div>' +
+            '<div class="nv-mcp-doc-head"><h3 id="nvMcpDocTitle">在 Agent 里接入 NOVAI MCP</h3><button type="button" class="nv-mcp-doc-close" aria-label="关闭" data-doc-close>×</button></div>' +
             '<div class="nv-mcp-doc-body">' +
-                '<div class="nv-mcp-doc-label">stdio 配置 <button type="button" class="nv-mcp-doc-copy" data-mcp-doc-copy>复制</button></div>' +
+                '<div class="nv-mcp-doc-label">stdio 配置 <button type="button" class="nv-mcp-doc-copy" data-doc-copy>复制</button></div>' +
                 '<pre class="nv-mcp-doc-pre" id="nvMcpDocJson"></pre>' +
                 '<div class="nv-mcp-doc-label">Codex 命令</div>' +
                 '<pre class="nv-mcp-doc-pre" id="nvMcpDocCodex"></pre>' +
@@ -38907,88 +38949,150 @@ function ensureTableApi(){
             sel.addRange(range);
         } catch(e) {}
     }
-    function focusDocTarget(kind){
-        var targetId = kind === 'codex' ? 'nvMcpDocCodex' : (kind === 'url' ? 'nvMcpDocUrl' : 'nvMcpDocJson');
-        var target = document.getElementById(targetId);
-        if(target) target.scrollIntoView({ block: 'nearest' });
-        setTimeout(function(){ selectText(target); }, 30);
-    }
-    function copyText(text, successText, failureFocus){
+    function copyText(text, successText, fallbackEl){
         if(!text){ toastCopy('没有可复制的内容', 'alert'); return; }
-        var failure = function(){
-            openDocs(failureFocus);
-            toastCopy('已打开配置，按 ⌘C 复制', 'check');
+        var fallback = function(){
+            if(copyFallback(text)) { toastCopy(successText, 'check'); return; }
+            if(fallbackEl){ selectText(fallbackEl); toastCopy('已选中文本，按 ⌘C 复制', 'check'); }
+            else toastCopy('复制失败，请手动选择', 'alert');
         };
-        var fallback = function(){ if(copyFallback(text)) toastCopy(successText, 'check'); else failure(); };
         if(navigator.clipboard && navigator.clipboard.writeText){
             navigator.clipboard.writeText(text).then(function(){ toastCopy(successText, 'check'); }, fallback);
         } else fallback();
     }
     function stdioJson(){ return JSON.stringify((info && info.mcp_servers_json) || {}, null, 2); }
-    function sync(){
-        var nodeCount = (nodes || []).filter(function(n){ return n && n.id !== SMART_LOG_PREVIEW_NODE_ID; }).length;
-        var linkCount = (canvas && Array.isArray(canvas.connections)) ? canvas.connections.length : 0;
-        var show = !!info && !dismissed && nodeCount === 0 && linkCount === 0;
-        card.classList.toggle('open', show);
+    function serverSummary(){
+        var entry = (info && info.server_entry) || {};
+        var command = [entry.command || ''].concat(entry.args || []).filter(Boolean).join(' ');
+        return 'novai-canvas · stdio · ' + (command || '配置未生成');
     }
-    function closeCard(){
-        dismissed = true;
-        try { localStorage.setItem(DISMISS_KEY, '1'); } catch(e) {}
-        sync();
+    function promptText(){
+        var entry = (info && info.server_entry) || {};
+        var command = [entry.command || ''].concat(entry.args || []).filter(Boolean).join(' ');
+        return '请通过 MCP 连接 NOVAI 画布，继续当前项目。\n' +
+            '服务器名：novai-canvas\n' +
+            'stdio 命令：' + command + '\n' +
+            'base_url：' + ((info && info.base_url) || '') + '\n' +
+            '要求：先列出可用的画布工具再动手，确认可用工具后把当前项目接到 NOVAI 继续创作。';
     }
-    function openDocs(focusKind){
+    function loadInfo(){
+        if(info) return Promise.resolve(info);
+        if(infoPromise) return infoPromise;
+        infoPromise = fetch('/api/mcp/connect-info', { headers: { Accept: 'application/json' } })
+            .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+            .then(function(data){ info = data || null; if(info) { var summary = panel.querySelector('.nv-mcp-server-summary'); if(summary) summary.textContent = serverSummary(); } return info; })
+            .catch(function(){ info = null; return null; })
+            .then(function(data){ infoPromise = null; return data; });
+        return infoPromise;
+    }
+    function openPanel(){
+        loadInfo().then(function(data){
+            if(!data){ toastCopy('MCP 配置暂不可用', 'alert'); return; }
+            panel.hidden = false;
+            panel.classList.add('open');
+        });
+    }
+    function closePanel(){ panel.hidden = true; panel.classList.remove('open'); }
+    function togglePanel(){ if(panel.hidden) openPanel(); else closePanel(); }
+
+    function docsOpen(){
         if(!info) return;
         document.getElementById('nvMcpDocJson').textContent = stdioJson();
         document.getElementById('nvMcpDocCodex').textContent = info.codex_command || '未提供 Codex 命令';
         document.getElementById('nvMcpDocUrl').textContent = info.http_url || '未启用 HTTP 服务';
         document.getElementById('nvMcpDocPath').textContent = info.docs_path || '未提供文档路径';
         docs.hidden = false;
-        docs.classList.add('open');
-        if(focusKind) focusDocTarget(focusKind);
     }
-    function closeDocs(){ docs.hidden = true; docs.classList.remove('open'); }
-    card.addEventListener('mousedown', function(e){ e.stopPropagation(); });
-    card.addEventListener('click', function(e){
-        var action = e.target && e.target.closest ? e.target.closest('[data-mcp-act]') : null;
-        if(!action) return;
-        e.preventDefault();
-        e.stopPropagation();
-        var act = action.getAttribute('data-mcp-act');
-        if(act === 'claude') copyText(stdioJson(), '已复制 Claude 配置，粘贴到 claude_desktop_config.json 后重启', 'claude');
-        else if(act === 'codex') copyText(info && info.codex_command, '命令已复制', 'codex');
-        else if(act === 'url') copyText(info && info.http_url, 'MCP 地址已复制', 'url');
-        else if(act === 'docs') openDocs();
-    });
-    card.querySelector('.nv-mcp-entry-close').addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); closeCard(); });
-    docs.addEventListener('click', function(e){
-        if(e.target.closest && e.target.closest('[data-mcp-doc-close]')){ e.preventDefault(); closeDocs(); return; }
-        if(e.target.closest && e.target.closest('[data-mcp-doc-copy]')){ e.preventDefault(); copyText(stdioJson(), 'MCP 配置已复制', 'claude'); }
-        e.stopPropagation();
-    });
-    document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && !docs.hidden) closeDocs(); });
+    function docsClose(){ docs.hidden = true; }
 
-    function setInfo(data){
-        info = data || null;
-        if(!info) return;
-        var urlBtn = card.querySelector('[data-mcp-act="url"]');
-        if(urlBtn){
-            var hasUrl = !!String(info.http_url || '').trim();
-            urlBtn.disabled = !hasUrl;
-            urlBtn.title = hasUrl ? '复制 MCP 的 HTTP 地址' : '未启用 HTTP 服务';
+    function renderAgent(agent){
+        activeAgent = agent;
+        var data = agents[agent] || agents.claude;
+        Array.prototype.forEach.call(modal.querySelectorAll('[data-modal-agent]'), function(el){
+            el.classList.toggle('is-on', el.getAttribute('data-modal-agent') === agent);
+        });
+        document.getElementById('nvMcpAgentAvatar').textContent = data.icon;
+        document.getElementById('nvMcpAgentAvatar').className = 'nv-mcp-avatar is-' + agent;
+        document.getElementById('nvMcpModalTitle').textContent = data.title;
+        document.getElementById('nvMcpModalDesc').textContent = data.desc;
+        var prompt = document.getElementById('nvMcpPrompt');
+        var actions = document.getElementById('nvMcpModalActions');
+        prompt.hidden = agent !== 'claude';
+        prompt.textContent = agent === 'claude' ? promptText() : '';
+        if(agent === 'claude'){
+            actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-prompt-copy>没有打开？复制提示词</button>' +
+                '<button type="button" class="nv-mcp-action-primary" data-claude-open>在 Claude 打开</button>';
+        } else if(agent === 'chatgpt'){
+            var hasUrl = !!(info && String(info.http_url || '').trim());
+            actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-http-copy' + (hasUrl ? '' : ' disabled') + ' title="' + (hasUrl ? '复制 HTTP 地址' : '未配置 HTTP 服务') + '">复制 HTTP 地址</button>';
+        } else {
+            actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-generic-copy>复制配置</button>' +
+                '<button type="button" class="nv-mcp-action-primary" data-generic-docs>MCP 文档</button>';
         }
-        sync();
     }
-    if(dismissed){ sync(); return; }
-    fetch('/api/mcp/connect-info', { headers: { Accept: 'application/json' } })
-        .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
-        .then(function(data){
-            if(!data || !data.mcp_servers_json) return;
-            setInfo(data);
-            new MutationObserver(sync).observe(world, { childList: true, subtree: true });
-            setTimeout(sync, 1200);
-        })
-        .catch(function(){});
+    function openModal(agent){
+        if(!info) return;
+        renderAgent(agent || 'claude');
+        modal.hidden = false;
+    }
+    function closeModal(){ modal.hidden = true; }
+
+    launch.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); togglePanel(); });
+    panel.addEventListener('click', function(e){
+        e.stopPropagation();
+        var target = e.target && e.target.closest ? e.target.closest('[data-panel-agent],[data-panel-docs],[data-panel-copy]') : null;
+        if(!target) return;
+        e.preventDefault();
+        if(target.hasAttribute('data-panel-agent')){
+            var agent = target.getAttribute('data-panel-agent');
+            if(agent === 'codex'){ copyText(info && info.codex_command, '命令已复制', null); return; }
+            openModal(agent);
+        } else if(target.hasAttribute('data-panel-docs')) docsOpen();
+        else if(target.hasAttribute('data-panel-copy')) copyText(stdioJson(), '已复制 MCP 配置', panel.querySelector('.nv-mcp-server-summary'));
+    });
+    panel.querySelector('.nv-mcp-panel-close').addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); closePanel(); });
+    modal.addEventListener('click', function(e){
+        e.stopPropagation();
+        var close = e.target.closest && e.target.closest('[data-modal-close]');
+        if(close){ e.preventDefault(); closeModal(); return; }
+        var agentEl = e.target.closest && e.target.closest('[data-modal-agent]');
+        if(agentEl){ e.preventDefault(); renderAgent(agentEl.getAttribute('data-modal-agent')); return; }
+        if(e.target.closest && e.target.closest('[data-prompt-copy]')){
+            e.preventDefault(); copyText(promptText(), '已复制提示词', document.getElementById('nvMcpPrompt')); return;
+        }
+        if(e.target.closest && e.target.closest('[data-claude-open]')){
+            e.preventDefault();
+            copyText(promptText(), '已复制提示词', document.getElementById('nvMcpPrompt'));
+            try { var link = document.createElement('a'); link.href = 'claude://'; link.rel = 'noopener'; link.style.display = 'none'; document.body.appendChild(link); link.click(); link.remove(); } catch(err) {}
+            return;
+        }
+        if(e.target.closest && e.target.closest('[data-http-copy]')){
+            e.preventDefault(); copyText(info && info.http_url, 'HTTP 地址已复制', document.getElementById('nvMcpDocUrl')); return;
+        }
+        if(e.target.closest && e.target.closest('[data-generic-copy]')){
+            e.preventDefault(); copyText(stdioJson(), '已复制 MCP 配置', document.getElementById('nvMcpPrompt')); return;
+        }
+        if(e.target.closest && e.target.closest('[data-generic-docs]')){ e.preventDefault(); docsOpen(); }
+    });
+    docs.addEventListener('click', function(e){
+        if(e.target.closest && e.target.closest('[data-doc-close]')){ e.preventDefault(); docsClose(); return; }
+        if(e.target.closest && e.target.closest('[data-doc-copy]')){ e.preventDefault(); copyText(stdioJson(), 'MCP 配置已复制', document.getElementById('nvMcpDocJson')); }
+        e.stopPropagation();
+    });
+    document.addEventListener('click', function(e){
+        if(panel.hidden) return;
+        if(e.target.closest && (e.target.closest('#novaiMcpPanel') || e.target.closest('#novaiMcpLaunch') || e.target.closest('#novaiMcpModal') || e.target.closest('.nv-mcp-doc-root'))) return;
+        closePanel();
+    });
+    document.addEventListener('keydown', function(e){
+        if(e.key !== 'Escape') return;
+        if(!docs.hidden){ docsClose(); return; }
+        if(!modal.hidden){ closeModal(); return; }
+        if(!panel.hidden) closePanel();
+    });
+    refreshIcons();
 })();
+
 
 /* ═══ 第 7 轮：视频后期 —— 尾帧接力 / 首帧成图 / 拼接选中视频 ═══ */
 function smartVideoItemOfNode(node){
