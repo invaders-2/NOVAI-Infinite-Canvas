@@ -51,6 +51,21 @@ pre { margin: 0; padding: 13px 14px; border: 0; border-radius: var(--radius-md);
 .table .row:nth-child(4n+1) { background: transparent; }
 .table .tool { color: var(--ink); font-family: var(--font-mono); font-size: 11px; }
 .list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); font: 400 12.5px/20px var(--font-sans); }
+.install-line { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; }
+.install-line p { margin: 0; color: var(--ink); font: 500 12.5px/18px var(--font-sans); }
+.install-line .copy-btn { height: 30px; padding: 0 12px; background: var(--accent); color: var(--on-accent); }
+.install-line .copy-btn:hover:not(:disabled) { opacity: .86; background: var(--accent); color: var(--on-accent); }
+.install-modal { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.install-modal[hidden] { display: none; }
+.install-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--ink) 28%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.install-panel { position: relative; width: min(520px, calc(100vw - 32px)); padding: 22px; border: 0; border-radius: var(--radius-xl); background: var(--solid); color: var(--ink); box-shadow: var(--shadow-float); display: flex; flex-direction: column; gap: 10px; }
+.install-panel h3 { margin: 0; font: 600 17px/24px var(--font-sans); }
+.install-panel p { margin: 0; color: var(--ink-2); font: 400 12px/18px var(--font-sans); }
+.install-panel pre { margin: 0; }
+.install-panel .install-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.install-panel .install-actions button { height: 32px; padding: 0 13px; border: 0; border-radius: 8px; font: 500 12px/1 var(--font-sans); cursor: pointer; }
+.install-panel .install-actions .ghost { background: var(--fill-1); color: var(--ink); }
+.install-panel .install-actions .primary { background: var(--accent); color: var(--on-accent); }
 .notice { padding: 12px 14px; border: 0; border-radius: 10px; background: color-mix(in srgb, var(--danger) 8%, transparent); color: var(--danger); font: 400 12px/19px var(--font-sans); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
@@ -68,6 +83,11 @@ h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
         </div>
         <button type="button" class="theme-btn" id="themeBtn">切换主题</button>
     </header>
+
+    <section class="card install-line" id="installLine" hidden>
+        <p>已安装的客户端可以一键接入</p>
+        <button type="button" class="copy-btn" id="installAgentBtn">一键接入 Claude</button>
+    </section>
 
     <section class="card">
         <h2>这是什么</h2>
@@ -135,6 +155,16 @@ h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
     </section>
     <p class="hint" id="docsPath"></p>
 </main>
+<div class="install-modal" id="installModal" hidden>
+    <div class="install-scrim" data-install-cancel></div>
+    <div class="install-panel" role="dialog" aria-modal="true" aria-labelledby="installTitle">
+        <h3 id="installTitle">写入 Claude 配置？</h3>
+        <p>将修改以下文件：</p>
+        <pre id="installPath"></pre>
+        <p>会先备份原文件，重启 Claude 后生效。</p>
+        <div class="install-actions"><button type="button" class="ghost" data-install-cancel>取消</button><button type="button" class="primary" id="installConfirm">确认写入</button></div>
+    </div>
+</div>
 <script>
 (function(){
     var root = document.documentElement;
@@ -168,6 +198,50 @@ h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
         document.getElementById('stdioConfig').textContent = '无法读取本机 MCP 配置：' + (e && e.message || '网络错误');
         document.getElementById('httpUrl').textContent = '无法读取本机 MCP 配置';
         var err = document.getElementById('configError'); if(err){ err.hidden=false; err.textContent='请确认 NOVAI 已启动，再刷新本页。'; }
+    });
+
+    var installLine = document.getElementById('installLine');
+    var installBtn = document.getElementById('installAgentBtn');
+    var installModal = document.getElementById('installModal');
+    var installPath = document.getElementById('installPath');
+    var installConfirm = document.getElementById('installConfirm');
+    var claudeAgent = null;
+    function closeInstall(){ installModal.hidden = true; }
+    function setInstalledStatus(text){
+        installLine.querySelector('p').textContent = text;
+        installBtn.hidden = true;
+    }
+    fetch('/api/mcp/installed-agents', { headers: { Accept: 'application/json' } })
+        .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function(data){
+            var list = (data && data.agents) || [];
+            claudeAgent = list.find(function(item){ return item && item.id === 'claude'; }) || null;
+            if(!claudeAgent || !claudeAgent.installed) return;
+            installLine.hidden = false;
+            if(claudeAgent.configured){ setInstalledStatus('Claude 已接入 NOVAI MCP'); return; }
+            installBtn.addEventListener('click', function(){
+                installPath.textContent = claudeAgent.config_path || (/Mac/i.test(navigator.platform) ? '~/Library/Application Support/Claude/claude_desktop_config.json' : '%APPDATA%\\Claude\\claude_desktop_config.json');
+                installModal.hidden = false;
+                installConfirm.disabled = false;
+                installConfirm.textContent = '确认写入';
+            });
+        })
+        .catch(function(){});
+    installModal.addEventListener('click', function(e){
+        if(e.target.closest && e.target.closest('[data-install-cancel]')){ e.preventDefault(); closeInstall(); return; }
+        if(e.target.closest && e.target.closest('#installConfirm')){
+            e.preventDefault();
+            if(!claudeAgent) return;
+            installConfirm.disabled = true;
+            installConfirm.textContent = '写入中…';
+            fetch('/api/mcp/install-agent', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ id: 'claude', confirm: true }) })
+                .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(data){ if(!r.ok) throw new Error(data.detail || ('HTTP ' + r.status)); return data; }); })
+                .then(function(data){
+                    closeInstall();
+                    setInstalledStatus(data.already ? 'Claude 之前已接入过' : 'Claude 已接入 NOVAI MCP，重启 Claude 后生效');
+                })
+                .catch(function(err){ installConfirm.disabled = false; installConfirm.textContent = '确认写入'; alert((err && err.message) || '写入失败'); });
+        }
     });
 })();
 </script>

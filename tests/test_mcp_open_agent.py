@@ -56,16 +56,21 @@ class InstalledAgentsTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in agents],
                          ["claude", "chatgpt", "workbuddy", "codex", "claude-cli"])
         by_id = {item["id"]: item for item in agents}
-        self.assertEqual(set(by_id["claude"].keys()),
-                         {"id", "name", "kind", "installed", "path"})
+        # configured 是后加的字段（install-agent 用）；读取失败时还会多一个 reason
+        claude_keys = set(by_id["claude"].keys())
+        self.assertTrue({"id", "name", "kind", "installed", "path", "configured"} <= claude_keys)
+        self.assertTrue(claude_keys <= {"id", "name", "kind", "installed", "path",
+                                        "configured", "reason"})
         self.assertTrue(by_id["claude"]["installed"])
         self.assertEqual(by_id["claude"]["path"], "/Applications/Claude.app")
         self.assertEqual(by_id["claude"]["kind"], "desktop")
         self.assertFalse(by_id["chatgpt"]["installed"])
         self.assertEqual(by_id["chatgpt"]["path"], "")
         self.assertFalse(by_id["workbuddy"]["installed"])
-        self.assertEqual(set(by_id["codex"].keys()),
-                         {"id", "name", "kind", "installed", "command"})
+        codex_keys = set(by_id["codex"].keys())
+        self.assertTrue({"id", "name", "kind", "installed", "command", "configured"} <= codex_keys)
+        self.assertTrue(codex_keys <= {"id", "name", "kind", "installed", "command",
+                                        "configured", "reason"})
         self.assertTrue(by_id["codex"]["installed"])
         self.assertEqual(by_id["codex"]["command"], "/Users/x/.npm-global/bin/codex")
         self.assertFalse(by_id["claude-cli"]["installed"])

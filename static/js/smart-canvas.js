@@ -38841,6 +38841,7 @@ function ensureTableApi(){
     var activeAgent = 'claude';
     var installedAgents = {};
     var installedPromise = null;
+    var installTarget = '';
     var AGENT_LOGOS = {
         claude: '<span class="nv-brand-mark is-claude" role="img" aria-label="Claude"></span>',
         chatgpt: '<span class="nv-brand-mark is-openai" role="img" aria-label="ChatGPT"></span>',
@@ -38879,9 +38880,9 @@ function ensureTableApi(){
             '<button type="button" class="nv-mcp-panel-close" aria-label="关闭" title="关闭">×</button>' +
         '</div>' +
         '<div class="nv-mcp-agent-buttons">' +
-            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="claude"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.claude + '</span><span class="nv-mcp-agent-label">添加到 Claude</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
-            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="codex"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.codex + '</span><span class="nv-mcp-agent-label">添加到 Codex</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
-            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="workbuddy"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.workbuddy + '</span><span class="nv-mcp-agent-label">添加到 WorkBuddy</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
+            '<div class="nv-mcp-agent-wrap" data-agent-wrap="claude"><button type="button" class="nv-mcp-agent-btn" data-panel-agent="claude"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.claude + '</span><span class="nv-mcp-agent-label">添加到 Claude</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button><button type="button" class="nv-mcp-agent-secondary" data-panel-open="claude" hidden>打开 Claude</button></div>' +
+            '<div class="nv-mcp-agent-wrap" data-agent-wrap="codex"><button type="button" class="nv-mcp-agent-btn" data-panel-agent="codex"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.codex + '</span><span class="nv-mcp-agent-label">添加到 Codex</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button><button type="button" class="nv-mcp-agent-secondary" data-panel-open="codex" hidden>打开 Codex</button></div>' +
+            '<div class="nv-mcp-agent-wrap" data-agent-wrap="workbuddy"><button type="button" class="nv-mcp-agent-btn" data-panel-agent="workbuddy"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.workbuddy + '</span><span class="nv-mcp-agent-label">添加到 WorkBuddy</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button><button type="button" class="nv-mcp-agent-secondary" data-panel-open="workbuddy" hidden>打开 WorkBuddy</button></div>' +
         '</div>' +
         '<div class="nv-mcp-panel-foot">' +
             '<div class="nv-mcp-foot-row"><span>在其他 Agent 中使用 NOVAI MCP</span><a class="nv-mcp-link" href="/static/help/mcp.html" target="_blank" rel="noopener">MCP 文档</a></div>' +
@@ -38935,6 +38936,20 @@ function ensureTableApi(){
             '</div>' +
         '</div>';
     document.body.appendChild(docs);
+
+    var installRoot = document.createElement('div');
+    installRoot.className = 'nv-mcp-install-root';
+    installRoot.hidden = true;
+    installRoot.innerHTML =
+        '<div class="nv-mcp-install-scrim" data-install-close></div>' +
+        '<div class="nv-mcp-install" role="dialog" aria-modal="true" aria-labelledby="nvMcpInstallTitle">' +
+            '<h3 id="nvMcpInstallTitle">写入 Claude 配置？</h3>' +
+            '<p class="nv-mcp-install-sub">将修改以下文件：</p>' +
+            '<pre class="nv-mcp-install-path" id="nvMcpInstallPath"></pre>' +
+            '<p class="nv-mcp-install-hint" id="nvMcpInstallHint">会先备份原文件，重启 Claude 后生效。</p>' +
+            '<div class="nv-mcp-install-actions"><button type="button" class="nv-mcp-action-ghost" data-install-close>取消</button><button type="button" class="nv-mcp-action-primary" id="nvMcpInstallConfirm">确认写入</button></div>' +
+        '</div>';
+    document.body.appendChild(installRoot);
 
     function toastCopy(text, icon){ try { toast(text, icon || 'check'); } catch(e) {} }
     function copyFallback(text){
@@ -39031,10 +39046,17 @@ function ensureTableApi(){
                 var next = {};
                 if(Array.isArray(list)){
                     list.forEach(function(item){
-                        if(typeof item === 'string'){ next[item] = true; return; }
+                        if(typeof item === 'string'){ next[item] = { installed: true, configured: false }; return; }
                         if(item && typeof item === 'object'){
                             var id = String(item.id || item.name || '').toLowerCase();
-                            if(id && item.installed !== false) next[id] = true;
+                            if(!id) return;
+                            next[id] = {
+                                installed: item.installed !== false,
+                                configured: item.configured === true,
+                                path: String(item.path || item.command || ''),
+                                configPath: String(item.config_path || item.configPath || item.file || item.config || item.target || ''),
+                                kind: String(item.kind || '')
+                            };
                         }
                     });
                 }
@@ -39045,22 +39067,90 @@ function ensureTableApi(){
             .then(function(list){ installedPromise = null; return list; });
         return installedPromise;
     }
-    function isInstalled(id){ return !!installedAgents[String(id || '').toLowerCase()]; }
+    function agentState(id){ return installedAgents[String(id || '').toLowerCase()] || null; }
+    function isInstalled(id){ var st = agentState(id); return !!(st && st.installed); }
+    function isConfigured(id){ var st = agentState(id); return !!(st && st.installed && st.configured); }
+    function canInstall(id){ var key = String(id || '').toLowerCase(); return key === 'claude' || key === 'codex'; }
+    function agentConfigPath(id){
+        var key = String(id || '').toLowerCase();
+        var st = agentState(id);
+        if(st && st.configPath) return String(st.configPath);
+        if(key === 'claude') return /Mac/i.test(navigator.platform) ? '~/Library/Application Support/Claude/claude_desktop_config.json' : '%APPDATA%\\Claude\\claude_desktop_config.json';
+        if(key === 'codex') return '~/.codex/config.toml';
+        return '客户端默认配置文件（后端自动定位）';
+    }
     function renderInstalledUi(){
-        Array.prototype.forEach.call(panel.querySelectorAll('[data-panel-agent]'), function(btn){
-            var id = btn.getAttribute('data-panel-agent');
-            var label = btn.querySelector('.nv-mcp-agent-label');
-            var badge = btn.querySelector('.nv-mcp-installed-badge');
+        Array.prototype.forEach.call(panel.querySelectorAll('[data-agent-wrap]'), function(wrap){
+            var id = wrap.getAttribute('data-agent-wrap');
             var installed = isInstalled(id);
-            if(label) label.textContent = (installed ? '打开 ' : '添加到 ') + agentName(id);
-            if(badge) badge.hidden = !installed;
-            btn.classList.toggle('is-installed', installed);
+            var configured = isConfigured(id);
+            var main = wrap.querySelector('[data-panel-agent]');
+            var open = wrap.querySelector('[data-panel-open]');
+            var label = main && main.querySelector('.nv-mcp-agent-label');
+            var badge = main && main.querySelector('.nv-mcp-installed-badge');
+            var offerInstall = installed && !configured && canInstall(id);
+            if(label) label.textContent = !installed ? '添加到 ' + agentName(id) : (offerInstall ? '一键接入 ' + agentName(id) : '打开 ' + agentName(id));
+            if(badge){ badge.hidden = !installed; badge.textContent = configured ? '已接入' : '已安装'; }
+            if(main) main.classList.toggle('is-configured', configured);
+            if(open){ open.hidden = !offerInstall; open.textContent = '打开 ' + agentName(id); }
         });
         Array.prototype.forEach.call(modal.querySelectorAll('[data-modal-agent]'), function(btn){
             var id = btn.getAttribute('data-modal-agent');
             var badge = btn.querySelector('.nv-mcp-installed-badge');
-            if(badge) badge.hidden = !isInstalled(id);
-            btn.classList.toggle('is-installed', isInstalled(id));
+            var installed = isInstalled(id);
+            var configured = isConfigured(id);
+            if(badge){ badge.hidden = !installed; badge.textContent = configured ? '已接入' : '已安装'; }
+            btn.classList.toggle('is-installed', installed);
+        });
+    }
+    function openInstallConfirm(id){
+        installTarget = id;
+        var name = agentName(id);
+        document.getElementById('nvMcpInstallTitle').textContent = '写入 ' + name + ' 配置？';
+        document.getElementById('nvMcpInstallPath').textContent = agentConfigPath(id);
+        var st = agentState(id);
+        document.getElementById('nvMcpInstallHint').textContent = (st && st.kind === 'cli') ? '会先备份原文件，重启终端后生效。' : '会先备份原文件，重启 ' + name + ' 后生效。';
+        installRoot.hidden = false;
+        var btn = document.getElementById('nvMcpInstallConfirm');
+        btn.disabled = false;
+        btn.textContent = '确认写入';
+    }
+    function closeInstallConfirm(){
+        installRoot.hidden = true;
+        installTarget = '';
+    }
+    function installAgent(){
+        var id = installTarget;
+        if(!id) return;
+        var btn = document.getElementById('nvMcpInstallConfirm');
+        if(btn){ btn.disabled = true; btn.textContent = '写入中…'; }
+        fetch('/api/mcp/install-agent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ id: id, confirm: true })
+        }).then(function(res){
+            return res.json().catch(function(){ return {}; }).then(function(data){
+                if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+                var st = installedAgents[id] || { installed: true, configured: false };
+                st.installed = true;
+                st.configured = true;
+                if(data.path) st.configPath = String(data.path);
+                installedAgents[id] = st;
+                closeInstallConfirm();
+                renderInstalledUi();
+                if(!modal.hidden) renderAgent(activeAgent);
+                var name = agentName(id);
+                if(data.already){
+                    toastCopy('之前已接入过', 'check');
+                } else if(data.action === 'command'){
+                    toastCopy('已执行 ' + name + ' mcp add，重启终端生效', 'check');
+                } else {
+                    toastCopy('已写入配置，重启 ' + name + ' 生效', 'check');
+                }
+            });
+        }).catch(function(e){
+            if(btn){ btn.disabled = false; btn.textContent = '确认写入'; }
+            toastCopy((e && e.message) || '写入失败', 'alert');
         });
     }
     function openInstalledAgent(id, content, button, fallbackEl, copySuccess){
@@ -39123,15 +39213,16 @@ function ensureTableApi(){
         prompt.hidden = agent !== 'claude';
         prompt.textContent = agent === 'claude' ? promptText() : '';
         if(agent === 'claude'){
-            actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-prompt-copy>没有打开？复制提示词</button>' +
-                '<button type="button" class="nv-mcp-action-primary" data-claude-open>' + (isInstalled('claude') ? '打开 Claude' : '在 Claude 打开') + '</button>';
+            if(isInstalled('claude') && !isConfigured('claude')){
+                actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-install-agent="claude">一键接入 Claude</button>' +
+                    '<button type="button" class="nv-mcp-action-ghost" data-open-installed="claude">打开 Claude</button>';
+            } else {
+                actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-prompt-copy>没有打开？复制提示词</button>' +
+                    '<button type="button" class="nv-mcp-action-primary" data-claude-open>' + (isConfigured('claude') ? '打开 Claude' : '在 Claude 打开') + '</button>';
+            }
         } else if(agent === 'chatgpt'){
             var hasUrl = !!(info && String(info.http_url || '').trim());
-            if(isInstalled('chatgpt') && hasUrl){
-                actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-chatgpt-open>打开 ChatGPT</button>';
-            } else {
-                actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-http-copy' + (hasUrl ? '' : ' disabled') + ' title="' + (hasUrl ? '复制 HTTP 地址' : '未配置 HTTP 服务') + '">复制 HTTP 地址</button>';
-            }
+            actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-http-copy' + (hasUrl ? '' : ' disabled') + ' title="' + (hasUrl ? '复制 HTTP 地址' : '未配置 HTTP 服务') + '">复制 HTTP 地址</button>';
         } else if(agent === 'workbuddy' && isInstalled('workbuddy')){
             actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-generic-copy>复制配置</button>' +
                 '<button type="button" class="nv-mcp-action-primary" data-workbuddy-open>打开 WorkBuddy</button>';
@@ -39153,12 +39244,22 @@ function ensureTableApi(){
     launch.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); togglePanel(); });
     panel.addEventListener('click', function(e){
         e.stopPropagation();
+        var panelOpen = e.target && e.target.closest ? e.target.closest('[data-panel-open]') : null;
+        if(panelOpen){
+            e.preventDefault();
+            var openId = panelOpen.getAttribute('data-panel-open');
+            if(openId === 'claude') openInstalledAgent('claude', promptText(), panelOpen, document.getElementById('nvMcpPrompt'), '已复制提示词');
+            else if(openId === 'codex') openInstalledAgent('codex', info && info.codex_command, panelOpen, null, '已复制命令');
+            else openInstalledAgent(openId, stdioJson(), panelOpen, panel.querySelector('.nv-mcp-server-summary'), '已复制配置');
+            return;
+        }
         var target = e.target && e.target.closest ? e.target.closest('[data-panel-agent],[data-panel-copy]') : null;
         if(!target) return;
         e.preventDefault();
         if(target.hasAttribute('data-panel-agent')){
             var agent = target.getAttribute('data-panel-agent');
             if(isInstalled(agent)){
+                if(!isConfigured(agent) && canInstall(agent)){ openInstallConfirm(agent); return; }
                 if(agent === 'claude') { openInstalledAgent('claude', promptText(), target, document.getElementById('nvMcpPrompt'), '已复制提示词'); return; }
                 if(agent === 'codex') { openInstalledAgent('codex', info && info.codex_command, target, null, '已复制命令'); return; }
                 if(agent === 'workbuddy') { openInstalledAgent('workbuddy', stdioJson(), target, panel.querySelector('.nv-mcp-server-summary'), '已复制配置'); return; }
@@ -39168,12 +39269,28 @@ function ensureTableApi(){
         } else if(target.hasAttribute('data-panel-copy')) copyText(stdioJson(), '已复制 MCP 配置', panel.querySelector('.nv-mcp-server-summary'), target);
     });
     panel.querySelector('.nv-mcp-panel-close').addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); closePanel(); });
+    installRoot.addEventListener('click', function(e){
+        e.stopPropagation();
+        if(e.target.closest && e.target.closest('[data-install-close]')){ e.preventDefault(); closeInstallConfirm(); return; }
+        if(e.target.closest && e.target.closest('#nvMcpInstallConfirm')){ e.preventDefault(); installAgent(); }
+    });
     modal.addEventListener('click', function(e){
         e.stopPropagation();
         var close = e.target.closest && e.target.closest('[data-modal-close]');
         if(close){ e.preventDefault(); closeModal(); return; }
         var agentEl = e.target.closest && e.target.closest('[data-modal-agent]');
         if(agentEl){ e.preventDefault(); renderAgent(agentEl.getAttribute('data-modal-agent')); return; }
+        var installEl = e.target.closest && e.target.closest('[data-install-agent]');
+        if(installEl){ e.preventDefault(); openInstallConfirm(installEl.getAttribute('data-install-agent')); return; }
+        var openInstalledEl = e.target.closest && e.target.closest('[data-open-installed]');
+        if(openInstalledEl){
+            e.preventDefault();
+            var oid = openInstalledEl.getAttribute('data-open-installed');
+            if(oid === 'claude') openInstalledAgent('claude', promptText(), openInstalledEl, document.getElementById('nvMcpPrompt'), '已复制提示词');
+            else if(oid === 'chatgpt') openInstalledAgent('chatgpt', info && info.http_url, openInstalledEl, null, '已复制 HTTP 地址');
+            else openInstalledAgent(oid, stdioJson(), openInstalledEl, document.getElementById('nvMcpPrompt'), '已复制配置');
+            return;
+        }
         if(e.target.closest && e.target.closest('[data-prompt-copy]')){
             e.preventDefault(); copyText(promptText(), '已复制提示词', document.getElementById('nvMcpPrompt'), e.target.closest('[data-prompt-copy]')); return;
         }
@@ -39210,6 +39327,7 @@ function ensureTableApi(){
     });
     document.addEventListener('keydown', function(e){
         if(e.key !== 'Escape') return;
+        if(!installRoot.hidden){ closeInstallConfirm(); return; }
         if(!docs.hidden){ docsClose(); return; }
         if(!modal.hidden){ closeModal(); return; }
         if(!panel.hidden) closePanel();

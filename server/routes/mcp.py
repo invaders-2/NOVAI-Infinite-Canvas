@@ -21,10 +21,14 @@ Python 3.9 约束：注解用 Optional/Dict/List，禁止 X | Y 联合写法。
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
@@ -101,6 +105,10 @@ def mcp_disable_server(name: str) -> Dict[str, Any]:
 @router.get("/connect-info")
 def mcp_connect_info() -> Dict[str, Any]:
     """画布「MCP 接入」入口卡的数据：全部从当前运行态与本地配置推导，不写死端口/路径。"""
+    return _connect_info()
+
+
+def _connect_info() -> Dict[str, Any]:
     port = _server_port()
     base_url = "http://127.0.0.1:%d" % port
     server_py = os.path.join(_REPO_ROOT, _SERVER_PY_NAME)
@@ -159,16 +167,74 @@ def _cli_agent_command(command: str) -> str:
     return found or ""
 
 
+def _home_dir() -> str:
+    return os.path.expanduser("~")
+
+
+def _claude_config_path() -> str:
+    return os.path.join(_home_dir(), "Library", "Application Support", "Claude",
+                        "claude_desktop_config.json")
+
+
+def _codex_config_path() -> str:
+    return os.path.join(_home_dir(), ".codex", "config.toml")
+
+
+def _read_text(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _claude_configured() -> Dict[str, Any]:
+    path = _claude_config_path()
+    try:
+        if not os.path.isfile(path):
+            return {"configured": False}
+        payload = json.loads(_read_text(path))
+    except Exception as exc:
+        return {"configured": False, "reason": "读取 Claude 配置失败：%s" % exc}
+    servers = payload.get("mcpServers") if isinstance(payload, dict) else None
+    return {"configured": isinstance(servers, dict) and "novai-canvas" in servers}
+
+
+_CODEX_CONNECTION_RE = re.compile(
+    r'mcp_servers\s*(?:\.\s*novai-canvas|\[\s*["\']?novai-canvas["\']?\s*\])')
+
+
+def _codex_configured() -> Dict[str, Any]:
+    path = _codex_config_path()
+    try:
+        if not os.path.isfile(path):
+            return {"configured": False}
+        text = _read_text(path)
+    except Exception as exc:
+        return {"configured": False, "reason": "读取 Codex 配置失败：%s" % exc}
+    return {"configured": bool(_CODEX_CONNECTION_RE.search(text))}
+
+
+_UNSUPPORTED_WRITE_REASON = "不支持自动写入配置"
+
+
 def _installed_agents() -> List[Dict[str, Any]]:
     agents: List[Dict[str, Any]] = []
     for item in _DESKTOP_AGENTS:
         path = _desktop_agent_path(item["app"])
-        agents.append({"id": item["id"], "name": item["name"], "kind": "desktop",
-                       "installed": bool(path), "path": path})
+        entry = {"id": item["id"], "name": item["name"], "kind": "desktop",
+                 "installed": bool(path), "path": path}
+        if item["id"] == "claude":
+            entry.update(_claude_configured())
+        else:
+            entry.update({"configured": False, "reason": _UNSUPPORTED_WRITE_REASON})
+        agents.append(entry)
     for item in _CLI_AGENTS:
         command = _cli_agent_command(item["command"])
-        agents.append({"id": item["id"], "name": item["name"], "kind": "cli",
-                       "installed": bool(command), "command": command})
+        entry = {"id": item["id"], "name": item["name"], "kind": "cli",
+                 "installed": bool(command), "command": command}
+        if item["id"] == "codex":
+            entry.update(_codex_configured())
+        else:
+            entry.update({"configured": False, "reason": _UNSUPPORTED_WRITE_REASON})
+        agents.append(entry)
     return agents
 
 
@@ -213,6 +279,119 @@ def mcp_open_agent(payload: OpenAgentRequest) -> Dict[str, Any]:
         command = os.path.basename(found) if found else item["command"]
         return {"ok": True, "action": "command", "command": command}
     raise HTTPException(status_code=400, detail="不支持的 Agent：%s" % agent_id)
+
+
+# ---------------------------------------------------------------------------
+# 一键写入 Agent 配置（只允许 claude / codex；路径写死，不接收任何路径参数）
+# ---------------------------------------------------------------------------
+
+_INSTALLABLE_AGENT_IDS = ("claude", "codex")
+_INSTALL_TIMEOUT = 20
+
+
+class InstallAgentRequest(BaseModel):
+    id: str = Field("", max_length=64)
+    confirm: bool = False
+
+
+def _atomic_write_text(path: str, text: str) -> None:
+    """临时文件 + os.replace：写失败不会破坏原文件。"""
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".novai-mcp-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _install_claude() -> Dict[str, Any]:
+    if not _desktop_agent_path("Claude"):
+        raise HTTPException(status_code=400, detail="未检测到本机安装：Claude")
+    path = _claude_config_path()
+    exists = os.path.isfile(path)
+    backup = ""
+    if exists:
+        try:
+            backup = "%s.bak.%d" % (path, int(time.time()))
+            shutil.copyfile(path, backup)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="备份 Claude 配置失败（原文件未改动）：%s" % exc)
+        try:
+            raw = _read_text(path)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="读取 Claude 配置失败（原文件未改动）：%s" % exc)
+        try:
+            payload = json.loads(raw)
+        except Exception as exc:
+            raise HTTPException(status_code=400,
+                                detail="Claude 配置不是合法 JSON（原文件未改动）：%s" % exc)
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Claude 配置顶层必须是对象（原文件未改动）")
+    else:
+        payload = {}
+    servers = payload.get("mcpServers")
+    if servers is None:
+        servers = {}
+    if not isinstance(servers, dict):
+        raise HTTPException(status_code=400, detail="Claude 配置里的 mcpServers 必须是对象（原文件未改动）")
+    if "novai-canvas" in servers:
+        return {"ok": True, "action": "written", "path": path, "backup": backup,
+                "already": True, "needs_restart": True}
+    servers["novai-canvas"] = _connect_info()["server_entry"]
+    payload["mcpServers"] = servers
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    try:
+        _atomic_write_text(path, text)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="写入 Claude 配置失败（原文件未改动）：%s" % exc)
+    return {"ok": True, "action": "written", "path": path, "backup": backup,
+            "already": False, "needs_restart": True}
+
+
+def _install_codex() -> Dict[str, Any]:
+    codex = _cli_agent_command("codex")
+    if not codex:
+        raise HTTPException(status_code=400, detail="未检测到本机安装：Codex CLI")
+    info = _connect_info()
+    base_url = info["base_url"]
+    server_py = info.get("server_py") or ""
+    if not server_py:
+        raise HTTPException(status_code=400, detail="仓库里找不到 novai_mcp_server.py，无法写入 Codex 配置")
+    argv = [codex, "mcp", "add", "novai-canvas",
+            "--env", "NOVAI_BASE_URL=%s" % base_url,
+            "--", info["server_entry"]["command"], server_py]
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=_INSTALL_TIMEOUT)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="写入 Codex 配置失败：%s: %s" % (
+            type(exc).__name__, exc))
+    output = ((result.stdout or "") + (result.stderr or "")).strip()
+    if result.returncode != 0:
+        raise HTTPException(status_code=500,
+                            detail="写入 Codex 配置失败：%s" % (output[:200] or "codex 返回非 0"))
+    return {"ok": True, "action": "command", "output": output[:2000], "needs_restart": True}
+
+
+@router.post("/install-agent")
+def mcp_install_agent(payload: InstallAgentRequest) -> Dict[str, Any]:
+    """一键把 novai-canvas 写进本机 Agent 配置（Claude 写 JSON、Codex 走 CLI）。"""
+    agent_id = str(payload.id or "").strip()
+    if agent_id not in _INSTALLABLE_AGENT_IDS:
+        raise HTTPException(status_code=400, detail="不支持的 Agent：%s" % (agent_id or "<空>"))
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="需要 confirm: true 才会写入 Agent 配置")
+    if agent_id == "claude":
+        return _install_claude()
+    return _install_codex()
 
 
 @router.post("/reload")
