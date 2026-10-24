@@ -74,3 +74,13 @@ planAction / confirmAction / togglePlanConfirm / openHistory / openNode / toast`
 
 颜色/圆角/间距全部映射到画布页令牌（`--panel/--surface/--text/--accent/--radius-*/--shadow-*`），
 浅色深色跟随 `html.theme-dark`；容器一律用填充 + 柔影 + 间距表达层级。
+
+## 应用市场 brief 自动发送
+
+`window.NovaiCanvasAssistantBridge.seedAutoSend({ text, skillRef }) -> Promise<boolean>`
+
+- 微应用就绪：把 text 填进 Composer、设置技能、走官方 `sendChatMessage` 通路发送一次，resolve(true)。
+- 3 秒内起不来：resolve(false)，并在页面 toast + 之后挂载时补一条系统消息（不静默）。
+- 发送失败：resolve(false)，微应用里出现可见系统消息，提示词留在输入框。
+- `skillRef="store:<id>"`（应用市场技能）不在能力列表里，桥接层会在下一次 `/api/agent/run` 请求体注入 `skill_ref`。
+- 打开画布时的种子（`novai_canvas_seed:<canvasId>`，`autoSend:true`）由桥接层接管：先抓内存副本，再把落盘种子的 agent/autoSend 摘掉，避免旧面板重复发送；节点等字段保持不动。

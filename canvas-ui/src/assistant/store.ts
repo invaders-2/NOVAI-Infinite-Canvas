@@ -18,6 +18,7 @@ export interface EnvState {
 	refs: RefChip[]
 	skills: SkillChip[]
 	selectedSkillId: string | null
+	selectedSkillName: string
 	contextUsage: ContextUsage | null
 	artifacts: ArtifactItem[]
 	steerPending: boolean
@@ -34,7 +35,9 @@ export interface AssistantStore {
 	env: EnvState
 	subscribe(listener: () => void): () => void
 	getVersion(): number
-	send(text: string): void
+	send(text: string): Promise<boolean>
+	seedAutoSend(input: { text: string; skillRef?: string }): Promise<boolean>
+	registerComposer(fill: ((text: string) => void) | null): void
 	abort(): void
 	steer(text: string): void
 	chooseSkill(id: string): void
@@ -82,6 +85,7 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		refs: [],
 		skills: [],
 		selectedSkillId: null,
+		selectedSkillName: "",
 		contextUsage: null,
 		artifacts: [],
 		steerPending: false,
@@ -103,6 +107,16 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		emit()
 	}
 
+	const pushSystem = (text: string, kind: "info" | "warn" | "error" = "warn") => {
+		if (!text) return
+		const message = historyMessage("system", text)
+		message.systemKind = kind
+		state.messages.push(message)
+		emit()
+	}
+
+	let composerFill: ((text: string) => void) | null = null
+
 	const store: AssistantStore = {
 		get version() {
 			return version
@@ -118,26 +132,78 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		},
 		send(text) {
 			const value = String(text || "").trim()
-			if (!value) return
+			if (!value) return Promise.resolve(false)
+			if (env.running) {
+				pushSystem("助手还在执行，这条消息没有发出去", "warn")
+				return Promise.resolve(false)
+			}
 			env.running = true
 			env.streamState = "streaming"
 			state.streamState = "streaming"
 			state.messages.push(historyMessage("user", value))
 			emit()
-			try {
-				const result = api.send(value)
-				if (result && typeof (result as Promise<boolean>).then === "function") {
-					(result as Promise<boolean>).then((ok) => {
-						if (!ok) {
-							env.running = false
-							emit()
-						}
-					})
-				}
-			} catch {
-				env.running = false
-				emit()
+			return Promise.resolve()
+				.then(() => api.send(value))
+				.then((ok) => {
+					if (ok === false) {
+						env.running = false
+						env.streamState = "idle"
+						state.streamState = "idle"
+						pushSystem("发送失败：没有拿到运行回执，请检查模型与网络后重试", "error")
+						return false
+					}
+					return true
+				})
+				.catch((error) => {
+					env.running = false
+					env.streamState = "idle"
+					state.streamState = "idle"
+					pushSystem("发送失败：" + ((error as Error)?.message || "网络错误"), "error")
+					return false
+				})
+		},
+		async seedAutoSend(input) {
+			const text = String(input && input.text ? input.text : "").trim()
+			const skillRef = String(input && input.skillRef ? input.skillRef : "").trim()
+			if (!text) {
+				pushSystem("自动发送缺少内容", "error")
+				return false
 			}
+			if (env.running) {
+				pushSystem("助手还在执行，自动发送没有执行", "warn")
+				return false
+			}
+			try {
+				let injectedSkillRef = false
+				if (skillRef) {
+					const known = env.skills.find((skill) => skill.id === skillRef)
+					env.selectedSkillId = skillRef
+					env.selectedSkillName = known
+						? known.name
+						: skillRef.replace(/^store:/, "").replace(/[-_]+/g, " ")
+					if (known) {
+						await Promise.resolve(api.selectSkill(skillRef))
+					} else if (typeof api.applySkillRef === "function") {
+						api.applySkillRef(skillRef)
+						injectedSkillRef = true
+					}
+					emit()
+				}
+				if (composerFill) composerFill(text)
+				const accepted = await store.send(text)
+				/* 失败时把提示词留在输入框，用户可以直接重发 */
+				if (composerFill) composerFill(accepted ? "" : text)
+				if (injectedSkillRef && accepted) {
+					window.setTimeout(() => store.clearSkill(), 400)
+				}
+				return accepted
+			} catch (error) {
+				pushSystem("自动发送失败：" + ((error as Error)?.message || "未知错误"), "error")
+				return false
+			}
+		},
+		registerComposer(fill) {
+			composerFill = fill
 		},
 		abort() {
 			try {
@@ -165,6 +231,9 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		},
 		chooseSkill(id) {
 			env.selectedSkillId = id || null
+			env.selectedSkillName = id
+				? (env.skills.find((skill) => skill.id === id)?.name || id)
+				: ""
 			try {
 				if (id) api.selectSkill(id)
 				else api.clearSkill()
@@ -299,6 +368,8 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			emit()
 		},
 		setHistory(messages) {
+			/* 刚发送/运行中的历史可能还没落盘：旧面板的线程拉取晚到，别用它覆盖当前对话（会把用户消息吞掉） */
+			if (env.running) return
 			const list = Array.isArray(messages) ? messages : []
 			if (!list.length) {
 				state.messages = []
@@ -373,6 +444,9 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		},
 		clearHistory() {
 			store.clearHistory()
+		},
+		seedAutoSend(input) {
+			return store.seedAutoSend(input)
 		},
 		destroy() {
 			store.destroy()

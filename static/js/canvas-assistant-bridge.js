@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.136.1792859352';
+    var ASSET_VERSION = '1.0.136.1792860231';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -31,6 +31,12 @@
     }
 
     var mountedHandle = null;
+    var pendingSeedHints = [];
+    var seedCapture = null;
+    var seedStarted = false;
+    var seedSendInFlight = false;
+    var configProvidersCache = null;
+    var pendingRunSkillRef = '';
     var selectedSkillId = null;
     var skillPending = false;
     var artifactTimer = 0;
@@ -76,6 +82,114 @@
     function notice(text, kind) {
         if (!text) return;
         if (mountedHandle) mountedHandle.notifySystem(String(text), kind || 'info');
+    }
+    /* 微应用没起来时也不能静默：先弹页面 toast，等微应用起来后再补一条系统消息 */
+    function hintVisible(text, kind) {
+        if (!text) return;
+        if (mountedHandle) {
+            try { mountedHandle.notifySystem(String(text), kind || 'warn'); } catch (e) {}
+            return;
+        }
+        pendingSeedHints.push({ text: String(text), kind: kind || 'warn' });
+        toastFallback(text);
+    }
+    function flushSeedHints() {
+        if (!mountedHandle || !pendingSeedHints.length) return;
+        var queued = pendingSeedHints.splice(0);
+        queued.forEach(function (item) {
+            try { mountedHandle.notifySystem(item.text, item.kind); } catch (e) {}
+        });
+    }
+
+    /* 应用市场 brief 的种子：{v:1, agent, autoSend:true, skillRef}。
+       旧面板的 openHomeSeedAgent 只认 autoSend；这里先抓一份内存副本，再把落盘的 autoSend 关掉，
+       避免旧面板和我们各发一次；nodes/toast 等字段保持不动，旧逻辑照常铺画布。 */
+    function captureHomeSeed() {
+        if (!canvasId) return;
+        var key = 'novai_canvas_seed:' + canvasId;
+        var raw = null;
+        try { raw = localStorage.getItem(key); } catch (e) { return; }
+        if (!raw) return;
+        var seed = null;
+        try { seed = JSON.parse(raw); } catch (e) { return; }
+        if (!seed || typeof seed !== 'object') return;
+        var text = String(seed.agent || '').trim();
+        if (!text) return;
+        seedCapture = {
+            key: key,
+            text: text,
+            skillRef: String(seed.skillRef || '').trim(),
+            autoSend: seed.autoSend === true
+        };
+        if (!seedCapture.autoSend) return;
+        try {
+            /* 旧面板看到 seed.agent 就会走 openHomeSeedAgent；把 agent/autoSend 摘掉，
+               既避免重复发送，也不会冒出「自动发送失败」的旧 note。nodes/toast 等字段保持不动。 */
+            seed.autoSend = false;
+            delete seed.agent;
+            delete seed.skillRef;
+            localStorage.setItem(key, JSON.stringify(seed));
+        } catch (e) {}
+        log('seed', 'captured autoSend skill=' + (seedCapture.skillRef || '-'));
+    }
+    captureHomeSeed();
+
+    function ensurePanelOpen() {
+        try {
+            var panel = document.getElementById('canvasAssistantPanel');
+            var chat = document.getElementById('chatModal');
+            if (panel && !panel.classList.contains('open')) {
+                var rail = document.getElementById('canvasRailChat');
+                if (rail) { rail.click(); return; }
+                if (typeof window.toggleChatPanel === 'function') window.toggleChatPanel();
+                return;
+            }
+            if (chat && !chat.classList.contains('open') && typeof window.toggleChatPanel === 'function') {
+                window.toggleChatPanel();
+            }
+        } catch (e) {}
+    }
+
+    /* 外部统一入口：window.NovaiCanvasAssistantBridge.seedAutoSend({text, skillRef}) -> Promise<boolean> */
+    bridge.seedAutoSend = function (options) {
+        var opts = (options && typeof options === 'object') ? options : {};
+        var text = String(opts.text == null ? '' : opts.text).trim();
+        var skillRef = String(opts.skillRef == null ? '' : opts.skillRef).trim();
+        if (!text) {
+            hintVisible('自动发送缺少内容', 'error');
+            return Promise.resolve(false);
+        }
+        /* 自动发送要让用户看得见：面板没开就先打开（旧面板的 openHomeSeedAgent 也这么干） */
+        ensurePanelOpen();
+        return waitFor(function () { return mountedHandle; }, 3000, 100).then(function (handle) {
+            if (!handle || typeof handle.seedAutoSend !== 'function') {
+                hintVisible('画布助手还没准备好，自动发送没有执行', 'warn');
+                log('seed', 'ui not ready');
+                return false;
+            }
+            seedSendInFlight = true;
+            return Promise.resolve(handle.seedAutoSend({ text: text, skillRef: skillRef }))
+                .then(function (ok) {
+                    seedSendInFlight = false;
+                    log('seed', ok ? 'auto send ok' : 'auto send failed');
+                    return ok !== false;
+                }, function (error) {
+                    seedSendInFlight = false;
+                    hintVisible('自动发送失败：' + ((error && error.message) || '未知错误'), 'error');
+                    return false;
+                });
+        });
+    };
+
+    function startCapturedSeed() {
+        if (seedStarted) return;
+        seedStarted = true;
+        var captured = seedCapture;
+        seedCapture = null;
+        if (!captured || !captured.autoSend) return;
+        window.setTimeout(function () {
+            bridge.seedAutoSend({ text: captured.text, skillRef: captured.skillRef });
+        }, 120);
     }
 
     /* ── SSE 解析（与 smart-canvas.js 内联实现同语义，跨 chunk 半行 / 心跳 / 空行分发） ── */
@@ -362,26 +476,90 @@
             if (btn) btn.click();
         });
     }
+    function ensureChatModelReady(timeout) {
+        return waitFor(function () {
+            var select = document.getElementById('chatModelSelect');
+            if (!select || !select.options || !select.options.length) return null;
+            return select.value ? select : null;
+        }, timeout || 4000, 100);
+    }
+    function loadConfigProviders() {
+        if (configProvidersCache) return Promise.resolve(configProvidersCache);
+        if (typeof originalFetch !== 'function') return Promise.resolve([]);
+        return originalFetch.call(window, '/api/config', { headers: { Accept: 'application/json' } })
+            .then(function (response) { return response.ok ? response.json() : null; })
+            .then(function (data) {
+                configProvidersCache = (data && Array.isArray(data.api_providers)) ? data.api_providers : [];
+                return configProvidersCache;
+            })
+            .catch(function () { return []; });
+    }
+    /* 首次打开时 initChatModel 可能挑到没配 Key 的平台（例如默认的 ModelScope）：
+       自动发送前优先选一个有 Key、且有对话模型的平台，仍然走页面自己的模型下拉/change 通路。 */
+    function primeChatModelForSeed() {
+        var select = document.getElementById('chatModelSelect');
+        if (!select || !select.options || !select.options.length) return Promise.resolve(false);
+        return loadConfigProviders().then(function (providers) {
+            if (!providers || !providers.length) return false;
+            var current = select.selectedOptions && select.selectedOptions[0];
+            var currentProvider = current ? String(current.getAttribute('data-provider') || '') : '';
+            var currentCfg = providers.filter(function (item) { return String(item.id) === currentProvider; })[0];
+            if (currentCfg && currentCfg.has_key) return false;
+            var options = Array.prototype.slice.call(select.options);
+            var candidates = providers.filter(function (item) { return item.enabled !== false && item.has_key; });
+            for (var i = 0; i < candidates.length; i += 1) {
+                var provider = candidates[i];
+                var models = provider.chat_models || [];
+                var pick = null;
+                if (models.length) {
+                    for (var j = 0; j < options.length; j += 1) {
+                        if (String(options[j].getAttribute('data-provider')) === String(provider.id)
+                            && models.indexOf(options[j].value) !== -1) { pick = options[j]; break; }
+                    }
+                } else {
+                    pick = options.filter(function (option) {
+                        return String(option.getAttribute('data-provider')) === String(provider.id);
+                    })[0] || null;
+                }
+                if (!pick) continue;
+                select.value = pick.value;
+                try { select.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+                log('seed', 'prime model ' + provider.id + '/' + pick.value);
+                return true;
+            }
+            return false;
+        }).catch(function () { return false; });
+    }
     function selectSkill(id) {
         var want = String(id || '');
-        if (!want) return;
+        if (!want) return Promise.resolve(false);
         var trigger = document.getElementById('chatSkillBtn');
-        if (!trigger) { notice('技能入口还没准备好'); return; }
+        if (!trigger) { notice('技能入口还没准备好'); return Promise.resolve(false); }
         skillPending = true;
         trigger.click();
-        waitFor(function () {
+        return waitFor(function () {
             return document.querySelector('.chat-skill-option[data-skill-id="' + cssEscape(want) + '"]');
         }, 6000, 80).then(function (option) {
             skillPending = false;
-            if (!option) { notice('没有找到这个技能'); return; }
+            if (!option) { notice('没有找到这个技能'); return false; }
             option.click();
             selectedSkillId = want;
             if (mountedHandle) mountedHandle.setSelectedSkill(want);
+            return true;
         });
+    }
+    function applySkillRef(ref) {
+        var value = String(ref || '').trim();
+        if (!value) return;
+        /* store:<id> 不在能力列表里：不走旧技能选择器，改成下一次 /api/agent/run 请求体带 skill_ref */
+        pendingRunSkillRef = value;
+        selectedSkillId = value;
+        log('skillRef', value);
     }
     function clearSkill() {
         var remove = $('#chatSkillChip .chat-skill-chip-remove');
         if (remove) remove.click();
+        pendingRunSkillRef = '';
         selectedSkillId = null;
         if (mountedHandle) mountedHandle.setSelectedSkill(null);
     }
@@ -412,16 +590,38 @@
             var value = String(text == null ? '' : text).trim();
             if (!value) return Promise.resolve(false);
             var skillChip = $('#chatSkillChip .chat-skill-chip');
-            var pre = (selectedSkillId && !skillChip) ? ensureSkillApplied(1500) : Promise.resolve(true);
+            var pre = ensureChatModelReady(4000)
+                .then(function () { return seedSendInFlight ? primeChatModelForSeed() : false; })
+                .then(function () {
+                    return (selectedSkillId && !pendingRunSkillRef && !skillChip) ? ensureSkillApplied(1500) : true;
+                });
             return pre.then(function () {
                 if (!setLegacyInput(value)) return false;
                 if (typeof window.sendChatMessage !== 'function') {
                     notice('发送入口不可用，已回落旧面板');
                     return false;
                 }
-                var result = window.sendChatMessage();
-                return Promise.resolve(result).then(function (ok) {
-                    return ok !== false;
+                var result;
+                try { result = window.sendChatMessage(); } catch (e) { return false; }
+                /* sendChatMessage 的 promise 要等整轮结束才 resolve：只等 800ms 判断有没有「立刻失败」 */
+                return new Promise(function (resolve) {
+                    var settled = false;
+                    var timer = window.setTimeout(function () {
+                        if (settled) return;
+                        settled = true;
+                        resolve(true);
+                    }, 800);
+                    Promise.resolve(result).then(function (ok) {
+                        if (settled) return;
+                        settled = true;
+                        window.clearTimeout(timer);
+                        resolve(ok !== false);
+                    }).catch(function () {
+                        if (settled) return;
+                        settled = true;
+                        window.clearTimeout(timer);
+                        resolve(false);
+                    });
                 });
             });
         },
@@ -431,6 +631,7 @@
         },
         steer: steer,
         selectSkill: selectSkill,
+        applySkillRef: applySkillRef,
         clearSkill: clearSkill,
         removeRef: removeRefById,
         clearRefs: function () {
@@ -477,7 +678,25 @@
             var isThread = method === 'GET' && /\/api\/agent\/thread\/[^/?#]+/.test(url);
             var isCapabilities = method === 'GET' && /\/api\/capabilities(?:\?|$)/.test(url);
             var isUndo = method === 'POST' && /\/api\/agent\/undo(?:\?|$)/.test(url);
-            var pending = originalFetch.apply(window, arguments);
+            var requestInput = input;
+            var requestInit = init;
+            if (isRun && pendingRunSkillRef) {
+                var skillRef = pendingRunSkillRef;
+                try {
+                    if (init && typeof init.body === 'string') {
+                        var runBody = JSON.parse(init.body);
+                        runBody.skill_ref = skillRef;
+                        requestInit = {};
+                        for (var initKey in init) {
+                            if (Object.prototype.hasOwnProperty.call(init, initKey)) requestInit[initKey] = init[initKey];
+                        }
+                        requestInit.body = JSON.stringify(runBody);
+                        pendingRunSkillRef = '';
+                        log('skillRef', 'injected ' + skillRef);
+                    }
+                } catch (e) { log('skillRef', 'inject failed'); }
+            }
+            var pending = originalFetch.call(window, requestInput, requestInit);
             if (!isRun && !isResume && !isSteer && !isThread && !isCapabilities && !isUndo) return pending;
             return pending.then(function (response) {
                 try {
@@ -632,13 +851,27 @@
                 syncRunningFromLegacy();
                 pushSkillState();
                 loadSkills();
-                loadHistory();
+                /* 必须先让历史回来再触发自动发送，否则历史 setHistory 会把刚推入的用户消息覆盖掉 */
+                loadHistory().then(function () {
+                    flushSeedHints();
+                    startCapturedSeed();
+                });
             })
             .catch(function (error) {
                 bridge.reason = 'asset-load-failed';
                 bridge.error = String((error && error.message) || error);
                 chatModal.classList.remove('nv-assistant-new');
                 if (root.parentNode) root.parentNode.removeChild(root);
+                if (seedCapture && seedCapture.autoSend) {
+                    toastFallback('画布助手加载失败，自动发送没有执行');
+                    try {
+                        var restore = JSON.parse(localStorage.getItem(seedCapture.key) || '{}');
+                        restore.agent = seedCapture.text;
+                        restore.skillRef = seedCapture.skillRef;
+                        restore.autoSend = false;
+                        localStorage.setItem(seedCapture.key, JSON.stringify(restore));
+                    } catch (e) {}
+                }
                 console.error('[canvas-assistant] 微应用加载失败，已回退旧面板', error);
             });
     }
@@ -653,8 +886,8 @@
     }
 
     function loadHistory() {
-        if (!canvasId || !mountedHandle) return;
-        originalFetch.call(window, '/api/agent/thread/' + encodeURIComponent(canvasId) + '?limit=60', { headers: { Accept: 'application/json' } })
+        if (!canvasId || !mountedHandle) return Promise.resolve();
+        return originalFetch.call(window, '/api/agent/thread/' + encodeURIComponent(canvasId) + '?limit=60', { headers: { Accept: 'application/json' } })
             .then(function (response) { return response.ok ? response.json() : null; })
             .then(function (data) {
                 if (mountedHandle && data && Array.isArray(data.messages)) mountedHandle.setHistory(data.messages);

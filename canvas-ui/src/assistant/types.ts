@@ -107,7 +107,9 @@ export interface CanvasAssistantHostApi {
 	send(text: string): boolean | Promise<boolean>
 	abort(): void
 	steer(text: string): void
-	selectSkill(id: string): void
+	selectSkill(id: string): void | Promise<boolean>
+	/** 应用市场种子里的 store:<id> 技能：由桥接层在下一次 /api/agent/run 的请求体里带上 skill_ref */
+	applySkillRef?(ref: string): void
 	clearSkill(): void
 	removeRef(id: string): void
 	clearRefs(): void
@@ -134,5 +136,7 @@ export interface CanvasAssistantHandle {
 	notifySystem(text: string, kind?: "info" | "warn" | "error"): void
 	notifyRunSummary(text: string): void
 	clearHistory(): void
+	/** 外部（桥接层/应用市场种子）触发的自动发送；resolve 表示是否已进入官方 run 通路 */
+	seedAutoSend(input: { text: string; skillRef?: string }): Promise<boolean>
 	destroy(): void
 }

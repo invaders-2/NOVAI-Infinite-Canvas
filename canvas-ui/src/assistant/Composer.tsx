@@ -23,10 +23,32 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 	const [text, setText] = useState("")
 	const [skillOpen, setSkillOpen] = useState(false)
-	const activeSkill = useMemo(
-		() => env.skills.find((skill) => skill.id === env.selectedSkillId) || null,
-		[env.skills, env.selectedSkillId],
-	)
+	const activeSkill = useMemo(() => {
+		const found = env.skills.find((skill) => skill.id === env.selectedSkillId)
+		if (found) return found
+		// 应用市场种子带的是 store:<id>，能力列表里没有，仍然要在 composer 上显示成一个技能 chip
+		if (env.selectedSkillId) {
+			return {
+				id: env.selectedSkillId,
+				name: env.selectedSkillName || env.selectedSkillId,
+				icon: "✨",
+			}
+		}
+		return null
+	}, [env.skills, env.selectedSkillId, env.selectedSkillName])
+
+	useEffect(() => {
+		store.registerComposer((value: string) => {
+			const node = textareaRef.current
+			if (node) {
+				node.value = value
+				node.style.height = "auto"
+				if (value) node.focus()
+			}
+			setText(value)
+		})
+		return () => store.registerComposer(null)
+	}, [store])
 
 	useEffect(() => {
 		if (!pendingText) return

@@ -40721,11 +40721,28 @@ function applyHomeCanvasSeed(seed){
     selectedImage = {nodeId:'', index:-1};
     return {created, firstGen};
 }
-function openHomeSeedAgent(text, autoSend, skillRef){
+function homeSeedNewPanelActive(){
+    return !!(document.querySelector('.nv-assistant-new') || document.querySelector('#chatModal.nv-assistant-new'));
+}
+function noteHomeSeedNewPanelFailure(){
+    try { addChatMessage('system', '自动发送失败，提示词已留在输入框'); } catch(e) {}
+    try { toast('自动发送失败，提示词已留在输入框'); } catch(e) {}
+}
+async function openHomeSeedAgent(text, autoSend, skillRef){
     const value = String(text || '').trim();
     if(!value) return;
-    if(!chatModal.classList.contains('open')) toggleChatPanel();
     const wantAutoSend = shouldAutoSend({ agent: value, autoSend: autoSend });
+    /* 新面板（React 微应用）优先交给桥接层：它负责填输入并发送。
+       返回 true 就结束，绝不再碰旧面板的 #chatInput；false/异常才走旧兜底。 */
+    const bridge = window.NovaiCanvasAssistantBridge;
+    if(wantAutoSend && bridge && typeof bridge.seedAutoSend === 'function'){
+        clearHomeSeedAutoSend();
+        try {
+            const handled = await bridge.seedAutoSend({ text: value, skillRef: String(skillRef || '').trim() });
+            if(handled === true) return;
+        } catch(e) {}
+    }
+    if(!chatModal.classList.contains('open')) toggleChatPanel();
     pendingAgentSkillRef = wantAutoSend ? String(skillRef || '').trim() : '';
     let attempts = 0;
     function fillInput(){
@@ -40740,7 +40757,8 @@ function openHomeSeedAgent(text, autoSend, skillRef){
     function fail(message){
         clearHomeSeedAutoSend();
         fillInput();
-        noteHomeSeedAutoSend(message);
+        if(homeSeedNewPanelActive()) noteHomeSeedNewPanelFailure();
+        else noteHomeSeedAutoSend(message);
     }
     function attempt(){
         attempts += 1;
