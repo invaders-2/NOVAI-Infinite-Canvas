@@ -36416,6 +36416,43 @@ async def agent_run_model_context(run_id: str, request: Request):
     }
 
 
+AGENT_THREAD_MESSAGES_DEFAULT = 60
+AGENT_THREAD_MESSAGES_MAX = 200
+
+
+@app.get("/api/agent/threads/{thread_id}/messages")
+async def agent_thread_messages(thread_id: str, request: Request, canvas_id: str = "",
+                                limit: int = AGENT_THREAD_MESSAGES_DEFAULT):
+    """只读：按线程 id 读消息（最近 limit 条，1..200，超限夹到 200）。
+
+    与 switch 的区别：这里**不改变 active_id**，只是读某个线程的历史；切线程才用 switch。
+    """
+    canvas_id = str(canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    require_canvas_access(load_canvas(canvas_id), request, "view")
+    try:
+        limit_value = int(limit)
+    except (TypeError, ValueError):
+        limit_value = AGENT_THREAD_MESSAGES_DEFAULT
+    limit_value = max(1, min(limit_value, AGENT_THREAD_MESSAGES_MAX))
+    doc = _agent_thread_doc_load(canvas_id)
+    thread = _agent_thread_find(doc, thread_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail="线程不存在")
+    messages = [item for item in (thread.get("messages") or []) if isinstance(item, dict)]
+    total = len(messages)
+    sliced = messages[-limit_value:] if limit_value < total else messages
+    rows = []
+    for msg in sliced:
+        row = {"role": msg.get("role"), "content": msg.get("text"), "at": msg.get("at")}
+        if msg.get("session_id"):
+            row["session_id"] = msg["session_id"]
+        rows.append(row)
+    return {"thread_id": thread["id"], "title": thread.get("title") or "",
+            "messages": rows, "count": len(rows), "has_more": total > len(rows)}
+
+
 @app.delete("/api/agent/thread/{canvas_id}")
 async def agent_thread_clear(canvas_id: str):
     """「新对话」：清掉这张画布的对话记录（画布本身不动）。"""

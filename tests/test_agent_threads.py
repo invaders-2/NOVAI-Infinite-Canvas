@@ -354,5 +354,79 @@ class ThreadConcurrencyTests(unittest.TestCase):
         self.assertEqual(doc["threads"][0]["title"], "第二次改名")
 
 
+class ThreadMessagesTests(unittest.TestCase):
+    """GET /api/agent/threads/{thread_id}/messages：按线程 id 只读消息，不改变 active_id。"""
+
+    def setUp(self):
+        self.canvas_id = new_canvas("messages 画布")
+        seed_messages(self.canvas_id, 3)
+        self.thread_id = CLIENT.get("/api/agent/threads",
+                                    params={"canvas_id": self.canvas_id}).json()["threads"][0]["id"]
+
+    def _messages(self, thread_id=None, limit=None, canvas_id=None):
+        params = {"canvas_id": canvas_id if canvas_id is not None else self.canvas_id}
+        if limit is not None:
+            params["limit"] = limit
+        return CLIENT.get("/api/agent/threads/%s/messages" % (thread_id or self.thread_id),
+                          params=params)
+
+    def test_reads_messages_in_order(self):
+        resp = self._messages()
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()
+        self.assertEqual(body["thread_id"], self.thread_id)
+        self.assertEqual(body["title"], "对话 1")
+        self.assertEqual([item["content"] for item in body["messages"]],
+                         ["第 1 句", "第 2 句", "第 3 句"])
+        self.assertEqual([item["role"] for item in body["messages"]],
+                         ["user", "user", "user"])
+        self.assertEqual(body["count"], 3)
+        self.assertFalse(body["has_more"])
+        self.assertIsInstance(body["messages"][0]["at"], float)
+
+    def test_limit_truncates_tail_and_has_more(self):
+        main.agent_thread_append(self.canvas_id, [{"role": "user", "text": "第 4 句"},
+                                                  {"role": "user", "text": "第 5 句"}])   # 共 5 条
+        resp = self._messages(limit=2)
+        body = resp.json()
+        self.assertEqual(body["count"], 2)
+        self.assertEqual([item["content"] for item in body["messages"]],
+                         ["第 4 句", "第 5 句"])
+        self.assertTrue(body["has_more"])
+        full = self._messages(limit=200).json()
+        self.assertEqual(full["count"], 5)
+        self.assertFalse(full["has_more"])
+
+    def test_limit_clamped_to_200(self):
+        with main._AGENT_THREAD_LOCK:
+            doc = main._agent_thread_doc_load(self.canvas_id)
+            thread = main._agent_thread_find(doc, self.thread_id)
+            thread["messages"] = [{"role": "user", "text": "m%03d" % index, "at": float(index)}
+                                  for index in range(250)]
+            main._agent_thread_doc_save(self.canvas_id, doc)
+        body = self._messages(limit=999).json()
+        self.assertEqual(body["count"], 200)
+        self.assertTrue(body["has_more"])
+        self.assertEqual(body["messages"][-1]["content"], "m249")
+
+    def test_thread_and_canvas_404(self):
+        missing_thread = self._messages(thread_id="no-such-thread")
+        self.assertEqual(missing_thread.status_code, 404)
+        self.assertIn("线程不存在", missing_thread.json()["detail"])
+        missing_canvas = self._messages(canvas_id="no-such-canvas")
+        self.assertEqual(missing_canvas.status_code, 404)
+
+    def test_does_not_change_active_id(self):
+        forked = CLIENT.post("/api/agent/threads/fork", json={
+            "canvas_id": self.canvas_id, "thread_id": self.thread_id, "message_index": 1}).json()["thread"]["id"]
+        CLIENT.post("/api/agent/threads/switch",
+                    json={"canvas_id": self.canvas_id, "thread_id": forked})
+        resp = self._messages(thread_id=self.thread_id)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(len(resp.json()["messages"]), 3)
+        rows = CLIENT.get("/api/agent/threads", params={"canvas_id": self.canvas_id}).json()
+        self.assertEqual(rows["active_id"], forked)
+
+
 if __name__ == "__main__":
     unittest.main()
