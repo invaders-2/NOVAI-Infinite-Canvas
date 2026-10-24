@@ -1,0 +1,116 @@
+{
+  "kind": "skill",
+  "name": "primordia-creator-skills",
+  "display_name": "【原基】创作者Skill公开",
+  "description": "Orin Jo Liu 与 Johann Qiao 随《原基》分享的三项影视创作 Skill。",
+  "category": "创作者Skill公开",
+  "business_scenario": "film-video",
+  "marketing_line": "塑造角色，构建场景，规划镜头，让创作意图贯穿每一场。",
+  "search_terms": [
+    "原基",
+    "创作者",
+    "角色资产",
+    "镜头规划",
+    "场景美术"
+  ],
+  "cover_url": "/static/store/covers/774f7216d4fc9f95.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": false,
+  "runtime_status": "not-applicable",
+  "activation_skill": "primordia-creator-skills",
+  "guide": {
+    "summary": "角色、场景与镜头，三项可独立使用、相互配合的创作工作流。",
+    "scenarios": [],
+    "required_context": [],
+    "use_cases": [],
+    "steps": [],
+    "outputs": [],
+    "follow_ups": [],
+    "boundaries": []
+  },
+  "presentation": {
+    "variant": "creator-cinematic",
+    "series": {
+      "collection": {
+        "kind": "skill",
+        "name": "primordia-creator-skills"
+      },
+      "title": "【原基】创作者Skill公开",
+      "work_title": "原基",
+      "creators": [
+        {
+          "name": "Orin Jo Liu"
+        },
+        {
+          "name": "Johann Qiao"
+        }
+      ],
+      "hero": {
+        "kind": "image",
+        "src": "/static/store/covers/5d9c27535a673700.webp",
+        "alt": "《原基》官方海报",
+        "object_position": "center"
+      },
+      "watch_url": "https://glanze.tv/en/discover/primordia-e49416a153"
+    }
+  },
+  "collection": {
+    "categories": [
+      {
+        "id": "workflow",
+        "label": "创作工作流"
+      }
+    ],
+    "entries": [
+      {
+        "item": {
+          "kind": "skill",
+          "name": "character-asset-pack"
+        },
+        "category": "workflow",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/774f7216d4fc9f95.webp"
+        },
+        "status": "live",
+        "title": "声音控制表演",
+        "description": "从剧本、角色构想或已有资产出发，建立可复用的形象与声音。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "primordia-art-director"
+        },
+        "category": "workflow",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/774f7216d4fc9f95.webp"
+        },
+        "status": "live",
+        "title": "三维造景",
+        "description": "让每一场戏，拥有统一的视觉世界。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "shot-planning"
+        },
+        "category": "workflow",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/774f7216d4fc9f95.webp"
+        },
+        "status": "live",
+        "title": "真实法则",
+        "description": "将镜头语言、人物表演与节奏整理成可衔接生成的镜头规划。"
+      }
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

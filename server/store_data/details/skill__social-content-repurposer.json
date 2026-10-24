@@ -1,0 +1,96 @@
+{
+  "kind": "skill",
+  "name": "social-content-repurposer",
+  "display_name": "跨平台内容复用器",
+  "description": "一条长视频、播客或文章，先拆成 3–7 条能单独发布的内容，再分别适配 Instagram、TikTok、LinkedIn 和 Shorts。",
+  "category": "社媒内容",
+  "business_scenario": "social-media-content",
+  "marketing_line": "同一份素材，变成多条真正适合各平台的内容。",
+  "search_terms": [
+    "跨平台内容复用器",
+    "内容复用",
+    "3–7 个内容原子",
+    "多平台",
+    "社媒内容"
+  ],
+  "cover_url": "/static/store/covers/d4c0c04ff74f8c6d.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "social-content-repurposer",
+  "guide": {
+    "summary": "把一份长素材交给我，我会先找出 3–7 个可以独立成立的重点，再分别适配平台，让每条内容都有自己的开场、格式和 CTA。",
+    "scenarios": [
+      "找出最值得做成帖子的重点",
+      "把每个重点改成适合它的平台内容"
+    ],
+    "required_context": [
+      {
+        "title": "长素材是什么？",
+        "description": "提供视频、播客、文章、逐字稿或录音。"
+      },
+      {
+        "title": "你想让谁看到？",
+        "description": "说清受众、目标，以及最好的几条内容希望换来的动作。"
+      },
+      {
+        "title": "重点发到哪些平台？",
+        "description": "选择 Instagram、TikTok、LinkedIn、YouTube Shorts，或四个平台都要。"
+      },
+      {
+        "title": "交付要满足什么？",
+        "description": "写明语言、语气、画幅、版本数量、截止时间和披露要求；单段生成短视频最长 5 秒。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "先找值得做的重点",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 把这份已确认素材拆成 3–7 个独立重点。用简单的话说明每个重点，排好优先级，先给我看草稿。",
+        "description": "先拆出 3–7 个可以单独讲清楚的重点，再决定哪些值得做成内容。"
+      },
+      {
+        "title": "分别做成平台原生版本",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 把选中的重点改成 Instagram、TikTok、LinkedIn 和 YouTube Shorts 版本。每段生成短视频不超过 5 秒，写清每版改了什么，等我确认。",
+        "description": "每个重点都有自己的钩子、节奏、CTA 和格式，不把同一条复制到所有平台。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "先保住源素材",
+        "description": "拆解前确认事实、使用权和 master 素材。"
+      },
+      {
+        "title": "挑出值得保留的重点",
+        "description": "找出 3–7 个离开上下文也能讲清楚的内容。"
+      },
+      {
+        "title": "让每个重点适合自己的平台",
+        "description": "按平台改钩子、格式、节奏、CTA 和安全区。"
+      },
+      {
+        "title": "把整套内容过一遍",
+        "description": "逐条检查说法、裁切、时长、披露、权利和改动了什么。"
+      }
+    ],
+    "outputs": [
+      "按优先级排列的 3–7 个独立重点",
+      "平台原生脚本、字幕、封面、短片方向和 CTA",
+      "一张简单对比表：来源、平台、时长和每条内容改了什么"
+    ],
+    "follow_ups": [
+      "保留源素材，只改一个平台变量。",
+      "把最强重点改成另一种原生格式。",
+      "发布前重新核对当前平台要求。"
+    ],
+    "boundaries": [
+      "我会在画布里先做草稿和检查过的素材包；什么时候发布或排期，由你最后确认。",
+      "我只使用你提供并确认过的事实和使用权；没有依据的说法、私密信息或披露不清的内容会停在审阅。",
+      "每段生成的短视频最长 5 秒；更长的故事需要拆成已确认的片段，或交给独立剪辑流程。",
+      "页面能打开或请求成功，不代表一定能发布或一定有效果；交付前请看完最终素材包。"
+    ]
+  },
+  "starter_prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 我有一份长视频、播客或文章想复用。先问我缺少的信息，找出最值得保留的 3–7 个重点，再说明每个重点适合哪个平台，确认后再写稿。",
+  "capabilities": [],
+  "connectors": []
+}

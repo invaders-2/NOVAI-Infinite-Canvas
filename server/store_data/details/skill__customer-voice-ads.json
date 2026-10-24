@@ -1,0 +1,122 @@
+{
+  "kind": "skill",
+  "name": "customer-voice-ads",
+  "display_name": "客户之声广告",
+  "description": "把真实好评变成最强带货力：自动分析商品评论中的真实使用体验与痛点解答，结合商品实拍生成带可信证据、旁白与字幕的高转化短视频。",
+  "category": "电商广告",
+  "business_scenario": "ecommerce-advertising",
+  "marketing_line": "粘贴商品详情页链接，AI 提炼买家真实口碑与热评，生成有理有据、自带信任感的爆款短视频。",
+  "search_terms": [
+    "customer-voice-ads",
+    "客户之声广告",
+    "电商广告",
+    "广告创意",
+    "品牌内容"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/app-store/commerce/customer-voice-ads-output.svg",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "customer-voice-ads",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "把真实好评变成最强带货力：自动分析商品评论中的真实使用体验与痛点解答，结合商品实拍生成带可信证据、旁白与字幕的高转化短视频。",
+    "scenarios": [
+      "用真实客户反馈、产品画面、图形、字幕和有证据依据的旁白，制作符合需求的电商广告。"
+    ],
+    "required_context": [
+      {
+        "title": "开始前准备",
+        "description": "准备产品详情页 URL、1–4 张产品图、目标受众、优惠、声音、时长、画幅和使用权。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "customer-voice-ads-start",
+        "title": "客户之声广告",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 打开用户提供的产品详情页 URL，搜索并读取页面信息和用户 review，再结合上传的产品图和有证据的评论主题制作一条电商短视频广告。按需求使用产品画面、图形、字幕、旁白或出镜者。保持引用或转述可追溯，区分用户观点和已验证的产品事实，不要编造卖点。",
+        "description": "搜索产品详情页，提炼用户 review 主题，并结合上传的产品图制作有证据依据的电商短视频。",
+        "context": "客户之声广告"
+      }
+    ],
+    "steps": [
+      {
+        "title": "提炼真实反馈",
+        "description": "归纳重复主题，核对引用权限或使用匿名聚合转述。"
+      },
+      {
+        "title": "编写电商广告脚本",
+        "description": "每句旁白都配产品画面、图形或字幕证据；如果需求需要，也可以安排出镜者。"
+      },
+      {
+        "title": "检查画面与声音",
+        "description": "核对事实、旁白、字幕与剪辑完成情况。"
+      }
+    ],
+    "outputs": [
+      "客户主题、引用权限说明与电商广告视听脚本",
+      "产品片段、旁白、字幕与剪辑完成情况"
+    ],
+    "follow_ups": [
+      "保留已确认的内容，只修改你指定的部分。"
+    ],
+    "boundaries": [
+      "不会编造证言、客户、结果、评分或产品证据。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "input-results",
+    "eyebrow": "输入与交付",
+    "caption": "工作流示意；具体内容根据你提供的素材和目标制作。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "客户之声广告视频预览"
+    },
+    "panels": [
+      {
+        "id": "input",
+        "label": "产品图",
+        "alt": "客户之声广告使用的产品图",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/2410963e171a7765.webp"
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "output-1",
+        "label": "视频广告 1",
+        "alt": "客户之声电商视频广告案例",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "9/16",
+        "is_result": true
+      },
+      {
+        "id": "output-2",
+        "label": "视频广告 2",
+        "alt": "第二个客户之声电商视频广告案例",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "9/16",
+        "is_result": true
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 打开用户提供的产品详情页 URL，搜索并读取页面信息和用户 review，再结合上传的产品图和有证据的评论主题制作一条电商短视频广告。按需求使用产品画面、图形、字幕、旁白或出镜者。保持引用或转述可追溯，区分用户观点和已验证的产品事实，不要编造卖点。",
+  "capabilities": [],
+  "connectors": []
+}

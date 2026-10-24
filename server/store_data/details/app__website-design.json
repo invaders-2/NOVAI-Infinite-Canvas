@@ -1,0 +1,193 @@
+{
+  "kind": "app",
+  "name": "website-design",
+  "display_name": "3D交互网页设计",
+  "description": "浏览 21 款网站设计模板，确认后在原对话中生成和修改可预览的 HTML。",
+  "category": "更多应用",
+  "business_scenario": "brand-design",
+  "marketing_line": "挑选并确认模板，在对话中持续修改 HTML。",
+  "search_terms": [
+    "Website Design",
+    "HTML",
+    "interactive",
+    "motion",
+    "template",
+    "网站设计",
+    "网站设计",
+    "模板"
+  ],
+  "icon_url": "/static/store/covers/d475245fe2b4f3ae.webp",
+  "cover_url": "/static/store/covers/6719283f9ee785f6.webp",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "website-design",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "浏览 21 款网站设计模板；只有在选库中确认后才开始生成。",
+    "scenarios": [
+      "网站设计模板选择",
+      "Agent 推荐并由用户确认",
+      "HTML 生成与改稿"
+    ],
+    "required_context": [
+      {
+        "title": "想做什么",
+        "description": "描述网站设计的内容和用途。"
+      },
+      {
+        "title": "文案与视觉方向",
+        "description": "提供文字、颜色、氛围和交互要求。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "选择网站设计模板",
+        "prompt": "打开 网站设计，我想挑一个模板",
+        "description": "打开库，预览全部 21 款模板，确认后再生成。"
+      },
+      {
+        "title": "请 Agent 推荐",
+        "prompt": "推荐一个网站设计模板，让我确认后再生成 HTML",
+        "description": "让 Agent 高亮合适模板，同时保留完整模板库供浏览。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "打开模板库",
+        "description": "Agent 只打开网站设计的选择面板。"
+      },
+      {
+        "title": "预览并确认",
+        "description": "浏览、调整参数并明确采用一个模板。"
+      },
+      {
+        "title": "查看 HTML",
+        "description": "Agent 根据确认的模板生成可播放 HTML。"
+      },
+      {
+        "title": "对话改稿",
+        "description": "继续修改文案、颜色、内容、节奏、动作或交互。"
+      }
+    ],
+    "outputs": [
+      "可预览的独立 HTML",
+      "原对话中保留的改稿版本"
+    ],
+    "follow_ups": [
+      "修改标题和强调色。",
+      "把示例换成我的内容。",
+      "保持布局，调整动作节奏。"
+    ],
+    "boundaries": [
+      "只有确认模板后才开始生成 HTML。",
+      "当前产物是 HTML，暂不包含视频导出。"
+    ]
+  },
+  "library": {
+    "families": [
+      {
+        "id": "product-narrative",
+        "label": "产品叙事"
+      },
+      {
+        "id": "architectural-space",
+        "label": "建筑空间"
+      },
+      {
+        "id": "spatial-gallery",
+        "label": "空间画廊"
+      },
+      {
+        "id": "material-showcase",
+        "label": "材质展示"
+      },
+      {
+        "id": "globe-navigation",
+        "label": "地球导航"
+      },
+      {
+        "id": "product-configurator",
+        "label": "产品配置"
+      },
+      {
+        "id": "particle-typography",
+        "label": "粒子排版"
+      },
+      {
+        "id": "layered-interface",
+        "label": "分层界面"
+      }
+    ],
+    "featured_template_ids": [
+      "W01",
+      "W02",
+      "W03",
+      "W04",
+      "W05",
+      "W06",
+      "W07",
+      "W08"
+    ],
+    "templates": {
+      "W01": {
+        "name": "瓶器 · 产品叙事",
+        "description": "旋转瓶器、肩部曲面与金属刻纹，用滚动展开盖体和内芯。",
+        "family": "product-narrative",
+        "interaction": "拖拽旋转；滚动拆解瓶盖；悬停改变摄影机。"
+      },
+      "W02": {
+        "name": "拱廊 · 建筑漫游",
+        "description": "连续拱廊、阶梯与天窗形成有纵深的建筑场景。",
+        "family": "architectural-space",
+        "interaction": "滚动推进视线；拖拽改变观察角度；悬停产生小幅视差。"
+      },
+      "W03": {
+        "name": "展序 · 空间画廊",
+        "description": "六幅立体浮雕在弧形展线上排布，拖拽切换观看角度。",
+        "family": "spatial-gallery",
+        "interaction": "横向拖拽转动展廊；悬停抬起对应作品；滚动靠近作品。"
+      },
+      "W04": {
+        "name": "物性 · 材质雕塑",
+        "description": "连续扭结与小型材质样本，展示釉面、金属和表面粗糙度。",
+        "family": "material-showcase",
+        "interaction": "拖拽观察连续曲面；滚动从粗糙过渡至釉面；悬停改变取景。"
+      },
+      "W05": {
+        "name": "远行 · 地球导航",
+        "description": "球面陆地点阵与真实三维弧线展示跨地区连接。",
+        "family": "globe-navigation",
+        "interaction": "拖拽旋转地球；滚动提高航线；悬停改变摄影机。"
+      },
+      "W06": {
+        "name": "光器 · 产品配置",
+        "description": "弯管灯架、双层灯罩与发光扩散片，展示颜色及结构配置。",
+        "family": "product-configurator",
+        "interaction": "拖拽旋转；滚动拆解灯罩和扩散片；强度调整灯光。"
+      },
+      "W07": {
+        "name": "聚形 · 粒子字场",
+        "description": "发光以外的实体微粒，在字形与球状群组之间变换。",
+        "family": "particle-typography",
+        "interaction": "标题的前六个拉丁字符生成字形；滚动聚散；悬停推开微粒；拖拽转动。"
+      },
+      "W08": {
+        "name": "层次 · 界面解构",
+        "description": "将界面拆为真实空间层，以图表、结构和节点展示产品逻辑。",
+        "family": "layered-interface",
+        "interaction": "拖拽查看层间关系；滚动展开；悬停调整视差。"
+      }
+    },
+    "label": "不同的页面，供你选择",
+    "description": "产品叙事、空间漫游、配置器……几种完全不同的页面形态，挑最接近你故事的那个。"
+  },
+  "starter_prompt": "打开 3D交互网页设计，我想挑一个模板",
+  "capabilities": [],
+  "connectors": []
+}

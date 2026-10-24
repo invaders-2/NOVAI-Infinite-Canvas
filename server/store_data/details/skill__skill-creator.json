@@ -1,0 +1,83 @@
+{
+  "kind": "skill",
+  "name": "skill-creator",
+  "display_name": "技能创建器",
+  "description": "把重复工作流程整理为可复用的 Skill，并持续完善指令与质量。",
+  "category": "Agent",
+  "marketing_line": "把创意转化为可用于正式制作的成果。",
+  "search_terms": [
+    "沉淀可重复的工作流",
+    "把这套重复的工作流程整理成一个可复用 Skill",
+    "把示例变成可靠的规则",
+    "从这些文档和示例中提炼 Skill 的触发条件与执行规则",
+    "测试和优化 Skill",
+    "帮我测试这个 Skill，并根据结果优化它的说明和边界"
+  ],
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "skill-creator",
+  "guide": {
+    "summary": "把重复工作流程整理为可复用的 Skill，并持续完善指令与质量。",
+    "scenarios": [
+      "沉淀重复工作",
+      "把示例变成规则",
+      "测试与迭代 Skill"
+    ],
+    "required_context": [
+      {
+        "title": "带来真实的重复工作流",
+        "description": "说明什么任务会重复发生、什么时候触发，以及最终要交付给谁。"
+      },
+      {
+        "title": "提供好例子与坏例子",
+        "description": "给出已成功、失败或容易误用的样例，帮助 Skill 学会边界而不只是照抄答案。"
+      },
+      {
+        "title": "明确工具与安全护栏",
+        "description": "说明哪些动作可自动做、哪些动作必须确认，以及外部内容应当如何作为资料处理。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "沉淀可重复的工作流",
+        "prompt": "把这套重复的工作流程整理成一个可复用 Skill",
+        "description": ""
+      }
+    ],
+    "steps": [
+      {
+        "title": "抽取触发条件与目标",
+        "description": "从真实工作流中识别什么时候该启用 Skill，以及什么结果才算完成。"
+      },
+      {
+        "title": "写成可执行的规则",
+        "description": "把输入、步骤、工具、异常路径和不可做的事情整理成清晰的 Skill 说明。"
+      },
+      {
+        "title": "用样例验证行为",
+        "description": "覆盖正常任务、缺少上下文、权限不足和用户改变目标等情况。"
+      },
+      {
+        "title": "根据结果继续收窄",
+        "description": "修正触发范围、输出格式和边界，让 Skill 在真实任务中更可靠而不是更会夸大。"
+      }
+    ],
+    "outputs": [
+      "可复用的 Skill 规则",
+      "触发、输入、输出与边界说明",
+      "用于回归测试的真实样例"
+    ],
+    "follow_ups": [
+      "为这个 Skill 增加一个权限不足的测试样例。",
+      "把这条规则改得更窄，避免误触发。",
+      "检查这个 Skill 是否把资料误当成了指令。"
+    ],
+    "boundaries": [
+      "Skill 需要通过真实样例持续测试和修订；一份说明文档本身不代表运行时已经可用。",
+      "不会为了让结果看起来完整而虚构工具能力、权限或未验证的成功。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

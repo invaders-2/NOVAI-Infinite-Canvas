@@ -1,0 +1,105 @@
+{
+  "kind": "skill",
+  "name": "digital-human-market-bulletin",
+  "display_name": "新闻播报",
+  "description": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。",
+  "category": "影视创意",
+  "business_scenario": "film-video",
+  "marketing_line": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。",
+  "search_terms": [
+    "新闻播报",
+    "用有时间边界的事实做一条新闻播报",
+    "数字人",
+    "数字人视频"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/static/store/covers/408c77d518d5f4d7.webp",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "digital-human-market-bulletin",
+  "guide": {
+    "summary": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。",
+    "scenarios": [
+      "用有时间边界的事实做一条新闻播报"
+    ],
+    "required_context": [
+      {
+        "title": "Brief",
+        "description": "提供来源、数据截至时间、受众，以及这条播报要帮助什么决策。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "digital-human-market-bulletin-start",
+        "title": "新闻播报",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 根据我提供的来源做一条有时间边界的新闻播报：先说清数据截至时间，区分已确认事实和解读，缺失数据要明确标为待核验。",
+        "description": "围绕“新闻播报”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+        "context": "新闻播报"
+      }
+    ],
+    "steps": [
+      {
+        "title": "确认事实与目标",
+        "description": "先确认受众、输入资料和希望观众完成的动作。"
+      },
+      {
+        "title": "生成第一版",
+        "description": "数字人演播厅按同一份 brief 组织脚本、表达和画面。"
+      },
+      {
+        "title": "逐项修改",
+        "description": "只修改需要调整的台词、镜头或 CTA，再继续生成。"
+      }
+    ],
+    "outputs": [
+      "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。",
+      "可继续修改的数字人视频草稿"
+    ],
+    "follow_ups": [
+      "保留同一数字人身份，换一个主题继续制作。",
+      "只修改结尾 CTA，保留前面的脚本和镜头。"
+    ],
+    "boundaries": [
+      "没有确认的事实会保留为待补信息，不会自动编造。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "一个 brief，直接开始",
+    "caption": "从资料和目标出发，数字人演播厅先锁定“新闻播报”的表达，再交付可以继续修改的视频草稿。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "新闻播报视频预览"
+    },
+    "panels": [
+      {
+        "id": "input",
+        "label": "新闻播报",
+        "alt": "数字人新闻播报视频",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "result",
+        "label": "输出音频",
+        "alt": "新闻播报输出音频",
+        "media": {
+          "kind": "audio",
+          "src": ""
+        },
+        "aspect": "1/1",
+        "is_result": true
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:digital-human-video:digital-human-video}} 根据我提供的来源做一条有时间边界的新闻播报：先说清数据截至时间，区分已确认事实和解读，缺失数据要明确标为待核验。",
+  "capabilities": [],
+  "connectors": []
+}

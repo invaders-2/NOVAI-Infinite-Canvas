@@ -1,0 +1,142 @@
+{
+  "kind": "skill",
+  "name": "3d-studio",
+  "display_name": "3D实验室",
+  "description": "把画面搬进三维空间，开拍前掌控镜头与光影。",
+  "category": "3D",
+  "business_scenario": "film-video",
+  "marketing_line": "把画面搬进三维空间，开拍前掌控镜头与光影。",
+  "search_terms": [
+    "3D实验室",
+    "3D工坊",
+    "白模视频预演",
+    "图片3D建模",
+    "图像转3D建模"
+  ],
+  "cover_url": "/static/store/covers/ba87d3ae8ad69b46.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "3d-studio",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "把画面搬进三维空间，开拍前掌控镜头与光影。",
+    "scenarios": [
+      "成片前先用可播放白模确认空间与运镜",
+      "把静帧重建成可旋转的 3D 场景"
+    ],
+    "required_context": [
+      {
+        "title": "按需求选择玩法",
+        "description": "白模适合空间与镜头预演；图片3D建模适合从参考图重建可浏览场景。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "3d-studio-whitebox",
+        "title": "白模视频预演",
+        "prompt": "{{skill:whitebox-to-film:白模视频预演}} 从我的场景想法出发，先生成可播放的 3D 白模视频预演，确认空间、角色动作、运镜与节奏，再给出成片计划",
+        "description": "在正式生成视频前，先用可播放的白模确认空间、动作和镜头节奏。",
+        "context": "3D实验室 · 白模"
+      },
+      {
+        "id": "3d-studio-image-to-3d",
+        "title": "图片3D建模",
+        "prompt": "{{skill:3d-scene-director:图片3D建模}} 根据我的参考图重建 3D 场景，还原真实比例、结构、材质与灯光，并支持在浏览器中旋转预览",
+        "description": "把参考图重建成可预览、可旋转的 3D 场景，保留比例、结构与材质。",
+        "context": "3D实验室 · 3D"
+      }
+    ],
+    "steps": [
+      {
+        "title": "进入 3D实验室",
+        "description": "选择白模视频预演或图片3D建模。"
+      },
+      {
+        "title": "开始创作",
+        "description": "按玩法提示词，带上你的场景想法或参考图继续。"
+      }
+    ],
+    "outputs": [
+      "可播放的白模视频预演",
+      "可旋转预览的 3D 场景"
+    ],
+    "follow_ups": [
+      "白模定稿后继续整理成正式视频生成方案。",
+      "3D 场景建好后继续设计运镜路径。"
+    ],
+    "boundaries": []
+  },
+  "collection": {
+    "categories": [
+      {
+        "id": "3d-lab",
+        "label": "3D实验室"
+      }
+    ],
+    "entries": [
+      {
+        "item": {
+          "kind": "skill",
+          "name": "3d-studio-v2"
+        },
+        "category": "3d-lab",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/5fb15e5bdbf0354f.webp"
+        },
+        "tags": [
+          "3D Lab"
+        ],
+        "featured": true,
+        "title": "3D片场 2.0",
+        "description": "用 Agent 创建和编辑 3D 场景、角色、灯光与运镜，在一个片场里完成从预演到成片的规划。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "whitebox-to-film"
+        },
+        "category": "3d-lab",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/16094e6315c3e015.webp"
+        },
+        "tags": [
+          "3D Lab"
+        ],
+        "featured": true,
+        "title": "白模视频预演",
+        "description": "从画面创意或商品出发，先做白模视频预演。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "3d-scene-director"
+        },
+        "category": "3d-lab",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/c9f51dae333aac4e.webp"
+        },
+        "tags": [
+          "3D Lab"
+        ],
+        "featured": true,
+        "title": "图片3D建模",
+        "description": "上传一张参考图，还原可预览的 3D 现场。"
+      }
+    ]
+  },
+  "starter_prompt": "帮我选一个 3D实验室 玩法：白模预演或图片转3D建模。",
+  "capabilities": [],
+  "connectors": []
+}

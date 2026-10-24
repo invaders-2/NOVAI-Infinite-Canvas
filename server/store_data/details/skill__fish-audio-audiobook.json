@@ -1,0 +1,160 @@
+{
+  "kind": "skill",
+  "name": "fish-audio-audiobook",
+  "display_name": "有声书章节",
+  "description": "给我一个章节或短篇故事，就能听到它被演绎出来：温暖的旁白，每个角色都有各自的演绎声音，情绪在句中转变，从平静到惊慌只需一口气。整章生成之前，你可以先听一段。",
+  "category": "音频创作",
+  "business_scenario": "film-video",
+  "marketing_line": "角色会演，而不只是读。",
+  "search_terms": [
+    "有声书",
+    "故事旁白",
+    "角色声音",
+    "睡前故事",
+    "Drama 3"
+  ],
+  "cover_url": "/static/store/covers/11f7e3da8e466c42.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "fish-audio-lab",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium",
+    "show_badge": false
+  },
+  "guide": {
+    "summary": "一个朗读章节，每个角色都容易辨认，情绪变化就像表演者会演绎的那样。我用大白话提示为你的文本做导演，并让你先听最繁忙的一段。",
+    "scenarios": [
+      "自出版小说与连载故事",
+      "儿童睡前故事",
+      "用于推介书籍的样章"
+    ],
+    "required_context": [
+      {
+        "title": "你的文本",
+        "description": "粘贴章节或故事，或分享文件。还没有文本？给我一个创意，我会写一个简短的原创故事。"
+      },
+      {
+        "title": "谁在听？",
+        "description": "选填。成年人、青少年，还是睡前听故事的孩子。这会影响节奏和语气。"
+      },
+      {
+        "title": "旁白风格",
+        "description": "选填。默认温暖、平静；也可以尝试温馨、戏剧化或柔和的睡前朗读。"
+      },
+      {
+        "title": "难读的名字",
+        "description": "选填。告诉我任何人名或虚构词该怎么读。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "audiobook-chapter-characters",
+        "title": "带角色演绎声音的章节",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `audiobook-chapter` playbook。用温暖的旁白，加上每个角色各自的演绎声音，为这一章做导演并朗读。先给我看导演版脚本和演员阵容，然后把最繁忙的一段做成样片。",
+        "description": "一位旁白，加上每个角色各自独特的演绎声音。"
+      },
+      {
+        "id": "audiobook-chapter-turn",
+        "title": "一切改变的时刻",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `audiobook-chapter` playbook。找出本章最大的情绪转折，并为它做导演，让角色在一镜中、句中完成转变。先为该段生成样片，然后朗读其余部分。",
+        "description": "把章节中的重大转折放在一镜中完成，句中从平静转为惊慌。"
+      },
+      {
+        "id": "audiobook-chapter-bedtime",
+        "title": "睡前故事",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `audiobook-chapter` playbook。用缓慢、轻柔的声音朗读这篇睡前故事，配以温和的角色声音和平静的停顿。先生成一段样片。",
+        "description": "缓慢、轻柔的朗读，配以温和的角色声音和较长的停顿。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "为文本做导演",
+        "description": "旁白和角色台词都会加上标注、演绎提示和停顿。"
+      },
+      {
+        "title": "为声音选角",
+        "description": "一位旁白，以及每个主要角色一个清晰、各不相同的声音。"
+      },
+      {
+        "title": "试听样片",
+        "description": "选取角色最多的一段，检查人名、节奏和情感。"
+      },
+      {
+        "title": "获取整章",
+        "description": "分段音频文件、合并后的整章，以及带时间轴的脚本。"
+      }
+    ],
+    "outputs": [
+      "章节音频，分段文件加一个合并文件",
+      "带说话人标注、提示和时间轴的最终脚本",
+      "演员阵容表和发音清单"
+    ],
+    "follow_ups": [
+      "用同一组演员朗读下一章。",
+      "制作一个更轻柔的睡前版本。",
+      "用新的提示重新导演某个角色。"
+    ],
+    "boundaries": [
+      "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。",
+      "你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。",
+      "参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。",
+      "请使用你自己撰写的文本，或你拥有录制权利的文本。对于你不拥有的书籍，我可以处理一段简短的私人摘录。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Fish Audio Drama 3",
+    "caption": "角色会演，而不只是读。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/11f7e3da8e466c42.webp"
+      },
+      "alt": "有声书章节"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 0
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "text",
+        "label": "你的文本",
+        "placeholder": "粘贴章节或故事，或分享文件。还没有文本？给我一个创意，我会写一个简短的原创故事。",
+        "max_length": 2000
+      },
+      {
+        "id": "audience",
+        "label": "谁在听？",
+        "placeholder": "选填。成年人、青少年，还是睡前听故事的孩子。这会影响节奏和语气。",
+        "max_length": 120
+      },
+      {
+        "id": "narrator",
+        "label": "旁白风格",
+        "placeholder": "选填。默认温暖、平静；也可以尝试温馨、戏剧化或柔和的睡前朗读。",
+        "max_length": 120
+      },
+      {
+        "id": "names",
+        "label": "难读的名字",
+        "placeholder": "选填。告诉我任何人名或虚构词该怎么读。",
+        "max_length": 400
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `audiobook-chapter` playbook。我有一个章节或故事需要朗读。只询问缺失的信息，为脚本做导演，安排旁白和演绎的角色声音，然后先生成一段样片，再做其余部分。",
+  "capabilities": [],
+  "connectors": []
+}

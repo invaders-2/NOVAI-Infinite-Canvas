@@ -1,0 +1,83 @@
+{
+  "kind": "skill",
+  "name": "explain-how-it-made",
+  "display_name": "解读创作过程",
+  "description": "从创作意图、关键节点、模型选择与可复用方法，解读已有画布的制作过程。",
+  "category": "Agent",
+  "marketing_line": "把创意转化为可用于正式制作的成果。",
+  "search_terms": [
+    "解读 Canvas 的创作逻辑",
+    "解读这个 Canvas 是如何做出来的，说明创作意图、关键节点、提示词和迭代逻辑",
+    "找到可复用的方法",
+    "从这个项目里提炼可以迁移到其他创作中的方法和决策",
+    "解读一条创作链路",
+    "围绕这个 Canvas 的完整创作链路，给我一份基于证据的工作流解读"
+  ],
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "explain-how-it-made",
+  "guide": {
+    "summary": "从创作意图、关键节点、模型选择与可复用方法，解读已有画布的制作过程。",
+    "scenarios": [
+      "复盘一个 Canvas",
+      "理解创作决策",
+      "提炼可迁移的方法"
+    ],
+    "required_context": [
+      {
+        "title": "提供要解读的 Canvas",
+        "description": "选择一个已有 Canvas 或克隆的 TapTV 项目，最好能说明你最想理解哪一段创作链路。"
+      },
+      {
+        "title": "明确想复盘的维度",
+        "description": "可以关注创作意图、关键节点、素材关系、模型选择、重试方式或最终结果。"
+      },
+      {
+        "title": "把结论当作证据化解读",
+        "description": "页面只会根据项目里实际可见的节点、关系和媒体结果解释，不把猜测包装成作者意图。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "解读 Canvas 的创作逻辑",
+        "prompt": "解读这个 Canvas 是如何做出来的，说明创作意图、关键节点、提示词和迭代逻辑",
+        "description": ""
+      }
+    ],
+    "steps": [
+      {
+        "title": "建立项目范围与证据",
+        "description": "先判断 Canvas 的规模和素材覆盖，再读取能支撑结论的代表性节点。"
+      },
+      {
+        "title": "沿创作链路读取关键节点",
+        "description": "关注 brief、参考、复用节点、媒体转折点、重试簇和最终输出，而不是机械罗列所有节点。"
+      },
+      {
+        "title": "区分事实、解读与未知",
+        "description": "把可见内容、合理解释和项目没有证明的动机分开说明；存储的 prompt 不等于结果已经验证。"
+      },
+      {
+        "title": "整理可迁移的方法",
+        "description": "输出一份完整 walkthrough，帮助你理解方法，但不把它变成课程、练习或 prompt 倾倒。"
+      }
+    ],
+    "outputs": [
+      "基于证据的创作 walkthrough",
+      "关键节点、模型与迭代关系",
+      "可以迁移到其他项目的工作方法"
+    ],
+    "follow_ups": [
+      "只解释这个 Canvas 中与最终输出最相关的依赖链。",
+      "比较两个版本实际保留和改变了什么。",
+      "把这次创作中可迁移的方法整理成检查清单。"
+    ],
+    "boundaries": [
+      "这是只读解读，不会创建、编辑、连接、排列、生成或删除 Canvas 内容。",
+      "不会暴露内部命令、原始数据结构或受保护上下文；缺少证据的阶段会明确标为未知。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

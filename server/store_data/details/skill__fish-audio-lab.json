@@ -1,0 +1,267 @@
+{
+  "kind": "skill",
+  "name": "fish-audio-lab",
+  "display_name": "Fish Audio Lab",
+  "description": "像配音演员一样为 Fish Audio Drama 3 做导演。用大白话写清每句台词该有的感觉，就能听到它被演绎出来：句中转换的情绪、全员阵容的完整场景、句中切换的语言，以及准确读出的人名、数字和编码。先听一段样片，再生成其余部分。",
+  "category": "音频创作",
+  "business_scenario": "film-video",
+  "marketing_line": "写下导演指令，Drama 3 来演绎。",
+  "search_terms": [
+    "Fish Audio",
+    "Drama 3",
+    "文本转语音",
+    "AI 配音表演",
+    "有声书",
+    "播客",
+    "广播剧",
+    "游戏语音",
+    "双语配音"
+  ],
+  "cover_url": "/static/store/covers/ae523f8148b39a84.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "fish-audio-lab",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium",
+    "show_badge": false
+  },
+  "guide": {
+    "summary": "带上故事、笔记或剧本。我会像导演一样处理：标注说话人，并用大白话写出提示，例如 [紧张，几乎撑不住了]。我会先确认 Drama 3 可用，做一段样片供你审阅，然后按带时间轴的脚本生成其余部分。",
+    "scenarios": [
+      "用角色演绎的声音朗读章节",
+      "一镜到底演完整场戏或双主持人节目",
+      "逐句为游戏角色配音",
+      "同一个声音混合两种语言，或精准朗读人名和编码"
+    ],
+    "required_context": [
+      {
+        "title": "你有什么素材？",
+        "description": "章节、笔记、创意概要或完成的剧本都可以。哪怕只有一句话，也足够开始。"
+      },
+      {
+        "title": "希望是什么感觉？",
+        "description": "选填。用你自己的话描述，就像写给演员的一段话。我会把它转换成提示，并告诉你放在哪里。"
+      },
+      {
+        "title": "谁在说话？",
+        "description": "选填。描述旁白、主持人或角色，或者交给我来分配。"
+      },
+      {
+        "title": "有什么必须准确的内容？",
+        "description": "选填。人名、价格、日期、编码，或第二种语言。我会列出这些内容，并在样片中逐一核对。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "用角色声音朗读我的章节",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `audiobook-chapter` playbook。为我的章节做导演并朗读，用温暖的旁白，加上每个角色各自的演绎声音，包括句中的情绪转换。先给我看导演版脚本和演员阵容，然后先生成一段样片，再做其余部分。",
+        "description": "一位旁白，加上句中情绪会转变的角色。"
+      },
+      {
+        "title": "一镜到底演我的场景",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `audio-drama-scene` playbook。根据这个创意，写一段 2 分钟、三个角色的悬疑场景并进行演绎，作为一场完整的戏来呈现，让角色彼此回应。给我看脚本和提示单，然后生成高潮部分的样片。",
+        "description": "全员阵容彼此回应，附带音效提示单。"
+      },
+      {
+        "title": "双语配音",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `bilingual-voiceover` playbook。为这条信息写一段 30 秒的配音，用同一个声音在英文和我指定的语言之间切换。先做第一版，我确认后再做其余版本。",
+        "description": "同一个声音在句中切换语言。"
+      },
+      {
+        "title": "准确朗读人名、价格和编码",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `names-and-numbers-read` playbook。朗读这份公告，确保每个人名、价格、日期和编码都准确无误。先给我看发音清单，然后为信息最密集的部分生成样片。",
+        "description": "逐项核对的公告。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "分享你的素材",
+        "description": "文本、笔记或创意概要，以及你希望的感觉。"
+      },
+      {
+        "title": "审阅导演版脚本",
+        "description": "说话人标注、大白话提示、情绪转换，以及一份难读词清单。"
+      },
+      {
+        "title": "确认可用性和费用",
+        "description": "我会确认 Drama 3 已在你的账户中可用，并告诉你将要生成的内容。"
+      },
+      {
+        "title": "试听一段样片",
+        "description": "先听最难的部分。我们在这里调整发音、节奏或导演方式。"
+      },
+      {
+        "title": "获取完整音频",
+        "description": "所有片段、合并文件，以及带说话人标注和时间轴的最终脚本。"
+      }
+    ],
+    "outputs": [
+      "每个片段的音频文件和一个合并文件",
+      "带说话人标注、导演提示以及起止时间的最终脚本",
+      "可复用的演员阵容表和发音清单",
+      "需要时，为你的剪辑师提供音效和音乐提示单"
+    ],
+    "follow_ups": [
+      "用新的提示重新导演某个角色或某一句台词。",
+      "用同一个声音，把同一份脚本制作成另一种语言。",
+      "把最好的一版剪成更短的社交视频版本。"
+    ],
+    "boundaries": [
+      "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。",
+      "你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。",
+      "参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。",
+      "本工作室只制作语音内容。音乐和音效会以提示单的形式提供给你的剪辑师，且不会为视频配音或对口型。"
+    ]
+  },
+  "collection": {
+    "categories": [
+      {
+        "id": "stories",
+        "label": "故事与戏剧"
+      },
+      {
+        "id": "shows-and-promos",
+        "label": "节目与宣传"
+      },
+      {
+        "id": "games",
+        "label": "游戏角色"
+      }
+    ],
+    "entries": [
+      {
+        "item": {
+          "kind": "skill",
+          "name": "fish-audio-audiobook"
+        },
+        "category": "stories",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/11f7e3da8e466c42.webp"
+        },
+        "tags": [
+          "有声书",
+          "角色声音",
+          "睡前故事"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "有声书章节",
+        "description": "角色会演，而不只是读。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "fish-audio-podcast"
+        },
+        "category": "shows-and-promos",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/da16eeb5d0c702ab.webp"
+        },
+        "tags": [
+          "播客",
+          "双主持人",
+          "讲解"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "双主持人播客",
+        "description": "两位真正会互相倾听的主持人。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "fish-audio-drama"
+        },
+        "category": "stories",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/755a9f35a369b66f.webp"
+        },
+        "tags": [
+          "广播剧",
+          "全员阵容",
+          "一镜到底"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "广播剧场景",
+        "description": "整场戏一镜到底，每个角色都在其中。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "fish-audio-game-voices"
+        },
+        "category": "games",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/82d094e859ce8d45.webp"
+        },
+        "tags": [
+          "游戏音频",
+          "角色",
+          "语音台词"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "游戏语音包",
+        "description": "每句台词都有导演、有标注、即可使用。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "fish-audio-bilingual-voiceover"
+        },
+        "category": "shows-and-promos",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/fae10e0a17318959.webp"
+        },
+        "tags": [
+          "配音",
+          "双语",
+          "短视频"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "双语配音",
+        "description": "两种语言，一个声音，毫无缝隙。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "fish-audio-names-numbers"
+        },
+        "category": "shows-and-promos",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/05bdc823c1062ff5.webp"
+        },
+        "tags": [
+          "公告",
+          "产品朗读",
+          "发音"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "人名、数字与编码",
+        "description": "每个人名、价格和编码，一次就读对。"
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 我想用 Drama 3 制作语音内容。只询问缺失的信息，推荐最合适的 playbook，给我看导演版脚本和演员阵容，然后先生成一段样片，再做其余部分。",
+  "capabilities": [],
+  "connectors": []
+}

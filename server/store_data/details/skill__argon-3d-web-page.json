@@ -1,0 +1,144 @@
+{
+  "kind": "skill",
+  "name": "argon-3d-web-page",
+  "display_name": "3D 网页",
+  "description": "分享产品说明或需求简报。获得一个带有真实文案、导航和明确行动号召的交互式 3D 落地页，从首屏英雄区开始。",
+  "category": "AI 模型工作室",
+  "business_scenario": "interactive-games",
+  "marketing_line": "输入一份简报，输出一个可以点击浏览的 3D 页面。",
+  "search_terms": [
+    "3D 网页",
+    "落地页",
+    "交互式网站",
+    "Three.js 页面",
+    "产品发布页",
+    "Argon"
+  ],
+  "cover_url": "/static/store/covers/f3a8b81f9bf0abd5.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "gemini-argon-studio",
+  "recommended_model": {
+    "id": "gemini-4-argon",
+    "display_name": "Argon"
+  },
+  "guide": {
+    "summary": "Agent 会阅读你的素材，并一次性编写完整的 3D 页面：可拖拽或滚动的首屏、真实的章节、导航和备用方案。你先确认首屏。",
+    "scenarios": [
+      "为产品发布打造让人愿意探索的页面",
+      "把作品集或活动变成交互式网站"
+    ],
+    "required_context": [
+      {
+        "title": "页面用途是什么？",
+        "description": "产品、发布、作品集或活动，以及访客应该采取的一个行动。"
+      },
+      {
+        "title": "我可以使用哪些内容？",
+        "description": "笔记、产品信息、现有文案或 PDF。我只会把有依据的内容放到页面上。"
+      },
+      {
+        "title": "有品牌规范吗？",
+        "description": "颜色、字体或标识。否则默认使用深色页面，搭配一种温暖的强调色。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "3d-web-page-product",
+        "title": "产品发布 | 滚动时拆解产品",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `3d-web-page` 玩法。制作一个产品发布页，我的产品 3D 模型会随滚动分解为各个部件，每个部件对应一个功能章节，并配有清晰的行动号召。仅使用我笔记中的事实。先做首屏。",
+        "description": "3D 产品随着访客滚动分解成各个部件，每个部件配有一个功能说明。"
+      },
+      {
+        "id": "3d-web-page-portfolio",
+        "title": "作品集 | 可以漫游的空间",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `3d-web-page` 玩法。把我的作品集做成一个 3D 页面，每个项目都是访客可以拖动并打开的物体。添加锚点导航，并为不支持 3D 的设备提供简化版本。先给我看首屏。",
+        "description": "将项目呈现为访客可以在其间移动的房间或物体。"
+      },
+      {
+        "id": "3d-web-page-revise",
+        "title": "修改 | 只改一处",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `3d-web-page` 玩法。保留我最新的页面，只修改我在下方描述的内容。另存为新版本，并告诉我改了什么。",
+        "description": "保留页面，只修改颜色、文案或镜头。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "选择方向",
+        "description": "我会根据你的简报提出两个 3D 构思。"
+      },
+      {
+        "title": "确认首屏",
+        "description": "我先制作第一屏，由你检查。"
+      },
+      {
+        "title": "获取完整页面",
+        "description": "包括所有章节、导航和备用方案，可直接预览。"
+      }
+    ],
+    "outputs": [
+      "一个自包含的交互式 HTML 页面",
+      "取自你素材的章节文案",
+      "在费用检查后可选的生成图片"
+    ],
+    "follow_ups": [
+      "更换调色板或镜头运动。",
+      "添加一个章节或一张价格表。",
+      "从“3D Interactive Web Design”资料库中的模板开始。"
+    ],
+    "boundaries": [
+      "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。",
+      "在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。",
+      "结果为 HTML。只有在渲染工具可用时才会导出视频。",
+      "当缺少事实时，占位文案会被清楚地标注。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Argon Studio",
+    "caption": "输入一份简报，输出一个可以点击浏览的 3D 页面。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/f3a8b81f9bf0abd5.webp"
+      },
+      "alt": "3D 网页"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 2
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "purpose",
+        "label": "页面用途是什么？",
+        "placeholder": "产品、发布、作品集或活动，以及访客应该采取的一个行动。",
+        "max_length": 200
+      },
+      {
+        "id": "material",
+        "label": "我可以使用哪些内容？",
+        "placeholder": "笔记、产品信息、现有文案或 PDF。我只会把有依据的内容放到页面上。",
+        "max_length": 2000
+      },
+      {
+        "id": "brand",
+        "label": "有品牌规范吗？",
+        "placeholder": "颜色、字体或标识。否则默认使用深色页面，搭配一种温暖的强调色。",
+        "max_length": 200
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `3d-web-page` 玩法。我需要一个 3D 落地页。请阅读我的素材，提出两个 3D 方向，并先制作首屏英雄区。",
+  "capabilities": [],
+  "connectors": []
+}

@@ -1,0 +1,160 @@
+{
+  "kind": "skill",
+  "name": "fish-audio-podcast",
+  "display_name": "双主持人播客",
+  "description": "把笔记、文章或大纲变成两位主持人之间的对话。每个讨论要点都作为一场戏来演，因此笑声和反应都会回应前一句台词。",
+  "category": "音频创作",
+  "business_scenario": "film-video",
+  "marketing_line": "两位真正会互相倾听的主持人。",
+  "search_terms": [
+    "播客",
+    "双主持人",
+    "AI 播客",
+    "音频讲解",
+    "对话"
+  ],
+  "cover_url": "/static/store/covers/da16eeb5d0c702ab.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "fish-audio-lab",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium",
+    "show_badge": false
+  },
+  "guide": {
+    "summary": "一期简短的节目，两位风格鲜明的主持人围绕你的素材展开讨论，彼此回应，并确保事实准确。",
+    "scenarios": [
+      "向更广泛的受众讲解一份报告或文章",
+      "为团队或社群制作的每周更新节目",
+      "电子通讯的快速音频版"
+    ],
+    "required_context": [
+      {
+        "title": "你的素材",
+        "description": "笔记、文章、大纲，或只是一个主题和几个要点。"
+      },
+      {
+        "title": "时长多长？",
+        "description": "选填。默认三到五分钟。"
+      },
+      {
+        "title": "主持人风格",
+        "description": "选填。默认是好奇、积极的主持人加上沉稳、清晰的主持人；也可以是主持人与嘉宾。"
+      },
+      {
+        "title": "节目名称",
+        "description": "选填。如果你还没有，我会为你建议一句开场白。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "podcast-episode-notes",
+        "title": "从笔记到节目",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `podcast-episode` playbook。把这些笔记做成一期 4 分钟的双主持人节目，按要点逐段作为完整场景来演，让主持人彼此回应。事实保持原样，并先为最有活力的一段对话生成样片。",
+        "description": "两位联合主持人带着提问和真实反应，讲解你的笔记。"
+      },
+      {
+        "id": "podcast-episode-interview",
+        "title": "主持人与嘉宾",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `podcast-episode` playbook。根据这篇文章做一期主持人与嘉宾的访谈，由嘉宾讲解主要观点。先给我看脚本，然后生成一段对话样片。",
+        "description": "主持人采访一位根据你的素材塑造的专家角色。"
+      },
+      {
+        "id": "podcast-episode-newsletter",
+        "title": "把电子通讯做成节目",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `podcast-episode` playbook。把这份电子通讯做成一段 3 分钟的双主持人回顾，并为我的节目加上开场和结束语。请先生成样片。",
+        "description": "把你的电子通讯做成一段简短、友好的双人版回顾。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "挑出关键要点",
+        "description": "从你的素材中选出三到五个要点，不添加任何内容。"
+      },
+      {
+        "title": "撰写对话",
+        "description": "开场、提问、举例、简短反应、回顾和结束语。"
+      },
+      {
+        "title": "试听一段对话",
+        "description": "检查两位主持人的声音是否不同，反应是否自然。"
+      },
+      {
+        "title": "获取节目",
+        "description": "完整音频，以及带时间轴、标注说话人的脚本。"
+      }
+    ],
+    "outputs": [
+      "节目音频，分段文件加一个合并文件",
+      "带说话人标注和时间轴的脚本",
+      "供剪辑师使用的片头和片尾音乐提示"
+    ],
+    "follow_ups": [
+      "用同一组主持人制作下一期节目。",
+      "剪一段 30 秒的预告。",
+      "用另一种语言制作这期节目。"
+    ],
+    "boundaries": [
+      "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。",
+      "你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。",
+      "参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。",
+      "本工作室只制作语音内容。音乐和音效会以提示单的形式提供给你的剪辑师，且不会为视频配音或对口型。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Fish Audio Drama 3",
+    "caption": "两位真正会互相倾听的主持人。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/da16eeb5d0c702ab.webp"
+      },
+      "alt": "双主持人播客"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 0
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "material",
+        "label": "你的素材",
+        "placeholder": "笔记、文章、大纲，或只是一个主题和几个要点。",
+        "max_length": 2000
+      },
+      {
+        "id": "length",
+        "label": "时长多长？",
+        "placeholder": "选填。默认三到五分钟。",
+        "max_length": 60
+      },
+      {
+        "id": "hosts",
+        "label": "主持人风格",
+        "placeholder": "选填。默认是好奇、积极的主持人加上沉稳、清晰的主持人；也可以是主持人与嘉宾。",
+        "max_length": 120
+      },
+      {
+        "id": "show_name",
+        "label": "节目名称",
+        "placeholder": "选填。如果你还没有，我会为你建议一句开场白。",
+        "max_length": 80
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `podcast-episode` playbook。把我的笔记做成一期双主持人播客。只询问缺失的信息，给我看脚本，并先生成一段对话样片。",
+  "capabilities": [],
+  "connectors": []
+}

@@ -1,0 +1,2651 @@
+{
+  "code": 200,
+  "data": {
+    "content_version": "2a276d32834dd82a",
+    "items": [
+      {
+        "kind": "skill",
+        "name": "primordia-creator-skills",
+        "display_name": "【原基】创作者Skill公开",
+        "description": "Orin Jo Liu 与 Johann Qiao 随《原基》分享的三项影视创作 Skill。",
+        "category": "创作者Skill公开",
+        "business_scenario": "film-video",
+        "marketing_line": "塑造角色，构建场景，规划镜头，让创作意图贯穿每一场。",
+        "search_terms": [
+          "原基",
+          "创作者",
+          "角色资产",
+          "镜头规划",
+          "场景美术"
+        ],
+        "cover_url": "/static/store/covers/774f7216d4fc9f95.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": false,
+        "enabled": false,
+        "runtime_status": "not-applicable",
+        "activation_skill": "primordia-creator-skills",
+        "cover_poster_url": "/static/store/covers/81dc9472e273d989.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "character-asset-pack",
+        "display_name": "声音控制表演",
+        "description": "从剧本、角色构想或已有资产出发，建立可复用的形象与声音。",
+        "category": "创作者Skill公开",
+        "business_scenario": "film-video",
+        "marketing_line": "从剧本、角色构想或已有资产出发，建立可复用的形象与声音。",
+        "search_terms": [
+          "原基",
+          "角色资产包",
+          "character-asset-pack",
+          "primordia-character-asset-pack"
+        ],
+        "cover_url": "/static/store/covers/774f7216d4fc9f95.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "runtime_status": "published",
+        "activation_skill": "primordia-character-asset-pack",
+        "cover_poster_url": "/static/store/covers/d1df6e5f1aaca9d2.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "primordia-art-director",
+        "display_name": "三维造景",
+        "description": "从剧本或参考图出发，明确场景的美术方向、空间布局与可复用资产。",
+        "category": "创作者Skill公开",
+        "business_scenario": "film-video",
+        "marketing_line": "让每一场戏，拥有统一的视觉世界。",
+        "search_terms": [
+          "原基",
+          "场景美术导演",
+          "场景",
+          "3D Studio",
+          "primordia-art-director"
+        ],
+        "cover_url": "/static/store/covers/774f7216d4fc9f95.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "runtime_status": "published",
+        "activation_skill": "primordia-art-director",
+        "cover_poster_url": "/static/store/covers/e8d27dd14e1382e6.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "shot-planning",
+        "display_name": "真实法则",
+        "description": "将镜头语言、人物表演与节奏整理成可衔接生成的镜头规划。",
+        "category": "创作者Skill公开",
+        "business_scenario": "film-video",
+        "marketing_line": "将镜头语言、人物表演与节奏整理成可衔接生成的镜头规划。",
+        "search_terms": [
+          "原基",
+          "镜头规划",
+          "shot-planning",
+          "primordia-shot-planning"
+        ],
+        "cover_url": "/static/store/covers/774f7216d4fc9f95.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "runtime_status": "published",
+        "activation_skill": "primordia-shot-planning",
+        "cover_poster_url": "/static/store/covers/9eb898a2d50c816a.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "astra-studio",
+        "display_name": "Astra Studio",
+        "description": "顶级创意的实验场：汇集 3D、动效与视觉艺术的边界玩法。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "顶级创意的实验场：汇集 3D、动效与视觉艺术的边界玩法。",
+        "search_terms": [
+          "Astra Studio",
+          "Astra Studio",
+          "Astra",
+          "白模视频预演",
+          "图片3D建模",
+          "深度影视工坊",
+          "Astra 玩法"
+        ],
+        "cover_url": "/app-store/astra-studio-cover.webp",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "astra-studio",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        }
+      },
+      {
+        "kind": "skill",
+        "name": "3d-studio",
+        "display_name": "3D实验室",
+        "description": "把画面搬进三维空间，开拍前掌控镜头与光影。",
+        "category": "3D",
+        "business_scenario": "film-video",
+        "marketing_line": "把画面搬进三维空间，开拍前掌控镜头与光影。",
+        "search_terms": [
+          "3D实验室",
+          "3D工坊",
+          "白模视频预演",
+          "图片3D建模",
+          "图像转3D建模"
+        ],
+        "cover_url": "/static/store/covers/ba87d3ae8ad69b46.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "3d-studio",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/ba87d3ae8ad69b46.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "3d-studio-v2",
+        "display_name": "3D片场 2.0",
+        "description": "用 Agent 创建和编辑 3D 场景、角色、灯光与运镜，在一个片场里完成从预演到成片的规划。",
+        "category": "3D",
+        "business_scenario": "film-video",
+        "marketing_line": "用 Agent 创建和编辑 3D 场景、角色、灯光与运镜，在一个片场里完成从预演到成片的规划。",
+        "search_terms": [
+          "3D片场 2.0",
+          "3D片场",
+          "Agent 3D 场景编辑"
+        ],
+        "cover_url": "/static/store/covers/5fb15e5bdbf0354f.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "3d-studio-v2",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/5fb15e5bdbf0354f.webp"
+      },
+      {
+        "kind": "app",
+        "name": "visualize",
+        "display_name": "Visualize",
+        "description": "将想法转化为交互式视觉内容。",
+        "category": "平台",
+        "business_scenario": "brand-design",
+        "marketing_line": "将想法转化为交互式视觉内容。",
+        "search_terms": [
+          "把这组数据做成一个可交互的业务仪表盘",
+          "把这组数据做成一个可交互的业务仪表盘",
+          "为这个新产品创建一个视觉鲜明的响应式落地页",
+          "为这个新产品创建一个视觉鲜明的响应式落地页",
+          "构建一个可筛选的方案对比页面，突出关键差异",
+          "构建一个可筛选的方案对比页面，突出关键差异",
+          "building-widgets",
+          "用于构建对话内交互式 HTML 组件、决策面板、对比布局和结构化展示。",
+          "frontend-design",
+          "用于创建高质量前端界面、HTML 概念页、组件和视觉方案。"
+        ],
+        "icon_url": "/static/store/covers/b5f0f9696f3c9c10.webp",
+        "icon_style": "visualize",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/a3f0648bdaebaa53.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/a1950899bfc7225c.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/a1950899bfc7225c.webp"
+          }
+        ],
+        "installed": true,
+        "enabled": true,
+        "install_mode": "system",
+        "activation_skill": "building-widgets"
+      },
+      {
+        "kind": "app",
+        "name": "brainstorm",
+        "display_name": "头脑风暴",
+        "description": "将想法塑造成值得讲述的故事。",
+        "category": "平台",
+        "marketing_line": "将想法塑造成值得讲述的故事。",
+        "search_terms": [
+          "基于我的核心创意，发展三个差异明显的故事方向",
+          "基于我的核心创意，发展三个差异明显的故事方向",
+          "为主角和反派设计清晰的动机、冲突与人物弧光",
+          "为主角和反派设计清晰的动机、冲突与人物弧光",
+          "把这个故事概念拆成逐场景的大纲，并标出关键转折",
+          "把这个故事概念拆成逐场景的大纲，并标出关键转折",
+          "brainstorm",
+          "当用户需要发散探索和深度共创时发展故事、角色、世界观、结构、风格和场景；它是创作定义阶段的可选方法。",
+          "repair-doc",
+          "用于修复 Brainstorm 侧边文档为空、未更新、格式异常或内容显示错误的问题。"
+        ],
+        "icon_url": "/static/store/covers/08d6e2ac600bddee.webp",
+        "icon_style": "brainstorm",
+        "cover_url": "/static/store/covers/9b81c806fc4dc004.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/22cc949df6c52feb.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/4d25877b22b338d2.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/4d25877b22b338d2.webp"
+          }
+        ],
+        "installed": true,
+        "enabled": true,
+        "install_mode": "system",
+        "activation_skill": "brainstorm"
+      },
+      {
+        "kind": "app",
+        "name": "hubspot",
+        "display_name": "HubSpot",
+        "description": "连接 HubSpot CRM，支持读取和管理 contacts、companies、deals、tickets 等业务对象。",
+        "category": "效率工具",
+        "marketing_line": "连接 HubSpot CRM，支持读取和管理 contacts、companies、deals、tickets 等业务对象。",
+        "search_terms": [
+          "整理一个客户的完整背景",
+          "读取这个 HubSpot 客户的联系人、公司、deal 和历史互动，整理一份跟进 brief",
+          "找出销售漏斗中的下一步",
+          "读取这个 pipeline，按阶段和最近互动整理需要跟进的 deal 与下一步",
+          "HubSpot",
+          "读写 HubSpot contacts、companies、deals、tickets，并推进 CRM pipeline。"
+        ],
+        "icon_url": "/static/store/covers/7d12741cbccd47f1.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/1493e8a9fd87b604.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/b2ade741a8fb23a2.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/b2ade741a8fb23a2.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "hubspot-crm"
+      },
+      {
+        "kind": "app",
+        "name": "airtable",
+        "display_name": "Airtable",
+        "description": "连接 Airtable，支持读取和管理 bases、tables、records 与 schema。",
+        "category": "效率工具",
+        "marketing_line": "连接 Airtable，支持读取和管理 bases、tables、records 与 schema。",
+        "search_terms": [
+          "按条件整理一批记录",
+          "读取这个 Airtable 表，按状态和负责人整理符合条件的记录",
+          "检查表结构是否支持这个流程",
+          "读取这个 Airtable base 的 schema，指出字段、关系和流程上的缺口",
+          "Airtable",
+          "读取和管理 Airtable bases、tables、records 与 schema。"
+        ],
+        "icon_url": "/static/store/covers/6b43a2badc4f66fe.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/6824addff98929bd.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/833933579c476773.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/833933579c476773.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "airtable-bases"
+      },
+      {
+        "kind": "app",
+        "name": "atlassian",
+        "display_name": "Atlassian",
+        "description": "连接 Atlassian，支持 Jira issue、project、sprint 和 Confluence space、page 的读写。",
+        "category": "效率工具",
+        "marketing_line": "连接 Atlassian，支持 Jira issue、project、sprint 和 Confluence space、page 的读写。",
+        "search_terms": [
+          "整理一个 sprint 的风险",
+          "读取这个 Jira sprint 和相关 issue，整理进度、阻塞项和需要升级的问题",
+          "把项目决定写成 Confluence 页面",
+          "把这份项目决定整理成 Confluence 页面结构，并列出需要确认的内容",
+          "Atlassian",
+          "读写 Jira issues、projects、sprints、boards，以及 Confluence spaces 和 pages。"
+        ],
+        "icon_url": "/static/store/covers/496f1468670413bb.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/9e56ed97daac9fc1.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/dfb7937c13bbfef0.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/dfb7937c13bbfef0.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "atlassian-workspace"
+      },
+      {
+        "kind": "app",
+        "name": "asana",
+        "display_name": "Asana",
+        "description": "连接 Asana 工作区，支持读取和管理 tasks、projects、sections、portfolios 和 users。",
+        "category": "效率工具",
+        "marketing_line": "连接 Asana 工作区，支持读取和管理 tasks、projects、sections、portfolios 和 users。",
+        "search_terms": [
+          "整理项目的未完成任务",
+          "读取这个 Asana 项目，按负责人和截止时间整理未完成任务与风险",
+          "把计划拆成 Asana 任务",
+          "把这份执行计划拆成 Asana 任务，标注 section、负责人和截止时间",
+          "Asana",
+          "读取和管理 Asana tasks、projects、sections、portfolios 与 users。"
+        ],
+        "icon_url": "/static/store/covers/d3edd4b53ecfc900.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/a3c0ca21128cb7e5.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/249d4ad5955a6d09.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/249d4ad5955a6d09.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "asana-workspace"
+      },
+      {
+        "kind": "app",
+        "name": "linear",
+        "display_name": "Linear",
+        "description": "连接 Linear 工作区，支持读取和管理 issues、projects、cycles、teams 和 users。",
+        "category": "效率工具",
+        "marketing_line": "连接 Linear 工作区，支持读取和管理 issues、projects、cycles、teams 和 users。",
+        "search_terms": [
+          "整理一个项目当前进度",
+          "读取这个 Linear 项目和相关 cycle，整理当前进度、风险和下一步",
+          "把讨论拆成可执行的 issue",
+          "把这段需求讨论整理成 Linear issue，包含目标、范围、验收条件和依赖",
+          "Linear",
+          "读取和管理 Linear issues、projects、cycles、roadmaps、teams、users 与 comments。"
+        ],
+        "icon_url": "/static/store/covers/2e0095214e5a9f49.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/74e012607c944576.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/2e06d5e37a2d8dcc.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/2e06d5e37a2d8dcc.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "linear-workspace"
+      },
+      {
+        "kind": "app",
+        "name": "slack",
+        "display_name": "Slack",
+        "description": "连接 Slack 频道和消息，支持读取上下文、发送消息、回复和处理文件。",
+        "category": "效率工具",
+        "marketing_line": "连接 Slack 频道和消息，支持读取上下文、发送消息、回复和处理文件。",
+        "search_terms": [
+          "找出一段讨论的最终结论",
+          "搜索 Slack 中关于这个项目的讨论，整理最新结论、分歧和下一步",
+          "把频道讨论整理成团队摘要",
+          "读取这个 Slack 频道最近的相关讨论，整理成带重点和行动项的摘要",
+          "Slack",
+          "读取 Slack 频道历史、搜索消息、发送消息、回复、添加 reaction 和上传文件。"
+        ],
+        "icon_url": "/static/store/covers/b6d8c131ef5358ef.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/743e2805293b18ac.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/073c895dfcd8fc3c.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/073c895dfcd8fc3c.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "slack-workspace"
+      },
+      {
+        "kind": "app",
+        "name": "notion",
+        "display_name": "Notion",
+        "description": "连接 Notion 工作区，支持搜索、读取和写入页面、数据库和评论。",
+        "category": "效率工具",
+        "marketing_line": "连接 Notion 工作区，支持搜索、读取和写入页面、数据库和评论。",
+        "search_terms": [
+          "读取 Notion 剧本，整理角色和情节",
+          "读取 Notion 中的剧本和角色设定，整理人物关系、情节节点和需要继续确认的创作约束",
+          "把项目资料变成执行 brief",
+          "读取 Notion 中关于这个项目的讨论和资料，提取目标、参考、约束和下一步，整理成一份执行 brief",
+          "Notion",
+          "搜索、读取、创建和更新 Notion 页面、数据库与评论。"
+        ],
+        "icon_url": "/static/store/covers/07874e42baee6c23.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/ebf85078179f923e.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/696f6c991c8c870a.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/696f6c991c8c870a.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "notion-workspace"
+      },
+      {
+        "kind": "app",
+        "name": "lark",
+        "display_name": "Lark",
+        "description": "连接 Lark 文档、群聊、会议和工作区上下文，支持取材、交付、通知和协作任务。",
+        "category": "效率工具",
+        "marketing_line": "连接 Lark 文档、群聊、会议和工作区上下文，支持取材、交付、通知和协作任务。",
+        "search_terms": [
+          "读取会议纪要，整理下一步行动",
+          "读取这份 Lark 会议纪要，提取已经确认的决定、负责人和截止时间，整理成可执行的下一步行动清单",
+          "把项目讨论整理成分镜表",
+          "读取 Lark 中关于这个项目的讨论，提取目标、参考、约束和未决问题，整理成一份可交付的分镜表",
+          "lark-auth",
+          "管理飞书连接的认证状态、能力可见性、身份选择和高危写操作约定。",
+          "lark-deliver",
+          "把 canvas 产出交付到飞书文档、多维表格或画板，并返回可分享链接。",
+          "lark-event",
+          "处理飞书群内 @机器人或消息事件，映射平台用户并以 bot 身份回复。",
+          "lark-gather",
+          "从飞书群聊、会议妙记、文档、知识库和云盘中搜索并读取上下文。",
+          "lark-notify",
+          "向飞书群聊或私聊发送产出、状态和链接，并按需 @ 相关人。",
+          "lark-track",
+          "把会议结论和计划转成飞书任务与待办，支持分配负责人和跟踪里程碑。"
+        ],
+        "icon_url": "/static/store/covers/ade109ee839164b5.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/53508112d877b88d.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/93e6ddff350b8846.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/93e6ddff350b8846.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "lark-auth"
+      },
+      {
+        "kind": "app",
+        "name": "feishu",
+        "display_name": "Feishu",
+        "description": "连接飞书文档、群聊、会议和工作区上下文，支持取材、交付、通知和协作任务。",
+        "category": "效率工具",
+        "marketing_line": "连接飞书文档、群聊、会议和工作区上下文，支持取材、交付、通知和协作任务。",
+        "search_terms": [
+          "从会议纪要提取决定和待办",
+          "读取飞书中的会议纪要，整理决定、负责人、截止时间和待办",
+          "把项目资料整理成一份 brief",
+          "读取飞书里关于这个项目的资料，提取目标、约束、参考和下一步，整理成 brief",
+          "feishu-auth",
+          "管理飞书连接的认证状态、能力可见性、身份选择和高危写操作约定。",
+          "feishu-deliver",
+          "把 canvas 产出交付到飞书文档、多维表格或画板，并返回可分享链接。",
+          "feishu-event",
+          "处理飞书群内 @机器人或消息事件，映射平台用户并以 bot 身份回复。",
+          "feishu-gather",
+          "从飞书群聊、会议妙记、文档、知识库和云盘中搜索并读取上下文。",
+          "feishu-notify",
+          "向飞书群聊或私聊发送产出、状态和链接，并按需 @ 相关人。",
+          "feishu-track",
+          "把会议结论和计划转成飞书任务与待办，支持分配负责人和跟踪里程碑。"
+        ],
+        "icon_url": "/static/store/covers/d42b3aea46f2937b.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/2d1cbf5c5f50b9f5.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/ba7c6fd4c995b43f.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/ba7c6fd4c995b43f.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "feishu-auth"
+      },
+      {
+        "kind": "app",
+        "name": "vimeo",
+        "display_name": "Vimeo",
+        "description": "连接 Vimeo 视频库，支持搜索、读取、分析和管理视频内容。",
+        "category": "创意工具",
+        "marketing_line": "连接 Vimeo 视频库，支持搜索、读取、分析和管理视频内容。",
+        "search_terms": [
+          "找出 Vimeo 视频库中最近上传的品牌宣传片",
+          "找出 Vimeo 视频库中最近上传的品牌宣传片",
+          "汇总这个视频的观众评论和主要修改建议",
+          "汇总这个视频的观众评论和主要修改建议",
+          "比较这三条视频的播放表现，并指出表现最好的内容",
+          "比较这三条视频的播放表现，并指出表现最好的内容",
+          "Vimeo",
+          "读取和管理 Vimeo 视频、metadata、transcripts、comments、analytics、folders 和 showcases。"
+        ],
+        "icon_url": "/static/store/covers/985eb1b00c7447d1.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/fd2f01d155f6597e.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/16a6e58ad095ad6c.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/16a6e58ad095ad6c.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "vimeo-library"
+      },
+      {
+        "kind": "app",
+        "name": "frameio",
+        "display_name": "Frame.io",
+        "description": "连接 Frame.io，支持读取和管理 accounts、workspaces、projects、folders、files、comments 和 shares。",
+        "category": "创意工具",
+        "marketing_line": "连接 Frame.io，支持读取和管理 accounts、workspaces、projects、folders、files、comments 和 shares。",
+        "search_terms": [
+          "找出这个 Frame.io 项目中每个视频的最新版本",
+          "找出这个 Frame.io 项目中每个视频的最新版本",
+          "汇总所有尚未解决的审阅评论，并按文件分组",
+          "汇总所有尚未解决的审阅评论，并按文件分组",
+          "按场景和交付状态整理这个项目中的视频文件",
+          "按场景和交付状态整理这个项目中的视频文件",
+          "Frame.io",
+          "读取和管理 Frame.io V4 accounts、workspaces、projects、folders、files、comments 和 shares。"
+        ],
+        "icon_url": "/static/store/covers/57d832ff0a916e5c.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/5f0fa2039e13324e.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/7c1255e191fb40cb.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/7c1255e191fb40cb.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "frameio-workspace"
+      },
+      {
+        "kind": "app",
+        "name": "unsplash",
+        "display_name": "Unsplash",
+        "description": "搜索 Unsplash 公开图片，读取公开照片详情和作者公开作品。",
+        "category": "创意工具",
+        "marketing_line": "搜索 Unsplash 公开图片，读取公开照片详情和作者公开作品。",
+        "search_terms": [
+          "为这个旅行专题寻找十张竖版、色调温暖的 Unsplash 图片",
+          "为这个旅行专题寻找十张竖版、色调温暖的 Unsplash 图片",
+          "围绕极简科技感建立一个 Unsplash 视觉情绪板",
+          "围绕极简科技感建立一个 Unsplash 视觉情绪板",
+          "找出与这张参考图在构图和氛围上相近的图片",
+          "找出与这张参考图在构图和氛围上相近的图片",
+          "Unsplash",
+          "搜索 Unsplash 公开图片，查看照片详情、作者公开作品和下载追踪链接。"
+        ],
+        "icon_url": "/static/store/covers/78b7f3afffc9bddd.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/6e4fc80fb15cc12d.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/52083735d05462ec.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/52083735d05462ec.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "unsplash-photos"
+      },
+      {
+        "kind": "app",
+        "name": "motion-library",
+        "display_name": "动效工作室",
+        "description": "给品牌、产品或发布会做一段会呼吸的开场——选好节奏，立刻看到它动起来，再换成你的文案和颜色。",
+        "category": "平台",
+        "business_scenario": "brand-design",
+        "marketing_line": "让标题走进画面，让图形替你把故事讲完。",
+        "search_terms": [
+          "animation",
+          "motion",
+          "title",
+          "brand intro",
+          "3D",
+          "generative art",
+          "hardware",
+          "动效",
+          "数字艺术",
+          "开场",
+          "MG"
+        ],
+        "icon_url": "/static/store/covers/907856cefec91641.webp",
+        "cover_url": "/static/store/covers/d8a7238b05ec171b.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "motion-library",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/d8a7238b05ec171b.webp"
+      },
+      {
+        "kind": "app",
+        "name": "website-design",
+        "display_name": "3D交互网页设计",
+        "description": "浏览 21 款网站设计模板，确认后在原对话中生成和修改可预览的 HTML。",
+        "category": "平台",
+        "business_scenario": "brand-design",
+        "marketing_line": "挑选并确认模板，在对话中持续修改 HTML。",
+        "search_terms": [
+          "Website Design",
+          "HTML",
+          "interactive",
+          "motion",
+          "template",
+          "网站设计",
+          "网站设计",
+          "模板"
+        ],
+        "icon_url": "/static/store/covers/d475245fe2b4f3ae.webp",
+        "cover_url": "/static/store/covers/6719283f9ee785f6.webp",
+        "marketing_slots": [],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "website-design",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        }
+      },
+      {
+        "kind": "app",
+        "name": "creative-generative-art",
+        "display_name": "生成式数字艺术库",
+        "description": "浏览 16 款生成式数字艺术模板，确认后在原对话中生成和修改可预览的 HTML。",
+        "category": "平台",
+        "business_scenario": "brand-design",
+        "marketing_line": "挑选并确认模板，在对话中持续修改 HTML。",
+        "search_terms": [
+          "Generative Art Library",
+          "HTML",
+          "interactive",
+          "motion",
+          "template",
+          "生成式数字艺术库",
+          "生成式数字艺术",
+          "模板"
+        ],
+        "icon_url": "/static/store/covers/33f781f3b9cb007e.webp",
+        "cover_url": "/static/store/covers/1c38375a727b86d0.webp",
+        "marketing_slots": [],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "creative-generative-art",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        }
+      },
+      {
+        "kind": "app",
+        "name": "creative-hardware-mg",
+        "display_name": "硬件发布 MG 库",
+        "description": "浏览 8 款硬件发布 MG 模板，确认后在原对话中生成和修改可预览的 HTML。",
+        "category": "平台",
+        "business_scenario": "brand-design",
+        "marketing_line": "挑选并确认模板，在对话中持续修改 HTML。",
+        "search_terms": [
+          "Hardware Launch MG",
+          "HTML",
+          "interactive",
+          "motion",
+          "template",
+          "硬件发布 MG 库",
+          "硬件发布 MG",
+          "模板"
+        ],
+        "icon_url": "/static/store/covers/b38e370b0894e743.webp",
+        "marketing_slots": [],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "creative-hardware-mg",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        }
+      },
+      {
+        "kind": "app",
+        "name": "casting-room",
+        "display_name": "角色工坊",
+        "description": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。",
+        "category": "平台",
+        "business_scenario": "film-video",
+        "marketing_line": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。",
+        "search_terms": [
+          "影视创作｜一键整理人物妆造",
+          "从这段人物小传和角色设定出发，整理角色外形、服装妆容、表情和镜头参考，形成可复用的演员资产",
+          "视频创作｜统一角色造型与表演",
+          "为这个人物整理统一的造型、妆容、表情和镜头设定，确保后续视频内容保持一致",
+          "Casting Room 演员资产室",
+          "用可选模块逐步创建或补全一个真人演员，逐项确认媒体，并可选择创建或更新主体库中的演员 Element。"
+        ],
+        "icon_url": "/static/store/covers/c1bc028a4c83e929.webp",
+        "cover_url": "/static/store/covers/408c77d518d5f4d7.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "casting-room",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/408c77d518d5f4d7.webp"
+      },
+      {
+        "kind": "app",
+        "name": "design-room",
+        "display_name": "一键电商组图",
+        "description": "摆脱高昂摄影成本与漫长修图周期：上传一张包装或白底图，自动检索同类竞品视觉风格，生成可直接上架的高清商业摄影组图。",
+        "category": "平台",
+        "business_scenario": "ecommerce-advertising",
+        "marketing_line": "只需一张商品原图，AI 自动提炼卖点并对标大牌光影，批量生成主图、特写与生活场景大片。",
+        "search_terms": [
+          "电商新品｜从一张包装图出整套上架图",
+          "{{skill:commerce-ad-studio:commerce-ad-studio}} 用这张商品包装图出一套可直接上架的静帧，包含主图、卖点图、细节图和生活场景。先网络搜索竞品怎么拍。瓶身上有的信息都要保住，不要编。",
+          "品牌视觉｜网络搜索竞品，再统一拍法",
+          "{{skill:commerce-ad-studio:commerce-ad-studio}} 先网络搜索同类独立站和竞品怎么拍，再统一这套产品的主图、特写和生活场景，不要编造卖点。",
+          "Design Room (Ecom)",
+          "Design Room (Ecom)：保存产品事实与视觉方向档案，复用时直接打开可编辑规划，按渠道与品类配方规划商品图组并批量生成；仅静态图。"
+        ],
+        "icon_url": "/static/store/covers/3297cae249e24d83.webp",
+        "cover_url": "/static/store/covers/c57cc748dd1b1f60.webp",
+        "cover_video_url": "",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/5b3d8bea28f1fc55.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/1f1f3805546517f5.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/1f1f3805546517f5.webp"
+          }
+        ],
+        "installed": true,
+        "enabled": true,
+        "install_mode": "user",
+        "activation_skill": "design-room",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/c57cc748dd1b1f60.webp"
+      },
+      {
+        "kind": "app",
+        "name": "previs",
+        "display_name": "分镜预演",
+        "description": "服务于电影、短片、广告及其他视频内容前期，把剧本与参考素材拆成可预演的镜头、动作、节奏和转场方案，先对齐再制作。",
+        "category": "平台",
+        "business_scenario": "film-video",
+        "marketing_line": "拍摄前先对齐镜头、动作与节奏，减少返工。",
+        "search_terms": [
+          "影视前期｜把剧本拆成动态分镜",
+          "把这段剧本拆成一套可预演的动态分镜，明确镜头、动作、节奏和转场",
+          "镜头设计｜排出可预演时间线",
+          "根据这份脚本和参考素材，规划一条可预演的镜头时间线和画面节奏",
+          "Previs 动态分镜",
+          "先展示可编辑的文字镜头设计，确认后再生成故事板；可调整四轨时间线和九格景别候选，描述修改确认后交给 Agent，不直接生成视频或音频。"
+        ],
+        "icon_url": "/static/store/covers/3f2b27b2c05fd9ab.webp",
+        "cover_url": "/static/store/covers/e6cf1b99f249d8c9.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/da62ee4c34f6c3c5.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/dccd81b0d16d1e88.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/dccd81b0d16d1e88.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "previs",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        }
+      },
+      {
+        "kind": "skill",
+        "name": "whitebox-to-film",
+        "display_name": "白模视频预演",
+        "description": "服务于影视预演、广告和产品展示：从一句画面创意、一段剧情或一个商品出发，先生成可播放的 3D 白模预演，确认空间、动作、运镜和节奏，再转成具有真实人物、材质、光影与表演的完整视频。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "从画面创意或商品出发，先做白模视频预演。",
+        "search_terms": [
+          "白模转电影｜从一句画面创意开始",
+          "做一个人在暴雨中的停车楼被追赶，最后跃上开动的公交车，12 秒一镜到底；先生成 3D 白模预演，确认空间、动作、运镜、转场和节奏，再整理成电影化视频生成方案",
+          "产品展示｜把商品做成 3D 白模预演",
+          "把这个商品设计成一段可播放的 3D 白模预演，展示它的关键操作和卖点，明确产品、道具、空间、镜头路径、动作节奏和转场，供后续生成电影化产品视频",
+          "复杂运镜｜先验证场面再生成正式视频",
+          "设计一段多人物舞台追逐戏，先用简化 3D 场景做白模视频预演，明确人物位置、动作关系、镜头运动、关键事件时机和节奏，再生成具有真实表演、服装、材质和灯光的正式视频方案"
+        ],
+        "cover_url": "/app-store/whitebox-to-film-cover.webp",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "whitebox-to-film",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        }
+      },
+      {
+        "kind": "skill",
+        "name": "skill-creator",
+        "display_name": "技能创建器",
+        "description": "把重复工作流程整理为可复用的 Skill，并持续完善指令与质量。",
+        "category": "Agent",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "沉淀可重复的工作流",
+          "把这套重复的工作流程整理成一个可复用 Skill",
+          "把示例变成可靠的规则",
+          "从这些文档和示例中提炼 Skill 的触发条件与执行规则",
+          "测试和优化 Skill",
+          "帮我测试这个 Skill，并根据结果优化它的说明和边界"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "skill-creator"
+      },
+      {
+        "kind": "skill",
+        "name": "seedance-2-prompt-copilot",
+        "display_name": "Seedance 2 视频提示词助手",
+        "description": "为 Seedance 2 视频整理提示词、分镜与参考素材，并分析和改进失败结果。",
+        "category": "视频",
+        "business_scenario": "film-video",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "编写完整的视频 brief",
+          "把这个创意转成 Seedance 2 的镜头、动作和声音提示词",
+          "规划多模态参考素材",
+          "为这些参考图定义角色、场景和动作之间的关系",
+          "修复失败的生成结果",
+          "诊断这次视频生成结果，并给出最小修改方案"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "seedance-2-prompt-copilot"
+      },
+      {
+        "kind": "skill",
+        "name": "seedance-2-5-prompt-copilot",
+        "display_name": "Seedance 2.5 视频提示词助手",
+        "description": "设计 Seedance 2.5 视频提示词、多模态参考、分镜及首尾帧衔接方案。",
+        "category": "视频",
+        "business_scenario": "film-video",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "设计连续的时间线",
+          "为 Seedance 2.5 设计一条连续时间线的视频提示词",
+          "通过首尾帧衔接镜头",
+          "用首尾帧和参考素材规划一段自然衔接的镜头",
+          "进行一次受控修订",
+          "根据这个视频结果，只修正动作和声音不同步的问题"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "seedance-2-5-prompt-copilot"
+      },
+      {
+        "kind": "skill",
+        "name": "plugin-guide",
+        "display_name": "应用指南",
+        "description": "了解可用应用，以及如何安装、连接并将其用于工作流程。",
+        "category": "Agent",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "找到合适的 App",
+          "根据我的目标推荐应该安装哪个 App 或连接器",
+          "了解一个 App",
+          "解释 Notion、飞书、Slack 等 App 分别能做什么",
+          "安全地建立连接",
+          "告诉我如何检查这个外部工具的连接和使用方式"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "plugin-guide"
+      },
+      {
+        "kind": "skill",
+        "name": "minimax-h3-prompt-copilot",
+        "display_name": "MiniMax H3 视频提示词助手",
+        "description": "为分镜、广告、表演和视频编辑任务编写 MiniMax H3 提示词与参考素材方案。",
+        "category": "视频",
+        "business_scenario": "film-video",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "把 brief 转成带时间码的 H3 计划",
+          "把这个已确认的创意整理成 MiniMax H3 的生产级提示词和完整的分段视听时间线",
+          "规划由参考素材引导的 H3 镜头",
+          "根据这些已经确认的参考素材，为 MiniMax H3 规划角色、动作、镜头和连续性约束",
+          "修正一个可见问题",
+          "只针对这次 MiniMax H3 结果中最明显的问题，给出一轮最小化修订方案"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "minimax-h3-prompt-copilot"
+      },
+      {
+        "kind": "skill",
+        "name": "kling-prompt-copilot",
+        "display_name": "可灵提示词助手",
+        "description": "结合参考图、对白与运动设计，编写 Kling 视频提示词和分镜方案。",
+        "category": "视频",
+        "business_scenario": "film-video",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "把镜头整理成分镜",
+          "把这个故事梗概整理成 Kling 分镜与视频提示词",
+          "编写以对白为核心的 brief",
+          "根据人物、镜头和对白重写一版视频 brief",
+          "诊断失败结果",
+          "诊断这次 Kling 视频结果，并告诉我下一次应该怎么改"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "kling-prompt-copilot"
+      },
+      {
+        "kind": "skill",
+        "name": "gpt-image2-prompt-copilot",
+        "display_name": "GPT Image 2 提示词助手",
+        "description": "为图像生成、编辑、文字设计与版式编写 GPT Image 2 提示词。",
+        "category": "图像",
+        "business_scenario": "brand-design",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "生成结构化图像",
+          "把这个海报想法写成 GPT Image 2 的结构化提示词",
+          "保留构图进行编辑",
+          "编辑这张图，同时保留原构图，只替换我指定的元素",
+          "制作文字准确的视觉素材",
+          "生成一张包含准确文字的图表或标准视觉素材"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "gpt-image2-prompt-copilot"
+      },
+      {
+        "kind": "skill",
+        "name": "explain-how-it-made",
+        "display_name": "解读创作过程",
+        "description": "从创作意图、关键节点、模型选择与可复用方法，解读已有画布的制作过程。",
+        "category": "Agent",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "解读 Canvas 的创作逻辑",
+          "解读这个 Canvas 是如何做出来的，说明创作意图、关键节点、提示词和迭代逻辑",
+          "找到可复用的方法",
+          "从这个项目里提炼可以迁移到其他创作中的方法和决策",
+          "解读一条创作链路",
+          "围绕这个 Canvas 的完整创作链路，给我一份基于证据的工作流解读"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "explain-how-it-made"
+      },
+      {
+        "kind": "skill",
+        "name": "client-surface-routing",
+        "display_name": "执行路径选择",
+        "description": "为涉及本地文件、应用和在线服务的任务选择合适的桌面、网页或云端工具。",
+        "category": "Agent",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "选择合适的执行环境",
+          "判断这个任务应该在本地桌面、云端 Canvas 还是外部 App 执行",
+          "安全地处理本地文件",
+          "处理这个本地文件夹时，帮我选择安全的工具路径",
+          "了解 Desktop 的用途",
+          "说明哪些操作需要 Desktop，哪些可以直接在云端完成"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "client-surface-routing"
+      },
+      {
+        "kind": "skill",
+        "name": "banana-prompt-copilot",
+        "display_name": "Nano Banana 提示词助手",
+        "description": "根据参考素材与创作方向，设计 Nano Banana 图像提示词、编辑方案与视觉变体。",
+        "category": "图像",
+        "business_scenario": "brand-design",
+        "marketing_line": "把创意转化为可用于正式制作的成果。",
+        "search_terms": [
+          "编写参考素材感知的提示词",
+          "用 Nano Banana 根据这张参考图生成一版视觉方向",
+          "只修改一个指定细节",
+          "保留主体和构图，只修改我指定的这个细节",
+          "检查并优化编辑结果",
+          "根据这次结果做一次受控的图像修订"
+        ],
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "banana-prompt-copilot"
+      },
+      {
+        "kind": "skill",
+        "name": "3d-scene-director",
+        "display_name": "图片3D建模",
+        "description": "基于你提供的参考图还原 3D 现场：一张产品图可以还原成可预览的 3D 产品模型，一张妆造图或场景图可以还原成结构、比例与光影一致的 3D 角色或场景，供后续镜头设计与视频生成使用。",
+        "category": "创作工具",
+        "business_scenario": "interactive-games",
+        "marketing_line": "上传一张参考图，还原可预览的 3D 现场。",
+        "search_terms": [
+          "产品图｜还原 3D 产品模型",
+          "基于我上传的这张产品图还原一个 3D 产品模型，保持真实比例、结构、材质和关键细节，做成可以在浏览器中旋转预览的 3D 场景",
+          "妆造图｜还原 3D 角色与造型",
+          "基于我上传的这张妆造图还原一个 3D 角色造型，保留五官特征、发型、妆容、服饰和配饰的层次关系，输出可在浏览器中预览的 3D 场景",
+          "场景图｜还原 3D 空间与镜头",
+          "基于我上传的这张场景图还原 3D 现场，包括空间结构、物体位置、材质和光线方向，并设计几组可以复用的机位与镜头运动"
+        ],
+        "cover_url": "/app-store/3d-scene-director-cover.webp",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "3d-scene-director",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        }
+      },
+      {
+        "kind": "skill",
+        "name": "depth-video-studio",
+        "display_name": "深度影视工坊",
+        "description": "锁定原片神级运镜与调度，一键置换全新角色与电影级场景。",
+        "category": "影视与视频",
+        "business_scenario": "film-video",
+        "marketing_line": "锁定原片神级运镜与调度，一键置换全新角色与电影级场景。",
+        "search_terms": [
+          "深度影视",
+          "深度视频",
+          "深度通道",
+          "深度图",
+          "角色替换",
+          "场景迁移",
+          "同一运镜",
+          "参考迁移",
+          "运动锁定",
+          "重塑视频",
+          "画面迁移"
+        ],
+        "cover_url": "/static/store/covers/ab062db11a6f3c5a.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "depth-video-studio",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/ab062db11a6f3c5a.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "opus-motion-studio",
+        "display_name": "Opus 5.5 Studio",
+        "description": "体验用代码生成视频的惊艳和乐趣，再把一个想法带入Icon动画制作、动态文字视频设计、商品视频、知识内容、动态播报或 3D 场景。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "体验代码生成视频的惊艳和乐趣，用 Opus 5.5 把想法变成可查看的动效。",
+        "search_terms": [
+          "Opus 5.5 Studio",
+          "Icon动画制作",
+          "动态文字视频设计",
+          "YouTube 商品视频",
+          "知识内容",
+          "新闻播报",
+          "3D 场景"
+        ],
+        "cover_url": "/static/store/covers/56852faae34038ad.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "opus-motion-studio",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5"
+        },
+        "cover_poster_url": "/static/store/covers/56852faae34038ad.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "opus55-motion-icon",
+        "display_name": "Icon动画制作",
+        "description": "给我一个主体和一句清楚的运动想法，先得到在小尺寸也看得清的循环预览，再导出有边界的视频。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "一个主体、一个清楚动作、一段干净循环。",
+        "search_terms": [
+          "Icon动画制作",
+          "Opus 5.5",
+          "动画图标",
+          "循环图标视频",
+          "产品动效"
+        ],
+        "cover_url": "/static/store/covers/23528d3c0bb27d9b.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "opus55-motion-icon",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5"
+        },
+        "cover_poster_url": "/static/store/covers/23528d3c0bb27d9b.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "html-beat-morph-video",
+        "display_name": "动态文字视频设计",
+        "description": "给我一个视觉主体和节拍想法，把它做成可以先预览、再导出的短循环 HTML 视频。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "让文字沿着节奏动起来，做成一段看得懂的动态文字视频。",
+        "search_terms": [
+          "动态文字视频设计",
+          "动态文字视频设计",
+          "单主体变形",
+          "HTML loop video"
+        ],
+        "cover_url": "/static/store/covers/56852faae34038ad.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "html-beat-morph-video",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5"
+        },
+        "cover_poster_url": "/static/store/covers/56852faae34038ad.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "youtube-product-video",
+        "display_name": "YouTube 品牌影片工作室",
+        "description": "把你的产品页变成一条有品牌质感的 YouTube 品牌影片或付费广告，自带标题包装、动态字幕和 Logo 结尾。",
+        "category": "电商广告",
+        "business_scenario": "ecommerce-advertising",
+        "marketing_line": "从产品页出发，做出体现品牌调性的 YouTube 影片与 ABCD 广告。",
+        "search_terms": [
+          "YouTube 品牌影片工作室",
+          "YouTube 品牌影片",
+          "YouTube 广告",
+          "ABCD",
+          "YouTube Shorts",
+          "品牌视频",
+          "产品演示",
+          "电商广告"
+        ],
+        "cover_url": "/static/store/covers/e2754af715d1ff2d.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "youtube-product-video",
+        "recommended_model": {
+          "id": "gemini-3.7-flash",
+          "display_name": "Gemini 3.7 Flash"
+        },
+        "cover_poster_url": "/static/store/covers/e2754af715d1ff2d.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "digital-human-studio",
+        "display_name": "数字人演播厅",
+        "description": "专属数字人随时登台，一条搞定全场景。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "专属数字人随时登台，一条搞定全场景。",
+        "search_terms": [
+          "数字人演播厅",
+          "数字人",
+          "数字人视频",
+          "数字人玩法",
+          "口播",
+          "带看",
+          "产品演示",
+          "教程",
+          "新闻播报"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/static/store/covers/22ef0d8888f638b1.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "digital-human-studio",
+        "cover_poster_url": "/static/store/covers/22ef0d8888f638b1.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "digital-human-social-talking-head",
+        "display_name": "社媒口播",
+        "description": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+        "search_terms": [
+          "社媒口播",
+          "为短视频平台制作稳定、自然的数字人口播",
+          "数字人",
+          "数字人视频"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/static/store/covers/e1e3b56c817740fc.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "digital-human-social-talking-head",
+        "cover_poster_url": "/static/store/covers/e1e3b56c817740fc.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "digital-human-property-tour",
+        "display_name": "房产带看",
+        "description": "把房源资料做成专业带看实录：动线清晰、事实可信，让客户像跟着经纪人现场看房一样。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "把房源资料做成专业带看实录：动线清晰、事实可信，让客户像跟着经纪人现场看房一样。",
+        "search_terms": [
+          "房产带看",
+          "用数字人带观众快速看懂一套房源",
+          "数字人",
+          "数字人视频"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/static/store/covers/17776a412bb660c7.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "digital-human-property-tour",
+        "recommended_model": {
+          "id": "gemini-3.8-flash",
+          "display_name": "Gemini 3.8 Flash"
+        },
+        "cover_poster_url": "/static/store/covers/17776a412bb660c7.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "digital-human-product-demo",
+        "display_name": "产品演示",
+        "description": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+        "search_terms": [
+          "产品演示",
+          "让数字人把产品价值、用法和试用动作讲清楚",
+          "数字人",
+          "数字人视频"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/static/store/covers/1bafa50bc29868ed.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "digital-human-product-demo",
+        "cover_poster_url": "/static/store/covers/95d5caaa29afef84.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "digital-human-course-explainer",
+        "display_name": "知识科普讲解",
+        "description": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+        "search_terms": [
+          "知识科普讲解",
+          "基于 brief 和素材制作知识科普类数字人课程",
+          "数字人",
+          "数字人视频"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/static/store/covers/e54530abc0d58782.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "digital-human-course-explainer",
+        "cover_poster_url": "/static/store/covers/e54530abc0d58782.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "digital-human-market-bulletin",
+        "display_name": "新闻播报",
+        "description": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。",
+        "search_terms": [
+          "新闻播报",
+          "用有时间边界的事实做一条新闻播报",
+          "数字人",
+          "数字人视频"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/static/store/covers/408c77d518d5f4d7.webp",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "digital-human-market-bulletin"
+      },
+      {
+        "kind": "skill",
+        "name": "digital-human-asset",
+        "display_name": "数字人资产",
+        "description": "开拍前先拥有你的专属出镜分身：统一视觉定位与发声特质，成为品牌的长期数字面孔。",
+        "category": "影视创意",
+        "business_scenario": "film-video",
+        "marketing_line": "开拍前先拥有你的专属出镜分身：统一视觉定位与发声特质，成为品牌的长期数字面孔。",
+        "search_terms": [
+          "数字人资产",
+          "先建立可复用的数字人形象与声音资产",
+          "数字人",
+          "数字人视频"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/static/store/covers/eeadd2cbfa72e12f.webp",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "digital-human-asset"
+      },
+      {
+        "kind": "skill",
+        "name": "ecommerce-studio",
+        "display_name": "电商设计室",
+        "description": "专为电商卖家与投流团队打造的一站式创意工作台：无需繁琐布景与漫长测试，输入商品图或链接，即可智能生成符合各大平台投放规范的高转化视觉资产。",
+        "category": "电商广告",
+        "business_scenario": "ecommerce-advertising",
+        "marketing_line": "丢入商品图、详情页链接或对标参考，AI 帮你搞定全套高转化投放素材——从上架商拍、多语言海报到爆款视频变体。",
+        "search_terms": [
+          "电商设计室",
+          "电商广告",
+          "静态广告",
+          "视频广告"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/static/store/covers/c57cc748dd1b1f60.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "ecommerce-studio",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/c57cc748dd1b1f60.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "ad-localizer",
+        "display_name": "广告本地化",
+        "description": "告别逐字翻译与重新排版的繁琐工序：上传成熟广告素材，自动适配目标市场语言、文化习惯与版面空间，保持商品与品牌质感不失真。",
+        "category": "电商广告",
+        "business_scenario": "ecommerce-advertising",
+        "marketing_line": "上传一张国内或现成广告图，AI 自动翻译目标语言并重构排版与文案，一键出海拓客。",
+        "search_terms": [
+          "ad-localizer",
+          "广告本地化",
+          "电商广告",
+          "广告创意",
+          "品牌内容"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/app-store/commerce/ad-localizer-output.svg",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "ad-localizer",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/0c7b722f5e462e62.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "ad-resizer",
+        "display_name": "尺寸适配器",
+        "description": "告别手动切图改尺寸的机械劳动：智能识别主体、卖点文案与 CTA 按钮，为各平台信息流与故事版位自动重构最佳构图与安全区。",
+        "category": "电商广告",
+        "business_scenario": "ecommerce-advertising",
+        "marketing_line": "上传单张定稿海报，智能重构 1:1、4:5、9:16 与横幅等多渠道版位，画面绝不生硬拉伸。",
+        "search_terms": [
+          "ad-resizer",
+          "尺寸适配器",
+          "电商广告",
+          "广告创意",
+          "品牌内容"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/app-store/commerce/ad-resizer-output.svg",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "ad-resizer",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/a658a504208dde06.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "headline-multiplier",
+        "display_name": "标题变体",
+        "description": "用科学的 A/B 测试跑出最高转化：固定好视觉与版面，从焦虑唤醒、限时利益、社交认同等多心理维度快速生成对比标题，助你找到最优解。",
+        "category": "电商广告",
+        "business_scenario": "ecommerce-advertising",
+        "marketing_line": "锁定跑量素材的高点击画面，批量裂变不同痛点与卖点文案，低成本测出 CTR 翻倍的爆款标题。",
+        "search_terms": [
+          "headline-multiplier",
+          "标题变体",
+          "电商广告",
+          "广告创意",
+          "品牌内容"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/app-store/commerce/headline-multiplier-output.svg",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "headline-multiplier",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/41e71d7d25f3d050.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "customer-voice-ads",
+        "display_name": "客户之声广告",
+        "description": "把真实好评变成最强带货力：自动分析商品评论中的真实使用体验与痛点解答，结合商品实拍生成带可信证据、旁白与字幕的高转化短视频。",
+        "category": "电商广告",
+        "business_scenario": "ecommerce-advertising",
+        "marketing_line": "粘贴商品详情页链接，AI 提炼买家真实口碑与热评，生成有理有据、自带信任感的爆款短视频。",
+        "search_terms": [
+          "customer-voice-ads",
+          "客户之声广告",
+          "电商广告",
+          "广告创意",
+          "品牌内容"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/app-store/commerce/customer-voice-ads-output.svg",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "customer-voice-ads",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/0389e5954f8908c1.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "hook-multiplier",
+        "display_name": "开头钩子测试",
+        "description": "前 3 秒决定一条视频的生死：在不重新拍摄整条广告的前提下，快速生成提问悬念、视觉反差或痛点直击等不同开头变体，快速测出爆款率。",
+        "category": "电商广告",
+        "business_scenario": "ecommerce-advertising",
+        "marketing_line": "保留原视频主体与转化结尾，批量替换前 3 秒黄金抓人开头，低成本拯救完播率与 ROI。",
+        "search_terms": [
+          "hook-multiplier",
+          "开头钩子测试",
+          "电商广告",
+          "广告创意",
+          "品牌内容"
+        ],
+        "icon_style": "visualize",
+        "cover_url": "/app-store/commerce/hook-multiplier-output.svg",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "hook-multiplier",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/5f44f87cde93021d.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "social-instagram-content",
+        "display_name": "Instagram 停留感素材包",
+        "description": "给我一份链接、图片或视频，我会把它整理成 Instagram Reel 或轮播：先做好第一屏、文字安全区、封面和 CTA，再按你的确认出素材。",
+        "category": "社媒内容",
+        "business_scenario": "social-media-content",
+        "marketing_line": "先把第一屏做清楚，再交付一套可以继续修改的 Instagram 素材。",
+        "search_terms": [
+          "Instagram 停留感素材包",
+          "Instagram",
+          "Reels",
+          "轮播",
+          "社媒内容"
+        ],
+        "cover_url": "/app-store/social-media/instagram-content.svg",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "social-instagram-content",
+        "cover_poster_url": "/static/store/covers/5241af443db18ada.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "social-tiktok-content",
+        "display_name": "TikTok 钩子实验室",
+        "description": "从一份素材先做 3 个开场方向，每次只改一个地方，帮你在投入完整剪辑前找到更值得试的那一个。",
+        "category": "社媒内容",
+        "business_scenario": "social-media-content",
+        "marketing_line": "先比较开场，再决定把时间花在哪条片子上。",
+        "search_terms": [
+          "TikTok 钩子实验室",
+          "TikTok",
+          "前一秒钩子",
+          "短视频",
+          "社媒内容"
+        ],
+        "cover_url": "/app-store/social-media/tiktok-content.svg",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "social-tiktok-content",
+        "cover_poster_url": "/static/store/covers/8c4a82814a80498f.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "social-linkedin-content",
+        "display_name": "LinkedIn 洞察工作室",
+        "description": "发来 LinkedIn 链接、文章或产品事实，我会把它整理成有依据的帖子、轮播或带字图片；文字会在确认后准确叠加到最终图上。",
+        "category": "社媒内容",
+        "business_scenario": "social-media-content",
+        "marketing_line": "把一个链接讲清楚，把确认过的文字准确放到图上。",
+        "search_terms": [
+          "LinkedIn 洞察工作室",
+          "LinkedIn",
+          "有依据的内容",
+          "文档轮播",
+          "社媒内容"
+        ],
+        "cover_url": "/app-store/social-media/linkedin-content.svg",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "social-linkedin-content",
+        "cover_poster_url": "/static/store/covers/cd79d38a09827c3f.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "social-content-repurposer",
+        "display_name": "跨平台内容复用器",
+        "description": "一条长视频、播客或文章，先拆成 3–7 条能单独发布的内容，再分别适配 Instagram、TikTok、LinkedIn 和 Shorts。",
+        "category": "社媒内容",
+        "business_scenario": "social-media-content",
+        "marketing_line": "同一份素材，变成多条真正适合各平台的内容。",
+        "search_terms": [
+          "跨平台内容复用器",
+          "内容复用",
+          "3–7 个内容原子",
+          "多平台",
+          "社媒内容"
+        ],
+        "cover_url": "/static/store/covers/d4c0c04ff74f8c6d.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "social-content-repurposer",
+        "cover_poster_url": "/static/store/covers/d4c0c04ff74f8c6d.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "social-trending-recast",
+        "display_name": "热门玩法复刻",
+        "description": "看到一个有意思的热门视频？发给我，再上传你的人物、产品或场景参考。我会保留动作和运镜，先给你看一版复刻方案，再出片。",
+        "category": "社媒内容",
+        "business_scenario": "social-media-content",
+        "marketing_line": "源视频加新人物或场景，快速做出属于你的热门玩法。",
+        "search_terms": [
+          "热门玩法复刻",
+          "热门视频复刻",
+          "深度重塑",
+          "人物替换",
+          "场景替换"
+        ],
+        "cover_url": "/static/store/covers/3229d8fea6764fb3.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "depth-video-studio",
+        "recommended_model": {
+          "id": "gpt-6-astra",
+          "display_name": "Astra",
+          "thinking_level": "low"
+        },
+        "cover_poster_url": "/static/store/covers/3229d8fea6764fb3.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "trending-recast-gallery",
+        "display_name": "Skrull",
+        "description": "把刷屏的爆款视频形式做成一键模板：排行榜锐评、双人播客、街头采访、恶搞预告、聊天短剧……选一个，填个想法或者留空，直接拿到 9:16 竖屏成片。",
+        "category": "社媒内容",
+        "business_scenario": "social-media-content",
+        "marketing_line": "挑个爆款，一键复刻。",
+        "search_terms": [
+          "Skrull",
+          "爆款模板",
+          "表情包视频",
+          "天梯榜",
+          "播客切片",
+          "街头采访",
+          "电影预告",
+          "聊天故事",
+          "UGC 广告",
+          "倒计时",
+          "带货视频",
+          "恶搞视频"
+        ],
+        "cover_url": "/static/store/covers/2c1fae7720f865dc.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "skrull",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium"
+        },
+        "cover_poster_url": "/static/store/covers/2c1fae7720f865dc.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "social-media-content-studio",
+        "display_name": "社媒素材工作室",
+        "description": "你只要给我一份链接、视频、图片或产品资料，再说想发到哪里；我会先帮你选玩法、写第一版，再决定做哪些素材。",
+        "category": "社媒内容",
+        "business_scenario": "social-media-content",
+        "marketing_line": "一份素材开始，先看懂方向，再拿到能继续修改的社媒内容。",
+        "search_terms": [
+          "社媒素材工作室",
+          "Instagram Reels",
+          "TikTok 钩子",
+          "LinkedIn 内容",
+          "内容复用"
+        ],
+        "cover_url": "/static/store/covers/e8a73cd5cd433bf5.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "social-media-content-studio",
+        "cover_poster_url": "/static/store/covers/e8a73cd5cd433bf5.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "ai-influencer-studio",
+        "display_name": "Forge 1.0",
+        "description": "设定虚拟创作者，在画布上从三个方向中选定形象，先确认无对白视频草稿，再制作最终成片。",
+        "category": "社媒内容",
+        "business_scenario": "social-media-content",
+        "marketing_line": "为无对白视觉喜剧打造角色。",
+        "search_terms": [
+          "AI 网红",
+          "虚拟网红",
+          "虚拟人",
+          "捏人",
+          "数字人",
+          "小红书",
+          "抖音",
+          "种草",
+          "forge",
+          "哈哈镜"
+        ],
+        "cover_url": "/static/store/covers/c3b1b97fe9ee55d0.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": false,
+        "enabled": false,
+        "runtime_status": "not-applicable",
+        "activation_skill": "ai-influencer-studio",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium",
+          "show_badge": false
+        },
+        "cover_poster_url": "/static/store/covers/567e441275e461fe.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "ai-influencer-builder",
+        "display_name": "Forge Builder",
+        "description": "选择角色特质和首支视频构想。在画布上查看需求草稿，选定生成的角色，再确认视频草稿。",
+        "category": "社媒内容",
+        "business_scenario": "social-media-content",
+        "marketing_line": "设定特质。选定形象。确认视频。",
+        "search_terms": [
+          "AI 网红",
+          "虚拟网红",
+          "虚拟人",
+          "捏人",
+          "数字人",
+          "小红书",
+          "抖音",
+          "种草",
+          "forge"
+        ],
+        "cover_url": "/app-store/ai-influencer/studio-cover.svg",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "runtime_status": "published",
+        "activation_skill": "ai-influencer-studio",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium",
+          "show_badge": false
+        }
+      },
+      {
+        "kind": "skill",
+        "name": "fish-audio-audiobook",
+        "display_name": "有声书章节",
+        "description": "给我一个章节或短篇故事，就能听到它被演绎出来：温暖的旁白，每个角色都有各自的演绎声音，情绪在句中转变，从平静到惊慌只需一口气。整章生成之前，你可以先听一段。",
+        "category": "音频创作",
+        "business_scenario": "film-video",
+        "marketing_line": "角色会演，而不只是读。",
+        "search_terms": [
+          "有声书",
+          "故事旁白",
+          "角色声音",
+          "睡前故事",
+          "Drama 3"
+        ],
+        "cover_url": "/static/store/covers/11f7e3da8e466c42.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "fish-audio-lab",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium",
+          "show_badge": false
+        },
+        "cover_poster_url": "/static/store/covers/11f7e3da8e466c42.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "fish-audio-podcast",
+        "display_name": "双主持人播客",
+        "description": "把笔记、文章或大纲变成两位主持人之间的对话。每个讨论要点都作为一场戏来演，因此笑声和反应都会回应前一句台词。",
+        "category": "音频创作",
+        "business_scenario": "film-video",
+        "marketing_line": "两位真正会互相倾听的主持人。",
+        "search_terms": [
+          "播客",
+          "双主持人",
+          "AI 播客",
+          "音频讲解",
+          "对话"
+        ],
+        "cover_url": "/static/store/covers/da16eeb5d0c702ab.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "fish-audio-lab",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium",
+          "show_badge": false
+        },
+        "cover_poster_url": "/static/store/covers/da16eeb5d0c702ab.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "fish-audio-drama",
+        "display_name": "广播剧场景",
+        "description": "从一句话的创意或你自己的剧本出发，由全员阵容一镜到底地演完一场戏：角色会打断、回应，并在句中从平静转为惊慌。附带一份供剪辑师使用的音效提示单。",
+        "category": "音频创作",
+        "business_scenario": "film-video",
+        "marketing_line": "整场戏一镜到底，每个角色都在其中。",
+        "search_terms": [
+          "广播剧",
+          "广播剧目",
+          "配音表演",
+          "虚构类播客",
+          "Drama 3"
+        ],
+        "cover_url": "/static/store/covers/755a9f35a369b66f.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "fish-audio-lab",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium",
+          "show_badge": false
+        },
+        "cover_poster_url": "/static/store/covers/755a9f35a369b66f.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "fish-audio-game-voices",
+        "display_name": "游戏语音包",
+        "description": "描述一个角色，即可获得问候、攻击、受伤、胜利等场合的标注语音台词。每句台词都有自己的演绎备注，例如 [喘着粗气，咬紧牙关]，文件已按规则命名，团队可以直接放入项目。",
+        "category": "音频创作",
+        "business_scenario": "film-video",
+        "marketing_line": "每句台词都有导演、有标注、即可使用。",
+        "search_terms": [
+          "游戏语音台词",
+          "角色声音",
+          "NPC 对话",
+          "语音包",
+          "短台词"
+        ],
+        "cover_url": "/static/store/covers/82d094e859ce8d45.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "fish-audio-lab",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium",
+          "show_badge": false
+        },
+        "cover_poster_url": "/static/store/covers/82d094e859ce8d45.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "fish-audio-bilingual-voiceover",
+        "display_name": "双语配音",
+        "description": "分享你的信息和两种语言，即可获得一段简短配音：同一个声音在句中切换语言，就像双语者真实说话的方式。你可以从几个版本中挑选，每个版本只改变一个变量。",
+        "category": "音频创作",
+        "business_scenario": "film-video",
+        "marketing_line": "两种语言，一个声音，毫无缝隙。",
+        "search_terms": [
+          "双语配音",
+          "多语种广告",
+          "语码转换",
+          "短视频旁白",
+          "Drama 3"
+        ],
+        "cover_url": "/static/store/covers/fae10e0a17318959.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "fish-audio-lab",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium",
+          "show_badge": false
+        },
+        "cover_poster_url": "/static/store/covers/fae10e0a17318959.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "fish-audio-names-numbers",
+        "display_name": "人名、数字与编码",
+        "description": "适用于产品发布、活动公告、教程和宣传朗读，其中每个人名、价格、日期、编码和邮箱都必须准确。我会逐一列出，你确认难读的部分，样片也会逐项核对。",
+        "category": "音频创作",
+        "business_scenario": "film-video",
+        "marketing_line": "每个人名、价格和编码，一次就读对。",
+        "search_terms": [
+          "产品发布配音",
+          "优惠码朗读",
+          "活动公告",
+          "发音",
+          "教程旁白"
+        ],
+        "cover_url": "/static/store/covers/05bdc823c1062ff5.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "fish-audio-lab",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium",
+          "show_badge": false
+        },
+        "cover_poster_url": "/static/store/covers/05bdc823c1062ff5.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "fish-audio-lab",
+        "display_name": "Fish Audio Lab",
+        "description": "像配音演员一样为 Fish Audio Drama 3 做导演。用大白话写清每句台词该有的感觉，就能听到它被演绎出来：句中转换的情绪、全员阵容的完整场景、句中切换的语言，以及准确读出的人名、数字和编码。先听一段样片，再生成其余部分。",
+        "category": "音频创作",
+        "business_scenario": "film-video",
+        "marketing_line": "写下导演指令，Drama 3 来演绎。",
+        "search_terms": [
+          "Fish Audio",
+          "Drama 3",
+          "文本转语音",
+          "AI 配音表演",
+          "有声书",
+          "播客",
+          "广播剧",
+          "游戏语音",
+          "双语配音"
+        ],
+        "cover_url": "/static/store/covers/ae523f8148b39a84.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "fish-audio-lab",
+        "recommended_model": {
+          "id": "claude-opus-5-5",
+          "display_name": "Opus 5.5",
+          "thinking_level": "medium",
+          "show_badge": false
+        },
+        "cover_poster_url": "/static/store/covers/ae523f8148b39a84.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "argon-how-it-works",
+        "display_name": "3D 原理演示",
+        "description": "问一个「它是怎么工作的」：电机、心脏、变速箱、黑洞都行。得到一个可以旋转、放慢、逐步查看的 3D 模拟，因果关系一步不错。",
+        "category": "AI 模型工作室",
+        "business_scenario": "interactive-games",
+        "marketing_line": "问它怎么工作，答案拿在手里转。",
+        "search_terms": [
+          "运作原理",
+          "3D 仿真",
+          "物理模拟",
+          "科学讲解",
+          "交互式图解",
+          "Argon"
+        ],
+        "cover_url": "/static/store/covers/2aa9e44b6acb28d2.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "gemini-argon-studio",
+        "recommended_model": {
+          "id": "gemini-4-argon",
+          "display_name": "Argon"
+        },
+        "cover_poster_url": "/static/store/covers/2aa9e44b6acb28d2.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "argon-photo-to-3d",
+        "display_name": "照片转 3D 世界",
+        "description": "拍几张你的书桌、房间、店铺或建筑。得到一个可以环绕观看、走进去逛的 3D 场景，还能加玩法，比如桌面小赛车或找东西小游戏。",
+        "category": "AI 模型工作室",
+        "business_scenario": "interactive-games",
+        "marketing_line": "拍下房间，走进去逛。",
+        "search_terms": [
+          "照片转 3D",
+          "3D 场景",
+          "房间转 3D",
+          "立体场景",
+          "桌面赛车游戏",
+          "Argon"
+        ],
+        "cover_url": "/static/store/covers/6b7bdc6c930f33b7.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "gemini-argon-studio",
+        "recommended_model": {
+          "id": "gemini-4-argon",
+          "display_name": "Argon"
+        },
+        "cover_poster_url": "/static/store/covers/6b7bdc6c930f33b7.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "argon-sketch-to-game",
+        "display_name": "草图转可玩游戏",
+        "description": "分享草图、截图或一句话的创意。获得一款可在浏览器中游玩的游戏，包含操作、计分、关卡和触屏支持，并从你可以试玩的核心玩法开始。",
+        "category": "AI 模型工作室",
+        "business_scenario": "interactive-games",
+        "marketing_line": "在纸上画出来，在浏览器里玩。",
+        "search_terms": [
+          "草图转游戏",
+          "浏览器游戏",
+          "HTML 游戏",
+          "迷你游戏",
+          "游戏原型",
+          "Argon"
+        ],
+        "cover_url": "/static/store/covers/d99211f5109306d9.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "gemini-argon-studio",
+        "recommended_model": {
+          "id": "gemini-4-argon",
+          "display_name": "Argon"
+        },
+        "cover_poster_url": "/static/store/covers/d99211f5109306d9.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "argon-3d-web-page",
+        "display_name": "3D 网页",
+        "description": "分享产品说明或需求简报。获得一个带有真实文案、导航和明确行动号召的交互式 3D 落地页，从首屏英雄区开始。",
+        "category": "AI 模型工作室",
+        "business_scenario": "interactive-games",
+        "marketing_line": "输入一份简报，输出一个可以点击浏览的 3D 页面。",
+        "search_terms": [
+          "3D 网页",
+          "落地页",
+          "交互式网站",
+          "Three.js 页面",
+          "产品发布页",
+          "Argon"
+        ],
+        "cover_url": "/static/store/covers/f3a8b81f9bf0abd5.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "gemini-argon-studio",
+        "recommended_model": {
+          "id": "gemini-4-argon",
+          "display_name": "Argon"
+        },
+        "cover_poster_url": "/static/store/covers/f3a8b81f9bf0abd5.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "argon-kinetic-type",
+        "display_name": "动态文字循环",
+        "description": "分享一条信息。获得一段最长 5 秒的动态排版循环，文字会在你确认的节拍网格上移动，且在编写任何代码之前你都可以确认。",
+        "category": "AI 模型工作室",
+        "business_scenario": "interactive-games",
+        "marketing_line": "一行文字，伴随清晰的节奏动起来。",
+        "search_terms": [
+          "动态排版",
+          "文字动画",
+          "文字循环",
+          "动态字体",
+          "发布预告",
+          "Argon"
+        ],
+        "cover_url": "/static/store/covers/26aa7313227929ff.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "gemini-argon-studio",
+        "recommended_model": {
+          "id": "gemini-4-argon",
+          "display_name": "Argon"
+        },
+        "cover_poster_url": "/static/store/covers/26aa7313227929ff.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "argon-generative-art",
+        "display_name": "生成艺术海报",
+        "description": "分享一个主题、笔记或一小份数据集。获得一件以代码生成的原创随机种子艺术作品，可导出为海报、用作实时背景，或通过更换种子生成变体。",
+        "category": "AI 模型工作室",
+        "business_scenario": "interactive-games",
+        "marketing_line": "你的主题或数据，由一个可重复的算法绘制。",
+        "search_terms": [
+          "生成艺术",
+          "数据艺术",
+          "算法海报",
+          "创意编程",
+          "实时背景",
+          "Argon"
+        ],
+        "cover_url": "/static/store/covers/a9a4b3018727492b.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "gemini-argon-studio",
+        "recommended_model": {
+          "id": "gemini-4-argon",
+          "display_name": "Argon"
+        },
+        "cover_poster_url": "/static/store/covers/a9a4b3018727492b.webp"
+      },
+      {
+        "kind": "skill",
+        "name": "gemini-argon-studio",
+        "display_name": "Argon Studio",
+        "description": "给 Agent 一个问题、一张照片、一张草图或一段简短需求。在 Argon 上，它会推理空间与物理原理，并用代码写出完整成果：展示事物运作方式的 3D 模拟、由你的照片生成的 3D 世界、可玩的游戏、3D 网页、文字动效循环或生成艺术。",
+        "category": "AI 模型工作室",
+        "business_scenario": "interactive-games",
+        "marketing_line": "问个问题或拍张照，得到一个会动的 3D 世界。",
+        "search_terms": [
+          "Argon",
+          "运作原理 3D",
+          "照片转 3D",
+          "草图转游戏",
+          "3D 网页",
+          "动态排版",
+          "生成艺术"
+        ],
+        "cover_url": "/static/store/covers/0d4496aa6a297c9c.webp",
+        "cover_video_url": "",
+        "marketing_slots": [],
+        "installed": true,
+        "enabled": true,
+        "activation_skill": "gemini-argon-studio",
+        "recommended_model": {
+          "id": "gemini-4-argon",
+          "display_name": "Argon"
+        },
+        "cover_poster_url": "/static/store/covers/0d4496aa6a297c9c.webp"
+      },
+      {
+        "kind": "app",
+        "name": "baidupan",
+        "display_name": "百度网盘",
+        "description": "连接百度网盘，支持列目录、搜索、读文件、创建文件夹、移动复制与分享链接。",
+        "category": "效率工具",
+        "marketing_line": "连接百度网盘，支持列目录、搜索、读文件、创建文件夹、移动复制与分享链接。",
+        "search_terms": [
+          "百度网盘",
+          "列目录、搜索、读文件元数据，创建文件夹、移动复制重命名与分享。"
+        ],
+        "icon_url": "/static/store/covers/0d23f9fbbbd51441.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/4e8f5a8a064fe799.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/6058cf62f684292e.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/6058cf62f684292e.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "baidupan-files"
+      },
+      {
+        "kind": "app",
+        "name": "descript",
+        "display_name": "Descript",
+        "description": "连接 Descript 账号，支持读取项目与任务、导入媒体、触发 AI 编辑与导出转写。",
+        "category": "效率工具",
+        "marketing_line": "连接 Descript 账号，支持读取项目与任务、导入媒体、触发 AI 编辑与导出转写。",
+        "search_terms": [
+          "descript-deliver",
+          "导入媒体并触发 Underlord AI 编辑任务。",
+          "descript-export",
+          "发布项目并导出 transcript 文本。",
+          "descript-gather",
+          "只读：列 Descript 项目 / job / 已发布产物。"
+        ],
+        "icon_url": "/static/store/covers/817f96e77badb7ce.webp",
+        "marketing_slots": [
+          {
+            "position": 1,
+            "media_type": "image",
+            "url": "/static/store/covers/6e16f2f87d8752d3.webp"
+          },
+          {
+            "position": 2,
+            "media_type": "image",
+            "url": "/static/store/covers/84582d82cdccc6c1.webp"
+          },
+          {
+            "position": 3,
+            "media_type": "video",
+            "url": "",
+            "poster_url": "/static/store/covers/84582d82cdccc6c1.webp"
+          }
+        ],
+        "installed": false,
+        "enabled": false,
+        "install_mode": "user",
+        "activation_skill": "descript-deliver"
+      }
+    ],
+    "featured": [
+      {
+        "kind": "skill",
+        "name": "trending-recast-gallery"
+      },
+      {
+        "kind": "skill",
+        "name": "ai-influencer-studio"
+      },
+      {
+        "kind": "skill",
+        "name": "gemini-argon-studio"
+      },
+      {
+        "kind": "skill",
+        "name": "fish-audio-lab"
+      },
+      {
+        "kind": "skill",
+        "name": "primordia-creator-skills"
+      },
+      {
+        "kind": "skill",
+        "name": "social-media-content-studio"
+      },
+      {
+        "kind": "skill",
+        "name": "opus-motion-studio"
+      },
+      {
+        "kind": "skill",
+        "name": "ecommerce-studio"
+      },
+      {
+        "kind": "skill",
+        "name": "digital-human-studio"
+      },
+      {
+        "kind": "skill",
+        "name": "3d-studio-v2"
+      },
+      {
+        "kind": "app",
+        "name": "motion-library"
+      },
+      {
+        "kind": "skill",
+        "name": "depth-video-studio"
+      },
+      {
+        "kind": "skill",
+        "name": "3d-studio"
+      },
+      {
+        "kind": "app",
+        "name": "casting-room"
+      }
+    ],
+    "categories": [
+      {
+        "id": "brand-design",
+        "label": "品牌设计"
+      },
+      {
+        "id": "film-video",
+        "label": "影视创意"
+      },
+      {
+        "id": "ecommerce-advertising",
+        "label": "电商广告"
+      },
+      {
+        "id": "interactive-games",
+        "label": "互动游戏"
+      },
+      {
+        "id": "social-media-content",
+        "label": "社媒内容"
+      }
+    ],
+    "trending_use_cases": [
+      {
+        "id": "astra-whitebox",
+        "title": "Astra · 白模预演",
+        "prompt": "{{skill:whitebox-to-film:白模视频预演}} 请根据我的画面创意，先生成一段可播放的 3D 白模视频预演",
+        "context": "Astra Studio",
+        "item": {
+          "kind": "skill",
+          "name": "astra-studio"
+        }
+      },
+      {
+        "id": "whitebox-film-plan",
+        "title": "白模转电影｜从画面创意生成视频预演",
+        "prompt": "做一个人在暴雨中的停车楼被追赶，最后跃上开动的公交车，12 秒一镜到底；先生成 3D 白模预演，确认空间、动作、运镜、转场和节奏，再整理成电影化视频生成方案",
+        "context": "白模视频预演",
+        "item": {
+          "kind": "skill",
+          "name": "whitebox-to-film"
+        }
+      },
+      {
+        "id": "scene-director-product-photo",
+        "title": "产品图建模｜一张商品图还原 3D 模型",
+        "prompt": "基于我上传的这张产品图还原一个 3D 产品模型，保持真实比例、结构、材质和关键细节，做成可以在浏览器中旋转预览的 3D 场景",
+        "context": "图片3D建模",
+        "item": {
+          "kind": "skill",
+          "name": "3d-scene-director"
+        }
+      },
+      {
+        "id": "motion-library-brand-intro",
+        "title": "品牌设计｜做一段开场动效",
+        "prompt": "按这个气质，推荐一段适合品牌开场的动效",
+        "context": "动效设计",
+        "item": {
+          "kind": "app",
+          "name": "motion-library"
+        }
+      },
+      {
+        "id": "design-room-new-product",
+        "title": "电商新品｜从一张包装图出整套上架图",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 读取这份飞书会议纪要，提取已经确认的目标、受众和视觉约束，再用这张商品包装图出一套可直接上架的静帧",
+        "context": "电商素材生成",
+        "item": {
+          "kind": "app",
+          "name": "design-room"
+        }
+      },
+      {
+        "id": "casting-character-assets",
+        "title": "影视创作｜一键整理人物妆造",
+        "prompt": "读取飞书中关于人物的讨论纪要，提取人物小传、外形和表演约束，整理一套完整的人物妆造资产",
+        "context": "人物妆造",
+        "item": {
+          "kind": "app",
+          "name": "casting-room"
+        }
+      },
+      {
+        "id": "previs-script-breakdown",
+        "title": "影视前期｜把剧本拆成动态分镜",
+        "prompt": "读取 Notion 中的剧本和角色设定，把它拆成一套可预演的动态分镜，明确镜头、动作、节奏和转场",
+        "context": "影视动态分镜",
+        "item": {
+          "kind": "app",
+          "name": "previs"
+        }
+      },
+      {
+        "id": "lark-meeting-actions",
+        "title": "会议资料｜提取决定与下一步",
+        "prompt": "读取这份飞书会议纪要，提取已经确认的决定、负责人和截止时间，整理成可执行的下一步清单",
+        "context": "飞书 · 会议资料",
+        "item": {
+          "kind": "app",
+          "name": "lark"
+        }
+      }
+    ]
+  }
+}

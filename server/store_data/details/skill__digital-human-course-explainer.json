@@ -1,0 +1,106 @@
+{
+  "kind": "skill",
+  "name": "digital-human-course-explainer",
+  "display_name": "知识科普讲解",
+  "description": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+  "category": "影视创意",
+  "business_scenario": "film-video",
+  "marketing_line": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+  "search_terms": [
+    "知识科普讲解",
+    "基于 brief 和素材制作知识科普类数字人课程",
+    "数字人",
+    "数字人视频"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/static/store/covers/e54530abc0d58782.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "digital-human-course-explainer",
+  "guide": {
+    "summary": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+    "scenarios": [
+      "基于 brief 和素材制作知识科普类数字人课程"
+    ],
+    "required_context": [
+      {
+        "title": "Brief",
+        "description": "提供课程主题、目标受众、知识 brief 或参考素材，以及希望观众掌握的要点。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "digital-human-course-explainer-start",
+        "title": "知识科普讲解",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 根据我提供的 brief 或素材，制作一条知识科普类数字人讲解：先梳理核心知识点，再按清晰节奏逐步讲解，用易懂的例子帮助理解，最后总结要点。所有事实以我提供的资料为准。",
+        "description": "围绕“知识科普讲解”这个场景，把用户提供的 brief 或素材整理成结构清晰的数字人课程。",
+        "context": "知识科普讲解"
+      }
+    ],
+    "steps": [
+      {
+        "title": "确认事实与目标",
+        "description": "先确认受众、输入资料和希望观众完成的动作。"
+      },
+      {
+        "title": "生成第一版",
+        "description": "数字人演播厅按同一份 brief 组织脚本、表达和画面。"
+      },
+      {
+        "title": "逐项修改",
+        "description": "只修改需要调整的台词、镜头或 CTA，再继续生成。"
+      }
+    ],
+    "outputs": [
+      "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+      "可继续修改的数字人视频草稿"
+    ],
+    "follow_ups": [
+      "保留同一数字人身份，换一个主题继续制作。",
+      "只修改结尾 CTA，保留前面的脚本和镜头。"
+    ],
+    "boundaries": [
+      "没有确认的事实会保留为待补信息，不会自动编造。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "一个 brief，直接开始",
+    "caption": "从资料和目标出发，数字人演播厅先锁定“知识科普讲解”的表达，再交付可以继续修改的视频草稿。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "知识科普讲解视频预览"
+    },
+    "panels": [
+      {
+        "id": "input",
+        "label": "输出视频 1",
+        "alt": "知识科普讲解输出视频 1",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "result",
+        "label": "输出视频 2",
+        "alt": "知识科普讲解输出视频 2",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "16/9",
+        "is_result": true
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:digital-human-video:digital-human-video}} 根据我提供的 brief 或素材，制作一条知识科普类数字人讲解：先梳理核心知识点，再按清晰节奏逐步讲解，用易懂的例子帮助理解，最后总结要点。所有事实以我提供的资料为准。",
+  "capabilities": [],
+  "connectors": []
+}

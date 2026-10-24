@@ -1,0 +1,106 @@
+{
+  "kind": "skill",
+  "name": "digital-human-product-demo",
+  "display_name": "产品演示",
+  "description": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+  "category": "影视创意",
+  "business_scenario": "film-video",
+  "marketing_line": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+  "search_terms": [
+    "产品演示",
+    "让数字人把产品价值、用法和试用动作讲清楚",
+    "数字人",
+    "数字人视频"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/static/store/covers/1bafa50bc29868ed.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "digital-human-product-demo",
+  "guide": {
+    "summary": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+    "scenarios": [
+      "让数字人把产品价值、用法和试用动作讲清楚"
+    ],
+    "required_context": [
+      {
+        "title": "Brief",
+        "description": "提供产品事实、目标用户、三个可验证卖点和试用 CTA。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "digital-human-product-demo-start",
+        "title": "产品演示",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 做一条数字人产品演示：先讲用户问题，再讲三个有事实依据的核心卖点，最后说明如何开始试用，所有说法都以我提供的资料为准。",
+        "description": "围绕“产品演示”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+        "context": "产品演示"
+      }
+    ],
+    "steps": [
+      {
+        "title": "确认事实与目标",
+        "description": "先确认受众、输入资料和希望观众完成的动作。"
+      },
+      {
+        "title": "生成第一版",
+        "description": "数字人演播厅按同一份 brief 组织脚本、表达和画面。"
+      },
+      {
+        "title": "逐项修改",
+        "description": "只修改需要调整的台词、镜头或 CTA，再继续生成。"
+      }
+    ],
+    "outputs": [
+      "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+      "可继续修改的数字人视频草稿"
+    ],
+    "follow_ups": [
+      "保留同一数字人身份，换一个主题继续制作。",
+      "只修改结尾 CTA，保留前面的脚本和镜头。"
+    ],
+    "boundaries": [
+      "没有确认的事实会保留为待补信息，不会自动编造。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "一个 brief，直接开始",
+    "caption": "从资料和目标出发，数字人演播厅先锁定“产品演示”的表达，再交付可以继续修改的视频草稿。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "最终视频"
+    },
+    "panels": [
+      {
+        "id": "input",
+        "label": "输入图",
+        "alt": "输入图",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/17db151bec365c5b.webp"
+        },
+        "aspect": "1/1"
+      },
+      {
+        "id": "result",
+        "label": "最终视频",
+        "alt": "最终视频",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "16/9",
+        "is_result": true
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:digital-human-video:digital-human-video}} 做一条数字人产品演示：先讲用户问题，再讲三个有事实依据的核心卖点，最后说明如何开始试用，所有说法都以我提供的资料为准。",
+  "capabilities": [],
+  "connectors": []
+}

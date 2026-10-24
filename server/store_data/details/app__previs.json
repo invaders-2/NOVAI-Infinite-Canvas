@@ -1,0 +1,95 @@
+{
+  "kind": "app",
+  "name": "previs",
+  "display_name": "分镜预演",
+  "description": "服务于电影、短片、广告及其他视频内容前期，把剧本与参考素材拆成可预演的镜头、动作、节奏和转场方案，先对齐再制作。",
+  "category": "更多应用",
+  "business_scenario": "film-video",
+  "marketing_line": "拍摄前先对齐镜头、动作与节奏，减少返工。",
+  "search_terms": [
+    "影视前期｜把剧本拆成动态分镜",
+    "把这段剧本拆成一套可预演的动态分镜，明确镜头、动作、节奏和转场",
+    "镜头设计｜排出可预演时间线",
+    "根据这份脚本和参考素材，规划一条可预演的镜头时间线和画面节奏"
+  ],
+  "icon_url": "/static/store/covers/3f2b27b2c05fd9ab.webp",
+  "cover_url": "/static/store/covers/e6cf1b99f249d8c9.webp",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "previs",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "服务于电影、短片、广告及其他视频内容前期，把剧本与参考素材拆成可预演的镜头、动作、节奏和转场方案，先对齐再制作。",
+    "scenarios": [
+      "电影与广告前期",
+      "视频分镜预演",
+      "镜头节奏与转场"
+    ],
+    "required_context": [
+      {
+        "title": "完整剧本或场景文本",
+        "description": "提供要被拆解的故事、对白和动作；没有剧本时，Agent 不会替你编造生产前提。"
+      },
+      {
+        "title": "节奏与交付约束",
+        "description": "说明目标时长、镜头数量或平台要求，以及最需要确认的节奏问题。"
+      },
+      {
+        "title": "镜头与视觉参考",
+        "description": "可提供参考图、视频或既有分镜板，用来约束镜头语言，而不是直接当作可执行指令。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "影视前期｜把剧本拆成动态分镜",
+        "prompt": "把这段剧本拆成一套可预演的动态分镜，明确镜头、动作、节奏和转场",
+        "description": "将文字脚本转成镜头、动作、节奏和转场明确的预演方案。"
+      },
+      {
+        "title": "镜头设计｜排出可预演时间线",
+        "prompt": "根据这份脚本和参考素材，规划一条可预演的镜头时间线和画面节奏",
+        "description": "根据参考素材规划镜头顺序，并提前发现节奏和叙事上的问题。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "先说清楚故事目标",
+        "description": "提供脚本、场景或想表达的情绪，让 Agent 理解这段内容要传达什么。"
+      },
+      {
+        "title": "补充镜头与平台约束",
+        "description": "加入参考视频、图片、镜头语言或平台限制，明确视觉、时长和画幅边界。"
+      },
+      {
+        "title": "拆解为可预演镜头",
+        "description": "Agent 会按时间线整理景别、机位、运动、动作和转场。"
+      },
+      {
+        "title": "预演并修正节奏",
+        "description": "从整体节奏到单个镜头逐层调整，直到方案可以交给制作执行。"
+      }
+    ],
+    "outputs": [
+      "可编辑的文字镜头设计",
+      "包含景别、时长、机位和运动的时间线",
+      "确认后的 3×3 分镜板与可继续执行的镜头方案"
+    ],
+    "follow_ups": [
+      "只调整某一个镜头的景别、时长或运动。",
+      "为已有分镜板单独生成一个景别变体。",
+      "保留剧本结构，只重排一段镜头的节奏。"
+    ],
+    "boundaries": [
+      "它先做文字镜头设计和节奏预演，不直接生成视频或音频。",
+      "没有剧本或场景文本时，不会凭空编造一个生产前提。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

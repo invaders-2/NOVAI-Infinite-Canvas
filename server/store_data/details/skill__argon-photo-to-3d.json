@@ -1,0 +1,138 @@
+{
+  "kind": "skill",
+  "name": "argon-photo-to-3d",
+  "display_name": "照片转 3D 世界",
+  "description": "拍几张你的书桌、房间、店铺或建筑。得到一个可以环绕观看、走进去逛的 3D 场景，还能加玩法，比如桌面小赛车或找东西小游戏。",
+  "category": "AI 模型工作室",
+  "business_scenario": "interactive-games",
+  "marketing_line": "拍下房间，走进去逛。",
+  "search_terms": [
+    "照片转 3D",
+    "3D 场景",
+    "房间转 3D",
+    "立体场景",
+    "桌面赛车游戏",
+    "Argon"
+  ],
+  "cover_url": "/static/store/covers/6b7bdc6c930f33b7.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "gemini-argon-studio",
+  "recommended_model": {
+    "id": "gemini-4-argon",
+    "display_name": "Argon"
+  },
+  "guide": {
+    "summary": "Agent 会读取你的照片，列出它看到的内容及其位置，并用代码把这个地方重建为风格化的 3D 场景。在加入任何游戏模式之前，你先检查布局。",
+    "scenarios": [
+      "把你的桌面或房间做成可以分享的 3D 立体场景",
+      "在真实场所中制作一个小游戏"
+    ],
+    "required_context": [
+      {
+        "title": "哪些照片？",
+        "description": "同一地点或物体的一到四张照片。不同角度能让我少做猜测。"
+      },
+      {
+        "title": "它应该做什么？",
+        "description": "默认是环绕视角。可以加入漫步、迷你赛车、物品寻找，或白天到夜晚的切换。"
+      },
+      {
+        "title": "需要什么风格？",
+        "description": "默认是简洁的低多边形立体场景。如果你想要玩具感、写实或像素风，请告诉我。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "photo-to-3d-world-desk-racer",
+        "title": "桌面 | 在上面竞速",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `photo-to-3d-world` 玩法。这是我桌面的一张照片。请列出你看到的内容及其位置，先制作带轨道控制的 3D 桌面，然后在桌面上方的赛道中加入一辆小赛车和一个计圈计时器。",
+        "description": "一辆小车绕过你真实的杯子、穿过台灯，在你的真实桌面上飞驰。"
+      },
+      {
+        "id": "photo-to-3d-world-room",
+        "title": "房间 | 走进去逛逛",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `photo-to-3d-world` 玩法。这是我房间的几张照片。请列出你看到的内容及其位置，先将其制作为带轨道控制的低多边形立体场景，然后加入漫步模式和白天到夜晚的灯光切换。",
+        "description": "你的房间变成一个可以环绕走动的温馨 3D 立体场景。"
+      },
+      {
+        "id": "photo-to-3d-world-landmark",
+        "title": "建筑 | 把它做成模型",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `photo-to-3d-world` 玩法。这是一栋建筑的照片。请先将其重建为带轨道控制的风格化 3D 模型，不要包含标识或招牌，然后隐藏五个小物品用于寻找，并附带计数器。",
+        "description": "一个店面或建筑，做成带有隐藏物品寻找的 3D 模型。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "读取照片",
+        "description": "我会列出我看到的内容、它的位置，以及我不得不猜测的部分。"
+      },
+      {
+        "title": "搭建场景",
+        "description": "我会用轨道控制搭建静态 3D 场景，并与你的照片进行对照。"
+      },
+      {
+        "title": "加入游戏模式",
+        "description": "我会加入步行控制、赛车、寻找或灯光开关，并附带重置按钮。"
+      }
+    ],
+    "outputs": [
+      "一份所见内容与猜测内容的清单",
+      "一个可探索的 HTML 文件 3D 场景",
+      "渲染工具支持时，一段短小的环绕飞行视频"
+    ],
+    "follow_ups": [
+      "在不改变布局的情况下切换风格。",
+      "再加入一种游戏模式。",
+      "制作一段用于发布的环绕飞行视频。"
+    ],
+    "boundaries": [
+      "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。",
+      "在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。",
+      "照片中的人会变成简单的人形，绝不会是可辨认的真实形象。",
+      "我会省去屏幕、文件和地址等私人细节，并跳过标识和招牌。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Argon Studio",
+    "caption": "拍下房间，走进去逛。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/6b7bdc6c930f33b7.webp"
+      },
+      "alt": "照片转 3D 世界"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 4
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "mode",
+        "label": "它应该做什么？",
+        "placeholder": "默认是环绕视角。可以加入漫步、迷你赛车、物品寻找，或白天到夜晚的切换。",
+        "max_length": 120
+      },
+      {
+        "id": "style",
+        "label": "需要什么风格？",
+        "placeholder": "默认是简洁的低多边形立体场景。如果你想要玩具感、写实或像素风，请告诉我。",
+        "max_length": 120
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `photo-to-3d-world` 玩法。我会分享一个地方的照片。请列出你看到的内容及其位置，先用轨道控制制作 3D 场景，然后再问我要加入哪种游戏模式。",
+  "capabilities": [],
+  "connectors": []
+}

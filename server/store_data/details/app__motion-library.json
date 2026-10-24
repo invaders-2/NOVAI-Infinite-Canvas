@@ -1,0 +1,173 @@
+{
+  "kind": "app",
+  "name": "motion-library",
+  "display_name": "动效工作室",
+  "description": "给品牌、产品或发布会做一段会呼吸的开场——选好节奏，立刻看到它动起来，再换成你的文案和颜色。",
+  "category": "更多应用",
+  "business_scenario": "brand-design",
+  "marketing_line": "让标题走进画面，让图形替你把故事讲完。",
+  "search_terms": [
+    "animation",
+    "motion",
+    "title",
+    "brand intro",
+    "3D",
+    "generative art",
+    "hardware",
+    "动效",
+    "数字艺术",
+    "开场",
+    "MG"
+  ],
+  "icon_url": "/static/store/covers/907856cefec91641.webp",
+  "cover_url": "/static/store/covers/d8a7238b05ec171b.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "motion-library",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "给品牌或产品做一段会呼吸的开场。选好节奏，立刻看到它动起来，再换成你的文案和颜色。",
+    "scenarios": [
+      "品牌标题入场",
+      "产品图形叙事",
+      "发布会动态预告"
+    ],
+    "required_context": [
+      {
+        "title": "要动起来的那句话",
+        "description": "品牌名、口号，或你想推到画面前的产品卖点。"
+      },
+      {
+        "title": "想要的感觉",
+        "description": "克制精准、有冲劲，还是更接近发布片。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "做一个标题入场",
+        "prompt": "帮我做一个品牌标题入场动效",
+        "description": "让品牌名或口号带着节奏走进画面。"
+      },
+      {
+        "title": "找一段对味的开场",
+        "prompt": "按这个气质，推荐一段适合品牌开场的动效",
+        "description": "说清气质，Agent 帮你找到最像你的那段动效。"
+      },
+      {
+        "title": "做发布会或产品演示",
+        "prompt": "我想做一段产品发布或 3D 展示动效",
+        "description": "硬件、SaaS、3D 网站——不只是标题，是一整段动态叙事。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "说出要动的内容",
+        "description": "标题、口号、产品，还是一段图形故事。"
+      },
+      {
+        "title": "找对节奏",
+        "description": "在预览里感受入场、停顿和收束，直到某一款像你。"
+      },
+      {
+        "title": "看它真正动起来",
+        "description": "马上播放，确认这是不是你要的开场。"
+      },
+      {
+        "title": "改成你的版本",
+        "description": "换上文案、颜色和内容，直到刚好。"
+      }
+    ],
+    "outputs": [
+      "马上能播的开场动效",
+      "同一轮里改到满意的版本"
+    ],
+    "follow_ups": [
+      "把标题换成我的品牌名和口号。",
+      "换成我的产品颜色。",
+      "入场再利落一点，收束再稳一点。"
+    ],
+    "boundaries": [
+      "选好一款动效后才会开始制作。",
+      "现在交付的是可播放的动效，还不支持导出成视频。"
+    ]
+  },
+  "library": {
+    "families": [
+      {
+        "id": "mask-reveals",
+        "label": "遮罩揭示"
+      },
+      {
+        "id": "elastic-deformation",
+        "label": "弹性形变"
+      },
+      {
+        "id": "material-rendering",
+        "label": "材质成像"
+      },
+      {
+        "id": "layout-choreography",
+        "label": "版式编舞"
+      },
+      {
+        "id": "spatial-mechanics",
+        "label": "空间机械"
+      },
+      {
+        "id": "scene-narratives",
+        "label": "场景叙事"
+      }
+    ],
+    "featured_template_ids": [
+      "T01",
+      "T11",
+      "T24",
+      "T30",
+      "G01",
+      "G16"
+    ],
+    "templates": {
+      "T01": {
+        "name": "行遮罩追赶",
+        "description": "字面先移动，遮罩随后追上；入场余速在基线处消散。",
+        "family": "mask-reveals"
+      },
+      "T11": {
+        "name": "超尺度冲入",
+        "description": "整词从画面外冲入，先缩过终态，再发生两次不等幅回弹。",
+        "family": "elastic-deformation"
+      },
+      "T24": {
+        "name": "液面显影",
+        "description": "可控的波面由下向上穿过字形，局部浪尖先露出笔画，最后平稳落版。",
+        "family": "material-rendering"
+      },
+      "T30": {
+        "name": "标题段落",
+        "description": "小标题先定位，主标题穿过遮罩进入；副标题在主动作末端出现，末尾统一退出。",
+        "family": "layout-choreography"
+      },
+      "G01": {
+        "name": "联动机芯",
+        "description": "钢球逐站触发推杆，三个齿轮反向咬合后锁定。",
+        "family": "spatial-mechanics"
+      },
+      "G16": {
+        "name": "数据换一种读法",
+        "description": "六列数据逐个长出，柱体收束成节点，折线把相同数据连起来。",
+        "family": "scene-narratives"
+      }
+    },
+    "label": "先感受这些节奏",
+    "description": "几种完全不同的入场方式，帮你判断哪一种更像你的品牌。"
+  },
+  "capabilities": [],
+  "connectors": []
+}

@@ -1,0 +1,144 @@
+{
+  "kind": "skill",
+  "name": "argon-kinetic-type",
+  "display_name": "动态文字循环",
+  "description": "分享一条信息。获得一段最长 5 秒的动态排版循环，文字会在你确认的节拍网格上移动，且在编写任何代码之前你都可以确认。",
+  "category": "AI 模型工作室",
+  "business_scenario": "interactive-games",
+  "marketing_line": "一行文字，伴随清晰的节奏动起来。",
+  "search_terms": [
+    "动态排版",
+    "文字动画",
+    "文字循环",
+    "动态字体",
+    "发布预告",
+    "Argon"
+  ],
+  "cover_url": "/static/store/covers/26aa7313227929ff.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "gemini-argon-studio",
+  "recommended_model": {
+    "id": "gemini-4-argon",
+    "display_name": "Argon"
+  },
+  "guide": {
+    "summary": "你信息中的文字会按照固定节拍切换，并循环回到开头。你先确认节拍网格，然后 Agent 用代码编写循环。",
+    "scenarios": [
+      "发布预告或片头卡片",
+      "由一句话制作的可循环社交帖子"
+    ],
+    "required_context": [
+      {
+        "title": "信息内容是什么？",
+        "description": "一行文字、一个名字或一个简短短语。"
+      },
+      {
+        "title": "哪些文字，按什么顺序？",
+        "description": "可选。如果你不提供，我会提出 8-12 个状态。"
+      },
+      {
+        "title": "外观与尺寸？",
+        "description": "默认黑白配一种强调色，并使用方形画框。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "kinetic-type-loop-launch",
+        "title": "发布文案 | 踩准节拍的文字",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `kinetic-type-loop` 玩法。将这句发布文案转为一个最长 5 秒的动态文字循环。先给我看按顺序排列的文字和节拍网格，然后制作，并为每个节拍展示一张静帧。",
+        "description": "将发布短语转为一个 5 秒循环。"
+      },
+      {
+        "id": "kinetic-type-loop-vertical",
+        "title": "竖版 | 为手机屏幕设计",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `kinetic-type-loop` 玩法。用这条信息制作一个 9:16 的动态文字循环，最长 5 秒，文字大而易读，并使用一种强调色。在编写代码之前，先与我确认网格。",
+        "description": "同样的创意，采用 9:16 比例和更大的字号。"
+      },
+      {
+        "id": "kinetic-type-loop-export",
+        "title": "导出 | 将循环导出为视频",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `kinetic-type-loop` 玩法。将我确认的循环渲染为最长 5 秒的视频。检查时长、帧数和循环点，如果渲染工具不可用，请告诉我。",
+        "description": "在工具支持的情况下，将已确认的循环渲染为视频文件。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "确认网格",
+        "description": "文字按顺序排列，每个节拍变化一次。"
+      },
+      {
+        "title": "查看静帧",
+        "description": "每个节拍一张静帧，用于检查时间和可读性。"
+      },
+      {
+        "title": "获得循环",
+        "description": "HTML 循环；渲染工具可用时另附视频。"
+      }
+    ],
+    "outputs": [
+      "无缝的 HTML 文字循环",
+      "节拍静帧的接触表",
+      "在支持渲染时，最长 5 秒的视频文件"
+    ],
+    "follow_ups": [
+      "更换强调色。",
+      "制作竖版版本。",
+      "加入一段经授权的音乐，并裁剪到循环长度。"
+    ],
+    "boundaries": [
+      "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。",
+      "在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。",
+      "循环最长 5 秒，展示一个连续的主体，而不是多场景剪辑。",
+      "音乐会被裁剪至循环长度；不会对其进行分析或节拍匹配。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Argon Studio",
+    "caption": "一行文字，伴随清晰的节奏动起来。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/26aa7313227929ff.webp"
+      },
+      "alt": "动态文字循环"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 0
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "message",
+        "label": "信息内容是什么？",
+        "placeholder": "一行文字、一个名字或一个简短短语。",
+        "max_length": 120
+      },
+      {
+        "id": "words",
+        "label": "哪些文字，按什么顺序？",
+        "placeholder": "可选。如果你不提供，我会提出 8-12 个状态。",
+        "max_length": 200
+      },
+      {
+        "id": "look",
+        "label": "外观与尺寸？",
+        "placeholder": "默认黑白配一种强调色，并使用方形画框。",
+        "max_length": 120
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `kinetic-type-loop` 玩法。我有一条信息。请按顺序提出文字内容和一个节拍网格，等我确认后，再制作一段最长 5 秒的无缝循环。",
+  "capabilities": [],
+  "connectors": []
+}

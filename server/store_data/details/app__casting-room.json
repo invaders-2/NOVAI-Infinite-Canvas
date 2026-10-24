@@ -1,0 +1,150 @@
+{
+  "kind": "app",
+  "name": "casting-room",
+  "display_name": "角色工坊",
+  "description": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。",
+  "category": "更多应用",
+  "business_scenario": "film-video",
+  "marketing_line": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。",
+  "search_terms": [
+    "影视创作｜一键整理人物妆造",
+    "从这段人物小传和角色设定出发，整理角色外形、服装妆容、表情和镜头参考，形成可复用的演员资产",
+    "视频创作｜统一角色造型与表演",
+    "为这个人物整理统一的造型、妆容、表情和镜头设定，确保后续视频内容保持一致"
+  ],
+  "icon_url": "/static/store/covers/c1bc028a4c83e929.webp",
+  "cover_url": "/static/store/covers/408c77d518d5f4d7.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "casting-room",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。",
+    "scenarios": [
+      "人物小传与角色设定",
+      "一键妆造与造型",
+      "影视内容中的人物一致性"
+    ],
+    "required_context": [
+      {
+        "title": "明确的角色与内容场景",
+        "description": "说明要建立谁的资产，以及这些资产会服务什么样的内容或镜头。"
+      },
+      {
+        "title": "需要生成的妆造模块",
+        "description": "可以指定人物小传、选角照、服装、妆容、声音或表情，也可以最后保存为一个主体。"
+      },
+      {
+        "title": "身份与表演参考",
+        "description": "提供已确认的人物参考、服装、声音或表情方向，并区分哪些特征不能改变。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "影视创作｜一键整理人物妆造",
+        "prompt": "从这段人物小传和角色设定出发，整理角色外形、服装妆容、表情和镜头参考，形成可复用的演员资产",
+        "description": "把人物小传、外观和表演方向整理成一套可以持续使用的演员设定。"
+      },
+      {
+        "title": "视频创作｜统一角色造型与表演",
+        "prompt": "为这个人物整理统一的造型、妆容、表情和镜头设定，确保后续视频内容保持一致",
+        "description": "为角色建立可复用的视觉约束，减少不同素材之间的漂移。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "描述人物与视频场景",
+        "description": "说明人物是谁、服务哪类影视或视频内容，以及需要在哪些镜头中出现。"
+      },
+      {
+        "title": "加入外观与妆造参考",
+        "description": "提供人物参考、服装、妆容、表情、姿态和镜头偏好，建立角色边界。"
+      },
+      {
+        "title": "整理演员资产",
+        "description": "Agent 会归纳外观、妆造、表情、动作和镜头规则，形成可复用的角色档案。"
+      },
+      {
+        "title": "在新内容中复用",
+        "description": "将角色带入新的脚本或画面，并针对具体镜头做局部调整。"
+      }
+    ],
+    "outputs": [
+      "可独立审阅的人物、妆造、声音和表情资产",
+      "角色身份、造型与表演的一致性约束",
+      "确认后可在后续创作中复用的演员主体"
+    ],
+    "follow_ups": [
+      "只补齐演员资产中的一个模块。",
+      "为同一个演员增加一组新的妆造或表情。",
+      "将已确认主体带入下一段脚本或镜头。"
+    ],
+    "boundaries": [
+      "它建立演员资产，不负责开放式角色创意、身体动作或多演员调度。",
+      "只有明确选择主体库时，才会写入可复用主体。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "能力预览",
+    "caption": "先出人物图，再出声音，最后才出对应的试镜视频。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "角色工坊案例预览"
+    },
+    "panels": [
+      {
+        "id": "portrait",
+        "label": "人物",
+        "alt": "人物定妆照",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/f4b249a70006529e.webp"
+        },
+        "aspect": "2/3"
+      },
+      {
+        "id": "look",
+        "label": "妆造",
+        "alt": "同一人物的妆造板",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/eeadd2cbfa72e12f.webp"
+        },
+        "aspect": "3/2"
+      },
+      {
+        "id": "voice",
+        "label": "声音",
+        "alt": "声音",
+        "media": {
+          "kind": "audio",
+          "src": ""
+        }
+      },
+      {
+        "id": "fitting",
+        "label": "试镜",
+        "alt": "同一人物的试镜视频",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "16/9",
+        "is_result": true
+      }
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

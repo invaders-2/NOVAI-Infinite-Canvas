@@ -1,0 +1,117 @@
+{
+  "kind": "skill",
+  "name": "opus55-motion-icon",
+  "display_name": "Icon动画制作",
+  "description": "给我一个主体和一句清楚的运动想法，先得到在小尺寸也看得清的循环预览，再导出有边界的视频。",
+  "category": "影视创意",
+  "business_scenario": "film-video",
+  "marketing_line": "一个主体、一个清楚动作、一段干净循环。",
+  "search_terms": [
+    "Icon动画制作",
+    "Opus 5.5",
+    "动画图标",
+    "循环图标视频",
+    "产品动效"
+  ],
+  "cover_url": "/static/store/covers/23528d3c0bb27d9b.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "opus55-motion-icon",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5"
+  },
+  "guide": {
+    "summary": "给我一个主体和一句清楚的运动想法，先得到在小尺寸也看得清的循环预览，再导出有边界的视频。",
+    "scenarios": [
+      "Icon动画制作",
+      "品牌标志循环",
+      "UI 或数据图形"
+    ],
+    "required_context": [
+      {
+        "title": "主体和来源",
+        "description": "提供提示词、已确认的静帧或素材，并说明图标会出现在哪里。"
+      },
+      {
+        "title": "动作和循环",
+        "description": "说明一个物理动作、配色、背景、时长和 FPS；循环不能超过 5 秒。"
+      },
+      {
+        "title": "交付标准",
+        "description": "明确尺寸、版权和让图标可以使用的那一项视觉检查。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "icon-from-prompt",
+        "title": "Icon动画制作｜让一个想法看得清",
+        "prompt": "{{skill:opus55-motion-icon:opus55-motion-icon}} 把这个主体做成一个小尺寸也清楚的动效图标。只保留一个物理动作，先返回预览静帧，再导出有边界的视频。",
+        "description": "把一个主体做成紧凑的动效标记，不额外加入第二个场景。",
+        "context": "Icon动画制作"
+      },
+      {
+        "id": "brand-mark-loop",
+        "title": "品牌标志｜让静帧循环起来",
+        "prompt": "{{skill:opus55-motion-icon:opus55-motion-icon}} 给这份已确认的标志加入克制的动作，让它在小尺寸下仍清楚，并干净地回到开头姿态。导出前说明已经验证的内容。",
+        "description": "给已确认的标志或静帧加入克制的动作，并回到开头姿态。",
+        "context": "Icon动画制作"
+      },
+      {
+        "id": "data-ui-motif",
+        "title": "UI 或数据图形｜解释一次变化",
+        "prompt": "{{skill:opus55-motion-icon:opus55-motion-icon}} 让这个 UI 或数据图形在不超过 5 秒的确定性循环里解释一次状态变化。保持主体居中清楚，不加入指针覆盖层。",
+        "description": "用一个 UI 或数据符号表达一次状态变化，不加入鼠标指针或无关界面。",
+        "context": "Icon动画制作"
+      }
+    ],
+    "steps": [
+      {
+        "title": "锁定主体",
+        "description": "确认来源、版权、画布、配色和一句动作描述。"
+      },
+      {
+        "title": "制作循环",
+        "description": "让每一帧都由时间计算得到，保持主体在画面内，并回到开头姿态。"
+      },
+      {
+        "title": "检查导出",
+        "description": "检查开头、中段、结尾、帧数和解码后的视频，再称为已交付。"
+      }
+    ],
+    "outputs": [
+      "一份紧凑的动效 brief",
+      "可查看的 HTML 预览",
+      "带验证状态的有边界视频"
+    ],
+    "follow_ups": [
+      "保留动作，换一种强调色",
+      "用同一个主体适配另一个图标尺寸",
+      "保持轮廓不变，让循环更平静"
+    ],
+    "boundaries": [
+      "这里制作的是一个动效图标，不是完整场景或游戏。",
+      "预览、渲染计划和已验证视频是不同状态。",
+      "输出最长 5 秒，并使用已经确认的素材和版权信息。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Icon 动画",
+    "caption": "一个主体、一个清楚动作、一段干净循环。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/23528d3c0bb27d9b.webp"
+      },
+      "alt": "Icon 动画封面"
+    },
+    "panels": []
+  },
+  "starter_prompt": "{{skill:opus55-motion-icon:opus55-motion-icon}} 我有一个主体和明确的运动想法。请制作一个小尺寸仍清楚的确定性图标循环，先给我预览状态，再导出有明确时长边界的视频。",
+  "capabilities": [],
+  "connectors": []
+}

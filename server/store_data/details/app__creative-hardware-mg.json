@@ -1,0 +1,189 @@
+{
+  "kind": "app",
+  "name": "creative-hardware-mg",
+  "display_name": "硬件发布 MG 库",
+  "description": "浏览 8 款硬件发布 MG 模板，确认后在原对话中生成和修改可预览的 HTML。",
+  "category": "更多应用",
+  "business_scenario": "brand-design",
+  "marketing_line": "挑选并确认模板，在对话中持续修改 HTML。",
+  "search_terms": [
+    "Hardware Launch MG",
+    "HTML",
+    "interactive",
+    "motion",
+    "template",
+    "硬件发布 MG 库",
+    "硬件发布 MG",
+    "模板"
+  ],
+  "icon_url": "/static/store/covers/b38e370b0894e743.webp",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "creative-hardware-mg",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "浏览 8 款硬件发布 MG 模板；只有在选库中确认后才开始生成。",
+    "scenarios": [
+      "硬件发布 MG 模板选择",
+      "Agent 推荐并由用户确认",
+      "HTML 生成与改稿"
+    ],
+    "required_context": [
+      {
+        "title": "想做什么",
+        "description": "描述硬件发布 MG 的内容和用途。"
+      },
+      {
+        "title": "文案与视觉方向",
+        "description": "提供文字、颜色、氛围和交互要求。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "选择硬件发布 MG 模板",
+        "prompt": "打开硬件发布 MG 库，我想挑一个模板",
+        "description": "打开库，预览全部 8 款模板，确认后再生成。"
+      },
+      {
+        "title": "请 Agent 推荐",
+        "prompt": "推荐一个硬件发布 MG 模板，让我确认后再生成 HTML",
+        "description": "让 Agent 高亮合适模板，同时保留完整模板库供浏览。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "打开模板库",
+        "description": "Agent 只打开硬件发布 MG 库的选择面板。"
+      },
+      {
+        "title": "预览并确认",
+        "description": "浏览、调整参数并明确采用一个模板。"
+      },
+      {
+        "title": "查看 HTML",
+        "description": "Agent 根据确认的模板生成可播放 HTML。"
+      },
+      {
+        "title": "对话改稿",
+        "description": "继续修改文案、颜色、内容、节奏、动作或交互。"
+      }
+    ],
+    "outputs": [
+      "可预览的独立 HTML",
+      "原对话中保留的改稿版本"
+    ],
+    "follow_ups": [
+      "修改标题和强调色。",
+      "把示例换成我的内容。",
+      "保持布局，调整动作节奏。"
+    ],
+    "boundaries": [
+      "只有确认模板后才开始生成 HTML。",
+      "当前产物是 HTML，暂不包含视频导出。"
+    ]
+  },
+  "library": {
+    "families": [
+      {
+        "id": "product-hero",
+        "label": "产品主视觉"
+      },
+      {
+        "id": "precision-optics",
+        "label": "精密光学"
+      },
+      {
+        "id": "acoustic-products",
+        "label": "声学产品"
+      },
+      {
+        "id": "internal-structure",
+        "label": "内部结构"
+      },
+      {
+        "id": "wearables",
+        "label": "可穿戴设备"
+      },
+      {
+        "id": "connected-accessories",
+        "label": "连接配件"
+      },
+      {
+        "id": "industrial-design",
+        "label": "工业设计"
+      },
+      {
+        "id": "lineup-launch",
+        "label": "系列发布"
+      }
+    ],
+    "featured_template_ids": [
+      "H01",
+      "H02",
+      "H03",
+      "H04",
+      "H05",
+      "H06",
+      "H07",
+      "H08"
+    ],
+    "templates": {
+      "H01": {
+        "name": "精密金属模块",
+        "description": "切角外壳从暗处转入光线；面板分离后露出内部，再合拢定格。",
+        "family": "product-hero",
+        "interaction": "移动指针或拖动，微调观察角度"
+      },
+      "H02": {
+        "name": "光学镜组展开",
+        "description": "镜筒、玻璃与光圈沿真实空间轴线分层，镜头归位后收成完整外观。",
+        "family": "precision-optics",
+        "interaction": "移动指针或拖动，微调观察角度"
+      },
+      "H03": {
+        "name": "耳机与声场",
+        "description": "金属头梁和柔软耳垫先完成外观展示，耳杯展开后出现有节奏的声场环。",
+        "family": "acoustic-products",
+        "interaction": "移动指针或拖动，微调观察角度"
+      },
+      "H04": {
+        "name": "芯片与散热层",
+        "description": "芯片、均热层和散热鳍片垂直分离；路径流点说明层级与气流方向。",
+        "family": "internal-structure",
+        "interaction": "移动指针或拖动，微调观察角度"
+      },
+      "H05": {
+        "name": "腕上感知",
+        "description": "由正面玻璃转到背部传感结构，传感窗口依次点亮，最后回到佩戴形态。",
+        "family": "wearables",
+        "interaction": "移动指针或拖动，微调观察角度"
+      },
+      "H06": {
+        "name": "桌面连接与磁吸",
+        "description": "接口细节先被灯光带出，小型扩展件靠近后准确吸附，线缆保持自然弧度。",
+        "family": "connected-accessories",
+        "interaction": "移动指针或拖动，微调观察角度"
+      },
+      "H07": {
+        "name": "超薄板件侧影",
+        "description": "从狭窄侧影转出完整平面，玻璃与背板短暂分开，再以轻薄侧面结束。",
+        "family": "industrial-design",
+        "interaction": "移动指针或拖动，微调观察角度"
+      },
+      "H08": {
+        "name": "产品家族编排",
+        "description": "不同体量和轮廓的设备错峰入场，由悬浮队列排成完整系列，再围绕主产品收束。",
+        "family": "lineup-launch",
+        "interaction": "移动指针或拖动，微调观察角度"
+      }
+    }
+  },
+  "capabilities": [],
+  "connectors": []
+}

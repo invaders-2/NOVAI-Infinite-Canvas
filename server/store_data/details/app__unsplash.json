@@ -1,0 +1,27 @@
+{
+  "kind": "app",
+  "name": "unsplash",
+  "display_name": "Unsplash",
+  "description": "搜索 Unsplash 公开图片，读取公开照片详情和作者公开作品。",
+  "category": "更多应用",
+  "marketing_line": "搜索 Unsplash 公开图片，读取公开照片详情和作者公开作品。",
+  "search_terms": [],
+  "icon_url": "/static/store/covers/78b7f3afffc9bddd.webp",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "unsplash",
+  "guide": {
+    "summary": "搜索 Unsplash 公开图片，读取公开照片详情和作者公开作品。",
+    "scenarios": [],
+    "required_context": [],
+    "use_cases": [],
+    "steps": [],
+    "outputs": [],
+    "follow_ups": [],
+    "boundaries": []
+  },
+  "capabilities": [],
+  "connectors": []
+}

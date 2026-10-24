@@ -1,0 +1,116 @@
+{
+  "kind": "skill",
+  "name": "digital-human-social-talking-head",
+  "display_name": "社媒口播",
+  "description": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+  "category": "影视创意",
+  "business_scenario": "film-video",
+  "marketing_line": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+  "search_terms": [
+    "社媒口播",
+    "为短视频平台制作稳定、自然的数字人口播",
+    "数字人",
+    "数字人视频"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/static/store/covers/e1e3b56c817740fc.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "digital-human-social-talking-head",
+  "guide": {
+    "summary": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+    "scenarios": [
+      "为短视频平台制作稳定、自然的数字人口播"
+    ],
+    "required_context": [
+      {
+        "title": "Brief",
+        "description": "提供主题、受众、发布平台，以及希望观众完成的动作。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "digital-human-social-talking-head-start",
+        "title": "社媒口播",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 做一条竖屏社媒口播视频：先用一句清晰的开场钩子抓住观众，保持自然表达，最后落到一个明确的 CTA。",
+        "description": "围绕“社媒口播”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+        "context": "社媒口播"
+      }
+    ],
+    "steps": [
+      {
+        "title": "确认事实与目标",
+        "description": "先确认受众、输入资料和希望观众完成的动作。"
+      },
+      {
+        "title": "生成第一版",
+        "description": "数字人演播厅按同一份 brief 组织脚本、表达和画面。"
+      },
+      {
+        "title": "逐项修改",
+        "description": "只修改需要调整的台词、镜头或 CTA，再继续生成。"
+      }
+    ],
+    "outputs": [
+      "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+      "可继续修改的数字人视频草稿"
+    ],
+    "follow_ups": [
+      "保留同一数字人身份，换一个主题继续制作。",
+      "只修改结尾 CTA，保留前面的脚本和镜头。"
+    ],
+    "boundaries": [
+      "没有确认的事实会保留为待补信息，不会自动编造。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "story",
+    "eyebrow": "一个 brief，直接开始",
+    "caption": "从资料和目标出发，数字人演播厅先锁定“社媒口播”的表达，再交付可以继续修改的视频草稿。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "最终视频"
+    },
+    "panels": [
+      {
+        "id": "input",
+        "label": "输出图片 1",
+        "alt": "输出图片 1",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/f6c6975c31c83c00.webp"
+        },
+        "aspect": "9/16"
+      },
+      {
+        "id": "reference",
+        "label": "输出图片 2",
+        "alt": "输出图片 2",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/8bb18a02ea645df9.webp"
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "result",
+        "label": "最终视频",
+        "alt": "最终视频",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "16/9",
+        "is_result": true
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:digital-human-video:digital-human-video}} 做一条竖屏社媒口播视频：先用一句清晰的开场钩子抓住观众，保持自然表达，最后落到一个明确的 CTA。",
+  "capabilities": [],
+  "connectors": []
+}

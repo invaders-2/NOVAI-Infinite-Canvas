@@ -1,0 +1,84 @@
+{
+  "kind": "skill",
+  "name": "seedance-2-prompt-copilot",
+  "display_name": "Seedance 2 视频提示词助手",
+  "description": "为 Seedance 2 视频整理提示词、分镜与参考素材，并分析和改进失败结果。",
+  "category": "视频",
+  "business_scenario": "film-video",
+  "marketing_line": "把创意转化为可用于正式制作的成果。",
+  "search_terms": [
+    "编写完整的视频 brief",
+    "把这个创意转成 Seedance 2 的镜头、动作和声音提示词",
+    "规划多模态参考素材",
+    "为这些参考图定义角色、场景和动作之间的关系",
+    "修复失败的生成结果",
+    "诊断这次视频生成结果，并给出最小修改方案"
+  ],
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "seedance-2-prompt-copilot",
+  "guide": {
+    "summary": "为 Seedance 2 视频整理提示词、分镜与参考素材，并分析和改进失败结果。",
+    "scenarios": [
+      "创意转视频 brief",
+      "多模态参考规划",
+      "失败结果诊断"
+    ],
+    "required_context": [
+      {
+        "title": "先说明想要的结果",
+        "description": "提供创作目标，以及人物、场景、动作或声音参考。"
+      },
+      {
+        "title": "补充素材与约束",
+        "description": "提供参考文件、目标受众、格式、风格、时长或其他不能被改变的条件。"
+      },
+      {
+        "title": "告诉 Agent 如何取舍",
+        "description": "说明优先级、验收重点，以及哪些内容需要先确认再继续。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "编写完整的视频 brief",
+        "prompt": "把这个创意转成 Seedance 2 的镜头、动作和声音提示词",
+        "description": ""
+      }
+    ],
+    "steps": [
+      {
+        "title": "明确创意和参考素材",
+        "description": "先整理角色、场景、动作、镜头和声音参考，区分事实、风格与待探索部分。"
+      },
+      {
+        "title": "组织镜头与多模态关系",
+        "description": "把素材对应到角色、场景和动作，形成可检查的镜头结构。"
+      },
+      {
+        "title": "输出可执行的提示词",
+        "description": "将创意转成完整视频 brief，并保留运行时需要验证的模型和参数边界。"
+      },
+      {
+        "title": "针对失败结果做最小修订",
+        "description": "从实际结果出发定位问题，不把 prompt 层的建议当成已经提交或生成成功。"
+      }
+    ],
+    "outputs": [
+      "镜头与视听 brief",
+      "参考素材关系整理",
+      "基于结果的最小修订建议"
+    ],
+    "follow_ups": [
+      "编写完整的视频 brief",
+      "规划多模态参考素材",
+      "修复失败的生成结果"
+    ],
+    "boundaries": [
+      "它负责创意结构和提示词质量；实际模型能力、参数、提交和结果由运行时决定。",
+      "不会假设某个模型、时长或参考模式当前一定可用，也不会静默替换模型。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

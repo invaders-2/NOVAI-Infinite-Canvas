@@ -1,0 +1,300 @@
+{
+  "kind": "skill",
+  "name": "opus-motion-studio",
+  "display_name": "Opus 5.5 Studio",
+  "description": "体验用代码生成视频的惊艳和乐趣，再把一个想法带入Icon动画制作、动态文字视频设计、商品视频、知识内容、动态播报或 3D 场景。",
+  "category": "影视创意",
+  "business_scenario": "film-video",
+  "marketing_line": "体验代码生成视频的惊艳和乐趣，用 Opus 5.5 把想法变成可查看的动效。",
+  "search_terms": [
+    "Opus 5.5 Studio",
+    "Icon动画制作",
+    "动态文字视频设计",
+    "YouTube 商品视频",
+    "知识内容",
+    "新闻播报",
+    "3D 场景"
+  ],
+  "cover_url": "/static/store/covers/56852faae34038ad.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "opus-motion-studio",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5"
+  },
+  "guide": {
+    "summary": "体验用代码生成视频的惊艳和乐趣，再把一个想法带入Icon动画制作、动态文字视频设计、商品视频、知识内容、动态播报或 3D 场景。",
+    "scenarios": [
+      "动态文字视频设计",
+      "Icon动画制作",
+      "知识科普讲解",
+      "YouTube 商品视频",
+      "新闻播报",
+      "3D片场 2.0"
+    ],
+    "required_context": [
+      {
+        "title": "准备 brief 和真实素材",
+        "description": "提供准确文案、源视频或世界观规则、真实参考、目标时长/FPS/比例和版权信息。"
+      },
+      {
+        "title": "先选一个结果状态",
+        "description": "明确需要 HTML 预览、EDL/渲染计划还是已验证 MP4。"
+      },
+      {
+        "title": "写下验收标准",
+        "description": "指定让结果可用的画面、交互、字幕、节奏、音频或交接检查。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "beat-morph-video",
+        "title": "动态文字视频设计",
+        "prompt": "{{skill:html-beat-morph-video:html-beat-morph-video}} 把这个主体做成一段连贯的节拍驱动 HTML 循环。写动画前先给出 120 BPM、10 拍的节拍表。",
+        "description": "在确认状态表之后，让一个视觉主体变成短的动态文字视频设计。",
+        "context": "动态文字视频设计"
+      },
+      {
+        "id": "motion-icon",
+        "title": "Icon动画制作",
+        "prompt": "{{skill:opus55-motion-icon:opus55-motion-icon}} 把这个主体做成一个小尺寸也清楚的确定性动效图标。先返回可查看的预览状态，再导出。",
+        "description": "先把一个小的视觉想法做成看得清的循环，再决定是否进入更大的 Opus 玩法。",
+        "context": "Icon动画制作"
+      },
+      {
+        "id": "digital-human-course-explainer-start",
+        "title": "知识科普讲解",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 根据我提供的 brief 或素材，制作一条知识科普类数字人讲解：先梳理核心知识点，再按清晰节奏逐步讲解，用易懂的例子帮助理解，最后总结要点。所有事实以我提供的资料为准。",
+        "description": "围绕“知识科普讲解”这个场景，把用户提供的 brief 或素材整理成结构清晰的数字人课程。",
+        "context": "知识科普讲解"
+      },
+      {
+        "id": "youtube-product-video",
+        "title": "长视频｜深入展示和评测商品",
+        "prompt": "根据这张商品图制作一条 YouTube 长视频。保持事实准确，同时突出关键卖点。先给我创意方向，等脚本和分镜确认后再生成。",
+        "description": "放入一张商品图，制作完整的长视频，讲清痛点和核心卖点，并准备标题、缩略图、描述和字幕。",
+        "context": "YouTube 商品视频"
+      },
+      {
+        "id": "digital-human-market-bulletin-start",
+        "title": "新闻播报",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 根据我提供的来源做一条有时间边界的新闻播报：先说清数据截至时间，区分已确认事实和解读，缺失数据要明确标为待核验。",
+        "description": "围绕“新闻播报”这个场景，把输入事实、数字人表达和最终交付一次整理清楚。",
+        "context": "新闻播报"
+      },
+      {
+        "id": "3d-studio-v2-agent-scene",
+        "title": "用 Agent 创建和编辑 3D 场景",
+        "prompt": "用 Agent 创建和编辑一个 3D 场景。",
+        "description": "让 Agent 创建可编辑的 3D 场景，再通过连续指令调整世界、角色、灯光和运镜。",
+        "context": "3D片场 2.0 · Agent 玩法"
+      }
+    ],
+    "steps": [
+      {
+        "title": "锁定玩法和证据",
+        "description": "先选一个玩法，检查输入与版权，在写代码前完成 brief、节拍表或场景图。"
+      },
+      {
+        "title": "构建确定性预览",
+        "description": "使用固定 FPS 和 seek(t) 或等价的可复现状态，保留准确文案与素材身份。"
+      },
+      {
+        "title": "检查并说明状态",
+        "description": "完成 contact sheet、关键帧、console、窄屏和音频/交互检查，明确说明已验证内容。"
+      }
+    ],
+    "outputs": [
+      "聚焦的 brief 与验收清单",
+      "所选工作流可继续评审的第一版",
+      "可进入画布继续修改且边界清晰的结果"
+    ],
+    "follow_ups": [
+      "保留已确认方向，只修改一个镜头或段落",
+      "复用同一批素材制作另一种版本",
+      "进入画布继续打磨结果"
+    ],
+    "boundaries": [
+      "入口一次只路由到一个现有市场工作流。",
+      "被选中的子工作流保留自己的输入输出契约。",
+      "从该入口启动聊天类工作流时，Agent 使用 Opus 5.5。"
+    ]
+  },
+  "collection": {
+    "categories": [
+      {
+        "id": "beat-morph-video",
+        "label": "动态文字视频设计"
+      },
+      {
+        "id": "motion-icon",
+        "label": "Icon动画制作"
+      },
+      {
+        "id": "course-explainer",
+        "label": "知识科普讲解"
+      },
+      {
+        "id": "youtube-product-video",
+        "label": "YouTube 商品视频"
+      },
+      {
+        "id": "market-bulletin",
+        "label": "新闻播报"
+      },
+      {
+        "id": "three-d-studio-v2",
+        "label": "3D片场 2.0"
+      },
+      {
+        "id": "motion-library",
+        "label": "动效设计库"
+      }
+    ],
+    "entries": [
+      {
+        "item": {
+          "kind": "skill",
+          "name": "html-beat-morph-video"
+        },
+        "category": "beat-morph-video",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/56852faae34038ad.webp"
+        },
+        "tags": [
+          "动态文字视频设计",
+          "Opus 5.5"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "动态文字视频设计",
+        "description": "让文字沿着节奏动起来，做成一段看得懂的动态文字视频。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "opus55-motion-icon"
+        },
+        "category": "motion-icon",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/23528d3c0bb27d9b.webp"
+        },
+        "tags": [
+          "Icon动画制作",
+          "Opus 5.5"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "Icon动画制作",
+        "description": "一个主体、一个清楚动作、一段干净循环。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "digital-human-course-explainer"
+        },
+        "category": "course-explainer",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "知识科普讲解",
+          "Opus 5.5"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "知识科普讲解",
+        "description": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "youtube-product-video"
+        },
+        "category": "youtube-product-video",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/e2754af715d1ff2d.webp"
+        },
+        "tags": [
+          "YouTube 商品视频",
+          "Opus 5.5"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "YouTube 品牌影片工作室",
+        "description": "从产品页出发，做出体现品牌调性的 YouTube 影片与 ABCD 广告。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "digital-human-market-bulletin"
+        },
+        "category": "market-bulletin",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "新闻播报",
+          "Opus 5.5"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "新闻播报",
+        "description": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "3d-studio-v2"
+        },
+        "category": "three-d-studio-v2",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/5fb15e5bdbf0354f.webp"
+        },
+        "tags": [
+          "3D片场 2.0",
+          "Opus 5.5"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "3D片场 2.0",
+        "description": "用 Agent 创建和编辑 3D 场景、角色、灯光与运镜，在一个片场里完成从预演到成片的规划。"
+      },
+      {
+        "item": {
+          "kind": "app",
+          "name": "motion-library"
+        },
+        "category": "motion-library",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/d8a7238b05ec171b.webp"
+        },
+        "tags": [
+          "动效设计库",
+          "Opus 5.5"
+        ],
+        "featured": true,
+        "title": "动效工作室",
+        "description": "让标题走进画面，让图形替你把故事讲完。"
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:opus55-motion-icon:opus55-motion-icon}} 我有一个视觉主体和小段动效想法。先从看得清的动效图标开始；如果 brief 更适合节拍视频、商品视频、知识内容、播报或 3D 场景，再告诉我 Opus 5.5 Studio 的下一步入口。",
+  "capabilities": [],
+  "connectors": []
+}

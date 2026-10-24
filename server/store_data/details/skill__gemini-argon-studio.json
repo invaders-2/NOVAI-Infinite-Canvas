@@ -1,0 +1,263 @@
+{
+  "kind": "skill",
+  "name": "gemini-argon-studio",
+  "display_name": "Argon Studio",
+  "description": "给 Agent 一个问题、一张照片、一张草图或一段简短需求。在 Argon 上，它会推理空间与物理原理，并用代码写出完整成果：展示事物运作方式的 3D 模拟、由你的照片生成的 3D 世界、可玩的游戏、3D 网页、文字动效循环或生成艺术。",
+  "category": "AI 模型工作室",
+  "business_scenario": "interactive-games",
+  "marketing_line": "问个问题或拍张照，得到一个会动的 3D 世界。",
+  "search_terms": [
+    "Argon",
+    "运作原理 3D",
+    "照片转 3D",
+    "草图转游戏",
+    "3D 网页",
+    "动态排版",
+    "生成艺术"
+  ],
+  "cover_url": "/static/store/covers/0d4496aa6a297c9c.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "gemini-argon-studio",
+  "recommended_model": {
+    "id": "gemini-4-argon",
+    "display_name": "Argon"
+  },
+  "guide": {
+    "summary": "六种玩法，让擅长空间与物理推理、并能写出长篇可运行代码的 Agent 为你工作。分享一个问题、一张照片或一段需求，并在制作其他内容之前先审阅一个样例。",
+    "scenarios": [
+      "看清一台机器、一个器官或一个物理原理在 3D 中如何运作",
+      "把真实场所的照片变成可以探索的 3D 世界",
+      "把草图或需求变成可以直接使用的页面或游戏",
+      "把一条消息或一个主题变成用代码制作的动效或艺术作品"
+    ],
+    "required_context": [
+      {
+        "title": "你从什么开始？",
+        "description": "一个问题、一到四张照片、一张草图或截图、笔记，或一句话的创意。请分享你有权使用的素材。"
+      },
+      {
+        "title": "你希望得到什么？",
+        "description": "3D 模拟、3D 世界、游戏、网页、文字动效循环或艺术作品。如果你还不确定，我会为你推荐一种。"
+      },
+      {
+        "title": "面向谁？",
+        "description": "说明受众，以及他们看完后应该做的一件事或理解的一点内容。"
+      },
+      {
+        "title": "有哪些必备要求？",
+        "description": "颜色、语言、比例、时长、设备或截止日期。其他未提及的部分，我会采用合理的默认值并告诉你。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "问题 | 看懂它怎么工作",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `how-it-works-3d` 玩法。展示三相感应电机如何转动。先写出从电流到转矩的各个阶段，然后制作一个可以旋转、逐步查看并加速的 3D 场景，先从第一阶段开始。",
+        "description": "获得需要核对的因果阶段，再得到一个可以旋转、逐步查看的 3D 模拟。"
+      },
+      {
+        "title": "照片 | 走进去逛",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `photo-to-3d-world` 玩法。这是我桌面的一张照片。请列出你看到的内容及其位置，先制作带轨道控制的 3D 桌面，然后在桌面上方的赛道中加入一辆小赛车和一个计圈计时器。",
+        "description": "把你桌面或房间的照片转为 3D 场景，然后加入游戏模式。"
+      },
+      {
+        "title": "草图 | 在浏览器中直接玩",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `sketch-to-game` 玩法。阅读我的草图，列出你看到的内容，写一份单屏游戏设计，并在完整游戏之前，先做出可玩的核心循环，支持键盘和触屏操作。",
+        "description": "把草图或一句话的创意转为可玩的游戏，先做核心玩法。"
+      },
+      {
+        "title": "需求 | 3D 发布页",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `3d-web-page` 玩法。阅读我的产品说明，提出两个 3D 方向，先制作首屏英雄区，然后完成整个落地页，包括导航、真实文案，以及不支持 3D 的设备的备用方案。",
+        "description": "把产品说明转为带有真实文案的交互式 3D 落地页。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "提供素材",
+        "description": "提出你的问题或上传照片、草图、笔记，并说明你想要得到什么。"
+      },
+      {
+        "title": "我通读全部内容",
+        "description": "我会阅读你分享的全部内容，区分我看到的内容与我推断的内容，并标出我无法打开的部分。"
+      },
+      {
+        "title": "确认方案",
+        "description": "你会收到一份简短的阶段列表、场景布局、游戏设计或章节计划供你确认。任何需要付费的生成都会先列出费用。"
+      },
+      {
+        "title": "审阅一个样例",
+        "description": "我会先制作或生成一个具有代表性的作品，并在制作其余部分前进行检查。"
+      },
+      {
+        "title": "获取成果包",
+        "description": "文件、检查说明，以及你可以在画布中继续进行的后续步骤。"
+      }
+    ],
+    "outputs": [
+      "可在聊天中预览和修改的交互式 3D 模拟、3D 场景、网页和浏览器游戏",
+      "你在制作前确认的阶段列表、场景布局和游戏设计",
+      "文字动效循环和生成艺术作品，工具支持时可导出为视频或 PNG",
+      "可选的生成图片或片段，仅在实时模型检查并获得你的费用确认后制作"
+    ],
+    "follow_ups": [
+      "保留方案，只修改风格、时长或受众。",
+      "把 3D 场景做成短小的环绕飞行视频，或加入游戏模式。",
+      "基于早前的文件制作另一个版本，且不丢失第一个版本。"
+    ],
+    "boundaries": [
+      "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。",
+      "在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。",
+      "仿真中的事实来自你提供的参考资料，或会标注为近似值。我会列出从你的照片中猜测的内容。",
+      "我在画布中制作草稿和文件。发布的内容、地点和时间由你决定。"
+    ]
+  },
+  "collection": {
+    "categories": [
+      {
+        "id": "3d-worlds",
+        "label": "3D 世界"
+      },
+      {
+        "id": "interactive-builds",
+        "label": "交互式作品"
+      },
+      {
+        "id": "motion-and-art",
+        "label": "动效与艺术"
+      }
+    ],
+    "entries": [
+      {
+        "item": {
+          "kind": "skill",
+          "name": "argon-how-it-works"
+        },
+        "category": "3d-worlds",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/2aa9e44b6acb28d2.webp"
+        },
+        "tags": [
+          "3D 模拟",
+          "科普",
+          "可交互"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "3D 原理演示",
+        "description": "问它怎么工作，答案拿在手里转。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "argon-photo-to-3d"
+        },
+        "category": "3d-worlds",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/6b7bdc6c930f33b7.webp"
+        },
+        "tags": [
+          "照片",
+          "3D 世界",
+          "可玩"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "照片转 3D 世界",
+        "description": "拍下房间，走进去逛。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "argon-sketch-to-game"
+        },
+        "category": "interactive-builds",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/d99211f5109306d9.webp"
+        },
+        "tags": [
+          "游戏",
+          "草图",
+          "HTML"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "草图转可玩游戏",
+        "description": "在纸上画出来，在浏览器里玩。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "argon-3d-web-page"
+        },
+        "category": "interactive-builds",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/f3a8b81f9bf0abd5.webp"
+        },
+        "tags": [
+          "3D",
+          "网页",
+          "HTML"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "3D 网页",
+        "description": "输入一份简报，输出一个可以点击浏览的 3D 页面。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "argon-kinetic-type"
+        },
+        "category": "motion-and-art",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/26aa7313227929ff.webp"
+        },
+        "tags": [
+          "排版",
+          "循环",
+          "5 秒"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "动态文字循环",
+        "description": "一行文字，伴随清晰的节奏动起来。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "argon-generative-art"
+        },
+        "category": "motion-and-art",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/a9a4b3018727492b.webp"
+        },
+        "tags": [
+          "生成艺术",
+          "海报",
+          "随机种子"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "生成艺术海报",
+        "description": "你的主题或数据，由一个可重复的算法绘制。"
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 我有一个问题、一张照片、一张草图或一段简短需求。请只追问缺少的信息，并推荐一种玩法：`how-it-works-3d`、`photo-to-3d-world`、`sketch-to-game`、`3d-web-page`、`kinetic-type-loop` 或 `generative-art-poster`。在制作其余内容之前，先给我看一个样例。",
+  "capabilities": [],
+  "connectors": []
+}

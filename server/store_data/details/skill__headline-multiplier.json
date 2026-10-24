@@ -1,0 +1,130 @@
+{
+  "kind": "skill",
+  "name": "headline-multiplier",
+  "display_name": "标题变体",
+  "description": "用科学的 A/B 测试跑出最高转化：固定好视觉与版面，从焦虑唤醒、限时利益、社交认同等多心理维度快速生成对比标题，助你找到最优解。",
+  "category": "电商广告",
+  "business_scenario": "ecommerce-advertising",
+  "marketing_line": "锁定跑量素材的高点击画面，批量裂变不同痛点与卖点文案，低成本测出 CTR 翻倍的爆款标题。",
+  "search_terms": [
+    "headline-multiplier",
+    "标题变体",
+    "电商广告",
+    "广告创意",
+    "品牌内容"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/app-store/commerce/headline-multiplier-output.svg",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "headline-multiplier",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "用科学的 A/B 测试跑出最高转化：固定好视觉与版面，从焦虑唤醒、限时利益、社交认同等多心理维度快速生成对比标题，助你找到最优解。",
+    "scenarios": [
+      "固定产品、优惠、画面和构图，只改变标题角度，生成可比较的测试变体。"
+    ],
+    "required_context": [
+      {
+        "title": "开始前准备",
+        "description": "准备控制组广告、产品与优惠事实、受众、可编辑文案、品牌语气、测试数量和成功指标。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "headline-multiplier-start",
+        "title": "标题变体",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 从这张已批准的静态广告做标题测试：固定所有画面和商业变量，只改变标题角度，并给出准确文案和换行。",
+        "description": "固定产品、优惠、画面和构图，只改变标题角度，生成可比较的测试变体。",
+        "context": "标题变体"
+      }
+    ],
+    "steps": [
+      {
+        "title": "锁定控制组",
+        "description": "保持产品、图片、优惠、CTA、排版和版位不变。"
+      },
+      {
+        "title": "撰写不同标题",
+        "description": "每个变体只测试一个有依据的假设，提供准确换行。"
+      },
+      {
+        "title": "排入准确文字",
+        "description": "保留控制组像素；无法精确排版时，交付文案与排版方案。"
+      }
+    ],
+    "outputs": [
+      "受控标题假设、准确文案和换行方案",
+      "保留标题区域外像素的变体，或文案排版包"
+    ],
+    "follow_ups": [
+      "保留已确认的内容，只修改你指定的部分。"
+    ],
+    "boundaries": [
+      "不会重做广告、做市场本地化、改版位比例，也不会一次改变多个说服变量。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "comparison",
+    "eyebrow": "输入与交付",
+    "caption": "工作流示意；具体内容根据你提供的素材和目标制作。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "标题变体视频预览"
+    },
+    "panels": [
+      {
+        "id": "input",
+        "label": "源广告",
+        "alt": "标题变体源广告",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/a6298d053ff29239.webp"
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "output-1",
+        "label": "标题变体 1",
+        "alt": "标题变体第一版输出",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/f5e0a4976239f506.webp"
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "output-2",
+        "label": "标题变体 2",
+        "alt": "标题变体第二版输出",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/85b9bbc849aa9bf7.webp"
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "output-3",
+        "label": "标题变体 3",
+        "alt": "标题变体第三版输出",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/ed2bbaf8627aba33.webp"
+        },
+        "aspect": "16/9"
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 从这张已批准的静态广告做标题测试：固定所有画面和商业变量，只改变标题角度，并给出准确文案和换行。",
+  "capabilities": [],
+  "connectors": []
+}

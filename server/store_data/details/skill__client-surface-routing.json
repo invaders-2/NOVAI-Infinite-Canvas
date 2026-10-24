@@ -1,0 +1,83 @@
+{
+  "kind": "skill",
+  "name": "client-surface-routing",
+  "display_name": "执行路径选择",
+  "description": "为涉及本地文件、应用和在线服务的任务选择合适的桌面、网页或云端工具。",
+  "category": "Agent",
+  "marketing_line": "把创意转化为可用于正式制作的成果。",
+  "search_terms": [
+    "选择合适的执行环境",
+    "判断这个任务应该在本地桌面、云端 Canvas 还是外部 App 执行",
+    "安全地处理本地文件",
+    "处理这个本地文件夹时，帮我选择安全的工具路径",
+    "了解 Desktop 的用途",
+    "说明哪些操作需要 Desktop，哪些可以直接在云端完成"
+  ],
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "client-surface-routing",
+  "guide": {
+    "summary": "为涉及本地文件、应用和在线服务的任务选择合适的桌面、网页或云端工具。",
+    "scenarios": [
+      "本地文件与应用",
+      "网页端 / 云端 Canvas",
+      "选择安全执行面"
+    ],
+    "required_context": [
+      {
+        "title": "说明资料在哪里",
+        "description": "告诉 Agent 是本地文件夹、当前屏幕、浏览器、Canvas 还是外部 App 中的内容。"
+      },
+      {
+        "title": "说明是否需要本地能力",
+        "description": "例如访问本地文件、已安装应用、Shell 或系统操作；不需要时优先留在 Web 或云端。"
+      },
+      {
+        "title": "允许它先判断运行面",
+        "description": "路由依据当前客户端的真实能力信号，而不是仅凭你在文字里说了 Desktop 或 Web。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "选择合适的执行环境",
+        "prompt": "判断这个任务应该在本地桌面、云端 Canvas 还是外部 App 执行",
+        "description": ""
+      }
+    ],
+    "steps": [
+      {
+        "title": "读取当前客户端能力",
+        "description": "先判断当前是具备本地能力的 Desktop 还是 Web-only，避免承诺当前环境做不到的动作。"
+      },
+      {
+        "title": "把任务拆成本地与云端部分",
+        "description": "区分文件访问、屏幕操作、Canvas 生成和外部连接器各自需要的执行面。"
+      },
+      {
+        "title": "选择能完成目标的路径",
+        "description": "优先使用当前客户端真实可用的能力，不要求用户自己判断该调用哪一种工具。"
+      },
+      {
+        "title": "明确不能完成的部分",
+        "description": "如果当前环境没有所需权限或能力，会说明边界，而不是伪装成已经完成。"
+      }
+    ],
+    "outputs": [
+      "当前任务的执行面判断",
+      "本地与云端能力边界",
+      "安全的下一步操作路径"
+    ],
+    "follow_ups": [
+      "这个任务如果改成 Web-only，哪些步骤需要调整？",
+      "先只读取本地文件，不要执行写入。",
+      "把需要本地能力的步骤和可以在 Canvas 完成的步骤分开。"
+    ],
+    "boundaries": [
+      "不会因为用户提到 Desktop 就假设本地权限已开启，也不会在 Web-only 环境调用本地工具。",
+      "执行面判断说明的是能力边界，不代表外部服务、登录状态或业务结果已经成功。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

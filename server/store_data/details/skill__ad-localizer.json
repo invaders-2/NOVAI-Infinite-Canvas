@@ -1,0 +1,130 @@
+{
+  "kind": "skill",
+  "name": "ad-localizer",
+  "display_name": "广告本地化",
+  "description": "告别逐字翻译与重新排版的繁琐工序：上传成熟广告素材，自动适配目标市场语言、文化习惯与版面空间，保持商品与品牌质感不失真。",
+  "category": "电商广告",
+  "business_scenario": "ecommerce-advertising",
+  "marketing_line": "上传一张国内或现成广告图，AI 自动翻译目标语言并重构排版与文案，一键出海拓客。",
+  "search_terms": [
+    "ad-localizer",
+    "广告本地化",
+    "电商广告",
+    "广告创意",
+    "品牌内容"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/app-store/commerce/ad-localizer-output.svg",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "ad-localizer",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "告别逐字翻译与重新排版的繁琐工序：上传成熟广告素材，自动适配目标市场语言、文化习惯与版面空间，保持商品与品牌质感不失真。",
+    "scenarios": [
+      "为不同市场本地化已批准的电商静态广告，同时保留产品、品牌、优惠和法律事实。"
+    ],
+    "required_context": [
+      {
+        "title": "开始前准备",
+        "description": "准备源广告、目标市场和语言、版位、已批准文案、法律文本和字体。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "ad-localizer-start",
+        "title": "广告本地化",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 把这张已批准的电商静态广告本地化到指定市场：保留产品和优惠事实，连同文案一起调整排版，并标出法律或字体风险。",
+        "description": "为不同市场本地化已批准的电商静态广告，同时保留产品、品牌、优惠和法律事实。",
+        "context": "广告本地化"
+      }
+    ],
+    "steps": [
+      {
+        "title": "核对源文案",
+        "description": "提取广告文字，确认有歧义的价格、优惠和法律文本。"
+      },
+      {
+        "title": "适配本地表达",
+        "description": "翻译或创译后，重排字体、阅读顺序和文字长度。"
+      },
+      {
+        "title": "检查市场版本",
+        "description": "检查准确文字、产品一致性、优惠事实和版位可读性。"
+      }
+    ],
+    "outputs": [
+      "市场语言矩阵、准确文案与字体排版规范",
+      "本地化静态素材，或可用于排版的准确文案包"
+    ],
+    "follow_ups": [
+      "保留已确认的内容，只修改你指定的部分。"
+    ],
+    "boundaries": [
+      "不会推断当地价格、折扣、认证、配送承诺或法律声明。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "comparison",
+    "eyebrow": "输入与交付",
+    "caption": "工作流示意；具体内容根据你提供的素材和目标制作。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "广告本地化视频预览"
+    },
+    "panels": [
+      {
+        "id": "input",
+        "label": "源广告",
+        "alt": "广告本地化源广告",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/a6298d053ff29239.webp"
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "output-法语",
+        "label": "法语",
+        "alt": "广告本地化法语输出",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/828f2c060980d5a4.webp"
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "output-日语",
+        "label": "日语",
+        "alt": "广告本地化日语输出",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/2f80d799729b0d2a.webp"
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "output-德语",
+        "label": "德语",
+        "alt": "广告本地化德语输出",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/48eebf705eea3d53.webp"
+        },
+        "aspect": "16/9"
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 把这张已批准的电商静态广告本地化到指定市场：保留产品和优惠事实，连同文案一起调整排版，并标出法律或字体风险。",
+  "capabilities": [],
+  "connectors": []
+}

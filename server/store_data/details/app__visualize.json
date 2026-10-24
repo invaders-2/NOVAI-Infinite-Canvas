@@ -1,0 +1,29 @@
+{
+  "kind": "app",
+  "name": "visualize",
+  "display_name": "Visualize",
+  "description": "将想法转化为交互式视觉内容。",
+  "category": "更多应用",
+  "business_scenario": "brand-design",
+  "marketing_line": "将想法转化为交互式视觉内容。",
+  "search_terms": [],
+  "icon_url": "/static/store/covers/b5f0f9696f3c9c10.webp",
+  "icon_style": "visualize",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "visualize",
+  "guide": {
+    "summary": "将想法转化为交互式视觉内容。",
+    "scenarios": [],
+    "required_context": [],
+    "use_cases": [],
+    "steps": [],
+    "outputs": [],
+    "follow_ups": [],
+    "boundaries": []
+  },
+  "capabilities": [],
+  "connectors": []
+}

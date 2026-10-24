@@ -1,0 +1,160 @@
+{
+  "kind": "skill",
+  "name": "fish-audio-bilingual-voiceover",
+  "display_name": "双语配音",
+  "description": "分享你的信息和两种语言，即可获得一段简短配音：同一个声音在句中切换语言，就像双语者真实说话的方式。你可以从几个版本中挑选，每个版本只改变一个变量。",
+  "category": "音频创作",
+  "business_scenario": "film-video",
+  "marketing_line": "两种语言，一个声音，毫无缝隙。",
+  "search_terms": [
+    "双语配音",
+    "多语种广告",
+    "语码转换",
+    "短视频旁白",
+    "Drama 3"
+  ],
+  "cover_url": "/static/store/covers/fae10e0a17318959.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "fish-audio-lab",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium",
+    "show_badge": false
+  },
+  "guide": {
+    "summary": "一份按你指定时长精炼的脚本，在两种语言之间切换，由同一个声音、以几个导演版本演绎，方便你轻松选择。",
+    "scenarios": [
+      "面向双语受众的广告和宣传",
+      "旅行、美食或文化短视频",
+      "面向两个市场的品牌片头"
+    ],
+    "required_context": [
+      {
+        "title": "你的信息",
+        "description": "你要说的内容或推广的产品，以及任何我可以使用的事实。"
+      },
+      {
+        "title": "两种语言",
+        "description": "选填。英文加上你指定的一种语言。请检查第二种语言，或请母语者确认。"
+      },
+      {
+        "title": "时长",
+        "description": "选填。默认 30 秒；15 到 60 秒均可。"
+      },
+      {
+        "title": "情绪基调",
+        "description": "选填。默认温暖而自信。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "bilingual-voiceover-ad",
+        "title": "双语广告",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `bilingual-voiceover` playbook。根据这条信息写一段 30 秒的广告配音：以英文为主，关键短语使用我指定的语言，由同一个声音演绎。先做第一版，我确认后再做另外两版。",
+        "description": "以一种语言为主，关键句使用另一种语言。"
+      },
+      {
+        "id": "bilingual-voiceover-travel",
+        "title": "旅行或美食短片",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `bilingual-voiceover` playbook。写一段 20 秒的旅行视频配音，在问候语和菜名处切换到当地语言，语气温暖、轻松。请先生成第一版样片。",
+        "description": "温暖、轻松的朗读，并自然地过渡到当地语言。"
+      },
+      {
+        "id": "bilingual-voiceover-my-script",
+        "title": "朗读我的双语脚本",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `bilingual-voiceover` playbook。用同一个声音朗读我的双语脚本，加入演绎提示，将其调整为 30 秒，并先生成第一版样片。",
+        "description": "你的混合语言脚本，经过导演并计时。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "按长度撰写",
+        "description": "开场钩子、承诺、事实和行动号召，并在自然的短语处切换语言。"
+      },
+      {
+        "title": "规划版本",
+        "description": "每个版本只改变情绪、节奏或语言比例。"
+      },
+      {
+        "title": "试听第一版",
+        "description": "检查语言切换、口音、人名和时间。"
+      },
+      {
+        "title": "比较各版本",
+        "description": "经过测量的版本，附带简单的对比表。"
+      }
+    ],
+    "outputs": [
+      "两到三个配音版本，已裁剪至指定长度",
+      "包含两种语言、提示和时间轴的脚本",
+      "对比表，以及供剪辑师参考的音乐提示"
+    ],
+    "follow_ups": [
+      "把获胜版本剪成 15 秒。",
+      "为另一个市场更换第二种语言。",
+      "用不同的声音重新演绎获胜版本。"
+    ],
+    "boundaries": [
+      "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。",
+      "你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。",
+      "我只使用你提供的事实，不保证翻译质量；发布前请检查第二种语言。",
+      "仅限语音内容。你需要自行放入剪辑中；它不会与视频同步，音乐仅作为给剪辑师的参考建议。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Fish Audio Drama 3",
+    "caption": "两种语言，一个声音，毫无缝隙。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/fae10e0a17318959.webp"
+      },
+      "alt": "双语配音"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 0
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "message",
+        "label": "你的信息",
+        "placeholder": "你要说的内容或推广的产品，以及任何我可以使用的事实。",
+        "max_length": 1000
+      },
+      {
+        "id": "languages",
+        "label": "两种语言",
+        "placeholder": "选填。英文加上你指定的一种语言。请检查第二种语言，或请母语者确认。",
+        "max_length": 80
+      },
+      {
+        "id": "length",
+        "label": "时长",
+        "placeholder": "选填。默认 30 秒；15 到 60 秒均可。",
+        "max_length": 40
+      },
+      {
+        "id": "mood",
+        "label": "情绪基调",
+        "placeholder": "选填。默认温暖而自信。",
+        "max_length": 60
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `bilingual-voiceover` playbook。我需要一段两种语言的简短配音。只询问缺失的信息，撰写带有自然语言切换的脚本，规划几个版本，并先做第一版，再做其余版本。",
+  "capabilities": [],
+  "connectors": []
+}

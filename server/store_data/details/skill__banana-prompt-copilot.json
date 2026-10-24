@@ -1,0 +1,84 @@
+{
+  "kind": "skill",
+  "name": "banana-prompt-copilot",
+  "display_name": "Nano Banana 提示词助手",
+  "description": "根据参考素材与创作方向，设计 Nano Banana 图像提示词、编辑方案与视觉变体。",
+  "category": "图像",
+  "business_scenario": "brand-design",
+  "marketing_line": "把创意转化为可用于正式制作的成果。",
+  "search_terms": [
+    "编写参考素材感知的提示词",
+    "用 Nano Banana 根据这张参考图生成一版视觉方向",
+    "只修改一个指定细节",
+    "保留主体和构图，只修改我指定的这个细节",
+    "检查并优化编辑结果",
+    "根据这次结果做一次受控的图像修订"
+  ],
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "banana-prompt-copilot",
+  "guide": {
+    "summary": "根据参考素材与创作方向，设计 Nano Banana 图像提示词、编辑方案与视觉变体。",
+    "scenarios": [
+      "图像探索",
+      "从上下文到第一版结果",
+      "围绕结果继续迭代"
+    ],
+    "required_context": [
+      {
+        "title": "先说明想要的结果",
+        "description": "提供参考图，并明确哪些内容需要保留、哪些需要修改。"
+      },
+      {
+        "title": "补充素材与约束",
+        "description": "提供参考文件、目标受众、格式、风格、时长或其他不能被改变的条件。"
+      },
+      {
+        "title": "告诉 Agent 如何取舍",
+        "description": "说明优先级、验收重点，以及哪些内容需要先确认再继续。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "编写参考素材感知的提示词",
+        "prompt": "用 Nano Banana 根据这张参考图生成一版视觉方向",
+        "description": ""
+      }
+    ],
+    "steps": [
+      {
+        "title": "从一个具体结果开始",
+        "description": "先选择一个贴近当前工作的用例，不需要一次讲完所有背景。"
+      },
+      {
+        "title": "让 Skill 读取相关上下文",
+        "description": "Agent 会按照这个 Skill 的规则整理素材、识别缺口，并在需要时提出澄清问题。"
+      },
+      {
+        "title": "先产出一版可检查的结果",
+        "description": "它会把目标转成结构化 brief、提示词、方案或其他可继续工作的中间产物。"
+      },
+      {
+        "title": "针对重点做下一轮修改",
+        "description": "保留已经确认的部分，只要求它修改真正影响结果的变量。"
+      }
+    ],
+    "outputs": [
+      "一份围绕具体目标组织的第一版结果",
+      "可以继续交给 Agent 执行或审阅的结构化内容",
+      "下一轮迭代可以直接复用的上下文与约束"
+    ],
+    "follow_ups": [
+      "编写参考素材感知的提示词",
+      "只修改一个指定细节",
+      "检查并优化编辑结果"
+    ],
+    "boundaries": [
+      "它负责参考图驱动的编辑提示词；不会把参考图中没有证据的细节当成事实。",
+      "具体图像编辑能力和结果验证由运行时负责，不会承诺保留内容一定不发生漂移。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

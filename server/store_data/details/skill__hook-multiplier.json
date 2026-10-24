@@ -1,0 +1,123 @@
+{
+  "kind": "skill",
+  "name": "hook-multiplier",
+  "display_name": "开头钩子测试",
+  "description": "前 3 秒决定一条视频的生死：在不重新拍摄整条广告的前提下，快速生成提问悬念、视觉反差或痛点直击等不同开头变体，快速测出爆款率。",
+  "category": "电商广告",
+  "business_scenario": "ecommerce-advertising",
+  "marketing_line": "保留原视频主体与转化结尾，批量替换前 3 秒黄金抓人开头，低成本拯救完播率与 ROI。",
+  "search_terms": [
+    "hook-multiplier",
+    "开头钩子测试",
+    "电商广告",
+    "广告创意",
+    "品牌内容"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/app-store/commerce/hook-multiplier-output.svg",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "hook-multiplier",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "前 3 秒决定一条视频的生死：在不重新拍摄整条广告的前提下，快速生成提问悬念、视觉反差或痛点直击等不同开头变体，快速测出爆款率。",
+    "scenarios": [
+      "只改变开头钩子，保留已批准的正文、优惠、CTA 和结尾，生成完整可比较的电商视频变体。"
+    ],
+    "required_context": [
+      {
+        "title": "开始前准备",
+        "description": "准备控制组视频、源时间码、钩子边界、共用正文与结尾、产品事实、变体数量、发布场景和音频约束。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "hook-multiplier-start",
+        "title": "开头钩子测试",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 基于这条视频测试不同的开头钩子，保持正文、优惠、CTA 和结尾不变。先确认开头边界；支持完整剪辑时交付完整变体，否则明确交付钩子片段与剪辑方案。",
+        "description": "只改变开头钩子，保留已批准的正文、优惠、CTA 和结尾，生成完整可比较的电商视频变体。",
+        "context": "开头钩子测试"
+      }
+    ],
+    "steps": [
+      {
+        "title": "确认钩子边界",
+        "description": "标出开头结束、保留正文开始的准确位置。"
+      },
+      {
+        "title": "每次测试一个思路",
+        "description": "设计有依据的开头，写清接入时间和音频过渡。"
+      },
+      {
+        "title": "检查衔接",
+        "description": "支持剪辑时交付完整变体，否则明确交付钩子片段与剪辑方案。"
+      }
+    ],
+    "outputs": [
+      "钩子变体假设、源视频接入时间与音频过渡方案",
+      "支持剪辑时交付完整变体，否则交付钩子片段与剪辑方案"
+    ],
+    "follow_ups": [
+      "保留已确认的内容，只修改你指定的部分。"
+    ],
+    "boundaries": [
+      "如果没有可用的完整剪辑能力，会明确交付钩子片段和装配方案，不把片段称作完整变体。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "输入与交付",
+    "caption": "工作流示意；具体内容根据你提供的素材和目标制作。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "开头钩子测试视频预览"
+    },
+    "panels": [
+      {
+        "id": "output-1",
+        "label": "钩子视频 1",
+        "alt": "开头钩子测试第一个视频结果",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "9/16",
+        "is_result": true
+      },
+      {
+        "id": "output-2",
+        "label": "钩子视频 2",
+        "alt": "开头钩子测试第二个视频结果",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "9/16",
+        "is_result": true
+      },
+      {
+        "id": "output-3",
+        "label": "钩子视频 3",
+        "alt": "开头钩子测试第三个视频结果",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "9/16",
+        "is_result": true
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 基于这条视频测试不同的开头钩子，保持正文、优惠、CTA 和结尾不变。先确认开头边界；支持完整剪辑时交付完整变体，否则明确交付钩子片段与剪辑方案。",
+  "capabilities": [],
+  "connectors": []
+}

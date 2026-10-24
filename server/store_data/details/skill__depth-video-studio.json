@@ -1,0 +1,345 @@
+{
+  "kind": "skill",
+  "name": "depth-video-studio",
+  "display_name": "深度影视工坊",
+  "description": "锁定原片神级运镜与调度，一键置换全新角色与电影级场景。",
+  "category": "影视与视频",
+  "business_scenario": "film-video",
+  "marketing_line": "锁定原片神级运镜与调度，一键置换全新角色与电影级场景。",
+  "search_terms": [
+    "深度影视",
+    "深度视频",
+    "深度通道",
+    "深度图",
+    "角色替换",
+    "场景迁移",
+    "同一运镜",
+    "参考迁移",
+    "运动锁定",
+    "重塑视频",
+    "画面迁移"
+  ],
+  "cover_url": "/static/store/covers/ab062db11a6f3c5a.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "depth-video-studio",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "锁定原片神级运镜与调度，一键置换全新角色与电影级场景。",
+    "scenarios": [
+      "同一动作换角色表演",
+      "同一运镜迁移到新场景",
+      "人和场景一起换，但保住节奏",
+      "先做可复用的深度通道，再连续出变体"
+    ],
+    "required_context": [
+      {
+        "title": "源视频",
+        "description": "提供需要保留其动作、节奏、站位和运镜的视频。"
+      },
+      {
+        "title": "要改什么",
+        "description": "说明要替换角色、场景，还是两者都换，并给出画布参考或文字描述。"
+      },
+      {
+        "title": "必须保住的约束",
+        "description": "标出必须锁定在源深度通道上的时长、构图或关键动作节拍。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "depth-motion-transfer",
+        "title": "深度动作迁移",
+        "prompt": "用这条参考视频做深度动作迁移：先转成深度运动通道，再按人物参考重生成。深度只负责动作、节奏、站位和空间关系；人物参考负责身份与服装。不要继承深度图的灰度外观。",
+        "description": "提供一段参考视频，以及要迁移到的人物或场景参考图；先得到深度运动通道，再重塑成新外观的成片。",
+        "context": "深度动作迁移",
+        "trial": {
+          "mode": "depth",
+          "source_modes": [
+            "depth"
+          ],
+          "skill_prompt": "用这条参考视频做深度动作迁移：先转成深度运动通道，再按人物参考重生成。深度只负责动作、节奏、站位和空间关系；人物参考负责身份与服装。不要继承深度图的灰度外观。",
+          "use_case_id": "depth-motion-transfer",
+          "depth_pass": {
+            "url": ""
+          }
+        },
+        "showcase": {
+          "layout": "grid",
+          "panels": [
+            {
+              "id": "reference-video",
+              "label": "参考视频",
+              "alt": "用于提取动作与运镜的参考视频",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "depth-pass",
+              "label": "深度运动",
+              "alt": "从参考视频提取的深度运动通道",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "character-ref",
+              "label": "人物参考",
+              "alt": "需要迁移到的人物参考图",
+              "media": {
+                "kind": "image",
+                "src": "/static/store/covers/aa3c1cb3346caf49.webp"
+              }
+            },
+            {
+              "id": "final-clip",
+              "label": "最终成片",
+              "alt": "按人物参考重塑外观后的最终成片",
+              "media": {
+                "kind": "video",
+                "src": ""
+              },
+              "is_result": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "hitchcock-zoom-transfer",
+        "title": "希区柯克变焦运镜迁移",
+        "prompt": "用这条希区柯克变焦运镜模板做深度动作迁移：先转成深度运动通道，再按人物参考重生成。深度只负责变焦推拉、构图、节奏和空间关系；人物参考负责身份与服装。不要继承深度图的灰度外观。",
+        "description": "用希区柯克变焦运镜模板提取深度运动，再迁移到新的人物参考上，保留推拉变焦的空间压迫感。",
+        "context": "希区柯克变焦运镜迁移",
+        "trial": {
+          "mode": "depth",
+          "source_modes": [
+            "depth"
+          ],
+          "skill_prompt": "用这条希区柯克变焦运镜模板做深度动作迁移：先转成深度运动通道，再按人物参考重生成。深度只负责变焦推拉、构图、节奏和空间关系；人物参考负责身份与服装。不要继承深度图的灰度外观。",
+          "use_case_id": "hitchcock-zoom-transfer",
+          "depth_pass": {
+            "url": ""
+          }
+        },
+        "showcase": {
+          "layout": "grid",
+          "panels": [
+            {
+              "id": "camera-template",
+              "label": "运镜模板",
+              "alt": "希区柯克变焦运镜模板视频",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "depth-pass",
+              "label": "深度运动",
+              "alt": "从运镜模板提取的深度运动通道",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "character-ref",
+              "label": "人物参考",
+              "alt": "要套用运镜的人物参考图",
+              "media": {
+                "kind": "image",
+                "src": "/static/store/covers/aa3c1cb3346caf49.webp"
+              }
+            },
+            {
+              "id": "final-clip",
+              "label": "最终成片",
+              "alt": "希区柯克变焦运镜迁移后的最终成片",
+              "media": {
+                "kind": "video",
+                "src": ""
+              },
+              "is_result": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "orbit-shot-transfer",
+        "title": "环绕镜头复刻",
+        "prompt": "用这条环绕镜头参考视频做深度动作迁移：先转成深度运动通道，再按人物参考重生成。深度只负责环绕轨迹、构图、节奏和空间关系；人物参考负责身份与服装。不要继承深度图的灰度外观。",
+        "description": "用环绕运镜参考视频提取深度运动，再迁移到新的人物参考上，复刻环绕镜头的空间感。",
+        "context": "环绕镜头复刻",
+        "trial": {
+          "mode": "depth",
+          "source_modes": [
+            "depth"
+          ],
+          "skill_prompt": "用这条环绕镜头参考视频做深度动作迁移：先转成深度运动通道，再按人物参考重生成。深度只负责环绕轨迹、构图、节奏和空间关系；人物参考负责身份与服装。不要继承深度图的灰度外观。",
+          "use_case_id": "orbit-shot-transfer",
+          "depth_pass": {
+            "url": ""
+          }
+        },
+        "showcase": {
+          "layout": "grid",
+          "panels": [
+            {
+              "id": "reference-video",
+              "label": "原视频",
+              "alt": "用于提取环绕运镜的参考原视频",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "depth-pass",
+              "label": "深度运动",
+              "alt": "从环绕镜头提取的深度运动通道",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "character-ref",
+              "label": "人物参考",
+              "alt": "要套用环绕运镜的人物参考图",
+              "media": {
+                "kind": "image",
+                "src": "/static/store/covers/aa3c1cb3346caf49.webp"
+              }
+            },
+            {
+              "id": "final-clip",
+              "label": "最终成片",
+              "alt": "环绕镜头复刻后的最终成片",
+              "media": {
+                "kind": "video",
+                "src": ""
+              },
+              "is_result": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "whip-zoom-transfer",
+        "title": "快速变焦推（Whip Zoom Look）",
+        "prompt": "用这条快速变焦推参考视频做深度动作迁移：先转成深度运动通道，再按人物参考重生成。深度只负责快速变焦推、构图、节奏和空间关系；人物参考负责身份与服装。不要继承深度图的灰度外观。",
+        "description": "用快速变焦推运镜参考视频提取深度运动，再迁移到新的人物参考上，复刻鞭状变焦的冲击感。",
+        "context": "快速变焦推运镜复刻",
+        "trial": {
+          "mode": "depth",
+          "source_modes": [
+            "depth"
+          ],
+          "skill_prompt": "用这条快速变焦推参考视频做深度动作迁移：先转成深度运动通道，再按人物参考重生成。深度只负责快速变焦推、构图、节奏和空间关系；人物参考负责身份与服装。不要继承深度图的灰度外观。",
+          "use_case_id": "whip-zoom-transfer",
+          "depth_pass": {
+            "url": ""
+          }
+        },
+        "showcase": {
+          "layout": "grid",
+          "panels": [
+            {
+              "id": "reference-video",
+              "label": "参考视频",
+              "alt": "用于提取快速变焦推运镜的参考视频",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "depth-pass",
+              "label": "深度运动",
+              "alt": "从快速变焦推参考视频提取的深度运动通道",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "character-ref",
+              "label": "人物参考",
+              "alt": "要套用快速变焦推运镜的人物参考图",
+              "media": {
+                "kind": "image",
+                "src": "/static/store/covers/cf2de5b0dc115aad.webp"
+              }
+            },
+            {
+              "id": "final-clip",
+              "label": "最终成片",
+              "alt": "快速变焦推复刻后的最终成片",
+              "media": {
+                "kind": "video",
+                "src": ""
+              },
+              "is_result": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "depth-custom-video",
+        "title": "自定义深度视频",
+        "prompt": "把我上传的视频作为深度动作迁移的源视频，再按我提供的人物或场景参考重生成。保留源视频的动作、节奏、构图和空间关系，参考素材负责新的外观。",
+        "description": "上传自己的源视频，把它作为深度重塑的运动参考。",
+        "context": "自定义用户视频源",
+        "trial": {
+          "mode": "user-video",
+          "source_modes": [
+            "user-video"
+          ],
+          "skill_prompt": "把我上传的视频作为深度动作迁移的源视频，再按我提供的人物或场景参考重生成。保留源视频的动作、节奏、构图和空间关系，参考素材负责新的外观。",
+          "use_case_id": "depth-custom-video"
+        }
+      }
+    ],
+    "steps": [
+      {
+        "title": "读懂源视频",
+        "description": "先看真实画面里的主体动作、运镜、时长和构图，再决定是否值得转深度。"
+      },
+      {
+        "title": "生成深度通道",
+        "description": "把源视频转成逐帧深度视频，保留运动与空间，去掉身份外观。"
+      },
+      {
+        "title": "确认角色与场景",
+        "description": "只问画布和对话里还没有的信息，支持点选参考或文字描述。"
+      },
+      {
+        "title": "按角色映射重生成",
+        "description": "深度作运动权威，新参考作外观权威，生成迁移后的新视频。"
+      }
+    ],
+    "outputs": [
+      "可复用的深度视频节点",
+      "跟随深度运动、跟随新参考外观的重塑视频",
+      "清晰说明深度与各参考职责的角色映射"
+    ],
+    "follow_ups": [
+      "用同一深度通道再换一个角色参考。",
+      "保持运动权威不变，只换场景再出一版。",
+      "如果灰度感渗进成片，收紧角色映射，让深度只贡献运动。"
+    ],
+    "boundaries": []
+  },
+  "starter_prompt": "{{skill:depth-video-studio:depth-video-studio}} 以这条源视频为运动模板：先转成深度通道，再根据我提供的角色与场景参考重生成。深度负责运动与空间，参考负责外观。",
+  "capabilities": [],
+  "connectors": []
+}

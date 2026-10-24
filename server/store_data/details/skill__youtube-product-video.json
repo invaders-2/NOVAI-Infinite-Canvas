@@ -1,0 +1,142 @@
+{
+  "kind": "skill",
+  "name": "youtube-product-video",
+  "display_name": "YouTube 品牌影片工作室",
+  "description": "把你的产品页变成一条有品牌质感的 YouTube 品牌影片或付费广告，自带标题包装、动态字幕和 Logo 结尾。",
+  "category": "电商广告",
+  "business_scenario": "ecommerce-advertising",
+  "marketing_line": "从产品页出发，做出体现品牌调性的 YouTube 影片与 ABCD 广告。",
+  "search_terms": [
+    "YouTube 品牌影片工作室",
+    "YouTube 品牌影片",
+    "YouTube 广告",
+    "ABCD",
+    "YouTube Shorts",
+    "品牌视频",
+    "产品演示",
+    "电商广告"
+  ],
+  "cover_url": "/static/store/covers/e2754af715d1ff2d.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "youtube-product-video",
+  "recommended_model": {
+    "id": "gemini-3.7-flash",
+    "display_name": "Gemini 3.7 Flash"
+  },
+  "guide": {
+    "summary": "填入品牌或产品链接，选择尺寸、时长和用途。我会先读页面里的事实与品牌线索，给出方向供你确认，再制作带标题包装、字幕和 Logo 结尾的成片。",
+    "scenarios": [
+      "基于 Google ABCD 的 YouTube 付费广告",
+      "频道品牌影片",
+      "高质感产品演示"
+    ],
+    "required_context": [
+      {
+        "title": "品牌在哪里？",
+        "description": "必填产品页或品牌官网链接。动笔前我会先从页面读取产品事实、图片、Logo 和品牌调性。"
+      },
+      {
+        "title": "尺寸、时长与用途",
+        "description": "选择 16:9、9:16 或 1:1，选一个时长区间，再说明是付费广告还是频道内容。"
+      },
+      {
+        "title": "需要严格保留的品牌素材",
+        "description": "可选：产品图、Logo 文件、品牌规范或不能出现的说法。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "youtube-brand-paid-ad",
+        "title": "付费广告｜按 ABCD 打造品牌广告",
+        "prompt": "{{skill:youtube-product-video:youtube-product-video}} 用我的产品页做一条 YouTube 品牌付费广告。按 Google ABCD 原则执行，先给我看每个方向的 ABCD 评估再选择。开场加标题，结尾打出 Logo，脚本和分镜确认后再生成。",
+        "description": "内置 Attention、Branding、Connection、Direction：开场抓人、品牌尽早露出、连接真实受众场景，并以 Logo 结尾卡给出一个明确行动。"
+      },
+      {
+        "id": "youtube-brand-film",
+        "title": "频道内容｜频道品牌影片",
+        "prompt": "{{skill:youtube-product-video:youtube-product-video}} 用我的产品页为我们的 YouTube 频道做一条品牌影片。保持品牌的视觉与调性，先给我几个方向，脚本和分镜确认后再生成。",
+        "description": "通过产品讲品牌故事，延续品牌已有的画面、节奏和语气。"
+      },
+      {
+        "id": "youtube-product-demonstration",
+        "title": "频道内容｜高质感产品演示",
+        "prompt": "{{skill:youtube-product-video:youtube-product-video}} 用我的产品页为我们的 YouTube 频道做一条高质感产品演示。用产品的工艺和真实使用体现品牌，保证事实准确，脚本和分镜确认后再生成。",
+        "description": "让工艺、材质和真实使用来承载品牌，所有事实都来自你的产品页，绝不编造。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "读取页面与素材",
+        "description": "从链接和你上传的文件中提取产品事实、图片、Logo 和品牌调性，不编造任何信息。"
+      },
+      {
+        "title": "设定尺寸、时长和用途",
+        "description": "你的选择决定节奏、构图和包装方式；付费广告会自动走 ABCD 评估。"
+      },
+      {
+        "title": "确认方向和分镜",
+        "description": "对比几个方向（付费广告附 ABCD 评分），确认脚本和镜头后才开始生成。"
+      },
+      {
+        "title": "拿到包装好的成片",
+        "description": "经过检查的成片，含标题包装、字幕和 Logo 结尾卡，另附标题、封面方向和简介。"
+      }
+    ],
+    "outputs": [
+      "按你所选尺寸和时长制作的 YouTube 品牌影片或付费广告",
+      "符合品牌风格的开场标题、动态字幕和 Logo 结尾卡",
+      "付费广告的 ABCD 评分，以及标题、封面方向、简介和字幕"
+    ],
+    "follow_ups": [
+      "换成之前给出的另一个方向，已确认的事实保持不变。",
+      "把同一条影片改成另一种尺寸或时长。",
+      "成片不动，只换结尾卡或字幕。"
+    ],
+    "boundaries": [
+      "我在画布里制作影片和配套文案；什么时候上传或发布，由你决定。",
+      "事实只来自你的页面、文件和说明。不会编造功能，也不承诺播放量、销量或排名。",
+      "如果你只需要商品页静态图，请使用电商设计室。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "从产品页出发，做配得上品牌的影片",
+    "caption": "填入链接，选择尺寸、时长和用途，确认方向后，拿到带标题包装、字幕和 Logo 结尾的成片。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "YouTube 品牌影片工作室预览"
+    },
+    "panels": [
+      {
+        "id": "input",
+        "label": "品牌素材",
+        "alt": "品牌素材",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/0455ac4ee5a0a96c.webp"
+        },
+        "aspect": "16/9"
+      },
+      {
+        "id": "output",
+        "label": "品牌影片",
+        "alt": "品牌影片",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "aspect": "16/9",
+        "is_result": true
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:youtube-product-video:youtube-product-video}} 用我的产品页做一条 YouTube 品牌影片。先读取页面，给我看方向，确认后再生成。",
+  "capabilities": [],
+  "connectors": []
+}

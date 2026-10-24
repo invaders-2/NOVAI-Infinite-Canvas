@@ -1,0 +1,190 @@
+{
+  "kind": "app",
+  "name": "creative-generative-art",
+  "display_name": "生成式数字艺术库",
+  "description": "浏览 16 款生成式数字艺术模板，确认后在原对话中生成和修改可预览的 HTML。",
+  "category": "更多应用",
+  "business_scenario": "brand-design",
+  "marketing_line": "挑选并确认模板，在对话中持续修改 HTML。",
+  "search_terms": [
+    "Generative Art Library",
+    "HTML",
+    "interactive",
+    "motion",
+    "template",
+    "生成式数字艺术库",
+    "生成式数字艺术",
+    "模板"
+  ],
+  "icon_url": "/static/store/covers/33f781f3b9cb007e.webp",
+  "cover_url": "/static/store/covers/1c38375a727b86d0.webp",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "creative-generative-art",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "浏览 16 款生成式数字艺术模板；只有在选库中确认后才开始生成。",
+    "scenarios": [
+      "生成式数字艺术模板选择",
+      "Agent 推荐并由用户确认",
+      "HTML 生成与改稿"
+    ],
+    "required_context": [
+      {
+        "title": "想做什么",
+        "description": "描述生成式数字艺术的内容和用途。"
+      },
+      {
+        "title": "文案与视觉方向",
+        "description": "提供文字、颜色、氛围和交互要求。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "选择生成式数字艺术模板",
+        "prompt": "打开生成式数字艺术库，我想挑一个模板",
+        "description": "打开库，预览全部 16 款模板，确认后再生成。"
+      },
+      {
+        "title": "请 Agent 推荐",
+        "prompt": "推荐一个生成式数字艺术模板，让我确认后再生成 HTML",
+        "description": "让 Agent 高亮合适模板，同时保留完整模板库供浏览。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "打开模板库",
+        "description": "Agent 只打开生成式数字艺术库的选择面板。"
+      },
+      {
+        "title": "预览并确认",
+        "description": "浏览、调整参数并明确采用一个模板。"
+      },
+      {
+        "title": "查看 HTML",
+        "description": "Agent 根据确认的模板生成可播放 HTML。"
+      },
+      {
+        "title": "对话改稿",
+        "description": "继续修改文案、颜色、内容、节奏、动作或交互。"
+      }
+    ],
+    "outputs": [
+      "可预览的独立 HTML",
+      "原对话中保留的改稿版本"
+    ],
+    "follow_ups": [
+      "修改标题和强调色。",
+      "把示例换成我的内容。",
+      "保持布局，调整动作节奏。"
+    ],
+    "boundaries": [
+      "只有确认模板后才开始生成 HTML。",
+      "当前产物是 HTML，暂不包含视频导出。"
+    ]
+  },
+  "library": {
+    "families": [
+      {
+        "id": "ascii-imaging",
+        "label": "ASCII 成像"
+      },
+      {
+        "id": "pixel-displacement",
+        "label": "像素位移"
+      },
+      {
+        "id": "fluid",
+        "label": "流体"
+      },
+      {
+        "id": "characters",
+        "label": "字符"
+      },
+      {
+        "id": "imagery",
+        "label": "影像"
+      },
+      {
+        "id": "organic",
+        "label": "有机"
+      },
+      {
+        "id": "particles",
+        "label": "粒子"
+      },
+      {
+        "id": "light-and-shadow",
+        "label": "光影"
+      }
+    ],
+    "featured_template_ids": [
+      "A01",
+      "A02",
+      "A03",
+      "A04",
+      "A06",
+      "A09",
+      "A10",
+      "A11"
+    ],
+    "templates": {
+      "A01": {
+        "name": "字符花房",
+        "description": "字符亮度与深度缓冲共同塑成立体花瓣。",
+        "family": "ascii-imaging",
+        "interaction": "移动指针改变观察角度；拖动可继续转动花冠。"
+      },
+      "A02": {
+        "name": "折射玻璃",
+        "description": "彩色图形和文字经过逐像素采样，沿磨砂透镜与细玻璃肋偏折。",
+        "family": "pixel-displacement",
+        "interaction": "移动指针改变透镜中心；强度控制采样位移和磨砂幅度。"
+      },
+      "A03": {
+        "name": "流体画布",
+        "description": "流体画布",
+        "family": "fluid",
+        "interaction": "悬停局部推开流线；拖动改变整层的位置。"
+      },
+      "A04": {
+        "name": "ASCII 雕塑",
+        "description": "ASCII 雕塑",
+        "family": "characters",
+        "interaction": "移动指针改变山丘位置；强度改变地形高度与等高线间距。"
+      },
+      "A06": {
+        "name": "网点映像",
+        "description": "网点映像",
+        "family": "imagery",
+        "interaction": "移动指针偏移各单元，强度控制拓扑变形幅度。"
+      },
+      "A09": {
+        "name": "水墨晕染",
+        "description": "水墨形态在水中缓慢扩散。",
+        "family": "organic",
+        "interaction": "移动指针或拖动，调整画面构图。"
+      },
+      "A10": {
+        "name": "磁力线团",
+        "description": "层叠纤维呈现不可见的力场。",
+        "family": "particles",
+        "interaction": "移动指针或拖动，调整画面构图。"
+      },
+      "A11": {
+        "name": "极光织幕",
+        "description": "缓慢移动的发光丝线形成极光帷幕。",
+        "family": "light-and-shadow",
+        "interaction": "移动指针或拖动，调整画面构图。"
+      }
+    }
+  },
+  "capabilities": [],
+  "connectors": []
+}

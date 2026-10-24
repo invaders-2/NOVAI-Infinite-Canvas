@@ -1,0 +1,255 @@
+{
+  "kind": "skill",
+  "name": "ecommerce-studio",
+  "display_name": "电商设计室",
+  "description": "专为电商卖家与投流团队打造的一站式创意工作台：无需繁琐布景与漫长测试，输入商品图或链接，即可智能生成符合各大平台投放规范的高转化视觉资产。",
+  "category": "电商广告",
+  "business_scenario": "ecommerce-advertising",
+  "marketing_line": "丢入商品图、详情页链接或对标参考，AI 帮你搞定全套高转化投放素材——从上架商拍、多语言海报到爆款视频变体。",
+  "search_terms": [
+    "电商设计室",
+    "电商广告",
+    "静态广告",
+    "视频广告"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/static/store/covers/c57cc748dd1b1f60.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "ecommerce-studio",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "选定你需要的素材类型，提供商品图、链接或已有广告，AI 即可为你规划并生成可直接上架投放的高清成片。",
+    "scenarios": [
+      "静态广告",
+      "视频广告"
+    ],
+    "required_context": [
+      {
+        "title": "选定本次投放目标",
+        "description": "想要一套新品上架图、海外本地化海报，还是测试爆款短视频？按目标直接点选对应工具。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "ecommerce-studio-ad-localizer",
+        "title": "广告本地化",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 把这张已批准的电商静态广告本地化到指定市场：保留产品和优惠事实，连同文案一起调整排版，并标出法律或字体风险。",
+        "description": "上传一张国内或现成广告图，AI 自动翻译目标语言并重构排版与文案，一键出海拓客。",
+        "context": "静态广告"
+      },
+      {
+        "id": "ecommerce-studio-ad-resizer",
+        "title": "广告适配",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 把这张已批准的静态广告适配到指定比例：重新安排层级、裁切、产品大小、文字换行、安全区和 CTA 位置，不拉伸源图。",
+        "description": "上传单张定稿海报，智能重构 1:1、4:5、9:16 与横幅等多渠道版位，画面绝不生硬拉伸。",
+        "context": "静态广告"
+      },
+      {
+        "id": "ecommerce-studio-headline-multiplier",
+        "title": "标题变体",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 从这张已批准的静态广告做标题测试：固定所有画面和商业变量，只改变标题角度，并给出准确文案和换行。",
+        "description": "锁定跑量素材的高点击画面，批量裂变不同痛点与卖点文案，低成本测出 CTR 翻倍的爆款标题。",
+        "context": "静态广告"
+      },
+      {
+        "id": "ecommerce-studio-customer-voice-ads",
+        "title": "客户之声广告",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 根据这些真实客户反馈制作一条电商广告：保持引用可追溯，每个 claim 都配产品证据，再按需求选择产品画面、字幕、旁白或出镜者。",
+        "description": "粘贴商品详情页链接，AI 提炼买家真实口碑与热评，生成有理有据、自带信任感的爆款短视频。",
+        "context": "视频广告"
+      },
+      {
+        "id": "ecommerce-studio-hook-multiplier",
+        "title": "开头钩子测试",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 基于这条视频测试不同的开头钩子，保持正文、优惠、CTA 和结尾不变。先确认开头边界；支持完整剪辑时交付完整变体，否则明确交付钩子片段与剪辑方案。",
+        "description": "保留原视频主体与转化结尾，批量替换前 3 秒黄金抓人开头，低成本拯救完播率与 ROI。",
+        "context": "视频广告"
+      }
+    ],
+    "steps": [
+      {
+        "title": "挑选专属玩法",
+        "description": "根据本次上架、出海拓展、多版位适配或短视频测款需求，选择对应工作流。"
+      },
+      {
+        "title": "放入商品资料",
+        "description": "上传几张商品图、粘贴产品详情页链接或对标视频，AI 自动解析核心卖点。"
+      },
+      {
+        "title": "获取投放级成片",
+        "description": "快速获得符合平台规范的商拍组图、海报变体或带节奏分镜的视频广告。"
+      }
+    ],
+    "outputs": [
+      "符合主流电商与社媒投放规范的高清商拍图与海报",
+      "带节奏分镜、精准旁白与多测试变体的短视频广告",
+      "支持在画布中无缝继续精修或延伸新尺寸"
+    ],
+    "follow_ups": [
+      "保持同一套商品事实与视觉风格，直接切换到下一个工作流继续制作。",
+      "把跑出好数据的静态爆款，一键转为视频广告或多语言版本。"
+    ],
+    "boundaries": []
+  },
+  "collection": {
+    "categories": [
+      {
+        "id": "static-ads",
+        "label": "静态广告"
+      },
+      {
+        "id": "video-ads",
+        "label": "视频广告"
+      }
+    ],
+    "entries": [
+      {
+        "item": {
+          "kind": "app",
+          "name": "design-room"
+        },
+        "category": "static-ads",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/c57cc748dd1b1f60.webp"
+        },
+        "tags": [
+          "电商",
+          "组图"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "一键电商组图",
+        "description": "只需一张商品原图，AI 自动提炼卖点并对标大牌光影，批量生成主图、特写与生活场景大片。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "ad-localizer"
+        },
+        "category": "static-ads",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/0c7b722f5e462e62.webp"
+        },
+        "tags": [
+          "广告本地化",
+          "电商"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "广告本地化",
+        "description": "上传一张国内或现成广告图，AI 自动翻译目标语言并重构排版与文案，一键出海拓客。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "ad-resizer"
+        },
+        "category": "static-ads",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/a658a504208dde06.webp"
+        },
+        "tags": [
+          "广告适配",
+          "电商"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "尺寸适配器",
+        "description": "上传单张定稿海报，智能重构 1:1、4:5、9:16 与横幅等多渠道版位，画面绝不生硬拉伸。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "headline-multiplier"
+        },
+        "category": "static-ads",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/41e71d7d25f3d050.webp"
+        },
+        "tags": [
+          "标题变体",
+          "电商"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "标题变体",
+        "description": "锁定跑量素材的高点击画面，批量裂变不同痛点与卖点文案，低成本测出 CTR 翻倍的爆款标题。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "customer-voice-ads"
+        },
+        "category": "video-ads",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "客户之声广告",
+          "电商"
+        ],
+        "featured": false,
+        "status": "live",
+        "title": "客户之声广告",
+        "description": "粘贴商品详情页链接，AI 提炼买家真实口碑与热评，生成有理有据、自带信任感的爆款短视频。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "hook-multiplier"
+        },
+        "category": "video-ads",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "开头钩子测试",
+          "电商"
+        ],
+        "featured": false,
+        "status": "live",
+        "title": "开头钩子测试",
+        "description": "保留原视频主体与转化结尾，批量替换前 3 秒黄金抓人开头，低成本拯救完播率与 ROI。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "youtube-product-video"
+        },
+        "category": "video-ads",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/e2754af715d1ff2d.webp"
+        },
+        "tags": [
+          "YouTube Ads",
+          "E-commerce"
+        ],
+        "featured": false,
+        "status": "live",
+        "title": "YouTube 品牌影片工作室",
+        "description": "从产品页出发，做出体现品牌调性的 YouTube 影片与 ABCD 广告。"
+      }
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

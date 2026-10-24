@@ -1,0 +1,27 @@
+{
+  "kind": "app",
+  "name": "vimeo",
+  "display_name": "Vimeo",
+  "description": "连接 Vimeo 视频库，支持搜索、读取、分析和管理视频内容。",
+  "category": "更多应用",
+  "marketing_line": "连接 Vimeo 视频库，支持搜索、读取、分析和管理视频内容。",
+  "search_terms": [],
+  "icon_url": "/static/store/covers/985eb1b00c7447d1.webp",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "vimeo",
+  "guide": {
+    "summary": "连接 Vimeo 视频库，支持搜索、读取、分析和管理视频内容。",
+    "scenarios": [],
+    "required_context": [],
+    "use_cases": [],
+    "steps": [],
+    "outputs": [],
+    "follow_ups": [],
+    "boundaries": []
+  },
+  "capabilities": [],
+  "connectors": []
+}

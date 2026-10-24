@@ -1,0 +1,27 @@
+{
+  "kind": "app",
+  "name": "frameio",
+  "display_name": "Frame.io",
+  "description": "连接 Frame.io，支持读取和管理 accounts、workspaces、projects、folders、files、comments 和 shares。",
+  "category": "更多应用",
+  "marketing_line": "连接 Frame.io，支持读取和管理 accounts、workspaces、projects、folders、files、comments 和 shares。",
+  "search_terms": [],
+  "icon_url": "/static/store/covers/57d832ff0a916e5c.webp",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "frameio",
+  "guide": {
+    "summary": "连接 Frame.io，支持读取和管理 accounts、workspaces、projects、folders、files、comments 和 shares。",
+    "scenarios": [],
+    "required_context": [],
+    "use_cases": [],
+    "steps": [],
+    "outputs": [],
+    "follow_ups": [],
+    "boundaries": []
+  },
+  "capabilities": [],
+  "connectors": []
+}

@@ -1,0 +1,108 @@
+{
+  "kind": "skill",
+  "name": "3d-studio-v2",
+  "display_name": "3D片场 2.0",
+  "description": "用 Agent 创建和编辑 3D 场景、角色、灯光与运镜，在一个片场里完成从预演到成片的规划。",
+  "category": "3D",
+  "business_scenario": "film-video",
+  "marketing_line": "用 Agent 创建和编辑 3D 场景、角色、灯光与运镜，在一个片场里完成从预演到成片的规划。",
+  "search_terms": [
+    "3D片场 2.0",
+    "3D片场",
+    "Agent 3D 场景编辑"
+  ],
+  "cover_url": "/static/store/covers/5fb15e5bdbf0354f.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "3d-studio-v2",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "用 Agent 把场景描述变成可编辑的 3D 世界，再持续调整场景、角色、灯光和运镜，为成片生成做好准备。",
+    "scenarios": [
+      "用自然语言创建可编辑的 3D 场景",
+      "让 Agent 持续调整角色、环境、灯光与运镜",
+      "在生成成片前先预览并确认场景方案"
+    ],
+    "required_context": [
+      {
+        "title": "描述你想搭建的场景",
+        "description": "告诉 Agent 主体、环境、视觉风格、灯光和镜头意图，Agent 会先搭出可编辑的 3D 场景，再根据对话继续修改。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "3d-studio-v2-agent-scene",
+        "title": "用 Agent 创建和编辑 3D 场景",
+        "prompt": "用 Agent 创建和编辑一个 3D 场景。",
+        "description": "让 Agent 创建可编辑的 3D 场景，再通过连续指令调整世界、角色、灯光和运镜。",
+        "context": "3D片场 2.0 · Agent 玩法"
+      },
+      {
+        "id": "3d-studio-v2-camera-light",
+        "title": "调整灯光与运镜",
+        "prompt": "保持场景布局，改镜头和灯光。",
+        "description": "保持场景布局，让 Agent 改镜头路径或灯光方案。",
+        "context": "3D片场 2.0 · 运镜"
+      }
+    ],
+    "steps": [
+      {
+        "title": "描述场景目标",
+        "description": "告诉 Agent 要创建什么，包括主体、环境、风格、灯光和镜头意图。"
+      },
+      {
+        "title": "让 Agent 完成首版",
+        "description": "Agent 会把描述变成可编辑的 3D 场景，并展示环境、角色、灯光和运镜的首轮方案。"
+      },
+      {
+        "title": "通过对话持续编辑",
+        "description": "直接提出场景、材质、灯光、调度或运镜的具体修改，并逐轮确认结果。"
+      }
+    ],
+    "outputs": [
+      "根据描述创建的可编辑 3D 场景",
+      "持续迭代后的角色、环境、灯光与运镜"
+    ],
+    "follow_ups": [
+      "保持场景布局不变，把镜头改成低机位跟拍。",
+      "把主光改成冷色月光，同时保留角色调度。"
+    ],
+    "boundaries": []
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "lockstep": true,
+    "eyebrow": "流程预览",
+    "caption": "先在 3D片场 2.0 里搭出可编辑的预演，再生成同一镜头的成片。",
+    "panels": [
+      {
+        "id": "previs",
+        "label": "3D片场 2.0 预演",
+        "alt": "在 3D片场 2.0 中搭建的可编辑预演",
+        "media": {
+          "kind": "video",
+          "src": ""
+        }
+      },
+      {
+        "id": "final",
+        "label": "成片",
+        "alt": "同一镜头生成的成片",
+        "media": {
+          "kind": "video",
+          "src": ""
+        },
+        "is_result": true
+      }
+    ]
+  },
+  "starter_prompt": "用 Agent 创建和编辑一个 3D 场景，加入角色、灯光和运镜。",
+  "capabilities": [],
+  "connectors": []
+}

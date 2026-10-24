@@ -1,0 +1,291 @@
+{
+  "kind": "skill",
+  "name": "social-trending-recast",
+  "display_name": "热门玩法复刻",
+  "description": "看到一个有意思的热门视频？发给我，再上传你的人物、产品或场景参考。我会保留动作和运镜，先给你看一版复刻方案，再出片。",
+  "category": "社媒内容",
+  "business_scenario": "social-media-content",
+  "marketing_line": "源视频加新人物或场景，快速做出属于你的热门玩法。",
+  "search_terms": [
+    "热门玩法复刻",
+    "热门视频复刻",
+    "深度重塑",
+    "人物替换",
+    "场景替换"
+  ],
+  "cover_url": "/static/store/covers/3229d8fea6764fb3.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "depth-video-studio",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "发来一条你喜欢的视频，再上传新人物、产品或场景参考。我会先说明哪些动作和运镜会保留、哪些外观会替换，确认方案后再出片。",
+    "scenarios": [
+      "给熟悉的热门动作换一个人物",
+      "把喜欢的运镜放进自己的场景",
+      "用自己的参考视频快速做一版新变体"
+    ],
+    "required_context": [
+      {
+        "title": "你想参考哪条视频？",
+        "description": "提供要复用动作、节奏、构图和运镜的视频。"
+      },
+      {
+        "title": "你想换成什么？",
+        "description": "上传决定新版外观的人物、产品、场景或其他参考素材。"
+      },
+      {
+        "title": "哪些地方要保留？",
+        "description": "说清动作节拍、构图、时长和必须保持的视觉规则。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "depth-motion-transfer",
+        "title": "热门动作｜保留动作，换成你的人物",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 把这条视频当作动作参考。先告诉我会保留什么，再用我的人物或产品参考复刻，生成前先给我看方案。",
+        "description": "让你的人物或产品进入熟悉的动作玩法，同时保留源片的节奏和构图。",
+        "context": "热门动作换人物",
+        "showcase": {
+          "layout": "grid",
+          "panels": [
+            {
+              "id": "reference-video",
+              "label": "参考视频",
+              "alt": "用于提取动作与运镜的参考视频",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "depth-pass",
+              "label": "深度运动",
+              "alt": "从参考视频提取的深度运动通道",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "character-ref",
+              "label": "人物参考",
+              "alt": "需要迁移到的人物参考图",
+              "media": {
+                "kind": "image",
+                "src": "/static/store/covers/aa3c1cb3346caf49.webp"
+              }
+            },
+            {
+              "id": "final-clip",
+              "label": "最终成片",
+              "alt": "按人物参考重塑外观后的最终成片",
+              "media": {
+                "kind": "video",
+                "src": ""
+              },
+              "is_result": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "hitchcock-zoom-transfer",
+        "title": "希区柯克变焦｜保留镜头，换掉主体",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 用我的人物或产品参考复刻这套推拉变焦。先说明哪些地方保留、哪些地方替换，确认后再生成。",
+        "description": "保留推拉镜头的感觉，把画面中心换成你的人物或产品。",
+        "context": "希区柯克变焦换主体",
+        "showcase": {
+          "layout": "grid",
+          "panels": [
+            {
+              "id": "camera-template",
+              "label": "运镜模板",
+              "alt": "希区柯克变焦运镜模板视频",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "depth-pass",
+              "label": "深度运动",
+              "alt": "从运镜模板提取的深度运动通道",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "character-ref",
+              "label": "人物参考",
+              "alt": "要套用运镜的人物参考图",
+              "media": {
+                "kind": "image",
+                "src": "/static/store/covers/aa3c1cb3346caf49.webp"
+              }
+            },
+            {
+              "id": "final-clip",
+              "label": "最终成片",
+              "alt": "希区柯克变焦运镜迁移后的最终成片",
+              "media": {
+                "kind": "video",
+                "src": ""
+              },
+              "is_result": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "orbit-shot-transfer",
+        "title": "环绕运镜｜保留运动，换成你的场景",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 用我的场景参考复刻这套环绕运镜。先告诉我保留什么、改变什么，确认方案后再生成。",
+        "description": "把喜欢的环绕镜头带进自己的环境和氛围里。",
+        "context": "环绕运镜换场景",
+        "showcase": {
+          "layout": "grid",
+          "panels": [
+            {
+              "id": "reference-video",
+              "label": "原视频",
+              "alt": "用于提取环绕运镜的参考原视频",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "depth-pass",
+              "label": "深度运动",
+              "alt": "从环绕镜头提取的深度运动通道",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "character-ref",
+              "label": "人物参考",
+              "alt": "要套用环绕运镜的人物参考图",
+              "media": {
+                "kind": "image",
+                "src": "/static/store/covers/aa3c1cb3346caf49.webp"
+              }
+            },
+            {
+              "id": "final-clip",
+              "label": "最终成片",
+              "alt": "环绕镜头复刻后的最终成片",
+              "media": {
+                "kind": "video",
+                "src": ""
+              },
+              "is_result": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "whip-zoom-transfer",
+        "title": "快速变焦｜保留冲击力，换掉外观",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 用我的人物、产品或场景参考复刻这套快速变焦。先给我看保留/替换清单，确认后再生成。",
+        "description": "保留快速推近的节奏，把人物、产品或环境换成你的版本。",
+        "context": "快速变焦换新外观",
+        "showcase": {
+          "layout": "grid",
+          "panels": [
+            {
+              "id": "reference-video",
+              "label": "参考视频",
+              "alt": "用于提取快速变焦推运镜的参考视频",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "depth-pass",
+              "label": "深度运动",
+              "alt": "从快速变焦推参考视频提取的深度运动通道",
+              "media": {
+                "kind": "video",
+                "src": ""
+              }
+            },
+            {
+              "id": "character-ref",
+              "label": "人物参考",
+              "alt": "要套用快速变焦推运镜的人物参考图",
+              "media": {
+                "kind": "image",
+                "src": "/static/store/covers/cf2de5b0dc115aad.webp"
+              }
+            },
+            {
+              "id": "final-clip",
+              "label": "最终成片",
+              "alt": "快速变焦推复刻后的最终成片",
+              "media": {
+                "kind": "video",
+                "src": ""
+              },
+              "is_result": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "depth-custom-video",
+        "title": "上传自己的参考｜把喜欢的玩法变成你的版本",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 把我上传的视频当作玩法参考。先告诉我会保留什么、会替换什么，再给我看复刻方案，确认后再生成。",
+        "description": "上传一条有意思的源视频，快速做一版可以审阅的变体。",
+        "context": "自定义热门参考"
+      }
+    ],
+    "steps": [
+      {
+        "title": "先一起看懂源片",
+        "description": "拆解源片的动作、节奏、构图、运镜和使用权。"
+      },
+      {
+        "title": "分清保留什么、替换什么",
+        "description": "先固定源片的动作和运镜，再决定用哪份人物、产品或场景参考替换原内容。"
+      },
+      {
+        "title": "先给你看复刻方案",
+        "description": "让你确认每份参考素材负责什么、关键动作怎么走、最后会得到什么。"
+      },
+      {
+        "title": "出片后一起检查",
+        "description": "检查动作、外观、裁切、披露和平台适配，再决定是否使用。"
+      }
+    ],
+    "outputs": [
+      "一份清楚的保留/替换清单",
+      "带你的人物、产品或场景的新版短片",
+      "一份参考素材清单，说明每张图会影响什么"
+    ],
+    "follow_ups": [
+      "保留源片动作，换另一套人物参考。",
+      "保留人物，换一个场景再做一版。",
+      "把最强的玩法做成一组已确认的变体。"
+    ],
+    "boundaries": [
+      "我会先做可审阅的复刻素材包；什么时候、发到哪里，由你确认。",
+      "源视频、产品图、logo、音乐和其他素材都要有可复用的权利。",
+      "源片负责动作、节奏、构图、运镜和空间，参考素材负责新的外观；不能保证每个细节逐像素一致。",
+      "发布前请检查说法、披露、裁切、时长和平台要求。"
+    ]
+  },
+  "starter_prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 我有一条源视频和新人物或场景参考。先告诉我会保留什么、会替换什么，再给我看复刻方案，确认后再生成。",
+  "capabilities": [],
+  "connectors": []
+}

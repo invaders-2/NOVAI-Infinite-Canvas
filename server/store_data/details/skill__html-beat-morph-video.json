@@ -1,0 +1,116 @@
+{
+  "kind": "skill",
+  "name": "html-beat-morph-video",
+  "display_name": "动态文字视频设计",
+  "description": "给我一个视觉主体和节拍想法，把它做成可以先预览、再导出的短循环 HTML 视频。",
+  "category": "影视创意",
+  "business_scenario": "film-video",
+  "marketing_line": "让文字沿着节奏动起来，做成一段看得懂的动态文字视频。",
+  "search_terms": [
+    "动态文字视频设计",
+    "动态文字视频设计",
+    "单主体变形",
+    "HTML loop video"
+  ],
+  "cover_url": "/static/store/covers/56852faae34038ad.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "html-beat-morph-video",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5"
+  },
+  "guide": {
+    "summary": "给我一个视觉主体和节拍想法，把它做成可以先预览、再导出的短循环 HTML 视频。",
+    "scenarios": [
+      "动态文字视频设计",
+      "产品或功能故事",
+      "品牌或数据开场"
+    ],
+    "required_context": [
+      {
+        "title": "主体和状态",
+        "description": "说明这一个主体，以及它需要经过的 8–12 个状态或节拍。"
+      },
+      {
+        "title": "配色和音频",
+        "description": "选择黑白或一种强调色，并提供有版权依据的音乐来源。"
+      },
+      {
+        "title": "循环和交付",
+        "description": "确认画布、FPS、不超过 5 秒的时长和让循环可用的验收检查。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "ui-state-morph",
+        "title": "动态文字｜让文字跟着意思动起来",
+        "prompt": "{{skill:html-beat-morph-video:html-beat-morph-video}} 把这 8–12 个 UI 状态做成一段连续的节拍驱动 HTML 循环。写动画前先给出 120 BPM、10 拍的节拍表让我确认。",
+        "description": "让一个连贯的 UI 主体完成可读的状态序列，不切场景，也不使用鼠标指针演示。",
+        "context": "动态文字视频设计"
+      },
+      {
+        "id": "product-feature-story",
+        "title": "产品故事｜把一句话做成动效",
+        "prompt": "{{skill:html-beat-morph-video:html-beat-morph-video}} 把这个产品功能做成一个连贯的变形构图。保持主体连续，使用一种干净强调色，并在渲染前等待我确认有边界的状态表。",
+        "description": "让一个产品表面或功能说明从吸引点走到证明点，并以清楚的结尾收束。",
+        "context": "动态文字视频设计"
+      },
+      {
+        "id": "brand-data-opener",
+        "title": "品牌或数据｜用动态文字开场",
+        "prompt": "{{skill:html-beat-morph-video:html-beat-morph-video}} 用这个主体制作一段短的品牌或数据开场。所有变化都跟随节拍，回到第一帧，并分别说明 HTML、帧数和解码后视频的状态。",
+        "description": "让标志、标题、数字或数据形态承担一段短开场，并干净地回到循环起点。",
+        "context": "动态文字视频设计"
+      }
+    ],
+    "steps": [
+      {
+        "title": "确认节拍表",
+        "description": "在写代码前列出状态、配色、音频版权、画布和有边界的时长。"
+      },
+      {
+        "title": "制作变形",
+        "description": "让视觉状态由 seek(t) 计算得到，保持一个连贯主体并保留循环点。"
+      },
+      {
+        "title": "渲染和检查",
+        "description": "检查节拍静帧、浏览器结果、帧数、时长、解码和首尾帧一致性。"
+      }
+    ],
+    "outputs": [
+      "已确认的节拍表",
+      "可查看的 HTML 预览",
+      "带独立验证说明的有边界视频"
+    ],
+    "follow_ups": [
+      "保留节拍表，换一种强调色",
+      "用同一个主体制作产品变体",
+      "重新确认节拍表后缩短循环"
+    ],
+    "boundaries": [
+      "这里制作的是一段连续的 HTML 动效循环，不是多场景剪辑。",
+      "音频只做连续截取，不分析 BPM 或峰值。",
+      "输出不能超过 5 秒；没有浏览器和媒体检查就不能声称已验证。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "动态文字",
+    "caption": "让文字沿着节奏动起来，做成一段看得懂的动态文字视频。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/56852faae34038ad.webp"
+      },
+      "alt": "动态文字视频封面"
+    },
+    "panels": []
+  },
+  "starter_prompt": "{{skill:html-beat-morph-video:html-beat-morph-video}} 我有一个视觉主体和文字动效想法。请先帮我确定状态、配色和有边界的时长，再制作可查看的 HTML 循环；节拍表确认后再导出。",
+  "capabilities": [],
+  "connectors": []
+}

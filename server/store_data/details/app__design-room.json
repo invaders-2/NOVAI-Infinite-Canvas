@@ -1,0 +1,165 @@
+{
+  "kind": "app",
+  "name": "design-room",
+  "display_name": "一键电商组图",
+  "description": "摆脱高昂摄影成本与漫长修图周期：上传一张包装或白底图，自动检索同类竞品视觉风格，生成可直接上架的高清商业摄影组图。",
+  "category": "更多应用",
+  "business_scenario": "ecommerce-advertising",
+  "marketing_line": "只需一张商品原图，AI 自动提炼卖点并对标大牌光影，批量生成主图、特写与生活场景大片。",
+  "search_terms": [
+    "电商新品｜从一张包装图出整套上架图",
+    "{{skill:commerce-ad-studio:commerce-ad-studio}} 用这张商品包装图出一套可直接上架的静帧，包含主图、卖点图、细节图和生活场景。先网络搜索竞品怎么拍。瓶身上有的信息都要保住，不要编。",
+    "品牌视觉｜网络搜索竞品，再统一拍法",
+    "{{skill:commerce-ad-studio:commerce-ad-studio}} 先网络搜索同类独立站和竞品怎么拍，再统一这套产品的主图、特写和生活场景，不要编造卖点。"
+  ],
+  "icon_url": "/static/store/covers/3297cae249e24d83.webp",
+  "cover_url": "/static/store/covers/c57cc748dd1b1f60.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "design-room",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "摆脱高昂摄影成本与漫长修图周期：上传一张包装或白底图，自动检索同类竞品视觉风格，生成可直接上架的高清商业摄影组图。",
+    "scenarios": [
+      "电商新品上架",
+      "竞品网络搜索",
+      "独立站与社媒生活场景"
+    ],
+    "required_context": [
+      {
+        "title": "商品原图与已确认事实",
+        "description": "提供 1–5 张包装图或细节图，以及容量、材质、锁扣和必须保留的卖点。没有依据的内容不会补写。"
+      },
+      {
+        "title": "卖给谁、用在哪",
+        "description": "说明面向独立站、Amazon 还是社媒，以及买家第一眼要看懂什么。"
+      },
+      {
+        "title": "视觉参考",
+        "description": "可加品牌规范、竞品页面或灯光参考。没给时，Agent 会用网络搜索去找竞品拍法。参考用来约束拍法，而不是替代商品原图。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "电商新品｜从一张包装图出整套上架图",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 用这张商品包装图出一套可直接上架的静帧，包含主图、卖点图、细节图和生活场景。先网络搜索竞品怎么拍。瓶身上有的信息都要保住，不要编。",
+        "description": "丢进包装图。Agent 会先网络搜索竞品，再规划并生成主图、卖点图、细节图和生活场景。"
+      },
+      {
+        "title": "品牌视觉｜网络搜索竞品，再统一拍法",
+        "prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}} 先网络搜索同类独立站和竞品怎么拍，再统一这套产品的主图、特写和生活场景，不要编造卖点。",
+        "description": "Agent 会网络搜索同类独立站的主图、特写和生活场景，锁住同一套光和画面语言。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "先读商品图",
+        "description": "Agent 从包装图开始：瓶型、Logo、盖子、刻度和已经印在产品上的信息。"
+      },
+      {
+        "title": "网络搜索竞品",
+        "description": "Agent 会做网络搜索，查找同类独立站和竞品怎么拍主图、特写和生活场景，再锁住同一套光。"
+      },
+      {
+        "title": "出图前锁住事实",
+        "description": "容量、锁扣、Logo 和颜色都来自原图。只有你要求的卖点图才带文案。"
+      },
+      {
+        "title": "交出可上架的一套图",
+        "description": "得到卖点主图、细节特写、手提尺度和生活场景，再按单张继续改。"
+      }
+    ],
+    "outputs": [
+      "需要时带卖点文案的主图",
+      "与原图一致的细节特写和手提尺度",
+      "同一套光、同一套产品事实的生活场景"
+    ],
+    "follow_ups": [
+      "为同一件商品再补一张生活场景或详情页图。",
+      "保住产品事实，只改某一张的构图或场景。",
+      "把同一张包装图适配成独立站或社媒那一套。"
+    ],
+    "boundaries": [
+      "只做静态商品图，不生成视频或室内设计。",
+      "没有真实商品图或已确认事实时，不会编造功能、参数或卖点。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "一张商品图，一套上架图",
+    "caption": "把包装图丢进去。Agent 先读产品事实，再做网络搜索查找竞品怎么拍，最后出可发布的静帧——不会编造卖点。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": ""
+      },
+      "alt": "一键电商组图案例预览"
+    },
+    "panels": [
+      {
+        "id": "source",
+        "label": "你的商品图",
+        "alt": "运动水壶商品原图",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/17db151bec365c5b.webp"
+        },
+        "aspect": "4/5"
+      },
+      {
+        "id": "feature-copy",
+        "label": "卖点字",
+        "alt": "卖点字",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/d562aa62e2722fe6.webp"
+        },
+        "aspect": "1/1",
+        "is_result": true
+      },
+      {
+        "id": "lid-macro",
+        "label": "锁扣特写",
+        "alt": "锁扣特写",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/73c2dd8890b59347.webp"
+        },
+        "aspect": "1/1",
+        "is_result": true
+      },
+      {
+        "id": "handheld",
+        "label": "手提尺度",
+        "alt": "手提尺度",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/71bee908d6b8c2bd.webp"
+        },
+        "aspect": "1/1",
+        "is_result": true
+      },
+      {
+        "id": "lifestyle",
+        "label": "训练场景",
+        "alt": "训练场景",
+        "media": {
+          "kind": "image",
+          "src": "/static/store/covers/459fd554fa0f8a3e.webp"
+        },
+        "aspect": "1/1",
+        "is_result": true
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:commerce-ad-studio:commerce-ad-studio}}",
+  "capabilities": [],
+  "connectors": []
+}

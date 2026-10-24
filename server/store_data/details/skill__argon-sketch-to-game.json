@@ -1,0 +1,144 @@
+{
+  "kind": "skill",
+  "name": "argon-sketch-to-game",
+  "display_name": "草图转可玩游戏",
+  "description": "分享草图、截图或一句话的创意。获得一款可在浏览器中游玩的游戏，包含操作、计分、关卡和触屏支持，并从你可以试玩的核心玩法开始。",
+  "category": "AI 模型工作室",
+  "business_scenario": "interactive-games",
+  "marketing_line": "在纸上画出来，在浏览器里玩。",
+  "search_terms": [
+    "草图转游戏",
+    "浏览器游戏",
+    "HTML 游戏",
+    "迷你游戏",
+    "游戏原型",
+    "Argon"
+  ],
+  "cover_url": "/static/store/covers/d99211f5109306d9.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "gemini-argon-studio",
+  "recommended_model": {
+    "id": "gemini-4-argon",
+    "display_name": "Argon"
+  },
+  "guide": {
+    "summary": "Agent 会读取你的草图，写下规则，并制作一款可以在单个 HTML 文件中游玩的游戏。在完整游戏制作完成之前，你可以先体验核心玩法。",
+    "scenarios": [
+      "把纸质或白板草图变成可玩的原型",
+      "为活动或页面制作一款小型品牌游戏"
+    ],
+    "required_context": [
+      {
+        "title": "游戏是什么？",
+        "description": "一张草图、一张截图，或一句话描述玩家要做什么。"
+      },
+      {
+        "title": "谁来玩，在哪里玩？",
+        "description": "手机、电脑，或两者兼有。默认为键盘加触屏。"
+      },
+      {
+        "title": "游戏要持续多久？",
+        "description": "默认三个短关卡，或是一个逐渐加速的无尽模式。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "sketch-to-game-paper",
+        "title": "纸上草图 | 一次制作即可游玩",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `sketch-to-game` 玩法。阅读这张草图，列出你看到的内容以及你推测的内容，写一份单屏游戏设计，并制作带有键盘和触屏操作的核心玩法。在添加关卡之前，请等待我的反馈。",
+        "description": "把你的绘画照片转为一款遵循其布局和角色的游戏。"
+      },
+      {
+        "id": "sketch-to-game-idea",
+        "title": "一句话创意 | 一款小型街机游戏",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `sketch-to-game` 玩法。根据这个创意制作一款原创街机游戏。先写出规则，然后制作带有开始和游戏结束画面的可玩核心玩法，再做三个关卡并保存最高分。",
+        "description": "从一句话出发，获得规则、关卡和最高分记录。"
+      },
+      {
+        "id": "sketch-to-game-sprites",
+        "title": "美术处理 | 游戏跑通后再加精灵图",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `sketch-to-game` 玩法。保留游戏规则，并加入生成的美术素材。检查实时图片模型，给我看费用，制作一张精灵图表，放入游戏中供我审阅，然后再完成其余部分。",
+        "description": "保留规则，并将代码绘制的图形替换为生成的精灵图。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "读取草图",
+        "description": "我会列出我看到的内容和我推断的内容。"
+      },
+      {
+        "title": "编写规则",
+        "description": "你确认一份单屏游戏设计。"
+      },
+      {
+        "title": "体验核心玩法",
+        "description": "在完整游戏之前，你先试玩第一个可玩版本。"
+      }
+    ],
+    "outputs": [
+      "单个 HTML 文件中可玩的游戏",
+      "包含可调整数值的规则表",
+      "可选的生成精灵图或背景"
+    ],
+    "follow_ups": [
+      "让它更难或更简单。",
+      "添加一个关卡或一个 Boss。",
+      "重新设计游戏风格，使其符合你的品牌。"
+    ],
+    "boundaries": [
+      "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。",
+      "在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。",
+      "游戏为原创。我不会复制现有游戏中的角色、名称、标识、音乐或关卡。",
+      "游戏在浏览器中运行；不包括应用商店的打包。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Argon Studio",
+    "caption": "在纸上画出来，在浏览器里玩。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/d99211f5109306d9.webp"
+      },
+      "alt": "草图转可玩游戏"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 1
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "game",
+        "label": "游戏是什么？",
+        "placeholder": "一张草图、一张截图，或一句话描述玩家要做什么。",
+        "max_length": 400
+      },
+      {
+        "id": "device",
+        "label": "谁来玩，在哪里玩？",
+        "placeholder": "手机、电脑，或两者兼有。默认为键盘加触屏。",
+        "max_length": 80
+      },
+      {
+        "id": "length",
+        "label": "游戏要持续多久？",
+        "placeholder": "默认三个短关卡，或是一个逐渐加速的无尽模式。",
+        "max_length": 120
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `sketch-to-game` 玩法。我有一张草图或一个游戏创意。请阅读它，写一份单屏游戏设计，并先做出可玩的核心玩法。",
+  "capabilities": [],
+  "connectors": []
+}

@@ -1,0 +1,144 @@
+{
+  "kind": "skill",
+  "name": "argon-generative-art",
+  "display_name": "生成艺术海报",
+  "description": "分享一个主题、笔记或一小份数据集。获得一件以代码生成的原创随机种子艺术作品，可导出为海报、用作实时背景，或通过更换种子生成变体。",
+  "category": "AI 模型工作室",
+  "business_scenario": "interactive-games",
+  "marketing_line": "你的主题或数据，由一个可重复的算法绘制。",
+  "search_terms": [
+    "生成艺术",
+    "数据艺术",
+    "算法海报",
+    "创意编程",
+    "实时背景",
+    "Argon"
+  ],
+  "cover_url": "/static/store/covers/a9a4b3018727492b.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "gemini-argon-studio",
+  "recommended_model": {
+    "id": "gemini-4-argon",
+    "display_name": "Argon"
+  },
+  "guide": {
+    "summary": "Agent 会选择适合你主题的算法，用代码实现它，并将其绑定到一个种子上，使相同的设置总能生成相同的图像。",
+    "scenarios": [
+      "由主题或名称制作海报或封面",
+      "由你自己的数字驱动的艺术作品"
+    ],
+    "required_context": [
+      {
+        "title": "主题是什么？",
+        "description": "一个主题、一个词、笔记、一份 CSV，或一张可取样的照片。"
+      },
+      {
+        "title": "上面需要文字吗？",
+        "description": "一个标题和副标题，或不需要。"
+      },
+      {
+        "title": "调色板和尺寸？",
+        "description": "默认为深色底色配暖色强调色，尺寸 1600 x 900。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "generative-art-poster-theme",
+        "title": "主题 | 三种可选算法",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `generative-art-poster` 玩法。提出三种符合此主题的生成算法，用固定种子实现我选择的那一种，添加种子、强度和颜色控件，并加入 PNG 导出。",
+        "description": "获得三个与你的主题相关的构思，然后制作一件随机种子作品。"
+      },
+      {
+        "id": "generative-art-poster-data",
+        "title": "数据 | 让你的数字塑造作品",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `generative-art-poster` 玩法。用这份数据集驱动一件生成艺术作品。告诉我哪一列控制哪种视觉属性，展示被跳过的行，并先制作一个随机种子版本。",
+        "description": "将一份小型数据集的各列映射到视觉属性，并说明映射方式。"
+      },
+      {
+        "id": "generative-art-poster-variants",
+        "title": "变体 | 同样的风格，新的种子",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `generative-art-poster` 玩法。保留我已确认的作品，并并排展示三个种子变体及其种子值，方便我为海报选择一个。",
+        "description": "保留已确认的风格，并并排比较不同种子的效果。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "选择算法",
+        "description": "三个与你的主题或数据相关的构思。"
+      },
+      {
+        "title": "查看一件随机种子作品",
+        "description": "用其种子和设置检查效果。"
+      },
+      {
+        "title": "导出并变化",
+        "description": "PNG 导出、实时控件和种子变体。"
+      }
+    ],
+    "outputs": [
+      "带控件的随机种子生成艺术页面",
+      "PNG 海报导出",
+      "可重复使用的种子变体"
+    ],
+    "follow_ups": [
+      "更换调色板或密度。",
+      "将作品用作页面背景。",
+      "制作一个循环版本。"
+    ],
+    "boundaries": [
+      "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。",
+      "在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。",
+      "作品由代码绘制；仅在你要求时，并在费用检查后，才会使用生成的图片。",
+      "视频导出仅在渲染工具可用时进行。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Argon Studio",
+    "caption": "你的主题或数据，由一个可重复的算法绘制。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/a9a4b3018727492b.webp"
+      },
+      "alt": "生成艺术海报"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 1
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "theme",
+        "label": "主题是什么？",
+        "placeholder": "一个主题、一个词、笔记、一份 CSV，或一张可取样的照片。",
+        "max_length": 400
+      },
+      {
+        "id": "text",
+        "label": "上面需要文字吗？",
+        "placeholder": "一个标题和副标题，或不需要。",
+        "max_length": 120
+      },
+      {
+        "id": "palette",
+        "label": "调色板和尺寸？",
+        "placeholder": "默认为深色底色配暖色强调色，尺寸 1600 x 900。",
+        "max_length": 120
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `generative-art-poster` 玩法。我有一个主题或一些数据。请提出三个算法构思，制作一件带控件和 PNG 导出的随机种子作品，然后展示种子变体。",
+  "capabilities": [],
+  "connectors": []
+}

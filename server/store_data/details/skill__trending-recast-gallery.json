@@ -1,0 +1,1108 @@
+{
+  "kind": "skill",
+  "name": "trending-recast-gallery",
+  "display_name": "Skrull",
+  "description": "把刷屏的爆款视频形式做成一键模板：排行榜锐评、双人播客、街头采访、恶搞预告、聊天短剧……选一个，填个想法或者留空，直接拿到 9:16 竖屏成片。",
+  "category": "社媒内容",
+  "business_scenario": "social-media-content",
+  "marketing_line": "挑个爆款，一键复刻。",
+  "search_terms": [
+    "Skrull",
+    "爆款模板",
+    "表情包视频",
+    "天梯榜",
+    "播客切片",
+    "街头采访",
+    "电影预告",
+    "聊天故事",
+    "UGC 广告",
+    "倒计时",
+    "带货视频",
+    "恶搞视频"
+  ],
+  "cover_url": "/static/store/covers/2c1fae7720f865dc.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "skrull",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium"
+  },
+  "guide": {
+    "summary": "选一个爆款形式，填上你的想法（或者留空），Skrull 技能会完成写作、生成、剪辑和渲染，产出一条成品竖屏视频。",
+    "scenarios": [
+      "把一个热门观点做成天梯榜吐槽",
+      "把任何东西做成恶搞新闻、预告片或颁奖礼",
+      "用 UGC 风格的博主广告卖你的产品"
+    ],
+    "required_context": [
+      {
+        "title": "选哪种形式？",
+        "description": "从墙上挑一个模板。"
+      },
+      {
+        "title": "讲什么？",
+        "description": "输入你的想法，想放照片也可以。每一项都是可选的。"
+      }
+    ],
+    "use_cases": [],
+    "steps": [
+      {
+        "title": "选一种形式",
+        "description": "点开墙上的任意卡片。"
+      },
+      {
+        "title": "添加你的想法",
+        "description": "填写你想要的内容，或者留空，直接用现成的示例。"
+      },
+      {
+        "title": "获取视频",
+        "description": "Agent 会写脚本、生成素材，并渲染出 9:16 的 MP4。"
+      }
+    ],
+    "outputs": [
+      "一条成品 9:16 视频，带代码绘制的字幕、榜单和图形"
+    ],
+    "follow_ups": [],
+    "boundaries": [
+      "除非你提供自己的照片和事实，否则会使用虚构的人物、品牌和事件。"
+    ]
+  },
+  "preset_gallery": {
+    "categories": [
+      {
+        "id": "talk",
+        "label": "真人口播"
+      },
+      {
+        "id": "parody",
+        "label": "恶搞"
+      },
+      {
+        "id": "game",
+        "label": "游戏"
+      },
+      {
+        "id": "story",
+        "label": "故事"
+      },
+      {
+        "id": "faceless",
+        "label": "无人出镜"
+      }
+    ],
+    "presets": [
+      {
+        "id": "ranking-board-roast",
+        "title": "排行榜锐评",
+        "description": "一个博主实时把任何东西打上 S 到 D 的榜单，狠狠吐槽。",
+        "category": "talk",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/58db93a4a29f798e.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `ranking-board-roast` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：给最被高估的早餐排个序。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1,
+            "roles": [
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "theme",
+              "label": "要排什么？",
+              "placeholder": "国足最被高估的球员",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "podcast-clip",
+        "title": "播客切片",
+        "description": "两个主播，一场离谱辩论，剪成爆款播客。",
+        "category": "talk",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/6d2b8385bf4008e2.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `podcast-clip` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：两个小朋友争论麦片到底算不算汤。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 2,
+            "roles": [
+              "character",
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "topic",
+              "label": "他们在吵什么？",
+              "placeholder": "麦片算不算汤？",
+              "max_length": 400
+            },
+            {
+              "id": "hosts",
+              "label": "主播是谁？",
+              "placeholder": "两个宝宝、一只猫和一条狗、拿破仑和一个抖音up主",
+              "max_length": 120
+            }
+          ]
+        }
+      },
+      {
+        "id": "street-interview",
+        "title": "街头采访",
+        "description": "一个问题，五个路人，最后一个回答直接跑偏。",
+        "category": "talk",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/a871177a6e08b8f6.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `street-interview` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：在王府井问路人收到过的最烂礼物是什么。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "question",
+              "label": "采访问题",
+              "placeholder": "你收到过最烂的礼物是什么？",
+              "max_length": 120
+            },
+            {
+              "id": "who",
+              "label": "采访谁？",
+              "placeholder": "路人、大妈、穿西装的猫",
+              "max_length": 120
+            },
+            {
+              "id": "place",
+              "label": "在哪里？",
+              "placeholder": "深夜的春熙路",
+              "max_length": 120
+            }
+          ]
+        }
+      },
+      {
+        "id": "ugc-product",
+        "title": "UGC 种草广告",
+        "description": "博主像分享秘密一样推销你的产品：开场钩子、效果证明、价格、行动号召。",
+        "category": "talk",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/50d57bffd48aa663.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `ugc-product` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：给一款 24 元的维C精华液做一条 UGC 广告。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 2,
+            "roles": [
+              "prop",
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "facts",
+              "label": "产品名称和卖点",
+              "placeholder": "亮肤C精华，15% 维C，无香精，24 元（原价 34 元）",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "top-countdown",
+        "title": "Top 5 倒计时",
+        "description": "数字炸场，排名逐个亮起，第 1 名来个反转。",
+        "category": "faceless",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/dde34a84b4fdb1c3.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `top-countdown` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：盘点 5 种“健康”零食，其实都在骗你。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "theme",
+              "label": "倒计时主题",
+              "placeholder": "那些在骗你的健康零食",
+              "max_length": 120
+            },
+            {
+              "id": "entries",
+              "label": "条目（可选）",
+              "placeholder": "米饼、坚果混合包、燕麦棒……",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "chat-story",
+        "title": "聊天故事",
+        "description": "一整出大戏，全在一个手机聊天框里。对方正在输入…… 对方正在输入……",
+        "category": "story",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/88ca57bc5b6c4094.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `chat-story` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：妹妹发现我吃了她的剩饭，聊天框里的一场对峙。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "premise",
+              "label": "聊天里发生了什么？",
+              "placeholder": "妹妹发现我偷吃了她的剩饭",
+              "max_length": 400
+            },
+            {
+              "id": "skin",
+              "label": "聊天风格",
+              "placeholder": "微信 / QQ",
+              "max_length": 60
+            }
+          ]
+        }
+      },
+      {
+        "id": "breaking-news",
+        "title": "突发新闻恶搞",
+        "description": "直播间一本正经，全程围绕钟楼上的一只猫。",
+        "category": "parody",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/112bdb54dbf52335.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `breaking-news` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：突发新闻：一只鹅占领了公司停车场。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "event",
+              "label": "什么“突发”新闻？",
+              "placeholder": "一只鹅占领了停车场",
+              "max_length": 400
+            },
+            {
+              "id": "place",
+              "label": "在哪里？",
+              "placeholder": "市中心",
+              "max_length": 120
+            }
+          ]
+        }
+      },
+      {
+        "id": "quiz-challenge",
+        "title": "趣味答题",
+        "description": "3-2-1 倒数结束前猜出答案，评论区留下你的得分。",
+        "category": "game",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/c6d29e573d8c5f7f.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `quiz-challenge` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一个小测验：根据特写猜动物，共 3 题。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "topic",
+              "label": "测验主题",
+              "placeholder": "根据特写猜水果",
+              "max_length": 120
+            },
+            {
+              "id": "questions",
+              "label": "你的题目（可选）",
+              "placeholder": "题目、选项、答案……",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "starting-lineup",
+        "title": "首发阵容",
+        "description": "同事们像 NBA 巨星一样出场，数据全都有。",
+        "category": "parody",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/cb2868aeb8d264a7.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `starting-lineup` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：给我们办公室来一段首发阵容介绍：咖啡狂魔、零食囤积王和爱回复全员的那位。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 4,
+            "roles": [
+              "character",
+              "character",
+              "character",
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "team",
+              "label": "哪支队伍？",
+              "placeholder": "我们公司的三楼",
+              "max_length": 120
+            },
+            {
+              "id": "players",
+              "label": "球员（可选）",
+              "placeholder": "老张，永远很困；小美，零食囤积王",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "vhs-day",
+        "title": "录像带里的一天",
+        "description": "你在 1987 年的一天，从一盘老摄像机录像带里翻出来。",
+        "category": "story",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/9cf93ed0a0dccec9.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `vhs-day` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：1987 年，一盘老摄像机录像带里的一天。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1,
+            "roles": [
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "setting",
+              "label": "哪个年代或城市？",
+              "placeholder": "1987 年，或者北京",
+              "max_length": 120
+            },
+            {
+              "id": "moments",
+              "label": "关键时刻（可选）",
+              "placeholder": "早饭、公交车、游戏厅、日落",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "mockumentary",
+        "title": "伪纪录片",
+        "description": "一部关于办公室打印机的正经悬疑纪录片。",
+        "category": "parody",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/fa19ab5533f8ead4.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `mockumentary` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一部关于办公室打印机卡纸事件的一本正经纪录片。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1,
+            "roles": [
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "subject",
+              "label": "（小小的）主题",
+              "placeholder": "2026 年那场惊天大卡纸",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "toy-commercial",
+        "title": "玩具广告",
+        "description": "把任何人变成一个带盒的 90 年代动作小人。电池需另外购买。",
+        "category": "parody",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/728bc31612aba228.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `toy-commercial` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一支 90 年代玩具广告，主角是“周一早上的老王”，附赠真实叹气声。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1,
+            "roles": [
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "who",
+              "label": "谁变成玩具？他有什么怪癖？",
+              "placeholder": "总是很累的同事",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "comment-reply",
+        "title": "评论区回怼",
+        "description": "置顶这条评论，三点回击。",
+        "category": "talk",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/73c240c80c782c9b.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `comment-reply` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：回复评论“猫是不可能训练的”。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1,
+            "roles": [
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "comment",
+              "label": "要回复的评论",
+              "placeholder": "猫根本没法训练 哈哈",
+              "max_length": 400
+            },
+            {
+              "id": "answer",
+              "label": "你的回答（可选）",
+              "placeholder": "零食、短时间训练、让它以为是自己的主意",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "before-after",
+        "title": "前后对比",
+        "description": "拖动分割线，再拖回来，再拖一次。",
+        "category": "faceless",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/28bc325d95550841.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `before-after` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一间凌乱卧室变身温馨阅读角的前后对比。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1,
+            "roles": [
+              "setting"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "change",
+              "label": "改造后是什么样？",
+              "placeholder": "带绿植的温馨北欧风卧室",
+              "max_length": 120
+            }
+          ]
+        }
+      },
+      {
+        "id": "fake-trailer",
+        "title": "电影预告",
+        "description": "在一个 WiFi 断网的世界里……一位英雄必须出门。",
+        "category": "parody",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/768276b27a5999a0.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `fake-trailer` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一部史诗动作预告，讲一个男人寻找电视遥控器的征途。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1,
+            "roles": [
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "premise",
+              "label": "（小小的）史诗",
+              "placeholder": "我室友寻找电视遥控器的征途",
+              "max_length": 400
+            },
+            {
+              "id": "genre",
+              "label": "类型",
+              "placeholder": "动作 / 恐怖 / 爱情 / 劫案 / 自然纪录片",
+              "max_length": 60
+            }
+          ]
+        }
+      },
+      {
+        "id": "game-show",
+        "title": "综艺竞猜",
+        "description": "复古灯光、奇葩奖品、三次乱猜，一声抢答铃。",
+        "category": "game",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/a8cfd8b49708a970.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `game-show` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一档综艺节目，选手竞猜一只用过一点点的袜子值多少钱。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1,
+            "roles": [
+              "prop"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "prize",
+              "label": "奖品",
+              "placeholder": "一只用过一点点的袜子",
+              "max_length": 120
+            },
+            {
+              "id": "price",
+              "label": "实际价格（可选）",
+              "placeholder": "1.5 元",
+              "max_length": 120
+            }
+          ]
+        }
+      },
+      {
+        "id": "versus-screen",
+        "title": "格斗对决",
+        "description": "第一回合，开打。每次翻盘都会扣掉一格血。",
+        "category": "game",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/a3708138a15ac197.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `versus-screen` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一场格斗游戏对决：现在的我 vs 2015 年的我。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 2,
+            "roles": [
+              "character",
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "a",
+              "label": "选手 A",
+              "placeholder": "现在的我",
+              "max_length": 120
+            },
+            {
+              "id": "b",
+              "label": "选手 B",
+              "placeholder": "2015 年的我",
+              "max_length": 120
+            }
+          ]
+        }
+      },
+      {
+        "id": "year-wrapped",
+        "title": "年度总结",
+        "description": "你家猫的一年数据。性格：房东。",
+        "category": "faceless",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/deea5e6996ab2175.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `year-wrapped` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：给我家猫做一份年度总结。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "subject",
+              "label": "谁的一年？",
+              "placeholder": "我家猫",
+              "max_length": 120
+            },
+            {
+              "id": "stats",
+              "label": "数据（可选）",
+              "placeholder": "无视我 4,812 次，趴在我键盘上睡觉……",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "post-story",
+        "title": "帖子故事",
+        "description": "论坛忏悔体，一字一句讲完，配上解压的循环画面。",
+        "category": "story",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/055dcc637a4f328d.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `post-story` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一篇故事帖：我给室友的饭贴上假过敏原标签，我是不是做错了？ 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "story",
+              "label": "故事内容",
+              "placeholder": "室友老是吃我的东西，所以我开始给它贴标签……",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "sports-broadcast",
+        "title": "体育解说",
+        "description": "你家猫跳沙发，带回放、裁判打分和世界纪录。",
+        "category": "parody",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/b058974340cc76d8.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `sports-broadcast` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：像奥运会一样解说我家猫三连跳上沙发。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1,
+            "roles": [
+              "character"
+            ]
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "event",
+              "label": "“比赛”项目",
+              "placeholder": "我家猫跳上沙发",
+              "max_length": 400
+            },
+            {
+              "id": "competitor",
+              "label": "选手",
+              "placeholder": "咪咪 🐱",
+              "max_length": 120
+            }
+          ]
+        }
+      },
+      {
+        "id": "cctv-footage",
+        "title": "监控实录",
+        "description": "凌晨 3:14，夜视镜头，厨房里有东西。",
+        "category": "story",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/eb4f9fad2da29e69.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `cctv-footage` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：监控画面：凌晨 3 点，一只浣熊闯进来偷狗粮。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "culprit",
+              "label": "作案者和罪行",
+              "placeholder": "一只浣熊偷走了狗粮",
+              "max_length": 400
+            },
+            {
+              "id": "place",
+              "label": "在哪里？",
+              "placeholder": "后院",
+              "max_length": 120
+            }
+          ]
+        }
+      },
+      {
+        "id": "sign-grid",
+        "title": "星座系列",
+        "description": "12 个星座，12 段视频，每个人都在等属于自己的那段。",
+        "category": "story",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/f9adf540dd03be96.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `sign-grid` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一场聚餐上的十二星座。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "theme",
+              "label": "场景",
+              "placeholder": "一场聚餐上的十二星座",
+              "max_length": 120
+            },
+            {
+              "id": "system",
+              "label": "分类体系",
+              "placeholder": "星座 / MBTI / 生肖",
+              "max_length": 60
+            }
+          ]
+        }
+      },
+      {
+        "id": "award-show",
+        "title": "颁奖礼",
+        "description": "大奖终于揭晓……得主是一盆塑料绿植。",
+        "category": "parody",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/d88bcc0da2be0728.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `award-show` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：一场颁奖礼，奖项是“最佳室内植物表演”。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "category",
+              "label": "奖项类别",
+              "placeholder": "最佳室内植物表演",
+              "max_length": 120
+            },
+            {
+              "id": "nominees",
+              "label": "提名（可选）",
+              "placeholder": "蕨类植物老刘、绿萝小美、没人浇水的仙人掌",
+              "max_length": 400
+            }
+          ]
+        }
+      },
+      {
+        "id": "life-receipt",
+        "title": "人生小票",
+        "description": "你的周一小票，附赠情绪税。",
+        "category": "faceless",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/f9bfb31c3f6958c5.webp"
+        },
+        "aspect": "9/16",
+        "is_new": true,
+        "agent": {
+          "skill_mention": "{{skill:skrull:skrull}}",
+          "prompt": "使用 `life-receipt` 模板。根据下面的输入生成视频，输入为空的部分由你自行决定。如果没有任何输入，就做这个：我的周一小票。 直接写脚本、生成素材、渲染并交付 MP4，无需先征得我的同意。",
+          "auto_send": true
+        },
+        "inputs": {
+          "references": {
+            "min": 0,
+            "max": 1
+          },
+          "prompt": {
+            "max_length": 500
+          },
+          "fields": [
+            {
+              "id": "subject",
+              "label": "什么的小票？",
+              "placeholder": "我的周一",
+              "max_length": 120
+            },
+            {
+              "id": "items",
+              "label": "明细（可选）",
+              "placeholder": "贪睡闹钟 x5、咖啡忘在车顶……",
+              "max_length": 400
+            }
+          ]
+        }
+      }
+    ],
+    "hero": {
+      "kind": "image",
+      "src": "/static/store/covers/833121a3d04ac705.webp",
+      "alt": "Skrull 封面图",
+      "object_position": "50% 30%"
+    }
+  },
+  "starter_prompt": "{{skill:skrull:skrull}} 把我的想法变成一条爆款短视频。挑选最合适的 Skrull 模板，写脚本、生成素材，渲染并交付 MP4。",
+  "capabilities": [],
+  "connectors": []
+}

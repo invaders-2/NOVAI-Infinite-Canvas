@@ -1,0 +1,160 @@
+{
+  "kind": "skill",
+  "name": "fish-audio-game-voices",
+  "display_name": "游戏语音包",
+  "description": "描述一个角色，即可获得问候、攻击、受伤、胜利等场合的标注语音台词。每句台词都有自己的演绎备注，例如 [喘着粗气，咬紧牙关]，文件已按规则命名，团队可以直接放入项目。",
+  "category": "音频创作",
+  "business_scenario": "film-video",
+  "marketing_line": "每句台词都有导演、有标注、即可使用。",
+  "search_terms": [
+    "游戏语音台词",
+    "角色声音",
+    "NPC 对话",
+    "语音包",
+    "短台词"
+  ],
+  "cover_url": "/static/store/covers/82d094e859ce8d45.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "fish-audio-lab",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium",
+    "show_badge": false
+  },
+  "guide": {
+    "summary": "一组风格统一的简短角色台词，每句都有各自的演绎提示，并附带与之匹配的文件名和表格。",
+    "scenarios": [
+      "为独立游戏制作原型语音",
+      "为演示版或游戏创作赛制作 NPC 台词",
+      "正式选角前的占位台词"
+    ],
+    "required_context": [
+      {
+        "title": "你的角色",
+        "description": "一个名字，以及一句关于他是谁的介绍。"
+      },
+      {
+        "title": "游戏基调",
+        "description": "选填。默认是奇幻冒险。"
+      },
+      {
+        "title": "台词类型",
+        "description": "选填。默认为问候、待机、攻击、受伤、胜利和失败，每类三条。"
+      },
+      {
+        "title": "命名规则",
+        "description": "选填。默认为 character_type_number。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "game-voice-pack-hero",
+        "title": "主角战斗语音包",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `game-voice-pack` playbook。为我的主角撰写并配音一套 18 句的战斗语音包，涵盖六种台词类型，每个变体都有不同的演绎提示。请先试听问候、攻击、受伤和胜利的样片。",
+        "description": "六个战斗时刻共 18 句短台词，每句都有各自的提示。"
+      },
+      {
+        "id": "game-voice-pack-npc",
+        "title": "商店老板与任务发布人",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `game-voice-pack` playbook。创建两个 NPC，一位商店老板和一位任务发布人，包括问候、任务台词和告别语。请先在其中一个 NPC 的样片中核对物品名称和价格。",
+        "description": "两个 NPC，包括问候、任务台词和告别语。"
+      },
+      {
+        "id": "game-voice-pack-my-lines",
+        "title": "为我的台词列表配音",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `game-voice-pack` playbook。为我现有的台词列表配音，每句都带演绎提示，并按我的规则为文件命名。请先试听五句样片。",
+        "description": "你现有的台词，按你的规则进行导演和命名。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "制作台词表",
+        "description": "每句台词的编号、角色、类型、演绎提示和文本。"
+      },
+      {
+        "title": "为角色选角",
+        "description": "每个角色一个清晰、统一的声音。"
+      },
+      {
+        "title": "试听一个角色",
+        "description": "检查音域、一致性和感染力。"
+      },
+      {
+        "title": "获取语音包",
+        "description": "裁剪过、音量统一的文件，以及一份 CSV。"
+      }
+    ],
+    "outputs": [
+      "每句台词一个音频文件，已裁剪且音量统一",
+      "包含编号、角色、类型、提示、文本、文件和时长的 CSV",
+      "角色备注，便于之后保持角色一致"
+    ],
+    "follow_ups": [
+      "为同一角色增加更多台词。",
+      "用同一声音制作另一种语言的语音包。",
+      "创建一个声音形成对比的对手角色。"
+    ],
+    "boundaries": [
+      "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。",
+      "你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。",
+      "参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。",
+      "仅限原创或已获授权的角色，不得使用与真实演员相似的声音。文件将交付给你自行导入，不包含游戏引擎设置。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Fish Audio Drama 3",
+    "caption": "每句台词都有导演、有标注、即可使用。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/82d094e859ce8d45.webp"
+      },
+      "alt": "游戏语音包"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 0
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "character",
+        "label": "你的角色",
+        "placeholder": "一个名字，以及一句关于他是谁的介绍。",
+        "max_length": 400
+      },
+      {
+        "id": "tone",
+        "label": "游戏基调",
+        "placeholder": "选填。默认是奇幻冒险。",
+        "max_length": 80
+      },
+      {
+        "id": "line_types",
+        "label": "台词类型",
+        "placeholder": "选填。默认为问候、待机、攻击、受伤、胜利和失败，每类三条。",
+        "max_length": 200
+      },
+      {
+        "id": "naming",
+        "label": "命名规则",
+        "placeholder": "选填。默认为 character_type_number。",
+        "max_length": 80
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `game-voice-pack` playbook。我需要一个游戏角色的语音台词。只询问缺失的信息，制作每句台词都带演绎提示的台词表，并先为一个角色的音域生成样片。",
+  "capabilities": [],
+  "connectors": []
+}

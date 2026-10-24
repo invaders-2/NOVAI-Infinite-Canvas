@@ -1,0 +1,84 @@
+{
+  "kind": "skill",
+  "name": "minimax-h3-prompt-copilot",
+  "display_name": "MiniMax H3 视频提示词助手",
+  "description": "为分镜、广告、表演和视频编辑任务编写 MiniMax H3 提示词与参考素材方案。",
+  "category": "视频",
+  "business_scenario": "film-video",
+  "marketing_line": "把创意转化为可用于正式制作的成果。",
+  "search_terms": [
+    "把 brief 转成带时间码的 H3 计划",
+    "把这个已确认的创意整理成 MiniMax H3 的生产级提示词和完整的分段视听时间线",
+    "规划由参考素材引导的 H3 镜头",
+    "根据这些已经确认的参考素材，为 MiniMax H3 规划角色、动作、镜头和连续性约束",
+    "修正一个可见问题",
+    "只针对这次 MiniMax H3 结果中最明显的问题，给出一轮最小化修订方案"
+  ],
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "minimax-h3-prompt-copilot",
+  "guide": {
+    "summary": "为分镜、广告、表演和视频编辑任务编写 MiniMax H3 提示词与参考素材方案。",
+    "scenarios": [
+      "广告与产品片",
+      "多参考素材与首尾帧",
+      "失败结果的定向修订"
+    ],
+    "required_context": [
+      {
+        "title": "先确认 brief 与交付范围",
+        "description": "明确目标、受众、时长或非生成任务的范围，以及最终要交付的内容。"
+      },
+      {
+        "title": "给每份参考素材指定角色",
+        "description": "说明哪些素材负责身份、场景、动作、镜头、声音、首帧或尾帧；不要让 Agent 猜测素材用途。"
+      },
+      {
+        "title": "确认验收标准与最高风险",
+        "description": "指出最重要的可见成功条件，以及必须锁定的身份、产品、台词、版权或最终状态。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "把 brief 转成带时间码的 H3 计划",
+        "prompt": "把这个已确认的创意整理成 MiniMax H3 的生产级提示词和完整的分段视听时间线",
+        "description": ""
+      }
+    ],
+    "steps": [
+      {
+        "title": "先做一次强制确认",
+        "description": "开始规划、改写或生成前，先确认 brief、范围、参考模式和验收风险；没有确认就不会继续。"
+      },
+      {
+        "title": "建立参考角色表",
+        "description": "把每个已确认素材绑定到一个主要职责，并保留顺序、覆盖范围和冲突处理依据。"
+      },
+      {
+        "title": "输出带时间线的生产提示词",
+        "description": "将镜头、动作、对白、声音和连续性要求整理成可执行的完整视听计划。"
+      },
+      {
+        "title": "只修一个最明显的问题",
+        "description": "复盘结果后做选择性修订，不无理由丢弃素材、切换模式或静默替换模型。"
+      }
+    ],
+    "outputs": [
+      "参考素材角色表",
+      "带时间码的完整视频 brief",
+      "针对单一问题的最小修订方案"
+    ],
+    "follow_ups": [
+      "保持已确认的角色和镜头，只修正动作连续性。",
+      "把这组参考素材重新整理成首帧和尾帧方案。",
+      "检查当前结果是否满足已经确认的最高风险锁定项。"
+    ],
+    "boundaries": [
+      "它负责提示词、分镜和修订方案；模型、模式、时长、参数、价格、可用性和提交状态以实时运行时为准。",
+      "无法执行精确模型时，会交付已确认的提示词或分镜包，不会静默切换到其他模型。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

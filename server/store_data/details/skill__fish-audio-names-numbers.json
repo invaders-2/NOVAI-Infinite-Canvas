@@ -1,0 +1,160 @@
+{
+  "kind": "skill",
+  "name": "fish-audio-names-numbers",
+  "display_name": "人名、数字与编码",
+  "description": "适用于产品发布、活动公告、教程和宣传朗读，其中每个人名、价格、日期、编码和邮箱都必须准确。我会逐一列出，你确认难读的部分，样片也会逐项核对。",
+  "category": "音频创作",
+  "business_scenario": "film-video",
+  "marketing_line": "每个人名、价格和编码，一次就读对。",
+  "search_terms": [
+    "产品发布配音",
+    "优惠码朗读",
+    "活动公告",
+    "发音",
+    "教程旁白"
+  ],
+  "cover_url": "/static/store/covers/05bdc823c1062ff5.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "fish-audio-lab",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium",
+    "show_badge": false
+  },
+  "guide": {
+    "summary": "对细节密集文本的自然、清晰朗读，附带一份发音清单，在你拿到文件之前会与音频逐项核对。",
+    "scenarios": [
+      "包含型号和价格的产品发布",
+      "包含日期、时间和场地的活动公告",
+      "包含版本号、命令或网址的教程"
+    ],
+    "required_context": [
+      {
+        "title": "你的文本或事实",
+        "description": "脚本、产品说明或活动详情。我会保持每项事实与你提供的完全一致。"
+      },
+      {
+        "title": "用途",
+        "description": "选填。默认为公告；也可用于教程、宣传和确认信息。"
+      },
+      {
+        "title": "难读的词",
+        "description": "选填。告诉我如何读任何不常见的词，否则我会就有歧义的部分向你确认。"
+      },
+      {
+        "title": "声音",
+        "description": "选填。默认清晰、友好，语速适中。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "names-and-numbers-read-launch",
+        "title": "产品发布朗读",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `names-and-numbers-read` playbook。根据这份说明撰写并朗读一段 45 秒的产品发布配音，确保每个型号、价格和日期都准确无误。先给我看发音清单，然后为最密集的部分生成样片。",
+        "description": "型号、价格和日期清晰而热情地朗读。"
+      },
+      {
+        "id": "names-and-numbers-read-event",
+        "title": "活动公告",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `names-and-numbers-read` playbook。朗读这份活动公告，确保每位演讲者的名字、日期、时间和场地都读准确。如果日期格式有歧义，请先问我，然后再生成样片。",
+        "description": "演讲者、日期、时间和场地都读准确。"
+      },
+      {
+        "id": "names-and-numbers-read-promo-code",
+        "title": "优惠码和链接",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `names-and-numbers-read` playbook。朗读这段宣传内容，让优惠码、邮箱和网址读得足够慢、足够清楚，方便观众记下来。请先为优惠码部分生成样片，并逐项核对。",
+        "description": "编码、邮箱和网址读得足够慢，方便记录。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "列出每个细节",
+        "description": "人名、数字、日期、编码、邮箱和链接，以及每一项应该如何读。"
+      },
+      {
+        "title": "确认难读的部分",
+        "description": "你只需确认那些可能有两种读法的内容。"
+      },
+      {
+        "title": "试听最密集的部分",
+        "description": "清单上的每一项都会与样片逐一核对。"
+      },
+      {
+        "title": "获取朗读成品",
+        "description": "音频、最终脚本和已核对的清单。"
+      }
+    ],
+    "outputs": [
+      "完整朗读的音频，分段文件加一个合并文件",
+      "带时间轴的最终脚本",
+      "发音清单，每一项都有通过标记"
+    ],
+    "follow_ups": [
+      "为社交视频制作更短的剪辑。",
+      "用另一种语言朗读同一份公告。",
+      "更新一个价格或日期，并重新生成该段。"
+    ],
+    "boundaries": [
+      "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。",
+      "你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。",
+      "我会保持你提供的每一项事实完全一致；有歧义的内容会向你确认，而不会猜测。",
+      "本工作室只制作语音内容。音乐和音效会以提示单的形式提供给你的剪辑师，且不会为视频配音或对口型。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Fish Audio Drama 3",
+    "caption": "每个人名、价格和编码，一次就读对。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/05bdc823c1062ff5.webp"
+      },
+      "alt": "人名、数字与编码"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 0
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "text",
+        "label": "你的文本或事实",
+        "placeholder": "脚本、产品说明或活动详情。我会保持每项事实与你提供的完全一致。",
+        "max_length": 2000
+      },
+      {
+        "id": "purpose",
+        "label": "用途",
+        "placeholder": "选填。默认为公告；也可用于教程、宣传和确认信息。",
+        "max_length": 80
+      },
+      {
+        "id": "tricky_words",
+        "label": "难读的词",
+        "placeholder": "选填。告诉我如何读任何不常见的词，否则我会就有歧义的部分向你确认。",
+        "max_length": 400
+      },
+      {
+        "id": "voice",
+        "label": "声音",
+        "placeholder": "选填。默认清晰、友好，语速适中。",
+        "max_length": 80
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `names-and-numbers-read` playbook。我有一段充满人名、数字、日期或编码的朗读稿。只询问缺失的信息，给我看发音清单，并先为信息最密集的部分生成样片。",
+  "capabilities": [],
+  "connectors": []
+}

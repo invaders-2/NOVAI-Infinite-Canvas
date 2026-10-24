@@ -1,0 +1,144 @@
+{
+  "kind": "skill",
+  "name": "argon-how-it-works",
+  "display_name": "3D 原理演示",
+  "description": "问一个「它是怎么工作的」：电机、心脏、变速箱、黑洞都行。得到一个可以旋转、放慢、逐步查看的 3D 模拟，因果关系一步不错。",
+  "category": "AI 模型工作室",
+  "business_scenario": "interactive-games",
+  "marketing_line": "问它怎么工作，答案拿在手里转。",
+  "search_terms": [
+    "运作原理",
+    "3D 仿真",
+    "物理模拟",
+    "科学讲解",
+    "交互式图解",
+    "Argon"
+  ],
+  "cover_url": "/static/store/covers/2aa9e44b6acb28d2.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "gemini-argon-studio",
+  "recommended_model": {
+    "id": "gemini-4-argon",
+    "display_name": "Argon"
+  },
+  "guide": {
+    "summary": "Agent 会先写出因果链条，让你在制作任何内容之前检查科学原理。然后它会构建一个 3D 场景，让每个运动部件都与各阶段的描述一致。",
+    "scenarios": [
+      "看清一台机器、一个器官或一个自然过程如何运作",
+      "把教科书里的图示变成可以旋转和测试的东西"
+    ],
+    "required_context": [
+      {
+        "title": "这次要解释什么？",
+        "description": "一台机器、一个器官、一个自然过程，或一个物理原理。每个场景只讲一个主题效果最好。"
+      },
+      {
+        "title": "面向谁？",
+        "description": "默认面向好奇的 14 岁读者。如果是用于课堂、路演或专家，请告诉我。"
+      },
+      {
+        "title": "有参考资料吗？",
+        "description": "一张图示、一页教科书或笔记，可以帮助我贴合你的版本。可选。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "how-it-works-3d-machine",
+        "title": "机器 | 观察零件运动",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `how-it-works-3d` 玩法。展示三相感应电机如何转动。先写出从电流到转矩的各个阶段，然后制作一个可以旋转、逐步查看并加速的 3D 场景，先从第一阶段开始。",
+        "description": "一台电动机、发动机或齿轮箱，并展示受力情况和速度滑块。"
+      },
+      {
+        "id": "how-it-works-3d-body",
+        "title": "人体 | 沿着它的内部前进",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `how-it-works-3d` 玩法。为一堂初中课展示血液如何流经心脏的四个腔室。先写出各阶段，然后制作一个带标签和步骤控制的 3D 场景，先从第一阶段开始。",
+        "description": "血液流经心脏、空气流经肺部，或信号沿神经传递，逐步呈现。"
+      },
+      {
+        "id": "how-it-works-3d-space",
+        "title": "太空 | 改变一处，看看会怎样",
+        "prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `how-it-works-3d` 玩法。解释为什么我们会有季节。先写出各阶段，然后制作一个带倾角滑块的 3D 地球和太阳，让我看到倾角为 0 度时会发生什么，先从单独的轨道开始。",
+        "description": "轨道、潮汐或季节，配合一个能改变结果的滑块。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "写出阶段",
+        "description": "我会用平实的语言列出因果步骤，并标出我不确定的部分。"
+      },
+      {
+        "title": "制作第一阶段",
+        "description": "我会用轨道控制制作主要部件，使其正确运动，并展示给你。"
+      },
+      {
+        "title": "完成场景",
+        "description": "我会加入所有阶段、步骤控制、滑块、标签和说明文字。"
+      }
+    ],
+    "outputs": [
+      "经过核对的因果阶段清单",
+      "一个 HTML 文件中的交互式 3D 模拟",
+      "渲染工具支持时，场景的一段短视频"
+    ],
+    "follow_ups": [
+      "为每个阶段添加旁白。",
+      "为过程的下一部分制作第二个场景。",
+      "把场景做成一段竖版短视频。"
+    ],
+    "boundaries": [
+      "专为运行在 Argon 上的 Agent 设计。请在模型选择器中选择它；这些玩法在其他 Agent 模型上也可使用。",
+      "在任何图片或视频生成之前，我都会检查实时模型列表，并先确认费用。如果所需模型不可用，我只会提供方案或代码，并说明这一点。",
+      "模拟仅供学习。现实世界的数值来自你的参考资料，或会标注为近似值。",
+      "不提供医疗、剂量或维修说明。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Argon Studio",
+    "caption": "问它怎么工作，答案拿在手里转。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/2aa9e44b6acb28d2.webp"
+      },
+      "alt": "3D 原理演示"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 1
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "subject",
+        "label": "这次要解释什么？",
+        "placeholder": "一台机器、一个器官、一个自然过程，或一个物理原理。每个场景只讲一个主题效果最好。",
+        "max_length": 200
+      },
+      {
+        "id": "audience",
+        "label": "面向谁？",
+        "placeholder": "默认面向好奇的 14 岁读者。如果是用于课堂、路演或专家，请告诉我。",
+        "max_length": 120
+      },
+      {
+        "id": "reference",
+        "label": "有参考资料吗？",
+        "placeholder": "一张图示、一页教科书或笔记，可以帮助我贴合你的版本。可选。",
+        "max_length": 400
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:gemini-argon-studio:gemini-argon-studio}} 使用 `how-it-works-3d` 玩法。我想看看某样东西是如何运作的。如果我还没有说明是什么，请先问我，然后为我写出因果阶段供核对，并在完整模拟之前先把第一阶段做成 3D 场景。",
+  "capabilities": [],
+  "connectors": []
+}

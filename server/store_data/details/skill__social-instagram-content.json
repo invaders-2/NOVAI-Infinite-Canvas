@@ -1,0 +1,88 @@
+{
+  "kind": "skill",
+  "name": "social-instagram-content",
+  "display_name": "Instagram 停留感素材包",
+  "description": "给我一份链接、图片或视频，我会把它整理成 Instagram Reel 或轮播：先做好第一屏、文字安全区、封面和 CTA，再按你的确认出素材。",
+  "category": "社媒内容",
+  "business_scenario": "social-media-content",
+  "marketing_line": "先把第一屏做清楚，再交付一套可以继续修改的 Instagram 素材。",
+  "search_terms": [
+    "Instagram 停留感素材包",
+    "Instagram",
+    "Reels",
+    "轮播",
+    "社媒内容"
+  ],
+  "cover_url": "/app-store/social-media/instagram-content.svg",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "social-instagram-content",
+  "guide": {
+    "summary": "把素材交给我，我会先做一版 Instagram Reel 或轮播方案，让你看懂、修改并确认后，再继续做素材。",
+    "scenarios": [
+      "把一个卖点做成 Reel 或短片",
+      "做一套看得懂、愿意保存的轮播"
+    ],
+    "required_context": [
+      {
+        "title": "你想分享什么？",
+        "description": "告诉我帖子要讲的想法、商品或故事。"
+      },
+      {
+        "title": "你希望谁做什么？",
+        "description": "说清受众、目标，以及你希望他们看完完成的一个动作。"
+      },
+      {
+        "title": "你希望它是什么感觉？",
+        "description": "提供源素材、语气、参考、画幅、语言，以及权利或披露要求。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "Reel｜先把第一屏做好",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 根据这份素材设计 Instagram Reel。给我 3 个开场，每段生成短视频不超过 5 秒，先给我看脚本和方案。",
+        "description": "用一个有依据的承诺开场，再用短镜头说明，最后只留一个 CTA。"
+      },
+      {
+        "title": "轮播｜把一个重点讲到值得保存",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 把这份素材转成 Instagram 轮播大纲。每页只讲一个重点，写准确文案、alt 文本和一个 CTA，先给我看草稿。",
+        "description": "首屏说清重点，中间给证据，最后只留一个下一步。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "先选一个承诺",
+        "description": "开头只讲一件源素材真正能支撑的事。"
+      },
+      {
+        "title": "把第一屏排好",
+        "description": "写出钩子、画面方向、安全区、封面和 CTA。"
+      },
+      {
+        "title": "导出前先检查",
+        "description": "一起检查文字可读性、裁切、权利、披露、时长和 CTA。"
+      }
+    ],
+    "outputs": [
+      "Reel 或短片脚本和分镜方案",
+      "轮播文案、逐页结构、alt 文本、封面方向和 CTA",
+      "一份简单清单：画幅、时长、权利和审批状态"
+    ],
+    "follow_ups": [
+      "保留源素材，只改一个平台变量。",
+      "把最强洞察改成轮播或 Reel。",
+      "发布前重新核对 Instagram 要求。"
+    ],
+    "boundaries": [
+      "我会在画布里先做草稿和检查过的素材包；什么时候发布或排期，由你最后确认。",
+      "我只使用你提供并确认过的事实和使用权；没有依据的说法、私密信息或披露不清的内容会停在审阅。",
+      "每段生成的短视频最长 5 秒；更长的故事需要拆成已确认的片段，或交给独立剪辑流程。",
+      "页面能打开或请求成功，不代表一定能发布或一定有效果；交付前请看完最终素材包。"
+    ]
+  },
+  "starter_prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 我有一份要发到 Instagram 的素材。先问我缺少的信息，再给我 3 个开场钩子和 Reel 或轮播方案，确认后再做素材。",
+  "capabilities": [],
+  "connectors": []
+}

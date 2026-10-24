@@ -1,0 +1,324 @@
+{
+  "kind": "skill",
+  "name": "digital-human-studio",
+  "display_name": "数字人演播厅",
+  "description": "专属数字人随时登台，一条搞定全场景。",
+  "category": "影视创意",
+  "business_scenario": "film-video",
+  "marketing_line": "专属数字人随时登台，一条搞定全场景。",
+  "search_terms": [
+    "数字人演播厅",
+    "数字人",
+    "数字人视频",
+    "数字人玩法",
+    "口播",
+    "带看",
+    "产品演示",
+    "教程",
+    "新闻播报"
+  ],
+  "icon_style": "visualize",
+  "cover_url": "/static/store/covers/22ef0d8888f638b1.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "digital-human-studio",
+  "guide": {
+    "summary": "专属数字人随时登台，一条搞定全场景。",
+    "scenarios": [
+      "为短视频平台制作稳定、自然的数字人口播",
+      "用数字人带观众快速看懂一套房源",
+      "让数字人把产品价值、用法和试用动作讲清楚",
+      "把专业知识讲成清晰易懂的数字人课程",
+      "用有时间边界的事实做一条新闻播报",
+      "先建立可复用的角色形象与声音资产"
+    ],
+    "required_context": [
+      {
+        "title": "先选玩法",
+        "description": "先看最终要让观众完成什么，再用平台、时长和画幅细化 brief。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "digital-human-studio-social-talking-head",
+        "title": "社媒口播",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 做一条竖屏社媒口播视频：先用一句清晰的开场钩子抓住观众，保持自然表达，最后落到一个明确的 CTA。",
+        "description": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。",
+        "context": "社媒口播"
+      },
+      {
+        "id": "digital-human-studio-property-tour",
+        "title": "房产带看",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 根据已确认的房源事实做一条数字人带看：按空间顺序讲清户型和核心卖点，不补写未知信息，最后引导预约看房。",
+        "description": "把房源资料做成专业带看实录：动线清晰、事实可信，让客户像跟着经纪人现场看房一样。",
+        "context": "房产带看"
+      },
+      {
+        "id": "digital-human-studio-product-demo",
+        "title": "产品演示",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 做一条数字人产品演示：先讲用户问题，再讲三个有事实依据的核心卖点，最后说明如何开始试用，所有说法都以我提供的资料为准。",
+        "description": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。",
+        "context": "产品演示"
+      },
+      {
+        "id": "digital-human-studio-course-explainer",
+        "title": "知识科普讲解",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 根据我提供的 brief 或素材，制作一条知识科普类数字人讲解：先梳理核心知识点，再按清晰节奏逐步讲解，用易懂的例子帮助理解，最后总结要点。所有事实以我提供的资料为准。",
+        "description": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。",
+        "context": "知识科普讲解"
+      },
+      {
+        "id": "digital-human-studio-market-bulletin",
+        "title": "新闻播报",
+        "prompt": "{{skill:digital-human-video:digital-human-video}} 根据我提供的来源做一条有时间边界的新闻播报：先说清数据截至时间，区分已确认事实和解读，缺失数据要明确标为待核验。",
+        "description": "把有来源、有时间边界的事实整理成清晰可信的新闻播报。",
+        "context": "新闻播报"
+      },
+      {
+        "id": "digital-human-studio-character-workshop",
+        "title": "角色工坊",
+        "prompt": "打开角色工坊，先定义一套可复用的角色形象、妆造、声音和表演方向，再开始制作视频。",
+        "description": "开拍前先建立统一的角色形象、妆造、声音与表演设定，让数字主角在后续内容中保持一致。",
+        "context": "角色工坊"
+      }
+    ],
+    "steps": [
+      {
+        "title": "选择玩法",
+        "description": "按最终目标选择社媒口播、房产带看、产品演示、知识科普讲解、市场播报或角色工坊。"
+      },
+      {
+        "title": "补充 brief",
+        "description": "提供事实、受众、来源资料和希望观众完成的下一步。"
+      },
+      {
+        "title": "直接试用",
+        "description": "五个视频玩法会用同一个数字人演播厅 Skill 打开聊天草稿；角色工坊进入独立的角色设定流程。"
+      }
+    ],
+    "outputs": [
+      "一条聚焦目标的数字人视频草稿",
+      "选择角色工坊时得到一套可复用的角色身份设定"
+    ],
+    "follow_ups": [
+      "保留同一数字人身份，切换到另一种玩法。",
+      "只修改一个镜头或结尾 CTA，不重开整份 brief。"
+    ],
+    "boundaries": [
+      "六个详情页是同一个远端 Skill 的不同入口，不会创建六个独立运行时 Skill。"
+    ]
+  },
+  "collection": {
+    "categories": [
+      {
+        "id": "social",
+        "label": "社媒口播"
+      },
+      {
+        "id": "property",
+        "label": "房产带看"
+      },
+      {
+        "id": "product",
+        "label": "产品演示"
+      },
+      {
+        "id": "course",
+        "label": "知识科普讲解"
+      },
+      {
+        "id": "market",
+        "label": "新闻播报"
+      },
+      {
+        "id": "character-workshop",
+        "label": "角色工坊"
+      },
+      {
+        "id": "voice",
+        "label": "声音配音"
+      }
+    ],
+    "entries": [
+      {
+        "item": {
+          "kind": "skill",
+          "name": "digital-human-social-talking-head"
+        },
+        "category": "social",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "社媒口播",
+          "数字人"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "社媒口播",
+        "description": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "digital-human-property-tour"
+        },
+        "category": "property",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "房产带看",
+          "数字人"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "房产带看",
+        "description": "把房源资料做成专业带看实录：动线清晰、事实可信，让客户像跟着经纪人现场看房一样。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "digital-human-product-demo"
+        },
+        "category": "product",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "产品演示",
+          "数字人"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "产品演示",
+        "description": "专业主讲人出镜解构核心卖点：一步步演示操作，让产品价值直观可见。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "digital-human-course-explainer"
+        },
+        "category": "course",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "知识科普讲解",
+          "数字人"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "知识科普讲解",
+        "description": "基于用户提供的 brief 或素材，制作知识科普类数字人课程：结构清晰、表达自然，让复杂知识更容易理解。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "digital-human-market-bulletin"
+        },
+        "category": "market",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "新闻播报",
+          "数字人"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "新闻播报",
+        "description": "把枯燥的研报和数据简讯，变成有事实边界的新闻播报。"
+      },
+      {
+        "item": {
+          "kind": "app",
+          "name": "casting-room"
+        },
+        "category": "character-workshop",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "角色工坊",
+          "数字人"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "角色工坊",
+        "description": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "fish-audio-podcast"
+        },
+        "category": "voice",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/da16eeb5d0c702ab.webp"
+        },
+        "tags": [
+          "双主持人播客",
+          "Fish Audio Drama 3"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "双主持人播客",
+        "description": "两位真正会互相倾听的主持人。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "fish-audio-bilingual-voiceover"
+        },
+        "category": "voice",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/fae10e0a17318959.webp"
+        },
+        "tags": [
+          "双语配音",
+          "Fish Audio Drama 3"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "双语配音",
+        "description": "两种语言，一个声音，毫无缝隙。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "fish-audio-names-numbers"
+        },
+        "category": "voice",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/05bdc823c1062ff5.webp"
+        },
+        "tags": [
+          "人名、数字与编码",
+          "Fish Audio Drama 3"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "人名、数字与编码",
+        "description": "每个人名、价格和编码，一次就读对。"
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:digital-human-video:digital-human-video}} 根据我的目标帮我选择数字人玩法，先完成最小可用的一版。",
+  "capabilities": [],
+  "connectors": []
+}

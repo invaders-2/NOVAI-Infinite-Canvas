@@ -1,0 +1,84 @@
+{
+  "kind": "skill",
+  "name": "seedance-2-5-prompt-copilot",
+  "display_name": "Seedance 2.5 视频提示词助手",
+  "description": "设计 Seedance 2.5 视频提示词、多模态参考、分镜及首尾帧衔接方案。",
+  "category": "视频",
+  "business_scenario": "film-video",
+  "marketing_line": "把创意转化为可用于正式制作的成果。",
+  "search_terms": [
+    "设计连续的时间线",
+    "为 Seedance 2.5 设计一条连续时间线的视频提示词",
+    "通过首尾帧衔接镜头",
+    "用首尾帧和参考素材规划一段自然衔接的镜头",
+    "进行一次受控修订",
+    "根据这个视频结果，只修正动作和声音不同步的问题"
+  ],
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "seedance-2-5-prompt-copilot",
+  "guide": {
+    "summary": "设计 Seedance 2.5 视频提示词、多模态参考、分镜及首尾帧衔接方案。",
+    "scenarios": [
+      "大规模多模态参考",
+      "连续时间线与首尾帧",
+      "广告、剧情与产品视频"
+    ],
+    "required_context": [
+      {
+        "title": "确认 brief、时长与交付物",
+        "description": "说明目标、受众、目的、准确时长，以及这次是生成、改写、分镜还是失败诊断。"
+      },
+      {
+        "title": "为参考素材标注权威范围",
+        "description": "分别标注身份、产品、场景、镜头、动作、对白、声音、首尾状态和原视频编辑范围。"
+      },
+      {
+        "title": "锁定验收重点",
+        "description": "提前说清楚最不能漂移的内容，例如 SKU、人物身份、准确文案、对白、版权或结尾状态。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "设计连续的时间线",
+        "prompt": "为 Seedance 2.5 设计一条连续时间线的视频提示词",
+        "description": ""
+      }
+    ],
+    "steps": [
+      {
+        "title": "先完成强制 preflight",
+        "description": "Skill 会先让你确认 brief、范围、参考模式和风险；没有结构化确认，不会直接写 prompt 或生成。"
+      },
+      {
+        "title": "整理多参考角色与冲突",
+        "description": "建立参考角色表，按已确认的优先级处理身份、几何、镜头、声音与风格冲突。"
+      },
+      {
+        "title": "形成完整时间线",
+        "description": "将镜头顺序、动作、对白、节奏和声音整理为一条可检查、可交给运行时的计划。"
+      },
+      {
+        "title": "按局部问题选择性修订",
+        "description": "保留已经有效的内容，只调整真正影响结果的变量，不因失败就静默减少参考素材。"
+      }
+    ],
+    "outputs": [
+      "参考角色与素材覆盖表",
+      "完整的时间码视听计划",
+      "可控的局部修订 prompt"
+    ],
+    "follow_ups": [
+      "保留人物身份和产品几何，只修正镜头运动。",
+      "检查首尾帧之间的动作和状态是否连续。",
+      "把当前 brief 改成一版更适合广告交付的时间线。"
+    ],
+    "boundaries": [
+      "运行时负责当前模型、模式、输入类型、参考数量、参数、价格、提交和结果状态；页面只呈现可理解的工作流程。",
+      "如果组合被实时能力拒绝，不会自动减少素材或切换模式，而是回到确认环节。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

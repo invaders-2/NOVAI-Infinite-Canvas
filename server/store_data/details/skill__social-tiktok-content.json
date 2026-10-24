@@ -1,0 +1,88 @@
+{
+  "kind": "skill",
+  "name": "social-tiktok-content",
+  "display_name": "TikTok 钩子实验室",
+  "description": "从一份素材先做 3 个开场方向，每次只改一个地方，帮你在投入完整剪辑前找到更值得试的那一个。",
+  "category": "社媒内容",
+  "business_scenario": "social-media-content",
+  "marketing_line": "先比较开场，再决定把时间花在哪条片子上。",
+  "search_terms": [
+    "TikTok 钩子实验室",
+    "TikTok",
+    "前一秒钩子",
+    "短视频",
+    "社媒内容"
+  ],
+  "cover_url": "/app-store/social-media/tiktok-content.svg",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "social-tiktok-content",
+  "guide": {
+    "summary": "先比较几个 TikTok 开场，再决定要不要投入完整剪辑。每一版只改一个地方，并写清楚要观察什么。",
+    "scenarios": [
+      "找到最值得继续做的开场",
+      "用循环结尾快速解释一个观点"
+    ],
+    "required_context": [
+      {
+        "title": "你想讲清楚什么？",
+        "description": "告诉我想讲的内容、受众，以及视频之后希望发生的一个动作。"
+      },
+      {
+        "title": "可以用哪份素材？",
+        "description": "提供链接、逐字稿、视频、图片、产品事实或有权使用的参考素材。"
+      },
+      {
+        "title": "你想比较什么？",
+        "description": "告诉我是比较开场观点、画面、节奏，还是 CTA。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "三个开场｜先比较，再剪片",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 根据这份素材设计 3 个 TikTok 开场。每版只改一个变量，每段生成短视频不超过 5 秒，写清要观察什么，等我确认。",
+        "description": "给出三个前一秒方向，每版只改一个变量，并写清楚要观察什么。"
+      },
+      {
+        "title": "循环式解释｜把一个观点讲明白",
+        "prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 做一个带循环结尾的 TikTok 解释视频。保住源素材事实，每段生成短视频不超过 5 秒，先给我看脚本和字幕。",
+        "description": "快速解释一个观点，用视觉或语言循环收尾，不补写没有依据的卖点。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "先选一个承诺",
+        "description": "只保留源素材能够支撑的说法。"
+      },
+      {
+        "title": "每次只改一个地方",
+        "description": "只改变观点、画面、节奏或 CTA，让开场可以公平比较。"
+      },
+      {
+        "title": "一起看选项",
+        "description": "检查字幕、裁切、披露、权利、时长和想观察的信号。"
+      }
+    ],
+    "outputs": [
+      "三个可比较的开场方向和清楚的假设",
+      "短视频脚本、字幕、循环结尾和封面方向",
+      "一张对比表：每版改了什么、要看什么"
+    ],
+    "follow_ups": [
+      "保留源素材，只改一个开场变量。",
+      "把最强开场扩展成平台原生解释视频。",
+      "发布前重新核对 TikTok 要求。"
+    ],
+    "boundaries": [
+      "我会在画布里先做草稿和检查过的素材包；什么时候发布或排期，由你最后确认。",
+      "我只使用你提供并确认过的事实和使用权；没有依据的说法、私密信息或披露不清的内容会停在审阅。",
+      "每段生成的短视频最长 5 秒；更长的故事需要拆成已确认的片段，或交给独立剪辑流程。",
+      "页面能打开或请求成功，不代表一定能发布或一定有效果；交付前请看完最终素材包。"
+    ]
+  },
+  "starter_prompt": "{{skill:social-media-content-studio:social-media-content-studio}} 我有一份要发到 TikTok 的素材。先问我缺少的信息，再给我 3 个开场方向和比较方法，确认后再做素材。",
+  "capabilities": [],
+  "connectors": []
+}

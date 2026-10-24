@@ -1,0 +1,29 @@
+{
+  "kind": "app",
+  "name": "brainstorm",
+  "display_name": "头脑风暴",
+  "description": "将想法塑造成值得讲述的故事。",
+  "category": "更多应用",
+  "marketing_line": "将想法塑造成值得讲述的故事。",
+  "search_terms": [],
+  "icon_url": "/static/store/covers/08d6e2ac600bddee.webp",
+  "icon_style": "brainstorm",
+  "cover_url": "/static/store/covers/9b81c806fc4dc004.webp",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": true,
+  "install_mode": "user",
+  "activation_skill": "brainstorm",
+  "guide": {
+    "summary": "将想法塑造成值得讲述的故事。",
+    "scenarios": [],
+    "required_context": [],
+    "use_cases": [],
+    "steps": [],
+    "outputs": [],
+    "follow_ups": [],
+    "boundaries": []
+  },
+  "capabilities": [],
+  "connectors": []
+}

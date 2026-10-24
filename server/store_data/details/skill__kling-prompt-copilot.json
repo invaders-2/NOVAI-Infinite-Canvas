@@ -1,0 +1,84 @@
+{
+  "kind": "skill",
+  "name": "kling-prompt-copilot",
+  "display_name": "可灵提示词助手",
+  "description": "结合参考图、对白与运动设计，编写 Kling 视频提示词和分镜方案。",
+  "category": "视频",
+  "business_scenario": "film-video",
+  "marketing_line": "把创意转化为可用于正式制作的成果。",
+  "search_terms": [
+    "把镜头整理成分镜",
+    "把这个故事梗概整理成 Kling 分镜与视频提示词",
+    "编写以对白为核心的 brief",
+    "根据人物、镜头和对白重写一版视频 brief",
+    "诊断失败结果",
+    "诊断这次 Kling 视频结果，并告诉我下一次应该怎么改"
+  ],
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "kling-prompt-copilot",
+  "guide": {
+    "summary": "结合参考图、对白与运动设计，编写 Kling 视频提示词和分镜方案。",
+    "scenarios": [
+      "视频探索",
+      "从上下文到第一版结果",
+      "围绕结果继续迭代"
+    ],
+    "required_context": [
+      {
+        "title": "先说明想要的结果",
+        "description": "提供故事节点、主体、镜头意图、对白或参考视频。"
+      },
+      {
+        "title": "补充素材与约束",
+        "description": "提供参考文件、目标受众、格式、风格、时长或其他不能被改变的条件。"
+      },
+      {
+        "title": "告诉 Agent 如何取舍",
+        "description": "说明优先级、验收重点，以及哪些内容需要先确认再继续。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "把镜头整理成分镜",
+        "prompt": "把这个故事梗概整理成 Kling 分镜与视频提示词",
+        "description": ""
+      }
+    ],
+    "steps": [
+      {
+        "title": "从一个具体结果开始",
+        "description": "先选择一个贴近当前工作的用例，不需要一次讲完所有背景。"
+      },
+      {
+        "title": "让 Skill 读取相关上下文",
+        "description": "Agent 会按照这个 Skill 的规则整理素材、识别缺口，并在需要时提出澄清问题。"
+      },
+      {
+        "title": "先产出一版可检查的结果",
+        "description": "它会把目标转成结构化 brief、提示词、方案或其他可继续工作的中间产物。"
+      },
+      {
+        "title": "针对重点做下一轮修改",
+        "description": "保留已经确认的部分，只要求它修改真正影响结果的变量。"
+      }
+    ],
+    "outputs": [
+      "一份围绕具体目标组织的第一版结果",
+      "可以继续交给 Agent 执行或审阅的结构化内容",
+      "下一轮迭代可以直接复用的上下文与约束"
+    ],
+    "follow_ups": [
+      "把镜头整理成分镜",
+      "编写以对白为核心的 brief",
+      "诊断失败结果"
+    ],
+    "boundaries": [
+      "它帮助整理故事、镜头、对白和视频提示词，不等于已经调用 Kling 生成。",
+      "模型、参数、输入限制和最终结果以实时运行时为准；失败时先解释可修订的创意变量。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

@@ -1,0 +1,253 @@
+{
+  "kind": "skill",
+  "name": "astra-studio",
+  "display_name": "Astra Studio",
+  "description": "顶级创意的实验场：汇集 3D、动效与视觉艺术的边界玩法。",
+  "category": "影视创意",
+  "business_scenario": "film-video",
+  "marketing_line": "顶级创意的实验场：汇集 3D、动效与视觉艺术的边界玩法。",
+  "search_terms": [
+    "Astra Studio",
+    "Astra Studio",
+    "Astra",
+    "白模视频预演",
+    "图片3D建模",
+    "深度影视工坊",
+    "Astra 玩法"
+  ],
+  "cover_url": "/app-store/astra-studio-cover.webp",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "astra-studio",
+  "recommended_model": {
+    "id": "gpt-6-astra",
+    "display_name": "Astra",
+    "thinking_level": "low"
+  },
+  "guide": {
+    "summary": "顶级创意的实验场：汇集 3D、动效与视觉艺术的边界玩法。",
+    "scenarios": [
+      "成片前先做白模预演",
+      "把静帧重建成可预览的 3D 场景",
+      "保留原片运动，迁移角色或场景外观"
+    ],
+    "required_context": [
+      {
+        "title": "按任务选玩法",
+        "description": "需要场面与运镜先用白模；需要空间重建用图片3D；需要动作迁移用深度影视。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "astra-whitebox",
+        "title": "白模视频预演",
+        "prompt": "{{skill:whitebox-to-film:白模视频预演}} 请根据我的画面创意或商品，先生成一段可播放的 3D 白模视频预演，确认空间、人物动作、镜头运动和节奏，再整理成正式视频的生成方案",
+        "description": "在正式生成视频前，先用可播放的白模确认空间、动作和镜头节奏。",
+        "context": "Astra · 白模"
+      },
+      {
+        "id": "astra-image-to-3d",
+        "title": "图片3D建模",
+        "prompt": "{{skill:3d-scene-director:图片3D建模}} 请基于我上传的参考图还原 3D 现场，保持真实比例、结构、材质和光影，并做成可以在浏览器中旋转预览的 3D 场景",
+        "description": "把参考图重建成可预览、可旋转的 3D 场景，保留比例、结构与材质。",
+        "context": "Astra · 3D"
+      },
+      {
+        "id": "astra-depth-filmmaking",
+        "title": "深度影视工坊",
+        "prompt": "{{skill:depth-video-studio:depth-video-studio}} 以这条源视频为运动模板：先转成深度通道，再根据我提供的角色与场景参考重生成。深度负责运动与空间，参考负责外观。",
+        "description": "用深度通道保住原片动作与运镜，再按参考素材迁移角色与场景并重生成。",
+        "context": "Astra · 深度"
+      }
+    ],
+    "steps": [
+      {
+        "title": "选玩法",
+        "description": "按你要解决的是场面、空间还是运动迁移，选择白模、图片3D或深度影视。"
+      },
+      {
+        "title": "准备输入",
+        "description": "白模需要画面创意，3D需要参考图，深度需要源视频与外观参考。"
+      },
+      {
+        "title": "直接试玩",
+        "description": "每个用例都会打开对应官方 Skill 的草稿，可马上开跑。"
+      }
+    ],
+    "outputs": [
+      "可播放的白模预演",
+      "可旋转预览的 3D 场景",
+      "保留运动的深度重塑成片"
+    ],
+    "follow_ups": [
+      "白模定稿后继续整理成正式视频生成方案。",
+      "3D 场景建好后继续设计运镜路径。",
+      "复用同一深度通道再换角色或场景出一版。"
+    ],
+    "boundaries": []
+  },
+  "collection": {
+    "categories": [
+      {
+        "id": "3d-studio",
+        "label": "3D实验室"
+      },
+      {
+        "id": "motion-design",
+        "label": "动效工作室"
+      },
+      {
+        "id": "filmmaking",
+        "label": "深度影视工坊"
+      },
+      {
+        "id": "fashion",
+        "label": "时尚"
+      }
+    ],
+    "entries": [
+      {
+        "item": {
+          "kind": "skill",
+          "name": "whitebox-to-film"
+        },
+        "category": "3d-studio",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/16094e6315c3e015.webp"
+        },
+        "tags": [
+          "3D Lab"
+        ],
+        "featured": true,
+        "title": "白模视频预演",
+        "description": "从画面创意或商品出发，先做白模视频预演。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "3d-scene-director"
+        },
+        "category": "3d-studio",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/c9f51dae333aac4e.webp"
+        },
+        "tags": [
+          "3D Lab"
+        ],
+        "featured": true,
+        "title": "图片3D建模",
+        "description": "上传一张参考图，还原可预览的 3D 现场。"
+      },
+      {
+        "item": {
+          "kind": "app",
+          "name": "motion-library"
+        },
+        "category": "motion-design",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "Motion Design"
+        ],
+        "featured": true,
+        "title": "动效工作室",
+        "description": "让标题走进画面，让图形替你把故事讲完。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "depth-video-studio"
+        },
+        "category": "filmmaking",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "Filmmaking"
+        ],
+        "featured": true,
+        "title": "深度影视工坊",
+        "description": "锁定原片神级运镜与调度，一键置换全新角色与电影级场景。"
+      },
+      {
+        "item": {
+          "kind": "app",
+          "name": "casting-room"
+        },
+        "category": "fashion",
+        "cover": {
+          "kind": "video",
+          "src": ""
+        },
+        "tags": [
+          "Fashion"
+        ],
+        "title": "角色工坊",
+        "description": "从人物小传到高定妆造，定制全片镜头绝不漂移的数字主角。"
+      },
+      {
+        "item": {
+          "kind": "app",
+          "name": "website-design"
+        },
+        "category": "3d-studio",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/f65e391df98972ae.webp"
+        },
+        "tags": [
+          "3D Lab"
+        ],
+        "title": "3D交互网页设计",
+        "description": "挑选并确认模板，在对话中持续修改 HTML。"
+      },
+      {
+        "item": {
+          "kind": "app",
+          "name": "creative-generative-art"
+        },
+        "category": "fashion",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/522cc23e02e09a25.webp"
+        },
+        "tags": [
+          "Fashion"
+        ],
+        "title": "生成式数字艺术库",
+        "description": "挑选并确认模板，在对话中持续修改 HTML。"
+      },
+      {
+        "item": {
+          "kind": "app",
+          "name": "creative-hardware-mg"
+        },
+        "category": "motion-design",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/8cb9d8e787848561.webp"
+        },
+        "tags": [
+          "Motion Design",
+          "MG"
+        ],
+        "title": "硬件发布 MG 库",
+        "description": "挑选并确认模板，在对话中持续修改 HTML。"
+      }
+    ]
+  },
+  "starter_prompt": "帮我在 Astra Studio 里选一个玩法：白模视频预演、图片3D建模，或深度影视工坊。",
+  "capabilities": [],
+  "connectors": []
+}

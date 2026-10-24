@@ -1,0 +1,154 @@
+{
+  "kind": "skill",
+  "name": "fish-audio-drama",
+  "display_name": "广播剧场景",
+  "description": "从一句话的创意或你自己的剧本出发，由全员阵容一镜到底地演完一场戏：角色会打断、回应，并在句中从平静转为惊慌。附带一份供剪辑师使用的音效提示单。",
+  "category": "音频创作",
+  "business_scenario": "film-video",
+  "marketing_line": "整场戏一镜到底，每个角色都在其中。",
+  "search_terms": [
+    "广播剧",
+    "广播剧目",
+    "配音表演",
+    "虚构类播客",
+    "Drama 3"
+  ],
+  "cover_url": "/static/store/covers/755a9f35a369b66f.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "fish-audio-lab",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium",
+    "show_badge": false
+  },
+  "guide": {
+    "summary": "一场有表演的戏：角色各具特色、彼此回应，情绪有真实的转折，并附带一份提示单，列出你的剪辑师要在下方添加的音效和音乐。",
+    "scenarios": [
+      "虚构类播客的试播场景",
+      "游戏或漫画预告中的故事片段",
+      "供编剧和导演练习的素材"
+    ],
+    "required_context": [
+      {
+        "title": "创意或剧本",
+        "description": "一句话即可，或者粘贴你的场景。"
+      },
+      {
+        "title": "情绪基调",
+        "description": "选填。默认悬疑；也可以试试喜剧、爱情、恐怖或科幻。"
+      },
+      {
+        "title": "角色",
+        "description": "选填。两到四个角色，或交给我来分配。"
+      },
+      {
+        "title": "时长",
+        "description": "选填。一到三分钟。"
+      }
+    ],
+    "use_cases": [
+      {
+        "id": "audio-drama-scene-premise",
+        "title": "从创意生成场景",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `audio-drama-scene` playbook。根据这个创意写一段 2 分钟、三个角色的悬疑场景，作为一场完整的戏来呈现，让他们彼此回应。给我看脚本和提示单，然后生成高潮部分的样片。",
+        "description": "我写出紧凑的场景，演员阵容一镜到底演完。"
+      },
+      {
+        "id": "audio-drama-scene-script",
+        "title": "演绎我的剧本",
+        "prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `audio-drama-scene` playbook。演绎我的场景。在情绪转折处加上演绎提示，包括句中的情绪转换，为角色配以对比鲜明的声音，并先为最强烈的时刻生成样片。",
+        "description": "你的场景，在情绪转折处加上演绎提示。"
+      }
+    ],
+    "steps": [
+      {
+        "title": "塑造场景",
+        "description": "一个诉求、一个冲突、一次转折和一个结尾节拍。"
+      },
+      {
+        "title": "指导演出",
+        "description": "为每个转折写下大白话提示，就像写给演员的笔记。"
+      },
+      {
+        "title": "试听高潮",
+        "description": "检查情绪是否可信，声音是否保持各不相同。"
+      },
+      {
+        "title": "获取场景",
+        "description": "场景音频、带时间轴的脚本，以及音效和音乐提示单。"
+      }
+    ],
+    "outputs": [
+      "场景音频和一个合并文件",
+      "带说话人标注和提示的时间轴脚本",
+      "供剪辑师使用的音效和音乐提示单"
+    ],
+    "follow_ups": [
+      "撰写并配音下一场戏。",
+      "用不同的导演方向演绎高潮部分。",
+      "制作一句 20 秒的预告台词。"
+    ],
+    "boundaries": [
+      "在产生任何付费内容之前，我会先确认 Fish Audio Drama 3 在你的账户中可用。如果只有其他 Fish Audio 语音模型可用，我会先告诉你再使用；如果都不可用，你只会拿到导演版脚本和配音方案。未经你同意，我绝不会切换到其他服务商。",
+      "你会先看到脚本和费用，然后是一段样片。只有在你确认样片后，才会生成其余部分。如需修改某句台词，我只会重新生成那一句或那一段。",
+      "参考声音需要明确的同意和权利。我绝不会克隆或模仿公众人物，或任何未同意的人。",
+      "本工作室只制作语音内容。音乐和音效会以提示单的形式提供给你的剪辑师，且不会为视频配音或对口型。"
+    ]
+  },
+  "intro_showcase": {
+    "layout": "even",
+    "eyebrow": "Fish Audio Drama 3",
+    "caption": "整场戏一镜到底，每个角色都在其中。",
+    "hero": {
+      "media": {
+        "kind": "video",
+        "src": "",
+        "poster": "/static/store/covers/755a9f35a369b66f.webp"
+      },
+      "alt": "广播剧场景"
+    },
+    "panels": []
+  },
+  "try_form": {
+    "references": {
+      "min": 0,
+      "max": 0
+    },
+    "prompt": {
+      "max_length": 400
+    },
+    "fields": [
+      {
+        "id": "premise",
+        "label": "创意或剧本",
+        "placeholder": "一句话即可，或者粘贴你的场景。",
+        "max_length": 2000
+      },
+      {
+        "id": "mood",
+        "label": "情绪基调",
+        "placeholder": "选填。默认悬疑；也可以试试喜剧、爱情、恐怖或科幻。",
+        "max_length": 60
+      },
+      {
+        "id": "characters",
+        "label": "角色",
+        "placeholder": "选填。两到四个角色，或交给我来分配。",
+        "max_length": 200
+      },
+      {
+        "id": "length",
+        "label": "时长",
+        "placeholder": "选填。一到三分钟。",
+        "max_length": 60
+      }
+    ]
+  },
+  "starter_prompt": "{{skill:fish-audio-lab:fish-audio-lab}} 请使用 `audio-drama-scene` playbook。我想要一段简短的广播剧场景。只询问缺失的信息，撰写或打磨带有演绎提示的场景，并先把情绪高潮做成样片。",
+  "capabilities": [],
+  "connectors": []
+}

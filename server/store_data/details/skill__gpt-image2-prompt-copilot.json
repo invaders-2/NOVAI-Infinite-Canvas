@@ -1,0 +1,84 @@
+{
+  "kind": "skill",
+  "name": "gpt-image2-prompt-copilot",
+  "display_name": "GPT Image 2 提示词助手",
+  "description": "为图像生成、编辑、文字设计与版式编写 GPT Image 2 提示词。",
+  "category": "图像",
+  "business_scenario": "brand-design",
+  "marketing_line": "把创意转化为可用于正式制作的成果。",
+  "search_terms": [
+    "生成结构化图像",
+    "把这个海报想法写成 GPT Image 2 的结构化提示词",
+    "保留构图进行编辑",
+    "编辑这张图，同时保留原构图，只替换我指定的元素",
+    "制作文字准确的视觉素材",
+    "生成一张包含准确文字的图表或标准视觉素材"
+  ],
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "activation_skill": "gpt-image2-prompt-copilot",
+  "guide": {
+    "summary": "为图像生成、编辑、文字设计与版式编写 GPT Image 2 提示词。",
+    "scenarios": [
+      "图像探索",
+      "从上下文到第一版结果",
+      "围绕结果继续迭代"
+    ],
+    "required_context": [
+      {
+        "title": "先说明想要的结果",
+        "description": "提供图像、编辑、文字排版、界面或图表的目标结果，以及相关参考。"
+      },
+      {
+        "title": "补充素材与约束",
+        "description": "提供参考文件、目标受众、格式、风格、时长或其他不能被改变的条件。"
+      },
+      {
+        "title": "告诉 Agent 如何取舍",
+        "description": "说明优先级、验收重点，以及哪些内容需要先确认再继续。"
+      }
+    ],
+    "use_cases": [
+      {
+        "title": "生成结构化图像",
+        "prompt": "把这个海报想法写成 GPT Image 2 的结构化提示词",
+        "description": ""
+      }
+    ],
+    "steps": [
+      {
+        "title": "从一个具体结果开始",
+        "description": "先选择一个贴近当前工作的用例，不需要一次讲完所有背景。"
+      },
+      {
+        "title": "让 Skill 读取相关上下文",
+        "description": "Agent 会按照这个 Skill 的规则整理素材、识别缺口，并在需要时提出澄清问题。"
+      },
+      {
+        "title": "先产出一版可检查的结果",
+        "description": "它会把目标转成结构化 brief、提示词、方案或其他可继续工作的中间产物。"
+      },
+      {
+        "title": "针对重点做下一轮修改",
+        "description": "保留已经确认的部分，只要求它修改真正影响结果的变量。"
+      }
+    ],
+    "outputs": [
+      "一份围绕具体目标组织的第一版结果",
+      "可以继续交给 Agent 执行或审阅的结构化内容",
+      "下一轮迭代可以直接复用的上下文与约束"
+    ],
+    "follow_ups": [
+      "生成结构化图像",
+      "保留构图进行编辑",
+      "制作文字准确的视觉素材"
+    ],
+    "boundaries": [
+      "它负责把图像、编辑、文字或图表目标转成高质量提示词，不承诺当前一定能生成指定结果。",
+      "具体模型能力、文字准确性、输入限制和提交状态以运行时为准。"
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

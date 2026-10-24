@@ -1,0 +1,192 @@
+{
+  "kind": "skill",
+  "name": "ai-influencer-studio",
+  "display_name": "Forge 1.0",
+  "description": "设定虚拟创作者，在画布上从三个方向中选定形象，先确认无对白视频草稿，再制作最终成片。",
+  "category": "社媒内容",
+  "business_scenario": "social-media-content",
+  "marketing_line": "为无对白视觉喜剧打造角色。",
+  "search_terms": [
+    "AI 网红",
+    "虚拟网红",
+    "虚拟人",
+    "捏人",
+    "数字人",
+    "小红书",
+    "抖音",
+    "种草",
+    "forge",
+    "哈哈镜"
+  ],
+  "cover_url": "/static/store/covers/c3b1b97fe9ee55d0.webp",
+  "cover_video_url": "",
+  "marketing_slots": [],
+  "installed": false,
+  "enabled": false,
+  "runtime_status": "not-applicable",
+  "activation_skill": "ai-influencer-studio",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium",
+    "show_badge": false
+  },
+  "guide": {
+    "summary": "设定虚拟创作者，在画布上从三个方向中选定形象，先确认无对白视频草稿，再制作最终成片。",
+    "scenarios": [],
+    "required_context": [],
+    "use_cases": [],
+    "steps": [],
+    "outputs": [],
+    "follow_ups": [],
+    "boundaries": []
+  },
+  "collection": {
+    "categories": [
+      {
+        "id": "create",
+        "label": "设定角色"
+      },
+      {
+        "id": "shoot",
+        "label": "探索更多形式"
+      }
+    ],
+    "entries": [
+      {
+        "item": {
+          "kind": "skill",
+          "name": "ai-influencer-builder"
+        },
+        "category": "create",
+        "cover": {
+          "kind": "image",
+          "src": "/app-store/ai-influencer/studio-cover.svg"
+        },
+        "tags": [
+          "捏人",
+          "9:16",
+          "种草"
+        ],
+        "featured": true,
+        "status": "live",
+        "title": "Forge Builder",
+        "description": "设定特质。选定形象。确认视频。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "trending-recast-gallery"
+        },
+        "category": "shoot",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/2c1fae7720f865dc.webp"
+        },
+        "tags": [
+          "爆款模板",
+          "梗"
+        ],
+        "status": "live",
+        "title": "Skrull",
+        "description": "挑个爆款，一键复刻。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "digital-human-social-talking-head"
+        },
+        "category": "shoot",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/e1e3b56c817740fc.webp"
+        },
+        "tags": [
+          "口播",
+          "对口型"
+        ],
+        "status": "live",
+        "title": "社媒口播",
+        "description": "给品牌配一位会抓眼球的全天候主播：节奏利落、表达自然，专为短视频引流打造。"
+      },
+      {
+        "item": {
+          "kind": "skill",
+          "name": "social-tiktok-content"
+        },
+        "category": "shoot",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/app-store/social-media/tiktok-content.svg"
+        },
+        "tags": [
+          "TikTok",
+          "脚本"
+        ],
+        "status": "live",
+        "title": "TikTok 钩子实验室",
+        "description": "先比较开场，再决定把时间花在哪条片子上。"
+      }
+    ]
+  },
+  "influencer_studio": {
+    "view": "hub",
+    "studio": {
+      "kind": "skill",
+      "name": "ai-influencer-builder"
+    },
+    "ticker": [
+      "GRWM",
+      "POV",
+      "Photo dump",
+      "穿搭变装",
+      "一日 vlog",
+      "街头反应",
+      "爆款舞蹈",
+      "产品演示"
+    ],
+    "hero": {
+      "persona": "ayu",
+      "video": "",
+      "poster": "/static/store/covers/cc7314cfcb9e010c.webp",
+      "caption": "POV：他喝浓缩\n只用两根手指"
+    },
+    "heroes": [
+      {
+        "persona": "ayu",
+        "video": "",
+        "poster": "/static/store/covers/cc7314cfcb9e010c.webp",
+        "caption": "POV：他喝浓缩\n只用两根手指"
+      },
+      {
+        "persona": "lan",
+        "video": "",
+        "poster": "/static/store/covers/bfc1878c682d26db.webp",
+        "caption": "POV：她的发髻\n每天早上都长一点"
+      },
+      {
+        "persona": "henrik",
+        "video": "",
+        "poster": "/static/store/covers/bb26bbdbddc97602.webp",
+        "caption": "POV：他的发型\n主要靠抛光"
+      },
+      {
+        "persona": "marisol",
+        "video": "",
+        "poster": "/static/store/covers/169de7f180ed56d1.webp",
+        "caption": "POV：她这辈子\n没用过踩脚凳"
+      },
+      {
+        "persona": "kwame",
+        "video": "",
+        "poster": "/static/store/covers/dc6fdebcc1992a81.webp",
+        "caption": "POV：每条裤子\n都得谈判"
+      }
+    ]
+  },
+  "capabilities": [],
+  "connectors": []
+}

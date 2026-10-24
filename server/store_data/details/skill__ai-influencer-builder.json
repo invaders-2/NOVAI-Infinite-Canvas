@@ -1,0 +1,2180 @@
+{
+  "kind": "skill",
+  "name": "ai-influencer-builder",
+  "display_name": "Forge Builder",
+  "description": "选择角色特质和首支视频构想。在画布上查看需求草稿，选定生成的角色，再确认视频草稿。",
+  "category": "社媒内容",
+  "business_scenario": "social-media-content",
+  "marketing_line": "设定特质。选定形象。确认视频。",
+  "search_terms": [
+    "AI 网红",
+    "虚拟网红",
+    "虚拟人",
+    "捏人",
+    "数字人",
+    "小红书",
+    "抖音",
+    "种草",
+    "forge"
+  ],
+  "cover_url": "/app-store/ai-influencer/studio-cover.svg",
+  "marketing_slots": [],
+  "installed": true,
+  "enabled": true,
+  "runtime_status": "published",
+  "activation_skill": "ai-influencer-studio",
+  "recommended_model": {
+    "id": "claude-opus-5-5",
+    "display_name": "Opus 5.5",
+    "thinking_level": "medium",
+    "show_badge": false
+  },
+  "guide": {
+    "summary": "在这里准备需求草稿，就绪后从画布发送。选定三个角色方向之一，并在最终成片前确认完整的无对白视频草稿。",
+    "scenarios": [
+      "孵化一个虚拟博主账号",
+      "自己出镜前先测试内容赛道",
+      "给品牌打造固定出镜的虚拟代言人"
+    ],
+    "required_context": [
+      {
+        "title": "外形特征",
+        "description": "全部可选。未填的选择会补全并说明；明确的风格、比例和角色选择会被保留。"
+      },
+      {
+        "title": "参考照片",
+        "description": "可选。请使用你有权使用的照片。人物身份参考需要本人同意；不支持公众人物。"
+      }
+    ],
+    "use_cases": [],
+    "steps": [
+      {
+        "title": "设定角色",
+        "description": "选择特质和视频构想，然后在画布上查看并发送可编辑的需求草稿。"
+      },
+      {
+        "title": "选定形象",
+        "description": "比较同一自然基底的三个方向并选定肖像。Agent 会检查七视图，并将两份参考一并保存。"
+      },
+      {
+        "title": "确认视频",
+        "description": "查看费用和完整的无对白视频草稿。你确认后，成片会在后期加入字幕、音乐和 AI 角色标识。"
+      }
+    ],
+    "outputs": [
+      "角色需求草稿",
+      "已选定肖像与已检查的七视图",
+      "带两份参考的可复用角色",
+      "确认视频草稿后的 9:16 视频",
+      "配文、话题标签、封面和下一条内容构想"
+    ],
+    "follow_ups": [
+      "用同一角色拍下一种格式",
+      "给 TA 做一组本周 photo dump"
+    ],
+    "boundaries": [
+      "人物角色必须是成年人。可用的身份照片需要本人同意；不支持公众人物。真实动物保留符合物种的身体结构与动作。",
+      "默认无对白。对白需要明确要求，且相应能力要支持。",
+      "生成会消耗积分。首次付费视频请求前会确认视频费用；不会自动发布。"
+    ]
+  },
+  "influencer_studio": {
+    "view": "studio",
+    "agent": {
+      "skill_mention": "{{skill:ai-influencer-studio:ai-influencer-studio}}",
+      "prompt": "帮我做这个角色和第一条视频。",
+      "auto_send": true
+    },
+    "traits": [
+      {
+        "id": "exaggerate",
+        "label": "夸张部位",
+        "section": "caricature",
+        "select": "multi",
+        "max": 2,
+        "options": [
+          {
+            "id": "head",
+            "label": "大头"
+          },
+          {
+            "id": "jaw",
+            "label": "大下巴"
+          },
+          {
+            "id": "neck",
+            "label": "天鹅颈"
+          },
+          {
+            "id": "forehead",
+            "label": "高额头"
+          },
+          {
+            "id": "nose",
+            "label": "大鼻子"
+          },
+          {
+            "id": "eyes",
+            "label": "大眼睛"
+          },
+          {
+            "id": "lips",
+            "label": "厚嘴唇"
+          },
+          {
+            "id": "ears",
+            "label": "招风耳"
+          },
+          {
+            "id": "cheeks",
+            "label": "肉嘟嘟脸颊"
+          },
+          {
+            "id": "hair",
+            "label": "超大发量"
+          },
+          {
+            "id": "brows",
+            "label": "粗眉"
+          },
+          {
+            "id": "shoulders",
+            "label": "宽肩细腰"
+          },
+          {
+            "id": "thick-neck",
+            "label": "粗脖子"
+          },
+          {
+            "id": "tiny-head",
+            "label": "小头"
+          },
+          {
+            "id": "mustache",
+            "label": "大八字胡"
+          },
+          {
+            "id": "beard",
+            "label": "超长胡子"
+          },
+          {
+            "id": "arms",
+            "label": "长手臂"
+          },
+          {
+            "id": "hands",
+            "label": "巨手"
+          },
+          {
+            "id": "legs",
+            "label": "大长腿"
+          },
+          {
+            "id": "feet",
+            "label": "巨脚"
+          }
+        ]
+      },
+      {
+        "id": "exaggeration",
+        "label": "夸张程度",
+        "section": "caricature",
+        "select": "single",
+        "options": [
+          {
+            "id": "subtle",
+            "label": "微夸张"
+          },
+          {
+            "id": "bold",
+            "label": "大胆"
+          },
+          {
+            "id": "extreme",
+            "label": "极致"
+          }
+        ],
+        "default": [
+          "extreme"
+        ]
+      },
+      {
+        "id": "art_style",
+        "label": "漫画风格",
+        "section": "caricature",
+        "select": "single",
+        "options": [
+          {
+            "id": "photoreal-caricature",
+            "label": "写实夸张"
+          },
+          {
+            "id": "street-sketch",
+            "label": "公园速写"
+          },
+          {
+            "id": "airbrush",
+            "label": "喷枪漫画"
+          },
+          {
+            "id": "painted-hyperreal",
+            "label": "油画写实"
+          },
+          {
+            "id": "ink-line",
+            "label": "一笔线描"
+          },
+          {
+            "id": "latex-puppet",
+            "label": "讽刺木偶"
+          },
+          {
+            "id": "bobblehead",
+            "label": "摇头公仔"
+          },
+          {
+            "id": "magazine-parody",
+            "label": "杂志恶搞"
+          },
+          {
+            "id": "me-and-my-job",
+            "label": "我和我的工作"
+          }
+        ],
+        "default": [
+          "photoreal-caricature"
+        ]
+      },
+      {
+        "id": "character_type",
+        "label": "角色类型",
+        "section": "identity",
+        "select": "single",
+        "options": [
+          {
+            "id": "natural",
+            "label": "真人自然"
+          },
+          {
+            "id": "editorial",
+            "label": "时装超模"
+          },
+          {
+            "id": "extreme",
+            "label": "夸张怪咖"
+          },
+          {
+            "id": "cat",
+            "label": "猫系"
+          },
+          {
+            "id": "dog",
+            "label": "狗系"
+          },
+          {
+            "id": "frog",
+            "label": "蛙系"
+          },
+          {
+            "id": "bird",
+            "label": "鸟系"
+          },
+          {
+            "id": "cyborg",
+            "label": "赛博义体"
+          },
+          {
+            "id": "clay",
+            "label": "黏土玩偶"
+          }
+        ],
+        "default": [
+          "natural"
+        ]
+      },
+      {
+        "id": "gender",
+        "label": "性别",
+        "section": "identity",
+        "select": "single",
+        "options": [
+          {
+            "id": "female",
+            "label": "女"
+          },
+          {
+            "id": "male",
+            "label": "男"
+          },
+          {
+            "id": "nonbinary",
+            "label": "非二元"
+          }
+        ],
+        "default": [
+          "female"
+        ]
+      },
+      {
+        "id": "age",
+        "label": "年龄感",
+        "section": "identity",
+        "select": "single",
+        "options": [
+          {
+            "id": "early-20s",
+            "label": "20 出头"
+          },
+          {
+            "id": "late-20s",
+            "label": "20 代后半"
+          },
+          {
+            "id": "thirties",
+            "label": "30+"
+          },
+          {
+            "id": "forties",
+            "label": "40+"
+          },
+          {
+            "id": "silver",
+            "label": "银发"
+          }
+        ],
+        "default": [
+          "early-20s"
+        ]
+      },
+      {
+        "id": "heritage",
+        "label": "族裔外观",
+        "section": "identity",
+        "select": "single",
+        "options": [
+          {
+            "id": "east-asian",
+            "label": "东亚"
+          },
+          {
+            "id": "southeast-asian",
+            "label": "东南亚"
+          },
+          {
+            "id": "south-asian",
+            "label": "南亚"
+          },
+          {
+            "id": "black",
+            "label": "非裔"
+          },
+          {
+            "id": "white",
+            "label": "欧裔"
+          },
+          {
+            "id": "latino",
+            "label": "拉美"
+          },
+          {
+            "id": "middle-eastern",
+            "label": "中东"
+          },
+          {
+            "id": "mixed",
+            "label": "混血"
+          }
+        ]
+      },
+      {
+        "id": "skin_tone",
+        "label": "肤色",
+        "section": "identity",
+        "select": "single",
+        "options": [
+          {
+            "id": "porcelain",
+            "label": "冷白",
+            "swatch": "#F3DACB"
+          },
+          {
+            "id": "fair",
+            "label": "白皙",
+            "swatch": "#EBC3A6"
+          },
+          {
+            "id": "light",
+            "label": "自然白",
+            "swatch": "#D9A986"
+          },
+          {
+            "id": "olive",
+            "label": "橄榄",
+            "swatch": "#C08E62"
+          },
+          {
+            "id": "tan",
+            "label": "小麦",
+            "swatch": "#A8754C"
+          },
+          {
+            "id": "brown",
+            "label": "棕",
+            "swatch": "#8A5A3B"
+          },
+          {
+            "id": "deep",
+            "label": "深棕",
+            "swatch": "#5E3B26"
+          },
+          {
+            "id": "ebony",
+            "label": "乌木",
+            "swatch": "#3B2416"
+          }
+        ]
+      },
+      {
+        "id": "build",
+        "label": "身材",
+        "section": "identity",
+        "select": "single",
+        "options": [
+          {
+            "id": "slim",
+            "label": "纤细"
+          },
+          {
+            "id": "athletic",
+            "label": "运动型"
+          },
+          {
+            "id": "muscular",
+            "label": "肌肉"
+          },
+          {
+            "id": "curvy",
+            "label": "曲线"
+          },
+          {
+            "id": "plus-size",
+            "label": "大码"
+          },
+          {
+            "id": "petite",
+            "label": "娇小"
+          },
+          {
+            "id": "statuesque",
+            "label": "高挑"
+          }
+        ]
+      },
+      {
+        "id": "hair_style",
+        "label": "发型",
+        "section": "look",
+        "select": "single",
+        "options": [
+          {
+            "id": "long-straight",
+            "label": "黑长直"
+          },
+          {
+            "id": "wolf-cut",
+            "label": "狼尾"
+          },
+          {
+            "id": "bob",
+            "label": "波波头"
+          },
+          {
+            "id": "hime-cut",
+            "label": "公主切"
+          },
+          {
+            "id": "curtain-bangs",
+            "label": "八字刘海"
+          },
+          {
+            "id": "buzz-cut",
+            "label": "寸头"
+          },
+          {
+            "id": "mullet",
+            "label": "鲻鱼头"
+          },
+          {
+            "id": "braids",
+            "label": "编发"
+          },
+          {
+            "id": "space-buns",
+            "label": "双丸子"
+          },
+          {
+            "id": "afro",
+            "label": "爆炸头"
+          },
+          {
+            "id": "curly",
+            "label": "羊毛卷"
+          },
+          {
+            "id": "slick-back",
+            "label": "大背头"
+          },
+          {
+            "id": "bowl-cut",
+            "label": "锅盖头"
+          },
+          {
+            "id": "mohawk",
+            "label": "莫西干"
+          },
+          {
+            "id": "high-pony",
+            "label": "高马尾"
+          },
+          {
+            "id": "bald",
+            "label": "光头"
+          }
+        ]
+      },
+      {
+        "id": "hair_color",
+        "label": "发色",
+        "section": "look",
+        "select": "single",
+        "options": [
+          {
+            "id": "jet-black",
+            "label": "乌黑",
+            "swatch": "#141414"
+          },
+          {
+            "id": "dark-brown",
+            "label": "深棕",
+            "swatch": "#3B2A20"
+          },
+          {
+            "id": "ash-brown",
+            "label": "灰棕",
+            "swatch": "#6E6259"
+          },
+          {
+            "id": "honey-blonde",
+            "label": "蜂蜜金",
+            "swatch": "#C9A063"
+          },
+          {
+            "id": "platinum",
+            "label": "铂金",
+            "swatch": "#E8E2D0"
+          },
+          {
+            "id": "silver",
+            "label": "银灰",
+            "swatch": "#B8BCC4"
+          },
+          {
+            "id": "ginger",
+            "label": "姜红",
+            "swatch": "#B5562A"
+          },
+          {
+            "id": "cherry-red",
+            "label": "樱桃红",
+            "swatch": "#A3172C"
+          },
+          {
+            "id": "pastel-pink",
+            "label": "粉色",
+            "swatch": "#F2A7C3"
+          },
+          {
+            "id": "lilac",
+            "label": "香芋紫",
+            "swatch": "#B9A3E3"
+          },
+          {
+            "id": "electric-blue",
+            "label": "电光蓝",
+            "swatch": "#2F6BFF"
+          },
+          {
+            "id": "mint",
+            "label": "薄荷绿",
+            "swatch": "#8FE3C6"
+          }
+        ]
+      },
+      {
+        "id": "face",
+        "label": "五官特征",
+        "section": "look",
+        "select": "multi",
+        "max": 3,
+        "options": [
+          {
+            "id": "freckles",
+            "label": "雀斑"
+          },
+          {
+            "id": "dimples",
+            "label": "酒窝"
+          },
+          {
+            "id": "beauty-mark",
+            "label": "美人痣"
+          },
+          {
+            "id": "high-cheekbones",
+            "label": "高颧骨"
+          },
+          {
+            "id": "full-lips",
+            "label": "厚唇"
+          },
+          {
+            "id": "thick-brows",
+            "label": "浓眉"
+          },
+          {
+            "id": "gap-teeth",
+            "label": "门牙缝"
+          },
+          {
+            "id": "sharp-jaw",
+            "label": "利落下颌线"
+          },
+          {
+            "id": "button-nose",
+            "label": "小翘鼻"
+          },
+          {
+            "id": "fox-eyes",
+            "label": "狐狸眼"
+          },
+          {
+            "id": "doe-eyes",
+            "label": "小鹿眼"
+          },
+          {
+            "id": "monolid",
+            "label": "单眼皮"
+          }
+        ]
+      },
+      {
+        "id": "details",
+        "label": "记忆点",
+        "section": "look",
+        "select": "multi",
+        "max": 3,
+        "options": [
+          {
+            "id": "glasses",
+            "label": "眼镜"
+          },
+          {
+            "id": "septum",
+            "label": "鼻环"
+          },
+          {
+            "id": "ear-stack",
+            "label": "耳骨钉"
+          },
+          {
+            "id": "face-tattoo",
+            "label": "脸部纹身"
+          },
+          {
+            "id": "face-gems",
+            "label": "脸钻"
+          },
+          {
+            "id": "gold-grill",
+            "label": "金牙套"
+          },
+          {
+            "id": "braces",
+            "label": "牙套"
+          },
+          {
+            "id": "brow-slit",
+            "label": "断眉"
+          },
+          {
+            "id": "nail-art",
+            "label": "美甲"
+          },
+          {
+            "id": "headphones",
+            "label": "头戴耳机"
+          },
+          {
+            "id": "beanie",
+            "label": "毛线帽"
+          },
+          {
+            "id": "nose-tape",
+            "label": "鼻贴"
+          }
+        ]
+      },
+      {
+        "id": "style",
+        "label": "穿搭风格",
+        "section": "look",
+        "select": "single",
+        "options": [
+          {
+            "id": "y2k",
+            "label": "Y2K 千禧"
+          },
+          {
+            "id": "streetwear",
+            "label": "街头"
+          },
+          {
+            "id": "old-money",
+            "label": "老钱风"
+          },
+          {
+            "id": "clean-girl",
+            "label": "干净松弛"
+          },
+          {
+            "id": "gorpcore",
+            "label": "山系户外"
+          },
+          {
+            "id": "goth",
+            "label": "暗黑哥特"
+          },
+          {
+            "id": "techwear",
+            "label": "机能风"
+          },
+          {
+            "id": "coquette",
+            "label": "蝴蝶结甜妹"
+          },
+          {
+            "id": "sporty",
+            "label": "运动风"
+          },
+          {
+            "id": "vintage",
+            "label": "复古"
+          },
+          {
+            "id": "office-siren",
+            "label": "职场辣妹"
+          },
+          {
+            "id": "avant-garde",
+            "label": "先锋前卫"
+          }
+        ]
+      },
+      {
+        "id": "niche",
+        "label": "内容赛道",
+        "section": "persona",
+        "select": "single",
+        "options": [
+          {
+            "id": "fashion",
+            "label": "穿搭"
+          },
+          {
+            "id": "beauty",
+            "label": "美妆"
+          },
+          {
+            "id": "food",
+            "label": "美食探店"
+          },
+          {
+            "id": "fitness",
+            "label": "健身"
+          },
+          {
+            "id": "travel",
+            "label": "旅行"
+          },
+          {
+            "id": "tech",
+            "label": "数码科技"
+          },
+          {
+            "id": "gaming",
+            "label": "游戏"
+          },
+          {
+            "id": "comedy",
+            "label": "搞笑"
+          },
+          {
+            "id": "pets",
+            "label": "萌宠"
+          },
+          {
+            "id": "lifestyle",
+            "label": "生活方式"
+          },
+          {
+            "id": "music",
+            "label": "音乐"
+          },
+          {
+            "id": "study",
+            "label": "学习干货"
+          }
+        ],
+        "default": [
+          "lifestyle"
+        ]
+      },
+      {
+        "id": "vibe",
+        "label": "人设性格",
+        "section": "persona",
+        "select": "multi",
+        "max": 2,
+        "options": [
+          {
+            "id": "deadpan",
+            "label": "冷面笑匠"
+          },
+          {
+            "id": "chaotic",
+            "label": "发疯文学"
+          },
+          {
+            "id": "wholesome",
+            "label": "治愈系"
+          },
+          {
+            "id": "sarcastic",
+            "label": "毒舌"
+          },
+          {
+            "id": "mysterious",
+            "label": "神秘感"
+          },
+          {
+            "id": "hype",
+            "label": "热血"
+          },
+          {
+            "id": "cozy",
+            "label": "松弛感"
+          },
+          {
+            "id": "nerdy",
+            "label": "技术宅"
+          }
+        ],
+        "default": [
+          "deadpan"
+        ]
+      },
+      {
+        "id": "platform",
+        "label": "首发平台",
+        "section": "persona",
+        "select": "single",
+        "options": [
+          {
+            "id": "tiktok",
+            "label": "TikTok"
+          },
+          {
+            "id": "reels",
+            "label": "Instagram Reels"
+          },
+          {
+            "id": "shorts",
+            "label": "YouTube Shorts"
+          },
+          {
+            "id": "xiaohongshu",
+            "label": "小红书"
+          },
+          {
+            "id": "douyin",
+            "label": "抖音"
+          }
+        ],
+        "default": [
+          "tiktok"
+        ]
+      }
+    ],
+    "fields": [
+      {
+        "id": "name",
+        "label": "名字 / 账号名",
+        "placeholder": "名字或 @账号",
+        "max_length": 40,
+        "section": "persona"
+      },
+      {
+        "id": "topic",
+        "label": "第一条视频拍什么",
+        "placeholder": "例如：把便利店甜品挨个锐评一遍",
+        "max_length": 200,
+        "section": "post"
+      },
+      {
+        "id": "product",
+        "label": "要种草的产品",
+        "placeholder": "例如：一款抹茶能量饮料",
+        "max_length": 120,
+        "section": "post",
+        "formats": [
+          "product-ugc"
+        ]
+      }
+    ],
+    "formats": [
+      {
+        "id": "trend-dance",
+        "title": "趋势舞",
+        "hook": "盛大铺垫。一个小动作。",
+        "description": "熟悉的动作加上冷面反差：先拉起期待，再落下那个小动作，最后盛大收尾。音乐稍后加入。",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/dc6fdebcc1992a81.webp"
+        },
+        "aspect": "9/16",
+        "beats": [
+          "钩子姿势",
+          "蓄势",
+          "标志动作",
+          "盛大收尾"
+        ],
+        "prompt": "用「趋势舞」模板，帮我做这个角色和第一条视频。",
+        "idea": "{{name}}把一支爆款舞的铺垫做得像世界决赛：钩子姿势、漫长蓄势，结果标志动作只是一个小小的动作，全靠{{feature}}撑起来，最后盛大收尾。"
+      },
+      {
+        "id": "grwm",
+        "title": "GRWM",
+        "hook": "准备了这么多。就为这个？",
+        "description": "无对白的准备过程不断加码，最后揭晓一个好笑的场合。反应和字幕把故事讲清楚。",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/45320a507b3769ac.webp"
+        },
+        "aspect": "9/16",
+        "beats": [
+          "第一项仪式",
+          "过度准备",
+          "最后修饰",
+          "揭晓场合"
+        ],
+        "prompt": "用「GRWM」模板，帮我做这个角色和第一条视频。",
+        "idea": "跟{{name}}一起出门准备：围绕{{feature}}的一整套夸张仪式，一步比一步郑重，最后揭晓只是下楼扔个垃圾。"
+      },
+      {
+        "id": "pov-skit",
+        "title": "POV 短剧",
+        "hook": "一个情境。意外的收尾。",
+        "description": "单个角色演出由字幕带动的 POV 设定和反转，没有口头对白。",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/ccc66dfcb6c113e6.webp"
+        },
+        "aspect": "9/16",
+        "beats": [
+          "POV 钩子",
+          "铺垫",
+          "升级",
+          "笑点收尾"
+        ],
+        "prompt": "用「POV 短剧」模板，帮我做这个角色和第一条视频。",
+        "idea": "POV：你和{{name}}挤同一部电梯。TA 的{{feature}}一层一层慢慢占领整个场面，最后一秒反转成一个小小的胜利。"
+      },
+      {
+        "id": "photo-dump",
+        "title": "随手拍",
+        "hook": "这周最小的抢镜瞬间。",
+        "description": "一支视频里的抓拍瞬间，加上反复出现的道具笑点。9 张照片的轮播需另行要求。",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/62c69c481e08c137.webp"
+        },
+        "aspect": "9/16",
+        "beats": [
+          "本周钩子",
+          "抓拍瞬间",
+          "道具抢镜",
+          "结尾呼应"
+        ],
+        "prompt": "用「随手拍」模板，帮我做这个角色和第一条视频。",
+        "idea": "{{name}}这一周的随手拍：早上的咖啡、通勤路上、周末出门。{{feature}}每张都在悄悄抢镜，最后一张和第一张遥相呼应。"
+      },
+      {
+        "id": "outfit-check",
+        "title": "穿搭检查",
+        "hook": "三套造型。一个反复笑点。",
+        "description": "用一支无对白视频比较三个造型，道具笑点逐步升级。真实动物使用合适的配饰或休息处。",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/a5ce3d26c0da77d1.webp"
+        },
+        "aspect": "9/16",
+        "beats": [
+          "第一套",
+          "切换",
+          "三个造型",
+          "道具收尾"
+        ],
+        "prompt": "用「穿搭检查」模板，帮我做这个角色和第一条视频。",
+        "idea": "{{name}}试三套穿搭，每套都为{{feature}}量身设计。同一个道具一直碍事，直到第三套让它成了主角。"
+      },
+      {
+        "id": "day-in-life",
+        "title": "我的一天",
+        "hook": "隆重的日常。小小的成果。",
+        "description": "无对白的一日故事，把过于郑重的仪式收成一个小小的、出其不意的结果。",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/0e905c21fe863361.webp"
+        },
+        "aspect": "9/16",
+        "beats": [
+          "晨间仪式",
+          "日常",
+          "升级",
+          "微小成果"
+        ],
+        "prompt": "用「我的一天」模板，帮我做这个角色和第一条视频。",
+        "idea": "跟{{name}}过一天：起床、通勤、午饭、跑腿。{{feature}}让每件小事都变成隆重的仪式，最后收获一个小小的、骄傲的成就。"
+      },
+      {
+        "id": "street-interview",
+        "title": "街头反应",
+        "hook": "一个角色。问题卡反转。",
+        "description": "空无他人的街头上，单个角色对问题卡做无声反应。不采访陌生人，也不开口回答。",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/ac27c366080a40f1.webp"
+        },
+        "aspect": "9/16",
+        "beats": [
+          "问题卡",
+          "无声反应",
+          "反转",
+          "结束示意"
+        ],
+        "prompt": "用「街头反应」模板，帮我做这个角色和第一条视频。",
+        "idea": "{{name}}独自站在安静的街头，用无声的表情回答一张张问题卡。最后一张问到{{feature}}，TA 只回了一个面无表情的眼神。"
+      },
+      {
+        "id": "product-ugc",
+        "title": "产品演示",
+        "hook": "寻常产品。夸张的仪式。",
+        "description": "根据提供的产品事实做无对白演示，加上虚构角色的反应和视觉收尾。",
+        "cover": {
+          "kind": "video",
+          "src": "",
+          "poster": "/static/store/covers/72995887c7f02733.webp"
+        },
+        "aspect": "9/16",
+        "beats": [
+          "产品钩子",
+          "试用",
+          "事实细节",
+          "收尾与号召"
+        ],
+        "prompt": "用「产品演示」模板，帮我做这个角色和第一条视频。",
+        "idea": "{{name}}把一件日常小物开箱得像典礼，用{{feature}}亲自测试，讲清一个真实的产品细节，再来一个无声的收尾笑点。"
+      }
+    ],
+    "personas": [
+      {
+        "id": "ayu",
+        "name": "阿屿",
+        "handle": "ayu.daily",
+        "bio": "脖子和头一样宽，喝浓缩只用两根手指。",
+        "traits": {
+          "exaggerate": [
+            "thick-neck"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "male"
+          ],
+          "age": [
+            "early-20s"
+          ],
+          "heritage": [
+            "east-asian"
+          ],
+          "skin_tone": [
+            "light"
+          ],
+          "build": [
+            "muscular"
+          ],
+          "hair_color": [
+            "jet-black"
+          ],
+          "style": [
+            "streetwear"
+          ],
+          "niche": [
+            "lifestyle"
+          ],
+          "vibe": [
+            "deadpan"
+          ],
+          "platform": [
+            "douyin"
+          ]
+        },
+        "format": "day-in-life",
+        "images": {
+          "base": "/static/store/covers/75223b17c39f89e2.webp",
+          "caricature": "/static/store/covers/0645d6766e95586b.webp",
+          "turnaround": "/static/store/covers/ee108cca5afa499b.webp"
+        },
+        "focus": "face"
+      },
+      {
+        "id": "marisol",
+        "name": "Marisol",
+        "handle": "marisol.reach",
+        "bio": "手臂垂到脚踝，从来不用踩凳子。",
+        "traits": {
+          "exaggerate": [
+            "arms"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "female"
+          ],
+          "age": [
+            "late-20s"
+          ],
+          "heritage": [
+            "latino"
+          ],
+          "skin_tone": [
+            "olive"
+          ],
+          "build": [
+            "slim"
+          ],
+          "hair_style": [
+            "curly"
+          ],
+          "hair_color": [
+            "dark-brown"
+          ],
+          "style": [
+            "streetwear"
+          ],
+          "niche": [
+            "lifestyle"
+          ],
+          "vibe": [
+            "deadpan"
+          ],
+          "platform": [
+            "reels"
+          ]
+        },
+        "format": "day-in-life",
+        "images": {
+          "base": "/static/store/covers/4b03e99a19521dd8.webp",
+          "caricature": "/static/store/covers/727c88767605c19a.webp",
+          "turnaround": "/static/store/covers/83cd9ed5d40b0047.webp"
+        },
+        "focus": "body"
+      },
+      {
+        "id": "lan",
+        "name": "兰姨",
+        "handle": "auntie.lan",
+        "bio": "发髻比她还高，而且每天早上都在长。",
+        "traits": {
+          "exaggerate": [
+            "hair"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "female"
+          ],
+          "age": [
+            "forties"
+          ],
+          "heritage": [
+            "east-asian"
+          ],
+          "skin_tone": [
+            "fair"
+          ],
+          "build": [
+            "petite"
+          ],
+          "hair_style": [
+            "curly"
+          ],
+          "hair_color": [
+            "jet-black"
+          ],
+          "style": [
+            "vintage"
+          ],
+          "niche": [
+            "lifestyle"
+          ],
+          "vibe": [
+            "cozy"
+          ],
+          "platform": [
+            "xiaohongshu"
+          ]
+        },
+        "format": "grwm",
+        "images": {
+          "base": "/static/store/covers/d72dbd1be856d44c.webp",
+          "caricature": "/static/store/covers/1fe0c89fa4474317.webp",
+          "turnaround": "/static/store/covers/b813b22e82708375.webp"
+        },
+        "focus": "face"
+      },
+      {
+        "id": "henrik",
+        "name": "Henrik",
+        "handle": "henrik.thinks",
+        "bio": "额头大到装得下所有点子，眼镜常年停在头顶。",
+        "traits": {
+          "exaggerate": [
+            "forehead"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "male"
+          ],
+          "age": [
+            "forties"
+          ],
+          "heritage": [
+            "white"
+          ],
+          "skin_tone": [
+            "fair"
+          ],
+          "build": [
+            "slim"
+          ],
+          "hair_color": [
+            "honey-blonde"
+          ],
+          "details": [
+            "glasses"
+          ],
+          "style": [
+            "gorpcore"
+          ],
+          "niche": [
+            "tech"
+          ],
+          "vibe": [
+            "nerdy"
+          ],
+          "platform": [
+            "shorts"
+          ]
+        },
+        "format": "pov-skit",
+        "images": {
+          "base": "/static/store/covers/6b9c0f5118b051b2.webp",
+          "caricature": "/static/store/covers/5db0da941f86c257.webp",
+          "turnaround": "/static/store/covers/d3ffe2f42fe1f8fb.webp"
+        },
+        "focus": "face"
+      },
+      {
+        "id": "chen",
+        "name": "老陈",
+        "handle": "laochen",
+        "bio": "一双铲子一样的大手，剥葡萄一颗一颗来。",
+        "traits": {
+          "exaggerate": [
+            "hands"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "male"
+          ],
+          "age": [
+            "forties"
+          ],
+          "heritage": [
+            "east-asian"
+          ],
+          "skin_tone": [
+            "tan"
+          ],
+          "build": [
+            "athletic"
+          ],
+          "hair_color": [
+            "jet-black"
+          ],
+          "style": [
+            "gorpcore"
+          ],
+          "niche": [
+            "food"
+          ],
+          "vibe": [
+            "deadpan"
+          ],
+          "platform": [
+            "douyin"
+          ]
+        },
+        "format": "product-ugc",
+        "images": {
+          "base": "/static/store/covers/a4d9be91b4e09151.webp",
+          "caricature": "/static/store/covers/7ca441937fd28ac7.webp",
+          "turnaround": "/static/store/covers/303f52f48f1851df.webp"
+        },
+        "focus": "body"
+      },
+      {
+        "id": "zhou",
+        "name": "周大爷",
+        "handle": "grandpa.zhou",
+        "bio": "整条街的事都听得见，一句都不往外说。",
+        "traits": {
+          "exaggerate": [
+            "ears"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "male"
+          ],
+          "age": [
+            "silver"
+          ],
+          "heritage": [
+            "east-asian"
+          ],
+          "skin_tone": [
+            "light"
+          ],
+          "build": [
+            "slim"
+          ],
+          "hair_style": [
+            "buzz-cut"
+          ],
+          "hair_color": [
+            "silver"
+          ],
+          "style": [
+            "vintage"
+          ],
+          "niche": [
+            "lifestyle"
+          ],
+          "vibe": [
+            "wholesome"
+          ],
+          "platform": [
+            "douyin"
+          ]
+        },
+        "format": "street-interview",
+        "images": {
+          "base": "/static/store/covers/01187c87648aee74.webp",
+          "caricature": "/static/store/covers/c2c0db626526140f.webp",
+          "turnaround": "/static/store/covers/096b31e3795c3097.webp"
+        },
+        "focus": "face"
+      },
+      {
+        "id": "kwame",
+        "name": "Kwame",
+        "handle": "kwame.long",
+        "bio": "腿长得没边，买裤子永远要谈判。",
+        "traits": {
+          "exaggerate": [
+            "legs"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "male"
+          ],
+          "age": [
+            "thirties"
+          ],
+          "heritage": [
+            "black"
+          ],
+          "skin_tone": [
+            "deep"
+          ],
+          "build": [
+            "slim"
+          ],
+          "hair_color": [
+            "jet-black"
+          ],
+          "style": [
+            "old-money"
+          ],
+          "niche": [
+            "fashion"
+          ],
+          "vibe": [
+            "mysterious"
+          ],
+          "platform": [
+            "reels"
+          ]
+        },
+        "format": "outfit-check",
+        "images": {
+          "base": "/static/store/covers/28276957c95eaa4f.webp",
+          "caricature": "/static/store/covers/f0ce8fe0b27234c9.webp",
+          "turnaround": "/static/store/covers/808a966486d3a490.webp"
+        },
+        "focus": "body"
+      },
+      {
+        "id": "mei",
+        "name": "小梅",
+        "handle": "mei.neck",
+        "bio": "先到的是脖子，然后才是她。围巾是个大工程。",
+        "traits": {
+          "exaggerate": [
+            "neck"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "female"
+          ],
+          "age": [
+            "thirties"
+          ],
+          "heritage": [
+            "east-asian"
+          ],
+          "skin_tone": [
+            "fair"
+          ],
+          "build": [
+            "slim"
+          ],
+          "hair_style": [
+            "bob"
+          ],
+          "hair_color": [
+            "jet-black"
+          ],
+          "style": [
+            "old-money"
+          ],
+          "niche": [
+            "fashion"
+          ],
+          "vibe": [
+            "deadpan"
+          ],
+          "platform": [
+            "xiaohongshu"
+          ]
+        },
+        "format": "outfit-check",
+        "images": {
+          "base": "/static/store/covers/ffd90658c3b50b74.webp",
+          "caricature": "/static/store/covers/056fd55d32343985.webp",
+          "turnaround": "/static/store/covers/571d70cf7ab7709f.webp"
+        },
+        "focus": "face"
+      },
+      {
+        "id": "momo",
+        "name": "桃桃",
+        "handle": "momo.bighead",
+        "bio": "头大身子小，计划更大。",
+        "traits": {
+          "exaggerate": [
+            "head"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "female"
+          ],
+          "age": [
+            "early-20s"
+          ],
+          "heritage": [
+            "east-asian"
+          ],
+          "skin_tone": [
+            "light"
+          ],
+          "build": [
+            "petite"
+          ],
+          "hair_color": [
+            "jet-black"
+          ],
+          "style": [
+            "streetwear"
+          ],
+          "niche": [
+            "study"
+          ],
+          "vibe": [
+            "cozy"
+          ],
+          "platform": [
+            "xiaohongshu"
+          ]
+        },
+        "format": "day-in-life",
+        "images": {
+          "base": "/static/store/covers/68eedea962054d8b.webp",
+          "caricature": "/static/store/covers/c1973d32f9e8a12d.webp",
+          "turnaround": "/static/store/covers/52067e2fb2e221bd.webp"
+        },
+        "focus": "body"
+      },
+      {
+        "id": "walter",
+        "name": "Walter",
+        "handle": "walter.stache",
+        "bio": "胡子大到有自己的邮编，喝汤是一场冒险。",
+        "traits": {
+          "exaggerate": [
+            "mustache"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "male"
+          ],
+          "age": [
+            "silver"
+          ],
+          "heritage": [
+            "white"
+          ],
+          "skin_tone": [
+            "fair"
+          ],
+          "hair_color": [
+            "silver"
+          ],
+          "style": [
+            "vintage"
+          ],
+          "niche": [
+            "food"
+          ],
+          "vibe": [
+            "deadpan"
+          ],
+          "platform": [
+            "shorts"
+          ]
+        },
+        "format": "product-ugc",
+        "images": {
+          "base": "/static/store/covers/e63662e8c0595f89.webp",
+          "caricature": "/static/store/covers/97dfcc02eb4b324e.webp",
+          "turnaround": "/static/store/covers/45d2608f661c3ac4.webp"
+        },
+        "focus": "face"
+      },
+      {
+        "id": "freya",
+        "name": "Freya",
+        "handle": "freya.eyes",
+        "bio": "什么都看得见的大眼睛，刷睫毛膏要一小时。",
+        "traits": {
+          "exaggerate": [
+            "eyes"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "female"
+          ],
+          "age": [
+            "late-20s"
+          ],
+          "heritage": [
+            "white"
+          ],
+          "skin_tone": [
+            "porcelain"
+          ],
+          "build": [
+            "slim"
+          ],
+          "hair_style": [
+            "long-straight"
+          ],
+          "hair_color": [
+            "honey-blonde"
+          ],
+          "style": [
+            "clean-girl"
+          ],
+          "niche": [
+            "beauty"
+          ],
+          "vibe": [
+            "deadpan"
+          ],
+          "platform": [
+            "tiktok"
+          ]
+        },
+        "format": "grwm",
+        "images": {
+          "base": "/static/store/covers/fce0858b8891b4c8.webp",
+          "caricature": "/static/store/covers/ea9290e7f2bc74ad.webp",
+          "turnaround": "/static/store/covers/d79f0ffb43ab139d.webp"
+        },
+        "focus": "face"
+      },
+      {
+        "id": "harold",
+        "name": "Harold",
+        "handle": "harold.small",
+        "bio": "小小的脑袋，大大的开衫，帽子对他来说是个谜。",
+        "traits": {
+          "exaggerate": [
+            "tiny-head"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "male"
+          ],
+          "age": [
+            "silver"
+          ],
+          "heritage": [
+            "white"
+          ],
+          "skin_tone": [
+            "fair"
+          ],
+          "build": [
+            "statuesque"
+          ],
+          "hair_color": [
+            "silver"
+          ],
+          "style": [
+            "old-money"
+          ],
+          "niche": [
+            "lifestyle"
+          ],
+          "vibe": [
+            "wholesome"
+          ],
+          "platform": [
+            "reels"
+          ]
+        },
+        "format": "outfit-check",
+        "images": {
+          "base": "/static/store/covers/1f71696f09a8fd64.webp",
+          "caricature": "/static/store/covers/5b63f67ccedb68f6.webp",
+          "turnaround": "/static/store/covers/baff08a44fa7a501.webp"
+        },
+        "focus": "face"
+      },
+      {
+        "id": "chloe",
+        "name": "Chloé",
+        "handle": "chloe.pony",
+        "bio": "马尾拖到地上，每转一圈就清场。",
+        "traits": {
+          "exaggerate": [
+            "hair"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "female"
+          ],
+          "age": [
+            "early-20s"
+          ],
+          "heritage": [
+            "white"
+          ],
+          "skin_tone": [
+            "fair"
+          ],
+          "build": [
+            "slim"
+          ],
+          "hair_style": [
+            "high-pony"
+          ],
+          "hair_color": [
+            "dark-brown"
+          ],
+          "face": [
+            "freckles"
+          ],
+          "style": [
+            "vintage"
+          ],
+          "niche": [
+            "fashion"
+          ],
+          "vibe": [
+            "chaotic"
+          ],
+          "platform": [
+            "tiktok"
+          ]
+        },
+        "format": "trend-dance",
+        "images": {
+          "base": "/static/store/covers/6dcaec86a2ffa01e.webp",
+          "caricature": "/static/store/covers/0c877ea8381b6d23.webp",
+          "turnaround": "/static/store/covers/b55479f2a67fe7ab.webp"
+        },
+        "focus": "body"
+      },
+      {
+        "id": "marcus",
+        "name": "Marcus",
+        "handle": "marcus.kicks",
+        "bio": "60 码的球鞋，照跳不误。",
+        "traits": {
+          "exaggerate": [
+            "feet"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "male"
+          ],
+          "age": [
+            "forties"
+          ],
+          "heritage": [
+            "black"
+          ],
+          "skin_tone": [
+            "deep"
+          ],
+          "build": [
+            "athletic"
+          ],
+          "hair_style": [
+            "bald"
+          ],
+          "style": [
+            "streetwear"
+          ],
+          "niche": [
+            "fashion"
+          ],
+          "vibe": [
+            "deadpan"
+          ],
+          "platform": [
+            "tiktok"
+          ]
+        },
+        "format": "trend-dance",
+        "images": {
+          "base": "/static/store/covers/c1e50e74a2496b9e.webp",
+          "caricature": "/static/store/covers/62b3b858ce1ed2b3.webp",
+          "turnaround": "/static/store/covers/c356bbcabe80cbfd.webp"
+        },
+        "focus": "body"
+      },
+      {
+        "id": "darius",
+        "name": "Darius",
+        "handle": "darius.beard",
+        "bio": "胡子垂到膝盖，打理一次要一整个上午。",
+        "traits": {
+          "exaggerate": [
+            "beard"
+          ],
+          "exaggeration": [
+            "extreme"
+          ],
+          "art_style": [
+            "photoreal-caricature"
+          ],
+          "character_type": [
+            "natural"
+          ],
+          "gender": [
+            "male"
+          ],
+          "age": [
+            "thirties"
+          ],
+          "heritage": [
+            "black"
+          ],
+          "skin_tone": [
+            "brown"
+          ],
+          "build": [
+            "athletic"
+          ],
+          "hair_style": [
+            "buzz-cut"
+          ],
+          "hair_color": [
+            "jet-black"
+          ],
+          "style": [
+            "vintage"
+          ],
+          "niche": [
+            "lifestyle"
+          ],
+          "vibe": [
+            "mysterious"
+          ],
+          "platform": [
+            "reels"
+          ]
+        },
+        "format": "grwm",
+        "images": {
+          "base": "/static/store/covers/8ff131569336011f.webp",
+          "caricature": "/static/store/covers/9c830d0cbacb8730.webp",
+          "turnaround": "/static/store/covers/f43f31df9166ae0e.webp"
+        },
+        "focus": "body"
+      }
+    ],
+    "references": {
+      "min": 0,
+      "max": 2,
+      "roles": [
+        "character",
+        "wardrobe"
+      ]
+    },
+    "note": {
+      "max_length": 500
+    },
+    "clips": [
+      {
+        "id": "pompadour-laundry",
+        "video": "",
+        "poster": "/static/store/covers/0da6a8a2bd538181.webp",
+        "handle": "rocky.quiff",
+        "caption": "POV：洗衣日\n发型依旧完美"
+      },
+      {
+        "id": "lan-bun",
+        "video": "",
+        "poster": "/static/store/covers/bfc1878c682d26db.webp",
+        "handle": "auntie.lan",
+        "caption": "POV：她的发髻\n每天早上都长一点"
+      },
+      {
+        "id": "space-buns",
+        "video": "",
+        "poster": "/static/store/covers/a29e09830ee2b044.webp",
+        "handle": "bun.voyage",
+        "caption": "POV：我的丸子头\n有自己的粉丝团"
+      },
+      {
+        "id": "egghead-reporter",
+        "video": "",
+        "poster": "/static/store/covers/ed835c6784d32d87.webp",
+        "handle": "egg.reports",
+        "caption": "街头采访：\n他专问大问题"
+      },
+      {
+        "id": "henrik-polish",
+        "video": "",
+        "poster": "/static/store/covers/bb26bbdbddc97602.webp",
+        "handle": "henrik.thinks",
+        "caption": "POV：他的发型\n主要靠抛光"
+      },
+      {
+        "id": "gym-frog",
+        "video": "",
+        "poster": "/static/store/covers/0688e9501818eaf1.webp",
+        "handle": "leg.day.frog",
+        "caption": "POV：每天\n都是练腿日"
+      },
+      {
+        "id": "blowout-tower",
+        "video": "",
+        "poster": "/static/store/covers/5b492d9d43f86500.webp",
+        "handle": "volume.queen",
+        "caption": "GRWM：吹个头\n要一上午"
+      },
+      {
+        "id": "cat-laundromat",
+        "video": "",
+        "poster": "/static/store/covers/968e4ad241ef1fbb.webp",
+        "handle": "night.cat",
+        "caption": "POV：凌晨两点\n等烘干机"
+      },
+      {
+        "id": "kwame-trousers",
+        "video": "",
+        "poster": "/static/store/covers/dc6fdebcc1992a81.webp",
+        "handle": "kwame.long",
+        "caption": "POV：每条裤子\n都得谈判"
+      },
+      {
+        "id": "wok-chef",
+        "video": "",
+        "poster": "/static/store/covers/4ac10f7df82927e1.webp",
+        "handle": "chef.flambe",
+        "caption": "POV：晚市开火\n火力全开"
+      },
+      {
+        "id": "shiba-summit",
+        "video": "",
+        "poster": "/static/store/covers/53c1d1258f37d4c4.webp",
+        "handle": "shiba.summit",
+        "caption": "随手拍：\n在云层之上"
+      },
+      {
+        "id": "mei-subway",
+        "video": "",
+        "poster": "/static/store/covers/b9ca5dc3d104e96e.webp",
+        "handle": "mei.neck",
+        "caption": "POV：她看书\n越过所有人的肩膀"
+      },
+      {
+        "id": "checkout-buns",
+        "video": "",
+        "poster": "/static/store/covers/5953dc43bd44a101.webp",
+        "handle": "shift.buns",
+        "caption": "我的一天：\n扫码也要有型"
+      },
+      {
+        "id": "airport-runway",
+        "video": "",
+        "poster": "/static/store/covers/d1a8edc8fadb1380.webp",
+        "handle": "gate.runway",
+        "caption": "穿搭检查：\n传送带就是T台"
+      },
+      {
+        "id": "ayu-doorway",
+        "video": "",
+        "poster": "/static/store/covers/e36dcafe837712b1.webp",
+        "handle": "ayu.daily",
+        "caption": "POV：衬衫领口\n从来没扣上过"
+      },
+      {
+        "id": "subway-dance",
+        "video": "",
+        "poster": "/static/store/covers/6d886111c4c24f5e.webp",
+        "handle": "platform.moves",
+        "caption": "爆款舞蹈：\n站台就是舞台"
+      },
+      {
+        "id": "horns-hallway",
+        "video": "",
+        "poster": "/static/store/covers/ccc66dfcb6c113e6.webp",
+        "handle": "horns.daily",
+        "caption": "POV：走廊永远\n不够他的角高"
+      },
+      {
+        "id": "elevator-chef",
+        "video": "",
+        "poster": "/static/store/covers/4353c41b18426a64.webp",
+        "handle": "chef.flambe",
+        "caption": "POV：电梯里\n全是蒜香"
+      },
+      {
+        "id": "marisol-reach",
+        "video": "",
+        "poster": "/static/store/covers/169de7f180ed56d1.webp",
+        "handle": "marisol.reach",
+        "caption": "POV：她这辈子\n没用过踩脚凳"
+      },
+      {
+        "id": "kitchen-demo",
+        "video": "",
+        "poster": "/static/store/covers/0c2431b6084821e1.webp",
+        "handle": "fridge.facts",
+        "caption": "产品演示：\n他来讲解冰箱"
+      },
+      {
+        "id": "crosswalk-walk",
+        "video": "",
+        "poster": "/static/store/covers/7868a7ae8cc80025.webp",
+        "handle": "golden.hour.walks",
+        "caption": "我的一天：\n黄昏通勤"
+      },
+      {
+        "id": "neck-grwm",
+        "video": "",
+        "poster": "/static/store/covers/45320a507b3769ac.webp",
+        "handle": "tall.order",
+        "caption": "GRWM：戴项链\n得先搬梯子"
+      },
+      {
+        "id": "afro-aisle",
+        "video": "",
+        "poster": "/static/store/covers/8c70609091d7c293.webp",
+        "handle": "big.hair.energy",
+        "caption": "穿搭检查：\n头发就是穿搭"
+      },
+      {
+        "id": "stache-market",
+        "video": "",
+        "poster": "/static/store/covers/2be10ce1e7d4b9bc.webp",
+        "handle": "grand.stache",
+        "caption": "POV：胡子总比他\n先进店"
+      },
+      {
+        "id": "night-pier",
+        "video": "",
+        "poster": "/static/store/covers/0a69a411e63d6261.webp",
+        "handle": "pier.walks",
+        "caption": "POV：城市的灯\n为你亮起"
+      }
+    ],
+    "clip_prompt": "以附带的视频（source_video）为参考：保留它的场景、运镜、动作和节奏，只把视频里的人物换成我的角色。"
+  },
+  "starter_prompt": "{{skill:ai-influencer-studio:ai-influencer-studio}} 使用 INPUTS 准备我的角色和首支视频，保留明确指定的风格、强度和角色选择。从自然基底出发，基于同一基底展示三个不同方向供我选择。我选定肖像后，检查七视图，并将肖像与七视图一并保存为可复用角色。使用固定的自然摄影场景风格，展示确切的场景提示词并创建空场景。规划一支完整的无对白多镜头视频，通常 15 秒，不超过 30 秒，并在首次付费视频请求前确认费用。等我确认完整视频草稿后，再制作忠实的高清成片。在后期加入字幕、音乐和 AI 角色标识，然后准备视频与发布素材包，但不要发布。默认无对白，也不默认对镜说话。如果我要求真实动物，保留其自然的物种结构与动作；其余既有动物选项仍保持拟人含义。只在遇到阻塞或确实需要确认时询问我。如果某条 INPUTS 缺失，简要告诉我你做了什么选择。",
+  "capabilities": [],
+  "connectors": []
+}
