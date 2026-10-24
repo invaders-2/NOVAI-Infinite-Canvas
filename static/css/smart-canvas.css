@@ -7812,3 +7812,39 @@ html.studio-theme-dark .nv-mcp-brand-logo { filter: invert(1); }
 .nv-mcp-avatar .nv-brand-mark { width: 52px; height: 52px; flex: 0 0 52px; }
 .nv-mcp-avatar .nv-brand-img { width: 52px; height: 52px; flex: 0 0 52px; }
 
+
+/* 已安装徽标 + 复制按钮状态 */
+.nv-mcp-installed-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    margin-left: 2px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    color: var(--ink-2, var(--muted));
+    font: 500 9px/1 var(--font-sans);
+    white-space: nowrap;
+}
+.nv-mcp-installed-badge[hidden] { display: none; }
+.nv-mcp-agent-btn.is-installed { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.nv-mcp-modal-list button .nv-mcp-installed-badge { margin-left: auto; }
+.nv-mcp-copy-btn.is-copied,
+.nv-mcp-action-ghost.is-copied,
+.nv-mcp-action-primary.is-copied,
+.nv-mcp-doc-copy.is-copied,
+.nv-mcp-agent-btn.is-copied {
+    background: color-mix(in srgb, var(--success, var(--accent)) 14%, transparent) !important;
+    color: var(--success, var(--ink)) !important;
+    opacity: 1 !important;
+}
+.nv-mcp-copy-btn.is-copy-fail,
+.nv-mcp-action-ghost.is-copy-fail,
+.nv-mcp-action-primary.is-copy-fail,
+.nv-mcp-doc-copy.is-copy-fail,
+.nv-mcp-agent-btn.is-copy-fail {
+    background: color-mix(in srgb, var(--danger, var(--text)) 12%, transparent) !important;
+    color: var(--danger, var(--text)) !important;
+    opacity: 1 !important;
+}
+

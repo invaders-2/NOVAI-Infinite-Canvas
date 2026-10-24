@@ -38839,6 +38839,8 @@ function ensureTableApi(){
     var info = null;
     var infoPromise = null;
     var activeAgent = 'claude';
+    var installedAgents = {};
+    var installedPromise = null;
     var AGENT_LOGOS = {
         claude: '<span class="nv-brand-mark is-claude" role="img" aria-label="Claude"></span>',
         chatgpt: '<span class="nv-brand-mark is-openai" role="img" aria-label="ChatGPT"></span>',
@@ -38877,12 +38879,12 @@ function ensureTableApi(){
             '<button type="button" class="nv-mcp-panel-close" aria-label="关闭" title="关闭">×</button>' +
         '</div>' +
         '<div class="nv-mcp-agent-buttons">' +
-            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="claude"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.claude + '</span>添加到 Claude</button>' +
-            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="codex"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.codex + '</span>添加到 Codex</button>' +
-            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="workbuddy"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.workbuddy + '</span>添加到 WorkBuddy</button>' +
+            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="claude"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.claude + '</span><span class="nv-mcp-agent-label">添加到 Claude</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
+            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="codex"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.codex + '</span><span class="nv-mcp-agent-label">添加到 Codex</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
+            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="workbuddy"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.workbuddy + '</span><span class="nv-mcp-agent-label">添加到 WorkBuddy</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
         '</div>' +
         '<div class="nv-mcp-panel-foot">' +
-            '<div class="nv-mcp-foot-row"><span>在其他 Agent 中使用 NOVAI MCP</span><button type="button" class="nv-mcp-link" data-panel-docs>MCP 文档</button></div>' +
+            '<div class="nv-mcp-foot-row"><span>在其他 Agent 中使用 NOVAI MCP</span><a class="nv-mcp-link" href="/static/help/mcp.html" target="_blank" rel="noopener">MCP 文档</a></div>' +
             '<div class="nv-mcp-server-row"><code class="nv-mcp-server-summary"></code><button type="button" class="nv-mcp-copy-btn" data-panel-copy>复制</button></div>' +
         '</div>';
     document.body.appendChild(panel);
@@ -38896,10 +38898,10 @@ function ensureTableApi(){
         '<div class="nv-mcp-modal" role="dialog" aria-modal="true" aria-labelledby="nvMcpModalTitle">' +
             '<aside class="nv-mcp-modal-list">' +
                 '<h3>在 Agent 中打开</h3>' +
-                '<button type="button" data-modal-agent="claude"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.claude + '</span>Claude</button>' +
-                '<button type="button" data-modal-agent="chatgpt"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.chatgpt + '</span>ChatGPT</button>' +
-                '<button type="button" data-modal-agent="workbuddy"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.workbuddy + '</span>WorkBuddy</button>' +
-                '<button type="button" data-modal-agent="more"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.more + '</span>更多 Agent</button>' +
+                '<button type="button" data-modal-agent="claude"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.claude + '</span><span class="nv-mcp-list-label">Claude</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
+                '<button type="button" data-modal-agent="chatgpt"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.chatgpt + '</span><span class="nv-mcp-list-label">ChatGPT</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
+                '<button type="button" data-modal-agent="workbuddy"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.workbuddy + '</span><span class="nv-mcp-list-label">WorkBuddy</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
+                '<button type="button" data-modal-agent="more"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.more + '</span><span class="nv-mcp-list-label">更多 Agent</span></button>' +
             '</aside>' +
             '<section class="nv-mcp-modal-main">' +
                 '<button type="button" class="nv-mcp-modal-close" aria-label="关闭" title="关闭" data-modal-close>×</button>' +
@@ -38958,16 +38960,37 @@ function ensureTableApi(){
             sel.addRange(range);
         } catch(e) {}
     }
-    function copyText(text, successText, fallbackEl){
-        if(!text){ toastCopy('没有可复制的内容', 'alert'); return; }
-        var fallback = function(){
-            if(copyFallback(text)) { toastCopy(successText, 'check'); return; }
+    function flashButton(btn, ok){
+        if(!btn || !btn.classList) return;
+        if(btn.__copyFlashTimer) clearTimeout(btn.__copyFlashTimer);
+        if(!btn.__copyFlashHtml) btn.__copyFlashHtml = btn.innerHTML;
+        btn.classList.remove('is-copied', 'is-copy-fail');
+        btn.classList.add(ok ? 'is-copied' : 'is-copy-fail');
+        btn.innerHTML = ok ? '✓ 已复制' : '复制失败';
+        var delay = ok ? 1600 : 900;
+        btn.__copyFlashTimer = setTimeout(function(){
+            if(btn.__copyFlashHtml != null) btn.innerHTML = btn.__copyFlashHtml;
+            btn.classList.remove('is-copied', 'is-copy-fail');
+            btn.__copyFlashHtml = null;
+            btn.__copyFlashTimer = null;
+        }, delay);
+    }
+    function writeClipboard(text){
+        return new Promise(function(resolve){
+            if(navigator.clipboard && navigator.clipboard.writeText){
+                navigator.clipboard.writeText(text).then(function(){ resolve(true); }, function(){ resolve(copyFallback(text)); });
+            } else resolve(copyFallback(text));
+        });
+    }
+    function copyText(text, successText, fallbackEl, button, quiet){
+        if(!text){ toastCopy('没有可复制的内容', 'alert'); flashButton(button, false); return Promise.resolve(false); }
+        return writeClipboard(text).then(function(ok){
+            flashButton(button, ok);
+            if(ok){ if(!quiet) toastCopy(successText, 'check'); return true; }
             if(fallbackEl){ selectText(fallbackEl); toastCopy('已选中文本，按 ⌘C 复制', 'check'); }
             else toastCopy('复制失败，请手动选择', 'alert');
-        };
-        if(navigator.clipboard && navigator.clipboard.writeText){
-            navigator.clipboard.writeText(text).then(function(){ toastCopy(successText, 'check'); }, fallback);
-        } else fallback();
+            return false;
+        });
     }
     function stdioJson(){ return JSON.stringify((info && info.mcp_servers_json) || {}, null, 2); }
     function serverSummary(){
@@ -38994,9 +39017,79 @@ function ensureTableApi(){
             .then(function(data){ infoPromise = null; return data; });
         return infoPromise;
     }
+    function agentName(id){
+        if(String(id || '').toLowerCase() === 'codex') return 'Codex';
+        var data = agents[id];
+        return data ? data.name : id;
+    }
+    function loadInstalledAgents(){
+        if(installedPromise) return installedPromise;
+        installedPromise = fetch('/api/mcp/installed-agents', { headers: { Accept: 'application/json' } })
+            .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+            .then(function(data){
+                var list = (data && (data.agents || data.installed_agents || data.installed || data.items)) || [];
+                var next = {};
+                if(Array.isArray(list)){
+                    list.forEach(function(item){
+                        if(typeof item === 'string'){ next[item] = true; return; }
+                        if(item && typeof item === 'object'){
+                            var id = String(item.id || item.name || '').toLowerCase();
+                            if(id && item.installed !== false) next[id] = true;
+                        }
+                    });
+                }
+                installedAgents = next;
+                return installedAgents;
+            })
+            .catch(function(){ installedAgents = {}; return installedAgents; })
+            .then(function(list){ installedPromise = null; return list; });
+        return installedPromise;
+    }
+    function isInstalled(id){ return !!installedAgents[String(id || '').toLowerCase()]; }
+    function renderInstalledUi(){
+        Array.prototype.forEach.call(panel.querySelectorAll('[data-panel-agent]'), function(btn){
+            var id = btn.getAttribute('data-panel-agent');
+            var label = btn.querySelector('.nv-mcp-agent-label');
+            var badge = btn.querySelector('.nv-mcp-installed-badge');
+            var installed = isInstalled(id);
+            if(label) label.textContent = (installed ? '打开 ' : '添加到 ') + agentName(id);
+            if(badge) badge.hidden = !installed;
+            btn.classList.toggle('is-installed', installed);
+        });
+        Array.prototype.forEach.call(modal.querySelectorAll('[data-modal-agent]'), function(btn){
+            var id = btn.getAttribute('data-modal-agent');
+            var badge = btn.querySelector('.nv-mcp-installed-badge');
+            if(badge) badge.hidden = !isInstalled(id);
+            btn.classList.toggle('is-installed', isInstalled(id));
+        });
+    }
+    function openInstalledAgent(id, content, button, fallbackEl, copySuccess){
+        var label = agentName(id);
+        return copyText(content, copySuccess || '已复制', fallbackEl, button, true).then(function(){
+            return fetch('/api/mcp/open-agent', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ id: id })
+            }).then(function(res){
+                return res.json().catch(function(){ return {}; }).then(function(data){
+                    if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+                    if(data.action === 'opened'){
+                        var text = id === 'workbuddy' ? '已复制配置并打开 WorkBuddy，粘到对话框后发送' : '已复制提示词并打开 ' + label + '，粘到对话框后发送';
+                        toastCopy(text, 'check');
+                    } else if(data.action === 'command'){
+                        toastCopy('已复制命令，在终端运行后粘贴提示词', 'check');
+                    } else {
+                        toastCopy('已复制配置，请手动打开 ' + label, 'check');
+                    }
+                });
+            });
+        }).catch(function(e){ toastCopy((e && e.message) || '打开失败', 'alert'); });
+    }
     function openPanel(){
-        loadInfo().then(function(data){
+        Promise.all([loadInfo(), loadInstalledAgents()]).then(function(results){
+            var data = results[0];
             if(!data){ toastCopy('MCP 配置暂不可用', 'alert'); return; }
+            renderInstalledUi();
             panel.hidden = false;
             panel.classList.add('open');
         });
@@ -39031,34 +39124,48 @@ function ensureTableApi(){
         prompt.textContent = agent === 'claude' ? promptText() : '';
         if(agent === 'claude'){
             actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-prompt-copy>没有打开？复制提示词</button>' +
-                '<button type="button" class="nv-mcp-action-primary" data-claude-open>在 Claude 打开</button>';
+                '<button type="button" class="nv-mcp-action-primary" data-claude-open>' + (isInstalled('claude') ? '打开 Claude' : '在 Claude 打开') + '</button>';
         } else if(agent === 'chatgpt'){
             var hasUrl = !!(info && String(info.http_url || '').trim());
-            actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-http-copy' + (hasUrl ? '' : ' disabled') + ' title="' + (hasUrl ? '复制 HTTP 地址' : '未配置 HTTP 服务') + '">复制 HTTP 地址</button>';
+            if(isInstalled('chatgpt') && hasUrl){
+                actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-chatgpt-open>打开 ChatGPT</button>';
+            } else {
+                actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-http-copy' + (hasUrl ? '' : ' disabled') + ' title="' + (hasUrl ? '复制 HTTP 地址' : '未配置 HTTP 服务') + '">复制 HTTP 地址</button>';
+            }
+        } else if(agent === 'workbuddy' && isInstalled('workbuddy')){
+            actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-generic-copy>复制配置</button>' +
+                '<button type="button" class="nv-mcp-action-primary" data-workbuddy-open>打开 WorkBuddy</button>';
         } else {
             actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-generic-copy>复制配置</button>' +
-                '<button type="button" class="nv-mcp-action-primary" data-generic-docs>MCP 文档</button>';
+                '<a class="nv-mcp-action-primary" href="/static/help/mcp.html" target="_blank" rel="noopener">MCP 文档</a>';
         }
+        renderInstalledUi();
     }
     function openModal(agent){
-        if(!info) return;
-        renderAgent(agent || 'claude');
-        modal.hidden = false;
+        Promise.all([loadInfo(), loadInstalledAgents()]).then(function(results){
+            if(!results[0]) return;
+            renderAgent(agent || 'claude');
+            modal.hidden = false;
+        });
     }
     function closeModal(){ modal.hidden = true; }
 
     launch.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); togglePanel(); });
     panel.addEventListener('click', function(e){
         e.stopPropagation();
-        var target = e.target && e.target.closest ? e.target.closest('[data-panel-agent],[data-panel-docs],[data-panel-copy]') : null;
+        var target = e.target && e.target.closest ? e.target.closest('[data-panel-agent],[data-panel-copy]') : null;
         if(!target) return;
         e.preventDefault();
         if(target.hasAttribute('data-panel-agent')){
             var agent = target.getAttribute('data-panel-agent');
-            if(agent === 'codex'){ copyText(info && info.codex_command, '命令已复制', null); return; }
+            if(isInstalled(agent)){
+                if(agent === 'claude') { openInstalledAgent('claude', promptText(), target, document.getElementById('nvMcpPrompt'), '已复制提示词'); return; }
+                if(agent === 'codex') { openInstalledAgent('codex', info && info.codex_command, target, null, '已复制命令'); return; }
+                if(agent === 'workbuddy') { openInstalledAgent('workbuddy', stdioJson(), target, panel.querySelector('.nv-mcp-server-summary'), '已复制配置'); return; }
+            }
+            if(agent === 'codex'){ copyText(info && info.codex_command, '已复制命令', null, target); return; }
             openModal(agent);
-        } else if(target.hasAttribute('data-panel-docs')) docsOpen();
-        else if(target.hasAttribute('data-panel-copy')) copyText(stdioJson(), '已复制 MCP 配置', panel.querySelector('.nv-mcp-server-summary'));
+        } else if(target.hasAttribute('data-panel-copy')) copyText(stdioJson(), '已复制 MCP 配置', panel.querySelector('.nv-mcp-server-summary'), target);
     });
     panel.querySelector('.nv-mcp-panel-close').addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); closePanel(); });
     modal.addEventListener('click', function(e){
@@ -39068,25 +39175,32 @@ function ensureTableApi(){
         var agentEl = e.target.closest && e.target.closest('[data-modal-agent]');
         if(agentEl){ e.preventDefault(); renderAgent(agentEl.getAttribute('data-modal-agent')); return; }
         if(e.target.closest && e.target.closest('[data-prompt-copy]')){
-            e.preventDefault(); copyText(promptText(), '已复制提示词', document.getElementById('nvMcpPrompt')); return;
+            e.preventDefault(); copyText(promptText(), '已复制提示词', document.getElementById('nvMcpPrompt'), e.target.closest('[data-prompt-copy]')); return;
         }
         if(e.target.closest && e.target.closest('[data-claude-open]')){
             e.preventDefault();
-            copyText(promptText(), '已复制提示词', document.getElementById('nvMcpPrompt'));
+            var claudeBtn = e.target.closest('[data-claude-open]');
+            if(isInstalled('claude')){ openInstalledAgent('claude', promptText(), claudeBtn, document.getElementById('nvMcpPrompt'), '已复制提示词'); return; }
+            copyText(promptText(), '已复制提示词', document.getElementById('nvMcpPrompt'), claudeBtn);
             try { var link = document.createElement('a'); link.href = 'claude://'; link.rel = 'noopener'; link.style.display = 'none'; document.body.appendChild(link); link.click(); link.remove(); } catch(err) {}
             return;
         }
+        if(e.target.closest && e.target.closest('[data-chatgpt-open]')){
+            e.preventDefault(); openInstalledAgent('chatgpt', info && info.http_url, e.target.closest('[data-chatgpt-open]'), null, '已复制 HTTP 地址'); return;
+        }
         if(e.target.closest && e.target.closest('[data-http-copy]')){
-            e.preventDefault(); copyText(info && info.http_url, 'HTTP 地址已复制', document.getElementById('nvMcpDocUrl')); return;
+            e.preventDefault(); copyText(info && info.http_url, '已复制 HTTP 地址', document.getElementById('nvMcpDocUrl'), e.target.closest('[data-http-copy]')); return;
         }
         if(e.target.closest && e.target.closest('[data-generic-copy]')){
-            e.preventDefault(); copyText(stdioJson(), '已复制 MCP 配置', document.getElementById('nvMcpPrompt')); return;
+            e.preventDefault(); copyText(stdioJson(), '已复制 MCP 配置', document.getElementById('nvMcpPrompt'), e.target.closest('[data-generic-copy]')); return;
         }
-        if(e.target.closest && e.target.closest('[data-generic-docs]')){ e.preventDefault(); docsOpen(); }
+        if(e.target.closest && e.target.closest('[data-workbuddy-open]')){
+            e.preventDefault(); openInstalledAgent('workbuddy', stdioJson(), e.target.closest('[data-workbuddy-open]'), null, '已复制配置'); return;
+        }
     });
     docs.addEventListener('click', function(e){
         if(e.target.closest && e.target.closest('[data-doc-close]')){ e.preventDefault(); docsClose(); return; }
-        if(e.target.closest && e.target.closest('[data-doc-copy]')){ e.preventDefault(); copyText(stdioJson(), 'MCP 配置已复制', document.getElementById('nvMcpDocJson')); }
+        if(e.target.closest && e.target.closest('[data-doc-copy]')){ e.preventDefault(); copyText(stdioJson(), '已复制 MCP 配置', document.getElementById('nvMcpDocJson'), e.target.closest('[data-doc-copy]')); }
         e.stopPropagation();
     });
     document.addEventListener('click', function(e){

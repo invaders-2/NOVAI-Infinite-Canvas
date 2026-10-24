@@ -22,11 +22,13 @@ Python 3.9 约束：注解用 Optional/Dict/List，禁止 X | Y 联合写法。
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from server.mcp import config, registry
 
@@ -130,6 +132,87 @@ def mcp_connect_info() -> Dict[str, Any]:
         "server_py": server_py,
         "base_url": base_url,
     }
+
+
+# 本机可跳转的 Agent 清单（白名单；id → 展示信息）。检测只读：看 /Applications 下的 .app 与 PATH 里的 CLI。
+_INSTALLED_APPS_DIR = "/Applications"
+_DESKTOP_AGENTS = (
+    {"id": "claude", "name": "Claude", "app": "Claude"},
+    {"id": "chatgpt", "name": "ChatGPT", "app": "ChatGPT"},
+    {"id": "workbuddy", "name": "WorkBuddy", "app": "WorkBuddy"},
+)
+_CLI_AGENTS = (
+    {"id": "codex", "name": "Codex CLI", "command": "codex"},
+    {"id": "claude-cli", "name": "Claude CLI", "command": "claude"},
+)
+_OPEN_AGENT_IDS = tuple(item["id"] for item in _DESKTOP_AGENTS) + tuple(item["id"] for item in _CLI_AGENTS)
+_OPEN_AGENT_TIMEOUT = 10
+
+
+def _desktop_agent_path(app: str) -> str:
+    path = os.path.join(_INSTALLED_APPS_DIR, "%s.app" % app)
+    return path if os.path.isdir(path) else ""
+
+
+def _cli_agent_command(command: str) -> str:
+    found = shutil.which(command)
+    return found or ""
+
+
+def _installed_agents() -> List[Dict[str, Any]]:
+    agents: List[Dict[str, Any]] = []
+    for item in _DESKTOP_AGENTS:
+        path = _desktop_agent_path(item["app"])
+        agents.append({"id": item["id"], "name": item["name"], "kind": "desktop",
+                       "installed": bool(path), "path": path})
+    for item in _CLI_AGENTS:
+        command = _cli_agent_command(item["command"])
+        agents.append({"id": item["id"], "name": item["name"], "kind": "cli",
+                       "installed": bool(command), "command": command})
+    return agents
+
+
+class OpenAgentRequest(BaseModel):
+    id: str = Field("", max_length=64)
+
+
+@router.get("/installed-agents")
+def mcp_installed_agents() -> Dict[str, Any]:
+    """本机检测到的 Agent（只读：不启动任何进程）。"""
+    return {"agents": _installed_agents()}
+
+
+@router.post("/open-agent")
+def mcp_open_agent(payload: OpenAgentRequest) -> Dict[str, Any]:
+    """跳到本机已安装的 Agent：桌面端用 open -a 打开；CLI 只返回命令，不启动进程。
+
+    安全：先做白名单校验（不拼接任何用户字符串），桌面端用 argv 调 subprocess，绝不 shell=True。
+    """
+    agent_id = str(payload.id or "").strip()
+    if agent_id not in _OPEN_AGENT_IDS:
+        raise HTTPException(status_code=400, detail="不支持的 Agent：%s" % (agent_id or "<空>"))
+    for item in _DESKTOP_AGENTS:
+        if item["id"] != agent_id:
+            continue
+        if not _desktop_agent_path(item["app"]):
+            raise HTTPException(status_code=400, detail="未检测到本机安装：%s" % item["name"])
+        argv = ["open", "-a", item["app"]]
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=_OPEN_AGENT_TIMEOUT)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="打开 %s 失败：%s: %s" % (
+                item["name"], type(exc).__name__, exc))
+        if result.returncode != 0:
+            stderr = str(result.stderr or "").strip()[:200] or "open 返回非 0"
+            raise HTTPException(status_code=500, detail="打开 %s 失败：%s" % (item["name"], stderr))
+        return {"ok": True, "action": "opened", "app": item["name"]}
+    for item in _CLI_AGENTS:
+        if item["id"] != agent_id:
+            continue
+        found = _cli_agent_command(item["command"])
+        command = os.path.basename(found) if found else item["command"]
+        return {"ok": True, "action": "command", "command": command}
+    raise HTTPException(status_code=400, detail="不支持的 Agent：%s" % agent_id)
 
 
 @router.post("/reload")

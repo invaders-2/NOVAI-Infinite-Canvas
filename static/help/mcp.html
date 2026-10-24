@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOVAI MCP 文档</title>
+<style>
+:root {
+    --bg: #fafafa; --solid: #ffffff; --fill-1: rgba(0,0,0,.035); --fill-2: rgba(0,0,0,.065);
+    --ink: #0a0a0a; --ink-2: #525252; --ink-3: #737373; --ink-4: #a3a3a3;
+    --accent: #0a0a0a; --on-accent: #ffffff; --danger: #b42318; --success: #248a3d;
+    --radius-xl: 16px; --radius-lg: 12px; --radius-md: 8px;
+    --shadow-float: 0 8px 24px -12px rgba(0,0,0,.12);
+    --font-sans: "Geist", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", -apple-system, system-ui, sans-serif;
+    --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+html[data-theme="dark"] {
+    --bg: #0a0a0a; --solid: #171717; --fill-1: rgba(255,255,255,.055); --fill-2: rgba(255,255,255,.09);
+    --ink: #fafafa; --ink-2: #d4d4d4; --ink-3: #a3a3a3; --ink-4: #737373;
+    --accent: #fafafa; --on-accent: #0a0a0a; --danger: #ff6b5e; --success: #30d158;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-sans); }
+body { padding: 32px 20px 64px; }
+.page { width: min(980px, 100%); margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+.hero { display: flex; align-items: flex-start; gap: 14px; padding: 4px 2px 6px; }
+.hero img { width: 34px; height: 34px; object-fit: contain; }
+html[data-theme="dark"] .hero img { filter: invert(1); }
+.hero h1 { margin: 0; font: 600 28px/34px var(--font-sans); letter-spacing: -.02em; }
+.hero p { margin: 7px 0 0; color: var(--ink-2); font: 400 13px/21px var(--font-sans); }
+.theme-btn { margin-left: auto; height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--fill-1); color: var(--ink-2); font: 500 11.5px/1 var(--font-sans); cursor: pointer; }
+.theme-btn:hover { background: var(--fill-2); color: var(--ink); }
+.card { padding: 22px; border: 0; border-radius: var(--radius-xl); background: var(--solid); box-shadow: var(--shadow-float); display: flex; flex-direction: column; gap: 12px; }
+.card h2 { margin: 0; font: 600 16px/22px var(--font-sans); }
+.card p { margin: 0; color: var(--ink-2); font: 400 12.5px/21px var(--font-sans); }
+.muted { color: var(--ink-3) !important; }
+.mono { font-family: var(--font-mono); }
+.code-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.copy-btn { height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--fill-1); color: var(--ink-2); font: 500 11px/1 var(--font-sans); cursor: pointer; }
+.copy-btn:hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
+.copy-btn:disabled { opacity: .42; cursor: default; }
+.copy-btn.is-copied { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+pre { margin: 0; padding: 13px 14px; border: 0; border-radius: var(--radius-md); background: var(--fill-1); color: var(--ink); font: 400 11.5px/19px var(--font-mono); white-space: pre-wrap; word-break: break-word; overflow: auto; max-height: 300px; }
+.inline-code { padding: 1px 5px; border-radius: 4px; background: var(--fill-1); font: 400 11.5px/18px var(--font-mono); }
+.table { display: grid; grid-template-columns: 1.2fr 1.7fr 1.3fr .8fr; gap: 2px; }
+.table > div { padding: 8px 9px; border: 0; background: transparent; color: var(--ink-2); font: 400 11.5px/18px var(--font-sans); }
+.table .th { background: var(--fill-1); color: var(--ink); font-weight: 600; }
+.table .th:first-child { border-radius: 8px 0 0 8px; }
+.table .th:last-child { border-radius: 0 8px 8px 0; }
+.table .row { background: var(--fill-1); }
+.table .row:nth-child(4n+1) { background: transparent; }
+.table .tool { color: var(--ink); font-family: var(--font-mono); font-size: 11px; }
+.list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); font: 400 12.5px/20px var(--font-sans); }
+.notice { padding: 12px 14px; border: 0; border-radius: 10px; background: color-mix(in srgb, var(--danger) 8%, transparent); color: var(--danger); font: 400 12px/19px var(--font-sans); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
+.hint { color: var(--ink-3); font: 400 11px/17px var(--font-sans); }
+@media (max-width: 760px) { body { padding: 22px 12px 44px; } .grid2 { grid-template-columns: 1fr; } .table { grid-template-columns: 1fr; } .table .th { display: none; } .table > div { border-radius: 8px !important; } .hero h1 { font-size: 22px; } }
+</style>
+</head>
+<body>
+<main class="page">
+    <header class="hero">
+        <img src="/static/images/logo.svg" alt="NOVAI">
+        <div>
+            <h1>NOVAI MCP 文档</h1>
+            <p>让 Claude、Codex、WorkBuddy 等外部 Agent 通过 MCP 调用 NOVAI 的画布工具。</p>
+        </div>
+        <button type="button" class="theme-btn" id="themeBtn">切换主题</button>
+    </header>
+
+    <section class="card">
+        <h2>这是什么</h2>
+        <p>NOVAI 提供一个 MCP Server（入口 <span class="inline-code">novai_mcp_server.py</span>），外部 Agent 通过 stdio 或 Streamable HTTP 连接它，就能列出画布、新建/更新/删除节点、触发生图。</p>
+        <p class="muted">方向是「外部 Agent → NOVAI」。反向的「NOVAI 调用外部 MCP 工具」在设置页的 MCP 区块配置，两者互不影响。</p>
+    </section>
+
+    <section class="card">
+        <div class="code-head"><h2>stdio 配置（推荐）</h2><button type="button" class="copy-btn" id="copyConfig">复制配置</button></div>
+        <p>把下面的配置粘到客户端的 MCP 配置文件中，然后重启客户端。命令来自当前运行中的 NOVAI，端口与路径自动生成，不需要手填。</p>
+        <pre id="stdioConfig">正在读取本机配置…</pre>
+        <p class="hint" id="configError" hidden></p>
+    </section>
+
+    <section class="card">
+        <h2>HTTP 方式</h2>
+        <p>也可以独立启动 Streamable HTTP 服务；所有 JSON-RPC 都 <span class="inline-code">POST /mcp</span>，<span class="inline-code">GET /mcp</span> 返回 405（不支持服务端推送流）。</p>
+        <div class="code-head"><span class="mono hint">HTTP URL</span><button type="button" class="copy-btn" id="copyHttp">复制地址</button></div>
+        <pre id="httpUrl">正在读取…</pre>
+    </section>
+
+    <section class="card">
+        <h2>7 个工具</h2>
+        <div class="table">
+            <div class="th">工具</div><div class="th">作用</div><div class="th">关键参数</div><div class="th">数据</div>
+            <div class="row tool">novai_canvas_list</div><div class="row">列出画布（id / 标题 / 更新时间）</div><div class="row">limit? (1–200)</div><div class="row">只读</div>
+            <div class="row tool">novai_canvas_get</div><div class="row">画布结构摘要（节点、连线）</div><div class="row">canvas_id</div><div class="row">只读</div>
+            <div class="row tool">novai_canvas_create</div><div class="row">新建空白画布</div><div class="row">title?</div><div class="row">写入</div>
+            <div class="row tool">novai_node_create</div><div class="row">新建节点</div><div class="row">canvas_id, type?, title?, text?</div><div class="row">写入</div>
+            <div class="row tool">novai_node_update</div><div class="row">更新节点标题 / 文本 / 参数</div><div class="row">canvas_id, node_id</div><div class="row">写入</div>
+            <div class="row tool">novai_node_delete</div><div class="row">删除节点（不可撤销）</div><div class="row">canvas_id, node_id</div><div class="row">写入</div>
+            <div class="row tool">novai_image_generate</div><div class="row">触发一次图片生成（异步）</div><div class="row">canvas_id, prompt</div><div class="row">写入 + 消耗额度</div>
+        </div>
+        <p class="hint">写工具没有二次确认；是否执行由 MCP 客户端自己的确认机制负责。</p>
+    </section>
+
+    <section class="card">
+        <h2>安全提示</h2>
+        <p class="notice">该进程以你的系统用户权限在本机运行；它能做什么，取决于该用户在 NOVAI 里的权限。不要把带权限的 NOVAI 地址暴露给不可信客户端。</p>
+        <ul class="list">
+            <li><span class="inline-code">NOVAI_BASE_URL</span> 建议只指向本机 <span class="inline-code">127.0.0.1</span> 或 <span class="inline-code">localhost</span>。</li>
+            <li><span class="inline-code">NOVAI_API_TOKEN</span> 通过环境变量传入，不写进仓库文件。</li>
+            <li>HTTP 模式默认只监听 127.0.0.1；改成 0.0.0.0 前先确认网络边界。</li>
+        </ul>
+    </section>
+
+    <section class="card">
+        <h2>故障排查</h2>
+        <div class="grid2">
+            <div><h3>连不上 NOVAI</h3><p>NOVAI 没启动或端口不对。先 <span class="inline-code">curl http://127.0.0.1:&lt;端口&gt;/api/canvases</span> 确认。</p></div>
+            <div><h3>HTTP 401</h3><p>需要登录态但没给或给错 <span class="inline-code">NOVAI_API_TOKEN</span>。</p></div>
+            <div><h3>GET /mcp 405</h3><p>HTTP 传输不支持服务端推送流，改用 POST。</p></div>
+            <div><h3>-32601 / -32700</h3><p>方法名不在 initialize / tools/list / tools/call / ping 内，或请求体不是合法 JSON。</p></div>
+            <div><h3>画布 / 节点不存在</h3><p>canvas_id / node_id 错误；先 list / get 取正确 id。</p></div>
+            <div><h3>生图未配置模型</h3><p>到「设置 → API 设置」里给生图平台配置模型。</p></div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>两个方向的区别</h2>
+        <div class="grid2">
+            <div><h3>MCP Server（本页）</h3><p>外部 Agent → NOVAI。入口 <span class="inline-code">novai_mcp_server.py</span>，NOVAI 是被调用方。</p></div>
+            <div><h3>MCP Client（设置页）</h3><p>NOVAI → 外部工具。配置在 <span class="inline-code">data/mcp_servers.json</span>，需要 <span class="inline-code">NOVAI_MCP_ENABLED=1</span>，把外部工具并进画布助手。</p></div>
+        </div>
+    </section>
+    <p class="hint" id="docsPath"></p>
+</main>
+<script>
+(function(){
+    var root = document.documentElement;
+    var params = new URLSearchParams(location.search);
+    if(params.get('theme') === 'dark') root.dataset.theme = 'dark';
+    var btn = document.getElementById('themeBtn');
+    if(btn) btn.addEventListener('click', function(){ root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark'; });
+    function flash(button, ok){
+        if(!button) return;
+        var old = button.dataset.old || button.textContent;
+        button.dataset.old = old;
+        button.textContent = ok ? '✓ 已复制' : '复制失败';
+        button.classList.toggle('is-copied', ok);
+        clearTimeout(button.__t);
+        button.__t = setTimeout(function(){ button.textContent = old; button.classList.remove('is-copied'); }, ok ? 1600 : 900);
+    }
+    function fallback(text){ try { var a=document.createElement('textarea'); a.value=text; a.style.cssText='position:fixed;left:-9999px'; document.body.appendChild(a); a.select(); var ok=document.execCommand('copy'); a.remove(); return ok; } catch(e){ return false; } }
+    function copy(text, button){ if(!text) return; var done=function(ok){ flash(button, ok); if(!ok){ var pre=document.querySelector('#stdioConfig'); if(pre && window.getSelection){ var r=document.createRange(); r.selectNodeContents(pre); var s=window.getSelection(); s.removeAllRanges(); s.addRange(r); } } }; if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(function(){done(true);}, function(){done(fallback(text));}); } else done(fallback(text)); }
+    var info = null;
+    fetch('/api/mcp/connect-info', {headers:{Accept:'application/json'}}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(data){
+        info = data || {};
+        var config = JSON.stringify(info.mcp_servers_json || {}, null, 2);
+        document.getElementById('stdioConfig').textContent = config;
+        document.getElementById('httpUrl').textContent = info.http_url || '未启用 HTTP 服务';
+        document.getElementById('docsPath').textContent = info.docs_path ? '文档路径：' + info.docs_path : '';
+        var httpCopy = document.getElementById('copyHttp');
+        if(!info.http_url){ httpCopy.disabled = true; httpCopy.title = '未启用 HTTP 服务'; }
+        else httpCopy.addEventListener('click', function(){ copy(info.http_url || '', this); });
+        document.getElementById('copyConfig').addEventListener('click', function(){ copy(config, this); });
+    }).catch(function(e){
+        document.getElementById('stdioConfig').textContent = '无法读取本机 MCP 配置：' + (e && e.message || '网络错误');
+        document.getElementById('httpUrl').textContent = '无法读取本机 MCP 配置';
+        var err = document.getElementById('configError'); if(err){ err.hidden=false; err.textContent='请确认 NOVAI 已启动，再刷新本页。'; }
+    });
+})();
+</script>
+</body>
+</html>
