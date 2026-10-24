@@ -87,6 +87,16 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/agent/tools/generate_image":
             return self._send(200, {"ok": True, "tool": "generate_image",
                                     "result": {"task_id": "task_1", "node_id": "node_img"}})
+        if path == "/api/agent/tools/delete_node":
+            if str(args.get("node_id") or "") == "missing":
+                return self._send(404, {"detail": {"message": "节点 missing 不存在",
+                                                   "code": "node_not_found"}})
+            return self._send(200, {"ok": True, "tool": "delete_node",
+                                    "result": {"node_id": args.get("node_id"), "deleted": True}})
+        if path == "/api/canvases":
+            title = body.get("title") if isinstance(body, dict) else ""
+            return self._send(200, {"canvas": {"id": "c_new", "title": title or "新画布",
+                                               "kind": "classic"}})
         return self._send(404, {"detail": "unknown tool"})
 
 
@@ -111,7 +121,7 @@ class ServerToolsTests(unittest.TestCase):
 
     def test_tool_catalog_shape(self):
         names = [tool["name"] for tool in server_tools.TOOLS]
-        self.assertEqual(len(names), 5)
+        self.assertEqual(len(names), 7)
         for tool in server_tools.TOOLS:
             with self.subTest(tool=tool["name"]):
                 self.assertTrue(tool["description"])
@@ -120,10 +130,22 @@ class ServerToolsTests(unittest.TestCase):
         self.assertEqual(required["novai_canvas_get"], {"canvas_id"})
         self.assertEqual(required["novai_node_update"], {"canvas_id", "node_id"})
         self.assertEqual(required["novai_image_generate"], {"canvas_id", "prompt"})
+        self.assertEqual(required["novai_canvas_create"], set())
+        self.assertEqual(required["novai_node_delete"], {"canvas_id", "node_id"})
         # 写操作要在说明里标出副作用
         for name in ("novai_node_create", "novai_node_update", "novai_image_generate"):
             tool = next(item for item in server_tools.TOOLS if item["name"] == name)
             self.assertIn("会修改画布", tool["description"])
+        delete_tool = next(item for item in server_tools.TOOLS if item["name"] == "novai_node_delete")
+        self.assertIn("会修改画布", delete_tool["description"])
+        self.assertIn("不可撤销", delete_tool["description"])
+        create_tool = next(item for item in server_tools.TOOLS if item["name"] == "novai_canvas_create")
+        self.assertIn("新建", create_tool["description"])
+        # 现有工具补了「先确认画布 id」的使用约束
+        for name in ("novai_canvas_get", "novai_node_create", "novai_node_update",
+                     "novai_image_generate"):
+            tool = next(item for item in server_tools.TOOLS if item["name"] == name)
+            self.assertIn("确认画布 id", tool["description"])
 
     def test_canvas_list_request_and_limit(self):
         outcome = server_tools.canvas_list(self.base, "", limit=2)
@@ -243,6 +265,39 @@ class ServerToolsTests(unittest.TestCase):
         self.assertFalse(outcome["ok"])
         self.assertIn("不是 JSON", outcome["text"])
 
+    def test_canvas_create_request_and_result(self):
+        outcome = server_tools.canvas_create(self.base, "", title="演示画布")
+        self.assertTrue(outcome["ok"], outcome)
+        self.assertEqual(outcome["data"]["canvas_id"], "c_new")
+        self.assertIn("c_new", outcome["text"])
+        request = self.httpd.requests[-1]
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["path"], "/api/canvases")
+        self.assertEqual(request["body"], {"title": "演示画布"})
+
+    def test_canvas_create_default_title(self):
+        server_tools.canvas_create(self.base, "")
+        self.assertEqual(self.httpd.requests[-1]["body"], {"title": "新画布"})
+
+    def test_node_delete_request_and_result(self):
+        outcome = server_tools.node_delete(self.base, "", canvas_id="c1", node_id="n1")
+        self.assertTrue(outcome["ok"], outcome)
+        self.assertIn("不可撤销", outcome["text"])
+        request = self.httpd.requests[-1]
+        self.assertEqual(request["path"], "/api/agent/tools/delete_node")
+        self.assertEqual(request["body"]["args"], {"canvas_id": "c1", "node_id": "n1"})
+
+    def test_node_delete_missing_node_maps_error(self):
+        outcome = server_tools.node_delete(self.base, "", canvas_id="c1", node_id="missing")
+        self.assertFalse(outcome["ok"])
+        self.assertIn("HTTP 404", outcome["text"])
+        self.assertIn("不存在", outcome["text"])
+
+    def test_node_delete_requires_ids(self):
+        outcome = server_tools.node_delete(self.base, "", canvas_id="", node_id="n1")
+        self.assertFalse(outcome["ok"])
+        self.assertIn("不能为空", outcome["text"])
+
     def test_dispatch_unknown_tool(self):
         outcome = server_tools.dispatch(self.base, "", "no_such_tool", {})
         self.assertFalse(outcome["ok"])
@@ -252,6 +307,11 @@ class ServerToolsTests(unittest.TestCase):
         outcome = server_tools.dispatch(self.base, "", "novai_canvas_list", {"limit": 1})
         self.assertTrue(outcome["ok"], outcome)
         self.assertEqual(len(outcome["data"]["canvases"]), 1)
+        created = server_tools.dispatch(self.base, "", "novai_canvas_create", {"title": "x"})
+        self.assertTrue(created["ok"], created)
+        deleted = server_tools.dispatch(self.base, "", "novai_node_delete",
+                                        {"canvas_id": "c1", "node_id": "n1"})
+        self.assertTrue(deleted["ok"], deleted)
 
 
 if __name__ == "__main__":

@@ -20,7 +20,8 @@ from server.mcp.stdio import StdioMcpSession  # noqa: E402
 
 SERVER_ENTRY = str(ROOT / "novai_mcp_server.py")
 EXPECTED_TOOLS = ["novai_canvas_list", "novai_canvas_get", "novai_node_create",
-                  "novai_node_update", "novai_image_generate"]
+                  "novai_node_update", "novai_image_generate", "novai_canvas_create",
+                  "novai_node_delete"]
 
 
 class _FakeNovai(BaseHTTPRequestHandler):
@@ -75,7 +76,7 @@ class McpServerProcessTests(unittest.TestCase):
             "timeout": 10,
         })
 
-    def test_initialize_negotiates_version_and_lists_five_tools(self):
+    def test_initialize_negotiates_version_and_lists_seven_tools(self):
         with self._session() as session:
             # 客户端先提 2025-03-26，服务端只认 2024-11-05，最终以服务端返回的为准
             self.assertEqual(session.negotiated_version, "2024-11-05")

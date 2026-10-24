@@ -307,13 +307,54 @@ def image_generate(base_url: str, token: str = "", canvas_id: str = "", prompt: 
 
 
 # ---------------------------------------------------------------------------
+# 工具 6：新建画布
+# ---------------------------------------------------------------------------
+
+def canvas_create(base_url: str, token: str = "", title: str = "",
+                  timeout: float = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+    title = str(title or "").strip()[:80] or "新画布"
+    payload = {"title": title}
+    response = _http("POST", base_url, "/api/canvases", token, payload, timeout=timeout)
+    if not response.get("ok"):
+        return _result(False, _error_from(response))
+    body, snippet = _decode(response)
+    if not isinstance(body, dict):
+        return _result(False, "NOVAI 返回的不是 JSON：%s" % (snippet or "空响应"))
+    canvas = body.get("canvas") if isinstance(body.get("canvas"), dict) else body
+    canvas_id = str(canvas.get("id") or "")
+    if not canvas_id:
+        return _result(False, "NOVAI 没有返回 canvas_id：%s" % json.dumps(body, ensure_ascii=False)[:200])
+    data = {"canvas_id": canvas_id, "title": canvas.get("title") or title, "kind": canvas.get("kind")}
+    return _result(True, "已创建画布：%s（%s）" % (canvas_id, data["title"]), data)
+
+
+# ---------------------------------------------------------------------------
+# 工具 7：删除节点
+# ---------------------------------------------------------------------------
+
+def node_delete(base_url: str, token: str = "", canvas_id: str = "", node_id: str = "",
+                timeout: float = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+    canvas_id = str(canvas_id or "").strip()
+    node_id = str(node_id or "").strip()
+    if not canvas_id or not node_id:
+        return _result(False, "canvas_id 与 node_id 不能为空")
+    outcome = _agent_tool(base_url, token, "delete_node",
+                          {"canvas_id": canvas_id, "node_id": node_id}, timeout)
+    if not outcome.get("ok"):
+        return _result(False, outcome.get("error") or "删除节点失败")
+    data = outcome.get("result")
+    return _result(True, "节点已删除：%s（不可撤销）" % node_id, data)
+
+
+# ---------------------------------------------------------------------------
 # MCP 工具目录
 # ---------------------------------------------------------------------------
 
 TOOLS: List[Dict[str, Any]] = [
     {
         "name": "novai_canvas_list",
-        "description": "列出 NOVAI 里的画布（id、标题、更新时间）。只读，不修改任何数据。",
+        "description": "列出 NOVAI 里的画布（id、标题、更新时间）。只读，不修改任何数据。"
+                       "调用其它画布工具前先用它确认 canvas_id。",
         "inputSchema": {
             "type": "object",
             "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT,
@@ -323,7 +364,8 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "novai_canvas_get",
-        "description": "读取一个画布的结构摘要（节点数量、节点 id/类型/标题、连线数量）。只读，不修改画布内容。",
+        "description": "读取一个画布的结构摘要（节点数量、节点 id/类型/标题、连线数量）。只读，不修改画布内容。"
+                       "调用前请先确认画布 id（novai_canvas_list 可查）。",
         "inputSchema": {
             "type": "object",
             "properties": {"canvas_id": {"type": "string", "description": "画布 id"}},
@@ -333,7 +375,8 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "novai_node_create",
-        "description": "在指定画布上新建一个节点（默认文本节点），返回新节点 id。会修改画布：写入一个新节点。",
+        "description": "在指定画布上新建一个节点（默认文本节点），返回新节点 id。会修改画布：写入一个新节点。"
+                       "调用前请先确认画布 id。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -352,7 +395,8 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "novai_node_update",
-        "description": "更新一个节点的标题、文本或生成参数，返回更新结果。会修改画布：覆盖指定节点的字段。",
+        "description": "更新一个节点的标题、文本或生成参数，返回更新结果。会修改画布：覆盖指定节点的字段。"
+                       "调用前请先确认画布 id 与 node_id。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -368,7 +412,8 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "novai_image_generate",
-        "description": "触发一次图片生成（异步，立即返回，不等待出图）。会修改画布并消耗生成额度：新建图片节点或更新指定节点。",
+        "description": "触发一次图片生成（异步，立即返回，不等待出图）。会修改画布并消耗生成额度：新建图片节点或更新指定节点。"
+                       "调用前请先确认画布 id。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -377,6 +422,29 @@ TOOLS: List[Dict[str, Any]] = [
                 "node_id": {"type": "string", "description": "可选：把提示词写进这个已有节点再触发生成"},
             },
             "required": ["canvas_id", "prompt"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "novai_canvas_create",
+        "description": "新建一个空白画布，返回 canvas_id。会创建新画布（数据落盘）；标题不传则用默认名。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"title": {"type": "string", "description": "画布标题（可选，最长 80 字）"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "novai_node_delete",
+        "description": "删除指定画布上的一个节点。会修改画布，不可撤销（被连线引用时后端会返回需要确认的错误）。"
+                       "调用前请先确认画布 id 与 node_id。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string"},
+                "node_id": {"type": "string", "description": "要删除的节点 id"},
+            },
+            "required": ["canvas_id", "node_id"],
             "additionalProperties": False,
         },
     },
@@ -408,6 +476,11 @@ def dispatch(base_url: str, token: str, name: str, arguments: Optional[Dict[str,
             return image_generate(base_url, token, canvas_id=args.get("canvas_id", ""),
                                   prompt=args.get("prompt", ""), node_id=args.get("node_id"),
                                   timeout=timeout)
+        if name == "novai_canvas_create":
+            return canvas_create(base_url, token, title=args.get("title", ""), timeout=timeout)
+        if name == "novai_node_delete":
+            return node_delete(base_url, token, canvas_id=args.get("canvas_id", ""),
+                               node_id=args.get("node_id", ""), timeout=timeout)
     except Exception as exc:                      # 工具层绝不把异常抛给 MCP 客户端
         return _result(False, "工具执行异常：%s: %s" % (type(exc).__name__, exc))
     return _result(False, "未知工具：%s（可用：%s）" % (name, "、".join(TOOL_NAMES)))
