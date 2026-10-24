@@ -38871,11 +38871,14 @@ function ensureTableApi(){
             '<div class="nv-mcp-doc-body">' +
                 '<div class="nv-mcp-doc-label">stdio 配置 <button type="button" class="nv-mcp-doc-copy" data-mcp-doc-copy>复制</button></div>' +
                 '<pre class="nv-mcp-doc-pre" id="nvMcpDocJson"></pre>' +
+                '<div class="nv-mcp-doc-label">Codex 命令</div>' +
+                '<pre class="nv-mcp-doc-pre" id="nvMcpDocCodex"></pre>' +
                 '<div class="nv-mcp-doc-label">HTTP 地址</div>' +
                 '<div class="nv-mcp-doc-url" id="nvMcpDocUrl"></div>' +
                 '<p class="nv-mcp-doc-warn">该 MCP 服务会以你的系统权限在本机运行外部进程，请确认来源可信。</p>' +
                 '<div class="nv-mcp-doc-label">文档路径</div>' +
                 '<div class="nv-mcp-doc-path" id="nvMcpDocPath"></div>' +
+                '<p class="nv-mcp-doc-hint">若复制按钮无效，可手动选中上面文本复制</p>' +
             '</div>' +
         '</div>';
     document.body.appendChild(docs);
@@ -38894,9 +38897,29 @@ function ensureTableApi(){
             return !!ok;
         } catch(e) { return false; }
     }
-    function copyText(text, successText){
+    function selectText(el){
+        if(!el) return;
+        try {
+            var range = document.createRange();
+            range.selectNodeContents(el);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        } catch(e) {}
+    }
+    function focusDocTarget(kind){
+        var targetId = kind === 'codex' ? 'nvMcpDocCodex' : (kind === 'url' ? 'nvMcpDocUrl' : 'nvMcpDocJson');
+        var target = document.getElementById(targetId);
+        if(target) target.scrollIntoView({ block: 'nearest' });
+        setTimeout(function(){ selectText(target); }, 30);
+    }
+    function copyText(text, successText, failureFocus){
         if(!text){ toastCopy('没有可复制的内容', 'alert'); return; }
-        var fallback = function(){ if(copyFallback(text)) toastCopy(successText, 'check'); else toastCopy('复制失败，请手动选择', 'alert'); };
+        var failure = function(){
+            openDocs(failureFocus);
+            toastCopy('已打开配置，按 ⌘C 复制', 'check');
+        };
+        var fallback = function(){ if(copyFallback(text)) toastCopy(successText, 'check'); else failure(); };
         if(navigator.clipboard && navigator.clipboard.writeText){
             navigator.clipboard.writeText(text).then(function(){ toastCopy(successText, 'check'); }, fallback);
         } else fallback();
@@ -38913,13 +38936,15 @@ function ensureTableApi(){
         try { localStorage.setItem(DISMISS_KEY, '1'); } catch(e) {}
         sync();
     }
-    function openDocs(){
+    function openDocs(focusKind){
         if(!info) return;
         document.getElementById('nvMcpDocJson').textContent = stdioJson();
+        document.getElementById('nvMcpDocCodex').textContent = info.codex_command || '未提供 Codex 命令';
         document.getElementById('nvMcpDocUrl').textContent = info.http_url || '未启用 HTTP 服务';
         document.getElementById('nvMcpDocPath').textContent = info.docs_path || '未提供文档路径';
         docs.hidden = false;
         docs.classList.add('open');
+        if(focusKind) focusDocTarget(focusKind);
     }
     function closeDocs(){ docs.hidden = true; docs.classList.remove('open'); }
     card.addEventListener('mousedown', function(e){ e.stopPropagation(); });
@@ -38929,15 +38954,15 @@ function ensureTableApi(){
         e.preventDefault();
         e.stopPropagation();
         var act = action.getAttribute('data-mcp-act');
-        if(act === 'claude') copyText(stdioJson(), '已复制 Claude 配置，粘贴到 claude_desktop_config.json 后重启');
-        else if(act === 'codex') copyText(info && info.codex_command, '命令已复制');
-        else if(act === 'url') copyText(info && info.http_url, 'MCP 地址已复制');
+        if(act === 'claude') copyText(stdioJson(), '已复制 Claude 配置，粘贴到 claude_desktop_config.json 后重启', 'claude');
+        else if(act === 'codex') copyText(info && info.codex_command, '命令已复制', 'codex');
+        else if(act === 'url') copyText(info && info.http_url, 'MCP 地址已复制', 'url');
         else if(act === 'docs') openDocs();
     });
     card.querySelector('.nv-mcp-entry-close').addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); closeCard(); });
     docs.addEventListener('click', function(e){
         if(e.target.closest && e.target.closest('[data-mcp-doc-close]')){ e.preventDefault(); closeDocs(); return; }
-        if(e.target.closest && e.target.closest('[data-mcp-doc-copy]')){ e.preventDefault(); copyText(stdioJson(), 'MCP 配置已复制'); }
+        if(e.target.closest && e.target.closest('[data-mcp-doc-copy]')){ e.preventDefault(); copyText(stdioJson(), 'MCP 配置已复制', 'claude'); }
         e.stopPropagation();
     });
     document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && !docs.hidden) closeDocs(); });
