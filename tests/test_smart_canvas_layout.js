@@ -31,10 +31,11 @@ const idsOf = text => Array.from(text.matchAll(/\bid="([^"]+)"/g), match => matc
 const block = marker => (css.indexOf(marker) >= 0 ? css.slice(css.indexOf(marker)) : '');
 const refCss = block('参考站结构（A 左下');
 const darkCss = block('参考站数值校准');
-const tapCss = block('tapnow 左侧浮层');
+const tapCss = block('左侧浮层');
 
-console.log('[0] 深色默认 / 底色 / 网格');
-ok(/localStorage\.getItem\("studio_theme"\)\|\|localStorage\.getItem\("canvas_theme"\)\|\|"dark"/.test(html), '画布页默认深色');
+console.log('[0] 主题跟随 / 底色 / 网格');
+ok(/localStorage\.getItem\("studio_theme"\)\|\|localStorage\.getItem\("canvas_theme"\)\|\|"light"/.test(html), '画布页跟随主题、首次默认浅色');
+ok(!/StudioTheme\.apply\('dark'\)/.test(rail), 'canvas-rail.js 不再强制深色');
 ok(/background-color: #0f0f0f;/.test(darkCss) && /background-size: 24px 24px;/.test(darkCss), '底色 #0f0f0f + 24px 网格');
 ok(/--grid-dot: rgba\(255, 255, 255, \.06\)/.test(darkCss), '点色 rgba(255,255,255,.06)');
 ok(/html:not\(\.studio-theme-dark\) \{/.test(darkCss), '浅色主题变量保留');
@@ -138,7 +139,7 @@ console.log('[G] i18n');
     ok(new RegExp('"' + key.replace(/\./g, '\\.') + '": \\{ zh: "[^"]+", en: "[^"]+" \\}').test(i18n), 'i18n 成对：' + key);
 });
 
-console.log('[H] tapnow 结构：右上移除 / 左栏顺序 / 左侧浮层 / 右下收敛 / 空状态');
+console.log('[H] 左侧浮层结构：右上移除 / 左栏顺序 / 左侧浮层 / 右下收敛 / 空状态');
 ok(/#canvasTopRight \{ display: none !important; \}/.test(tapCss), '右上容器隐藏（节点保留）');
 ['sourceBrowserToggle', 'smartExportToggle', 'smartWorkflowToggle', 'smartShortcutToggle', 'smartLogToggle', 'assetToggle', 'canvasMoreBtn'].forEach(id => {
     ok(idsOf(html).filter(item => item === id).length === 1, '右上节点保留：' + id);

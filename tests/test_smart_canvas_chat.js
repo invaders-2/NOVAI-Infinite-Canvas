@@ -98,7 +98,8 @@ ok(!/state\.stickIds\.length\s*\n?\s*\? \{id: state\.stickIds/.test(js), 'F2：�
 console.log('[3] 「思考中」动效：ThoughtLine 风格（sparkle 呼吸 + 文案微光 + 秒表）');
 ok(js.includes('llm-chat-thinking'), '聊天记录里有 .llm-chat-thinking（verify 脚本的选择器）');
 ok(/node\.running \? \`<div class="llm-chat-thinking">\$\{thinkingHtml\(tr\('smart\.chatThinking'\), node\.id\)\}<\/div>\` : ''/.test(js), 'running 时才渲染，且把节点 id 当计时 key 传给 thinkingHtml + i18n 文案不动');
-ok(js.includes("thinkingHtml('正在规划…')"), '智能画布助手气泡仍复用 thinkingHtml（第二个参数省略 = agent）');
+/* 第 3 步起助手气泡改走 appendRunThinking（多次思考合并进同一块），thinkingHtml 保留给节点聊天 */
+ok(js.includes("appendRunThinking(parts.bubble, '正在规划…')") && /function thinkingHtml\(text, key\)/.test(js), '助手气泡改走 appendRunThinking，thinkingHtml 本身仍在');
 const thinkFn = (js.match(/function thinkingHtml\(text, key\)\{([\s\S]*?)\n\}/) || [])[1] || '';
 ok(thinkFn.length > 200, 'thinkingHtml(text, key)：第二个参数可选，老调用方式不破');
 ok(/const k = key \|\| 'agent';/.test(thinkFn), "key 缺省 = 'agent'（助手气泡）");

@@ -6,8 +6,8 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title data-i18n="smart.title">智能画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
-    <script>(function(){try{/* 画布页默认深色悬浮外观；用户显式选过浅色时沿用其选择 */var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"dark";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.136.1792561994">
+    <script>(function(){try{/* 跟随应用主题，首次默认浅色（与 canvas.html / index.html / theme.js 一致） */var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.136.1792824866">
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.136.1790560477">
     <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.136.1791729997">
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.136.1789606971">
@@ -19,6 +19,8 @@
     <script defer src="/static/vendor/js/html-to-image.js?v=1.0.136.1789615756"></script>
     <script defer src="/static/js/shared/icons.js?v=1.0.136.1792330467"></script>
     <script src="/static/js/theme.js?v=1.0.136.1792474521"></script>
+    <script defer src="/static/js/credits.js?v=1.0.136.1792815506"></script>
+    <script src="/static/js/user-menu.js?v=1.0.136.1792776481" defer></script>
     <script src="/static/js/shared/utils.js?v=1.0.136.1790560477"></script>
     <script src="/static/js/shared/size-policy.js?v=1.0.136.1792185305"></script>
     <script src="/static/js/shared/media.js?v=1.0.136.1789606971"></script>
@@ -298,6 +300,8 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
         <div id="createMenu" class="create-menu">
             <button class="menu-btn" type="button" data-create-type="image"><i data-lucide="image" class="w-4 h-4"></i><span>图片节点</span></button>
             <button class="menu-btn" type="button" data-create-type="video"><i data-lucide="video" class="w-4 h-4"></i><span>视频节点</span></button>
+            <button class="menu-btn" type="button" data-create-type="audio"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg><span>音频节点</span></button>
+            <button class="menu-btn" type="button" data-create-type="upload"><i data-lucide="upload" class="w-4 h-4"></i><span>上传…</span></button>
             <button class="menu-btn" type="button" data-create-type="group"><i data-lucide="group" class="w-4 h-4"></i><span>分组</span></button>
             <button class="menu-btn" type="button" data-create-type="prompt"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span>文本生成</span></button>
             <button class="menu-btn" type="button" data-create-type="text"><i data-lucide="file-text" class="w-4 h-4"></i><span>纯文本</span></button>
@@ -359,7 +363,6 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
             </div>
         </div>
         <div class="minimap-selection-actions">
-            <button id="smartRunSelectedBtn" class="minimap-arrange-btn selected-run-btn" type="button" title="运行选中" aria-label="运行选中"><i data-lucide="arrow-up"></i></button>
             <button id="smartPickSelectedBtn" class="minimap-arrange-btn" type="button" title="把选中节点里的图放在一起对比、标星、淘汰" aria-label="挑图"><i data-lucide="layout-grid"></i><span>挑图</span></button>
             <button id="smartConcatVideosBtn" class="minimap-arrange-btn" type="button" title="按画布上从左到右、从上到下的顺序拼成一条视频" aria-label="拼接选中视频"><i data-lucide="film"></i><span>拼接视频</span></button>
             <button id="smartArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid"></i><span>整理选中</span></button>
@@ -912,9 +915,11 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
     </div>
     <script defer src="/static/js/image-adjust-engine.js?v=1.0.136.1791729997"></script>
     <script defer src="/static/js/image-adjust-editor.js?v=1.0.136.1791729997"></script>
-    <script defer src="/static/js/canvas-rail.js?v=1.0.136.1792338362"></script>
+    <script defer src="/static/js/canvas-rail.js?v=1.0.136.1792746961"></script>
     <script defer src="/static/js/online-prompt-library.js?v=1.0.136.1792337992"></script>
     <script defer src="/static/js/source-browser.js?v=1.0.136.1792373520"></script>
-    <script defer src="/static/js/smart-canvas.js?v=1.0.136.1792573099"></script>
+    <script defer src="/static/js/shared/agent-session.js?v=1.0.136.1792816544"></script>
+    <script defer src="/static/js/smart-canvas.js?v=1.0.136.1792824854"></script>
+    <script defer src="/static/js/collab.js?v=1.0.136.1792815495"></script>
 </body>
 </html>

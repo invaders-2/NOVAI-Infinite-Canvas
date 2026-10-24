@@ -6,6 +6,9 @@
                                                              tags,deliverables,enabled,available}]}
     GET  /api/capabilities/{id}           -> {capability:{...含 input_schema}}
     GET  /api/skills                      -> {skills:[...]}（等价 kind='skill'）
+    GET  /api/skills/{id}/export          -> text/markdown（SKILL.md：frontmatter + 正文），Content-Disposition <id>.md
+    POST /api/skills/import               -> body {markdown, overwrite?} 导入 SKILL.md（也兼容旧的 JSON 定义）
+                                             -> {ok, skill, created}；name 非法 400、已存在未 overwrite 409
     GET  /api/agents                      -> {agents:[...]}（等价 kind='agent'，原字段不变）
     GET  /api/agents/{agent_id}           -> {agent:{...完整定义含 input_schema}}
     POST /api/agents/{agent_id}/run       -> multipart(form-data): file(可多个) + params(JSON 字符串)
@@ -26,11 +29,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from server.agents import catalog, platforms, registry, store
 from server.agents.context import FilesRunContext
@@ -39,6 +43,7 @@ from server.integrations import input_sources
 from server.integrations import openclaw_capability
 from server.integrations import video_sources
 from server.skills import registry as skills_registry
+from server.skills import skill_md
 from server.routes.deps import deps
 
 router = APIRouter(prefix="/api")
@@ -438,14 +443,181 @@ async def skills_list():
                        for s in catalog.list_skills()]}
 
 
+# ---------------------------------------------------------------------------
+# SKILL.md（Agent Skills 开放规范）：导出 / 导入
+# ---------------------------------------------------------------------------
+
+_SKILL_METADATA_KEYS = ("display_name", "category", "icon", "tags", "platforms", "scenarios",
+                        "usage_instruction", "deliverables", "input_schema", "enabled",
+                        "skill_type", "source_skill_code")
+
+
+def _raw_skill_json(skill_id: str) -> Dict[str, Any]:
+    """读 data/skills/<id>.json 原文：导出时把导入时附带的 license/metadata/allowed-tools 一起带走。"""
+    folder = skills_registry.skills_dir()
+    path = os.path.join(folder, "%s.json" % skill_id)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _skill_md_metadata(skill: Dict[str, Any], raw: Dict[str, Any]) -> Dict[str, Any]:
+    """导出用的 metadata：规范字段之外的技能信息都塞这里（导入时可原样还原）。"""
+    metadata: Dict[str, Any] = {}
+    if isinstance(raw.get("metadata"), dict):
+        metadata.update(raw["metadata"])
+    display = str(skill.get("name") or "").strip()
+    if display and display != str(skill.get("id") or ""):
+        metadata.setdefault("display_name", display)
+    for key in ("category", "icon", "usage_instruction", "source_skill_code", "skill_type"):
+        value = str(skill.get(key) or "").strip()
+        if value:
+            metadata.setdefault(key, value)
+    for key in ("tags", "platforms", "scenarios"):
+        value = skill.get(key) or []
+        if isinstance(value, list) and value:
+            metadata.setdefault(key, [str(item) for item in value])
+    for key in ("deliverables", "input_schema"):
+        value = skill.get(key)
+        if value:
+            metadata.setdefault(key, json.dumps(value, ensure_ascii=False))
+    metadata.setdefault("enabled", "true" if skill.get("enabled", True) else "false")
+    return metadata
+
+
+@router.get("/skills/{skill_id}/export")
+async def skills_export_md(skill_id: str):
+    """按 Agent Skills 规范导出 SKILL.md（frontmatter + 正文），文件名 <id>.md。"""
+    skill = skills_registry.get_skill(skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="技能不存在：%s" % (skill_id or "<空>"))
+    raw = _raw_skill_json(str(skill.get("id") or skill_id))
+    markdown = skill_md.serialize_skill_md({
+        "id": skill.get("id"),
+        "description": skill.get("description") or "",
+        "license": raw.get("license") or skill.get("license") or "",
+        "compatibility": raw.get("compatibility") or skill.get("compatibility") or "",
+        "metadata": _skill_md_metadata(skill, raw),
+        "allowed_tools": raw.get("allowed_tools") or skill.get("allowed_tools") or [],
+        "skill_prompt": skill.get("skill_prompt") or "",
+    })
+    filename = "%s.md" % (skill.get("id") or skill_id)
+    return Response(content=markdown, media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="%s"' % filename})
+
+
+def _skill_md_json_meta(metadata: Dict[str, Any], key: str, fallback: Any) -> Any:
+    """metadata 里以 JSON 字符串存的复杂字段（input_schema / deliverables）还原。"""
+    value = metadata.get(key)
+    if value is None or value == "":
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return fallback
+        return parsed if isinstance(parsed, type(fallback)) else fallback
+    return fallback
+
+
+def _skill_md_to_definition(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """把 parse_skill_md 的结果落成 data/skills 里的技能定义（id = name）。"""
+    metadata = parsed.get("metadata") if isinstance(parsed.get("metadata"), dict) else {}
+    name = str(parsed.get("name") or "").strip()
+
+    def meta_text(key: str, default: str = "") -> str:
+        value = metadata.get(key)
+        if value is None:
+            return default
+        text = str(value).strip()
+        return text or default
+
+    tags = metadata.get("tags") if isinstance(metadata.get("tags"), list) else []
+    platforms = metadata.get("platforms") if isinstance(metadata.get("platforms"), list) else []
+    scenarios = metadata.get("scenarios") if isinstance(metadata.get("scenarios"), list) else []
+    schema = _skill_md_json_meta(metadata, "input_schema", {"files": [], "params": []})
+    deliverables = _skill_md_json_meta(metadata, "deliverables", [])
+    if not isinstance(schema, dict):
+        schema = {"files": [], "params": []}
+    deliverables = [item for item in deliverables if isinstance(item, dict)] if isinstance(deliverables, list) else []
+    enabled_raw = metadata.get("enabled", True)
+    enabled = str(enabled_raw).strip().lower() not in ("false", "0", "no", "off", "")
+    return {
+        "id": name,
+        "name": meta_text("display_name", name),
+        "category": meta_text("category", "我的技能"),
+        "icon": meta_text("icon", ""),
+        "description": parsed.get("description") or "",
+        "tags": [str(item) for item in tags if str(item or "").strip()],
+        "platforms": [str(item) for item in platforms if str(item or "").strip()],
+        "scenarios": [str(item) for item in scenarios if str(item or "").strip()],
+        "usage_instruction": meta_text("usage_instruction", ""),
+        "source_skill_code": meta_text("source_skill_code", ""),
+        "input_schema": schema,
+        "deliverables": deliverables,
+        "skill_prompt": parsed.get("body") or "",
+        "enabled": enabled,
+        "available": True,
+        "skill_type": "mine",
+        "license": parsed.get("license") or "",
+        "compatibility": parsed.get("compatibility") or "",
+        "metadata": metadata,
+        "allowed_tools": list(parsed.get("allowed_tools") or []),
+    }
+
+
+def _write_skill_definition(skill: Dict[str, Any]) -> str:
+    folder = os.path.abspath(skills_registry.skills_dir())
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.abspath(os.path.join(folder, "%s.json" % skill["id"]))
+    if not path.startswith(folder + os.sep):        # 防路径穿越（name 已限制字符，这里再兜一层）
+        raise HTTPException(status_code=400, detail="非法的技能名")
+    tmp = "%s.tmp" % path
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(skill, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return path
+
+
 @router.post("/skills/import")
 async def skills_import(data: Dict[str, Any] = Body(...)):
-    """导入一份技能定义（JSON 对象）到 data/skills/{id}.json，导入后就是「我的技能」。"""
+    """导入技能：传 markdown（SKILL.md）按开放规范解析；否则按旧的 JSON 定义导入。"""
+    markdown = data.get("markdown") if isinstance(data, dict) else None
+    if markdown is not None:
+        return _import_skill_md(markdown, bool(data.get("overwrite")))
     try:
         skill, created = skills_registry.import_skill(data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"skill": skills_registry.public_skill(skill, kind="skill"), "created": created}
+
+
+def _import_skill_md(markdown: Any, overwrite: bool) -> Dict[str, Any]:
+    if not isinstance(markdown, str) or not markdown.strip():
+        raise HTTPException(status_code=400, detail="markdown 不能为空（要导入的 SKILL.md 文本）")
+    if not overwrite and len(markdown.encode("utf-8")) > skill_md.MAX_MARKDOWN_BYTES:
+        raise HTTPException(status_code=400, detail="markdown 超过 1MB 上限")
+    try:
+        parsed = skill_md.parse_skill_md(markdown)
+    except skill_md.SkillMdError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    name = str(parsed.get("name") or "")
+    existing = skills_registry.get_skill(name)
+    if existing and not overwrite:
+        raise HTTPException(status_code=409,
+                            detail="技能已存在：%s（需要 overwrite: true 才能覆盖）" % name)
+    skill = _skill_md_to_definition(parsed)
+    _write_skill_definition(skill)
+    saved = skills_registry.get_skill(name) or skill
+    return {"ok": True, "skill": skills_registry.public_skill(saved, kind="skill"),
+            "created": existing is None}
 
 
 # --- 目录：列表 / 详情 ---

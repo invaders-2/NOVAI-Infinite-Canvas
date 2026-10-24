@@ -10,6 +10,7 @@ import AboutPanel from './settings/AboutPanel.vue';
 import ApiSettingsPanel from './settings/ApiSettingsPanel.vue';
 import WorkflowSettingsPanel from './settings/WorkflowSettingsPanel.vue';
 import MemoryPanel from './settings/MemoryPanel.vue';
+import McpSettingsPanel from './settings/McpSettingsPanel.vue';
 import { state, t } from '../lib/store.js';
 import { versionLabel } from '../lib/update.js';
 import { onSettingsOverlay, syncFrame } from '../lib/bridge.js';
@@ -18,13 +19,42 @@ const emit = defineEmits(['quickstart']);
 const TABS = [
     { id: 'general', icon: 'monitor', i18n: 'common.general', label: '通用', desc: '管理 NOVAI 的常用偏好与入口。', descKey: 'common.generalDesc' },
     { id: 'memory', icon: 'brain', i18n: 'common.memory', label: '记忆', desc: '管理长期记忆，会由服务端自动注入到对话与生成请求里。', descKey: 'common.memoryDesc' },
+    { id: 'mcp', icon: 'server', i18n: 'common.mcp', label: 'MCP', desc: '管理本机 MCP 服务与工具。', descKey: 'mcp.subtitle' },
     { id: 'api-settings', icon: 'key', i18n: 'common.apiSettings', label: 'API 设置', desc: '管理平台地址、模型列表和 Key。', descKey: 'api.subtitle' },
     { id: 'comfyui-settings', icon: 'workflow', i18n: 'common.comfyuiSettings', label: '工作流设置', desc: '管理 ComfyUI 后端与工作流。', descKey: 'comfy.subtitle' },
     { id: 'backup', icon: 'box', i18n: 'common.backup', label: '数据备份', desc: '备份画布、素材和设置，换电脑时一键导回。', descKey: 'common.backupDesc' },
     { id: 'appearance', icon: 'palette', i18n: 'common.appearance', label: '外观', desc: '主题、语言与界面缩放。', descKey: 'common.appearanceDesc' },
     { id: 'about', icon: 'badge', i18n: 'common.about', label: '关于', desc: '版本、更新与回滚。', descKey: 'common.aboutDesc' },
 ];
-const tab = computed(() => TABS.find(x => x.id === state.settingsTab) || TABS[0]);
+/* API 设置只给管理员：auth 开启时按 /api/auth/me 的 role 判断；auth 关闭（本地单机）保持原样可见。
+   meReady 之前一律先隐藏，避免非管理员看到一眼再消失。 */
+const me = ref(null);
+const authEnabled = ref(false);
+const meReady = ref(false);
+const canApi = computed(() => {
+    if (!meReady.value) return false;
+    if (!authEnabled.value) return true;
+    return !!(me.value && me.value.role === 'admin');
+});
+const tabs = computed(() => (canApi.value ? TABS : TABS.filter(x => x.id !== 'api-settings')));
+const tab = computed(() => tabs.value.find(x => x.id === state.settingsTab) || tabs.value[0]);
+
+function enforceAllowedTab() {
+    if (!canApi.value && state.settingsTab === 'api-settings') state.settingsTab = tabs.value[0].id;
+}
+async function loadMe() {
+    try {
+        const res = await fetch('/api/auth/me', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        const data = res.ok ? await res.json() : {};
+        authEnabled.value = !!(data && data.auth_enabled === true);
+        me.value = data && data.role ? data : null;
+    } catch (e) {
+        authEnabled.value = false;
+        me.value = null;
+    }
+    meReady.value = true;
+    enforceAllowedTab();
+}
 const frameEl = ref(null);
 const frameSrc = ref('');
 const veil = ref(false);
@@ -34,13 +64,17 @@ const pill = ref({ y: 0, h: 0 });
 
 watch(() => [state.settingsOpen, state.settingsTab], ([open]) => {
     veil.value = false;
+    enforceAllowedTab();
     if (!open) return;
     frameSrc.value = tab.value.frame ? tab.value.frame + '?embed=1&t=' + Date.now() : '';
     nextTick(() => { restoreSize(); placePill(); });
 }, { immediate: true });
 function onFrameLoad() { if (frameEl.value) syncFrame(frameEl.value); }
 function close() { state.settingsOpen = false; }
-function pickTab(id) { state.settingsTab = id; }
+function pickTab(id) {
+    if (id === 'api-settings' && !canApi.value) return;
+    state.settingsTab = id;
+}
 function placePill() {
     const el = tabsEl.value && tabsEl.value.querySelector('.tab.is-on');
     if (el) pill.value = { y: el.offsetTop, h: el.offsetHeight };
@@ -76,7 +110,11 @@ function rsUp() {
     try { localStorage.setItem(SIZE_KEY, JSON.stringify({ w: panelEl.value.offsetWidth, h: panelEl.value.offsetHeight })); } catch (e) {}
 }
 function onKey(e) { if (e.key === 'Escape' && state.settingsOpen) close(); }
-onMounted(() => window.addEventListener('keydown', onKey));
+onMounted(() => {
+    window.addEventListener('keydown', onKey);
+    loadMe();
+});
+watch(canApi, () => enforceAllowedTab());
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 </script>
 
@@ -88,7 +126,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
                     <div class="aside-top"><h2 id="sm-title">{{ t('common.settings', '设置') }}</h2><span class="mono">{{ versionLabel(state.version) }}</span></div>
                     <div ref="tabsEl" class="tabs" role="tablist" aria-label="设置分类">
                         <span class="tab-pill" :style="{ transform: `translateY(${pill.y}px)`, height: pill.h + 'px' }"></span>
-                        <button v-for="x in TABS" :key="x.id" type="button" role="tab" class="tab" :class="{ 'is-on': x.id === state.settingsTab }" :aria-selected="x.id === state.settingsTab" @click="pickTab(x.id)">
+                        <button v-for="x in tabs" :key="x.id" type="button" role="tab" class="tab" :class="{ 'is-on': x.id === state.settingsTab }" :aria-selected="x.id === state.settingsTab" @click="pickTab(x.id)">
                             <NvIcon :name="x.icon" />{{ t(x.i18n, x.label) }}
                         </button>
                     </div>
@@ -106,6 +144,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
                         <Transition name="panel" mode="out-in">
                             <GeneralPanel v-if="tab.id === 'general'" />
                             <MemoryPanel v-else-if="tab.id === 'memory'" />
+                            <McpSettingsPanel v-else-if="tab.id === 'mcp'" />
                             <BackupPanel v-else-if="tab.id === 'backup'" />
                             <AppearancePanel v-else-if="tab.id === 'appearance'" />
                             <AboutPanel v-else-if="tab.id === 'about'" @quickstart="emit('quickstart')" />

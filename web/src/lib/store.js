@@ -9,6 +9,7 @@ export const PAGES = [
     { id: 'online', label: '在线生图', i18n: 'nav.online', icon: 'globe', native: true },
     { id: 'gpt-chat', label: 'GPT 对话', i18n: 'nav.gpt', icon: 'chat', native: true },
     { id: 'asset-manager', label: '素材库', i18n: 'nav.assetManager', icon: 'library', native: true },
+    { id: 'store', label: '应用市场', i18n: 'nav.store', icon: 'grid9', native: true },
     // 不在侧栏，但旧页面会 navigate 过来
     { id: 'zimage', label: 'Z-Image', icon: 'image', native: true, hidden: true },
     // 旧页面 navigate 到这两个 id 时改为打开设置弹窗对应页（bridge.navigate 里处理）

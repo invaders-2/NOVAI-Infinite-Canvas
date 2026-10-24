@@ -10,6 +10,7 @@ import OnlinePage from './pages/online/OnlinePage.vue';
 import ZImagePage from './pages/online/ZImagePage.vue';
 import ChatPage from './pages/chat/ChatPage.vue';
 import AssetsPage from './pages/assets/AssetsPage.vue';
+import StorePage from './pages/store/StorePage.vue';
 import UpdateModal from './shell/UpdateModal.vue';
 import UpdateDone from './shell/UpdateDone.vue';
 import UpdateReminder from './shell/UpdateReminder.vue';
@@ -24,7 +25,9 @@ const hideSidebar = computed(() => isCanvas.value);
 watch(isCanvas, on => { if (!on) state.sourcePanelOpen = false; });
 function openSettings(tab) { state.settingsTab = typeof tab === 'string' ? tab : 'general'; state.settingsOpen = true; }
 
-const intro = ref((() => { try { return localStorage.getItem('novai-visited') ? '' : 'welcome'; } catch (e) { return ''; } })());
+// 只有首访且落在首页才出欢迎层；深链/记住的 native 页（应用市场等）不能先被欢迎层盖住
+const intro = ref((() => { try { return localStorage.getItem('novai-visited') || state.active !== 'home' ? '' : 'welcome'; } catch (e) { return ''; } })());
+watch(() => state.active, id => { if (id !== 'home' && intro.value === 'welcome') intro.value = ''; });
 onMounted(() => {
     document.documentElement.classList.remove('studio-route-booting');
     initUpdates();
@@ -38,10 +41,11 @@ onMounted(() => {
             <Sidebar @open-settings="openSettings" @open-update="openUpdateModal" />
             <main class="stage">
                 <CanvasListPage v-show="state.active === 'canvas' && !state.canvasOpen" />
-                <OnlinePage v-if="state.visited.online" v-show="state.active === 'online'" />
-                <ZImagePage v-if="state.visited.zimage" v-show="state.active === 'zimage'" />
-                <ChatPage v-if="state.visited['gpt-chat']" v-show="state.active === 'gpt-chat'" />
-                <AssetsPage v-if="state.visited['asset-manager']" v-show="state.active === 'asset-manager'" />
+                <OnlinePage v-if="state.visited.online" v-show="state.active === 'online'" class="stage-page" />
+                <ZImagePage v-if="state.visited.zimage" v-show="state.active === 'zimage'" class="stage-page" />
+                <ChatPage v-if="state.visited['gpt-chat']" v-show="state.active === 'gpt-chat'" class="stage-page" />
+                <AssetsPage v-if="state.visited['asset-manager']" v-show="state.active === 'asset-manager'" class="stage-page" />
+                <StorePage v-if="state.visited.store" v-show="state.active === 'store'" class="stage-page" />
                 <LegacyStage />
             </main>
         </div>
@@ -62,6 +66,8 @@ onMounted(() => {
 .stage { position: relative; flex: 1; min-width: 0; margin-left: 10px; border-radius: 20px; overflow: hidden; background: transparent; transition: margin-left .3s ease-out; }
 /* 画布页：画布铺满整个窗口（去掉留白和圆角），侧栏保持 15px 内缩浮在画布上 */
 .route-canvas .body { padding: 0; }
+/* 重写过的 native 页永远压在 LegacyStage 的 iframe 层之上；非激活页由 v-show 置 none */
+.stage-page { position: relative; z-index: 1; }
 .route-canvas .stage { position: absolute; inset: 0; margin: 0; border-radius: 0; box-shadow: none; }
 .route-canvas :deep(.sidebar) { margin: 15px 0 15px 15px; height: calc(100% - 30px); }
 /* 画布编辑态：左侧导航平滑收起（约 180ms），画布铺满整宽；退出画布（回列表）自动恢复 */
