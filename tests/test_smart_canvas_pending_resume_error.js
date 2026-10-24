@@ -50,7 +50,6 @@ const guardedEntries = [
     'runGeneration().catch(',
     'runSmartCascade().catch(',
     'runSmartCascade(tail).catch(',
-    'runSelectedNodesCascade().catch(',
     'runSmartPromptChat(node).catch(',
     'runSmartLLMListMode(node).catch(',
     'runPromptLLMNode(node.id).catch(',

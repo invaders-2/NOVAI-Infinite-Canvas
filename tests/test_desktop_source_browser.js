@@ -57,7 +57,8 @@ ok(/if \(!isSourceViewAlive\(\)\) return \{ ok: true, url: '', title: '', html: 
 ok(/return \{ ok: false, error: msg \}/.test(handleFn), 'page-html 异常返回 {ok:false,error}');
 ok(/action === 'fetch-bytes'/.test(handleFn), 'fetch-bytes 动作');
 ok(/return \{ ok: false, error: 'no-view' \}/.test(handleFn), '没有 view 时 fetch-bytes 返回 no-view');
-ok(/fetch\(url, \{ credentials: 'include' \}\)/.test(handleFn), '页面上下文带登录态 fetch（credentials:include）');
+ok(/fetch\(url, \{ credentials: credentials \}\)/.test(handleFn) && /readOnce\('include'\)/.test(handleFn), '页面上下文先带登录态 fetch（credentials:include）');
+ok(/readOnce\('omit'\)/.test(handleFn), '公共 CDN（ACAO:* + ACAC:false）被 CORS 拒后去掉凭据重试');
 ok(/b\.size > maxBytes/.test(handleFn) && /error: 'too-large'/.test(handleFn), '超过 maxBytes 返回 too-large');
 ok(/25 \* 1024 \* 1024/.test(handleFn), 'maxBytes 默认 25MB');
 ok(/Math\.min\(30 \* 1024 \* 1024/.test(handleFn), '主进程侧把上限压到 30MB（超了返回 too-large）');
@@ -238,7 +239,7 @@ ok(/'\[smoke\] SMOKE_UI=' \+ smokeUi/.test(smokeSection), '打印 SMOKE_UI');
 ok(/'\[smoke\] SMOKE_UI_FRAME=' \+ smokeUiFrame/.test(smokeSection), '打印 SMOKE_UI_FRAME');
 ok(/'\[smoke\] SMOKE_WEBVIEW=' \+ smokeWebview/.test(smokeSection), '打印 SMOKE_WEBVIEW');
 ok(/'\[smoke\] SMOKE_RESULT=' \+ \(ok \? 'ok' : 'fail'\)/.test(smokeSection), '打印 SMOKE_RESULT');
-ok(/const ok = !!\(openResult && openResult\.ok && state\.open\)/.test(smokeSection), 'SMOKE_RESULT 只要求 openResult.ok && state.open');
+ok(/const ok = !!\(openResult && openResult\.ok && state\.open && smokeDropPrefetch && smokeDropPrefetch\.hit && smokeDropPrefetch\.nodeAdded\)/.test(smokeSection), 'SMOKE_RESULT 还要预取通道命中且落图加了节点');
 ok(/ready-to-show[\s\S]{0,220}isSmokeMode\(\)/.test(main), '冒烟模式主窗口不弹给用户');
 ok(/loadURL\(url\)\.then[\s\S]{0,220}runSourceBrowserSmoke\(\)/.test(main), '主窗口加载完成后自动跑冒烟');
 

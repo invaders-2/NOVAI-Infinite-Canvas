@@ -4,7 +4,7 @@
    只是换了个地方点（见 tests/artifacts/verify-scripts/verify_toolbar_overflow.py）。
    点它打开已有的图片编辑弹窗并切到 lossless 模式；弹窗底部「应用」在新模式下生成一张
    新图片节点（标题「无损改图」），并把当前节点的图带进本地内置工具
-   （static/tools/lossless-edit/index.html，CC BY-NC-SA 4.0，作者 陶醉）。
+   （static/tools/lossless-edit/index.html，本项目自研实现，见同目录 NOTICE.md）。
    跑法：node tests/test_smart_canvas_lossless_edit_entry.js */
 'use strict';
 const fs = require('fs');
@@ -156,13 +156,13 @@ ok(/\.image-lossless-tools\.active\{display:flex;\}/.test(css), 'CSS：.active �
 ok(/\.lossless-edit-frame\{[^}]*width:100%;height:100%/.test(css), 'CSS：iframe 填满面板');
 ok(/\.lossless-edit-frame\{[^}]*border:0[^}]*border-radius:var\(--radius-xl\)/.test(css), 'CSS：去掉 iframe 默认边框，用圆角容器（不画发丝线）');
 
-console.log('[9] 打包件存在（另一执行岗产出的上游件）');
+console.log('[9] 打包件存在（自研实现 + 许可文件，vendor 已删除）');
 ['static/tools/lossless-edit/index.html',
- 'static/tools/lossless-edit/vendor/ag-psd.js',
  'static/tools/lossless-edit/LICENSE.md',
  'static/tools/lossless-edit/NOTICE.md'].forEach(file => {
     ok(fs.existsSync(path.join(root, file)), '打包件存在：' + file);
 });
+ok(!fs.existsSync(path.join(root, 'static/tools/lossless-edit/vendor/ag-psd.js')), 'vendor/ag-psd.js 已删除（PSD 库内联进 index.html）');
 
 console.log('[10] 缓存戳：?v= 是「项目版本.mtime」形式');
 ['static/js/smart-canvas.js', 'static/css/smart-canvas.css'].forEach(file => {
@@ -305,32 +305,29 @@ ok(!/\.lossless-edit-frame\{[^}]*background:var\(--card\)/.test(css), 'iframe �
     ok(/\.image-adjust-tools\.iaj\{[^}]*background:transparent\s*!important/.test(adjustCss), '调色右栏 #imageAdjustTools 透明');
 }
 
-console.log('[22] 署名：界面不再自带，#credit/#ver 改由仓库 NOTICE/LICENSE 承担');
+console.log('[22] 界面无署名残留；NOTICE 记录自研实现与第三方');
 {
     const toolHtml = read('static/tools/lossless-edit/index.html');
-    ok(toolHtml.indexOf('id="credit"') < 0 && toolHtml.indexOf('id="ver"') < 0, '内置工具界面已无 #credit / #ver');
+    ok(toolHtml.indexOf('id="credit"') < 0 && toolHtml.indexOf('id="ver"') < 0, '内置工具界面无 #credit / #ver');
     const notice = read('static/tools/lossless-edit/NOTICE.md');
-    const license = read('static/tools/lossless-edit/LICENSE.md');
-    ok(/陶醉/.test(notice) && /陶醉/.test(license), '仓库 NOTICE.md / LICENSE.md 仍保留「陶醉」署名');
+    ok(/自研/.test(notice), 'NOTICE.md 写明本项目自研实现');
+    ok(/ag-psd/.test(notice) && /MIT/.test(notice), 'NOTICE.md 保留 ag-psd（MIT）第三方声明');
 }
 
-console.log('[23] 署名移除（强版）：界面无 #credit / #ver / © 陶醉 / v260923b，许可头与仓库文档保留');
+console.log('[23] 自研实现：界面无 #credit / #ver / CC BY-NC-SA 链接，NOTICE 与 LICENSE 说明归属');
 {
     const toolHtmlRaw = read('static/tools/lossless-edit/index.html');
     const uiHtml = toolHtmlRaw.replace(/<!--[\s\S]*?-->/g, '');
     ok(toolHtmlRaw.indexOf('id="credit"') < 0, 'index.html 不含 id="credit"');
     ok(toolHtmlRaw.indexOf('id="ver"') < 0, 'index.html 不含 id="ver"');
     ok(uiHtml.indexOf('id="credit"') < 0 && uiHtml.indexOf('id="ver"') < 0, '去掉注释后的界面标记里也没有 credit / ver 容器');
-    ok(uiHtml.indexOf('© 陶醉') < 0, '去掉许可头注释后的界面不出现「© 陶醉」');
-    ok(uiHtml.indexOf('v260923b') < 0, '去掉许可头注释后的界面不出现版本号 v260923b');
-    const header = (toolHtmlRaw.match(/^[\s\S]*?-->/) || [''])[0];
-    ok(/陶醉/.test(header), '顶部许可头注释仍保留作者「陶醉」');
-    ok(/https:\/\/github\.com\/[^\s"']+/.test(header), '顶部许可头注释仍保留来源仓库链接');
-    ok(/creativecommons\.org\/licenses\/by-nc-sa\/4\.0/.test(header), '顶部许可头注释仍保留 CC BY-NC-SA 4.0 许可链接');
-    const license = read('static/tools/lossless-edit/LICENSE.md');
+    ok(!/creativecommons\.org\/licenses\/by-nc-sa/i.test(toolHtmlRaw), 'index.html 不再挂 CC BY-NC-SA 许可链接（自研实现）');
     const notice = read('static/tools/lossless-edit/NOTICE.md');
-    ok(/陶醉/.test(license) && /https?:\/\//.test(license), 'LICENSE.md 仍含「陶醉」+ 许可/来源链接');
-    ok(/陶醉/.test(notice) && /github\.com\/[^\s>]+/.test(notice), 'NOTICE.md 仍含「陶醉」+ 来源仓库链接');
+    const license = read('static/tools/lossless-edit/LICENSE.md');
+    ok(/自研/.test(notice), 'NOTICE.md 写明「自研」');
+    ok(/ag-psd/.test(notice) && /MIT/.test(notice), 'NOTICE.md 保留 ag-psd（MIT）声明');
+    ok(/LICENSE/.test(notice), 'NOTICE.md 指向项目根 LICENSE');
+    ok(/项目根\s*LICENSE/.test(license), 'LICENSE.md 写明遵循项目根 LICENSE');
 }
 
 console.log('[24] 扁平宫格：losslessEditPickListHtml 只产出一个整体 .lossless-pick-grid');

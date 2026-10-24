@@ -30,6 +30,7 @@
     },
     "files": [
       "main.js",
+      "cloud-config.js",
       "preload.js",
       "source-drag-preload.js",
       "package.json"

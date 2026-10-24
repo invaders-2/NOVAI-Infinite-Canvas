@@ -379,7 +379,7 @@ class AgentRunEndpointModeTests(unittest.TestCase):
         chat = AsyncMock(return_value=json.dumps(chat_reply, ensure_ascii=False))
 
         async def run():
-            response = await main.agent_run(payload)
+            response = await main.agent_run(payload, object())   # 路由新增 request 参数（auth-off 放行）
             return [chunk async for chunk in response.body_iterator]
 
         with patch.object(main, "load_canvas", return_value=canvas()), \

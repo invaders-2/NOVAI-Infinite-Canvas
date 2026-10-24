@@ -1,0 +1,632 @@
+/* NOVAI 公开分享页（/c/{token}）：只读画布渲染 + 密码/过期/无效状态。
+   默认暗色，浅色跟随系统；颜色只走本页令牌，不复用画布的编辑态样式。 */
+
+:root {
+    color-scheme: dark;
+    --share-bg: #0b0b0c;
+    --share-grid: rgba(255, 255, 255, 0.055);
+    --share-surface: #131315;
+    --share-surface-2: #1b1b1e;
+    --share-elevated: #1c1c1f;
+    --share-text: #f5f5f7;
+    --share-text-2: #a1a1a6;
+    --share-text-3: #7c7c82;
+    --share-border: rgba(255, 255, 255, 0.08);
+    --share-border-2: rgba(255, 255, 255, 0.14);
+    --share-line: rgba(255, 255, 255, 0.14);
+    --share-accent: #fafafa;
+    --share-accent-text: #0b0b0c;
+    --share-danger: #ff6961;
+    --share-info: #409cff;
+    --share-scrim: rgba(0, 0, 0, 0.55);
+    --share-shadow: 0 10px 34px rgba(0, 0, 0, 0.42);
+    --share-font: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+    :root {
+        color-scheme: light;
+        --share-bg: #f3f3f4;
+        --share-grid: rgba(0, 0, 0, 0.055);
+        --share-surface: #ffffff;
+        --share-surface-2: #f4f4f5;
+        --share-elevated: #ffffff;
+        --share-text: #0a0a0a;
+        --share-text-2: #66666c;
+        --share-text-3: #8a8a90;
+        --share-border: rgba(0, 0, 0, 0.07);
+        --share-border-2: rgba(0, 0, 0, 0.13);
+        --share-line: rgba(0, 0, 0, 0.13);
+        --share-accent: #171717;
+        --share-accent-text: #fafafa;
+        --share-danger: #d70015;
+        --share-info: #0040dd;
+        --share-scrim: rgba(0, 0, 0, 0.28);
+        --share-shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+    }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    background-color: var(--share-bg);
+    background-image: radial-gradient(var(--share-grid) 1px, transparent 1px);
+    background-size: 22px 22px;
+    color: var(--share-text);
+    font-family: var(--share-font);
+    font-size: 13px;
+    line-height: 1.5;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+button, input { font-family: inherit; }
+
+:focus-visible {
+    outline: 2px solid var(--share-info);
+    outline-offset: 2px;
+}
+
+.share-app {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── 顶部 ── */
+.share-top {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 20px;
+    background: linear-gradient(to bottom, color-mix(in srgb, var(--share-bg) 88%, transparent), transparent);
+}
+
+.share-brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+}
+
+.share-brand-mark {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: var(--share-accent);
+    color: var(--share-accent-text);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.share-brand-name {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--share-text-2);
+}
+
+.share-brand-divider {
+    width: 1px;
+    height: 16px;
+    flex: none;
+    background: var(--share-border-2);
+}
+
+.share-canvas-title {
+    margin: 0;
+    min-width: 0;
+    max-width: 46vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--share-text);
+}
+
+.share-top-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+}
+
+.share-clone-btn {
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid var(--share-accent);
+    border-radius: 9px;
+    background: var(--share-accent);
+    color: var(--share-accent-text);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.share-clone-btn:hover { opacity: 0.88; }
+.share-clone-btn:active { transform: scale(0.98); }
+.share-clone-btn:disabled { opacity: 0.6; cursor: progress; }
+
+.share-open-app {
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 12px;
+    border: 1px solid var(--share-border-2);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--share-surface) 82%, transparent);
+    color: var(--share-text-2);
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.share-open-app:hover {
+    color: var(--share-text);
+    border-color: var(--share-border-2);
+}
+
+/* ── 画布舞台 ── */
+.share-stage {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.share-stage.is-panning { cursor: grabbing; }
+
+.share-world {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+}
+
+.share-links {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.share-links path {
+    fill: none;
+    stroke: var(--share-line);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+}
+
+.share-node {
+    position: absolute;
+    box-sizing: border-box;
+}
+
+.share-node--media {
+    border-radius: 14px;
+    background: var(--share-surface);
+    border: 1px solid var(--share-border);
+    box-shadow: var(--share-shadow);
+    overflow: hidden;
+}
+
+.share-node--media.is-single { padding: 0; }
+
+.share-node--media img,
+.share-node--media video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: var(--share-surface-2);
+}
+
+.share-node--media.is-single img,
+.share-node--media.is-single video { border-radius: 13px; }
+
+.share-media-grid {
+    display: grid;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    padding: 8px;
+}
+
+.share-media-cell {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 8px;
+    background: var(--share-surface-2);
+}
+
+.share-media-cell .share-media-missing {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--share-text-3);
+    font-size: 11px;
+}
+
+.share-media-missing[hidden] { display: none; }
+
+.share-node--media.is-single .share-media-cell {
+    width: 100%;
+    height: 100%;
+    border-radius: 13px;
+}
+
+.share-empty-canvas {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--share-text-3);
+    font-size: 13px;
+    pointer-events: none;
+}
+
+.share-audio-card {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 16px;
+}
+
+.share-audio-icon {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    background: var(--share-surface-2);
+    color: var(--share-text-2);
+}
+
+.share-audio-icon svg { width: 20px; height: 20px; }
+
+.share-audio-card audio { width: 100%; max-width: 240px; }
+
+.share-node-alias {
+    position: absolute;
+    left: 2px;
+    top: -21px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--share-text-3);
+    pointer-events: none;
+}
+
+.share-node--text,
+.share-node--prompt,
+.share-node--generic {
+    border-radius: 14px;
+    background: var(--share-surface);
+    border: 1px solid var(--share-border);
+    box-shadow: var(--share-shadow);
+    padding: 16px;
+    overflow: hidden;
+}
+
+.share-text,
+.share-prompt-text,
+.share-generic-text {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.62;
+    color: var(--share-text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: hidden;
+}
+
+.share-prompt-head,
+.share-generic-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--share-text-3);
+}
+
+.share-empty-text {
+    color: var(--share-text-3);
+    font-size: 12.5px;
+}
+
+.share-node--label {
+    display: flex;
+    align-items: center;
+}
+
+.share-label-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 38px;
+    max-width: 100%;
+    padding: 7px 14px;
+    border-radius: 999px;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.share-label-pill .share-label-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.share-label-dot {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--label-accent, var(--share-text-2));
+}
+
+.share-label-pill.is-solid .share-label-dot { background: var(--label-fg, #fff); }
+
+.share-node--group {
+    border-radius: 16px;
+    border: 1.4px dashed var(--share-border-2);
+    background: color-mix(in srgb, var(--share-surface) 52%, transparent);
+    overflow: hidden;
+}
+
+.share-group-title {
+    position: absolute;
+    left: 14px;
+    top: 11px;
+    right: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--share-text-2);
+}
+
+/* ── 底部 ── */
+.share-foot {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    display: flex;
+    justify-content: center;
+    padding: 12px 20px 14px;
+    background: linear-gradient(to top, color-mix(in srgb, var(--share-bg) 86%, transparent), transparent);
+    pointer-events: none;
+}
+
+.share-foot span {
+    font-size: 11px;
+    color: var(--share-text-3);
+}
+
+.share-foot b {
+    color: var(--share-text-2);
+    font-weight: 600;
+}
+
+/* ── 加载 / 密码 / 错误状态 ── */
+.share-state {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--share-bg);
+    background-image: radial-gradient(var(--share-grid) 1px, transparent 1px);
+    background-size: 22px 22px;
+}
+
+.share-state[hidden] { display: none; }
+
+.share-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    color: var(--share-text-2);
+    font-size: 12.5px;
+}
+
+.share-loading[hidden] { display: none; }
+
+.share-spinner {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid var(--share-border-2);
+    border-top-color: var(--share-text);
+    animation: share-spin 0.8s linear infinite;
+}
+
+@keyframes share-spin { to { transform: rotate(360deg); } }
+
+.share-card {
+    width: min(400px, calc(100vw - 40px));
+    padding: 28px 26px 24px;
+    border-radius: 18px;
+    background: var(--share-elevated);
+    border: 1px solid var(--share-border);
+    box-shadow: var(--share-shadow);
+    text-align: center;
+}
+
+.share-gate-icon {
+    width: 46px;
+    height: 46px;
+    margin: 0 auto;
+    display: grid;
+    place-items: center;
+    border-radius: 13px;
+    background: var(--share-surface-2);
+    color: var(--share-text-2);
+}
+
+.share-gate-icon svg { width: 22px; height: 22px; }
+
+.share-card h1 {
+    margin: 15px 0 0;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--share-text);
+}
+
+.share-card-sub {
+    margin: 7px 0 0;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--share-text-2);
+}
+
+.share-gate-form {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.share-gate-form input {
+    flex: 1;
+    min-width: 0;
+    height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--share-border-2);
+    border-radius: 10px;
+    background: var(--share-surface-2);
+    color: var(--share-text);
+    font-size: 13px;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.share-gate-form input::placeholder { color: var(--share-text-3); }
+.share-gate-form input:focus { border-color: var(--share-info); }
+
+.share-gate-form button {
+    flex: none;
+    height: 40px;
+    padding: 0 18px;
+    border: 1px solid var(--share-accent);
+    border-radius: 10px;
+    background: var(--share-accent);
+    color: var(--share-accent-text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.share-gate-form button:disabled { opacity: 0.6; cursor: progress; }
+
+.share-gate-error {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: var(--share-danger);
+}
+
+.share-gate-error[hidden] { display: none; }
+
+.share-card-link {
+    display: inline-flex;
+    align-items: center;
+    margin-top: 18px;
+    color: var(--share-info);
+    font-size: 12.5px;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.share-card-link:hover { text-decoration: underline; }
+.share-card-link[hidden] { display: none; }
+
+.share-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 48px;
+    z-index: 50;
+    transform: translate(-50%, 6px);
+    max-width: min(420px, calc(100vw - 32px));
+    padding: 9px 14px;
+    border-radius: 10px;
+    background: var(--share-elevated);
+    border: 1px solid var(--share-border-2);
+    box-shadow: var(--share-shadow);
+    color: var(--share-text);
+    font-size: 12px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.share-toast[hidden] { display: none; }
+
+.share-toast.is-show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+.share-toast.is-error { color: var(--share-danger); }
+
+@media (prefers-reduced-motion: reduce) {
+    .share-spinner { animation: none; }
+    .share-toast { transition: none; }
+    .share-clone-btn { transition: none; }
+}
+
+@media (max-width: 720px) {
+    .share-brand-name, .share-brand-divider { display: none; }
+    .share-canvas-title { max-width: 34vw; }
+    .share-clone-btn { padding: 0 11px; }
+    .share-top { padding: 12px 14px; }
+}

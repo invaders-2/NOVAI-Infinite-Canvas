@@ -634,7 +634,7 @@ async function exportCanvas(id){
         if(!res.ok) throw new Error('export failed');
         const data = await res.json();
         const cv = data.canvas || data;
-        const base = String((c?.title) || cv.title || 'canvas').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || 'canvas';
+        const base = exportCanvasBaseName((c?.title) || cv.title, 'canvas');
         const blob = new Blob([JSON.stringify(cv, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -651,6 +651,14 @@ let ZIP_CRC_TABLE = null;
 
 function safeExportBase(name, fallback = 'canvas'){
     return String(name || fallback).replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || fallback;
+}
+
+/* 画布标题常带着媒体扩展名（如“图57.png”），导出 JSON/ZIP 时先剥掉，避免“图57.png.zip”。 */
+function exportCanvasBaseName(name, fallback = 'canvas'){
+    const pattern = /\.(?:png|jpe?g|webp|gif|bmp|svg|mp4|webm|mov|m4v|mkv|avi|mp3|wav|m4a|aac|ogg|json|zip)$/i;
+    let text = safeExportBase(name, fallback);
+    while(pattern.test(text)) text = text.slice(0, text.lastIndexOf('.')).trim();
+    return text || fallback;
 }
 
 function collectCanvasResourceUrls(value, out = [], seen = new Set()){
@@ -789,7 +797,7 @@ async function exportCanvasWithResources(id){
         if(!res.ok) throw new Error('export failed');
         const data = await res.json();
         const cv = data.canvas || data;
-        const base = safeExportBase((c?.title) || cv.title || 'canvas');
+        const base = exportCanvasBaseName((c?.title) || cv.title, 'canvas');
         const urls = collectCanvasResourceUrls(cv).slice(0, 1000);
         const usedNames = new Set(['canvas.json', 'resources-manifest.json']);
         const entries = [{ name:'canvas.json', bytes:ZIP_ENCODER.encode(JSON.stringify(cv, null, 2)) }];

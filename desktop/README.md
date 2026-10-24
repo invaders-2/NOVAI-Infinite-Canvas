@@ -65,6 +65,21 @@ cd desktop
 npm start        # electron . —— 自动用 python3 启动 main.py（端口 3000；被占用自动顺延）
 ```
 
+## 指向云端（云端模式）
+
+默认仍拉起本机后端。要让桌面端直接连服务器，二选一：
+
+1. 环境变量：`NOVAI_URL=https://novai.example.com`
+2. 配置文件：把 `novai-cloud.example.json` 复制成数据目录下的 `novai-cloud.json`，
+   内容 `{ "baseUrl": "https://your-host" }`（只接受合法 http/https 地址）。
+   数据目录：macOS/Linux `~/NOVAI/`、Windows `%APPDATA%\NOVAI\`（开发模式是仓库 `data/`）；
+   Electron 的 `app.getPath('userData')` 也会被查一次，两个位置先查前者。
+
+- 解析顺序：`NOVAI_URL` → `<userData>/novai-cloud.json` → 本机 `http://127.0.0.1:<port>`。
+- 命中前两者时**不启动本地后端、不探测端口**，窗口直接加载该地址。
+- 想临时回到本机后端：`NOVAI_LOCAL_BACKEND=1`（会跳过配置文件；显式 `NOVAI_URL` 仍优先）。
+- 解析逻辑在 `cloud-config.js`（纯函数），单测：`node desktop/__tests__/test_cloud_base_url.js`。
+
 ## 打包安装包
 
 ```bash

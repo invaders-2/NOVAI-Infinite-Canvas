@@ -316,7 +316,7 @@ ok(/const buildOrdered = \(\) =>/.test(urlBranch) && /const tierState = buildOrd
 ok(/const runMediaPass = async \(\) =>/.test(urlBranch) && /for\(const candidate of tierState\.ordered\)/.test(urlBranch), '逐个媒体候选尝试（page 不进本轮）');
 ok(/const fromBytes = await importFromFetchedBytes\(candidate\);/.test(urlBranch), '每个候选 import-urls 失败后单独 fetch-bytes');
 ok(/const fromUrl = await importFromFetchedUrl\(candidate\);/.test(urlBranch), '视频网络地址再加 fetch-url 通道');
-ok(urlBranch.indexOf("if(isVideoCandidate(candidate) && /^https?:\\/\\//i.test(candidate)){") >= 0, 'fetch-url 只给视频网络候选（图片路径不变）');
+ok(urlBranch.indexOf("if((isVideoCandidate(candidate) || isImageCandidate(candidate)) && /^https?:\\/\\//i.test(candidate)){") >= 0, 'fetch-url 对图片候选同样生效（后端直连不通的站点只能靠主进程代理取图）');
 ok(urlBranch.indexOf('importFromFetchedUrl(candidate)') > urlBranch.indexOf('importFromFetchedBytes(candidate)'), '通道顺序 import-urls → fetch-bytes → fetch-url');
 ok(/trail\.concat\('done'\)\.join\(' > '\)/.test(urlBranch) && /trail\.join\(' > '\)/.test(urlBranch), '日志记录每个候选走了哪些通道');
 ok(/const isBlobUrl = url =>/.test(urlBranch) && /const isM3u8Url = url =>/.test(urlBranch), '有 blob / m3u8 判定');

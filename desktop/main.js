@@ -11,6 +11,7 @@ const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const { resolveBaseUrl } = require('./cloud-config');
 
 // 后端端口：与正式版一致使用 3000（数据目录也相同，Electron 版就是正式版的桌面壳）。
 // 若 3000 上已有 NOVAI 后端在跑（正式版/网页版），直接复用而不重复启动；
@@ -87,6 +88,8 @@ function resolveBackendBinary() {
 // 用户从正式版换到 Electron 版无需迁移、无需重新下载任何数据。
 // 独立于 .app 包内部（可写、非只读、升级不丢）。
 function resolveDataDir() {
+  // 冒烟/自动验收：显式给的数据目录优先，别把探针拖出来的节点写进日常数据
+  if (isSmokeMode() && process.env.NOVAI_DATA_DIR) return process.env.NOVAI_DATA_DIR;
   if (!app.isPackaged) return path.join(__dirname, '..', 'data');
   const dir = path.join(process.env.APPDATA || require('os').homedir(), 'NOVAI');
   // 兼容早期 Electron 测试版（数据曾写到系统 appData/NOVAI，macOS 上与正式版不一致）：
@@ -1407,22 +1410,29 @@ async function handleSourceViewAction(payload) {
       const script = `(function(){
         var url = ${JSON.stringify(targetUrl)};
         var maxBytes = ${maxBytes};
-        return fetch(url, { credentials: 'include' }).then(function(r){
-          if (!r.ok) return { ok: false, status: r.status };
-          return r.blob().then(function(b){
-            if (b.size > maxBytes) return { ok: false, error: 'too-large', size: b.size };
-            return b.arrayBuffer().then(function(buf){
-              var s = '';
-              var u8 = new Uint8Array(buf);
-              var CH = 0x8000;
-              for (var i = 0; i < u8.length; i += CH) {
-                s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
-              }
-              var type = r.headers.get('content-type') || b.type || 'application/octet-stream';
-              return { ok: true, contentType: r.headers.get('content-type') || b.type || '', size: b.size, dataUrl: 'data:' + type + ';base64,' + btoa(s) };
+        function readOnce(credentials) {
+          return fetch(url, { credentials: credentials }).then(function(r){
+            if (!r.ok) return { ok: false, status: r.status };
+            return r.blob().then(function(b){
+              if (b.size > maxBytes) return { ok: false, error: 'too-large', size: b.size };
+              return b.arrayBuffer().then(function(buf){
+                var s = '';
+                var u8 = new Uint8Array(buf);
+                var CH = 0x8000;
+                for (var i = 0; i < u8.length; i += CH) {
+                  s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+                }
+                var type = r.headers.get('content-type') || b.type || 'application/octet-stream';
+                return { ok: true, contentType: r.headers.get('content-type') || b.type || '', size: b.size, dataUrl: 'data:' + type + ';base64,' + btoa(s) };
+              });
             });
           });
-        }).catch(function(e){ return { ok: false, error: String(e && e.message || e) }; });
+        }
+        // 公共 CDN（i.pinimg.com 等）返回 ACAO:* + ACAC:false：带凭据必被 CORS 挡，去掉凭据就放行
+        return readOnce('include').then(function(first){
+          if (first.ok) return first;
+          return readOnce('omit');
+        }).catch(function(){ return readOnce('omit'); }).catch(function(e){ return { ok: false, error: String(e && e.message || e) }; });
       })()`;
       try {
         return await sourceView.webContents.executeJavaScript(script, true);
@@ -1577,6 +1587,45 @@ function sourceBrowserUiProbe() {
       const videoNodesAfter = document.querySelectorAll('.image-node').length;
       const videoNodeAdded = videoNodesAfter > nodesAfter || !!document.querySelector('.image-node video');
 
+      // 预取通道回归点：主进程已备好字节时，drop 必须秒出节点且不碰网络。
+      // 桥名再写错一次（本次 Pinterest 事故），这里拿不到 dataUrl，drop 只能走网络，判失败。
+      const dropLogs = [];
+      const probeLog = console.log;
+      console.log = function(){
+        try {
+          dropLogs.push(Array.prototype.map.call(arguments, function(v){
+            if (typeof v === 'string') return v;
+            try { return JSON.stringify(v); } catch (e) { return String(v); }
+          }).join(' '));
+        } catch (e) {}
+        return probeLog.apply(console, arguments);
+      };
+      const nodesBeforePrefetch = document.querySelectorAll('.image-node').length;
+      const pinUrl = 'https://i.pinimg.com/originals/d8/b7/52/d8b7528ce0b1b78e177d6314c7248321.jpg';
+      const pinTransfer = new DataTransfer();
+      pinTransfer.setData('text/uri-list', pinUrl);
+      pinTransfer.setData('text/html', '<img src="' + pinUrl + '">');
+      shell.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: pinTransfer, clientX: 900, clientY: 620 }));
+      await new Promise(function(r){ setTimeout(r, 1500); });
+      console.log = probeLog;
+      const prefetchNodesAfter = document.querySelectorAll('.image-node').length;
+      const dropText = dropLogs.join('\\n');
+      const prefetchResult = {
+        hit: /medium hit bytes=/.test(dropText),
+        nodeAdded: prefetchNodesAfter > nodesBeforePrefetch,
+        bridgeHit: /guest_drag_bytes: .*hit/.test(dropText),
+        bridgeMissing: /guest_drag_bytes bridge: missing/.test(dropText),
+        garbageCandidate: dropText.indexOf('[object Object]') !== -1,
+        networkFallback: /(?:import-urls count0|fetch-url:fail|fetch-url fail)/.test(dropText),
+        nodesBefore: nodesBeforePrefetch,
+        nodesAfter: prefetchNodesAfter,
+        // 留几条原文，方便下次直接看出走了哪个通道
+        samples: dropLogs.filter(function(line){
+          return line.indexOf('guest_drag_bytes') !== -1 || line.indexOf('medium hit') !== -1
+            || line.indexOf('prefetch-bytes') !== -1 || line.indexOf('candidate[') !== -1;
+        }).slice(0, 6).map(function(line){ return line.slice(0, 180); })
+      };
+
       const uiResult = {
         bridge: bridge,
         rows: rows,
@@ -1639,11 +1688,38 @@ function sourceBrowserUiProbe() {
       } catch (err) {
         frameResult = { error: String(err && err.message || err) };
       }
-      return JSON.stringify(uiResult) + '\\n' + JSON.stringify(frameResult);
+      return JSON.stringify(uiResult) + '\\n' + JSON.stringify(frameResult) + '\\n' + JSON.stringify(prefetchResult);
     } catch (err) {
       return JSON.stringify({ error: String(err && err.message || err) });
     }
   })()`;
+}
+
+// 冒烟专用：伪造一条"内嵌页面拖拽"记录（预取字节直接给定），落图过程不依赖任何网络。
+// 探针随后丢一次 i.pinimg.com 的 drop：字节预取走通才算过——桥名写错的回归就卡在这里。
+function installSmokeGuestDrag() {
+  const url = 'https://i.pinimg.com/1200x/d8/b7/52/d8b7528ce0b1b78e177d6314c7248321.jpg';
+  const originalUrl = 'https://i.pinimg.com/originals/d8/b7/52/d8b7528ce0b1b78e177d6314c7248321.jpg';
+  const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  lastGuestDrag = {
+    payload: {
+      tagName: 'IMG',
+      tag: 'IMG',
+      src: url,
+      bestUrl: originalUrl,
+      mediaUrl: originalUrl,
+      // 对象形态（{url,w}）跟真机 source-drag-preload 一致，顺带覆盖画布侧的候选归一
+      imageCandidates: [{ url: originalUrl, w: 0 }, { url: url, w: 0 }],
+      videoCandidates: [],
+      pageUrl: 'https://www.pinterest.com/pin/123456789/',
+      at: Date.now(),
+    },
+    receivedAt: Date.now(),
+    bytesPromise: Promise.resolve({ ok: true, url: url, dataUrl: dataUrl, contentType: 'image/png', size: 101940, originalUrl: originalUrl }),
+    bytesResult: null,
+    originalPromise: Promise.resolve({ ok: false, error: 'smoke-no-original' }),
+    originalUrl: originalUrl,
+  };
 }
 
 async function runSourceBrowserUiCheck() {
@@ -1819,13 +1895,25 @@ async function runSourceBrowserSmoke() {
   let smokeUi = '';
   let smokeUiFrame = '';
   let smokeWebview = '';
+  let smokeDropPrefetch = { hit: false, nodeAdded: false, error: '探针未执行' };
   try {
+    // 先备好预取记录，探针的 drop 才能走"秒出图"通道（失败信息落在 SMOKE_DROP_PREFETCH 里）
+    installSmokeGuestDrag();
     const uiResult = String((await runSourceBrowserUiCheck()) || '');
-    // 探针返回三行 JSON：主窗口面板 / 真实 iframe 路径 / webview 可行性
+    // 探针返回四行 JSON：主窗口面板 / 真实 iframe 路径 / 预取落图 / webview 可行性
     const parts = uiResult.split('\n');
     smokeUi = parts[0] || '';
     smokeUiFrame = parts[1] || JSON.stringify({ error: 'iframe 探针未返回结果' });
-    smokeWebview = parts[2] || JSON.stringify({ error: 'webview 探针未返回结果' });
+    if (parts[2]) {
+      try {
+        smokeDropPrefetch = JSON.parse(parts[2]);
+      } catch (_) {
+        smokeDropPrefetch = { hit: false, nodeAdded: false, error: '预取探针结果无法解析：' + String(parts[2]).slice(0, 200) };
+      }
+    } else {
+      smokeDropPrefetch = { hit: false, nodeAdded: false, error: '预取探针未返回结果' };
+    }
+    smokeWebview = parts[3] || JSON.stringify({ error: 'webview 探针未返回结果' });
   } catch (err) {
     smokeUi = JSON.stringify({ error: String(err && err.message || err) });
     smokeUiFrame = smokeUi;
@@ -1863,7 +1951,7 @@ async function runSourceBrowserSmoke() {
   } catch (err) {
     clog('source-view', '冒烟 cookie/复用检查失败: ' + (err && err.message || err));
   }
-  const ok = !!(openResult && openResult.ok && state.open);
+  const ok = !!(openResult && openResult.ok && state.open && smokeDropPrefetch && smokeDropPrefetch.hit && smokeDropPrefetch.nodeAdded);
   console.log('[smoke] SMOKE_OPEN=' + JSON.stringify(openResult));
   console.log('[smoke] SMOKE_STATE=' + JSON.stringify(state));
   console.log('[smoke] SMOKE_UA=' + String(smokeUa || ''));
@@ -1874,6 +1962,7 @@ async function runSourceBrowserSmoke() {
   console.log('[smoke] SMOKE_VIEW_REUSE=' + (smokeViewReuse ? 'true' : 'false'));
   console.log('[smoke] SMOKE_UI=' + smokeUi);
   console.log('[smoke] SMOKE_UI_FRAME=' + smokeUiFrame);
+  console.log('[smoke] SMOKE_DROP_PREFETCH=' + JSON.stringify(smokeDropPrefetch));
   console.log('[smoke] SMOKE_WEBVIEW=' + smokeWebview);
   console.log('[smoke] SMOKE_RESULT=' + (ok ? 'ok' : 'fail'));
   try { destroySourceView(); } catch (_) {}
@@ -2539,6 +2628,29 @@ if (!gotLock) {
     registerIpc();
 
     const requested = Number(process.env.NOVAI_PORT) || DEFAULT_PORT;
+    // 云端模式：NOVAI_URL 或 <userData>/novai-cloud.json 指向合法 http(s) 地址时，
+    // 桌面端只做窗口壳，不再拉起/探测本地后端（NOVAI_LOCAL_BACKEND=1 可强制回本地）。
+    // 两个都查：NOVAI 数据目录（用户能点「打开数据目录」看到）优先，其次 Electron 的 userData。
+    const configDirs = [dataDir];
+    try {
+      const electronDataDir = app.getPath('userData');
+      if (electronDataDir && electronDataDir !== dataDir) configDirs.push(electronDataDir);
+    } catch (_) {}
+    const target = resolveBaseUrl({
+      env: process.env,
+      userDataDirs: configDirs,
+      localUrl: `http://127.0.0.1:${requested}`,
+    });
+    if (target.source !== 'local') {
+      clog('boot', '使用云端地址(' + target.source + '): ' + target.baseUrl + '，跳过本地后端');
+      createWindow(target.baseUrl);
+      setupAutoUpdate();
+      app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow(target.baseUrl);
+      });
+      return;
+    }
+
     // 端口 3000 上若已有 NOVAI 后端（正式版/网页版正在运行）则直接复用——
     // 数据目录相同，再起一个后端写同一数据目录会互相踩踏。
     let port = requested;
@@ -2547,7 +2659,7 @@ if (!gotLock) {
       reuseExisting = await looksLikeNovaiBackend(requested);
       if (!reuseExisting) port = await resolvePort(requested);
     }
-    const baseUrl = process.env.NOVAI_URL || `http://127.0.0.1:${port}`;
+    const baseUrl = `http://127.0.0.1:${port}`;
 
     try {
       clog('boot', '数据目录: ' + dataDir);

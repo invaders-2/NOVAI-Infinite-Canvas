@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOVAI 服务器搭建详细操作手册</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --panel:#fff; --ink:#1b1d21; --sub:#6b7078; --muted:#9aa0a8;
+    --line:#eceef1; --accent:#3b5bfd; --accent-soft:#eef1ff; --accent-ink:#23308f;
+    --ok:#0e9f6e; --ok-soft:#e7f7f0; --warn:#c2410c; --warn-soft:#fff3ec;
+    --shadow:0 1px 2px rgba(20,23,28,.04),0 14px 36px rgba(20,23,28,.06);
+    --radius:20px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.75;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1040px;margin:0 auto;padding:44px 24px 90px}
+
+  /* ---------- hero ---------- */
+  .hero{margin-bottom:30px}
+  .eyebrow{font-size:12px;letter-spacing:.16em;font-weight:700;color:var(--accent);text-transform:uppercase}
+  h1{font-size:34px;line-height:1.2;letter-spacing:-.025em;margin:10px 0 12px}
+  .lede{color:var(--sub);font-size:15.5px;max-width:760px;margin:0}
+  .meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:600}
+  .pill.acc{background:var(--accent-soft);color:var(--accent-ink)}
+  .pill.ok{background:var(--ok-soft);color:var(--ok)}
+  .pill.warn{background:var(--warn-soft);color:var(--warn)}
+
+  /* ---------- nav chips ---------- */
+  .nav{display:flex;gap:8px;flex-wrap:wrap;margin:24px 0 30px}
+  .nav a{font-size:12.5px;color:var(--sub);background:#fff;padding:5px 11px;border-radius:999px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .nav a:hover{color:var(--accent);text-decoration:none}
+
+  /* ---------- split cards ---------- */
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px}
+  .panel{background:var(--panel);border-radius:var(--radius);box-shadow:var(--shadow);padding:22px 24px}
+  .panel h3{margin:0 0 10px;font-size:15.5px;display:flex;align-items:center;gap:8px}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .panel ul{margin:0;padding-left:18px;font-size:14px;color:var(--sub)}
+  .panel li{margin:4px 0}
+
+  /* ---------- overview ---------- */
+  .overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:18px 0 34px}
+  .ov{background:#fff;border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
+  .ov .n{flex:0 0 auto;width:28px;height:28px;border-radius:9px;background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font-weight:700;font-size:13px}
+  .ov b{display:block;font-size:13.5px;line-height:1.35}
+  .ov span{font-size:11.5px;color:var(--muted)}
+
+  /* ---------- step ---------- */
+  .step{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:26px 26px 24px;margin:16px 0}
+  .step-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  .step-num{flex:0 0 auto;width:40px;height:40px;border-radius:13px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;font-size:16px}
+  .step h2{font-size:19.5px;margin:0;letter-spacing:-.015em}
+  .step .time{margin-left:auto;font-size:12.5px;color:var(--muted)}
+  .url{display:inline-flex;align-items:center;gap:8px;background:#f7f8fa;border-radius:10px;padding:7px 12px;margin:12px 0 4px;font-size:13.5px;color:var(--accent)}
+  .url::before{content:"↗";font-size:12px;opacity:.6}
+  .path{font-size:14px;color:var(--ink);margin:8px 0 14px}
+  .path b{background:#f2f4ff;color:var(--accent-ink);padding:1px 6px;border-radius:6px;font-weight:600}
+  .step p{font-size:14px;color:var(--sub);margin:8px 0}
+  .step ul,.step ol{font-size:14px;color:var(--ink);margin:8px 0 8px;padding-left:20px}
+  .step li{margin:5px 0}
+  .step li small{color:var(--muted)}
+
+  /* ---------- tables ---------- */
+  table{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px;margin:12px 0 6px;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:10px 14px;background:#fafbfc}
+  td{padding:10px 14px;vertical-align:top;box-shadow:inset 0 1px 0 var(--line)}
+  td b{color:var(--ink)}
+  tr:hover td{background:#fcfcfe}
+
+  /* ---------- callouts ---------- */
+  .callout{border-radius:14px;padding:12px 16px;font-size:13.5px;margin:14px 0;display:flex;gap:10px;align-items:flex-start}
+  .callout .ic{flex:0 0 auto;font-weight:700}
+  .send{background:var(--accent-soft);color:var(--accent-ink)}
+  .warnbox{background:var(--warn-soft);color:#8a3b12}
+  .okbox{background:var(--ok-soft);color:#0b6b4b}
+  .callout b{font-weight:700}
+
+  .tag{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent-ink);margin-left:6px;vertical-align:1px}
+
+  /* ---------- checklist ---------- */
+  .check{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:10px 24px}
+  .check label{display:flex;gap:12px;align-items:flex-start;padding:13px 0;font-size:14.5px;cursor:pointer;box-shadow:inset 0 -1px 0 var(--line)}
+  .check label:last-child{box-shadow:none}
+  .check input{margin-top:5px;width:16px;height:16px;accent-color:var(--accent);cursor:pointer}
+  .check label.done{color:var(--muted);text-decoration:line-through}
+  .check .note{display:block;font-size:12.5px;color:var(--muted);text-decoration:none;margin-top:2px}
+
+  /* ---------- grid of pitfalls ---------- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin:16px 0}
+  .card{background:#fff;border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:18px 20px;font-size:13.5px}
+  .card h4{margin:0 0 6px;font-size:14px}
+  .card p{margin:0;color:var(--sub);font-size:13px}
+
+  .section-title{font-size:12.5px;letter-spacing:.14em;color:var(--muted);font-weight:700;margin:38px 0 14px;text-transform:uppercase}
+  .foot{margin-top:44px;font-size:12.5px;color:var(--muted);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+  @media (max-width:720px){
+    h1{font-size:26px}
+    .split{grid-template-columns:1fr}
+    .step{padding:20px 18px}
+    .step .time{margin-left:0;width:100%}
+    table{font-size:12.5px}
+    th,td{padding:8px 10px}
+  }
+
+  @media print{
+    body{background:#fff}
+    .nav,.foot{display:none}
+    .wrap{max-width:none;padding:0}
+    .step,.panel,.card,.check{box-shadow:none;border:1px solid #e6e8ec;break-inside:avoid}
+    .step{page-break-inside:avoid}
+    a{color:#000;text-decoration:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">NOVAI · 云端部署</div>
+    <h1>服务器搭建详细操作手册</h1>
+    <p class="lede">阿里云香港 ECS + OSS 图床 + 域名 + HTTPS。每一步写了网址、点哪里、填什么、发我什么。你只管买和验收，装环境部署全是团队的事。</p>
+    <div class="meta">
+      <span class="pill acc">10 步 · 约 1.5 小时（加实名等待）</span>
+      <span class="pill ok">采购归你，部署归我</span>
+      <span class="pill warn">香港服务器不需要备案</span>
+    </div>
+  </header>
+
+  <nav class="nav">
+    <a href="#split">分工</a>
+    <a href="#overview">总览</a>
+    <a href="#s1">1 账号</a>
+    <a href="#s2">2 买 ECS</a>
+    <a href="#s3">3 安全组</a>
+    <a href="#s4">4 OSS</a>
+    <a href="#s5">5 小号</a>
+    <a href="#s6">6 域名</a>
+    <a href="#s7">7 解析</a>
+    <a href="#s8">8 发我</a>
+    <a href="#s9">9 部署</a>
+    <a href="#s10">10 验收</a>
+    <a href="#pit">坑</a>
+    <a href="#checklist">勾选清单</a>
+  </nav>
+
+  <section id="split" class="split">
+    <div class="panel">
+      <h3><span class="dot" style="background:#3b5bfd"></span>你做的（只有你能做）</h3>
+      <ul>
+        <li>阿里云注册、实名、充值、付款</li>
+        <li>买 ECS / OSS / 域名，配安全组和解析</li>
+        <li>把服务器和 OSS 的访问方式交给团队</li>
+        <li>手机 4G 验收、发邀请码给朋友</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3><span class="dot" style="background:#0e9f6e"></span>我做的（不用你碰命令行）</h3>
+      <ul>
+        <li>装环境、放代码、起服务、开机自启</li>
+        <li>配 nginx、申请免费 HTTPS 证书</li>
+        <li>接 OSS 图床、素材转存、资产库打通</li>
+        <li>每日备份、监控告警、出问题修复</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="section-title">总览 · 10 步</div>
+  <div id="overview" class="overview">
+    <div class="ov"><div class="n">1</div><div><b>阿里云账号</b><span>30 分钟 · 实名 + 充值</span></div></div>
+    <div class="ov"><div class="n">2</div><div><b>买 ECS</b><span>10 分钟 · 香港 4 核 8G</span></div></div>
+    <div class="ov"><div class="n">3</div><div><b>安全组</b><span>5 分钟 · 放行 22/80/443</span></div></div>
+    <div class="ov"><div class="n">4</div><div><b>OSS 两个桶</b><span>10 分钟 · 图床 + 备份</span></div></div>
+    <div class="ov"><div class="n">5</div><div><b>RAM 小号</b><span>10 分钟 · 只给 OSS 权限</span></div></div>
+    <div class="ov"><div class="n">6</div><div><b>买域名</b><span>30 分钟 + 实名 1–2 天</span></div></div>
+    <div class="ov"><div class="n">7</div><div><b>域名解析</b><span>5 分钟 · 两条 A 记录</span></div></div>
+    <div class="ov"><div class="n">8</div><div><b>发我 4 样</b><span>2 分钟 · 团队接手</span></div></div>
+    <div class="ov"><div class="n">9</div><div><b>我部署</b><span>约 1 天 · 你等</span></div></div>
+    <div class="ov"><div class="n">10</div><div><b>验收 + 试运行</b><span>半天 · 发邀请码</span></div></div>
+  </div>
+
+  <!-- ============ STEP 1 ============ -->
+  <section id="s1" class="step">
+    <div class="step-head"><div class="step-num">1</div><h2>阿里云账号：注册、实名、充值</h2><span class="time">约 30 分钟</span></div>
+    <a class="url" href="https://www.aliyun.com" target="_blank" rel="noreferrer">https://www.aliyun.com</a>
+    <div class="path">路径：<b>手机号注册</b> → 右上角头像 <b>实名认证</b> → 右上角 <b>费用中心</b> 充值</div>
+    <ol>
+      <li>用手机号注册，登录阿里云。</li>
+      <li>右上角头像 → 「实名认证」→ 选 <b>个人</b> → 支付宝扫脸，约 1 分钟通过。</li>
+      <li>右上角 → 「费用中心」→ 充值 <b>1000 元</b>，后面买机器和域名直接扣。</li>
+    </ol>
+    <div class="callout warnbox"><span class="ic">!</span><div>个人实名就能买香港 ECS 和 .com 域名，不需要公司；后面要开发票、升级企业主体再认证企业。<b>主账号密码不要给任何人，包括我。</b></div></div>
+  </section>
+
+  <!-- ============ STEP 2 ============ -->
+  <section id="s2" class="step">
+    <div class="step-head"><div class="step-num">2</div><h2>买云服务器 ECS</h2><span class="time">约 10 分钟</span></div>
+    <a class="url" href="https://ecs.console.aliyun.com" target="_blank" rel="noreferrer">https://ecs.console.aliyun.com</a>
+    <div class="path">路径：左侧 <b>实例</b> → 上方 <b>创建实例</b> → 进入购买页</div>
+    <table>
+      <thead><tr><th style="width:130px">选项</th><th>选什么</th><th style="width:38%">说明</th></tr></thead>
+      <tbody>
+        <tr><td>付费模式</td><td><b>包年包月</b>，买 1 个月</td><td>比按量便宜，先试一个月</td></tr>
+        <tr><td>地域</td><td><b>中国香港</b></td><td>必须香港；选错要重买</td></tr>
+        <tr><td>可用区</td><td>默认随机</td><td>不用管</td></tr>
+        <tr><td>实例规格</td><td><b>4 核 8G</b>（通用型 g8i / g7 或经济型 e）</td><td>没货先买 2 核 4G，后面可升配</td></tr>
+        <tr><td>镜像</td><td>公共镜像 → <b>Ubuntu 22.04 64 位</b></td><td>不要选 Windows</td></tr>
+        <tr><td>系统盘</td><td><b>ESSD 云盘 100 GiB</b></td><td>默认 40G 不够，改成 100</td></tr>
+        <tr><td>数据盘</td><td>不加</td><td>数据放 OSS</td></tr>
+        <tr><td>公网 IP</td><td>勾选 <b>分配公网 IPv4 地址</b></td><td>不勾就没有公网</td></tr>
+        <tr><td>带宽计费</td><td><b>按使用流量</b>，峰值 10 Mbps</td><td>别选固定带宽，贵很多</td></tr>
+        <tr><td>安全组</td><td>新建安全组，默认</td><td>第 3 步再补规则</td></tr>
+        <tr><td>登录凭证</td><td><b>自定义密码</b>，设强密码并记下来</td><td>比密钥对省事</td></tr>
+        <tr><td>购买时长</td><td>1 个月，自动续费先不勾</td><td></td></tr>
+        <tr><td>数量</td><td>1 台</td><td></td></tr>
+      </tbody>
+    </table>
+    <p>勾选协议 → 「确认订单」→ 支付。买完回到实例列表，记下这台机器的 <b>公网 IP</b>（形如 47.x.x.x）。</p>
+    <div class="callout send"><span class="ic">→</span><div><b>发我：</b>公网 IP + 登录密码（下面的第 8 步一起发也行）。</div></div>
+  </section>
+
+  <!-- ============ STEP 3 ============ -->
+  <section id="s3" class="step">
+    <div class="step-head"><div class="step-num">3</div><h2>安全组：放行 80 和 443</h2><span class="time">约 5 分钟</span></div>
+    <div class="path">路径：ECS 控制台 → 实例列表 → 点实例名 → <b>安全组</b> → <b>配置规则</b> → 入方向 → <b>手动添加</b></div>
+    <table>
+      <thead><tr><th>端口</th><th>协议</th><th>授权对象</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td>22</td><td>TCP</td><td>你的公网 IP</td><td>团队 SSH 登录服务器</td></tr>
+        <tr><td>80</td><td>TCP</td><td>0.0.0.0/0</td><td>网站访问 + HTTPS 证书验证</td></tr>
+        <tr><td>443</td><td>TCP</td><td>0.0.0.0/0</td><td>HTTPS</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warnbox"><span class="ic">!</span><div>不要开 3000、7860、3306、6379——网站走 nginx 转发，这些端口不该暴露。不知道自己的 IP：搜「我的 IP」，或临时把 22 设成 0.0.0.0/0，部署完再收紧。</div></div>
+  </section>
+
+  <!-- ============ STEP 4 ============ -->
+  <section id="s4" class="step">
+    <div class="step-head"><div class="step-num">4</div><h2>买 OSS，建两个桶</h2><span class="time">约 10 分钟</span></div>
+    <a class="url" href="https://oss.console.aliyun.com" target="_blank" rel="noreferrer">https://oss.console.aliyun.com</a>
+    <div class="path">路径：<b>创建 Bucket</b>，按下面填</div>
+    <table>
+      <thead><tr><th style="width:120px">选项</th><th>公共读桶（图床）</th><th>私有桶（备份）</th></tr></thead>
+      <tbody>
+        <tr><td>桶名</td><td>novai-assets-加你的后缀</td><td>novai-backup-加你的后缀</td></tr>
+        <tr><td>地域</td><td><b>中国香港</b></td><td><b>中国香港</b></td></tr>
+        <tr><td>读写权限</td><td><b>公共读</b></td><td><b>私有</b></td></tr>
+        <tr><td>版本控制</td><td>开启（防误删）</td><td>开启</td></tr>
+        <tr><td>其他</td><td>默认</td><td>默认</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>桶名只能小写字母、数字、中划线，<b>全球唯一</b>，被占就换个后缀。</li>
+      <li>公共读 = 拿到图片链接的人都能看（这是 AI 能读取素材的前提）；文件名是 32 位随机串，别人猜不到、也遍历不了。</li>
+      <li>私有备份桶只给程序用，外网拿不到。</li>
+    </ul>
+    <div class="callout send"><span class="ic">→</span><div><b>发我：</b>两个桶名。</div></div>
+  </section>
+
+  <!-- ============ STEP 5 ============ -->
+  <section id="s5" class="step">
+    <div class="step-head"><div class="step-num">5</div><h2>开一个「只能管 OSS」的小号</h2><span class="time">约 10 分钟</span></div>
+    <a class="url" href="https://ram.console.aliyun.com" target="_blank" rel="noreferrer">https://ram.console.aliyun.com</a>
+    <div class="path">路径：<b>用户</b> → <b>创建用户</b> → 建 AccessKey → <b>权限管理</b> → 新增授权</div>
+    <ol>
+      <li>左侧「用户」→「创建用户」，登录名称填 <b>novai-deploy</b>。</li>
+      <li>访问方式 <b>只勾「OpenAPI 调用访问」</b>，不要勾控制台访问。</li>
+      <li>创建完成后点进这个用户 →「创建 AccessKey」→ 复制 <b>AccessKey ID</b> 和 <b>AccessKey Secret</b>（Secret 只显示一次）。</li>
+      <li>同页「权限管理」→「新增授权」→ 搜索 <b>AliyunOSSFullAccess</b> → 选中 → 确定。</li>
+    </ol>
+    <div class="callout send"><span class="ic">→</span><div><b>发我：</b>AccessKey ID + Secret。<b>单独发，别发群、别截图。</b>这个小号只能读写 OSS，动不了服务器；部署完随时能在控制台禁用。</div></div>
+  </section>
+
+  <!-- ============ STEP 6 ============ -->
+  <section id="s6" class="step">
+    <div class="step-head"><div class="step-num">6</div><h2>买域名并实名</h2><span class="time">30 分钟 + 审核 1–2 天</span></div>
+    <a class="url" href="https://wanwang.aliyun.com" target="_blank" rel="noreferrer">https://wanwang.aliyun.com</a>
+    <div class="path">路径：搜域名 → 加入清单 → 结算 → 填 <b>信息模板</b> 做域名实名</div>
+    <ol>
+      <li>搜一个你喜欢的 <b>.com</b>，加入清单，结算，买 1 年。</li>
+      <li>结算时填「信息模板」：姓名 + 身份证号 + 手机号，提交 <b>域名实名</b>。</li>
+      <li>实名审核 1–2 个工作日，通过前不能解析——<b>所以这一步尽早做，别拖到最后。</b></li>
+    </ol>
+    <div class="callout okbox"><span class="ic">✓</span><div>香港服务器<b>不需要 ICP 备案</b>，买 .com 最省事。别买奇怪后缀，也不要用别人送的域名（实名不是你就控制不了）。</div></div>
+  </section>
+
+  <!-- ============ STEP 7 ============ -->
+  <section id="s7" class="step">
+    <div class="step-head"><div class="step-num">7</div><h2>域名解析到服务器</h2><span class="time">约 5 分钟</span></div>
+    <a class="url" href="https://dns.console.aliyun.com" target="_blank" rel="noreferrer">https://dns.console.aliyun.com</a>
+    <div class="path">路径：域名列表 → 你的域名 → <b>解析设置</b> → <b>添加记录</b></div>
+    <table>
+      <thead><tr><th>记录类型</th><th>主机记录</th><th>记录值</th><th>TTL</th></tr></thead>
+      <tbody>
+        <tr><td>A</td><td>@</td><td>你的 ECS 公网 IP</td><td>10 分钟</td></tr>
+        <tr><td>A</td><td>www</td><td>你的 ECS 公网 IP</td><td>10 分钟</td></tr>
+      </tbody>
+    </table>
+    <p>保存后等 10 分钟生效；团队会验证，你也可以在电脑上 ping 一下域名，能看到 IP 就成了。</p>
+    <div class="callout send"><span class="ic">→</span><div><b>发我：</b>域名。</div></div>
+  </section>
+
+  <!-- ============ STEP 8 ============ -->
+  <section id="s8" class="step">
+    <div class="step-head"><div class="step-num">8</div><h2>把 4 样东西发我</h2><span class="time">约 2 分钟</span></div>
+    <table>
+      <thead><tr><th style="width:50px">#</th><th>发什么</th><th style="width:34%">从哪来</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><b>ECS 公网 IP + root 密码</b></td><td>第 2 步</td></tr>
+        <tr><td>2</td><td><b>两个 OSS 桶名</b> + 地域（香港）</td><td>第 4 步</td></tr>
+        <tr><td>3</td><td><b>RAM 的 AccessKey ID + Secret</b></td><td>第 5 步</td></tr>
+        <tr><td>4</td><td><b>域名</b></td><td>第 6 步</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warnbox"><span class="ic">!</span><div>用私聊或密码管理器发，<b>不要发群、不要截图</b>；永远不要给主账号密码。部署完成后你可以立刻改服务器密码、禁用这个 AccessKey，都不影响网站运行。</div></div>
+    <p>可选：钉钉群机器人 Webhook，用来接收告警（见文末）。</p>
+  </section>
+
+  <!-- ============ STEP 9 ============ -->
+  <section id="s9" class="step">
+    <div class="step-head"><div class="step-num">9</div><h2>我部署，你等</h2><span class="time">约 1 天</span></div>
+    <ul>
+      <li>装 Ubuntu 环境、Python 3.11、nginx、开机自启。</li>
+      <li>代码放 <b>/opt/novai</b>，数据目录 <b>/opt/novai/cloud-data</b>（全新空目录，不碰你本地数据，试用期不同步）。</li>
+      <li>nginx 反向代理 + 免费 HTTPS 证书（自动续期）。</li>
+      <li>接 OSS：上传素材落 OSS、生成结果立刻转存 OSS、素材库和 AI 引用都用 OSS 地址。</li>
+      <li>每日备份到私有桶；磁盘 / 余额 / 报错告警。</li>
+      <li>给你管理员初始账号和网址。</li>
+    </ul>
+    <div class="callout okbox"><span class="ic">✓</span><div>这期间不需要你操作；有问题我直接说。</div></div>
+  </section>
+
+  <!-- ============ STEP 10 ============ -->
+  <section id="s10" class="step">
+    <div class="step-head"><div class="step-num">10</div><h2>手机验收 + 发邀请码</h2><span class="time">约半天</span></div>
+    <p>用<b>手机 4G</b>（别用公司 Wi-Fi，避免误判），逐条过：</p>
+    <ol>
+      <li>打开 <b>https://你的域名</b>，地址栏有小锁，没有「不安全」提示。</li>
+      <li>用管理员账号登录，生成一张图。</li>
+      <li>刷新页面，图还在。</li>
+      <li>复制图片地址，应该长这样：<b>https://novai-assets-xxxx.oss-cn-hongkong.aliyuncs.com/...</b>（不是服务器 IP 开头的路径）。</li>
+      <li>换个浏览器注册普通账号（用邀请码），确认看不到管理员的画布和素材。</li>
+      <li>让我重启一次服务器，网站 1 分钟内自动恢复。</li>
+    </ol>
+    <p>全部通过后：后台生成 <b>6 位数字邀请码</b>（一码一次、7 天有效），发 3–5 个朋友试一周。</p>
+  </section>
+
+  <div class="section-title">常见坑</div>
+  <div id="pit" class="grid">
+    <div class="card"><h4>没实名</h4><p>买不了 ECS、域名解析会被锁。先做实名再买。</p></div>
+    <div class="card"><h4>域名实名要 1–2 天</h4><p>通过前解析不了，先买先审，别拖到最后。</p></div>
+    <div class="card"><h4>香港 4 核 8G 可能没货</h4><p>先买 2 核 4G 跑起来，后面随时能升配。</p></div>
+    <div class="card"><h4>带宽别选固定</h4><p>按使用流量便宜得多，图片走 OSS 后 ECS 流量很小。</p></div>
+    <div class="card"><h4>安全组别开 3000</h4><p>网站只走 80/443，其他端口不该暴露。</p></div>
+    <div class="card"><h4>公共读图床</h4><p>拿到链接的人都能看图；路径随机不能遍历，但敏感图别传。</p></div>
+    <div class="card"><h4>主账号 AccessKey 不能外发</h4><p>只给 OSS 权限的小号，部署完可禁用。</p></div>
+    <div class="card"><h4>OSS 桶名全球唯一</h4><p>被占就换后缀，不用纠结。</p></div>
+    <div class="card"><h4>别用大陆 CDN 加速 OSS</h4><p>那要备案；香港不需要。</p></div>
+    <div class="card"><h4>密码 / 密钥单独发</h4><p>用私聊或密码管理器，事后可改可停。</p></div>
+  </div>
+
+  <div class="section-title">费用参考（以购买页为准）</div>
+  <table>
+    <thead><tr><th>项目</th><th>费用</th><th style="width:40%">说明</th></tr></thead>
+    <tbody>
+      <tr><td>ECS 4 核 8G（香港，包月）</td><td>约 500–900 元/月</td><td>2 核 4G 大约便宜一半</td></tr>
+      <tr><td>公网流量</td><td>按 GB 计费</td><td>图片走 OSS 后很少</td></tr>
+      <tr><td>OSS 存储 100G</td><td>约 20–50 元/月</td><td>按实际用量</td></tr>
+      <tr><td>OSS 公网流量</td><td>按 GB 计费</td><td>看图 / 下载产生</td></tr>
+      <tr><td>域名 .com</td><td>约 60–100 元/年</td><td>含免费实名</td></tr>
+      <tr><td>SSL 证书</td><td>0 元</td><td>Let's Encrypt 免费，自动续期</td></tr>
+    </tbody>
+  </table>
+
+  <div class="section-title">你的勾选清单</div>
+  <div id="checklist" class="check">
+    <label><input type="checkbox" data-k="c1"><span>阿里云注册 + 实名 + 充值<span class="note">第 1 步</span></span></label>
+    <label><input type="checkbox" data-k="c2"><span>买 ECS（香港 / 4 核 8G / Ubuntu 22.04 / 100G / 按流量）<span class="note">第 2 步</span></span></label>
+    <label><input type="checkbox" data-k="c3"><span>安全组放行 22 / 80 / 443<span class="note">第 3 步</span></span></label>
+    <label><input type="checkbox" data-k="c4"><span>建 OSS 公共读桶 + 私有备份桶<span class="note">第 4 步</span></span></label>
+    <label><input type="checkbox" data-k="c5"><span>开 RAM 小号 novai-deploy + 只给 OSS 权限 + 建 AccessKey<span class="note">第 5 步</span></span></label>
+    <label><input type="checkbox" data-k="c6"><span>买 .com 域名 + 实名<span class="note">第 6 步</span></span></label>
+    <label><input type="checkbox" data-k="c7"><span>加两条 A 记录（@ / www）<span class="note">第 7 步</span></span></label>
+    <label><input type="checkbox" data-k="c8"><span>发我：IP + root 密码、两个桶名、AccessKey、域名<span class="note">第 8 步</span></span></label>
+    <label><input type="checkbox" data-k="c9"><span>手机 4G 验收 6 条<span class="note">第 10 步</span></span></label>
+    <label><input type="checkbox" data-k="c10"><span>后台生成 6 位邀请码，发朋友试用<span class="note">试运行</span></span></label>
+  </div>
+
+  <div class="section-title">可选 · 钉钉告警（5 分钟）</div>
+  <div class="panel" style="margin-top:0">
+    <p style="margin:0;font-size:14px;color:var(--sub)">钉钉建群 → 群设置 → 智能群助手 → 添加机器人 → 自定义 → 安全设置选「关键词」（填 NOVAI）→ 复制 Webhook 发我。之后磁盘快满、APImart 余额低、服务挂掉会直接推到群里。</p>
+  </div>
+
+  <footer class="foot">
+    <span>NOVAI · 服务器搭建详细操作手册 · 对应仓库 docs/服务器搭建详细步骤.md</span>
+    <span>卡在哪一步就截图发我（密码 / 密钥打码），我告诉你点哪里。</span>
+  </footer>
+
+</div>
+<script>
+  document.querySelectorAll('#checklist input[type=checkbox]').forEach(function (box) {
+    var key = 'novai-deploy-' + box.dataset.k;
+    try { if (localStorage.getItem(key) === '1') { box.checked = true; box.parentElement.classList.add('done'); } } catch (e) {}
+    box.addEventListener('change', function () {
+      box.parentElement.classList.toggle('done', box.checked);
+      try { localStorage.setItem(key, box.checked ? '1' : '0'); } catch (e) {}
+    });
+  });
+</script>
+</body>
+</html>

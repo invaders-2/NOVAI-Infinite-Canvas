@@ -14,10 +14,14 @@
     <script src="/static/js/shared/viewport.js?v=1.0.136.1789606971"></script>
     <script defer src="/static/js/touch-mouse.js?v=1.0.136.1789606971"></script>
     <script src="/static/js/i18n.js?v=1.0.136.1790130330"></script>
+    <script defer src="/static/js/credits.js?v=1.0.136.1792815506"></script>
+    <script src="/static/js/user-menu.js?v=1.0.136.1792776481" defer></script>
     <script src="/static/js/shared/morph-button.js?v=1.0.136.1789845865"></script>
     <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.136.1790560477">
     <link rel="stylesheet" href="/static/css/theme.css?v=1.0.136.1790560477">
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.136.1790560477">
+    <link rel="stylesheet" href="/static/css/canvas-perms.css?v=1.0.136.1792747657">
+    <script defer src="/static/js/canvas-perms.js?v=1.0.136.1792738024"></script>
 
     <style>
         /* ═══ V4 Apple-style Glassmorphism Design System ═══ */
@@ -1248,11 +1252,16 @@
                 }
 
                 const kindBadge = isSmart ? `<span class="card-preview-count" style="background:var(--accent);color:var(--text-on-accent)">智能</span>` : `<span class="card-preview-count">画布</span>`;
+                const accessRole = c.access_role || '';
+                const shareTag = accessRole === 'viewer'
+                    ? '<span class="card-share-badge viewer">只读</span>'
+                    : (accessRole === 'editor' ? '<span class="card-share-badge editor">可编辑</span>' : '');
 
                 card.innerHTML = `
                     <div class="card-preview" data-thumbs="${thumbs.length}" style="aspect-ratio:16/10">
                         ${previewHTML}
                         ${kindBadge}
+                        ${shareTag}
                         <button class="card-more-btn" aria-label="更多操作">
                             <svg fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="6" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></svg>
                         </button>
@@ -1266,6 +1275,10 @@
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                             复制画布
                         </button>
+                        ${accessRole ? `<button class="card-more-menu-item" data-action="permissions">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+                            权限
+                        </button>` : ''}
                         <button class="card-more-menu-item delete" data-action="delete">
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                             删除
@@ -1328,6 +1341,8 @@
                     if (confirm(`确定要复制画布「${c.title}」吗？`)) {
                         duplicateCanvasAPI(c);
                     }
+                } else if (action === 'permissions') {
+                    if (window.NOVAI_CANVAS_PERMS) window.NOVAI_CANVAS_PERMS.open(c);
                 } else if (action === 'delete') {
                     if (confirm(`确定要删除画布「${c.title}」吗？此操作可在回收站撤销。`)) {
                         deleteCanvasAPI(c.id);

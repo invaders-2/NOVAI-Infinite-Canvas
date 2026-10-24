@@ -50,8 +50,8 @@ const constNames = ['SMART_GROUP_MIN_WIDTH','SMART_GROUP_MIN_HEIGHT','SMART_GROU
     'SMART_GROUP_ARRANGE_PADDING','SMART_GROUP_ARRANGE_GAP','SMART_GROUP_ARRANGE_HEADER','SMART_GROUP_MAX_MEMBER_ZOOM',
     'MEDIA_GROUP_THUMB_BASE','MEDIA_GROUP_DEFAULT_SCALE','SMART_GROUP_MAX_VISIBLE_ROWS','MEDIA_NODE_DEFAULT_SCALE','MEDIA_GROUP_MAX_VISIBLE_ROWS'];
 const fnNames = ['smartGroupMembers','smartGroupCompactMembers','smartGroupMemberImageNodes','smartGroupCardImageRefs',
-    'mediaLayoutSize','mediaNodeDefaultScale','isAudioMediaItem','isVideoMediaItem','smartGroupSingleInnerBox','singleImageLayout',
-    'groupImageGridLayout','smartGroupThumbLayout','arrangeSmartGroupMembersInFrame','arrangeSmartGroupMembers','smartGroupFreeResizeBox',
+    'mediaLayoutSize','mediaCellAspect','mediaNodeDefaultScale','isAudioMediaItem','isVideoMediaItem','smartGroupSingleInnerBox','singleImageLayout',
+    'groupImageGridLayout','smartGroupThumbLayout','smartGroupMemberFrameAspect','fitManualMediaGridLayout','arrangeSmartGroupMembersInFrame','arrangeSmartGroupMembers','smartGroupFreeResizeBox',
     'smartGroupReadingRowTolerance','smartGroupReadingOrder'];
 let src = constNames.map(c => constant(js, c)).filter(Boolean).join('\n') + '\n';
 src += 'let nodes=[];let canvas={connections:[]};\n';

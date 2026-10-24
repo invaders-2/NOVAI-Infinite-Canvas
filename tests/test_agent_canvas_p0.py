@@ -445,7 +445,11 @@ class ConfirmFlowTests(unittest.TestCase):
         events = _drain_run(_req(), execute, [{"done": True, "message": "好"}])
         done = [d for n, d in events if n == "done"][0]
         self.assertIn("changes", done)
-        self.assertEqual(set(done["changes"]), {"nodes_created", "nodes_modified", "nodes_deleted", "connections", "generations"})
+        # artifacts 是「本轮产物」新增字段（artifact_updated 事件同源），其余字段不变
+        self.assertEqual(set(done["changes"]),
+                         {"nodes_created", "nodes_modified", "nodes_deleted", "connections",
+                          "generations", "artifacts"})
+        self.assertIsInstance(done["changes"]["artifacts"], list)
         self.assertFalse(done["undoable"])
 
 

@@ -2,7 +2,7 @@
    - 左上胶囊：点开小菜单（重命名 / 返回画布列表），重命名复用 #smartTitle 的既有就地编辑，返回走 window.backToCanvasList；
    - 左侧竖栏：不复制 id，按钮点击后触发右上角/底部已有的按钮（事件仍由 smart-canvas.js 绑定），
      「+」走 window.openCreateMenu（与双击菜单同一个入口）；
-   - 齿轮：切换深浅主题（画布页默认深色，用户选择会写进 localStorage，不破坏现有主题体系）。 */
+   - 齿轮：打开应用设置（navigate api-settings），画布主题跟随应用主题。 */
 (function(){
     'use strict';
 
@@ -15,26 +15,6 @@
         if(!el) return;
         if(typeof el.click === 'function') el.click();
     }
-
-    /* ── 画布页默认深色 ──
-       theme.js 在没有显式选择时按浅色应用；这里只在用户没存过主题时补回深色，
-       不写 localStorage，因此用户点齿轮切到浅色后依然是真实选择（不破坏主题切换）。 */
-    (function ensureCanvasDefaultDark(){
-        const hasStoredTheme = () => Boolean(localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme'));
-        const ensure = () => {
-            if(hasStoredTheme()) return;
-            if(!window.StudioTheme || typeof window.StudioTheme.apply !== 'function') return;
-            if(document.documentElement.classList.contains('studio-theme-dark')) return;
-            window.StudioTheme.apply('dark');
-        };
-        ensure();
-        document.addEventListener('DOMContentLoaded', ensure);
-        window.addEventListener('studio-theme-change', ensure);
-        /* theme.js 在 DOMContentLoaded 里还会按存储值再应用一次；用属性观察兜底，用户存过主题后自动停手 */
-        try {
-            new MutationObserver(ensure).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-        } catch(_) {}
-    })();
 
     /* ── 左上胶囊菜单 ── */
     (function bindCanvasPill(){

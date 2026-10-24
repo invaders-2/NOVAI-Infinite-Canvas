@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>分享的画布 · NOVAI</title>
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <link rel="stylesheet" href="/static/css/share.css?v=1.0.136.1792773344">
+</head>
+<body>
+    <div class="share-app">
+        <header class="share-top" id="shareTop" hidden>
+            <div class="share-brand">
+                <span class="share-brand-mark" aria-hidden="true">N</span>
+                <span class="share-brand-name">NOVAI</span>
+                <span class="share-brand-divider" aria-hidden="true"></span>
+                <h1 class="share-canvas-title" id="shareTitle">画布</h1>
+            </div>
+            <div class="share-top-actions">
+                <button class="share-clone-btn" id="shareCloneBtn" type="button" hidden>克隆到我的画布</button>
+                <a class="share-open-app" id="shareOpenApp" href="/">打开 NOVAI</a>
+            </div>
+        </header>
+
+        <main class="share-stage" id="shareStage" aria-label="画布预览">
+            <div class="share-world" id="shareWorld"></div>
+        </main>
+
+        <footer class="share-foot" id="shareFoot" hidden>
+            <span>由 <b id="shareOwner"></b> 分享 · 只读</span>
+        </footer>
+
+        <div class="share-state" id="shareState">
+            <div class="share-loading" id="shareLoading">
+                <span class="share-spinner" aria-hidden="true"></span>
+                <p>正在加载分享的画布…</p>
+            </div>
+            <section class="share-card" id="shareGate" hidden>
+                <div class="share-gate-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2.4"/><path d="M8 10V7.4a4 4 0 0 1 8 0V10"/></svg>
+                </div>
+                <h1 id="shareGateTitle">此画布需要密码</h1>
+                <p class="share-card-sub" id="shareGateSub">输入访问密码后即可查看</p>
+                <form class="share-gate-form" id="sharePasswordForm">
+                    <input id="sharePasswordInput" type="password" placeholder="访问密码" autocomplete="current-password" aria-label="访问密码">
+                    <button type="submit">打开</button>
+                </form>
+                <p class="share-gate-error" id="shareGateError" hidden></p>
+            </section>
+            <section class="share-card" id="shareMessage" hidden>
+                <div class="share-gate-icon" id="shareMessageIcon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.4v.1"/></svg>
+                </div>
+                <h1 id="shareMessageTitle">链接无效或已被关闭</h1>
+                <p class="share-card-sub" id="shareMessageText">请向画布创建者确认分享链接是否仍然有效。</p>
+                <a class="share-card-link" id="shareMessageAction" href="/" hidden>返回首页</a>
+            </section>
+        </div>
+
+        <div class="share-toast" id="shareToast" role="status" aria-live="polite" hidden></div>
+    </div>
+    <script src="/static/js/share-view.js?v=1.0.136.1792773522"></script>
+</body>
+</html>

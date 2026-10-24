@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>重置密码 · NOVAI</title>
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.136.1790560477">
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark', 'theme-dark');
+                }
+            } catch (e) { }
+        })();
+    </script>
+    <style>
+        * { box-sizing: border-box; }
+
+        html,
+        body {
+            min-height: 100%;
+            margin: 0;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            color: var(--text);
+            background:
+                radial-gradient(1200px 600px at 12% -10%, var(--accent-subtle), transparent 60%),
+                radial-gradient(900px 500px at 100% 110%, var(--info-bg), transparent 55%),
+                var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .page {
+            width: 100%;
+            max-width: 440px;
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-6);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-3);
+            user-select: none;
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .brand img {
+            width: 34px;
+            height: 34px;
+            border-radius: var(--radius-md);
+        }
+
+        .brand-name {
+            font-size: var(--text-xl);
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: -0.01em;
+        }
+
+        .brand-tag {
+            font-size: var(--text-xs);
+            color: var(--text-2);
+            background: var(--soft);
+            border-radius: var(--radius-pill);
+            padding: 2px 8px;
+        }
+
+        .card {
+            background: var(--surface);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-lg);
+            padding: var(--space-8);
+        }
+
+        h1 {
+            margin: 0 0 var(--space-1);
+            font-size: var(--text-2xl);
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: var(--tracking-2xl);
+        }
+
+        .sub {
+            margin: 0 0 var(--space-5);
+            color: var(--text-2);
+            font-size: var(--text-base);
+            line-height: var(--leading-relaxed);
+        }
+
+        .notice {
+            margin: 0 0 var(--space-5);
+            padding: 10px 12px;
+            border-radius: var(--radius-md);
+            background: var(--info-bg);
+            color: var(--info-text);
+            font-size: var(--text-sm);
+            line-height: var(--leading-normal);
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: var(--space-4);
+            font-size: var(--text-xs);
+            color: var(--text-2);
+        }
+
+        .field input {
+            height: 42px;
+            padding: 0 12px;
+            background: var(--surface-2);
+            border: 0;
+            border-radius: var(--radius-md);
+            color: var(--text);
+            font: inherit;
+            font-size: var(--text-base);
+            outline: none;
+            transition: background var(--duration-fast) var(--fast-ease), box-shadow var(--duration-fast) var(--fast-ease);
+        }
+
+        .field input::placeholder { color: var(--text-3); }
+
+        .field input:focus {
+            background: var(--surface);
+            box-shadow: 0 0 0 3px var(--accent-subtle);
+        }
+
+        .field input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .field .hint {
+            font-size: var(--text-xs);
+            color: var(--text-3);
+            line-height: var(--leading-normal);
+        }
+
+        .alert {
+            display: none;
+            margin: 0 0 var(--space-4);
+            padding: 10px 12px;
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            line-height: var(--leading-snug);
+            background: var(--danger-bg);
+            color: var(--danger-text);
+        }
+
+        .alert[data-show="true"] { display: block; }
+
+        .alert[data-tone="ok"] {
+            background: var(--success-bg);
+            color: var(--success-text);
+        }
+
+        .primary {
+            width: 100%;
+            height: 44px;
+            border: 0;
+            border-radius: var(--radius-md);
+            background: var(--accent);
+            color: var(--accent-text);
+            font: inherit;
+            font-size: var(--text-base);
+            font-weight: var(--font-weight-medium);
+            cursor: pointer;
+            transition: background var(--duration-fast) var(--fast-ease), transform var(--duration-fast) var(--fast-ease);
+        }
+
+        .primary:hover { background: var(--accent-hover); }
+        .primary:active { background: var(--accent-pressed); transform: translateY(0.5px); }
+        .primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+        .footer {
+            margin-top: var(--space-5);
+            font-size: var(--text-xs);
+            color: var(--text-3);
+            text-align: center;
+            line-height: var(--leading-relaxed);
+        }
+
+        .footer a,
+        .success a {
+            color: var(--info-text);
+            text-decoration: none;
+        }
+
+        .footer a:hover,
+        .success a:hover { text-decoration: underline; }
+
+        .success[hidden] { display: none; }
+
+        .success .link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 42px;
+            padding: 0 20px;
+            margin-top: var(--space-3);
+            border-radius: var(--radius-md);
+            background: var(--accent);
+            color: var(--accent-text);
+            font-size: var(--text-sm);
+            font-weight: var(--font-weight-medium);
+            text-decoration: none;
+        }
+
+        .success .link:hover { background: var(--accent-hover); text-decoration: none; }
+
+        a:focus-visible,
+        button:focus-visible,
+        input:focus-visible {
+            outline: 2px solid var(--info);
+            outline-offset: 2px;
+        }
+
+        @media (max-width: 480px) {
+            .card { padding: var(--space-5); }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page">
+        <a class="brand" href="/login">
+            <img src="/static/images/logo.png" alt="NOVAI">
+            <span class="brand-name">NOVAI</span>
+            <span class="brand-tag">找回密码</span>
+        </a>
+
+        <main class="card">
+            <h1>重置密码</h1>
+            <p class="sub">用管理员发给你的一次性重置码，设置一个新密码。</p>
+
+            <p class="notice">邀请制：重置码由管理员生成，请向管理员索取 6 位重置码（15 分钟内有效，只能用一次）。</p>
+
+            <div class="alert" id="alert" role="alert"></div>
+
+            <form id="reset-form" novalidate>
+                <label class="field">
+                    <span>用户名</span>
+                    <input id="username" type="text" autocomplete="username" placeholder="你的用户名"
+                        maxlength="32" required>
+                </label>
+
+                <label class="field">
+                    <span>重置码</span>
+                    <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                        placeholder="6 位数字" maxlength="6" required>
+                </label>
+
+                <label class="field">
+                    <span>新密码</span>
+                    <input id="new-password" type="password" autocomplete="new-password"
+                        placeholder="至少 8 位" maxlength="128" required>
+                </label>
+
+                <label class="field">
+                    <span>确认新密码</span>
+                    <input id="confirm-password" type="password" autocomplete="new-password"
+                        placeholder="再输入一次" maxlength="128" required>
+                </label>
+
+                <button class="primary" id="submit" type="submit">重置密码</button>
+            </form>
+
+            <div class="success" id="success" hidden>
+                <div class="alert" id="success-alert" data-show="true" data-tone="ok" role="status">
+                    密码已重置。该账号在所有设备上的登录都已失效，请用新密码重新登录。
+                </div>
+                <a class="link" href="/login">去登录</a>
+            </div>
+
+            <div class="footer">想起密码了？<a href="/login">返回登录</a></div>
+        </main>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            var $ = function (id) { return document.getElementById(id); };
+            var form = $('reset-form');
+            var alertBox = $('alert');
+            var submitBtn = $('submit');
+            var fields = ['username', 'code', 'new-password', 'confirm-password'].map(function (id) {
+                return $(id);
+            });
+
+            function showAlert(message, tone) {
+                alertBox.textContent = message;
+                alertBox.setAttribute('data-tone', tone || 'error');
+                alertBox.setAttribute('data-show', 'true');
+            }
+
+            function clearAlert() {
+                alertBox.textContent = '';
+                alertBox.setAttribute('data-show', 'false');
+            }
+
+            function messageFor(error, status) {
+                var code = error && error.code;
+                if (code === 'invalid_reset_code') return '重置码无效或已使用，请向管理员重新索取。';
+                if (code === 'reset_code_expired') return '重置码已过期，请向管理员重新索取。';
+                if (code === 'invalid_password' || code === 'weak_password') return '新密码需为 8-128 个字符。';
+                if (code === 'user_disabled') return '账号已被停用，请联系管理员。';
+                if (code === 'auth_disabled') return '当前服务未开启登录体系。';
+                if (code === 'rate_limited' || status === 429) return '尝试过于频繁，请一小时后再试。';
+                return (error && error.detail) ? String(error.detail) : '请求失败，请稍后重试。';
+            }
+
+            function setBusy(busy) {
+                submitBtn.disabled = busy;
+                submitBtn.textContent = busy ? '重置中…' : '重置密码';
+                fields.forEach(function (input) { input.disabled = busy; });
+            }
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                clearAlert();
+
+                var username = $('username').value.trim();
+                var code = $('code').value.trim();
+                var newPassword = $('new-password').value;
+                var confirmPassword = $('confirm-password').value;
+
+                if (!username || !code) {
+                    showAlert('请填写用户名和 6 位重置码。');
+                    return;
+                }
+                if (!/^\d{6}$/.test(code)) {
+                    showAlert('重置码是 6 位数字，请检查后重试。');
+                    return;
+                }
+                if (newPassword.length < 8 || newPassword.length > 128) {
+                    showAlert('新密码需为 8-128 个字符。');
+                    return;
+                }
+                if (newPassword !== confirmPassword) {
+                    showAlert('两次输入的新密码不一致。');
+                    return;
+                }
+
+                setBusy(true);
+                fetch('/api/auth/reset-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ username: username, code: code, new_password: newPassword })
+                }).then(function (response) {
+                    return response.json().catch(function () { return {}; }).then(function (data) {
+                        if (!response.ok) {
+                            throw { code: data && data.code, detail: data && data.detail, status: response.status };
+                        }
+                        return data;
+                    });
+                }).then(function () {
+                    form.hidden = true;
+                    $('success').hidden = false;
+                    form.reset();
+                }).catch(function (error) {
+                    setBusy(false);
+                    showAlert(messageFor(error, error && error.status));
+                });
+            });
+
+            // auth 关闭时页面本应 404；这里只做兜底提示，避免出现死表单
+            fetch('/api/auth/me', { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+                .then(function (response) { return response.json(); })
+                .then(function (data) {
+                    if (data && data.auth_enabled === false) {
+                        setBusy(true);
+                        showAlert('当前服务未开启登录体系，可以直接访问首页。', 'ok');
+                    }
+                })
+                .catch(function () { });
+
+            $('username').focus();
+        })();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,1315 @@
+{
+ "schema_version": 1,
+ "generated_at": "2026-10-24T12:23:22+0800",
+ "source": {
+  "providers": "data/api_providers.json",
+  "pricing": "server/credits/apimart_pricing.json"
+ },
+ "entries": {
+  "modelscope|image|Tongyi-MAI/Z-Image-Turbo": {
+   "provider": "modelscope",
+   "kind": "image",
+   "model": "Tongyi-MAI/Z-Image-Turbo",
+   "target": "z-image-turbo",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "modelscope|image|Qwen/Qwen-Image-2512": {
+   "provider": "modelscope",
+   "kind": "image",
+   "model": "Qwen/Qwen-Image-2512",
+   "target": "qwen-image-2.0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "modelscope|image|Qwen/Qwen-Image-Edit-2511": {
+   "provider": "modelscope",
+   "kind": "image",
+   "model": "Qwen/Qwen-Image-Edit-2511",
+   "target": "qwen-image-2.0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "modelscope|image|black-forest-labs/FLUX.2-klein-9B": {
+   "provider": "modelscope",
+   "kind": "image",
+   "model": "black-forest-labs/FLUX.2-klein-9B",
+   "target": "flux-2-flex",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "volcengine|chat|deepseek-v4-1-flash-260910": {
+   "provider": "volcengine",
+   "kind": "chat",
+   "model": "deepseek-v4-1-flash-260910",
+   "target": "deepseek-v4.1-flash",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|image|agnes-image-2.0-flash": {
+   "provider": "agnes-ai",
+   "kind": "image",
+   "model": "agnes-image-2.0-flash",
+   "target": "gpt-image-2.5-ext",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|image|agnes-image-2.1-flash": {
+   "provider": "agnes-ai",
+   "kind": "image",
+   "model": "agnes-image-2.1-flash",
+   "target": "gpt-image-2.5-ext",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|image|agnes-image-2.5-flash": {
+   "provider": "agnes-ai",
+   "kind": "image",
+   "model": "agnes-image-2.5-flash",
+   "target": "gpt-image-2.5-ext",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|video|agnes-video-2.5": {
+   "provider": "agnes-ai",
+   "kind": "video",
+   "model": "agnes-video-2.5",
+   "target": "seedance-2.5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|video|agnes-video-2.5-flash": {
+   "provider": "agnes-ai",
+   "kind": "video",
+   "model": "agnes-video-2.5-flash",
+   "target": "seedance-2.5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|video|agnes-video-v2.0": {
+   "provider": "agnes-ai",
+   "kind": "video",
+   "model": "agnes-video-v2.0",
+   "target": "seedance-2.5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|chat|agnes-2.0-flash": {
+   "provider": "agnes-ai",
+   "kind": "chat",
+   "model": "agnes-2.0-flash",
+   "target": "gemini-3.5-flash",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|chat|agnes-2.5-flash": {
+   "provider": "agnes-ai",
+   "kind": "chat",
+   "model": "agnes-2.5-flash",
+   "target": "gemini-3.5-flash",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|chat|agnes-2.5-pro": {
+   "provider": "agnes-ai",
+   "kind": "chat",
+   "model": "agnes-2.5-pro",
+   "target": "gemini-3-pro-preview",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|chat|agnes-2.5-pro-alpha": {
+   "provider": "agnes-ai",
+   "kind": "chat",
+   "model": "agnes-2.5-pro-alpha",
+   "target": "gemini-3-pro-preview",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|chat|agnes-2.5-pro-beta": {
+   "provider": "agnes-ai",
+   "kind": "chat",
+   "model": "agnes-2.5-pro-beta",
+   "target": "gemini-3-pro-preview",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "agnes-ai|chat|agnes-3.0-flash": {
+   "provider": "agnes-ai",
+   "kind": "chat",
+   "model": "agnes-3.0-flash",
+   "target": "gemini-3.8-flash",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_flare": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_flare",
+   "target": "gpt-image-2.5-flare",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_flare_low": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_flare_low",
+   "target": "gpt-image-2.5-flare",
+   "mode": "proxy",
+   "quality": "low",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_flare_medium": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_flare_medium",
+   "target": "gpt-image-2.5-flare",
+   "mode": "proxy",
+   "quality": "medium",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_flare_high": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_flare_high",
+   "target": "gpt-image-2.5-flare",
+   "mode": "proxy",
+   "quality": "high",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_flare_xhigh": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_flare_xhigh",
+   "target": "gpt-image-2.5-flare",
+   "mode": "proxy",
+   "quality": "xhigh",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_flare_max": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_flare_max",
+   "target": "gpt-image-2.5-flare",
+   "mode": "proxy",
+   "quality": "max",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_sunburst": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_sunburst",
+   "target": "gpt-image-2.5-sunburst",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_sunburst_low": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_sunburst_low",
+   "target": "gpt-image-2.5-sunburst",
+   "mode": "proxy",
+   "quality": "low",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_sunburst_medium": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_sunburst_medium",
+   "target": "gpt-image-2.5-sunburst",
+   "mode": "proxy",
+   "quality": "medium",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_sunburst_high": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_sunburst_high",
+   "target": "gpt-image-2.5-sunburst",
+   "mode": "proxy",
+   "quality": "high",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_sunburst_xhigh": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_sunburst_xhigh",
+   "target": "gpt-image-2.5-sunburst",
+   "mode": "proxy",
+   "quality": "xhigh",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_5_sunburst_max": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_5_sunburst_max",
+   "target": "gpt-image-2.5-sunburst",
+   "mode": "proxy",
+   "quality": "max",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2",
+   "target": "gpt-image-2",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_low": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_low",
+   "target": "gpt-image-2",
+   "mode": "proxy",
+   "quality": "low",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_medium": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_medium",
+   "target": "gpt-image-2",
+   "mode": "proxy",
+   "quality": "medium",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_2_high": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_2_high",
+   "target": "gpt-image-2",
+   "mode": "proxy",
+   "quality": "high",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_nano_banana_pro": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_nano_banana_pro",
+   "target": "gemini-3-pro-image-preview",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_nano_banana_2": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_nano_banana_2",
+   "target": "gemini-3.1-flash-image-preview",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_seedream_v5_pro": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_seedream_v5_pro",
+   "target": "seedream-5-0-pro",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_gpt_image_1_5": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_gpt_image_1_5",
+   "target": "gpt-image-1.5-official",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_seedream_v5": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_seedream_v5",
+   "target": "seedream-5-0-flash",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_luma_uni_1": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_luma_uni_1",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "显式排除：无常量等价模型"
+  },
+  "lovart|image|generate_image_luma_uni_1_max": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_luma_uni_1_max",
+   "target": "",
+   "mode": "conservative",
+   "quality": "max",
+   "note": "无等价模型，按类型最高价"
+  },
+  "lovart|image|generate_image_flux_2_max": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_flux_2_max",
+   "target": "flux-2-max",
+   "mode": "proxy",
+   "quality": "max",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_flux_2_pro": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_flux_2_pro",
+   "target": "flux-2-pro",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_seedream_v4_5": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_seedream_v4_5",
+   "target": "seedream-4-5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_nano_banana": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_nano_banana",
+   "target": "gemini-2.5-flash-image-preview",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_seedream_v4": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_seedream_v4",
+   "target": "seedream-4-0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_midjourney": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_midjourney",
+   "target": "midjourney",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_ideogram_v4": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_ideogram_v4",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "显式排除：无常量等价模型"
+  },
+  "lovart|image|generate_image_qwen_image3": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_qwen_image3",
+   "target": "qwen-image-3.0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_qwen_image3_pro": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_qwen_image3_pro",
+   "target": "qwen-image-3.0-pro",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_nano_banana_2_lite": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_nano_banana_2_lite",
+   "target": "gemini-3.1-flash-lite-image",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|image|generate_image_p_image_ideogram": {
+   "provider": "lovart",
+   "kind": "image",
+   "model": "generate_image_p_image_ideogram",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "显式排除：无常量等价模型"
+  },
+  "lovart|video|generate_video_seedance_v2_5": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_seedance_v2_5",
+   "target": "seedance-2.5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_seedance_v2_0": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_seedance_v2_0",
+   "target": "seedance-2.0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_seedance_v2_0_fast": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_seedance_v2_0_fast",
+   "target": "seedance-2.0-fast",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_seedance_v2_0_mini": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_seedance_v2_0_mini",
+   "target": "seedance-2.0-mini",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_kling_v3": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_kling_v3",
+   "target": "kling-v3",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_kling_v3_omni": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_kling_v3_omni",
+   "target": "kling-v3-omni",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_minimax_h3": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_minimax_h3",
+   "target": "MiniMax-H3",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_seedance_pro_v1_5": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_seedance_pro_v1_5",
+   "target": "seedance-1-5-pro",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_kling_v2_6": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_kling_v2_6",
+   "target": "kling-v2-6",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_wan_v2_6": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_wan_v2_6",
+   "target": "wan2.6",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_veo3_1": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_veo3_1",
+   "target": "veo3.1-quality-ext（veo3.1-quality）",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_veo3_1_fast": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_veo3_1_fast",
+   "target": "veo3.1-fast-ext（veo3.1-fast）",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_kling_omni_v1": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_kling_omni_v1",
+   "target": "kling-video-o1",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_hailuo_v2_3": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_hailuo_v2_3",
+   "target": "MiniMax-Hailuo-2.3",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_veo3": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_veo3",
+   "target": "veo3.1-quality-ext",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_vidu_q2": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_vidu_q2",
+   "target": "viduq3",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_gemini_omni_flash": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_gemini_omni_flash",
+   "target": "gemini-omni-flash-preview",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_minimax_h3_max": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_minimax_h3_max",
+   "target": "MiniMax-H3-Max",
+   "mode": "proxy",
+   "quality": "max",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_wan_v3": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_wan_v3",
+   "target": "wan3.0-video",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|video|generate_video_wan_v3_prime": {
+   "provider": "lovart",
+   "kind": "video",
+   "model": "generate_video_wan_v3_prime",
+   "target": "wan3.0-video-prime",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "lovart|chat|lovart-agent": {
+   "provider": "lovart",
+   "kind": "chat",
+   "model": "lovart-agent",
+   "target": "gemini-3.5-flash",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|5.0": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "5.0",
+   "target": "seedream-5-0-pro",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|4.6": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "4.6",
+   "target": "seedream-4-5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|4.5": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "4.5",
+   "target": "seedream-4-5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|4.1": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "4.1",
+   "target": "seedream-4-5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|4.0": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "4.0",
+   "target": "seedream-4-0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|3.1": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "3.1",
+   "target": "seedream-4-0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|3.0": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "3.0",
+   "target": "seedream-4-0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|5.0Pro": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "5.0Pro",
+   "target": "seedream-5-0-pro",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|4.7": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "4.7",
+   "target": "seedream-4-5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|video|seedance2.0fast_vip": {
+   "provider": "jimeng",
+   "kind": "video",
+   "model": "seedance2.0fast_vip",
+   "target": "seedance-2.0-fast",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|video|seedance2.0_vip": {
+   "provider": "jimeng",
+   "kind": "video",
+   "model": "seedance2.0_vip",
+   "target": "seedance-2.0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|video|seedance2.0": {
+   "provider": "jimeng",
+   "kind": "video",
+   "model": "seedance2.0",
+   "target": "seedance-2.0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|video|seedance2.0fast": {
+   "provider": "jimeng",
+   "kind": "video",
+   "model": "seedance2.0fast",
+   "target": "seedance-2.0-fast",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|video|seedance2.0mini": {
+   "provider": "jimeng",
+   "kind": "video",
+   "model": "seedance2.0mini",
+   "target": "seedance-2.0-mini",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|video|seedance1.5pro": {
+   "provider": "jimeng",
+   "kind": "video",
+   "model": "seedance1.5pro",
+   "target": "seedance-1-5-pro",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "apimart|image|gemini-3-pro-image-preview": {
+   "provider": "apimart",
+   "kind": "image",
+   "model": "gemini-3-pro-image-preview",
+   "target": "gemini-3-pro-image-preview",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|image|gpt-image-2.5-ext": {
+   "provider": "apimart",
+   "kind": "image",
+   "model": "gpt-image-2.5-ext",
+   "target": "gpt-image-2.5-ext",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|image|gpt-image-2.5-flare": {
+   "provider": "apimart",
+   "kind": "image",
+   "model": "gpt-image-2.5-flare",
+   "target": "gpt-image-2.5-flare",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|image|gpt-image-2.5-sunburst": {
+   "provider": "apimart",
+   "kind": "image",
+   "model": "gpt-image-2.5-sunburst",
+   "target": "gpt-image-2.5-sunburst",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|video|MiniMax-H3": {
+   "provider": "apimart",
+   "kind": "video",
+   "model": "MiniMax-H3",
+   "target": "MiniMax-H3",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|video|MiniMax-H3-Context-IR": {
+   "provider": "apimart",
+   "kind": "video",
+   "model": "MiniMax-H3-Context-IR",
+   "target": "MiniMax-H3-Context-IR",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|video|MiniMax-H3-Max": {
+   "provider": "apimart",
+   "kind": "video",
+   "model": "MiniMax-H3-Max",
+   "target": "MiniMax-H3-Max",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|video|seedance-2.5": {
+   "provider": "apimart",
+   "kind": "video",
+   "model": "seedance-2.5",
+   "target": "seedance-2.5",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|audio|flowmusic": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "flowmusic",
+   "target": "flowmusic@generate",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|audio|gpt-4o-audio-preview": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "gpt-4o-audio-preview",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|audio|gpt-4o-audio-preview-2024-10-01": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "gpt-4o-audio-preview-2024-10-01",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|audio|gpt-4o-mini-tts": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "gpt-4o-mini-tts",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|audio|gpt-audio-mini": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "gpt-audio-mini",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|audio|gpt-audio-mini-2025-10-06": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "gpt-audio-mini-2025-10-06",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|audio|suno": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "suno",
+   "target": "suno@music",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|audio|tts-1": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "tts-1",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|audio|tts-1-1106": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "tts-1-1106",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|audio|tts-1-hd": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "tts-1-hd",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|audio|tts-1-hd-1106": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "tts-1-hd-1106",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|audio|whisper-1": {
+   "provider": "apimart",
+   "kind": "audio",
+   "model": "whisper-1",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "APIMart 价目表无此模型（语音）"
+  },
+  "apimart|chat|claude-fable-5": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "claude-fable-5",
+   "target": "claude-fable-5",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|claude-fable-5.1": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "claude-fable-5.1",
+   "target": "claude-fable-5.1",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3-flash-preview-thinking": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3-flash-preview-thinking",
+   "target": "gemini-3-flash-preview-thinking",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3-pro-preview": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3-pro-preview",
+   "target": "gemini-3-pro-preview",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3-pro-preview-thinking": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3-pro-preview-thinking",
+   "target": "gemini-3-pro-preview-thinking",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3.1-flash-lite-preview": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3.1-flash-lite-preview",
+   "target": "gemini-3.1-flash-lite-preview",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3.1-pro-preview": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3.1-pro-preview",
+   "target": "gemini-3.1-pro-preview",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3.1-pro-preview-thinking": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3.1-pro-preview-thinking",
+   "target": "gemini-3.1-pro-preview-thinking",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3.5-flash": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3.5-flash",
+   "target": "gemini-3.5-flash",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3.5-flash-lite": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3.5-flash-lite",
+   "target": "gemini-3.5-flash-lite",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3.6-flash": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3.6-flash",
+   "target": "gemini-3.6-flash",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3.7-flash": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3.7-flash",
+   "target": "gemini-3.7-flash",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-3.8-flash": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-3.8-flash",
+   "target": "gemini-3.8-flash",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gemini-4-argon": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gemini-4-argon",
+   "target": "gemini-4-argon",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gpt-5.5": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gpt-5.5",
+   "target": "gpt-5.5",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "apimart|chat|gpt-4o-mini": {
+   "provider": "apimart",
+   "kind": "chat",
+   "model": "gpt-4o-mini",
+   "target": "GPT-4o Mini",
+   "mode": "direct",
+   "quality": "",
+   "note": ""
+  },
+  "runninghub|image|gpt-image-2.0/text-to-image-channel-low-price": {
+   "provider": "runninghub",
+   "kind": "image",
+   "model": "gpt-image-2.0/text-to-image-channel-low-price",
+   "target": "gpt-image-2",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "runninghub|image|gpt-image-2.0/edit-channel-low-price": {
+   "provider": "runninghub",
+   "kind": "image",
+   "model": "gpt-image-2.0/edit-channel-low-price",
+   "target": "gpt-image-2",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "runninghub|image|gpt-image-2/text-to-image-official-stable": {
+   "provider": "runninghub",
+   "kind": "image",
+   "model": "gpt-image-2/text-to-image-official-stable",
+   "target": "gpt-image-2",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "runninghub|image|gpt-image-2/image-to-image-official-stable": {
+   "provider": "runninghub",
+   "kind": "image",
+   "model": "gpt-image-2/image-to-image-official-stable",
+   "target": "gpt-image-2",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "runninghub|image|nano-banana/text-to-image-official-stable": {
+   "provider": "runninghub",
+   "kind": "image",
+   "model": "nano-banana/text-to-image-official-stable",
+   "target": "gemini-3-pro-image-preview",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "runninghub|image|nano-banana/edit-official-stable": {
+   "provider": "runninghub",
+   "kind": "image",
+   "model": "nano-banana/edit-official-stable",
+   "target": "gemini-3-pro-image-preview",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "runninghub|video|google/veo3.1-fast/text-to-video-channel-low-price": {
+   "provider": "runninghub",
+   "kind": "video",
+   "model": "google/veo3.1-fast/text-to-video-channel-low-price",
+   "target": "veo3.1-fast-ext（veo3.1-fast）",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "runninghub|video|sora-2/text-to-video-official-stable": {
+   "provider": "runninghub",
+   "kind": "video",
+   "model": "sora-2/text-to-video-official-stable",
+   "target": "",
+   "mode": "conservative",
+   "quality": "",
+   "note": "显式排除：无常量等价模型"
+  },
+  "runninghub|video|seedance-2.0-global/text-to-video": {
+   "provider": "runninghub",
+   "kind": "video",
+   "model": "seedance-2.0-global/text-to-video",
+   "target": "seedance-2.0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "runninghub|video|seedance-2.0-global/image-to-video": {
+   "provider": "runninghub",
+   "kind": "video",
+   "model": "seedance-2.0-global/image-to-video",
+   "target": "seedance-2.0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "codex|image|gpt-image-2": {
+   "provider": "codex",
+   "kind": "image",
+   "model": "gpt-image-2",
+   "target": "gpt-image-2",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "codex|chat|gpt-5.5": {
+   "provider": "codex",
+   "kind": "chat",
+   "model": "gpt-5.5",
+   "target": "gpt-5.5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "gemini-cli|image|auto": {
+   "provider": "gemini-cli",
+   "kind": "image",
+   "model": "auto",
+   "target": "gpt-image-2.5-ext",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "gemini-cli|chat|auto": {
+   "provider": "gemini-cli",
+   "kind": "chat",
+   "model": "auto",
+   "target": "gemini-3.5-flash",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|jimeng-image-2k": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "jimeng-image-2k",
+   "target": "seedream-4-5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|image|jimeng-image-4k": {
+   "provider": "jimeng",
+   "kind": "image",
+   "model": "jimeng-image-4k",
+   "target": "seedream-5-0-pro",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|video|jimeng-video-720p": {
+   "provider": "jimeng",
+   "kind": "video",
+   "model": "jimeng-video-720p",
+   "target": "seedance-2.0",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "jimeng|video|jimeng-video-1080p": {
+   "provider": "jimeng",
+   "kind": "video",
+   "model": "jimeng-video-1080p",
+   "target": "seedance-2.5",
+   "mode": "proxy",
+   "quality": "",
+   "note": "映射到 APIMart 等价模型，按最高档价"
+  }
+ },
+ "conservative": {
+  "image": {
+   "usd": 0.56936,
+   "unit": "per_image",
+   "source_model": "gpt-image-2-official",
+   "source_spec": "2880x2880@high"
+  },
+  "video": {
+   "usd": 0.722,
+   "unit": "per_second",
+   "source_model": "seedance-2.0",
+   "source_spec": "4K"
+  },
+  "audio": {
+   "usd": 0.96,
+   "unit": "per_call",
+   "source_model": "suno@create_model",
+   "source_spec": "default"
+  },
+  "chat": {
+   "input_usd": 120.0,
+   "output_usd": 480.0,
+   "source_model_in": "o1-pro",
+   "source_model_out": "o1-pro",
+   "unit": "per_1m_tokens"
+  }
+ },
+ "coverage": {
+  "configured_models": 123,
+  "builtin_models": 18,
+  "total_entries": 141,
+  "direct": 26,
+  "proxy": 100,
+  "conservative": 15,
+  "uncovered": 0
+ }
+}

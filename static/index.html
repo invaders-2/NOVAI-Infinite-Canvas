@@ -38,6 +38,8 @@
     <script src="/static/js/shared/utils.js?v=1.0.136.1790560477"></script>
     <script src="/static/js/shared/morph-button.js?v=1.0.136.1789845865"></script>
     <script src="/static/js/i18n.js?v=1.0.136.1790130330"></script>
+    <script defer src="/static/js/credits.js?v=1.0.136.1792815506"></script>
+    <script src="/static/js/user-menu.js?v=1.0.136.1792776481" defer></script>
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.136.1789606971">
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.136.1790560477">
     <style>
@@ -3335,14 +3337,14 @@
                     <div class="skeleton-card"></div>
                 </div>
             </div>
-            <iframe id="frame-home" src="/static/home.html?v=1.0.136.1792563798" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.136.1792563798" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=1.0.136.1792563798" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.136.1792563798" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.136.1792563798" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.136.1792563798" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.136.1792563798" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.136.1792563798" scrolling="yes"></iframe>
+            <iframe id="frame-home" src="/static/home.html?v=1.0.136.1792748971" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.136.1792636018" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=1.0.136.1792636018" scrolling="yes"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.136.1792636018" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.136.1792636018" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.136.1792636018" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.136.1792636018" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.136.1792815650" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -5106,9 +5108,38 @@
             });
         })();
 
+        /* API 设置只给管理员：auth 开启且当前用户不是 admin 时隐藏入口，切到该页也回退到「通用」。
+           auth 关闭（本地单机）保持原样可见。 */
+        var novaiCanApiSettings = true;
+        function applyApiSettingsVisibility(allowed) {
+            novaiCanApiSettings = !!allowed;
+            var btn = document.querySelector('.settings-tab[data-settings-tab="api-settings"]');
+            if (btn) {
+                btn.hidden = !allowed;
+                btn.style.display = allowed ? '' : 'none';
+                btn.setAttribute('aria-hidden', allowed ? 'false' : 'true');
+                btn.setAttribute('tabindex', allowed ? '0' : '-1');
+            }
+            if (!allowed) {
+                var active = document.querySelector('.settings-tab.active');
+                if (active && active.dataset.settingsTab === 'api-settings') switchSettingsTab('general');
+            }
+        }
+        function loadAuthForApiSettings() {
+            fetch('/api/auth/me', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+                .then(function (response) { return response.ok ? response.json() : {}; })
+                .catch(function () { return {}; })
+                .then(function (me) {
+                    var authOn = !!(me && me.auth_enabled === true);
+                    applyApiSettingsVisibility(!authOn || (me && me.role === 'admin'));
+                });
+        }
+        loadAuthForApiSettings();
+
         function switchSettingsTab(tabId) {
             const modal = document.getElementById('settings-modal');
             if (!modal) return;
+            if (tabId === 'api-settings' && !novaiCanApiSettings) tabId = 'general';
 
             // 先关闭内嵌详情页（如果之前打开的话）
             closeSettingsDetail();

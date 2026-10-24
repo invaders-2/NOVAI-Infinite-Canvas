@@ -213,7 +213,7 @@ class AgentRunEndpointTests(unittest.TestCase):
                      {"role": "assistant", "text": "好的，马上"}])
 
         async def drive():
-            response = await main.agent_run(payload)
+            response = await main.agent_run(payload, object())   # 路由新增 request 参数（auth-off 放行）
             chunks = [chunk async for chunk in response.body_iterator]
             return response, chunks
 

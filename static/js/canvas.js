@@ -3444,6 +3444,17 @@ function safeDownloadFileName(name, fallback='image.png'){
     const cleaned = String(name || fallback).replace(/[\\/:*?"<>|]+/g, '_').trim() || fallback;
     return cleaned;
 }
+/* 导出基名：画布/分组标题常带着媒体扩展名（如“图57.png”），直接拼 .zip 会变成“图57.png.zip”。
+   只剥掉末尾已知的媒体/文档扩展，“v1.2 海报”这种正常名字里的点保持不动。 */
+function stripExportMediaExt(name){
+    const pattern = /\.(?:png|jpe?g|webp|gif|bmp|svg|mp4|webm|mov|m4v|mkv|avi|mp3|wav|m4a|aac|ogg|json|zip)$/i;
+    let text = String(name == null ? '' : name).trim();
+    while(pattern.test(text)) text = text.slice(0, text.lastIndexOf('.')).trim();
+    return text;
+}
+function exportFileNameBase(name, fallback='download'){
+    return safeDownloadFileName(stripExportMediaExt(name), fallback);
+}
 function downloadNameForGroupImage(item, index=0){
     const fallback = `image-${String(index + 1).padStart(2, '0')}${extensionFromNameOrUrl(item?.name, item?.url)}`;
     let name = safeDownloadFileName(item?.name || outputImageName(item?.url || '') || fallback, fallback);
@@ -3532,13 +3543,14 @@ async function downloadOutputNodeImages(nodeId){
         alert(tr('canvas.outputDownloadEmpty'));
         return;
     }
+    const filename = `${exportFileNameBase(canvas?.title, 'canvas-output').slice(0, 48)}-${node.id}.zip`;
     try {
         const res = await fetch('/api/canvas-assets/download', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
                 urls,
-                filename:`${(canvas?.title || 'canvas-output').slice(0, 48)}-${node.id}.zip`
+                filename
             })
         });
         if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.outputDownloadEmpty')));
@@ -3549,7 +3561,7 @@ async function downloadOutputNodeImages(nodeId){
             link.download = f;
             document.body.appendChild(link); link.click(); link.remove();
             setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-        })(blob, `${(canvas?.title || 'canvas-output').slice(0, 48)}-${node.id}.zip`);
+        })(blob, filename);
     } catch(err) {
         alert(err.message || tr('canvas.outputDownloadEmpty'));
     }
@@ -3561,7 +3573,7 @@ async function downloadGroupNodeImages(groupId){
         alert(tr('canvas.outputDownloadEmpty'));
         return;
     }
-    const filename = safeDownloadFileName(`${canvas?.title || 'canvas-group'}-${group.id}.zip`, 'canvas-group.zip');
+    const filename = safeDownloadFileName(`${exportFileNameBase(canvas?.title, 'canvas-group').slice(0, 48)}-${group.id}.zip`, 'canvas-group.zip');
     try {
         const res = await fetch('/api/canvas-assets/download', {
             method:'POST',
@@ -13962,7 +13974,7 @@ function selectedWorkflowPayload(){
     };
 }
 function workflowFilename(ext){
-    const title = (canvas?.title || 'canvas-workflow').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 48) || 'canvas-workflow';
+    const title = exportFileNameBase(canvas?.title, 'canvas-workflow').slice(0, 48) || 'canvas-workflow';
     const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
     return `${title}-${stamp}.${ext}`;
 }

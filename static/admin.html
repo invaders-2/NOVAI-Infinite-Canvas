@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 · NOVAI</title>
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.136.1790560477">
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark', 'theme-dark');
+                }
+            } catch (e) { }
+        })();
+    </script>
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: var(--font-sans);
+            color: var(--text);
+            background: var(--bg);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        a { color: inherit; }
+
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-4);
+            padding: 14px 28px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(12px);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+        }
+
+        .brand img { width: 28px; height: 28px; border-radius: var(--radius-sm); }
+
+        .brand b { font-size: var(--text-lg); font-weight: var(--font-weight-semibold); }
+
+        .brand-tag {
+            font-size: var(--text-xs);
+            color: var(--text-2);
+            border: 1px solid var(--border-2);
+            border-radius: var(--radius-pill);
+            padding: 2px 8px;
+        }
+
+        .top-actions { display: flex; align-items: center; gap: 10px; }
+
+        .who {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: var(--text-sm);
+            color: var(--text-2);
+        }
+
+        .avatar {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--accent-text);
+            background: var(--accent);
+            text-transform: uppercase;
+            overflow: hidden;
+            flex: none;
+        }
+
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .avatar.has-image {
+            background: var(--surface-2);
+        }
+
+        .user-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .avatar-btn {
+            border: 0;
+            padding: 0;
+            cursor: pointer;
+            position: relative;
+            background: transparent;
+        }
+
+        .avatar-btn .avatar {
+            transition: box-shadow .14s var(--fast-ease), transform .14s var(--fast-ease);
+        }
+
+        .avatar-btn:hover .avatar {
+            box-shadow: 0 0 0 2px var(--info-border);
+            transform: translateY(-1px);
+        }
+
+        .avatar-btn:focus-visible {
+            outline: 2px solid var(--info);
+            outline-offset: 2px;
+            border-radius: 50%;
+        }
+
+        .avatar-btn[data-busy="1"] .avatar {
+            opacity: .55;
+            cursor: progress;
+        }
+
+        .wrap {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 28px 28px 64px;
+        }
+
+        h1 {
+            margin: 0 0 4px;
+            font-size: var(--text-2xl);
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: var(--tracking-2xl);
+        }
+
+        .sub {
+            margin: 0 0 var(--space-6);
+            color: var(--text-2);
+            font-size: var(--text-base);
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: var(--space-4);
+            margin-bottom: var(--space-6);
+        }
+
+        .stat {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .stat-label { font-size: var(--text-sm); color: var(--text-2); margin-bottom: 6px; }
+
+        .stat-value {
+            font-size: var(--text-3xl);
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: var(--tracking-3xl);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .tabs {
+            display: inline-flex;
+            gap: 2px;
+            padding: 3px;
+            background: var(--soft);
+            border-radius: var(--radius-md);
+            margin-bottom: var(--space-4);
+        }
+
+        .tabs button {
+            appearance: none;
+            border: 0;
+            background: transparent;
+            color: var(--text-2);
+            font: inherit;
+            font-size: var(--text-base);
+            font-weight: var(--font-weight-medium);
+            padding: 8px 18px;
+            border-radius: calc(var(--radius-md) - 2px);
+            cursor: pointer;
+            transition: background var(--duration-fast) var(--fast-ease), color var(--duration-fast) var(--fast-ease);
+        }
+
+        .tabs button[aria-selected="true"] {
+            background: var(--surface);
+            color: var(--text);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+            margin-bottom: var(--space-6);
+        }
+
+        .panel[hidden] { display: none; }
+
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: 12px;
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface-2);
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-size: var(--text-xs);
+            color: var(--text-2);
+        }
+
+        .field select,
+        .field input {
+            height: 34px;
+            min-width: 104px;
+            padding: 0 10px;
+            border: 1px solid var(--border-2);
+            border-radius: var(--radius-sm);
+            background: var(--surface);
+            color: var(--text);
+            font: inherit;
+            font-size: var(--text-sm);
+            outline: none;
+        }
+
+        .field select:focus,
+        .field input:focus {
+            border-color: var(--border-strong);
+            box-shadow: 0 0 0 3px var(--accent-subtle);
+        }
+
+        .btn {
+            height: 34px;
+            padding: 0 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-2);
+            background: var(--surface);
+            color: var(--text);
+            font: inherit;
+            font-size: var(--text-sm);
+            font-weight: var(--font-weight-medium);
+            cursor: pointer;
+            transition: background var(--duration-fast) var(--fast-ease), border-color var(--duration-fast) var(--fast-ease);
+            white-space: nowrap;
+        }
+
+        .btn:hover { background: var(--soft); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--accent-text);
+        }
+
+        .btn-primary:hover { background: var(--accent-hover); }
+
+        .btn-danger {
+            color: var(--danger-text);
+            border-color: var(--danger-border);
+            background: var(--danger-bg);
+        }
+
+        .btn-sm {
+            height: 28px;
+            padding: 0 10px;
+            font-size: var(--text-xs);
+        }
+
+        .table-scroll { overflow-x: auto; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: var(--text-sm);
+        }
+
+        th {
+            text-align: left;
+            font-weight: var(--font-weight-medium);
+            color: var(--text-2);
+            font-size: var(--text-xs);
+            letter-spacing: var(--tracking-xs);
+            padding: 10px 18px;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+            background: var(--surface);
+        }
+
+        td {
+            padding: 11px 18px;
+            border-bottom: 1px solid var(--divider);
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+
+        tbody tr:last-child td { border-bottom: 0; }
+        tbody tr:hover { background: var(--surface-2); }
+
+        .code {
+            font-family: var(--font-mono);
+            font-size: var(--text-base);
+            letter-spacing: 0.08em;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .muted { color: var(--text-3); }
+        .num { font-variant-numeric: tabular-nums; }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 2px 8px;
+            border-radius: var(--radius-pill);
+            font-size: var(--text-xs);
+            border: 1px solid var(--border-2);
+            color: var(--text-2);
+            background: var(--surface-2);
+        }
+
+        .badge::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .badge.ok { color: var(--success-text); background: var(--success-bg); border-color: var(--success-border); }
+        .badge.warn { color: var(--warning-text); background: var(--warning-bg); border-color: var(--warning-border); }
+        .badge.bad { color: var(--danger-text); background: var(--danger-bg); border-color: var(--danger-border); }
+        .badge.off { color: var(--text-3); }
+
+        .generated {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin: 0;
+            padding: 14px 18px;
+            background: var(--success-bg);
+            border-bottom: 1px solid var(--success-border);
+            color: var(--success-text);
+            font-size: var(--text-sm);
+        }
+
+        .generated .code { font-size: var(--text-xl); color: var(--text); }
+        .generated[hidden] { display: none; }
+
+        .actions { display: flex; gap: 6px; }
+
+        /* 积分列：余额 + 行内分配按钮 */
+        .credit-cell { display: flex; align-items: center; gap: 8px; }
+        .credit-balance {
+            min-width: 46px;
+            font-variant-numeric: tabular-nums;
+            font-weight: var(--font-weight-semibold);
+        }
+        .credit-balance.is-unknown { color: var(--text-3); font-weight: var(--font-weight-regular); }
+        .credit-form { display: flex; flex-direction: column; gap: 12px; margin: 14px 0 18px; }
+        .credit-form .field input { width: 100%; }
+        .credit-quick { display: flex; gap: 6px; }
+        .modal-error {
+            margin: 0;
+            padding: 9px 12px;
+            border-radius: var(--radius-sm);
+            background: var(--danger-bg);
+            color: var(--danger-text);
+            font-size: var(--text-sm);
+            line-height: var(--leading-normal);
+        }
+        .modal-error[hidden] { display: none; }
+
+        .empty {
+            padding: 32px 18px;
+            text-align: center;
+            color: var(--text-3);
+            font-size: var(--text-sm);
+        }
+
+        .toast {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            z-index: 50;
+            max-width: 360px;
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
+            background: var(--elevated);
+            border: 1px solid var(--border-2);
+            box-shadow: var(--shadow-lg);
+            font-size: var(--text-sm);
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity var(--duration-fast) var(--fast-ease), transform var(--duration-fast) var(--fast-ease);
+            pointer-events: none;
+        }
+
+        .toast.show { opacity: 1; transform: translateY(0); }
+        .toast.error { border-color: var(--danger-border); color: var(--danger-text); }
+
+        .modal {
+            position: fixed;
+            inset: 0;
+            z-index: 60;
+            display: grid;
+            place-items: center;
+            background: var(--scrim);
+            padding: 24px;
+        }
+
+        .modal[hidden] { display: none; }
+
+        .modal-card {
+            width: 100%;
+            max-width: 420px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-xl);
+            padding: 24px;
+        }
+
+        .modal-card h2 {
+            margin: 0 0 6px;
+            font-size: var(--text-lg);
+            font-weight: var(--font-weight-semibold);
+        }
+
+        .modal-card p { margin: 0 0 14px; color: var(--text-2); font-size: var(--text-sm); line-height: var(--leading-relaxed); }
+
+        .temp-pass {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            border: 1px dashed var(--border-strong);
+            border-radius: var(--radius-md);
+            background: var(--surface-2);
+            margin-bottom: 16px;
+        }
+
+        .temp-pass .code { font-size: var(--text-lg); }
+
+        .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+        .skeleton { color: var(--text-3); font-size: var(--text-sm); padding: 18px; }
+
+        @media (max-width: 720px) {
+            .topbar { padding: 12px 16px; }
+            .wrap { padding: 20px 16px 48px; }
+            .stats { grid-template-columns: 1fr; }
+            .who span { display: none; }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="topbar">
+        <a class="brand" href="/">
+            <img src="/static/images/logo.png" alt="NOVAI">
+            <b>NOVAI</b>
+            <span class="brand-tag">管理后台</span>
+        </a>
+        <div class="top-actions">
+            <span class="who"><span class="avatar" id="avatar">A</span><span id="who-name">admin</span></span>
+            <a class="btn" href="/">返回工作台</a>
+            <button class="btn" id="logout">退出登录</button>
+        </div>
+    </header>
+
+    <main class="wrap">
+        <h1>管理后台</h1>
+        <p class="sub">邀请码与账号管理 · 所有操作会写入审计日志</p>
+
+        <section class="stats">
+            <div class="stat"><div class="stat-label">用户数</div><div class="stat-value" id="stat-users">–</div></div>
+            <div class="stat"><div class="stat-label">有效邀请码</div><div class="stat-value" id="stat-invites">–</div></div>
+            <div class="stat"><div class="stat-label">今日注册</div><div class="stat-value" id="stat-today">–</div></div>
+        </section>
+
+        <div class="tabs" role="tablist" aria-label="管理模块">
+            <button type="button" role="tab" data-tab="invites" aria-selected="true">邀请码</button>
+            <button type="button" role="tab" data-tab="users" aria-selected="false">用户</button>
+        </div>
+
+        <section class="panel" id="panel-invites">
+            <p class="generated" id="generated" hidden>
+                <span>已生成邀请码</span>
+                <span class="code" id="generated-code"></span>
+                <button class="btn btn-sm" id="copy-generated">复制</button>
+            </p>
+            <div class="toolbar">
+                <label class="field">可用次数
+                    <select id="invite-uses">
+                        <option value="1">1 次</option>
+                        <option value="3">3 次</option>
+                        <option value="5">5 次</option>
+                        <option value="10">10 次</option>
+                    </select>
+                </label>
+                <label class="field">有效期
+                    <select id="invite-days">
+                        <option value="7">7 天</option>
+                        <option value="1">1 天</option>
+                        <option value="30">30 天</option>
+                        <option value="0">立即过期</option>
+                        <option value="">永不过期</option>
+                    </select>
+                </label>
+                <label class="field">角色
+                    <select id="invite-role">
+                        <option value="user">普通用户</option>
+                        <option value="team">团队</option>
+                        <option value="admin">管理员</option>
+                    </select>
+                </label>
+                <button class="btn btn-primary" id="create-invite">生成邀请码</button>
+                <span class="muted" style="font-size:var(--text-xs)">6 位数字，一次有效</span>
+            </div>
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>邀请码</th><th>角色</th><th>状态</th><th>已用/上限</th><th>过期时间</th><th>创建人</th><th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invite-rows">
+                        <tr><td colspan="7" class="skeleton">加载中…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel" id="panel-users" hidden>
+            <div class="toolbar">
+                <span class="muted" style="font-size:var(--text-xs)">停用会立刻作废该账号的登录态；改角色/重置密码立即生效；重置码 15 分钟内一次性有效</span>
+                <button class="btn" id="refresh" style="margin-left:auto">刷新</button>
+            </div>
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>画布数</th><th>积分</th><th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="user-rows">
+                        <tr><td colspan="7" class="skeleton">加载中…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <div class="toast" id="toast" role="status"></div>
+    <input type="file" id="avatar-file" accept="image/png,image/jpeg,image/webp" hidden>
+
+    <div class="modal" id="credits-modal" hidden>
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="credits-title">
+            <h2 id="credits-title">分配积分</h2>
+            <p id="credits-desc">给 <b id="credits-user">—</b> 调整积分，当前余额 <b id="credits-current">—</b>。</p>
+            <div class="credit-form">
+                <label class="field">调整数量
+                    <input id="credits-delta" type="number" step="0.0001" inputmode="decimal"
+                        placeholder="正数加分，负数扣分" autocomplete="off">
+                </label>
+                <div class="credit-quick">
+                    <button class="btn btn-sm" type="button" data-credit-quick="10">+10</button>
+                    <button class="btn btn-sm" type="button" data-credit-quick="50">+50</button>
+                    <button class="btn btn-sm" type="button" data-credit-quick="-10">-10</button>
+                </div>
+                <label class="field">备注
+                    <input id="credits-note" type="text" maxlength="200" placeholder="选填，写进流水备注" autocomplete="off">
+                </label>
+                <p class="modal-error" id="credits-error" hidden></p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" id="credits-cancel" type="button">取消</button>
+                <button class="btn btn-primary" id="credits-confirm" type="button">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="modal" hidden>
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <h2 id="modal-title">临时密码</h2>
+            <p id="modal-desc">下面这串密码只显示一次，请现在复制给用户；关闭后无法再次查看。</p>
+            <div class="temp-pass">
+                <span class="code" id="temp-password">–</span>
+                <button class="btn btn-sm" id="copy-temp">复制</button>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-primary" id="modal-close">我已保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            var STATUS_TEXT = { active: '可用', exhausted: '已用完', disabled: '已停用', expired: '已过期' };
+            var STATUS_CLASS = { active: 'ok', exhausted: 'warn', disabled: 'bad', expired: 'off' };
+            var ROLE_TEXT = { user: '普通用户', team: '团队', admin: '管理员' };
+            var USER_STATUS_TEXT = { active: '正常', disabled: '已停用' };
+            var state = { users: [], invites: [], me: null, modalKind: 'temp-password', avatarUserId: null, balances: {}, creditUser: null };
+            var toastTimer = null;
+
+            var $ = function (id) { return document.getElementById(id); };
+
+            function escapeHtml(value) {
+                return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+                });
+            }
+
+            function fmtTime(ts) {
+                if (!ts) return '—';
+                var date = new Date(Number(ts) * 1000);
+                if (isNaN(date.getTime())) return '—';
+                var pad = function (n) { return String(n).padStart(2, '0'); };
+                return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+                    ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+            }
+
+            function initialOf(name) {
+                return String(name || '?').trim().slice(0, 1).toUpperCase() || '?';
+            }
+
+            /* 余额展示：最多 4 位小数、去掉无意义尾随 0；非零小额显示 <0.0001，不显示成 0 */
+            function formatCredits(value) {
+                var num = Number(value);
+                if (!isFinite(num)) return '—';
+                var abs = Math.abs(num);
+                if (abs > 0 && abs < 0.0001) return (num < 0 ? '-' : '') + '<0.0001';
+                var rounded = Math.round(num * 10000) / 10000;
+                if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return String(Math.round(rounded));
+                return rounded.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+            }
+
+            /* 用户列表接口目前不返回余额：优先用接口字段，其次用本页调账后的返回值 */
+            function balanceOf(user) {
+                if (!user) return null;
+                var fields = [user.credits, user.balance, user.credit_balance];
+                for (var i = 0; i < fields.length; i += 1) {
+                    var value = Number(fields[i]);
+                    if (fields[i] !== undefined && fields[i] !== null && isFinite(value)) return value;
+                }
+                if (state.balances[String(user.id)] !== undefined) return state.balances[String(user.id)];
+                return null;
+            }
+
+            function balanceHtml(user) {
+                var balance = balanceOf(user);
+                var text = balance === null ? '—' : formatCredits(balance);
+                return '<span class="credit-balance' + (balance === null ? ' is-unknown' : '') +
+                    '" data-credit-balance="' + user.id + '">' + escapeHtml(text) + '</span>';
+            }
+
+            /* 头像：users 里带 avatar_url 就显示图片，否则首字圆 */
+            function avatarBody(url, name) {
+                return url
+                    ? '<img src="' + escapeHtml(url) + '" alt="">'
+                    : escapeHtml(initialOf(name));
+            }
+
+            function avatarHtml(user) {
+                var url = user && user.avatar_url ? String(user.avatar_url) : '';
+                return '<span class="avatar' + (url ? ' has-image' : '') + '">' + avatarBody(url, user && user.username) + '</span>';
+            }
+
+            function setAvatarEl(el, user) {
+                if (!el) return;
+                var url = user && user.avatar_url ? String(user.avatar_url) : '';
+                el.className = 'avatar' + (url ? ' has-image' : '');
+                el.innerHTML = avatarBody(url, user && user.username);
+            }
+
+            function avatarFallback(el, name) {
+                if (!el) return;
+                el.className = 'avatar';
+                el.textContent = initialOf(name);
+            }
+
+            function toast(message, isError) {
+                var box = $('toast');
+                box.textContent = message;
+                box.className = 'toast show' + (isError ? ' error' : '');
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(function () { box.className = 'toast'; }, 3200);
+            }
+
+            function redirectToLogin() {
+                location.replace('/login?next=/admin');
+            }
+
+            async function api(path, options) {
+                var response = await fetch(path, Object.assign({
+                    credentials: 'same-origin',
+                    headers: { 'Accept': 'application/json' }
+                }, options || {}));
+                var data = {};
+                try { data = await response.json(); } catch (e) { }
+                if (response.status === 401) {
+                    redirectToLogin();
+                    throw new Error('未登录');
+                }
+                if (!response.ok) {
+                    var message = (data && data.detail) || ('请求失败：' + response.status);
+                    throw new Error(typeof message === 'string' ? message : '请求失败');
+                }
+                return data;
+            }
+
+            function bindTab(tab) {
+                document.querySelectorAll('[data-tab]').forEach(function (button) {
+                    button.setAttribute('aria-selected', String(button.dataset.tab === tab));
+                });
+                $('panel-invites').hidden = tab !== 'invites';
+                $('panel-users').hidden = tab !== 'users';
+                try { history.replaceState(null, '', '#' + tab); } catch (e) { }
+            }
+
+            function copyText(text) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    return navigator.clipboard.writeText(text);
+                }
+                var area = document.createElement('textarea');
+                area.value = text;
+                area.style.position = 'fixed';
+                area.style.opacity = '0';
+                document.body.appendChild(area);
+                area.select();
+                try { document.execCommand('copy'); } catch (e) { }
+                document.body.removeChild(area);
+                return Promise.resolve();
+            }
+
+            function renderStats(stats) {
+                stats = stats || {};
+                $('stat-users').textContent = stats.users == null ? '–' : stats.users;
+                $('stat-invites').textContent = stats.active_invites == null ? '–' : stats.active_invites;
+                $('stat-today').textContent = stats.new_today == null ? '–' : stats.new_today;
+            }
+
+            function renderInvites() {
+                var rows = $('invite-rows');
+                if (!state.invites.length) {
+                    rows.innerHTML = '<tr><td colspan="7" class="empty">还没有邀请码，点右上角生成一个</td></tr>';
+                    return;
+                }
+                rows.innerHTML = state.invites.map(function (invite) {
+                    var status = invite.status || 'active';
+                    var expired = invite.expires_at ? fmtTime(invite.expires_at) : '永不过期';
+                    var canDisable = status === 'active';
+                    return '<tr>' +
+                        '<td class="code">' + escapeHtml(invite.code) + '</td>' +
+                        '<td>' + escapeHtml(ROLE_TEXT[invite.role] || invite.role) + '</td>' +
+                        '<td><span class="badge ' + (STATUS_CLASS[status] || '') + '">' + (STATUS_TEXT[status] || status) + '</span></td>' +
+                        '<td class="num">' + invite.used + ' / ' + invite.max_uses + '</td>' +
+                        '<td class="muted">' + expired + '</td>' +
+                        '<td class="muted">' + escapeHtml(invite.created_by || '—') + '</td>' +
+                        '<td><div class="actions">' +
+                        '<button class="btn btn-sm" data-copy-invite="' + escapeHtml(invite.code) + '">复制</button>' +
+                        (canDisable
+                            ? '<button class="btn btn-sm btn-danger" data-disable-invite="' + escapeHtml(invite.code) + '">停用</button>'
+                            : '<button class="btn btn-sm" disabled>停用</button>') +
+                        '</div></td></tr>';
+                }).join('');
+            }
+
+            function renderUsers() {
+                var rows = $('user-rows');
+                if (!state.users.length) {
+                    rows.innerHTML = '<tr><td colspan="7" class="empty">还没有用户</td></tr>';
+                    return;
+                }
+                rows.innerHTML = state.users.map(function (user) {
+                    var active = user.status === 'active';
+                    var roleOptions = Object.keys(ROLE_TEXT).map(function (role) {
+                        return '<option value="' + role + '"' + (user.role === role ? ' selected' : '') + '>' + ROLE_TEXT[role] + '</option>';
+                    }).join('');
+                    return '<tr>' +
+                        '<td><div class="user-cell">' +
+                        '<button class="avatar-btn" type="button" data-avatar-user="' + user.id + '"' +
+                        ' title="换头像：' + escapeHtml(user.username) + '" aria-label="换头像：' + escapeHtml(user.username) + '">' +
+                        avatarHtml(user) +
+                        '</button>' +
+                        '<b>' + escapeHtml(user.username) + '</b></div></td>' +
+                        '<td><select class="role-select" data-role-user="' + user.id + '">' + roleOptions + '</select></td>' +
+                        '<td><span class="badge ' + (active ? 'ok' : 'bad') + '">' + (USER_STATUS_TEXT[user.status] || user.status) + '</span></td>' +
+                        '<td class="muted">' + fmtTime(user.created_at) + '</td>' +
+                        '<td class="num">' + (user.canvas_count == null ? 0 : user.canvas_count) + '</td>' +
+                        '<td><div class="credit-cell">' + balanceHtml(user) +
+                        '<button class="btn btn-sm" data-credit-user="' + user.id + '" title="分配积分：' + escapeHtml(user.username) + '">分配</button>' +
+                        '</div></td>' +
+                        '<td><div class="actions">' +
+                        (active
+                            ? '<button class="btn btn-sm btn-danger" data-disable-user="' + user.id + '">停用</button>'
+                            : '<button class="btn btn-sm" data-enable-user="' + user.id + '">启用</button>') +
+                        '<button class="btn btn-sm" data-reset-user="' + user.id + '">重置密码</button>' +
+                        '<button class="btn btn-sm" data-reset-code="' + user.id + '">生成重置码</button>' +
+                        '</div></td></tr>';
+                }).join('');
+            }
+
+            async function loadAll() {
+                try {
+                    var results = await Promise.all([api('/api/admin/users'), api('/api/admin/invites')]);
+                    state.users = results[0].users || [];
+                    state.users.forEach(function (user) {
+                        var value = Number(user.credits);
+                        if (user.credits !== undefined && user.credits !== null && isFinite(value)) {
+                            state.balances[String(user.id)] = value;
+                        }
+                    });
+                    renderStats(results[0].stats);
+                    state.invites = results[1].invites || [];
+                    renderInvites();
+                    renderUsers();
+                } catch (error) {
+                    if (String(error.message) !== '未登录') toast(error.message, true);
+                }
+            }
+
+            async function loadMe() {
+                var me = await api('/api/auth/me');
+                if (!me || me.role !== 'admin') {
+                    redirectToLogin();
+                    return false;
+                }
+                state.me = me;
+                $('who-name').textContent = me.username;
+                setAvatarEl($('avatar'), me);
+                return true;
+            }
+
+            function showSecret(kind, username, secret, note) {
+                state.modalKind = kind;
+                $('modal-title').textContent = kind === 'reset-code' ? '密码重置码' : '临时密码';
+                $('modal-desc').textContent = note;
+                $('temp-password').textContent = secret;
+                $('modal').hidden = false;
+            }
+
+            function showTempPassword(username, password) {
+                showSecret('temp-password', username, password,
+                    '已为 ' + username + ' 生成新的临时密码。这串密码只显示一次，请现在复制给用户；关闭后无法再次查看。');
+            }
+
+            function showResetCode(username, code, expiresAt) {
+                var when = expiresAt ? fmtTime(expiresAt) + ' 前有效' : '15 分钟内有效';
+                showSecret('reset-code', username, code,
+                    '已为 ' + username + ' 生成 6 位重置码，' + when + '（一次性，生成新码会让旧码失效）。' +
+                    '请现在转告用户：在登录页点「忘记密码」，输入用户名、重置码和新密码。');
+            }
+
+            async function uploadAvatar(event) {
+                var file = event.target.files && event.target.files[0];
+                event.target.value = '';
+                var userId = state.avatarUserId;
+                state.avatarUserId = null;
+                if (!file || !userId) return;
+                if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { toast('头像支持 PNG / JPG / WebP', true); return; }
+                if (file.size > 2 * 1024 * 1024) { toast('头像不能超过 2 MB', true); return; }
+                var button = document.querySelector('[data-avatar-user="' + userId + '"]');
+                if (button) button.setAttribute('data-busy', '1');
+                try {
+                    var form = new FormData();
+                    form.append('file', file);
+                    var response = await fetch('/api/admin/users/' + encodeURIComponent(userId) + '/avatar', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Accept': 'application/json' },
+                        body: form
+                    });
+                    var data = {};
+                    try { data = await response.json(); } catch (e) { }
+                    if (response.status === 401) { redirectToLogin(); return; }
+                    if (!response.ok) throw new Error((data && data.detail) || ('上传失败：' + response.status));
+                    await loadAll();
+                    if (state.me && String(state.me.id) === String(userId)) {
+                        try { await loadMe(); } catch (e) { }
+                    }
+                    toast('头像已更新');
+                } catch (error) {
+                    toast(error.message, true);
+                } finally {
+                    if (button) button.removeAttribute('data-busy');
+                }
+            }
+
+            /* ── 积分分配弹窗 ── */
+            function openCreditsModal(user) {
+                if (!user) return;
+                state.creditUser = user;
+                $('credits-user').textContent = user.username || ('#' + user.id);
+                var balance = balanceOf(user);
+                $('credits-current').textContent = balance === null ? '—（分配后返回）' : formatCredits(balance) + ' 积分';
+                $('credits-delta').value = '';
+                $('credits-note').value = '';
+                $('credits-error').hidden = true;
+                $('credits-error').textContent = '';
+                $('credits-confirm').disabled = false;
+                $('credits-modal').hidden = false;
+                setTimeout(function () { $('credits-delta').focus(); }, 20);
+            }
+
+            function closeCreditsModal() {
+                $('credits-modal').hidden = true;
+                state.creditUser = null;
+            }
+
+            function showCreditsError(message) {
+                var box = $('credits-error');
+                box.textContent = String(message || '分配失败');
+                box.hidden = false;
+            }
+
+            function updateCreditRow(userId, balance) {
+                state.balances[String(userId)] = Number(balance);
+                var cells = document.querySelectorAll('[data-credit-balance="' + userId + '"]');
+                for (var i = 0; i < cells.length; i += 1) {
+                    cells[i].textContent = formatCredits(balance);
+                    cells[i].classList.remove('is-unknown');
+                }
+                var user = state.users.find(function (item) { return String(item.id) === String(userId); });
+                if (user) user.credits = Number(balance);
+            }
+
+            async function submitCredits() {
+                var user = state.creditUser;
+                if (!user) return;
+                var raw = String($('credits-delta').value || '').trim();
+                var delta = Number(raw);
+                if (raw === '' || !isFinite(delta)) { showCreditsError('请输入调整数量'); return; }
+                if (Math.abs(delta) < 1e-9) { showCreditsError('调整数量不能为 0'); return; }
+                var button = $('credits-confirm');
+                button.disabled = true;
+                $('credits-error').hidden = true;
+                try {
+                    var result = await api('/api/admin/users/' + user.id + '/credits', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                        body: JSON.stringify({ delta: delta, note: String($('credits-note').value || '').trim() })
+                    });
+                    updateCreditRow(user.id, result.balance);
+                    closeCreditsModal();
+                    toast('已为 ' + user.username + (delta > 0 ? ' 增加 ' : ' 扣减 ') +
+                        formatCredits(Math.abs(delta)) + ' 积分，余额 ' + formatCredits(result.balance));
+                } catch (error) {
+                    showCreditsError(error && error.message ? error.message : '分配失败');
+                } finally {
+                    button.disabled = false;
+                }
+            }
+
+            function bindEvents() {
+                $('avatar-file').addEventListener('change', uploadAvatar);
+                $('user-rows').addEventListener('error', function (event) {
+                    var img = event.target;
+                    if (!img || img.tagName !== 'IMG') return;
+                    var holder = img.parentNode;
+                    if (!holder || !holder.classList || !holder.classList.contains('avatar')) return;
+                    var button = holder.parentNode && holder.parentNode.closest ? holder.parentNode.closest('[data-avatar-user]') : null;
+                    var id = button ? button.getAttribute('data-avatar-user') : '';
+                    var user = state.users.find(function (item) { return String(item.id) === String(id); });
+                    avatarFallback(holder, user ? user.username : '?');
+                }, true);
+                $('avatar').addEventListener('error', function (event) {
+                    if (event.target && event.target.tagName === 'IMG') avatarFallback($('avatar'), state.me && state.me.username);
+                }, true);
+
+                document.querySelectorAll('[data-tab]').forEach(function (button) {
+                    button.addEventListener('click', function () { bindTab(button.dataset.tab); });
+                });
+
+                $('create-invite').addEventListener('click', async function () {
+                    var button = $('create-invite');
+                    var daysValue = $('invite-days').value;
+                    var payload = {
+                        uses: Number($('invite-uses').value),
+                        role: $('invite-role').value
+                    };
+                    if (daysValue !== '') payload.days = Number(daysValue);
+                    else payload.days = null;
+                    button.disabled = true;
+                    try {
+                        var result = await api('/api/admin/invites', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        $('generated-code').textContent = result.code;
+                        $('generated').hidden = false;
+                        bindTab('invites');
+                        await loadAll();
+                        toast('已生成邀请码 ' + result.code);
+                    } catch (error) {
+                        toast(error.message, true);
+                    } finally {
+                        button.disabled = false;
+                    }
+                });
+
+                $('copy-generated').addEventListener('click', function () {
+                    copyText($('generated-code').textContent).then(function () { toast('已复制'); });
+                });
+                $('copy-temp').addEventListener('click', function () {
+                    var label = state.modalKind === 'reset-code' ? '已复制重置码' : '已复制临时密码';
+                    copyText($('temp-password').textContent).then(function () { toast(label); });
+                });
+                $('modal-close').addEventListener('click', function () { $('modal').hidden = true; });
+                $('modal').addEventListener('click', function (event) {
+                    if (event.target === $('modal')) $('modal').hidden = true;
+                });
+                $('refresh').addEventListener('click', function () { loadAll(); toast('已刷新'); });
+                $('credits-cancel').addEventListener('click', closeCreditsModal);
+                $('credits-confirm').addEventListener('click', submitCredits);
+                $('credits-modal').addEventListener('click', function (event) {
+                    var quick = event.target.getAttribute('data-credit-quick');
+                    if (quick) {
+                        $('credits-delta').value = String(Number(quick));
+                        $('credits-delta').focus();
+                        return;
+                    }
+                    if (event.target === $('credits-modal')) closeCreditsModal();
+                });
+                $('credits-delta').addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter') { event.preventDefault(); submitCredits(); }
+                });
+                $('credits-note').addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter') { event.preventDefault(); submitCredits(); }
+                });
+                $('logout').addEventListener('click', async function () {
+                    try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) { }
+                    location.replace('/login');
+                });
+
+                $('invite-rows').addEventListener('click', async function (event) {
+                    var copyCode = event.target.getAttribute('data-copy-invite');
+                    if (copyCode) {
+                        await copyText(copyCode);
+                        toast('已复制邀请码 ' + copyCode);
+                        return;
+                    }
+                    var disableCode = event.target.getAttribute('data-disable-invite');
+                    if (disableCode) {
+                        if (!confirm('停用邀请码 ' + disableCode + '？停用后无法再注册。')) return;
+                        try {
+                            await api('/api/admin/invites/' + encodeURIComponent(disableCode) + '/disable', { method: 'POST' });
+                            await loadAll();
+                            toast('已停用 ' + disableCode);
+                        } catch (error) { toast(error.message, true); }
+                    }
+                });
+
+                $('user-rows').addEventListener('click', async function (event) {
+                    var target = event.target;
+                    var avatarBtn = target.closest ? target.closest('[data-avatar-user]') : null;
+                    if (avatarBtn) {
+                        state.avatarUserId = avatarBtn.getAttribute('data-avatar-user');
+                        $('avatar-file').click();
+                        return;
+                    }
+                    var creditId = target.getAttribute('data-credit-user');
+                    if (creditId) {
+                        user = state.users.find(function (item) { return String(item.id) === String(creditId); });
+                        openCreditsModal(user);
+                        return;
+                    }
+                    var disableId = target.getAttribute('data-disable-user');
+                    var enableId = target.getAttribute('data-enable-user');
+                    var resetId = target.getAttribute('data-reset-user');
+                    var resetCodeId = target.getAttribute('data-reset-code');
+                    var user = null;
+                    try {
+                        if (disableId) {
+                            user = state.users.find(function (item) { return String(item.id) === disableId; });
+                            if (!confirm('停用用户 ' + (user ? user.username : disableId) + '？其登录态会立刻失效。')) return;
+                            await api('/api/admin/users/' + disableId + '/disable', { method: 'POST' });
+                            await loadAll();
+                            toast('已停用');
+                        } else if (enableId) {
+                            await api('/api/admin/users/' + enableId + '/enable', { method: 'POST' });
+                            await loadAll();
+                            toast('已启用');
+                        } else if (resetId) {
+                            user = state.users.find(function (item) { return String(item.id) === resetId; });
+                            if (!confirm('重置 ' + (user ? user.username : resetId) + ' 的密码？旧密码会立刻失效。')) return;
+                            var result = await api('/api/admin/users/' + resetId + '/reset-password', { method: 'POST' });
+                            showTempPassword(result.user ? result.user.username : resetId, result.temp_password);
+                            await loadAll();
+                        } else if (resetCodeId) {
+                            user = state.users.find(function (item) { return String(item.id) === resetCodeId; });
+                            var targetName = user ? user.username : resetCodeId;
+                            if (!confirm('为 ' + targetName + ' 生成一次性密码重置码？15 分钟内有效，生成新码会让旧码失效。')) return;
+                            var codeResult = await api('/api/admin/users/' + resetCodeId + '/reset-code', { method: 'POST' });
+                            showResetCode(codeResult.user ? codeResult.user.username : targetName, codeResult.code, codeResult.expires_at);
+                        }
+                    } catch (error) {
+                        toast(error.message, true);
+                    }
+                });
+
+                $('user-rows').addEventListener('change', async function (event) {
+                    var select = event.target;
+                    var userId = select.getAttribute('data-role-user');
+                    if (!userId) return;
+                    var role = select.value;
+                    try {
+                        await api('/api/admin/users/' + userId + '/role', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                            body: JSON.stringify({ role: role })
+                        });
+                        await loadAll();
+                        toast('角色已更新为 ' + (ROLE_TEXT[role] || role));
+                    } catch (error) {
+                        toast(error.message, true);
+                        await loadAll();
+                    }
+                });
+            }
+
+            async function main() {
+                bindEvents();
+                try {
+                    if (!(await loadMe())) return;
+                } catch (error) {
+                    redirectToLogin();
+                    return;
+                }
+                var hash = (location.hash || '').replace('#', '');
+                bindTab(hash === 'users' ? 'users' : 'invites');
+                await loadAll();
+            }
+
+            main();
+        })();
+    </script>
+</body>
+
+</html>

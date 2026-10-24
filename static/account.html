@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的账户 · NOVAI</title>
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.136.1790560477">
+    <script src="/static/js/credits.js?v=1.0.136.1792815506"></script>
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark', 'theme-dark');
+                }
+            } catch (e) { }
+        })();
+    </script>
+    <style>
+        * { box-sizing: border-box; }
+
+        html,
+        body {
+            min-height: 100%;
+            margin: 0;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            color: var(--text);
+            background:
+                radial-gradient(1200px 600px at 12% -10%, var(--accent-subtle), transparent 60%),
+                radial-gradient(900px 500px at 100% 110%, var(--info-bg), transparent 55%),
+                var(--bg);
+            display: flex;
+            justify-content: center;
+            padding: 40px 24px 64px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .page {
+            width: 100%;
+            max-width: 760px;
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-5);
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-4);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+            user-select: none;
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .brand img {
+            width: 30px;
+            height: 30px;
+            border-radius: var(--radius-md);
+        }
+
+        .brand-name {
+            font-size: var(--text-lg);
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: -0.01em;
+        }
+
+        .brand-tag {
+            font-size: var(--text-xs);
+            color: var(--text-2);
+            background: var(--soft);
+            border-radius: var(--radius-pill);
+            padding: 2px 8px;
+        }
+
+        .back {
+            font-size: var(--text-sm);
+            color: var(--text-2);
+            text-decoration: none;
+            padding: 6px 10px;
+            border-radius: var(--radius-pill);
+            transition: background var(--duration-fast) var(--fast-ease), color var(--duration-fast) var(--fast-ease);
+        }
+
+        .back:hover {
+            background: var(--soft);
+            color: var(--text);
+        }
+
+        .back:focus-visible,
+        .btn:focus-visible,
+        .field input:focus-visible {
+            outline: 2px solid var(--info);
+            outline-offset: 2px;
+        }
+
+        .card {
+            background: var(--surface);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-lg);
+            padding: var(--space-8);
+        }
+
+        .profile {
+            display: flex;
+            align-items: center;
+            gap: var(--space-4);
+        }
+
+        .avatar {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            flex: none;
+            background: var(--accent);
+            color: var(--accent-text);
+            font-size: var(--text-xl);
+            font-weight: var(--font-weight-semibold);
+            text-transform: uppercase;
+            user-select: none;
+        }
+
+        .profile-main {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .avatar.has-image {
+            background: var(--surface-2);
+            overflow: hidden;
+        }
+
+        .avatar-actions {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: var(--space-2);
+            margin-top: var(--space-2);
+        }
+
+        .avatar-actions .btn {
+            height: 30px;
+            padding: 0 10px;
+            font-size: var(--text-xs);
+        }
+
+        .avatar-hint {
+            font-size: var(--text-xs);
+            color: var(--text-3);
+        }
+
+        h1 {
+            margin: 0;
+            font-size: var(--text-xl);
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: var(--tracking-xl);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .role {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            align-self: flex-start;
+            padding: 3px 10px;
+            border-radius: var(--radius-pill);
+            background: var(--soft);
+            color: var(--text-2);
+            font-size: var(--text-xs);
+            font-weight: var(--font-weight-medium);
+        }
+
+        .role::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .facts {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: var(--space-3);
+            margin-top: var(--space-6);
+        }
+
+        .fact {
+            background: var(--surface-2);
+            border-radius: var(--radius-lg);
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .fact-label {
+            font-size: var(--text-xs);
+            color: var(--text-3);
+        }
+
+        .fact-value {
+            font-size: var(--text-lg);
+            font-weight: var(--font-weight-semibold);
+            font-variant-numeric: tabular-nums;
+            letter-spacing: var(--tracking-lg);
+        }
+
+        .fact-value.small {
+            font-size: var(--text-base);
+            font-weight: var(--font-weight-medium);
+        }
+
+        .section {
+            margin-top: var(--space-8);
+        }
+
+        /* ── 积分 ── */
+        .credits-hero {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 16px 18px;
+            border-radius: var(--radius-lg);
+            background: var(--surface-2);
+        }
+
+        .credits-value {
+            font-size: 32px;
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: -0.02em;
+            line-height: 1.05;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .credits-unit {
+            font-size: var(--text-xs);
+            color: var(--text-3);
+            padding-bottom: 5px;
+        }
+
+        .credits-usd {
+            margin-left: auto;
+            padding-bottom: 5px;
+            font-size: var(--text-sm);
+            color: var(--text-2);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .credit-list {
+            display: flex;
+            flex-direction: column;
+            margin-top: var(--space-4);
+        }
+
+        .credit-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) auto auto;
+            align-items: center;
+            gap: var(--space-4);
+            padding: 9px 4px;
+            font-size: var(--text-sm);
+            border-radius: var(--radius-sm);
+        }
+
+        .credit-row:hover { background: var(--soft); }
+
+        .credit-row-main {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .credit-row-main b { font-weight: var(--font-weight-semibold); }
+
+        .credit-row-main span {
+            font-size: var(--text-xs);
+            color: var(--text-3);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .credit-row-time {
+            font-size: var(--text-xs);
+            color: var(--text-3);
+            white-space: nowrap;
+        }
+
+        .credit-row-amount {
+            font-weight: var(--font-weight-semibold);
+            font-variant-numeric: tabular-nums;
+            text-align: right;
+            white-space: nowrap;
+            min-width: 64px;
+        }
+
+        .credit-row-amount.up { color: var(--success-text); }
+
+        .credit-row-balance {
+            min-width: 76px;
+            text-align: right;
+            font-size: var(--text-xs);
+            color: var(--text-2);
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+
+        .credit-empty {
+            padding: 22px 0 18px;
+            text-align: center;
+            font-size: var(--text-sm);
+            color: var(--text-3);
+        }
+
+        /* 「修改密码」区块的锚点：账户菜单「修改密码」带 #password 直达，留出顶部呼吸位，别贴顶 */
+        #password {
+            scroll-margin-top: 28px;
+        }
+
+        .section-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: var(--space-3);
+            margin-bottom: var(--space-4);
+        }
+
+        .section-head h2 {
+            margin: 0;
+            font-size: var(--text-base);
+            font-weight: var(--font-weight-semibold);
+        }
+
+        .section-head p {
+            margin: 0;
+            font-size: var(--text-xs);
+            color: var(--text-3);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: var(--space-3);
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: var(--text-xs);
+            color: var(--text-2);
+        }
+
+        .field.wide {
+            grid-column: 1 / -1;
+        }
+
+        .field input {
+            height: 40px;
+            padding: 0 12px;
+            background: var(--surface-2);
+            border: 0;
+            border-radius: var(--radius-md);
+            color: var(--text);
+            font: inherit;
+            font-size: var(--text-base);
+            outline: none;
+            transition: background var(--duration-fast) var(--fast-ease), box-shadow var(--duration-fast) var(--fast-ease);
+        }
+
+        .field input::placeholder { color: var(--text-3); }
+
+        .field input:focus {
+            background: var(--surface);
+            box-shadow: 0 0 0 3px var(--accent-subtle);
+        }
+
+        .form-foot {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+            margin-top: var(--space-4);
+        }
+
+        .btn {
+            height: 38px;
+            padding: 0 16px;
+            border: 0;
+            border-radius: var(--radius-md);
+            background: var(--soft);
+            color: var(--text);
+            font: inherit;
+            font-size: var(--text-sm);
+            font-weight: var(--font-weight-medium);
+            cursor: pointer;
+            transition: background var(--duration-fast) var(--fast-ease), opacity var(--duration-fast) var(--fast-ease);
+        }
+
+        .btn:hover { background: var(--soft-2); }
+
+        .btn-primary {
+            background: var(--accent);
+            color: var(--accent-text);
+        }
+
+        .btn-primary:hover { background: var(--accent-hover); }
+
+        .btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .alert {
+            display: none;
+            margin: 0;
+            padding: 9px 12px;
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            line-height: var(--leading-normal);
+            background: var(--danger-bg);
+            color: var(--danger-text);
+        }
+
+        .alert[data-show="true"] { display: block; }
+
+        .alert[data-tone="ok"] {
+            background: var(--success-bg);
+            color: var(--success-text);
+        }
+
+        .form-foot .alert {
+            flex: 1;
+            margin: 0;
+        }
+
+        .section-foot {
+            margin-top: var(--space-8);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-3);
+        }
+
+        .muted {
+            font-size: var(--text-xs);
+            color: var(--text-3);
+        }
+
+        .toast {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            z-index: 20;
+            max-width: calc(100vw - 32px);
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            background: var(--elevated);
+            box-shadow: var(--shadow-lg);
+            color: var(--text);
+            font-size: var(--text-sm);
+            opacity: 0;
+            transform: translate(-50%, 8px);
+            pointer-events: none;
+            transition: opacity var(--duration-fast) var(--fast-ease), transform var(--duration-fast) var(--fast-ease);
+        }
+
+        .toast[data-show="true"] {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+
+        @media (max-width: 640px) {
+            body { padding: 24px 16px 48px; }
+            .card { padding: var(--space-5); }
+            .facts { grid-template-columns: 1fr; }
+            .grid { grid-template-columns: 1fr; }
+            .credit-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; }
+            .credit-row-time { display: none; }
+            .credit-row-balance { grid-column: 2; text-align: right; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .toast { transition: none; }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page">
+        <div class="topbar">
+            <a class="brand" href="/">
+                <img src="/static/images/logo.png" alt="NOVAI">
+                <span class="brand-name">NOVAI</span>
+                <span class="brand-tag">我的账户</span>
+            </a>
+            <a class="back" href="/">返回工作台</a>
+        </div>
+
+        <main class="card">
+            <div class="profile">
+                <div class="avatar" id="avatar" role="img" aria-label="我的头像">?</div>
+                <div class="profile-main">
+                    <h1 id="username">加载中…</h1>
+                    <span class="role" id="role">–</span>
+                    <div class="avatar-actions">
+                        <button class="btn" id="avatar-pick" type="button">更换头像</button>
+                        <button class="btn btn-primary" id="avatar-save" type="button" hidden>保存头像</button>
+                        <button class="btn" id="avatar-remove" type="button" hidden>移除</button>
+                        <span class="avatar-hint" id="avatar-hint">PNG / JPG / WebP，≤ 2 MB</span>
+                    </div>
+                </div>
+                <input type="file" id="avatar-file" accept="image/png,image/jpeg,image/webp" hidden>
+            </div>
+
+            <div class="facts">
+                <div class="fact">
+                    <span class="fact-label">注册时间</span>
+                    <span class="fact-value small" id="created-at">–</span>
+                </div>
+                <div class="fact">
+                    <span class="fact-label">画布数</span>
+                    <span class="fact-value" id="canvas-count">–</span>
+                </div>
+                <div class="fact">
+                    <span class="fact-label">账号状态</span>
+                    <span class="fact-value small" id="status">–</span>
+                </div>
+            </div>
+
+            <section class="section" id="credits">
+                <div class="section-head">
+                    <h2>积分</h2>
+                    <p id="credits-hint">1 积分 = $0.10 · 由管理员分配</p>
+                </div>
+                <div class="credits-hero">
+                    <span class="credits-value" id="credits-balance">–</span>
+                    <span class="credits-unit">积分</span>
+                    <span class="credits-usd" id="credits-usd">—</span>
+                </div>
+                <div class="credit-list" id="credit-list" aria-live="polite">
+                    <div class="credit-empty">加载中…</div>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="section-head">
+                    <h2>修改用户名</h2>
+                    <p>改完立刻生效，下次登录用新用户名</p>
+                </div>
+                <form id="username-form" novalidate>
+                    <div class="grid">
+                        <label class="field">
+                            <span>新用户名</span>
+                            <input id="new-username" type="text" autocomplete="username"
+                                placeholder="3-32 位字符" maxlength="32" required>
+                        </label>
+                        <label class="field">
+                            <span>当前密码</span>
+                            <input id="username-password" type="password" autocomplete="current-password"
+                                placeholder="验证是你本人" maxlength="128" required>
+                        </label>
+                    </div>
+                    <div class="form-foot">
+                        <button class="btn btn-primary" id="username-submit" type="submit">保存用户名</button>
+                        <div class="alert" id="username-alert" role="alert"></div>
+                    </div>
+                </form>
+            </section>
+
+            <section class="section" id="password">
+                <div class="section-head">
+                    <h2>修改密码</h2>
+                    <p>改完当前设备保持登录，其它设备需重新登录</p>
+                </div>
+                <form id="password-form" novalidate>
+                    <div class="grid">
+                        <label class="field">
+                            <span>当前密码</span>
+                            <input id="old-password" type="password" autocomplete="current-password"
+                                placeholder="当前密码" maxlength="128" required>
+                        </label>
+                        <label class="field">
+                            <span>新密码</span>
+                            <input id="new-password" type="password" autocomplete="new-password"
+                                placeholder="至少 8 位" maxlength="128" required>
+                        </label>
+                        <label class="field wide">
+                            <span>确认新密码</span>
+                            <input id="confirm-password" type="password" autocomplete="new-password"
+                                placeholder="再输入一次" maxlength="128" required>
+                        </label>
+                    </div>
+                    <div class="form-foot">
+                        <button class="btn btn-primary" id="password-submit" type="submit">保存新密码</button>
+                        <div class="alert" id="password-alert" role="alert"></div>
+                    </div>
+                </form>
+            </section>
+
+            <div class="section-foot">
+                <span class="muted">忘记密码？请向管理员索取 6 位重置码，然后在登录页点「忘记密码」。</span>
+                <button class="btn" id="logout" type="button">退出登录</button>
+            </div>
+        </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            var ROLE_TEXT = { admin: '管理员', team: '团队', user: '普通用户' };
+            var STATUS_TEXT = { active: '正常', disabled: '已停用' };
+            var $ = function (id) { return document.getElementById(id); };
+            var state = { user: null, avatarUrl: '', pendingFile: null, previewUrl: '', busy: false };
+            var toastTimer = null;
+
+            function toast(message, isError) {
+                var box = $('toast');
+                box.textContent = message;
+                box.style.color = isError ? 'var(--danger-text)' : '';
+                box.setAttribute('data-show', 'true');
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(function () { box.setAttribute('data-show', 'false'); }, 3200);
+            }
+
+            function showAlert(id, message, tone) {
+                var box = $(id);
+                box.textContent = message;
+                box.setAttribute('data-tone', tone || 'error');
+                box.setAttribute('data-show', 'true');
+            }
+
+            function clearAlert(id) {
+                var box = $(id);
+                box.textContent = '';
+                box.setAttribute('data-show', 'false');
+            }
+
+            function fmtTime(ts) {
+                if (!ts) return '—';
+                var date = new Date(Number(ts) * 1000);
+                if (isNaN(date.getTime())) return '—';
+                var pad = function (n) { return String(n).padStart(2, '0'); };
+                return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+                    ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+            }
+
+            function initial(name) {
+                return String(name || '?').trim().slice(0, 1).toUpperCase() || '?';
+            }
+
+            /* ── 积分：余额 + USD 等值 + 最近 20 条流水 ── */
+            var CREDIT_KIND_TEXT = { admin_adjust: '管理员分配', charge: '生成扣费', refund: '退款' };
+            var credits = { available: false, balance: null, usd_per_credit: 0.1, unit: 'credit' };
+
+            function escapeCredit(value) {
+                return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+                });
+            }
+
+            /* 积分展示统一口径：最多 4 位小数、去掉无意义尾随 0；非零小额显示 <0.0001，不显示成 0 */
+            function formatCredits(value) {
+                var num = Number(value);
+                if (!isFinite(num)) return '—';
+                var abs = Math.abs(num);
+                if (abs > 0 && abs < 0.0001) return (num < 0 ? '-' : '') + '<0.0001';
+                var rounded = Math.round(num * 10000) / 10000;
+                if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return String(Math.round(rounded));
+                return rounded.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+            }
+
+            function creditKindLabel(tx) {
+                var kind = String((tx && tx.kind) || '');
+                return CREDIT_KIND_TEXT[kind] || (kind || '积分变动');
+            }
+
+            /* 扣费流水的 note 是后端的 estimate / upstream:* 这类技术标记，不往界面搬 */
+            function creditNote(tx) {
+                var note = String((tx && tx.note) || '').trim();
+                if (!note || /^(estimate|actual_cost|usage_tokens|upstream:)/i.test(note)) return '';
+                return note;
+            }
+
+            function fmtCreditTime(ts) {
+                if (!ts) return '—';
+                var date = new Date(Number(ts) * 1000);
+                if (isNaN(date.getTime())) return '—';
+                var pad = function (n) { return String(n).padStart(2, '0'); };
+                return pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+            }
+
+            function renderCreditsBalance() {
+                $('credits-balance').textContent = credits.balance === null ? '–' : formatCredits(credits.balance);
+                var rate = Number(credits.usd_per_credit || 0);
+                $('credits-usd').textContent = credits.balance === null ? '—' : '≈ $' + (Number(credits.balance) * rate).toFixed(2);
+                $('credits-hint').textContent = '1 积分 = $' + rate.toFixed(2) + ' · 由管理员分配';
+            }
+
+            function renderCreditList(list) {
+                var host = $('credit-list');
+                var items = (list || []).slice(0, 20);
+                if (!items.length) {
+                    host.innerHTML = '<div class="credit-empty">还没有积分记录。管理员分配后会出现在这里。</div>';
+                    return;
+                }
+                host.innerHTML = items.map(function (tx) {
+                    var delta = Number(tx && tx.delta) || 0;
+                    var note = creditNote(tx);
+                    return '<div class="credit-row">' +
+                        '<span class="credit-row-main"><b>' + escapeCredit(creditKindLabel(tx)) + '</b>' +
+                        (note ? '<span title="' + escapeCredit(note) + '">' + escapeCredit(note) + '</span>' : '') +
+                        '</span>' +
+                        '<span class="credit-row-time">' + escapeCredit(fmtCreditTime(tx && tx.created_at)) + '</span>' +
+                        '<span class="credit-row-amount' + (delta > 0 ? ' up' : '') + '">' +
+                        (delta > 0 ? '+' : delta < 0 ? '−' : '') + escapeCredit(formatCredits(Math.abs(delta))) +
+                        '</span>' +
+                        '<span class="credit-row-balance">余额 ' + escapeCredit(formatCredits(tx && tx.balance_after)) + '</span>' +
+                        '</div>';
+                }).join('');
+            }
+
+            function renderCreditsUnavailable() {
+                credits.available = false;
+                credits.balance = null;
+                renderCreditsBalance();
+                $('credits-hint').textContent = '积分功能未启用';
+                $('credits-usd').textContent = '—';
+                $('credit-list').innerHTML = '<div class="credit-empty">当前部署没有开启积分。</div>';
+            }
+
+            function applyCreditsDetail(detail) {
+                if (!detail || detail.available !== true) return;
+                credits.available = true;
+                credits.balance = Number(detail.balance) || 0;
+                if (detail.usd_per_credit) credits.usd_per_credit = Number(detail.usd_per_credit);
+                renderCreditsBalance();
+            }
+
+            function loadCredits() {
+                return api('/api/credits/me').then(function (data) {
+                    if (!data || data.auth_enabled === false || typeof data.balance === 'undefined') {
+                        renderCreditsUnavailable();
+                        return null;
+                    }
+                    credits.available = true;
+                    credits.balance = Number(data.balance) || 0;
+                    credits.usd_per_credit = Number(data.usd_per_credit) || credits.usd_per_credit;
+                    renderCreditsBalance();
+                    return api('/api/credits/transactions?limit=20').then(function (result) {
+                        renderCreditList((result && result.transactions) || []);
+                    });
+                }).catch(function (error) {
+                    if (error && error.code === 'unauthorized') return;
+                    credits.available = false;
+                    $('credit-list').innerHTML = '<div class="credit-empty">积分加载失败，刷新页面重试。</div>';
+                });
+            }
+
+            /* credits.js 的 SSE 推送到这里：余额实时更新，不用刷新页面 */
+            document.addEventListener('novai-credits', function (event) {
+                applyCreditsDetail(event.detail);
+            });
+
+            /* ── 头像：avatar_url 有就显示图片，否则首字；本地上传先预览，保存后才落库 ── */
+            function avatarImgHtml(url, name) {
+                var src = String(url || '');
+                if (!src) return '';
+                var alt = String(name || '').replace(/[&<>"]/g, function (ch) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch];
+                });
+                return '<img src="' + src.replace(/"/g, '&quot;') + '" alt="' + alt + '">';
+            }
+
+            function setAvatar(url, name) {
+                var box = $('avatar');
+                var html = avatarImgHtml(url, name);
+                if (html) {
+                    box.classList.add('has-image');
+                    box.innerHTML = html;
+                } else {
+                    box.classList.remove('has-image');
+                    box.textContent = initial(name);
+                }
+                box.setAttribute('aria-label', (name || '') + ' 的头像');
+            }
+
+            function clearAvatarDraft() {
+                if (state.previewUrl) { URL.revokeObjectURL(state.previewUrl); state.previewUrl = ''; }
+                state.pendingFile = null;
+                var save = $('avatar-save');
+                save.hidden = true;
+                save.disabled = false;
+                save.textContent = '保存头像';
+            }
+
+            function onAvatarPick(event) {
+                var file = event.target.files && event.target.files[0];
+                event.target.value = '';
+                if (!file) return;
+                if (!/^image\/(png|jpeg|webp)$/.test(file.type)) { toast('头像支持 PNG / JPG / WebP', true); return; }
+                if (file.size > 2 * 1024 * 1024) { toast('头像不能超过 2 MB', true); return; }
+                clearAvatarDraft();
+                state.pendingFile = file;
+                state.previewUrl = URL.createObjectURL(file);
+                setAvatar(state.previewUrl, state.user && state.user.username);
+                $('avatar-save').hidden = false;
+                $('avatar-remove').hidden = false;
+            }
+
+            async function saveAvatar() {
+                if (!state.pendingFile || state.busy) return;
+                state.busy = true;
+                var button = $('avatar-save');
+                button.disabled = true;
+                button.textContent = '保存中…';
+                var form = new FormData();
+                form.append('file', state.pendingFile);
+                try {
+                    var response = await fetch('/api/auth/avatar', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Accept': 'application/json' },
+                        body: form
+                    });
+                    var data = {};
+                    try { data = await response.json(); } catch (e) { }
+                    if (!response.ok) throw { code: data && data.code, detail: data && data.detail, status: response.status };
+                    var nextUrl = (data && data.avatar_url) || (data && data.user && data.user.avatar_url) || '';
+                    clearAvatarDraft();
+                    if (nextUrl) { state.avatarUrl = nextUrl; setAvatar(nextUrl, state.user && state.user.username); }
+                    await loadAccount();
+                    $('avatar-remove').hidden = !state.avatarUrl;
+                    toast('头像已更新');
+                } catch (error) {
+                    button.disabled = false;
+                    button.textContent = '保存头像';
+                    toast(messageFor(error), true);
+                } finally {
+                    state.busy = false;
+                }
+            }
+
+            async function removeAvatar() {
+                if (state.busy) return;
+                state.busy = true;
+                var button = $('avatar-remove');
+                button.disabled = true;
+                button.textContent = '移除中…';
+                try {
+                    var response = await fetch('/api/auth/avatar', {
+                        method: 'DELETE',
+                        credentials: 'same-origin',
+                        headers: { 'Accept': 'application/json' }
+                    });
+                    var data = {};
+                    try { data = await response.json(); } catch (e) { }
+                    if (!response.ok) throw { code: data && data.code, detail: data && data.detail, status: response.status };
+                    state.avatarUrl = '';
+                    clearAvatarDraft();
+                    setAvatar('', state.user && state.user.username);
+                    $('avatar-remove').hidden = true;
+                    await loadAccount();
+                    toast('头像已移除');
+                } catch (error) {
+                    toast(messageFor(error), true);
+                } finally {
+                    button.disabled = false;
+                    button.textContent = '移除';
+                }
+            }
+
+            function render(user, canvasCount) {
+                state.user = user;
+                if (typeof user.avatar_url === 'string' && !state.pendingFile) state.avatarUrl = user.avatar_url;
+                setAvatar(state.avatarUrl, user.username);
+                $('avatar-remove').hidden = !state.avatarUrl || !!state.pendingFile;
+                $('username').textContent = user.username;
+                $('role').textContent = ROLE_TEXT[user.role] || user.role || '普通用户';
+                $('created-at').textContent = fmtTime(user.created_at);
+                $('canvas-count').textContent = String(canvasCount == null ? 0 : canvasCount);
+                $('status').textContent = STATUS_TEXT[user.status] || user.status || '正常';
+            }
+
+            function toLogin() {
+                location.replace('/login?next=/account');
+            }
+
+            function api(path, options) {
+                return fetch(path, Object.assign({
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+                }, options || {})).then(function (response) {
+                    return response.json().catch(function () { return {}; }).then(function (data) {
+                        if (response.status === 401) {
+                            toLogin();
+                            throw { code: 'unauthorized', detail: '登录状态已过期' };
+                        }
+                        if (!response.ok) {
+                            throw { code: data && data.code, detail: data && data.detail, status: response.status };
+                        }
+                        return data;
+                    });
+                });
+            }
+
+            function messageFor(error) {
+                var code = error && error.code;
+                if (code === 'bad_credentials') return '密码不正确';
+                if (code === 'username_taken') return '这个用户名已被占用';
+                if (code === 'invalid_username') return '用户名需为 3-32 位字符（字母、数字、下划线、点、中划线或 @）';
+                if (code === 'invalid_password' || code === 'weak_password') return '新密码需为 8-128 个字符';
+                if (code === 'unauthorized') return '登录状态已过期，请重新登录';
+                if (code === 'rate_limited') return (error.detail && String(error.detail)) || '操作太频繁，请稍后再试';
+                if (code === 'file_too_large' || (error && error.status === 413)) return '头像不能超过 2 MB';
+                if (code === 'unsupported_image' || code === 'invalid_image') return '头像格式不支持，请用 PNG / JPG / WebP';
+                return (error && error.detail && String(error.detail)) || '请求失败，请稍后重试';
+            }
+
+            function loadAccount() {
+                return api('/api/auth/account').then(function (data) {
+                    render(data.user || {}, data.canvas_count);
+                }).catch(function (error) {
+                    if (error && error.code === 'unauthorized') return;
+                    toast(messageFor(error), true);
+                });
+            }
+
+            function submitUsername(event) {
+                event.preventDefault();
+                clearAlert('username-alert');
+                var newName = $('new-username').value.trim();
+                var password = $('username-password').value;
+                if (!newName || !password) {
+                    showAlert('username-alert', '请填写新用户名和当前密码');
+                    return;
+                }
+                if (newName.length < 3 || newName.length > 32) {
+                    showAlert('username-alert', '用户名需为 3-32 位字符');
+                    return;
+                }
+                var button = $('username-submit');
+                button.disabled = true;
+                button.textContent = '保存中…';
+                api('/api/auth/username', {
+                    method: 'POST',
+                    body: JSON.stringify({ new_username: newName, password: password })
+                }).then(function (data) {
+                    $('username-form').reset();
+                    showAlert('username-alert', '用户名已更新为 ' + ((data.user && data.user.username) || newName), 'ok');
+                    toast('用户名已修改');
+                    return loadAccount();
+                }).catch(function (error) {
+                    if (error && error.code !== 'unauthorized') showAlert('username-alert', messageFor(error));
+                }).then(function () {
+                    button.disabled = false;
+                    button.textContent = '保存用户名';
+                });
+            }
+
+            function submitPassword(event) {
+                event.preventDefault();
+                clearAlert('password-alert');
+                var oldValue = $('old-password').value;
+                var newValue = $('new-password').value;
+                var confirmValue = $('confirm-password').value;
+                if (!oldValue || !newValue) {
+                    showAlert('password-alert', '请填写当前密码和新密码');
+                    return;
+                }
+                if (newValue.length < 8 || newValue.length > 128) {
+                    showAlert('password-alert', '新密码需为 8-128 个字符');
+                    return;
+                }
+                if (newValue !== confirmValue) {
+                    showAlert('password-alert', '两次输入的新密码不一致');
+                    return;
+                }
+                var button = $('password-submit');
+                button.disabled = true;
+                button.textContent = '保存中…';
+                api('/api/auth/password', {
+                    method: 'POST',
+                    body: JSON.stringify({ old_password: oldValue, new_password: newValue })
+                }).then(function () {
+                    $('password-form').reset();
+                    showAlert('password-alert', '密码已修改，其它设备已退出登录', 'ok');
+                    toast('密码已修改');
+                }).catch(function (error) {
+                    if (error && error.code !== 'unauthorized') showAlert('password-alert', messageFor(error));
+                }).then(function () {
+                    button.disabled = false;
+                    button.textContent = '保存新密码';
+                });
+            }
+
+            function logout() {
+                var button = $('logout');
+                button.disabled = true;
+                fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+                    .catch(function () { })
+                    .then(function () { location.replace('/login'); });
+            }
+
+            $('username-form').addEventListener('submit', submitUsername);
+            $('password-form').addEventListener('submit', submitPassword);
+            $('logout').addEventListener('click', logout);
+            $('avatar-pick').addEventListener('click', function () { $('avatar-file').click(); });
+            $('avatar-file').addEventListener('change', onAvatarPick);
+            $('avatar-save').addEventListener('click', saveAvatar);
+            $('avatar-remove').addEventListener('click', removeAvatar);
+
+            /* 带 #password 打开时（V2 账户菜单「修改密码」）：静态内容浏览器会先滚一次，
+               这里在数据 / 字体就绪后再补一次，避免布局变化把目标带偏。
+               已经到位就不动，避免抢用户自己的滚动；只补一次。 */
+            var hashScrollDone = false;
+            function scrollToPasswordOnce() {
+                if (hashScrollDone || location.hash !== '#password') return;
+                var target = $('password');
+                if (!target) return;
+                hashScrollDone = true;
+                var top = target.getBoundingClientRect().top;
+                if (top >= 0 && top <= 80) return;
+                target.scrollIntoView({ block: 'start' });
+            }
+
+            loadAccount().then(function () {
+                loadCredits();
+                scrollToPasswordOnce();
+                requestAnimationFrame(scrollToPasswordOnce);
+                setTimeout(scrollToPasswordOnce, 120);
+            });
+            if (document.fonts && document.fonts.ready) document.fonts.ready.then(scrollToPasswordOnce);
+        })();
+    </script>
+</body>
+
+</html>

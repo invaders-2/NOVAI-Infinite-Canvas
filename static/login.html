@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 · NOVAI</title>
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.136.1790560477">
+    <script>
+        (function () {
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark', 'theme-dark');
+                }
+            } catch (e) { }
+        })();
+    </script>
+    <style>
+        * { box-sizing: border-box; }
+
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            color: var(--text);
+            background:
+                radial-gradient(1200px 600px at 12% -10%, var(--accent-subtle), transparent 60%),
+                radial-gradient(900px 500px at 100% 110%, var(--info-bg), transparent 55%),
+                var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .page {
+            width: 100%;
+            max-width: 420px;
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-6);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-3);
+            user-select: none;
+        }
+
+        .brand img {
+            width: 34px;
+            height: 34px;
+            border-radius: var(--radius-md);
+        }
+
+        .brand-name {
+            font-size: var(--text-xl);
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: -0.01em;
+        }
+
+        .brand-tag {
+            font-size: var(--text-xs);
+            color: var(--text-2);
+            border: 1px solid var(--border-2);
+            border-radius: var(--radius-pill);
+            padding: 2px 8px;
+            margin-left: var(--space-1);
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-lg);
+            padding: var(--space-8);
+        }
+
+        h1 {
+            margin: 0 0 var(--space-1);
+            font-size: var(--text-2xl);
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: var(--tracking-2xl);
+        }
+
+        .sub {
+            margin: 0 0 var(--space-6);
+            color: var(--text-2);
+            font-size: var(--text-base);
+            line-height: var(--leading-relaxed);
+        }
+
+        .tabs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2px;
+            padding: 3px;
+            margin-bottom: var(--space-5);
+            background: var(--soft);
+            border-radius: var(--radius-md);
+        }
+
+        .tabs button {
+            appearance: none;
+            border: 0;
+            background: transparent;
+            color: var(--text-2);
+            font: inherit;
+            font-size: var(--text-base);
+            font-weight: var(--font-weight-medium);
+            padding: 8px 0;
+            border-radius: calc(var(--radius-md) - 2px);
+            cursor: pointer;
+            transition: background var(--duration-fast) var(--fast-ease), color var(--duration-fast) var(--fast-ease);
+        }
+
+        .tabs button[aria-selected="true"] {
+            background: var(--surface);
+            color: var(--text);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: var(--space-4);
+        }
+
+        .field>span {
+            font-size: var(--text-sm);
+            font-weight: var(--font-weight-medium);
+            color: var(--text-2);
+        }
+
+        .field input {
+            width: 100%;
+            height: 42px;
+            padding: 0 12px;
+            color: var(--text);
+            background: var(--surface-2);
+            border: 1px solid var(--border-2);
+            border-radius: var(--radius-md);
+            font: inherit;
+            font-size: var(--text-base);
+            outline: none;
+            transition: border-color var(--duration-fast) var(--fast-ease), box-shadow var(--duration-fast) var(--fast-ease);
+        }
+
+        .field input::placeholder { color: var(--text-3); }
+
+        .field input:focus {
+            border-color: var(--border-strong);
+            box-shadow: 0 0 0 3px var(--accent-subtle);
+        }
+
+        .field input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        /* .field 的 display:flex 优先级高于 UA 的 [hidden]，必须显式隐藏 */
+        .field[hidden] { display: none; }
+
+        .hint {
+            font-size: var(--text-xs);
+            color: var(--text-3);
+            line-height: var(--leading-normal);
+        }
+
+        .forgot {
+            display: flex;
+            justify-content: flex-end;
+            margin: -6px 0 var(--space-4);
+        }
+
+        /* .forgot 的 display:flex 优先级高于 UA 的 [hidden]，必须显式隐藏 */
+        .forgot[hidden] { display: none; }
+
+        .forgot a {
+            font-size: var(--text-sm);
+            color: var(--text-2);
+            text-decoration: none;
+        }
+
+        .forgot a:hover { color: var(--text); text-decoration: underline; }
+
+        .alert {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            margin: 0 0 var(--space-4);
+            padding: 10px 12px;
+            border-radius: var(--radius-md);
+            font-size: var(--text-base);
+            line-height: var(--leading-snug);
+            background: var(--danger-bg);
+            border: 1px solid var(--danger-border);
+            color: var(--danger-text);
+        }
+
+        .alert[data-tone="info"] {
+            background: var(--info-bg);
+            border-color: var(--info-border);
+            color: var(--info-text);
+        }
+
+        .alert[hidden] { display: none; }
+
+        .primary {
+            width: 100%;
+            height: 44px;
+            border: 0;
+            border-radius: var(--radius-md);
+            background: var(--accent);
+            color: var(--accent-text);
+            font: inherit;
+            font-size: var(--text-base);
+            font-weight: var(--font-weight-medium);
+            cursor: pointer;
+            transition: background var(--duration-fast) var(--fast-ease), transform var(--duration-fast) var(--fast-ease);
+        }
+
+        .primary:hover { background: var(--accent-hover); }
+        .primary:active { background: var(--accent-pressed); transform: translateY(0.5px); }
+        .primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+        .footer {
+            margin-top: var(--space-5);
+            font-size: var(--text-xs);
+            color: var(--text-3);
+            text-align: center;
+            line-height: var(--leading-relaxed);
+        }
+
+        .meta {
+            text-align: center;
+            font-size: var(--text-xs);
+            color: var(--text-3);
+        }
+
+        @media (max-width: 480px) {
+            .card { padding: var(--space-5); }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page">
+        <div class="brand">
+            <img src="/static/images/logo.png" alt="NOVAI">
+            <span class="brand-name">NOVAI</span>
+            <span class="brand-tag">邀请内测</span>
+        </div>
+
+        <main class="card">
+            <h1 id="card-title">登录</h1>
+            <p class="sub" id="card-sub">使用账号密码登录，进入你的创作工作台。</p>
+
+            <div class="tabs" role="tablist" aria-label="登录或注册">
+                <button type="button" role="tab" id="tab-login" aria-selected="true" data-mode="login">登录</button>
+                <button type="button" role="tab" id="tab-register" aria-selected="false" data-mode="register">注册</button>
+            </div>
+
+            <form id="auth-form" novalidate>
+                <label class="field">
+                    <span>用户名</span>
+                    <input id="username" name="username" type="text" autocomplete="username"
+                        placeholder="3-32 位字符" maxlength="32" required>
+                </label>
+
+                <label class="field">
+                    <span>密码</span>
+                    <input id="password" name="password" type="password" autocomplete="current-password"
+                        placeholder="至少 8 位" maxlength="128" required>
+                </label>
+
+                <div class="forgot" id="forgot-row">
+                    <a href="/reset" id="forgot-link">忘记密码？</a>
+                </div>
+
+                <label class="field" id="invite-field" hidden>
+                    <span>邀请码</span>
+                    <input id="invite-code" name="invite_code" type="text" inputmode="numeric"
+                        autocomplete="one-time-code" placeholder="6 位数字" maxlength="32" required>
+                    <span class="hint">由管理员发放；旧格式 NOVAI-XXXX-XXXX-XXXX 也可以直接粘贴。</span>
+                </label>
+
+                <div class="alert" id="alert" role="alert" hidden></div>
+
+                <button class="primary" id="submit" type="submit">登录</button>
+            </form>
+
+            <div class="footer">邀请制内测 · 没有邀请码请联系管理员</div>
+        </main>
+
+        <div class="meta">NOVAI · 登录后回到你刚才访问的页面</div>
+    </div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            var form = document.getElementById('auth-form');
+            var usernameInput = document.getElementById('username');
+            var passwordInput = document.getElementById('password');
+            var inviteField = document.getElementById('invite-field');
+            var inviteInput = document.getElementById('invite-code');
+            var alertBox = document.getElementById('alert');
+            var submitBtn = document.getElementById('submit');
+            var title = document.getElementById('card-title');
+            var sub = document.getElementById('card-sub');
+            var tabs = [document.getElementById('tab-login'), document.getElementById('tab-register')];
+            var forgotRow = document.getElementById('forgot-row');
+            var mode = 'login';
+            var authAvailable = true;
+            var nextTarget = sanitizeNext(new URLSearchParams(location.search).get('next'));
+
+            function sanitizeNext(raw) {
+                var value = String(raw || '');
+                if (!value || value.charAt(0) !== '/') return '/';
+                if (value.indexOf('//') === 0) return '/';
+                if (value.indexOf('/login') === 0) return '/';
+                return value;
+            }
+
+            function showAlert(message, tone) {
+                alertBox.textContent = message;
+                alertBox.setAttribute('data-tone', tone || 'error');
+                alertBox.hidden = false;
+            }
+
+            function clearAlert() {
+                alertBox.hidden = true;
+                alertBox.textContent = '';
+            }
+
+            function setMode(nextMode) {
+                mode = nextMode === 'register' ? 'register' : 'login';
+                var isRegister = mode === 'register';
+                tabs.forEach(function (tab) {
+                    tab.setAttribute('aria-selected', String(tab.dataset.mode === mode));
+                });
+                title.textContent = isRegister ? '注册' : '登录';
+                sub.textContent = isRegister
+                    ? '填写邀请码创建账号，注册成功后会直接登录。'
+                    : '使用账号密码登录，进入你的创作工作台。';
+                inviteField.hidden = !isRegister;
+                inviteInput.required = isRegister;
+                forgotRow.hidden = isRegister || !authAvailable;
+                passwordInput.setAttribute('autocomplete', isRegister ? 'new-password' : 'current-password');
+                submitBtn.textContent = isRegister ? '注册并登录' : '登录';
+                clearAlert();
+            }
+
+            tabs.forEach(function (tab) {
+                tab.addEventListener('click', function () { setMode(tab.dataset.mode); });
+            });
+
+            function setBusy(busy) {
+                submitBtn.disabled = busy;
+                submitBtn.textContent = busy
+                    ? (mode === 'register' ? '注册中…' : '登录中…')
+                    : (mode === 'register' ? '注册并登录' : '登录');
+            }
+
+            function friendlyMessage(data, status) {
+                if (data && data.detail) return String(data.detail);
+                if (status === 429) return '尝试过于频繁，请稍后再试。';
+                if (status === 401) return '用户名或密码不正确。';
+                if (status === 403) return '账号不可用，请联系管理员。';
+                return '请求失败，请稍后重试。';
+            }
+
+            form.addEventListener('submit', function (event) {
+                event.preventDefault();
+                clearAlert();
+
+                var username = usernameInput.value.trim();
+                var password = passwordInput.value;
+                if (!username || !password) {
+                    showAlert('请填写用户名和密码。');
+                    return;
+                }
+                if (mode === 'register' && !inviteInput.value.trim()) {
+                    showAlert('注册需要邀请码。');
+                    return;
+                }
+
+                var body = { username: username, password: password };
+                var url = '/api/auth/login';
+                if (mode === 'register') {
+                    body.invite_code = inviteInput.value.trim();
+                    url = '/api/auth/register';
+                }
+
+                setBusy(true);
+                fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(body)
+                }).then(function (response) {
+                    return response.json().catch(function () { return {}; }).then(function (data) {
+                        if (!response.ok) {
+                            var error = new Error(friendlyMessage(data, response.status));
+                            error.status = response.status;
+                            throw error;
+                        }
+                        return data;
+                    });
+                }).then(function () {
+                    location.replace(nextTarget || '/');
+                }).catch(function (error) {
+                    showAlert(error && error.message ? error.message : '请求失败，请稍后重试。');
+                    setBusy(false);
+                });
+            });
+
+            // 已登录就不必再看登录页；auth 未开启时也不挡路，只做提示
+            fetch('/api/auth/me', { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+                .then(function (response) { return response.json(); })
+                .then(function (data) {
+                    if (!data) return;
+                    if (data.auth_enabled === false) {
+                        authAvailable = false;
+                        forgotRow.hidden = true;
+                        showAlert('当前服务未开启登录体系（NOVAI_AUTH_ENABLED=0），可以直接访问首页。', 'info');
+                        return;
+                    }
+                    if (data.username) location.replace(nextTarget || '/');
+                })
+                .catch(function () { });
+
+            setMode('login');
+            if (new URLSearchParams(location.search).get('mode') === 'register') setMode('register');
+            usernameInput.focus();
+        })();
+    </script>
+</body>
+
+</html>

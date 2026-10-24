@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOVAI 智能画布 · 协作预览</title>
+<style>
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;overflow:hidden;font-family:'Geist','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+input,select,textarea{font:inherit;color:inherit}
+#app{height:100%;position:relative;overflow:hidden;color:var(--text);background:var(--bg);
+--bg:#0f0f0f;--surface:#141414;--panel:rgba(20,20,20,.92);--panel-solid:#161618;--text:#fafafa;--text2:#a3a3a3;--text3:#8a8a8a;
+--accent:#fafafa;--accent-text:#0a0a0a;--grid:rgba(255,255,255,.07);--shadow:rgba(0,0,0,.45);
+--soft:rgba(255,255,255,.06);--soft2:rgba(255,255,255,.1);--ring:rgba(255,255,255,.32);
+--line:rgba(255,255,255,.1);--live:#4fbf8b;--danger:#f97066}
+#app[data-theme="light"] .btn.primary,#app[data-theme="light"] .rail-btn.primary{background:#171717 !important;color:#fafafa !important}
+#app[data-theme="dark"] .btn.primary,#app[data-theme="dark"] .rail-btn.primary{background:#fafafa !important;color:#0a0a0a !important}
+#app[data-theme="light"]{--bg:#f5f5f5;--surface:#fff;--panel:rgba(255,255,255,.92);--panel-solid:#ffffff;--text:#0a0a0a;--text2:#737373;--text3:#8a8a8a;
+--accent:#171717;--accent-text:#fafafa;--grid:rgba(52,58,72,.11);--shadow:rgba(0,0,0,.08);
+--soft:rgba(0,0,0,.04);--soft2:rgba(0,0,0,.07);--ring:rgba(0,0,0,.22);--line:rgba(0,0,0,.08);--live:#1f9d63;--danger:#b42318}
+.i{width:16px;height:16px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.i.sm{width:14px;height:14px}
+.i.lg{width:18px;height:18px}
+.grid{position:fixed;inset:0;background-image:radial-gradient(circle at 1px 1px,var(--grid) 1px,transparent 0);background-size:24px 24px;pointer-events:none;z-index:0}
+.canvas{position:fixed;inset:0;z-index:1}
+svg.links{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+svg.links path{fill:none;stroke:var(--line);stroke-width:1.5}
+svg.links circle{fill:var(--line)}
+.node{position:absolute;width:260px;user-select:none;cursor:move;transition:transform .16s ease,box-shadow .16s ease;z-index:2}
+.node:hover{transform:scale(1.01)}
+.node.sel{z-index:9}
+.ering{position:absolute;inset:-4px;border-radius:15px;pointer-events:none;z-index:0}
+.node .img{height:186px;border-radius:12px;overflow:hidden;position:relative;background:var(--surface);box-shadow:0 10px 30px -18px var(--shadow)}
+.node.sel .img{box-shadow:0 0 0 2px var(--ring),0 0 26px 2px color-mix(in srgb, var(--ring) 45%, transparent),0 22px 50px -22px var(--shadow)}
+.node .img .ph{position:absolute;inset:0}
+.g1{background:linear-gradient(135deg,#2c3e50,#4b6584 45%,#8fa8c8)}
+.g2{background:linear-gradient(135deg,#3d2b1f,#7a5a3a 55%,#c9a97a)}
+.g3{background:linear-gradient(135deg,#1e2a38,#33506b 50%,#6f8fa8)}
+.node .img .lb{position:absolute;left:8px;bottom:8px;padding:3px 8px;border-radius:999px;font-size:10px;background:rgba(0,0,0,.5);color:#fff;backdrop-filter:blur(6px)}
+.node .img .sh{position:absolute;inset:0;background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.1) 45%,transparent 70%);background-size:220% 100%;animation:sh 1.6s linear infinite}
+@keyframes sh{from{background-position:180% 0}to{background-position:-60% 0}}
+.node .cap{display:flex;align-items:center;gap:6px;padding:8px 4px 0;font-size:12px;color:var(--text2)}
+.node .cap b{font-weight:500;color:var(--text);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .cap .st{margin-left:auto;display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--text3);white-space:nowrap}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--live);display:inline-block}
+.dot.warn{background:#f2a93b}
+.node .tagrow{display:flex;gap:5px;padding:6px 4px 0;flex-wrap:wrap}
+.mini{padding:2px 7px;border-radius:999px;font-size:10px;background:var(--soft);color:var(--text3)}
+.node.text{width:260px}
+.node.text .card{border-radius:12px;background:var(--surface);box-shadow:0 10px 30px -18px var(--shadow);padding:12px 14px 14px}
+.node.sel.text .card{box-shadow:0 0 0 2px var(--ring),0 0 26px 2px color-mix(in srgb, var(--ring) 45%, transparent),0 22px 50px -22px var(--shadow)}
+.node.text .ttl{font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.node.text .txt{font-size:12.5px;line-height:1.62;color:var(--text2)}
+.node.text .txt b{color:var(--text);font-weight:600}
+.cursors{position:fixed;inset:0;pointer-events:none;z-index:35;overflow:hidden}
+.cursor{position:absolute;left:0;top:0;will-change:transform}
+.cursor svg{width:22px;height:22px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
+.cursor .ct{position:absolute;left:16px;top:18px;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:500;color:#fff;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.pulse{position:absolute;width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;pointer-events:none;animation:pl .7s ease-out forwards}
+@keyframes pl{from{transform:scale(.4);opacity:.85}to{transform:scale(2);opacity:0}}
+.float,.glass{background:var(--panel);backdrop-filter:blur(44px) saturate(190%);-webkit-backdrop-filter:blur(44px) saturate(190%);box-shadow:0 16px 40px var(--shadow)}
+.float{position:fixed;z-index:60}
+#topLeft{position:fixed;left:15px;top:16px;display:flex;align-items:center;gap:8px;z-index:61}
+.pill{display:flex;align-items:center;gap:6px;height:40px;padding:0 8px 0 6px;border-radius:999px}
+.pill .logo{width:24px;height:24px;border-radius:6px;background:var(--accent);color:var(--accent-text);display:grid;place-items:center;flex-shrink:0}
+.pill .title{font-size:14px;font-weight:600;max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill .chev{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;color:var(--text3)}
+.pill .chev:hover{background:var(--soft)}
+#saveState{position:fixed;left:20px;top:62px;font-size:11px;color:var(--text3);z-index:55;display:flex;align-items:center;gap:6px}
+#topRight{position:fixed;right:15px;top:16px;display:flex;align-items:center;gap:8px;z-index:61}
+.stack{display:flex;align-items:center;gap:0;height:40px;padding:0 8px 0 10px;border-radius:999px;cursor:pointer}
+.stack .av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:10.5px;font-weight:600;color:#fff;margin-left:-7px;box-shadow:0 0 0 2px var(--panel);position:relative;flex-shrink:0}
+.stack .av:first-child{margin-left:0}
+.stack .av .on{position:absolute;right:-1px;bottom:-1px;width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 0 1.5px var(--panel)}
+.stack .av.more{background:var(--soft2);color:var(--text2);font-size:10px}
+.stack .cnt{font-size:11.5px;color:var(--text2);margin-left:8px;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 16px;border-radius:999px;font-size:12.5px;font-weight:600;background:var(--soft2);color:var(--text);transition:.16s;white-space:nowrap}
+.btn:hover{opacity:.85}
+.btn.primary{background:var(--accent);color:var(--accent-text)}
+.btn.sm{height:30px;padding:0 11px;font-size:11.5px;border-radius:9px}
+.iconbtn{width:40px;height:40px;border-radius:999px;display:grid;place-items:center;color:var(--text2);transition:.16s}
+.iconbtn:hover{background:var(--soft2);color:var(--text)}
+#rail{left:15px;top:50%;transform:translateY(-50%);width:54px;padding:8px 0;border-radius:27px;display:flex;flex-direction:column;align-items:center;gap:4px;z-index:60}
+.rail-btn{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:var(--text2);transition:.16s}
+.rail-btn:hover{background:var(--soft2);color:var(--text)}
+.rail-btn.primary{width:40px;height:40px;background:var(--accent);color:var(--accent-text);margin-bottom:4px}
+.rail-btn.primary:hover{opacity:.88;background:var(--accent)}
+.rail-sep{width:20px;height:1px;background:var(--line);margin:4px 0}
+#zoombar{left:15px;bottom:15px;height:40px;padding:4px;border-radius:999px;display:flex;align-items:center;gap:2px;z-index:60}
+#zoombar .z{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:var(--text2)}
+#zoombar .z:hover{background:var(--soft2);color:var(--text)}
+#zoombar .pct{font-size:11.5px;color:var(--text2);padding:0 6px;min-width:40px;text-align:center}
+#minimap{right:15px;bottom:15px;width:168px;height:108px;border-radius:14px;padding:10px;z-index:55;overflow:hidden}
+#minimap .mm{position:absolute;border-radius:2px;background:var(--soft2)}
+#minimap .mm.on{background:var(--text2)}
+#minimap .vp{position:absolute;inset:8px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--line)}
+.composer{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;width:min(640px,calc(100vw - 430px));min-width:420px;border-radius:16px;padding:12px;z-index:50}
+.composer .chead{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.selpill{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:999px;background:var(--soft);font-size:11.5px;color:var(--text2)}
+.selpill:hover{background:var(--soft2)}
+.selpill b{font-weight:500;color:var(--text)}
+.composer .prompt{min-height:46px;max-height:120px;overflow:auto;font-size:13px;line-height:1.55;color:var(--text);padding:2px 2px 8px;outline:none}
+.composer .prompt:empty::before{content:attr(data-ph);color:var(--text3)}
+.composer .cbot{display:flex;align-items:center;gap:6px}
+.param{height:26px;padding:0 9px;border-radius:8px;background:var(--soft);font-size:11px;color:var(--text2);display:inline-flex;align-items:center;gap:4px}
+.param:hover{background:var(--soft2)}
+.run{width:34px;height:34px;border-radius:50%;background:var(--accent);color:var(--accent-text);display:grid;place-items:center;margin-left:auto;flex-shrink:0}
+.run:hover{opacity:.88}
+.hint{text-align:center;font-size:10.5px;color:var(--text3);margin-top:7px}
+#panel{right:15px;top:70px;bottom:15px;width:340px;border-radius:20px;display:none;flex-direction:column;overflow:hidden;z-index:62}
+#panel.on{display:flex}
+.phead{display:flex;align-items:center;gap:8px;padding:15px 15px 6px}
+.phead b{font-size:13.5px;font-weight:600}
+.phead .cnt{font-size:11px;color:var(--text3)}
+.tabs{display:flex;gap:2px;padding:4px 11px 8px}
+.tab{padding:6px 10px;border-radius:8px;font-size:12px;color:var(--text3)}
+.tab.on{background:var(--soft2);color:var(--text)}
+.pbody{flex:1;overflow:auto;padding:0 9px 14px;scrollbar-width:thin}
+.mrow{display:flex;align-items:center;gap:9px;padding:8px;border-radius:11px}
+.mrow:hover{background:var(--soft)}
+.mrow .who{flex:1;min-width:0}
+.mrow .who b{display:block;font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mrow .who span{font-size:10.5px;color:var(--text3);display:flex;align-items:center;gap:5px}
+.mrow .av{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff;flex-shrink:0}
+select.role{background:var(--soft);border-radius:8px;padding:4px 6px;font-size:11.5px;color:var(--text2);outline:none}
+.sec{padding:12px 8px 4px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text3)}
+.field{display:flex;align-items:center;gap:8px;margin:6px 0;padding:8px 10px;border-radius:10px;background:var(--soft)}
+.field input{flex:1;background:none;border:0;outline:none;font-size:12px;color:var(--text);min-width:0}
+.field.link{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;color:var(--text2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.row{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:9px 8px;font-size:12px;color:var(--text2)}
+.row b{font-weight:500;color:var(--text);font-size:12px}
+.sw{width:34px;height:20px;border-radius:999px;background:var(--soft2);position:relative;transition:.16s;flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.3);transition:.16s}
+.sw.on{background:var(--live)}
+.sw.on::after{left:16px}
+.tip{font-size:10.5px;color:var(--text3);padding:6px 8px;line-height:1.5}
+.act{display:flex;gap:8px;padding:8px;font-size:11.5px;color:var(--text2)}
+.act .t{color:var(--text3);font-size:10.5px;width:46px;flex-shrink:0}
+.badge{padding:2px 7px;border-radius:999px;font-size:10.5px;background:var(--soft);color:var(--text2);white-space:nowrap}
+.badge.live{background:color-mix(in srgb, var(--live) 15%, transparent);color:var(--live)}
+#demo{position:fixed;left:50%;top:16px;transform:translateX(-50%);display:none;align-items:center;gap:2px;padding:4px;border-radius:999px;z-index:58}
+#demo .d{height:28px;padding:0 9px;border-radius:999px;font-size:11px;color:var(--text2);white-space:nowrap}
+#demo .d:hover{background:var(--soft2);color:var(--text)}
+#demo .d.on{background:var(--soft2);color:var(--text)}
+#demo.on{display:flex}
+#viewerPill{left:15px;top:92px;height:28px;padding:0 10px;border-radius:999px;display:none;align-items:center;gap:6px;font-size:11px;color:var(--text2);z-index:55}
+#viewerPill.on{display:flex}
+#menu{left:15px;top:66px;width:200px;border-radius:14px;padding:6px;display:none;z-index:70}
+#menu.on{display:block}
+.mitem{display:flex;align-items:center;gap:8px;width:100%;padding:8px 9px;border-radius:9px;font-size:12px;color:var(--text2);text-align:left}
+.mitem:hover{background:var(--soft2);color:var(--text)}
+.msep{height:1px;background:var(--line);margin:4px 6px}
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.28);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:100;display:none;align-items:center;justify-content:center;padding:24px}
+.backdrop.on{display:flex}
+.dialog{width:480px;max-width:100%;max-height:88vh;overflow:auto;border-radius:20px;background:var(--panel);backdrop-filter:blur(44px) saturate(190%);box-shadow:0 32px 80px -26px var(--shadow);padding:20px;color:var(--text)}
+.dialog h3{margin:0 0 4px;font-size:15px;font-weight:600}
+.dialog .sub{font-size:12px;color:var(--text3);margin-bottom:14px;line-height:1.5}
+.dialog .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.toasts{position:fixed;left:16px;bottom:72px;display:flex;flex-direction:column;gap:8px;z-index:130;align-items:flex-start;pointer-events:none}
+.toast{padding:8px 14px;border-radius:999px;background:var(--panel-solid,#161618);box-shadow:0 14px 36px var(--shadow);font-size:12.5px;font-weight:500;color:var(--text);animation:tin .2s ease-out;white-space:normal;max-width:320px;line-height:1.5;transition:opacity .25s}
+.toast.warn{color:var(--danger)}
+@keyframes tin{from{transform:translateX(-6px)}to{transform:none}}
+.page{position:fixed;inset:0;z-index:110;background:var(--bg);overflow:auto;padding:24px 32px 40px;display:none}
+.page.on{display:block}
+.phead2{display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+.phead2 h1{font-size:20px;margin:0;font-weight:600}
+.phead2 .sub{font-size:12px;color:var(--text3)}
+.search{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:var(--soft);color:var(--text3);font-size:12px;margin-left:auto;width:230px}
+.search input{flex:1;background:none;border:0;outline:none;color:var(--text);font-size:12px;min-width:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
+.chip{padding:6px 12px;border-radius:999px;font-size:12px;background:var(--soft);color:var(--text2)}
+.chip.on{background:var(--accent);color:var(--accent-text)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+.card{border-radius:16px;overflow:hidden;background:var(--surface);box-shadow:0 10px 26px -18px var(--shadow);transition:transform .18s ease}
+.card:hover{transform:translateY(-2px)}
+.cover{height:126px;position:relative;overflow:hidden}
+.cover .ct{position:absolute;left:8px;top:8px;padding:2px 8px;border-radius:999px;font-size:10px;background:rgba(0,0,0,.5);color:#fff;backdrop-filter:blur(6px)}
+.cmeta{padding:10px 12px 12px}
+.cmeta .h{display:flex;align-items:center;gap:8px}
+.cmeta .h b{font-size:12.5px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmeta .a{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--text3)}
+.cmeta .s{display:flex;align-items:center;gap:12px;margin-top:10px;font-size:11px;color:var(--text3)}
+.cmeta .s span{display:flex;align-items:center;gap:4px}
+.cmeta .s .clone{margin-left:auto;color:var(--text);display:flex;align-items:center;gap:4px;font-size:11px}
+.frow{display:flex;align-items:center;gap:12px;padding:12px 8px;border-radius:12px}
+.frow:hover{background:var(--soft)}
+.frow .who{flex:1;min-width:0}
+.frow .who b{display:block;font-size:13px;font-weight:500}
+.frow .who span{font-size:11px;color:var(--text3)}
+.frow .av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff;flex-shrink:0}
+.dotline{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text3)}
+.dept{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:22px}
+.dcard{padding:14px;border-radius:14px;background:var(--surface);box-shadow:0 10px 24px -18px var(--shadow)}
+.dcard b{display:block;font-size:13px;margin-bottom:4px}
+.dcard span{font-size:11px;color:var(--text3)}
+.mtable{width:100%;border-collapse:collapse;font-size:12px}
+.mtable th{text-align:left;font-weight:500;color:var(--text3);font-size:11px;padding:8px 10px;background:var(--soft)}
+.mtable td{padding:10px;color:var(--text2)}
+.mtable tr:nth-child(even) td{background:var(--soft)}
+.mtable td b{color:var(--text);font-weight:500}
+@media(max-width:1100px){.composer{width:calc(100vw - 380px);min-width:360px}#minimap{display:none}}
+</style>
+</head>
+<body>
+<div id="app" data-theme="light">
+  <div class="grid"></div>
+
+  <div class="canvas" id="canvas">
+    <svg class="links" id="links"></svg>
+    <div class="node sel" id="n1">
+      <div class="img"><div class="ph g1"></div><span class="lb">2048 × 2048</span></div>
+      <div class="cap"><b>商品主图 · 浴室场景</b><span class="st"><i class="dot"></i>已完成</span></div>
+      <div class="tagrow"><span class="mini">Seedream 5.0</span><span class="mini">16:9</span></div>
+    </div>
+    <div class="node" id="n2">
+      <div class="ering" style="box-shadow:0 0 0 2px rgba(232,93,117,.7),0 0 14px 0 rgba(232,93,117,.18)"></div>
+      <div class="img"><div class="ph g2"></div><div class="sh"></div><span class="lb">4K · 局部重绘</span></div>
+      <div class="cap"><b>场景图 · 光影重绘</b><span class="st"><i class="dot warn"></i>生成中 68%</span></div>
+      <div class="tagrow"><span class="mini">王五 正在编辑</span></div>
+    </div>
+    <div class="node text" id="n3">
+      <div class="card">
+        <div class="ttl"><svg class="i sm" viewBox="0 0 24 24"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>卖点文案</div>
+        <div class="txt"><b>轻量 · 防水 · 快充</b><br>浴室场景主图，突出 24h 续航与 IPX7 防水，右下角留白放价格标签。</div>
+      </div>
+      <div class="cap"><b>引用 2 次</b><span class="st">已锁定</span></div>
+    </div>
+  </div>
+
+  <div class="cursors" id="cursors"></div>
+
+  <div id="topLeft">
+    <div class="pill glass">
+      <button class="logo" id="backBtn" title="返回画布列表"><svg class="i sm" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></button>
+      <span class="title">618 浴室主图 · 协作演示</span>
+      <button class="chev" id="menuBtn" title="画布操作"><svg class="i sm" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    </div>
+  </div>
+  <div id="saveState"><i class="dot"></i>所有更改已保存</div>
+
+  <div id="topRight">
+    <div class="stack glass" id="avatarStack"><span class="cnt" id="onlineCount">4 人在线</span></div>
+    <button class="btn primary glass" id="shareBtn"><svg class="i sm" viewBox="0 0 24 24"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M16 6l-4-4-4 4M12 2v13"/></svg>分享</button>
+    <button class="iconbtn glass" id="panelBtn" title="协作面板"><svg class="i" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"/></svg></button>
+  </div>
+
+  <nav id="rail" class="float">
+    <button class="rail-btn primary" title="新建节点"><svg class="i lg" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <div class="rail-sep"></div>
+    <button class="rail-btn" title="在线素材"><svg class="i" viewBox="0 0 24 24"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21"/></svg></button>
+    <button class="rail-btn" title="资产库"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+    <button class="rail-btn" title="工作流"><svg class="i" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></button>
+    <button class="rail-btn" title="历史记录"><svg class="i" viewBox="0 0 24 24"><path d="M3 3v5h5M3.05 13A9 9 0 1 0 6 5.3L3 8M12 7v5l4 2"/></svg></button>
+    <button class="rail-btn" title="模板库"><svg class="i" viewBox="0 0 24 24"><path d="M12 2l9 5-9 5-9-5zM3 12l9 5 9-5M3 17l9 5 9-5"/></svg></button>
+    <button class="rail-btn" title="对话"><svg class="i" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
+    <button class="rail-btn" title="更多"><svg class="i" viewBox="0 0 24 24"><path d="M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM19 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM5 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg></button>
+    <div class="rail-sep"></div>
+    <button class="rail-btn" title="设置"><svg class="i" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></button>
+  </nav>
+
+  <div id="zoombar" class="float">
+    <button class="z" title="缩小"><svg class="i sm" viewBox="0 0 24 24"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35M8 11h6"/></svg></button>
+    <span class="pct">100%</span>
+    <button class="z" title="放大"><svg class="i sm" viewBox="0 0 24 24"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35M11 8v6M8 11h6"/></svg></button>
+    <button class="z" title="适应画布"><svg class="i sm" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+  </div>
+
+  <div id="minimap" class="float">
+    <div class="vp"></div>
+    <div class="mm on" style="left:34px;top:28px;width:34px;height:22px"></div>
+    <div class="mm" style="left:78px;top:52px;width:28px;height:18px"></div>
+    <div class="mm" style="left:46px;top:64px;width:30px;height:16px"></div>
+  </div>
+
+  <div class="composer float">
+    <div class="chead">
+      <button class="selpill"><b>API 生成</b><svg class="i sm" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+      <button class="selpill">Seedream 5.0<svg class="i sm" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    </div>
+    <div class="prompt" contenteditable="true" data-ph="描述你想生成或编辑的图片…"></div>
+    <div class="cbot">
+      <button class="param">16:9</button><button class="param">2K</button><button class="param">1 张</button>
+      <button class="run" title="运行"><svg class="i lg" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+    </div>
+    <div class="hint">Enter 发送 · Shift + Enter 换行</div>
+  </div>
+
+  <div id="demo" class="float">
+    <button class="d" id="addMember">+ 成员</button>
+    <button class="d" id="removeMember">- 成员</button>
+    <button class="d" id="toggleCursor">光标开</button>
+    <button class="d" id="toggleViewer">查看者</button>
+    <button class="d" id="demoTheme">浅色</button>
+    <button class="d" id="demoShare">分享弹窗</button>
+    <button class="d" id="demoClose">关闭</button>
+  </div>
+
+  <div id="viewerPill" class="float"><svg class="i sm" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>查看者视角 · 只读</div>
+
+  <div id="menu" class="float">
+    <button class="mitem" data-menu="rename"><svg class="i sm" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>重命名画布</button>
+    <button class="mitem" data-menu="back"><svg class="i sm" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>返回画布列表</button>
+    <div class="msep"></div>
+    <button class="mitem" data-menu="community"><svg class="i sm" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg>社区</button>
+    <button class="mitem" data-menu="friends"><svg class="i sm" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"/></svg>好友</button>
+    <button class="mitem" data-menu="theme"><svg class="i sm" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>切换深浅色</button>
+    <button class="mitem" data-menu="demo"><svg class="i sm" viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg>演示控制（仅预览）</button>
+    <button class="mitem" data-menu="org"><svg class="i sm" viewBox="0 0 24 24"><path d="M3 21h18M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2"/></svg>组织与部门</button>
+  </div>
+
+  <aside id="panel" class="float">
+    <div class="phead">
+      <svg class="i" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"/></svg>
+      <b>协作</b><span class="cnt" id="panelCount">4 人在线</span>
+      <div style="flex:1"></div>
+      <button class="iconbtn" id="panelClose" style="width:30px;height:30px" title="收起"><svg class="i sm" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="tabs">
+      <button class="tab on" data-tab="members">成员</button>
+      <button class="tab" data-tab="share">分享</button>
+      <button class="tab" data-tab="activity">活动</button>
+    </div>
+    <div class="pbody" id="pbody"></div>
+  </aside>
+
+  <div class="backdrop" id="shareModal">
+    <div class="dialog">
+      <h3>分享「618 浴室主图 · 协作演示」</h3>
+      <div class="sub">持有链接的人可以加入画布。创建者可随时修改权限或关闭链接。</div>
+      <div class="field link"><svg class="i sm" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l3-3a5 5 0 0 0-7.1-7.1l-1.5 1.5M14 11a5 5 0 0 0-7.1 0l-3 3a5 5 0 0 0 7.1 7.1l1.5-1.5"/></svg><span>https://novai.app/c/7f3a9d</span></div>
+      <div style="display:flex;gap:8px;margin:10px 0">
+        <select class="role" id="shareRole" style="flex:1;padding:8px 10px"><option value="view">持链接可查看</option><option value="edit">持链接可编辑</option><option value="none">仅受邀成员</option></select>
+        <select class="role" id="shareExpiry" style="padding:8px 10px"><option value="7d">7 天有效</option><option value="1d">1 天有效</option><option value="forever">永久有效</option></select>
+      </div>
+      <div class="row"><span>需要密码访问</span><button class="sw" id="swPwd"></button></div>
+      <div class="row"><span>允许克隆该画布</span><button class="sw" id="swClone"></button></div>
+      <div class="field"><input id="inviteInput" placeholder="输入好友名字或邮箱，直接邀请"><button class="btn sm" id="inviteBtn">邀请</button></div>
+      <div class="tip">仅创建者可以修改权限、移除成员和删除画布。当前画布上限 10 人。</div>
+      <div class="foot"><button class="btn" id="shareClose" style="height:34px">关闭</button><button class="btn primary" id="copyBtn" style="height:34px">复制链接</button></div>
+    </div>
+  </div>
+
+  <section class="page" id="page-community">
+    <div class="phead2"><h1>社区</h1><span class="sub">公开画布与模板，可一键克隆</span>
+      <div class="search"><svg class="i sm" viewBox="0 0 24 24"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35"/></svg><input placeholder="搜索画布、模板、作者"></div>
+      <button class="btn" data-back>返回画布</button>
+    </div>
+    <div class="chips"><button class="chip on">全部</button><button class="chip">电商</button><button class="chip">视频</button><button class="chip">插画</button><button class="chip">工作流</button></div>
+    <div class="cards" id="communityCards"></div>
+  </section>
+
+  <section class="page" id="page-friends">
+    <div class="phead2"><h1>好友</h1><span class="sub">好友可以被直接邀请进画布</span>
+      <button class="btn" data-back>返回画布</button>
+    </div>
+    <div id="friendList"></div>
+  </section>
+
+  <section class="page" id="page-org">
+    <div class="phead2"><h1>组织 · NOVAI 设计部</h1><span class="sub">部门成员与画布共享</span>
+      <button class="btn" data-back>返回画布</button>
+    </div>
+    <div class="dept" id="deptCards"></div>
+    <table class="mtable"><thead><tr><th>成员</th><th>部门</th><th>角色</th><th>可访问画布</th></tr></thead><tbody id="orgRows"></tbody></table>
+  </section>
+
+  <div class="toasts" id="toasts"></div>
+</div>
+<script>
+(function(){
+  "use strict";
+  var $=function(s,r){return (r||document).querySelector(s)};
+  var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+  var state={
+    theme:"dark", viewer:false, cursors:true, tab:"members", panelOpen:false,
+    members:[
+      {id:"me",name:"你",role:"owner",color:"#8b9cff",initials:"你"},
+      {id:"li",name:"李四",role:"editor",color:"#5B8DEF",initials:"李"},
+      {id:"wang",name:"王五",role:"viewer",color:"#E85D75",initials:"王"},
+      {id:"zhao",name:"赵六",role:"editor",color:"#F2A93B",initials:"赵"}
+    ],
+    pool:["孙七","周八","吴九","郑十","陈一","林二","黄三","刘四"],
+    share:{pwd:false,clone:false}
+  };
+  var cursors={}, anim=null;
+  function roleName(r){return r==="owner"?"创建者":r==="admin"?"管理员":r==="editor"?"可编辑":"仅查看"}
+  function toast(msg,warn){
+    var d=document.createElement("div"); d.className="toast"+(warn?" warn":""); d.textContent=msg;
+    $("#toasts").appendChild(d); setTimeout(function(){d.style.opacity="0"},4800); setTimeout(function(){d.remove()},5200);
+  }
+  function renderAvatars(){
+    var box=$("#avatarStack"); var cnt=$("#onlineCount");
+    Array.prototype.slice.call(box.querySelectorAll(".av")).forEach(function(a){a.remove()});
+    state.members.forEach(function(m,i){
+      if(i>4) return;
+      var a=document.createElement("div"); a.className="av"; a.style.background=m.color; a.title=m.name+" · "+roleName(m.role); a.textContent=m.initials;
+      var dot=document.createElement("i"); dot.className="on"; a.appendChild(dot); box.insertBefore(a,cnt);
+    });
+    if(state.members.length>5){var mo=document.createElement("div");mo.className="av more";mo.textContent="+"+(state.members.length-5);box.insertBefore(mo,cnt)}
+    cnt.textContent=state.members.length+" 人在线";
+    $("#panelCount").textContent=state.members.length+" 人在线";
+  }
+  function renderMembers(){
+    var h='<div class="sec">画布成员</div>';
+    state.members.forEach(function(m){
+      var online='<span class="dotline"><i class="dot"></i>在线</span>';
+      var sel='';
+      if(m.id==="me"){sel='<span class="badge">创建者</span>'}
+      else if(state.viewer){sel='<span class="badge">'+roleName(m.role)+'</span>'}
+      else {sel='<select class="role" data-role="'+m.id+'">';["admin","editor","viewer"].forEach(function(r){sel+='<option value="'+r+'"'+(m.role===r?" selected":"")+'>'+roleName(r)+'</option>'});sel+='</select>'}
+      var rm=(m.id!=="me"&&!state.viewer)?'<button class="iconbtn" data-rm="'+m.id+'" style="width:26px;height:26px" title="移除">x</button>':'';
+      h+='<div class="mrow"><div class="av" style="background:'+m.color+'">'+m.initials+'</div><div class="who"><b>'+m.name+'</b>'+online+'</div>'+sel+rm+'</div>';
+    });
+    h+='<div class="field" style="margin-top:12px"><input id="panelInvite" placeholder="输入名字或邮箱邀请"><button class="btn sm" id="panelInviteBtn">邀请</button></div>';
+    h+='<div class="tip">仅创建者可修改角色与移除成员；画布上限 10 人。</div>';
+    $("#pbody").innerHTML=h;
+  }
+  function renderShareTab(){
+    $("#pbody").innerHTML=
+      '<div class="sec">分享链接</div><div class="field link"><span>https://novai.app/c/7f3a9d</span></div>'+
+      '<div style="display:flex;gap:8px;margin:8px 0"><select class="role" id="pRole" style="flex:1;padding:8px"><option value="view">持链接可查看</option><option value="edit">持链接可编辑</option><option value="none">仅受邀成员</option></select><select class="role" id="pExpiry" style="padding:8px"><option value="7d">7 天</option><option value="forever">永久</option></select></div>'+
+      '<div class="row"><span>需要密码</span><button class="sw'+(state.share.pwd?" on":"")+'" id="pPwd"></button></div>'+
+      '<div class="row"><span>允许克隆</span><button class="sw'+(state.share.clone?" on":"")+'" id="pClone"></button></div>'+
+      '<button class="btn primary" id="panelCopy" style="width:100%;justify-content:center;margin-top:10px;height:34px">复制链接</button>'+
+      '<div class="tip">创建者可以随时关闭链接、修改权限或删除画布；被移除的成员会立即失去访问。</div>';
+  }
+  function renderActivity(){
+    var acts=[["刚刚","李四 加入了画布"],["2 分钟前","王五 修改了「场景图」节点"],["5 分钟前","你 生成了「商品主图」"],["8 分钟前","赵六 评论了画布"],["12 分钟前","李四 移动了 3 个节点"]];
+    $("#pbody").innerHTML='<div class="sec">最近活动</div>'+acts.map(function(a){return '<div class="act"><span class="t">'+a[0]+'</span><span>'+a[1]+'</span></div>'}).join("")+'<div class="tip">实时操作会在这里留下记录，方便回溯。</div>';
+  }
+  function renderPanel(){
+    if(state.tab==="members") renderMembers(); else if(state.tab==="share") renderShareTab(); else renderActivity();
+    $$(".tab").forEach(function(t){t.classList.toggle("on",t.getAttribute("data-tab")===state.tab)});
+  }
+  function renderAll(){renderAvatars();renderPanel();syncCursors()}
+  function addMember(name){
+    if(state.members.length>=10){toast("画布人数已达上限（10 人），新成员会进入排队",true);return}
+    var nm=name||state.pool.shift()||("访客"+Math.floor(Math.random()*90+10));
+    var colors=["#9B7BF0","#4FBF8B","#3AA6B9","#E07A5F","#C0A062","#7A9E7E"];
+    var m={id:"u"+Date.now()+Math.floor(Math.random()*999),name:nm,role:"editor",color:colors[state.members.length%colors.length],initials:nm.charAt(0)};
+    state.members.push(m); renderAll(); toast(nm+" 加入了画布");
+  }
+  function removeMember(id){
+    var idx=-1;
+    if(id){state.members.forEach(function(m,i){if(m.id===id)idx=i})}
+    else{for(var i=state.members.length-1;i>0;i--){if(state.members[i].id!=="me"){idx=i;break}}}
+    if(idx<0){toast("没有可移除的成员",true);return}
+    var m=state.members[idx]; state.members.splice(idx,1);
+    if(cursors[m.id]){cursors[m.id].el.remove();delete cursors[m.id]}
+    renderAll(); toast(m.name+" 离开了画布");
+  }
+  function syncCursors(){
+    state.members.forEach(function(m){
+      if(m.id==="me"||cursors[m.id]) return;
+      var el=document.createElement("div"); el.className="cursor";
+      el.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 4l7 17 2.5-6.5L20 12z" fill="'+m.color+'" stroke="rgba(0,0,0,.35)" stroke-width="1"/></svg><span class="ct" style="background:'+m.color+'">'+m.name+'</span>';
+      $("#cursors").appendChild(el);
+      var r=$("#canvas").getBoundingClientRect();
+      cursors[m.id]={el:el,x:r.width*0.45,y:r.height*0.45,tx:r.width*0.45,ty:r.height*0.45,next:0,color:m.color};
+    });
+    Object.keys(cursors).forEach(function(id){
+      if(!state.members.some(function(m){return m.id===id})){cursors[id].el.remove();delete cursors[id]}
+    });
+    if(!anim) anim=requestAnimationFrame(tick);
+  }
+  function tick(ts){
+    var r=$("#canvas").getBoundingClientRect();
+    Object.keys(cursors).forEach(function(id){
+      var c=cursors[id];
+      if(!c.next||ts>c.next){c.tx=70+Math.random()*Math.max(120,r.width-420);c.ty=110+Math.random()*Math.max(120,r.height-330);c.next=ts+1800+Math.random()*2600}
+      c.x+=(c.tx-c.x)*0.045; c.y+=(c.ty-c.y)*0.045;
+      c.el.style.transform="translate("+c.x+"px,"+c.y+"px)";
+      if(Math.random()<0.0012) pulse(c.x,c.y,c.color);
+    });
+    anim=requestAnimationFrame(tick);
+  }
+  function pulse(x,y,color){
+    var p=document.createElement("div"); p.className="pulse"; p.style.left=x+"px"; p.style.top=y+"px";
+    p.style.boxShadow="0 0 0 2px "+color; p.style.background=color+"22";
+    $("#cursors").appendChild(p); setTimeout(function(){p.remove()},720);
+  }
+  function toggleCursors(){
+    state.cursors=!state.cursors; $("#cursors").style.display=state.cursors?"block":"none";
+    $("#toggleCursor").textContent="光标"+(state.cursors?"开":"关"); $("#toggleCursor").classList.toggle("on",state.cursors);
+    toast("协作光标已"+(state.cursors?"显示":"隐藏"));
+  }
+  function setViewer(v){
+    state.viewer=v; $("#viewerPill").classList.toggle("on",v);
+    $("#toggleViewer").textContent=v?"退出查看":"查看者"; $("#toggleViewer").classList.toggle("on",v);
+    toast(v?"已切换到查看者视角（只读）":"已回到编辑者视角"); renderPanel();
+  }
+  function openShare(){$("#shareModal").classList.add("on")}
+  function closeShare(){$("#shareModal").classList.remove("on")}
+  function openPanel(tab){
+    state.panelOpen=true; if(tab){state.tab=tab} $("#panel").classList.add("on"); renderPanel();
+  }
+  function copyLink(){
+    var txt="https://novai.app/c/7f3a9d";
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(function(){toast("链接已复制")}).catch(function(){toast("已生成链接： "+txt)})}
+    else{toast("已生成链接： "+txt)}
+  }
+  function showPage(id){
+    $$(".page").forEach(function(p){p.classList.remove("on")});
+    if(id) $("#page-"+id).classList.add("on");
+  }
+  function layoutNodes(){
+    var r=$("#canvas").getBoundingClientRect(), W=r.width, H=r.height;
+    function place(id,x,y){var n=document.getElementById(id); if(n.dataset.dragged)return; n.style.left=Math.round(x)+"px"; n.style.top=Math.round(y)+"px"}
+    place("n1",W*0.14,H*0.16); place("n2",W*0.42,H*0.36); place("n3",W*0.18,H*0.50);
+    updateLinks();
+  }
+  function nodeRect(id){
+    var n=document.getElementById(id), c=$("#canvas").getBoundingClientRect(), b=n.getBoundingClientRect();
+    return {x:b.left-c.left,y:b.top-c.top,w:b.width,h:b.height};
+  }
+  function updateLinks(){
+    var a=nodeRect("n3"), b=nodeRect("n1"), c=nodeRect("n2"), svg=$("#links");
+    function path(p,q){var x1=p.x+p.w,y1=p.y+p.h/2,x2=q.x,y2=q.y+q.h/2,dx=Math.max(36,Math.abs(x2-x1)*0.5);return "M"+x1+","+y1+" C"+(x1+dx)+","+y1+" "+(x2-dx)+","+y2+" "+x2+","+y2}
+    function dot(x,y){return '<circle cx="'+x+'" cy="'+y+'" r="2.5"/>'}
+    svg.innerHTML='<path d="'+path(a,b)+'"/>'+dot(a.x+a.w,a.y+a.h/2)+dot(b.x,b.y+b.h/2)+'<path d="'+path(b,c)+'"/>'+dot(b.x+b.w,b.y+b.h/2)+dot(c.x,c.y+c.h/2);
+  }
+  function bindDrag(){
+    var drag=null;
+    $$(".node").forEach(function(n){
+      n.addEventListener("pointerdown",function(e){
+        if(e.target.closest("select,button")) return;
+        if(state.viewer){toast("当前为仅查看权限，无法编辑画布",true);return}
+        var r=$("#canvas").getBoundingClientRect(), b=n.getBoundingClientRect();
+        drag={el:n,ox:b.left-r.left,oy:b.top-r.top,sx:e.clientX,sy:e.clientY};
+        n.setPointerCapture(e.pointerId); n.classList.add("sel");
+        $$(".node").forEach(function(o){if(o!==n)o.classList.remove("sel")});
+      });
+      n.addEventListener("pointermove",function(e){
+        if(!drag||drag.el!==n) return;
+        drag.el.style.left=Math.round(drag.ox+e.clientX-drag.sx)+"px";
+        drag.el.style.top=Math.round(drag.oy+e.clientY-drag.sy)+"px";
+        drag.el.dataset.dragged="1"; updateLinks();
+      });
+      n.addEventListener("pointerup",function(){drag=null});
+      n.addEventListener("pointercancel",function(){drag=null});
+    });
+  }
+  function community(){
+    var items=[
+      {t:"双十一美妆主图工作流",a:"李四",tag:"电商",g:"g1",l:128,c:36},
+      {t:"电影感产品短片 · 分镜模板",a:"王五",tag:"视频",g:"g2",l:96,c:22},
+      {t:"浴室场景光影重绘",a:"赵六",tag:"电商",g:"g3",l:74,c:18},
+      {t:"国风插画 · 角色一致性",a:"孙七",tag:"插画",g:"g2",l:210,c:54},
+      {t:"电商详情页批量生成",a:"周八",tag:"工作流",g:"g1",l:165,c:41},
+      {t:"TVC 预演 · 镜头库",a:"吴九",tag:"视频",g:"g3",l:88,c:19}
+    ];
+    $("#communityCards").innerHTML=items.map(function(it){
+      return '<div class="card"><div class="cover '+it.g+'"><span class="ct">'+it.tag+'</span></div><div class="cmeta"><div class="h"><b>'+it.t+'</b></div><div class="a"><span>'+it.a+'</span><span>·</span><span>公开</span></div><div class="s"><span>♡ '+it.l+'</span><span>⑂ '+it.c+'</span><button class="clone">克隆</button></div></div></div>';
+    }).join("");
+    $$("#communityCards .clone").forEach(function(b){b.addEventListener("click",function(){toast("已克隆到「我的画布」")})});
+  }
+  function friends(){
+    var fs=[["李四","设计部 · 在线",true],["王五","电商部 · 在线",true],["赵六","视频组 · 30 分钟前",false],["孙七","外部合作 · 在线",true],["周八","设计部 · 昨天",false]];
+    $("#friendList").innerHTML=fs.map(function(f){
+      return '<div class="frow"><div class="av" style="background:'+(f[2]?"#5B8DEF":"#6b6b6b")+'">'+f[0].charAt(0)+'</div><div class="who"><b>'+f[0]+'</b><span class="dotline">'+(f[2]?'<i class="dot"></i>':'')+f[1]+'</span></div><button class="btn sm">邀请协作</button></div>';
+    }).join("");
+    $$("#friendList .btn").forEach(function(b){b.addEventListener("click",function(){toast("已发送协作邀请")})});
+  }
+  function org(){
+    var ds=[["设计部","12 人 · 8 个画布"],["电商部","8 人 · 5 个画布"],["视频组","5 人 · 3 个画布"]];
+    $("#deptCards").innerHTML=ds.map(function(d){return '<div class="dcard"><b>'+d[0]+'</b><span>'+d[1]+'</span></div>'}).join("");
+    var rows=[["李四","设计部","管理员"],["王五","电商部","成员"],["赵六","视频组","成员"],["孙七","设计部","成员"]];
+    $("#orgRows").innerHTML=rows.map(function(r){return '<tr><td><b>'+r[0]+'</b></td><td>'+r[1]+'</td><td>'+r[2]+'</td><td>3 个画布</td></tr>'}).join("");
+  }
+  function bind(){
+    $("#backBtn").addEventListener("click",function(){toast("返回画布列表")});
+    $("#menuBtn").addEventListener("click",function(){$("#menu").classList.toggle("on")});
+    document.addEventListener("click",function(e){
+      if(!e.target.closest("#menu")&&!e.target.closest("#menuBtn")) $("#menu").classList.remove("on");
+      var m=e.target.closest("[data-menu]");
+      if(m){$("#menu").classList.remove("on");var k=m.getAttribute("data-menu");
+        if(k==="rename")toast("重命名画布");
+        else if(k==="back")toast("返回画布列表");
+        else if(k==="theme"){state.theme=state.theme==="dark"?"light":"dark";$("#app").setAttribute("data-theme",state.theme);toast("已切换"+(state.theme==="dark"?"深色":"浅色")+"主题");}
+        else if(k==="demo")$("#demo").classList.toggle("on");
+        else showPage(k);
+      }
+      var b=e.target.closest("[data-back]"); if(b)showPage(null);
+      var t=e.target;
+      if(t.id==="panelInviteBtn"){var v=$("#panelInvite").value.trim();if(!v){toast("先输入名字",true);return}addMember(v);$("#panelInvite").value=""}
+      if(t.id==="panelCopy")copyLink();
+      if(t.id==="pPwd"){state.share.pwd=!state.share.pwd;t.classList.toggle("on",state.share.pwd)}
+      if(t.id==="pClone"){state.share.clone=!state.share.clone;t.classList.toggle("on",state.share.clone)}
+      var rm=t.getAttribute&&t.getAttribute("data-rm"); if(rm)removeMember(rm);
+    });
+    document.addEventListener("change",function(e){
+      var id=e.target.getAttribute&&e.target.getAttribute("data-role");
+      if(id){state.members.forEach(function(m){if(m.id===id)m.role=e.target.value});toast("角色已更新")}
+    });
+    $("#shareBtn").addEventListener("click",openShare);
+    $("#demoShare").addEventListener("click",openShare);
+    $("#shareClose").addEventListener("click",closeShare);
+    $("#copyBtn").addEventListener("click",copyLink);
+    $("#shareModal").addEventListener("click",function(e){if(e.target.id==="shareModal")closeShare()});
+    $("#panelBtn").addEventListener("click",function(){state.panelOpen=!state.panelOpen;$("#panel").classList.toggle("on",state.panelOpen);if(state.panelOpen)renderPanel()});
+    $("#panelClose").addEventListener("click",function(){state.panelOpen=false;$("#panel").classList.remove("on")});
+    $$(".tab").forEach(function(t){t.addEventListener("click",function(){state.tab=t.getAttribute("data-tab");renderPanel()})});
+    $("#avatarStack").addEventListener("click",function(){openPanel("members")});
+    $("#demoClose").addEventListener("click",function(){$("#demo").classList.remove("on")});
+    $("#addMember").addEventListener("click",function(){addMember()});
+    $("#removeMember").addEventListener("click",function(){removeMember()});
+    $("#toggleCursor").addEventListener("click",toggleCursors);
+    $("#toggleViewer").addEventListener("click",function(){setViewer(!state.viewer)});
+    $("#demoTheme").addEventListener("click",function(){
+      state.theme=state.theme==="dark"?"light":"dark"; $("#app").setAttribute("data-theme",state.theme);
+      $("#demoTheme").textContent=state.theme==="dark"?"浅色":"深色"; toast("已切换"+(state.theme==="dark"?"深色":"浅色")+"主题");
+    });
+    $("#swPwd").addEventListener("click",function(){state.share.pwd=!state.share.pwd;$("#swPwd").classList.toggle("on",state.share.pwd)});
+    $("#swClone").addEventListener("click",function(){state.share.clone=!state.share.clone;$("#swClone").classList.toggle("on",state.share.clone)});
+    $("#inviteBtn").addEventListener("click",function(){var v=$("#inviteInput").value.trim();if(!v){toast("先输入名字或邮箱",true);return}addMember(v);$("#inviteInput").value=""});
+    $("#inviteInput").addEventListener("keydown",function(e){if(e.key==="Enter")$("#inviteBtn").click()});
+    $("#toggleCursor").classList.add("on");
+    document.addEventListener("keydown",function(e){if(e.key==="Escape"){closeShare();$("#menu").classList.remove("on")}});
+    window.addEventListener("resize",function(){layoutNodes()});
+  }
+  function init(){
+    state.theme=$("#app").getAttribute("data-theme")||"dark";
+    layoutNodes(); bindDrag(); renderAll(); community(); friends(); org(); bind();
+    toast("协作预览：点右上角头像 / 分享，或底部演示按钮");
+    setTimeout(function(){toast("王五 正在编辑「场景图」节点")},1800);
+    setTimeout(function(){toast("赵六 加入了画布")},3600);
+    if(location.hash==="#panel") openPanel("members");
+    if(location.hash==="#share") openShare();
+    if(location.hash==="#light"){state.theme="light";$("#app").setAttribute("data-theme","light");$("#demoTheme").textContent="深色";}
+  }
+  document.addEventListener("DOMContentLoaded",init);
+})();
+</script>
+</body>
+</html>

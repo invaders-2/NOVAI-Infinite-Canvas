@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* 拖拽提速 / 拖错图回归：
-   - guest_drag_bytes 预取命中走 import-urls 的 data 通道，失败/缺 dataUrl 回退原链；
+   - 桥调用走 get_guest_drag_bytes / get_guest_drag_original（旧名 guest_drag_* 只作兼容回落）；
+   - 预取命中走 import-urls 的 data 通道，失败/缺 dataUrl 回退原链；
    - uri-list 与 imageCandidates 同主路径时才用高清候选，否则保持 uri-list 原值；
    - 无 uri-list 才用 candidates[0]。
    跑法：node tests/test_smart_canvas_drop_prefetch.js */
@@ -24,16 +25,19 @@ function topLevelFunction(src, name){
     return '';
 }
 
-const helperNames = ['smartPrimaryPathKey', 'smartChooseGuestImageCandidate', 'smartPrefetchDropHit', 'smartImportUrlsEmptyResult'];
+const helperNames = ['smartPrimaryPathKey', 'smartDropCandidateUrls', 'smartChooseGuestImageCandidate', 'smartPrefetchDropHit', 'smartImportUrlsEmptyResult', 'smartGuestBridgeMethod'];
 const helperCode = helperNames.map(name => topLevelFunction(smart, name)).join('\n');
-ok(helperNames.every(name => helperCode.includes('function ' + name)), '三个拖拽纯函数都能提取');
-const sandbox = { URL };
+ok(helperNames.every(name => helperCode.includes('function ' + name)), '拖拽纯函数都能提取');
+const sandbox = { URL, window: {} };
 vm.createContext(sandbox);
 vm.runInContext(helperCode, sandbox);
 const keyOf = sandbox.smartPrimaryPathKey;
+const candidateUrls = sandbox.smartDropCandidateUrls;
 const choose = sandbox.smartChooseGuestImageCandidate;
 const prefetchHit = sandbox.smartPrefetchDropHit;
 const emptyResult = sandbox.smartImportUrlsEmptyResult;
+const bridgeMethod = sandbox.smartGuestBridgeMethod;
+const withBridgeApi = api => { sandbox.window = { pywebview: { api } }; };
 
 console.log('[1] 预取命中判定');
 const hit = prefetchHit({ ok:true, url:'https://i.pinimg.com/736x/ab/cd/a.jpg', dataUrl:'data:image/jpeg;base64,AAAA', contentType:'image/jpeg', size:1234 });
@@ -69,7 +73,9 @@ ok(choose('', []).url === '', '无 uri-list 且无候选返回空');
 console.log('[5] 接线');
 const dropFn = topLevelFunction(smart, 'handleSmartImageDropPayload');
 const urlBranch = dropFn ? dropFn.slice(dropFn.indexOf("payload.type === 'url'")) : '';
-ok(/guest_drag_bytes/.test(urlBranch) && urlBranch.indexOf('guest_drag_bytes') < urlBranch.indexOf('get_last_guest_drag'), '预取在 guest drag 读取之前');
+ok(/callSmartGuestBridge\(\['get_guest_drag_bytes', 'guest_drag_bytes'\]\)/.test(urlBranch), '预取调用真实桥名 get_guest_drag_bytes，并把旧名 guest_drag_bytes 作为兼容候选');
+ok(urlBranch.indexOf('get_guest_drag_bytes') < urlBranch.indexOf('get_last_guest_drag'), '预取在 guest drag 读取之前');
+ok(/dropLog\('guest_drag_bytes bridge: missing'\)/.test(urlBranch), '桥方法缺失时留一条 dropLog');
 ok(/smartPrefetchDropHit\(prefetched\)/.test(urlBranch), '用纯函数判定预取结果');
 ok(/bytes=' \+ prefetchSize \+ ' url=' \+ prefetchUrl/.test(urlBranch), '日志打印 bytes=<size> url=...');
 ok(/importFetchedData\(guestBytesPrefetch, prefetchedCandidate, 'prefetch-bytes'\)/.test(urlBranch), '命中后走 data 版 import');
@@ -84,7 +90,8 @@ ok(/uriList/.test(payloadFn) && /getData\('text\/uri-list'\)/.test(payloadFn), '
 console.log('[6] 中等尺寸秒出 + 后台原图升级');
 ok(/medium hit bytes=' \+ guestBytesPrefetch\.size \+ ' node=' \+ createdNode\.id/.test(urlBranch), '预取命中日志 medium hit bytes/node');
 ok(/upgradePrefetchedOriginal\(createdNode\.id, prefetchedFiles\.map/.test(urlBranch), '秒出节点后按 nodeId 后台升级');
-ok(/guest_drag_original\(\)/.test(urlBranch), '后台调用 guest_drag_original');
+ok(/callSmartGuestBridge\(\['get_guest_drag_original', 'guest_drag_original'\]\)/.test(urlBranch), '后台原图升级调用真实桥名 get_guest_drag_original，兼容旧名 guest_drag_original');
+ok(/guest_drag_original bridge: missing/.test(urlBranch), '原图桥缺失时留一条 dropLog');
 ok(/original upgrade done node=' \+ node\.id/.test(urlBranch) && /original upgrade failed:/.test(urlBranch), '原图升级 done/failed 日志');
 ok(/const geometry = \{ x: node\.x, y: node\.y, w: node\.w, h: node\.h, scale: node\.scale, rotation: node\.rotation \}/.test(urlBranch), '升级前记录节点位置/尺寸');
 ok(/node\.images\[targetIndex\] = ensureSmartImageAssetId/.test(urlBranch) && /url: high\.url/.test(urlBranch), '只替换目标图片 URL');
@@ -105,6 +112,18 @@ ok(/downloadFailed = true/.test(urlBranch) && /toast\(downloadFailed \?/.test(ur
 ok(/const fromBytes = await importFromFetchedBytes\(candidate\);/.test(urlBranch) && urlBranch.indexOf('importFromFetchedBytes(candidate)') > urlBranch.indexOf('import-urls count0'), 'count0 后继续 fetch-bytes');
 ok(/dropLog\('fetch-bytes fail'/.test(urlBranch) && /dropLog\('fetch-url fail'/.test(urlBranch), 'fetch-bytes/fetch-url 失败均有日志');
 ok(!/if\(!files\.length\)\{\s*return;/.test(urlBranch.slice(0, urlBranch.indexOf('importFromFetchedBytes(candidate)'))), 'count0 不提前 return');
+
+console.log('[8] 桥方法名兼容（真名 / 旧名 / 缺失）');
+withBridgeApi({});
+ok(bridgeMethod(['get_guest_drag_bytes', 'guest_drag_bytes']) === '', '桥上一个都没有时返回空');
+withBridgeApi({ get_guest_drag_bytes: () => 'x', guest_drag_bytes: () => 'y' });
+ok(bridgeMethod(['get_guest_drag_bytes', 'guest_drag_bytes']) === 'get_guest_drag_bytes', '两个名字都在时优先真名 get_guest_drag_bytes');
+withBridgeApi({ guest_drag_bytes: () => 'y' });
+ok(bridgeMethod(['get_guest_drag_bytes', 'guest_drag_bytes']) === 'guest_drag_bytes', '只有旧名时回落到 guest_drag_bytes');
+withBridgeApi({ get_guest_drag_original: () => 'x' });
+ok(bridgeMethod(['get_guest_drag_original', 'guest_drag_original']) === 'get_guest_drag_original', '原图桥真名优先');
+withBridgeApi({ get_guest_drag_bytes: 'not-a-function' });
+ok(bridgeMethod(['get_guest_drag_bytes']) === '', '不是函数不算命中（特性检测等价）');
 
 console.log('');
 console.log('拖拽预取/拖错图回归：' + pass + ' 项通过' + (fails.length ? ('，失败 ' + fails.length + ' 项') : ''));
