@@ -35,7 +35,6 @@ const inputPromptPreview = document.getElementById('inputPromptPreview');
 const minimap = document.getElementById('minimap');
 const minimapContent = document.getElementById('minimapContent');
 const smartArrangeBtn = document.getElementById('smartArrangeBtn');
-const smartRunSelectedBtn = document.getElementById('smartRunSelectedBtn');
 const imageEditModal = document.getElementById('imageEditModal');
 const smartLogModal = document.getElementById('smartLogModal');
 const snapGuides = document.getElementById('snapGuides');
@@ -88,6 +87,9 @@ let minimapViewport = document.getElementById('minimapViewport');
 let canvas = null;
 let canvasUsesConnections = true;
 let nodes = [];
+/* M4 实时协作：viewer 只读开关。collab.js 通过 window.SmartCanvasCollab.setReadOnly() 打开；
+   编辑入口在函数级拦一道，远端 patch 直接改数组、不走这些入口。 */
+let collabReadOnly = false;
 let selectedId = '';
 let selectedIds = [];
 let selectedImage = {nodeId:'', index:-1};
@@ -102,6 +104,7 @@ let promptSplitResizeState = null;
 let thumbDragState = null;
 let uploadTargetId = '';
 let pendingGroupUploadPoint = null;
+let pendingMenuUploadPoint = null;
 let mentionRange = null;
 let mentionAnchorEl = null;
 let mentionInsertMode = 'token';
@@ -164,8 +167,6 @@ let smartCascadeRunPath = null;
 const smartCascadeRuns = new Map();
 let smartRunSelectedRunning = false;
 let smartRunSelectedAbort = false;
-let smartRunSelectedCacheKey = '';
-let smartRunSelectedCacheList = [];
 let smartLoopContext = null;
 let transientSmartCloudLinks = [];
 let runBtnCooldownToken = 0;
@@ -282,6 +283,7 @@ function restoreUndoSnapshot(frozen){
     undoSuppressed = false;
 }
 function performRedo(){
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
     if(!redoStack.length){ toast(tr('smart.toastNoRedo')); return; }
     const snap = redoStack.pop();
     undoStack.push(snapshotForUndo());
@@ -290,6 +292,7 @@ function performRedo(){
     toast(tr('smart.toastRedone'));
 }
 function performUndo(){
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
     if(!undoStack.length){ toast(tr('smart.toastNoUndo')); return; }
     const snap = thawUndoSnapshot(undoStack.pop());
     redoStack.push(snapshotForUndo());
@@ -1292,9 +1295,20 @@ function _localDownloadBlob(blob, filename){
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 800);
 }
+/* 导出基名：标题/图片名常带着媒体扩展名（如“图57.png”），直接拼 .zip / -workflow 会变成“图57.png.zip”。
+   这里只剥掉末尾已知的媒体/文档扩展，像“v1.2 海报”这种正常名字里的点保持不动。 */
+function stripSmartExportMediaExt(name){
+    const pattern = /\.(?:png|jpe?g|webp|gif|bmp|svg|mp4|webm|mov|m4v|mkv|avi|mp3|wav|m4a|aac|ogg|json|zip)$/i;
+    let text = String(name == null ? '' : name).trim();
+    while(pattern.test(text)) text = text.slice(0, text.lastIndexOf('.')).trim();
+    return text;
+}
+function smartExportBaseName(name, fallback='download'){
+    return safeExportFileName(stripSmartExportMediaExt(name), fallback);
+}
 function smartWorkflowFilename(ext='json'){
-    const title = (canvas?.title || document.getElementById('smartTitle')?.textContent || 'smart-canvas').trim();
-    const safe = title.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '-').slice(0, 48) || 'smart-canvas';
+    const title = smartExportBaseName(canvas?.title || document.getElementById('smartTitle')?.textContent || '', 'smart-canvas');
+    const safe = title.replace(/\s+/g, '-').slice(0, 48) || 'smart-canvas';
     const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
     return `${safe}-workflow-${stamp}.${ext}`;
 }
@@ -1311,8 +1325,8 @@ const SMART_EXPORT_MAX_PIXELS = 64000000;
    否则任何一张 404 的图都会让整张画布导不出来。 */
 const SMART_EXPORT_IMAGE_PLACEHOLDER = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mO4fPkyAAT2AnqzAEMqAAAAAElFTkSuQmCC';
 function smartCanvasExportTitle(){
-    const title = String(canvas?.title || document.getElementById('smartTitle')?.textContent || 'smart-canvas').trim();
-    return title.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '-').slice(0, 48) || 'smart-canvas';
+    const title = smartExportBaseName(canvas?.title || document.getElementById('smartTitle')?.textContent || '', 'smart-canvas');
+    return title.replace(/\s+/g, '-').slice(0, 48) || 'smart-canvas';
 }
 function smartCanvasExportFilename(ext){
     const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
@@ -1842,6 +1856,7 @@ function normalizeLegacySmartNode(node){
     /* 老画布兼容：内容或产出为视频的 smart-image 迁成独立的 smart-video。
        只改 type，id/x/y/scale/w/h/runSettings/连线等字段原样保留。 */
     if(node.type === 'smart-image' && smartNodeCarriesVideo(node)) node.type = 'smart-video';
+    if(isSmartMediaNode(node) && (node.images || []).length > 1) node.mediaGroup = true;
 
     return node;
 }
@@ -1982,6 +1997,7 @@ function canvasListUrlForProject(projectId){
     return `/static/canvas-list.html?project=${encodeURIComponent(pid)}`;
 }
 function backToCanvasList(){
+    clearAgentSkill();
     savePromptDraftForCurrent();
     window.location.href = canvasListUrlForProject(canvas?.project || sourceProjectId || 'default');
 }
@@ -2090,7 +2106,6 @@ function syncSelectionUi(){
     smartArrangeBtn?.classList.toggle('visible', ids.length > 0);
     syncConcatVideosButton(ids);
     syncPickSelectedButton(ids);
-    syncRunSelectedButton();
     smartNodeElementsByIds(touchedIds).forEach(el => {
         const id = el.dataset.id || '';
         el.classList.toggle('selected', isNodeSelected(id));
@@ -2302,6 +2317,12 @@ function addNodeToSmartGroup(group, child){
     group.items = [...items, child.id];
     scaleSmartGroupMemberToZoom(group, child, zoom);
     return true;
+}
+// 多图媒体节点（批量结果 / 历史分组）同样是图片容器：可以逐张拖出，最后一张也允许拖出。
+function smartMediaNodeIsGroupContainer(node){
+    if(!node || !isSmartMediaNode(node)) return false;
+    if((node.images || []).length > 1 || node.mediaGroup || isHistoryGroupNode(node)) return true;
+    return ['Group', 'Videos', 'Audios', '历史分组'].includes(String(node.title || ''));
 }
 // 找到把某个节点作为成员的智能分组（用于双击组内图片时按整组左右切换）。
 function smartGroupContainingNode(nodeId){
@@ -2560,10 +2581,23 @@ function snapSmartGroupDragBatch(group, draggedNodes, primaryNode){
 }
 // 把分组内的成员整理成整齐的网格（先行后列保持当前阅读顺序），列数尽量接近正方形，
 // 每个成员在所属单元格内居中；最后把分组框尺寸收敛到正好包住所有成员。
-/* 拖动分组缩放把手时的成员整理：分组框由手势决定，**不再**按内容收紧；
-   把组内真实成员（提示词 / 图片节点）排成网格，并整体等比缩放到框内，成员都落在框里。
-   与 arrangeSmartGroupMembers 的自然网格分支共用「列宽/行高 + 单元格居中」口径，
-   只是多一个统一的 fit 系数把整块内容塞进当前框。 */
+// 成员的布局比例：单张媒体按素材原始比例（避免用已被压扁的节点框把画面裁掉）；
+// 提示词 / 多图成员第一次按自身框比例记下 groupAspect，之后都用它，缩到 1px 再拉回也不会变形。
+function smartGroupMemberFrameAspect(member){
+    const items = (member?.images || []).filter(item => item?.url);
+    const size = items.length === 1 ? mediaLayoutSize(items[0]) : null;
+    if(size && size.width > 0 && size.height > 0) return mediaCellAspect(items[0]);
+    const remembered = Number(member?.groupAspect);
+    if(!member?.sizeUserSet && Number.isFinite(remembered) && remembered > 0){
+        return Math.min(4, Math.max(0.25, remembered));
+    }
+    const rect = nodeRect(member);
+    const aspect = rect.height > 0 ? rect.width / rect.height : 1;
+    return Math.min(4, Math.max(0.25, Number.isFinite(aspect) && aspect > 0 ? aspect : 1));
+}
+/* 拖动分组缩放把手时的成员整理：分组框由手势决定，**不再**按内容收紧。
+   列数由框的形状和成员比例决定（复用多图网格的拟合），拉宽/拉高分组时成员会重新排序；
+   格宽统一、行高按成员比例，反复缩放不会把某一成员越缩越小。 */
 function arrangeSmartGroupMembersInFrame(group, options={}){
     if(!isSmartGroupNode(group)) return false;
     const ordered = [...smartGroupCompactMembers(group), ...smartGroupMemberImageNodes(group)];
@@ -2578,69 +2612,49 @@ function arrangeSmartGroupMembersInFrame(group, options={}){
     const headerH = SMART_GROUP_ARRANGE_HEADER;
     const innerW = Math.max(24, boxW - pad * 2);
     const innerH = Math.max(24, boxH - headerH - pad * 2);
-    const sizes = ordered.map(member => {
-        const r = nodeRect(member);
-        return {node:member, w:Math.max(1, Number(r.width) || 120), h:Math.max(1, Number(r.height) || 120)};
+    const count = ordered.length;
+    const aspects = ordered.map(smartGroupMemberFrameAspect);
+    ordered.forEach((member, index) => {
+        if(!member.sizeUserSet) member.groupAspect = aspects[index];
     });
-    const count = sizes.length;
-    const cols = Math.max(1, Math.min(count, Math.round(Math.sqrt(count)) || 1));
+    const fit = fitManualMediaGridLayout(count, innerW, innerH, aspects, 0, gap);
+    const minCols = Math.max(1, Math.ceil(count / Math.max(1, innerH)));
+    const maxCols = Math.max(minCols, Math.min(count, Math.floor(innerW)));
+    const cols = Math.max(minCols, Math.min(maxCols, Number(fit.cols) || 1));
     const rows = Math.ceil(count / cols);
-    const colW = new Array(cols).fill(0);
-    const rowH = new Array(rows).fill(0);
-    sizes.forEach((s, i) => {
-        const c = i % cols, r = Math.floor(i / cols);
-        colW[c] = Math.max(colW[c], s.w);
-        rowH[r] = Math.max(rowH[r], s.h);
+    const gapX = cols > 1 ? Math.max(0, Math.min(gap, Math.floor((innerW - cols) / (cols - 1)))) : 0;
+    const gapY = rows > 1 ? Math.max(0, Math.min(gap, Math.floor((innerH - rows) / (rows - 1)))) : 0;
+    const rowAspects = new Array(rows).fill(1);
+    ordered.forEach((member, index) => {
+        const row = Math.floor(index / cols);
+        rowAspects[row] = Math.min(rowAspects[row], aspects[index]);
     });
-    const contentW = colW.reduce((a, b) => a + b, 0) + gap * (cols - 1);
-    const contentH = rowH.reduce((a, b) => a + b, 0) + gap * (rows - 1);
-    // 放大沿用 SMART_GROUP_MAX_MEMBER_ZOOM 的上限，缩小不设固定下限：格子与间隙按同一个 fit 收窄，
-    // 框小到放不下时成员跟着缩进框里，而不是像 Math.max(40) 那样把整块网格顶出内框。
-    const fit = Math.min(SMART_GROUP_MAX_MEMBER_ZOOM, innerW / Math.max(1, contentW), innerH / Math.max(1, contentH));
-    const cellW = colW.map(w => Math.max(1, Math.floor(w * fit)));
-    const cellH = rowH.map(h => Math.max(1, Math.floor(h * fit)));
-    let totalW = cellW.reduce((a, b) => a + b, 0);
-    let totalH = cellH.reduce((a, b) => a + b, 0);
-    const gapScale = Math.min(1, fit);
-    const gapX = Math.max(0, Math.min(Math.floor(gap * gapScale), Math.floor(Math.max(0, innerW - totalW) / Math.max(1, cols - 1))));
-    const gapY = Math.max(0, Math.min(Math.floor(gap * gapScale), Math.floor(Math.max(0, innerH - totalH) / Math.max(1, rows - 1))));
-    // 格宽取整 + 整数格定位后，成员一定不会越出内框、也不会压到隔壁格。
-    // max(1) 在极端比例下可能多占几像素，从最宽的格依次扣掉。
-    const budgetW = innerW - gapX * (cols - 1);
-    while(totalW > budgetW){
-        let widest = -1;
-        for(let c = 0; c < cols; c += 1){ if(cellW[c] > 1 && (widest < 0 || cellW[c] > cellW[widest])) widest = c; }
-        if(widest < 0) break;
-        cellW[widest] -= 1;
-        totalW -= 1;
-    }
-    const budgetH = innerH - gapY * (rows - 1);
-    while(totalH > budgetH){
-        let tallest = -1;
-        for(let r = 0; r < rows; r += 1){ if(cellH[r] > 1 && (tallest < 0 || cellH[r] > cellH[tallest])) tallest = r; }
-        if(tallest < 0) break;
-        cellH[tallest] -= 1;
-        totalH -= 1;
-    }
-    const gridW = totalW + gapX * (cols - 1);
-    const gridH = totalH + gapY * (rows - 1);
-    const colX = [];
-    let accX = 0;
-    for(let c = 0; c < cols; c++){ colX[c] = accX; accX += cellW[c] + gapX; }
+    const invSum = rowAspects.reduce((total, aspect) => total + 1 / Math.max(0.25, aspect), 0);
+    const widthLimit = Math.floor((innerW - (cols - 1) * gapX) / cols);
+    const heightLimit = Math.floor((innerH - (rows - 1) * gapY) / Math.max(1, invSum));
+    const cellW = Math.max(1, Math.min(Math.floor(Number(fit.thumb) || 1), widthLimit, heightLimit));
+    const rowHeights = new Array(rows).fill(1);
+    const memberHeights = ordered.map((member, index) => {
+        const height = Math.max(1, Math.floor(cellW / aspects[index]));
+        const row = Math.floor(index / cols);
+        rowHeights[row] = Math.max(rowHeights[row], height);
+        return height;
+    });
     const rowY = [];
     let accY = 0;
-    for(let r = 0; r < rows; r++){ rowY[r] = accY; accY += cellH[r] + gapY; }
+    rowHeights.forEach(height => { rowY.push(accY); accY += height + gapY; });
+    const gridW = cols * cellW + (cols - 1) * gapX;
+    const gridH = rowHeights.reduce((total, height) => total + height, 0) + (rows - 1) * gapY;
     const originX = (Number(group.x) || 0) + pad + Math.max(0, Math.round((innerW - gridW) / 2));
     const originY = (Number(group.y) || 0) + headerH + pad + Math.max(0, Math.round((innerH - gridH) / 2));
-    sizes.forEach((s, i) => {
-        const c = i % cols, r = Math.floor(i / cols);
-        const w = Math.min(cellW[c], Math.max(1, Math.floor(s.w * fit)));
-        const h = Math.min(cellH[r], Math.max(1, Math.floor(s.h * fit)));
-        s.node.x = originX + colX[c] + Math.floor((cellW[c] - w) / 2);
-        s.node.y = originY + rowY[r] + Math.floor((cellH[r] - h) / 2);
-        s.node.w = w;
-        s.node.h = h;
-        if(isSmartMediaNode(s.node)) s.node.scale = 1;
+    ordered.forEach((member, index) => {
+        const col = index % cols;
+        const row = Math.floor(index / cols);
+        member.x = originX + col * (cellW + gapX);
+        member.y = originY + rowY[row];
+        member.w = cellW;
+        member.h = memberHeights[index];
+        if(isSmartMediaNode(member)) member.scale = 1;
     });
     if(group._memberZoom !== undefined) group._memberZoom = 1;
     if(options.syncDom) syncSmartGroupMemberElements(group);
@@ -2740,6 +2754,28 @@ function arrangeSmartGroupMembers(group, options={}){
     // 成员已回到自然尺寸，分组缩放基准随之归零，避免后续再缩放时跳变。
     if(group._memberZoom !== undefined) group._memberZoom = 1;
     return true;
+}
+// 成员框的比例和素材原始比例对不上时会被 object-fit:cover 裁掉，而且之后每次缩放都沿用这个错比例。
+// 载入时只对「确实比例不对」的分组重排一次，让被裁的画面自己恢复。
+function smartGroupMemberAspectMismatch(member){
+    const items = (member?.images || []).filter(item => item?.url);
+    if(items.length !== 1) return false;
+    const size = mediaLayoutSize(items[0]);
+    if(!(size.width > 0 && size.height > 0)) return false;
+    const rect = nodeRect(member);
+    if(!(rect.width > 0 && rect.height > 0)) return true;
+    const wanted = mediaCellAspect(items[0]);
+    const current = rect.width / rect.height;
+    return !(wanted > 0 && Math.abs(current - wanted) / wanted <= 0.02);
+}
+function healSmartGroupMemberFrames(){
+    let changed = false;
+    nodes.filter(isSmartGroupNode).forEach(group => {
+        const members = [...smartGroupCompactMembers(group), ...smartGroupMemberImageNodes(group)];
+        if(!members.length || !members.some(smartGroupMemberAspectMismatch)) return;
+        if(arrangeSmartGroupMembers(group, {skipUndo:true, frame:true})) changed = true;
+    });
+    return changed;
 }
 function mediaLayoutSize(img){
     const width = Number(img?.natural_w || img?.width || img?.w || img?.layout_w || img?.preview_w || 0);
@@ -3130,12 +3166,29 @@ function imageLayout(images, scale=1, node=null){
         if(groupThumbLayout) return groupThumbLayout;
         return {cols:1, rows:1, ...smartGroupLayoutSize(node), thumb:96, single:true};
     }
-    /* 分组里的真实图片成员：尺寸完全听成员自己的 w/h。极小框排出来的成员可能只有几十甚至几像素，
-       若按素材自然尺寸重算，DOM 会重新顶破分组框（singleImageLayout 只认 >24 的显式尺寸）。 */
-    if(isSmartMediaNode(node) && smartGroupContainingNode(node.id) && (node.images || []).filter(img => img?.url).length <= 1){
+    /* 分组里的真实媒体成员：尺寸完全听成员自己的 w/h。极小框排出来的成员可能只有几十甚至几像素，
+       若按素材自然尺寸重算，DOM 会重新顶破分组框（singleImageLayout 只认 >24 的显式尺寸）。
+       多图成员（批量结果群组）同样按分组给的框铺满，内部格子自己拟合，否则格子尺寸会把框顶回去。 */
+    if(isSmartMediaNode(node) && smartGroupContainingNode(node.id)){
         const memberW = Math.round(Number(node.w) || 0);
         const memberH = Math.round(Number(node.h) || 0);
-        if(memberW > 0 && memberH > 0) return {cols:1, rows:1, width:memberW, height:memberH, thumb:96, single:true};
+        const memberItems = (node.images || []).filter(img => img?.url);
+        if(memberW > 0 && memberH > 0){
+            if(memberItems.length <= 1) return {cols:1, rows:1, width:memberW, height:memberH, thumb:96, single:true};
+            const memberFit = fitManualMediaGridLayout(memberItems.length, memberW, memberH, mediaGridCellAspects(node, memberItems, memberItems.length), 32, 8);
+            return {
+                cols:memberFit.cols,
+                rows:memberFit.rows,
+                visibleRows:memberFit.rows,
+                width:memberW,
+                height:memberH,
+                thumb:memberFit.thumb,
+                visibleH:memberFit.contentH,
+                contentH:memberFit.contentH,
+                gapX:memberFit.gapX,
+                gapY:memberFit.gapY
+            };
+        }
     }
     if(node?.type === 'smart-prompt') return {cols:1, rows:1, ...promptNodeLayoutSize(node), thumb:96, single:true};
     if(node?.type === 'smart-loop'){
@@ -3697,7 +3750,6 @@ function renderMinimap(){
     smartArrangeBtn?.classList.toggle('visible', selectedNodeIds().length > 0);
     syncConcatVideosButton();
     syncPickSelectedButton();
-    syncRunSelectedButton();
     const width = minimapContent.clientWidth || 170;
     const height = minimapContent.clientHeight || 108;
     const viewW = shell.clientWidth / viewport.scale;
@@ -6971,6 +7023,8 @@ const chatContext = document.getElementById('chatContext');
 const chatModelSelect = document.getElementById('chatModelSelect');
 const agentImageProviderSelect = document.getElementById('agentImageProviderSelect');
 let chatMessages = [], chatDrag = false, chatResize = false, chatDX = 0, chatDY = 0, chatW = 0, chatH = 0, chatSX = 0, chatSY = 0;
+/* 会话线程（P1）：threads 只存元信息；messages 用于 hover 分支时定位 message_index。 */
+var agentThreadState = { threads: [], activeId: '', messages: [], loaded: false };
 let chatRefs = [], chatProvider = '', chatModel = '', agentImageProvider = '';
 function initChatModel(){
     var allModels = [];
@@ -7404,7 +7458,8 @@ function renderAgentHistorySession(s){
     }
 }
 function syncChatContext(){
-    if(!chatModal.classList.contains('open')) return;
+    // 停靠态只有 is-docked、没有 open 类，但它同样可见、同样要同步引用条
+    if(!chatModal.classList.contains('open') && !chatModal.classList.contains('is-docked')) return;
     // 当前选中集：selectedIds（多选）+ selectedId（单选兜底）
     var selIds = [];
     (selectedIds && selectedIds.length ? selectedIds : (selectedId ? [selectedId] : [])).forEach(function(id){
@@ -7428,7 +7483,7 @@ function syncChatContext(){
         });
         var firstImg = imgs[0] || {};
         var thumbUrl = firstImg.preview || firstImg.url || '';
-        chatRefs.push({id:sel.id, name:nodeAliasText(sel) || sel.title || (sel.type||'node'), thumbUrl:thumbUrl, type:sel.type, images:imgs});
+        chatRefs.push({id:sel.id, name:nodeAliasText(sel) || sel.title || (sel.type||'node'), thumbUrl:thumbUrl, type:sel.type, images:imgs, role: null});
     });
     renderChatContext();
 }
@@ -7455,7 +7510,8 @@ async function chatUploadSelected(input){
                 thumbUrl: kind === 'video' ? '' : item.url,
                 type:'upload',
                 upload:true,
-                images:[item]
+                images:[item],
+                role: null
             });
         });
         renderChatContext();
@@ -7463,6 +7519,119 @@ async function chatUploadSelected(input){
     } catch(e){
         toast(e.message || '上传失败', '!');
     }
+}
+/* ── 引用角色（后端 white-list；只表达「这张图是干什么用的」，不动 URL 字段）── */
+const CHAT_REF_ROLES = [
+    { id:'', label:'未指定' },
+    { id:'subject', label:'主体' },
+    { id:'style', label:'风格' },
+    { id:'composition', label:'构图' },
+    { id:'first_frame', label:'首帧' },
+    { id:'last_frame', label:'尾帧' },
+    { id:'context', label:'仅参考' }
+];
+let chatRefRolePicker = null;
+let chatRefRolePickerRef = '';
+function chatRefRoleIndex(role){
+    var key = String(role || '');
+    for(var i = 0; i < CHAT_REF_ROLES.length; i++){
+        if(CHAT_REF_ROLES[i].id === key) return i;
+    }
+    return 0;
+}
+function chatRefRoleLabel(role){
+    return CHAT_REF_ROLES[chatRefRoleIndex(role)].label;
+}
+/* 徽标 / 选项都靠半透明软底 + 字重表达层级，不画边框（项目设计硬规则） */
+function chatRefRoleBadgeStyle(active){
+    return 'display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:9px;font-size:10px;line-height:1;flex-shrink:0;white-space:nowrap;cursor:pointer;transition:background .14s ease,color .14s ease;'
+        + (active ? 'background:color-mix(in srgb, var(--text) 12%, transparent);color:var(--text);font-weight:600;' : 'background:color-mix(in srgb, var(--text) 6%, transparent);color:var(--faint);');
+}
+function chatRefRoleOptionStyle(active){
+    return 'display:flex;align-items:center;height:30px;padding:0 10px;margin:1px 0;border-radius:8px;font-size:12px;line-height:1;cursor:pointer;'
+        + (active ? 'background:color-mix(in srgb, var(--text) 10%, transparent);color:var(--text);font-weight:600;' : 'background:transparent;color:var(--muted);font-weight:500;');
+}
+function closeChatRefRolePicker(){
+    if(!chatRefRolePicker) return;
+    if(chatRefRolePicker.parentNode) chatRefRolePicker.parentNode.removeChild(chatRefRolePicker);
+    chatRefRolePicker = null;
+    chatRefRolePickerRef = '';
+    document.removeEventListener('mousedown', onChatRefRolePickerOutside, true);
+    document.removeEventListener('keydown', onChatRefRolePickerKey, true);
+    window.removeEventListener('resize', closeChatRefRolePicker);
+}
+function onChatRefRolePickerOutside(e){
+    if(!chatRefRolePicker || !e.target || !e.target.closest) return;
+    if(e.target.closest('.chat-ref-role-picker') || e.target.closest('.chat-ctx-role')) return;
+    closeChatRefRolePicker();
+}
+function onChatRefRolePickerKey(e){
+    if(e.key === 'Escape') closeChatRefRolePicker();
+}
+function openChatRefRolePicker(refId, ev){
+    if(ev && ev.stopPropagation) ev.stopPropagation();
+    var targetId = String(refId || '');
+    var toggling = !!chatRefRolePicker && chatRefRolePickerRef === targetId;
+    closeChatRefRolePicker();
+    if(toggling) return;
+    var ref = null;
+    for(var i = 0; i < chatRefs.length; i++){
+        if(String(chatRefs[i].id) === targetId){ ref = chatRefs[i]; break; }
+    }
+    if(!ref) return;
+    var anchor = (ev && ev.currentTarget) || document.querySelector('.chat-ctx-role[data-ref-role="' + targetId.replace(/"/g, '\\"') + '"]');
+    if(!anchor) return;
+    var current = chatRefRoleIndex(ref.role);
+    var optionsHtml = '';
+    for(var j = 0; j < CHAT_REF_ROLES.length; j++){
+        var active = current === j;
+        optionsHtml += '<span class="chat-ref-role-option' + (active ? ' is-active' : '') + '" role="option" aria-selected="' + (active ? 'true' : 'false') + '" data-ref-role-value="' + CHAT_REF_ROLES[j].id + '" style="' + chatRefRoleOptionStyle(active) + '">' + CHAT_REF_ROLES[j].label + '</span>';
+    }
+    var panel = document.createElement('div');
+    panel.className = 'smart-popover chat-ref-role-picker';
+    panel.setAttribute('role', 'listbox');
+    /* .smart-popover 默认是收起态（absolute / 不可见），这里用内联改回 fixed + 可见，不动样式表 */
+    panel.style.cssText = 'position:fixed;left:0;top:0;right:auto;bottom:auto;z-index:90;min-width:132px;padding:6px;margin:0;opacity:1;visibility:visible;pointer-events:auto;transform:none;';
+    panel.innerHTML = optionsHtml;
+    document.body.appendChild(panel);
+    Array.prototype.forEach.call(panel.querySelectorAll('.chat-ref-role-option'), function(option){
+        option.addEventListener('mouseenter', function(){
+            if(!option.classList.contains('is-active')) option.style.background = 'color-mix(in srgb, var(--text) 6%, transparent)';
+        });
+        option.addEventListener('mouseleave', function(){
+            if(!option.classList.contains('is-active')) option.style.background = 'transparent';
+        });
+        option.addEventListener('click', function(event){
+            event.stopPropagation();
+            setChatRefRole(targetId, option.getAttribute('data-ref-role-value'));
+            closeChatRefRolePicker();
+        });
+    });
+    var rect = anchor.getBoundingClientRect();
+    var width = panel.offsetWidth || 132;
+    var height = panel.offsetHeight || 0;
+    var left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    var top = rect.bottom + 6;
+    if(top + height > window.innerHeight - 8) top = Math.max(8, rect.top - height - 6);
+    panel.style.left = Math.round(left) + 'px';
+    panel.style.top = Math.round(top) + 'px';
+    chatRefRolePicker = panel;
+    chatRefRolePickerRef = targetId;
+    document.addEventListener('mousedown', onChatRefRolePickerOutside, true);
+    document.addEventListener('keydown', onChatRefRolePickerKey, true);
+    window.addEventListener('resize', closeChatRefRolePicker);
+}
+function setChatRefRole(refId, role){
+    var targetId = String(refId || '');
+    var nextRole = CHAT_REF_ROLES[chatRefRoleIndex(role)].id || null;
+    var changed = false;
+    chatRefs.forEach(function(r){
+        if(String(r.id) !== targetId) return;
+        if((r.role || null) === nextRole) return;
+        r.role = nextRole;
+        changed = true;
+    });
+    if(changed) renderChatContext();
 }
 function renderChatContext(){
     if(!chatRefs.length){ chatContext.innerHTML = ''; chatContext.classList.remove('has-items'); return; }
@@ -7478,11 +7647,14 @@ function renderChatContext(){
             var icon = r.type==='smart-prompt'?'P':r.type==='smart-loop'?'L':r.type==='storyboard'?'S':r.type==='upload'?'+':'?';
             thumb = '<span style="width:28px;height:28px;border-radius:4px;background:var(--soft);display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0">'+icon+'</span>';
         }
-        return '<div class="chat-ctx-chip">'+thumb+'<span class="chat-ctx-name">'+escapeHtml(r.name)+'</span>'+(isVideo?'<span class="chat-ctx-kind">视频</span>':'')+'<span class="chat-ctx-remove" onclick="removeChatRef(\''+escapeHtml(r.id)+'\')">×</span></div>';
+        var roleIndex = chatRefRoleIndex(r.role);
+        var roleBadge = '<span class="chat-ctx-role" data-ref-role="'+escapeHtml(r.id)+'" onclick="openChatRefRolePicker(\''+escapeHtml(r.id)+'\',event)" style="'+chatRefRoleBadgeStyle(roleIndex > 0)+'">'+(roleIndex ? chatRefRoleLabel(r.role) : '角色')+'</span>';
+        return '<div class="chat-ctx-chip">'+thumb+'<span class="chat-ctx-name">'+escapeHtml(r.name)+'</span>'+roleBadge+(isVideo?'<span class="chat-ctx-kind">视频</span>':'')+'<span class="chat-ctx-remove" onclick="removeChatRef(\''+escapeHtml(r.id)+'\')">×</span></div>';
     }).join('');
     html += '<span class="chat-ctx-clear" onclick="chatRefs=[];renderChatContext()">清除</span>';
     chatContext.innerHTML = html;
     chatContext.classList.add('has-items');
+    if(chatRefRolePicker && !chatRefs.some(function(r){ return String(r.id) === chatRefRolePickerRef; })) closeChatRefRolePicker();
 }
 function chatContextImages(){
     // 图片参考 URL：只收集 kind=image 的素材（视频不当作图片参考）
@@ -7533,6 +7705,15 @@ function createChatMsgEl(role){
     var bubble = document.createElement('div');
     bubble.className = 'chat-bubble';
     div.appendChild(bubble);
+    if(role === 'assistant'){
+        var branch = document.createElement('button');
+        branch.type = 'button';
+        branch.className = 'chat-branch-btn';
+        branch.title = '从此处分支';
+        branch.setAttribute('aria-label', '从此处分支');
+        branch.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8.2 6h7.6M6 8.2v2.6a3 3 0 0 0 3 3h1.8M18 8.2v2.6a3 3 0 0 1-3 3h-1.8"/></svg><span>从此处分支</span>';
+        div.appendChild(branch);
+    }
     return {div:div, bubble:bubble};
 }
 function addChatMessage(role, text, images){
@@ -7718,29 +7899,214 @@ async function loadAgentThreadOnce(){
     agentThreadLoaded = true;
     if(chatMessages.length) return;
     try {
-        var res = await fetch('/api/agent/thread/' + encodeURIComponent(canvasId) + '?limit=40');
+        var res = await fetch('/api/agent/thread/' + encodeURIComponent(canvasId) + '?limit=60');
         if(!res.ok) return;
         var data = await res.json();
         var msgs = Array.isArray(data.messages) ? data.messages : [];
+        agentThreadState.messages = msgs;
         if(!msgs.length || chatMessages.length) return;
         removeChatWelcome();
         chatTypewriterStop(true);
         var box = document.getElementById('chatMessages');
-        msgs.forEach(function(m){
+        msgs.forEach(function(m, index){
             var role = m.role === 'user' ? 'user' : 'assistant';
             var text = String(m.text || '');
             if(!text.trim()) return;
             chatMessages.push({role:role, text:text, images:[]});
             var parts = createChatMsgEl(role);
             parts.bubble.innerHTML = '<span>' + escapeHtml(text).replace(/\n/g, '<br>') + '</span>';
+            parts.div.dataset.threadIndex = String(index);
             box.appendChild(parts.div);
         });
         box.scrollTop = box.scrollHeight;
     } catch(e){}
+    loadAgentThreads();
+}
+
+/* ── 会话线程：切换 / 从某条助手消息分支 ─────────────────────────────── */
+function closeAgentThreadMenu(){
+    var menu = document.getElementById('chatThreadMenu');
+    var btn = document.getElementById('chatThreadBtn');
+    if(menu) menu.hidden = true;
+    if(btn) btn.setAttribute('aria-expanded', 'false');
+}
+function renderAgentThreadSwitcher(){
+    var nameEl = document.getElementById('chatThreadName');
+    var menu = document.getElementById('chatThreadMenu');
+    if(!nameEl || !menu) return;
+    var threads = agentThreadState.threads || [];
+    var active = null;
+    for(var i = 0; i < threads.length; i++){
+        if(String(threads[i].id) === String(agentThreadState.activeId)){ active = threads[i]; break; }
+    }
+    if(!active && threads.length) active = threads[0];
+    if(active && !agentThreadState.activeId) agentThreadState.activeId = String(active.id);
+    nameEl.textContent = active ? (active.title || '对话') : '新对话';
+    nameEl.title = nameEl.textContent;
+    if(!threads.length){
+        menu.innerHTML = '<div class="chat-thread-empty">还没有线程，发一条消息就会创建。</div>';
+        return;
+    }
+    menu.innerHTML = threads.map(function(thread){
+        var isOn = String(thread.id) === String(agentThreadState.activeId);
+        var count = Number(thread.message_count) || 0;
+        return '<button type="button" class="chat-thread-item' + (isOn ? ' active' : '') + '" data-thread-id="' + escapeAttr(String(thread.id)) + '">' +
+            '<span class="chat-thread-item-name">' + escapeHtml(String(thread.title || '对话')) + '</span>' +
+            '<span class="chat-thread-count">' + count + ' 条</span>' +
+            (isOn ? '<span class="chat-thread-check">✓</span>' : '') +
+            '</button>';
+    }).join('');
+    Array.prototype.forEach.call(menu.querySelectorAll('[data-thread-id]'), function(item){
+        item.addEventListener('click', function(event){
+            event.stopPropagation();
+            switchAgentThread(item.getAttribute('data-thread-id'));
+        });
+    });
+}
+async function loadAgentThreads(){
+    if(!canvasId) return;
+    try {
+        var res = await fetch('/api/agent/threads?canvas_id=' + encodeURIComponent(canvasId), {headers:{Accept:'application/json'}});
+        if(!res.ok) return;
+        var data = await res.json();
+        agentThreadState.threads = Array.isArray(data.threads) ? data.threads : [];
+        agentThreadState.activeId = String(data.active_id || '');
+        agentThreadState.loaded = true;
+        renderAgentThreadSwitcher();
+    } catch(e){}
+}
+function renderThreadMessagesView(msgs){
+    var box = document.getElementById('chatMessages');
+    if(!box) return;
+    chatMessages = [];
+    box.innerHTML = '';
+    chatTypewriterStop(true);
+    if(!msgs.length){ renderChatWelcomeIfEmpty(); return; }
+    removeChatWelcome();
+    msgs.forEach(function(m, index){
+        var role = m.role === 'user' ? 'user' : 'assistant';
+        var text = String(m.text || '');
+        if(!text.trim() && role !== 'assistant') return;
+        chatMessages.push({role:role, text:text, images:[]});
+        var parts = createChatMsgEl(role);
+        parts.bubble.innerHTML = '<span>' + escapeHtml(text).replace(/\n/g, '<br>') + '</span>';
+        parts.div.dataset.threadIndex = String(index);
+        box.appendChild(parts.div);
+    });
+    box.scrollTop = box.scrollHeight;
+}
+async function reloadThreadMessagesView(){
+    if(!canvasId) return;
+    try {
+        var res = await fetch('/api/agent/thread/' + encodeURIComponent(canvasId) + '?limit=60', {headers:{Accept:'application/json'}});
+        if(!res.ok) return;
+        var data = await res.json();
+        var msgs = Array.isArray(data.messages) ? data.messages : [];
+        agentThreadState.messages = msgs;
+        renderThreadMessagesView(msgs);
+    } catch(e){}
+}
+async function switchAgentThread(threadId){
+    if(!canvasId || !threadId || String(threadId) === String(agentThreadState.activeId)){ closeAgentThreadMenu(); return; }
+    if(agentRunAbort){ toast('运行中不能切换对话'); return; }
+    try {
+        var res = await fetch('/api/agent/threads/switch', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({canvas_id:canvasId, thread_id:String(threadId)})
+        });
+        var data = await res.json().catch(function(){ return {}; });
+        if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+        agentThreadState.activeId = String(data.active_id || threadId);
+        closeAgentThreadMenu();
+        await loadAgentThreads();
+        await reloadThreadMessagesView();
+        toast('已切换对话');
+    } catch(e){ toast((e && e.message) || '切换对话失败', {danger:true, icon:'alert'}); }
+}
+async function forkAgentMessage(msgEl){
+    if(!canvasId) return;
+    if(agentRunAbort){ toast('运行中不能分支'); return; }
+    var index = Number(msgEl && msgEl.dataset ? msgEl.dataset.threadIndex : NaN);
+    if(!isFinite(index) || index < 0){ toast('这条消息还没有写入对话，稍后再试'); return; }
+    var threadId = agentThreadState.activeId;
+    if(!threadId){ toast('当前对话还没有可分支的线程'); return; }
+    try {
+        var res = await fetch('/api/agent/threads/fork', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({canvas_id:canvasId, thread_id:String(threadId), message_index:index})
+        });
+        var data = await res.json().catch(function(){ return {}; });
+        if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+        var newId = data.thread && data.thread.id;
+        if(!newId) throw new Error('没有拿到新线程');
+        var sw = await fetch('/api/agent/threads/switch', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({canvas_id:canvasId, thread_id:String(newId)})
+        });
+        if(!sw.ok){ var err = await sw.json().catch(function(){ return {}; }); throw new Error(err.detail || ('HTTP ' + sw.status)); }
+        agentThreadState.activeId = String(newId);
+        await loadAgentThreads();
+        await reloadThreadMessagesView();
+        toast('已从第 ' + (index + 1) + ' 条分支');
+    } catch(e){ toast((e && e.message) || '分支失败', {danger:true, icon:'alert'}); }
+}
+function initAgentThreadsUi(){
+    var head = document.querySelector('#chatModal .chat-head-text');
+    var host = document.querySelector('#canvasAssistantPanel .canvas-assistant-head-left');
+    if((!head && !host) || document.getElementById('chatThreadBtn')) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'chat-thread-switch';
+    wrap.innerHTML = '<button id="chatThreadBtn" class="chat-thread-btn" type="button" aria-haspopup="listbox" aria-expanded="false" title="切换对话线程">' +
+        '<span class="chat-thread-caption">对话</span><span id="chatThreadName" class="chat-thread-name">新对话</span>' +
+        '<i data-lucide="chevron-down" class="chat-thread-caret"></i></button>';
+    var threadMenu = document.createElement('div');
+    threadMenu.id = 'chatThreadMenu';
+    threadMenu.className = 'chat-thread-menu';
+    threadMenu.setAttribute('role', 'listbox');
+    threadMenu.hidden = true;
+    /* 挂到 documentElement：面板 overflow:hidden 不会裁掉，也不受消息层叠影响 */
+    document.documentElement.appendChild(threadMenu);
+    if(host){
+        var newChatPill = document.getElementById('canvasAssistantNewChatBtn');
+        if(newChatPill) newChatPill.insertAdjacentElement('afterend', wrap); else host.appendChild(wrap);
+    } else {
+        var sub = head.querySelector('.chat-modal-sub');
+        if(sub) sub.insertAdjacentElement('afterend', wrap); else head.appendChild(wrap);
+    }
+    document.getElementById('chatThreadBtn').addEventListener('click', function(event){
+        event.stopPropagation();
+        var menu = document.getElementById('chatThreadMenu');
+        var open = menu.hidden;
+        menu.hidden = !open;
+        this.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if(open){
+            /* 固定定位：菜单展开到头部之外，不能被 chatMessages 拦截点击 */
+            var rect = this.getBoundingClientRect();
+            var left = Math.max(8, Math.min(rect.left, window.innerWidth - 260));
+            menu.style.left = left + 'px';
+            menu.style.top = (rect.bottom + 6) + 'px';
+            loadAgentThreads();
+        }
+    });
+    document.addEventListener('click', function(event){
+        if(!event.target.closest('.chat-thread-switch')) closeAgentThreadMenu();
+    });
+    var box = document.getElementById('chatMessages');
+    if(box) box.addEventListener('click', function(event){
+        var branch = event.target.closest('.chat-branch-btn');
+        if(!branch) return;
+        event.preventDefault();
+        event.stopPropagation();
+        forkAgentMessage(branch.closest('.chat-msg'));
+    });
+    renderAgentThreadSwitcher();
 }
 function resetChatConversation(){
-    if(canvasId) fetch('/api/agent/thread/' + encodeURIComponent(canvasId), {method:'DELETE'}).catch(function(){});
+    clearAgentSkill();
+    if(canvasId) fetch('/api/agent/thread/' + encodeURIComponent(canvasId), {method:'DELETE'}).then(function(){ loadAgentThreads(); }).catch(function(){});
     agentThreadLoaded = true;
+    agentThreadState = { threads: [], activeId: '', messages: [], loaded: false };
+    renderAgentThreadSwitcher();
     var btn = document.querySelector('.chat-reset-btn');
     var ico = btn ? btn.querySelector('.chat-reset-ico') : null;
     if(btn && ico){
@@ -7980,24 +8346,52 @@ function initAgentPlanConfirmToggle(){
     renderAgentReviewToggle();
 }
 initAgentPlanConfirmToggle(); // 挂载点必须在常量赋值之后：var 提升会让文件顶层调用时 AGENT_PLAN_CONFIRM_KEY 还是 undefined
+initCanvasContextUsage(); // 输入区工具条的上下文占用位（数据来了才显示）
+initAgentSkillUi(); // 输入区工具条的技能入口（挂在 composer-left）
+initAgentSteerUi(); // 运行中插话按钮 + 输入区上方提示位
+initAgentThreadsUi(); // 对话线程切换器 + 助手消息「从此处分支」
+ensureChatSkillMentions(); // @ 技能候选：先预取 capabilities，打开 @ 时直接分组
 initAgentMemoryUi();
 // ── V2 Phase 5C: /api/agent/run 流式 Agent（SSE + 逐步落图）──
 var AGENT_RUN_MAX_STEPS = 12;
+/* 断流续传策略：最多 5 次，退避 1s/2s/4s/8s/15s（纯常量 + 纯函数，便于单测） */
+var AGENT_RESUME_MAX_ATTEMPTS = 5;
+var AGENT_RESUME_DELAYS = [1000, 2000, 4000, 8000, 15000];
+function agentResumeDelay(attempt){
+    var index = Number(attempt) - 1;
+    if(!isFinite(index) || index < 0 || index >= AGENT_RESUME_DELAYS.length) return 0;
+    return AGENT_RESUME_DELAYS[index];
+}
+/* seq 去重：只应用比已处理游标更新的帧；无 id 的帧照常应用（老后端） */
+function shouldApplyAgentEvent(lastSeq, id){
+    if(id === undefined || id === null || id === '') return true;
+    var seq = Number(id);
+    if(!isFinite(seq)) return true;
+    return !(Number(lastSeq) >= seq);
+}
 var agentRunAbort = null; // 非 null = 正在流式运行（同时作为「发送键 = 停止键」的判据）
+var agentSession = null; // 会话状态机（shared/agent-session.js）的当前 state；只做旁路双写
+var agentStreamRunId = ''; // 当前流式运行的 run id（插话端点要用）
+var agentSteerPending = false;
+var agentSteerButton = null;
+var agentSteerNoteEl = null;
+var agentSteerNoteTimer = 0;
 // __SSE_PARSER_START__ 独立可测：不依赖 DOM/window，验证脚本按标记整段提取后可直接喂数据
 function createSseParser(onEvent){
     // SSE 解析：处理跨 chunk 半行、event:/data: 字段、': ping' 心跳注释行、空行分发
-    var buf = '', evName = '', dataLines = [];
+    var buf = '', evName = '', evId = '', dataLines = [];
     function dispatch(){
-        if(!dataLines.length){ evName = ''; return; }
+        if(!dataLines.length){ evName = ''; evId = ''; return; }
         var raw = dataLines.join('\n');
         dataLines = [];
         var name = evName || 'message';
+        var id = evId || undefined; // SSE 的 id: 行 → 续传游标（每帧重置，无 id 就是 undefined）
         evName = '';
+        evId = '';
         var payload;
         try { payload = JSON.parse(raw); }
         catch(e){ payload = {__raw: raw}; }
-        onEvent(name, payload);
+        onEvent(name, payload, id);
     }
     function handleLine(line){
         if(line.charAt(line.length - 1) === '\r') line = line.slice(0, -1);
@@ -8009,6 +8403,7 @@ function createSseParser(onEvent){
         if(value.charAt(0) === ' ') value = value.slice(1);
         if(field === 'event') evName = value;
         else if(field === 'data') dataLines.push(value);
+        else if(field === 'id') evId = value;
     }
     return {
         push: function(chunk){
@@ -8029,12 +8424,21 @@ function createSseParser(onEvent){
 // __SSE_PARSER_END__
 function buildAgentFocus(){
     // 结构化「焦点」：只表达用户此刻的注意力，画布权威状态由后端自己 load_canvas
-    var focus = { selected_node_ids: [], reference_images: [], reference_videos: [], viewport: {x:0, y:0, scale:1} };
+    var focus = { selected_node_ids: [], reference_images: [], reference_videos: [], references: [], viewport: {x:0, y:0, scale:1} };
     try {
         var live = nodes || [];
         focus.selected_node_ids = selectedNodeIds().filter(function(id){ return live.some(function(n){ return n.id === id; }); });
         focus.reference_images = chatContextImages();
         focus.reference_videos = chatContextVideos();
+        // 只发 URL 会丢节点身份，模型分不清哪张是主体、哪张是风格图
+        focus.references = (chatRefs || []).map(function(r){
+            return {
+                id: String(r.id || ''),
+                name: String(r.name || '').slice(0, 80),
+                role: r.role || null,
+                source: r.upload ? 'upload' : 'node'
+            };
+        }).filter(function(r){ return r.id; });
         if(typeof viewport !== 'undefined' && viewport){
             focus.viewport = { x: Math.round(Number(viewport.x) || 0), y: Math.round(Number(viewport.y) || 0), scale: Number(viewport.scale) || 1 };
         }
@@ -8042,10 +8446,10 @@ function buildAgentFocus(){
     return focus;
 }
 function agentSetComposerRunning(running){
-    // 运行态：输入框锁住防重复提交，发送键变停止键（中止能力）
+    // 运行中仍可输入：插话（steer）要复用同一个输入框；防重复提交靠 chatSending，发送键只负责停止
     var inp = document.getElementById('chatInput');
     var btn = document.getElementById('chatSendBtn');
-    if(inp) inp.disabled = !!running;
+    if(inp) inp.disabled = false;
     if(btn){
         btn.classList.toggle('is-running', !!running);
         btn.setAttribute('aria-label', running ? '停止' : '发送');
@@ -8058,15 +8462,721 @@ function agentSetComposerRunning(running){
 function abortAgentRun(){
     if(agentRunAbort) agentRunAbort.abort();
 }
+/* ── 运行中插话（steer）：纯状态判定 + 输入区按钮 + 事件回填 ── */
+function steerButtonState(inputText, streamState, pending){
+    var text = String(inputText === undefined || inputText === null ? '' : inputText).trim();
+    var state = String(streamState || '');
+    if(state !== 'streaming') return { show: false, disabled: false };
+    if(!text) return { show: false, disabled: false };
+    return { show: true, disabled: !!pending };
+}
+function currentAgentStreamState(){
+    return (agentSession && agentSession.streamState) ? String(agentSession.streamState) : '';
+}
+function showAgentSteerNote(text){
+    var el = agentSteerNoteEl || document.getElementById('chatSteerNote');
+    if(!el || !text) return;
+    agentSteerNoteEl = el;
+    el.textContent = text;
+    el.style.display = 'block';
+    if(agentSteerNoteTimer) clearTimeout(agentSteerNoteTimer);
+    agentSteerNoteTimer = setTimeout(function(){
+        el.style.display = 'none';
+        el.textContent = '';
+        agentSteerNoteTimer = 0;
+    }, 2600);
+}
+function syncAgentSteerButton(){
+    var btn = agentSteerButton || document.getElementById('chatSteerBtn');
+    if(!btn) return;
+    var inp = document.getElementById('chatInput');
+    var state = steerButtonState(inp ? inp.value : '', currentAgentStreamState(), agentSteerPending);
+    var show = !!(state.show && agentStreamRunId);
+    btn.style.display = show ? 'inline-flex' : 'none';
+    btn.disabled = !!state.disabled;
+    if(show) btn.textContent = agentSteerPending ? '发送中…' : '打断并发送';
+}
+function handleAgentSteerEvent(data){
+    var info = data || {};
+    var status = String(info.status || '');
+    var text = String(info.text || info.message || '');
+    if(status === 'unread'){
+        var inp = document.getElementById('chatInput');
+        if(inp && text && !String(inp.value || '').trim()){
+            inp.value = text;
+            inp.style.height = 'auto';
+        }
+        showAgentSteerNote('没来得及读，已放回输入框');
+    } else if(status === 'placed'){
+        showAgentSteerNote('已加入（运行中）');
+    }
+    syncAgentSteerButton();
+}
+async function sendAgentSteer(){
+    if(agentSteerPending) return;
+    var inp = document.getElementById('chatInput');
+    var text = inp ? String(inp.value || '').trim() : '';
+    if(!text) return;
+    var state = steerButtonState(text, currentAgentStreamState(), false);
+    if(!state.show || !agentStreamRunId){
+        showAgentSteerNote('运行已结束');
+        syncAgentSteerButton();
+        return;
+    }
+    var runId = agentStreamRunId;
+    agentSteerPending = true;
+    syncAgentSteerButton();
+    try {
+        var res = await fetch('/api/agent/runs/' + encodeURIComponent(runId) + '/steer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text })
+        });
+        if(res.status === 409){
+            /* 运行已结束：文本留在输入框，别让用户重打一遍 */
+            showAgentSteerNote('运行已结束');
+            return;
+        }
+        if(res.status === 404){
+            showAgentSteerNote('无法插话：这轮已过期');
+            return;
+        }
+        if(!res.ok) throw new Error('HTTP ' + res.status);
+        if(inp){ inp.value = ''; inp.style.height = 'auto'; }
+        showAgentSteerNote('已加入，下一轮生效');
+    } catch(e){
+        showAgentSteerNote('插话失败：' + ((e && e.message) || '网络错误'));
+    } finally {
+        agentSteerPending = false;
+        syncAgentSteerButton();
+    }
+}
+function initAgentSteerUi(){
+    if(!agentSteerButton){
+        var send = document.getElementById('chatSendBtn');
+        var host = send && send.parentNode ? send.parentNode : document.querySelector('.chat-composer-right');
+        if(host){
+            var btn = document.createElement('button');
+            btn.id = 'chatSteerBtn';
+            btn.type = 'button';
+            btn.className = 'chat-steer-btn';
+            btn.title = '把这句话插给正在跑的这轮，下一轮生效';
+            btn.textContent = '打断并发送';
+            btn.style.cssText = 'display:none;align-items:center;height:26px;padding:0 9px;border:0;outline:none;border-radius:9px;background:var(--soft);color:var(--text);font-size:10.5px;line-height:1;cursor:pointer;white-space:nowrap;';
+            btn.addEventListener('click', function(event){ event.stopPropagation(); sendAgentSteer(); });
+            if(send && send.parentNode === host) host.insertBefore(btn, send);
+            else host.appendChild(btn);
+            agentSteerButton = btn;
+        }
+    }
+    var box = document.getElementById('chatComposerBox');
+    var host = box ? box.parentNode : null;
+    if(!agentSteerNoteEl && host){
+        var note = document.createElement('div');
+        note.id = 'chatSteerNote';
+        note.className = 'chat-steer-note';
+        note.style.cssText = 'display:none;font-size:10.5px;line-height:1.4;color:var(--faint);padding:0 0 3px;';
+        host.insertBefore(note, box);
+        agentSteerNoteEl = note;
+    }
+    var inp = document.getElementById('chatInput');
+    if(inp && !inp.__steerBound){
+        inp.__steerBound = true;
+        inp.addEventListener('input', function(){ syncAgentSteerButton(); });
+    }
+    syncAgentSteerButton();
+}
+/* ── 运行卡：耗时 / 状态文案 / 思考合并（渲染细节内联，不加样式表） ── */
+function formatWorkMs(ms){
+    var total = Number(ms);
+    if(!isFinite(total) || total < 0) total = 0;
+    total = Math.floor(total / 1000);
+    if(total < 60) return total + 's';
+    if(total < 3600){
+        var seconds = total % 60;
+        return Math.floor(total / 60) + 'm' + (seconds < 10 ? '0' : '') + seconds + 's';
+    }
+    var minutes = Math.floor((total % 3600) / 60);
+    return Math.floor(total / 3600) + 'h' + (minutes < 10 ? '0' : '') + minutes + 'm';
+}
+function agentRunStatusText(state){
+    var key = String(state || '');
+    if(key === 'idle') return '连接中…';
+    if(key === 'streaming' || key === 'running') return '正在执行…';
+    if(key === 'waiting_user_input' || key === 'waiting_external') return '等你确认';
+    if(key === 'completed') return '已完成';
+    if(key === 'stopped') return '已停止';
+    if(key === 'failed') return '失败';
+    return '处理中…';
+}
+function agentRunWorkMs(startedAt){
+    var api = window.NovaiAgentSession;
+    if(api && agentSession) return api.workMs(agentSession, Date.now());
+    return Math.max(0, Date.now() - (Number(startedAt) || Date.now()));
+}
+function agentRunStartTicker(card){
+    if(!card || !card._run || card._run.ticker) return;
+    var timeEl = card.querySelector('.agent-run-time');
+    if(!timeEl) return;
+    if(!card._run.startedAt) card._run.startedAt = Date.now();
+    var paint = function(){
+        if(!card._run || card._run.tickerStopped) return;
+        timeEl.hidden = false;
+        timeEl.textContent = '处理了 ' + formatWorkMs(agentRunWorkMs(card._run.startedAt));
+    };
+    paint();
+    card._run.ticker = setInterval(paint, 1000);
+}
+function agentRunStopTicker(card){
+    if(!card || !card._run) return;
+    if(card._run.ticker) clearInterval(card._run.ticker);
+    card._run.ticker = null;
+    card._run.tickerStopped = true;
+    var timeEl = card.querySelector('.agent-run-time');
+    if(!timeEl) return;
+    timeEl.hidden = false;
+    /* 终态走 workMs 的冻结值；中止/断流也在这里落最后一帧，ticker 一定停 */
+    timeEl.textContent = '处理了 ' + formatWorkMs(agentRunWorkMs(card._run.startedAt));
+}
+function agentRunSyncStatus(card){
+    if(!card || !card._run || !agentSession) return;
+    var api = window.NovaiAgentSession;
+    if(!api) return;
+    var state = agentSession.streamState;
+    if(state === 'streaming') agentRunSetStatus(card, 'running', agentRunStatusText(state));
+    else if(api.isWaiting(state)) agentRunSetStatus(card, 'waiting', agentRunStatusText(state));
+}
+/* 计划卡上的「处理了 Xs」：与运行卡共用 formatWorkMs / workMs，确认、执行完都留在消息里可查 */
+function agentPlanTimeMs(){
+    var api = window.NovaiAgentSession;
+    if(!api || !agentSession || typeof api.workMs !== 'function') return 0;
+    var ms = 0;
+    try { ms = Number(api.workMs(agentSession, Date.now())); } catch(e){ return 0; }
+    return ms > 0 ? ms : 0;
+}
+function agentPlanTimeText(){
+    var ms = agentPlanTimeMs();
+    if(!(ms > 0)) return '';
+    return '处理了 ' + formatWorkMs(ms);
+}
+function agentPlanTimeSync(card){
+    if(!card) return;
+    var el = card.querySelector('.agent-plan-time');
+    if(!el) return;
+    var text = agentPlanTimeText();
+    el.hidden = !text;
+    el.textContent = text;
+}
+function agentPlanTimeHide(card){
+    var el = card && card.querySelector('.agent-plan-time');
+    if(!el) return;
+    el.hidden = true;
+    el.textContent = '';
+}
+function runSessionThinkingMs(){
+    try {
+        var api = window.NovaiAgentSession;
+        var messages = (agentSession && agentSession.messages) ? agentSession.messages : [];
+        var message = messages.length ? messages[messages.length - 1] : null;
+        var merged = api.mergeThinking((message && message.parts) || []);
+        var total = 0;
+        for(var i = 0; i < merged.length; i++){
+            if(merged[i] && merged[i].type === 'thinking') total += Number(merged[i].totalDurationMs) || 0;
+        }
+        return total;
+    } catch(e){ return 0; }
+}
+function runThinkingBlock(host, isCard){
+    var block = host.querySelector('.agent-run-thinking');
+    if(block) return block;
+    block = document.createElement('div');
+    block.className = 'agent-run-thinking';
+    block.style.cssText = 'display:flex;flex-direction:column;gap:2px;padding:2px 0 0;';
+    var head = document.createElement('div');
+    head.className = 'agent-run-thinking-head';
+    head.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;';
+    var time = document.createElement('span');
+    time.className = 'agent-run-think-time';
+    time.style.cssText = 'font-size:10px;line-height:1;color:var(--faint);font-variant-numeric:tabular-nums;';
+    time.textContent = '0s';
+    head.appendChild(time);
+    block.appendChild(head);
+    var lines = document.createElement('div');
+    lines.className = 'agent-run-thinking-lines';
+    block.appendChild(lines);
+    if(isCard){
+        var intent = host.querySelector('.agent-plan-intent');
+        if(intent && intent.parentNode === host) host.insertBefore(block, intent.nextSibling);
+        else host.appendChild(block);
+    } else {
+        host.innerHTML = '';
+        host.appendChild(block);
+    }
+    return block;
+}
+function appendRunThinking(card, text){
+    var label = String(text === undefined || text === null ? '' : text).trim();
+    if(!label) return null;
+    var isCard = !!(card && card._run);
+    var host = isCard ? card : (card && card.classList ? card : null);
+    if(!host) return null;
+    var block = runThinkingBlock(host, isCard);
+    if(block._thinkingLabel === label) return block;
+    var lines = block.querySelector('.agent-run-thinking-lines');
+    if(!lines) return block;
+    var line = document.createElement('div');
+    line.className = 'agent-run-think-line';
+    line.style.cssText = 'font-size:12px;line-height:1.6;color:var(--muted);';
+    line.textContent = label;
+    lines.appendChild(line);
+    while(lines.children.length > 6 && lines.firstElementChild) lines.removeChild(lines.firstElementChild);
+    block._thinkingLabel = label;
+    var now = Date.now();
+    var api = window.NovaiAgentSession;
+    var durationMs;
+    /* 运行中的思考喂进状态机，累计时长取 mergeThinking 的合并结果；未开始/已结束就只按本轮本地起算 */
+    var live = !!(api && agentSession && !api.isTerminal(agentSession.streamState) && !api.isWaiting(agentSession.streamState));
+    if(live){
+        var startedAt = block._thinkingStartedAt || now;
+        if(!block._thinkingStartedAt) block._thinkingStartedAt = startedAt;
+        var lastAt = block._thinkingLastAt || startedAt;
+        block._thinkingLastAt = now;
+        try {
+            api.applyEvent(agentSession, { type: 'thinking', text: label, duration_ms: Math.max(0, now - lastAt) });
+            durationMs = runSessionThinkingMs();
+        } catch(e){
+            durationMs = Math.max(0, now - startedAt);
+        }
+    } else {
+        if(!block._thinkingStartedAt) block._thinkingStartedAt = now;
+        durationMs = Math.max(0, now - block._thinkingStartedAt);
+    }
+    var timeEl = block.querySelector('.agent-run-think-time');
+    if(timeEl) timeEl.textContent = formatWorkMs(durationMs);
+    return block;
+}
+/* ── 上下文占用指示器（输入区工具条，内联样式不加边框） ── */
+var canvasContextUsageEl = null;
+function formatTokens(count){
+    var n = Number(count);
+    if(!isFinite(n) || n < 0) n = 0;
+    n = Math.floor(n);
+    if(n < 1000) return String(n);
+    if(n < 1000000) return (n / 1000).toFixed(1) + 'k';
+    return (n / 1000000).toFixed(1) + 'm';
+}
+function formatContextUsage(usage){
+    if(!usage || typeof usage !== 'object') return '';
+    if(typeof usage.percentage === 'number' && isFinite(usage.percentage)) return '上下文 ' + Math.round(usage.percentage) + '%';
+    if(typeof usage.used_tokens === 'number' && isFinite(usage.used_tokens)) return '上下文 ' + formatTokens(usage.used_tokens);
+    return '';
+}
+function initCanvasContextUsage(){
+    if(canvasContextUsageEl) return canvasContextUsageEl;
+    var row = document.querySelector('.chat-composer-left');
+    if(!row) return null;
+    var el = document.createElement('span');
+    el.id = 'canvasContextUsage';
+    el.className = 'canvas-context-usage';
+    el.hidden = true;
+    el.style.cssText = 'font-size:10.5px;line-height:1;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums;margin-left:2px;';
+    el.title = '上下文占用为估算值（system + user 文本，不含图片）；模型窗口未配置时只显示绝对 token 数。';
+    row.appendChild(el);
+    canvasContextUsageEl = el;
+    return el;
+}
+function updateCanvasContextUsage(){
+    var el = canvasContextUsageEl || initCanvasContextUsage();
+    if(!el) return;
+    var text = '';
+    try { text = formatContextUsage(agentSession ? agentSession.contextUsage : null); } catch(e){ text = ''; }
+    if(el.textContent === text && el.hidden === !text) return;
+    el.hidden = !text;
+    el.textContent = text;
+}
+/* ── 卡片底部的 part 摘要：只读 agentSession.messages 里的 parts，不另起状态 ── */
+function agentRunPartLines(message){
+    var lines = [];
+    if(!message || !message.parts) return lines;
+    var outcome = null;
+    var usagePart = null;
+    var contextPart = null;
+    var steers = [];
+    message.parts.forEach(function(part){
+        if(!part) return;
+        if(part.type === 'run_outcome') outcome = part;
+        else if(part.type === 'usage') usagePart = part;
+        else if(part.type === 'context_nodes') contextPart = part;
+        else if(part.type === 'user_steer') steers.push(part);
+    });
+    steers.forEach(function(part){
+        var raw = String(part.text || '');
+        var text = raw.slice(0, 20);
+        if(!text) return;
+        /* unread = 服务端没读到、文本已放回输入框，不能写「已插话」误导用户；旧数据没 status 按 placed 保守显示 */
+        var prefix = String(part.status || '') === 'unread' ? '未读到（已放回输入框）：' : '已插话：';
+        lines.push({ kind: 'user_steer', text: prefix + text + (raw.length > 20 ? '…' : '') });
+    });
+    if(contextPart && Number(contextPart.nodeCount) > 0){
+        lines.push({ kind: 'context_nodes', text: '本轮引用 ' + Number(contextPart.nodeCount) + ' 个节点' });
+    }
+    if(usagePart){
+        var usage = usagePart.usage || {};
+        var bits = [];
+        if(typeof usage.input_tokens === 'number') bits.push('输入 ' + formatTokens(usage.input_tokens));
+        if(typeof usage.output_tokens === 'number') bits.push('输出 ' + formatTokens(usage.output_tokens));
+        if(!bits.length && typeof usage.total_tokens === 'number') bits.push('共 ' + formatTokens(usage.total_tokens));
+        if(bits.length) lines.push({ kind: 'usage', text: '用量 ' + bits.join(' · ') });
+    }
+    if(outcome){
+        var status = String(outcome.status || '');
+        var label = status === 'completed' ? '完成' : (status === 'stopped' ? '已停止' : (status === 'failed' ? '失败' : '结束'));
+        var ms = Number(outcome.activeWorkMs) || 0;
+        lines.push({ kind: 'run_outcome', text: label + (ms > 0 ? ' · 处理了 ' + formatWorkMs(ms) : '') });
+    }
+    return lines;
+}
+function agentSessionAssistantMessage(){
+    try {
+        var messages = (agentSession && agentSession.messages) || [];
+        for(var i = messages.length - 1; i >= 0; i--){ if(messages[i] && messages[i].role === 'assistant') return messages[i]; }
+    } catch(e){}
+    return null;
+}
+/* 运行卡 / 方案卡共用：容器 + parts 传进来，只负责把摘要行画进去，不复制两套 */
+function renderAgentRunPartsInto(container, parts, className){
+    if(!container) return;
+    var boxClass = className || 'agent-run-parts';
+    var lines = agentRunPartLines({ parts: parts || [] });
+    var box = container.querySelector('.' + boxClass);
+    if(!lines.length){
+        if(box && box.parentNode) box.parentNode.removeChild(box);
+        return;
+    }
+    if(!box){
+        box = document.createElement('div');
+        box.className = boxClass;
+        box.style.cssText = 'display:flex;flex-direction:column;gap:1px;padding:2px 0 0;';
+        container.appendChild(box);
+    }
+    var signature = lines.map(function(line){ return line.kind + ':' + line.text; }).join('|');
+    if(box.dataset.signature === signature) return;
+    box.dataset.signature = signature;
+    box.innerHTML = '';
+    lines.forEach(function(line){
+        var el = document.createElement('div');
+        el.className = 'agent-run-part agent-run-part-' + line.kind;
+        el.style.cssText = 'font-size:11px;line-height:1.5;color:var(--muted);';
+        el.textContent = line.text;
+        box.appendChild(el);
+    });
+}
+function renderAgentRunParts(card){
+    if(!card || !card._run) return;
+    var message = agentSessionAssistantMessage();
+    renderAgentRunPartsInto(card, message ? message.parts : [], 'agent-run-parts');
+}
+function renderAgentPlanParts(card){
+    if(!card) return;
+    var message = agentSessionAssistantMessage();
+    renderAgentRunPartsInto(card, message ? message.parts : [], 'agent-plan-parts');
+}
+/* ── 技能选择：本轮挂一个技能；skill_id 走独立通道，不混进 references ── */
+var agentSelectedSkill = null;
+/* 市场 brief 种子里的 skill_ref：只作用于自动发送的那一轮，空串不传给后端（兼容旧接口） */
+var pendingAgentSkillRef = '';
+var agentSkillButton = null;
+var agentSkillChipEl = null;
+var agentSkillPickerEl = null;
+var agentSkillPickerAnchor = null;
+var agentSkillCapsState = 'idle'; // idle | loading | ready | error
+var agentSkillOptions = [];
+var agentSkillQuery = '';
+var agentSkillAllDisabled = false;
+
+function skillOptionsFrom(capabilities){
+    var list = capabilities instanceof Array ? capabilities : [];
+    var out = [];
+    for(var i = 0; i < list.length; i++){
+        var item = list[i];
+        if(!item || typeof item !== 'object') continue;
+        if(String(item.kind || '') !== 'skill') continue;
+        if(item.enabled === false) continue;
+        var id = String(item.id || '').trim();
+        if(!id) continue;
+        out.push({
+            id: id,
+            name: String(item.name || id).trim() || id,
+            description: String(item.description || '').trim(),
+            icon: String(item.icon || '').trim() || '✨'
+        });
+    }
+    return out;
+}
+function filterSkillOptions(options, query){
+    var list = options instanceof Array ? options : [];
+    var q = String(query === undefined || query === null ? '' : query).trim().toLowerCase();
+    if(!q) return list.slice();
+    return list.filter(function(item){
+        return String(item.name || '').toLowerCase().indexOf(q) !== -1
+            || String(item.description || '').toLowerCase().indexOf(q) !== -1;
+    });
+}
+function renderAgentSkillChip(){
+    /* composer 重建过时旧引用会脱离文档，每次都解析成当前文档里的真实节点 */
+    var el = (agentSkillChipEl && document.body.contains(agentSkillChipEl)) ? agentSkillChipEl : document.getElementById('chatSkillChip');
+    agentSkillChipEl = el;
+    if(!el) return;
+    if(!agentSelectedSkill){
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+    }
+    el.style.display = 'flex';
+    el.innerHTML = '';
+    var chip = document.createElement('span');
+    chip.className = 'chat-skill-chip';
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px 0 10px;border-radius:13px;background:var(--soft);color:var(--text);font-size:11px;line-height:1;max-width:100%;';
+    var icon = document.createElement('span');
+    icon.style.cssText = 'font-size:12px;line-height:1;flex-shrink:0;';
+    icon.textContent = agentSelectedSkill.icon || '✨';
+    var name = document.createElement('span');
+    name.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    name.textContent = agentSelectedSkill.name || agentSelectedSkill.id;
+    var remove = document.createElement('span');
+    remove.className = 'chat-skill-chip-remove';
+    remove.textContent = '×';
+    remove.title = '取消本轮技能';
+    remove.style.cssText = 'cursor:pointer;color:var(--muted);width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-size:12px;flex-shrink:0;';
+    remove.addEventListener('click', function(event){ event.stopPropagation(); clearAgentSkill(); });
+    chip.appendChild(icon);
+    chip.appendChild(name);
+    chip.appendChild(remove);
+    el.appendChild(chip);
+}
+function clearAgentSkill(){
+    agentSelectedSkill = null;
+    renderAgentSkillChip();
+}
+function setAgentSkill(skill){
+    if(!skill || !skill.id) return;
+    agentSelectedSkill = {
+        id: String(skill.id),
+        name: String(skill.name || skill.id),
+        icon: String(skill.icon || '✨')
+    };
+    renderAgentSkillChip();
+}
+function initAgentSkillUi(){
+    var row = document.querySelector('.chat-composer-left');
+    if(!agentSkillButton && row){
+        var btn = document.createElement('button');
+        btn.id = 'chatSkillBtn';
+        btn.type = 'button';
+        btn.className = 'canvas-composer-skill';
+        btn.title = '技能：给本轮挂一个技能';
+        btn.setAttribute('aria-label', '选择技能');
+        btn.style.cssText = 'display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 8px;border:0;outline:none;border-radius:9px;background:transparent;color:var(--muted);font-size:11px;line-height:1;cursor:pointer;';
+        var icon = document.createElement('i');
+        icon.setAttribute('data-lucide', 'sparkles');
+        icon.style.cssText = 'width:12px;height:12px;';
+        var label = document.createElement('span');
+        label.textContent = '技能';
+        btn.appendChild(icon);
+        btn.appendChild(label);
+        btn.addEventListener('click', function(event){ event.stopPropagation(); openAgentSkillPicker(btn); });
+        row.appendChild(btn);
+        agentSkillButton = btn;
+    }
+    /* 按钮建过也要重跑：composer 被重建后 chip 行的旧引用会失效，这里按 id 重新绑定 */
+    var chipRow = document.getElementById('chatSkillChip');
+    if(!chipRow){
+        var box = document.getElementById('chatComposerBox');
+        var host = box ? box.parentNode : null;
+        if(host){
+            chipRow = document.createElement('div');
+            chipRow.id = 'chatSkillChip';
+            chipRow.className = 'chat-skill-chip-row';
+            chipRow.style.cssText = 'display:none;align-items:center;gap:6px;padding:2px 0 4px;';
+            host.insertBefore(chipRow, box);
+        }
+    }
+    agentSkillChipEl = chipRow || null;
+    renderAgentSkillChip();
+    refreshIcons();
+}
+function closeAgentSkillPicker(){
+    if(!agentSkillPickerEl) return;
+    if(agentSkillPickerEl.parentNode) agentSkillPickerEl.parentNode.removeChild(agentSkillPickerEl);
+    agentSkillPickerEl = null;
+    agentSkillPickerAnchor = null;
+    document.removeEventListener('mousedown', onAgentSkillPickerOutside, true);
+    document.removeEventListener('keydown', onAgentSkillPickerKey, true);
+    window.removeEventListener('resize', positionAgentSkillPicker);
+}
+function onAgentSkillPickerOutside(e){
+    if(!agentSkillPickerEl) return;
+    var target = e.target;
+    if(target && target.closest && (target.closest('.chat-skill-picker') || target.closest('#chatSkillBtn'))) return;
+    closeAgentSkillPicker();
+}
+function onAgentSkillPickerKey(e){
+    if(e.key === 'Escape') closeAgentSkillPicker();
+}
+function positionAgentSkillPicker(){
+    if(!agentSkillPickerEl || !agentSkillPickerAnchor) return;
+    var rect = agentSkillPickerAnchor.getBoundingClientRect();
+    var width = agentSkillPickerEl.offsetWidth || 280;
+    var height = agentSkillPickerEl.offsetHeight || 0;
+    var left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    var top = rect.bottom + 6;
+    if(top + height > window.innerHeight - 8) top = Math.max(8, rect.top - height - 6);
+    agentSkillPickerEl.style.left = Math.round(left) + 'px';
+    agentSkillPickerEl.style.top = Math.round(top) + 'px';
+}
+function renderAgentSkillPickerList(){
+    if(!agentSkillPickerEl) return;
+    var listEl = agentSkillPickerEl.querySelector('.chat-skill-picker-list');
+    if(!listEl) return;
+    listEl.innerHTML = '';
+    if(agentSkillCapsState === 'loading'){
+        var loading = document.createElement('div');
+        loading.className = 'chat-skill-picker-state';
+        loading.style.cssText = 'padding:10px 8px;font-size:11px;color:var(--faint);';
+        loading.textContent = '正在加载技能…';
+        listEl.appendChild(loading);
+    } else if(agentSkillCapsState === 'error'){
+        var retry = document.createElement('div');
+        retry.className = 'chat-skill-picker-state is-error';
+        retry.style.cssText = 'padding:10px 8px;font-size:11px;color:var(--muted);cursor:pointer;';
+        retry.textContent = '加载失败，点击重试';
+        retry.addEventListener('click', function(){ loadAgentSkills(true); });
+        listEl.appendChild(retry);
+    } else {
+        var filtered = filterSkillOptions(agentSkillOptions, agentSkillQuery);
+        if(!filtered.length){
+            var empty = document.createElement('div');
+            empty.className = 'chat-skill-picker-state';
+            empty.style.cssText = 'padding:10px 8px;font-size:11px;color:var(--faint);';
+            empty.textContent = agentSkillAllDisabled ? '全部技能已禁用' : '没有可用技能';
+            listEl.appendChild(empty);
+        }
+        filtered.forEach(function(option){
+            var rowEl = document.createElement('div');
+            rowEl.className = 'chat-skill-option' + (agentSelectedSkill && agentSelectedSkill.id === option.id ? ' is-active' : '');
+            rowEl.setAttribute('role', 'option');
+            rowEl.setAttribute('data-skill-id', option.id);
+            rowEl.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;'
+                + (agentSelectedSkill && agentSelectedSkill.id === option.id
+                    ? 'background:color-mix(in srgb, var(--text) 10%, transparent);'
+                    : 'background:transparent;');
+            var iconEl = document.createElement('span');
+            iconEl.style.cssText = 'font-size:16px;line-height:1.2;flex-shrink:0;';
+            iconEl.textContent = option.icon;
+            var bodyEl = document.createElement('div');
+            bodyEl.style.cssText = 'min-width:0;display:flex;flex-direction:column;gap:2px;';
+            var nameEl = document.createElement('div');
+            nameEl.style.cssText = 'font-size:12px;line-height:1.3;color:var(--text);font-weight:600;';
+            nameEl.textContent = option.name;
+            bodyEl.appendChild(nameEl);
+            if(option.description){
+                var descEl = document.createElement('div');
+                descEl.style.cssText = 'font-size:10.5px;line-height:1.4;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+                descEl.textContent = option.description.length > 60 ? option.description.slice(0, 60) + '…' : option.description;
+                bodyEl.appendChild(descEl);
+            }
+            rowEl.appendChild(iconEl);
+            rowEl.appendChild(bodyEl);
+            rowEl.addEventListener('mouseenter', function(){
+                if(!rowEl.classList.contains('is-active')) rowEl.style.background = 'color-mix(in srgb, var(--text) 6%, transparent)';
+            });
+            rowEl.addEventListener('mouseleave', function(){
+                if(!rowEl.classList.contains('is-active')) rowEl.style.background = 'transparent';
+            });
+            rowEl.addEventListener('click', function(event){
+                event.stopPropagation();
+                setAgentSkill(option);
+                closeAgentSkillPicker();
+            });
+            listEl.appendChild(rowEl);
+        });
+    }
+    positionAgentSkillPicker();
+}
+function loadAgentSkills(force){
+    if(agentSkillCapsState === 'loading') return;
+    if(!force && agentSkillCapsState === 'ready') return;
+    agentSkillCapsState = 'loading';
+    renderAgentSkillPickerList();
+    fetch('/api/capabilities', { headers: { 'Accept': 'application/json' } })
+        .then(function(res){
+            if(!res.ok) throw new Error('HTTP ' + res.status);
+            return res.json();
+        })
+        .then(function(data){
+            var rawList = (data && data.capabilities instanceof Array) ? data.capabilities : [];
+            agentSkillOptions = skillOptionsFrom(rawList);
+            /* 一条可用都没有、但确实有技能条目 → 说明全被禁用了，空态换个说法 */
+            agentSkillAllDisabled = !agentSkillOptions.length && rawList.some(function(item){
+                return item && String(item.kind || '') === 'skill';
+            });
+            agentSkillCapsState = 'ready';
+        })
+        .catch(function(){
+            agentSkillCapsState = 'error';
+        })
+        .then(function(){
+            renderAgentSkillPickerList();
+        });
+}
+function openAgentSkillPicker(anchor){
+    if(agentSkillPickerEl) closeAgentSkillPicker();
+    var panel = document.createElement('div');
+    panel.className = 'smart-popover chat-skill-picker';
+    panel.setAttribute('role', 'listbox');
+    /* .smart-popover 默认是收起态（absolute / 不可见），这里用内联改回 fixed + 可见，不动样式表 */
+    panel.style.cssText = 'position:fixed;left:0;top:0;right:auto;bottom:auto;z-index:90;width:min(280px, calc(100vw - 16px));padding:8px;margin:0;opacity:1;visibility:visible;pointer-events:auto;transform:none;';
+    var input = document.createElement('input');
+    input.type = 'search';
+    input.className = 'chat-skill-search';
+    input.placeholder = '搜索技能';
+    input.setAttribute('aria-label', '搜索技能');
+    input.style.cssText = 'width:100%;height:28px;padding:0 8px;border-radius:8px;background:var(--soft);color:var(--text);font-size:12px;outline:none;box-sizing:border-box;';
+    input.style.border = '0';
+    input.addEventListener('input', function(event){
+        agentSkillQuery = event.target.value || '';
+        renderAgentSkillPickerList();
+    });
+    input.addEventListener('keydown', function(event){
+        if(event.key === 'Escape') closeAgentSkillPicker();
+    });
+    var list = document.createElement('div');
+    list.className = 'chat-skill-picker-list';
+    list.style.cssText = 'display:flex;flex-direction:column;gap:1px;margin-top:6px;max-height:240px;overflow:auto;scrollbar-width:thin;';
+    panel.appendChild(input);
+    panel.appendChild(list);
+    document.body.appendChild(panel);
+    agentSkillPickerEl = panel;
+    agentSkillPickerAnchor = anchor || agentSkillButton;
+    positionAgentSkillPicker();
+    document.addEventListener('mousedown', onAgentSkillPickerOutside, true);
+    document.addEventListener('keydown', onAgentSkillPickerKey, true);
+    window.addEventListener('resize', positionAgentSkillPicker);
+    agentSkillQuery = '';
+    loadAgentSkills(false);
+    renderAgentSkillPickerList();
+    try { input.focus(); } catch(e){}
+}
 function agentRunCardInit(bubble, planRound){
     bubble.innerHTML = '';
     var card = document.createElement('div');
     card.className = 'agent-plan-card agent-stream-card';
-    card._run = { run_id:'', finished:false, lastMessage:'', lastRow:null, seq:0, steps:{}, max_steps:AGENT_RUN_MAX_STEPS, planRound:!!planRound, planHandedOff:false, planCard:null, instruction:'' };
+    card._run = { run_id:'', finished:false, lastMessage:'', lastRow:null, seq:0, steps:{}, max_steps:AGENT_RUN_MAX_STEPS, planRound:!!planRound, planHandedOff:false, planCard:null, instruction:'', startedAt:0, ticker:null, tickerStopped:false };
     card.innerHTML =
         '<div class="agent-plan-head">' +
             '<span class="agent-plan-badge"><i data-lucide="workflow"></i> Agent 运行</span>' +
-            '<span class="agent-plan-status">连接中…</span>' +
+            '<span class="agent-plan-status">' + agentRunStatusText('idle') + '</span>' +
+            '<span class="agent-run-time" hidden style="font-size:10.5px;line-height:1;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap;"></span>' +
         '</div>' +
         '<div class="agent-plan-intent"><i data-lucide="list-todo" class="agent-intent-icon"></i> ' + (planRound ? '正在生成方案…' : '正在执行你的指令…') + '</div>' +
         '<div class="agent-run-rounds"></div>' +
@@ -8074,6 +9184,7 @@ function agentRunCardInit(bubble, planRound){
         '<div class="agent-run-notes"></div>';
     bubble.appendChild(card);
     refreshIcons();
+    agentRunStartTicker(card);
     return card;
 }
 function agentRunSetStatus(card, state, text){
@@ -8253,6 +9364,7 @@ function agentRunStepStart(card, ev){
     card.querySelector('.agent-plan-timeline').appendChild(row);
     card._run.steps[key] = row;
     card._run.lastRow = row;
+    agentPlanStepMark(card, ev.index, 'spin');
     refreshIcons();
     row.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
@@ -8266,6 +9378,7 @@ function agentRunStepResult(card, ev){
     var descEl = row.querySelector('.agent-step-desc');
     var bodyEl = row.querySelector('.agent-step-body');
     row.classList.remove('running');
+    agentPlanStepMark(card, ev.index, ev.ok ? 'ok' : 'fail');
     if(ev.ok){
         row.classList.add('ok');
         if(stateEl) stateEl.innerHTML = agentStepStateHtml('ok');
@@ -8328,13 +9441,66 @@ function agentRunPlanHandoff(card, plan){
     var summary = String(plan.summary || '').trim();
     if(summary) card._run.lastMessage = summary;
 }
+function agentArtifactIcon(kind){
+    var k = String(kind || '').toLowerCase();
+    if(k === 'html' || k === 'code' || k === 'json' || k === 'md') return 'code';
+    if(k === 'xlsx' || k === 'csv' || k === 'sheet') return 'table';
+    if(k === 'image' || k === 'png' || k === 'jpg') return 'image';
+    if(k === 'video' || k === 'mp4') return 'film';
+    return 'file';
+}
+function agentArtifactSize(size){
+    var n = Number(size) || 0;
+    if(n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+    if(n >= 1024) return Math.round(n / 1024) + ' KB';
+    return n ? n + ' B' : '';
+}
+function agentArtifactsAdd(card, files){
+    if(!card || !Array.isArray(files) || !files.length) return;
+    var host = card.querySelector('.agent-artifacts');
+    if(!host){
+        host = document.createElement('div');
+        host.className = 'agent-artifacts';
+        var title = document.createElement('div');
+        title.className = 'agent-artifacts-title';
+        title.textContent = '本轮产物';
+        host.appendChild(title);
+        var list = document.createElement('div');
+        list.className = 'agent-artifacts-list';
+        host.appendChild(list);
+        card.appendChild(host);
+    }
+    var listEl = host.querySelector('.agent-artifacts-list');
+    var keys = {};
+    Array.prototype.forEach.call(listEl.querySelectorAll('.agent-artifact'), function(el){ keys[el.getAttribute('data-artifact-key')] = 1; });
+    files.forEach(function(file){
+        if(!file || !file.name) return;
+        var key = String(file.kind || '') + '|' + String(file.name);
+        if(keys[key]) return;
+        keys[key] = 1;
+        var url = String(file.url || ('/api/agent/files/' + encodeURIComponent(file.name)));
+        var el = document.createElement('a');
+        el.className = 'agent-artifact';
+        el.setAttribute('data-artifact-key', key);
+        el.href = url;
+        el.download = String(file.name);
+        el.target = '_blank';
+        el.rel = 'noopener';
+        el.innerHTML = '<span class="agent-artifact-ico"><i data-lucide="' + agentArtifactIcon(file.kind) + '"></i></span>' +
+            '<span class="agent-artifact-name">' + escapeHtml(String(file.name)) + '</span>' +
+            '<span class="agent-artifact-meta">' + escapeHtml(String(file.kind || '').toUpperCase()) + (file.size ? ' · ' + agentArtifactSize(file.size) : '') + '</span>' +
+            '<span class="agent-artifact-open"><i data-lucide="download"></i></span>';
+        listEl.appendChild(el);
+    });
+    refreshIcons();
+}
 function agentRunHandleEvent(card, name, data){
     if(!card) return;
     var ev = data || {};
     if(name === 'run_start'){
         card._run.run_id = ev.run_id || '';
         card._run.max_steps = Number(ev.max_steps) || card._run.max_steps;
-        agentRunSetStatus(card, 'running', '运行中');
+        agentRunSetStatus(card, 'running', agentRunStatusText('streaming'));
         return;
     }
     if(name === 'plan'){
@@ -8362,6 +9528,11 @@ function agentRunHandleEvent(card, name, data){
     }
     if(name === 'step_start'){ agentRunStepStart(card, ev); return; }
     if(name === 'step_result'){ agentRunStepResult(card, ev); return; }
+    if(name === 'artifact_updated'){
+        agentArtifactsAdd(card, ev.files);
+        if(card._run.planCard) agentArtifactsAdd(card._run.planCard, ev.files);
+        return;
+    }
     if(name === 'message'){ agentRunAssistantBubble(card, ev.text); return; }
     if(name === 'confirm_required'){
         var label = (ev.tool || '该操作') + (ev.description ? '：' + ev.description : '');
@@ -8371,10 +9542,15 @@ function agentRunHandleEvent(card, name, data){
     }
     if(name === 'done'){
         card._run.finished = true;
+        if(ev.changes && Array.isArray(ev.changes.artifacts)){
+            agentArtifactsAdd(card, ev.changes.artifacts);
+            if(card._run.planCard) agentArtifactsAdd(card._run.planCard, ev.changes.artifacts);
+        }
         var status = ev.status || 'ok';
         if(ev.message) agentRunAssistantBubble(card, ev.message);
         if(ev.undoable && ev.session_id) agentRunUndoFooter(card, ev);
-        var label2 = status === 'ok' ? '完成' : (status === 'aborted' ? '已中止' : '失败');
+        var terminalKey = status === 'ok' ? 'completed' : (status === 'aborted' ? 'stopped' : 'failed');
+        var label2 = agentRunStatusText(terminalKey);
         var steps = Number(ev.steps_executed);
         agentRunSetStatus(card, status, label2 + (steps ? ' · ' + steps + ' 步' : ''));
         if(card._run.planRound){
@@ -8396,7 +9572,7 @@ function agentRunHandleEvent(card, name, data){
         var msg = ev.message || '未知错误';
         agentRunNote(card, '错误：' + msg + (ev.code ? '（' + ev.code + '）' : ''), 'fail');
         addChatMessage('system', '智能画布运行出错：' + msg + (ev.code ? '（' + ev.code + '）' : ''));
-        agentRunSetStatus(card, 'failed', '失败');
+        agentRunSetStatus(card, 'failed', agentRunStatusText('failed'));
         if(card._run.planCard) agentStreamPlanSetState(card._run.planCard, 'pending', '待执行 · 本轮出错');
         return;
     }
@@ -8433,7 +9609,7 @@ function isVideoUrl(u){ return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(String(u || ''
 async function agentReviewRequest(ctx){
     var parts = createChatMsgEl('assistant');
     document.getElementById('chatMessages').appendChild(parts.div);
-    parts.bubble.innerHTML = thinkingHtml('正在对照你的要求看图…');
+    appendRunThinking(parts.bubble, '正在对照你的要求看图…');
     parts.div.scrollIntoView({behavior:'smooth', block:'end'});
     var res = null;
     try {
@@ -8774,10 +9950,29 @@ function agentHistoryPayload(instruction){
         return [];
     }
 }
+/* 自动发送时把种子 skill_ref 顶到 /api/agent/run 的顶层；空串保持旧请求体（不带该键） */
+function agentRunBodyWithSkillRef(body, skillRef){
+    var out = body || {};
+    var ref = String(skillRef || '').trim();
+    if(ref) out.skill_ref = ref;
+    return out;
+}
 async function runAgentStream(instruction, bubble, opts){
     // POST /api/agent/run 消费 SSE。EventSource 不支持 POST，只能 fetch + getReader 手写解析。
     var text = String(instruction || '');
     if(text.length > 4000) return {unavailable:true, reason:'指令超过 4000 字上限'};
+    /* 会话状态机旁路双写：每轮新建一份 state，之后每个事件都喂一遍；失败只告警，绝不影响现有渲染 */
+    var baselineMs = Number(opts && opts.baselineMs) || 0;
+    try {
+        agentSession = window.NovaiAgentSession ? window.NovaiAgentSession.create() : null;
+        /* 整轮累计：把上一段（规划卡）的结算值当基线，run_start 之后 workMs 从这里接着长 */
+        if(agentSession && baselineMs > 0) window.NovaiAgentSession.setBaseline(agentSession, baselineMs);
+    } catch(e){
+        agentSession = null;
+        console.warn('[agent-session] create 失败', e);
+    }
+    window.__novaiAgentSession = agentSession;
+    updateCanvasContextUsage(); // run_start 清零：新 session 没有 contextUsage 就先收起上一轮的读数
     var approved = (opts && Array.isArray(opts.approved_steps) && opts.approved_steps.length) ? opts.approved_steps : null;
     // 带 approved_steps = 用户已经点过「执行」，后端忽略 mode 直接跑；否则按开关决定这一轮只出方案。
     // 写操作 / 生成操作在服务端有强制闸门：开关只影响聊天与只读动作的即时性，关掉开关也不会让写操作直接执行——
@@ -8789,23 +9984,28 @@ async function runAgentStream(instruction, bubble, opts){
     agentRunAbort = ctl;
     var resp;
     try {
+        var activeThreadId = agentThreadState.activeId || '';
+        var runBody = agentRunBodyWithSkillRef({
+            canvas_id: canvasId,
+            instruction: text,
+            mode: planRound ? 'plan' : 'run',
+            approved_steps: approved || undefined,
+            skill_id: agentSelectedSkill ? String(agentSelectedSkill.id || '') : '',
+            focus: buildAgentFocus(),
+            thread_id: activeThreadId,
+            history: activeThreadId ? undefined : agentHistoryPayload(text),
+            provider: provider,
+            model: model,
+            image_provider: agentImageProvider || '',
+            image_model: '',
+            ms_model: provider === 'modelscope' ? model : '',
+            max_steps: AGENT_RUN_MAX_STEPS
+        }, pendingAgentSkillRef);
+        pendingAgentSkillRef = '';
         resp = await fetch('/api/agent/run', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                canvas_id: canvasId,
-                instruction: text,
-                mode: planRound ? 'plan' : 'run',
-                approved_steps: approved || undefined,
-                focus: buildAgentFocus(),
-                history: agentHistoryPayload(text),
-                provider: provider,
-                model: model,
-                image_provider: agentImageProvider || '',
-                image_model: '',
-                ms_model: provider === 'modelscope' ? model : '',
-                max_steps: AGENT_RUN_MAX_STEPS
-            }),
+            body:JSON.stringify(runBody),
             signal: ctl.signal
         });
     } catch(e){
@@ -8821,58 +10021,172 @@ async function runAgentStream(instruction, bubble, opts){
     }
     var card = agentRunCardInit(bubble, planRound);
     card._run.instruction = text;
-    var parser = createSseParser(function(name, data){ agentRunHandleEvent(card, name, data); });
-    var reader = resp.body.getReader();
-    var decoder = new TextDecoder('utf-8');
+    card._run.planCard = (opts && opts.planCard) || null;
+    if(card._run.planCard){
+        card._run.planCard.querySelectorAll('.agent-plan2-step').forEach(function(row){
+            row.classList.remove('spin', 'ok', 'fail');
+            row.classList.add('pending');
+            var num = row.querySelector('.agent-plan2-num');
+            if(num) num.textContent = String(Number(row.getAttribute('data-step')) + 1);
+        });
+        agentPlanProgressUpdate(card._run.planCard);
+    }
+    var terminalSeen = false;
+    var runId = String((resp.headers && resp.headers.get && resp.headers.get('X-NOVAI-Run-Id')) || '');
+    agentStreamRunId = runId;
+    syncAgentSteerButton();
+    var resumeAfter = function(){
+        return (agentSession && agentSession.lastEventId) ? String(agentSession.lastEventId) : '0';
+    };
+    var handleAgentEvent = function(name, data, id){
+        /* 续传会把边界帧重发一遍：只应用比已处理游标新的；游标存在 agentSession.lastEventId，不另存一份 */
+        var appliedSeq = (agentSession && agentSession.lastEventId) ? agentSession.lastEventId : null;
+        if(!shouldApplyAgentEvent(appliedSeq, id)) return;
+        if(name === 'run_start' && data && data.run_id) runId = String(data.run_id);
+        if(runId) agentStreamRunId = runId;
+        if(name === 'done' || name === 'error') terminalSeen = true;
+        agentRunHandleEvent(card, name, data);
+        if(name === 'user_steer') handleAgentSteerEvent(data);
+        syncAgentSteerButton();
+        if(!agentSession || !window.NovaiAgentSession) return;
+        try {
+            window.NovaiAgentSession.applyEvent(agentSession, { id: id, type: name, data: data });
+        } catch(e){
+            console.warn('[agent-session] applyEvent 失败（' + name + '）', e);
+        }
+        /* 状态机收口后再刷卡片：等待态冻结、终态/断流/中止都交给 ticker 停表 */
+        if(name === 'done' || name === 'error'){
+            agentRunStopTicker(card);
+            if(card._run && card._run.planCard){
+                agentPlanTimeSync(card._run.planCard);
+                renderAgentPlanParts(card._run.planCard);
+            }
+        } else {
+            agentRunSyncStatus(card);
+        }
+        renderAgentRunParts(card);
+        updateCanvasContextUsage();
+        syncAgentSteerButton();
+    };
+    var readAgentStream = async function(source){
+        var parser = createSseParser(handleAgentEvent); // 首连与续传共用同一个事件入口 → 同一张卡、同一套去重
+        var reader = source.body.getReader();
+        var decoder = new TextDecoder('utf-8');
+        try {
+            for(;;){
+                var chunk = await reader.read();
+                if(chunk.done) break;
+                parser.push(decoder.decode(chunk.value, {stream:true}));
+            }
+            parser.push(decoder.decode());
+            parser.flush();
+        } finally {
+            try { var p = reader.cancel(); if(p && p.catch) p.catch(function(){}); } catch(e){}
+        }
+    };
+    var giveUpRecovery = function(reason){
+        agentRunSetStatus(card, 'broken', '连接中断，无法恢复');
+        agentRunStopTicker(card);
+        agentRunNote(card, reason || '连接中断，无法恢复', 'warn');
+        if(card._run.planCard) agentStreamPlanSetState(card._run.planCard, 'pending', '待执行 · 连接中断');
+        addChatMessage('system', '智能画布流式连接中断，无法恢复；已按当前画布状态刷新。');
+        refreshCanvasAfterAgent();
+        return {failed:true, card:card};
+    };
     try {
-        for(;;){
-            var chunk = await reader.read();
-            if(chunk.done) break;
-            parser.push(decoder.decode(chunk.value, {stream:true}));
+        var primaryError = null;
+        try {
+            await readAgentStream(resp);
+        } catch(readErr){
+            if(readErr && readErr.name === 'AbortError') throw readErr;
+            primaryError = readErr; // fetch/读流抛错也进入恢复，不直接判死
         }
-        parser.push(decoder.decode());
-        parser.flush();
-        if(!card._run.finished){
-            agentRunNote(card, '连接提前结束：没有收到 done 事件', 'warn');
-            agentRunSetStatus(card, 'broken', '连接中断');
-            if(card._run.planCard) agentStreamPlanSetState(card._run.planCard, 'pending', '待执行 · 连接中断');
-            addChatMessage('system', '智能画布流式连接提前结束（未收到 done），已按当前画布状态刷新。');
-            refreshCanvasAfterAgent();
+        var attempt = 0;
+        while(!terminalSeen && !ctl.signal.aborted && runId && attempt < AGENT_RESUME_MAX_ATTEMPTS){
+            attempt += 1;
+            agentRunSetStatus(card, 'recovering', '连接中断，正在恢复…');
+            agentSetComposerRunning(false); // 恢复期间输入框保持可用，不锁死
+            await sleep(agentResumeDelay(attempt));
+            if(ctl.signal.aborted) break;
+            var opened = null;
+            try {
+                opened = await fetch('/api/agent/runs/' + encodeURIComponent(runId) + '/stream?after=' + encodeURIComponent(resumeAfter()), {
+                    headers: { 'Accept': 'text/event-stream' },
+                    signal: ctl.signal
+                });
+            } catch(fetchErr){
+                if(fetchErr && fetchErr.name === 'AbortError') throw fetchErr;
+                opened = null;
+            }
+            if(opened && opened.status === 404) return giveUpRecovery('这轮运行已过期，无法恢复');
+            if(!opened || !opened.ok || !opened.body){
+                agentRunSetStatus(card, 'recovering', '恢复失败（第 ' + attempt + ' 次，稍后重试）');
+                continue;
+            }
+            agentRunSetStatus(card, 'running', '已恢复');
+            agentSetComposerRunning(true);
+            try {
+                await readAgentStream(opened);
+            } catch(readErr2){
+                if(readErr2 && readErr2.name === 'AbortError') throw readErr2;
+                console.warn('[agent-resume] 续传读取失败', readErr2);
+            }
         }
-        return {ok:true, card:card};
+        if(terminalSeen) return {ok:true, card:card};
+        if(ctl.signal.aborted) return {aborted:true};
+        if(!runId) return giveUpRecovery('没有拿到 run id，无法自动续传');
+        return giveUpRecovery(primaryError ? ('流式中断：' + ((primaryError && primaryError.message) || '未知错误')) : '连接提前结束：没有收到 done 事件，恢复失败');
     } catch(e){
         if(e && e.name === 'AbortError'){
             agentRunNote(card, '已手动停止', 'warn');
-            agentRunSetStatus(card, 'aborted', '已停止');
+            agentRunSetStatus(card, 'aborted', agentRunStatusText('stopped'));
             // 方案已到手但本轮被中止：方案卡状态跟着更新，别停在「执行中」
             if(card._run.planCard) agentStreamPlanSetState(card._run.planCard, 'pending', '待执行 · 本轮已中止');
             return {aborted:true};
         }
         agentRunNote(card, '流式中断：' + ((e && e.message) || '未知错误'), 'fail');
-        agentRunSetStatus(card, 'failed', '流式中断');
+        agentRunSetStatus(card, 'failed', agentRunStatusText('failed'));
         if(card._run.planCard) agentStreamPlanSetState(card._run.planCard, 'pending', '待执行 · 本轮出错');
         addChatMessage('system', '智能画布流式中断：' + ((e && e.message) || '未知错误'));
         return {failed:true};
     } finally {
-        try { var p = reader.cancel(); if(p && p.catch) p.catch(function(){}); } catch(e){}
         if(agentRunAbort === ctl) agentRunAbort = null;
+        agentRunStopTicker(card); /* 收尾：ticker 一定停，耗时落在最终值 */
+        agentStreamRunId = '';
+        agentSteerPending = false;
+        syncAgentSteerButton(); /* 运行结束：插话按钮隐藏 */
     }
+}
+function stripSelectedSkillMention(text){
+    /* @技能 只用来选 chip：文本里的 @技能名 不进入 instruction */
+    if(!agentSelectedSkill) return text;
+    var names = [agentSelectedSkill.name, agentSelectedSkill.id].filter(Boolean);
+    var out = String(text || '');
+    names.forEach(function(name){
+        var escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        out = out.replace(new RegExp('@' + escaped + '\\s*', 'g'), '');
+    });
+    return out.replace(/\s{2,}/g, ' ').trim();
 }
 async function sendChatMessage(){
     /* —— 运行中：发送键就是停止键（中止本次流式运行）—— */
-    if(agentRunAbort){ abortAgentRun(); return; }
+    if(agentRunAbort){ abortAgentRun(); return false; }
     /* —— 防重入保护：防止用户连续按Enter发送多条消息产生竞态 —— */
-    if(chatSending) return;
+    if(chatSending) return false;
     var inp = document.getElementById('chatInput');
-    var text = inp.value.trim();
-    if(!text) return;
+    var text = stripSelectedSkillMention(inp.value.trim());
+    if(!text && agentSelectedSkill) text = '使用技能「' + agentSelectedSkill.name + '」';
+    if(!text) return false;
     chatSending = true;
+    var sendOk = true;
     agentSetComposerRunning(true);
     refreshChatModels();
     inp.value = ''; inp.style.height = 'auto';
+    var threadBase = (agentThreadState.messages || []).length;
     addChatMessage('user', text, chatContextImages());
     var parts = createChatMsgEl('assistant');
-    parts.bubble.innerHTML = thinkingHtml('正在规划…');
+    parts.div.dataset.threadIndex = String(threadBase + 1);
+    appendRunThinking(parts.bubble, '正在规划…');
     document.getElementById('chatMessages').appendChild(parts.div);
     parts.div.scrollIntoView({behavior:'smooth',block:'end'});
     try {
@@ -8893,6 +10207,7 @@ async function sendChatMessage(){
             }
         }
     } catch(e){
+        sendOk = false;
         parts.bubble.textContent = '失败: ' + (e.message || '未知');
         chatMessages.push({role:'assistant', text:parts.bubble.textContent});
     } finally {
@@ -8901,7 +10216,10 @@ async function sendChatMessage(){
         inp.focus();
         /* 计时 key 用完即删：不清的话下一轮发送会接着上一轮的秒数往下走 */
         thoughtLineStarts.delete('agent');
+        agentThreadState.messages.push({role:'user', text:text}, {role:'assistant', text:''});
+        loadAgentThreads();
     }
+    return sendOk;
 }
 // ── Agent 计划卡片渲染与操作（时间线卡片流）──
 var AGENT_TOOL_ICONS = {
@@ -9209,6 +10527,50 @@ function agentPlan2EditHtml(s, i){
         extra +
     '</div>';
 }
+var AGENT_PLAN_TOOL_LABELS = {
+    create_node: '新建节点', update_node: '修改节点', delete_node: '删除节点',
+    connect_nodes: '连接节点', disconnect_nodes: '断开连线', arrange_canvas: '整理画布',
+    generate_image: '生成图片', generate_video: '生成视频', run_generation: '重新生成',
+    batch_generate: '批量生成', run_batch: '批量运行', run_downstream: '顺序运行',
+    remember: '记住偏好', forget: '忘记偏好', list_templates: '查看模板',
+    save_template: '保存模板', apply_template: '套用模板', refine_prompt: '润色提示词'
+};
+var AGENT_PLAN_GEN_TOOLS = { generate_image:1, generate_video:1, run_generation:1, batch_generate:1, run_batch:1, run_downstream:1 };
+function agentPlanToolLabel(tool){
+    return AGENT_PLAN_TOOL_LABELS[tool] || String(tool || '执行').replace(/_/g, ' ');
+}
+function agentPlanImpact(s){
+    var tool = (s && s.tool) || '';
+    if(AGENT_PLAN_GEN_TOOLS[tool]) return '生成消耗配额';
+    if(tool === 'remember' || tool === 'forget' || tool === 'list_templates' || tool === 'check_task' || tool === 'list_canvases' || tool === 'get_canvas') return '只读';
+    return '画布改动';
+}
+function agentPlanProgressUpdate(card){
+    if(!card || !card._agentPlan) return;
+    var rows = card.querySelectorAll('.agent-plan2-step');
+    var done = card.querySelectorAll('.agent-plan2-step.ok').length;
+    var el = card.querySelector('.agent-plan2-progress');
+    if(el) el.textContent = '已完成 ' + done + '/' + rows.length;
+}
+function agentPlanStepMark(runCard, index, state){
+    if(!runCard || !runCard._run) return;
+    var planCard = runCard._run.planCard;
+    if(!planCard) return;
+    var idx = Number(index);
+    if(!isFinite(idx) || idx < 0) idx = Object.keys(runCard._run.steps || {}).length - 1;
+    var row = planCard.querySelector('.agent-plan2-step[data-step="' + idx + '"]');
+    if(!row) return;
+    row.classList.remove('pending', 'spin', 'ok', 'fail');
+    row.classList.add(state === 'ok' ? 'ok' : (state === 'fail' ? 'fail' : (state === 'spin' ? 'spin' : 'pending')));
+    var num = row.querySelector('.agent-plan2-num');
+    if(num){
+        if(state === 'ok') num.innerHTML = '<i data-lucide="check"></i>';
+        else if(state === 'fail') num.innerHTML = '<i data-lucide="x"></i>';
+        else num.textContent = String(idx + 1);
+    }
+    if(window.lucide) refreshIcons();
+    agentPlanProgressUpdate(planCard);
+}
 function renderAgentPlanCard2(bubble, plan, opts){
     bubble.innerHTML = '';
     var card = document.createElement('div');
@@ -9224,17 +10586,24 @@ function renderAgentPlanCard2(bubble, plan, opts){
     var stepsHtml = steps.map(function(s, i){
         var h = agentStepHuman(s);
         var meta = (h.meta || []).filter(Boolean).map(function(m){ return '<span>' + escapeHtml(m) + '</span>'; }).join('');
-        return '<div class="agent-plan2-step agent-step" data-step="' + i + '"><span class="agent-plan2-num">' + (i + 1) + '</span><div>' +
-            '<div class="agent-plan2-what">' + h.html + '</div>' +
-            (meta ? '<div class="agent-plan2-meta">' + meta + '</div>' : '') + (h.extra || '') +
-        '</div></div>';
+        var impact = agentPlanImpact(s);
+        return '<div class="agent-plan2-step agent-step pending" data-step="' + i + '"><span class="agent-plan2-num">' + (i + 1) + '</span>' +
+            '<div class="agent-plan2-step-main">' +
+                '<div class="agent-plan2-what"><span class="agent-plan2-tool">' + escapeHtml(agentPlanToolLabel(s.tool)) + '</span>' + h.html + '</div>' +
+                '<span class="agent-plan2-impact ' + (impact === '只读' ? 'is-read' : (impact === '生成消耗配额' ? 'is-gen' : '')) + '">' + impact + '</span>' +
+            '</div>' +
+            (meta ? '<div class="agent-plan2-meta">' + meta + '</div>' : '') +
+            (h.extra ? '<div class="agent-plan2-extra">' + h.extra + '</div>' : '') +
+        '</div>';
     }).join('');
     var editable = steps.map(function(s, i){ return agentStepEditable(s) ? agentPlan2EditHtml(s, i) : ''; }).join('');
     var gens = Number((plan.impact || {}).generations) || 0;
     var title = String(plan.intent || '').trim() || String(plan.summary || '').trim() || '按你说的改画布';
     card.innerHTML =
         '<div class="agent-plan2-head"><span class="agent-plan2-kicker"><i data-lucide="list-checks"></i>我打算这样做</span>' +
-            '<span class="agent-plan2-state agent-plan-status">等你确认</span></div>' +
+            '<span class="agent-plan2-progress">已完成 0/' + steps.length + '</span>' +
+            '<span class="agent-plan2-state agent-plan-status">等你确认</span>' +
+            '<span class="agent-plan-time" hidden style="font-size:10.5px;line-height:1;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap;"></span></div>' +
         '<div class="agent-plan2-title">' + escapeHtml(title) + '</div>' +
         '<div class="agent-plan2-steps">' + stepsHtml + '</div>' +
         '<div class="agent-plan2-cost"><i data-lucide="' + (gens ? 'coins' : 'check') + '"></i><span>' + agentPlanCostHtml(plan) + '</span>' +
@@ -9250,6 +10619,8 @@ function renderAgentPlanCard2(bubble, plan, opts){
     if(tweak) tweak.addEventListener('click', function(){ card.classList.toggle('tweaking'); });
     bubble.appendChild(card);
     refreshIcons();
+    agentPlanTimeSync(card);
+    renderAgentPlanParts(card);
     chatMessages.push({role:'assistant', text:'[方案] ' + title});
     card.scrollIntoView({behavior:'smooth', block:'end'});
     return card;
@@ -9490,12 +10861,15 @@ async function agentStreamPlanExecute(card, btn){
     agentPlanSetBusy(card, true, '执行中…', btn);
     btn.classList.add('applying');
     agentStreamPlanSetState(card, 'running', '执行中…');
+    /* 整轮累计：先把规划卡上已结算的耗时记成新一轮的基线，再隐藏计划卡计时 */
+    if(card._agentPlan) card._agentPlan.baselineMs = agentPlanTimeMs();
+    agentPlanTimeHide(card); /* 执行阶段由运行卡计时，计划卡不再重复显示 */
     var parts = createChatMsgEl('assistant');
     document.getElementById('chatMessages').appendChild(parts.div);
     parts.div.scrollIntoView({behavior:'smooth',block:'end'});
     var res = null;
     try {
-        res = await runAgentStream(st.instruction || st.intent || '', parts.bubble, { approved_steps: steps });
+        res = await runAgentStream(st.instruction || st.intent || '', parts.bubble, { approved_steps: steps, baselineMs: Number(st.baselineMs) || 0, planCard: card });
     } catch(e){
         res = { failed:true };
     }
@@ -9508,6 +10882,7 @@ async function agentStreamPlanExecute(card, btn){
     else if(res && res.aborted) agentStreamPlanSetState(card, 'aborted', '已中止 · 可重新执行');
     else if(res && res.unavailable) agentStreamPlanSetState(card, 'failed', '无法执行 · ' + (res.reason || '接口不可用'));
     else agentStreamPlanSetState(card, 'failed', '执行失败 · 可重新执行');
+    agentPlanTimeSync(card); /* 执行结束后把最终时长写回计划卡，事后可查 */
     refreshIcons();
     return res;
 }
@@ -10138,46 +11513,120 @@ if(chatInput) chatInput.addEventListener('keydown', function(e){
 if(chatInput) chatInput.addEventListener('input', function(){
     this.style.height = 'auto';
     this.style.height = Math.min(this.scrollHeight, 100) + 'px';
-    // @ 引用
+    // @ 引用：画布内容 + 技能两组
     var val = this.value, cursor = this.selectionStart;
     var atIdx = val.lastIndexOf('@', cursor);
     if(atIdx >= 0 && (atIdx === 0 || val[atIdx-1] === ' ')){
         var q = val.slice(atIdx+1, cursor).toLowerCase();
-        var matches = chatRefs.filter(function(n){return (n.name||'').toLowerCase().includes(q) || (n.type||'').toLowerCase().includes(q)}).slice(0,5);
-        showChatMentions(matches, this, atIdx);
+        renderChatMentionMenu(this, atIdx, q);
+        if(!chatSkillMentionCache) ensureChatSkillMentions().then(function(){
+            if(chatInput && chatInput.value.lastIndexOf('@') >= 0) renderChatMentionMenu(chatInput, atIdx, q);
+        });
     } else { hideChatMentions(); }
 });
 var chatMentionBox = null;
-function showChatMentions(matches, inp, atIdx){
+var chatMentionEntries = [];
+var chatMentionActiveIndex = 0;
+var chatMentionContext = null;
+var chatSkillMentionCache = null;
+var chatSkillMentionLoading = null;
+function ensureChatSkillMentions(){
+    if(chatSkillMentionCache) return Promise.resolve(chatSkillMentionCache);
+    if(chatSkillMentionLoading) return chatSkillMentionLoading;
+    chatSkillMentionLoading = fetch('/api/capabilities', { headers: { Accept: 'application/json' } })
+        .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+        .then(function(data){ chatSkillMentionCache = skillOptionsFrom((data && data.capabilities) || []); return chatSkillMentionCache; })
+        .catch(function(){ chatSkillMentionCache = []; return chatSkillMentionCache; })
+        .then(function(list){ chatSkillMentionLoading = null; return list; });
+    return chatSkillMentionLoading;
+}
+function chatMentionGroups(query){
+    var q = String(query || '').toLowerCase();
+    var nodes = chatRefs.filter(function(n){
+        return !q || String(n.name || '').toLowerCase().indexOf(q) >= 0 || String(n.type || '').toLowerCase().indexOf(q) >= 0;
+    }).slice(0, 5).map(function(n){
+        var isVid = (n.images || [])[0] && n.images[0].kind === 'video';
+        return { kind: 'node', name: n.name || n.type || '', type: n.type || '画布内容', thumbUrl: n.thumbUrl || '', thumbKind: isVid ? 'video' : 'image', raw: n };
+    });
+    var skills = (chatSkillMentionCache || []).filter(function(skill){
+        return !q || String(skill.name || '').toLowerCase().indexOf(q) >= 0 || String(skill.description || '').toLowerCase().indexOf(q) >= 0;
+    }).slice(0, 5).map(function(skill){
+        return { kind: 'skill', name: skill.name || skill.id, type: '技能', id: skill.id, icon: skill.icon || '✨', raw: skill };
+    });
+    var groups = [];
+    if(nodes.length) groups.push({ label: '画布内容', items: nodes });
+    if(skills.length) groups.push({ label: '技能', items: skills });
+    return groups;
+}
+function chatMentionPick(entry){
+    if(!entry || !chatMentionContext) return;
+    var inp = chatMentionContext.inp;
+    var atIdx = chatMentionContext.atIdx;
+    var v = inp.value, before = v.slice(0, atIdx), after = v.slice(inp.selectionStart);
+    inp.value = before + '@' + entry.name + ' ' + after;
+    if(entry.kind === 'skill' && entry.raw) setAgentSkill(entry.raw);
+    inp.focus();
     hideChatMentions();
-    if(!matches.length) return;
+    syncChatContext();
+}
+function chatMentionSetActive(index){
+    if(!chatMentionEntries.length) return;
+    chatMentionActiveIndex = (index + chatMentionEntries.length) % chatMentionEntries.length;
+    var box = chatMentionBox;
+    if(!box) return;
+    Array.prototype.forEach.call(box.querySelectorAll('.chat-mention-item'), function(el){
+        var on = Number(el.getAttribute('data-mention-index')) === chatMentionActiveIndex;
+        el.classList.toggle('is-active', on);
+        if(on) el.scrollIntoView({ block: 'nearest' });
+    });
+}
+function renderChatMentionMenu(inp, atIdx, query){
+    var groups = chatMentionGroups(query);
+    if(!groups.length){ hideChatMentions(); return; }
+    hideChatMentions();
+    chatMentionEntries = [];
     var box = document.createElement('div');
     box.className = 'chat-mention-box';
-    box.style.cssText = 'position:fixed;z-index:200;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px var(--shadow);padding:4px;max-height:200px;overflow-y:auto;font-size:12px';
+    box.style.cssText = 'position:fixed;z-index:200;background:var(--surface);border-radius:12px;box-shadow:0 12px 32px -10px var(--shadow),0 2px 8px -2px var(--shadow);padding:4px;max-height:280px;overflow-y:auto;font-size:12px;min-width:220px';
     var r = inp.getBoundingClientRect();
     box.style.left = r.left + 'px'; box.style.bottom = (window.innerHeight - r.top + 4) + 'px';
-    matches.forEach(function(n){
-        var el = document.createElement('div');
-        el.style.cssText = 'padding:6px 10px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px';
-        var thumbHtml = '';
-        if(n.thumbUrl){
-            var isVid = (n.images||[])[0] && n.images[0].kind === 'video';
-            thumbHtml = '<img src="'+escapeHtml(n.thumbUrl)+'" style="width:24px;height:24px;border-radius:4px;object-fit:cover;flex-shrink:0'+(isVid?';opacity:.7':'')+'">';
-        }
-        el.innerHTML = thumbHtml + '<span style="font-weight:600">' + escapeHtml(n.name||n.type||'') + '</span><span style="color:var(--muted);font-size:10px">' + escapeHtml(n.type||'') + '</span>';
-        el.addEventListener('mousedown', function(e){ e.preventDefault();
-            var v = inp.value, before = v.slice(0, atIdx), after = v.slice(inp.selectionStart);
-            inp.value = before + '@' + (n.name||n.id) + ' ' + after;
-            inp.focus();
-            hideChatMentions();
-            syncChatContext();
+    groups.forEach(function(group){
+        var head = document.createElement('div');
+        head.className = 'chat-mention-group';
+        head.textContent = group.label;
+        box.appendChild(head);
+        group.items.forEach(function(entry){
+            var index = chatMentionEntries.length;
+            entry.index = index;
+            chatMentionEntries.push(entry);
+            var el = document.createElement('div');
+            el.className = 'chat-mention-item';
+            el.setAttribute('data-mention-index', String(index));
+            var media = '<span class="chat-mention-ico">' + (entry.kind === 'skill' ? escapeHtml(entry.icon || '✨') : '◻') + '</span>';
+            if(entry.kind === 'node' && entry.thumbUrl){
+                media = '<img class="chat-mention-thumb" src="' + escapeHtml(entry.thumbUrl) + '" alt="">';
+            }
+            el.innerHTML = media + '<span class="chat-mention-name">' + escapeHtml(entry.name || entry.type || '') + '</span><span class="chat-mention-type">' + escapeHtml(entry.type || '') + '</span>';
+            el.addEventListener('mousedown', function(e){ e.preventDefault(); chatMentionPick(entry); });
+            box.appendChild(el);
         });
-        box.appendChild(el);
     });
     document.body.appendChild(box);
     chatMentionBox = box;
+    chatMentionContext = { inp: inp, atIdx: atIdx };
+    chatMentionSetActive(0);
 }
-function hideChatMentions(){ if(chatMentionBox){ chatMentionBox.remove(); chatMentionBox = null; } }
+function hideChatMentions(){ if(chatMentionBox){ chatMentionBox.remove(); chatMentionBox = null; } chatMentionContext = null; chatMentionEntries = []; }
+if(chatInput) chatInput.addEventListener('keydown', function(e){
+    if(!chatMentionBox) return;
+    if(e.key === 'ArrowDown'){ e.preventDefault(); e.stopImmediatePropagation(); chatMentionSetActive(chatMentionActiveIndex + 1); return; }
+    if(e.key === 'ArrowUp'){ e.preventDefault(); e.stopImmediatePropagation(); chatMentionSetActive(chatMentionActiveIndex - 1); return; }
+    if(e.key === 'Escape'){ e.preventDefault(); e.stopImmediatePropagation(); hideChatMentions(); return; }
+    if(e.key === 'Enter' && !e.shiftKey){
+        e.preventDefault(); e.stopImmediatePropagation();
+        chatMentionPick(chatMentionEntries[chatMentionActiveIndex]);
+    }
+}, true);
 // 点击其他地方关闭 mention
 document.addEventListener('mousedown', function(e){ if(chatMentionBox && !e.target.closest('.chat-mention-box') && e.target !== chatInput) hideChatMentions(); });
 promptInput.addEventListener('input', () => {
@@ -11435,6 +12884,7 @@ function applyMergedServerCanvas(serverCanvas){
     setSmartServerBase(rawNodes, serverCanvas.connections);
     const cleanedState = clearCompletedNodeBusyStates();
     const recoveredLoopOutputs = recoverStuckLoopOutputsFromLogs();
+    const healedGroupFrames = healSmartGroupMemberFrames();
     canvas.updated_at = Number(serverCanvas.updated_at || canvas.updated_at || 0);
     if(canvas.title !== serverCanvas.title && serverCanvas.title){
         canvas.title = serverCanvas.title;
@@ -11443,7 +12893,7 @@ function applyMergedServerCanvas(serverCanvas){
     }
     render();
     if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
-    if(cleanedState || recoveredLoopOutputs) scheduleSave();
+    if(cleanedState || recoveredLoopOutputs || healedGroupFrames) scheduleSave();
     resumeSmartPendingTasks().catch(error => console.error('[smart-canvas] 待处理任务恢复入口失败', error));
     resumeJimengPendingNodes();
     return true;
@@ -12043,6 +13493,7 @@ function resetStaleBatchRuns(){
 }
 async function loadCanvas(){
     if(!canvasId) return;
+    clearAgentSkill();
     try {
         const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}`);
         if(!res.ok) return;
@@ -12075,6 +13526,7 @@ async function loadCanvas(){
         const recoveredLoopOutputs = recoverStuckLoopOutputsFromLogs();
         const hiddenCompletedTimers = hideCompletedRunTimers();
         const cleanedDetachedInputs = cleanupDetachedRunInputRefs();
+        const healedGroupFrames = healSmartGroupMemberFrames();
         viewport = {...viewport, ...(canvas.viewport || {}), ...(loadLocalViewport() || {})};
         viewport.scale = safeScale(viewport.scale);
         if(canvas.settings) settings = {...settings, ...canvas.settings};
@@ -12103,10 +13555,10 @@ async function loadCanvas(){
             centerViewportOnWorldPoint({x:r.x + r.width / 2, y:r.y + r.height / 2});
         }
         render();
-        if(cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers) scheduleSave();
+        if(cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers || healedGroupFrames) scheduleSave();
         /* 记下刚加载的内容签名：之后只有内容真的变了才会保存。载入时做过自愈的，签名留空，保证自愈结果一定落盘 */
         canvas.nodes = nodes;
-        lastSavedContentSig = (cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers)
+        lastSavedContentSig = (cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers || healedGroupFrames)
             ? '' : canvasContentSignature(canvasForStorage());
         resumeSmartPendingTasks().catch(error => console.error('[smart-canvas] 待处理任务恢复入口失败', error));
         resumeJimengPendingNodes();
@@ -12125,6 +13577,7 @@ function viewportShowsAnySmartNode(){
     });
 }
 function scheduleSave(){
+    if(collabReadOnly) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveCanvas, 450);
 }
@@ -12169,7 +13622,7 @@ function canvasContentSignature(storageCanvas){
     } catch(e) { return ''; }
 }
 async function saveCanvas(){
-    if(!canvasId || !canvas) return;
+    if(collabReadOnly || !canvasId || !canvas) return;
     savePromptDraftForCurrent();
     nodes.forEach(node => {
         node.images = (node.images || []).map(img => mediaItemForStorage(stripImageGenerationMeta(img)));
@@ -12245,6 +13698,7 @@ function inheritNodeMetaFromImage(node){
     node.images = (node.images || []).map(img => stripImageGenerationMeta(img));
 }
 function createNode(x, y, images=[], options={}){
+    if(collabReadOnly){ collabNotifyReadOnly(); return null; }
     if(!options.skipUndo) pushUndo();
     // V2 Phase 2: 素材首次进入画布时分配 asset_id
     const nodeImages = (images || []).map(img => ensureSmartImageAssetId(cloneMediaItem(img)));
@@ -13199,7 +14653,7 @@ async function zipDownloadImageItems(title, items){
     const list = (items || []).filter(item => item?.url);
     if(!list.length) return;
     try {
-        const filename = safeExportFileName(`${title || 'image-group'}.zip`, 'image-group.zip');
+        const filename = `${smartExportBaseName(title, 'image-group')}.zip`;
         const response = await fetch('/api/canvas-assets/download', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
@@ -17241,7 +18695,7 @@ function smartExportCanvasForNode(node, index, format){
         ctx.drawImage(img, 0, 0);
         canvasEl.toBlob(blob => {
             if(!blob){ toast('导出失败'); return; }
-            const base = safeExportFileName((item.name || node.title || 'image').replace(/\.[^.]+$/, ''), 'image');
+            const base = smartExportBaseName(item.name || node.title, 'image');
             downloadBlob(blob, base + (format === 'jpg' ? '.jpg' : '.png'));
             toast('已导出 ' + format.toUpperCase());
         }, format === 'jpg' ? 'image/jpeg' : 'image/png', 0.92);
@@ -17293,7 +18747,7 @@ async function smartExportNodeAsPsd(node, index, options={}){
     if(options.ocrText){
         try {
             const result = await smartExportNodeAsPsdWithText(node, index, message => toast(message));
-            const base = safeExportFileName((node.title || 'canvas').replace(/\.[^.]+$/, ''), 'canvas');
+            const base = smartExportBaseName(node.title, 'canvas');
             downloadBlob(result.blob, base + '.psd');
             const names = result.layers.map(layer => layer.name);
             toast('已导出分层 PSD（' + result.layers.length + ' 层：' + names.slice(0, 3).join(' / ') + (names.length > 3 ? ' …' : '') + '）');
@@ -17309,7 +18763,7 @@ async function smartExportNodeAsPsd(node, index, options={}){
         const spec = await smartPsdLayersForNode(node, index);
         const blob = NovaPsd.write({width:spec.width, height:spec.height, layers:spec.layers});
         if(!blob){ toast('PSD 导出失败：没有可写的图层'); return; }
-        const base = safeExportFileName((node.title || 'canvas').replace(/\.[^.]+$/, ''), 'canvas');
+        const base = smartExportBaseName(node.title, 'canvas');
         downloadBlob(blob, base + '.psd');
         toast('已导出 PSD（' + spec.layers.length + ' 层）');
     } catch(error) {
@@ -21762,7 +23216,7 @@ function smartGroupToolbarHtml(node){
     const hasContent = (node.images || []).some(img => img?.url) || smartGroupMembers(node).length > 0;
     const imageCount = (node.images || []).filter(img => img?.url).length;
     const actions = [
-        // 一键运行：把组内所有可运行的链路结尾节点依次跑一遍（和框选「运行选中」同一套机器）。
+        // 一键运行：把组内所有可运行的链路结尾节点依次跑一遍（走 runCascadeTargetList 同一套机器）。
         // 这里不预先算可运行数量——canRunSmartCascade 要遍历链路图，放在 render 里每个分组每次都算太贵，
         // 改成点的时候再判定，没得跑就提示。
         {key:'run', icon:'play', label:'一键运行', enabled:true},
@@ -22062,6 +23516,7 @@ function render(){
         const isSmartGroup = node.type === 'smart-group';
         const isCompactMember = isSmartGroupCompactMember(node);
         const isImageNode = isSmartMediaNode(node);
+        const isGroupMediaMember = isImageNode && smartGroupContainingNode(node.id);
         const isJimengPending = Boolean(node.jimengPending && node.jimengPending.submitId && imgs.length === 0);
         const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending && !isJimengPending);
         const isEmpty = isImageNode && imgs.length === 0 && !node.pending && !isQueued && !isJimengPending;
@@ -22078,9 +23533,10 @@ function render(){
         /* 根节点自身的 class（选中/拖动这些**临时态**都在这里）：单独拿出来，
            比较「要不要重建」时把它排除，这样拖动/选中不会把整棵子树（图标、表格、面板）重建一遍 ——
            重建既慢、又会让实测尺寸在拖动过程中变化（用户报的「拖动时节点忽大忽小」）。 */
-        const rootClass = `image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isText ? 'text-smart-node' : ''} ${isLabel ? 'label-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.sizeUserSet ? 'size-user-set' : ''} ${smartLodKind(node) ? 'has-lod' : ''} ${node.type === 'table' || node.type === 'smart-batch' ? 'has-lod-band' : ''} ${node.alias ? 'has-alias' : ''}`;
+        const rootClass = `image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isText ? 'text-smart-node' : ''} ${isLabel ? 'label-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isGroupMediaMember ? 'smart-group-media-member' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.sizeUserSet ? 'size-user-set' : ''} ${smartLodKind(node) ? 'has-lod' : ''} ${node.type === 'table' || node.type === 'smart-batch' ? 'has-lod-band' : ''} ${node.alias ? 'has-alias' : ''} ${node.templateTitle ? 'has-template-title' : ''}`;
         const html = `<div class="${rootClass}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${nodeAliasStyle(node)}">
             ${nodeAliasHtml(node)}
+            ${node.templateTitle ? `<span class="node-template-title">${escapeHtml(node.templateTitle)}</span>` : ''}
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty ? `<div class="floating-node-actions">${imgs.some(img => img?.url) ? `<button class="mini-x node-replace" type="button" data-smart-node-action="replace" data-node-id="${escapeAttr(node.id)}" title="${escapeHtml(tr('smart.replaceMedia'))}" aria-label="${escapeHtml(tr('smart.replaceMedia'))}"><i data-lucide="image-plus"></i></button>` : ''}<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${shouldRenderNodeToolbar(node) ? smartNodeToolbarHtml(node) + smartGroupToolbarHtml(node) : ''}
@@ -22241,6 +23697,8 @@ function measureSmartNodeImages(){
                 }
                 updateNodeElementDuringResize(node);
                 if(containerNode && containerNode.id !== node.id) updateNodeElementDuringResize(containerNode);
+                const memberGroup = smartGroupContainingNode(node.id);
+                if(memberGroup) arrangeSmartGroupMembers(memberGroup, {skipUndo:true, syncDom:true, frame:true});
                 if(isNodeSelected(node.id)) updateComposer();
                 scheduleSave();
             });
@@ -22263,6 +23721,8 @@ function measureSmartNodeImages(){
                 }
                 updateNodeElementDuringResize(node);
                 if(containerNode && containerNode.id !== node.id) updateNodeElementDuringResize(containerNode);
+                const memberGroup = smartGroupContainingNode(node.id);
+                if(memberGroup) arrangeSmartGroupMembers(memberGroup, {skipUndo:true, syncDom:true, frame:true});
                 if(isNodeSelected(node.id)) updateComposer();
                 scheduleSave();
             });
@@ -22294,6 +23754,8 @@ function measureSmartNodeImages(){
             }
             updateNodeElementDuringResize(node);
             if(containerNode && containerNode.id !== node.id) updateNodeElementDuringResize(containerNode);
+            const memberGroup = smartGroupContainingNode(node.id);
+            if(memberGroup) arrangeSmartGroupMembers(memberGroup, {skipUndo:true, syncDom:true, frame:true});
             if(isNodeSelected(node.id)) updateComposer();
             scheduleSave();
         };
@@ -22918,6 +24380,7 @@ function nearestSmartPortForDrop(clientX, clientY, kind, fromId){
     return bestDistance <= 64 ? best : null;
 }
 function pickMediaForSmartNode(nodeId){
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*,video/*,audio/*';
@@ -22940,6 +24403,7 @@ function bindSmartGroupTitleInput(el, node){
     const input = el.querySelector('.smart-group-title-input');
     if(!input) return;
     // 同一个输入框只绑一次：render 会复用 DOM，重复绑定会让一次输入跑 N 遍
+    if(collabReadOnly){ input.readOnly = true; input.tabIndex = -1; return; }
     if(input.dataset.smartGroupTitleBound === '1') return;
     input.dataset.smartGroupTitleBound = '1';
     ['pointerdown','mousedown','click','dblclick'].forEach(type => {
@@ -23282,12 +24746,16 @@ function bindNodeEvents(){
             openImagePreviewSmart(target.targetNodeId, target.imageIndex);
         }, true);
         });
-        el.querySelectorAll('.thumb-item,.smart-group-single-thumb').forEach(item => {
+        const thumbDragSelector = smartMediaNodeIsGroupContainer(nodeForControls) && !isHistoryGroupNode(nodeForControls)
+            ? '.thumb-item,.smart-group-single-thumb,.image-wrap[data-image-index]'
+            : '.thumb-item,.smart-group-single-thumb';
+        el.querySelectorAll(thumbDragSelector).forEach(item => {
             if(item.dataset.thumbDragBound === '1') return;
             item.dataset.thumbDragBound = '1';
             item.addEventListener('mousedown', e => {
                 if(e.target.closest('video,audio')) return;
                 if(e.button !== 0 || e.target.closest('.mini-x')) return;
+                if(collabReadOnly){ collabNotifyReadOnly(); return; }
                 if(e.detail >= 2) return;
                 const node = nodes.find(n => n.id === id);
                 const refNodeId = item.dataset.refNodeId || '';
@@ -23296,7 +24764,7 @@ function bindNodeEvents(){
                 const imgIndex = Number(item.dataset.imageIndex || 0);
                 if(isSmartGroupNode(node)){
                     if(!node.images?.[imgIndex]) return;
-                } else if((node.images || []).length <= 1) return;
+                } else if(!smartMediaNodeIsGroupContainer(node) || isHistoryGroupNode(node) || !node.images?.[imgIndex]) return;
                 e.preventDefault(); e.stopPropagation();
                 thumbDragState = {nodeId:id, imgIndex, startX:e.clientX, startY:e.clientY, detached:false};
                 capturePendingUndo();
@@ -23307,6 +24775,7 @@ function bindNodeEvents(){
             resizeHandle.dataset.nodeResizeHandleBound = '1';
             resizeHandle.addEventListener('mousedown', e => {
                 if(e.button !== 0) return;
+                if(collabReadOnly){ collabNotifyReadOnly(); return; }
                 e.preventDefault(); e.stopPropagation();
                 const node = nodes.find(n => n.id === id);
                 if(!node) return;
@@ -23330,6 +24799,7 @@ function bindNodeEvents(){
             });
         }
         const beginNodeDrag = e => {
+            if(collabReadOnly){ collabNotifyReadOnly(); return; }
             if(e.button !== 0 || e.target.closest('.mini-x, .smart-label-text[contenteditable="true"], .smart-node-floating-menu, .node-resize-handle, .node-inline-editor, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button, .smart-video-controls')) return;
             if(e.target.closest('.prompt-node-pill, textarea:not(.prompt-node-text)')) return;
             /* 视频节点：原来整块 .smart-video-player 都不给拖 —— 一点播放，播放器就铺满节点，
@@ -23370,6 +24840,7 @@ function bindNodeEvents(){
             port.dataset.nodePortBound = '1';
             port.addEventListener('mousedown', e => {
                 if(e.button !== 0) return;
+                if(collabReadOnly){ collabNotifyReadOnly(); return; }
                 e.preventDefault(); e.stopPropagation();
                 const portType = port.dataset.port;
                 const p = screenToWorld(e);
@@ -23415,6 +24886,7 @@ function bindNodeEvents(){
         el.ondrop = async e => {
             e.preventDefault();
             e.stopPropagation();
+            if(collabReadOnly){ collabNotifyReadOnly(); return; }
             const payload = await mergeGuestDropPayload(await resolveSmartImageDropPayload(e.dataTransfer));
             if(payload.type === 'none') return;
             await handleSmartImageDropPayload(payload, id);
@@ -23483,6 +24955,7 @@ function setDropHighlight(targetId){
     if(el) el.classList.add('drop-target');
 }
 function deleteNode(id){
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
     pushUndo();
     const deleteIds = new Set([id]);
     nodes.forEach(node => {
@@ -23525,6 +24998,7 @@ function clearNodeMediaBeforeDelete(id){
     return true;
 }
 function deleteNodeFromButton(id){
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
     if(clearNodeMediaBeforeDelete(id)) return;
     deleteNode(id);
 }
@@ -23533,6 +25007,7 @@ function disconnectConnection(index){
 }
 // 断开一条或多条连线（合并到分组的连线会一次性断开其下所有成员连线）。spec 可为索引数组或逗号分隔字符串。
 function disconnectConnections(spec){
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
     if(!canvas || !Array.isArray(canvas.connections)) return;
     const indices = (Array.isArray(spec) ? spec : String(spec).split(','))
         .map(v => Number(v))
@@ -27153,7 +28628,7 @@ function uploadTitleForItems(items, fallback='Upload'){
     const kinds = new Set(list.map(item => item instanceof File ? mediaKindForFile(item) : mediaKindForItem(item)));
     if(kinds.size > 1) return list.length > 1 ? 'Media' : fallback;
     if(kinds.has('video')) return list.length > 1 ? 'Videos' : 'Video';
-    if(kinds.has('audio')) return 'Audio';
+    if(kinds.has('audio')) return tr('smart.kindAudio');
     return list.length > 1 ? 'Group' : 'Image';
 }
 const SMART_IMAGE_DROP_EXT_RE = /\.(png|jpe?g|webp|gif)$/i;
@@ -27280,9 +28755,35 @@ function smartPrimaryPathKey(url){
         return text.split(/[?#]/)[0].toLowerCase();
     }
 }
+/* 主进程回传的候选是 {url,w} 对象，直接 String() 会得到 "[object Object]"；统一取值并丢掉非媒体垃圾 */
+function smartDropCandidateUrls(list){
+    const urls = (Array.isArray(list) ? list : []).map(entry => {
+        if(entry && typeof entry === 'object') return String(entry.url || entry.src || '').trim();
+        return String(entry || '').trim();
+    }).filter(url => /^(?:https?:\/\/|data:)/i.test(url));
+    return Array.from(new Set(urls));
+}
+/* 桥方法名：老版本 preload 只暴露无 get_ 前缀的名字，两个都拿不到才算缺失（拖拽预取因此整条通道失效过） */
+function smartGuestBridgeMethod(names){
+    const api = window.pywebview && window.pywebview.api;
+    if(!api) return '';
+    for(const name of (Array.isArray(names) ? names : [])){
+        if(typeof api[name] === 'function') return name;
+    }
+    return '';
+}
+async function callSmartGuestBridge(names){
+    const method = smartGuestBridgeMethod(names);
+    if(!method) return {missing:true, method:'', ok:false, result:null, error:''};
+    try {
+        return {missing:false, method, ok:true, result: await window.pywebview.api[method](), error:''};
+    } catch(error){
+        return {missing:false, method, ok:false, result:null, error: error && error.message ? String(error.message) : String(error)};
+    }
+}
 /* uri-list 指向哪张就用哪张；candidates 里只有同主路径的高清版才允许替换 */
 function smartChooseGuestImageCandidate(uriSource, imageCandidates){
-    const list = (Array.isArray(imageCandidates) ? imageCandidates : []).map(value => String(value || '').trim()).filter(Boolean);
+    const list = smartDropCandidateUrls(imageCandidates);
     const source = String(uriSource || '').trim();
     if(!source) return { url:list[0] || '', matched:'', key:'' };
     const key = smartPrimaryPathKey(source);
@@ -27343,8 +28844,8 @@ async function guestDropFallbackPayload(){
         window.__novaLastGuestDragAt = Date.now();
         const target = drag.target && typeof drag.target === 'object' ? drag.target : drag;
         const tag = String(target.tag || drag.tagName || drag.tag || '').toUpperCase();
-        const imageCandidates = Array.isArray(drag.imageCandidates) ? drag.imageCandidates.map(v => String(v || '').trim()).filter(Boolean) : [];
-        const videoCandidates = Array.isArray(drag.videoCandidates) ? drag.videoCandidates.map(v => String(v || '').trim()).filter(Boolean) : [];
+        const imageCandidates = smartDropCandidateUrls(drag.imageCandidates);
+        const videoCandidates = smartDropCandidateUrls(drag.videoCandidates);
         const mediaUrl = String(drag.mediaUrl || '').trim();
         const src = String(target.src || drag.src || '').trim();
         const best = imageCandidates[0] || videoCandidates[0] || mediaUrl || src || '';
@@ -27428,6 +28929,13 @@ async function uploadFiles(files){
         kind:file.kind || mediaKindForFile(supported[index])
     }));
 }
+/* 新节点的类型按落地素材的真实类型收敛：清一色音频 → smart-audio，清一色视频 → smart-video，其余（含图文混传）→ 图片节点 */
+function smartUploadNodeKind(items){
+    const list = [...(items || [])];
+    if(!list.length) return 'image';
+    if(list.every(isAudioMediaItem)) return 'audio';
+    return list.every(isVideoMediaItem) ? 'video' : 'image';
+}
 function appendImagesToSmartNode(uploaded, targetId='', opts={}){
     const images = [...(uploaded || [])].filter(file => file?.url);
     if(!images.length) return null;
@@ -27449,7 +28957,7 @@ function appendImagesToSmartNode(uploaded, targetId='', opts={}){
     const previousCount = (node.images || []).length;
     // V2 Phase 2: 素材首次进入画布时分配 asset_id
     node.images = [...(node.images || []), ...images.map(file => ensureSmartImageAssetId({...file, kind:file.kind || mediaKindForItem(file)}))];
-    if(createdNew) applySmartMediaTypeForKind(node, node.images.every(isVideoMediaItem) ? 'video' : 'image');
+    if(createdNew) applySmartMediaTypeForKind(node, smartUploadNodeKind(node.images));
     /* 用户手动拖过缩放把手的节点保留 w/h：追加素材算「内容变化」，不该把已经拉好的尺寸丢掉
        （否则多图群组节点加一张图就跳回自适应大小）。 */
     if(node.images.length > 1){
@@ -27489,6 +28997,7 @@ function appendImagesToSmartNode(uploaded, targetId='', opts={}){
     return node;
 }
 async function handleFiles(files, targetId='', opts={}){
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
     try {
         const fileList = [...(files || [])].filter(isSupportedUploadFile).slice(0, SMART_UPLOAD_MAX);
         if(!fileList.length) return;
@@ -27564,13 +29073,17 @@ async function handleSmartImageDropPayload(payload, targetId='', opts={}){
             /* electron 拖拽开始预取图片字节：命中就直接走 import-urls 的 data 通道 */
             let guestBytesPrefetch = null;
             try {
-                const prefetchApi = window.pywebview && window.pywebview.api;
-                if(prefetchApi && typeof prefetchApi.guest_drag_bytes === 'function'){
-                    const prefetched = await prefetchApi.guest_drag_bytes();
+                const prefetchCall = await callSmartGuestBridge(['get_guest_drag_bytes', 'guest_drag_bytes']);
+                if(prefetchCall.missing){
+                    dropLog('guest_drag_bytes bridge: missing');
+                } else if(prefetchCall.ok){
+                    const prefetched = prefetchCall.result;
                     guestBytesPrefetch = smartPrefetchDropHit(prefetched);
                     const prefetchUrl = String(prefetched && prefetched.url || '');
                     const prefetchSize = Number(prefetched && prefetched.size) || 0;
                     dropLog('guest_drag_bytes:', 'bytes=' + prefetchSize + ' url=' + prefetchUrl, guestBytesPrefetch ? 'hit' : 'miss');
+                } else {
+                    dropLog('guest_drag_bytes error:', prefetchCall.error);
                 }
             } catch(error){
                 guestBytesPrefetch = null;
@@ -27694,8 +29207,8 @@ async function handleSmartImageDropPayload(payload, targetId='', opts={}){
                         const rawDataSrc = String(target.dataSrc || drag.dataSrc || '').trim();
                         const currentSrc = String(drag.currentSrc || '').trim();
                         const mediaUrl = String(drag.mediaUrl || '').trim();
-                        const imageCandidates = (Array.isArray(drag.imageCandidates) ? drag.imageCandidates : []).map(v => String(v || '').trim()).filter(Boolean);
-                        const videoCandidates = (Array.isArray(drag.videoCandidates) ? drag.videoCandidates : []).map(v => String(v || '').trim()).filter(Boolean);
+                        const imageCandidates = smartDropCandidateUrls(drag.imageCandidates);
+                        const videoCandidates = smartDropCandidateUrls(drag.videoCandidates);
                         const uriList = payloadUriList.length ? payloadUriList : String(drag.uriList || '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
                         const uriSource = uriList[0] || '';
                         const uriChoice = smartChooseGuestImageCandidate(uriSource, imageCandidates);
@@ -27834,11 +29347,18 @@ async function handleSmartImageDropPayload(payload, targetId='', opts={}){
             };
             /* 预取命中：先用中等尺寸秒出节点，再后台换原图；原图失败不影响已出的节点 */
             const upgradePrefetchedOriginal = async (nodeId, mediumUrls, originalUrl) => {
-                const api = window.pywebview && window.pywebview.api;
-                if(!api || typeof api.guest_drag_original !== 'function') return;
+                if(!smartGuestBridgeMethod(['get_guest_drag_original', 'guest_drag_original'])) return;
                 try {
-                    const fetched = await api.guest_drag_original();
-                    const hit = smartPrefetchDropHit(fetched);
+                    const originalCall = await callSmartGuestBridge(['get_guest_drag_original', 'guest_drag_original']);
+                    if(originalCall.missing){
+                        dropLog('guest_drag_original bridge: missing');
+                        return;
+                    }
+                    if(!originalCall.ok){
+                        dropLog('original upgrade failed:', originalCall.error);
+                        return;
+                    }
+                    const hit = smartPrefetchDropHit(originalCall.result);
                     if(!hit || !hit.dataUrl){
                         dropLog('original upgrade failed: no dataUrl');
                         return;
@@ -27922,7 +29442,7 @@ async function handleSmartImageDropPayload(payload, targetId='', opts={}){
                 }
                 return importFetchedData(fetched, candidate, 'fetch-bytes');
             };
-            /* 通道 3：主进程 session.fetch（带 Referer/cookie，不受 CORS），只给视频网络地址用 */
+            /* 通道 3：主进程 session.fetch（走系统代理/登录态，不受 CORS），视频和图片网络地址都能用 */
             const importFromFetchedUrl = async candidate => {
                 const api = window.pywebview && window.pywebview.api;
                 if(!api || typeof api.fetch_source_url !== 'function') return [];
@@ -28023,7 +29543,8 @@ async function handleSmartImageDropPayload(payload, targetId='', opts={}){
                     dropLog('channels:', String(candidate).slice(0, 160), trail.join(' > '));
                     return true;
                 }
-                if(isVideoCandidate(candidate) && /^https?:\/\//i.test(candidate)){
+                /* 图片也要走：后端直连不通的站点（Pinterest）只能靠主进程系统代理取字节 */
+                if((isVideoCandidate(candidate) || isImageCandidate(candidate)) && /^https?:\/\//i.test(candidate)){
                     const fromUrl = await importFromFetchedUrl(candidate);
                     trail.push('fetch-url:' + (fromUrl.length ? 'ok' : 'fail'));
                     if(!fromUrl.length) dropLog('fetch-url fail', String(candidate).slice(0, 160));
@@ -30118,41 +31639,7 @@ function syncCascadeRunButton(node=selectedNode()){
         refreshIcons();
     }
 }
-/* ── 框选运行：一键运行框选中的链路结尾节点 ── */
-function runnableSelectedCascadeTargets(){
-    const ids = selectedNodeIds();
-    const connCount = (canvas && canvas.connections && canvas.connections.length) || 0;
-    const key = ids.join('|') + '@' + nodes.length + '#' + connCount;
-    if(key === smartRunSelectedCacheKey) return smartRunSelectedCacheList;
-    const out = [];
-    const seen = new Set();
-    for(const id of ids){
-        if(!id || seen.has(id)) continue;
-        seen.add(id);
-        const node = nodes.find(n => n.id === id);
-        if(node && canRunSmartCascade(node)) out.push(node);
-    }
-    smartRunSelectedCacheKey = key;
-    smartRunSelectedCacheList = out;
-    return out;
-}
-function syncRunSelectedButton(){
-    if(!smartRunSelectedBtn) return;
-    const running = smartRunSelectedRunning;
-    const visible = running ? true : runnableSelectedCascadeTargets().length > 0;
-    smartRunSelectedBtn.classList.toggle('visible', visible);
-    smartRunSelectedBtn.classList.toggle('is-stop', running);
-    const mode = running ? 'stop' : 'run';
-    if(smartRunSelectedBtn.dataset.runMode !== mode){
-        smartRunSelectedBtn.dataset.runMode = mode;
-        /* 纯 arrow-up 方键：运行态是「停止」（title/aria 也跟着换），不保留任何文字节点 */
-        smartRunSelectedBtn.innerHTML = '<i data-lucide="arrow-up"></i>';
-        smartRunSelectedBtn.title = running ? '停止' : '运行选中';
-        smartRunSelectedBtn.setAttribute('aria-label', running ? '停止' : '运行选中');
-        refreshIcons();
-    }
-}
-// 一批「链路结尾」节点依次跑完。框选运行和分组「一键运行」共用这段机器：
+// 一批「链路结尾」节点依次跑完。分组「一键运行」走这段机器：
 // 同一条链只跑一次、可中途停止（smartRunSelectedAbort）、跑完把选中状态还原。
 async function runCascadeTargetList(targets, options={}){
     if(smartRunSelectedRunning) return;
@@ -30166,7 +31653,6 @@ async function runCascadeTargetList(targets, options={}){
     smartRunSelectedRunning = true;
     let aborted = false;
     let done = 0;
-    syncRunSelectedButton();
     try {
         for(const target of list){
             if(smartRunSelectedAbort){ aborted = true; break; }
@@ -30179,19 +31665,14 @@ async function runCascadeTargetList(targets, options={}){
         if(smartRunSelectedAbort) aborted = true;
         smartRunSelectedRunning = false;
         smartRunSelectedAbort = false;
-        smartRunSelectedCacheKey = '';
         /* 运行结束恢复框选，方便继续操作 */
         selectedId = keepId;
         selectedIds = keepIds;
         selectedImage = keepImage;
         render();
         syncSelectionUi();
-        syncRunSelectedButton();
     }
     if(done > 1 && !aborted) toast((options.doneText || '已运行 ') + done + ' 条链路');
-}
-async function runSelectedNodesCascade(){
-    return runCascadeTargetList(runnableSelectedCascadeTargets(), {emptyText:'框选里没有可运行的链路结尾图片节点'});
 }
 function loadNodePromptDraftToInput(node){
     if(node?.promptDraftHtml) {
@@ -32340,17 +33821,19 @@ function closeCreateMenu(){
     createMenuDropConnect = null;
 }
 function openCreateMenu(event, options={}){
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
     if(!createMenu) return;
     createMenuPoint = screenToWorld(event);
     createMenuGroupId = options.groupId || '';
     createMenuDropConnect = options.fromPortDrop || null;
     const w = 190;
-    const h = 210;
     const left = Math.max(14, Math.min(window.innerWidth - w - 14, event.clientX + 8));
-    const top = Math.max(14, Math.min(window.innerHeight - h - 14, event.clientY + 8));
     createMenu.style.left = `${left}px`;
-    createMenu.style.top = `${top}px`;
     createMenu.classList.add('open');
+    /* 菜单项数量会变（新增音频/上传后是 10 项），高度按实际量到的算，靠底边右键才不会溢出 */
+    const h = createMenu.offsetHeight || 210;
+    const top = Math.max(14, Math.min(window.innerHeight - h - 14, event.clientY + 8));
+    createMenu.style.top = `${top}px`;
     refreshIcons();
 }
 function addCreatedNodeToMenuGroup(node){
@@ -32553,6 +34036,7 @@ function updateSmartTextEditorCount(){
     if(input && count) count.textContent = trf('smart.textNodeCount', {n:smartTextModalPlain(input).length});
 }
 function openSmartTextEditor(nodeId){
+    if(collabReadOnly){ collabNotifyReadOnly(); return false; }
     const node = nodes.find(n => n.id === nodeId);
     if(!isSmartTextNode(node)) return false;
     const {modal, input} = smartTextEditorEls();
@@ -32596,6 +34080,7 @@ function syncSmartTextEditorNode(){
    只把胶囊里的文字切成 contenteditable（render 的 keepEl 会原样留住这段 DOM），
    回车/失焦提交，Esc 还原，空内容回落到默认「标签」。 */
 function beginSmartLabelEdit(nodeId){
+    if(collabReadOnly){ collabNotifyReadOnly(); return false; }
     const node = nodes.find(n => n.id === nodeId);
     if(!isSmartLabelNode(node)) return false;
     const hostEl = world.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"]`);
@@ -32715,6 +34200,14 @@ function updateSmartLabelNode(mutate){
     scheduleSave();
 }
 function createNodeFromMenu(type){
+    if(collabReadOnly){ collabNotifyReadOnly(); return null; }
+    /* 「上传…」不建空节点：记住右键落点，交给 fileInput 选完文件后在原地建节点 */
+    if(type === 'upload'){
+        pendingMenuUploadPoint = createMenuPoint || viewportCenter();
+        closeCreateMenu();
+        fileInput?.click();
+        return null;
+    }
     const p = createMenuPoint || viewportCenter();
     const groupId = createMenuGroupId;
     const dropConnect = createMenuDropConnect;
@@ -32794,6 +34287,7 @@ shell.onmousedown = e => {
     document.body.classList.add('smart-board-pan');
 };
 shell.oncontextmenu = e => {
+    if(collabReadOnly){ e.preventDefault(); e.stopPropagation(); collabNotifyReadOnly(); return; }
     if((e.ctrlKey || e.metaKey) || isRKeyDown){
         e.preventDefault();
         e.stopPropagation();
@@ -32843,13 +34337,6 @@ minimap?.addEventListener('mousedown', e => {
     centerViewportOnWorldPoint(minimapEventToWorld(e));
 });
 smartArrangeBtn?.addEventListener('mousedown', e => e.stopPropagation());
-smartRunSelectedBtn?.addEventListener('mousedown', e => e.stopPropagation());
-smartRunSelectedBtn?.addEventListener('click', e => {
-    e.preventDefault();
-    e.stopPropagation();
-    if(smartRunSelectedRunning){ smartRunSelectedAbort = true; requestSmartCascadeStop(); return; }
-    runSelectedNodesCascade().catch(error => logSmartRunEntryFailure('框选运行', error));
-});
 smartArrangeBtn?.addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();
@@ -33227,25 +34714,47 @@ function isMediaAspectLockedNode(node){
         const dy = e.clientY - thumbDragState.startY;
         const source = nodes.find(n => n.id === thumbDragState.nodeId);
         if(!thumbDragState.detached && Math.abs(dx) + Math.abs(dy) > 6){
-            const canDetachThumb = source && (isSmartGroupNode(source) ? (source.images || []).length >= 1 : (source.images || []).length > 1);
+            const canDetachThumb = source && (isSmartGroupNode(source)
+                ? (source.images || []).length >= 1
+                : ((source.images || []).length > 1
+                    || ((source.images || []).length === 1 && smartMediaNodeIsGroupContainer(source) && !isHistoryGroupNode(source))));
             if(canDetachThumb){
                 const img = source.images[thumbDragState.imgIndex];
                 if(img){
+                    const wasGroupContainer = smartMediaNodeIsGroupContainer(source);
                     commitPendingUndo();
                     undoSuppressed = true;
                     applyNodeMetaToImage(img, source);
                     source.images.splice(thumbDragState.imgIndex, 1);
                     if(isSmartGroupNode(source)){
                         arrangeSmartGroupMembers(source, {skipUndo:true, syncDom:true});
-                    } else if(source.images.length <= 1){
-                        source.title = 'Image';
-                        delete source.w; delete source.h;
-                        inheritNodeMetaFromImage(source);
+                    } else {
+                        if(wasGroupContainer) source.mediaGroup = true;
+                        if(source.images.length <= 1){
+                            source.title = 'Image';
+                            delete source.w; delete source.h;
+                            inheritNodeMetaFromImage(source);
+                        }
+                        if(!(Number(source.pending) > 0)){
+                            delete source.batchRowOrder;
+                            delete source.batchRowStates;
+                            delete source.batchRunExpected;
+                            delete source.batchRunLanded;
+                            delete source.batchRunFailed;
+                            delete source.batchRunConcurrency;
+                        }
                     }
                     const point = screenToWorld(e);
                     selectedId = '';
                     selectedImage = {nodeId:'', index:-1};
                     const newNode = createImageNodeAt(point, [img], {select:false, skipUndo:true});
+                    if(wasGroupContainer && !source.images.length && !isHistoryGroupNode(source) && !(Number(source.pending) > 0)){
+                        rerouteSmartConnections(source.id, newNode.id);
+                        nodes = nodes.filter(item => item.id !== source.id);
+                        nodes.forEach(group => {
+                            if(isSmartGroupNode(group) && Array.isArray(group.items)) group.items = group.items.filter(itemId => itemId !== source.id);
+                        });
+                    }
                     undoSuppressed = false;
                     dragState = {id:newNode.id, startX:e.clientX, startY:e.clientY, ox:newNode.x, oy:newNode.y, thumbDetached:true};
                     thumbDragState.detached = true;
@@ -33637,6 +35146,7 @@ shell.addEventListener('wheel', e => {
 shell.ondragover = e => setSmartDropCopyEffect(e, true);
 shell.ondrop = async e => {
     e.preventDefault();
+    if(collabReadOnly){ e.stopPropagation(); collabNotifyReadOnly(); return; }
     if(e.target.closest('.image-node')) return;
     const p = screenToWorld(e);
     const assetRaw = e.dataTransfer.getData('application/x-smart-asset');
@@ -33657,6 +35167,12 @@ shell.ondrop = async e => {
     await handleSmartImageDropPayload(payload, '', {point:p, forceNew:true});
 };
 window.addEventListener('paste', e => {
+    if(collabReadOnly && !isEditableTarget(e.target)){
+        e.preventDefault();
+        e.stopPropagation();
+        collabNotifyReadOnly();
+        return;
+    }
     const files = [...(e.clipboardData?.files || [])].filter(isSupportedUploadFile);
     if(files.length){
         lastImagePasteAt = Date.now();
@@ -33675,6 +35191,12 @@ window.addEventListener('paste', e => {
 });
 window.addEventListener('keydown', e => {
     const key = String(e.key || '').toLowerCase();
+    if(collabReadOnly && !isEditableTarget(e.target) && collabBlocksEditKey(e, key)){
+        e.preventDefault();
+        e.stopPropagation();
+        collabNotifyReadOnly();
+        return;
+    }
     if(key === 'r' && !isEditableTarget(e.target)) isRKeyDown = true;
     if(imageEditModal.classList.contains('open') && imageEditMode === 'preview' && !isEditableTarget(e.target)){
         if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
@@ -33812,17 +35334,23 @@ cascadeRunBtn.onclick = () => {
 };
 fileInput.onchange = () => {
     const groupPoint = pendingGroupUploadPoint;
+    const menuPoint = pendingMenuUploadPoint;
+    pendingMenuUploadPoint = null;
     if(!fileInput.files?.length){
         pendingGroupUploadPoint = null;
         uploadTargetId = '';
         return;
     }
-    const targetId = groupPoint ? '' : (uploadTargetId || selectedId);
-    handleFiles(fileInput.files, targetId, groupPoint ? {point:groupPoint} : {});
+    /* 右键菜单「上传…」：落到菜单打开时的世界坐标，且不复用当前选中节点 */
+    const targetId = (groupPoint || menuPoint) ? '' : (uploadTargetId || selectedId);
+    const opts = menuPoint ? {point:menuPoint, forceNew:true} : groupPoint ? {point:groupPoint} : {};
+    handleFiles(fileInput.files, targetId, opts);
     pendingGroupUploadPoint = null;
     uploadTargetId = '';
     fileInput.value = '';
 };
+/* 取消选择文件时不留下一次性的右键落点，避免下一次从其它入口上传被它抢走 */
+fileInput.addEventListener('cancel', () => { pendingMenuUploadPoint = null; });
 if(assetToggle) assetToggle.onclick = () => toggleAssetLibrary();
 if(assetCloseBtn) assetCloseBtn.onclick = () => toggleAssetLibrary(false);
 if(smartWorkflowToggle) smartWorkflowToggle.onclick = event => {
@@ -34872,6 +36400,10 @@ window.toggleAgentPlanConfirm = toggleAgentPlanConfirm;
 window.agentPlanConfirmEnabled = agentPlanConfirmEnabled;
 window.chatUploadClick = chatUploadClick;
 window.chatUploadSelected = chatUploadSelected;
+/* chips 的 × / 清除 / 角色徽标都是内联 onclick，走的是 window，不导出点了没反应 */
+window.openChatRefRolePicker = openChatRefRolePicker;
+window.removeChatRef = removeChatRef;
+window.renderChatContext = renderChatContext;
 window.setBrushTool = setBrushTool;
 window.setGridCustomOrientation = setGridCustomOrientation;
 window.setGridJoinOutputSize = setGridJoinOutputSize;
@@ -35242,7 +36774,7 @@ window.imageAdjust = {
     finish: function () { closeImageEditor(); render(); scheduleSave(); }
 };
 /* ═══ 无损改图（static/tools/lossless-edit/index.html）桥接 ═══
-   本地内置上游工具（CC BY-NC-SA 4.0，作者 陶醉），iframe 懒创建、离开模式不卸载，
+   本地内置工具（本项目自研实现，见 static/tools/lossless-edit/NOTICE.md），iframe 懒创建、离开模式不卸载，
    避免重进时丢掉工具内的对齐/蒙版进度。消息一律校验 event.source，targetOrigin 用 location.origin。 */
 const LOSSLESS_EDIT_FRAME_ID = 'losslessEditFrame';
 const LOSSLESS_EDIT_SOURCE = 'novai-lossless-edit';
@@ -37527,10 +39059,38 @@ function syncPickSelectedButton(ids){
     const label = btn.querySelector('span');
     if(label) label.textContent = `挑图 ${count} 张`;
 }
+/* 入场动画期间挂 backdrop-filter 会让整屏模糊每帧重算（实测单帧 70-80ms），所以先只上纯色遮罩，
+   面板动画结束再加 .nv-pick-settled 打开磨砂——最终观感与原设计一致，Open 过程不再掉帧。 */
+const SMART_PICK_ENTER_MS = 240;
+const SMART_PICK_PRELOAD_MS = 120;
+let smartPickBlurTimer = 0;
+function settleSmartPickBlur(el){
+    if(!el) return;
+    clearTimeout(smartPickBlurTimer);
+    if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+        el.classList.add('nv-pick-settled');
+        return;
+    }
+    smartPickBlurTimer = setTimeout(() => el.classList.add('nv-pick-settled'), SMART_PICK_ENTER_MS);
+}
+/* 卡片图不再 loading="lazy"：display:none 里懒加载根本不发请求，等加了 .open 才去取图，
+   于是先画出一排空卡片、几十毫秒后图片才“啪”地出现。这里改成显示前就等首屏缩略图就绪。 */
+function preloadSmartPickCards(el){
+    const imgs = [...el.querySelectorAll('.nv-pick-img img')];
+    if(!imgs.length) return Promise.resolve();
+    const ready = imgs.map(img => new Promise(resolve => {
+        const done = () => { if(img.decode) img.decode().then(resolve, resolve); else resolve(); };
+        if(img.complete && img.naturalWidth > 0){ done(); return; }
+        img.addEventListener('load', done, {once:true});
+        img.addEventListener('error', resolve, {once:true});
+    }));
+    return Promise.race([Promise.all(ready), sleep(SMART_PICK_PRELOAD_MS)]);
+}
 function openSmartPickViewer(nodeIds, focusIndex=-1){
     const entries = (nodeIds || []).flatMap(id => pickableImagesOfNode(nodes.find(n => n.id === id)));
     if(entries.length < 2){ toast('至少要两张图才能挑'); return; }
-    smartPickState = {entries, nodeIds:[...new Set(entries.map(e => e.node.id))], focus:-1, cursor:Math.max(0, Math.min(entries.length - 1, focusIndex))};
+    const st = {entries, nodeIds:[...new Set(entries.map(e => e.node.id))], focus:-1, cursor:Math.max(0, Math.min(entries.length - 1, focusIndex))};
+    smartPickState = st;
     let el = document.getElementById('smartPickViewer');
     if(!el){
         el = document.createElement('div');
@@ -37541,9 +39101,18 @@ function openSmartPickViewer(nodeIds, focusIndex=-1){
         document.body.appendChild(el);
         el.addEventListener('click', onSmartPickClick);
     }
-    el.classList.add('open');
+    const alreadyOpen = el.classList.contains('open');
     renderSmartPickViewer();
     document.addEventListener('keydown', onSmartPickKey, true);
+    if(alreadyOpen){ settleSmartPickBlur(el); return; }
+    /* 先把完整内容建好（此时 display:none 不产生绘制），首屏缩略图就绪后再显示，
+       第一帧就是完整画面：没有空面板，也没有图片迟一步出现。 */
+    el.classList.remove('nv-pick-settled');
+    preloadSmartPickCards(el).then(() => {
+        if(smartPickState !== st) return;
+        el.classList.add('open');
+        settleSmartPickBlur(el);
+    });
 }
 /* 画布数据可能在交互中被整体替换（撤销、落盘回读等），所以每次都按节点 id 重新取「活的」图片对象，不缓存引用 */
 function refreshSmartPickEntries(){
@@ -37557,7 +39126,12 @@ function refreshSmartPickEntries(){
     return st.entries;
 }
 function closeSmartPickViewer(){
-    document.getElementById('smartPickViewer')?.classList.remove('open');
+    clearTimeout(smartPickBlurTimer);
+    const el = document.getElementById('smartPickViewer');
+    if(el){
+        el.classList.remove('open', 'nv-pick-settled');
+        el.dataset.pickKey = '';
+    }
     document.removeEventListener('keydown', onSmartPickKey, true);
     smartPickState = null;
     render();
@@ -37566,11 +39140,18 @@ function smartPickCounts(){
     const list = smartPickState?.entries || [];
     return {star:list.filter(e => e.raw.pick === 'star').length, reject:list.filter(e => e.raw.pick === 'reject').length, total:list.length};
 }
+function smartPickCols(count){
+    return count <= 4 ? count : count <= 6 ? 3 : count <= 12 ? 4 : 5;
+}
+/* 图片集合的身份：节点 + 序号 + 原图地址。变了才重建骨架，否则只做增量同步 */
+function smartPickEntryKey(entries){
+    return entries.map(entry => entry.node.id + '#' + entry.index + '@' + (entry.raw?.url || '')).join('|');
+}
 function smartPickCardHtml(entry, i){
     const pick = entry.raw.pick || '';
-    const size = entry.raw.natural_w && entry.raw.natural_h ? `${entry.raw.natural_w}×${entry.raw.natural_h}` : '';
-    return `<figure class="nv-pick-card${pick ? ' is-' + pick : ''}${smartPickState.cursor === i ? ' is-cursor' : ''}" data-pick-index="${i}">
-        <button type="button" class="nv-pick-img" data-pick-act="focus" title="放大查看（空格）"><img src="${escapeAttr(smartMediaPreviewUrl(entry.item, 1024))}" alt="" loading="lazy" draggable="false"></button>
+    const size = entry.raw.natural_w && entry.raw.natural_h ? entry.raw.natural_w + '×' + entry.raw.natural_h : '';
+    return `<figure class="nv-pick-card" data-pick-index="${i}">
+        <button type="button" class="nv-pick-img" data-pick-act="focus" title="放大查看（空格）"><img src="${escapeAttr(smartMediaPreviewUrl(entry.item, 1024))}" alt="" decoding="async" draggable="false"></button>
         <figcaption>
             <span class="nv-pick-no">${i + 1}</span>
             ${size ? `<span class="nv-pick-size">${size}</span>` : ''}
@@ -37581,39 +39162,87 @@ function smartPickCardHtml(entry, i){
         </figcaption>
     </figure>`;
 }
+/* 骨架只建一次：网格和放大态都长驻 DOM（放大态靠 .is-focus 切换、卡片节点搬进 stage），
+   所以标星 / 淘汰 / 切换光标 / 放大缩小都只改 class 和属性，图片不会重新加载、面板也不会重画一遍。 */
+function smartPickShellHtml(){
+    const multi = smartPickState.nodeIds.length > 1;
+    return `<div class="nv-pick-panel">
+            <header class="nv-pick-head">
+                <div class="nv-pick-title">挑图<em></em></div>
+                <div class="nv-pick-stats"><span class="st"><i data-lucide="star"></i><b data-pick-count="star">0</b></span><span class="rj"><i data-lucide="x"></i><b data-pick-count="reject">0</b></span></div>
+                <div class="nv-pick-hint">S 标星 · X 淘汰 · ← → 切换 · 空格放大 · Esc 关闭</div>
+                <button type="button" class="nv-pick-close" data-pick-act="close" title="关闭（Esc）"><i data-lucide="x"></i></button>
+            </header>
+            <div class="nv-pick-focus">
+                <button type="button" class="nv-pick-nav" data-pick-act="prev" title="上一张（←）"><i data-lucide="chevron-left"></i></button>
+                <div class="nv-pick-stage"></div>
+                <button type="button" class="nv-pick-nav" data-pick-act="next" title="下一张（→）"><i data-lucide="chevron-right"></i></button>
+            </div>
+            <div class="nv-pick-grid" style="--pick-cols:${smartPickCols(smartPickState.entries.length)}">${smartPickState.entries.map((entry, i) => smartPickCardHtml(entry, i)).join('')}</div>
+            <footer class="nv-pick-foot">
+                <button type="button" class="nv-pick-action nv-pick-back" data-pick-act="grid"><i data-lucide="layout-grid"></i><span>返回网格</span></button>
+                <span class="nv-pick-spacer"></span>
+                <button type="button" class="nv-pick-action" data-pick-act="download"><i data-lucide="download"></i><span>下载标星的</span></button>
+                <button type="button" class="nv-pick-action" data-pick-act="drop-rejected"><i data-lucide="trash-2"></i><span>删掉淘汰的（0）</span></button>
+                <button type="button" class="nv-pick-action nv-pick-primary" data-pick-act="split-starred"><i data-lucide="image-plus"></i><span>${multi ? '标星的合成新节点（0）' : '标星的拆成新节点（0）'}</span></button>
+            </footer>
+        </div>`;
+}
+function syncSmartPickViewer(){
+    const el = document.getElementById('smartPickViewer');
+    const st = smartPickState;
+    if(!el || !st || !st.cardEls) return;
+    const {entries, focus, nodeIds} = st;
+    const counts = smartPickCounts();
+    const multi = nodeIds.length > 1;
+    const focusEntry = focus >= 0 && focus < entries.length ? entries[focus] : null;
+    const grid = el.querySelector('.nv-pick-grid');
+    const stage = el.querySelector('.nv-pick-stage');
+    if(grid) grid.style.setProperty('--pick-cols', String(smartPickCols(entries.length)));
+    st.cardEls.forEach((card, i) => {
+        const pick = entries[i]?.raw?.pick || '';
+        card.classList.toggle('is-cursor', st.cursor === i);
+        card.classList.toggle('is-star', pick === 'star');
+        card.classList.toggle('is-reject', pick === 'reject');
+        card.classList.toggle('is-large', Boolean(focusEntry) && focus === i);
+        card.querySelector('[data-pick-act="star"]')?.classList.toggle('on', pick === 'star');
+        card.querySelector('[data-pick-act="reject"]')?.classList.toggle('on', pick === 'reject');
+    });
+    el.classList.toggle('is-focus', Boolean(focusEntry));
+    if(focusEntry){
+        if(stage && st.cardEls[focus].parentElement !== stage) stage.appendChild(st.cardEls[focus]);
+    } else if(grid && stage){
+        stage.querySelectorAll('.nv-pick-card').forEach(card => grid.appendChild(card));
+        st.cardEls.forEach((card, i) => {
+            const at = grid.children[i];
+            if(at !== card) grid.insertBefore(card, at || null);
+        });
+    }
+    const title = el.querySelector('.nv-pick-title em');
+    if(title) title.textContent = entries.length + ' 张' + (multi ? ' · 来自 ' + nodeIds.length + ' 个节点' : '');
+    el.querySelectorAll('[data-pick-count]').forEach(node => { node.textContent = String(counts[node.dataset.pickCount] || 0); });
+    const download = el.querySelector('[data-pick-act="download"]');
+    if(download) download.disabled = !counts.star;
+    const drop = el.querySelector('[data-pick-act="drop-rejected"]');
+    if(drop){ drop.disabled = !counts.reject; drop.querySelector('span').textContent = '删掉淘汰的（' + counts.reject + '）'; }
+    const split = el.querySelector('[data-pick-act="split-starred"]');
+    if(split){ split.disabled = !counts.star; split.querySelector('span').textContent = (multi ? '标星的合成新节点（' : '标星的拆成新节点（') + counts.star + '）'; }
+}
 function renderSmartPickViewer(){
     const el = document.getElementById('smartPickViewer');
     if(!el || !smartPickState) return;
     refreshSmartPickEntries();
-    const {entries, focus, nodeIds} = smartPickState;
-    const counts = smartPickCounts();
-    const multi = nodeIds.length > 1;
-    const cols = entries.length <= 4 ? entries.length : entries.length <= 6 ? 3 : entries.length <= 12 ? 4 : 5;
-    const focusEntry = focus >= 0 ? entries[focus] : null;
-    el.innerHTML = `
-        <div class="nv-pick-panel">
-            <header class="nv-pick-head">
-                <div class="nv-pick-title">挑图<em>${entries.length} 张${multi ? ` · 来自 ${nodeIds.length} 个节点` : ''}</em></div>
-                <div class="nv-pick-stats"><span class="st"><i data-lucide="star"></i>${counts.star}</span><span class="rj"><i data-lucide="x"></i>${counts.reject}</span></div>
-                <div class="nv-pick-hint">S 标星 · X 淘汰 · ← → 切换 · 空格放大 · Esc 关闭</div>
-                <button type="button" class="nv-pick-close" data-pick-act="close" title="关闭（Esc）"><i data-lucide="x"></i></button>
-            </header>
-            ${focusEntry ? `
-            <div class="nv-pick-focus">
-                <button type="button" class="nv-pick-nav" data-pick-act="prev" title="上一张（←）"><i data-lucide="chevron-left"></i></button>
-                <div class="nv-pick-stage">${smartPickCardHtml(focusEntry, focus).replace('nv-pick-card', 'nv-pick-card is-large')}</div>
-                <button type="button" class="nv-pick-nav" data-pick-act="next" title="下一张（→）"><i data-lucide="chevron-right"></i></button>
-            </div>` : `
-            <div class="nv-pick-grid" style="--pick-cols:${cols}">${entries.map((entry, i) => smartPickCardHtml(entry, i)).join('')}</div>`}
-            <footer class="nv-pick-foot">
-                ${focusEntry ? `<button type="button" class="nv-pick-action" data-pick-act="grid"><i data-lucide="layout-grid"></i><span>返回网格</span></button>` : ''}
-                <span class="nv-pick-spacer"></span>
-                <button type="button" class="nv-pick-action" data-pick-act="download" ${counts.star ? '' : 'disabled'}><i data-lucide="download"></i><span>下载标星的</span></button>
-                <button type="button" class="nv-pick-action" data-pick-act="drop-rejected" ${counts.reject ? '' : 'disabled'}><i data-lucide="trash-2"></i><span>删掉淘汰的（${counts.reject}）</span></button>
-                <button type="button" class="nv-pick-action nv-pick-primary" data-pick-act="split-starred" ${counts.star ? '' : 'disabled'}><i data-lucide="image-plus"></i><span>${multi ? '标星的合成新节点' : '标星的拆成新节点'}（${counts.star}）</span></button>
-            </footer>
-        </div>`;
-    refreshIcons();
+    const st = smartPickState;
+    const key = smartPickEntryKey(st.entries);
+    if(el.dataset.pickKey !== key || !el.querySelector('.nv-pick-grid')){
+        el.innerHTML = smartPickShellHtml();
+        el.dataset.pickKey = key;
+        el.classList.remove('is-focus');
+        refreshIcons();
+    }
+    st.cardEls = [...el.querySelectorAll('.nv-pick-card')].sort((a, b) => Number(a.dataset.pickIndex) - Number(b.dataset.pickIndex));
+    syncSmartPickViewer();
+    return el;
 }
 function setSmartPickMark(index, mark){
     const entry = refreshSmartPickEntries()[index];
@@ -37648,7 +39277,7 @@ function moveSmartPick(delta){
     st.cursor = (st.cursor + delta + n) % n;
     if(st.focus >= 0) st.focus = st.cursor;
     renderSmartPickViewer();
-    document.querySelector('#smartPickViewer .nv-pick-card.is-cursor')?.scrollIntoView({block:'nearest'});
+    if(st.focus < 0) document.querySelector('#smartPickViewer .nv-pick-card.is-cursor')?.scrollIntoView({block:'nearest'});
 }
 function onSmartPickKey(event){
     if(!smartPickState) return;
@@ -38028,6 +39657,24 @@ window.alignSelectedSmartNodes = alignSelectedSmartNodes;
            text（纯文本说明，连到生成节点时会并进提示词）· label（标题胶囊）· table / batch（表格批量）
      inputs: 上游节点 key，建成 input 连线（参考图 / 文本都会自动进生成请求） */
 const HOME_SEED_KEY_PREFIX = 'novai_canvas_seed:';
+/* 应用市场 brief 进来时会带 autoSend:true：只消费一次（读种子即删），发送前再保险清一次，
+   刷新/二次打开画布都不会重复自动发送。 */
+const HOME_SEED_AUTOSEND_ATTEMPTS = 3;
+const HOME_SEED_AUTOSEND_RETRY_MS = 300;
+let homeSeedReadGuard = null;
+function shouldAutoSend(seed){
+    return !!(seed && typeof seed === 'object' && seed.autoSend === true && String(seed.agent || '').trim());
+}
+function clearHomeSeedAutoSend(){
+    const guard = homeSeedReadGuard;
+    homeSeedReadGuard = null;
+    if(!guard || !guard.key) return;
+    try { localStorage.removeItem(guard.key); } catch(e) {}
+}
+function noteHomeSeedAutoSend(text){
+    try { addChatMessage('system', text); } catch(e) {}
+    try { toast(text); } catch(e) {}
+}
 function readHomeCanvasSeed(){
     if(!canvasId) return null;
     const key = HOME_SEED_KEY_PREFIX + canvasId;
@@ -38036,6 +39683,7 @@ function readHomeCanvasSeed(){
     if(!raw) return null;
     try {
         const seed = JSON.parse(raw);
+        if(seed && typeof seed === 'object') homeSeedReadGuard = { key: key };
         return seed && typeof seed === 'object' ? seed : null;
     } catch(e) { return null; }
 }
@@ -38071,11 +39719,22 @@ function buildHomeSeedNode(spec, x, y){
     if(type === 'batch'){
         return {id:uid('batch'), type:'smart-batch', x, y, w:420, h:0, title:spec.title || '生成输入'};
     }
+    /* 首页模板里的智能分组：只支持「空分组 + 可选初始图片」，拖入图片走 addNodeToSmartGroup 正常吸收。 */
+    if(type === 'group'){
+        const groupImages = (Array.isArray(spec.images) ? spec.images : [])
+            .filter(img => img && img.url)
+            .map(img => ensureSmartImageAssetId({url:img.url, name:img.name || '参考图', kind:img.kind || 'image'}));
+        return {id:uid('group'), type:'smart-group', x, y, w:SMART_GROUP_DEFAULT_WIDTH, h:SMART_GROUP_DEFAULT_HEIGHT,
+            title:spec.title || '智能分组', items:[], images:groupImages, created_at:Date.now()};
+    }
     const images = (Array.isArray(spec.images) ? spec.images : [])
         .filter(img => img && img.url)
         .map(img => ensureSmartImageAssetId({url:img.url, name:img.name || '参考图', kind:img.kind || 'image'}));
     const node = {id:uid('smart'), type:'smart-image', x, y, title:spec.title || (images.length > 1 ? 'Group' : 'Image'), images, created_at:Date.now()};
     node.scale = images.length > 1 ? MEDIA_GROUP_DEFAULT_SCALE : mediaNodeDefaultScale(node);
+    /* 首页模板的素材/生成节点平时只在数据里带 title（画布上不显示），
+       spec.titleChip 明确要求时才在卡片外挂一个可见的名字，避免用户分不清哪张卡是模特、哪张是生成。 */
+    if(spec.titleChip && String(spec.title || '').trim()) node.templateTitle = String(spec.title).trim();
     if(type === 'gen'){
         const text = String(spec.prompt || '');
         node.promptDraftText = text;
@@ -38130,19 +39789,54 @@ function applyHomeCanvasSeed(seed){
     selectedImage = {nodeId:'', index:-1};
     return {created, firstGen};
 }
-function openHomeSeedAgent(text, autoSend){
+function openHomeSeedAgent(text, autoSend, skillRef){
     const value = String(text || '').trim();
     if(!value) return;
     if(!chatModal.classList.contains('open')) toggleChatPanel();
-    setTimeout(() => {
+    const wantAutoSend = shouldAutoSend({ agent: value, autoSend: autoSend });
+    pendingAgentSkillRef = wantAutoSend ? String(skillRef || '').trim() : '';
+    let attempts = 0;
+    function fillInput(){
         chatTypewriterStop(true);
         const inp = document.getElementById('chatInput');
-        if(!inp) return;
+        if(!inp) return false;
         inp.value = value;
         inp.dispatchEvent(new Event('input', {bubbles:true}));
         inp.focus();
-        if(autoSend) sendChatMessage();
-    }, 320);
+        return true;
+    }
+    function fail(message){
+        clearHomeSeedAutoSend();
+        fillInput();
+        noteHomeSeedAutoSend(message);
+    }
+    function attempt(){
+        attempts += 1;
+        const inp = document.getElementById('chatInput');
+        if(!(inp && !chatSending)){
+            if(attempts < HOME_SEED_AUTOSEND_ATTEMPTS) return setTimeout(attempt, HOME_SEED_AUTOSEND_RETRY_MS);
+            fail('画布助手还没准备好，提示词已留在输入框');
+            return;
+        }
+        fillInput();
+        if(!wantAutoSend){ clearHomeSeedAutoSend(); return; }
+        refreshChatModels();
+        if(!currentChatModel()){
+            /* 模型不可用属于终态，不重试：只留文本 + note，避免反复打后端 */
+            fail('没有可用模型，提示词已留在输入框');
+            return;
+        }
+        /* 先消费再发送：即使发送中途失败/用户立刻刷新，也不会二次自动发送 */
+        clearHomeSeedAutoSend();
+        let pending = null;
+        try { pending = sendChatMessage(); }
+        catch(e){ fail('发送失败，提示词已留在输入框'); return; }
+        if(pending && typeof pending.then === 'function'){
+            pending.then(function(sent){ if(sent === false) fail('发送失败，提示词已留在输入框'); })
+                .catch(function(){ fail('发送失败，提示词已留在输入框'); });
+        }
+    }
+    setTimeout(attempt, 320);
 }
 function consumeHomeCanvasSeed(){
     const seed = readHomeCanvasSeed();
@@ -38157,7 +39851,7 @@ function consumeHomeCanvasSeed(){
         scheduleSave();
         if(seed.toast) toast(seed.toast);
     }
-    if(seed.agent) openHomeSeedAgent(seed.agent, Boolean(seed.autoSend));
+    if(seed.agent) openHomeSeedAgent(seed.agent, shouldAutoSend(seed), seed.skillRef);
     else if(seed.autoRun && result?.firstGen){
         /* 首页「图片 / 视频」模式直接发送：选中那颗生成节点，走和手点「运行」完全一样的路径 */
         setTimeout(() => {
@@ -38167,4 +39861,164 @@ function consumeHomeCanvasSeed(){
         }, 360);
     }
 }
+/* ── M4 实时协作客户端桥（static/js/collab.js）──────────────────────────────
+   页面状态都在这层 IIFE 闭包里，collab.js 只能通过这个受限桥读写：文档快照、
+   远端 patch 应用、视口、只读开关与提示。不暴露 nodes/canvas 本体，避免两边抢着改。 */
+function collabNotifyReadOnly(){
+    try {
+        if(window.SmartCanvasCollab && typeof window.SmartCanvasCollab.notifyReadOnly === 'function'){
+            window.SmartCanvasCollab.notifyReadOnly();
+        }
+    } catch(e) {}
+}
+function collabBlocksEditKey(e, key){
+    if(!collabReadOnly) return false;
+    if(e.key === 'Delete' || e.key === 'Backspace') return true;
+    if((e.ctrlKey || e.metaKey) && ['d','v','z','y','g'].includes(key)) return true;
+    if(e.altKey && ['arrowleft','arrowright','arrowup','arrowdown'].includes(key)) return true;
+    if(!e.ctrlKey && !e.metaKey && !e.altKey && ['arrowleft','arrowright','arrowup','arrowdown'].includes(key)) return true;
+    return false;
+}
+/* 存盘格式就是协作文档格式：canvasForStorage() 会剥掉 __renderKey / pending 等页面内临时态，
+   不剥的话 render() 每轮都会改 __renderKey，diff 会一直把补丁发出去。 */
+function collabDocSnapshot(){
+    if(!canvas) return null;
+    const previousNodes = canvas.nodes;
+    canvas.nodes = nodes;
+    let clean = null;
+    try { clean = canvasForStorage(); } finally { canvas.nodes = previousNodes; }
+    return {
+        title: String((clean && clean.title) || ''),
+        nodes: Array.isArray(clean && clean.nodes) ? clean.nodes : [],
+        connections: Array.isArray(clean && clean.connections) ? clean.connections : []
+    };
+}
+/* 旧画布连线没有 id；协议里的 remove/update 又必须是字符串 id，所以无 id 时用稳定键：
+   「起点->终点::类型」。collab.js 端用完全相同的算法生成键。 */
+function collabConnectionKey(conn){
+    if(!conn) return '';
+    if(conn.id != null && conn.id !== '') return String(conn.id);
+    return String(conn.from || '') + '->' + String(conn.to || '') + '::' + String(conn.kind || 'flow');
+}
+function collabApplyFieldUpdates(list, updates, keyOf){
+    if(!Array.isArray(updates)) return false;
+    const keyFn = typeof keyOf === 'function' ? keyOf : (entry => (entry && entry.id != null ? String(entry.id) : ''));
+    let changed = false;
+    updates.forEach(item => {
+        if(!item || !item.id) return;
+        const target = list.find(entry => entry && keyFn(entry) === String(item.id));
+        if(!target) return;
+        const fields = item.fields && typeof item.fields === 'object' ? item.fields : {};
+        Object.keys(fields).forEach(key => {
+            if(key === 'id') return;
+            if(fields[key] === null){
+                if(key in target) delete target[key];
+            } else {
+                target[key] = fields[key];
+            }
+            changed = true;
+        });
+    });
+    return changed;
+}
+function collabApplyConnections(section){
+    if(!canvas || !section || typeof section !== 'object') return false;
+    canvas.connections = Array.isArray(canvas.connections) ? canvas.connections : [];
+    let changed = false;
+    if(Array.isArray(section.remove)){
+        section.remove.forEach(id => {
+            const before = canvas.connections.length;
+            canvas.connections = canvas.connections.filter(conn => !conn || collabConnectionKey(conn) !== String(id));
+            if(canvas.connections.length !== before) changed = true;
+        });
+    }
+    if(Array.isArray(section.add) && section.add.length){
+        section.add.forEach(conn => {
+            if(!conn || typeof conn !== 'object') return;
+            if(conn.id != null && conn.id !== ''){
+                canvas.connections = canvas.connections.filter(item => !item || String(item.id) !== String(conn.id));
+            } else {
+                const key = collabConnectionKey(conn);
+                canvas.connections = canvas.connections.filter(item => !item || collabConnectionKey(item) !== key);
+            }
+            canvas.connections.push(conn);
+            changed = true;
+        });
+        if(changed) canvasUsesConnections = true;
+    }
+    if(collabApplyFieldUpdates(canvas.connections, section.update, collabConnectionKey)) changed = true;
+    return changed;
+}
+function collabApplyPatch(patch){
+    if(!canvas || !patch || typeof patch !== 'object') return false;
+    let changed = false;
+    if(typeof patch.title === 'string' && patch.title !== canvas.title){
+        canvas.title = patch.title;
+        document.title = patch.title || tr('canvas.smartCanvas');
+        const titleEl = document.getElementById('smartTitle');
+        if(titleEl) titleEl.textContent = patch.title || tr('canvas.smartCanvas');
+        changed = true;
+    }
+    const nodeSection = patch.nodes;
+    if(nodeSection && typeof nodeSection === 'object'){
+        let nextNodes = nodes.filter(Boolean);
+        if(Array.isArray(nodeSection.remove)){
+            nodeSection.remove.forEach(id => {
+                const index = nextNodes.findIndex(node => String(node.id) === String(id));
+                if(index >= 0){ nextNodes.splice(index, 1); changed = true; }
+            });
+        }
+        if(Array.isArray(nodeSection.add)){
+            nodeSection.add.forEach(node => {
+                if(!node || typeof node !== 'object' || !node.id) return;
+                const index = nextNodes.findIndex(item => String(item.id) === String(node.id));
+                if(index >= 0) nextNodes.splice(index, 1);
+                nextNodes.push(node);
+                changed = true;
+            });
+        }
+        if(collabApplyFieldUpdates(nextNodes, nodeSection.update)) changed = true;
+        nodes = nextNodes;
+    }
+    if(collabApplyConnections(patch.connections)) changed = true;
+    if(changed){
+        render();
+        if(!collabReadOnly) scheduleSave();
+    }
+    return changed;
+}
+function collabApplySnapshot(doc){
+    if(!canvas || !doc || typeof doc !== 'object') return false;
+    if(typeof doc.title === 'string'){
+        canvas.title = doc.title;
+        document.title = doc.title || tr('canvas.smartCanvas');
+        const titleEl = document.getElementById('smartTitle');
+        if(titleEl) titleEl.textContent = doc.title || tr('canvas.smartCanvas');
+    }
+    if(Array.isArray(doc.nodes)){
+        nodes = doc.nodes.map(normalizeLegacySmartNode).filter(Boolean);
+    }
+    canvas.connections = Array.isArray(doc.connections) ? doc.connections : [];
+    if(Array.isArray(doc.connections) && doc.connections.length) canvasUsesConnections = true;
+    render();
+    if(!collabReadOnly) scheduleSave();
+    return true;
+}
+window.SmartCanvasCollab = {
+    version: 1,
+    getCanvas: () => ({ id: canvasId, title: (canvas && canvas.title) || '' }),
+    isLoaded: () => Boolean(canvas),
+    isEmpty: () => !nodes.some(node => node && node.id !== SMART_LOG_PREVIEW_NODE_ID),
+    getDoc: collabDocSnapshot,
+    getViewport: () => ({ x: viewport.x, y: viewport.y, scale: viewport.scale }),
+    applyPatch: collabApplyPatch,
+    applySnapshot: collabApplySnapshot,
+    setReadOnly: flag => {
+        collabReadOnly = Boolean(flag);
+        document.body.classList.toggle('collab-readonly', collabReadOnly);
+    },
+    isReadOnly: () => collabReadOnly,
+    notifyReadOnly: () => {},
+    toast: message => { if(message) toast(String(message)); }
+};
 })();

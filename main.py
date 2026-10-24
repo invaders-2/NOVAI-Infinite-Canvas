@@ -19,6 +19,7 @@ import traceback
 import shutil
 import glob
 import asyncio
+import contextlib
 import contextvars
 import logging
 import requests
@@ -49,6 +50,10 @@ from fastapi.middleware.cors import CORSMiddleware
 # 智能体底座（注册表 / 通用文件工具 / 上下文提供者基类），无反向依赖 main
 from server.agents.context import AgentRunContext as _AgentRunContext
 from server.agents.tools import AGENT_FILE_TOOLS as _AGENT_FILE_TOOLS, AgentFileToolError as _AgentFileToolError
+from server.agents import canvas_cli as _agent_canvas_cli
+from server.agents import tools as _agent_file_tools
+# MCP 客户端（默认关闭：NOVAI_MCP_ENABLED=1 才连服务）
+from server.mcp import registry as _mcp_registry
 
 # Windows 上 stdout/stderr 默认用本地代码页（英文系统为 cp1252），打印中文会抛
 # UnicodeEncodeError——后端启动阶段一行中文日志就能让 FastAPI 启动失败、整个后端起不来。
@@ -749,6 +754,21 @@ def store_uploaded_bytes(content: bytes, filename: str, category: str = "input",
                 except OSError:
                     pass
             if os.path.isfile(target_path):
+                return target_url
+            # 跨用户去重：同一份内容在别人目录里时，不能把别人的 URL 返回给当前用户，
+            # 直接给当前用户落一份自己的（硬链失败也安全）。
+            if current_tenant_user_id() is not None:
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                with open(target_path, "wb") as fh:
+                    fh.write(content)
+                index[digest] = {
+                    "url": target_url,
+                    "path": os.path.abspath(target_path),
+                    "size": int(len(content)),
+                    "name": str(display_name or filename),
+                    "updated_at": now_ms(),
+                }
+                _save_asset_hash_index(index)
                 return target_url
             existing_url = str(entry.get("url") or "").strip()
             if existing_url:
@@ -2255,6 +2275,99 @@ def public_provider(provider):
 def public_api_providers():
     return [public_provider(p) for p in load_api_providers()]
 
+
+# ---------------------------------------------------------------- 供应商可见性（普通成员只用 APIMart）
+# 产品口径：登录用户只能看到/使用 apimart；管理员后台仍可见可配全部；auth-off 本地模式保持全量。
+MEMBER_PROVIDER_ID = "apimart"
+LEGACY_DEFAULT_PROVIDERS = ("", "comfly", "default", "openai", "auto")
+
+
+class ProviderNotAllowed(Exception):
+    def __init__(self, provider: str = "") -> None:
+        super().__init__("provider_not_allowed")
+        self.provider = str(provider or "")
+
+
+@app.exception_handler(ProviderNotAllowed)
+async def _provider_not_allowed_handler(request, exc: ProviderNotAllowed):
+    return JSONResponse(
+        status_code=403,
+        content={
+            "detail": "当前账号只允许使用 APIMart 平台",
+            "code": "provider_not_allowed",
+            "provider": exc.provider,
+        },
+    )
+
+
+def _auth_actor(request=None):
+    """当前登录用户（auth 关闭返回 None）。request 可省，靠租户上下文兜底。"""
+    try:
+        if not _auth_service.auth_enabled():
+            return None
+        if request is not None:
+            user = getattr(request.state, "auth_user", None)
+            if not user:
+                token = request.cookies.get(_auth_service.COOKIE_NAME, "")
+                user = _auth_service.session_user(token) if token else None
+            if user:
+                return user
+        user_id = current_tenant_user_id()
+        if user_id is not None:
+            return _auth_service.store.get_user_by_id(int(user_id))
+    except Exception:
+        return None
+    return None
+
+
+def _is_admin_actor(request=None) -> bool:
+    try:
+        if not _auth_service.auth_enabled():
+            return True
+    except Exception:
+        return True
+    user = _auth_actor(request)
+    return bool(user and str(user.get("role") or "") == "admin")
+
+
+def member_provider(provider, default: str = MEMBER_PROVIDER_ID) -> str:
+    """成员请求的 provider 归一：空/旧默认值→apimart；显式非 apimart → 403。"""
+    value = str(provider or "").strip().lower()
+    try:
+        if not _auth_service.auth_enabled():
+            return value or default
+    except Exception:
+        return value or default
+    user = _auth_actor()
+    if user and str(user.get("role") or "") == "admin":
+        return value or default
+    if value in LEGACY_DEFAULT_PROVIDERS:
+        return default
+    if value != MEMBER_PROVIDER_ID:
+        raise ProviderNotAllowed(value)
+    return MEMBER_PROVIDER_ID
+
+
+def _all_provider_model_lists() -> Dict[str, Any]:
+    lists: Dict[str, List[str]] = {"chat_models": [], "image_models": [], "video_models": [], "audio_models": []}
+    for provider in load_api_providers():
+        for key in lists:
+            for model in provider.get(key) or []:
+                name = str(model or "").strip()
+                if name and name not in lists[key]:
+                    lists[key].append(name)
+    return lists
+
+
+def _apimart_model_lists() -> Dict[str, Any]:
+    provider = next((p for p in load_api_providers() if p.get("id") == MEMBER_PROVIDER_ID), {}) or {}
+    return {
+        "chat_models": [str(item) for item in (provider.get("chat_models") or []) if str(item or "").strip()],
+        "image_models": [str(item) for item in (provider.get("image_models") or []) if str(item or "").strip()],
+        "video_models": [str(item) for item in (provider.get("video_models") or []) if str(item or "").strip()],
+        "audio_models": [str(item) for item in (provider.get("audio_models") or []) if str(item or "").strip()],
+    }
+
 def provider_view_video_models(provider, models):
     """下发视图里把视频模型名归一后去重（只影响 /api/config 的返回，不写回磁盘）。
 
@@ -2421,6 +2534,46 @@ app.mount("/apps", StaticFiles(directory=APPS_DIR), name="apps")
 from server.appRegistry import registry, apps_router  # noqa: E402
 registry.scan(APPS_DIR)
 app.include_router(apps_router)   # GET /api/apps, GET /api/apps/health, POST /api/apps/invoke
+from server.routes.store import router as _store_router  # noqa: E402
+# 应用市场技能正文（skill_ref="store:<name>"）与系统提示段落：复用 store 路由里的同一份实现
+from server.routes.store import (skill_body_by_id as _store_skill_body_by_id,
+                                 skill_manual_text as _store_skill_manual_text)  # noqa: E402
+app.include_router(_store_router)   # 应用市场：GET /api/store/catalog、items/{kind}/{id}、install/uninstall
+from server.routes.mcp import router as _mcp_router  # noqa: E402
+app.include_router(_mcp_router)   # MCP 服务：GET /api/mcp/servers、POST .../{name}/enable、POST /api/mcp/reload
+
+# --- 邀请制登录（M1）：只有 NOVAI_AUTH_ENABLED=1 才真正拦截请求 --------------
+# 默认关闭时鉴权中间件直接放行、bootstrap_admin 也不会建号，本地桌面版完全无感。
+# set_data_dir 必须在 install 前执行：store 按 DATA_DIR 定位 users.db。
+from server.auth import install as _install_auth, bootstrap_admin as _bootstrap_admin  # noqa: E402
+from server.auth import set_data_dir as _set_auth_data_dir, set_static_dir as _set_auth_static_dir  # noqa: E402
+from server.auth import set_assets_dir as _set_auth_assets_dir, set_canvas_dir as _set_auth_canvas_dir  # noqa: E402
+from server.auth.errors import AuthError as _AuthError  # noqa: E402
+from server import perms as _canvas_perms  # noqa: E402
+from server import collab as _canvas_collab  # noqa: E402
+from server import asset_acl as _asset_acl  # noqa: E402
+from server import share_links as _share_links  # noqa: E402
+from server.auth import service as _auth_service  # noqa: E402
+from server.auth import passwords as _share_passwords  # noqa: E402
+_set_auth_data_dir(DATA_DIR)
+_set_auth_static_dir(STATIC_DIR)
+_set_auth_canvas_dir(CANVAS_DIR)
+_set_auth_assets_dir(ASSETS_DIR)
+_asset_acl.set_canvas_dir(CANVAS_DIR)
+_install_auth(app)
+_bootstrap_admin()
+
+# --- 积分制计费（M-Credits）：只在登录开启时生效；auth-off 全部 no-op，本地全开模式零感知 ---
+# 唯一接入口：credits_charge_start / credits_charge_settle / credits_charge_refund（见 server/credits/README.md）。
+from server.credits import install as _install_credits  # noqa: E402
+from server.credits.integration import (  # noqa: E402
+    credits_attach,
+    credits_charge_attach_task,
+    credits_charge_refund,
+    credits_charge_settle,
+    credits_charge_start,
+)
+_install_credits(app)
 
 # 桌面端（Chromium 系 WebView/Electron）会启发式缓存 HTML/JS/CSS：更新版本号后若页面本身被缓存，
 # 页面里的 ?v= 还是旧值 → 加载旧资源。这里对代码类静态资源强制 no-cache（媒体/输出文件不处理）。
@@ -4160,6 +4313,111 @@ def _task_restore_payload(task: dict):
     return payload
 
 
+# ---------------------------------------------------------------- 积分计费：任务级小工具
+# 路由只负责 credits_charge_start；runner 完成/失败时用这里的 helper 结算/退款，
+# 扣费单 id 存在 task["credits_charge_id"] 里（随任务分片持久化，重启后仍能结算/退款）。
+
+def _task_credit_charge_id(task_id: str) -> int:
+    task = task_get(task_id) or {}
+    try:
+        return int(task.get("credits_charge_id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _task_credit_settle(task_id: str, result=None):
+    charge_id = _task_credit_charge_id(task_id)
+    if not charge_id:
+        return None
+    return credits_charge_settle(charge_id, result=result)
+
+
+def _task_credit_refund(task_id: str, reason: str = ""):
+    charge_id = _task_credit_charge_id(task_id)
+    if not charge_id:
+        return None
+    return credits_charge_refund(charge_id, reason=reason or ("task_%s" % task_id))
+
+
+def _credits_image_params(payload) -> dict:
+    size = str(getattr(payload, "size", "") or "")
+    width, height = parse_size_pair(size)
+    try:
+        count = int(getattr(payload, "n", 1) or 1)
+    except (TypeError, ValueError):
+        count = 1
+    return {"width": width, "height": height, "quality": str(getattr(payload, "quality", "") or ""),
+            "size": size, "rows": max(1, count), "prompt": str(getattr(payload, "prompt", "") or "")}
+
+
+def _credits_video_params(payload) -> dict:
+    size = str(getattr(payload, "size", "") or "")
+    width, height = parse_size_pair(size)
+    resolution = str(getattr(payload, "resolution", "") or "")
+    if not height and resolution:
+        match = re.search(r"(\d{3,4})", resolution)
+        if match:
+            height = int(match.group(1))
+    try:
+        duration = float(getattr(payload, "duration", 0) or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    return {"width": width, "height": height, "duration": duration, "resolution": resolution,
+            "size": size, "rows": 1}
+
+
+def _credits_audio_params(payload) -> dict:
+    duration = getattr(payload, "length", None) or getattr(payload, "duration", None) or 0
+    try:
+        duration = float(duration or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    return {"rows": 1, "duration": duration, "text": str(getattr(payload, "prompt", "") or "")}
+
+
+def _credits_llm_params(payload) -> dict:
+    params = {"text": str(getattr(payload, "message", "") or ""),
+              "messages": getattr(payload, "messages", None) or []}
+    try:
+        max_tokens = int(getattr(payload, "max_tokens", 0) or 0)
+    except (TypeError, ValueError):
+        max_tokens = 0
+    if max_tokens > 0:
+        params["tokens_out"] = max_tokens
+    return params
+
+
+def _credits_llm_model(payload) -> str:
+    model = str(getattr(payload, "model", "") or "").strip()
+    if model:
+        return model
+    try:
+        provider = get_api_provider(getattr(payload, "provider", "") or "")
+        models = [str(item or "").strip() for item in (provider.get("chat_models") or []) if str(item or "").strip()]
+        return models[0] if models else ""
+    except Exception:
+        return ""
+
+
+def _attach_upstream_cost(result, raw):
+    """把上游任务体里的 cost / credits_cost / usage 提到结果顶层，供结算按实际成本入账。"""
+    if not isinstance(result, dict):
+        return result
+    sources = []
+    if isinstance(raw, dict):
+        sources.append(raw)
+        if isinstance(raw.get("data"), dict):
+            sources.append(raw["data"])
+    for key in ("cost", "credits_cost", "usage"):
+        if result.get(key) is not None:
+            continue
+        for source in sources:
+            if source.get(key) is not None:
+                result[key] = source[key]
+                break
+    return result
+
+
 async def task_run(task_id: str):
     """worker 单任务执行：取消检查 → running → 调用 runner → 自动重试判定。"""
     task = task_get(task_id)
@@ -4167,12 +4425,14 @@ async def task_run(task_id: str):
         return
     if task.get("cancel_requested") or task.get("status") == "cancel_requested":
         task_set_status(task_id, "cancelled", error="任务已取消")
+        _task_credit_refund(task_id, "task_cancelled")
         return
     if task.get("status") != "queued":
         return
     runner = TASK_RUNNERS.get(task.get("runner") or "")
     if not runner:
         task_set_status(task_id, "failed", error=f"未知执行器: {task.get('runner')}")
+        _task_credit_refund(task_id, "runner_missing")
         return
     task_set_status(task_id, "running")
     try:
@@ -4183,11 +4443,13 @@ async def task_run(task_id: str):
         if t and t.get("status") not in TASK_TERMINAL_STATUSES and t.get("status") != "retry":
             detail = getattr(exc, "detail", None) or str(exc)
             task_set_status(task_id, "failed", error=str(detail)[:2000], status_code=getattr(exc, "status_code", 500))
+            _task_credit_refund(task_id, "runner_exception")
     # 自动重试判定：runner 标记 retry（网络层错误）→ 未提交上游 且 次数未超限 才允许
     task = task_get(task_id)
     if task and task.get("status") == "retry":
         if task.get("submitted_to_provider") or (task.get("retry_count") or 0) >= TASK_AUTO_RETRY_MAX:
             task_set_status(task_id, "failed", error=(task.get("error") or "任务失败") + f"（已自动重试 {task.get('retry_count') or 0} 次）")
+            _task_credit_refund(task_id, "retry_exhausted")
         else:
             task_bump_retry(task_id)
             task_set_status(task_id, "queued")
@@ -4253,10 +4515,19 @@ async def task_retry(task_id: str) -> dict:
 
 
 def task_delete(task_id: str) -> bool:
+    charge_id = 0
     with TASK_STORE_LOCK:
         task = TASK_STORE.pop(task_id, None)
         if not task:
             return False
+        # 注意：这里绝对不能调用 _task_credit_refund()——它内部 task_get() 会再拿
+        # TASK_STORE_LOCK（普通 Lock 不可重入），余额不足的异常路径会直接把事件循环卡死。
+        # 只把 charge id 抄出来，出锁之后再退款。
+        if task.get("status") not in TASK_TERMINAL_STATUSES:
+            try:
+                charge_id = int(task.get("credits_charge_id") or 0)
+            except (TypeError, ValueError):
+                charge_id = 0
         shard = _task_shard_path(task.get("created_at") or time.time())
         try:
             if os.path.isfile(shard):
@@ -4268,6 +4539,8 @@ def task_delete(task_id: str) -> bool:
                 os.replace(tmp, shard)
         except Exception as e:
             print(f"[TaskEngine] 删除任务分片记录失败 {task_id}: {e}")
+    if charge_id:
+        credits_charge_refund(charge_id, "task_deleted")
     return True
 
 
@@ -5005,7 +5278,7 @@ def list_projects():
         out.append(rec)
     return out
 
-def new_canvas(title="未命名画布", icon="layers", kind="classic", project=None, board_x=None, board_y=None):
+def new_canvas(title="未命名画布", icon="layers", kind="classic", project=None, board_x=None, board_y=None, owner_id=None):
     timestamp = now_ms()
     canvas_kind = normalize_canvas_kind(kind)
     canvas = {
@@ -5027,6 +5300,8 @@ def new_canvas(title="未命名画布", icon="layers", kind="classic", project=N
         canvas["board_x"] = float(board_x)
     if board_y is not None:
         canvas["board_y"] = float(board_y)
+    if owner_id is not None:
+        canvas["owner_id"] = int(owner_id)
     save_canvas(canvas)
     return canvas
 
@@ -5388,6 +5663,7 @@ def canvas_thumbnails(data, max_count=4):
 def canvas_record(data):
     return {
         "id": data.get("id"),
+        "owner_id": _canvas_owner_id(data),
         "title": data.get("title", "未命名画布"),
         "icon": data.get("icon", "🧩"),
         "kind": normalize_canvas_kind(data.get("kind")),
@@ -5421,7 +5697,7 @@ def cleanup_expired_canvas_trash():
             except Exception:
                 continue
 
-def iter_canvas_records(include_deleted=False):
+def iter_canvas_records(include_deleted=False, owner_id=None):
     cleanup_expired_canvas_trash()
     records = []
     for filename in os.listdir(CANVAS_DIR):
@@ -5435,11 +5711,15 @@ def iter_canvas_records(include_deleted=False):
         is_deleted = bool(data.get("deleted_at"))
         if include_deleted != is_deleted:
             continue
+        if owner_id is not None:
+            owner = _canvas_owner_id(data)
+            if owner is None or owner != int(owner_id):
+                continue
         records.append(canvas_record(data))
     return records
 
-def list_canvases():
-    records = iter_canvas_records(include_deleted=False)
+def list_canvases(owner_id=None):
+    records = iter_canvas_records(include_deleted=False, owner_id=owner_id)
     return sorted(
         records,
         key=lambda item: (
@@ -5448,9 +5728,110 @@ def list_canvases():
         ),
     )
 
-def list_deleted_canvases():
-    records = iter_canvas_records(include_deleted=True)
+def list_deleted_canvases(owner_id=None):
+    records = iter_canvas_records(include_deleted=True, owner_id=owner_id)
     return sorted(records, key=lambda item: item["deleted_at"], reverse=True)
+
+
+# --- 云端数据隔离（M2）：画布归属 ------------------------------------------
+def request_auth_user(request):
+    """auth 关闭时中间件不会写 auth_user，这里恒为 None（老行为原样保留）。"""
+    return getattr(getattr(request, "state", None), "auth_user", None)
+
+
+def _canvas_owner_id(canvas):
+    value = (canvas or {}).get("owner_id")
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def canvas_access_role(canvas, request):
+    """当前用户对画布的角色：owner / admin / editor / viewer / None。"""
+    user = request_auth_user(request)
+    if not user:
+        return None
+    owner = _canvas_owner_id(canvas)
+    share = _canvas_perms.get_share(canvas.get("id"), int(user["id"])) if canvas.get("id") else None
+    return _canvas_perms.resolve_role(owner, user, share)
+
+
+def require_canvas_access(canvas, request, need="view"):
+    """auth-off 直接放行；auth-on 按 owner/admin/editor/viewer 判定（need: view/edit/manage）。"""
+    user = request_auth_user(request)
+    if not user:
+        return
+    role = canvas_access_role(canvas, request)
+    if _canvas_perms.can(role, need):
+        return
+    detail = "无权访问该画布" if need == "view" else ("需要可编辑权限" if need == "edit" else "需要管理权限")
+    raise HTTPException(status_code=403, detail=detail)
+
+
+def current_canvas_owner_id(request):
+    user = request_auth_user(request)
+    return int(user["id"]) if user and user.get("id") is not None else None
+
+
+def canvas_list_owner_filter(request):
+    """回收站过滤：返回 (user, owner_id)。auth-off → (None, None)；admin 带 ?all=1 → 全部。"""
+    user = request_auth_user(request)
+    if not user:
+        return None, None
+    if str(user.get("role")) == "admin":
+        all_flag = str(request.query_params.get("all") or "").strip().lower()
+        if all_flag in ("1", "true", "yes", "on"):
+            return user, None
+    return user, int(user["id"])
+
+
+def list_canvases_for_request(request):
+    """画布列表：auth-off 全量；auth-on 自己 + 被共享，带 access_role / owner_username。"""
+    user = request_auth_user(request)
+    if not user:
+        return list_canvases()
+
+    user_id = int(user["id"])
+    is_admin = str(user.get("role")) == "admin"
+    scope = str(request.query_params.get("scope") or "all").strip().lower()
+    if scope not in ("mine", "shared", "all"):
+        raise HTTPException(status_code=400, detail="scope 只能是 mine/shared/all")
+    all_flag = str(request.query_params.get("all") or "").strip().lower() in ("1", "true", "yes", "on")
+    admin_all = is_admin and all_flag
+    shares = _canvas_perms.shared_roles_for_user(user_id)
+    names = _canvas_perms.user_names()
+    records = []
+    for record in iter_canvas_records(include_deleted=False):
+        owner_id = record.get("owner_id")
+        is_owner = owner_id is not None and int(owner_id) == user_id
+        share_role = shares.get(str(record.get("id")))
+        if admin_all:
+            include = True
+        elif scope == "mine":
+            include = is_owner
+        elif scope == "shared":
+            include = share_role is not None
+        else:
+            include = is_owner or share_role is not None
+        if not include:
+            continue
+        if is_owner:
+            access_role = "owner"
+        elif is_admin:
+            access_role = "admin"
+        else:
+            access_role = share_role
+        record["access_role"] = access_role
+        record["owner_username"] = names.get(int(owner_id), "") if owner_id is not None else ""
+        records.append(record)
+    records.sort(key=lambda item: (
+        0 if item.get("pinned") else 1,
+        -int(item.get("updated_at") or item.get("created_at") or 0),
+    ))
+    return records
 
 def canvas_asset_url_value(value):
     if isinstance(value, str):
@@ -8507,7 +8888,20 @@ async def wait_for_image_task(client, task_id, provider=None):
     extra = f"，最后响应：{raw_text}" if raw_text else ""
     raise HTTPException(status_code=504, detail=f"生图任务超时（已等待 {int(timeout)} 秒），task_id={task_id}{extra}")
 
+def current_tenant_user_id():
+    """auth 开启且已登录时返回当前用户 id；auth 关闭恒为 None（旧行为不变）。"""
+    try:
+        from server.auth import tenant as _tenant
+        return _tenant.current_user_id()
+    except Exception:
+        return None
+
 def output_storage(category="output"):
+    """生成/上传落盘目录。auth-on 时按用户分目录：assets/users/{uid}/input|output。"""
+    subdir = "input" if category == "input" else "output"
+    user_id = current_tenant_user_id()
+    if user_id is not None:
+        return os.path.join(ASSETS_DIR, "users", str(int(user_id)), subdir), "users/%d/%s" % (int(user_id), subdir)
     return (OUTPUT_INPUT_DIR, "input") if category == "input" else (OUTPUT_OUTPUT_DIR, "output")
 
 def output_url_for(filename, category="output"):
@@ -8516,6 +8910,10 @@ def output_url_for(filename, category="output"):
 
 def output_path_for(filename, category="output"):
     folder, _ = output_storage(category)
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except Exception:
+        pass
     return os.path.join(folder, filename)
 
 def build_canvas_meta(urls, payload=None, node_type="video"):
@@ -8736,6 +9134,10 @@ def local_media_file_by_basename(name: str):
         os.path.join(ASSETS_DIR, "input"),
         os.path.join(ASSETS_DIR, "library"),
     ]
+    user_id = current_tenant_user_id()
+    if user_id is not None:
+        base = os.path.join(ASSETS_DIR, "users", str(int(user_id)))
+        roots[0:0] = [os.path.join(base, "output"), os.path.join(base, "input")]
     for root in roots:
         path = os.path.abspath(os.path.join(root, safe))
         root_abs = os.path.abspath(root)
@@ -12322,6 +12724,31 @@ async def capability_generate_image(spec):
 
     return {"provider": provider_id, "model": model_id, "size": size, "count": len(images),
             "images": images, "model_note": selection_note, "references": len(refs)}
+
+
+async def _capability_generate_image_charged(spec):
+    """能力运行时生图的扣费包装：Agent 走服务端直接生图，不经过 /api/online-image，必须单独计费。"""
+    spec = spec if isinstance(spec, dict) else {}
+    provider = member_provider(spec.get("provider") or spec.get("image_provider") or "")
+    if provider:
+        spec = {**spec, "provider": provider}
+    model = str(spec.get("model") or spec.get("image_model") or "")
+    size = str(spec.get("size") or "")
+    width, height = parse_size_pair(size)
+    try:
+        count = int(spec.get("count") or 1)
+    except (TypeError, ValueError):
+        count = 1
+    params = {"width": width, "height": height, "quality": str(spec.get("quality") or ""),
+              "size": size, "rows": max(1, count)}
+    charge = credits_charge_start("image", model, params, provider=provider)
+    try:
+        result = await capability_generate_image(spec)
+    except Exception:
+        credits_charge_refund(charge, "agent_image_failed")
+        raise
+    credits_charge_settle(charge, result=result)
+    return result
 
 
 def image_output_meta(url, source_item=None):
@@ -19029,43 +19456,54 @@ async def jimeng_query_media(payload: JimengQueryMediaRequest):
         return {"status": "failed", "submit_id": submit_id, "kind": kind, "error": str(getattr(exc, "detail", "") or exc)}
 
 @app.get("/api/config")
-async def ai_config():
+async def ai_config(request: Request):
+    admin = _is_admin_actor(request)
     preferred_chat_model = next((m for m in CHAT_MODELS if m == "gpt-5.5"), CHAT_MODELS[0] if CHAT_MODELS else CHAT_MODEL)
-    providers = public_api_providers()
+    providers = public_api_providers() if admin else [p for p in public_api_providers() if p.get("id") == MEMBER_PROVIDER_ID]
     # 只调整下发视图：磁盘上的 data/api_providers.json 保持用户原样
     for provider in providers:
         provider["video_models"] = provider_view_video_models(provider, provider.get("video_models"))
+    model_lists = _apimart_model_lists() if not admin else _all_provider_model_lists()
     return {
         "base_url": AI_BASE_URL,
-        "chat_model": preferred_chat_model,
-        "image_model": IMAGE_MODEL,
-        "chat_models": CHAT_MODELS,
-        "image_models": IMAGE_MODELS,
-        "video_models": VIDEO_MODELS,
-        "comfy_instances": COMFYUI_INSTANCES,
+        "chat_model": (model_lists.get("chat_models") or [""])[0] if not admin else preferred_chat_model,
+        "image_model": (model_lists.get("image_models") or [""])[0] if not admin else IMAGE_MODEL,
+        "chat_models": model_lists.get("chat_models", []),
+        "image_models": model_lists.get("image_models", []),
+        "video_models": model_lists.get("video_models", []),
+        "comfy_instances": COMFYUI_INSTANCES if admin else [],
         "api_providers": providers,
-        "has_api_key": bool(AI_API_KEY),
-        "ms_chat_models": MODELSCOPE_CHAT_MODELS,
-        "has_ms_key": bool(modelscope_api_key()),
+        "has_api_key": bool(AI_API_KEY) if admin else True,
+        "ms_chat_models": MODELSCOPE_CHAT_MODELS if admin else [],
+        "has_ms_key": bool(modelscope_api_key()) if admin else False,
     }
 
 @app.get("/api/models")
-async def ai_models():
-    return {"chat_models": CHAT_MODELS, "image_models": IMAGE_MODELS, "video_models": VIDEO_MODELS}
+async def ai_models(request: Request):
+    models = _all_provider_model_lists() if _is_admin_actor(request) else _apimart_model_lists()
+    return {"chat_models": models["chat_models"], "image_models": models["image_models"],
+            "video_models": models["video_models"]}
 
 @app.get("/api/provider-registry")
-async def provider_registry():
+async def provider_registry(request: Request):
     """供应商注册表（config/providers.json）：供应商地址、文档入口、识别别名与默认模型都在这里。
 
     只读；表里不含密钥（密钥从 API/.env 读，变量名见每项的 key_env）。
     新增供应商 = 注册表加一组 + 在 API/.env 填 Key，业务代码不用改。
     """
-    return {"file": PROVIDER_REGISTRY_FILE, "providers": load_provider_registry()}
+    entries = load_provider_registry()
+    if not _is_admin_actor(request):
+        entries = [item for item in entries if str((item or {}).get("id") or "") == MEMBER_PROVIDER_ID]
+    return {"file": PROVIDER_REGISTRY_FILE, "providers": entries}
 
 @app.get("/api/providers")
-async def api_providers():
+async def api_providers(request: Request):
     # registry_presets：注册表里的供应商识别信息与默认模型（不含密钥），前端推荐卡片按 id 取用
-    return {"providers": public_api_providers(), "registry_presets": public_registry_presets()}
+    if _is_admin_actor(request):
+        return {"providers": public_api_providers(), "registry_presets": public_registry_presets()}
+    providers = [p for p in public_api_providers() if p.get("id") == MEMBER_PROVIDER_ID]
+    presets = [p for p in public_registry_presets() if str((p or {}).get("id") or "") == MEMBER_PROVIDER_ID]
+    return {"providers": providers, "registry_presets": presets}
 
 @app.put("/api/providers")
 async def save_providers(payload: List[ApiProviderPayload]):
@@ -20333,6 +20771,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "background": normalize_image_background(payload.background), "n": count, "reference_images": refs},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
+    _attach_upstream_cost(result, raw)
     if size_notice:
         result["size_notice"] = size_notice
     save_to_history(result)
@@ -20342,7 +20781,21 @@ async def build_online_image_result(payload: OnlineImageRequest):
 
 @app.post("/api/online-image")
 async def online_image(payload: OnlineImageRequest):
-    return await build_online_image_result(payload)
+    payload.provider_id = member_provider(payload.provider_id)
+    provider = get_api_provider(payload.provider_id)
+    try:
+        model = preferred_image_model(provider, payload.model)
+    except HTTPException:
+        model = str(payload.model or "")
+    charge = credits_charge_start("image", model, _credits_image_params(payload),
+                                 provider=payload.provider_id)
+    try:
+        result = await build_online_image_result(payload)
+    except Exception:
+        credits_charge_refund(charge, "image_failed")
+        raise
+    credits = credits_charge_settle(charge, result=result)
+    return credits_attach(result, credits)
 
 @app.post("/api/image-task-query")
 async def query_image_task(payload: ImageTaskQueryRequest):
@@ -20503,6 +20956,7 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
         else:
             task_set_status(task_id, "failed", error=str(detail)[:2000], status_code=status_code,
                             extra={"upstream_task_id": upstream_task_id or ""})
+            _task_credit_refund(task_id, "image_task_failed")
             await _agent_writeback_and_broadcast(task_id, "image", [], str(detail)[:300])
         return
     task_set_status(task_id, "saving")
@@ -20512,10 +20966,13 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
         raw = result.get("raw")
         upstream = str(extract_task_id(raw) or "") if isinstance(raw, dict) else str(result.get("task_id") or "")
         request_id = str(raw.get("id") or "") if isinstance(raw, dict) else str(result.get("request_id") or "")
+    result = _attach_upstream_cost(result, result.get("raw") if isinstance(result, dict) else None)
+    credits = _task_credit_settle(task_id, result=result)
     task_set_status(task_id, "succeeded", extra={
         "result": result,
         "provider_task_id": upstream,
         "request_id": request_id,
+        "credits": credits,
     })
     # Agent 发起的生成：任务完成后把结果写回画布节点（加锁、追加不覆盖、写完广播）
     await _agent_writeback_and_broadcast(task_id, "image", _agent_result_media_urls(result))
@@ -20982,7 +21439,17 @@ async def generate_canvas_audio(payload: CanvasAudioRequest):
 
 @app.post("/api/canvas-audio")
 async def canvas_audio(payload: CanvasAudioRequest):
-    return await generate_canvas_audio(payload)
+    payload.provider_id = member_provider(payload.provider_id)
+    model = str(payload.model or "").strip() or "suno"
+    charge = credits_charge_start("audio", model, _credits_audio_params(payload),
+                                 provider=payload.provider_id)
+    try:
+        result = await generate_canvas_audio(payload)
+    except Exception:
+        credits_charge_refund(charge, "audio_failed")
+        raise
+    credits = credits_charge_settle(charge, result=result)
+    return credits_attach(result, credits)
 
 async def generate_canvas_tts(payload: CanvasTTSRequest):
     provider = get_api_provider(payload.provider_id)
@@ -21034,7 +21501,17 @@ async def generate_canvas_tts(payload: CanvasTTSRequest):
 
 @app.post("/api/canvas-tts")
 async def canvas_tts(payload: CanvasTTSRequest):
-    return await generate_canvas_tts(payload)
+    payload.provider_id = member_provider(payload.provider_id)
+    model = str(payload.model or "").strip() or APIMART_TTS_DEFAULT_MODEL
+    params = {"rows": 1, "text": str(payload.input or ""), "characters": len(str(payload.input or ""))}
+    charge = credits_charge_start("audio", model, params, provider=payload.provider_id)
+    try:
+        result = await generate_canvas_tts(payload)
+    except Exception:
+        credits_charge_refund(charge, "tts_failed")
+        raise
+    credits = credits_charge_settle(charge, result=result)
+    return credits_attach(result, credits)
 
 # ── 音频智能切分：自然语言 / 语义 → 时间段 ────────────────────────────────────
 # 前端拿到时间段只做「预览 + 确认」，真正的切片在浏览器本地完成；这里只负责让模型把
@@ -21325,17 +21802,52 @@ async def generate_canvas_audio_split(payload: CanvasAudioSplitRequest):
 
 @app.post("/api/canvas-audio-split")
 async def canvas_audio_split(payload: CanvasAudioSplitRequest):
-    return await generate_canvas_audio_split(payload)
+    payload.provider_id = member_provider(payload.provider_id)
+    # 切分本质是一次文本 LLM 调用：按对话模型 token 价计费（上游 usage 返回时按实际 token 结算）
+    try:
+        _provider, split_model = audio_split_resolve_provider(load_api_providers(), payload.provider_id, payload.model)
+    except HTTPException:
+        split_model = str(payload.model or "")
+    split_params = {"text": str(payload.text or ""), "duration": float(payload.duration_sec or 0),
+                    "tokens_out": 300}
+    charge = credits_charge_start("text", split_model, split_params,
+                                 provider=payload.provider_id)
+    try:
+        result = await generate_canvas_audio_split(payload)
+    except Exception:
+        credits_charge_refund(charge, "audio_split_failed")
+        raise
+    credits = credits_charge_settle(charge, result=result)
+    return credits_attach(result, credits)
 
 
 TASK_RUNNERS["run_canvas_image_task"] = run_canvas_image_task
 
 @app.post("/api/canvas-image-tasks")
 async def create_canvas_image_task(payload: OnlineImageRequest):
-    task = task_create(kind="online-image", payload=payload, runner_name="run_canvas_image_task",
-                       provider_id=payload.provider_id, model_id=payload.model or "")
+    payload.provider_id = member_provider(payload.provider_id)
+    provider = get_api_provider(payload.provider_id)
+    try:
+        model = preferred_image_model(provider, payload.model)
+    except HTTPException:
+        model = str(payload.model or "")
+    # 先预扣再建任务：余额不足直接 402，不留下任何 task，也不会有异常回滚路径。
+    charge = credits_charge_start("image", model, _credits_image_params(payload),
+                                 provider=payload.provider_id)
+    try:
+        task = task_create(kind="online-image", payload=payload, runner_name="run_canvas_image_task",
+                           provider_id=payload.provider_id, model_id=payload.model or "")
+    except Exception:
+        credits_charge_refund(charge, "task_create_failed")
+        raise
+    response = {"task_id": task["id"], "status": "queued"}
+    if charge:
+        credits_charge_attach_task(charge, task["id"])
+        task_set_status(task["id"], "queued", extra={"credits_charge_id": charge["id"],
+                                                     "credits": charge.get("credits")})
+        response["credits"] = charge.get("credits")
     await task_enqueue(task["id"])
-    return {"task_id": task["id"], "status": "queued"}
+    return response
 
 @app.get("/api/canvas-image-tasks/{task_id}")
 async def get_canvas_image_task(task_id: str):
@@ -21480,7 +21992,8 @@ def build_image_param_fields(engine: str, provider: dict, model: str):
     return fields
 
 @app.get("/api/image-params")
-async def image_params(provider_id: str = "", model: str = ""):
+async def image_params(request: Request, provider_id: str = "", model: str = ""):
+    provider_id = member_provider(provider_id)
     providers = load_api_providers()
     provider = next((p for p in providers if p.get("id") == (provider_id or "").strip().lower()), None) or {}
     if is_runninghub_provider(provider):
@@ -22482,6 +22995,7 @@ async def run_canvas_video_task(task_id: str, payload: CanvasVideoRequest):
     except Exception as exc:
         detail = getattr(exc, "detail", None) or str(exc)
         task_set_status(task_id, "failed", error=str(detail)[:2000], status_code=getattr(exc, "status_code", 500))
+        _task_credit_refund(task_id, "video_task_failed")
         await _agent_writeback_and_broadcast(task_id, "video", [], str(detail)[:300])
         raise
     if isinstance(result, dict) and result.get("jimeng_pending"):
@@ -22501,10 +23015,13 @@ async def run_canvas_video_task(task_id: str, payload: CanvasVideoRequest):
         upstream = str(extract_task_id(raw) or "") if isinstance(raw, dict) else str(result.get("task_id") or "")
         request_id = str(raw.get("id") or "") if isinstance(raw, dict) else ""
     task_set_status(task_id, "saving")
+    result = _attach_upstream_cost(result, result.get("raw") if isinstance(result, dict) else None)
+    credits = _task_credit_settle(task_id, result=result)
     task_set_status(task_id, "succeeded", extra={
         "result": result,
         "provider_task_id": upstream,
         "request_id": request_id,
+        "credits": credits,
     })
     # Agent 发起的生成：任务完成后把视频写回画布节点（加锁、追加不覆盖、写完广播）
     await _agent_writeback_and_broadcast(task_id, "video", _agent_result_video_urls(result))
@@ -22514,19 +23031,38 @@ TASK_RUNNERS["run_canvas_video_task"] = run_canvas_video_task
 
 @app.post("/api/canvas-video")
 async def canvas_video(payload: CanvasVideoRequest, async_mode: bool = Query(False, alias="async")):
+    payload.provider_id = member_provider(payload.provider_id)
     """视频生成入口（V2 Phase 1 任务化适配，平台分发逻辑不动）。
     默认同步模式：请求内联执行并返回原响应结构（前端零改动），同时记录完整任务证据链；
     ?async=1 时进入 Task Engine 队列，立即返回 {task_id, status: "queued"}。"""
-    task = task_create(kind="video", payload=payload, runner_name="run_canvas_video_task",
-                       provider_id=payload.provider_id, model_id=payload.model or "")
+    video_model = str(payload.model or "").strip() or "veo3-fast"
+    # 先预扣再建任务：余额不足直接 402，不创建 task，不走异常删除路径。
+    charge = credits_charge_start("video", video_model, _credits_video_params(payload),
+                                 provider=payload.provider_id)
+    try:
+        task = task_create(kind="video", payload=payload, runner_name="run_canvas_video_task",
+                           provider_id=payload.provider_id, model_id=payload.model or "")
+    except Exception:
+        credits_charge_refund(charge, "task_create_failed")
+        raise
+    if charge:
+        credits_charge_attach_task(charge, task["id"])
+        task_set_status(task["id"], "queued", extra={"credits_charge_id": charge["id"],
+                                                     "credits": charge.get("credits")})
     if async_mode:
         await task_enqueue(task["id"])
-        return {"task_id": task["id"], "status": "queued", "async_mode": True}
+        response = {"task_id": task["id"], "status": "queued", "async_mode": True}
+        if charge:
+            response["credits"] = charge.get("credits")
+        return response
     task_set_status(task["id"], "running")
     result = await run_canvas_video_task(task["id"], payload)
     if isinstance(result, dict) and result.get("jimeng_pending"):
+        if charge:
+            result = {**result, "credits": charge.get("credits")}
         return result
-    return {**result, "task_id": task["id"]}
+    credits = (task_get(task["id"]) or {}).get("credits") or (charge.get("credits") if charge else None)
+    return credits_attach({**result, "task_id": task["id"]}, credits)
 
 async def canvas_video_run(payload: CanvasVideoRequest):
     async with provider_slot(get_api_provider(payload.provider_id)):
@@ -23223,8 +23759,7 @@ async def _canvas_llm_apply_prompt_intelligence(payload):
     return payload
 
 
-@app.post("/api/canvas-llm")
-async def canvas_llm(payload: CanvasLLMRequest):
+async def _canvas_llm_impl(payload: CanvasLLMRequest):
     _provider = get_api_provider(payload.provider)
     # —— Prompt Intelligence（v1）：有参考素材或反推 ON 时启用；失败自动回退原流程 ——
     await _canvas_llm_apply_prompt_intelligence(payload)
@@ -23284,11 +23819,29 @@ async def canvas_llm(payload: CanvasLLMRequest):
     return {"text": text, "model": model, "raw_usage": raw_data.get("usage")}
 
 
-@app.post("/api/canvas-llm/stream")
-async def canvas_llm_stream(payload: CanvasLLMRequest):
+@app.post("/api/canvas-llm")
+async def canvas_llm(payload: CanvasLLMRequest):
+    payload.provider = member_provider(payload.provider)
+    model = _credits_llm_model(payload)
+    charge = credits_charge_start("text", model, _credits_llm_params(payload),
+                                 provider=payload.provider)
+    try:
+        result = await _canvas_llm_impl(payload)
+    except Exception:
+        credits_charge_refund(charge, "llm_failed")
+        raise
+    settled = credits_charge_settle(charge, result=result)
+    return credits_attach(result, settled)
+
+
+async def _canvas_llm_stream_impl(payload: CanvasLLMRequest, charge=None):
     """流式版 /api/canvas-llm：token 一到就往前端推（SSE），节点上边生成边显示。
     只支持标准 OpenAI 兼容供应商；codex / gemini-cli / lovart / apimart 这些不是一次补全的，
-    直接回 409，前端退回普通接口（行为与之前一致）。"""
+    直接回 409，前端退回普通接口（行为与之前一致）。
+
+    积分结算放在这个单层 generator 自己的 finally 里，不再套一层 "async for body_iterator"
+    的包装 generator —— 嵌套 async generator 在客户端断开时会被层层 throw/close，极端情况下
+    触发递归 finalize 把事件循环卡死。"""
     _provider = get_api_provider(payload.provider)
     if is_codex_provider(_provider) or is_gemini_cli_provider(_provider) or is_lovart_provider(_provider):
         raise HTTPException(status_code=409, detail="stream_unsupported")
@@ -23300,9 +23853,11 @@ async def canvas_llm_stream(payload: CanvasLLMRequest):
     upstream_messages = await _canvas_llm_upstream_messages(payload, model)
 
     async def stream():
-        yield sse_event({"type": "meta", "model": model, "provider": payload.provider})
-        parts = []
+        failed = False
+        completed = False
         try:
+            yield sse_event({"type": "meta", "model": model, "provider": payload.provider})
+            parts = []
             async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=AI_REQUEST_TIMEOUT) as client:
                 req_body = {"model": model, "messages": upstream_messages, "stream": True}
                 if int(payload.max_tokens or 0) > 0:
@@ -23311,6 +23866,7 @@ async def canvas_llm_stream(payload: CanvasLLMRequest):
                     if response.status_code >= 400:
                         body = (await response.aread()).decode("utf-8", errors="ignore")
                         friendly = friendly_chat_error_detail(body, model, _llm_provider)
+                        failed = True
                         yield sse_event({"type": "error", "detail": friendly or f"上游接口错误：{body}"})
                         return
                     # 有些供应商/模型不吃 stream=true，直接回一整块 JSON：
@@ -23324,10 +23880,12 @@ async def canvas_llm_stream(payload: CanvasLLMRequest):
                             whole = {}
                         whole_text = text_from_chat_response(whole).strip() if isinstance(whole, dict) else ""
                         if not whole_text:
+                            failed = True
                             yield sse_event({"type": "error", "detail": "上游没有按流式返回，整块补全也是空的。"})
                             return
                         parts.append(whole_text)
                         yield sse_event({"type": "delta", "delta": whole_text})
+                        completed = True
                         yield sse_event({"type": "done", "text": "".join(parts).strip(), "model": model})
                         return
                     async for line in response.aiter_lines():
@@ -23351,14 +23909,35 @@ async def canvas_llm_stream(payload: CanvasLLMRequest):
                         if delta:
                             parts.append(delta)
                             yield sse_event({"type": "delta", "delta": delta})
+            completed = True
+            text = "".join(parts).strip() or "接口返回了空回复。"
+            yield sse_event({"type": "done", "text": text, "model": model})
         except httpx.HTTPError as exc:
             log_net_error("画布LLM(流式) 网络/TLS错误", exc)
+            failed = True
             yield sse_event({"type": "error", "detail": f"请求上游接口失败：{exc}"})
-            return
-        text = "".join(parts).strip() or "接口返回了空回复。"
-        yield sse_event({"type": "done", "text": text, "model": model})
+        finally:
+            if charge:
+                if failed or not completed:
+                    credits_charge_refund(charge, "llm_stream_interrupted" if not failed else "llm_stream_failed")
+                else:
+                    credits_charge_settle(charge, result=None)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/canvas-llm/stream")
+async def canvas_llm_stream(payload: CanvasLLMRequest):
+    payload.provider = member_provider(payload.provider)
+    """流式入口：预扣积分；结算/退款在 _canvas_llm_stream_impl 的单层 generator 里完成。"""
+    model = _credits_llm_model(payload)
+    charge = credits_charge_start("text", model, _credits_llm_params(payload),
+                                 provider=payload.provider)
+    try:
+        return await _canvas_llm_stream_impl(payload, charge=charge)
+    except Exception:
+        credits_charge_refund(charge, "llm_stream_rejected")
+        raise
 
 
 # --- 对话管理 ---
@@ -23400,13 +23979,13 @@ async def debug_paths():
     }
 
 @app.get("/api/canvases")
-async def canvases():
-    return {"canvases": list_canvases()}
+async def canvases(request: Request):
+    return {"canvases": list_canvases_for_request(request)}
 
 @app.get("/api/recent-canvases")
-async def recent_canvases():
+async def recent_canvases(request: Request):
     """返回最近更新的画布列表（首页"最新画布"区域使用）。"""
-    return list_canvases()[:12]
+    return list_canvases_for_request(request)[:12]
 
 @app.get("/api/projects")
 async def get_projects():
@@ -23459,16 +24038,21 @@ async def delete_project(project_id: str):
     return {"ok": True, "moved": moved}
 
 @app.get("/api/canvases/trash")
-async def trashed_canvases():
-    return {"canvases": list_deleted_canvases(), "retention_days": 30}
+async def trashed_canvases(request: Request):
+    _user, owner_id = canvas_list_owner_filter(request)
+    return {"canvases": list_deleted_canvases(owner_id=owner_id), "retention_days": 30}
 
 @app.post("/api/canvases")
-async def create_canvas(payload: CanvasCreateRequest):
-    return {"canvas": new_canvas(payload.title, payload.icon, payload.kind, payload.project, payload.board_x, payload.board_y)}
+async def create_canvas(payload: CanvasCreateRequest, request: Request):
+    return {"canvas": new_canvas(
+        payload.title, payload.icon, payload.kind, payload.project, payload.board_x, payload.board_y,
+        owner_id=current_canvas_owner_id(request),
+    )}
 
 @app.get("/api/canvases/{canvas_id}/meta")
-async def get_canvas_meta(canvas_id: str):
+async def get_canvas_meta(canvas_id: str, request: Request):
     canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "view")
     return {
         "id": canvas.get("id"),
         "updated_at": canvas.get("updated_at", 0),
@@ -23478,10 +24062,15 @@ async def get_canvas_meta(canvas_id: str):
     }
 
 @app.post("/api/canvases/{canvas_id}/meta")
-async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate):
+async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate, request: Request):
     """更新画布的轻量元数据（标题/图标/负责人/颜色/置顶）。
     刻意不走 save_canvas（它会刷新 updated_at），以免打标签/置顶把画布顶到列表最前。"""
     canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "edit")
+    if payload.title is not None and (payload.title or "") != (canvas.get("title") or ""):
+        # editor 能改颜色/置顶等元数据，但不能重命名（重命名属于管理动作）
+        if not _canvas_perms.can(canvas_access_role(canvas, request), "manage"):
+            raise HTTPException(status_code=403, detail="只有所有者或管理员可以重命名画布")
     if payload.title is not None:
         canvas["title"] = (payload.title or canvas.get("title") or "未命名画布")[:80]
     if payload.icon is not None:
@@ -23503,12 +24092,374 @@ async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate):
     return {"canvas": canvas_record(canvas)}
 
 @app.get("/api/canvases/{canvas_id}")
-async def get_canvas(canvas_id: str):
-    return {"canvas": load_canvas(canvas_id)}
+async def get_canvas(canvas_id: str, request: Request):
+    canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "view")
+    return {"canvas": canvas}
+
+@app.post("/api/canvases/{canvas_id}/claim")
+async def claim_canvas(canvas_id: str, request: Request):
+    """旧画布过渡：admin 把无主画布认领到自己名下。"""
+    user = request_auth_user(request)
+    if not user or str(user.get("role")) != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可认领画布")
+    canvas = load_canvas_any(canvas_id)
+    if canvas.get("deleted_at"):
+        raise HTTPException(status_code=400, detail="画布在回收站，不能认领")
+    canvas["owner_id"] = int(user["id"])
+    save_canvas(canvas)
+    try:
+        from server.auth import audit as _auth_audit
+        _auth_audit("canvas_claim", user, canvas_id, "ok", "owner_id=%s" % user["id"])
+    except Exception:
+        pass
+    return {"canvas": canvas_record(canvas)}
+
+
+# --- 画布权限（M3）：owner/admin/editor/viewer --------------------------------
+class CanvasMemberAddRequest(BaseModel):
+    username: str = ""
+    role: str = "viewer"
+
+
+class CanvasMemberRoleRequest(BaseModel):
+    role: str = "viewer"
+
+
+def _canvas_permission_actor(request):
+    user = request_auth_user(request)
+    if not user:
+        raise HTTPException(status_code=403, detail="登录体系未启用，画布权限不可用")
+    return user
+
+
+def _canvas_permissions_payload(canvas, request):
+    owner_id = _canvas_owner_id(canvas)
+    owner = _canvas_perms.get_user(owner_id) if owner_id is not None else None
+    members = [
+        {"user_id": int(row["user_id"]), "username": row.get("username") or "", "role": row["role"]}
+        for row in _canvas_perms.list_members(canvas["id"])
+    ]
+    return {
+        "owner": {"id": owner_id, "username": (owner or {}).get("username", "")},
+        "members": members,
+        "my_role": canvas_access_role(canvas, request),
+    }
+
+
+@app.get("/api/canvases/{canvas_id}/permissions")
+async def get_canvas_permissions(canvas_id: str, request: Request):
+    _canvas_permission_actor(request)
+    canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "view")
+    return _canvas_permissions_payload(canvas, request)
+
+
+@app.post("/api/canvases/{canvas_id}/members")
+async def add_canvas_member(canvas_id: str, payload: CanvasMemberAddRequest, request: Request):
+    actor = _canvas_permission_actor(request)
+    canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "manage")
+    username = str(payload.username or "").strip()
+    role = str(payload.role or "").strip().lower()
+    if not username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    if role not in _canvas_perms.MEMBER_ROLES:
+        raise HTTPException(status_code=400, detail="角色只能是 viewer 或 editor")
+    target = _canvas_perms.get_user_by_username(username)
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if _canvas_owner_id(canvas) == int(target["id"]):
+        raise HTTPException(status_code=409, detail="画布所有者已在列表中")
+    try:
+        member = _canvas_perms.add_member(canvas["id"], int(target["id"]), role, int(actor["id"]))
+    except _AuthError as exc:
+        _canvas_perms.audit("canvas_share_add", actor, canvas["id"], username, "error", exc.code)
+        raise
+    _canvas_perms.audit("canvas_share_add", actor, canvas["id"], username, "ok", "role=%s" % role)
+    return {
+        "member": {"user_id": int(target["id"]), "username": target["username"], "role": member.get("role", role)},
+        "permissions": _canvas_permissions_payload(canvas, request),
+    }
+
+
+@app.patch("/api/canvases/{canvas_id}/members/{user_id}")
+async def update_canvas_member(canvas_id: str, user_id: int, payload: CanvasMemberRoleRequest, request: Request):
+    actor = _canvas_permission_actor(request)
+    canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "manage")
+    role = str(payload.role or "").strip().lower()
+    if role not in _canvas_perms.MEMBER_ROLES:
+        raise HTTPException(status_code=400, detail="角色只能是 viewer 或 editor")
+    target = _canvas_perms.get_user(user_id)
+    username = (target or {}).get("username") or str(user_id)
+    try:
+        member = _canvas_perms.update_member_role(canvas["id"], int(user_id), role)
+    except _AuthError as exc:
+        _canvas_perms.audit("canvas_share_update", actor, canvas["id"], username, "error", exc.code)
+        raise
+    _canvas_perms.audit("canvas_share_update", actor, canvas["id"], username, "ok", "role=%s" % role)
+    return {
+        "member": {"user_id": int(user_id), "username": username, "role": member.get("role", role)},
+        "permissions": _canvas_permissions_payload(canvas, request),
+    }
+
+
+@app.delete("/api/canvases/{canvas_id}/members/{user_id}")
+async def remove_canvas_member(canvas_id: str, user_id: int, request: Request):
+    actor = _canvas_permission_actor(request)
+    canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "manage")
+    target = _canvas_perms.get_user(user_id)
+    username = (target or {}).get("username") or str(user_id)
+    try:
+        _canvas_perms.remove_member(canvas["id"], int(user_id))
+    except _AuthError as exc:
+        _canvas_perms.audit("canvas_share_remove", actor, canvas["id"], username, "error", exc.code)
+        raise
+    _canvas_perms.audit("canvas_share_remove", actor, canvas["id"], username, "ok")
+    return {"ok": True, "permissions": _canvas_permissions_payload(canvas, request)}
+
+
+# --- 分享链接（M6）：链接本身仍要求登录，访问通过后自动加 viewer 成员 ----------
+SHARE_PAGE_PLACEHOLDER = """<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>分享画布 · NOVAI</title></head>
+<body style="margin:0;display:grid;place-items:center;min-height:100vh;font-family:-apple-system,sans-serif;background:#f5f5f7;color:#1d1d1f">
+<div style="text-align:center"><h1 style="font-size:20px">分享画布</h1>
+<p style="color:#656569;font-size:14px">分享页面正在由前端接入；接口已就绪。</p></div>
+</body></html>"""
+
+
+class ShareLinkCreateRequest(BaseModel):
+    expires_in_days: int = 7
+    password: Optional[str] = None
+    allow_clone: bool = False
+    role: str = "viewer"
+
+
+class ShareUnlockRequest(BaseModel):
+    password: str = ""
+
+
+def _share_error(status_code: int, code: str):
+    return JSONResponse(status_code=status_code, content={"code": code})
+
+
+def _share_session_user(request: Request):
+    token = request.cookies.get(_auth_service.COOKIE_NAME, "")
+    return _auth_service.session_user(token) if token else None
+
+
+def _share_client_ip(request: Request) -> str:
+    client_host = request.client.host if request.client else ""
+    if str(os.getenv("NOVAI_TRUST_PROXY", "")).strip().lower() in ("1", "true", "yes", "on"):
+        forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if forwarded:
+            return forwarded[:64]
+    return str(client_host or "")[:64]
+
+
+def _share_load_canvas(canvas_id: str):
+    try:
+        return load_canvas(canvas_id)
+    except Exception:
+        return None
+
+
+def _share_owner_username(canvas) -> str:
+    owner_id = _canvas_owner_id(canvas)
+    if owner_id is None:
+        return ""
+    owner = _canvas_perms.get_user(owner_id)
+    return (owner or {}).get("username") or ""
+
+
+def _share_bind_member(canvas, user) -> None:
+    """GET 分享文档通过后：把登录用户自动加为 viewer（owner/已是成员则跳过，幂等）。"""
+    user_id = int(user["id"])
+    owner_id = _canvas_owner_id(canvas)
+    if owner_id is not None and int(owner_id) == user_id:
+        return
+    if _canvas_perms.get_share(canvas["id"], user_id):
+        return
+    try:
+        _canvas_perms.add_member(canvas["id"], user_id, "viewer", 0)
+    except _AuthError:
+        # 并发下另一请求已加入：幂等
+        pass
+
+
+def _share_active_link(token: str):
+    link = _share_links.find_by_token(token)
+    if not link or int(link.get("revoked") or 0):
+        return None, _share_error(404, "NOT_FOUND")
+    if _share_links.is_expired(link):
+        return None, _share_error(410, "EXPIRED")
+    return link, None
+
+
+def _share_password_ok(request: Request, link) -> bool:
+    if not _share_links.has_password(link):
+        return True
+    raw = request.cookies.get(_share_links.COOKIE_NAME, "")
+    return _share_links.verify_access_cookie(raw, str(link.get("token") or ""))
+
+
+@app.get("/api/canvases/{canvas_id}/share-link")
+async def get_canvas_share_link(canvas_id: str, request: Request):
+    if not _auth_service.auth_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+    canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "manage")
+    link = _share_links.get_link(canvas["id"])
+    if not link or int(link.get("revoked") or 0):
+        return {"link": None}
+    return {"link": _share_links.link_payload(link, str(request.base_url))}
+
+
+@app.post("/api/canvases/{canvas_id}/share-link")
+async def create_canvas_share_link(canvas_id: str, payload: ShareLinkCreateRequest, request: Request):
+    if not _auth_service.auth_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+    canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "manage")
+    actor = _share_session_user(request) or {}
+    if int(payload.expires_in_days) not in _share_links.VALID_EXPIRES_IN_DAYS:
+        raise HTTPException(status_code=400, detail="expires_in_days 只能是 0/1/7/30")
+    role = str(payload.role or "viewer").strip().lower()
+    if role != "viewer":
+        raise HTTPException(status_code=400, detail="分享链接角色只能是 viewer")
+    raw_password = payload.password
+    password_hash = None
+    if raw_password:
+        text = str(raw_password)
+        if len(text) < 4 or len(text) > 128:
+            raise HTTPException(status_code=400, detail="密码长度需为 4-128 位")
+        password_hash = _share_passwords.hash_password(text)
+    link = _share_links.upsert_link(
+        canvas["id"],
+        int(actor.get("id") or 0),
+        int(payload.expires_in_days),
+        password_hash,
+        bool(payload.allow_clone),
+        role,
+    )
+    return {"link": _share_links.link_payload(link, str(request.base_url))}
+
+
+@app.delete("/api/canvases/{canvas_id}/share-link")
+async def delete_canvas_share_link(canvas_id: str, request: Request):
+    if not _auth_service.auth_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+    canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "manage")
+    _share_links.revoke_link(canvas["id"])
+    return {"ok": True}
+
+
+@app.api_route("/api/share/{token}", methods=["GET"])
+async def public_share_canvas(token: str, request: Request):
+    if not _auth_service.auth_enabled():
+        return _share_error(404, "NOT_FOUND")
+    user = _share_session_user(request)
+    if not user:
+        return _share_error(401, "AUTH_REQUIRED")
+    link, error = _share_active_link(token)
+    if error:
+        return error
+    if not _share_password_ok(request, link):
+        return _share_error(401, "PASSWORD_REQUIRED")
+    canvas = _share_load_canvas(str(link.get("canvas_id") or ""))
+    if not canvas:
+        return _share_error(404, "NOT_FOUND")
+    _share_bind_member(canvas, user)
+    return {
+        "canvas": canvas,
+        "title": canvas.get("title") or "未命名画布",
+        "owner_username": _share_owner_username(canvas),
+        "allow_clone": bool(int(link.get("allow_clone") or 0)),
+        "role": "viewer",
+        "authenticated": True,
+        "can_clone": bool(int(link.get("allow_clone") or 0)),
+    }
+
+
+@app.post("/api/share/{token}/unlock")
+async def unlock_share_canvas(token: str, payload: ShareUnlockRequest, request: Request):
+    if not _auth_service.auth_enabled():
+        return _share_error(404, "NOT_FOUND")
+    link, error = _share_active_link(token)
+    if error:
+        return error
+    if not _share_links.has_password(link):
+        return {"ok": True}
+    if _share_links.unlock_rate_limited(_share_client_ip(request)):
+        return _share_error(429, "RATE_LIMITED")
+    if not _share_links.password_matches(link, payload.password):
+        return _share_error(403, "BAD_PASSWORD")
+    value, max_age, _exp = _share_links.make_access_cookie(str(link.get("token") or ""), link)
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        _share_links.COOKIE_NAME,
+        value,
+        max_age=max_age,
+        httponly=True,
+        samesite="lax",
+        secure=(request.url.scheme == "https" or (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower() == "https"),
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/share/{token}/clone", status_code=201)
+async def clone_shared_canvas(token: str, request: Request):
+    if not _auth_service.auth_enabled():
+        return _share_error(404, "NOT_FOUND")
+    user = _share_session_user(request)
+    if not user:
+        return _share_error(401, "AUTH_REQUIRED")
+    link, error = _share_active_link(token)
+    if error:
+        return error
+    if not _share_password_ok(request, link):
+        return _share_error(401, "PASSWORD_REQUIRED")
+    if not int(link.get("allow_clone") or 0):
+        return _share_error(403, "CLONE_NOT_ALLOWED")
+    canvas = _share_load_canvas(str(link.get("canvas_id") or ""))
+    if not canvas:
+        return _share_error(404, "NOT_FOUND")
+    clone = json.loads(json.dumps(canvas, ensure_ascii=False))
+    clone["id"] = uuid.uuid4().hex
+    title = str(canvas.get("title") or "画布")[:70]
+    clone["title"] = (title + " 的副本")[:80]
+    clone["owner_id"] = int(user["id"])
+    clone["created_at"] = now_ms()
+    clone.pop("deleted_at", None)
+    save_canvas(clone)
+    return {"canvas_id": clone["id"]}
+
+
+@app.get("/c/{token}", include_in_schema=False)
+async def share_page(token: str):
+    if not _auth_service.auth_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+    path = os.path.join(STATIC_DIR, "share.html")
+    if os.path.isfile(path):
+        return FileResponse(path, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"})
+    return Response(content=SHARE_PAGE_PLACEHOLDER, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"})
+
+
+@app.websocket("/ws/canvas/{canvas_id}")
+async def canvas_collab_socket(websocket: WebSocket, canvas_id: str):
+    """M4 实时协作：/ws/canvas/{canvasId}，握手复用 novai_session cookie。"""
+    await _canvas_collab.serve(websocket, canvas_id, load_canvas)
+
 
 @app.post("/api/canvases/{canvas_id}/touch")
-async def touch_canvas(canvas_id: str):
+async def touch_canvas(canvas_id: str, request: Request):
     canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "edit")
     save_canvas(canvas)
     return {"canvas": canvas_record(canvas), "updated_at": canvas.get("updated_at", 0)}
 
@@ -23665,7 +24616,16 @@ def outputs_collect_from_canvases(favorites):
 
 def outputs_collect_from_dirs(favorites):
     entries = {}
-    for root, url_prefix in ((OUTPUT_DIR, "/output/"), (OUTPUT_OUTPUT_DIR, "/assets/output/")):
+    roots = [(OUTPUT_DIR, "/output/"), (OUTPUT_OUTPUT_DIR, "/assets/output/")]
+    user_id = current_tenant_user_id()
+    if user_id is not None:
+        # 当前用户的租户目录排在前面；历史公共目录仍保留（与 /assets 旧素材公共只读口径一致）
+        base = os.path.join(ASSETS_DIR, "users", str(int(user_id)))
+        roots = [
+            (os.path.join(base, "output"), "/assets/users/%d/output/" % int(user_id)),
+            (os.path.join(base, "input"), "/assets/users/%d/input/" % int(user_id)),
+        ] + roots
+    for root, url_prefix in roots:
         if not os.path.isdir(root):
             continue
         try:
@@ -24433,8 +25393,9 @@ def find_asset_item_in_library(lib, item_id, library_id=""):
 
 
 @app.put("/api/canvases/{canvas_id}")
-async def update_canvas(canvas_id: str, payload: CanvasSaveRequest):
+async def update_canvas(canvas_id: str, payload: CanvasSaveRequest, request: Request):
     canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "edit")
     current_updated_at = int(canvas.get("updated_at") or 0)
     if payload.base_updated_at and current_updated_at and int(payload.base_updated_at) < current_updated_at:
         raise HTTPException(status_code=409, detail={
@@ -24496,6 +25457,11 @@ def _generated_media_mount_path(url):
     if not text:
         return None
     clean = urllib.parse.unquote(text.split("?", 1)[0].split("#", 1)[0]).replace("\\", "/")
+    if clean.startswith("/assets/users/"):
+        path = output_file_from_url(text)
+        if not path:
+            return None
+        return path, ASSETS_DIR
     if clean.startswith("/assets/output/"):
         root = OUTPUT_OUTPUT_DIR
         rel = clean[len("/assets/output/"):]
@@ -24734,55 +25700,68 @@ async def delete_canvas_log(canvas_id, req):
 
 
 @app.post("/api/canvases/{canvas_id}/logs/delete")
-async def delete_canvas_log_api(canvas_id: str, req: DeleteCanvasLogRequest):
+async def delete_canvas_log_api(canvas_id: str, req: DeleteCanvasLogRequest, request: Request):
+    require_canvas_access(load_canvas_any(canvas_id), request, "edit")
     return await delete_canvas_log(canvas_id, req)
 
 
 @app.delete("/api/canvases/{canvas_id}")
-async def delete_canvas(canvas_id: str):
+async def delete_canvas(canvas_id: str, request: Request):
     canvas = load_canvas_any(canvas_id)
+    require_canvas_access(canvas, request, "manage")
     if not canvas.get("deleted_at"):
         canvas["deleted_at"] = now_ms()
         save_canvas(canvas)
     return {"ok": True}
 
 @app.post("/api/canvases/{canvas_id}/restore")
-async def restore_canvas(canvas_id: str):
+async def restore_canvas(canvas_id: str, request: Request):
     canvas = load_canvas_any(canvas_id)
+    require_canvas_access(canvas, request, "manage")
     if canvas.get("deleted_at"):
         canvas.pop("deleted_at", None)
         save_canvas(canvas)
     return {"canvas": canvas}
 
 @app.delete("/api/canvases/{canvas_id}/purge")
-async def purge_canvas(canvas_id: str):
+async def purge_canvas(canvas_id: str, request: Request):
+    canvas = load_canvas_any(canvas_id)
+    require_canvas_access(canvas, request, "manage")
     path = canvas_path(canvas_id)
     if os.path.exists(path):
         os.remove(path)
+    # 线程文件按画布存：彻底删除画布时一起清掉（软删除/回收站不清，恢复后对话还在）
+    try:
+        thread_path = _agent_thread_path(canvas_id)
+        if os.path.exists(thread_path):
+            os.remove(thread_path)
+    except Exception as exc:
+        print(f"[Agent] 清理画布线程失败 {canvas_id}: {exc}")
     return {"ok": True}
 
 # --- V2 Phase 2: 画布版本化 API ---
 
 @app.get("/api/canvases/{canvas_id}/versions")
-async def list_canvas_versions_api(canvas_id: str):
-    load_canvas(canvas_id)  # 404 校验（含软删除）
+async def list_canvas_versions_api(canvas_id: str, request: Request):
+    require_canvas_access(load_canvas(canvas_id), request, "view")  # 404 校验（含软删除）+ 归属
     return {"versions": list_canvas_versions(canvas_id), "limit": canvas_version_limit()}
 
 @app.get("/api/canvases/{canvas_id}/versions/{version}")
-async def get_canvas_version_api(canvas_id: str, version: int):
-    load_canvas(canvas_id)
+async def get_canvas_version_api(canvas_id: str, version: int, request: Request):
+    require_canvas_access(load_canvas(canvas_id), request, "view")
     return read_canvas_version(canvas_id, version)
 
 @app.post("/api/canvases/{canvas_id}/versions/{version}/restore")
 async def restore_canvas_version_api(canvas_id: str, version: int, request: Request):
     canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "edit")
     rec = read_canvas_version(canvas_id, version)
     snapshot = rec.get("canvas_snapshot")
     if not isinstance(snapshot, dict):
         raise HTTPException(status_code=400, detail="版本快照损坏")
     # 用快照覆盖画布内容；保留当前画布的身份/归属字段（id/创建时间/项目/负责人/颜色/置顶/位置）
     restored = dict(snapshot)
-    for key in ("id", "created_at", "project", "owner", "color", "pinned", "board_x", "board_y", "deleted_at"):
+    for key in ("id", "created_at", "project", "owner", "owner_id", "color", "pinned", "board_x", "board_y", "deleted_at"):
         if key in canvas:
             restored[key] = canvas[key]
     restored["kind"] = canvas.get("kind") or restored.get("kind") or "classic"
@@ -24799,8 +25778,8 @@ async def restore_canvas_version_api(canvas_id: str, version: int, request: Requ
     return {"canvas": restored, "version": new_version, "note": note}
 
 @app.delete("/api/canvases/{canvas_id}/versions/{version}")
-async def delete_canvas_version_api(canvas_id: str, version: int):
-    load_canvas(canvas_id)
+async def delete_canvas_version_api(canvas_id: str, version: int, request: Request):
+    require_canvas_access(load_canvas(canvas_id), request, "manage")
     path = os.path.join(canvas_versions_dir(canvas_id), f"v{int(version)}.json")
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="版本不存在")
@@ -24815,6 +25794,8 @@ async def delete_canvas_version_api(canvas_id: str, version: int):
 
 @app.post("/api/chat")
 async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
+    payload.provider = member_provider(payload.provider)
+    payload.image_provider = member_provider(payload.image_provider)
     user_id = safe_user_id(x_user_id, request)
     conversation = (
         load_conversation(user_id, payload.conversation_id)
@@ -24966,6 +25947,8 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
 
 @app.post("/api/chat/agent")
 async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
+    payload.provider = member_provider(payload.provider)
+    payload.image_provider = member_provider(payload.image_provider)
     user_id = safe_user_id(x_user_id, request)
     conversation = (
         load_conversation(user_id, payload.conversation_id)
@@ -25054,6 +26037,8 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
 
 @app.post("/api/chat/agent/stream")
 async def chat_agent_stream(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
+    payload.provider = member_provider(payload.provider)
+    payload.image_provider = member_provider(payload.image_provider)
     """agent 模式的流式版：决策阶段的 reasoning 实时转发、动作阶段发 status，落盘与 /api/chat/agent 一致。"""
     user_id = safe_user_id(x_user_id, request)
     started_at = time.monotonic()
@@ -25175,6 +26160,8 @@ async def chat_agent_stream(payload: ChatRequest, request: Request, x_user_id: s
 
 @app.post("/api/chat/stream")
 async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
+    payload.provider = member_provider(payload.provider)
+    payload.image_provider = member_provider(payload.image_provider)
     if payload.mode == "image":
         raise HTTPException(status_code=400, detail="图片模式请使用 /api/chat")
 
@@ -25698,6 +26685,7 @@ async def generate_cloud(req: CloudGenRequest):
 
 @app.post("/api/ms/generate")
 async def ms_generate(req: MsGenerateRequest):
+    member_provider("modelscope")   # 普通成员不允许绕过 APIMart 走 ModelScope
     api_root = modelscope_image_api_root()
     clean_token = modelscope_api_key(req.api_key)
     if not clean_token:
@@ -28678,6 +29666,37 @@ def _storyboard_render_payload(scene: dict, video_config: dict) -> dict:
     return payload
 
 
+def _storyboard_credit_params(payload: dict) -> dict:
+    """分镜 scene payload（dict）→ 视频估价参数；分辨率从 aspect_ratio 推一个保守高度。"""
+    try:
+        duration = float(payload.get("duration") or STORYBOARD_DEFAULT_DURATION)
+    except (TypeError, ValueError):
+        duration = float(STORYBOARD_DEFAULT_DURATION)
+    ratio = str(payload.get("aspect_ratio") or "16:9")
+    height = 720
+    match = re.match(r"\s*\d+\s*[:xX/]\s*(\d+)", ratio)
+    if match:
+        base = int(match.group(1))
+        if base and base <= 9:
+            height = 720
+    return {"duration": duration, "height": height, "width": 1280, "resolution": "720p", "rows": 1}
+
+
+def _storyboard_task_charge(task: dict, payload: dict):
+    """给分镜任务预扣积分并把 charge id 写回任务；返回 charge（auth-off 时 None）。"""
+    model = str(payload.get("model") or "veo3-fast")
+    try:
+        charge = credits_charge_start("video", model, _storyboard_credit_params(payload), task_ref=task["id"],
+                                     provider=str(payload.get("provider_id") or ""))
+    except Exception:
+        task_delete(task["id"])
+        raise
+    if charge:
+        task_set_status(task["id"], "queued", extra={"credits_charge_id": charge["id"],
+                                                     "credits": charge.get("credits")})
+    return charge
+
+
 # --- Storyboard API（V2 Phase 3） ---
 
 @app.post("/api/storyboards")
@@ -28790,6 +29809,7 @@ async def render_storyboard_scene(storyboard_id: str, scene_id: str = Query(""),
         video_config["provider_id"] = provider_id
     if model:
         video_config["model"] = model
+    video_config["provider_id"] = member_provider(video_config.get("provider_id"))
     payload = _storyboard_render_payload(scene, video_config)
     task = task_create(
         kind=STORYBOARD_KIND,
@@ -28804,6 +29824,7 @@ async def render_storyboard_scene(storyboard_id: str, scene_id: str = Query(""),
             "scene_order": scene.get("order") or 0,
         },
     )
+    charge = _storyboard_task_charge(task, payload)
     scene["task_id"] = task["id"]
     scene["status"] = "queued"
     with STORYBOARD_STORE_LOCK:
@@ -28816,7 +29837,10 @@ async def render_storyboard_scene(storyboard_id: str, scene_id: str = Query(""),
             store_sb["updated_at"] = time.time()
             storyboard_save(store_sb)
     await task_enqueue(task["id"])
-    return {"storyboard_id": storyboard_id, "scene_id": scene["scene_id"], "task_id": task["id"], "status": "queued"}
+    response = {"storyboard_id": storyboard_id, "scene_id": scene["scene_id"], "task_id": task["id"], "status": "queued"}
+    if charge:
+        response["credits"] = charge.get("credits")
+    return response
 
 
 @app.post("/api/storyboards/{storyboard_id}/render-all")
@@ -28834,35 +29858,47 @@ async def render_storyboard_all(storyboard_id: str, provider_id: str = Query("")
         video_config["provider_id"] = provider_id
     if model:
         video_config["model"] = model
+    video_config["provider_id"] = member_provider(video_config.get("provider_id"))
     launched: List[str] = []
     skipped: List[str] = []
     updated: List[dict] = []
-    for scene in scenes:
-        tid = scene.get("task_id") or ""
-        if tid:
-            t = task_get(tid)
-            if t and t.get("status") not in TASK_TERMINAL_STATUSES:
-                skipped.append(tid)
-                updated.append(scene)
-                continue
-        payload = _storyboard_render_payload(scene, video_config)
-        task = task_create(
-            kind=STORYBOARD_KIND,
-            payload=payload,
-            runner_name=STORYBOARD_RUNNER,
-            provider_id=str(payload.get("provider_id") or ""),
-            model_id=str(payload.get("model") or ""),
-            extra={
-                "storyboard_id": storyboard_id,
-                "storyboard_name": sb.get("name"),
-                "scene_id": scene["scene_id"],
-                "scene_order": scene.get("order") or 0,
-            },
-        )
-        scene["task_id"] = task["id"]
-        scene["status"] = "queued"
+    created: List[tuple] = []
+    try:
+        for scene in scenes:
+            tid = scene.get("task_id") or ""
+            if tid:
+                t = task_get(tid)
+                if t and t.get("status") not in TASK_TERMINAL_STATUSES:
+                    skipped.append(tid)
+                    updated.append(scene)
+                    continue
+            payload = _storyboard_render_payload(scene, video_config)
+            task = task_create(
+                kind=STORYBOARD_KIND,
+                payload=payload,
+                runner_name=STORYBOARD_RUNNER,
+                provider_id=str(payload.get("provider_id") or ""),
+                model_id=str(payload.get("model") or ""),
+                extra={
+                    "storyboard_id": storyboard_id,
+                    "storyboard_name": sb.get("name"),
+                    "scene_id": scene["scene_id"],
+                    "scene_order": scene.get("order") or 0,
+                },
+            )
+            charge = _storyboard_task_charge(task, payload)
+            created.append((scene, task, charge))
+            scene["task_id"] = task["id"]
+            scene["status"] = "queued"
+            updated.append(scene)
+    except Exception:
+        # 中途积分不足：把已经建好的任务和预扣全部回滚，避免「扣了钱没出片」
+        for _scene, task, charge in created:
+            credits_charge_refund(charge, "storyboard_render_aborted")
+            task_delete(task["id"])
+        raise
+    for _scene, task, charge in created:
         launched.append(task["id"])
-        updated.append(scene)
         await task_enqueue(task["id"])
     with STORYBOARD_STORE_LOCK:
         store_sb = STORYBOARD_STORE.get(storyboard_id)
@@ -31570,6 +32606,54 @@ def _agent_tool_use_asset_preview(args, canvas):
 # 工具 8: check_task
 # ---------------------------------------------------------------------------
 
+# 本轮已激活的技能（按 asyncio task 隔离：每个 run 一个 context，不跨请求串味）
+_AGENT_ACTIVATED_SKILLS = contextvars.ContextVar("novai_agent_activated_skills", default=None)
+
+
+def _agent_activated_skills_set():
+    current = _AGENT_ACTIVATED_SKILLS.get()
+    if current is None:
+        current = set()
+        _AGENT_ACTIVATED_SKILLS.set(current)
+    return current
+
+
+def _agent_tool_activate_skill_validate(args):
+    name = str((args or {}).get("name") or "").strip()
+    if not name:
+        raise AgentToolError("name 不能为空（要加载哪个技能）", code="invalid_args")
+    if len(name) > 64:
+        raise AgentToolError("name 最长 64 位", code="invalid_args")
+    return {"name": name}
+
+
+def _agent_tool_activate_skill_run(args):
+    """按需加载技能完整说明：返回 skill_prompt（截断 2 万字）；同一轮重复调用只回提示。"""
+    name = str(args.get("name") or "").strip()
+    activated = _agent_activated_skills_set()
+    if name in activated:
+        return {"name": name, "already_loaded": True, "characters": 0, "truncated": False,
+                "text": "技能 %s 本轮已加载，完整说明见上一次 activate_skill 的返回。" % name}
+    skill = _skills_registry.get_skill(name)
+    if not skill or not skill.get("enabled"):
+        raise AgentToolError("技能不存在或未启用：%s" % name, code="skill_not_found", status_code=404)
+    prompt = str(skill.get("skill_prompt") or "")
+    truncated = len(prompt) > AGENT_SKILL_PROMPT_MAX_CHARS
+    if truncated:
+        prompt = prompt[:AGENT_SKILL_PROMPT_MAX_CHARS] + AGENT_SKILL_TRUNCATED_NOTE
+    activated.add(name)
+    return {"name": name, "skill_id": skill.get("id"), "title": skill.get("name") or name,
+            "characters": len(prompt), "truncated": truncated, "already_loaded": False,
+            "text": prompt}
+
+
+def _agent_tool_activate_skill_preview(args):
+    name = str((args or {}).get("name") or "").strip()
+    if not name:
+        return {}
+    return {"type": "skill", "name": name, "title": "加载技能：%s" % name}
+
+
 def _agent_tool_check_task_validate(args):
     task_id = str(args.get("task_id") or "").strip()
     if not task_id:
@@ -33117,6 +34201,17 @@ AGENT_TOOLS = {
         "preview": _agent_tool_use_asset_preview,
         "mutates_canvas": False,
     },
+    "activate_skill": {
+        "description": "加载某个技能的完整说明（截断 2 万字），只读、不改画布。系统提示里只有技能索引；"
+                       "需要某个技能的完整操作手册时调用它，name 用索引里的技能 id。同一轮重复调用会直接返回已加载提示。",
+        "schema": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "技能 id（索引里每行第一个）"}},
+            "required": ["name"]},
+        "validate": _agent_tool_activate_skill_validate,
+        "run": _agent_tool_activate_skill_run,
+        "preview": _agent_tool_activate_skill_preview,
+        "mutates_canvas": False,
+    },
     "check_task": {
         "description": "查询任务状态（queued/running/provider_processing/succeeded/failed/cancelled…）与结果 URL。只读。",
         "schema": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]},
@@ -33126,6 +34221,10 @@ AGENT_TOOLS = {
         "mutates_canvas": False,
     },
 }
+
+# canvas_cli 挂在注册表末尾（不进字面量，避免它与命令行表逐条比对的源码解析测试把这行当成工具）。
+# 它只是「一条命令」的窄入口，真正的步骤在 _agent_run_normalize_steps 里就展开成真实工具了。
+AGENT_TOOLS[_agent_canvas_cli.TOOL_NAME] = _agent_canvas_cli.build_tool_entry(AGENT_TOOLS)
 
 
 def _agent_args_have_step_refs(args):
@@ -33143,8 +34242,49 @@ def _agent_args_have_step_refs(args):
 # Command Layer：统一执行器
 # ---------------------------------------------------------------------------
 
+# 画布助手额外可用的文件工具：只读表格 + 写 HTML/Excel 交付物（不建画布节点）。
+_AGENT_CANVAS_FILE_TOOL_NAMES = ("read_table", "write_html_report", "write_xlsx")
+_AGENT_FILE_WRITE_EXTS = {"write_html_report": (".html", ".htm"), "write_xlsx": (".xlsx",)}
+
+
+def _agent_canvas_file_tools():
+    return {name: _AGENT_FILE_TOOLS[name] for name in _AGENT_CANVAS_FILE_TOOL_NAMES
+            if name in _AGENT_FILE_TOOLS}
+
+
+def _agent_file_write_error(tool, args):
+    """写文件类工具的前置闸门：只允许纯文件名 + 白名单扩展名（写盘位置固定为 DATA_DIR 下）。
+
+    违规返回可读错误（交给 agent_execute_step 回灌模型），不抛异常。
+    """
+    allowed = _AGENT_FILE_WRITE_EXTS.get(str(tool or ""))
+    if not allowed:
+        return ""
+    args = args if isinstance(args, dict) else {}
+    name = str(args.get("name") or "").strip()
+    if not name:
+        return ""      # 不写名字时由工具用默认文件名（仍在 DATA_DIR 下）
+    if name != os.path.basename(name) or "\\" in name or "/" in name or ".." in name:
+        return "产物文件名只能是纯文件名（不能带目录/..）：%s" % name
+    ext = os.path.splitext(name)[1].lower()
+    if ext and ext not in allowed:
+        return "产物扩展名不支持：%s（%s 只允许 %s）" % (ext, tool, "、".join(allowed))
+    return ""
+
+
 async def agent_execute_step(tool_name, args):
     """执行单个工具步骤。返回统一结构 {ok, tool, result/error, code, ...}，绝不吞错误。"""
+    guard_error = _agent_file_write_error(tool_name, args or {})
+    if guard_error:
+        return {"ok": False, "tool": tool_name, "error": guard_error,
+                "code": "artifact_path_rejected", "status_code": 400}
+    if str(tool_name or "").startswith(_mcp_registry.AGENT_TOOL_PREFIX):
+        if not _mcp_registry.enabled():
+            return {"ok": False, "tool": tool_name,
+                    "error": "MCP 未启用（需要 NOVAI_MCP_ENABLED=1）",
+                    "code": "mcp_disabled", "status_code": 400}
+        # stdio 子进程调用是阻塞的，丢到线程里跑，别卡事件循环
+        return await asyncio.to_thread(_mcp_registry.execute_agent_step, tool_name, args or {})
     entry = AGENT_TOOLS.get(tool_name) or _AGENT_FILE_TOOLS.get(tool_name)
     if not entry:
         return {"ok": False, "tool": tool_name, "error": f"未知工具：{tool_name}",
@@ -33320,8 +34460,12 @@ _AGENT_PLAN_SYSTEM_PROMPT = (
 
 
 def _agent_build_tools_catalog():
-    return [{"name": name, "description": entry["description"], "schema": entry["schema"]}
-            for name, entry in AGENT_TOOLS.items()]
+    catalog = [{"name": name, "description": entry["description"], "schema": entry["schema"]}
+               for name, entry in AGENT_TOOLS.items()]
+    # MCP 工具（mcp__<server>__<tool>）：未启用时 registry 返回空列表，目录与原来逐字一致
+    catalog.extend({"name": item["name"], "description": item["description"], "schema": item["schema"]}
+                   for item in _mcp_registry.agent_tool_entries())
+    return catalog
 
 
 def agent_reference_image_count(reference_images):
@@ -33770,19 +34914,20 @@ async def agent_apply(payload: AgentApplyRequest):
 
 
 @app.post("/api/agent/rollback")
-async def agent_rollback(payload: AgentRollbackRequest):
+async def agent_rollback(payload: AgentRollbackRequest, request: Request):
     """接收 {canvas_id, to_version} → 复用 Phase 2 版本化还原逻辑回滚画布。"""
     canvas_id = str(payload.canvas_id or "").strip()
     to_version = int(payload.to_version or 0)
     if to_version <= 0:
         raise HTTPException(status_code=400, detail="to_version 必须是正整数")
     canvas = load_canvas(canvas_id)
+    require_canvas_access(canvas, request, "edit")
     rec = read_canvas_version(canvas_id, to_version)
     snapshot = rec.get("canvas_snapshot")
     if not isinstance(snapshot, dict):
         raise HTTPException(status_code=400, detail="版本快照损坏，无法回滚")
     restored = dict(snapshot)
-    for key in ("id", "created_at", "project", "owner", "color", "pinned", "board_x", "board_y", "deleted_at"):
+    for key in ("id", "created_at", "project", "owner", "owner_id", "color", "pinned", "board_x", "board_y", "deleted_at"):
         if key in canvas:
             restored[key] = canvas[key]
     restored["kind"] = canvas.get("kind") or restored.get("kind") or "classic"
@@ -33848,6 +34993,14 @@ _AGENT_RUN_SYSTEM_PROMPT = (
     "你是 NOVAI 无限画布的智能助手 Agent，运行在服务端的循环里：每一轮你只决定「接下来做哪几步」，"
     "系统会真实执行这些步骤，并把执行结果回灌给你；你据此决定下一轮，直到可以回复用户为止。\n"
     "可用工具清单（JSON Schema）：\n{tools_json}\n"
+    "工具选择：画布操作优先用 canvas_cli——一条命令一个步骤，写法 "
+    "{{\"tool\": \"canvas_cli\", \"args\": {{\"command\": \"<命令名>\", \"args\": {{...}}}}, "
+    "\"description\": \"给用户看的一句中文\"}}；command 只能取工具参数 enum 里列出的命令名。"
+    "原来的 22 个工具仍然可用、每个都与同名命令等价，但同一次运行里不要混用两种写法。"
+    "写命令 / 生成命令会走用户确认闸门：用户没点「执行」时系统只出方案，不会真的改画布。\n"
+    "例如建一个提示词节点（合法 JSON）：{{\"tool\": \"canvas_cli\", \"args\": {{\"command\": \"node.create\", "
+    "\"args\": {{\"canvas_id\": \"c1\", \"type\": \"prompt\", \"prompt\": \"黄昏海边的猫\"}}}}, "
+    "\"description\": \"新建提示词节点\"}}\n"
     "本次可用的生图/生视频平台与模型清单（写 generate_image / generate_video 时必须从这里选："
     "provider 用平台 id，model 用该平台声明的模型名，跨平台模型名不能混用；清单之外的模型名不能写）：\n"
     "{media_platforms_text}\n"
@@ -33939,6 +35092,9 @@ class AgentRunFocus(BaseModel):
     selected_node_ids: List[str] = []
     reference_images: List[str] = []
     reference_videos: List[str] = []
+    # 引用带身份（M1）：[{id, name?, role?, source?}]。这里不校验类型——脏条目交给
+    # _agent_run_normalize_focus 逐条丢弃，否则一个坏字段会让整个请求 422。
+    references: Any = []
     viewport: Optional[Dict[str, Any]] = None
 
 
@@ -33975,6 +35131,12 @@ class AgentRunRequest(BaseModel):
     max_steps: int = 12
     mode: str = "plan"
     approved_steps: List[AgentRunStep] = []
+    # NOVAI 自带技能：缺省空串 = 不挂技能。>64 字符直接 422（技能 id 上限与 registry._ID_RE 一致）
+    skill_id: str = Field("", max_length=64)
+    # 应用市场技能正文引用（形如 "store:skrull"）：由后端注入系统提示，不占 instruction 的 4000 字
+    skill_ref: str = Field("", max_length=128)
+    # 会话线程：给了就以该线程的消息为准（优先于 history），并把本轮追加回这个线程
+    thread_id: str = Field("", max_length=64)
 
     @field_validator("history", mode="before")
     @classmethod
@@ -34010,8 +35172,10 @@ class AgentRunRequest(BaseModel):
         return items
 
 
-def _agent_sse_event(event, data):
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+def _agent_sse_event(event, data, seq=None):
+    """SSE 分片。给了 seq 就带 `id:` 行（断流恢复时浏览器会把它当 Last-Event-ID 回传）。"""
+    prefix = "" if seq is None else "id: %d\n" % int(seq)
+    return "%sevent: %s\ndata: %s\n\n" % (prefix, event, json.dumps(data, ensure_ascii=False))
 
 
 def _agent_run_focus_dict(focus):
@@ -34022,6 +35186,39 @@ def _agent_run_focus_dict(focus):
     if hasattr(focus, "dict"):
         return focus.dict()
     return focus if isinstance(focus, dict) else {}
+
+
+# 引用带身份（M1）：focus.references 的 role / source 白名单与上限。
+AGENT_FOCUS_REFERENCE_ROLES = ("subject", "style", "composition", "first_frame", "last_frame", "context")
+AGENT_FOCUS_REFERENCE_SOURCES = ("node", "upload", "asset")
+AGENT_FOCUS_REFERENCES_LIMIT = 12
+AGENT_FOCUS_REFERENCE_NAME_CHARS = 80
+
+
+def _agent_run_normalize_references(raw):
+    """清洗 focus.references：只留字典条目、id 非空、按 id 去重、最多 12 条。
+    role / source 不在白名单时退回缺省值（None / node），name 截断 80 字；非法条目静默丢弃。"""
+    out, seen = [], set()
+    for item in (raw if isinstance(raw, list) else []):
+        if hasattr(item, "model_dump"):
+            item = item.model_dump()
+        if not isinstance(item, dict):
+            continue
+        ref_id = str(item.get("id") or "").strip()
+        if not ref_id or ref_id in seen:
+            continue
+        seen.add(ref_id)
+        role = str(item.get("role") or "").strip().lower()
+        source = str(item.get("source") or "").strip().lower()
+        out.append({
+            "id": ref_id,
+            "name": str(item.get("name") or "").strip()[:AGENT_FOCUS_REFERENCE_NAME_CHARS],
+            "role": role if role in AGENT_FOCUS_REFERENCE_ROLES else None,
+            "source": source if source in AGENT_FOCUS_REFERENCE_SOURCES else "node",
+        })
+        if len(out) >= AGENT_FOCUS_REFERENCES_LIMIT:
+            break
+    return out
 
 
 def _agent_run_normalize_focus(focus):
@@ -34051,6 +35248,7 @@ def _agent_run_normalize_focus(focus):
         "selected_node_ids": _str_list("selected_node_ids"),
         "reference_images": _str_list("reference_images"),
         "reference_videos": _str_list("reference_videos"),
+        "references": _agent_run_normalize_references(data.get("references")),
         "viewport": vp,
     }
 
@@ -34098,13 +35296,15 @@ def _agent_run_history_prompt(history):
 
 
 def _agent_run_focus_text(focus, canvas):
-    """把 focus 渲染成 system prompt 的「用户当前注意力」段落（选中节点标注真实存在性）。"""
+    """把 focus 渲染成 system prompt 的「用户当前注意力」段落（选中节点 / 参考对象都标注真实存在性）。"""
     nodes = {}
     for node in (canvas.get("nodes") or []):
         if isinstance(node, dict) and node.get("id"):
             nodes[str(node["id"])] = node
     lines = []
     selected = focus.get("selected_node_ids") or []
+    references = focus.get("references") or []
+    missing = []
     if selected:
         exist = [nid for nid in selected if nid in nodes]
         missing = [nid for nid in selected if nid not in nodes]
@@ -34113,10 +35313,37 @@ def _agent_run_focus_text(focus, canvas):
             for nid in exist:
                 node = nodes[nid]
                 lines.append(f"- {nid}｜type={node.get('type')}｜编号={node.get('alias') or '无'}｜标题={node.get('title') or '无'}")
-        if missing:
-            lines.append("用户提到但当前画布上不存在的节点 ID（可能已过期，不要盲信）：" + "、".join(missing))
     else:
         lines.append("用户当前没有选中任何节点。")
+    if references:
+        # 按 source 分流：上传素材的 id（upload_<ts>_<i>）本来就不在画布里，说成「可能已过期」会误导模型
+        node_refs, other_refs = [], []
+        for ref in references:
+            if not isinstance(ref, dict):
+                continue
+            (other_refs if str(ref.get("source") or "node") != "node" else node_refs).append(ref)
+        if node_refs:
+            lines.append("用户指定的参考节点（role 说明这次把它当什么用）：")
+            for ref in node_refs:
+                ref_id = str(ref.get("id") or "")
+                node = nodes.get(ref_id)
+                if node is None:
+                    # 不存在的别编造：并进下面那句「不存在的节点 ID」，让模型知道别硬用
+                    if ref_id and ref_id not in missing:
+                        missing.append(ref_id)
+                    continue
+                # 本函数产出的是最终文本（不再走 .format），双花括号就是固定引用标记
+                lines.append("- {{node/%s}}｜role=%s｜type=%s｜标题=%s" % (
+                    ref_id, ref.get("role") or "未指定", _agent_node_type(node), node.get("title") or "无"))
+        if other_refs:
+            lines.append("用户上传的参考素材（没有画布节点 ID，不能当 node id 用）：")
+            for ref in other_refs:
+                source = str(ref.get("source") or "").strip().lower()
+                label = "上传素材" if source == "upload" else "素材库素材"
+                lines.append("  - %s：%s（source=%s，没有画布节点身份）" % (
+                    label, str(ref.get("name") or "").strip() or "未命名素材", source))
+    if missing:
+        lines.append("用户提到但当前画布上不存在的节点 ID（可能已过期，不要盲信）：" + "、".join(missing))
     if focus.get("reference_images"):
         lines.append("用户附带的参考图 URL：" + "、".join(focus["reference_images"][:5]))
     if focus.get("reference_videos"):
@@ -34223,6 +35450,10 @@ def _agent_run_normalize_steps(raw_steps, tools=None):
             continue
         steps.append({"tool": tool, "args": dict(args),
                       "description": str(item.get("description") or "")[:300]})
+    # canvas_cli 只是外壳：必须在这里（任何闸门使用 steps 之前）展开成内层真实工具，
+    # 因为确认闸门 / 免费判定 / 生成单元计数全按工具名工作，展开晚了就是一条免确认的后门。
+    steps, expand_errors = _agent_canvas_cli.expand_steps(steps, available)
+    unknown.extend(expand_errors)
     return steps, unknown
 
 
@@ -34239,7 +35470,9 @@ def agent_plan_confirmation_needed(steps, confirmed=False):
     if confirmed:
         return {"needed": False, "tools": []}
     tools = [str((s or {}).get("tool") or "") for s in (steps or []) if isinstance(s, dict)]
-    blocked = [t for t in tools if t in AGENT_PLAN_CONFIRM_TOOLS]
+    # MCP 工具默认要确认：可能改外部系统、也可能有副作用，统一走「先出方案 → 用户点执行」
+    blocked = [t for t in tools
+               if t in AGENT_PLAN_CONFIRM_TOOLS or t.startswith(_mcp_registry.AGENT_TOOL_PREFIX)]
     return {"needed": bool(blocked), "tools": blocked}
 
 
@@ -34322,7 +35555,7 @@ def _agent_plan_event(intent, steps, expected_output="", extra=None):
 
 
 AGENT_FREE_TOOLS = {"refine_prompt", "get_canvas", "list_canvases", "use_asset", "check_task", "list_templates",
-                    "remember", "forget", "arrange_canvas"}
+                    "remember", "forget", "arrange_canvas", "activate_skill"}
 
 
 def _agent_steps_are_free(raw_steps):
@@ -34762,30 +35995,145 @@ def _agent_thread_path(canvas_id):
     return os.path.join(AGENT_THREADS_DIR, f"{cleaned}.json")
 
 
-def agent_thread_load(canvas_id):
+AGENT_THREAD_MAX_THREADS = 20
+AGENT_THREAD_TITLE_MAX = 60
+
+
+def _agent_thread_new_id():
+    return "th_" + uuid.uuid4().hex[:12]
+
+
+def _agent_thread_new_thread(title, created_at=None, forked_from="", forked_at_message=None,
+                             messages=None, recent=None, skill_id=""):
+    return {
+        "id": _agent_thread_new_id(),
+        "title": str(title or "对话 1")[:AGENT_THREAD_TITLE_MAX],
+        "created_at": float(created_at if created_at is not None else time.time()),
+        "forked_from": str(forked_from or ""),
+        "forked_at_message": forked_at_message,
+        "messages": list(messages or []),
+        "recent": list(recent or []),
+        "skill_id": str(skill_id or ""),
+    }
+
+
+def _agent_thread_normalize_thread(raw, fallback_index=0):
+    if not isinstance(raw, dict):
+        return None
+    messages = [item for item in (raw.get("messages") or []) if isinstance(item, dict)]
+    thread = _agent_thread_new_thread(
+        raw.get("title") or "对话 %d" % (fallback_index + 1),
+        created_at=raw.get("created_at") or raw.get("updated_at") or time.time(),
+        forked_from=raw.get("forked_from") or "",
+        forked_at_message=raw.get("forked_at_message"),
+        messages=messages,
+        recent=[str(a) for a in (raw.get("recent") or []) if a],
+        skill_id=raw.get("skill_id") or "",
+    )
+    if isinstance(raw.get("id"), str) and raw.get("id").strip():
+        thread["id"] = raw["id"].strip()
+    return thread
+
+
+def _agent_thread_doc_load(canvas_id):
+    """读整份线程文档。旧格式（单线程：messages/recent）自动迁移成 threads[0]，不丢任何消息。"""
+    empty = {"canvas_id": canvas_id, "threads": [], "active_id": "", "updated_at": 0}
     try:
         path = _agent_thread_path(canvas_id)
     except HTTPException:
-        return {"canvas_id": canvas_id, "messages": [], "recent": []}
+        return empty
     if not os.path.exists(path):
-        return {"canvas_id": canvas_id, "messages": [], "recent": []}
+        return empty
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if isinstance(data, dict):
-            data.setdefault("messages", [])
-            data.setdefault("recent", [])
-            return data
     except Exception as exc:
         print(f"[Agent] 读取对话记录失败 {canvas_id}: {exc}")
-    return {"canvas_id": canvas_id, "messages": [], "recent": []}
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    if isinstance(data.get("threads"), list):
+        threads = []
+        for index, raw in enumerate(data.get("threads") or []):
+            thread = _agent_thread_normalize_thread(raw, index)
+            if thread:
+                threads.append(thread)
+        active_id = str(data.get("active_id") or "").strip()
+        if not any(t["id"] == active_id for t in threads):
+            active_id = threads[0]["id"] if threads else ""
+        return {"canvas_id": canvas_id, "threads": threads, "active_id": active_id,
+                "updated_at": float(data.get("updated_at") or 0)}
+    # 旧格式：{"canvas_id", "messages", "recent", "updated_at"} → 包成单线程
+    migrated = _agent_thread_normalize_thread({
+        "title": data.get("title") or "对话 1",
+        "created_at": data.get("created_at") or data.get("updated_at"),
+        "messages": data.get("messages") or [],
+        "recent": data.get("recent") or [],
+    }, 0)
+    if not migrated:
+        return empty
+    return {"canvas_id": canvas_id, "threads": [migrated], "active_id": migrated["id"],
+            "updated_at": float(data.get("updated_at") or migrated["created_at"])}
+
+
+def _agent_thread_doc_save(canvas_id, doc):
+    doc = doc or {}
+    doc["canvas_id"] = canvas_id
+    doc["updated_at"] = time.time()
+    os.makedirs(AGENT_THREADS_DIR, exist_ok=True)
+    write_json_atomic(_agent_thread_path(canvas_id), doc, ensure_ascii=False, indent=2)
+
+
+def _agent_thread_active(doc):
+    threads = (doc or {}).get("threads") or []
+    active_id = str((doc or {}).get("active_id") or "")
+    for thread in threads:
+        if thread.get("id") == active_id:
+            return thread
+    return threads[0] if threads else None
+
+
+def _agent_thread_find(doc, thread_id):
+    for thread in (doc or {}).get("threads") or []:
+        if thread.get("id") == str(thread_id or ""):
+            return thread
+    return None
+
+
+def _agent_thread_require(doc, thread_id):
+    thread = _agent_thread_find(doc, thread_id)
+    if not thread:
+        raise HTTPException(status_code=404, detail="线程不存在：%s" % (thread_id or "<空>"))
+    return thread
+
+
+def _agent_thread_ensure_active(canvas_id):
+    """确保画布至少有一个线程（首次使用时建一个），返回 (doc, active_thread)。"""
+    doc = _agent_thread_doc_load(canvas_id)
+    thread = _agent_thread_active(doc)
+    if thread is None:
+        thread = _agent_thread_new_thread("对话 1")
+        doc["threads"] = [thread]
+        doc["active_id"] = thread["id"]
+    return doc, thread
+
+
+def agent_thread_load(canvas_id):
+    """兼容旧调用（只关心当前线程）：返回 active 线程的 messages/recent。"""
+    doc = _agent_thread_doc_load(canvas_id)
+    thread = _agent_thread_active(doc)
+    if not thread:
+        return {"canvas_id": canvas_id, "messages": [], "recent": []}
+    result = dict(thread)
+    result["canvas_id"] = canvas_id
+    return result
 
 
 def agent_thread_append(canvas_id, records, touched=None):
-    """追加若干条消息并更新「最近改动的节点」；失败只打日志，不影响主流程。"""
+    """往当前线程追加消息并更新「最近改动的节点」；失败只打日志，不影响主流程。"""
     try:
         with _AGENT_THREAD_LOCK:
-            thread = agent_thread_load(canvas_id)
+            doc, thread = _agent_thread_ensure_active(canvas_id)
             now = time.time()
             for rec in records or []:
                 if not isinstance(rec, dict) or not str(rec.get("text") or "").strip():
@@ -34801,10 +36149,7 @@ def agent_thread_append(canvas_id, records, touched=None):
                 if a not in recent:
                     recent.append(a)
             thread["recent"] = recent[:AGENT_THREAD_RECENT_LIMIT]
-            thread["canvas_id"] = canvas_id
-            thread["updated_at"] = now
-            os.makedirs(AGENT_THREADS_DIR, exist_ok=True)
-            write_json_atomic(_agent_thread_path(canvas_id), thread, ensure_ascii=False, indent=2)
+            _agent_thread_doc_save(canvas_id, doc)
     except Exception as exc:
         print(f"[Agent] 写对话记录失败 {canvas_id}: {exc}")
 
@@ -34861,6 +36206,104 @@ async def agent_thread_get(canvas_id: str, limit: int = 60):
             "recent": thread.get("recent", [])}
 
 
+class AgentThreadForkRequest(BaseModel):
+    canvas_id: str
+    thread_id: str = Field("", max_length=64)
+    message_index: int = 0
+    title: str = Field("", max_length=AGENT_THREAD_TITLE_MAX)
+
+
+class AgentThreadSwitchRequest(BaseModel):
+    canvas_id: str
+    thread_id: str = Field("", max_length=64)
+
+
+def _agent_thread_list_row(thread):
+    return {"id": thread.get("id"), "title": thread.get("title"),
+            "created_at": thread.get("created_at"),
+            "forked_from": thread.get("forked_from") or "",
+            "forked_at_message": thread.get("forked_at_message"),
+            "message_count": len(thread.get("messages") or [])}
+
+
+@app.get("/api/agent/threads")
+async def agent_threads_list(canvas_id: str, request: Request):
+    """线程列表（只给元信息，不含正文）。"""
+    canvas_id = str(canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    require_canvas_access(load_canvas(canvas_id), request, "view")
+    doc = _agent_thread_doc_load(canvas_id)
+    return {"canvas_id": canvas_id, "active_id": doc.get("active_id") or "",
+            "threads": [_agent_thread_list_row(thread) for thread in doc.get("threads") or []]}
+
+
+@app.post("/api/agent/threads/fork")
+async def agent_threads_fork(payload: AgentThreadForkRequest, request: Request):
+    """从某个线程的第 message_index 条（含）截断复制出一个新线程。"""
+    canvas_id = str(payload.canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    require_canvas_access(load_canvas(canvas_id), request, "view")
+    with _AGENT_THREAD_LOCK:
+        doc = _agent_thread_doc_load(canvas_id)
+        source = _agent_thread_require(doc, payload.thread_id)
+        messages = source.get("messages") or []
+        if not messages:
+            raise HTTPException(status_code=400, detail="该线程还没有消息，无法分支")
+        index = int(payload.message_index)
+        if index < 0 or index >= len(messages):
+            raise HTTPException(status_code=400,
+                                detail="message_index 越界（当前 0..%d）" % (len(messages) - 1))
+        if len(doc.get("threads") or []) >= AGENT_THREAD_MAX_THREADS:
+            raise HTTPException(status_code=400,
+                                detail="线程过多，请先删除（每张画布最多 %d 条）" % AGENT_THREAD_MAX_THREADS)
+        copied = json.loads(json.dumps(messages[:index + 1], ensure_ascii=False))
+        forks = len([item for item in doc.get("threads") or []
+                     if str(item.get("forked_from") or "") == source["id"]])
+        title = str(payload.title or "").strip() or ("%s · 分支 %d" % (source.get("title") or "对话", forks + 2))
+        thread = _agent_thread_new_thread(title, forked_from=source["id"], forked_at_message=index,
+                                          messages=copied, recent=list(source.get("recent") or []),
+                                          skill_id=source.get("skill_id") or "")
+        doc.setdefault("threads", []).append(thread)
+        _agent_thread_doc_save(canvas_id, doc)
+    return {"ok": True, "thread": {"id": thread["id"], "title": thread["title"],
+                                   "message_count": len(copied)}}
+
+
+@app.post("/api/agent/threads/switch")
+async def agent_threads_switch(payload: AgentThreadSwitchRequest, request: Request):
+    """切换当前线程（之后的对话与追加都落在这个线程上）。"""
+    canvas_id = str(payload.canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    require_canvas_access(load_canvas(canvas_id), request, "view")
+    with _AGENT_THREAD_LOCK:
+        doc = _agent_thread_doc_load(canvas_id)
+        thread = _agent_thread_require(doc, payload.thread_id)
+        doc["active_id"] = thread["id"]
+        _agent_thread_doc_save(canvas_id, doc)
+    return {"ok": True, "active_id": thread["id"]}
+
+
+@app.get("/api/agent/files/{name}")
+async def agent_artifact_file(name: str):
+    """智能体产物受控下载：只允许 data 目录下、扩展名白名单内的文件。"""
+    raw = str(name or "").strip()
+    if (not raw or os.path.basename(raw) != raw or "\\" in raw or "/" in raw
+            or ".." in raw or raw in (".", "..")):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    ext = os.path.splitext(raw)[1].lower()
+    if ext not in AGENT_ARTIFACT_EXTS:
+        raise HTTPException(status_code=400,
+                            detail="不支持的文件类型：%s（允许：%s）" % (ext or "无扩展名",
+                                                                "、".join(sorted(AGENT_ARTIFACT_EXTS))))
+    path = _agent_artifact_find_path(raw)
+    if not path:
+        raise HTTPException(status_code=404, detail="产物不存在：%s" % raw)
+    return FileResponse(path, filename=raw)
+
+
 @app.delete("/api/agent/thread/{canvas_id}")
 async def agent_thread_clear(canvas_id: str):
     """「新对话」：清掉这张画布的对话记录（画布本身不动）。"""
@@ -34899,13 +36342,13 @@ def _agent_chat_vision_key(chat):
 
 
 def _agent_run_collect_images(focus, canvas):
-    """这轮要给模型看的图：选中节点的图（用编号标注）+ 用户附带的参考图，最多 4 张，只要图片不要视频。"""
+    """这轮要给模型看的图：选中节点的图 + 用户指定的参考对象（按 references 顺序）+ 用户附带的参考图，
+    最多 AGENT_VISION_MAX_IMAGES 张，只要图片不要视频。"""
     picked, seen = [], set()
     by_id = _agent_nodes_by_id(canvas) if isinstance(canvas, dict) else {}
-    for nid in (focus or {}).get("selected_node_ids") or []:
-        node = by_id.get(str(nid))
-        if not node:
-            continue
+
+    def _take_first_image(node):
+        # 一个节点只取第一张图（与选中节点同一口径），免得单个节点把看图预算吃光
         for item in _agent_media_items(node):
             if _agent_item_kind(item) != "image":
                 continue
@@ -34913,7 +36356,19 @@ def _agent_run_collect_images(focus, canvas):
             if url and url not in seen:
                 seen.add(url)
                 picked.append({"url": url, "label": _agent_node_ref(node)})
-            break
+            return
+
+    for nid in (focus or {}).get("selected_node_ids") or []:
+        node = by_id.get(str(nid))
+        if node:
+            _take_first_image(node)
+    # references 排在旧 reference_images 前面：前者带身份（role 说明当什么用），意图更明确
+    for ref in (focus or {}).get("references") or []:
+        if not isinstance(ref, dict):
+            continue
+        node = by_id.get(str(ref.get("id") or ""))
+        if node:
+            _take_first_image(node)
     n = 0
     for url in (focus or {}).get("reference_images") or []:
         url = str(url or "").strip()
@@ -35183,6 +36638,7 @@ _AGENT_NATIVE_NOTE = (
     "\n【本次可以直接调用工具函数】需要操作画布时直接调用工具（一次可以调用多个；每个工具都可以带 description："
     "给用户看的一句中文，说清对哪个节点做什么）；canvas_id 可以省略。plan 模式下调用工具就是给出方案，系统不会立即执行，"
     "可以在正文里用一句话写清目标。回答问题、向用户提问、或者任务已经完成时，直接用中文写回复，不要输出 JSON。\n"
+    "画布操作优先调用 canvas_cli 工具；它的 command 取值见工具参数说明。\n"
 )
 
 
@@ -35353,6 +36809,79 @@ def _agent_run_persist_session(session, status, message, history, rounds, steps_
         print(f"[Agent] run {run_id} 会话持久化失败: {exc}")
 
 
+AGENT_SKILL_PROMPT_MAX_CHARS = 20000
+AGENT_SKILL_TRUNCATED_NOTE = "（技能说明过长，已截断）"
+
+
+def _agent_require_skill(skill_id):
+    """按 id 取一个**已启用**的技能；查不到 / 未启用直接 400。
+    用户挂了技能却按无技能跑，会拿错工具、产出错东西——宁可这次请求失败，也不静默降级。"""
+    skill_id = str(skill_id or "").strip()
+    skill = _skills_registry.get_skill(skill_id) if skill_id else None
+    if not skill or not skill.get("enabled"):
+        raise HTTPException(status_code=400, detail="技能不存在或未启用：%s" % (skill_id or "<空>"))
+    return skill
+
+
+def _agent_skill_prompt_block(skill_id):
+    """本轮追加到 system prompt 末尾的技能段落（放最后：越靠后的指令模型越当回事）。"""
+    skill = _agent_require_skill(skill_id)
+    prompt = str(skill.get("skill_prompt") or "")
+    if len(prompt) > AGENT_SKILL_PROMPT_MAX_CHARS:
+        prompt = prompt[:AGENT_SKILL_PROMPT_MAX_CHARS] + AGENT_SKILL_TRUNCATED_NOTE
+    parts = ["\n\n【本次运行的技能】%s（技能 ID：%s）" % (skill.get("name") or skill.get("id"), skill.get("id"))]
+    usage = str(skill.get("usage_instruction") or "").strip()
+    if usage:
+        parts.append(usage)
+    parts.append("—— 以下技能说明必须遵守 ——")
+    parts.append(prompt)
+    return "\n".join(parts) + "\n"
+
+
+AGENT_SKILL_INDEX_MAX = 60
+
+
+def _agent_skill_index_block():
+    """没选中技能时给模型看的技能索引：id + 名称 + 一句话描述 + 按需加载指令。"""
+    try:
+        skills = [s for s in _skills_registry.load_skills() if s.get("enabled")]
+    except Exception:
+        return ""
+    if not skills:
+        return ""
+    lines = ["\n\n【技能索引】当前可用技能（系统只给了索引；需要完整操作说明时调用 "
+             "activate_skill(name)，name 用每行开头的技能 id。没调用前不要假设技能细节）："]
+    for skill in skills[:AGENT_SKILL_INDEX_MAX]:
+        desc = str(skill.get("description") or "").strip().replace("\n", " ")
+        lines.append("- %s | %s | %s" % (skill.get("id"), skill.get("name") or skill.get("id"), desc[:80]))
+    if len(skills) > AGENT_SKILL_INDEX_MAX:
+        lines.append("…（还有 %d 个技能未列出）" % (len(skills) - AGENT_SKILL_INDEX_MAX))
+    return "\n".join(lines) + "\n"
+
+
+# skill_ref 的合法前缀：新写法 store:，另外兼容历史写法（已生成的画布种子 / 旧请求里还带着它）
+_AGENT_SKILL_REF_PREFIXES = ("store:", "tap" + "now:")
+
+
+def _agent_store_skill_manual(skill_ref):
+    """"store:<技能id>" -> 系统提示里的【技能执行手册】段落；未知/读不到返回空串（不报错）。
+
+    正文最大 6 万字，超过 30000 字截断并标注（截断逻辑在 store 路由里，与详情展示同一口径）。
+    """
+    ref = str(skill_ref or "").strip()
+    lowered = ref.lower()
+    prefix = next((p for p in _AGENT_SKILL_REF_PREFIXES if lowered.startswith(p)), "")
+    if not prefix:
+        return ""
+    name = ref[len(prefix):].strip()
+    if not name:
+        return ""
+    body = _store_skill_body_by_id(name)
+    if not body:
+        return ""
+    return _store_skill_manual_text(body)
+
+
 class _CanvasRunContext(_AgentRunContext):
     """画布上下文提供者：逐项复用原有画布函数，保证画布 agent 行为零变更。"""
 
@@ -35366,6 +36895,8 @@ class _CanvasRunContext(_AgentRunContext):
         self.use_thread = bool(req.get("use_thread"))
         self.image_provider = str(req.get("image_provider") or "").strip()
         self.image_model = str(req.get("image_model") or "").strip()
+        self.skill_id = str(req.get("skill_id") or "").strip()
+        self.skill_ref = str(req.get("skill_ref") or "").strip()
         self.vision_mode_direct = False
 
     def load(self):
@@ -35412,10 +36943,46 @@ class _CanvasRunContext(_AgentRunContext):
         return {"canvas_id": self.canvas_id}
 
     def tools(self):
-        return AGENT_TOOLS
+        tools = dict(AGENT_TOOLS)
+        # 画布助手也能产出交付物：文件工具执行走 agent_execute_step 的 _AGENT_FILE_TOOLS 分支
+        tools.update(_agent_canvas_file_tools())
+        # MCP 工具只带描述/schema（执行走 agent_execute_step 的 mcp__ 分支，不在这张表里跑）
+        for item in _mcp_registry.agent_tool_entries():
+            tools[item["name"]] = {"description": item["description"], "schema": item["schema"],
+                                   "mutates_canvas": False}
+        return tools
 
     def tool_catalog(self):
-        return _agent_build_tools_catalog()
+        catalog = _agent_build_tools_catalog()
+        # 画布助手也能产出交付物：把只读表格 + 写 HTML/Excel 的文件工具并进目录
+        for name, entry in _agent_canvas_file_tools().items():
+            catalog.append({"name": name, "description": entry["description"], "schema": entry["schema"]})
+        return catalog
+
+    def execution_scope(self):
+        """文件工具（read_table / write_html_report / write_xlsx）在画布 run 里的运行上下文。
+
+        写盘目录固定为 DATA_DIR/agent_outputs/<run_id>/，参数里的路径/扩展名由
+        agent_execute_step 的前置闸门先挡住，越权调用只会变成工具错误回灌模型。
+        """
+        ctx = self
+
+        @contextlib.contextmanager
+        def _scope():
+            run_dir = os.path.join(DATA_DIR, "agent_outputs",
+                                   re.sub(r"[^a-zA-Z0-9_-]", "", ctx.run_id or "run"))
+            token = _agent_file_tools.set_current_run({
+                "run_id": ctx.run_id,
+                "uploads_dir": "",
+                "output_dir": run_dir,
+                "files": [],
+            })
+            try:
+                yield
+            finally:
+                _agent_file_tools.reset_current_run(token)
+
+        return _scope()
 
     def build_system_prompt(self, snapshot, tools_json_text, history_text, vision_text=""):
         focus_text = _agent_run_focus_text(self.focus, snapshot) + (
@@ -35426,13 +36993,25 @@ class _CanvasRunContext(_AgentRunContext):
         if self.vision_mode_direct:
             focus_text += "\n用户消息里附了图片（按「图片「编号」：」标注），据此理解画面内容。"
         focus_text += _agent_memory_prompt(self.canvas_id)
-        return _AGENT_RUN_SYSTEM_PROMPT.format(
+        prompt = _AGENT_RUN_SYSTEM_PROMPT.format(
             tools_json=tools_json_text,
             media_platforms_text=_agent_run_media_platforms_text(self.image_provider),
             canvas_summary=json.dumps(_agent_canvas_summary(
                 snapshot, priority_ids=(self.focus or {}).get("selected_node_ids")), ensure_ascii=False),
             history_text=history_text,
             focus_text=focus_text)
+        if self.skill_id:
+            # 只挂了一个技能：保持老行为，直接注入全文（避免多一次往返）
+            prompt += _agent_skill_prompt_block(self.skill_id)
+        else:
+            # 没有选中技能：只给索引，模型需要完整说明时调用 activate_skill(name)
+            prompt += _agent_skill_index_block()
+        if self.skill_ref:
+            # 应用市场技能正文：放在系统提示，不进 instruction（避免 4000 字上限）
+            manual = _agent_store_skill_manual(self.skill_ref)
+            if manual:
+                prompt += "\n\n" + manual
+        return prompt
 
     def steps_are_free(self, steps):
         return _agent_steps_are_free(steps)
@@ -35520,7 +37099,378 @@ class _CanvasRunContext(_AgentRunContext):
                 "undoable": not _agent_undo_log_empty(undo_log)}
 
 
-async def _agent_run_producer(req, queue):
+# CJK 区段：中日韩文字基本「一个字 ≈ 一个 token」；英文按 4 字符 ≈ 1 token 的经验值折
+_AGENT_CJK_RANGES = (
+    (0x3000, 0x303F),    # CJK 标点（、。「」等）
+    (0x3040, 0x30FF),    # 日文假名
+    (0x3400, 0x4DBF),    # CJK 扩展 A
+    (0x4E00, 0x9FFF),    # CJK 统一表意文字
+    (0xAC00, 0xD7AF),    # 韩文音节
+    (0xF900, 0xFAFF),    # CJK 兼容表意文字
+    (0xFF00, 0xFFEF),    # 全角标点（，：；！？等）
+)
+
+
+def _agent_estimate_tokens(text):
+    """粗略估算 token 占用（纯函数）：CJK 字符 1 字 1 token，其它可见字符 4 字符 1 token 向上取整。
+    只用于给用户看「上下文大概用了多少」，不是计费口径：宁可简单可解释，也不引第三方分词器。"""
+    if text is None:
+        return 0
+    text = text if isinstance(text, str) else str(text)
+    if not text:
+        return 0
+    cjk, other = 0, 0
+    for ch in text:
+        if ch.isspace():
+            continue        # 空白不算「可见字符」，否则英文会被空格虚增 token
+        code = ord(ch)
+        if any(low <= code <= high for low, high in _AGENT_CJK_RANGES):
+            cjk += 1
+        else:
+            other += 1
+    return cjk + (other + 3) // 4
+
+
+# 内置上下文窗口默认表（前缀 -> token）。**只收公开可核实的值，新增必须写明来源**；
+# 没命中的模型一律返回 0（前端只显示绝对值），绝不按「大概是多少」猜一个。
+# 目前只有一条：claude → 200000，Anthropic 官方公布的 Claude 3 / 4 / 5 全系上下文窗口（200K）。
+AGENT_CONTEXT_WINDOW_DEFAULTS = (
+    ("claude", 200000),
+)
+
+
+def _agent_positive_int(value):
+    """只认正整数；0 / 负数 / 非数字 / 脏字符串 / bool 一律当「没有」（返回 0），绝不抛错。"""
+    if isinstance(value, bool):          # bool 是 int 的子类，别把 True 当成 1
+        return 0
+    try:
+        number = int(str(value).strip()) if isinstance(value, str) else int(value)
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0
+
+
+def _agent_context_window_default(model):
+    """内置默认表按前缀查（不区分大小写）；没命中就是 0。"""
+    name = str(model or "").strip().lower()
+    if not name:
+        return 0
+    for prefix, window in AGENT_CONTEXT_WINDOW_DEFAULTS:
+        if name.startswith(prefix):
+            return int(window)
+    return 0
+
+
+def _agent_run_context_max(chat):
+    """模型上下文窗口上限（token）。按优先级解析，全部拿不到就返回 0（前端只显示绝对值）：
+      1) chat.context_max（显式注入，测试用）
+      2) provider 配置的 context_max
+      3) provider 配置的 context_windows[当前 model]（精确命中）
+      4) 环境变量 NOVAI_CONTEXT_MAX
+      5) 内置默认表（只收可核实的值，见 AGENT_CONTEXT_WINDOW_DEFAULTS）
+    任何一步的值非法就跳过继续往下走——算错的百分比比不给百分比更误导用户。"""
+    chat = chat if isinstance(chat, dict) else {}
+    explicit = _agent_positive_int(chat.get("context_max"))
+    if explicit:
+        return explicit
+    provider_cfg = chat.get("provider_cfg")
+    provider_cfg = provider_cfg if isinstance(provider_cfg, dict) else {}
+    from_provider = _agent_positive_int(provider_cfg.get("context_max"))
+    if from_provider:
+        return from_provider
+    windows = provider_cfg.get("context_windows")
+    windows = windows if isinstance(windows, dict) else {}
+    model = str(chat.get("model") or "").strip()
+    if model and windows:
+        matched = _agent_positive_int(windows.get(model))
+        if matched:
+            return matched
+    from_env = _agent_positive_int(os.environ.get("NOVAI_CONTEXT_MAX"))
+    if from_env:
+        return from_env
+    return _agent_context_window_default(model)
+
+
+# ---------------------------------------------------------------------------
+# 画布 run 的 SSE 事件总线（进程内、单事件循环）
+#   POST /api/agent/run 在后台跑 producer，把事件 publish 进总线；
+#   GET /api/agent/runs/{run_id}/stream?after=N 订阅同一条流（支持 Last-Event-ID 续传）。
+# 保留策略：每个 run 留最近 AGENT_RUN_BUS_MAX_EVENTS 条事件（超出丢最旧）；
+#   已结束的 run 同时受 TTL（10 分钟）与条数（最近 200 个）限制，谁先到就清谁；
+#   正在跑的 run 永不清理。清理在新建 run 时顺带做，不额外起后台任务。
+# ---------------------------------------------------------------------------
+AGENT_RUN_BUS_MAX_EVENTS = 1000
+AGENT_RUN_BUS_TTL_SECONDS = 600
+AGENT_RUN_BUS_MAX_FINISHED = 200
+AGENT_RUN_STEER_MAX = 10              # 一个 run 同时最多排 10 条插话，超出让用户等这轮读完
+AGENT_RUN_STEER_TEXT_MAX = 2000       # 单条插话长度上限
+_AGENT_RUN_BUS = {}          # run_id -> {run_id, events, subs, done, created_at, finished_at, next_seq, task}
+
+
+def _agent_run_bus_prune(now=None):
+    """清掉过期 / 超量的已结束 run；运行中的不动。"""
+    now = time.time() if now is None else now
+    for run_id, bus in list(_AGENT_RUN_BUS.items()):
+        if not bus.get("done"):
+            continue
+        finished_at = float(bus.get("finished_at") or bus.get("created_at") or now)
+        if now - finished_at > AGENT_RUN_BUS_TTL_SECONDS:
+            _AGENT_RUN_BUS.pop(run_id, None)
+    finished = sorted((float(bus.get("finished_at") or bus.get("created_at") or 0), run_id)
+                      for run_id, bus in _AGENT_RUN_BUS.items() if bus.get("done"))
+    for _finished_at, run_id in finished[:-AGENT_RUN_BUS_MAX_FINISHED]:
+        _AGENT_RUN_BUS.pop(run_id, None)
+
+
+def _agent_run_bus_new(run_id, canvas_id=""):
+    _agent_run_bus_prune()
+    bus = {"run_id": str(run_id or ""), "canvas_id": str(canvas_id or ""),
+           "events": [], "subs": [], "done": False,
+           "created_at": time.time(), "finished_at": 0.0, "next_seq": 1, "task": None,
+           "steer": []}
+    _AGENT_RUN_BUS[bus["run_id"]] = bus
+    return bus
+
+
+def _agent_run_bus_get(run_id):
+    return _AGENT_RUN_BUS.get(str(run_id or "").strip())
+
+
+def _agent_require_run_access(bus, request, need="view"):
+    """run 级访问控制：按 bus 上记的画布判定（auth 关闭时 require_canvas_access 自动放行）。
+    必须在返回 StreamingResponse 之前调用——放进事件流里就变成 SSE error 事件而不是 403 了。"""
+    if not bus:
+        raise HTTPException(status_code=404, detail="run 不存在或已过期")
+    canvas_id = str(bus.get("canvas_id") or "").strip()
+    if not canvas_id:
+        return                      # 没有画布身份的 run（老数据/非画布上下文）：不误伤，放行
+    try:
+        canvas = load_canvas(canvas_id)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="画布不存在")
+    require_canvas_access(canvas, request, need)
+
+
+def _agent_run_bus_push_steer(run_id, text):
+    """把一条插话排进该 run 的下一轮（不打断当前轮）。返回 {ok, reason, pending}，
+    不抛异常：让 HTTP 层按 reason 决定 404 / 409。"""
+    bus = _agent_run_bus_get(run_id)
+    if bus is None:
+        return {"ok": False, "reason": "not_found", "pending": 0}
+    if bus.get("done"):
+        return {"ok": False, "reason": "done", "pending": 0}
+    waiting = bus.setdefault("steer", [])
+    if len(waiting) >= AGENT_RUN_STEER_MAX:
+        return {"ok": False, "reason": "full", "pending": len(waiting)}
+    waiting.append(str(text or "").strip())
+    return {"ok": True, "reason": "", "pending": len(waiting)}
+
+
+def _agent_run_bus_drain_steer(run_id):
+    """一次性取走并清空该 run 待处理的插话（producer 每轮开头 / 收尾时各取一次）。"""
+    bus = _agent_run_bus_get(run_id)
+    if bus is None:
+        return []
+    waiting = bus.get("steer") or []
+    if not waiting:
+        return []
+    bus["steer"] = []
+    return list(waiting)
+
+
+def _agent_run_bus_publish(bus, event, data):
+    """追加一条事件并推给所有订阅者；序号从 1 连续递增（即使丢了最旧的事件也不重排）。"""
+    if bus is None:
+        return 0
+    seq = int(bus.get("next_seq") or 1)
+    bus["next_seq"] = seq + 1
+    item = {"seq": seq, "name": str(event or ""), "data": data}
+    events = bus.setdefault("events", [])
+    events.append(item)
+    if len(events) > AGENT_RUN_BUS_MAX_EVENTS:
+        del events[:len(events) - AGENT_RUN_BUS_MAX_EVENTS]
+    for queue in list(bus.get("subs") or []):
+        queue.put_nowait(item)
+    return seq
+
+
+def _agent_run_bus_close(bus):
+    if bus is None or bus.get("done"):
+        return
+    bus["done"] = True
+    bus["finished_at"] = time.time()
+    for queue in list(bus.get("subs") or []):
+        queue.put_nowait(None)
+
+
+def _agent_run_bus_events_after(bus, after=0):
+    try:
+        after = int(after or 0)
+    except (TypeError, ValueError):
+        after = 0
+    return [item for item in (bus.get("events") or []) if int(item.get("seq") or 0) > after]
+
+
+def _agent_run_bus_subscribe(bus):
+    queue = asyncio.Queue()
+    bus.setdefault("subs", []).append(queue)
+    return queue
+
+
+def _agent_run_bus_unsubscribe(bus, queue):
+    subs = bus.get("subs") if isinstance(bus, dict) else None
+    if subs and queue in subs:
+        subs.remove(queue)
+
+
+async def _agent_run_bus_stream(bus, after=0):
+    """把一个 run 的事件流出来：先重放 seq>after 的旧事件，再挂实时（心跳与原实现一致）。"""
+    queue = _agent_run_bus_subscribe(bus)      # 先订阅再回放：中间没有 await，不会漏也不会重
+    last_seq = 0
+    try:
+        for item in _agent_run_bus_events_after(bus, after):
+            last_seq = max(last_seq, int(item["seq"]))
+            yield _agent_sse_event(item["name"], item["data"], item["seq"])
+        if bus.get("done"):
+            return
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=AGENT_RUN_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                yield "\n: ping\n\n"
+                continue
+            if item is None:
+                return
+            if int(item.get("seq") or 0) <= last_seq:
+                continue                            # 回放窗口里已经发过
+            last_seq = int(item["seq"])
+            yield _agent_sse_event(item["name"], item["data"], last_seq)
+    finally:
+        _agent_run_bus_unsubscribe(bus, queue)
+
+
+async def _agent_run_bus_drive(req, bus):
+    """在后台把 producer 跑完（与 HTTP 连接解耦：客户端断开后仍继续跑，断流恢复才等得到后续事件）。"""
+    try:
+        await _agent_run_producer(req, None, bus=bus)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        # producer 内部已兜底；这里只保证「总线一定被关掉」，不会让订阅者永远等下去
+        print(f"[Agent] run bus 驱动异常: {exc!r}", flush=True)
+        _agent_run_bus_publish(bus, "error", {"message": "Agent 运行异常：%s: %s" % (type(exc).__name__, exc),
+                                              "code": "agent_run_exception"})
+    finally:
+        _agent_run_bus_close(bus)
+
+
+AGENT_ARTIFACT_KINDS = ("html", "xlsx", "csv", "md", "image")
+AGENT_ARTIFACT_EXTS = {".html": "html", ".htm": "html", ".xlsx": "xlsx", ".csv": "csv",
+                       ".md": "md", ".png": "image", ".jpg": "image", ".jpeg": "image"}
+
+
+def _agent_artifact_kind(name, fallback=""):
+    ext = os.path.splitext(str(name or ""))[1].lower()
+    if ext in AGENT_ARTIFACT_EXTS:
+        return AGENT_ARTIFACT_EXTS[ext]
+    return fallback if fallback in AGENT_ARTIFACT_KINDS else ""
+
+
+def _agent_artifact_url(name):
+    return "/api/agent/files/%s" % urllib.parse.quote(str(name or ""), safe="")
+
+
+def _agent_artifact_find_path(name):
+    """在 data 目录下找产物文件（白名单扩展名）；只返回 data 目录内的真实路径。"""
+    raw = str(name or "").strip()
+    safe = os.path.basename(raw)
+    if not raw or safe != raw or "\\" in raw or "/" in raw or ".." in raw:
+        return ""
+    if os.path.splitext(safe)[1].lower() not in AGENT_ARTIFACT_EXTS:
+        return ""
+    data_real = os.path.realpath(DATA_DIR)
+    for root in (os.path.join(DATA_DIR, "agent_outputs"), os.path.join(DATA_DIR, "agent_runs"),
+                 os.path.join(DATA_DIR, "agent_files")):
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _dirs, files in os.walk(root):
+            if safe not in files:
+                continue
+            try:
+                real = os.path.realpath(os.path.join(dirpath, safe))
+                if os.path.commonpath([real, data_real]) != data_real:
+                    continue
+                return real
+            except Exception:
+                continue
+    return ""
+
+
+def _agent_artifact_entry(name, kind="", size=None):
+    """统一的产物形状：{name, kind, size, url}（前端按这个渲染「本轮产物」卡片）。"""
+    raw = str(name or "").strip()
+    safe = os.path.basename(raw)
+    if not raw or safe != raw or "\\" in raw or "/" in raw or ".." in raw:
+        return None
+    resolved = _agent_artifact_kind(safe, kind)
+    if resolved not in AGENT_ARTIFACT_KINDS:
+        return None
+    if size is None:
+        path = _agent_artifact_find_path(safe)
+        try:
+            size = os.path.getsize(path) if path else 0
+        except OSError:
+            size = 0
+    try:
+        size = int(size or 0)
+    except (TypeError, ValueError):
+        size = 0
+    return {"name": safe, "kind": resolved, "size": size, "url": _agent_artifact_url(safe)}
+
+
+def _agent_step_artifacts(result):
+    """从一步的工具结果里提取产物（write_html_report / write_xlsx / image_generate / 能力产物）。"""
+    data = result if isinstance(result, dict) else {}
+    found = []
+
+    def add(name, kind="", size=None):
+        entry = _agent_artifact_entry(name, kind, size)
+        if entry and not any(item["name"] == entry["name"] and item["kind"] == entry["kind"]
+                             for item in found):
+            found.append(entry)
+
+    if isinstance(data.get("images"), list):
+        for item in data["images"]:
+            if isinstance(item, dict):
+                add(item.get("name") or item.get("filename"), "image",
+                    item.get("bytes") if item.get("bytes") is not None else item.get("size"))
+    if isinstance(data.get("name"), str) and data.get("name"):
+        add(data["name"], str(data.get("kind") or ""),
+            data.get("bytes") if data.get("bytes") is not None else data.get("size"))
+    return found
+
+
+def _agent_collect_artifacts(step_artifacts, ctx):
+    """合并「步骤结果里的产物」与上下文登记的产物，统一成稳定形状并按 (kind,name) 去重。"""
+    merged = []
+    for item in list(step_artifacts or []):
+        entry = _agent_artifact_entry(item.get("name"), item.get("kind"), item.get("size"))
+        if entry and not any(x["name"] == entry["name"] and x["kind"] == entry["kind"] for x in merged):
+            merged.append(entry)
+    try:
+        registered = ctx.artifacts() if hasattr(ctx, "artifacts") else []
+    except Exception:
+        registered = []
+    for item in registered or []:
+        if not isinstance(item, dict):
+            continue
+        entry = _agent_artifact_entry(item.get("name"), item.get("kind"), item.get("size"))
+        if entry and not any(x["name"] == entry["name"] and x["kind"] == entry["kind"] for x in merged):
+            merged.append(entry)
+    return merged
+
+
+async def _agent_run_producer(req, queue, bus=None):
     """真正的 agent 循环（上下文无关）：执行步骤 → 结果回灌模型 → 下一轮，全程把事件塞进 queue。
     画布与上传文件共用同一个循环，差异全部由 ctx（AgentRunContext）提供；
     ctx 缺省时按画布上下文跑，行为与重构前一致。"""
@@ -35540,13 +37490,24 @@ async def _agent_run_producer(req, queue):
     plan_mode = mode == "plan" and not approved_steps
 
     def emit(event, data):
-        queue.put_nowait(_agent_sse_event(event, data))
+        if bus is not None:
+            _agent_run_bus_publish(bus, event, data)     # 走总线：带序号、可重放、可被多处订阅
+        elif queue is not None:
+            queue.put_nowait(_agent_sse_event(event, data))
 
-    run_id = getattr(ctx, "run_id", "") or f"run_{uuid.uuid4().hex[:16]}"
+    # run_id 优先用入口给的（总线按它寻址），否则沿用原来的生成方式
+    run_id = (str(req.get("run_id") or "").strip() or getattr(ctx, "run_id", "")
+              or f"run_{uuid.uuid4().hex[:16]}")
+    try:
+        ctx.run_id = run_id      # 文件工具的产物目录按 run_id 落 DATA_DIR/agent_outputs/
+    except Exception:
+        pass
     status, message, limit_reason = "failed", "", ""
     steps_executed, rounds = 0, 0
+    steer_count = 0          # 本 run 已投放的插话条数（事件 id 用它编号，跨轮不重复）
     no_progress_rounds = 0
     history, results = [], []
+    step_artifacts = []          # 本次 run 产出的文件（artifact_updated / done.changes.artifacts 共用）
     fail_counts = {}
     skipped_notes, fail_notes = [], []
     mutated = False
@@ -35618,10 +37579,31 @@ async def _agent_run_producer(req, queue):
                 tools_json_text = json.dumps(ctx.tool_catalog(), ensure_ascii=False)
                 system = ctx.build_system_prompt(snapshot, tools_json_text,
                                                  _agent_run_history_prompt(chat_history), vision_text)
+                # 运行中插话：每轮开新一轮之前一次性取走（不打断正在跑的这一轮）
+                steer_texts = _agent_run_bus_drain_steer(run_id) if bus is not None else []
+                for steer_text in steer_texts:
+                    steer_count += 1
+                    emit("user_steer", {"id": "%s:steer:%d" % (run_id, steer_count),
+                                        "status": "placed", "text": steer_text})
                 user_text = _agent_run_user_prompt(
                     instruction, history, rounds, max_steps, steps_executed, last_error, mode=mode,
                     reference_hint=agent_plan_reference_hint((focus or {}).get("reference_images")),
                     max_rounds=max_rounds)
+                if steer_texts:
+                    user_text += ("\n\n用户在运行中补充的内容（按时间顺序，用于修正方向）：\n"
+                                  + "\n".join("- " + text for text in steer_texts))
+                # 上下文占用：每轮在调用模型之前估一次 system + user 文本。
+                # 用 user_text 而不是 user_content——后者内嵌图片 data URL，按字符估会假到离谱。
+                context_used = _agent_estimate_tokens(system + "\n" + user_text)
+                context_max = _agent_run_context_max(chat)
+                emit("context_usage", {
+                    "id": f"{run_id}:{rounds}:cu",
+                    "used_tokens": context_used,
+                    "max_tokens": context_max,
+                    "percentage": round(context_used * 100.0 / context_max, 1) if context_max else None,
+                    "source": "estimate",
+                    "round": rounds,
+                })
                 try:
                     user_content = _agent_vision_user_content(user_text, vision_images) if vision_mode == "direct" else user_text
                     try:
@@ -35782,8 +37764,21 @@ async def _agent_run_producer(req, queue):
                                "result": raw_result if isinstance(raw_result, (dict, list)) else {"value": raw_result},
                                "message": result.get("message") or "执行成功"}
                     payload = ctx.decorate_step_payload(payload, info.get("ops") or {})
+                    new_files = []
+                    for artifact in _agent_step_artifacts(raw_result):
+                        if any(item["name"] == artifact["name"] and item["kind"] == artifact["kind"]
+                               for item in step_artifacts):
+                            continue
+                        step_artifacts.append(artifact)
+                        new_files.append(artifact)
+                    if new_files:
+                        # 模型下一步能从 step_result 里看到自己产出了什么文件
+                        payload["artifacts"] = new_files
+                        payload["files"] = [item["name"] for item in new_files]
                     ctx.record_step(index, tool, description, True, result=raw_result)
                     emit("step_result", payload)
+                    if new_files:
+                        emit("artifact_updated", {"files": new_files})
                     history.append({"index": index, "tool": tool, "args": resolved_args, "ok": True,
                                     "digest": _agent_run_digest_text(raw_result)})
                     last_error = ""
@@ -35839,10 +37834,20 @@ async def _agent_run_producer(req, queue):
             if isinstance(session, dict):
                 session["undo_log"] = undo_log
                 session["pre_version"] = pre_version
+            changes = ctx.done_changes(undo_log, used_units)
+            if not isinstance(changes, dict):
+                changes = {}
+            # 本轮产物：步骤结果 + 上下文登记（去重、统一 {name, kind, size, url}）
+            changes["artifacts"] = _agent_collect_artifacts(step_artifacts, ctx)
             done_payload = {"run_id": run_id, "status": status, "steps_executed": steps_executed,
                             "rounds": rounds, "message": final_message[:2000],
-                            "changes": ctx.done_changes(undo_log, used_units)}
+                            "changes": changes}
             done_payload.update(ctx.done_extra(session, undo_log, plan_payload))
+            # 跑到结束还没被任何一轮读到的插话：如实告诉用户「没读到」，不静默吞掉
+            unread_steer = _agent_run_bus_drain_steer(run_id) if bus is not None else []
+            for steer_text in unread_steer:
+                emit("user_steer", {"status": "unread", "text": steer_text})
+            done_payload["unread_steer"] = len(unread_steer)
             emit("done", done_payload)
             ctx.persist(session, status, final_message, history, rounds, steps_executed,
                         mutated, run_id, intent, instruction, focus, plan=plan_payload,
@@ -35861,39 +37866,12 @@ async def _agent_run_producer(req, queue):
                 print(f"[Agent] run {run_id} 写对话记录失败（不影响结果）: {exc}")
             print(f"[Agent] run {run_id} done status={status} steps={steps_executed} rounds={rounds} "
                   f"msg={final_message[:160]}", flush=True)
-        queue.put_nowait(None)
-
-
-async def _agent_run_event_stream(req):
-    """SSE 输出层：空闲超过 15 秒发注释心跳，客户端断开时取消生产者。"""
-    queue = asyncio.Queue()
-    producer = asyncio.create_task(_agent_run_producer(req, queue))
-
-    def _drain(task):
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc:
-            print(f"[Agent] run producer 异常: {exc!r}")
-
-    producer.add_done_callback(_drain)
-    try:
-        while True:
-            try:
-                chunk = await asyncio.wait_for(queue.get(), timeout=AGENT_RUN_HEARTBEAT_SECONDS)
-            except asyncio.TimeoutError:
-                yield "\n: ping\n\n"
-                continue
-            if chunk is None:
-                break
-            yield chunk
-    finally:
-        if not producer.done():
-            producer.cancel()
+        if queue is not None:
+            queue.put_nowait(None)
 
 
 @app.post("/api/agent/run")
-async def agent_run(payload: AgentRunRequest):
+async def agent_run(payload: AgentRunRequest, request: Request):
     """真·agent 循环：服务端多轮执行 + 结果回灌模型 + SSE 流式返回（契约 v1）。
     请求非法 / 画布不存在 / 无可用对话模型 → 直接 4xx（前端据此回退原聊天）。"""
     canvas_id = str(payload.canvas_id or "").strip()
@@ -35902,7 +37880,25 @@ async def agent_run(payload: AgentRunRequest):
     instruction = str(payload.instruction or "").strip()
     if not instruction:
         raise HTTPException(status_code=400, detail="instruction 不能为空")
-    load_canvas(canvas_id)  # 404 校验
+    # 技能校验放在最前面：坏技能要真 400，而不是开了流之后才发一个 error 事件
+    skill_id = str(payload.skill_id or "").strip()
+    if skill_id:
+        _agent_require_skill(skill_id)
+    canvas = load_canvas(canvas_id)  # 404 校验
+    # 画布级权限：带 approved_steps = 用户点了「执行」→ 需要可编辑；只出方案/只读 → view 即可。
+    # 必须在返回 StreamingResponse 之前抛，不能拖到事件流里。
+    require_canvas_access(canvas, request, "edit" if payload.approved_steps else "view")
+    # 会话线程优先：带了 thread_id 就用线程消息（并把 active 切过去），否则沿用请求里的 history。
+    # 放在解析对话模型之前：线程不存在要返回 404，不能因为模型没配就变成 400。
+    thread_id = str(payload.thread_id or "").strip()
+    history = _agent_run_normalize_history(payload.history)
+    if thread_id:
+        with _AGENT_THREAD_LOCK:
+            thread_doc = _agent_thread_doc_load(canvas_id)
+            thread = _agent_thread_require(thread_doc, thread_id)
+            history = _agent_thread_history(thread)
+            thread_doc["active_id"] = thread["id"]
+            _agent_thread_doc_save(canvas_id, thread_doc)
     chat = _agent_run_resolve_chat(payload.provider, payload.model, payload.ms_model)
     try:
         max_steps = int(payload.max_steps if payload.max_steps is not None else 12)
@@ -35914,9 +37910,12 @@ async def agent_run(payload: AgentRunRequest):
     mode = "run" if approved_steps else (payload.mode or "plan")
     req = {
         "canvas_id": canvas_id,
+        "skill_id": skill_id,
+        "skill_ref": str(payload.skill_ref or "").strip(),
         "instruction": instruction,
         "focus": _agent_run_normalize_focus(payload.focus),
-        "history": _agent_run_normalize_history(payload.history),
+        "history": history,
+        "thread_id": thread_id,
         "chat": chat,
         "max_steps": max_steps,
         "mode": mode,
@@ -35927,9 +37926,60 @@ async def agent_run(payload: AgentRunRequest):
         # 兼容旧调用保留；闸门已在 producer 里默认强开，这个字段不再能关闭闸门
         "enforce_write_confirmation": True,
     }
-    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
-    return StreamingResponse(_agent_run_event_stream(req), media_type="text/event-stream",
+    # 每个 run 一条可寻址的总线：事件带 id 序号、留缓冲；客户端断流后可以用 run_id + after 续传
+    run_id = f"run_{uuid.uuid4().hex[:16]}"
+    req["run_id"] = run_id
+    bus = _agent_run_bus_new(run_id, canvas_id)
+    # producer 放到后台任务里跑：连接断开不取消它，否则断流恢复根本等不到后续事件
+    bus["task"] = asyncio.create_task(_agent_run_bus_drive(req, bus))
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",
+               # 连接还没收到 run_start 就断了时，前端也能拿到 run_id 去续传
+               "X-NOVAI-Run-Id": run_id}
+    return StreamingResponse(_agent_run_bus_stream(bus), media_type="text/event-stream",
                              headers=headers)
+
+
+@app.get("/api/agent/runs/{run_id}/stream")
+async def agent_run_stream(run_id: str, request: Request, after: int = 0,
+                           last_event_id: Optional[str] = Header(None, alias="Last-Event-ID")):
+    """断流恢复：先重放 seq>after 的旧事件，再接实时；run 已结束就重放完正常收尾。
+    after 优先取查询参数（>0），否则用浏览器自动回传的 Last-Event-ID。"""
+    bus = _agent_run_bus_get(run_id)
+    _agent_require_run_access(bus, request, "view")   # 权限先于开流：403 必须是普通 HTTP 响应
+    resume_after = after if after and after > 0 else 0
+    if resume_after <= 0 and last_event_id:
+        try:
+            # 规范允许逗号分隔的多个 id，取最后一个
+            resume_after = int(str(last_event_id).split(",")[-1].strip() or 0)
+        except (TypeError, ValueError):
+            resume_after = 0
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+    return StreamingResponse(_agent_run_bus_stream(bus, resume_after), media_type="text/event-stream",
+                             headers=headers)
+
+
+class AgentRunSteerRequest(BaseModel):
+    message: str = ""
+
+
+@app.post("/api/agent/runs/{run_id}/steer")
+async def agent_run_steer(run_id: str, payload: AgentRunSteerRequest, request: Request):
+    """运行中插话：排进该 run 的下一轮（不打断正在跑的这一轮）。
+    404 = run 不存在/已过期；409 = run 已结束、或排队太频繁。"""
+    message = str(payload.message or "").strip()
+    if not message or len(message) > AGENT_RUN_STEER_TEXT_MAX:
+        raise HTTPException(status_code=400,
+                            detail="message 长度必须在 1..%d 字之间" % AGENT_RUN_STEER_TEXT_MAX)
+    # 插话会改变这一轮的方向 → 需要可编辑权限；同样必须在入队之前抛
+    _agent_require_run_access(_agent_run_bus_get(run_id), request, "edit")
+    result = _agent_run_bus_push_steer(run_id, message)
+    if not result["ok"]:
+        if result["reason"] == "not_found":
+            raise HTTPException(status_code=404, detail="run 不存在或已过期")
+        if result["reason"] == "done":
+            return JSONResponse(status_code=409, content={"error": "该运行已结束，无法插话"})
+        return JSONResponse(status_code=409, content={"error": "插话太频繁，请等本轮读完"})
+    return {"accepted": True, "pending": int(result["pending"])}
 
 
 # --- T05 素材路由接入（依赖全部定义完后才 bind）---
@@ -36042,7 +38092,7 @@ _platforms_registry.set_data_dir(DATA_DIR)
 _deps.bind(
     AGENT_RUN_PRODUCER=_agent_run_producer,
     # 能力运行时生图：server/agents/tools.py 的 image_generate 与 OpenClaw 生图阶段共用
-    AGENT_IMAGE_GENERATE=capability_generate_image,
+    AGENT_IMAGE_GENERATE=_capability_generate_image_charged,
     # OpenClaw 能力后端复用同一条 SSE 分片格式，事件体完全一致
     AGENT_SSE_EVENT=_agent_sse_event,
     AGENT_RESOLVE_CHAT=_agents_resolve_chat,
@@ -36053,6 +38103,8 @@ _deps.bind(
     CONVERSATION_LOAD=load_conversation,
     CONVERSATION_SAVE=save_conversation,
     CONVERSATION_USER_ID=safe_user_id,
+    # 应用市场 launch：新建画布复用 new_canvas（含登录态 owner 归属），store 路由不直接 import main
+    NEW_CANVAS=lambda title, owner_id=None: new_canvas(title, owner_id=owner_id),
 )
 from server.routes.agents import router as _agents_router
 app.include_router(_agents_router)
