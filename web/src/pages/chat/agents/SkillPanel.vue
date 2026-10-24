@@ -6,7 +6,7 @@ import { ref, computed } from 'vue';
 import ChIcon from '../ChIcon.vue';
 import { ICONS } from '../../../lib/icons.js';
 import { CAP, loadCapabilities, skillTypeOf, skillTypeLabel, skillUsageOf } from './capState.js';
-import { importSkill } from './capabilityApi.js';
+import { exportSkill, importSkillMarkdown } from './capabilityApi.js';
 import { toast } from '../../../lib/store.js';
 
 const emit = defineEmits(['pick', 'close']);
@@ -20,6 +20,8 @@ const CATS = [
 const cat = ref('all');
 const search = ref('');
 const fileInput = ref(null);
+const conflict = ref(null);
+const importing = ref(false);
 
 const skills = computed(() => CAP.list.filter(c => c.kind === 'skill'));
 const groups = computed(() => ({
@@ -60,17 +62,54 @@ function openImport() {
     el.value = '';
     el.click();
 }
+async function submitImport(markdown, overwrite) {
+    if (importing.value) return;
+    importing.value = true;
+    try {
+        const res = await importSkillMarkdown(markdown, overwrite);
+        if (res.ok) {
+            await loadCapabilities(true);
+            cat.value = 'mine';
+            conflict.value = null;
+            toast('已导入「' + ((res.skill && res.skill.name) || '技能') + '」', { icon: 'check' });
+            return;
+        }
+        if (res.conflict && !overwrite) {
+            conflict.value = { markdown: markdown, message: res.error || '已存在同名技能' };
+            return;
+        }
+        toast(res.error || '技能导入失败', { icon: 'alert', danger: true });
+    } finally {
+        importing.value = false;
+    }
+}
 async function onImportFile(e) {
     const file = e && e.target && e.target.files && e.target.files[0];
     if (!file) return;
-    let data;
-    try { data = JSON.parse(await file.text()); }
-    catch (err) { toast('不是有效的 JSON 文件', { icon: 'alert', danger: true }); return; }
-    const res = await importSkill(data);
-    if (!res.ok) { toast(res.error || '技能导入失败', { icon: 'alert', danger: true }); return; }
-    await loadCapabilities(true);
-    cat.value = 'mine';
-    toast('已导入「' + res.skill.name + '」', { icon: 'check' });
+    if (!/\.md$/i.test(file.name || '')) { toast('请选择 .md 格式的 SKILL.md', { icon: 'alert', danger: true }); return; }
+    const text = await file.text();
+    await submitImport(text, false);
+}
+async function confirmOverwrite() {
+    if (!conflict.value) return;
+    await submitImport(conflict.value.markdown, true);
+}
+function cancelOverwrite() {
+    if (!importing.value) conflict.value = null;
+}
+async function exportCard(skill) {
+    if (!skill || !skill.id) return;
+    const res = await exportSkill(skill.id);
+    if (!res.ok) { toast(res.error || '导出失败', { icon: 'alert', danger: true }); return; }
+    const url = URL.createObjectURL(res.blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = res.filename || (skill.id + '.md');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    toast('已导出 ' + (res.filename || (skill.id + '.md')), { icon: 'download' });
 }
 </script>
 
@@ -82,8 +121,8 @@ async function onImportFile(e) {
                 <input v-model="search" type="text" placeholder="请输入想搜索的技能名称或描述" aria-label="搜索技能" />
                 <button v-if="search" type="button" class="clr" title="清空" aria-label="清空" @click="search = ''"><ChIcon name="x" /></button>
             </label>
-            <button type="button" class="nv-btn sm skp-import" @click="openImport"><ChIcon name="download" />导入技能</button>
-            <input ref="fileInput" class="skp-file" type="file" accept=".json,application/json" aria-hidden="true" tabindex="-1" @change="onImportFile" />
+            <button type="button" class="nv-btn sm skp-import" @click="openImport"><ChIcon name="upload" />导入 SKILL.md</button>
+            <input ref="fileInput" class="skp-file" type="file" accept=".md,text/markdown" aria-hidden="true" tabindex="-1" @change="onImportFile" />
             <button type="button" class="nv-icon-btn sm round" title="收起技能面板" aria-label="收起技能面板" @click="emit('close')"><ChIcon name="x" /></button>
         </header>
 
@@ -110,7 +149,8 @@ async function onImportFile(e) {
                     <span class="sub">{{ emptyState.sub }}</span>
                 </div>
                 <div v-else class="skp-grid">
-                    <button v-for="s in list" :key="s.id" type="button" class="skp-card" :class="{ off: !s.available }" :disabled="!s.available" @click="pick(s)">
+                    <div v-for="s in list" :key="s.id" class="skp-card" :class="{ off: !s.available }" role="button"
+                         :tabindex="s.available ? 0 : -1" @click="s.available && pick(s)" @keydown.enter.prevent="s.available && pick(s)">
                         <span class="ic">
                             <ChIcon v-if="iconKey(s)" :name="iconKey(s)" />
                             <em v-else-if="charIcon(s)">{{ charIcon(s) }}</em>
@@ -121,10 +161,28 @@ async function onImportFile(e) {
                             <span class="ds">{{ s.description || '暂无描述' }}</span>
                         </span>
                         <span v-if="!s.available" class="soon">即将上线</span>
-                    </button>
+                        <span class="skp-actions">
+                            <button type="button" class="skp-act" title="导出 SKILL.md" aria-label="导出 SKILL.md" @click.stop="exportCard(s)"><ChIcon name="download" />导出 SKILL.md</button>
+                            <button type="button" class="skp-act" title="导入 SKILL.md" aria-label="导入 SKILL.md" @click.stop="openImport"><ChIcon name="upload" />导入 SKILL.md</button>
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>
+
+        <Teleport to="body">
+            <div v-if="conflict" class="skp-confirm-root" role="dialog" aria-modal="true" aria-labelledby="skp-confirm-title">
+                <div class="skp-confirm-scrim" @click="cancelOverwrite"></div>
+                <div class="skp-confirm">
+                    <h3 id="skp-confirm-title">已存在同名技能，覆盖？</h3>
+                    <p>{{ conflict.message }}</p>
+                    <div class="skp-confirm-foot">
+                        <button type="button" class="nv-btn" :disabled="importing" @click="cancelOverwrite">取消</button>
+                        <button type="button" class="skp-confirm-danger" :disabled="importing" @click="confirmOverwrite">{{ importing ? '覆盖中…' : '覆盖' }}</button>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
     </section>
 </template>
 
@@ -155,8 +213,12 @@ async function onImportFile(e) {
 .skp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .skp-card { position: relative; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; padding: 12px; border: 0; border-radius: 14px; text-align: left; color: var(--ink); cursor: pointer;
     background: var(--fill-1); transition: background var(--duration-fast), transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out); }
-.skp-card:hover:not(:disabled) { background: var(--fill-2); transform: translateY(-1px); box-shadow: var(--shadow-float); }
+.skp-card:hover:not(.off) { background: var(--fill-2); transform: translateY(-1px); box-shadow: var(--shadow-float); }
 .skp-card.off { opacity: .58; cursor: default; }
+.skp-actions { grid-column: 1 / -1; display: flex; gap: 6px; padding-top: 2px; }
+.skp-act { border: 0; height: 24px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink-3); display: inline-flex; align-items: center; gap: 4px; font: 400 10.5px/1 var(--font-sans); cursor: pointer; transition: background var(--duration-fast), color var(--duration-fast); }
+.skp-act:hover { background: var(--accent); color: var(--on-accent); }
+.skp-act .nv-i { width: 11px; height: 11px; }
 .skp-card .ic { grid-row: 1; width: 30px; height: 30px; border-radius: 9px; background: var(--glass-strong); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow-float); }
 .skp-card .ic .nv-i { width: 15px; height: 15px; }
 .skp-card .ic em { font: 500 14px/1 var(--font-sans); font-style: normal; }
@@ -171,5 +233,13 @@ async function onImportFile(e) {
 .skp-state p { margin: 0; font: 400 13px/20px var(--font-sans); color: var(--ink-2); }
 .skp-state .sub { font: 400 11.5px/17px var(--font-sans); color: var(--ink-4); }
 .skp-state.err p { color: var(--danger); }
+.skp-confirm-root { position: fixed; inset: 0; z-index: 4000; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.skp-confirm-scrim { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: var(--material-thin); -webkit-backdrop-filter: var(--material-thin); }
+.skp-confirm { position: relative; width: min(440px, calc(100vw - 48px)); display: flex; flex-direction: column; gap: 12px; padding: 22px; border-radius: var(--radius-xl); background: var(--solid); box-shadow: var(--shadow-dialog); color: var(--ink); animation: nv-dialog-in var(--duration-slow) var(--ease-sheet) both; }
+.skp-confirm h3 { margin: 0; font: 500 16px/24px var(--font-sans); letter-spacing: -0.01em; }
+.skp-confirm p { margin: 0; color: var(--ink-3); font: 400 12px/18px var(--font-sans); }
+.skp-confirm-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.skp-confirm-danger { border: 0; height: var(--control-md); padding: 0 16px; border-radius: var(--radius-md); background: var(--danger); color: var(--on-accent); font: 500 12.5px/1 var(--font-sans); cursor: pointer; }
+.skp-confirm-danger:disabled { opacity: .6; cursor: default; }
 @media (max-width: 640px) { .skp-rail { width: 104px; } .skp-grid { grid-template-columns: minmax(0, 1fr); } }
 </style>

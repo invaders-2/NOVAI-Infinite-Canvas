@@ -10,7 +10,6 @@ const data = ref({ enabled: false, servers: [] });
 const loading = ref(true);
 const error = ref('');
 const expanded = ref({});
-const localDisabled = ref({});
 const pending = ref(null);
 const busyName = ref('');
 const copying = ref(false);
@@ -21,11 +20,10 @@ function commandLine(server) {
     return [server.command, ...(server.args || [])].filter(Boolean).join(' ');
 }
 function isEnabled(server) {
-    return !!server.enabled && !localDisabled.value[server.name];
+    return !!server.enabled;
 }
 function effectiveStatus(server) {
-    if (localDisabled.value[server.name]) return '未启用';
-    return server.status || '未启用';
+    return server.status || (server.enabled ? '就绪' : '未启用');
 }
 function statusKind(server) {
     const status = effectiveStatus(server);
@@ -47,7 +45,6 @@ async function load() {
         const res = await fetch('/api/mcp/servers', { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         data.value = await res.json();
-        localDisabled.value = {};
     } catch (e) {
         error.value = (e && e.message) || '加载失败';
     } finally {
@@ -61,17 +58,34 @@ async function reload() {
         const body = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(body.detail || ('HTTP ' + res.status));
         data.value = body;
-        localDisabled.value = {};
         toast('已重新加载 MCP 服务');
     } catch (e) {
         toast((e && e.message) || '重新加载失败', { danger: true, icon: 'alert' });
     }
 }
 
-function toggle(server) {
+async function toggle(server) {
+    if (busyName.value) return;
     if (isEnabled(server)) {
-        localDisabled.value = { ...localDisabled.value, [server.name]: true };
-        toast('已关闭 ' + server.name + '（本页生效，重新加载会恢复配置）');
+        busyName.value = server.name;
+        try {
+            const res = await fetch('/api/mcp/servers/' + encodeURIComponent(server.name) + '/disable', {
+                method: 'POST',
+                headers: { Accept: 'application/json' },
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.detail || ('HTTP ' + res.status));
+            if (body.server) {
+                data.value = { ...data.value, servers: data.value.servers.map(row => row.name === server.name ? body.server : row) };
+            } else {
+                data.value = { ...data.value, servers: data.value.servers.map(row => row.name === server.name ? { ...row, enabled: false, status: '未启用', tool_count: 0, tools: [] } : row) };
+            }
+            toast('已停用 ' + server.name);
+        } catch (e) {
+            toast((e && e.message) || '停用失败', { danger: true, icon: 'alert' });
+        } finally {
+            busyName.value = '';
+        }
         return;
     }
     if (!canEnable(server)) {
@@ -96,9 +110,6 @@ async function confirmEnable() {
         if (body.server) {
             data.value = { ...data.value, servers: data.value.servers.map(row => row.name === server.name ? body.server : row) };
         }
-        const next = { ...localDisabled.value };
-        delete next[server.name];
-        localDisabled.value = next;
         pending.value = null;
         toast(body.ok ? '已启用 ' + server.name : '已提交启用：' + server.name, { danger: !body.ok, icon: 'check' });
     } catch (e) {

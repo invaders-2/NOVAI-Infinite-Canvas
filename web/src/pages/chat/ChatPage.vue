@@ -152,7 +152,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.gc { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; background: transparent; color: var(--ink); }
+.gc { position: absolute; inset: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; background: transparent; color: var(--ink); }
 .top { position: relative; z-index: 30; flex: none; height: 60px; display: flex; align-items: center; gap: 10px; padding: 0 20px 0 32px; }
 .ttl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 14px/20px var(--font-sans); }
 .sub { flex: none; font: 400 11px/1 var(--font-mono); color: var(--ink-3); letter-spacing: .03em; }

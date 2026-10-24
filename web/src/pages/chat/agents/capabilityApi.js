@@ -342,6 +342,47 @@ const api = (() => {
         };
     }
 
+    function errorFrom(res, data, stage) {
+        const detail = detailOf(data);
+        return { ok: false, status: res.status, error: detail || (stage + '（HTTP ' + res.status + '）') };
+    }
+
+    /* SKILL.md：导出（blob + 文件名） / 导入（409 = 同名，交给调用方确认覆盖） */
+    async function exportSkill(id) {
+        const skillId = text(id).trim();
+        if (!skillId) return { ok: false, error: '缺少技能 id' };
+        let res;
+        try { res = await fetch('/api/skills/' + encodeURIComponent(skillId) + '/export', { headers: { Accept: 'text/markdown' } }); }
+        catch (e) { return { ok: false, error: '无法连接技能服务' }; }
+        if (!res.ok) return errorFrom(res, await jsonBody(res), '技能导出失败');
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = /filename="?([^";]+)"?/i.exec(disposition);
+        return { ok: true, blob: blob, filename: match ? decodeURIComponent(match[1]) : (skillId + '.md') };
+    }
+
+    async function importSkillMarkdown(markdown, overwrite) {
+        const content = text(markdown);
+        if (!content.trim()) return { ok: false, status: 400, error: 'markdown 不能为空' };
+        let res;
+        try {
+            res = await fetch('/api/skills/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ markdown: content, overwrite: !!overwrite }),
+            });
+        } catch (e) { return { ok: false, error: '无法连接技能服务' }; }
+        if (!res.ok) {
+            const data = await jsonBody(res);
+            const error = errorFrom(res, data, '技能导入失败');
+            if (res.status === 409) error.conflict = true;
+            return error;
+        }
+        const data = await jsonBody(res);
+        if (!data || !data.skill) return { ok: false, error: '导入接口返回格式不正确' };
+        return { ok: true, skill: normalizeCapability(Object.assign({ kind: 'skill' }, data.skill)), created: !!data.created };
+    }
+
     async function getRun(runId) {
         if (!runId) return { ok: false, error: '缺少运行 id' };
         let res;
@@ -369,14 +410,14 @@ const api = (() => {
     }
 
     return {
-        listCapabilities, getCapability, importSkill, listSuggestions, runCapability, getRun, streamRun,
+        listCapabilities, getCapability, importSkill, exportSkill, importSkillMarkdown, listSuggestions, runCapability, getRun, streamRun,
         normalizeCapability, paramsOf, normalizeArtifacts, normalizeRun,
         isTerminal, isFailed, filesUrl,
     };
 })();
 
 export const {
-    listCapabilities, getCapability, importSkill, listSuggestions, runCapability, getRun, streamRun,
+    listCapabilities, getCapability, importSkill, exportSkill, importSkillMarkdown, listSuggestions, runCapability, getRun, streamRun,
     normalizeCapability, paramsOf, normalizeArtifacts, normalizeRun,
     isTerminal, isFailed, filesUrl,
 } = api;
