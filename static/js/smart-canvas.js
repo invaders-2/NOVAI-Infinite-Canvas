@@ -38843,6 +38843,7 @@ function ensureTableApi(){
     var installedPromise = null;
     var installTarget = '';
     var panelAnchor = null;
+    var openedFromMenu = false;
     var AGENT_LOGOS = {
         claude: '<span class="nv-brand-mark is-claude" role="img" aria-label="Claude"></span>',
         chatgpt: '<span class="nv-brand-mark is-openai" role="img" aria-label="ChatGPT"></span>',
@@ -38861,18 +38862,23 @@ function ensureTableApi(){
 
     var launch = document.createElement('button');
     launch.id = 'novaiMcpLaunch';
-    launch.className = 'canvas-rail-btn canvas-rail-mini nv-mcp-launch';
+    launch.className = 'canvas-anchored-item nv-mcp-menu-item';
     launch.type = 'button';
+    launch.setAttribute('role', 'menuitem');
     launch.title = '在 Agent 中打开';
     launch.setAttribute('aria-label', '在 Agent 中打开');
-    launch.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg>';
-    var railGroup = document.querySelector('#canvasRail .canvas-rail-group');
-    var railMore = document.getElementById('canvasRailMore');
-    if(railGroup) railGroup.insertBefore(launch, railMore || null);
+    launch.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg><span>在 Agent 中打开</span><span class="nv-mcp-menu-state" hidden></span>';
+    var morePanel = document.getElementById('canvasLeftMorePanel');
+    var moreHead = morePanel ? morePanel.querySelector('.canvas-more-head') : null;
+    if(morePanel) morePanel.insertBefore(launch, moreHead ? moreHead.nextSibling : morePanel.firstChild);
     else document.body.appendChild(launch);
-    var launchFallback = launch.cloneNode(true);
+    var launchFallback = document.createElement('button');
     launchFallback.id = 'novaiMcpLaunchFallback';
     launchFallback.className = 'nv-mcp-launch-fallback';
+    launchFallback.type = 'button';
+    launchFallback.title = '在 Agent 中打开';
+    launchFallback.setAttribute('aria-label', '在 Agent 中打开');
+    launchFallback.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg>';
     document.body.appendChild(launchFallback);
 
     var panel = document.createElement('section');
@@ -39161,6 +39167,7 @@ function ensureTableApi(){
                 installedAgents[id] = st;
                 closeInstallConfirm();
                 renderInstalledUi();
+                refreshMenuState();
                 if(!modal.hidden) renderAgent(activeAgent);
                 var name = agentName(id);
                 if(data.already){
@@ -39244,6 +39251,34 @@ function ensureTableApi(){
         var visible = !!(rail && getComputedStyle(rail).display !== 'none' && rail.getBoundingClientRect().width > 0);
         launchFallback.style.display = visible ? 'none' : 'inline-flex';
     }
+    function closeMoreMenu(){
+        var more = document.getElementById('canvasLeftMorePanel');
+        var btn = document.getElementById('canvasRailMore');
+        if(more) more.hidden = true;
+        if(btn){ btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('is-open'); }
+    }
+    function refreshMenuState(){
+        Promise.all([
+            fetch('/api/mcp/servers', { headers: { Accept: 'application/json' } }).then(function(res){ return res.ok ? res.json() : null; }).catch(function(){ return null; }),
+            loadInstalledAgents()
+        ]).then(function(results){
+            var state = launch.querySelector('.nv-mcp-menu-state');
+            if(!state) return;
+            var servers = results[0] || {};
+            var enabled = results[0] ? !!servers.enabled : false;
+            var configured = Object.keys(installedAgents).filter(function(id){ return installedAgents[id] && installedAgents[id].configured; }).length;
+            if(configured > 0){
+                state.hidden = false;
+                state.textContent = '已接入 ' + configured;
+            } else if(enabled){
+                state.hidden = false;
+                state.textContent = 'MCP 已开启';
+            } else {
+                state.hidden = true;
+                state.textContent = '';
+            }
+        });
+    }
     function openPanel(anchor){
         Promise.all([loadInfo(), loadInstalledAgents()]).then(function(results){
             var data = results[0];
@@ -39256,7 +39291,15 @@ function ensureTableApi(){
             requestAnimationFrame(function(){ positionPanel(panelAnchor); });
         });
     }
-    function closePanel(){ panel.hidden = true; panel.classList.remove('open'); }
+    function closePanel(){
+        panel.hidden = true;
+        panel.classList.remove('open');
+        if(openedFromMenu){
+            openedFromMenu = false;
+            var moreBtn = document.getElementById('canvasRailMore');
+            if(moreBtn) moreBtn.focus();
+        }
+    }
     function togglePanel(anchor){ if(panel.hidden) openPanel(anchor); else closePanel(); }
 
     function docsOpen(){
@@ -39319,8 +39362,14 @@ function ensureTableApi(){
     }
     function closeModal(){ modal.hidden = true; }
 
-    launch.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); togglePanel(launch); });
-    launchFallback.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); togglePanel(launchFallback); });
+    launch.addEventListener('click', function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        closeMoreMenu();
+        openedFromMenu = true;
+        togglePanel(document.getElementById('canvasRailMore'));
+    });
+    launchFallback.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); openedFromMenu = false; togglePanel(launchFallback); });
     window.addEventListener('resize', function(){ syncLaunchFallback(); if(!panel.hidden) positionPanel(panelAnchor); });
     panel.addEventListener('click', function(e){
         e.stopPropagation();
@@ -39413,6 +39462,11 @@ function ensureTableApi(){
         if(!panel.hidden) closePanel();
     });
     syncLaunchFallback();
+    var railEl = document.getElementById('canvasRail');
+    if(railEl && window.MutationObserver){
+        new MutationObserver(syncLaunchFallback).observe(railEl, { attributes: true, attributeFilter: ['class', 'style'] });
+    }
+    refreshMenuState();
     refreshIcons();
 })();
 

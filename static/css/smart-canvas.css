@@ -7913,3 +7913,13 @@ html.studio-theme-dark .nv-mcp-brand-logo { filter: invert(1); }
 .nv-mcp-stale-note[hidden] { display: none; }
 .nv-mcp-agent-wrap { flex-wrap: wrap; row-gap: 2px; }
 
+
+.nv-mcp-menu-item .nv-mcp-menu-state {
+    margin-left: auto;
+    flex: 0 0 auto;
+    color: var(--muted);
+    font: 400 10px/1.2 var(--font-sans);
+    white-space: nowrap;
+}
+.nv-mcp-menu-item .nv-mcp-menu-state[hidden] { display: none; }
+
