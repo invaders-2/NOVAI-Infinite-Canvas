@@ -21,6 +21,8 @@ Python 3.9 约束：注解用 Optional/Dict/List，禁止 X | Y 联合写法。
 """
 from __future__ import annotations
 
+import os
+import sys
 from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
@@ -29,6 +31,21 @@ from pydantic import BaseModel
 from server.mcp import config, registry
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_SERVER_PY_NAME = "novai_mcp_server.py"
+_DOCS_PATH = "docs/v2/MCP_SERVER.md"
+_DEFAULT_PORT = 3000
+
+
+def _server_port() -> int:
+    """当前实际监听端口：main 启动时会把最终端口写回 NOVAI_PORT（含 --port 覆盖），没跑主程序时用默认 3000。"""
+    raw = str(os.environ.get("NOVAI_PORT") or "").strip()
+    try:
+        port = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_PORT
+    return port if 0 < port < 65536 else _DEFAULT_PORT
 
 
 class McpEnableRequest(BaseModel):
@@ -77,6 +94,42 @@ def mcp_disable_server(name: str) -> Dict[str, Any]:
         row = {"name": server_name, "enabled": False, "status": "未启用",
                "tool_count": 0, "tools": [], "error": ""}
     return {"ok": True, "server": row}
+
+
+@router.get("/connect-info")
+def mcp_connect_info() -> Dict[str, Any]:
+    """画布「MCP 接入」入口卡的数据：全部从当前运行态与本地配置推导，不写死端口/路径。"""
+    port = _server_port()
+    base_url = "http://127.0.0.1:%d" % port
+    server_py = os.path.join(_REPO_ROOT, _SERVER_PY_NAME)
+    server_py = server_py if os.path.isfile(server_py) else ""
+    command = sys.executable or "python3"
+    server_entry = {
+        "command": command,
+        "args": [server_py] if server_py else [],
+        "env": {"NOVAI_BASE_URL": base_url},
+    }
+    http_url = ""
+    try:
+        cfg = config.load_config()
+        for server in (cfg.get("servers") or {}).values():
+            if str(server.get("type") or "") == "http" and str(server.get("url") or "").strip():
+                http_url = str(server.get("url") or "").strip()
+                break
+    except Exception:
+        http_url = ""
+    codex_command = "codex mcp add novai-canvas --env NOVAI_BASE_URL=%s -- %s %s" % (
+        base_url, command, server_py)
+    return {
+        "enabled": registry.enabled(),
+        "server_entry": server_entry,
+        "mcp_servers_json": {"mcpServers": {"novai-canvas": server_entry}},
+        "codex_command": codex_command,
+        "http_url": http_url,
+        "docs_path": _DOCS_PATH,
+        "server_py": server_py,
+        "base_url": base_url,
+    }
 
 
 @router.post("/reload")

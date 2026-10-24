@@ -623,6 +623,13 @@ function videoResolutionsFor(model){
 }
 // 时长官方区间：null 表示没有该模型的官方区间（保留各画布原有上下限，不额外收窄）。
 function videoDurationRange(model){
+    const name = String(model || '').toLowerCase();
+    // MiniMax H3-Max 上游真实区间是 5-15 秒（报错文案自证），共享能力表两页必须同内容、暂时没收录，先在本页按型号收窄
+    const override = [
+        { match: 'minimax-h3-max', min: 5, max: 15 },
+        { match: 'minimax_h3_max', min: 5, max: 15 }
+    ].find(entry => name.includes(entry.match));
+    if(override) return {min: override.min, max: override.max};
     const min = modelCapabilityFor(model, 'durationMin');
     const max = modelCapabilityFor(model, 'durationMax');
     return typeof min === 'number' && typeof max === 'number' && min <= max ? {min, max} : null;
@@ -14592,8 +14599,10 @@ function fileNameFromUrl(url=''){
     }
 }
 function extensionForMediaItem(item, fallback='.png'){
-    const source = [item?.name, item?.url].map(value => String(value || '').split('?')[0].split('#')[0]).find(value => /\.[a-z0-9]{2,8}$/i.test(value));
-    if(source) return source.match(/(\.[a-z0-9]{2,8})$/i)?.[1] || fallback;
+    // 只认 URL 路径末段的媒体扩展名；name 里的扩展名不作数，否则视频会带着 .png 存下来。
+    const pathName = String(item?.url || '').split('?')[0].split('#')[0].split('/').filter(Boolean).pop() || '';
+    const pathExt = pathName.match(/\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|m4v|mkv|avi|mp3|wav|m4a|aac|ogg|flac)$/i)?.[0];
+    if(pathExt) return pathExt.toLowerCase();
     const kind = mediaKindForItem(item);
     if(kind === 'video') return '.mp4';
     if(kind === 'audio') return '.mp3';
@@ -14606,7 +14615,10 @@ function downloadNameForMediaItem(item, fallbackPrefix='canvas-output'){
     const ext = extensionForMediaItem(item);
     const randomName = `${fallbackPrefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}${ext}`;
     let name = safeExportFileName(preferred || randomName, randomName);
-    if(!/\.[a-z0-9]{2,8}$/i.test(name)) name += ext;
+    if(!name.toLowerCase().endsWith(ext)){
+        if(/\.(png|jpe?g|webp|gif|bmp|svg|mp4|webm|mov|m4v|mkv|avi|mp3|wav|m4a|aac|ogg|flac|txt|json|csv|srt|vtt|md)$/i.test(name)) name = name.replace(/\.[a-z0-9]{2,8}$/i, '') + ext;
+        else if(!/\.[a-z0-9]{2,8}$/i.test(name)) name += ext;
+    }
     return name;
 }
 function downloadPreviewImage(){
@@ -29779,6 +29791,14 @@ function pendingRequestBoxForNode(node){
     return displayBoxFromNaturalSize(requestSize);
 }
 function pendingBaseBoxSize(options={}){
+    /* 视频占位框必须按「本次请求」的 videoAspect 算：这个键只活在请求设置里（全局设置叠节点 runSettings），
+       不带参数调 explicitRequestOutputSizeForPending() 永远进不了视频分支，于是落到图片的 sizeForRun()，
+       占位框一律是正方形。adaptive / keep_ratio 算不出具体比例，那个函数返回 null，这里继续走原有兜底。 */
+    const requestSettings = options.requestSettings;
+    if(requestSettings && isApiLikeEngine(requestSettings.engine) && requestSettings.apiKind === 'video'){
+        const videoRequestSize = explicitRequestOutputSizeForPending(requestSettings);
+        if(videoRequestSize) return displayBoxFromNaturalSize(videoRequestSize);
+    }
     const requestSize = explicitRequestOutputSizeForPending();
     if(requestSize) return displayBoxFromNaturalSize(requestSize);
     /* 显式给的参考比例（批量按行算出来的）优先于任何「源节点自己的框」：
@@ -30822,7 +30842,7 @@ function nextOutputPositionForSource(sourceNode, pendingBox, options={}){
     return {x, y};
 }
 function createPendingOutputFromSource(sourceNode, expectedCount, meta, options={}){
-    const pendingBox = pendingBoxSize(expectedCount, {sourceNode, ratio:options.ratio || null, refs:options.refs || meta?.promptRefs || []});
+    const pendingBox = pendingBoxSize(expectedCount, {sourceNode, ratio:options.ratio || null, refs:options.refs || meta?.promptRefs || [], requestSettings:options.requestSettings || null});   // requestSettings 见 pendingBaseBoxSize
     const pos = nextOutputPositionForSource(sourceNode, pendingBox);
     const output = {
         id:uid('smart'),
@@ -32055,11 +32075,14 @@ function appendCascadeRefsToReceiver(node, refs, ctx=smartLoopContext){
     if(!node || !refs?.length) return [];
     const additions = refs
         .filter(ref => ref?.url)
-        .map((ref, i) => stripImageGenerationMeta({
-            url:ref.url,
-            name:ref.name || `output-${i + 1}.png`,
-            kind:ref.kind || (isVideoMediaItem(ref) ? 'video' : 'image')
-        }));
+        .map((ref, i) => {
+            const kind = ref.kind || (isVideoMediaItem(ref) ? 'video' : 'image');
+            return stripImageGenerationMeta({
+                url:ref.url,
+                name:ref.name || `output-${i + 1}${extensionForMediaItem({url:ref.url, kind})}`,
+                kind
+            });
+        });
     if(!additions.length) return [];
     replaceOutputsToNodeWithHistory(node, additions, mediaKindForUrls(additions, additions.some(isVideoMediaItem) ? 'video' : 'image'), null, {skipShift:Boolean(ctx?.nodeId)});
     render();
@@ -32600,7 +32623,7 @@ async function runGeneration(){
     const shouldCreateBranchOutput = groupRun || (nodeHasImages && !workflowModeRun);
     const pendingMeta = shouldCreateBranchOutput ? stripRunInputMeta(meta) : meta;
     undoSuppressed = true;
-    if(shouldCreateBranchOutput) branchNode = createPendingOutputFromSource(node, expectedCount, pendingMeta, {connectSource:false, selectOutput:true, refs, kind:logKind});
+    if(shouldCreateBranchOutput) branchNode = createPendingOutputFromSource(node, expectedCount, pendingMeta, {connectSource:false, selectOutput:true, refs, kind:logKind, requestSettings:settings});
     undoSuppressed = false;
     const pendingNode = branchNode || node;
     /* 有图节点重跑时真正在跑的是新开的下游占位节点：把停止上下文指回用户选中的源节点。 */
@@ -32612,7 +32635,7 @@ async function runGeneration(){
         delete pendingNode.runFinishedAt;
         delete pendingNode.runElapsedMs;
         pendingNode.runTimerHidden = false;
-        const pendingBox = pendingBoxSize(pendingNode.pending, {sourceNode:node, refs});
+        const pendingBox = pendingBoxSize(pendingNode.pending, {sourceNode:node, refs, requestSettings:settings});
         pendingNode.w = pendingBox.w;
         pendingNode.h = pendingBox.h;
         attachRunMeta(pendingNode, pendingMeta);
@@ -37498,7 +37521,7 @@ function applyRowSourceRatioToSettings(runSettings, ratio){
 }
 /* 一次批量运行（batchRunId）对应一个下游结果节点：首个跑到的行创建它，后面的行并进去。 */
 const batchRunResultNodes = new Map();
-function batchResultNodeForRun(runId, sourceNode, meta, refs, ratio){
+function batchResultNodeForRun(runId, sourceNode, meta, refs, ratio, requestSettings=null){
     if(batchRunResultNodes.size > 50) batchRunResultNodes.clear();
     let output = runId ? batchRunResultNodes.get(runId) : null;
     if(output && !nodes.some(n => n.id === output.id)) output = null;
@@ -37514,7 +37537,7 @@ function batchResultNodeForRun(runId, sourceNode, meta, refs, ratio){
     const totalRows = Math.max(1, Number(sourceNode && sourceNode._batchRunRows) || Number(upstreamTables[0]?.table?.rows?.length) || 1);
     undoSuppressed = true;
     try {
-        output = createPendingOutputFromSource(sourceNode, totalRows, meta, {connectSource:false, selectOutput:false, refs, ratio});
+        output = createPendingOutputFromSource(sourceNode, totalRows, meta, {connectSource:false, selectOutput:false, refs, ratio, requestSettings});
         /* 结果节点的停止上下文指回上游批量节点：选中结果节点点停止也要能停到这一批。 */
         output._stopContextId = sourceNode.id;
         output.pending = totalRows;
@@ -37803,7 +37826,7 @@ async function tableRunOneRow(nodeId, options, forceVideo){
             applySourceRatioToVideoAspect(runSettings, srcRatio);
         }
     }
-    let output = batchResultNodeForRun(runId, node, meta, refs, srcRatio);
+    let output = batchResultNodeForRun(runId, node, meta, refs, srcRatio, runSettings);   // 占位框要跟本行真正发出去的参数同源（视频看 videoAspect）
     const liveOutput = output ? liveSmartNode(output) : null;
     if(liveOutput){
         /* 第一次拿到结果节点：按本轮真实行号建逐行状态（初始全部 queued），
@@ -38810,6 +38833,138 @@ function ensureTableApi(){
     setTimeout(sync, 1200);
     refreshIcons();
 })();
+/* ── 画布空状态：MCP 接入入口卡（数据来自 /api/mcp/connect-info） ─────────────
+   卡片是 fixed overlay，出现/消失不参与画布布局，不会让空状态模板区抖动。 */
+(function mountMcpEntryCard(){
+    if(document.getElementById('novaiMcpEntry')) return;
+    var DISMISS_KEY = 'novai_mcp_entry_dismissed';
+    var info = null;
+    var dismissed = false;
+    try { dismissed = localStorage.getItem(DISMISS_KEY) === '1'; } catch(e) {}
+
+    var card = document.createElement('section');
+    card.id = 'novaiMcpEntry';
+    card.className = 'nv-mcp-entry';
+    card.setAttribute('aria-label', 'MCP 接入');
+    card.innerHTML =
+        '<button type="button" class="nv-mcp-entry-close" aria-label="关闭 MCP 接入入口" title="关闭">×</button>' +
+        '<div class="nv-mcp-entry-body">' +
+            '<div class="nv-mcp-entry-kicker">MCP · 开放接入</div>' +
+            '<h3 class="nv-mcp-entry-title">让你的 Agent 直接调用 NOVAI 创作</h3>' +
+            '<p class="nv-mcp-entry-sub">连接 NOVAI 的 MCP，让你的 Agent 直接使用画布工具。</p>' +
+            '<div class="nv-mcp-entry-actions">' +
+                '<button type="button" class="nv-mcp-entry-btn is-primary" data-mcp-act="claude">添加到 Claude</button>' +
+                '<button type="button" class="nv-mcp-entry-btn" data-mcp-act="codex">添加到 Codex</button>' +
+                '<button type="button" class="nv-mcp-entry-btn" data-mcp-act="url">复制 MCP 地址</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="nv-mcp-entry-foot"><span>在其他 Agent 中使用</span><span class="nv-mcp-entry-dot">·</span><button type="button" class="nv-mcp-entry-link" data-mcp-act="docs">MCP 文档</button></div>';
+    document.body.appendChild(card);
+
+    var docs = document.createElement('div');
+    docs.className = 'nv-mcp-doc-root';
+    docs.hidden = true;
+    docs.innerHTML =
+        '<div class="nv-mcp-doc-scrim" data-mcp-doc-close></div>' +
+        '<div class="nv-mcp-doc" role="dialog" aria-modal="true" aria-labelledby="nvMcpDocTitle">' +
+            '<div class="nv-mcp-doc-head"><h3 id="nvMcpDocTitle">在 Agent 里接入 NOVAI MCP</h3><button type="button" class="nv-mcp-doc-close" aria-label="关闭" data-mcp-doc-close>×</button></div>' +
+            '<div class="nv-mcp-doc-body">' +
+                '<div class="nv-mcp-doc-label">stdio 配置 <button type="button" class="nv-mcp-doc-copy" data-mcp-doc-copy>复制</button></div>' +
+                '<pre class="nv-mcp-doc-pre" id="nvMcpDocJson"></pre>' +
+                '<div class="nv-mcp-doc-label">HTTP 地址</div>' +
+                '<div class="nv-mcp-doc-url" id="nvMcpDocUrl"></div>' +
+                '<p class="nv-mcp-doc-warn">该 MCP 服务会以你的系统权限在本机运行外部进程，请确认来源可信。</p>' +
+                '<div class="nv-mcp-doc-label">文档路径</div>' +
+                '<div class="nv-mcp-doc-path" id="nvMcpDocPath"></div>' +
+            '</div>' +
+        '</div>';
+    document.body.appendChild(docs);
+
+    function toastCopy(text, icon){ try { toast(text, icon || 'check'); } catch(e) {} }
+    function copyFallback(text){
+        try {
+            var area = document.createElement('textarea');
+            area.value = text;
+            area.setAttribute('readonly', 'readonly');
+            area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+            document.body.appendChild(area);
+            area.select();
+            var ok = document.execCommand('copy');
+            area.remove();
+            return !!ok;
+        } catch(e) { return false; }
+    }
+    function copyText(text, successText){
+        if(!text){ toastCopy('没有可复制的内容', 'alert'); return; }
+        var fallback = function(){ if(copyFallback(text)) toastCopy(successText, 'check'); else toastCopy('复制失败，请手动选择', 'alert'); };
+        if(navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(text).then(function(){ toastCopy(successText, 'check'); }, fallback);
+        } else fallback();
+    }
+    function stdioJson(){ return JSON.stringify((info && info.mcp_servers_json) || {}, null, 2); }
+    function sync(){
+        var nodeCount = (nodes || []).filter(function(n){ return n && n.id !== SMART_LOG_PREVIEW_NODE_ID; }).length;
+        var linkCount = (canvas && Array.isArray(canvas.connections)) ? canvas.connections.length : 0;
+        var show = !!info && !dismissed && nodeCount === 0 && linkCount === 0;
+        card.classList.toggle('open', show);
+    }
+    function closeCard(){
+        dismissed = true;
+        try { localStorage.setItem(DISMISS_KEY, '1'); } catch(e) {}
+        sync();
+    }
+    function openDocs(){
+        if(!info) return;
+        document.getElementById('nvMcpDocJson').textContent = stdioJson();
+        document.getElementById('nvMcpDocUrl').textContent = info.http_url || '未启用 HTTP 服务';
+        document.getElementById('nvMcpDocPath').textContent = info.docs_path || '未提供文档路径';
+        docs.hidden = false;
+        docs.classList.add('open');
+    }
+    function closeDocs(){ docs.hidden = true; docs.classList.remove('open'); }
+    card.addEventListener('mousedown', function(e){ e.stopPropagation(); });
+    card.addEventListener('click', function(e){
+        var action = e.target && e.target.closest ? e.target.closest('[data-mcp-act]') : null;
+        if(!action) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var act = action.getAttribute('data-mcp-act');
+        if(act === 'claude') copyText(stdioJson(), '已复制 Claude 配置，粘贴到 claude_desktop_config.json 后重启');
+        else if(act === 'codex') copyText(info && info.codex_command, '命令已复制');
+        else if(act === 'url') copyText(info && info.http_url, 'MCP 地址已复制');
+        else if(act === 'docs') openDocs();
+    });
+    card.querySelector('.nv-mcp-entry-close').addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); closeCard(); });
+    docs.addEventListener('click', function(e){
+        if(e.target.closest && e.target.closest('[data-mcp-doc-close]')){ e.preventDefault(); closeDocs(); return; }
+        if(e.target.closest && e.target.closest('[data-mcp-doc-copy]')){ e.preventDefault(); copyText(stdioJson(), 'MCP 配置已复制'); }
+        e.stopPropagation();
+    });
+    document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && !docs.hidden) closeDocs(); });
+
+    function setInfo(data){
+        info = data || null;
+        if(!info) return;
+        var urlBtn = card.querySelector('[data-mcp-act="url"]');
+        if(urlBtn){
+            var hasUrl = !!String(info.http_url || '').trim();
+            urlBtn.disabled = !hasUrl;
+            urlBtn.title = hasUrl ? '复制 MCP 的 HTTP 地址' : '未启用 HTTP 服务';
+        }
+        sync();
+    }
+    if(dismissed){ sync(); return; }
+    fetch('/api/mcp/connect-info', { headers: { Accept: 'application/json' } })
+        .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+        .then(function(data){
+            if(!data || !data.mcp_servers_json) return;
+            setInfo(data);
+            new MutationObserver(sync).observe(world, { childList: true, subtree: true });
+            setTimeout(sync, 1200);
+        })
+        .catch(function(){});
+})();
+
 /* ═══ 第 7 轮：视频后期 —— 尾帧接力 / 首帧成图 / 拼接选中视频 ═══ */
 function smartVideoItemOfNode(node){
     if(!node || !isSmartMediaNode(node)) return null;
@@ -38978,7 +39133,7 @@ async function rerunSmartNode(node){
         : Math.max(1, Math.min(8, Number(info.settings.count || 1)));
     pushUndo();
     undoSuppressed = true;
-    const out = createPendingOutputFromSource(source, expected, meta, {connectSource:false, selectOutput:false, refs, kind:info.kind});
+    const out = createPendingOutputFromSource(source, expected, meta, {connectSource:false, selectOutput:false, refs, kind:info.kind, requestSettings:info.settings});
     undoSuppressed = false;
     if(source === node){
         const conn = (canvas.connections || []).find(c => c.from === node.id && c.to === out.id);
