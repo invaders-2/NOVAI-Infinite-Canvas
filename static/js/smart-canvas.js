@@ -8529,6 +8529,7 @@ initCanvasContextUsage(); // 输入区工具条的上下文占用位（数据来
 initAgentSkillUi(); // 输入区工具条的技能入口（挂在 composer-left）
 initAgentSteerUi(); // 运行中插话按钮 + 输入区上方提示位
 initAgentThreadsUi(); // 对话线程切换器 + 助手消息「从此处分支」
+chatArtifactsMount(); // 助手顶部「产物」入口 + 画布产物面板
 ensureChatSkillMentions(); // @ 技能候选：先预取 capabilities，打开 @ 时直接分组
 initAgentMemoryUi();
 // ── V2 Phase 5C: /api/agent/run 流式 Agent（SSE + 逐步落图）──
@@ -9700,6 +9701,8 @@ function agentRunPlanHandoff(card, plan){
         summary: plan.summary || '',
         impact: plan.impact || null
     }, { stream:true, instruction:card._run.instruction || '' });
+    card._run.planCard._run = card._run;
+    agentRunEnsureContextButton(card._run.planCard);
     // summary 已经印在方案卡上，done.message 与它同文时不再重复出一个气泡
     var summary = String(plan.summary || '').trim();
     if(summary) card._run.lastMessage = summary;
@@ -9763,6 +9766,8 @@ function agentRunHandleEvent(card, name, data){
     if(name === 'run_start'){
         card._run.run_id = ev.run_id || '';
         card._run.max_steps = Number(ev.max_steps) || card._run.max_steps;
+        agentRunEnsureContextButton(card);
+        if(card._run.planCard) agentRunEnsureContextButton(card._run.planCard);
         agentRunSetStatus(card, 'running', agentRunStatusText('streaming'));
         return;
     }
@@ -9794,6 +9799,9 @@ function agentRunHandleEvent(card, name, data){
     if(name === 'artifact_updated'){
         agentArtifactsAdd(card, ev.files);
         if(card._run.planCard) agentArtifactsAdd(card._run.planCard, ev.files);
+        agentRunEnsureContextButton(card);
+        if(card._run.planCard) agentRunEnsureContextButton(card._run.planCard);
+        refreshChatArtifactsIfOpen();
         return;
     }
     if(name === 'message'){ agentRunAssistantBubble(card, ev.text); return; }
@@ -9809,6 +9817,9 @@ function agentRunHandleEvent(card, name, data){
             agentArtifactsAdd(card, ev.changes.artifacts);
             if(card._run.planCard) agentArtifactsAdd(card._run.planCard, ev.changes.artifacts);
         }
+        agentRunEnsureContextButton(card);
+        if(card._run.planCard) agentRunEnsureContextButton(card._run.planCard);
+        refreshChatArtifactsIfOpen();
         var status = ev.status || 'ok';
         if(ev.message) agentRunAssistantBubble(card, ev.message);
         if(ev.undoable && ev.session_id) agentRunUndoFooter(card, ev);
@@ -10297,6 +10308,7 @@ async function runAgentStream(instruction, bubble, opts){
     var terminalSeen = false;
     var runId = String((resp.headers && resp.headers.get && resp.headers.get('X-NOVAI-Run-Id')) || '');
     agentStreamRunId = runId;
+    if(runId){ card._run.run_id = runId; agentRunEnsureContextButton(card); if(card._run.planCard) agentRunEnsureContextButton(card._run.planCard); }
     syncAgentSteerButton();
     var resumeAfter = function(){
         return (agentSession && agentSession.lastEventId) ? String(agentSession.lastEventId) : '0';
@@ -40941,4 +40953,354 @@ window.SmartCanvasCollab = {
     notifyReadOnly: () => {},
     toast: message => { if(message) toast(String(message)); }
 };
+/* ── 画布产物面板：跨 run 的交付物清单 ── */
+var chatArtifactsPanel = document.getElementById('chatArtifactsPanel') || null;
+var chatArtifactsFiles = [];
+var chatArtifactsTruncated = false;
+var chatArtifactsLoading = false;
+var chatArtifactsError = '';
+var chatArtifactsReq = 0;
+function chatArtifactGroupLabel(kind){
+    return ({ html:'HTML', xlsx:'Excel', csv:'CSV', md:'文档', image:'图片' })[String(kind || '')] || '其他';
+}
+function chatArtifactIcon(kind){
+    return ({ html:'file-text', xlsx:'table', csv:'table', md:'file-text', image:'image' })[String(kind || '')] || 'file';
+}
+function chatArtifactSize(size){
+    var n = Number(size) || 0;
+    if(n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+    if(n >= 1024) return (n / 1024).toFixed(n >= 10 * 1024 ? 0 : 1) + ' KB';
+    return n ? n + ' B' : '—';
+}
+function chatArtifactTime(mtime){
+    var t = Number(mtime) || 0;
+    if(!t) return '';
+    var diff = Math.max(0, Date.now() / 1000 - t);
+    if(diff < 60) return '刚刚';
+    if(diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+    if(diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+    if(diff < 86400 * 7) return Math.floor(diff / 86400) + ' 天前';
+    var d = new Date(t * 1000);
+    return (d.getMonth() + 1) + '/' + d.getDate();
+}
+function chatArtifactMiddleName(name){
+    var s = String(name || '');
+    if(s.length <= 34) return s;
+    var dot = s.lastIndexOf('.');
+    var ext = dot > 0 ? s.slice(dot) : '';
+    var base = ext ? s.slice(0, dot) : s;
+    if(ext.length > 12) { ext = ''; base = s; }
+    var head = 18;
+    var tail = Math.max(6, 32 - head - ext.length);
+    return base.slice(0, head) + '…' + base.slice(-tail) + ext;
+}
+function chatArtifactsMount(){
+    var actions = document.querySelector('.canvas-assistant-head-actions');
+    if(!actions || document.getElementById('chatArtifactsBtn')) return;
+    var btn = document.createElement('button');
+    btn.id = 'chatArtifactsBtn';
+    btn.className = 'canvas-assistant-icon chat-artifacts-btn';
+    btn.type = 'button';
+    btn.title = '画布产物';
+    btn.setAttribute('aria-label', '画布产物');
+    btn.innerHTML = '<i data-lucide="package"></i><span class="chat-artifacts-badge" hidden></span>';
+    actions.insertBefore(btn, actions.firstChild);
+    btn.addEventListener('click', function(event){
+        event.preventDefault();
+        event.stopPropagation();
+        toggleChatArtifactsPanel();
+    });
+    chatArtifactsPanel = document.createElement('section');
+    chatArtifactsPanel.id = 'chatArtifactsPanel';
+    chatArtifactsPanel.className = 'chat-artifacts-panel';
+    chatArtifactsPanel.hidden = true;
+    chatArtifactsPanel.setAttribute('aria-label', '画布产物');
+    chatArtifactsPanel.innerHTML = '<div class="chat-artifacts-head"><div class="chat-artifacts-heading"><h3>本轮产物和历史交付物</h3><p>画布里的报告、表格和图片</p></div>' +
+        '<button type="button" class="chat-artifacts-refresh">刷新</button>' +
+        '<button type="button" class="chat-artifacts-close" aria-label="关闭">×</button></div>' +
+        '<div class="chat-artifacts-body"></div>' +
+        '<div class="chat-artifacts-foot" hidden>只显示最近 200 个文件</div>';
+    document.body.appendChild(chatArtifactsPanel);
+    chatArtifactsPanel.querySelector('.chat-artifacts-refresh').addEventListener('click', function(){ loadChatArtifacts(); });
+    chatArtifactsPanel.querySelector('.chat-artifacts-close').addEventListener('click', closeChatArtifactsPanel);
+    chatArtifactsPanel.addEventListener('click', function(event){ event.stopPropagation(); });
+    document.addEventListener('click', function(event){
+        if(!chatArtifactsPanel || chatArtifactsPanel.hidden) return;
+        if(event.target.closest('#chatArtifactsBtn') || chatArtifactsPanel.contains(event.target)) return;
+        closeChatArtifactsPanel();
+    });
+    document.addEventListener('keydown', function(event){ if(event.key === 'Escape') closeChatArtifactsPanel(); });
+    window.addEventListener('resize', function(){ if(chatArtifactsPanel && !chatArtifactsPanel.hidden) positionChatArtifactsPanel(); });
+    refreshChatArtifactsCount();
+}
+function positionChatArtifactsPanel(){
+    if(!chatArtifactsPanel) return;
+    var btn = document.getElementById('chatArtifactsBtn');
+    var rect = btn ? btn.getBoundingClientRect() : { right: window.innerWidth - 16, bottom: 52 };
+    var width = Math.min(360, window.innerWidth - 32);
+    var left = Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12));
+    var top = Math.max(12, rect.bottom + 8);
+    var maxH = Math.max(220, window.innerHeight - top - 150);
+    chatArtifactsPanel.style.width = width + 'px';
+    chatArtifactsPanel.style.left = left + 'px';
+    chatArtifactsPanel.style.top = top + 'px';
+    chatArtifactsPanel.style.maxHeight = maxH + 'px';
+}
+function toggleChatArtifactsPanel(){
+    if(!chatArtifactsPanel) return;
+    if(chatArtifactsPanel.hidden){ openChatArtifactsPanel(); }
+    else closeChatArtifactsPanel();
+}
+function openChatArtifactsPanel(){
+    if(!chatArtifactsPanel) return;
+    chatArtifactsPanel.hidden = false;
+    chatArtifactsPanel.classList.add('open');
+    positionChatArtifactsPanel();
+    loadChatArtifacts();
+}
+function closeChatArtifactsPanel(){
+    if(chatArtifactsPanel){ chatArtifactsPanel.hidden = true; chatArtifactsPanel.classList.remove('open'); }
+}
+function refreshChatArtifactsCount(){
+    if(!canvasId) return;
+    fetch('/api/agent/canvases/' + encodeURIComponent(canvasId) + '/artifacts', { headers: { Accept: 'application/json' } })
+        .then(function(res){ return res.ok ? res.json() : null; })
+        .then(function(data){ if(data) updateChatArtifactsBadge(Array.isArray(data.files) ? data.files.length : 0); })
+        .catch(function(){});
+}
+function updateChatArtifactsBadge(count){
+    var btn = document.getElementById('chatArtifactsBtn');
+    if(!btn) return;
+    var badge = btn.querySelector('.chat-artifacts-badge');
+    if(!badge) return;
+    var n = Number(count) || 0;
+    badge.hidden = n <= 0;
+    badge.textContent = n > 99 ? '99+' : String(n);
+    btn.title = n > 0 ? ('画布产物 · ' + n) : '画布产物';
+}
+function loadChatArtifacts(){
+    if(!canvasId || !chatArtifactsPanel) return;
+    var seq = ++chatArtifactsReq;
+    chatArtifactsLoading = true;
+    chatArtifactsError = '';
+    renderChatArtifactsBody();
+    fetch('/api/agent/canvases/' + encodeURIComponent(canvasId) + '/artifacts', { headers: { Accept: 'application/json' } })
+        .then(function(res){ return res.json().catch(function(){ return {}; }).then(function(data){ if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status)); return data; }); })
+        .then(function(data){
+            if(seq !== chatArtifactsReq) return;
+            chatArtifactsLoading = false;
+            chatArtifactsFiles = Array.isArray(data.files) ? data.files : [];
+            chatArtifactsTruncated = !!data.truncated;
+            updateChatArtifactsBadge(chatArtifactsFiles.length);
+            renderChatArtifactsBody();
+        })
+        .catch(function(error){
+            if(seq !== chatArtifactsReq) return;
+            chatArtifactsLoading = false;
+            chatArtifactsError = String((error && error.message) || '加载失败');
+            renderChatArtifactsBody();
+        });
+}
+function refreshChatArtifactsIfOpen(openOnly){
+    refreshChatArtifactsCount();
+    if(chatArtifactsPanel && !chatArtifactsPanel.hidden) loadChatArtifacts();
+}
+function renderChatArtifactsBody(){
+    if(!chatArtifactsPanel) return;
+    var body = chatArtifactsPanel.querySelector('.chat-artifacts-body');
+    var foot = chatArtifactsPanel.querySelector('.chat-artifacts-foot');
+    if(!body) return;
+    if(chatArtifactsLoading){
+        body.innerHTML = '<div class="chat-artifacts-skeleton">' +
+            '<div class="chat-artifacts-skeleton-row"></div><div class="chat-artifacts-skeleton-row"></div><div class="chat-artifacts-skeleton-row"></div>' +
+        '</div>';
+        if(foot) foot.hidden = true;
+        return;
+    }
+    if(chatArtifactsError){
+        body.innerHTML = '<div class="chat-artifacts-state"><p>产物加载失败：' + escapeHtml(chatArtifactsError) + '</p><button type="button" class="chat-artifacts-retry">重试</button></div>';
+        if(foot) foot.hidden = true;
+        var retry = body.querySelector('.chat-artifacts-retry');
+        if(retry) retry.addEventListener('click', function(){ loadChatArtifacts(); });
+        return;
+    }
+    if(!chatArtifactsFiles.length){
+        body.innerHTML = '<div class="chat-artifacts-empty"><i data-lucide="package-open"></i><p>这个画布还没有产物。让助手生成报告或表格后会自动出现在这里。</p></div>';
+        if(foot) foot.hidden = true;
+        refreshIcons();
+        return;
+    }
+    var order = ['html', 'xlsx', 'csv', 'md', 'image'];
+    var groups = {};
+    chatArtifactsFiles.forEach(function(file){
+        var kind = String(file.kind || '');
+        (groups[kind] = groups[kind] || []).push(file);
+    });
+    var html = '';
+    order.concat(Object.keys(groups).filter(function(k){ return order.indexOf(k) < 0; })).forEach(function(kind){
+        var files = groups[kind];
+        if(!files || !files.length) return;
+        html += '<div class="chat-artifacts-group"><div class="chat-artifacts-group-head"><span>' + escapeHtml(chatArtifactGroupLabel(kind)) + '</span><b>' + files.length + '</b></div>';
+        files.forEach(function(file){
+            var name = String(file.name || '');
+            var size = chatArtifactSize(file.size);
+            var time = chatArtifactTime(file.mtime);
+            var url = String(file.url || ('/api/agent/files/' + encodeURIComponent(name)));
+            html += '<div class="chat-artifact-row"><span class="chat-artifact-row-ico"><i data-lucide="' + chatArtifactIcon(kind) + '"></i></span>' +
+                '<span class="chat-artifact-row-main"><span class="chat-artifact-row-name" title="' + escapeAttr(name) + '">' + escapeHtml(chatArtifactMiddleName(name)) + '</span>' +
+                '<span class="chat-artifact-row-meta">' + escapeHtml(size) + (time ? ' · ' + escapeHtml(time) : '') + '</span></span>' +
+                '<a class="chat-artifact-download" href="' + escapeAttr(url) + '" target="_blank" rel="noopener" download="' + escapeAttr(name) + '" title="下载"><i data-lucide="download"></i></a></div>';
+        });
+        html += '</div>';
+    });
+    body.innerHTML = html;
+    if(foot){ foot.hidden = !chatArtifactsTruncated; foot.textContent = '只显示最近 200 个文件'; }
+    refreshIcons();
+}
+
+
+/* ── run 模型上下文：只读调试弹窗 ── */
+var agentRunContextRoot = null;
+var agentRunContextRunId = '';
+function agentRunContextChars(n){
+    if(n === null || n === undefined || n === '') return '—';
+    var v = Number(n);
+    if(!isFinite(v)) return '—';
+    return v.toLocaleString('zh-CN') + ' 字';
+}
+function agentRunEnsureContextButton(card){
+    if(!card) return;
+    var run = card._run || null;
+    var runId = run && run.run_id ? String(run.run_id) : '';
+    var old = card.querySelector('.agent-run-context-btn');
+    if(!runId){ if(old) old.remove(); return; }
+    var btn = old;
+    if(!btn){
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'agent-btn agent-run-context-btn';
+        btn.innerHTML = '<i data-lucide="braces"></i>上下文';
+        btn.addEventListener('click', function(event){
+            event.preventDefault(); event.stopPropagation();
+            if(run && run.run_id) openAgentRunContext(String(run.run_id));
+        });
+    }
+    var title = card.querySelector('.agent-artifacts-title');
+    if(title){
+        if(btn.parentNode !== title) title.appendChild(btn);
+    } else {
+        var row = card.querySelector('.agent-run-debug-row');
+        if(!row){
+            row = document.createElement('div');
+            row.className = 'agent-run-debug-row';
+            card.appendChild(row);
+        }
+        if(btn.parentNode !== row) row.appendChild(btn);
+    }
+    refreshIcons();
+}
+function closeAgentRunContext(){
+    if(agentRunContextRoot) agentRunContextRoot.hidden = true;
+}
+function agentRunContextShell(){
+    if(agentRunContextRoot) return agentRunContextRoot;
+    var root = document.createElement('div');
+    root.id = 'agentRunContextRoot';
+    root.className = 'agent-run-context-root';
+    root.hidden = true;
+    root.innerHTML = '<div class="agent-run-context-scrim" data-context-close></div>' +
+        '<div class="agent-run-context" role="dialog" aria-modal="true" aria-label="模型上下文">' +
+            '<div class="agent-run-context-head"><div><h3>模型上下文</h3><p class="agent-run-context-model"></p></div><button type="button" class="agent-run-context-close" aria-label="关闭">×</button></div>' +
+            '<div class="agent-run-context-body"></div>' +
+            '<div class="agent-run-context-foot">这些是本地估算值，不等于计费口径；不会展示提示词原文</div>' +
+        '</div>';
+    document.body.appendChild(root);
+    root.addEventListener('click', function(event){
+        if(event.target.closest('[data-context-close]') || event.target.closest('.agent-run-context-close')) closeAgentRunContext();
+    });
+    document.addEventListener('keydown', function(event){ if(event.key === 'Escape' && !root.hidden) closeAgentRunContext(); });
+    document.addEventListener('click', function(event){
+        if(root.hidden) return;
+        if(root.contains(event.target)) return;
+        if(event.target.closest('.agent-run-context-btn')) return;
+        closeAgentRunContext();
+    });
+    agentRunContextRoot = root;
+    return root;
+}
+function agentRunContextLoading(){
+    var body = agentRunContextRoot && agentRunContextRoot.querySelector('.agent-run-context-body');
+    if(body) body.innerHTML = '<div class="agent-run-context-skeleton"><i></i><i></i><i></i></div>';
+    var foot = agentRunContextRoot && agentRunContextRoot.querySelector('.agent-run-context-foot');
+    if(foot) foot.hidden = false;
+}
+function agentRunContextError(message){
+    var body = agentRunContextRoot && agentRunContextRoot.querySelector('.agent-run-context-body');
+    if(!body) return;
+    body.innerHTML = '<div class="agent-run-context-error"><p>' + escapeHtml(message || '加载失败') + '</p><button type="button" class="agent-btn agent-run-context-retry">重试</button></div>';
+    var retry = body.querySelector('.agent-run-context-retry');
+    if(retry) retry.addEventListener('click', function(){ if(agentRunContextRunId) loadAgentRunContext(agentRunContextRunId); });
+}
+function openAgentRunContext(runId){
+    if(!runId) return;
+    agentRunContextRunId = String(runId);
+    var root = agentRunContextShell();
+    root.hidden = false;
+    agentRunContextLoading();
+    loadAgentRunContext(agentRunContextRunId);
+}
+async function loadAgentRunContext(runId){
+    if(!agentRunContextRoot) agentRunContextShell();
+    agentRunContextLoading();
+    try {
+        var res = await fetch('/api/agent/runs/' + encodeURIComponent(runId) + '/model-context', { headers: { Accept: 'application/json' } });
+        var data = await res.json().catch(function(){ return {}; });
+        if(res.status === 404){
+            closeAgentRunContext();
+            toast('这轮已过期，无法查看上下文', '!');
+            return;
+        }
+        if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+        renderAgentRunContext(data);
+    } catch(error){
+        agentRunContextError(String((error && error.message) || '加载失败'));
+    }
+}
+function renderAgentRunContext(data){
+    if(!agentRunContextRoot) return;
+    var modelEl = agentRunContextRoot.querySelector('.agent-run-context-model');
+    var body = agentRunContextRoot.querySelector('.agent-run-context-body');
+    var foot = agentRunContextRoot.querySelector('.agent-run-context-foot');
+    var usage = agentSession ? agentSession.contextUsage : null;
+    var used = data.estimated_tokens !== null && data.estimated_tokens !== undefined ? Number(data.estimated_tokens) : null;
+    var max = data.context_max !== null && data.context_max !== undefined ? Number(data.context_max) : null;
+    var pct = data.percentage !== null && data.percentage !== undefined ? Number(data.percentage) : null;
+    if(pct === null && used !== null && max){ pct = used * 100 / max; }
+    var model = String(data.model || '未知模型');
+    if(modelEl) modelEl.textContent = model + (used !== null ? ' · 估算 ' + formatTokens(used) + ' tokens' : '');
+    var sections = Array.isArray(data.system_prompt_sections) ? data.system_prompt_sections : [];
+    var toolNames = Array.isArray(data.tool_names) ? data.tool_names : [];
+    var toolCount = data.tool_count !== null && data.tool_count !== undefined ? Number(data.tool_count) : toolNames.length;
+    var html = '<div class="agent-run-context-usage">' + (max ?
+        ('<div class="agent-run-context-bar"><i style="width:' + Math.max(0, Math.min(100, pct || 0)) + '%"></i></div><span>' + Math.round(pct || 0) + '%</span>') :
+        '<span class="agent-run-context-no-max">未设置上下文上限</span>') + '</div>' +
+        '<div class="agent-run-context-rows">' +
+            '<div class="agent-run-context-row"><span>系统提示</span><b>' + agentRunContextChars(data.system_prompt_chars) + '</b></div>' +
+            '<div class="agent-run-context-row is-chips"><span>分段</span><div class="agent-run-context-chips">' + (sections.length ? sections.map(function(s){ return '<em>' + escapeHtml(String(s)) + '</em>'; }).join('') : '<span class="agent-run-context-muted">—</span>') + '</div></div>' +
+            '<div class="agent-run-context-row"><span>工具</span><b><button type="button" class="agent-run-context-tools-toggle">' + (toolCount || 0) + ' 个' + (toolNames.length ? '<i data-lucide="chevron-down"></i>' : '') + '</button></b></div>' +
+            (toolNames.length ? '<div class="agent-run-context-tools" hidden>' + toolNames.slice(0, 60).map(function(n){ return '<em>' + escapeHtml(String(n)) + '</em>'; }).join('') + (toolNames.length > 60 ? '<span>还有 ' + (toolNames.length - 60) + ' 个</span>' : '') + '</div>' : '') +
+            '<div class="agent-run-context-row"><span>历史</span><b>' + agentRunContextChars(data.history_chars) + '</b></div>' +
+            '<div class="agent-run-context-row"><span>指令</span><b>' + agentRunContextChars(data.instruction_chars) + '</b></div>' +
+        '</div>';
+    body.innerHTML = html;
+    if(foot) foot.hidden = false;
+    var toggle = body.querySelector('.agent-run-context-tools-toggle');
+    if(toggle){
+        toggle.addEventListener('click', function(){
+            var list = body.querySelector('.agent-run-context-tools');
+            if(list) list.hidden = !list.hidden;
+        });
+    }
+    refreshIcons();
+}
 })();
