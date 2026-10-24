@@ -759,6 +759,7 @@ AGENT_FILE_TOOLS = {
     },
     "write_html_report": {
         "description": "生成 HTML 分析报告文件并登记到本次运行的产物；返回文件名与下载 URL。"
+                       "会写文件到 data 目录（产物目录），文件名只能是纯文件名（.html）；"
                        "sections 是报告模块数组，每项 {title, subtitle?, body?, items?, table?{columns,rows}}；"
                        "也可以直接给 html（完整 HTML 字符串）。左侧菜单由服务端按 sections 渲染。",
         "schema": {"type": "object", "properties": {
@@ -775,6 +776,7 @@ AGENT_FILE_TOOLS = {
     },
     "write_xlsx": {
         "description": "生成 Excel 数据表并登记到本次运行的产物；返回文件名与下载 URL。"
+                       "会写文件到 data 目录（产物目录），文件名只能是纯文件名（.xlsx）；"
                        "sheets 数组每项 {name, columns?, rows}（rows 为二维数组或对象数组）；"
                        "只有一张表时可直接给 columns + rows。",
         "schema": {"type": "object", "properties": {

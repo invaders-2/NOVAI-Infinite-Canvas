@@ -122,6 +122,10 @@ export function normalizeDetail(payload, fallbackItem) {
         presetGallery,
         influencerStudio: normalizeStudio(data.influencer_studio),
         collection,
+        introShowcase: normalizeShowcases(data.intro_showcase || data.introShowcase),
+        presentation: normalizePresentation(data.presentation),
+        library: normalizeLibrary(data.library),
+        publicContent: str(data.public_content || data.publicContent || ''),
         tryForm: normalizeTryForm(data.try_form),
         tryFormRaw: data.try_form || null,
         detailUnavailable: data.detail_unavailable === true,
@@ -130,6 +134,99 @@ export function normalizeDetail(payload, fallbackItem) {
         legacySections: asArray(data.sections).map(sec => ({ id: str(sec && sec.id), title: str(sec && sec.title), body: str(sec && sec.body) })),
         raw: data,
     };
+}
+
+function normalizeShowcaseHero(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const media = normalizeMedia(raw.media || raw);
+    const alt = neutralText(raw.alt || (raw.media && raw.media.alt) || '');
+    if (!media && !alt) return null;
+    return { media: media || { kind: 'image', src: '', poster: '', alt: alt }, alt: alt };
+}
+
+function normalizeShowcases(value) {
+    const list = Array.isArray(value) ? value : (value && typeof value === 'object'
+        ? (Array.isArray(value.items) ? value.items : [value]) : []);
+    return list.map(item => {
+        if (!item || typeof item !== 'object') return null;
+        const hero = normalizeShowcaseHero(item.hero);
+        const panels = asArray(item.panels).map(normalizeShowcaseHero).filter(Boolean);
+        const eyebrow = neutralText(item.eyebrow || '');
+        const caption = neutralText(item.caption || '');
+        if (!hero && !panels.length && !caption) return null;
+        return { layout: str(item.layout || 'even'), eyebrow: eyebrow, caption: caption, hero: hero, panels: panels };
+    }).filter(Boolean);
+}
+
+function normalizePresentation(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.series || typeof raw.series !== 'object') return null;
+    const series = raw.series;
+    const collection = series.collection && typeof series.collection === 'object'
+        ? { kind: str(series.collection.kind || 'skill'), name: str(series.collection.name) }
+        : null;
+    const creators = asArray(series.creators).map(person => {
+        const source = person && typeof person === 'object' ? person : { name: person };
+        return {
+            name: neutralText(source.name || source.display_name || ''),
+            avatar: str(source.avatar || source.avatar_url || source.image || (source.media && source.media.src) || ''),
+        };
+    }).filter(person => person.name);
+    if (!collection && !creators.length && !str(series.title) && !str(series.work_title)) return null;
+    return {
+        variant: str(raw.variant || ''),
+        series: {
+            collection: collection,
+            title: neutralText(series.title || ''),
+            workTitle: neutralText(series.work_title || series.workTitle || ''),
+            creators: creators,
+        },
+    };
+}
+
+function normalizeLibrary(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const families = asArray(raw.families).map(family => ({
+        id: str(family && (family.id || family.label)),
+        label: neutralText(family && (family.label || family.id)),
+        items: asArray(family && family.items),
+    })).filter(family => family.id || family.label);
+    const byId = new Map();
+    const sourceTemplates = Array.isArray(raw.templates)
+        ? raw.templates
+        : Object.entries(raw.templates && typeof raw.templates === 'object' ? raw.templates : {})
+            .map(([id, template]) => ({ id, ...(template && typeof template === 'object' ? template : {}) }));
+    const collect = (template, fallbackFamily) => {
+        if (!template || typeof template !== 'object') return;
+        const id = str(template.id || template.template_id || '');
+        const name = neutralText(template.name || template.title || id);
+        if (!id && !name) return;
+        const key = id || name;
+        if (byId.has(key)) return;
+        const family = str(template.family || fallbackFamily || '');
+        byId.set(key, {
+            id: key,
+            name: name,
+            description: neutralText(template.description || ''),
+            interaction: neutralText(template.interaction || ''),
+            family: family,
+            starter: str(template.starter || template.starter_prompt || template.prompt || ''),
+            cover: normalizeMedia(template.cover || template.media),
+        });
+    };
+    sourceTemplates.forEach(template => collect(template, ''));
+    families.forEach(family => family.items.forEach(template => collect(template, family.id)));
+    const featured = asArray(raw.featured_template_ids || raw.featuredTemplateIds).map(str);
+    let templates = Array.from(byId.values());
+    if (featured.length) {
+        const rank = new Map(featured.map((id, index) => [id, index]));
+        templates.sort((a, b) => {
+            const ai = rank.has(a.id) ? rank.get(a.id) : 999;
+            const bi = rank.has(b.id) ? rank.get(b.id) : 999;
+            return ai - bi;
+        });
+    }
+    if (!families.length && !templates.length) return null;
+    return { families: families.map(({ items, ...family }) => family), templates: templates, featuredIds: featured };
 }
 
 function normalizeMedia(media) {

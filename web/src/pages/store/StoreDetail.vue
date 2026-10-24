@@ -7,6 +7,7 @@ import StoreCover from './StoreCover.vue';
 import StoreBriefModal from './StoreBriefModal.vue';
 import StoreStudioHub from './StoreStudioHub.vue';
 import StoreStudioBuilder from './StoreStudioBuilder.vue';
+import StoreDetailExtras from './StoreDetailExtras.vue';
 import { fetchItemDetail } from './storeData.js';
 
 const props = defineProps({
@@ -30,6 +31,14 @@ const studio = computed(() => view.value.influencerStudio || null);
 const collection = computed(() => view.value.collection || null);
 const guide = computed(() => view.value.guide || {});
 const detailUnavailable = computed(() => !!view.value.detailUnavailable);
+const hasExtras = computed(() => {
+    const item = view.value;
+    const showcase = (item.introShowcase || []).length > 0;
+    const presentation = !!item.presentation;
+    const library = !!(item.library && ((item.library.families || []).length || (item.library.templates || []).length));
+    const publicContent = !!String(item.publicContent || '').trim();
+    return showcase || presentation || library || publicContent;
+});
 const unavailableReason = computed(() => view.value.detailUnavailableReason || '该应用详情由上游暂不提供');
 const isInstalled = ref(false);
 watch(() => view.value.installed, value => { isInstalled.value = !!value; }, { immediate: true });
@@ -241,13 +250,16 @@ watch([() => props.item.kind, () => props.item.name], load);
                         </div>
                     </button>
                 </div>
+                <StoreDetailExtras v-if="hasExtras" :view="view" @open-item="emit('open-item', $event)" />
             </section>
 
             <!-- 两个 studio：hub（Forge 1.0）与 builder（Forge Builder） -->
             <template v-else-if="branch === 'studio'">
                 <StoreStudioHub v-if="view.influencerStudio && view.influencerStudio.view === 'hub'" :detail="view" @open-builder="openBuilder" />
                 <StoreStudioBuilder v-else :detail="view" />
+                <StoreDetailExtras v-if="hasExtras" :view="view" @open-item="emit('open-item', $event)" />
             </template>
+
             <!-- 合集 -->
             <section v-else-if="branch === 'collection'" class="collection">
                 <p v-if="guide.summary" class="collection-summary">{{ guide.summary }}</p>
@@ -268,6 +280,7 @@ watch([() => props.item.kind, () => props.item.name], load);
                         </button>
                     </div>
                 </div>
+                <StoreDetailExtras v-if="hasExtras" :view="view" @open-item="emit('open-item', $event)" />
             </section>
 
             <!-- App / 通用技能：五段说明 -->
@@ -294,6 +307,8 @@ watch([() => props.item.kind, () => props.item.name], load);
                         <p v-if="sec.id === 'scopeAndLimits' && view.skillBodySource === 'generated'" class="sec-source">执行手册由公开信息整理，非官方原文</p>
                     </section>
                 </div>
+
+                <StoreDetailExtras v-if="hasExtras" :view="view" @open-item="emit('open-item', $event)" />
 
                 <footer class="detail-foot">
                     <template v-if="isApp">
