@@ -189,27 +189,41 @@ def _claude_configured() -> Dict[str, Any]:
     path = _claude_config_path()
     try:
         if not os.path.isfile(path):
-            return {"configured": False}
+            return {"configured": False, "configured_base_url": ""}
         payload = json.loads(_read_text(path))
     except Exception as exc:
-        return {"configured": False, "reason": "读取 Claude 配置失败：%s" % exc}
+        return {"configured": False, "configured_base_url": "",
+                "reason": "读取 Claude 配置失败：%s" % exc}
     servers = payload.get("mcpServers") if isinstance(payload, dict) else None
-    return {"configured": isinstance(servers, dict) and "novai-canvas" in servers}
+    entry = servers.get("novai-canvas") if isinstance(servers, dict) else None
+    base_url = ""
+    if isinstance(entry, dict):
+        env = entry.get("env")
+        if isinstance(env, dict):
+            base_url = str(env.get("NOVAI_BASE_URL") or "").strip()
+    return {"configured": isinstance(servers, dict) and "novai-canvas" in servers,
+            "configured_base_url": base_url}
 
 
 _CODEX_CONNECTION_RE = re.compile(
     r'mcp_servers\s*(?:\.\s*novai-canvas|\[\s*["\']?novai-canvas["\']?\s*\])')
 
 
+_BASE_URL_RE = re.compile(r'NOVAI_BASE_URL\s*=\s*["\']([^"\']*)["\']')
+
+
 def _codex_configured() -> Dict[str, Any]:
     path = _codex_config_path()
     try:
         if not os.path.isfile(path):
-            return {"configured": False}
+            return {"configured": False, "configured_base_url": ""}
         text = _read_text(path)
     except Exception as exc:
-        return {"configured": False, "reason": "读取 Codex 配置失败：%s" % exc}
-    return {"configured": bool(_CODEX_CONNECTION_RE.search(text))}
+        return {"configured": False, "configured_base_url": "",
+                "reason": "读取 Codex 配置失败：%s" % exc}
+    match = _BASE_URL_RE.search(text)
+    return {"configured": bool(_CODEX_CONNECTION_RE.search(text)),
+            "configured_base_url": str(match.group(1) or "").strip() if match else ""}
 
 
 _UNSUPPORTED_WRITE_REASON = "不支持自动写入配置"
@@ -224,7 +238,8 @@ def _installed_agents() -> List[Dict[str, Any]]:
         if item["id"] == "claude":
             entry.update(_claude_configured())
         else:
-            entry.update({"configured": False, "reason": _UNSUPPORTED_WRITE_REASON})
+            entry.update({"configured": False, "configured_base_url": "",
+                          "reason": _UNSUPPORTED_WRITE_REASON})
         agents.append(entry)
     for item in _CLI_AGENTS:
         command = _cli_agent_command(item["command"])
@@ -233,7 +248,8 @@ def _installed_agents() -> List[Dict[str, Any]]:
         if item["id"] == "codex":
             entry.update(_codex_configured())
         else:
-            entry.update({"configured": False, "reason": _UNSUPPORTED_WRITE_REASON})
+            entry.update({"configured": False, "configured_base_url": "",
+                          "reason": _UNSUPPORTED_WRITE_REASON})
         agents.append(entry)
     return agents
 

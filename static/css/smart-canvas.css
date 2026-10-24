@@ -7864,3 +7864,52 @@ html.studio-theme-dark .nv-mcp-brand-logo { filter: invert(1); }
 .nv-mcp-install-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .nv-mcp-install-actions .nv-mcp-action-primary:disabled { opacity: .5; cursor: default; }
 
+
+/* 入口 icon 融入左侧 rail；旧的右上角样式作为窄屏兜底 */
+#canvasRail .nv-mcp-launch {
+    position: static;
+    top: auto;
+    right: auto;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--canvas-float-muted);
+    box-shadow: none;
+    transform: none;
+}
+#canvasRail .nv-mcp-launch:hover {
+    background: color-mix(in srgb, var(--canvas-float-text) 10%, transparent);
+    color: var(--canvas-float-text);
+    transform: translateY(-1px);
+}
+#canvasRail .nv-mcp-launch::after { display: none; }
+.nv-mcp-launch-fallback {
+    position: fixed;
+    top: 74px;
+    right: 16px;
+    z-index: 60;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: var(--solid, var(--panel));
+    color: var(--ink, var(--text));
+    box-shadow: var(--shadow-float, var(--shadow-xl));
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+.nv-mcp-launch-fallback svg { width: 17px; height: 17px; }
+.nv-mcp-status-line { margin: 5px 0 0; color: var(--ink-2, var(--muted)); font: 500 10.5px/16px var(--font-sans); letter-spacing: .01em; }
+.nv-mcp-status-line.is-off { color: var(--ink-4, var(--faint)); font-weight: 400; }
+.nv-mcp-stale-note { flex: 0 0 100%; width: 100%; padding-left: 2px; color: var(--warning-text, var(--warning, #b25000)); font: 400 10px/15px var(--font-sans); }
+.nv-mcp-stale-note[hidden] { display: none; }
+.nv-mcp-agent-wrap { flex-wrap: wrap; row-gap: 2px; }
+

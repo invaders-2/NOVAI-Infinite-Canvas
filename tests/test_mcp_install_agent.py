@@ -228,8 +228,48 @@ class ConfiguredDetectionTests(_HomeMixin):
         self.assertFalse(agents["workbuddy"]["configured"])
         self.assertFalse(agents["claude-cli"]["configured"])
         self.assertIn("reason", agents["chatgpt"])
+        # 没配 NOVAI_BASE_URL 时为空串
+        for agent_id in ("claude", "codex", "chatgpt", "workbuddy", "claude-cli"):
+            self.assertEqual(agents[agent_id]["configured_base_url"], "")
         self.assertEqual(os.path.getmtime(claude_path), claude_mtime)
         self.assertEqual(os.path.getmtime(codex_path), codex_mtime)
+
+    def test_configured_base_url_values(self):
+        claude_path = claude_config_path(self.home)
+        os.makedirs(os.path.dirname(claude_path), exist_ok=True)
+        with open(claude_path, "w", encoding="utf-8") as fh:
+            json.dump({"mcpServers": {"novai-canvas": {
+                "command": "x", "args": [],
+                "env": {"NOVAI_BASE_URL": "http://127.0.0.1:4321"}}}}, fh)
+        codex_path = codex_config_path(self.home)
+        os.makedirs(os.path.dirname(codex_path), exist_ok=True)
+        with open(codex_path, "w", encoding="utf-8") as fh:
+            fh.write('[mcp_servers.novai-canvas]\ncommand = "x"\n'
+                     'env = { NOVAI_BASE_URL = "http://127.0.0.1:4322" }\n')
+        with patch.object(mcp_routes, "_desktop_agent_path", return_value=""), \
+                patch.object(mcp_routes, "_cli_agent_command", return_value=""):
+            agents = self._agents()
+        self.assertTrue(agents["claude"]["configured"])
+        self.assertEqual(agents["claude"]["configured_base_url"], "http://127.0.0.1:4321")
+        self.assertTrue(agents["codex"]["configured"])
+        self.assertEqual(agents["codex"]["configured_base_url"], "http://127.0.0.1:4322")
+        for agent_id in ("chatgpt", "workbuddy", "claude-cli"):
+            self.assertEqual(agents[agent_id]["configured_base_url"], "")
+
+    def test_configured_base_url_absent_env_is_empty(self):
+        claude_path = claude_config_path(self.home)
+        os.makedirs(os.path.dirname(claude_path), exist_ok=True)
+        with open(claude_path, "w", encoding="utf-8") as fh:
+            json.dump({"mcpServers": {"novai-canvas": {"command": "x", "args": []}}}, fh)
+        codex_path = codex_config_path(self.home)
+        os.makedirs(os.path.dirname(codex_path), exist_ok=True)
+        with open(codex_path, "w", encoding="utf-8") as fh:
+            fh.write('[mcp_servers.novai-canvas]\ncommand = "x"\n')
+        with patch.object(mcp_routes, "_desktop_agent_path", return_value=""), \
+                patch.object(mcp_routes, "_cli_agent_command", return_value=""):
+            agents = self._agents()
+        self.assertEqual(agents["claude"]["configured_base_url"], "")
+        self.assertEqual(agents["codex"]["configured_base_url"], "")
 
     def test_unreadable_configs_report_reason(self):
         claude_path = claude_config_path(self.home)

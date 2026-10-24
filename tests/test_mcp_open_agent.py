@@ -60,7 +60,7 @@ class InstalledAgentsTests(unittest.TestCase):
         claude_keys = set(by_id["claude"].keys())
         self.assertTrue({"id", "name", "kind", "installed", "path", "configured"} <= claude_keys)
         self.assertTrue(claude_keys <= {"id", "name", "kind", "installed", "path",
-                                        "configured", "reason"})
+                                        "configured", "configured_base_url", "reason"})
         self.assertTrue(by_id["claude"]["installed"])
         self.assertEqual(by_id["claude"]["path"], "/Applications/Claude.app")
         self.assertEqual(by_id["claude"]["kind"], "desktop")
@@ -70,7 +70,7 @@ class InstalledAgentsTests(unittest.TestCase):
         codex_keys = set(by_id["codex"].keys())
         self.assertTrue({"id", "name", "kind", "installed", "command", "configured"} <= codex_keys)
         self.assertTrue(codex_keys <= {"id", "name", "kind", "installed", "command",
-                                        "configured", "reason"})
+                                        "configured", "configured_base_url", "reason"})
         self.assertTrue(by_id["codex"]["installed"])
         self.assertEqual(by_id["codex"]["command"], "/Users/x/.npm-global/bin/codex")
         self.assertFalse(by_id["claude-cli"]["installed"])
