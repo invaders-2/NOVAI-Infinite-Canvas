@@ -7729,3 +7729,55 @@ body.canvas-assistant-open .nv-mcp-panel { right: calc(440px + 16px); }
     .nv-mcp-modal-hero { min-height: 110px; }
 }
 
+
+/* 品牌 logo：卡片标题 / Agent 按钮 / 二级弹窗统一内联 SVG，currentColor，无描边底 */
+.nv-mcp-title-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; min-width: 0; }
+.nv-mcp-title-row h3 { margin: 0; min-width: 0; }
+.nv-mcp-brand-logo { width: 20px; height: 20px; flex: 0 0 20px; object-fit: contain; display: block; }
+.nv-mcp-avatar .nv-mcp-brand-logo { width: 56px; height: 56px; }
+html.studio-theme-dark .nv-mcp-brand-logo { filter: invert(1); }
+.nv-mcp-agent-ico, .nv-mcp-agent-ico.is-claude, .nv-mcp-agent-ico.is-codex, .nv-mcp-agent-ico.is-workbuddy,
+.nv-mcp-list-ico, .nv-mcp-list-ico.is-claude, .nv-mcp-list-ico.is-chatgpt, .nv-mcp-list-ico.is-workbuddy, .nv-mcp-list-ico.is-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    border-radius: 0;
+    background: transparent;
+    color: currentColor;
+}
+.nv-mcp-agent-ico svg, .nv-mcp-list-ico svg { width: 16px; height: 16px; display: block; }
+.nv-mcp-avatar, .nv-mcp-avatar.is-novai, .nv-mcp-avatar.is-claude, .nv-mcp-avatar.is-chatgpt, .nv-mcp-avatar.is-workbuddy, .nv-mcp-avatar.is-more {
+    width: 62px;
+    height: 62px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: var(--ink, var(--text));
+}
+.nv-mcp-avatar svg { width: 52px; height: 52px; display: block; }
+.nv-mcp-modal-hero .nv-mcp-avatar svg { color: var(--ink, var(--text)); }
+
+
+.nv-mcp-launch::after {
+    content: attr(title);
+    position: absolute;
+    top: 42px;
+    right: 0;
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: var(--solid, var(--panel));
+    color: var(--ink, var(--text));
+    box-shadow: var(--shadow-float, var(--shadow-xl));
+    font: 500 10.5px/1 var(--font-sans);
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-2px);
+    transition: opacity .12s ease, transform .12s ease;
+}
+.nv-mcp-launch:hover::after { opacity: 1; transform: translateY(0); }
+

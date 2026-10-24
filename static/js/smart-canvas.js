@@ -38839,6 +38839,15 @@ function ensureTableApi(){
     var info = null;
     var infoPromise = null;
     var activeAgent = 'claude';
+    var AGENT_LOGOS = {
+        claude: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-label="Claude" role="img"><path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9M7.5 4.2l9 15.6M16.5 4.2l-9 15.6"/></svg>',
+        chatgpt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-label="ChatGPT" role="img"><path d="M12 3.2a4 4 0 0 1 3.4 6M20.5 12a4 4 0 0 1-6.8 2.8M12 20.8a4 4 0 0 1-3.4-6M3.5 12a4 4 0 0 1 6.8-2.8"/><path d="M8.6 5.2h5.8M17.8 8.6v5.8M15.4 18.8H9.6M6.2 15.4V9.6"/></svg>',
+        codex: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-label="Codex" role="img"><path d="m12 3 7.8 4.5v9L12 21l-7.8-4.5v-9z"/><path d="m8 9 4-2.2L16 9v4l-4 2.2L8 13z"/></svg>',
+        workbuddy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-label="WorkBuddy" role="img"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/><path d="M15.5 6.5l2 2"/></svg>',
+        novai: '<svg viewBox="0 0 24 24" fill="currentColor" aria-label="NOVAI" role="img"><path d="M4 19V5h4.2l7.6 9.2V5H20v14h-4.2L8.2 9.8V19z"/></svg>',
+        more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-label="更多 Agent" role="img"><rect x="4" y="4" width="6" height="6" rx="1.2"/><rect x="14" y="4" width="6" height="6" rx="1.2"/><rect x="4" y="14" width="6" height="6" rx="1.2"/><rect x="14" y="14" width="6" height="6" rx="1.2"/></svg>'
+    };
+    function logoOf(agent){ return AGENT_LOGOS[agent] || AGENT_LOGOS.more; }
     var agents = {
         claude: { name: 'Claude', icon: '✳', title: '在 Claude 里继续这个项目', desc: '打开 Claude 并预填一段提示词，通过 MCP 把它连到 NOVAI 并交接当前项目。首次使用时 Claude 会引导你添加连接器。' },
         chatgpt: { name: 'ChatGPT', icon: '◉', title: '在 ChatGPT 里继续这个项目', desc: 'ChatGPT 的连接器需要公网 HTTPS 地址，本机 127.0.0.1 不可达。请复制 HTTP 地址后在支持公网连接器的环境中添加。' },
@@ -38863,14 +38872,14 @@ function ensureTableApi(){
     panel.innerHTML =
         '<div class="nv-mcp-panel-head">' +
             '<div class="nv-mcp-panel-heading"><span class="nv-mcp-kicker">MCP · 开放接入</span>' +
-            '<h3>让你的 Agent 直接调用 NOVAI 创作</h3>' +
+            '<div class="nv-mcp-title-row"><img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="20" height="20"><h3>让你的 Agent 直接调用 NOVAI 创作</h3></div>' +
             '<p>连接 NOVAI 的 MCP，让你的 Agent 直接使用画布工具。</p></div>' +
             '<button type="button" class="nv-mcp-panel-close" aria-label="关闭" title="关闭">×</button>' +
         '</div>' +
         '<div class="nv-mcp-agent-buttons">' +
-            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="claude"><span class="nv-mcp-agent-ico is-claude">✳</span>添加到 Claude</button>' +
-            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="codex"><span class="nv-mcp-agent-ico is-codex">X</span>添加到 Codex</button>' +
-            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="workbuddy"><span class="nv-mcp-agent-ico is-workbuddy">W</span>添加到 WorkBuddy</button>' +
+            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="claude"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.claude + '</span>添加到 Claude</button>' +
+            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="codex"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.codex + '</span>添加到 Codex</button>' +
+            '<button type="button" class="nv-mcp-agent-btn" data-panel-agent="workbuddy"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.workbuddy + '</span>添加到 WorkBuddy</button>' +
         '</div>' +
         '<div class="nv-mcp-panel-foot">' +
             '<div class="nv-mcp-foot-row"><span>在其他 Agent 中使用 NOVAI MCP</span><button type="button" class="nv-mcp-link" data-panel-docs>MCP 文档</button></div>' +
@@ -38887,14 +38896,14 @@ function ensureTableApi(){
         '<div class="nv-mcp-modal" role="dialog" aria-modal="true" aria-labelledby="nvMcpModalTitle">' +
             '<aside class="nv-mcp-modal-list">' +
                 '<h3>在 Agent 中打开</h3>' +
-                '<button type="button" data-modal-agent="claude"><span class="nv-mcp-list-ico is-claude">✳</span>Claude</button>' +
-                '<button type="button" data-modal-agent="chatgpt"><span class="nv-mcp-list-ico is-chatgpt">◉</span>ChatGPT</button>' +
-                '<button type="button" data-modal-agent="workbuddy"><span class="nv-mcp-list-ico is-workbuddy">W</span>WorkBuddy</button>' +
-                '<button type="button" data-modal-agent="more"><span class="nv-mcp-list-ico is-more">⌘</span>更多 Agent</button>' +
+                '<button type="button" data-modal-agent="claude"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.claude + '</span>Claude</button>' +
+                '<button type="button" data-modal-agent="chatgpt"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.chatgpt + '</span>ChatGPT</button>' +
+                '<button type="button" data-modal-agent="workbuddy"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.workbuddy + '</span>WorkBuddy</button>' +
+                '<button type="button" data-modal-agent="more"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.more + '</span>更多 Agent</button>' +
             '</aside>' +
             '<section class="nv-mcp-modal-main">' +
                 '<button type="button" class="nv-mcp-modal-close" aria-label="关闭" title="关闭" data-modal-close>×</button>' +
-                '<div class="nv-mcp-modal-hero"><span class="nv-mcp-avatar is-novai">N</span><span class="nv-mcp-hero-arrow">↔</span><span class="nv-mcp-avatar" id="nvMcpAgentAvatar">✳</span></div>' +
+                '<div class="nv-mcp-modal-hero"><span class="nv-mcp-avatar is-novai"><img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="56" height="56"></span><span class="nv-mcp-hero-arrow">↔</span><span class="nv-mcp-avatar" id="nvMcpAgentAvatar">' + AGENT_LOGOS.claude + '</span></div>' +
                 '<h3 id="nvMcpModalTitle">在 Claude 里继续这个项目</h3>' +
                 '<p id="nvMcpModalDesc"></p>' +
                 '<pre class="nv-mcp-prompt" id="nvMcpPrompt" hidden></pre>' +
@@ -39011,8 +39020,9 @@ function ensureTableApi(){
         Array.prototype.forEach.call(modal.querySelectorAll('[data-modal-agent]'), function(el){
             el.classList.toggle('is-on', el.getAttribute('data-modal-agent') === agent);
         });
-        document.getElementById('nvMcpAgentAvatar').textContent = data.icon;
-        document.getElementById('nvMcpAgentAvatar').className = 'nv-mcp-avatar is-' + agent;
+        var avatar = document.getElementById('nvMcpAgentAvatar');
+        avatar.innerHTML = logoOf(agent);
+        avatar.className = 'nv-mcp-avatar is-' + agent;
         document.getElementById('nvMcpModalTitle').textContent = data.title;
         document.getElementById('nvMcpModalDesc').textContent = data.desc;
         var prompt = document.getElementById('nvMcpPrompt');
