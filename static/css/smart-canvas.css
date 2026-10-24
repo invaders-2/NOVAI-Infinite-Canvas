@@ -7798,3 +7798,17 @@ html.studio-theme-dark .nv-mcp-brand-logo { filter: invert(1); }
 .nv-mcp-agent-ico .nv-brand-mark, .nv-mcp-list-ico .nv-brand-mark { width: 16px; height: 16px; }
 .nv-mcp-avatar .nv-brand-mark { width: 52px; height: 52px; }
 
+
+.nv-brand-img { display: inline-block; object-fit: contain; width: 16px; height: 16px; }
+.nv-brand-mark.is-claude { --brand-image: url('/static/images/brands/claude.svg'); background: #D97757; }
+.nv-mcp-agent-ico .nv-brand-img, .nv-mcp-list-ico .nv-brand-img { width: 16px; height: 16px; }
+.nv-mcp-avatar .nv-mcp-brand-logo { width: 52px; height: 52px; }
+.nv-mcp-avatar .nv-brand-mark, .nv-mcp-avatar .nv-brand-img { width: 52px; height: 52px; }
+
+
+.nv-mcp-agent-ico, .nv-mcp-list-ico { width: 16px; height: 16px; flex: 0 0 16px; }
+.nv-mcp-agent-ico .nv-brand-mark, .nv-mcp-list-ico .nv-brand-mark,
+.nv-mcp-agent-ico .nv-brand-img, .nv-mcp-list-ico .nv-brand-img { width: 16px; height: 16px; flex: 0 0 16px; }
+.nv-mcp-avatar .nv-brand-mark { width: 52px; height: 52px; flex: 0 0 52px; }
+.nv-mcp-avatar .nv-brand-img { width: 52px; height: 52px; flex: 0 0 52px; }
+

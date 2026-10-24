@@ -38843,7 +38843,7 @@ function ensureTableApi(){
         claude: '<span class="nv-brand-mark is-claude" role="img" aria-label="Claude"></span>',
         chatgpt: '<span class="nv-brand-mark is-openai" role="img" aria-label="ChatGPT"></span>',
         codex: '<span class="nv-brand-mark is-openai" role="img" aria-label="Codex"></span>',
-        workbuddy: '<span class="nv-brand-mark is-workbuddy" role="img" aria-label="WorkBuddy"></span>',
+        workbuddy: '<img class="nv-brand-img is-workbuddy" src="/static/images/brands/workbuddy.svg" alt="WorkBuddy" width="16" height="16">',
         novai: '<img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="20" height="20">',
         more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-label="更多 Agent" role="img"><rect x="4" y="4" width="6" height="6" rx="1.2"/><rect x="14" y="4" width="6" height="6" rx="1.2"/><rect x="4" y="14" width="6" height="6" rx="1.2"/><rect x="14" y="14" width="6" height="6" rx="1.2"/></svg>'
     };
@@ -38903,7 +38903,7 @@ function ensureTableApi(){
             '</aside>' +
             '<section class="nv-mcp-modal-main">' +
                 '<button type="button" class="nv-mcp-modal-close" aria-label="关闭" title="关闭" data-modal-close>×</button>' +
-                '<div class="nv-mcp-modal-hero"><span class="nv-mcp-avatar is-novai"><img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="56" height="56"></span><span class="nv-mcp-hero-arrow">↔</span><span class="nv-mcp-avatar" id="nvMcpAgentAvatar">' + AGENT_LOGOS.claude + '</span></div>' +
+                '<div class="nv-mcp-modal-hero"><span class="nv-mcp-avatar is-novai"><img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="52" height="52"></span><span class="nv-mcp-hero-arrow">↔</span><span class="nv-mcp-avatar" id="nvMcpAgentAvatar">' + AGENT_LOGOS.claude + '</span></div>' +
                 '<h3 id="nvMcpModalTitle">在 Claude 里继续这个项目</h3>' +
                 '<p id="nvMcpModalDesc"></p>' +
                 '<pre class="nv-mcp-prompt" id="nvMcpPrompt" hidden></pre>' +
