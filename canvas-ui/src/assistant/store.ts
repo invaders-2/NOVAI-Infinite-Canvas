@@ -63,6 +63,7 @@ export interface AssistantStore {
 	clearRefs(): void
 	planAction(action: "run" | "cancel" | "adjust"): void
 	confirmAction(yes: boolean): void
+	undoRun(runId: string): Promise<{ ok: boolean; message: string }>
 	executeConfirmation(id: string): void
 	skipConfirmation(id: string): void
 	cancelConfirmation(id: string): void
@@ -389,6 +390,15 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			env.refs = []
 			emit()
 		},
+		async undoRun(runId) {
+			try {
+				if (typeof api.undoRun !== "function") return { ok: false, message: "撤销入口不可用" }
+				const result = await api.undoRun(String(runId))
+				return { ok: Boolean(result && result.ok), message: String((result && result.message) || "已撤销本次修改") }
+			} catch (error) {
+				return { ok: false, message: (error as Error)?.message || "撤销失败" }
+			}
+		},
 		executeConfirmation(id) {
 			const part = findConfirmationPart(state, id)
 			if (!part || part.status !== "pending") return
@@ -531,11 +541,15 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 				state.messages = []
 			} else {
 				state.messages = list.map((item) =>
-				historyMessage(
-					String(item.role || "assistant"),
-					String(item.text || ""),
-					Number(item.at) ? Number(item.at) * 1000 : Date.now(),
-				),
+				(() => {
+					const message = historyMessage(
+						String(item.role || "assistant"),
+						String(item.text || ""),
+						Number(item.at) ? Number(item.at) * 1000 : Date.now(),
+					)
+					if (item.run_id) message.runId = String(item.run_id)
+					return message
+				})(),
 			)
 			}
 			state.streamingMessageId = null

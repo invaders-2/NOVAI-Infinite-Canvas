@@ -74,6 +74,14 @@ export interface Message {
 	createdAt: number
 	/** 该轮 run 的 id：运行卡底部「上下文」调试入口用，历史消息没有 */
 	runId?: string
+	/** done 事件里的 changes：本轮改了画布才显示检查点 */
+	changes?: {
+		nodes_created?: number
+		nodes_modified?: number
+		nodes_deleted?: number
+		connections?: number
+		generations?: number
+	}
 	plan?: PlanData
 	planState?: "pending" | "running" | "applied" | "cancelled" | "adjusted" | "aborted" | ""
 	systemKind?: "info" | "warn" | "error"
@@ -157,6 +165,7 @@ export interface CanvasAssistantHostApi {
 	planAction(action: "run" | "cancel" | "adjust"): void
 	confirmAction?(yes: boolean): void
 	approveStep?(step: { tool: string; args?: unknown; description?: string }, instruction: string): Promise<boolean>
+	undoRun?(runId: string): Promise<{ ok: boolean; message: string }>
 	togglePlanConfirm(on: boolean): void
 	openHistory(): void
 	openNode(id: string): void

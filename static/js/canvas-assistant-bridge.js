@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.136.1792945742';
+    var ASSET_VERSION = '1.0.136.1792946710';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -477,6 +477,23 @@
             if (btn) btn.click();
         });
     }
+    function undoRun(runId) {
+        if (!runId) return Promise.resolve({ ok: false, message: '缺少 run_id' });
+        return originalFetch.call(window, '/api/agent/undo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ run_id: String(runId) })
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (data) {
+                if (!response.ok) {
+                    return { ok: false, message: String((data && (data.detail || data.message)) || ('HTTP ' + response.status)) };
+                }
+                return { ok: true, message: String((data && data.message) || '已撤销本次修改') };
+            });
+        }).catch(function (error) {
+            return { ok: false, message: String((error && error.message) || '撤销失败') };
+        });
+    }
     function approveStep(step, instruction) {
         if (!step || !step.tool) return Promise.resolve(false);
         if (typeof window.runAgentStream !== 'function') return Promise.resolve(false);
@@ -782,6 +799,7 @@
         planAction: planAction,
         confirmAction: confirmAction,
         approveStep: approveStep,
+        undoRun: undoRun,
         togglePlanConfirm: function (on) {
             var current = true;
             try { current = typeof window.agentPlanConfirmEnabled === 'function' ? !!window.agentPlanConfirmEnabled() : true; } catch (e) {}

@@ -30,7 +30,9 @@ import { Composer } from "./Composer"
 import { ModelContextDialog } from "./ModelContextDialog"
 import { ThreadBar } from "./ThreadBar"
 import { deriveRun, formatTokens, formatWorkMs, statusLabel, toolIconKey, toolLabel } from "./format"
+import { CheckpointCard } from "./CheckpointCard"
 import { QuestionCard } from "./QuestionCard"
+import { SourcesCard } from "./SourcesCard"
 import { ToolCard } from "./ToolCard"
 import { ToolIcon } from "./icons"
 import type { AssistantStore } from "./store"
@@ -409,6 +411,10 @@ const RunTurn = ({
 					) : null}
 				</div>
 			) : null}
+
+			<SourcesCard message={message} />
+
+			<CheckpointCard message={message} store={store} />
 
 			{message.runId || texts.length > 0 ? (
 				<div className="nvca-run-tools">

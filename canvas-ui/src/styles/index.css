@@ -2397,3 +2397,76 @@ html:not(.theme-dark) .nvca-question-btn.danger { color: #b91c1c; }
 /* 新面板里不再显示旧面板的确认/方案卡 */
 .nv-assistant-new .agent-confirm-card,
 .nv-assistant-new .agent-plan-card { display: none !important; }
+
+/* ── 来源引用 ── */
+.nvca-sources { align-self: flex-start; max-width: 100%; }
+.nvca-sources-trigger {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--tn-desc);
+}
+.nvca-sources-trigger:hover { color: var(--tn-text); }
+.nvca-sources-caret { width: 13px; height: 13px; transition: transform 0.16s var(--nvca-ease); }
+.nvca-sources-caret.is-open { transform: rotate(180deg); }
+.nvca-sources-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: var(--tn-card);
+  border: 1px solid var(--tn-line);
+}
+.nvca-source-group { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nvca-source-domain { font-size: 10.5px; line-height: 1.5; color: var(--tn-arrow); }
+.nvca-source-link {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--tn-text);
+  text-decoration: none;
+}
+.nvca-source-link:hover { text-decoration: underline; }
+
+/* ── 检查点 ── */
+.nvca-checkpoint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--tn-card);
+  border: 1px solid var(--tn-line);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--tn-desc);
+}
+.nvca-checkpoint > svg:first-child { color: var(--tn-arrow); flex: 0 0 auto; }
+.nvca-checkpoint-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nvca-checkpoint-undo {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: var(--tn-hover);
+  color: var(--tn-text);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.nvca-checkpoint-undo:hover { background: var(--tn-line-strong); }
+.nvca-checkpoint-undo:disabled { opacity: 0.5; }
+.nvca-checkpoint.is-undone { color: #4ade80; }
+.nvca-checkpoint.is-undone > svg:first-child { color: #4ade80; }

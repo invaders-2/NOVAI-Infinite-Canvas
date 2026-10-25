@@ -359,6 +359,17 @@ export const applyEvent = (state: SessionState, event: StreamEvent): SessionStat
 
 	if (type === "done") {
 		const message = ensureAssistant(state)
+		if (data.run_id) message.runId = String(data.run_id)
+		if (data.changes && typeof data.changes === "object") {
+			const changes = data.changes as Record<string, unknown>
+			message.changes = {
+				nodes_created: Number(changes.nodes_created) || 0,
+				nodes_modified: Number(changes.nodes_modified) || 0,
+				nodes_deleted: Number(changes.nodes_deleted) || 0,
+				connections: Number(changes.connections) || 0,
+				generations: Number(changes.generations) || 0,
+			}
+		}
 		const status = normalizeDone(data)
 		state.streamState = status
 		message.status = status
