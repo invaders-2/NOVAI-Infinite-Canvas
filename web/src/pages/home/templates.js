@@ -15,8 +15,20 @@ function refNode(title) { return { key: 'ref', type: 'image', title: title || '�
 function briefNode() { return { key: 'brief', type: 'text', brief: true, col: 0 }; }
 function labelNode(text, color) { return { key: 'label', type: 'label', text: text, color: color, col: 0 }; }
 
+var SWAP_TEXT = '【换鞋要求】只替换模特脚上的鞋子，画面其它一切保持不变：模特的五官、发型、身材比例、姿势、手部动作、服装、配饰、所处场景、背景、地面、光线方向、色调、景深和构图都不要改动。\n\n参考图顺序：前面几张是同一双鞋的多角度白底图，最后一张是模特图。\n\n鞋子按多角度白底图判断款式：鞋型、鞋头、鞋帮高度、颜色、材质、鞋带、鞋底纹路、Logo 与装饰细节都要和参考鞋一致，不要自己改款或加元素。\n\n贴上去时注意：根据模特脚的位置、朝向和承重调整鞋子的透视、角度、大小和左右脚配对；鞋底要自然落在原图地面上，接触阴影、投影方向和软硬程度跟场景光线一致；不能悬空、不能穿模、不能出现两只同方向的鞋。\n\n输出真实摄影质感的电商成品图，高清、细节清晰，不要新增文字、水印、边框或多余道具。';
+var SWAP_GEN = '在模特参考图的基础上完成换鞋：只替换模特脚上的鞋子，模特、姿势、服装、场景、光线和构图全部保持原样。';
+
 var CATS = ['全部', '电商', '海报', '人像', '分镜视频', '角色设定'];
 var TEMPLATES = [
+    { id: 'product-swap', title: '产品换图 · 换鞋', cat: '电商', icon: 'camera', color: '#0f766e',
+      desc: '多角度鞋图 + 模特图 → 只换鞋，其它不变',
+      agent: '帮我做产品换图：把模特脚上的鞋子换成参考鞋款，模特、姿势、服装、场景、光线和构图都不变。先看画布上的鞋子多角度图和模特图，再生成换鞋结果。',
+      toast: '已搭好产品换图流程：把鞋子多角度白底图一起拖进「鞋子多角度白底图」节点、模特图拖进「模特参考图」，再选中「换鞋生成」运行',
+      nodes: [labelNode('产品换图', '#0f766e'),
+        { key: 'shoes', type: 'group', title: '鞋子多角度白底图', col: 0 },
+        { key: 'model', type: 'image', title: '模特参考图', col: 0, titleChip: true },
+        { key: 'prompt', type: 'text', col: 0, text: SWAP_TEXT },
+        { key: 'swap', type: 'gen', title: '换鞋生成', ratio: 'portrait43', col: 1, titleChip: true, inputs: ['shoes', 'model', 'prompt'], prompt: SWAP_GEN }] },
     { id: 'ecom-set', title: '电商主图套装', cat: '电商', icon: 'bag', color: '#e0782f',
       desc: '主图、卖点、场景、细节一套出',
       agent: '帮我做一套电商套图：白底主图、卖点图、使用场景图、细节特写图各一张，风格统一。先根据画布上的产品图和卖点说明规划，再逐张生成。',

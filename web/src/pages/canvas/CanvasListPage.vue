@@ -1,7 +1,7 @@
 <script setup>
 // 画布列表（替换旧 canvas-list.html）。功能一一对应：
 //   顶部介绍 + 开始创作 / 继续上次 + 三张轮播（图像 / 视频 / 节点）；搜索、排序（记在本机）、新建画布；
-//   卡片（1–4 张缩略图铺满、智能/画布标记、打开、更多：重命名 / 复制画布 / 删除）；
+//   卡片（1–4 张缩略图铺满、智能/画布标记、打开、更多：重命名 / 复制画布 / 权限 / 删除）；
 //   回收站（角标、恢复、彻底删除二次确认、清空）；新建选择器（普通 / 智能）；空状态 / 无搜索结果。
 // 改进：删除改为「立即删除 + 5 秒撤销」；复制画布会连同节点和连线一起复制（旧版只建了同名空画布）。
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
@@ -133,6 +133,45 @@ async function create(kind) {
 /* ───────── 卡片菜单 ───────── */
 function toggleMenu(id) { menuFor.value = menuFor.value === id ? '' : id; sortOpen.value = false; }
 function closeMenus() { menuFor.value = ''; sortOpen.value = false; }
+
+/* ───────── 权限（沿用旧列表的 canvas-perms 弹窗，auth 开启才出现入口） ───────── */
+const permsOn = ref(false);
+let permsAssets = null;
+async function probeAuth() {
+    try {
+        const d = await getJSON('/api/auth/me', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+        permsOn.value = !!d && d.auth_enabled === true;
+    } catch (e) {
+        permsOn.value = false;
+    }
+}
+function loadPermsAssets() {
+    if (window.NOVAI_CANVAS_PERMS) return Promise.resolve();
+    if (permsAssets) return permsAssets;
+    const add = (tag, attrs) => new Promise((resolve, reject) => {
+        const el = document.createElement(tag);
+        Object.keys(attrs).forEach(k => { el[k] = attrs[k]; });
+        el.onload = resolve;
+        el.onerror = () => reject(new Error('load ' + tag + ' failed'));
+        document.head.appendChild(el);
+    });
+    permsAssets = Promise.all([
+        add('link', { rel: 'stylesheet', href: '/static/css/canvas-perms.css' }),
+        add('script', { src: '/static/js/canvas-perms.js' }),
+    ]).catch(e => { permsAssets = null; throw e; });
+    return permsAssets;
+}
+async function openPerms(c) {
+    closeMenus();
+    try {
+        await loadPermsAssets();
+        if (!window.NOVAI_CANVAS_PERMS) throw new Error('NOVAI_CANVAS_PERMS missing');
+        // 弹窗只读 id / title；传新对象，避免脚本持有 Vue 响应式代理
+        window.NOVAI_CANVAS_PERMS.open({ id: c.id, title: c.title || '未命名画布' });
+    } catch (e) {
+        toast('权限弹窗加载失败，请刷新后重试', { danger: true, icon: 'alert' });
+    }
+}
 
 function startRename(c) {
     closeMenus();
@@ -302,6 +341,7 @@ async function onOpenId(e) {
 }
 onMounted(() => {
     loadAll();
+    probeAuth();
     if (visible.value) restartSlides();
     if (typeof IntersectionObserver === 'function') {
         moreIO = new IntersectionObserver(entries => {
@@ -396,6 +436,7 @@ onBeforeUnmount(() => {
                             <div v-if="menuFor === c.id" class="nv-menu cl-pop right" role="menu">
                                 <button type="button" class="nv-menu-item" role="menuitem" @click="startRename(c)"><NvIcon name="pencil" />重命名</button>
                                 <button type="button" class="nv-menu-item" role="menuitem" @click="duplicate(c)"><NvIcon name="copy" />复制画布</button>
+                                <button v-if="permsOn" type="button" class="nv-menu-item" role="menuitem" @click="openPerms(c)"><NvIcon name="hand" />权限</button>
                                 <div class="nv-menu-sep"></div>
                                 <button type="button" class="nv-menu-item danger" role="menuitem" @click="remove(c)"><NvIcon name="trash" />删除</button>
                             </div>
@@ -630,4 +671,41 @@ onBeforeUnmount(() => {
 
 @media (max-width: 900px) { .cl-hero { flex-direction: column; } .cl-carousel { width: 100%; } .cl-bar { flex-wrap: wrap; } .cl-search { width: 100%; order: 5; } }
 @media (prefers-reduced-motion: reduce) { .cl-card { animation: none; } .cl-slide { transition: opacity 200ms; transform: none; } }
+</style>
+
+<style>
+/* 旧 canvas-perms.css 用的是 marvis 主题令牌，V2 壳里没有；在弹窗自己的根节点就地映射，
+   不往整页引入旧主题。弹窗 DOM 是旧脚本动态插入 body 的，所以只能用全局样式。 */
+.perm-overlay,
+.perm-toast {
+    --text: var(--ink);
+    --text-2: var(--ink-2);
+    --text-3: var(--ink-3);
+    --surface: var(--solid);
+    --surface-2: var(--fill-1);
+    --elevated: var(--solid);
+    --soft: var(--fill-2);
+    --border: var(--separator);
+    --border-2: var(--separator);
+    --divider: var(--separator);
+    --accent-text: var(--on-accent);
+    --accent-hover: var(--accent);
+    --panel: var(--solid);
+    --scrim: rgba(0, 0, 0, 0.42);
+    --shadow-lg: var(--shadow-pop);
+    --shadow-xl: var(--shadow-dialog);
+    --danger-bg: var(--danger-fill);
+    --danger-border: color-mix(in srgb, var(--danger) 32%, transparent);
+    --danger-text: var(--danger);
+    --success-bg: rgba(52, 199, 89, 0.12);
+    --success-border: rgba(52, 199, 89, 0.30);
+    --success-text: #248a3d;
+}
+html.theme-dark .perm-overlay,
+html.theme-dark .perm-toast {
+    --scrim: rgba(0, 0, 0, 0.58);
+    --success-bg: rgba(48, 209, 88, 0.12);
+    --success-border: rgba(48, 209, 88, 0.30);
+    --success-text: #30d158;
+}
 </style>

@@ -1,5 +1,5 @@
 // 能力（智能体 / 技能）在对话页的共享状态：广场视图开关、已挂载到输入框的能力、列表缓存与参数 schema 懒加载。
-// 组件（Composer / CapabilitySquare / MessageItem）都读这里的同一份状态，不各存一套。
+// Composer 与 MessageItem 都读这里的同一份状态，不各存一套。
 import { reactive } from 'vue';
 import { listCapabilities, getCapability, paramsOf, listSuggestions } from './capabilityApi.js';
 
@@ -186,7 +186,7 @@ export function selectGenerateImage(cardType) {
 
 /* ───────── 能力生图的模型选择（用户选哪个平台的哪个生图模型跑这次能力） ───────── */
 
-// 判定依据与后端 openclaw_capability._wants_generated_image 对齐：
+// 判定依据与后端能力生图的 wants_generated_image 对齐：
 // 交付物含 image，或用户显式填了 image_prompt；params.generate_image === false 一票否决。
 // 只有这类能力才在输入框顶部显示「生图模型」，避免给不生图的能力加无效控件。
 export function wantsGeneratedImage(cap) {

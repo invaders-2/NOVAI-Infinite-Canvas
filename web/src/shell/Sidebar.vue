@@ -53,15 +53,11 @@ const isAdmin = computed(() => !!(me.value && me.value.role === 'admin'));
 const credits = ref(null);          // { balance, usd_per_credit, … }；null = 不展示（auth-off / 积分关闭）
 const creditText = computed(() => (credits.value ? formatCredits(credits.value.balance) : '0'));
 
-/* 积分展示统一口径：最多 4 位小数、去掉无意义尾随 0；非零小额显示 <0.0001，不显示成 0 */
+/* 积分展示统一口径：固定 2 位小数（0.01 / 0.09 / 1.30 / 100.00；负数 -0.09） */
 function formatCredits(value) {
     const num = Number(value);
-    if (!Number.isFinite(num)) return '0';
-    const abs = Math.abs(num);
-    if (abs > 0 && abs < 0.0001) return (num < 0 ? '-' : '') + '<0.0001';
-    const rounded = Math.round(num * 10000) / 10000;
-    if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return String(Math.round(rounded));
-    return rounded.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+    if (!Number.isFinite(num)) return '0.00';
+    return num.toFixed(2);
 }
 
 function applyCredits(detail) {

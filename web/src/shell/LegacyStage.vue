@@ -107,7 +107,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.ls { position: absolute; inset: 0; pointer-events: none; }
+.ls { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
 .ls-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: transparent; visibility: hidden; opacity: 0; pointer-events: none; transition: opacity var(--duration-base) var(--ease-out); }
 .ls-frame.is-on { visibility: visible; opacity: 1; pointer-events: auto; }
 .ls-skel { position: absolute; inset: 0; pointer-events: auto; padding: 96px 100px; background: var(--bg); display: flex; flex-direction: column; animation: fade-in var(--duration-base) var(--ease-out) 180ms both; }

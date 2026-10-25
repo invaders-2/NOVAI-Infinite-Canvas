@@ -1,8 +1,8 @@
 <script setup>
 // GPT 对话（页面 id: gpt-chat，替换旧 static/gpt-chat.html）。
-// 顶栏：会话标题 · 「对话 / 智能体 / 图像」切换 · 新建对话 · 系统提示词 · 历史对话；
-// 正文区：消息列表，或「全部智能体 / 全部技能」网格视图（输入框始终在底部）；
-// 悬浮输入框（Composer）+ 图片预览（ImagePreview）。数据与接口见 chatState / session / library / agents。
+// 顶栏：会话标题 · 「对话 / 图像」切换 · 新建对话 · 系统提示词 · 历史对话；
+// 正文区：消息列表（输入框始终在底部）；
+// 悬浮输入框（Composer）+ 图片预览（ImagePreview）。数据与接口见 chatState / session / library。
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import ChIcon from './ChIcon.vue';
 import MessageList from './MessageList.vue';
@@ -10,17 +10,12 @@ import Composer from './Composer.vue';
 import HistoryPop from './HistoryPop.vue';
 import SystemPromptPop from './SystemPromptPop.vue';
 import ImagePreview from './ImagePreview.vue';
-import CapabilitySquare from './agents/CapabilitySquare.vue';
-import OpenClawInstallModal from './agents/OpenClawInstallModal.vue';
 import { S, setMode, loadConfig, normalizeSize } from './chatState.js';
 import { C, newConversation, initSession, loadConversations } from './session.js';
 import { loadPersonas, loadMemories, syncPersonaState } from './library.js';
-import { CAP, openSquare, closeSquare, closePanel, selectCapability } from './agents/capState.js';
-import { ensureStatus } from './agents/openclawSetup.js';
 import { closeAllPops } from './usePop.js';
 import { state, t } from '../../lib/store.js';
 
-// 智能体 / 技能不再是独立页面：顶栏与输入框的入口都在正文区打开同一个网格视图，选中后挂成输入框里的 chip
 const root = ref(null);
 const cmpWrap = ref(null);
 const composer = ref(null);
@@ -33,36 +28,23 @@ const sysOpen = ref(false);
 const preview = ref('');
 const active = computed(() => state.active === 'gpt-chat');
 // 切到别的页面时收起所有弹层（输入框弹层 / 看图 Teleport 在 body 上，不随 v-show 隐藏）
-watch(active, v => { if (!v) { closeAllPops(); histOpen.value = false; sysOpen.value = false; closeSquare(); closePanel(); preview.value = ''; } });
+watch(active, v => { if (!v) { closeAllPops(); histOpen.value = false; sysOpen.value = false; preview.value = ''; } });
 
 const title = computed(() => {
     const tt = C.current && C.current.title;
     return !tt || tt === '新对话' || tt === 'New Chat' ? t('chat.newConversation', '新对话') : tt;
 });
 
-function pickMode(id) { closeAllPops(); histOpen.value = false; sysOpen.value = false; closeSquare(); setMode(id); }
-function openAgents() {
-    histOpen.value = false;
-    sysOpen.value = false;
-    closeAllPops();
-    // 用到 OpenClaw 的地方才探测一次（不在应用启动时探测，避免拖慢启动）
-    ensureStatus(false);
-    if (CAP.square === 'agent') closeSquare();
-    else openSquare('agent');
-}
-function pickCap(cap) {
-    selectCapability(cap);
-    if (composer.value) composer.value.focus();
-}
+function pickMode(id) { closeAllPops(); histOpen.value = false; sysOpen.value = false; setMode(id); }
 function toggleHistory(force) {
     histOpen.value = typeof force === 'boolean' ? force : !histOpen.value;
-    if (histOpen.value) { sysOpen.value = false; closeSquare(); }
+    if (histOpen.value) sysOpen.value = false;
 }
 function toggleSystem(force) {
     sysOpen.value = typeof force === 'boolean' ? force : !sysOpen.value;
-    if (sysOpen.value) { histOpen.value = false; closeSquare(); syncPersonaState(); }
+    if (sysOpen.value) { histOpen.value = false; syncPersonaState(); }
 }
-async function createNew() { await newConversation(); histOpen.value = false; closeSquare(); }
+async function createNew() { await newConversation(); histOpen.value = false; }
 function fill(v) { composer.value && composer.value.fill(v); }
 
 // 顶栏两个弹层：点外面 / Esc 关闭
@@ -75,8 +57,6 @@ function onKey(e) {
     if (e.key !== 'Escape' || preview.value) return;
     histOpen.value = false;
     sysOpen.value = false;
-    closeSquare();
-    closePanel();
 }
 
 // 设置里改了 API 平台 → 重新拉配置（BroadcastChannel，外壳也可能转发成 window message）
@@ -119,9 +99,8 @@ onBeforeUnmount(() => {
             <span class="ttl">{{ title }}</span>
             <span class="sub">{{ t('chat.title', 'GPT 对话') }}</span>
             <span class="modes" role="tablist" aria-label="对话模式" data-glide="button" data-glide-active="is-on">
-                <button type="button" role="tab" :aria-selected="S.mode === 'chat' && !CAP.square" :class="{ 'is-on': S.mode === 'chat' && !CAP.square }" title="纯文字对话（流式输出）" @click="pickMode('chat')">对话</button>
-                <button type="button" role="tab" :aria-selected="CAP.square === 'agent'" :class="{ 'is-on': CAP.square === 'agent' }" title="智能体：在对话里选一个挂上" @click="openAgents()">智能体</button>
-                <button type="button" role="tab" :aria-selected="S.mode === 'image' && !CAP.square" :class="{ 'is-on': S.mode === 'image' && !CAP.square }" title="直接生成图片" @click="pickMode('image')">图像</button>
+                <button type="button" role="tab" :aria-selected="S.mode === 'chat'" :class="{ 'is-on': S.mode === 'chat' }" title="纯文字对话（流式输出）" @click="pickMode('chat')">对话</button>
+                <button type="button" role="tab" :aria-selected="S.mode === 'image'" :class="{ 'is-on': S.mode === 'image' }" title="直接生成图片" @click="pickMode('image')">图像</button>
             </span>
             <div class="acts">
                 <button type="button" class="nv-icon-btn" :title="t('chat.newConversation', '新建对话')" :aria-label="t('chat.newConversation', '新建对话')" @click="createNew"><ChIcon name="newchat" /></button>
@@ -132,8 +111,7 @@ onBeforeUnmount(() => {
 
         <div class="body">
             <div class="chat-layer">
-                <MessageList v-show="!CAP.square" @preview="u => (preview = u)" @fill="fill" />
-                <CapabilitySquare v-if="CAP.square" :kind="CAP.square" @pick="pickCap" @close="closeSquare" />
+                <MessageList @preview="u => (preview = u)" @fill="fill" />
                 <div ref="cmpWrap" class="cmp-wrap">
                     <Composer ref="composer" :active="active" @preview="u => (preview = u)" />
                 </div>
@@ -147,7 +125,6 @@ onBeforeUnmount(() => {
         </div>
 
         <ImagePreview :url="preview" @close="preview = ''" />
-        <OpenClawInstallModal />
     </div>
 </template>
 
