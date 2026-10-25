@@ -16,6 +16,8 @@ export type Part =
 			ok?: boolean
 			code?: string
 			result?: unknown
+			output?: string
+			args?: unknown
 			payload?: unknown
 			startedAt?: number
 			endedAt?: number

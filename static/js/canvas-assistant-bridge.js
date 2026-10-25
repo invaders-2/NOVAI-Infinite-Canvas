@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.136.1792942457';
+    var ASSET_VERSION = '1.0.136.1792943271';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}

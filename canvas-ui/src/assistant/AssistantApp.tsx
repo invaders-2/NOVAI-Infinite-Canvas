@@ -3,7 +3,6 @@ import { Markdown } from "@/components/ai-elements/markdown"
 import { Message, MessageContent } from "@/components/ai-elements/message"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Shimmer } from "@/components/ai-elements/shimmer"
-import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task"
 import { cn } from "@/lib/utils"
 import {
 	ChevronDownIcon,
@@ -15,7 +14,6 @@ import {
 	ImageIcon,
 	BrainIcon,
 	LayoutGridIcon,
-	ListChecksIcon,
 	PencilIcon,
 	PlayIcon,
 	RefreshCwIcon,
@@ -31,6 +29,7 @@ import { Composer } from "./Composer"
 import { ModelContextDialog } from "./ModelContextDialog"
 import { ThreadBar } from "./ThreadBar"
 import { deriveRun, formatTokens, formatWorkMs, statusLabel, toolIconKey, toolLabel } from "./format"
+import { ToolCard } from "./ToolCard"
 import { ToolIcon } from "./icons"
 import type { AssistantStore } from "./store"
 import type { ArtifactItem, Message as AssistantMessage, SkillChip } from "./types"
@@ -327,6 +326,7 @@ const RunTurn = ({
 						<Reasoning
 							className="nvca-reasoning"
 							duration={run.thinking.durationMs ? Math.max(1, Math.round(run.thinking.durationMs / 1000)) : undefined}
+							defaultOpen={false}
 							isStreaming={streaming && Boolean(run.thinking.text)}
 						>
 							<ReasoningTrigger
@@ -346,22 +346,14 @@ const RunTurn = ({
 					) : null}
 
 					{hasSteps ? (
-						<Task className="nvca-steps" defaultOpen={streaming || run.steps.length <= 6}>
-							<TaskTrigger className="nvca-steps-trigger" title="">
-								<ListChecksIcon className="nvca-i-sm" />
-								<span className="nvca-steps-title">执行清单</span>
-								<span className="nvca-steps-count">{run.steps.length + run.tools.length}</span>
-								<ChevronDownIcon className="nvca-i-xs nvca-steps-caret" />
-							</TaskTrigger>
-							<TaskContent className="nvca-steps-content">
-								{run.tools.map((part) => (
-									<StepRow key={part.id} part={part} />
-								))}
-								{run.steps.map((part, index) => (
-									<StepRow key={part.id} part={part} index={index} />
-								))}
-							</TaskContent>
-						</Task>
+						<div className="nvca-tool-list">
+							{run.tools.map((part) => (
+								<ToolCard key={part.id} part={part} />
+							))}
+							{run.steps.map((part) => (
+								<ToolCard key={part.id} part={part} />
+							))}
+						</div>
 					) : null}
 
 					{message.plan ? (
@@ -476,36 +468,6 @@ const RunTurn = ({
 			{contextOpen && message.runId ? (
 				<ModelContextDialog runId={message.runId} onClose={() => setContextOpen(false)} />
 			) : null}
-		</div>
-	)
-}
-
-const StepRow = ({
-	part,
-	index,
-}: {
-	part: Extract<AssistantMessage["parts"][number], { type: "tool_event" }>
-	index?: number
-}) => {
-	const status = part.status || ""
-	const icon = toolIconKey(part.tool)
-	return (
-		<div className="nvca-step" data-status={status || "pending"}>
-			<span className="nvca-step-icon">
-				<ToolIcon className="nvca-i-sm" name={icon} />
-			</span>
-			<div className="nvca-step-body">
-				<div className="nvca-step-head">
-					{typeof index === "number" ? <span className="nvca-step-index">{index + 1}</span> : null}
-					<span className="nvca-step-title">{part.title || toolLabel(part.tool)}</span>
-					<span className="nvca-step-state">
-						{status === "running" ? <span className="nvca-pulse" /> : null}
-						{status === "done" ? <ToolIcon className="nvca-i-xs is-ok" name="checkPlain" /> : null}
-						{status === "failed" ? <ToolIcon className="nvca-i-xs is-fail" name="fail" /> : null}
-					</span>
-				</div>
-				{part.message ? <div className="nvca-step-note">{part.message}</div> : null}
-			</div>
 		</div>
 	)
 }

@@ -137,6 +137,7 @@ const upsertStep = (state: SessionState, message: Message, data: Record<string, 
 	}
 	if (data.tool) part.tool = String(data.tool)
 	if (data.description && !part.title) part.title = String(data.description)
+	if (data.args && typeof data.args === "object") part.args = clone(data.args)
 	if (phase === "start") {
 		part.status = "running"
 		if (!part.startedAt) part.startedAt = at
@@ -148,6 +149,8 @@ const upsertStep = (state: SessionState, message: Message, data: Record<string, 
 		else if (data.error) part.message = String(data.error)
 		if (data.code) part.code = String(data.code)
 		if (data.result !== undefined) part.result = clone(data.result)
+		if (typeof data.output === "string") part.output = data.output
+		else if (data.output !== undefined) part.output = JSON.stringify(data.output, null, 2)
 		if (data.canvas_ops !== undefined) part.payload = clone(data.canvas_ops)
 	}
 	return part
