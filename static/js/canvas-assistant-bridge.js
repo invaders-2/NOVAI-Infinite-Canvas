@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.136.1792944681';
+    var ASSET_VERSION = '1.0.136.1792945742';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -477,6 +477,28 @@
             if (btn) btn.click();
         });
     }
+    function approveStep(step, instruction) {
+        if (!step || !step.tool) return Promise.resolve(false);
+        if (typeof window.runAgentStream !== 'function') return Promise.resolve(false);
+        var args = step.args && typeof step.args === 'object' ? step.args : {};
+        var payload = { tool: String(step.tool), args: args, description: String(step.description || '') };
+        return waitFor(function () {
+            var busy = false;
+            try {
+                busy = !!(mountedHandle && mountedHandle.store && mountedHandle.store.env && mountedHandle.store.env.running);
+            } catch (e) {}
+            return busy ? null : true;
+        }, 30000, 120).then(function () {
+            var bubble = document.createElement('div');
+            var result = window.runAgentStream(String(instruction || '执行已确认的步骤'), bubble, { approved_steps: [payload] });
+            return Promise.resolve(result).then(function (res) {
+                return !(res && res.failed);
+            }).catch(function () { return false; });
+        }).catch(function () {
+            notice('助手还在执行，等这一轮结束再确认');
+            return false;
+        });
+    }
     function ensureChatModelReady(timeout) {
         return waitFor(function () {
             var select = document.getElementById('chatModelSelect');
@@ -759,6 +781,7 @@
         },
         planAction: planAction,
         confirmAction: confirmAction,
+        approveStep: approveStep,
         togglePlanConfirm: function (on) {
             var current = true;
             try { current = typeof window.agentPlanConfirmEnabled === 'function' ? !!window.agentPlanConfirmEnabled() : true; } catch (e) {}

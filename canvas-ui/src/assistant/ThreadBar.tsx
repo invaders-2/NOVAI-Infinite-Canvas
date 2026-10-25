@@ -96,6 +96,12 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	}, [])
 
 	useEffect(() => {
+		const openArtifacts = () => setArtifactsOpen(true)
+		window.addEventListener("novai-canvas-assistant:artifacts", openArtifacts)
+		return () => window.removeEventListener("novai-canvas-assistant:artifacts", openArtifacts)
+	}, [])
+
+	useEffect(() => {
 		if (!menuOpen && !moreOpen && !actionsId && !artifactsOpen) return
 		const onDown = (event: MouseEvent) => {
 			const target = event.target as HTMLElement | null

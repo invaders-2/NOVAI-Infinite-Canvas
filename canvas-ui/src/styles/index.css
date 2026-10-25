@@ -2313,3 +2313,87 @@ html:not(.theme-dark) .nvca-attachment-preview { background: rgba(0, 0, 0, 0.05)
 .nvca-step-group-spacer { flex: 1; }
 .nvca-step-group-caret { width: 14px; height: 14px; color: var(--tn-arrow); transition: transform 0.16s var(--nvca-ease); }
 .nvca-step-group-caret.is-open { transform: rotate(180deg); }
+
+/* ── 确认提问卡 ── */
+.nvca-question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--tn-card);
+  border: 1px solid var(--tn-line);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+}
+.nvca-question-head { display: flex; align-items: center; gap: 7px; color: var(--tn-text); }
+.nvca-question-title { font-size: 14px; font-weight: 600; line-height: 20px; }
+.nvca-question-reason { margin: 0; font-size: 13px; line-height: 1.6; color: var(--tn-desc); white-space: pre-wrap; }
+.nvca-question-step { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.03); font-size: 12px; }
+html:not(.theme-dark) .nvca-question-step { background: rgba(0, 0, 0, 0.03); }
+.nvca-question-tool { flex: 0 0 auto; color: var(--tn-text); font-weight: 500; }
+.nvca-question-args { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tn-desc); }
+.nvca-question-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.nvca-question-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--tn-line);
+  color: var(--tn-desc);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.nvca-question-btn:hover { color: var(--tn-text); background: var(--tn-hover); }
+.nvca-question-btn.primary { background: var(--tn-text); border-color: transparent; color: var(--tn-bg); }
+.nvca-question-btn.primary:hover { opacity: 0.9; }
+.nvca-question-btn.danger { color: #fca5a5; }
+html:not(.theme-dark) .nvca-question-btn.danger { color: #b91c1c; }
+.nvca-question.is-resolved {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  box-shadow: none;
+  border-radius: 10px;
+  color: var(--tn-desc);
+}
+.nvca-question-resolved-icon { display: inline-flex; color: #4ade80; }
+.nvca-question.is-skipped .nvca-question-resolved-icon { color: var(--tn-arrow); }
+.nvca-question.is-cancelled .nvca-question-resolved-icon { color: #f87171; }
+.nvca-question-resolved-text { font-size: 12px; color: var(--tn-text); }
+.nvca-question-resolved-tool { font-size: 11px; color: var(--tn-arrow); }
+
+/* ── 斜杠命令面板 ── */
+.nvca-slash {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 43;
+  width: 312px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 5px;
+  border-radius: 16px;
+  background: var(--tn-card);
+  border: 1px solid var(--tn-line);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.34);
+  animation: nvca-pop 0.16s var(--nvca-ease) both;
+}
+.nvca-slash-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  text-align: left;
+}
+.nvca-slash-item:hover,
+.nvca-slash-item.is-active { background: var(--tn-hover); }
+.nvca-slash-name { font-size: 13px; font-weight: 500; line-height: 1.5; color: var(--tn-text); }
+.nvca-slash-desc { font-size: 11.5px; line-height: 1.5; color: var(--tn-desc); }
+
+/* 新面板里不再显示旧面板的确认/方案卡 */
+.nv-assistant-new .agent-confirm-card,
+.nv-assistant-new .agent-plan-card { display: none !important; }

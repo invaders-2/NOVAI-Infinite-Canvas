@@ -63,6 +63,9 @@ export interface AssistantStore {
 	clearRefs(): void
 	planAction(action: "run" | "cancel" | "adjust"): void
 	confirmAction(yes: boolean): void
+	executeConfirmation(id: string): void
+	skipConfirmation(id: string): void
+	cancelConfirmation(id: string): void
 	togglePlanConfirm(): void
 	openHistory(): void
 	openNode(id: string): void
@@ -151,6 +154,15 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			emit()
 			void store.send(next.text)
 		}, 260)
+	}
+
+	const findConfirmationPart = (current: ReturnType<typeof createSession>, id: string) => {
+		for (const message of current.messages) {
+			for (const part of message.parts) {
+				if (part.type === "confirmation" && part.id === id) return part
+			}
+		}
+		return null
 	}
 
 	const store: AssistantStore = {
@@ -376,6 +388,56 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			try { api.clearRefs() } catch {}
 			env.refs = []
 			emit()
+		},
+		executeConfirmation(id) {
+			const part = findConfirmationPart(state, id)
+			if (!part || part.status !== "pending") return
+			const args = part.args && typeof part.args === "object" ? { ...(part.args as Record<string, unknown>) } : {}
+			if (part.confirmKind === "delete" || /delete/i.test(part.tool)) args.force = true
+			part.status = "executed"
+			state.pendingConfirmation = null
+			emit()
+			pushNotice("已确认执行这一步")
+			const launch = () => {
+				try {
+					if (typeof api.approveStep === "function") {
+						void api.approveStep(
+							{ tool: part.tool, args, description: part.description },
+							part.description || "执行已确认的步骤",
+						)
+					} else if (typeof api.confirmAction === "function") {
+						api.confirmAction(true)
+					}
+				} catch {
+					pushNotice("确认执行失败，请重试")
+				}
+			}
+			if (env.running) {
+				const timer = window.setInterval(() => {
+					if (env.running) return
+					window.clearInterval(timer)
+					window.setTimeout(launch, 250)
+				}, 250)
+			} else {
+				window.setTimeout(launch, 120)
+			}
+		},
+		skipConfirmation(id) {
+			const part = findConfirmationPart(state, id)
+			if (!part || part.status !== "pending") return
+			part.status = "skipped"
+			state.pendingConfirmation = null
+			emit()
+			pushNotice("已跳过这一步")
+		},
+		cancelConfirmation(id) {
+			const part = findConfirmationPart(state, id)
+			if (!part) return
+			part.status = "cancelled"
+			state.pendingConfirmation = null
+			emit()
+			pushNotice("已取消本轮")
+			try { store.abort() } catch {}
 		},
 		planAction(action) {
 			try { api.planAction(action) } catch {}

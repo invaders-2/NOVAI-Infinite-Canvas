@@ -334,6 +334,19 @@ export const applyEvent = (state: SessionState, event: StreamEvent): SessionStat
 		state.streamState = "waiting_user_input"
 		const message = ensureAssistant(state)
 		message.status = "waiting_user_input"
+		const args = data.args && typeof data.args === "object" ? clone(data.args) : undefined
+		message.parts.push({
+			type: "confirmation",
+			id: uid("part"),
+			index: data.index === undefined || data.index === null ? "" : String(data.index),
+			tool: String(data.tool || ""),
+			args,
+			reason: String(data.reason || ""),
+			confirmKind: String(data.confirm_kind || ""),
+			units: Number(data.units) || 0,
+			description: String(data.description || ""),
+			status: "pending",
+		})
 		freezeActivity(state)
 		return state
 	}

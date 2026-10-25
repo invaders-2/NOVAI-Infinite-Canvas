@@ -22,6 +22,18 @@ export type Part =
 			startedAt?: number
 			endedAt?: number
 	  }
+	| {
+			type: "confirmation"
+			id: string
+			index?: string
+			tool: string
+			args?: unknown
+			reason: string
+			confirmKind: string
+			units?: number
+			description: string
+			status: "pending" | "executing" | "executed" | "skipped" | "cancelled"
+	  }
 	| { type: "run_outcome"; id: string; status: string; activeWorkMs: number; steps: number }
 	| { type: "usage"; id: string; usage: UsageTotals }
 	| { type: "user_steer"; id: string; text: string; status: string }
@@ -144,6 +156,7 @@ export interface CanvasAssistantHostApi {
 	pickUpload(): void
 	planAction(action: "run" | "cancel" | "adjust"): void
 	confirmAction?(yes: boolean): void
+	approveStep?(step: { tool: string; args?: unknown; description?: string }, instruction: string): Promise<boolean>
 	togglePlanConfirm(on: boolean): void
 	openHistory(): void
 	openNode(id: string): void

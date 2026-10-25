@@ -30,6 +30,7 @@ import { Composer } from "./Composer"
 import { ModelContextDialog } from "./ModelContextDialog"
 import { ThreadBar } from "./ThreadBar"
 import { deriveRun, formatTokens, formatWorkMs, statusLabel, toolIconKey, toolLabel } from "./format"
+import { QuestionCard } from "./QuestionCard"
 import { ToolCard } from "./ToolCard"
 import { ToolIcon } from "./icons"
 import type { AssistantStore } from "./store"
@@ -308,7 +309,8 @@ const RunTurn = ({
 	const outcomeLabel = run.outcome ? statusLabel(run.outcome.status, "已结束") : ""
 	const totalWork = run.outcome?.activeWorkMs || message.activeWorkMs || 0
 	const hasSteps = run.steps.length > 0 || run.tools.length > 0
-	const hasBody = hasSteps || Boolean(run.thinking) || Boolean(message.plan)
+	const confirmations = message.parts.filter((part) => part.type === "confirmation")
+	const hasBody = hasSteps || Boolean(run.thinking) || Boolean(message.plan) || confirmations.length > 0
 
 	return (
 		<div className="nvca-turn" data-streaming={streaming ? "true" : "false"}>
@@ -347,6 +349,9 @@ const RunTurn = ({
 					) : null}
 
 					{hasSteps ? <StepGroup parts={[...run.tools, ...run.steps]} /> : null}
+					{confirmations.map((part) => (
+						<QuestionCard key={part.id} part={part} store={store} />
+					))}
 
 					{message.plan ? (
 						<PlanCard
@@ -404,8 +409,6 @@ const RunTurn = ({
 					) : null}
 				</div>
 			) : null}
-
-			{pending && pending.kind !== "plan" ? <ConfirmationHint pending={pending} store={store} /> : null}
 
 			{message.runId || texts.length > 0 ? (
 				<div className="nvca-run-tools">

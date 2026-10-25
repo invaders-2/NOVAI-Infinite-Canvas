@@ -24,6 +24,22 @@ import type { CanvasNodeSummary } from "./api"
 import { formatTokens } from "./format"
 import type { AssistantStore } from "./store"
 
+interface SlashCommand {
+	name: string
+	description: string
+	action: "new" | "plan" | "auto" | "attach" | "artifacts" | "context" | "clear"
+}
+
+const SLASH_COMMANDS: SlashCommand[] = [
+	{ name: "new", description: "新对话：清空当前对话并新建", action: "new" },
+	{ name: "plan", description: "先出方案：本轮强制手动确认", action: "plan" },
+	{ name: "auto", description: "自动执行：只读步骤直接跑", action: "auto" },
+	{ name: "attach", description: "添加内容：引用节点或上传素材", action: "attach" },
+	{ name: "artifacts", description: "产物：打开本画布产物面板", action: "artifacts" },
+	{ name: "context", description: "上下文：查看占用与上限", action: "context" },
+	{ name: "clear", description: "清空输入：清掉输入框文字", action: "clear" },
+]
+
 interface ComposerProps {
 	store: AssistantStore
 	pendingText: { text: string; token: number } | null
@@ -39,6 +55,9 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	const [mentionNodes, setMentionNodes] = useState<CanvasNodeSummary[]>([])
 	const [mentionLoading, setMentionLoading] = useState(false)
 	const [attachmentPreview, setAttachmentPreview] = useState<{ url: string; name: string } | null>(null)
+	const [slashOpen, setSlashOpen] = useState(false)
+	const [slashQuery, setSlashQuery] = useState("")
+	const [slashIndex, setSlashIndex] = useState(0)
 	const [contextOpen, setContextOpen] = useState(false)
 
 	const modelGroups = useMemo(() => {
@@ -145,6 +164,61 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 		return "0%"
 	})()
 
+	const slashCommands = slashOpen
+		? SLASH_COMMANDS.filter((command) => !slashQuery || command.name.includes(slashQuery.toLowerCase()))
+		: []
+
+	const stripSlashCommand = (value: string) => value.replace(/\/[^\s/]*$/, "").trimEnd()
+
+	const runSlashCommand = (command: SlashCommand) => {
+		const field = textareaRef.current
+		const current = field ? field.value : text
+		const next = stripSlashCommand(current)
+		if (field) {
+			field.value = next
+			field.focus()
+			field.setSelectionRange(next.length, next.length)
+		}
+		setText(next)
+		setSlashOpen(false)
+		setSlashQuery("")
+		setMentionOpen(false)
+		switch (command.action) {
+			case "new": {
+				const btn = document.getElementById("canvasAssistantNewChatBtn")
+				if (btn) btn.click()
+				else store.clearHistory()
+				store.notify("已新建对话")
+				break
+			}
+			case "plan":
+				store.setPlanConfirm(true)
+				store.notify("已切换到手动确认")
+				break
+			case "auto":
+				store.setPlanConfirm(false)
+				store.notify("已切换到自动执行")
+				break
+			case "attach":
+				setAddOpen(true)
+				store.notify("已打开添加菜单")
+				break
+			case "artifacts":
+				window.dispatchEvent(new CustomEvent("novai-canvas-assistant:artifacts"))
+				store.notify("已打开产物面板")
+				break
+			case "context":
+				setContextOpen(true)
+				store.notify("已打开上下文")
+				break
+			case "clear":
+				if (field) field.value = ""
+				setText("")
+				store.notify("已清空输入框")
+				break
+		}
+	}
+
 	const refCount = env.refs.length
 	const isUpload = (ref: { id: string; type?: string }) => ref.type === "upload" || /^upload_/.test(ref.id)
 	const attachments = env.refs.filter(isUpload)
@@ -249,6 +323,27 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 				</div>
 			) : null}
 
+			{slashOpen ? (
+				<div className="nvca-slash" role="listbox" aria-label="斜杠命令">
+					<div className="nvca-tap-menu-label">斜杠命令</div>
+					{slashCommands.length === 0 ? <div className="nvca-tap-menu-empty">没有匹配的命令</div> : null}
+					{slashCommands.map((command, index) => (
+						<button
+							aria-selected={index === slashIndex}
+							className={cn("nvca-slash-item", index === slashIndex && "is-active")}
+							key={command.name}
+							onMouseDown={(event) => event.preventDefault()}
+							onClick={() => runSlashCommand(command)}
+							role="option"
+							type="button"
+						>
+							<span className="nvca-slash-name">/{command.name}</span>
+							<span className="nvca-slash-desc">{command.description}</span>
+						</button>
+					))}
+				</div>
+			) : null}
+
 			{mentionOpen ? (
 				<div className="nvca-tap-mention" role="listbox" aria-label="画布内容">
 					<div className="nvca-tap-menu-label">画布内容</div>
@@ -293,7 +388,17 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 					onChange={(event) => {
 						const value = event.currentTarget.value
 						setText(value)
+						const slash = /(?:^|\s)\/([^\s/]*)$/.exec(value)
+						if (slash) {
+							setSlashOpen(true)
+							setSlashQuery(slash[1] || "")
+							setSlashIndex(0)
+							setMentionOpen(false)
+						} else {
+							setSlashOpen(false)
+						}
 						if (/@([^\s@]*)$/.test(value)) {
+							if (slash) setSlashOpen(false)
 							setMentionOpen(true)
 							setMentionLoading(true)
 							void fetchCanvasNodes()
@@ -305,6 +410,28 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 						}
 					}}
 					onKeyDown={(event) => {
+						if (slashOpen) {
+							if (event.key === "ArrowDown") {
+								event.preventDefault()
+								setSlashIndex((index) => (index + 1) % Math.max(1, slashCommands.length))
+								return
+							}
+							if (event.key === "ArrowUp") {
+								event.preventDefault()
+								setSlashIndex((index) => (index - 1 + Math.max(1, slashCommands.length)) % Math.max(1, slashCommands.length))
+								return
+							}
+							if (event.key === "Escape") {
+								event.preventDefault()
+								setSlashOpen(false)
+								return
+							}
+							if ((event.key === "Enter" || event.key === "Tab") && slashCommands.length > 0) {
+								event.preventDefault()
+								runSlashCommand(slashCommands[Math.min(slashIndex, slashCommands.length - 1)])
+								return
+							}
+						}
 						if (event.key === "Escape") {
 							setMentionOpen(false)
 							return
