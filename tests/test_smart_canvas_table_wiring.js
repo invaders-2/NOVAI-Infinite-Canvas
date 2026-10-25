@@ -175,7 +175,7 @@ ok(/addEventListener\('click', e => \{\s*\n\s*if\(Date\.now\(\) >= suppressNodeC
 console.log('[12] 批量结果节点的形状按参考比例（不再用源节点自己的框）');
 ok(js.includes('const explicitRatio = options.ratio;'), '占位框支持显式参考比例');
 ok(/pendingBoxSize\(expectedCount, \{sourceNode, ratio:options\.ratio/.test(js), 'createPendingOutputFromSource 透传 ratio');
-ok(js.includes('batchResultNodeForRun(runId, node, meta, refs, srcRatio)'), '批量按行算出的比例传进结果节点');
+ok(js.includes('batchResultNodeForRun(runId, node, meta, refs, srcRatio, runSettings)'), '批量按行算出的比例 + 本行请求参数（视频比例）传进结果节点');
 ok(js.includes('const sourceIsGenerator'), '生成器类节点（批量/表格）不用自己的框当形状');
 ok(js.includes('mediaLayoutSize(live.images[0]).width > 0'), '单张结果按素材自己的比例定框');
 
