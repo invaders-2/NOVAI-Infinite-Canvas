@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.136.1792943271';
+    var ASSET_VERSION = '1.0.136.1792943909';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -799,21 +799,26 @@
             var isUndo = method === 'POST' && /\/api\/agent\/undo(?:\?|$)/.test(url);
             var requestInput = input;
             var requestInit = init;
-            if (isRun && pendingRunSkillRef) {
-                var skillRef = pendingRunSkillRef;
+            if (isRun && init && typeof init.body === 'string') {
                 try {
-                    if (init && typeof init.body === 'string') {
-                        var runBody = JSON.parse(init.body);
-                        runBody.skill_ref = skillRef;
-                        requestInit = {};
-                        for (var initKey in init) {
-                            if (Object.prototype.hasOwnProperty.call(init, initKey)) requestInit[initKey] = init[initKey];
-                        }
-                        requestInit.body = JSON.stringify(runBody);
+                    var runBody = JSON.parse(init.body);
+                    if (pendingRunSkillRef) {
+                        /* 应用市场 brief 的 store:<id>：只在这一轮注入 skill_ref，不额外带 skill_id */
+                        runBody.skill_ref = pendingRunSkillRef;
+                        delete runBody.skill_id;
+                        log('skillRef', 'injected ' + pendingRunSkillRef);
                         pendingRunSkillRef = '';
-                        log('skillRef', 'injected ' + skillRef);
+                    } else {
+                        /* 技能入口已删除：普通发送一律不携带技能字段 */
+                        delete runBody.skill_id;
+                        delete runBody.skill_ref;
                     }
-                } catch (e) { log('skillRef', 'inject failed'); }
+                    requestInit = {};
+                    for (var initKey in init) {
+                        if (Object.prototype.hasOwnProperty.call(init, initKey)) requestInit[initKey] = init[initKey];
+                    }
+                    requestInit.body = JSON.stringify(runBody);
+                } catch (e) { log('skillRef', 'prepare failed'); }
             }
             var pending = originalFetch.call(window, requestInput, requestInit);
             if (!isRun && !isResume && !isSteer && !isThread && !isCapabilities && !isUndo) return pending;
@@ -886,7 +891,6 @@
         var chatContext = document.getElementById('chatContext');
         if (chatContext) new MutationObserver(pushRefs).observe(chatContext, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
         var skillChip = document.getElementById('chatSkillChip');
-        if (skillChip) new MutationObserver(pushSkillState).observe(skillChip, { childList: true, subtree: true });
         var sendBtn = document.getElementById('chatSendBtn');
         if (sendBtn) new MutationObserver(syncRunningFromLegacy).observe(sendBtn, { attributes: true, attributeFilter: ['class', 'title'] });
         var usage = document.getElementById('canvasContextUsage');
@@ -975,10 +979,8 @@
                 pushPlanConfirm();
                 pushContextUsage();
                 syncRunningFromLegacy();
-                pushSkillState();
                 pushComposerState();
                 observeComposerSelects();
-                loadSkills();
                 /* 必须先让历史回来再触发自动发送，否则历史 setHistory 会把刚推入的用户消息覆盖掉 */
                 loadHistory().then(function () {
                     flushSeedHints();

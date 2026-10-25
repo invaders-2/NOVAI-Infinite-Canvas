@@ -38,6 +38,40 @@ export interface ThreadList {
 	threads: ThreadRow[]
 }
 
+export interface CanvasNodeSummary {
+	id: string
+	title: string
+	type: string
+}
+
+const mapCanvasNodes = (raw: unknown): CanvasNodeSummary[] => {
+	const nodes = Array.isArray(raw) ? raw : []
+	return nodes
+		.map((item) => {
+			const node = (item || {}) as Record<string, unknown>
+			const title = String(node.title || node.alias || node.prompt || node.type || "画布节点").slice(0, 40)
+			return { id: String(node.id || ""), title, type: String(node.type || "") }
+		})
+		.filter((node) => node.id)
+}
+
+export const fetchCanvasNodes = async (): Promise<CanvasNodeSummary[]> => {
+	if (!canvasId) return []
+	/* 优先读当前画布内存里的节点，@ 提及才能看到还没保存到服务端的改动 */
+	const collab = (window as unknown as { SmartCanvasCollab?: { getDoc?: () => { nodes?: unknown } | null } }).SmartCanvasCollab
+	try {
+		const doc = collab && typeof collab.getDoc === "function" ? collab.getDoc() : null
+		if (doc && Array.isArray(doc.nodes) && doc.nodes.length) return mapCanvasNodes(doc.nodes)
+	} catch {
+		/* 回退到接口 */
+	}
+	const response = await fetch("/api/canvases/" + encodeURIComponent(canvasId), { headers: { Accept: "application/json" } })
+	const data = await readJson(response)
+	if (!response.ok) throw new Error(errorText(data, "HTTP " + response.status))
+	const canvas = (data.canvas || {}) as { nodes?: unknown }
+	return mapCanvasNodes(canvas.nodes)
+}
+
 export interface ModelContext {
 	run_id: string
 	model: string | null

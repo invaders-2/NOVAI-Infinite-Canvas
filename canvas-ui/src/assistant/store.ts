@@ -19,9 +19,6 @@ export interface EnvState {
 	streamState: string
 	planConfirm: boolean
 	refs: RefChip[]
-	skills: SkillChip[]
-	selectedSkillId: string | null
-	selectedSkillName: string
 	chatModels: ChatModelOption[]
 	chatModel: string
 	chatProvider: string
@@ -50,8 +47,6 @@ export interface AssistantStore {
 	fillComposer(text: string): void
 	abort(): void
 	steer(text: string): void
-	chooseSkill(id: string): void
-	clearSkill(): void
 	setChatModel(model: string, provider: string): void
 	setImageProvider(value: string): void
 	setPlanConfirm(on: boolean): void
@@ -100,9 +95,6 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		streamState: "idle",
 		planConfirm: true,
 		refs: [],
-		skills: [],
-		selectedSkillId: null,
-		selectedSkillName: "",
 		chatModels: [],
 		chatModel: "",
 		chatProvider: "",
@@ -197,26 +189,19 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			}
 			try {
 				let injectedSkillRef = false
-				if (skillRef) {
-					const known = env.skills.find((skill) => skill.id === skillRef)
-					env.selectedSkillId = skillRef
-					env.selectedSkillName = known
-						? known.name
-						: skillRef.replace(/^store:/, "").replace(/[-_]+/g, " ")
-					if (known) {
-						await Promise.resolve(api.selectSkill(skillRef))
-					} else if (typeof api.applySkillRef === "function") {
-						api.applySkillRef(skillRef)
-						injectedSkillRef = true
-					}
-					emit()
+				if (skillRef && /^store:/.test(skillRef) && typeof api.applySkillRef === "function") {
+					/* 应用市场 brief 的 store:<id>：桥接层在下一轮 /api/agent/run 里注入 skill_ref */
+					api.applySkillRef(skillRef)
+					injectedSkillRef = true
 				}
 				if (composerFill) composerFill(text)
 				const accepted = await store.send(text)
 				/* 失败时把提示词留在输入框，用户可以直接重发 */
 				if (composerFill) composerFill(accepted ? "" : text)
 				if (injectedSkillRef && accepted) {
-					window.setTimeout(() => store.clearSkill(), 400)
+					window.setTimeout(() => {
+						try { api.clearSkill() } catch {}
+					}, 400)
 				}
 				return accepted
 			} catch (error) {
@@ -257,114 +242,6 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			} catch {
 				/* 失败由宿主提示 */
 			}
-		},
-		chooseSkill(id) {
-			env.selectedSkillId = id || null
-			env.selectedSkillName = id
-				? (env.skills.find((skill) => skill.id === id)?.name || id)
-				: ""
-			try {
-				if (id) api.selectSkill(id)
-				else api.clearSkill()
-			} catch {
-				/* 忽略：宿主会在状态变化时回推 */
-			}
-			emit()
-		},
-		clearSkill() {
-			store.chooseSkill("")
-		},
-		setChatModel(model, provider) {
-			env.chatModel = String(model || "")
-			env.chatProvider = String(provider || "")
-			try { api.setChatModel(env.chatModel, env.chatProvider) } catch {}
-			emit()
-		},
-		setImageProvider(value) {
-			env.imageProvider = String(value || "")
-			try { api.setImageProvider(env.imageProvider) } catch {}
-			emit()
-		},
-		setPlanConfirm(on) {
-			env.planConfirm = Boolean(on)
-			try { api.togglePlanConfirm(env.planConfirm) } catch {}
-			emit()
-		},
-		addSelectedRefs() {
-			return Promise.resolve()
-				.then(() => api.addSelectedRefs())
-				.then((count) => {
-					pushNotice(count > 0 ? "已引用 " + count + " 个画布节点" : "先在画布上选中要引用的节点")
-					return count
-				})
-				.catch(() => {
-					pushNotice("引用节点失败")
-					return 0
-				})
-		},
-		pickUpload() {
-			try { api.pickUpload() } catch {}
-		},
-		async branchAt(index) {
-			const list = await fetchThreads()
-			const activeId = list.active_id || (list.threads[0] ? list.threads[0].id : "")
-			if (!activeId) {
-				pushNotice("还没有可分支的对话")
-				return
-			}
-			const upto = state.messages.slice(0, index + 1).filter((message) => message.role !== "system")
-			const messageIndex = Math.max(0, upto.length - 1)
-			const thread = await forkThread(activeId, messageIndex)
-			await switchThreadViaLegacy(thread.id)
-			store.reloadHistory()
-			env.threadRefresh = (env.threadRefresh || 0) + 1
-			pushNotice("已创建分支对话")
-			emit()
-		},
-		removeRef(id) {
-			env.refs = env.refs.filter((ref) => String(ref.id) !== String(id))
-			try {
-				api.removeRef(String(id))
-			} catch {
-				/* ignore */
-			}
-			emit()
-		},
-		clearRefs() {
-			env.refs = []
-			try {
-				api.clearRefs()
-			} catch {
-				/* ignore */
-			}
-			emit()
-		},
-		planAction(action) {
-			const message = [...state.messages].reverse().find((m) => m.plan)
-			if (message) {
-				message.planState = action === "run" ? "running" : action === "cancel" ? "cancelled" : "adjusted"
-			}
-			if (action === "run") {
-				env.running = true
-				env.streamState = "streaming"
-				state.streamState = "streaming"
-			}
-			emit()
-			try {
-				api.planAction(action)
-			} catch {
-				/* host will surface its own error */
-			}
-		},
-		confirmAction(yes) {
-			try {
-				const fn = api.confirmAction
-				if (typeof fn === "function") fn(Boolean(yes))
-			} catch {
-				/* ignore */
-			}
-			state.pendingConfirmation = null
-			emit()
 		},
 		togglePlanConfirm() {
 			env.planConfirm = !env.planConfirm
@@ -469,13 +346,11 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			env.refs = Array.isArray(refs) ? refs : []
 			emit()
 		},
-		setSkills(skills) {
-			env.skills = Array.isArray(skills) ? skills : []
-			emit()
+		setSkills() {
+			/* 技能入口已移除：保留空实现，桥接层回推状态时不报错 */
 		},
-		setSelectedSkill(id) {
-			env.selectedSkillId = id || null
-			emit()
+		setSelectedSkill() {
+			/* 技能入口已移除 */
 		},
 		setRunning(running) {
 			env.running = Boolean(running)

@@ -1,9 +1,9 @@
 import {
 	ArrowUpIcon,
 	CheckIcon,
-	ChevronDownIcon,
 	ChevronUpIcon,
 	CircleIcon,
+	FolderClosedIcon,
 	HandIcon,
 	ImageUpIcon,
 	MicIcon,
@@ -17,6 +17,8 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
+import { fetchCanvasNodes } from "./api"
+import type { CanvasNodeSummary } from "./api"
 import { formatTokens } from "./format"
 import type { AssistantStore } from "./store"
 
@@ -30,18 +32,11 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 	const [text, setText] = useState("")
 	const [addOpen, setAddOpen] = useState(false)
-	const [skillView, setSkillView] = useState(false)
 	const [modelOpen, setModelOpen] = useState(false)
+	const [mentionOpen, setMentionOpen] = useState(false)
+	const [mentionNodes, setMentionNodes] = useState<CanvasNodeSummary[]>([])
+	const [mentionLoading, setMentionLoading] = useState(false)
 	const [contextOpen, setContextOpen] = useState(false)
-
-	const activeSkill = useMemo(() => {
-		const found = env.skills.find((skill) => skill.id === env.selectedSkillId)
-		if (found) return found
-		if (env.selectedSkillId) {
-			return { id: env.selectedSkillId, name: env.selectedSkillName || env.selectedSkillId, icon: "✨" }
-		}
-		return null
-	}, [env.skills, env.selectedSkillId, env.selectedSkillName])
 
 	const modelGroups = useMemo(() => {
 		const groups: { provider: string; providerName: string; models: string[] }[] = []
@@ -157,7 +152,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 					添加画布内容
 				</button>
 			</div>
-			{(refCount > 0 || activeSkill) ? (
+			{refCount > 0 ? (
 				<div className="nvca-tap-chips">
 					{env.refs.map((ref) => (
 						<span className="nvca-tap-chip" key={ref.id}>
@@ -168,15 +163,37 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 							</button>
 						</span>
 					))}
-					{activeSkill ? (
-						<span className="nvca-tap-chip is-skill">
-							<span>{activeSkill.icon || "✨"}</span>
-							<span className="nvca-tap-chip-name">{activeSkill.name}</span>
-							<button aria-label="取消本轮技能" onClick={() => store.clearSkill()} type="button">
-								<XIcon className="nvca-i-xs" />
-							</button>
-						</span>
-					) : null}
+				</div>
+			) : null}
+
+			{mentionOpen ? (
+				<div className="nvca-tap-mention" role="listbox" aria-label="画布内容">
+					<div className="nvca-tap-menu-label">画布内容</div>
+					{mentionLoading ? <div className="nvca-tap-menu-empty">正在读取画布…</div> : null}
+					{!mentionLoading && mentionNodes.length === 0 ? <div className="nvca-tap-menu-empty">画布上还没有节点</div> : null}
+					{mentionNodes.map((node) => (
+						<button
+							className="nvca-tap-menu-item"
+							key={node.id}
+							onClick={() => {
+								const field = textareaRef.current
+								const value = field ? field.value : text
+								const next = value.replace(/@([^\s@]*)$/, "@" + node.title + " ")
+								if (field) {
+									field.value = next
+									field.focus()
+									field.setSelectionRange(next.length, next.length)
+								}
+								setText(next)
+								setMentionOpen(false)
+							}}
+							type="button"
+						>
+							<FolderClosedIcon className="nvca-i-sm" />
+							<span className="nvca-tap-menu-text">{node.title}</span>
+							<span className="nvca-tap-mention-type">{node.type.replace(/^smart-/, "")}</span>
+						</button>
+					))}
 				</div>
 			) : null}
 
@@ -190,8 +207,25 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 				<textarea
 					aria-label="随心输入"
 					className="nvca-tap-input"
-					onChange={(event) => setText(event.currentTarget.value)}
+					onChange={(event) => {
+						const value = event.currentTarget.value
+						setText(value)
+						if (/@([^\s@]*)$/.test(value)) {
+							setMentionOpen(true)
+							setMentionLoading(true)
+							void fetchCanvasNodes()
+								.then((nodes) => setMentionNodes(nodes))
+								.catch(() => setMentionNodes([]))
+								.finally(() => setMentionLoading(false))
+						} else {
+							setMentionOpen(false)
+						}
+					}}
 					onKeyDown={(event) => {
+						if (event.key === "Escape") {
+							setMentionOpen(false)
+							return
+						}
 						if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
 							event.preventDefault()
 							submit()
@@ -208,10 +242,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 							<button
 								aria-expanded={addOpen}
 								className="nvca-tap-icon is-add"
-								onClick={() => {
-									setAddOpen((open) => !open)
-									setSkillView(false)
-								}}
+								onClick={() => setAddOpen((open) => !open)}
 								title="添加画布节点 / 素材"
 								type="button"
 							>
@@ -219,65 +250,28 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 							</button>
 							{addOpen ? (
 								<div className="nvca-tap-menu is-add">
-									{skillView ? (
-										<>
-											<div className="nvca-tap-menu-label">选择技能</div>
-											{env.skills.length === 0 ? (
-												<div className="nvca-tap-menu-empty">没有可用技能</div>
-											) : (
-												env.skills.map((skill) => (
-													<button
-														className={cn("nvca-tap-menu-item", skill.id === env.selectedSkillId && "is-on")}
-														key={skill.id}
-														onClick={() => {
-															store.chooseSkill(skill.id)
-															setAddOpen(false)
-															setSkillView(false)
-														}}
-														type="button"
-													>
-														<span className="nvca-tap-menu-icon">{skill.icon || "✨"}</span>
-														<span className="nvca-tap-menu-text">{skill.name}</span>
-														{skill.id === env.selectedSkillId ? <CheckIcon className="nvca-i-xs" /> : null}
-													</button>
-												))
-											)}
-										</>
-									) : (
-										<>
-											<button
-												className="nvca-tap-menu-item"
-												onClick={() => {
-													setAddOpen(false)
-													store.addSelectedRefs()
-												}}
-												type="button"
-											>
-												<MousePointerSquareDashedIcon className="nvca-i-sm" />
-												<span className="nvca-tap-menu-text">引用选中的画布节点</span>
-											</button>
-											<button
-												className="nvca-tap-menu-item"
-												onClick={() => {
-													setAddOpen(false)
-													store.pickUpload()
-												}}
-												type="button"
-											>
-												<ImageUpIcon className="nvca-i-sm" />
-												<span className="nvca-tap-menu-text">上传素材（图片 / 视频）</span>
-											</button>
-											<button
-												className="nvca-tap-menu-item"
-												onClick={() => setSkillView(true)}
-												type="button"
-											>
-												<SparklesIcon className="nvca-i-sm" />
-												<span className="nvca-tap-menu-text">选择技能</span>
-												<ChevronDownIcon className="nvca-i-xs nvca-tap-menu-caret" />
-											</button>
-										</>
-									)}
+									<button
+										className="nvca-tap-menu-item"
+										onClick={() => {
+											setAddOpen(false)
+											store.addSelectedRefs()
+										}}
+										type="button"
+									>
+										<MousePointerSquareDashedIcon className="nvca-i-sm" />
+										<span className="nvca-tap-menu-text">引用选中的画布节点</span>
+									</button>
+									<button
+										className="nvca-tap-menu-item"
+										onClick={() => {
+											setAddOpen(false)
+											store.pickUpload()
+										}}
+										type="button"
+									>
+										<ImageUpIcon className="nvca-i-sm" />
+										<span className="nvca-tap-menu-text">上传素材（图片 / 视频）</span>
+									</button>
 								</div>
 							) : null}
 						</div>
