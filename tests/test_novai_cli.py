@@ -485,7 +485,7 @@ class TokenAndVersionTests(unittest.TestCase):
             shutil.rmtree(directory, ignore_errors=True)
 
     def test_read_version(self):
-        self.assertEqual(novai_cli.read_version(str(ROOT)), "1.0.136")
+        self.assertEqual(novai_cli.read_version(str(ROOT)), "1.0.137")
         self.assertEqual(novai_cli.read_version("/nonexistent-path-for-cli-test"), "-")
 
 
