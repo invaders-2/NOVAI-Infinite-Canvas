@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.136.1792943909';
+    var ASSET_VERSION = '1.0.136.1792944681';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -361,10 +361,11 @@
             var removeEl = chip.querySelector('.chat-ctx-remove');
             var onclick = removeEl ? String(removeEl.getAttribute('onclick') || '') : '';
             var match = /removeChatRef\('([^']*)'\)/.exec(onclick);
+            var refId = match ? match[1] : 'ctx-' + index;
             var role = textOf(roleEl);
             var isVideo = !!chip.querySelector('.chat-ctx-vthumb') || !!chip.querySelector('.chat-ctx-kind');
             return {
-                id: match ? match[1] : 'ctx-' + index,
+                id: refId,
                 name: textOf(nameEl) || '素材',
                 role: role && role !== '角色' ? role : '',
                 type: 'node',

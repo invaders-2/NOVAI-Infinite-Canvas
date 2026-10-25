@@ -8,6 +8,8 @@ import {
 	ImageUpIcon,
 	MicIcon,
 	MousePointerSquareDashedIcon,
+	PencilIcon,
+	SendHorizontalIcon,
 	PlusIcon,
 	ScissorsIcon,
 	ShieldIcon,
@@ -36,6 +38,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	const [mentionOpen, setMentionOpen] = useState(false)
 	const [mentionNodes, setMentionNodes] = useState<CanvasNodeSummary[]>([])
 	const [mentionLoading, setMentionLoading] = useState(false)
+	const [attachmentPreview, setAttachmentPreview] = useState<{ url: string; name: string } | null>(null)
 	const [contextOpen, setContextOpen] = useState(false)
 
 	const modelGroups = useMemo(() => {
@@ -89,8 +92,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 		const value = String(textareaRef.current?.value ?? text ?? "").trim()
 		if (!value) return
 		if (env.running) {
-			store.steer(value)
-			clearInput()
+			if (store.enqueue(value)) clearInput()
 			return
 		}
 		store.send(value)
@@ -144,17 +146,98 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	})()
 
 	const refCount = env.refs.length
+	const isUpload = (ref: { id: string; type?: string }) => ref.type === "upload" || /^upload_/.test(ref.id)
+	const attachments = env.refs.filter(isUpload)
+	const nodeRefs = env.refs.filter((ref) => !isUpload(ref))
 
 	return (
 		<div className="nvca-tap-composer">
+			{env.queue.length > 0 ? (
+				<div className="nvca-queue">
+					<div className="nvca-queue-head">
+						<span className="nvca-queue-title">消息队列</span>
+						<span className="nvca-queue-count">{env.queue.length}/5</span>
+					</div>
+					<div className="nvca-queue-list">
+						{env.queue.map((item, index) => (
+							<div className="nvca-queue-item" key={item.id}>
+								<span className="nvca-queue-index">{index + 1}</span>
+								<span className="nvca-queue-text">{item.text}</span>
+								<div className="nvca-queue-actions">
+									<button
+										aria-label="编辑排队消息"
+										onClick={() => {
+											store.removeQueued(item.id)
+											store.fillComposer(item.text)
+										}}
+										title="编辑"
+										type="button"
+									>
+										<PencilIcon className="nvca-i-xs" />
+									</button>
+									<button
+										aria-label="移除排队消息"
+										onClick={() => store.removeQueued(item.id)}
+										title="移除"
+										type="button"
+									>
+										<XIcon className="nvca-i-xs" />
+									</button>
+									<button
+										aria-label="立即发送"
+										className="is-send"
+										onClick={() => store.sendQueuedNow(item.id)}
+										title="立即发送"
+										type="button"
+									>
+										<SendHorizontalIcon className="nvca-i-xs" />
+									</button>
+								</div>
+							</div>
+						))}
+					</div>
+				</div>
+			) : null}
+
+			{attachments.length > 0 ? (
+				<div className="nvca-attach-row">
+					{attachments.map((ref) => (
+						<div className="nvca-attachment" key={ref.id}>
+							<button
+								className="nvca-attachment-preview"
+								onClick={() => setAttachmentPreview({ url: ref.thumbUrl || "", name: ref.name })}
+								title={"预览 " + ref.name}
+								type="button"
+							>
+								{ref.kind === "video" || !ref.thumbUrl ? (
+									<span className="nvca-attachment-file">{ref.name.slice(0, 1).toUpperCase()}</span>
+								) : (
+									<img alt={ref.name} src={ref.thumbUrl} />
+								)}
+							</button>
+							<span className="nvca-attachment-name">{ref.name}</span>
+							<button
+								aria-label={"移除附件 " + ref.name}
+								className="nvca-attachment-remove"
+								onClick={() => store.removeRef(ref.id)}
+								title="移除"
+								type="button"
+							>
+								<XIcon className="nvca-i-xs" />
+							</button>
+						</div>
+					))}
+				</div>
+			) : null}
+
 			<div className="nvca-tap-composer-hint">
 				<button className="nvca-tap-hint-btn" onClick={() => setAddOpen((open) => !open)} type="button">
 					添加画布内容
 				</button>
 			</div>
-			{refCount > 0 ? (
+			{nodeRefs.length > 0 ? (
 				<div className="nvca-tap-chips">
-					{env.refs.map((ref) => (
+					{nodeRefs.map((ref) => (
 						<span className="nvca-tap-chip" key={ref.id}>
 							{ref.thumbUrl ? <img alt="" className="nvca-tap-chip-thumb" src={ref.thumbUrl} /> : <FolderClosedIcon className="nvca-i-xs" />}
 							<span className="nvca-tap-chip-name">{ref.name}</span>
@@ -429,6 +512,18 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 					</div>
 				</div>
 			</form>
+			{attachmentPreview ? (
+				<div className="nvca-attach-lightbox" onClick={() => setAttachmentPreview(null)} role="presentation">
+					<div className="nvca-attach-lightbox-box" onClick={(event) => event.stopPropagation()}>
+						{attachmentPreview.url ? <img alt={attachmentPreview.name} src={attachmentPreview.url} /> : <div className="nvca-attach-lightbox-fallback">无法预览</div>}
+						<div className="nvca-attach-lightbox-actions">
+							<span>{attachmentPreview.name}</span>
+							{attachmentPreview.url ? <a download={attachmentPreview.name} href={attachmentPreview.url}>下载</a> : null}
+							<button onClick={() => setAttachmentPreview(null)} type="button">关闭</button>
+						</div>
+					</div>
+				</div>
+			) : null}
 			{env.notice ? <div className="nvca-tap-notice">{env.notice}</div> : null}
 		</div>
 	)

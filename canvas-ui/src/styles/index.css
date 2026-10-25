@@ -2202,3 +2202,114 @@ html:not(.theme-dark) .nvca-tool-pre { background: rgba(0, 0, 0, 0.03); }
   animation: nvca-pop 0.16s var(--nvca-ease) both;
 }
 .nvca-tap-mention-type { flex: 0 0 auto; font-size: 10px; color: var(--tn-arrow); }
+
+/* ── 消息队列 ── */
+.nvca-queue {
+  margin: 0 0 6px;
+  padding: 7px 9px 8px;
+  border-radius: 12px;
+  background: var(--tn-card);
+  border: 1px solid var(--tn-line);
+}
+.nvca-queue-head { display: flex; align-items: center; gap: 6px; padding: 0 2px 4px; }
+.nvca-queue-title { font-size: 11px; line-height: 1.4; font-weight: 500; color: var(--tn-text); }
+.nvca-queue-count { margin-left: auto; font-size: 10px; color: var(--tn-arrow); font-variant-numeric: tabular-nums; }
+.nvca-queue-list { display: flex; flex-direction: column; gap: 1px; max-height: 132px; overflow-y: auto; }
+.nvca-queue-item { display: flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 3px; border-radius: 7px; }
+.nvca-queue-item:hover { background: var(--tn-hover); }
+.nvca-queue-index { flex: 0 0 14px; font-size: 10px; color: var(--tn-arrow); text-align: center; }
+.nvca-queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 1.5; color: var(--tn-desc); }
+.nvca-queue-actions { display: flex; align-items: center; gap: 1px; opacity: 0.55; transition: opacity 0.15s var(--nvca-ease); }
+.nvca-queue-item:hover .nvca-queue-actions,
+.nvca-queue-item:focus-within .nvca-queue-actions { opacity: 1; }
+.nvca-queue-actions button {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tn-desc);
+}
+.nvca-queue-actions button:hover { background: var(--tn-hover); color: var(--tn-text); }
+.nvca-queue-actions button.is-send { color: var(--tn-text); }
+
+/* ── 附件 chips ── */
+.nvca-attach-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px 6px; }
+.nvca-attachment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 190px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--tn-card);
+  border: 1px solid var(--tn-line);
+}
+.nvca-attachment-preview {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+html:not(.theme-dark) .nvca-attachment-preview { background: rgba(0, 0, 0, 0.05); }
+.nvca-attachment-preview img { width: 100%; height: 100%; object-fit: cover; }
+.nvca-attachment-file { font-size: 12px; color: var(--tn-desc); }
+.nvca-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--tn-desc); }
+.nvca-attachment-remove { width: 20px; height: 20px; flex: 0 0 20px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--tn-arrow); }
+.nvca-attachment-remove:hover { background: var(--tn-hover); color: var(--tn-text); }
+.nvca-attach-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+}
+.nvca-attach-lightbox-box {
+  max-width: min(78vw, 760px);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--tn-card);
+  border: 1px solid var(--tn-line-strong);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+.nvca-attach-lightbox-box img { max-width: 100%; max-height: 70vh; border-radius: 8px; object-fit: contain; }
+.nvca-attach-lightbox-fallback { padding: 40px; font-size: 13px; color: var(--tn-desc); }
+.nvca-attach-lightbox-actions { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--tn-desc); }
+.nvca-attach-lightbox-actions span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nvca-attach-lightbox-actions a,
+.nvca-attach-lightbox-actions button { color: var(--tn-text); text-decoration: none; padding: 4px 8px; border-radius: 7px; background: var(--tn-hover); }
+
+/* ── 执行清单分组 ── */
+.nvca-step-group { display: flex; flex-direction: column; gap: 6px; }
+.nvca-step-group-head {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  background: var(--tn-card);
+  border: 1px solid var(--tn-line);
+  text-align: left;
+}
+.nvca-step-group-head:hover { background: var(--tn-hover); }
+.nvca-step-group-head > svg:first-child { color: var(--tn-desc); }
+.nvca-step-group-title { font-size: 13px; font-weight: 500; line-height: 1.6; color: var(--tn-text); }
+.nvca-step-group-progress { font-size: 11px; color: var(--tn-arrow); font-variant-numeric: tabular-nums; }
+.nvca-step-group-spacer { flex: 1; }
+.nvca-step-group-caret { width: 14px; height: 14px; color: var(--tn-arrow); transition: transform 0.16s var(--nvca-ease); }
+.nvca-step-group-caret.is-open { transform: rotate(180deg); }

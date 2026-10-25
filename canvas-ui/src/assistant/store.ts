@@ -14,8 +14,14 @@ import type {
 import { canvasId, fetchThreads, forkThread, switchThreadViaLegacy } from "./api"
 import { applyEvent, createSession, isTerminal, workMs } from "./session"
 
+export interface QueueItem {
+	id: string
+	text: string
+}
+
 export interface EnvState {
 	running: boolean
+	queue: QueueItem[]
 	streamState: string
 	planConfirm: boolean
 	refs: RefChip[]
@@ -101,6 +107,7 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		imageProviders: [],
 		imageProvider: "",
 		contextUsage: null,
+		queue: [],
 		artifacts: [],
 		steerPending: false,
 		notice: "",
@@ -130,6 +137,21 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 	}
 
 	let composerFill: ((text: string) => void) | null = null
+	let queueTimer = 0
+	let suppressQueueFlushUntil = 0
+
+	const flushQueued = () => {
+		if (env.running || env.queue.length === 0 || queueTimer) return
+		if (Date.now() < suppressQueueFlushUntil) return
+		queueTimer = window.setTimeout(() => {
+			queueTimer = 0
+			if (env.running || env.queue.length === 0) return
+			const next = env.queue.shift()
+			if (!next) return
+			emit()
+			void store.send(next.text)
+		}, 260)
+	}
 
 	const store: AssistantStore = {
 		get version() {
@@ -159,6 +181,16 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			return Promise.resolve()
 				.then(() => api.send(value))
 				.then((ok) => {
+					if (ok !== false) {
+						const uploads = env.refs.filter((ref) => ref.type === "upload" || /^upload_/.test(ref.id))
+						uploads.forEach((ref) => {
+							try { api.removeRef(ref.id) } catch {}
+						})
+						if (uploads.length) {
+							env.refs = env.refs.filter((ref) => !(ref.type === "upload" || /^upload_/.test(ref.id)))
+							emit()
+						}
+					}
 					if (ok === false) {
 						env.running = false
 						env.streamState = "idle"
@@ -175,6 +207,41 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 					pushSystem("发送失败：" + ((error as Error)?.message || "网络错误"), "error")
 					return false
 				})
+		},
+		enqueue(text) {
+			const value = String(text || "").trim()
+			if (!value) return false
+			if (env.queue.length >= 5) {
+				pushNotice("队列最多 5 条，等前面的发完再加")
+				return false
+			}
+			env.queue.push({ id: uid("queue"), text: value })
+			emit()
+			return true
+		},
+		removeQueued(id) {
+			env.queue = env.queue.filter((item) => item.id !== id)
+			emit()
+		},
+		updateQueued(id, text) {
+			const value = String(text || "").trim()
+			if (!value) return
+			const item = env.queue.find((entry) => entry.id === id)
+			if (item) item.text = value
+			emit()
+		},
+		sendQueuedNow(id) {
+			const item = env.queue.find((entry) => entry.id === id)
+			if (!item) return
+			env.queue = env.queue.filter((entry) => entry.id !== id)
+			emit()
+			if (env.running) {
+				suppressQueueFlushUntil = Date.now() + 1600
+				try { store.abort() } catch {}
+				window.setTimeout(() => { void store.send(item.text) }, 500)
+			} else {
+				void store.send(item.text)
+			}
 		},
 		async seedAutoSend(input) {
 			const text = String(input && input.text ? input.text : "").trim()
@@ -220,6 +287,7 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			else pushNotice("输入框还没准备好，稍后再试")
 		},
 		abort() {
+			suppressQueueFlushUntil = Date.now() + 1200
 			try {
 				api.abort()
 			} finally {
@@ -252,6 +320,72 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			}
 			emit()
 		},
+		setChatModel(model, provider) {
+			env.chatModel = String(model || "")
+			env.chatProvider = String(provider || "")
+			try { api.setChatModel(env.chatModel, env.chatProvider) } catch {}
+			emit()
+		},
+		setImageProvider(value) {
+			env.imageProvider = String(value || "")
+			try { api.setImageProvider(env.imageProvider) } catch {}
+			emit()
+		},
+		setPlanConfirm(on) {
+			env.planConfirm = Boolean(on)
+			try { api.togglePlanConfirm(env.planConfirm) } catch {}
+			emit()
+		},
+		addSelectedRefs() {
+			return Promise.resolve()
+				.then(() => api.addSelectedRefs())
+				.then((count) => {
+					pushNotice(count > 0 ? "已引用 " + count + " 个画布节点" : "先在画布上选中要引用的节点")
+					return count
+				})
+				.catch(() => {
+					pushNotice("引用节点失败")
+					return 0
+				})
+		},
+		pickUpload() {
+			try { api.pickUpload() } catch {}
+		},
+		async branchAt(index) {
+			const list = await fetchThreads()
+			const activeId = list.active_id || (list.threads[0] ? list.threads[0].id : "")
+			if (!activeId) {
+				pushNotice("还没有可分支的对话")
+				return
+			}
+			const upto = state.messages.slice(0, index + 1).filter((message) => message.role !== "system")
+			const messageIndex = Math.max(0, upto.length - 1)
+			const thread = await forkThread(activeId, messageIndex)
+			await switchThreadViaLegacy(thread.id)
+			store.reloadHistory()
+			env.threadRefresh = (env.threadRefresh || 0) + 1
+			pushNotice("已创建分支对话")
+			emit()
+		},
+		removeRef(id) {
+			try { api.removeRef(String(id)) } catch {}
+			env.refs = env.refs.filter((ref) => ref.id !== id)
+			emit()
+		},
+		clearRefs() {
+			try { api.clearRefs() } catch {}
+			env.refs = []
+			emit()
+		},
+		planAction(action) {
+			try { api.planAction(action) } catch {}
+		},
+		confirmAction(yes) {
+			try {
+				const fn = api.confirmAction
+				if (typeof fn === "function") fn(Boolean(yes))
+			} catch {}
+		},
 		openHistory() {
 			try {
 				api.openHistory()
@@ -271,6 +405,7 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			emit()
 		},
 		clearHistory() {
+			env.queue = []
 			state.messages = []
 			state.streamingMessageId = null
 			state.streamState = "idle"
@@ -281,6 +416,7 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			emit()
 		},
 		reloadHistory() {
+			env.queue = []
 			if (!canvasId) return
 			fetch("/api/agent/thread/" + encodeURIComponent(canvasId) + "?limit=60", { headers: { Accept: "application/json" } })
 				.then((response) => (response.ok ? response.json() : null))
@@ -321,6 +457,7 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 						message.planState = type === "done" && state.streamState === "completed" ? "applied" : "cancelled"
 					}
 				})
+				flushQueued()
 			}
 			emit()
 		},
@@ -353,11 +490,13 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			/* 技能入口已移除 */
 		},
 		setRunning(running) {
+			const wasRunning = env.running
 			env.running = Boolean(running)
 			if (!running && !isTerminal(state.streamState) && state.streamState === "streaming") {
 				state.streamState = "completed"
 			}
 			emit()
+			if (wasRunning && !env.running) flushQueued()
 		},
 		setPlanConfirm(on) {
 			env.planConfirm = Boolean(on)

@@ -14,6 +14,7 @@ import {
 	ImageIcon,
 	BrainIcon,
 	LayoutGridIcon,
+	ListChecksIcon,
 	PencilIcon,
 	PlayIcon,
 	RefreshCwIcon,
@@ -345,16 +346,7 @@ const RunTurn = ({
 						</Reasoning>
 					) : null}
 
-					{hasSteps ? (
-						<div className="nvca-tool-list">
-							{run.tools.map((part) => (
-								<ToolCard key={part.id} part={part} />
-							))}
-							{run.steps.map((part) => (
-								<ToolCard key={part.id} part={part} />
-							))}
-						</div>
-					) : null}
+					{hasSteps ? <StepGroup parts={[...run.tools, ...run.steps]} /> : null}
 
 					{message.plan ? (
 						<PlanCard
@@ -467,6 +459,35 @@ const RunTurn = ({
 
 			{contextOpen && message.runId ? (
 				<ModelContextDialog runId={message.runId} onClose={() => setContextOpen(false)} />
+			) : null}
+		</div>
+	)
+}
+
+const StepGroup = ({ parts }: { parts: Extract<AssistantMessage["parts"][number], { type: "tool_event" }>[] }) => {
+	const [open, setOpen] = useState(true)
+	const total = parts.length
+	const finished = parts.filter((part) => part.status === "done" || part.status === "failed").length
+	return (
+		<div className="nvca-step-group">
+			<button
+				aria-expanded={open}
+				className="nvca-step-group-head"
+				onClick={() => setOpen((value) => !value)}
+				type="button"
+			>
+				<ListChecksIcon className="nvca-i-sm" />
+				<span className="nvca-step-group-title">执行清单</span>
+				<span className="nvca-step-group-progress">{finished}/{total}</span>
+				<span className="nvca-step-group-spacer" />
+				<ChevronDownIcon className={cn("nvca-step-group-caret", open && "is-open")} />
+			</button>
+			{open ? (
+				<div className="nvca-tool-list">
+					{parts.map((part) => (
+						<ToolCard key={part.id} part={part} />
+					))}
+				</div>
 			) : null}
 		</div>
 	)
