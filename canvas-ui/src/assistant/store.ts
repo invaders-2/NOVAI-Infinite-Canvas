@@ -11,7 +11,7 @@ import type {
 	SkillChip,
 	StreamEvent,
 } from "./types"
-import { canvasId } from "./api"
+import { canvasId, fetchThreads, forkThread, switchThreadViaLegacy } from "./api"
 import { applyEvent, createSession, isTerminal, workMs } from "./session"
 
 export interface EnvState {
@@ -46,6 +46,8 @@ export interface AssistantStore {
 	send(text: string): Promise<boolean>
 	seedAutoSend(input: { text: string; skillRef?: string }): Promise<boolean>
 	registerComposer(fill: ((text: string) => void) | null): void
+	notify(text: string): void
+	fillComposer(text: string): void
 	abort(): void
 	steer(text: string): void
 	chooseSkill(id: string): void
@@ -55,6 +57,7 @@ export interface AssistantStore {
 	setPlanConfirm(on: boolean): void
 	addSelectedRefs(): Promise<number>
 	pickUpload(): void
+	branchAt(index: number): Promise<void>
 	removeRef(id: string): void
 	clearRefs(): void
 	planAction(action: "run" | "cancel" | "adjust"): void
@@ -223,6 +226,13 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		registerComposer(fill) {
 			composerFill = fill
 		},
+		notify(text) {
+			pushNotice(String(text || ""))
+		},
+		fillComposer(text) {
+			if (composerFill) composerFill(String(text || ""))
+			else pushNotice("输入框还没准备好，稍后再试")
+		},
 		abort() {
 			try {
 				api.abort()
@@ -293,6 +303,22 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		},
 		pickUpload() {
 			try { api.pickUpload() } catch {}
+		},
+		async branchAt(index) {
+			const list = await fetchThreads()
+			const activeId = list.active_id || (list.threads[0] ? list.threads[0].id : "")
+			if (!activeId) {
+				pushNotice("还没有可分支的对话")
+				return
+			}
+			const upto = state.messages.slice(0, index + 1).filter((message) => message.role !== "system")
+			const messageIndex = Math.max(0, upto.length - 1)
+			const thread = await forkThread(activeId, messageIndex)
+			await switchThreadViaLegacy(thread.id)
+			store.reloadHistory()
+			env.threadRefresh = (env.threadRefresh || 0) + 1
+			pushNotice("已创建分支对话")
+			emit()
 		},
 		removeRef(id) {
 			env.refs = env.refs.filter((ref) => String(ref.id) !== String(id))

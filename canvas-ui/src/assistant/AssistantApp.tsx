@@ -7,11 +7,22 @@ import { Task, TaskContent, TaskTrigger } from "@/components/ai-elements/task"
 import { cn } from "@/lib/utils"
 import {
 	ChevronDownIcon,
+	ChevronRightIcon,
+	CopyIcon,
+	FileTextIcon,
+	GitBranchIcon,
 	GaugeIcon,
 	ImageIcon,
+	BrainIcon,
+	LayoutGridIcon,
 	ListChecksIcon,
+	PencilIcon,
 	PlayIcon,
+	RefreshCwIcon,
+	RefreshCcwIcon,
+	SearchIcon,
 	SparklesIcon,
+	WorkflowIcon,
 	XIcon,
 } from "lucide-react"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
@@ -23,7 +34,16 @@ import { ToolIcon } from "./icons"
 import type { AssistantStore } from "./store"
 import type { ArtifactItem, Message as AssistantMessage, SkillChip } from "./types"
 
-const EXAMPLES = ["生成一张红色杯子的图", "用选中的图做电商主图", "创建提示词节点并连线", "生成一张赛博朋克风格的街道图"]
+const SUGGESTION_SETS = [
+	[
+		{ icon: "grid", title: "帮我建立这个项目的创作记忆", desc: "记录项目主题、风格、关系和禁区。" },
+		{ icon: "memory", title: "帮我记住我的创作风格", desc: "总结画面偏好、叙事习惯和审美边界。" },
+	],
+	[
+		{ icon: "workflow", title: "搭建可视化创作工作台", desc: "把世界观、人物和故事结构可视化。" },
+		{ icon: "search", title: "为这个项目搜索历史考据", desc: "核查时代、地域、服饰和社会背景等创作细节。" },
+	],
+]
 
 interface AssistantAppProps {
 	store: AssistantStore
@@ -56,21 +76,52 @@ export const AssistantApp = ({ store }: AssistantAppProps) => {
 	}
 
 	return (
-		<div className="nvca-root">
+		<div className="nvca-root nvca-tap">
+			<div
+				aria-orientation="vertical"
+				className="nvca-tap-resize"
+				onMouseDown={(event) => {
+					event.preventDefault()
+					event.stopPropagation()
+				}}
+				onPointerDown={(event) => {
+					event.stopPropagation()
+					const panel = document.getElementById("canvasAssistantPanel")
+					if (!panel || panel.classList.contains("is-full")) return
+					event.preventDefault()
+					const startX = event.clientX
+					const startWidth = panel.getBoundingClientRect().width
+					const onMove = (moveEvent: PointerEvent) => {
+						const width = Math.max(360, Math.min(window.innerWidth - 160, startWidth - (moveEvent.clientX - startX)))
+						panel.style.width = width + "px"
+					}
+					const onUp = () => {
+						window.removeEventListener("pointermove", onMove)
+						window.removeEventListener("pointerup", onUp)
+						window.dispatchEvent(new Event("resize"))
+					}
+					window.addEventListener("pointermove", onMove)
+					window.addEventListener("pointerup", onUp)
+				}}
+				role="separator"
+			/>
 			<ThreadBar store={store} />
-			<Conversation className="nvca-conversation">
-				<ConversationContent className="nvca-conversation-content">
-					{messages.length === 0 ? (
-						<EmptyState onPick={pickExample} skills={env.skills} />
-					) : (
-						messages.map((message, index) => {
-							if (message.role === "user") return <UserBubble key={message.id} message={message} />
+			{messages.length === 0 ? (
+				<div className="nvca-tap-empty-wrap">
+					<EmptyState onPick={pickExample} />
+				</div>
+			) : (
+				<Conversation className="nvca-conversation">
+					<ConversationContent className="nvca-conversation-content">
+						{messages.map((message, index) => {
+							if (message.role === "user") return <UserBubble key={message.id} message={message} store={store} />
 							if (message.role === "system") return <SystemNote key={message.id} message={message} />
 							const isLast = index === lastAssistantIndex
 							const streaming = env.running && (state.streamingMessageId === message.id || (isLast && !state.streamingMessageId))
 							return (
 								<RunTurn
 									key={message.id}
+									index={index}
 									message={message}
 									streaming={streaming}
 									artifacts={isLast ? env.artifacts : []}
@@ -78,45 +129,81 @@ export const AssistantApp = ({ store }: AssistantAppProps) => {
 									store={store}
 								/>
 							)
-						})
-					)}
-				</ConversationContent>
-				<ConversationScrollButton className="nvca-scroll-btn" />
-			</Conversation>
+						})}
+					</ConversationContent>
+					<ConversationScrollButton className="nvca-scroll-btn" />
+				</Conversation>
+			)}
 			<Composer store={store} pendingText={pendingText} />
 			{lightbox ? <Lightbox item={lightbox} onClose={() => setLightbox(null)} /> : null}
 		</div>
 	)
 }
 
-const EmptyState = ({ onPick, skills }: { onPick: (text: string) => void; skills: SkillChip[] }) => (
-	<div className="nvca-empty">
-		<div className="nvca-empty-icon">
-			<SparklesIcon className="nvca-i-lg" />
-		</div>
-		<h3 className="nvca-empty-title">你好，我是画布助手</h3>
-		<p className="nvca-empty-sub">告诉我你想做什么。写操作会先给你一版方案，点「开始」才动画布。</p>
-		{skills.length > 0 ? (
-			<div className="nvca-empty-skills">
-				{skills.slice(0, 4).map((skill) => (
-					<span className="nvca-empty-skill" key={skill.id}>
-						<span>{skill.icon || "✨"}</span>
-						{skill.name}
-					</span>
-				))}
-			</div>
-		) : null}
-		<div className="nvca-empty-examples">
-			{EXAMPLES.map((example) => (
-				<button className="nvca-example" key={example} onClick={() => onPick(example)} type="button">
-					{example}
-				</button>
-			))}
-		</div>
-	</div>
-)
+const SUGGESTION_ICONS = {
+	grid: LayoutGridIcon,
+	memory: BrainIcon,
+	workflow: WorkflowIcon,
+	search: SearchIcon,
+}
 
-const UserBubble = ({ message }: { message: AssistantMessage }) => {
+const EmptyState = ({ onPick }: { onPick: (text: string) => void }) => {
+	const [setIndex, setSetIndex] = useState(0)
+	const [username, setUsername] = useState("")
+	useEffect(() => {
+		let alive = true
+		fetch("/api/auth/me", { headers: { Accept: "application/json" } })
+			.then((response) => (response.ok ? response.json() : null))
+			.then((data) => {
+				if (alive && data && data.username) setUsername(String(data.username))
+			})
+			.catch(() => {})
+		return () => {
+			alive = false
+		}
+	}, [])
+	const suggestions = SUGGESTION_SETS[setIndex] || SUGGESTION_SETS[0]
+	return (
+		<div className="nvca-tap-empty">
+			<div className="nvca-tap-greeting">
+				<img alt="" className="nvca-tap-greeting-logo" src="/static/images/logo.png" />
+				<span>Hi {username || "创作者"}!</span>
+			</div>
+			<h2 className="nvca-tap-empty-title">今天一起创作点什么?</h2>
+			<div className="nvca-tap-cards">
+				{suggestions.map((item) => {
+					const Icon = SUGGESTION_ICONS[item.icon as keyof typeof SUGGESTION_ICONS] || FileTextIcon
+					return (
+						<button
+							className="nvca-tap-card"
+							key={item.title}
+							onClick={() => onPick(item.title + "\n" + item.desc)}
+							type="button"
+						>
+							<Icon className="nvca-tap-card-icon" />
+							<span className="nvca-tap-card-body">
+								<span className="nvca-tap-card-title">{item.title}</span>
+								<span className="nvca-tap-card-desc">{item.desc}</span>
+							</span>
+							<ChevronRightIcon className="nvca-tap-card-arrow" />
+						</button>
+					)
+				})}
+			</div>
+			<button
+				aria-label="换一批"
+				className="nvca-tap-shuffle"
+				onClick={() => setSetIndex((current) => (current === 0 ? 1 : 0))}
+				title="换一批"
+				type="button"
+			>
+				<RefreshCwIcon className="nvca-tap-shuffle-icon" />
+			</button>
+		</div>
+	)
+}
+
+const UserBubble = ({ message, store }: { message: AssistantMessage; store: AssistantStore }) => {
 	const text = message.parts
 		.map((part) => (part.type === "text" ? part.text : ""))
 		.join("")
@@ -125,6 +212,29 @@ const UserBubble = ({ message }: { message: AssistantMessage }) => {
 		<Message className="nvca-user-msg" from="user">
 			<MessageContent className="nvca-user-bubble">
 				<p className="nvca-user-text">{text}</p>
+				<div className="nvca-msg-actions">
+					<button
+						aria-label="复制这条消息"
+						className="nvca-msg-action"
+						onClick={() => {
+							if (navigator.clipboard) void navigator.clipboard.writeText(text)
+							store.notify("已复制这条消息")
+						}}
+						title="复制"
+						type="button"
+					>
+						<CopyIcon className="nvca-i-xs" />
+					</button>
+					<button
+						aria-label="编辑这条消息"
+						className="nvca-msg-action"
+						onClick={() => store.fillComposer(text)}
+						title="编辑"
+						type="button"
+					>
+						<PencilIcon className="nvca-i-xs" />
+					</button>
+				</div>
 			</MessageContent>
 		</Message>
 	)
@@ -141,12 +251,14 @@ const SystemNote = ({ message }: { message: AssistantMessage }) => {
 
 const RunTurn = ({
 	message,
+	index,
 	streaming,
 	artifacts,
 	onOpenArtifact,
 	store,
 }: {
 	message: AssistantMessage
+	index: number
 	streaming: boolean
 	artifacts: ArtifactItem[]
 	onOpenArtifact: (item: ArtifactItem) => void
@@ -155,6 +267,7 @@ const RunTurn = ({
 	useTicker(streaming)
 	const [contextOpen, setContextOpen] = useState(false)
 	const run = deriveRun(message)
+	const texts = run.texts.map((item) => item.text)
 	const { state } = store
 	const pending = state.pendingConfirmation as { kind?: string; tool?: string; description?: string; units?: number; reason?: string } | null
 	const status = message.status || (streaming ? state.streamState : "")
@@ -276,12 +389,53 @@ const RunTurn = ({
 
 			{pending && pending.kind !== "plan" ? <ConfirmationHint pending={pending} store={store} /> : null}
 
-			{message.runId ? (
+			{message.runId || texts.length > 0 ? (
 				<div className="nvca-run-tools">
-					<button className="nvca-link-btn" onClick={() => setContextOpen(true)} title="查看这轮发给模型的上下文规模" type="button">
-						<GaugeIcon className="nvca-i-xs" />
-						上下文
-					</button>
+					{texts.length > 0 ? (
+						<>
+							<button
+								className="nvca-link-btn"
+								onClick={() => {
+									const copyText = texts.join("\n\n")
+									if (navigator.clipboard) void navigator.clipboard.writeText(copyText)
+									store.notify("已复制这条回复")
+								}}
+								title="复制"
+								type="button"
+							>
+								<CopyIcon className="nvca-i-xs" />
+								复制
+							</button>
+							<button
+								className="nvca-link-btn"
+								onClick={() => {
+									const lastUser = [...store.state.messages].reverse().find((item) => item.role === "user")
+									const text = lastUser ? lastUser.parts.map((part) => (part.type === "text" ? part.text : "")).join("").trim() : ""
+									if (text) store.send(text)
+								}}
+								title="重试"
+								type="button"
+							>
+								<RefreshCcwIcon className="nvca-i-xs" />
+								重试
+							</button>
+							<button
+								className="nvca-link-btn"
+								onClick={() => void store.branchAt(index)}
+								title="从这里分支"
+								type="button"
+							>
+								<GitBranchIcon className="nvca-i-xs" />
+								分支
+							</button>
+						</>
+					) : null}
+					{message.runId ? (
+						<button className="nvca-link-btn" onClick={() => setContextOpen(true)} title="查看这轮发给模型的上下文规模" type="button">
+							<GaugeIcon className="nvca-i-xs" />
+							上下文
+						</button>
+					) : null}
 				</div>
 			) : null}
 

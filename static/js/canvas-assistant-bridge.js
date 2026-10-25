@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.136.1792860762';
+    var ASSET_VERSION = '1.0.136.1792941776';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -928,7 +928,11 @@
        捕获阶段在微应用根上 stopPropagation，只挡冒泡到 shell/document 的路径，不动 React/Base UI 自己的监听。 */
     function guardPanelEvents(root) {
         ['mousedown', 'pointerdown', 'dblclick', 'wheel', 'contextmenu', 'touchstart'].forEach(function (type) {
-            root.addEventListener(type, function (event) { event.stopPropagation(); }, true);
+            root.addEventListener(type, function (event) {
+                /* 4px 拖拽手柄要同时拿到 pointerdown 和 mousedown，不能被这层守卫吞掉 */
+                if (event.target && event.target.closest && event.target.closest('.nvca-tap-resize')) return;
+                event.stopPropagation();
+            }, true);
         });
         /* click 用冒泡阶段挡：canvas 的 shell.onclick 会「点空白清选中」，不清的话点一下 composer
            就会把选中的节点取消、引用 chips 跟着消失；冒泡阶段 stopPropagation 不影响同节点上的 React 委托。 */

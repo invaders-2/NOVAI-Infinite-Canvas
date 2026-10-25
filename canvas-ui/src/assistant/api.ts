@@ -191,3 +191,17 @@ export const switchThreadApi = async (threadId: string): Promise<void> => {
 	})
 	if (!response.ok) throw new Error("HTTP " + response.status)
 }
+
+export const forkThread = async (threadId: string, messageIndex: number, title = ""): Promise<ThreadRow> => {
+	if (!canvasId) throw new Error("缺少画布 id")
+	const response = await fetch("/api/agent/threads/fork", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Accept: "application/json" },
+		body: JSON.stringify({ canvas_id: canvasId, thread_id: threadId, message_index: messageIndex, title }),
+	})
+	const data = await readJson(response)
+	if (!response.ok) throw new Error(errorText(data, "HTTP " + response.status))
+	const thread = (data.thread || {}) as ThreadRow
+	if (!thread.id) throw new Error("分支接口没有返回线程")
+	return thread
+}

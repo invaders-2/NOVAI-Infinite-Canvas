@@ -1,4 +1,17 @@
-import { CheckIcon, ChevronDownIcon, MoreHorizontalIcon, PackageIcon, Trash2Icon, XIcon } from "lucide-react"
+import {
+	CheckIcon,
+	ChevronDownIcon,
+	ChevronsLeftIcon,
+	HistoryIcon,
+	Maximize2Icon,
+	MoreHorizontalIcon,
+	PackageIcon,
+	PanelLeftIcon,
+	RotateCcwIcon,
+	SquarePenIcon,
+	Trash2Icon,
+	XIcon,
+} from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
 	canvasId,
@@ -9,18 +22,24 @@ import {
 	switchThreadApi,
 	switchThreadViaLegacy,
 } from "./api"
-import type { ArtifactList, ThreadRow } from "./api"
+import type { ThreadRow } from "./api"
 import { ArtifactsSheet } from "./ArtifactsSheet"
 import type { ArtifactPanelState } from "./ArtifactsSheet"
 import type { AssistantStore } from "./store"
 
 const EMPTY_ARTIFACTS: ArtifactPanelState = { status: "idle", data: null, error: "" }
 
+const clickHidden = (id: string) => {
+	const el = document.getElementById(id) as HTMLElement | null
+	if (el) el.click()
+}
+
 export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	const { env } = store
 	const [threads, setThreads] = useState<ThreadRow[]>([])
 	const [activeId, setActiveId] = useState("")
 	const [menuOpen, setMenuOpen] = useState(false)
+	const [moreOpen, setMoreOpen] = useState(false)
 	const [actionsId, setActionsId] = useState("")
 	const [renamingId, setRenamingId] = useState("")
 	const [renameValue, setRenameValue] = useState("")
@@ -29,6 +48,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	const [notice, setNotice] = useState("")
 	const [artifactsOpen, setArtifactsOpen] = useState(false)
 	const [artifactState, setArtifactState] = useState<ArtifactPanelState>(EMPTY_ARTIFACTS)
+	const [full, setFull] = useState(false)
 	const noticeTimer = useRef<number>(0)
 
 	const showNotice = useCallback((text: string) => {
@@ -71,17 +91,24 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	}, [artifactsOpen, loadArtifacts])
 
 	useEffect(() => {
-		if (!menuOpen && !actionsId && !artifactsOpen) return
+		const panel = document.getElementById("canvasAssistantPanel")
+		if (panel) setFull(panel.classList.contains("is-full"))
+	}, [])
+
+	useEffect(() => {
+		if (!menuOpen && !moreOpen && !actionsId && !artifactsOpen) return
 		const onDown = (event: MouseEvent) => {
 			const target = event.target as HTMLElement | null
-			if (target && target.closest && target.closest(".nvca-topbar")) return
+			if (target && target.closest && target.closest(".nvca-tap-header")) return
 			setMenuOpen(false)
+			setMoreOpen(false)
 			setActionsId("")
 			setArtifactsOpen(false)
 		}
 		const onKey = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return
 			setMenuOpen(false)
+			setMoreOpen(false)
 			setActionsId("")
 			setArtifactsOpen(false)
 			setDeleteTarget(null)
@@ -92,12 +119,38 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 			window.removeEventListener("mousedown", onDown, true)
 			window.removeEventListener("keydown", onKey)
 		}
-	}, [menuOpen, actionsId, artifactsOpen])
+	}, [menuOpen, moreOpen, actionsId, artifactsOpen])
 
 	const activeThread = threads.find((thread) => String(thread.id) === String(activeId)) || null
-	const currentTitle = activeThread?.title || "新对话"
 	const artifactCount = artifactState.data ? artifactState.data.files.length : 0
 	const onlyOne = threads.length <= 1
+
+	const newChat = () => {
+		setMenuOpen(false)
+		setMoreOpen(false)
+		const btn = document.getElementById("canvasAssistantNewChatBtn")
+		if (btn) btn.click()
+		else {
+			store.clearHistory()
+			store.notify("已新建对话")
+		}
+		window.setTimeout(() => void refreshThreads(), 120)
+	}
+
+	const collapse = () => {
+		setMenuOpen(false)
+		setMoreOpen(false)
+		clickHidden("canvasAssistantCollapseBtn")
+	}
+
+	const toggleFull = () => {
+		const panel = document.getElementById("canvasAssistantPanel")
+		if (!panel) return
+		panel.style.width = ""
+		panel.classList.toggle("is-full")
+		setFull(panel.classList.contains("is-full"))
+		window.dispatchEvent(new Event("resize"))
+	}
 
 	const handleSwitch = async (thread: ThreadRow) => {
 		setMenuOpen(false)
@@ -105,7 +158,6 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 		if (busy || String(thread.id) === String(activeId)) return
 		setBusy(true)
 		try {
-			// 旧面板的 activeId 是发消息时真正用的 thread_id，必须同步切过去
 			const viaLegacy = await switchThreadViaLegacy(thread.id)
 			if (!viaLegacy) await switchThreadApi(thread.id)
 			await new Promise((resolve) => window.setTimeout(resolve, 120))
@@ -173,43 +225,78 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	}
 
 	return (
-		<div className="nvca-topbar">
-			<div className="nvca-thread-cluster">
+		<header className="nvca-tap-header">
+			<div className="nvca-tap-header-left">
+				<button className="nvca-tap-head-btn is-sidebar" onClick={collapse} title="侧边栏" aria-label="侧边栏" type="button">
+					<PanelLeftIcon className="nvca-tap-head-icon-svg" />
+				</button>
 				<button
 					aria-expanded={menuOpen}
 					aria-haspopup="listbox"
-					className="nvca-thread-btn"
+					className="nvca-tap-newchat"
 					onClick={() => {
 						const next = !menuOpen
 						setMenuOpen(next)
+						setMoreOpen(false)
 						setActionsId("")
 						if (next) void refreshThreads()
 					}}
-					title="切换对话线程"
 					type="button"
 				>
-					<span className="nvca-thread-caption">对话</span>
-					<span className="nvca-thread-current">{currentTitle}</span>
-					<ChevronDownIcon className="nvca-i-xs nvca-thread-caret" />
+					<span>新建对话</span>
+					<ChevronDownIcon className="nvca-i-xs" />
 				</button>
-
+			</div>
+			<div className="nvca-tap-header-right">
+				<button className="nvca-tap-head-btn" onClick={newChat} title="新对话" aria-label="新对话" type="button">
+					<SquarePenIcon className="nvca-tap-head-icon-svg" />
+				</button>
+				<button
+					aria-pressed={full}
+					className="nvca-tap-head-btn"
+					onClick={toggleFull}
+					title="Agent 全屏"
+					aria-label="Agent 全屏"
+					type="button"
+				>
+					<Maximize2Icon className="nvca-tap-head-icon-svg" />
+				</button>
+				<button
+					aria-expanded={moreOpen}
+					className="nvca-tap-head-btn"
+					onClick={() => {
+						setMoreOpen((open) => !open)
+						setMenuOpen(false)
+					}}
+					title="更多选项"
+					aria-label="更多选项"
+					type="button"
+				>
+					<MoreHorizontalIcon className="nvca-tap-head-icon-svg" />
+				</button>
 			</div>
 
 			{menuOpen ? (
-				<div className="nvca-thread-menu" role="listbox" aria-label="对话线程">
+				<div className="nvca-tap-thread-menu" role="listbox" aria-label="对话线程">
+					<button className="nvca-tap-menu-item is-new" onClick={newChat} type="button">
+						<SquarePenIcon className="nvca-i-sm" />
+						<span className="nvca-tap-menu-text">新建对话</span>
+					</button>
+					<div className="nvca-tap-menu-sep" />
 					{threads.length === 0 ? (
-						<div className="nvca-thread-empty">还没有线程，发一条消息就会创建。</div>
+						<div className="nvca-tap-menu-empty">还没有线程，发一条消息就会创建。</div>
 					) : (
 						threads.map((thread) => {
 							const isActive = String(thread.id) === String(activeId)
 							const renaming = String(thread.id) === String(renamingId)
 							return (
-								<div className={"nvca-thread-row" + (isActive ? " is-active" : "")} key={thread.id}>
+								<div className={"nvca-tap-thread-row" + (isActive ? " is-active" : "")} key={thread.id}>
 									{renaming ? (
-										<div className="nvca-thread-rename-row">
+										<div className="nvca-tap-thread-rename-row">
 											<input
 												autoFocus
-												className="nvca-thread-rename"
+												aria-label="对话名称"
+												className="nvca-tap-thread-rename"
 												maxLength={60}
 												onChange={(event) => setRenameValue(event.currentTarget.value)}
 												onKeyDown={(event) => {
@@ -223,26 +310,25 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 													}
 												}}
 												value={renameValue}
-												aria-label="对话名称"
 											/>
-											<button className="nvca-thread-rename-save" onClick={() => void commitRename()} type="button">保存</button>
+											<button className="nvca-tap-thread-save" onClick={() => void commitRename()} type="button">保存</button>
 										</div>
 									) : (
 										<>
 											<button
-												className="nvca-thread-pick"
+												className="nvca-tap-thread-pick"
 												disabled={busy}
 												onClick={() => void handleSwitch(thread)}
 												role="option"
 												aria-selected={isActive}
 												type="button"
 											>
-												<span className="nvca-thread-row-title">{thread.title || "对话"}</span>
-												<span className="nvca-thread-row-count">{Number(thread.message_count) || 0}</span>
-												{isActive ? <CheckIcon className="nvca-i-xs nvca-thread-check" /> : null}
+												<span className="nvca-tap-thread-title">{thread.title || "对话"}</span>
+												<span className="nvca-tap-thread-count">{Number(thread.message_count) || 0}</span>
+												{isActive ? <CheckIcon className="nvca-i-xs nvca-tap-thread-check" /> : null}
 											</button>
 											{String(actionsId) === String(thread.id) ? (
-												<div className="nvca-thread-actions">
+												<div className="nvca-tap-thread-actions">
 													<button onClick={() => beginRename(thread)} type="button">重命名</button>
 													<button
 														disabled={onlyOne}
@@ -258,7 +344,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 												</div>
 											) : null}
 											<button
-												className="nvca-thread-more"
+												className="nvca-tap-thread-more"
 												onClick={(event) => {
 													event.stopPropagation()
 													setActionsId((current) => (current === String(thread.id) ? "" : String(thread.id)))
@@ -276,19 +362,57 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 					)}
 				</div>
 			) : null}
-						<div className="nvca-topbar-actions">
-				<button
-					aria-expanded={artifactsOpen}
-					className={"nvca-artifacts-toggle" + (artifactsOpen ? " is-open" : "")}
-					onClick={() => setArtifactsOpen((open) => !open)}
-					title="查看助手产出的文件"
-					type="button"
-				>
-					<PackageIcon className="nvca-i-sm" />
-					<span>产物</span>
-					{artifactCount > 0 ? <span className="nvca-artifacts-badge">{artifactCount}</span> : null}
-				</button>
-			</div>
+
+			{moreOpen ? (
+				<div className="nvca-tap-more-menu" role="menu">
+					<button
+						className="nvca-tap-menu-item"
+						onClick={() => {
+							setMoreOpen(false)
+							setArtifactsOpen(true)
+						}}
+						role="menuitem"
+						type="button"
+					>
+						<PackageIcon className="nvca-i-sm" />
+						<span className="nvca-tap-menu-text">产物</span>
+						{artifactCount > 0 ? <span className="nvca-tap-menu-count">{artifactCount}</span> : null}
+					</button>
+					<button
+						className="nvca-tap-menu-item"
+						onClick={() => {
+							setMoreOpen(false)
+							store.openHistory()
+						}}
+						role="menuitem"
+						type="button"
+					>
+						<HistoryIcon className="nvca-i-sm" />
+						<span className="nvca-tap-menu-text">历史记录</span>
+					</button>
+					<button
+						className="nvca-tap-menu-item"
+						onClick={() => {
+							setMoreOpen(false)
+							store.clearHistory()
+						}}
+						role="menuitem"
+						type="button"
+					>
+						<RotateCcwIcon className="nvca-i-sm" />
+						<span className="nvca-tap-menu-text">重置对话</span>
+					</button>
+					<button
+						className="nvca-tap-menu-item"
+						onClick={collapse}
+						role="menuitem"
+						type="button"
+					>
+						<ChevronsLeftIcon className="nvca-i-sm" />
+						<span className="nvca-tap-menu-text">收起面板</span>
+					</button>
+				</div>
+			) : null}
 
 			{artifactsOpen ? (
 				<ArtifactsSheet
@@ -322,6 +446,6 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 			) : null}
 
 			{notice ? <div className="nvca-bar-notice">{notice}</div> : null}
-		</div>
+		</header>
 	)
 }

@@ -91,3 +91,11 @@ planAction / confirmAction / togglePlanConfirm / openHistory / openNode / toast`
 - **模型 / 生图平台**：对话模型来自 `/api/config` 的 `chat_models`（按平台分组），默认取旧面板当前选择；切换会同步旧面板的 `#chatModelSelect`，请求体 `provider/model` 真实变化。生图平台为空 = 自动跟随模型，对应 `image_provider`。
 - **自动 / 手动确认**：两段式开关，写 `smart_agent_plan_confirm`；自动 → `mode:"run"`（只读/聊天直接跑，写操作服务端仍先出方案），手动确认 → `mode:"plan"`。
 - Enter 发送 / Shift+Enter 换行 / 空文本禁用发送 / 运行中按钮变停止。
+
+## TapNow 1:1 面板（docs/v2/TAPNOW_PANEL_SPEC.md）
+
+- 贴边全高抽屉：440 宽、#141414、圆角 16 0 0 16、无边框无投影、左缘 4px col-resize 手柄（可拖宽）。
+- 顶部栏 60：40×40 侧边栏开关 + 86×40「新建对话」下拉（线程切换/重命名/删除/新建）+ 右侧 36×36 新对话 / 全屏 / 更多（产物在「更多」里）。
+- 空态：24px/300「Hi {用户名}!」+ 28px/400 标题 + 412×124 建议卡（#1a1a1a、1px 白 5% 边框、16/36/16/12、14/500 标题、12/400 45% 描述、17 箭头）+ 16×16「换一批」；点卡片只填输入框不发。
+- 输入区：424 宽、#1a1a1a、16 圆角、0.5px 白 10% 边框、0 5px 10px 6% 阴影；输入 391×48 / 14px / placeholder 随心输入；底部 添加32 / 已选目录36×28 / 手动生成26 / 截图28 / 截屏16×28；右侧 上下文24×32 / Auto26 / 语音32 / 发送32 圆形。
+- 浅色：#fafafa 面板、#f5f5f5 卡片、rgba(0,0,0,.06) 描边。
