@@ -214,7 +214,7 @@ body.studio-theme-dark,
   flex-direction: column;
   align-items: stretch;
   gap: 18px;
-  padding: 18px 20px 6px;
+  padding: 16px 16px 6px;
 }
 .nvca-scroll-btn {
   position: absolute;
@@ -303,18 +303,63 @@ body.studio-theme-dark,
 .nvca-example:active { transform: scale(0.99); }
 
 /* ── 用户气泡 / 助手气泡 ── */
-.nvca-user-msg { max-width: 92%; }
-.nvca-user-bubble {
-  background: var(--nvca-accent);
-  color: var(--nvca-on-accent);
-  border-radius: 14px;
-  border-bottom-right-radius: 6px;
-  padding: 8px 12px;
-  font-size: 12.5px;
-  line-height: 1.55;
+.nvca-user-msg { max-width: 100%; width: auto; align-self: flex-end; }
+.nvca-user-msg .nvca-user-bubble {
+  width: fit-content;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--tn-user-bg);
+  color: var(--tn-user-text);
+  font-size: 14px;
+  line-height: 24.5px;
+  letter-spacing: 0.01em;
+  overflow: visible;
 }
-.nvca-root .nvca-user-bubble { background: var(--nvca-accent); color: var(--nvca-on-accent); }
-.nvca-user-text { white-space: pre-wrap; word-break: break-word; }
+.nvca-user-head { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 24px; }
+.nvca-user-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--tn-user-avatar);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--tn-user-name);
+}
+.nvca-user-name { font-size: 13px; line-height: 16px; font-weight: 500; color: var(--tn-user-name); }
+.nvca-user-spacer { flex: 1; min-width: 8px; }
+.nvca-user-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--tn-user-time);
+}
+.nvca-user-icon:hover { background: rgba(255, 255, 255, 0.08); color: var(--tn-user-name); }
+.nvca-user-icon svg { width: 14px; height: 14px; }
+.nvca-user-avatar svg { width: 12px; height: 12px; }
+html:not(.theme-dark) .nvca-user-icon:hover { background: rgba(0, 0, 0, 0.06); }
+.nvca-user-edit { opacity: 0; transition: opacity 0.15s var(--nvca-ease); }
+.nvca-user-bubble:hover .nvca-user-edit { opacity: 1; }
+.nvca-user-time { font-size: 12px; line-height: 12px; color: var(--tn-user-time); white-space: nowrap; }
+.nvca-user-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 24.5px;
+  letter-spacing: 0.01em;
+  color: var(--tn-user-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .nvca-assistant-msg { max-width: 100%; }
 .nvca-assistant-bubble {
   background: var(--nvca-solid);
@@ -327,20 +372,45 @@ body.studio-theme-dark,
 }
 .nvca-root .nvca-assistant-bubble { background: var(--nvca-solid); color: var(--nvca-ink); }
 
-/* ── 系统提示 ── */
-.nvca-system {
-  align-self: center;
-  max-width: 90%;
-  padding: 5px 11px;
-  border-radius: 999px;
-  background: var(--nvca-fill-1);
-  color: var(--nvca-ink-3);
-  font-size: 11px;
-  line-height: 1.5;
-  text-align: center;
+/* ── 系统提示卡 ── */
+.nvca-system.nvca-system-card {
+  align-self: flex-start;
+  width: 405px;
+  max-width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border-radius: 16px 16px 0 0;
+  border: 1px solid var(--tn-sys-border);
+  background: var(--tn-sys-bg);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  text-align: left;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--tn-sys-body);
 }
-.nvca-system.is-warn { color: var(--nvca-ink-2); background: color-mix(in srgb, var(--nvca-warning) 14%, transparent); }
-.nvca-system.is-error { color: var(--nvca-danger); background: var(--nvca-danger-fill); }
+.nvca-system-title { font-size: 14px; font-weight: 600; line-height: 20px; color: var(--tn-sys-title); }
+.nvca-system-body {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--tn-sys-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.nvca-system-actions { display: flex; gap: 8px; margin-top: 8px; }
+.nvca-system-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--tn-sys-btn-bg);
+  color: var(--tn-sys-btn-text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 36px;
+}
 
 /* ── 运行轮 ── */
 .nvca-turn { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
@@ -1480,6 +1550,17 @@ html:not(.theme-dark) #canvasAssistantPanel.canvas-assistant.open {
   --tn-hover: rgba(255, 255, 255, 0.06);
   --tn-menu: #1f1f1f;
   --tn-menu-line: rgba(255, 255, 255, 0.08);
+  --tn-user-bg: rgb(46, 46, 46);
+  --tn-user-text: rgb(212, 212, 216);
+  --tn-user-name: rgb(230, 230, 230);
+  --tn-user-time: rgba(255, 255, 255, 0.58);
+  --tn-user-avatar: rgba(255, 255, 255, 0.12);
+  --tn-sys-bg: rgb(38, 38, 38);
+  --tn-sys-border: rgba(255, 255, 255, 0.1);
+  --tn-sys-title: rgb(204, 204, 204);
+  --tn-sys-body: rgb(245, 245, 245);
+  --tn-sys-btn-bg: rgb(204, 204, 204);
+  --tn-sys-btn-text: rgb(38, 38, 38);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1505,6 +1586,17 @@ html:not(.theme-dark) .nvca-root.nvca-tap {
   --tn-hover: rgba(0, 0, 0, 0.05);
   --tn-menu: #ffffff;
   --tn-menu-line: rgba(0, 0, 0, 0.08);
+  --tn-user-bg: #ececec;
+  --tn-user-text: #262626;
+  --tn-user-name: #333333;
+  --tn-user-time: rgba(0, 0, 0, 0.45);
+  --tn-user-avatar: rgba(0, 0, 0, 0.08);
+  --tn-sys-bg: #f0f0f0;
+  --tn-sys-border: rgba(0, 0, 0, 0.06);
+  --tn-sys-title: #555555;
+  --tn-sys-body: #111111;
+  --tn-sys-btn-bg: #262626;
+  --tn-sys-btn-text: #ffffff;
 }
 .nvca-tap-resize {
   position: absolute;

@@ -66,6 +66,7 @@ export interface AssistantStore {
 	openHistory(): void
 	openNode(id: string): void
 	clearHistory(): void
+	removeMessage(id: string): void
 	reloadHistory(): void
 	destroy(): void
 }
@@ -78,7 +79,7 @@ const uid = (() => {
 	}
 })()
 
-const historyMessage = (role: string, text: string): Message => {
+const historyMessage = (role: string, text: string, createdAt = Date.now()): Message => {
 	const clean = String(text || "")
 	const resolved = role === "user" ? "user" : role === "system" ? "system" : "assistant"
 	return {
@@ -87,7 +88,7 @@ const historyMessage = (role: string, text: string): Message => {
 		parts: [{ type: "text", id: uid("part"), text: clean }],
 		status: "",
 		activeWorkMs: 0,
-		createdAt: Date.now(),
+		createdAt,
 		planState: "",
 	}
 }
@@ -388,6 +389,10 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 				/* ignore */
 			}
 		},
+		removeMessage(id) {
+			state.messages = state.messages.filter((message) => message.id !== id)
+			emit()
+		},
 		clearHistory() {
 			state.messages = []
 			state.streamingMessageId = null
@@ -449,7 +454,13 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			if (!list.length) {
 				state.messages = []
 			} else {
-				state.messages = list.map((item) => historyMessage(String(item.role || "assistant"), String(item.text || "")))
+				state.messages = list.map((item) =>
+				historyMessage(
+					String(item.role || "assistant"),
+					String(item.text || ""),
+					Number(item.at) ? Number(item.at) * 1000 : Date.now(),
+				),
+			)
 			}
 			state.streamingMessageId = null
 			emit()

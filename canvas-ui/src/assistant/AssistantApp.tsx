@@ -22,6 +22,7 @@ import {
 	RefreshCcwIcon,
 	SearchIcon,
 	SparklesIcon,
+	UserIcon,
 	WorkflowIcon,
 	XIcon,
 } from "lucide-react"
@@ -33,6 +34,12 @@ import { deriveRun, formatTokens, formatWorkMs, statusLabel, toolIconKey, toolLa
 import { ToolIcon } from "./icons"
 import type { AssistantStore } from "./store"
 import type { ArtifactItem, Message as AssistantMessage, SkillChip } from "./types"
+
+const formatClock = (timestamp: number) => {
+	const date = new Date(timestamp || Date.now())
+	const pad = (value: number) => String(value).padStart(2, "0")
+	return pad(date.getHours()) + ":" + pad(date.getMinutes())
+}
 
 const SUGGESTION_SETS = [
 	[
@@ -115,7 +122,7 @@ export const AssistantApp = ({ store }: AssistantAppProps) => {
 					<ConversationContent className="nvca-conversation-content">
 						{messages.map((message, index) => {
 							if (message.role === "user") return <UserBubble key={message.id} message={message} store={store} />
-							if (message.role === "system") return <SystemNote key={message.id} message={message} />
+							if (message.role === "system") return <SystemNote key={message.id} message={message} store={store} />
 							const isLast = index === lastAssistantIndex
 							const streaming = env.running && (state.streamingMessageId === message.id || (isLast && !state.streamingMessageId))
 							return (
@@ -211,11 +218,22 @@ const UserBubble = ({ message, store }: { message: AssistantMessage; store: Assi
 	return (
 		<Message className="nvca-user-msg" from="user">
 			<MessageContent className="nvca-user-bubble">
-				<p className="nvca-user-text">{text}</p>
-				<div className="nvca-msg-actions">
+				<div className="nvca-user-head">
+					<span className="nvca-user-avatar"><UserIcon className="nvca-i-xs" /></span>
+					<span className="nvca-user-name">你</span>
+					<span className="nvca-user-spacer" />
+					<button
+						aria-label="编辑这条消息"
+						className="nvca-user-icon nvca-user-edit"
+						onClick={() => store.fillComposer(text)}
+						title="编辑"
+						type="button"
+					>
+						<PencilIcon className="nvca-i-xs" />
+					</button>
 					<button
 						aria-label="复制这条消息"
-						className="nvca-msg-action"
+						className="nvca-user-icon"
 						onClick={() => {
 							if (navigator.clipboard) void navigator.clipboard.writeText(text)
 							store.notify("已复制这条消息")
@@ -225,28 +243,44 @@ const UserBubble = ({ message, store }: { message: AssistantMessage; store: Assi
 					>
 						<CopyIcon className="nvca-i-xs" />
 					</button>
-					<button
-						aria-label="编辑这条消息"
-						className="nvca-msg-action"
-						onClick={() => store.fillComposer(text)}
-						title="编辑"
-						type="button"
-					>
-						<PencilIcon className="nvca-i-xs" />
-					</button>
+					<time className="nvca-user-time" dateTime={new Date(message.createdAt || Date.now()).toISOString()}>
+						{formatClock(message.createdAt)}
+					</time>
 				</div>
+				<p className="nvca-user-text">{text}</p>
 			</MessageContent>
 		</Message>
 	)
 }
 
-const SystemNote = ({ message }: { message: AssistantMessage }) => {
+const SystemNote = ({ message, store }: { message: AssistantMessage; store: AssistantStore }) => {
 	const text = message.parts
 		.map((part) => (part.type === "text" ? part.text : ""))
 		.join("")
 		.trim()
 	if (!text) return null
-	return <div className={cn("nvca-system", message.systemKind === "warn" && "is-warn", message.systemKind === "error" && "is-error")}>{text}</div>
+	const lines = text.split("\n")
+	const hasTitle = lines.length > 1
+	const title = hasTitle ? lines[0].trim() : message.systemKind === "error" ? "出错了" : "提示"
+	const body = hasTitle ? lines.slice(1).join("\n").trim() : text
+	return (
+		<div
+			className={cn(
+				"nvca-system nvca-system-card",
+				message.systemKind === "warn" && "is-warn",
+				message.systemKind === "error" && "is-error",
+			)}
+			role="status"
+		>
+			<div className="nvca-system-title">{title}</div>
+			{body ? <p className="nvca-system-body">{body}</p> : null}
+			<div className="nvca-system-actions">
+				<button className="nvca-system-btn" onClick={() => store.removeMessage(message.id)} type="button">
+					知道了
+				</button>
+			</div>
+		</div>
+	)
 }
 
 const RunTurn = ({
