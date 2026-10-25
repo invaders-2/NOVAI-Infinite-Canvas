@@ -11,7 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -426,6 +426,116 @@ class ThreadMessagesTests(unittest.TestCase):
         self.assertEqual(len(resp.json()["messages"]), 3)
         rows = CLIENT.get("/api/agent/threads", params={"canvas_id": self.canvas_id}).json()
         self.assertEqual(rows["active_id"], forked)
+
+
+def run_canvas_agent(canvas_id, decisions, approved=None):
+    req = {
+        "canvas_id": canvas_id,
+        "instruction": "做个东西",
+        "focus": main._agent_run_normalize_focus(None),
+        "history": [],
+        "chat": {"provider": "p", "base": "https://example.invalid/v1", "headers": {},
+                 "model": "test-chat-model", "provider_cfg": {}},
+        "max_steps": 6,
+        "mode": "run",
+        "approved_steps": approved or [],
+        "use_thread": True,
+    }
+
+    async def fake_decide(*args, **kwargs):
+        return decisions.pop(0)
+
+    async def go():
+        with patch.object(main, "_agent_run_decide", new=AsyncMock(side_effect=fake_decide)), \
+                patch.object(main, "agent_session_save"):
+            await main._agent_run_producer(req, None)
+
+    asyncio.run(go())
+
+
+def last_assistant(canvas_id):
+    thread = main.agent_thread_load(canvas_id)
+    return [msg for msg in thread.get("messages") or [] if msg.get("role") == "assistant"][-1]
+
+
+class ThreadStepsPersistenceTests(unittest.TestCase):
+    """运行结束后把本轮工具步骤写进 assistant 消息，供历史回放。"""
+
+    def setUp(self):
+        self.canvas_id = new_canvas("步骤回放画布")
+
+    def test_success_step_is_persisted(self):
+        run_canvas_agent(self.canvas_id, [{"done": True, "message": "建好了"}],
+                         approved=[{"tool": "create_node",
+                                    "args": {"canvas_id": self.canvas_id, "type": "prompt",
+                                             "text": "你好"}}])
+        msg = last_assistant(self.canvas_id)
+        self.assertTrue(str(msg["run_id"]).startswith("run_"))
+        self.assertEqual(len(msg["steps"]), 1)
+        step = msg["steps"][0]
+        self.assertEqual(step["tool"], "create_node")
+        self.assertTrue(step["ok"])
+        self.assertIn("index", step)
+        self.assertIsInstance(step.get("duration_ms"), int)
+        self.assertGreaterEqual(msg["changes"]["nodes"], 1)
+        self.assertIn("artifacts", msg["changes"])
+
+    def test_failed_step_keeps_error_and_code(self):
+        run_canvas_agent(self.canvas_id, [{"done": True, "message": "失败了"}],
+                         approved=[{"tool": "delete_node",
+                                    "args": {"canvas_id": self.canvas_id,
+                                             "node_id": "missing-node"}}])
+        step = last_assistant(self.canvas_id)["steps"][0]
+        self.assertFalse(step["ok"])
+        self.assertIn("不存在", step["error"])
+        self.assertEqual(step["code"], "node_not_found")
+
+    def test_pure_chat_has_empty_steps_and_no_changes(self):
+        run_canvas_agent(self.canvas_id, [{"done": True, "message": "直接回答"}])
+        msg = last_assistant(self.canvas_id)
+        self.assertEqual(msg["steps"], [])
+        self.assertNotIn("changes", msg)
+
+    def test_huge_steps_keep_last_10_and_truncated(self):
+        steps = [{"index": index + 1, "tool": "tool%d" % (index + 1), "args": {},
+                  "ok": True, "output": "字" * 2000} for index in range(20)]
+        main.agent_thread_append(self.canvas_id, [{"role": "assistant", "text": "步骤很多",
+                                                   "steps": steps}])
+        msg = last_assistant(self.canvas_id)
+        self.assertEqual(len(msg["steps"]), 10)
+        self.assertTrue(msg["truncated"])
+        self.assertEqual(msg["steps"][0]["index"], 11)
+
+    def test_api_exposes_steps(self):
+        run_canvas_agent(self.canvas_id, [{"done": True, "message": "好了"}],
+                         approved=[{"tool": "create_node",
+                                    "args": {"canvas_id": self.canvas_id, "type": "prompt",
+                                             "text": "你好"}}])
+        thread_id = CLIENT.get("/api/agent/threads",
+                               params={"canvas_id": self.canvas_id}).json()["threads"][0]["id"]
+        rows = CLIENT.get("/api/agent/threads/%s/messages" % thread_id,
+                          params={"canvas_id": self.canvas_id}).json()["messages"]
+        assistant = [item for item in rows if item["role"] == "assistant"][-1]
+        self.assertIn("steps", assistant)
+        self.assertIn("run_id", assistant)
+        self.assertIn("changes", assistant)
+        self.assertEqual(assistant["steps"][0]["tool"], "create_node")
+        thread_msgs = CLIENT.get("/api/agent/thread/%s" % self.canvas_id).json()["messages"]
+        self.assertIn("steps", [item for item in thread_msgs if item["role"] == "assistant"][-1])
+
+    def test_old_message_without_steps_is_compatible(self):
+        canvas_id = new_canvas("旧线程画布")
+        os.makedirs(main.AGENT_THREADS_DIR, exist_ok=True)
+        legacy = {"canvas_id": canvas_id, "messages": [
+            {"role": "user", "text": "旧问题", "at": 1},
+            {"role": "assistant", "text": "旧回答", "at": 2},
+        ], "recent": []}
+        with open(thread_file(canvas_id), "w", encoding="utf-8") as fh:
+            json.dump(legacy, fh, ensure_ascii=False)
+        rows = CLIENT.get("/api/agent/thread/%s" % canvas_id).json()["messages"]
+        self.assertEqual([item["text"] for item in rows], ["旧问题", "旧回答"])
+        self.assertNotIn("steps", rows[1])
+        self.assertNotIn("changes", rows[1])
 
 
 if __name__ == "__main__":

@@ -36129,6 +36129,93 @@ def agent_thread_load(canvas_id):
     return result
 
 
+AGENT_THREAD_STEP_TEXT_MAX = 2000
+AGENT_THREAD_STEPS_TEXT_TOTAL_MAX = 20000
+AGENT_THREAD_STEPS_BYTES_MAX = 64 * 1024
+AGENT_THREAD_STEPS_KEEP_ON_HUGE = 10
+
+
+def _agent_thread_truncate_text(value, limit=AGENT_THREAD_STEP_TEXT_MAX):
+    text = "" if value is None else str(value)
+    if len(text) > limit:
+        return text[:limit], True
+    return text, False
+
+
+def _agent_thread_compact_steps(steps):
+    """把一轮步骤收成可持久化结构：单步 args/output ≤2000 字、总量 ≤20000 字、>64KB 只留最后 10 步。"""
+    normalized = []
+    truncated = False
+    for raw in (steps or []):
+        if not isinstance(raw, dict):
+            continue
+        step_truncated = False
+        args = raw.get("args") if isinstance(raw.get("args"), dict) else {}
+        try:
+            args_text = json.dumps(args, ensure_ascii=False)
+        except Exception:
+            args_text = "{}"
+        if len(args_text) > AGENT_THREAD_STEP_TEXT_MAX:
+            args = {"_truncated": True, "preview": args_text[:AGENT_THREAD_STEP_TEXT_MAX]}
+            step_truncated = True
+        output, output_truncated = _agent_thread_truncate_text(raw.get("output"))
+        error, error_truncated = _agent_thread_truncate_text(raw.get("error"))
+        step_truncated = step_truncated or output_truncated or error_truncated
+        step = {"index": int(raw.get("index") or 0), "tool": str(raw.get("tool") or ""),
+                "args": args, "ok": bool(raw.get("ok"))}
+        if output:
+            step["output"] = output
+        if error:
+            step["error"] = error
+        if raw.get("code"):
+            step["code"] = str(raw.get("code"))[:120]
+        if raw.get("duration_ms") is not None:
+            try:
+                step["duration_ms"] = int(raw.get("duration_ms") or 0)
+            except (TypeError, ValueError):
+                pass
+        if step_truncated:
+            step["truncated"] = True
+            truncated = True
+        normalized.append(step)
+
+    def size_bytes(items):
+        try:
+            return len(json.dumps(items, ensure_ascii=False).encode("utf-8"))
+        except Exception:
+            return 0
+
+    if size_bytes(normalized) > AGENT_THREAD_STEPS_BYTES_MAX:
+        normalized = normalized[-AGENT_THREAD_STEPS_KEEP_ON_HUGE:]
+        return normalized, True
+    while normalized and sum(len(str(item.get("output") or "")) + len(str(item.get("error") or ""))
+                             for item in normalized) > AGENT_THREAD_STEPS_TEXT_TOTAL_MAX:
+        normalized.pop(0)
+        truncated = True
+    return normalized, truncated
+
+
+def _agent_thread_steps_from_history(history):
+    """把本轮执行历史转成可回放的步骤摘要（不含提示词原文）。"""
+    steps = []
+    for rec in history or []:
+        if not isinstance(rec, dict):
+            continue
+        step = {"index": rec.get("index"), "tool": str(rec.get("tool") or ""),
+                "args": rec.get("args") if isinstance(rec.get("args"), dict) else {},
+                "ok": bool(rec.get("ok"))}
+        if rec.get("duration_ms") is not None:
+            step["duration_ms"] = rec.get("duration_ms")
+        if step["ok"]:
+            step["output"] = str(rec.get("digest") or rec.get("output") or "")
+        else:
+            step["error"] = str(rec.get("error") or "")
+            if rec.get("code"):
+                step["code"] = str(rec.get("code"))
+        steps.append(step)
+    return steps
+
+
 def agent_thread_append(canvas_id, records, touched=None):
     """往当前线程追加消息并更新「最近改动的节点」；失败只打日志，不影响主流程。"""
     try:
@@ -36142,6 +36229,16 @@ def agent_thread_append(canvas_id, records, touched=None):
                 for key in ("run_id", "actions"):
                     if rec.get(key):
                         item[key] = rec[key]
+                steps = rec.get("steps")
+                if isinstance(steps, list):
+                    compacted, steps_truncated = _agent_thread_compact_steps(steps)
+                    item["steps"] = compacted
+                    if steps_truncated:
+                        item["truncated"] = True
+                if rec.get("changes") is not None:
+                    item["changes"] = rec["changes"]
+                if rec.get("truncated"):
+                    item["truncated"] = True
                 thread["messages"].append(item)
             thread["messages"] = thread["messages"][-AGENT_THREAD_MAX_MESSAGES:]
             recent = [a for a in (touched or []) if a]
@@ -36152,6 +36249,15 @@ def agent_thread_append(canvas_id, records, touched=None):
             _agent_thread_doc_save(canvas_id, doc)
     except Exception as exc:
         print(f"[Agent] 写对话记录失败 {canvas_id}: {exc}")
+
+
+def _agent_thread_message_row(msg, text_field="text"):
+    """线程消息对外形状：老字段不变，新增 steps/changes/run_id 等有才带（旧客户端兼容）。"""
+    row = {"role": msg.get("role"), text_field: msg.get("text"), "at": msg.get("at")}
+    for key in ("run_id", "actions", "steps", "changes", "truncated", "session_id"):
+        if key in msg and msg.get(key) is not None:
+            row[key] = msg[key]
+    return row
 
 
 def _agent_thread_history(thread):
@@ -37974,8 +38080,10 @@ async def _agent_run_producer(req, queue, bus=None):
                 emit("step_start", {"index": index, "tool": tool, "args": resolved_args,
                                     "description": description})
                 before_snapshot = ctx.reload()
+                step_started = time.monotonic()
                 with ctx.execution_scope():
                     result = await agent_execute_step(tool, resolved_args)
+                step_duration_ms = int((time.monotonic() - step_started) * 1000)
                 after_snapshot = ctx.reload()
                 results.append(result)
                 if result.get("ok"):
@@ -38008,7 +38116,8 @@ async def _agent_run_producer(req, queue, bus=None):
                     if new_files:
                         emit("artifact_updated", {"files": new_files})
                     history.append({"index": index, "tool": tool, "args": resolved_args, "ok": True,
-                                    "digest": _agent_run_digest_text(raw_result)})
+                                    "digest": _agent_run_digest_text(raw_result),
+                                    "duration_ms": step_duration_ms})
                     last_error = ""
                 else:
                     error_text = result.get("error") or "执行失败"
@@ -38017,7 +38126,8 @@ async def _agent_run_producer(req, queue, bus=None):
                     fail_counts[signature] = fail_counts.get(signature, 0) + 1
                     fail_notes.append(f"#{index} {tool}：{error_text}（code={code}）")
                     history.append({"index": index, "tool": tool, "args": resolved_args, "ok": False,
-                                    "error": error_text, "code": code, "retryable": retryable})
+                                    "error": error_text, "code": code, "retryable": retryable,
+                                    "duration_ms": step_duration_ms})
                     last_error = f"第 {rounds} 轮第 {index} 步（{tool}）失败：{error_text}（code={code}）"
                     ctx.record_step(index, tool, description, False, error=error_text)
                     emit("step_result", {"index": index, "tool": tool, "ok": False, "error": error_text,
@@ -38088,7 +38198,18 @@ async def _agent_run_producer(req, queue, bus=None):
                 reply = final_message
                 if plan_payload:
                     reply = (plan_payload.get("summary") or final_message) + "（方案待确认）"
-                records.append({"role": "assistant", "text": reply, "run_id": run_id, "actions": action_lines})
+                thread_steps = _agent_thread_steps_from_history(history)
+                thread_changes = None
+                if thread_steps:
+                    thread_changes = {
+                        "nodes": int(changes.get("nodes_created") or 0)
+                                 + int(changes.get("nodes_modified") or 0)
+                                 + int(changes.get("nodes_deleted") or 0),
+                        "artifacts": len(changes.get("artifacts") or []),
+                    }
+                records.append({"role": "assistant", "text": reply, "run_id": run_id,
+                                "actions": action_lines, "steps": thread_steps,
+                                "changes": thread_changes})
                 ctx.thread_append(records, list(dict.fromkeys(touched_refs)))
             except Exception as exc:
                 print(f"[Agent] run {run_id} 写对话记录失败（不影响结果）: {exc}")

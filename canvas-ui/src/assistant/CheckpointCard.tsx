@@ -11,10 +11,17 @@ export const CheckpointCard = ({ message, store }: { message: Message; store: As
 		? (Number(changes.nodes_created) || 0) + (Number(changes.nodes_modified) || 0) + (Number(changes.nodes_deleted) || 0)
 		: 0
 	const connections = Number(changes?.connections) || 0
+	const artifacts = Number(changes?.artifacts) || 0
 	const hasChangeInfo = Boolean(changes)
 	if (!message.runId) return null
-	if (hasChangeInfo && nodeCount <= 0 && connections <= 0) return null
-	const label = nodeCount > 0 ? "已修改 " + nodeCount + " 个节点" : connections > 0 ? "已修改画布" : "撤销本次修改"
+	if (hasChangeInfo && nodeCount <= 0 && connections <= 0 && artifacts <= 0) return null
+	const label = nodeCount > 0
+		? "已修改 " + nodeCount + " 个节点"
+		: artifacts > 0
+			? "产出 " + artifacts + " 个产物"
+			: connections > 0
+				? "已修改画布"
+				: "撤销本次修改"
 	const undo = async () => {
 		if (busy || undone) return
 		setBusy(true)

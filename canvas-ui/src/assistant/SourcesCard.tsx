@@ -27,7 +27,12 @@ const deriveSources = (message: Message) => {
 		}
 	}
 	const urls: string[] = []
+	for (const source of message.sources || []) {
+		if (source && !urls.includes(source)) urls.push(source)
+		if (urls.length >= MAX_SOURCES) break
+	}
 	for (const text of found) {
+		if (urls.length >= MAX_SOURCES) break
 		for (const match of text.matchAll(URL_RE)) {
 			const url = cleanUrl(match[0])
 			if (url && !urls.includes(url)) urls.push(url)

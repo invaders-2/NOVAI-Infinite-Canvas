@@ -21,6 +21,8 @@ export type Part =
 			payload?: unknown
 			startedAt?: number
 			endedAt?: number
+			/** 历史消息里带的服务端耗时 */
+			durationMs?: number
 	  }
 	| {
 			type: "confirmation"
@@ -81,7 +83,10 @@ export interface Message {
 		nodes_deleted?: number
 		connections?: number
 		generations?: number
+		artifacts?: number
 	}
+	/** 历史消息里的来源 URL */
+	sources?: string[]
 	plan?: PlanData
 	planState?: "pending" | "running" | "applied" | "cancelled" | "adjusted" | "aborted" | ""
 	systemKind?: "info" | "warn" | "error"

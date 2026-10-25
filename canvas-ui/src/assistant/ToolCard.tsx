@@ -85,6 +85,9 @@ const formatMs = (ms: number): string => {
 }
 
 export const toolDuration = (part: StepPart): string => {
+	if (typeof part.durationMs === "number" && Number.isFinite(part.durationMs)) {
+		return formatMs(part.durationMs)
+	}
 	const startedAt = Number(part.startedAt) || 0
 	if (!startedAt) return ""
 	const endedAt = Number(part.endedAt) || (part.status === "running" ? Date.now() : 0)

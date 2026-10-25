@@ -98,6 +98,71 @@ const historyMessage = (role: string, text: string, createdAt = Date.now()): Mes
 	}
 }
 
+const historyString = (value: unknown): string => {
+	if (value == null) return ""
+	return typeof value === "string" ? value : JSON.stringify(value, null, 2)
+}
+
+const messageFromHistory = (item: Record<string, unknown>, createdAt = Date.now()): Message => {
+	const role = String(item.role || "assistant")
+	const text = String(item.content ?? item.text ?? "")
+	const message = historyMessage(role, text, createdAt)
+	if (item.run_id) message.runId = String(item.run_id)
+	const steps = Array.isArray(item.steps) ? item.steps : []
+	const seen = new Set<string>()
+	for (const raw of steps) {
+		if (!raw || typeof raw !== "object") continue
+		const step = raw as Record<string, unknown>
+		const tool = String(step.tool || "")
+		if (!tool) continue
+		const index = step.index === undefined || step.index === null ? "" : String(step.index)
+		const dedupeKey = String(message.runId || "") + "|" + index + "|" + tool
+		if (index && seen.has(dedupeKey)) continue
+		if (index) seen.add(dedupeKey)
+		const ok = step.ok !== false
+		message.parts.push({
+			type: "tool_event",
+			id: uid("part"),
+			kind: "step",
+			index,
+			tool,
+			title: String(step.description || ""),
+			status: ok ? "done" : "failed",
+			ok,
+			message: String(step.error || step.message || ""),
+			code: String(step.code || ""),
+			output: historyString(step.output),
+			args: step.args && typeof step.args === "object" ? step.args : undefined,
+			durationMs: Number(step.duration_ms) || 0,
+			startedAt: 0,
+			endedAt: 0,
+		})
+	}
+	if (item.changes && typeof item.changes === "object") {
+		const raw = item.changes as Record<string, unknown>
+		const created = Number(raw.nodes_created) || 0
+		const modified = Number(raw.nodes_modified) || 0
+		const deleted = Number(raw.nodes_deleted) || 0
+		const nodes = Number(raw.nodes) || 0
+		message.changes = {
+			nodes_created: created + (nodes && !created && !modified && !deleted ? nodes : 0),
+			nodes_modified: modified,
+			nodes_deleted: deleted,
+			connections: Number(raw.connections) || 0,
+			generations: Number(raw.generations) || 0,
+			artifacts: Number(raw.artifacts) || 0,
+		}
+	}
+	const sources = Array.isArray(item.sources) ? item.sources : []
+	const urls: string[] = []
+	for (const source of sources) {
+		const value = typeof source === "string" ? source : String((source && (source as Record<string, unknown>).url) || "")
+		if (/^https?:\/\//.test(value) && !urls.includes(value)) urls.push(value)
+	}
+	if (urls.length) message.sources = urls
+	return message
+}
+
 export const createAssistant = (api: CanvasAssistantHostApi): { store: AssistantStore; handle: CanvasAssistantHandle } => {
 	const state = createSession()
 	const env: EnvState = {
@@ -494,8 +559,8 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 				.then((response) => (response.ok ? response.json() : null))
 				.then((data) => {
 					if (!data || !Array.isArray(data.messages)) return
-					state.messages = data.messages.map((item: { role?: string; text?: string }) =>
-						historyMessage(String(item.role || "assistant"), String(item.text || "")),
+					state.messages = data.messages.map((item: Record<string, unknown>) =>
+						messageFromHistory(item, Number(item.at) ? Number(item.at) * 1000 : Date.now()),
 					)
 					state.streamingMessageId = null
 					env.artifacts = []
@@ -541,16 +606,8 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 				state.messages = []
 			} else {
 				state.messages = list.map((item) =>
-				(() => {
-					const message = historyMessage(
-						String(item.role || "assistant"),
-						String(item.text || ""),
-						Number(item.at) ? Number(item.at) * 1000 : Date.now(),
-					)
-					if (item.run_id) message.runId = String(item.run_id)
-					return message
-				})(),
-			)
+					messageFromHistory(item as Record<string, unknown>, Number((item as Record<string, unknown>).at) ? Number((item as Record<string, unknown>).at) * 1000 : Date.now()),
+				)
 			}
 			state.streamingMessageId = null
 			emit()
