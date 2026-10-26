@@ -239,3 +239,56 @@ export const forkThread = async (threadId: string, messageIndex: number, title =
 	if (!thread.id) throw new Error("分支接口没有返回线程")
 	return thread
 }
+
+export interface SkillRow {
+	id: string
+	name: string
+	description: string
+	icon?: string
+}
+
+export const fetchSkills = async (): Promise<SkillRow[]> => {
+	const response = await fetch("/api/skills?limit=60", jsonInit)
+	const data = await readJson(response)
+	if (!response.ok) throw new Error(errorText(data, "HTTP " + response.status))
+	const rows = Array.isArray(data.skills) ? data.skills : []
+	return rows
+		.filter((raw) => !raw || typeof raw !== "object" || (raw as Record<string, unknown>).enabled !== false)
+		.map((raw) => {
+			const row = (raw || {}) as Record<string, unknown>
+			return {
+				id: String(row.id || ""),
+				name: String(row.name || row.display_name || row.id || ""),
+				description: String(row.description || ""),
+				icon: String(row.icon || ""),
+			}
+		})
+		.filter((row) => row.id && row.name)
+}
+
+export interface StoreAppRow {
+	id: string
+	name: string
+	description: string
+	activationSkill: string
+}
+
+export const fetchStoreApps = async (): Promise<StoreAppRow[]> => {
+	const response = await fetch("/api/store/catalog", jsonInit)
+	const data = await readJson(response)
+	if (!response.ok) throw new Error(errorText(data, "HTTP " + response.status))
+	const items = Array.isArray(data.items) ? data.items : []
+	return items
+		.filter((raw) => raw && typeof raw === "object" && (raw as Record<string, unknown>).kind === "app")
+		.slice(0, 8)
+		.map((raw) => {
+			const row = raw as Record<string, unknown>
+			return {
+				id: String(row.name || row.id || row.display_name || ""),
+				name: String(row.display_name || row.name || ""),
+				description: String(row.description || ""),
+				activationSkill: String(row.activation_skill || ""),
+			}
+		})
+		.filter((row) => row.id && row.name)
+}

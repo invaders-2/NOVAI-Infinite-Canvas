@@ -2680,3 +2680,179 @@ html:not(.theme-dark) .nvca-shot-confirm-text span { color: rgba(0, 0, 0, 0.45);
 .nvca-shot-btn:hover { background: rgba(127, 127, 127, 0.14); }
 .nvca-shot-btn.is-primary { background: #3b82f6; color: #ffffff; }
 .nvca-shot-btn.is-primary:hover { background: #2563eb; }
+
+/* ── 加号菜单 ── */
+.nvca-plus-menu {
+  position: fixed;
+  z-index: 90;
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  padding: 8px 0;
+  border-radius: 16px;
+  background: #1f1f1f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+  color: #f5f5f5;
+  animation: nvca-pop 0.16s var(--nvca-ease) both;
+}
+html:not(.theme-dark) .nvca-plus-menu {
+  background: #f7f7f7;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
+  color: #111111;
+}
+.nvca-plus-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  color: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+}
+.nvca-plus-item.is-active { background: rgba(255, 255, 255, 0.06); }
+html:not(.theme-dark) .nvca-plus-item.is-active { background: rgba(0, 0, 0, 0.05); }
+.nvca-plus-item.is-disabled { opacity: 0.42; cursor: not-allowed; }
+.nvca-plus-icon { width: 20px; height: 20px; flex: 0 0 auto; stroke-width: 1.7; }
+.nvca-plus-chevron { width: 16px; height: 16px; margin-left: auto; flex: 0 0 auto; color: rgba(255, 255, 255, 0.4); }
+html:not(.theme-dark) .nvca-plus-chevron { color: rgba(0, 0, 0, 0.35); }
+.nvca-plus-separator {
+  height: 1px;
+  margin: 6px 14px;
+  background: rgba(255, 255, 255, 0.08);
+}
+html:not(.theme-dark) .nvca-plus-separator { background: rgba(0, 0, 0, 0.07); }
+.nvca-plus-submenu {
+  position: fixed;
+  z-index: 91;
+  width: 280px;
+  max-height: min(420px, calc(100vh - 16px));
+  overflow-y: auto;
+  padding: 8px 0;
+  border-radius: 14px;
+  background: #1f1f1f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+  color: #f5f5f5;
+  animation: nvca-pop 0.14s var(--nvca-ease) both;
+}
+html:not(.theme-dark) .nvca-plus-submenu {
+  background: #f7f7f7;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
+  color: #111111;
+}
+.nvca-plus-subhead {
+  display: flex;
+  border: 0;
+  background: transparent;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+}
+html:not(.theme-dark) .nvca-plus-subhead { color: rgba(0, 0, 0, 0.5); }
+.nvca-plus-subhead .nvca-plus-chevron { margin: 0; width: 14px; height: 14px; }
+.nvca-plus-subitem {
+  display: flex;
+  border: 0;
+  background: transparent;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.nvca-plus-subitem.is-active { background: rgba(255, 255, 255, 0.06); }
+html:not(.theme-dark) .nvca-plus-subitem.is-active { background: rgba(0, 0, 0, 0.05); }
+.nvca-plus-subitem > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nvca-plus-subitem.is-all { color: rgba(255, 255, 255, 0.6); }
+html:not(.theme-dark) .nvca-plus-subitem.is-all { color: rgba(0, 0, 0, 0.5); }
+.nvca-plus-empty { padding: 14px 12px; font-size: 12px; color: rgba(255, 255, 255, 0.42); }
+html:not(.theme-dark) .nvca-plus-empty { color: rgba(0, 0, 0, 0.4); }
+.nvca-tap-chip.is-folder { cursor: pointer; max-width: 286px; }
+.nvca-tap-chip.is-skill, .nvca-tap-chip.is-app { max-width: 240px; }
+
+/* ── OpenArc PromptInput 容器（套 TapNow 令牌） ── */
+.nvca-prompt-form {
+  width: calc(100% + 8px);
+  margin-left: -4px;
+}
+body.nvca-pick-mode #composer { display: none !important; }
+.nvca-prompt-form [data-slot="input-group"] {
+  width: 100%;
+  min-height: 0;
+  height: auto !important;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: visible;
+  border-radius: 16px;
+  border: 0.5px solid var(--tn-line-strong);
+  background: var(--tn-card);
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.06);
+  outline: none;
+}
+html.theme-dark .nvca-prompt-form [data-slot="input-group"] { box-shadow: 0 10px 26px rgba(0, 0, 0, 0.2); }
+.nvca-prompt-form [data-slot="input-group"]:focus-within {
+  border-color: var(--tn-line-strong);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+}
+.nvca-prompt-header[data-slot="input-group-addon"] {
+  width: 100%;
+  order: -1;
+  padding: 8px 10px 0 !important;
+  gap: 4px;
+}
+.nvca-prompt-header:empty { display: none; }
+.nvca-prompt-textarea {
+  display: block;
+  width: 100% !important;
+  min-height: 56px !important;
+  max-height: 120px !important;
+  height: auto !important;
+  margin: 0;
+  padding: 10px 12px 4px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--tn-text) !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  outline: none !important;
+  resize: none !important;
+  field-sizing: content;
+}
+.nvca-prompt-textarea::placeholder { color: var(--tn-placeholder); }
+.nvca-prompt-footer[data-slot="input-group-addon"] {
+  width: 100%;
+  order: 10;
+  padding: 2px 8px 8px !important;
+  gap: 0;
+  cursor: default;
+}
+.nvca-prompt-footer .nvca-tap-toolbar { width: 100%; }
+.nvca-prompt-attachments { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px 2px; }
+.nvca-prompt-attachments [data-slot="attachment"] { border-color: var(--tn-line) !important; background: var(--tn-hover) !important; color: var(--tn-text) !important; }
+
+.nvca-prompt-attachments { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 0 2px 6px; width: 100%; }
+.nvca-prompt-attachments [data-slot="attachment"] { display: inline-flex !important; align-items: center; gap: 5px; width: auto !important; max-width: 200px; height: 34px !important; padding: 0 5px 0 4px !important; border: 1px solid var(--tn-line) !important; border-radius: 9px !important; background: var(--tn-hover) !important; color: var(--tn-text) !important; font-size: 11.5px !important; }
+.nvca-prompt-attachments [data-slot="attachment"] > div:first-child { width: 24px !important; height: 24px !important; border-radius: 6px !important; overflow: hidden; background: var(--tn-card) !important; }
+.nvca-prompt-attachments [data-slot="attachment"] img { width: 100%; height: 100%; object-fit: cover; }
+.nvca-prompt-attachments [data-slot="attachment"] button { opacity: 1 !important; display: inline-flex !important; width: 20px !important; height: 20px !important; padding: 0 !important; border-radius: 5px !important; color: var(--tn-desc) !important; background: transparent !important; }
+.nvca-prompt-attachments [data-slot="attachment"] button:hover { background: var(--tn-line) !important; }
+.nvca-prompt-attachments [data-slot="attachment"] button svg { width: 12px; height: 12px; }

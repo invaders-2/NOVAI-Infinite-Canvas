@@ -63,6 +63,10 @@ export interface AssistantStore {
 	captureCanvas(): Promise<boolean>
 	captureRegionPreview(rect: { x: number; y: number; w: number; h: number }): Promise<{ url: string; width: number; height: number } | null>
 	addCaptureRef(url: string, width: number, height: number): boolean
+	addSkillRef(skill: { id: string; name: string; description?: string }): boolean
+	addAppRef(app: { id: string; name: string; description?: string; activationSkill?: string }): boolean
+	addFolderRef(name: string, count: number): boolean
+	addFolderFiles(files: { name: string; url?: string; kind?: string }[]): number
 	branchAt(index: number): Promise<void>
 	removeRef(id: string): void
 	clearRefs(): void
@@ -450,6 +454,30 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 				if (typeof api.addCaptureRef === "function") return Boolean(api.addCaptureRef(url, width, height))
 			} catch {}
 			return false
+		},
+		addSkillRef(skill) {
+			try {
+				if (typeof api.addSkillRef === "function") return Boolean(api.addSkillRef(skill))
+			} catch {}
+			return false
+		},
+		addAppRef(app) {
+			try {
+				if (typeof api.addAppRef === "function") return Boolean(api.addAppRef(app))
+			} catch {}
+			return false
+		},
+		addFolderRef(name, count) {
+			try {
+				if (typeof api.addFolderRef === "function") return Boolean(api.addFolderRef(name, count))
+			} catch {}
+			return false
+		},
+		addFolderFiles(files) {
+			try {
+				if (typeof api.addFolderFiles === "function") return Number(api.addFolderFiles(files)) || 0
+			} catch {}
+			return 0
 		},
 		captureCanvas() {
 			return Promise.resolve()

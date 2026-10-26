@@ -172,6 +172,10 @@ export interface CanvasAssistantHostApi {
 	captureCanvas?(): Promise<boolean>
 	captureRegionPreview?(rect: { x: number; y: number; w: number; h: number }): Promise<{ url: string; width: number; height: number } | null>
 	addCaptureRef?(url: string, width: number, height: number): boolean
+	addSkillRef?(skill: { id: string; name: string; description?: string }): boolean
+	addAppRef?(app: { id: string; name: string; description?: string; activationSkill?: string }): boolean
+	addFolderRef?(name: string, count: number): boolean
+	addFolderFiles?(files: { name: string; url?: string; kind?: string }[]): number
 	planAction(action: "run" | "cancel" | "adjust"): void
 	confirmAction?(yes: boolean): void
 	approveStep?(step: { tool: string; args?: unknown; description?: string }, instruction: string): Promise<boolean>

@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.137.1792979562';
+    var ASSET_VERSION = '1.0.137.1792982550';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -464,6 +464,93 @@
         pickGhost.style.left = x + 'px';
         pickGhost.style.top = y + 'px';
         document.body.classList.toggle('nvca-drop-active', insidePanel(x, y));
+    }
+    function capabilityRef(ref) {
+        pickedRefs = pickedRefs.filter(function (item) { return item.type !== 'skill' && item.type !== 'app'; });
+        pickedRefs.push(ref);
+        pushRefs();
+        log('capability', 'add ' + ref.name);
+        return true;
+    }
+    function addSkillRef(skill) {
+        if (!skill || !skill.id) return false;
+        return capabilityRef({
+            id: 'skill_' + String(skill.id),
+            skillId: String(skill.id),
+            name: '技能 · ' + String(skill.name || skill.id),
+            description: String(skill.description || ''),
+            role: null,
+            type: 'skill',
+            kind: 'text',
+            thumbUrl: '',
+            images: []
+        });
+    }
+    function addAppRef(app) {
+        if (!app || !app.id) return false;
+        return capabilityRef({
+            id: 'app_' + String(app.id),
+            appId: String(app.id),
+            activationSkill: String(app.activationSkill || ''),
+            name: '应用 · ' + String(app.name || app.id),
+            description: String(app.description || ''),
+            role: null,
+            type: 'app',
+            kind: 'text',
+            thumbUrl: '',
+            images: []
+        });
+    }
+    function addFolderRef(name, count) {
+        var folderName = String(name || '本地文件夹');
+        var fileCount = Math.max(0, Number(count) || 0);
+        var id = 'folder_last';
+        var existing = pickedRefs.filter(function (item) { return item.type === 'folder'; })[0];
+        if (existing) {
+            existing.id = id;
+            existing.name = '文件夹 · ' + folderName + ' · ' + fileCount + ' 个文件';
+            existing.folderName = folderName;
+            existing.fileCount = fileCount;
+        } else {
+            pickedRefs.push({
+                id: id,
+                name: '文件夹 · ' + folderName + ' · ' + fileCount + ' 个文件',
+                folderName: folderName,
+                fileCount: fileCount,
+                role: null,
+                type: 'folder',
+                kind: 'folder',
+                thumbUrl: '',
+                images: []
+            });
+        }
+        pushRefs();
+        log('folder', 'ref ' + folderName + ' ' + fileCount);
+        return true;
+    }
+    function addFolderFiles(files) {
+        var list = Array.isArray(files) ? files.slice(0, 20) : [];
+        var folder = pickedRefs.filter(function (item) { return item.type === 'folder'; })[0];
+        var folderName = folder ? folder.folderName : '本地文件夹';
+        list.forEach(function (file, index) {
+            var name = String((file && file.name) || ('文件 ' + (index + 1)));
+            var url = String((file && file.url) || '');
+            var kind = String((file && file.kind) || 'image');
+            pickedRefs.push({
+                id: 'folderfile_' + Date.now() + '_' + index,
+                name: name,
+                role: null,
+                type: 'upload',
+                upload: true,
+                thumbUrl: url,
+                kind: kind,
+                folderName: folderName,
+                images: url ? [{ url: url, preview: url, kind: kind, name: name }] : []
+            });
+        });
+        pushRefs();
+        log('folder', 'files ' + list.length);
+        return list.length;
     }
     function onPickPointerDown(event) {
         if (!pickModeActive || event.button !== 0 || pickPointer) return;
@@ -1072,6 +1159,10 @@
         captureCanvas: captureCanvas,
         captureRegionPreview: captureRegionPreview,
         addCaptureRef: addCaptureRef,
+        addSkillRef: addSkillRef,
+        addAppRef: addAppRef,
+        addFolderRef: addFolderRef,
+        addFolderFiles: addFolderFiles,
         addSelectedRefs: addSelectedRefs,
         pickUpload: pickUpload,
         clearSkill: clearSkill,
@@ -1134,7 +1225,12 @@
                         var images = Array.isArray(focus.reference_images) ? focus.reference_images.slice() : [];
                         pickedRefs.forEach(function (ref) {
                             if (!refs.some(function (item) { return String(item.id) === String(ref.id); })) {
-                                refs.push({ id: ref.id, name: ref.name, role: null, source: ref.upload ? 'upload' : 'node' });
+                                refs.push({
+                                    id: ref.id,
+                                    name: ref.name,
+                                    role: null,
+                                    source: ref.type === 'skill' ? 'skill' : ref.type === 'app' ? 'app' : ref.type === 'folder' ? 'folder' : ref.upload ? 'upload' : 'node'
+                                });
                             }
                             (ref.images || []).forEach(function (img) {
                                 if (img.url && images.indexOf(img.url) === -1) images.push(img.url);
@@ -1144,15 +1240,19 @@
                         focus.reference_images = images;
                         runBody.focus = focus;
                     }
+                    var pickedSkill = pickedRefs.filter(function (ref) { return ref.type === 'skill' && ref.skillId; })[0];
+                    if (pickedSkill) runBody.skill_id = String(pickedSkill.skillId);
                     if (pendingRunSkillRef) {
                         /* 应用市场 brief 的 store:<id>：只在这一轮注入 skill_ref，不额外带 skill_id */
                         runBody.skill_ref = pendingRunSkillRef;
                         delete runBody.skill_id;
                         log('skillRef', 'injected ' + pendingRunSkillRef);
                         pendingRunSkillRef = '';
-                    } else {
-                        /* 技能入口已删除：普通发送一律不携带技能字段 */
+                    } else if (!pickedSkill) {
+                        /* 普通发送不携带技能字段；只有从加号菜单选的技能引用走 skill_id */
                         delete runBody.skill_id;
+                        delete runBody.skill_ref;
+                    } else {
                         delete runBody.skill_ref;
                     }
                     requestInit = {};

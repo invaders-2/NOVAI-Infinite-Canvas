@@ -6,7 +6,9 @@ import {
 	FolderClosedIcon,
 	HandIcon,
 	ImageUpIcon,
+	LayoutGridIcon,
 	MicIcon,
+	PuzzleIcon,
 	MousePointerSquareDashedIcon,
 	PencilIcon,
 	SendHorizontalIcon,
@@ -19,7 +21,29 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import {
+	PromptInput,
+	PromptInputBody,
+	PromptInputButton,
+	PromptInputFooter,
+	PromptInputHeader,
+	PromptInputProvider,
+	PromptInputSubmit,
+	PromptInputTextarea,
+	PromptInputTools,
+	usePromptInputAttachments,
+	usePromptInputController,
+} from "../ai-elements/prompt-input"
+import {
+	Attachment,
+	AttachmentInfo,
+	AttachmentPreview,
+	AttachmentRemove,
+	Attachments,
+} from "../ai-elements/attachments"
+import { PlusMenu } from "./PlusMenu"
 import { ScreenshotPicker } from "./ScreenshotPicker"
+import { listFolderFiles, restoreFolder } from "./folder"
 import { cn } from "@/lib/utils"
 import { fetchCanvasNodes } from "./api"
 import type { CanvasNodeSummary } from "./api"
@@ -47,12 +71,17 @@ interface ComposerProps {
 	pendingText: { text: string; token: number } | null
 }
 
-export const Composer = ({ store, pendingText }: ComposerProps) => {
+const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 	const { env } = store
+	const controller = usePromptInputController()
+	const promptAttachments = usePromptInputAttachments()
+	const text = controller.textInput.value
+	const setText = controller.textInput.setInput
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-	const [text, setText] = useState("")
 	const [pickMode, setPickMode] = useState(false)
 	const [shotOpen, setShotOpen] = useState(false)
+	const [plusOpen, setPlusOpen] = useState(false)
+	const addButtonRef = useRef<HTMLButtonElement | null>(null)
 	const [modelOpen, setModelOpen] = useState(false)
 	const [mentionOpen, setMentionOpen] = useState(false)
 	const [mentionNodes, setMentionNodes] = useState<CanvasNodeSummary[]>([])
@@ -96,6 +125,24 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	}, [store])
 
 	useEffect(() => {
+		let alive = true
+		void restoreFolder()
+			.then((info) => {
+				if (alive && info) store.addFolderRef(info.name, info.count)
+			})
+			.catch(() => {})
+		return () => {
+			alive = false
+		}
+	}, [store])
+
+	useEffect(() => {
+		return () => {
+			try { store.exitPickMode() } catch {}
+		}
+	}, [store])
+
+	useEffect(() => {
 		if (!pendingText) return
 		const node = textareaRef.current
 		if (!node) return
@@ -107,18 +154,68 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 
 	const clearInput = () => {
 		if (textareaRef.current) textareaRef.current.value = ""
-		setText("")
+		controller.textInput.clear()
 	}
 
-	const submit = () => {
-		const value = String(textareaRef.current?.value ?? text ?? "").trim()
-		if (!value) return
+	const promptFilesToFiles = async (files: { url: string; filename?: string; mediaType?: string }[]) => {
+		const result: File[] = []
+		for (let index = 0; index < files.length; index += 1) {
+			const part = files[index]
+			try {
+				const response = await fetch(part.url)
+				const blob = await response.blob()
+				result.push(new File([blob], part.filename || "附件" + (index + 1), { type: part.mediaType || blob.type }))
+			} catch {
+				/* 单个文件失败时继续处理其余附件 */
+			}
+		}
+		return result
+	}
+
+	const handlePromptSubmit = async (message: { text: string; files: { url: string; filename?: string; mediaType?: string }[] }) => {
+		const value = String(message.text || "").trim()
 		if (env.running) {
-			if (store.enqueue(value)) clearInput()
+			if (value) store.enqueue(value)
 			return
 		}
-		store.send(value)
-		clearInput()
+		if (message.files.length > 0) {
+			const files = await promptFilesToFiles(message.files)
+			let added = 0
+			if (files.length) {
+				try {
+					const form = new FormData()
+					files.forEach((file, index) => form.append("files", file, file.name || "附件" + (index + 1)))
+					const response = await fetch("/api/upload", { method: "POST", body: form })
+					const data = await response.json().catch(() => ({}))
+					if (response.ok && Array.isArray(data.files) && data.files.length) {
+						added = store.addFolderFiles(
+							data.files.map((item: { name?: string; url?: string; kind?: string }) => ({
+								name: String(item.name || "附件"),
+								url: String(item.url || ""),
+								kind: String(item.kind || "image"),
+							})),
+						)
+					}
+				} catch {
+					/* 上传服务不可用时退回本地 data URL，仍可发送引用 */
+				}
+			}
+			if (!added) {
+				added = store.addFolderFiles(
+					message.files.map((file) => ({
+						name: file.filename || "附件",
+						url: file.url,
+						kind: (file.mediaType || "").startsWith("video") ? "video" : "image",
+					})),
+				)
+				if (!added) {
+					store.notify("附件读取失败，请重试")
+					throw new Error("upload failed")
+				}
+				store.notify("附件上传服务不可用，已按本地附件发送")
+			}
+		}
+		if (value) store.send(value)
 	}
 
 	const voiceInput = () => {
@@ -151,7 +248,37 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	}
 
 	const captureView = () => {
+		setPlusOpen(false)
 		setShotOpen(true)
+	}
+
+	const insertBrainstorm = () => {
+		const prompt = "把下面这个想法展开成 3 个差异明显的方向，每个方向给标题+一句话说明：\n"
+		const field = textareaRef.current
+		const value = field ? field.value : text
+		const next = value.trim() ? value.replace(/\s*$/, "") + "\n\n" + prompt : prompt
+		if (field) {
+			field.value = next
+			field.focus()
+			field.setSelectionRange(next.length, next.length)
+		}
+		setText(next)
+		setPlusOpen(false)
+		store.notify("已插入头脑风暴提示词")
+	}
+
+	const openFolderFiles = async () => {
+		try {
+			const files = await listFolderFiles(20)
+			if (!files.length) {
+				store.notify("文件夹里没有可加入的文件")
+				return
+			}
+			const added = store.addFolderFiles(files.map((file) => ({ name: file.name, url: file.url, kind: file.kind })))
+			store.notify(added ? "已从文件夹加入 " + added + " 个文件" : "没有加入新文件")
+		} catch (error) {
+			store.notify((error as Error)?.message || "读取文件夹失败")
+		}
 	}
 
 	const togglePickMode = () => {
@@ -214,8 +341,8 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 				store.notify("已切换到自动执行")
 				break
 			case "attach":
-				setAddOpen(true)
-				store.notify("已打开添加菜单")
+				promptAttachments.openFileDialog()
+				store.notify("已打开文件选择")
 				break
 			case "artifacts":
 				window.dispatchEvent(new CustomEvent("novai-canvas-assistant:artifacts"))
@@ -319,6 +446,23 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 			) : null}
 
 			<ScreenshotPicker onClose={() => setShotOpen(false)} open={shotOpen} store={store} />
+			<PlusMenu
+				anchor={addButtonRef.current}
+				onBrainstorm={insertBrainstorm}
+				onClose={() => setPlusOpen(false)}
+				onPickCanvas={() => {
+					setPlusOpen(false)
+					store.enterPickMode()
+					setPickMode(true)
+					store.notify("从画布添加：点击节点加入引用")
+				}}
+				onUpload={() => {
+					setPlusOpen(false)
+					promptAttachments.openFileDialog()
+				}}
+				open={plusOpen}
+				store={store}
+			/>
 			{pickMode
 				? createPortal(
 						<div className="nvca-pick-bar" role="status" aria-live="polite">
@@ -326,7 +470,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 								<strong>从画布添加</strong>
 								<span>点击或框选节点，也可拖到输入框</span>
 							</div>
-							<button className="nvca-pick-upload" onClick={() => store.pickUpload()} type="button">
+							<button className="nvca-pick-upload" onClick={() => promptAttachments.openFileDialog()} type="button">
 								<ImageUpIcon className="nvca-i-xs" />
 								上传素材
 							</button>
@@ -338,23 +482,11 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 					)
 				: null}
 			<div className="nvca-tap-composer-hint">
-				<button className="nvca-tap-hint-btn" onClick={togglePickMode} type="button">
+				<button className="nvca-tap-hint-btn" onClick={() => setPlusOpen((value) => !value)} type="button">
 					{pickMode ? "正在从画布添加…" : "添加画布内容"}
 				</button>
 			</div>
-			{nodeRefs.length > 0 ? (
-				<div className="nvca-tap-chips">
-					{nodeRefs.map((ref) => (
-						<span className="nvca-tap-chip" key={ref.id}>
-							{ref.thumbUrl ? <img alt="" className="nvca-tap-chip-thumb" src={ref.thumbUrl} /> : <FolderClosedIcon className="nvca-i-xs" />}
-							<span className="nvca-tap-chip-name">{ref.name}</span>
-							<button aria-label={"移除引用 " + ref.name} onClick={() => store.removeRef(ref.id)} type="button">
-								<XIcon className="nvca-i-xs" />
-							</button>
-						</span>
-					))}
-				</div>
-			) : null}
+
 
 			{slashOpen ? (
 				<div className="nvca-slash" role="listbox" aria-label="斜杠命令">
@@ -408,17 +540,64 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 				</div>
 			) : null}
 
-			<form
-				className="nvca-tap-box"
-				onSubmit={(event) => {
-					event.preventDefault()
-					submit()
-				}}
+			<PromptInput
+				className="nvca-prompt-form"
+				multiple
+				onSubmit={handlePromptSubmit}
 			>
+				<PromptInputHeader className="nvca-prompt-header">
+					{promptAttachments.files.length > 0 ? (
+						<Attachments className="nvca-prompt-attachments" variant="inline">
+							{promptAttachments.files.map((file) => (
+								<Attachment data={file} key={file.id} onRemove={() => promptAttachments.remove(file.id)}>
+									<AttachmentPreview />
+									<AttachmentInfo />
+									<AttachmentRemove label="移除附件" />
+								</Attachment>
+							))}
+						</Attachments>
+					) : null}
+			{nodeRefs.length > 0 ? (
+				<div className="nvca-tap-chips">
+					{nodeRefs.map((ref) => (
+						<span
+							className={"nvca-tap-chip" + (ref.type === "folder" ? " is-folder" : ref.type === "skill" ? " is-skill" : ref.type === "app" ? " is-app" : "")}
+							key={ref.id}
+							onClick={() => {
+								if (ref.type === "folder") void openFolderFiles()
+							}}
+							title={ref.type === "folder" ? "点击列出文件夹内的文件" : ref.name}
+						>
+							{ref.thumbUrl ? (
+								<img alt="" className="nvca-tap-chip-thumb" src={ref.thumbUrl} />
+							) : ref.type === "skill" ? (
+								<PuzzleIcon className="nvca-i-xs" />
+							) : ref.type === "app" ? (
+								<LayoutGridIcon className="nvca-i-xs" />
+							) : (
+								<FolderClosedIcon className="nvca-i-xs" />
+							)}
+							<span className="nvca-tap-chip-name">{ref.name}</span>
+							<button
+								aria-label={"移除引用 " + ref.name}
+								onClick={(event) => {
+									event.stopPropagation()
+									store.removeRef(ref.id)
+								}}
+								type="button"
+							>
+								<XIcon className="nvca-i-xs" />
+							</button>
+						</span>
+					))}
+				</div>
+			) : null}
+				</PromptInputHeader>
 				<div className="nvca-drop-hint">松手将节点加入引用</div>
-				<textarea
+				<PromptInputBody>
+					<PromptInputTextarea
 					aria-label="随心输入"
-					className="nvca-tap-input"
+					className="nvca-prompt-textarea"
 					onChange={(event) => {
 						const value = event.currentTarget.value
 						setText(value)
@@ -470,27 +649,25 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 							setMentionOpen(false)
 							return
 						}
-						if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-							event.preventDefault()
-							submit()
-						}
 					}}
 					placeholder="随心输入"
 					ref={textareaRef}
 					rows={1}
-					value={text}
 				/>
+				</PromptInputBody>
+				<PromptInputFooter className="nvca-prompt-footer">
 				<div className="nvca-tap-toolbar">
 					<div className="nvca-tap-tools-left">
-						<button
-							aria-pressed={pickMode}
-							className={cn("nvca-tap-icon is-add", pickMode && "is-on")}
-							onClick={togglePickMode}
-							title={pickMode ? "退出从画布添加" : "从画布添加引用"}
-							type="button"
+						<PromptInputButton
+							aria-expanded={plusOpen}
+							aria-haspopup="menu"
+							className={cn("nvca-tap-icon is-add", (plusOpen || pickMode) && "is-on")}
+							onClick={() => setPlusOpen((value) => !value)}
+							ref={addButtonRef}
+							tooltip="添加内容"
 						>
 							<PlusIcon className="nvca-i-sm" />
-						</button>
+						</PromptInputButton>
 						<button
 							aria-label={"已选目录，当前 " + refCount + " 项"}
 							className="nvca-tap-catalog"
@@ -500,7 +677,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 						>
 							<ShieldIcon className="nvca-i-sm" />
 						</button>
-						<button className="nvca-tap-icon is-upload" onClick={() => store.pickUpload()} title="上传素材" type="button">
+						<button className="nvca-tap-icon is-upload" onClick={() => promptAttachments.openFileDialog()} title="上传素材" type="button">
 							<ImageUpIcon className="nvca-i-sm" />
 						</button>
 						<button
@@ -630,24 +807,19 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 						<button className="nvca-tap-icon is-voice" onClick={voiceInput} title="语音输入" type="button">
 							<MicIcon className="nvca-i-sm" />
 						</button>
-						<button
+						<PromptInputSubmit
 							aria-label={env.running ? "停止" : "发送"}
 							className={cn("nvca-tap-send", env.running && "is-running")}
 							disabled={!env.running && !text.trim()}
-							onClick={() => {
-								if (env.running) {
-									store.abort()
-									return
-								}
-								submit()
-							}}
-							type="button"
+							onStop={() => store.abort()}
+							status={env.running ? "streaming" : "ready"}
 						>
 							{env.running ? <SquareIcon className="nvca-i-sm" /> : <ArrowUpIcon className="nvca-i-sm" />}
-						</button>
+						</PromptInputSubmit>
 					</div>
 				</div>
-			</form>
+				</PromptInputFooter>
+			</PromptInput>
 			{attachmentPreview ? (
 				<div className="nvca-attach-lightbox" onClick={() => setAttachmentPreview(null)} role="presentation">
 					<div className="nvca-attach-lightbox-box" onClick={(event) => event.stopPropagation()}>
@@ -664,3 +836,9 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 		</div>
 	)
 }
+
+export const Composer = (props: ComposerProps) => (
+	<PromptInputProvider>
+		<ComposerInner {...props} />
+	</PromptInputProvider>
+)
