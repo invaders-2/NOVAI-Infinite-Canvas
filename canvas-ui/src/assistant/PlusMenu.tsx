@@ -15,6 +15,7 @@ import type { AssistantStore } from "./store"
 
 type Submenu = "skills" | "apps" | null
 type Point = { left: number; top: number }
+type SubmenuPoint = { left: number; maxHeight: number; top?: number; bottom?: number }
 
 interface PlusMenuProps {
 	open: boolean
@@ -41,7 +42,7 @@ const visibleAnchor = (anchor: HTMLElement | null): DOMRect | null => {
 export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload, onBrainstorm }: PlusMenuProps) => {
 	const [submenu, setSubmenu] = useState<Submenu>(null)
 	const [menuPoint, setMenuPoint] = useState<Point>({ left: 12, top: 200 })
-	const [submenuPoint, setSubmenuPoint] = useState<Point>({ left: 12, top: 200 })
+	const [submenuPoint, setSubmenuPoint] = useState<SubmenuPoint>({ left: 12, top: 200, maxHeight: 400 })
 	const [active, setActive] = useState(0)
 	const [subActive, setSubActive] = useState(0)
 	const [catalog, setCatalog] = useState<StoreCatalogItem[]>([])
@@ -93,8 +94,11 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 			let left = rowRect.right + 8
 			if (left + SUBMENU_WIDTH > window.innerWidth - 8) left = rowRect.left - SUBMENU_WIDTH - 8
 			left = Math.max(8, left)
-			const top = Math.max(8, rowRect.top)
-			setSubmenuPoint((current) => (current.left === left && current.top === top ? current : { left, top }))
+			const spaceBelow = window.innerHeight - rowRect.bottom - 12
+			const next: SubmenuPoint = spaceBelow >= 150
+				? { left, maxHeight: window.innerHeight - rowRect.top - 12, top: Math.max(8, rowRect.top) }
+				: { left, maxHeight: Math.max(48, rowRect.bottom - 12), bottom: window.innerHeight - rowRect.bottom }
+			setSubmenuPoint((current) => (current.left === next.left && current.top === next.top && current.bottom === next.bottom && current.maxHeight === next.maxHeight ? current : next))
 		}
 		place()
 		const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null
@@ -292,7 +296,7 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 					className="nvca-plus-submenu"
 					ref={submenuRef}
 					role="menu"
-					style={{ left: submenuPoint.left, top: submenuPoint.top, maxHeight: Math.max(48, window.innerHeight - submenuPoint.top - 12) }}
+					style={{ left: submenuPoint.left, top: submenuPoint.top, bottom: submenuPoint.bottom, maxHeight: submenuPoint.maxHeight }}
 				>
 					{loading && catalog.length === 0 ? (
 						<div className="nvca-plus-empty">加载应用市场…</div>
