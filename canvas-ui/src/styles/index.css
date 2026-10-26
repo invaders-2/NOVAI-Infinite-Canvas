@@ -2687,6 +2687,10 @@ html:not(.theme-dark) .nvca-shot-confirm-text span { color: rgba(0, 0, 0, 0.45);
   z-index: 90;
   width: 358px;
   max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
   padding: 8px 0;
   border-radius: 16px;
   background: #1f1f1f;
@@ -2733,7 +2737,10 @@ html:not(.theme-dark) .nvca-plus-separator { background: rgba(0, 0, 0, 0.07); }
   width: 320px;
   max-height: min(560px, calc(100vh - 16px));
   overflow-y: auto;
-  padding: 8px 0;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  padding: 8px 0 0;
   border-radius: 14px;
   background: #1f1f1f;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -2782,7 +2789,24 @@ html:not(.theme-dark) .nvca-plus-subdesc { color: rgba(0, 0, 0, 0.42); }
 .nvca-plus-subitem.is-active { background: rgba(255, 255, 255, 0.06); }
 html:not(.theme-dark) .nvca-plus-subitem.is-active { background: rgba(0, 0, 0, 0.05); }
 
-.nvca-plus-subitem.is-all { color: rgba(255, 255, 255, 0.66); }
+.nvca-plus-subitem.is-all {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  color: rgba(255, 255, 255, 0.72);
+  background: #1f1f1f;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0 12px;
+}
+html:not(.theme-dark) .nvca-plus-subitem.is-all { background: #f7f7f7; border-top-color: rgba(0, 0, 0, 0.07); color: rgba(0, 0, 0, 0.6); }
+.nvca-plus-menu::-webkit-scrollbar,
+.nvca-plus-submenu::-webkit-scrollbar { width: 4px; }
+.nvca-plus-menu::-webkit-scrollbar-track,
+.nvca-plus-submenu::-webkit-scrollbar-track { background: transparent; }
+.nvca-plus-menu::-webkit-scrollbar-thumb,
+.nvca-plus-submenu::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); border-radius: 999px; }
+html:not(.theme-dark) .nvca-plus-menu::-webkit-scrollbar-thumb,
+html:not(.theme-dark) .nvca-plus-submenu::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.16); }
 html:not(.theme-dark) .nvca-plus-subitem.is-all { color: rgba(0, 0, 0, 0.5); }
 .nvca-plus-empty { padding: 14px 12px; font-size: 12px; color: rgba(255, 255, 255, 0.42); }
 html:not(.theme-dark) .nvca-plus-empty { color: rgba(0, 0, 0, 0.4); }

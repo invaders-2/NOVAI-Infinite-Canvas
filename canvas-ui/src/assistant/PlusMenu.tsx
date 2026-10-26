@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import {
-	ArrowLeftIcon,
 	ChevronRightIcon,
 	FolderPlusIcon,
 	LayoutGridIcon,
@@ -293,12 +292,8 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 					className="nvca-plus-submenu"
 					ref={submenuRef}
 					role="menu"
-					style={{ left: submenuPoint.left, top: submenuPoint.top, maxHeight: Math.max(180, window.innerHeight - submenuPoint.top - 8) }}
+					style={{ left: submenuPoint.left, top: submenuPoint.top, maxHeight: Math.max(48, window.innerHeight - submenuPoint.top - 12) }}
 				>
-					<button className="nvca-plus-subhead" onClick={() => setSubmenu(null)} type="button">
-						<ArrowLeftIcon className="nvca-plus-subhead-icon" />
-						<span>{submenu === "skills" ? "技能" : "全部应用"}</span>
-					</button>
 					{loading && catalog.length === 0 ? (
 						<div className="nvca-plus-empty">加载应用市场…</div>
 					) : (
@@ -319,7 +314,6 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 									</span>
 								</button>
 							))}
-							<div className="nvca-plus-separator" role="separator" />
 							<button
 								className={"nvca-plus-subitem is-all" + (subActive === (submenu === "skills" ? skills.length : apps.length) ? " is-active" : "")}
 								onClick={() => openAll(submenu)}
