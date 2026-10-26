@@ -63,7 +63,7 @@ export interface AssistantStore {
 	captureCanvas(): Promise<boolean>
 	captureRegionPreview(rect: { x: number; y: number; w: number; h: number }): Promise<{ url: string; width: number; height: number } | null>
 	addCaptureRef(url: string, width: number, height: number): boolean
-	addSkillRef(skill: { id: string; name: string; description?: string }): boolean
+	addSkillRef(skill: { id: string; name: string; description?: string; storeRef?: string }): boolean
 	addAppRef(app: { id: string; name: string; description?: string; activationSkill?: string }): boolean
 	addFolderRef(name: string, count: number): boolean
 	addFolderFiles(files: { name: string; url?: string; kind?: string }[]): number

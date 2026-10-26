@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.137.1792982550';
+    var ASSET_VERSION = '1.0.137.1792983099';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -476,7 +476,8 @@
         if (!skill || !skill.id) return false;
         return capabilityRef({
             id: 'skill_' + String(skill.id),
-            skillId: String(skill.id),
+            skillId: skill.storeRef ? '' : String(skill.id),
+            skillRef: String(skill.storeRef || ''),
             name: '技能 · ' + String(skill.name || skill.id),
             description: String(skill.description || ''),
             role: null,
@@ -1240,19 +1241,22 @@
                         focus.reference_images = images;
                         runBody.focus = focus;
                     }
-                    var pickedSkill = pickedRefs.filter(function (ref) { return ref.type === 'skill' && ref.skillId; })[0];
-                    if (pickedSkill) runBody.skill_id = String(pickedSkill.skillId);
+                    var pickedSkill = pickedRefs.filter(function (ref) { return ref.type === 'skill'; })[0];
                     if (pendingRunSkillRef) {
                         /* 应用市场 brief 的 store:<id>：只在这一轮注入 skill_ref，不额外带 skill_id */
                         runBody.skill_ref = pendingRunSkillRef;
                         delete runBody.skill_id;
                         log('skillRef', 'injected ' + pendingRunSkillRef);
                         pendingRunSkillRef = '';
-                    } else if (!pickedSkill) {
-                        /* 普通发送不携带技能字段；只有从加号菜单选的技能引用走 skill_id */
+                    } else if (pickedSkill && pickedSkill.skillRef) {
+                        /* 加号菜单里选的市场技能：同样用 store:<name>，与市场 brief 一致 */
+                        runBody.skill_ref = String(pickedSkill.skillRef);
                         delete runBody.skill_id;
+                    } else if (pickedSkill && pickedSkill.skillId) {
+                        runBody.skill_id = String(pickedSkill.skillId);
                         delete runBody.skill_ref;
                     } else {
+                        delete runBody.skill_id;
                         delete runBody.skill_ref;
                     }
                     requestInit = {};

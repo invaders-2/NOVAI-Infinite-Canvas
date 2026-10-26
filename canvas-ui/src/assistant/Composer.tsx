@@ -449,7 +449,10 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 			<PlusMenu
 				anchor={addButtonRef.current}
 				onBrainstorm={insertBrainstorm}
-				onClose={() => setPlusOpen(false)}
+				onClose={() => {
+					setPlusOpen(false)
+					try { addButtonRef.current?.focus() } catch {}
+				}}
 				onPickCanvas={() => {
 					setPlusOpen(false)
 					store.enterPickMode()

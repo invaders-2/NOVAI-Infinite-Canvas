@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import {
 	ArrowLeftIcon,
@@ -10,11 +10,12 @@ import {
 	PuzzleIcon,
 	SquareArrowDownIcon,
 } from "lucide-react"
-import { fetchSkills, fetchStoreApps, type SkillRow, type StoreAppRow } from "./api"
+import { fetchStoreCatalog, type StoreCatalogItem } from "./api"
 import { chooseFolder, folderSupported } from "./folder"
 import type { AssistantStore } from "./store"
 
 type Submenu = "skills" | "apps" | null
+type Point = { left: number; top: number }
 
 interface PlusMenuProps {
 	open: boolean
@@ -26,21 +27,81 @@ interface PlusMenuProps {
 	onBrainstorm: () => void
 }
 
-const MENU_WIDTH = 360
-const SUBMENU_WIDTH = 280
+const MENU_WIDTH = 358
+const SUBMENU_WIDTH = 320
+const ITEM_INDEX: Record<Exclude<Submenu, null>, number> = { skills: 3, apps: 5 }
 
-const isVisible = (element: HTMLElement | null) => Boolean(element && element.isConnected)
+const visibleAnchor = (anchor: HTMLElement | null): DOMRect | null => {
+	if (!anchor || !anchor.isConnected) return null
+	const rect = anchor.getBoundingClientRect()
+	if (rect.width <= 0 || rect.height <= 0) return null
+	if (rect.bottom < 0 || rect.top > window.innerHeight) return null
+	return rect
+}
 
 export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload, onBrainstorm }: PlusMenuProps) => {
 	const [submenu, setSubmenu] = useState<Submenu>(null)
-	const [position, setPosition] = useState({ left: 12, top: 200 })
+	const [menuPoint, setMenuPoint] = useState<Point>({ left: 12, top: 200 })
+	const [submenuPoint, setSubmenuPoint] = useState<Point>({ left: 12, top: 200 })
 	const [active, setActive] = useState(0)
 	const [subActive, setSubActive] = useState(0)
-	const [skills, setSkills] = useState<SkillRow[]>([])
-	const [apps, setApps] = useState<StoreAppRow[]>([])
+	const [catalog, setCatalog] = useState<StoreCatalogItem[]>([])
 	const [loading, setLoading] = useState(false)
 	const menuRef = useRef<HTMLDivElement | null>(null)
 	const submenuRef = useRef<HTMLDivElement | null>(null)
+
+	const skills = catalog.filter((item) => item.kind === "skill").slice(0, 10)
+	const apps = catalog.filter((item) => item.kind === "app").slice(0, 10)
+
+	useLayoutEffect(() => {
+		if (!open) return
+		const place = () => {
+			const rect = visibleAnchor(anchor)
+			if (!rect) {
+				onClose()
+				return
+			}
+			const menu = menuRef.current
+			const height = menu ? menu.offsetHeight : 330
+			let left = rect.left
+			if (left + MENU_WIDTH > window.innerWidth - 8) left = window.innerWidth - MENU_WIDTH - 8
+			left = Math.max(8, left)
+			let top = rect.top - 8 - height
+			if (top < 8) top = Math.min(window.innerHeight - height - 8, rect.bottom + 8)
+			setMenuPoint((current) => (current.left === left && current.top === top ? current : { left, top }))
+		}
+		place()
+		const onViewport = () => place()
+		window.addEventListener("resize", onViewport)
+		window.addEventListener("scroll", onViewport, true)
+		const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null
+		if (anchor) observer?.observe(anchor)
+		if (menuRef.current) observer?.observe(menuRef.current)
+		return () => {
+			window.removeEventListener("resize", onViewport)
+			window.removeEventListener("scroll", onViewport, true)
+			observer?.disconnect()
+		}
+	}, [open, anchor, onClose])
+
+	useLayoutEffect(() => {
+		if (!open || !submenu) return
+		const place = () => {
+			const row = menuRef.current?.querySelectorAll<HTMLElement>(".nvca-plus-item")[ITEM_INDEX[submenu]]
+			const menu = menuRef.current
+			if (!row || !menu) return
+			const rowRect = row.getBoundingClientRect()
+			let left = rowRect.right + 8
+			if (left + SUBMENU_WIDTH > window.innerWidth - 8) left = rowRect.left - SUBMENU_WIDTH - 8
+			left = Math.max(8, left)
+			const top = Math.max(8, rowRect.top)
+			setSubmenuPoint((current) => (current.left === left && current.top === top ? current : { left, top }))
+		}
+		place()
+		const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null
+		if (submenuRef.current) observer?.observe(submenuRef.current)
+		return () => observer?.disconnect()
+	}, [open, submenu, skills.length, apps.length, menuPoint])
 
 	useEffect(() => {
 		if (!open) {
@@ -53,20 +114,6 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 	}, [open])
 
 	useEffect(() => {
-		if (!open || !anchor) return
-		const place = () => {
-			const rect = anchor.getBoundingClientRect()
-			const width = Math.min(MENU_WIDTH, window.innerWidth - 24)
-			const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12))
-			const below = Math.max(200, window.innerHeight - rect.top + 8)
-			setPosition({ left, top: below })
-		}
-		place()
-		window.addEventListener("resize", place)
-		return () => window.removeEventListener("resize", place)
-	}, [open, anchor])
-
-	useEffect(() => {
 		if (!open) return
 		const onKey = (event: KeyboardEvent) => {
 			const key = event.key
@@ -77,23 +124,18 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 				return
 			}
 			if (submenu) {
-				const rows = submenu === "skills" ? skills.length : apps.length + 1
+				const rows = (submenu === "skills" ? skills.length : apps.length) + 1
 				if (key === "ArrowDown") {
 					event.preventDefault()
-					setSubActive((value) => (rows ? (value + 1) % rows : 0))
+					setSubActive((value) => (value + 1) % rows)
 				} else if (key === "ArrowUp") {
 					event.preventDefault()
-					setSubActive((value) => (rows ? (value - 1 + rows) % rows : 0))
+					setSubActive((value) => (value - 1 + rows) % rows)
 				} else if (key === "Enter") {
 					event.preventDefault()
-					if (submenu === "skills") {
-						const skill = skills[subActive]
-						if (skill) chooseSkill(skill)
-					} else if (apps[subActive]) {
-						chooseApp(apps[subActive])
-					} else if (subActive === apps.length) {
-						openAllApps()
-					}
+					if (submenu === "skills" && skills[subActive]) chooseSkill(skills[subActive])
+					else if (submenu === "apps" && apps[subActive]) chooseApp(apps[subActive])
+					else openAll(submenu)
 				}
 				return
 			}
@@ -117,9 +159,8 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 		const onDown = (event: PointerEvent) => {
 			const target = event.target as Node | null
 			if (!target) return
-			if (menuRef.current && menuRef.current.contains(target)) return
-			if (submenuRef.current && submenuRef.current.contains(target)) return
-			if (anchor && anchor.contains(target)) return
+			if (menuRef.current?.contains(target) || submenuRef.current?.contains(target)) return
+			if (anchor?.contains(target)) return
 			onClose()
 		}
 		document.addEventListener("pointerdown", onDown, true)
@@ -127,41 +168,37 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 	}, [open, anchor, onClose])
 
 	useEffect(() => {
-		if (!open || submenu !== "skills" || skills.length > 0) return
+		if (!open || !submenu || catalog.length > 0) return
 		setLoading(true)
-		fetchSkills()
-			.then((rows) => setSkills(rows))
-			.catch(() => store.notify("技能列表加载失败"))
+		fetchStoreCatalog()
+			.then((items) => setCatalog(items))
+			.catch(() => store.notify("应用市场列表加载失败"))
 			.finally(() => setLoading(false))
-	}, [open, submenu, skills.length, store])
+	}, [open, submenu, catalog.length, store])
 
-	useEffect(() => {
-		if (!open || submenu !== "apps" || apps.length > 0) return
-		setLoading(true)
-		fetchStoreApps()
-			.then((rows) => setApps(rows))
-			.catch(() => store.notify("应用列表加载失败"))
-			.finally(() => setLoading(false))
-	}, [open, submenu, apps.length, store])
-
-	const chooseSkill = (skill: SkillRow) => {
-		store.addSkillRef({ id: skill.id, name: skill.name, description: skill.description })
-		store.notify("已添加技能引用：" + skill.name)
-		onClose()
-	}
-
-	const chooseApp = (app: StoreAppRow) => {
-		store.addAppRef({
-			id: app.id,
-			name: app.name,
-			description: app.description,
-			activationSkill: app.activationSkill,
+	const chooseSkill = (item: StoreCatalogItem) => {
+		store.addSkillRef({
+			id: item.id,
+			name: item.name,
+			description: item.description,
+			storeRef: "store:" + item.name,
 		})
-		store.notify("已添加应用引用：" + app.name)
+		store.notify("已添加技能引用：" + item.name)
 		onClose()
 	}
 
-	const openAllApps = () => {
+	const chooseApp = (item: StoreCatalogItem) => {
+		store.addAppRef({
+			id: item.id,
+			name: item.name,
+			description: item.description,
+			activationSkill: item.activationSkill,
+		})
+		store.notify("已添加应用引用：" + item.name)
+		onClose()
+	}
+
+	const openAll = (kind: Exclude<Submenu, null>) => {
 		try {
 			window.parent.postMessage({ type: "navigate", route: "store" }, location.origin)
 		} catch {
@@ -212,18 +249,8 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 		}
 	}
 
-	const submenuPosition = () => {
-		const menu = menuRef.current
-		if (!menu) return { left: position.left, top: position.top }
-		const rect = menu.getBoundingClientRect()
-		const left = rect.left - SUBMENU_WIDTH - 8
-		const top = Math.max(8, Math.min(rect.top, window.innerHeight - Math.min(420, window.innerHeight - 16) - 8))
-		return { left: left >= 8 ? left : rect.right + 8, top }
-	}
+	if (!open || !visibleAnchor(anchor)) return null
 
-	if (!open || !isVisible(anchor)) return null
-
-	const submenuStyle = submenuPosition()
 	const items = [
 		{ label: "从画布添加", icon: SquareArrowDownIcon, disabled: false, chevron: false },
 		{ label: "上传附件", icon: PaperclipIcon, disabled: false, chevron: false },
@@ -235,12 +262,7 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 
 	return createPortal(
 		<>
-			<div
-				className="nvca-plus-menu"
-				ref={menuRef}
-				role="menu"
-				style={{ left: position.left, bottom: position.top }}
-			>
+			<div className="nvca-plus-menu" ref={menuRef} role="menu" style={{ left: menuPoint.left, top: menuPoint.top }}>
 				{items.map((item, index) => (
 					<div key={item.label}>
 						<button
@@ -271,61 +293,41 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 					className="nvca-plus-submenu"
 					ref={submenuRef}
 					role="menu"
-					style={{ left: submenuStyle.left, top: submenuStyle.top }}
+					style={{ left: submenuPoint.left, top: submenuPoint.top, maxHeight: Math.max(180, window.innerHeight - submenuPoint.top - 8) }}
 				>
 					<button className="nvca-plus-subhead" onClick={() => setSubmenu(null)} type="button">
-						<ArrowLeftIcon className="nvca-plus-chevron" />
+						<ArrowLeftIcon className="nvca-plus-subhead-icon" />
 						<span>{submenu === "skills" ? "技能" : "全部应用"}</span>
 					</button>
-					{submenu === "skills" ? (
-						loading && skills.length === 0 ? (
-							<div className="nvca-plus-empty">加载技能…</div>
-						) : skills.length === 0 ? (
-							<div className="nvca-plus-empty">暂时没有可用技能</div>
-						) : (
-							skills.map((skill, index) => (
-								<button
-									className={"nvca-plus-subitem" + (subActive === index ? " is-active" : "")}
-									key={skill.id}
-									onClick={() => chooseSkill(skill)}
-									onMouseEnter={() => setSubActive(index)}
-									role="menuitem"
-									type="button"
-								>
-									<PuzzleIcon className="nvca-plus-icon" />
-									<span>{skill.name}</span>
-								</button>
-							))
-						)
-					) : loading && apps.length === 0 ? (
-						<div className="nvca-plus-empty">加载应用…</div>
-					) : apps.length === 0 ? (
-						<div className="nvca-plus-empty">暂时没有可用应用</div>
+					{loading && catalog.length === 0 ? (
+						<div className="nvca-plus-empty">加载应用市场…</div>
 					) : (
 						<>
-							{apps.map((app, index) => (
+							{(submenu === "skills" ? skills : apps).map((item, index) => (
 								<button
 									className={"nvca-plus-subitem" + (subActive === index ? " is-active" : "")}
-									key={app.id}
-									onClick={() => chooseApp(app)}
+									key={item.id}
+									onClick={() => (submenu === "skills" ? chooseSkill(item) : chooseApp(item))}
 									onMouseEnter={() => setSubActive(index)}
 									role="menuitem"
 									type="button"
 								>
-									<LayoutGridIcon className="nvca-plus-icon" />
-									<span>{app.name}</span>
+									{submenu === "skills" ? <PuzzleIcon className="nvca-plus-icon" /> : <LayoutGridIcon className="nvca-plus-icon" />}
+									<span className="nvca-plus-subcopy">
+										<span className="nvca-plus-subname">{item.name}</span>
+										<span className="nvca-plus-subdesc">{item.description}</span>
+									</span>
 								</button>
 							))}
 							<div className="nvca-plus-separator" role="separator" />
 							<button
-								className={"nvca-plus-subitem is-all" + (subActive === apps.length ? " is-active" : "")}
-								onClick={openAllApps}
-								onMouseEnter={() => setSubActive(apps.length)}
+								className={"nvca-plus-subitem is-all" + (subActive === (submenu === "skills" ? skills.length : apps.length) ? " is-active" : "")}
+								onClick={() => openAll(submenu)}
+								onMouseEnter={() => setSubActive(submenu === "skills" ? skills.length : apps.length)}
 								role="menuitem"
 								type="button"
 							>
-								<span>查看全部</span>
-								<ChevronRightIcon className="nvca-plus-chevron" />
+								<span>{submenu === "skills" ? "查看全部技能" : "查看全部应用"}</span>
 							</button>
 						</>
 					)}

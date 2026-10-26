@@ -266,6 +266,33 @@ export const fetchSkills = async (): Promise<SkillRow[]> => {
 		.filter((row) => row.id && row.name)
 }
 
+export interface StoreCatalogItem {
+	id: string
+	name: string
+	description: string
+	kind: "skill" | "app" | string
+	activationSkill: string
+}
+
+export const fetchStoreCatalog = async (): Promise<StoreCatalogItem[]> => {
+	const response = await fetch("/api/store/catalog", jsonInit)
+	const data = await readJson(response)
+	if (!response.ok) throw new Error(errorText(data, "HTTP " + response.status))
+	const items = Array.isArray(data.items) ? data.items : []
+	return items
+		.map((raw) => {
+			const row = (raw || {}) as Record<string, unknown>
+			return {
+				id: String(row.name || row.id || ""),
+				name: String(row.display_name || row.name || ""),
+				description: String(row.description || row.marketing_line || ""),
+				kind: String(row.kind || ""),
+				activationSkill: String(row.activation_skill || ""),
+			}
+		})
+		.filter((row) => row.id && row.name)
+}
+
 export interface StoreAppRow {
 	id: string
 	name: string
