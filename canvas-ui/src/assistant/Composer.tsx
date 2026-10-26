@@ -5,6 +5,7 @@ import {
 	CircleIcon,
 	FolderClosedIcon,
 	HandIcon,
+	ImageIcon,
 	ImageUpIcon,
 	LayoutGridIcon,
 	MicIcon,
@@ -17,6 +18,7 @@ import {
 	ShieldIcon,
 	SparklesIcon,
 	SquareIcon,
+	VideoIcon,
 	XIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -125,6 +127,17 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 	}, [store])
 
 	useEffect(() => {
+		const sync = () => setPickMode(document.body.classList.contains("nvca-pick-mode"))
+		sync()
+		const observer = new MutationObserver(sync)
+		observer.observe(document.body, { attributes: true, attributeFilter: ["class"] })
+		return () => {
+			observer.disconnect()
+			try { store.exitPickMode() } catch {}
+		}
+	}, [store])
+
+	useEffect(() => {
 		let alive = true
 		void restoreFolder()
 			.then((info) => {
@@ -175,7 +188,11 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 	const handlePromptSubmit = async (message: { text: string; files: { url: string; filename?: string; mediaType?: string }[] }) => {
 		const value = String(message.text || "").trim()
 		if (env.running) {
-			if (value) store.enqueue(value)
+			if (value) {
+				store.enqueue(value)
+				store.exitPickMode()
+				setPickMode(false)
+			}
 			return
 		}
 		if (message.files.length > 0) {
@@ -215,7 +232,11 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 				store.notify("附件上传服务不可用，已按本地附件发送")
 			}
 		}
-		if (value) store.send(value)
+		if (value) {
+			store.send(value)
+			store.exitPickMode()
+			setPickMode(false)
+		}
 	}
 
 	const voiceInput = () => {
@@ -569,7 +590,11 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 							onClick={() => {
 								if (ref.type === "folder") void openFolderFiles()
 							}}
-							title={ref.type === "folder" ? "点击列出文件夹内的文件" : ref.name}
+							title={
+								ref.type === "folder"
+									? "点击列出文件夹内的文件"
+									: ref.name + (ref.id ? " · " + ref.id : "")
+							}
 						>
 							{ref.thumbUrl ? (
 								<img alt="" className="nvca-tap-chip-thumb" src={ref.thumbUrl} />
@@ -577,6 +602,14 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 								<PuzzleIcon className="nvca-i-xs" />
 							) : ref.type === "app" ? (
 								<LayoutGridIcon className="nvca-i-xs" />
+							) : ref.nodeType === "smart-text" ? (
+								<span className="nvca-tap-chip-t">T</span>
+							) : ref.nodeType === "smart-video" ? (
+								<VideoIcon className="nvca-i-xs" />
+							) : ref.nodeType === "smart-table" ? (
+								<span className="nvca-tap-chip-t">表</span>
+							) : ref.nodeType === "smart-image" ? (
+								<ImageIcon className="nvca-i-xs" />
 							) : (
 								<FolderClosedIcon className="nvca-i-xs" />
 							)}

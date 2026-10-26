@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.137.1792984179';
+    var ASSET_VERSION = '1.0.137.1792985831';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -376,6 +376,14 @@
             };
         });
     }
+    function nodeTypeLabel(type) {
+        var value = String(type || '');
+        if (value.indexOf('text') !== -1) return '文本';
+        if (value.indexOf('image') !== -1) return '图片';
+        if (value.indexOf('video') !== -1) return '视频';
+        if (value.indexOf('table') !== -1) return '表格';
+        return '节点';
+    }
     function pickedNodeRef(id) {
         var list = [];
         try { list = docNodes(); } catch (e) {}
@@ -387,9 +395,10 @@
             return { url: url, preview: String(img.preview || img.thumbnail || url), kind: kind };
         }).filter(function (img) { return img.url; });
         var first = images[0] || {};
+        var title = String(node.title || '').trim();
         return {
             id: String(node.id),
-            name: String(node.alias || node.title || node.type || '画布节点').slice(0, 40),
+            name: (title || nodeTypeLabel(node.type)).slice(0, 80),
             role: null,
             type: 'node',
             nodeType: String(node.type || ''),
@@ -399,8 +408,8 @@
         };
     }
     function mergeRefs() {
-        var list = readRefs();
-        pickedRefs.forEach(function (ref) {
+        var list = pickedRefs.slice();
+        readRefs().forEach(function (ref) {
             if (!list.some(function (item) { return String(item.id) === String(ref.id); })) list.push(ref);
         });
         return list;
@@ -420,6 +429,26 @@
     var pickPointer = null;
     var pickGhost = null;
     var pickMarquee = null;
+    var pickModeWatch = null;
+    function pickPanelVisible() {
+        var modal = document.getElementById('chatModal');
+        if (modal && !modal.classList.contains('open')) return false;
+        var panel = pickPanel();
+        if (!panel) return false;
+        var rect = panel.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && getComputedStyle(panel).display !== 'none';
+    }
+    function startPickModeWatch() {
+        if (pickModeWatch) return;
+        pickModeWatch = setInterval(function () {
+            if (!pickModeActive) return;
+            if (!pickPanelVisible()) exitPickMode();
+        }, 250);
+    }
+    function stopPickModeWatch() {
+        if (pickModeWatch) clearInterval(pickModeWatch);
+        pickModeWatch = null;
+    }
     function pickPanel() {
         return document.getElementById('canvasAssistantPanel') || document.getElementById('chatModal');
     }
@@ -637,9 +666,10 @@
     }
     function onPickKeyDown(event) {
         if (!pickModeActive) return;
-        if (event.key === 'Escape' && pickPointer) {
+        if (event.key === 'Escape') {
             event.preventDefault();
             cancelPickPointer();
+            exitPickMode();
         }
     }
     function enterPickMode() {
@@ -649,6 +679,7 @@
         document.addEventListener('pointermove', onPickPointerMove, true);
         document.addEventListener('pointerup', onPickPointerUp, true);
         document.addEventListener('keydown', onPickKeyDown, true);
+        startPickModeWatch();
         pushRefs();
         log('pick', 'enter');
     }
@@ -660,6 +691,7 @@
         document.removeEventListener('pointermove', onPickPointerMove, true);
         document.removeEventListener('pointerup', onPickPointerUp, true);
         document.removeEventListener('keydown', onPickKeyDown, true);
+        stopPickModeWatch();
         pushRefs();
         log('pick', 'exit');
     }
@@ -807,6 +839,15 @@
         pickedRefs = pickedRefs.filter(function (ref) { return String(ref.id) !== String(id); });
         if (pickedRefs.length !== before) {
             pushRefs();
+            var legacy = $all('#chatContext .chat-ctx-chip').filter(function (row) {
+                var removeEl = row.querySelector('.chat-ctx-remove');
+                var onclick = removeEl ? String(removeEl.getAttribute('onclick') || '') : '';
+                return onclick.indexOf("'" + id + "'") !== -1 || onclick.indexOf('"' + id + '"') !== -1;
+            })[0];
+            if (legacy) {
+                var legacyBtn = legacy.querySelector('.chat-ctx-remove');
+                if (legacyBtn) legacyBtn.click();
+            }
             return;
         }
         var chip = $all('#chatContext .chat-ctx-chip').filter(function (row) {

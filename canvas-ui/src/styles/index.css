@@ -1881,6 +1881,7 @@ html.theme-dark .nvca-tap-greeting-logo { filter: invert(1); }
 }
 .nvca-tap-chip.is-skill { border-color: var(--tn-line-strong); }
 .nvca-tap-chip-thumb { width: 16px; height: 16px; border-radius: 4px; object-fit: cover; }
+.nvca-tap-chip-t { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; background: var(--tn-hover); font-size: 10px; font-weight: 600; color: var(--tn-desc); }
 .nvca-tap-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nvca-tap-chip button { display: flex; align-items: center; color: var(--tn-desc); }
 .nvca-tap-box {
