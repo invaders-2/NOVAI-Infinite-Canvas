@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.137.1792947346';
+    var ASSET_VERSION = '1.0.137.1792978986';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -37,6 +37,8 @@
     var seedSendInFlight = false;
     var configProvidersCache = null;
     var pendingRunSkillRef = '';
+    var pickedRefs = [];
+    var pickModeActive = false;
     var selectedSkillId = null;
     var skillPending = false;
     var artifactTimer = 0;
@@ -374,39 +376,108 @@
             };
         });
     }
+    function pickedNodeRef(id) {
+        var list = [];
+        try { list = docNodes(); } catch (e) {}
+        var node = list.filter(function (item) { return String(item.id) === String(id); })[0];
+        if (!node) return null;
+        var images = (node.images || []).map(function (img) {
+            var kind = img.kind || 'image';
+            var url = String(img.url || '');
+            return { url: url, preview: String(img.preview || img.thumbnail || url), kind: kind };
+        }).filter(function (img) { return img.url; });
+        var first = images[0] || {};
+        return {
+            id: String(node.id),
+            name: String(node.alias || node.title || node.type || '画布节点').slice(0, 40),
+            role: null,
+            type: 'node',
+            thumbUrl: String(first.preview || first.url || ''),
+            kind: images[0] && images[0].kind === 'video' ? 'video' : 'image',
+            images: images
+        };
+    }
+    function mergeRefs() {
+        var list = readRefs();
+        pickedRefs.forEach(function (ref) {
+            if (!list.some(function (item) { return String(item.id) === String(ref.id); })) list.push(ref);
+        });
+        return list;
+    }
     function pushRefs() {
-        if (mountedHandle) mountedHandle.setRefs(readRefs());
+        if (mountedHandle) mountedHandle.setRefs(mergeRefs());
     }
-    function readLegacySkill() {
-        var chip = $('#chatSkillChip .chat-skill-chip');
-        if (!chip || !chip.children.length) return null;
-        var iconEl = chip.children[0];
-        var nameEl = chip.children[1];
-        return { icon: textOf(iconEl) || '✨', name: textOf(nameEl) };
+    function addPickedNode(id) {
+        var ref = pickedNodeRef(id);
+        if (!ref) return false;
+        if (pickedRefs.some(function (item) { return String(item.id) === String(ref.id); })) return true;
+        pickedRefs.push(ref);
+        pushRefs();
+        log('pick', 'add ' + ref.name);
+        return true;
     }
-    function pushSkillState() {
-        if (!mountedHandle) return;
-        var chip = readLegacySkill();
-        if (!chip) {
-            selectedSkillId = null;
-            mountedHandle.setSelectedSkill(null);
-            return;
+    function onPickClick(event) {
+        if (!pickModeActive) return;
+        var el = event.target && event.target.closest ? event.target.closest('.image-node') : null;
+        if (!el) return;
+        event.preventDefault();
+        event.stopPropagation();
+        var id = el.getAttribute('data-id') || '';
+        if (id) addPickedNode(id);
+    }
+    function enterPickMode() {
+        pickModeActive = true;
+        document.body.classList.add('nvca-pick-mode');
+        document.addEventListener('click', onPickClick, true);
+        pushRefs();
+        log('pick', 'enter');
+    }
+    function exitPickMode() {
+        pickModeActive = false;
+        document.body.classList.remove('nvca-pick-mode');
+        document.removeEventListener('click', onPickClick, true);
+        pushRefs();
+        log('pick', 'exit');
+    }
+    function captureCanvas() {
+        var world = document.getElementById('world');
+        var lib = window.htmlToImage;
+        if (!world) return Promise.resolve(false);
+        if (!lib || typeof lib.toPng !== 'function') {
+            notice('截图库未加载，请强制刷新页面后重试');
+            return Promise.resolve(false);
         }
-        mountedHandle.setSelectedSkill(selectedSkillId);
-    }
-    function skillsFromCapabilities(data) {
-        var list = data && Array.isArray(data.capabilities) ? data.capabilities : [];
-        return list.filter(function (item) {
-            return item && String(item.kind || '') === 'skill' && item.enabled !== false && String(item.id || '').trim();
-        }).map(function (item) {
-            return {
-                id: String(item.id),
-                name: String(item.name || item.id),
-                icon: String(item.icon || '✨'),
-                description: String(item.description || '')
+        var now = new Date();
+        var name = '画布截图 ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') + '.png';
+        return lib.toPng(world, {
+            cacheBust: true,
+            skipFonts: true,
+            imagePlaceholder: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mO4fPkyAAT2AnqzAEMqAAAAAElFTkSuQmCC',
+            onImageErrorHandler: function () { return true; },
+            pixelRatio: Math.min(2, Math.max(1, window.devicePixelRatio || 1)),
+            backgroundColor: (document.body && getComputedStyle(document.body).backgroundColor) || '#ffffff'
+        }).then(function (dataUrl) {
+            var ref = {
+                id: 'upload_capture_' + Date.now(),
+                name: name,
+                role: null,
+                type: 'upload',
+                upload: true,
+                thumbUrl: dataUrl,
+                kind: 'image',
+                images: [{ url: dataUrl, preview: dataUrl, kind: 'image', name: name }]
             };
+            pickedRefs.push(ref);
+            pushRefs();
+            log('capture', 'ok');
+            return true;
+        }).catch(function (error) {
+            log('capture', 'failed ' + String((error && error.message) || error));
+            notice('截图失败，请重试');
+            return false;
         });
     }
+
     function pushPlanConfirm() {
         if (!mountedHandle) return;
         var on = true;
@@ -442,6 +513,12 @@
         return waitFor(function () { return $('#chatSkillChip .chat-skill-chip'); }, timeout || 1200, 50);
     }
     function removeRefById(id) {
+        var before = pickedRefs.length;
+        pickedRefs = pickedRefs.filter(function (ref) { return String(ref.id) !== String(id); });
+        if (pickedRefs.length !== before) {
+            pushRefs();
+            return;
+        }
         var chip = $all('#chatContext .chat-ctx-chip').filter(function (row) {
             var removeEl = row.querySelector('.chat-ctx-remove');
             var onclick = removeEl ? String(removeEl.getAttribute('onclick') || '') : '';
@@ -788,6 +865,9 @@
         applySkillRef: applySkillRef,
         setChatModel: setChatModel,
         setImageProvider: setImageProvider,
+        enterPickMode: enterPickMode,
+        exitPickMode: exitPickMode,
+        captureCanvas: captureCanvas,
         addSelectedRefs: addSelectedRefs,
         pickUpload: pickUpload,
         clearSkill: clearSkill,
@@ -844,6 +924,22 @@
             if (isRun && init && typeof init.body === 'string') {
                 try {
                     var runBody = JSON.parse(init.body);
+                    if (pickedRefs.length) {
+                        var focus = runBody.focus && typeof runBody.focus === 'object' ? runBody.focus : {};
+                        var refs = Array.isArray(focus.references) ? focus.references.slice() : [];
+                        var images = Array.isArray(focus.reference_images) ? focus.reference_images.slice() : [];
+                        pickedRefs.forEach(function (ref) {
+                            if (!refs.some(function (item) { return String(item.id) === String(ref.id); })) {
+                                refs.push({ id: ref.id, name: ref.name, role: null, source: ref.upload ? 'upload' : 'node' });
+                            }
+                            (ref.images || []).forEach(function (img) {
+                                if (img.url && images.indexOf(img.url) === -1) images.push(img.url);
+                            });
+                        });
+                        focus.references = refs;
+                        focus.reference_images = images;
+                        runBody.focus = focus;
+                    }
                     if (pendingRunSkillRef) {
                         /* 应用市场 brief 的 store:<id>：只在这一轮注入 skill_ref，不额外带 skill_id */
                         runBody.skill_ref = pendingRunSkillRef;

@@ -18,6 +18,7 @@ import {
 	XIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
 import { fetchCanvasNodes } from "./api"
 import type { CanvasNodeSummary } from "./api"
@@ -49,7 +50,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	const { env } = store
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 	const [text, setText] = useState("")
-	const [addOpen, setAddOpen] = useState(false)
+	const [pickMode, setPickMode] = useState(false)
 	const [modelOpen, setModelOpen] = useState(false)
 	const [mentionOpen, setMentionOpen] = useState(false)
 	const [mentionNodes, setMentionNodes] = useState<CanvasNodeSummary[]>([])
@@ -148,12 +149,23 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	}
 
 	const captureView = () => {
-		const exportBtn = document.getElementById("smartExportToggle")
-		if (exportBtn) {
-			exportBtn.click()
-			return
+		void store.captureCanvas()
+	}
+
+	const togglePickMode = () => {
+		try {
+			const panel = document.getElementById("canvasAssistantPanel")
+			document.documentElement.style.setProperty("--nvca-panel-width", (panel ? panel.getBoundingClientRect().width : 440) + "px")
+		} catch {}
+		if (pickMode) {
+			store.exitPickMode()
+			setPickMode(false)
+			store.notify("已退出从画布添加")
+		} else {
+			store.enterPickMode()
+			setPickMode(true)
+			store.notify("从画布添加：点击节点加入引用")
 		}
-		store.notify("画布截图入口还没准备好")
 	}
 
 	const contextLabel = (() => {
@@ -304,9 +316,27 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 				</div>
 			) : null}
 
+			{pickMode
+				? createPortal(
+						<div className="nvca-pick-bar" role="status" aria-live="polite">
+							<div className="nvca-pick-copy">
+								<strong>从画布添加</strong>
+								<span>点击节点以添加为引用</span>
+							</div>
+							<button className="nvca-pick-upload" onClick={() => store.pickUpload()} type="button">
+								<ImageUpIcon className="nvca-i-xs" />
+								上传素材
+							</button>
+							<button className="nvca-pick-exit" onClick={togglePickMode} type="button">
+								退出
+							</button>
+						</div>,
+						document.body,
+					)
+				: null}
 			<div className="nvca-tap-composer-hint">
-				<button className="nvca-tap-hint-btn" onClick={() => setAddOpen((open) => !open)} type="button">
-					添加画布内容
+				<button className="nvca-tap-hint-btn" onClick={togglePickMode} type="button">
+					{pickMode ? "正在从画布添加…" : "添加画布内容"}
 				</button>
 			</div>
 			{nodeRefs.length > 0 ? (
@@ -448,51 +478,26 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 				/>
 				<div className="nvca-tap-toolbar">
 					<div className="nvca-tap-tools-left">
-						<div className="nvca-tap-add-wrap">
-							<button
-								aria-expanded={addOpen}
-								className="nvca-tap-icon is-add"
-								onClick={() => setAddOpen((open) => !open)}
-								title="添加画布节点 / 素材"
-								type="button"
-							>
-								<PlusIcon className="nvca-i-sm" />
-							</button>
-							{addOpen ? (
-								<div className="nvca-tap-menu is-add">
-									<button
-										className="nvca-tap-menu-item"
-										onClick={() => {
-											setAddOpen(false)
-											store.addSelectedRefs()
-										}}
-										type="button"
-									>
-										<MousePointerSquareDashedIcon className="nvca-i-sm" />
-										<span className="nvca-tap-menu-text">引用选中的画布节点</span>
-									</button>
-									<button
-										className="nvca-tap-menu-item"
-										onClick={() => {
-											setAddOpen(false)
-											store.pickUpload()
-										}}
-										type="button"
-									>
-										<ImageUpIcon className="nvca-i-sm" />
-										<span className="nvca-tap-menu-text">上传素材（图片 / 视频）</span>
-									</button>
-								</div>
-							) : null}
-						</div>
+						<button
+							aria-pressed={pickMode}
+							className={cn("nvca-tap-icon is-add", pickMode && "is-on")}
+							onClick={togglePickMode}
+							title={pickMode ? "退出从画布添加" : "从画布添加引用"}
+							type="button"
+						>
+							<PlusIcon className="nvca-i-sm" />
+						</button>
 						<button
 							aria-label={"已选目录，当前 " + refCount + " 项"}
 							className="nvca-tap-catalog"
-							onClick={() => setAddOpen((open) => !open)}
+							onClick={() => store.notify(refCount ? "已选 " + refCount + " 项引用" : "还没有引用，点＋从画布添加")}
 							title={"已选目录（" + refCount + "）"}
 							type="button"
 						>
 							<ShieldIcon className="nvca-i-sm" />
+						</button>
+						<button className="nvca-tap-icon is-upload" onClick={() => store.pickUpload()} title="上传素材" type="button">
+							<ImageUpIcon className="nvca-i-sm" />
 						</button>
 						<button
 							aria-pressed={env.planConfirm}

@@ -58,6 +58,9 @@ export interface AssistantStore {
 	setPlanConfirm(on: boolean): void
 	addSelectedRefs(): Promise<number>
 	pickUpload(): void
+	enterPickMode(): void
+	exitPickMode(): void
+	captureCanvas(): Promise<boolean>
 	branchAt(index: number): Promise<void>
 	removeRef(id: string): void
 	clearRefs(): void
@@ -428,6 +431,24 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		},
 		pickUpload() {
 			try { api.pickUpload() } catch {}
+		},
+		enterPickMode() {
+			try { if (typeof api.enterPickMode === "function") api.enterPickMode() } catch {}
+		},
+		exitPickMode() {
+			try { if (typeof api.exitPickMode === "function") api.exitPickMode() } catch {}
+		},
+		captureCanvas() {
+			return Promise.resolve()
+				.then(() => (typeof api.captureCanvas === "function" ? api.captureCanvas() : false))
+				.then((ok) => {
+					pushNotice(ok ? "已把画布可视区域加入引用" : "截图没有生成")
+					return Boolean(ok)
+				})
+				.catch(() => {
+					pushNotice("截图失败，请重试")
+					return false
+				})
 		},
 		async branchAt(index) {
 			const list = await fetchThreads()

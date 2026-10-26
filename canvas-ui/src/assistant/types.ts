@@ -167,6 +167,9 @@ export interface CanvasAssistantHostApi {
 	addSelectedRefs(): Promise<number>
 	/** 打开旧面板的素材上传（图片/视频），上传后同样以引用条形式进入本轮上下文 */
 	pickUpload(): void
+	enterPickMode?(): void
+	exitPickMode?(): void
+	captureCanvas?(): Promise<boolean>
 	planAction(action: "run" | "cancel" | "adjust"): void
 	confirmAction?(yes: boolean): void
 	approveStep?(step: { tool: string; args?: unknown; description?: string }, instruction: string): Promise<boolean>
