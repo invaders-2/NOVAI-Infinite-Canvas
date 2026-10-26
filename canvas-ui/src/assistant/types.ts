@@ -170,6 +170,8 @@ export interface CanvasAssistantHostApi {
 	enterPickMode?(): void
 	exitPickMode?(): void
 	captureCanvas?(): Promise<boolean>
+	captureRegionPreview?(rect: { x: number; y: number; w: number; h: number }): Promise<{ url: string; width: number; height: number } | null>
+	addCaptureRef?(url: string, width: number, height: number): boolean
 	planAction(action: "run" | "cancel" | "adjust"): void
 	confirmAction?(yes: boolean): void
 	approveStep?(step: { tool: string; args?: unknown; description?: string }, instruction: string): Promise<boolean>

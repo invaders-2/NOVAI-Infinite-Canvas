@@ -2531,3 +2531,152 @@ body.nvca-pick-mode .image-node:hover {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.55), 0 16px 36px rgba(0, 0, 0, 0.28);
 }
 body.nvca-pick-mode .image-node .node-port { pointer-events: none; }
+
+/* ── 框选 / 拖拽 / 区域截图 ── */
+.nvca-marquee {
+  position: fixed;
+  z-index: 64;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 2px;
+  background: rgba(59, 130, 246, 0.1);
+  pointer-events: none;
+}
+.nvca-node-ghost {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  padding: 7px 10px 7px 7px;
+  border-radius: 12px;
+  transform: translate(14px, 14px);
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  color: #f5f5f5;
+  font-size: 12px;
+  pointer-events: none;
+}
+html:not(.theme-dark) .nvca-node-ghost {
+  background: #f5f5f5;
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #111111;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+}
+.nvca-node-ghost img { width: 28px; height: 28px; border-radius: 8px; object-fit: cover; flex: 0 0 auto; }
+.nvca-node-ghost-mark { width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: rgba(59, 130, 246, 0.16); color: #3b82f6; font-size: 16px; }
+.nvca-node-ghost span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nvca-drop-hint {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -36px;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  border-radius: 999px;
+  background: #3b82f6;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+  pointer-events: none;
+}
+body.nvca-drop-active .nvca-drop-hint { display: flex; }
+.nvca-tap-box { position: relative; }
+body.nvca-drop-active .nvca-tap-box {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.55);
+  border-color: rgba(59, 130, 246, 0.55);
+}
+.nvca-shot-overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: calc(100vw - var(--nvca-panel-width, 440px));
+  height: 100vh;
+  z-index: 82;
+  cursor: crosshair;
+  user-select: none;
+  background: rgba(0, 0, 0, 0.32);
+}
+.nvca-shot-overlay.is-confirm { cursor: default; }
+.nvca-shot-label {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.82);
+  color: #f5f5f5;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.nvca-shot-select {
+  position: absolute;
+  border: 1.5px solid rgba(59, 130, 246, 0.9);
+  border-radius: 2px;
+  background: rgba(59, 130, 246, 0.1);
+  pointer-events: none;
+}
+.nvca-shot-size {
+  position: absolute;
+  right: -1px;
+  bottom: -24px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(20, 20, 20, 0.86);
+  color: #ffffff;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.nvca-shot-confirm {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 48px);
+  padding: 8px;
+  border-radius: 14px;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+  color: #f5f5f5;
+}
+html:not(.theme-dark) .nvca-shot-confirm {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #111111;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+.nvca-shot-confirm img {
+  width: 72px;
+  height: 46px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: rgba(127, 127, 127, 0.18);
+  flex: 0 0 auto;
+}
+.nvca-shot-confirm-text { display: flex; flex-direction: column; gap: 1px; min-width: 110px; }
+.nvca-shot-confirm-text strong { font-size: 12.5px; font-weight: 600; }
+.nvca-shot-confirm-text span { font-size: 11px; color: rgba(255, 255, 255, 0.45); }
+html:not(.theme-dark) .nvca-shot-confirm-text span { color: rgba(0, 0, 0, 0.45); }
+.nvca-shot-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.nvca-shot-btn:hover { background: rgba(127, 127, 127, 0.14); }
+.nvca-shot-btn.is-primary { background: #3b82f6; color: #ffffff; }
+.nvca-shot-btn.is-primary:hover { background: #2563eb; }

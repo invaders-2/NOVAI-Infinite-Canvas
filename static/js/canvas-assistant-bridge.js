@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.137.1792978986';
+    var ASSET_VERSION = '1.0.137.1792979562';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -392,6 +392,7 @@
             name: String(node.alias || node.title || node.type || '画布节点').slice(0, 40),
             role: null,
             type: 'node',
+            nodeType: String(node.type || ''),
             thumbUrl: String(first.preview || first.url || ''),
             kind: images[0] && images[0].kind === 'video' ? 'video' : 'image',
             images: images
@@ -416,26 +417,161 @@
         log('pick', 'add ' + ref.name);
         return true;
     }
-    function onPickClick(event) {
-        if (!pickModeActive) return;
-        var el = event.target && event.target.closest ? event.target.closest('.image-node') : null;
-        if (!el) return;
+    var pickPointer = null;
+    var pickGhost = null;
+    var pickMarquee = null;
+    function pickPanel() {
+        return document.getElementById('canvasAssistantPanel') || document.getElementById('chatModal');
+    }
+    function insidePanel(x, y) {
+        var panel = pickPanel();
+        if (!panel) return false;
+        var rect = panel.getBoundingClientRect();
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    }
+    function cancelPickPointer() {
+        pickPointer = null;
+        if (pickGhost && pickGhost.parentNode) pickGhost.parentNode.removeChild(pickGhost);
+        pickGhost = null;
+        if (pickMarquee && pickMarquee.parentNode) pickMarquee.parentNode.removeChild(pickMarquee);
+        pickMarquee = null;
+        document.body.classList.remove('nvca-drop-active');
+    }
+    function createGhost(ref, x, y) {
+        var ghost = document.createElement('div');
+        ghost.className = 'nvca-node-ghost';
+        if (ref && ref.thumbUrl) {
+            var img = document.createElement('img');
+            img.src = ref.thumbUrl;
+            img.alt = '';
+            ghost.appendChild(img);
+        } else {
+            var mark = document.createElement('span');
+            mark.className = 'nvca-node-ghost-mark';
+            mark.textContent = ref && /image|video/.test(String(ref.nodeType || '')) ? '▧' : 'T';
+            ghost.appendChild(mark);
+        }
+        var label = document.createElement('span');
+        label.textContent = ref ? ref.name : '画布节点';
+        ghost.appendChild(label);
+        ghost.style.left = x + 'px';
+        ghost.style.top = y + 'px';
+        document.body.appendChild(ghost);
+        return ghost;
+    }
+    function updateGhost(x, y) {
+        if (!pickGhost) return;
+        pickGhost.style.left = x + 'px';
+        pickGhost.style.top = y + 'px';
+        document.body.classList.toggle('nvca-drop-active', insidePanel(x, y));
+    }
+    function onPickPointerDown(event) {
+        if (!pickModeActive || event.button !== 0 || pickPointer) return;
+        var target = event.target;
+        if (!target || !target.closest) return;
+        if (target.closest('#canvasAssistantPanel, .nvca-pick-bar')) return;
+        var node = target.closest('.image-node');
+        if (node) {
+            var id = node.getAttribute('data-id') || '';
+            if (!id) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            pickPointer = { kind: 'node', id: id, startX: event.clientX, startY: event.clientY, moved: false, ref: pickedNodeRef(id) };
+            return;
+        }
+        var shell = document.getElementById('shell');
+        if (!shell || !shell.contains(target)) return;
+        if (target.closest('button, input, textarea, select, a, #canvasRail, .canvas-rail, .topbar, .canvas-topbar, #smartTitle, .smart-title')) return;
         event.preventDefault();
         event.stopPropagation();
-        var id = el.getAttribute('data-id') || '';
-        if (id) addPickedNode(id);
+        event.stopImmediatePropagation();
+        pickPointer = { kind: 'marquee', startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false };
+    }
+    function onPickPointerMove(event) {
+        if (!pickPointer) return;
+        var dx = event.clientX - pickPointer.startX;
+        var dy = event.clientY - pickPointer.startY;
+        if (pickPointer.kind === 'node') {
+            if (!pickPointer.moved && Math.hypot(dx, dy) < 5) return;
+            pickPointer.moved = true;
+            if (!pickGhost) pickGhost = createGhost(pickPointer.ref, event.clientX, event.clientY);
+            updateGhost(event.clientX, event.clientY);
+            return;
+        }
+        if (!pickPointer.moved && Math.hypot(dx, dy) < 4) return;
+        pickPointer.moved = true;
+        var left = Math.min(pickPointer.startX, event.clientX);
+        var top = Math.min(pickPointer.startY, event.clientY);
+        var width = Math.abs(dx);
+        var height = Math.abs(dy);
+        if (!pickMarquee) {
+            pickMarquee = document.createElement('div');
+            pickMarquee.className = 'nvca-marquee';
+            document.body.appendChild(pickMarquee);
+        }
+        pickMarquee.style.left = left + 'px';
+        pickMarquee.style.top = top + 'px';
+        pickMarquee.style.width = width + 'px';
+        pickMarquee.style.height = height + 'px';
+    }
+    function finishMarquee() {
+        if (!pickMarquee) return;
+        var rect = pickMarquee.getBoundingClientRect();
+        var els = document.querySelectorAll('.image-node');
+        var ids = [];
+        for (var i = 0; i < els.length; i += 1) {
+            var el = els[i];
+            if (!el.getAttribute('data-id')) continue;
+            var r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            if (r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top) {
+                ids.push(el.getAttribute('data-id'));
+            }
+        }
+        ids.forEach(addPickedNode);
+        log('pick', 'marquee ' + ids.length);
+    }
+    function onPickPointerUp(event) {
+        if (!pickPointer) return;
+        var pointer = pickPointer;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if (pointer.kind === 'node') {
+            if (!pointer.moved) addPickedNode(pointer.id);
+            else if (insidePanel(event.clientX, event.clientY)) addPickedNode(pointer.id);
+            log('pick', pointer.moved ? 'drop node' : 'click node');
+        } else if (pointer.kind === 'marquee') {
+            finishMarquee();
+        }
+        cancelPickPointer();
+    }
+    function onPickKeyDown(event) {
+        if (!pickModeActive) return;
+        if (event.key === 'Escape' && pickPointer) {
+            event.preventDefault();
+            cancelPickPointer();
+        }
     }
     function enterPickMode() {
         pickModeActive = true;
         document.body.classList.add('nvca-pick-mode');
-        document.addEventListener('click', onPickClick, true);
+        document.addEventListener('pointerdown', onPickPointerDown, true);
+        document.addEventListener('pointermove', onPickPointerMove, true);
+        document.addEventListener('pointerup', onPickPointerUp, true);
+        document.addEventListener('keydown', onPickKeyDown, true);
         pushRefs();
         log('pick', 'enter');
     }
     function exitPickMode() {
         pickModeActive = false;
+        cancelPickPointer();
         document.body.classList.remove('nvca-pick-mode');
-        document.removeEventListener('click', onPickClick, true);
+        document.removeEventListener('pointerdown', onPickPointerDown, true);
+        document.removeEventListener('pointermove', onPickPointerMove, true);
+        document.removeEventListener('pointerup', onPickPointerUp, true);
+        document.removeEventListener('keydown', onPickKeyDown, true);
         pushRefs();
         log('pick', 'exit');
     }
@@ -478,6 +614,72 @@
         });
     }
 
+    function captureRegionPreview(rect) {
+        var world = document.getElementById('world');
+        var shell = document.getElementById('shell');
+        var lib = window.htmlToImage;
+        if (!world || !shell) return Promise.resolve(null);
+        if (!lib || typeof lib.toPng !== 'function') {
+            notice('截图库未加载，请强制刷新页面后重试');
+            return Promise.resolve(null);
+        }
+        var width = Math.max(1, Math.round(Number(rect && rect.w) || 0));
+        var height = Math.max(1, Math.round(Number(rect && rect.h) || 0));
+        var x = Math.max(0, Number(rect && rect.x) || 0);
+        var y = Math.max(0, Number(rect && rect.y) || 0);
+        return lib.toPng(world, {
+            cacheBust: true,
+            skipFonts: true,
+            pixelRatio: 1,
+            imagePlaceholder: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mO4fPkyAAT2AnqzAEMqAAAAAElFTkSuQmCC',
+            onImageErrorHandler: function () { return true; },
+            backgroundColor: (document.body && getComputedStyle(document.body).backgroundColor) || '#ffffff'
+        }).then(function (dataUrl) {
+            return new Promise(function (resolve) {
+                var img = new Image();
+                img.onload = function () {
+                    var shellRect = shell.getBoundingClientRect();
+                    var scale = shellRect.width ? img.naturalWidth / shellRect.width : 1;
+                    var sx = Math.max(0, Math.min(img.naturalWidth - 1, Math.round((x - shellRect.left) * scale)));
+                    var sy = Math.max(0, Math.min(img.naturalHeight - 1, Math.round((y - shellRect.top) * scale)));
+                    var sw = Math.max(1, Math.min(img.naturalWidth - sx, Math.round(width * scale)));
+                    var sh = Math.max(1, Math.min(img.naturalHeight - sy, Math.round(height * scale)));
+                    var canvas = document.createElement('canvas');
+                    canvas.width = sw;
+                    canvas.height = sh;
+                    var ctx = canvas.getContext('2d');
+                    if (!ctx) { resolve(null); return; }
+                    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+                    resolve({ url: canvas.toDataURL('image/png'), width: sw, height: sh });
+                };
+                img.onerror = function () { resolve(null); };
+                img.src = dataUrl;
+            });
+        }).catch(function (error) {
+            log('capture-region', 'failed ' + String((error && error.message) || error));
+            return null;
+        });
+    }
+    function addCaptureRef(url, width, height) {
+        if (!url) return false;
+        var w = Math.max(1, Math.round(Number(width) || 1));
+        var h = Math.max(1, Math.round(Number(height) || 1));
+        var now = new Date();
+        var name = '画布截图 ' + w + '×' + h + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') + '.png';
+        pickedRefs.push({
+            id: 'upload_capture_' + Date.now(),
+            name: name,
+            role: null,
+            type: 'upload',
+            upload: true,
+            thumbUrl: url,
+            kind: 'image',
+            images: [{ url: url, preview: url, kind: 'image', name: name }]
+        });
+        pushRefs();
+        log('capture-region', 'added ' + w + 'x' + h);
+        return true;
+    }
     function pushPlanConfirm() {
         if (!mountedHandle) return;
         var on = true;
@@ -868,6 +1070,8 @@
         enterPickMode: enterPickMode,
         exitPickMode: exitPickMode,
         captureCanvas: captureCanvas,
+        captureRegionPreview: captureRegionPreview,
+        addCaptureRef: addCaptureRef,
         addSelectedRefs: addSelectedRefs,
         pickUpload: pickUpload,
         clearSkill: clearSkill,

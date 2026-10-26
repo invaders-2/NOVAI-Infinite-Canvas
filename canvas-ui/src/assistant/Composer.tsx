@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { ScreenshotPicker } from "./ScreenshotPicker"
 import { cn } from "@/lib/utils"
 import { fetchCanvasNodes } from "./api"
 import type { CanvasNodeSummary } from "./api"
@@ -51,6 +52,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 	const [text, setText] = useState("")
 	const [pickMode, setPickMode] = useState(false)
+	const [shotOpen, setShotOpen] = useState(false)
 	const [modelOpen, setModelOpen] = useState(false)
 	const [mentionOpen, setMentionOpen] = useState(false)
 	const [mentionNodes, setMentionNodes] = useState<CanvasNodeSummary[]>([])
@@ -149,7 +151,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 	}
 
 	const captureView = () => {
-		void store.captureCanvas()
+		setShotOpen(true)
 	}
 
 	const togglePickMode = () => {
@@ -316,12 +318,13 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 				</div>
 			) : null}
 
+			<ScreenshotPicker onClose={() => setShotOpen(false)} open={shotOpen} store={store} />
 			{pickMode
 				? createPortal(
 						<div className="nvca-pick-bar" role="status" aria-live="polite">
 							<div className="nvca-pick-copy">
 								<strong>从画布添加</strong>
-								<span>点击节点以添加为引用</span>
+								<span>点击或框选节点，也可拖到输入框</span>
 							</div>
 							<button className="nvca-pick-upload" onClick={() => store.pickUpload()} type="button">
 								<ImageUpIcon className="nvca-i-xs" />
@@ -412,6 +415,7 @@ export const Composer = ({ store, pendingText }: ComposerProps) => {
 					submit()
 				}}
 			>
+				<div className="nvca-drop-hint">松手将节点加入引用</div>
 				<textarea
 					aria-label="随心输入"
 					className="nvca-tap-input"

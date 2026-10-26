@@ -61,6 +61,8 @@ export interface AssistantStore {
 	enterPickMode(): void
 	exitPickMode(): void
 	captureCanvas(): Promise<boolean>
+	captureRegionPreview(rect: { x: number; y: number; w: number; h: number }): Promise<{ url: string; width: number; height: number } | null>
+	addCaptureRef(url: string, width: number, height: number): boolean
 	branchAt(index: number): Promise<void>
 	removeRef(id: string): void
 	clearRefs(): void
@@ -437,6 +439,17 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 		},
 		exitPickMode() {
 			try { if (typeof api.exitPickMode === "function") api.exitPickMode() } catch {}
+		},
+		captureRegionPreview(rect) {
+			return Promise.resolve()
+				.then(() => (typeof api.captureRegionPreview === "function" ? api.captureRegionPreview(rect) : null))
+				.catch(() => null)
+		},
+		addCaptureRef(url, width, height) {
+			try {
+				if (typeof api.addCaptureRef === "function") return Boolean(api.addCaptureRef(url, width, height))
+			} catch {}
+			return false
 		},
 		captureCanvas() {
 			return Promise.resolve()
