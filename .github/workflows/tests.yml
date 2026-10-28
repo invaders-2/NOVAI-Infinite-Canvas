@@ -47,7 +47,15 @@ jobs:
           node --check static/js/shared/table-model.js
 
       - name: Node tests
-        run: node tests/run-all.js
+        shell: bash
+        run: |
+          set -o pipefail
+          node tests/run-all.js 2>&1 | tee node-tests.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            while IFS= read -r line; do printf '::error::%s\n' "$line"; done < <(tail -n 35 node-tests.log)
+            exit "$status"
+          fi
 
       - name: Install minimal deps needed to import main.py
         run: |
