@@ -110,6 +110,22 @@ export const restoreFolder = async (): Promise<FolderInfo | null> => {
 	return { name: handle.name || "本地文件夹", count, handle }
 }
 
+export const forgetFolder = async (): Promise<void> => {
+	remembered = null
+	try {
+		const db = await openDb()
+		await new Promise<void>((resolve, reject) => {
+			const tx = db.transaction(STORE_NAME, "readwrite")
+			tx.objectStore(STORE_NAME).delete(KEY)
+			tx.oncomplete = () => resolve()
+			tx.onerror = () => reject(tx.error)
+		})
+		db.close()
+	} catch {
+		/* 即使持久化存储不可用，本次会话的授权引用也已移除 */
+	}
+}
+
 export const listFolderFiles = async (limit = 20): Promise<FolderFile[]> => {
 	const handle = remembered || (await loadHandle())
 	if (!handle) return []

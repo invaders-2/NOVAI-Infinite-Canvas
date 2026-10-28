@@ -16,13 +16,16 @@ class CreditsError(Exception):
 class InsufficientCredits(CreditsError):
     """生成前校验失败：契约要求 402 + body 带 estimate / balance。"""
 
-    def __init__(self, estimate: float, balance: float, detail: str = "积分不足") -> None:
+    def __init__(self, estimate: float, balance: float, detail: str = "积分不足",
+                 overdraft_limit=None) -> None:
         payload = {
             "code": "INSUFFICIENT_CREDITS",
             "detail": detail,
             "estimate": round(float(estimate), 6),
             "balance": round(float(balance), 6),
         }
+        if overdraft_limit is not None:
+            payload["overdraft_limit"] = round(float(overdraft_limit), 6)
         super().__init__(detail, 402, "INSUFFICIENT_CREDITS", payload)
 
 

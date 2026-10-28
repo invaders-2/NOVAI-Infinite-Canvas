@@ -37,6 +37,7 @@ export type Part =
 			status: "pending" | "executing" | "executed" | "skipped" | "cancelled"
 	  }
 	| { type: "run_outcome"; id: string; status: string; activeWorkMs: number; steps: number }
+	| { type: "vision"; id: string; mode: string; labels: string[]; text: string }
 	| { type: "usage"; id: string; usage: UsageTotals }
 	| { type: "user_steer"; id: string; text: string; status: string }
 	| { type: "context_nodes"; id: string; nodeIds: string[]; nodeCount: number }
@@ -90,6 +91,7 @@ export interface Message {
 	plan?: PlanData
 	planState?: "pending" | "running" | "applied" | "cancelled" | "adjusted" | "aborted" | ""
 	systemKind?: "info" | "warn" | "error"
+	rating?: "up" | "down"
 }
 
 export interface RefChip {
@@ -97,6 +99,7 @@ export interface RefChip {
 	name: string
 	role?: string
 	type?: string
+	nodeType?: string
 	thumbUrl?: string
 	kind?: "image" | "video"
 }
@@ -146,6 +149,8 @@ export interface ContextUsage {
 export interface StreamEvent {
 	id?: string
 	type?: string
+	event?: string
+	name?: string
 	data?: Record<string, unknown>
 }
 

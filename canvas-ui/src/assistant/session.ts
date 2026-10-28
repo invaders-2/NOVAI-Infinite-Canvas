@@ -215,7 +215,10 @@ export const applyEvent = (state: SessionState, event: StreamEvent): SessionStat
 	const data: Record<string, unknown> = event.data && typeof event.data === "object" ? event.data : (event as Record<string, unknown>)
 
 	if (type === "run_start") {
-		const assistant = pushAssistant(state)
+		const previous = state.messages[state.messages.length - 1]
+		const visionOnly = previous?.role === "assistant" && !previous.runId && previous.parts.length > 0 && previous.parts.every((part) => part.type === "vision")
+		const assistant = visionOnly ? previous : pushAssistant(state)
+		state.streamingMessageId = assistant.id
 		assistant.status = "streaming"
 		state.streamState = "streaming"
 		state.runId = String(data.run_id || data.runId || "")
@@ -276,9 +279,23 @@ export const applyEvent = (state: SessionState, event: StreamEvent): SessionStat
 			title: String(data.description || data.title || ""),
 			status: String(data.status || "") as "" | "running" | "done" | "failed",
 			message: String(data.message || ""),
+			args: data.args && typeof data.args === "object" ? clone(data.args) : undefined,
+			result: data.result === undefined ? undefined : clone(data.result),
 			payload: data.payload && typeof data.payload === "object" ? clone(data.payload) : undefined,
 		}
 		appendPart(state, ensureAssistant(state), part)
+		return state
+	}
+
+	if (type === "vision") {
+		const labels = Array.isArray(data.labels) ? data.labels.map(String).filter(Boolean) : []
+		appendPart(state, ensureAssistant(state), {
+			type: "vision",
+			id: uid("part"),
+			mode: String(data.mode || ""),
+			labels,
+			text: String(data.text || ""),
+		})
 		return state
 	}
 

@@ -165,7 +165,7 @@ ok(!/data-text-upstream-insert/.test(html) && !/smartTextModalUpstreamList/.test
 ok(/input\.addEventListener\('input', syncSmartTextEditorNode\)/.test(js), '输入即写回 node.text');
 ok(/event\.key === 'Escape'/.test(js) && /event\.key === 'Enter'/.test(js), 'Esc 关闭、Ctrl/⌘+Enter 保存');
 const closeFn = topLevelFunction(js, 'closeSmartTextEditor');
-ok(/if\(node && !save\) node\.text = smartTextEditorOriginalText;/.test(closeFn), '「取消」才还原打开前的文本');
+ok(/else if\(!save\)\{\s*node\.text = smartTextEditorOriginalText;\s*\}/.test(closeFn), '「取消」才还原打开前的文本');
 ok(/render\(\);/.test(closeFn), '关弹窗后重绘节点预览');
 ok(/node\.text = smartTextModalPlain\(input\)/.test(topLevelFunction(js, 'syncSmartTextEditorNode')), 'syncSmartTextEditorNode 把编辑面写进 node.text（contenteditable 版）');
 const wheelBlock = (js.match(/const WHEEL_LOCK_SELECTOR = \[([\s\S]*?)\]\.join/) || [])[1] || '';
@@ -264,8 +264,8 @@ console.log('[12] 文本生成直接请求模型');
 ok(!/llmFastModeHtml|prompt-llm-fast|skipPromptIntelligence/.test(js), 'JS 里没有快速按钮残留');
 ok(!/prompt-llm-fast/.test(css) && !/llmFastMode/.test(i18n), 'CSS / i18n 里也没有残留');
 const runPromptFn = topLevelFunction(js, 'runPromptLLMNode');
-ok(/answer = await callSmartCanvasLLM\(node, message, \[\], \{\s*noPromptIntelligence: true,\s*promptOnlySystem: true,\s*onDelta:/.test(runPromptFn), '流式请求跳过 Prompt Intelligence 并启用简洁默认 System');
-ok(/answer = await callSmartCanvasLLM\(node, message, \[\], \{noPromptIntelligence:true, promptOnlySystem:true\}\);/.test(runPromptFn), '409 退回普通接口时保留相同选项');
+ok(/answer = await callSmartCanvasLLM\(node, message, \[\], \{\s*noPromptIntelligence: true,\s*promptOnlySystem: true,\s*outputKind,\s*onDelta:/.test(runPromptFn), '流式请求跳过 Prompt Intelligence 并启用简洁默认 System');
+ok(/answer = await callSmartCanvasLLM\(node, message, \[\], \{noPromptIntelligence:true, promptOnlySystem:true, outputKind\}\);/.test(runPromptFn), '409 退回普通接口时保留相同选项');
 const callSmartFn = topLevelFunction(js, 'callSmartCanvasLLM');
 ok(/if\(options\.noPromptIntelligence\) body\.no_prompt_intelligence = true;/.test(callSmartFn), '跳过标记写入请求体');
 ok(/images,\s*videos,\s*reverse: false/.test(callSmartFn), '图片、视频字段保留，旧反推设置不会暗中生效');
@@ -388,6 +388,9 @@ async function verifyTextGenerationRequest(streamSupported, reverse, storedSyste
         topLevelFunction(js, 'streamCanvasLLMResponse'),
         topLevelFunction(js, 'callSmartCanvasLLM'),
         topLevelFunction(js, 'runPromptLLMNode'),
+        /* 输出类型（自动判定 / 手动覆盖）是 2026 新增的一层：这个用例只关心「默认仍是简洁 System」，
+           所以把判定固定成 prompt（自动判定的行为由 tests/test_llm_output_kind.js 单独覆盖）。 */
+        "globalThis.smartLlmResolvedOutputKind = () => 'prompt';",
         'globalThis.run = runPromptLLMNode;',
         'globalThis.callDirect = callSmartCanvasLLM;',
     ].join('\n'), sandbox);

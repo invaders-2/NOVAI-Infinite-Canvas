@@ -52,6 +52,10 @@ def set_auth(enabled: bool) -> None:
         os.environ.pop("NOVAI_AUTH_ENABLED", None)
 
 
+def tearDownModule():
+    set_auth(False)
+
+
 def unique_name(prefix: str = "u") -> str:
     return (prefix + uuid.uuid4().hex[:12])[:32]
 

@@ -6,10 +6,14 @@ import {
 	LayoutGridIcon,
 	LightbulbIcon,
 	PaperclipIcon,
+	PlusIcon,
 	PuzzleIcon,
+	SearchIcon,
+	Settings2Icon,
 	SquareArrowDownIcon,
+	UploadIcon,
 } from "lucide-react"
-import { fetchStoreCatalog, type StoreCatalogItem } from "./api"
+import { fetchSkills, fetchStoreCatalog, importSkill, type SkillRow, type StoreCatalogItem } from "./api"
 import { chooseFolder, folderSupported } from "./folder"
 import type { AssistantStore } from "./store"
 
@@ -27,9 +31,9 @@ interface PlusMenuProps {
 	onBrainstorm: () => void
 }
 
-const MENU_WIDTH = 358
-const SUBMENU_WIDTH = 320
-const ITEM_INDEX: Record<Exclude<Submenu, null>, number> = { skills: 3, apps: 5 }
+const MENU_WIDTH = 252
+const SUBMENU_WIDTH = 288
+const ITEM_INDEX: Record<Exclude<Submenu, null>, number> = { skills: 2, apps: 4 }
 
 const visibleAnchor = (anchor: HTMLElement | null): DOMRect | null => {
 	if (!anchor || !anchor.isConnected) return null
@@ -46,12 +50,20 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 	const [active, setActive] = useState(0)
 	const [subActive, setSubActive] = useState(0)
 	const [catalog, setCatalog] = useState<StoreCatalogItem[]>([])
+	const [skillRows, setSkillRows] = useState<SkillRow[]>([])
+	const [skillQuery, setSkillQuery] = useState("")
+	const [appQuery, setAppQuery] = useState("")
 	const [loading, setLoading] = useState(false)
+	const [importing, setImporting] = useState(false)
 	const menuRef = useRef<HTMLDivElement | null>(null)
 	const submenuRef = useRef<HTMLDivElement | null>(null)
+	const skillFileInputRef = useRef<HTMLInputElement | null>(null)
+	const skillFolderInputRef = useRef<HTMLInputElement | null>(null)
 
-	const skills = catalog.filter((item) => item.kind === "skill").slice(0, 10)
-	const apps = catalog.filter((item) => item.kind === "app").slice(0, 10)
+	const normalizedSkillQuery = skillQuery.trim().toLowerCase()
+	const normalizedAppQuery = appQuery.trim().toLowerCase()
+	const skills = skillRows.filter((item) => !normalizedSkillQuery || (item.name + " " + item.id + " " + item.description).toLowerCase().includes(normalizedSkillQuery))
+	const apps = catalog.filter((item) => item.kind === "app" && item.installed && (!normalizedAppQuery || (item.name + " " + item.id + " " + item.description).toLowerCase().includes(normalizedAppQuery))).slice(0, 10)
 
 	useLayoutEffect(() => {
 		if (!open) return
@@ -62,7 +74,7 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 				return
 			}
 			const menu = menuRef.current
-			const height = menu ? menu.offsetHeight : 330
+			const height = menu ? menu.offsetHeight : 220
 			let left = rect.left
 			if (left + MENU_WIDTH > window.innerWidth - 8) left = window.innerWidth - MENU_WIDTH - 8
 			left = Math.max(8, left)
@@ -95,9 +107,12 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 			if (left + SUBMENU_WIDTH > window.innerWidth - 8) left = rowRect.left - SUBMENU_WIDTH - 8
 			left = Math.max(8, left)
 			const spaceBelow = window.innerHeight - rowRect.bottom - 12
-			const next: SubmenuPoint = spaceBelow >= 150
-				? { left, maxHeight: window.innerHeight - rowRect.top - 12, top: Math.max(8, rowRect.top) }
-				: { left, maxHeight: Math.max(48, rowRect.bottom - 12), bottom: window.innerHeight - rowRect.bottom }
+			const maxHeight = Math.min(420, window.innerHeight - 16)
+			const next: SubmenuPoint = submenu === "skills" && spaceBelow < 420
+				? { left, maxHeight, top: Math.max(8, window.innerHeight - maxHeight - 8) }
+				: spaceBelow >= 150
+					? { left, maxHeight: Math.min(maxHeight, window.innerHeight - rowRect.top - 12), top: Math.max(8, rowRect.top) }
+					: { left, maxHeight, top: Math.max(8, window.innerHeight - maxHeight - 8) }
 			setSubmenuPoint((current) => (current.left === next.left && current.top === next.top && current.bottom === next.bottom && current.maxHeight === next.maxHeight ? current : next))
 		}
 		place()
@@ -127,7 +142,8 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 				return
 			}
 			if (submenu) {
-				const rows = (submenu === "skills" ? skills.length : apps.length) + 1
+				if ((event.target as HTMLElement | null)?.tagName === "INPUT" && key !== "Escape") return
+				const rows = (submenu === "skills" ? skills.length + 4 : apps.length + 1)
 				if (key === "ArrowDown") {
 					event.preventDefault()
 					setSubActive((value) => (value + 1) % rows)
@@ -138,7 +154,14 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 					event.preventDefault()
 					if (submenu === "skills" && skills[subActive]) chooseSkill(skills[subActive])
 					else if (submenu === "apps" && apps[subActive]) chooseApp(apps[subActive])
-					else openAll(submenu)
+					else if (submenu === "apps") openAll(submenu)
+					else {
+						const action = subActive - skills.length
+						if (action === 0) skillFileInputRef.current?.click()
+						else if (action === 1) skillFolderInputRef.current?.click()
+						else if (action === 2) createSkill()
+						else openAll("skills")
+					}
 				}
 				return
 			}
@@ -171,21 +194,25 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 	}, [open, anchor, onClose])
 
 	useEffect(() => {
-		if (!open || !submenu || catalog.length > 0) return
-		setLoading(true)
-		fetchStoreCatalog()
-			.then((items) => setCatalog(items))
-			.catch(() => store.notify("应用市场列表加载失败"))
-			.finally(() => setLoading(false))
-	}, [open, submenu, catalog.length, store])
+		if (!open || !submenu) return
+		if (submenu === "skills" && skillRows.length === 0) {
+			setLoading(true)
+			fetchSkills()
+				.then(setSkillRows)
+				.catch(() => store.notify("技能列表加载失败"))
+				.finally(() => setLoading(false))
+		}
+		if (submenu === "apps") {
+			setLoading(true)
+			fetchStoreCatalog()
+				.then(setCatalog)
+				.catch(() => store.notify("应用市场列表加载失败"))
+				.finally(() => setLoading(false))
+		}
+	}, [open, submenu, skillRows.length, store])
 
-	const chooseSkill = (item: StoreCatalogItem) => {
-		store.addSkillRef({
-			id: item.id,
-			name: item.name,
-			description: item.description,
-			storeRef: "store:" + item.name,
-		})
+	const chooseSkill = (item: SkillRow) => {
+		store.addSkillRef({ id: item.id, name: item.name, description: item.description })
 		store.notify("已添加技能引用：" + item.name)
 		onClose()
 	}
@@ -207,6 +234,36 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 		} catch {
 			store.notify("打开应用市场失败")
 		}
+		onClose()
+	}
+
+	const importSkillFiles = async (files: FileList | null) => {
+		if (!files?.length || importing) return
+		setImporting(true)
+		let completed = 0
+		try {
+			for (const file of Array.from(files)) {
+				try {
+					const skill = await importSkill(await file.text())
+					completed += 1
+					setSkillRows((current) => [...current.filter((item) => item.id !== skill.id), skill])
+				} catch (error) {
+					store.notify(file.name + "：" + ((error as Error)?.message || "导入失败"))
+				}
+			}
+			if (completed) {
+				store.notify("已导入 " + completed + " 个技能")
+				onClose()
+			}
+		} finally {
+			setImporting(false)
+			if (skillFileInputRef.current) skillFileInputRef.current.value = ""
+			if (skillFolderInputRef.current) skillFolderInputRef.current.value = ""
+		}
+	}
+
+	const createSkill = () => {
+		store.fillComposer("请帮我创建一个可复用的 SKILL.md 技能。先询问这个技能要完成什么、输入和输出是什么，再生成完整技能文件。\n")
 		onClose()
 	}
 
@@ -236,16 +293,13 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 				onUpload()
 				break
 			case 2:
-				void addFolder()
-				break
-			case 3:
 				setSubmenu("skills")
 				setSubActive(0)
 				break
-			case 4:
+			case 3:
 				onBrainstorm()
 				break
-			case 5:
+			case 4:
 				setSubmenu("apps")
 				setSubActive(0)
 				break
@@ -257,7 +311,6 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 	const items = [
 		{ label: "从画布添加", icon: SquareArrowDownIcon, disabled: false, chevron: false },
 		{ label: "上传附件", icon: PaperclipIcon, disabled: false, chevron: false },
-		{ label: "添加本地文件夹并记住授权", icon: FolderPlusIcon, disabled: !folderSupported(), chevron: false },
 		{ label: "技能", icon: PuzzleIcon, disabled: false, chevron: true },
 		{ label: "头脑风暴", icon: LightbulbIcon, disabled: false, chevron: false },
 		{ label: "全部应用", icon: LayoutGridIcon, disabled: false, chevron: true },
@@ -286,51 +339,58 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 							<span>{item.label}</span>
 							{item.chevron ? <ChevronRightIcon className="nvca-plus-chevron" /> : null}
 						</button>
-						{index === 2 || index === 3 ? <div className="nvca-plus-separator" role="separator" /> : null}
+						{index === 1 || index === 2 ? <div className="nvca-plus-separator" role="separator" /> : null}
 					</div>
 				))}
 			</div>
 
 			{submenu ? (
 				<div
-					className="nvca-plus-submenu"
+					className={"nvca-plus-submenu" + (submenu === "skills" ? " is-skills" : " is-apps")}
 					ref={submenuRef}
 					role="menu"
-					style={{ left: submenuPoint.left, top: submenuPoint.top, bottom: submenuPoint.bottom, maxHeight: submenuPoint.maxHeight }}
+					style={{ left: submenuPoint.left, top: submenuPoint.top, maxHeight: submenuPoint.maxHeight }}
 				>
-					{loading && catalog.length === 0 ? (
-						<div className="nvca-plus-empty">加载应用市场…</div>
+					{submenu === "skills" ? (
+						<>
+							<label className="nvca-plus-search"><SearchIcon className="nvca-i-sm" /><input aria-label="搜索技能" onChange={(event) => { setSkillQuery(event.currentTarget.value); setSubActive(0) }} placeholder="搜索技能" value={skillQuery} /></label>
+							<div className="nvca-plus-sublist">
+								{loading && skillRows.length === 0 ? <div className="nvca-plus-empty">加载技能…</div> : null}
+								{!loading && skills.length === 0 ? <div className="nvca-plus-empty">没有匹配的技能</div> : null}
+								{skills.map((item, index) => (
+									<button className={"nvca-plus-subitem" + (subActive === index ? " is-active" : "")} key={item.id} onClick={() => chooseSkill(item)} onMouseEnter={() => setSubActive(index)} role="menuitem" type="button">
+										<PuzzleIcon className="nvca-plus-icon" />
+										<span className="nvca-plus-subcopy"><span className="nvca-plus-subname">{item.name}</span></span>
+									</button>
+								))}
+							</div>
+							<div className="nvca-plus-management">
+								<button className={"nvca-plus-subitem" + (subActive === skills.length ? " is-active" : "")} disabled={importing} onClick={() => skillFileInputRef.current?.click()} role="menuitem" type="button"><UploadIcon className="nvca-plus-icon" /><span>上传技能文件</span></button>
+								<button className={"nvca-plus-subitem" + (subActive === skills.length + 1 ? " is-active" : "")} disabled={importing} onClick={() => skillFolderInputRef.current?.click()} role="menuitem" type="button"><FolderPlusIcon className="nvca-plus-icon" /><span>上传技能文件夹</span></button>
+								<button className={"nvca-plus-subitem" + (subActive === skills.length + 2 ? " is-active" : "")} onClick={createSkill} role="menuitem" type="button"><PlusIcon className="nvca-plus-icon" /><span>创建技能</span></button>
+								<button className={"nvca-plus-subitem is-all" + (subActive === skills.length + 3 ? " is-active" : "")} onClick={() => openAll("skills")} role="menuitem" type="button"><Settings2Icon className="nvca-plus-icon" /><span>管理技能</span></button>
+							</div>
+						</>
 					) : (
 						<>
-							{(submenu === "skills" ? skills : apps).map((item, index) => (
-								<button
-									className={"nvca-plus-subitem" + (subActive === index ? " is-active" : "")}
-									key={item.id}
-									onClick={() => (submenu === "skills" ? chooseSkill(item) : chooseApp(item))}
-									onMouseEnter={() => setSubActive(index)}
-									role="menuitem"
-									type="button"
-								>
-									{submenu === "skills" ? <PuzzleIcon className="nvca-plus-icon" /> : <LayoutGridIcon className="nvca-plus-icon" />}
-									<span className="nvca-plus-subcopy">
-										<span className="nvca-plus-subname">{item.name}</span>
-										<span className="nvca-plus-subdesc">{item.description}</span>
-									</span>
-								</button>
-							))}
-							<button
-								className={"nvca-plus-subitem is-all" + (subActive === (submenu === "skills" ? skills.length : apps.length) ? " is-active" : "")}
-								onClick={() => openAll(submenu)}
-								onMouseEnter={() => setSubActive(submenu === "skills" ? skills.length : apps.length)}
-								role="menuitem"
-								type="button"
-							>
-								<span>{submenu === "skills" ? "查看全部技能" : "查看全部应用"}</span>
-							</button>
+							<label className="nvca-plus-search"><SearchIcon className="nvca-i-sm" /><input aria-label="搜索应用" onChange={(event) => { setAppQuery(event.currentTarget.value); setSubActive(0) }} placeholder="搜索应用" value={appQuery} /></label>
+							<div className="nvca-plus-sublist">
+								{loading && catalog.length === 0 ? <div className="nvca-plus-empty">加载应用市场…</div> : null}
+								{!loading && apps.length === 0 ? <div className="nvca-plus-empty">{normalizedAppQuery ? "没有匹配的应用" : "暂无已安装应用"}</div> : null}
+								{apps.map((item, index) => (
+									<button className={"nvca-plus-subitem" + (subActive === index ? " is-active" : "")} key={item.id} onClick={() => chooseApp(item)} onMouseEnter={() => setSubActive(index)} role="menuitem" type="button">
+										<LayoutGridIcon className="nvca-plus-icon" />
+										<span className="nvca-plus-subcopy"><span className="nvca-plus-subname">{item.name}</span><span className="nvca-plus-subdesc">{item.description}</span></span>
+									</button>
+								))}
+							</div>
+							<button className={"nvca-plus-subitem is-all" + (subActive === apps.length ? " is-active" : "")} onClick={() => openAll("apps")} role="menuitem" type="button"><span>管理应用</span></button>
 						</>
 					)}
 				</div>
 			) : null}
+			<input accept=".md,.markdown" className="nvca-sr-only" multiple onChange={(event) => void importSkillFiles(event.currentTarget.files)} ref={skillFileInputRef} type="file" />
+			<input accept=".md,.markdown" className="nvca-sr-only" multiple onChange={(event) => void importSkillFiles(event.currentTarget.files)} ref={skillFolderInputRef} type="file" {...({ webkitdirectory: "" } as Record<string, string>)} />
 		</>,
 		document.body,
 	)

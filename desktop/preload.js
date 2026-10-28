@@ -22,6 +22,8 @@ const api = {
   // 对话框
   save_file: (dataUrl, filename) => ipcRenderer.invoke('novai:save-file', { dataUrl, filename }),
   select_directory: () => ipcRenderer.invoke('novai:select-directory'),
+  get_screen_sources: () => ipcRenderer.invoke('novai:recording-sources'),
+  select_screen_source: (sourceId) => ipcRenderer.invoke('novai:recording-select-source', { sourceId }),
 
   // 数据目录 / 系统
   get_data_dir: () => ipcRenderer.invoke('novai:get-data-dir'),

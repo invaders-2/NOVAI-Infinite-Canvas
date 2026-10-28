@@ -82,10 +82,12 @@ class ThreadStorageMigrationTests(unittest.TestCase):
         body = CLIENT.get("/api/agent/threads", params={"canvas_id": canvas_id}).json()
         self.assertEqual(len(body["threads"]), 1)
         row = body["threads"][0]
-        for key in ("id", "title", "created_at", "forked_from", "message_count"):
+        for key in ("id", "title", "created_at", "updated_at", "forked_from", "message_count"):
             self.assertIn(key, row)
         self.assertNotIn("messages", row)
         self.assertEqual(row["message_count"], 2)
+        self.assertIsInstance(row["updated_at"], float)
+        self.assertGreaterEqual(row["updated_at"], row["created_at"])
 
 
 class ThreadForkTests(unittest.TestCase):
@@ -334,6 +336,56 @@ class ThreadDeleteTests(unittest.TestCase):
     def test_unknown_canvas_is_404(self):
         resp = self._delete(self.base_id, canvas_id="no-such-canvas")
         self.assertEqual(resp.status_code, 404)
+
+
+class ThreadFeedbackTests(unittest.TestCase):
+
+    def setUp(self):
+        self.canvas_id = new_canvas("反馈画布")
+        main.agent_thread_append(self.canvas_id, [
+            {"role": "user", "text": "问题"},
+            {"role": "assistant", "text": "回答"},
+        ])
+        self.thread_id = CLIENT.get("/api/agent/threads",
+                                    params={"canvas_id": self.canvas_id}).json()["threads"][0]["id"]
+
+    def _rate(self, rating, index=1, thread_id=None):
+        return CLIENT.post("/api/agent/threads/feedback", json={
+            "canvas_id": self.canvas_id,
+            "thread_id": thread_id or self.thread_id,
+            "message_index": index,
+            "rating": rating,
+        })
+
+    def test_set_change_and_clear_feedback(self):
+        for rating in ("up", "down", None):
+            resp = self._rate(rating)
+            self.assertEqual(resp.status_code, 200, resp.text)
+            self.assertEqual(resp.json()["rating"], rating)
+            rows = CLIENT.get("/api/agent/thread/%s" % self.canvas_id).json()["messages"]
+            if rating:
+                self.assertEqual(rows[1]["rating"], rating)
+            else:
+                self.assertNotIn("rating", rows[1])
+        rows = CLIENT.get("/api/agent/threads", params={"canvas_id": self.canvas_id}).json()["threads"]
+        self.assertIsInstance(rows[0]["updated_at"], float)
+
+    def test_feedback_validation(self):
+        self.assertEqual(self._rate("up", index=0).status_code, 400)
+        self.assertEqual(self._rate("up", index=9).status_code, 400)
+        self.assertEqual(self._rate("other").status_code, 400)
+        self.assertEqual(self._rate("up", thread_id="no-such-thread").status_code, 404)
+
+    def test_fork_feedback_is_independent(self):
+        self.assertEqual(self._rate("up").status_code, 200)
+        forked = CLIENT.post("/api/agent/threads/fork", json={
+            "canvas_id": self.canvas_id, "thread_id": self.thread_id,
+            "message_index": 1}).json()["thread"]["id"]
+        self.assertEqual(self._rate(None).status_code, 200)
+        original = main._agent_thread_find(main._agent_thread_doc_load(self.canvas_id), self.thread_id)
+        fork = main._agent_thread_find(main._agent_thread_doc_load(self.canvas_id), forked)
+        self.assertNotIn("rating", original["messages"][1])
+        self.assertEqual(fork["messages"][1]["rating"], "up")
 
 
 class ThreadConcurrencyTests(unittest.TestCase):

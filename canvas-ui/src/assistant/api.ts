@@ -3,7 +3,10 @@
 
 export const canvasId = (() => {
 	try {
-		return new URLSearchParams(location.search).get("id") || ""
+		const fromUrl = new URLSearchParams(location.search).get("id")
+		if (fromUrl) return fromUrl
+		const collab = (window as unknown as { SmartCanvasCollab?: { getCanvas?: () => { id?: string } | null } }).SmartCanvasCollab
+		return String(collab?.getCanvas?.()?.id || "")
 	} catch {
 		return ""
 	}
@@ -29,8 +32,10 @@ export interface ThreadRow {
 	id: string
 	title: string
 	created_at?: number
+	updated_at?: number
 	message_count?: number
 	forked_from?: string
+	forked_at_message?: number | null
 }
 
 export interface ThreadList {
@@ -240,6 +245,17 @@ export const forkThread = async (threadId: string, messageIndex: number, title =
 	return thread
 }
 
+export const rateThreadMessage = async (threadId: string, messageIndex: number, rating: "up" | "down" | null): Promise<void> => {
+	if (!canvasId) throw new Error("缺少画布 id")
+	const response = await fetch("/api/agent/threads/feedback", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Accept: "application/json" },
+		body: JSON.stringify({ canvas_id: canvasId, thread_id: threadId, message_index: messageIndex, rating }),
+	})
+	const data = await readJson(response)
+	if (!response.ok) throw new Error(errorText(data, "HTTP " + response.status))
+}
+
 export interface SkillRow {
 	id: string
 	name: string
@@ -266,12 +282,27 @@ export const fetchSkills = async (): Promise<SkillRow[]> => {
 		.filter((row) => row.id && row.name)
 }
 
+export const importSkill = async (markdown: string, overwrite = false): Promise<SkillRow> => {
+	const response = await fetch("/api/skills/import", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Accept: "application/json" },
+		body: JSON.stringify({ markdown, overwrite }),
+	})
+	const data = await readJson(response)
+	if (!response.ok) throw new Error(errorText(data, "HTTP " + response.status))
+	const skill = (data.skill || {}) as Record<string, unknown>
+	const id = String(skill.id || "")
+	if (!id) throw new Error("技能导入接口没有返回技能")
+	return { id, name: String(skill.name || skill.display_name || id), description: String(skill.description || "") }
+}
+
 export interface StoreCatalogItem {
 	id: string
 	name: string
 	description: string
 	kind: "skill" | "app" | string
 	activationSkill: string
+	installed: boolean
 }
 
 export const fetchStoreCatalog = async (): Promise<StoreCatalogItem[]> => {
@@ -288,6 +319,7 @@ export const fetchStoreCatalog = async (): Promise<StoreCatalogItem[]> => {
 				description: String(row.description || row.marketing_line || ""),
 				kind: String(row.kind || ""),
 				activationSkill: String(row.activation_skill || ""),
+				installed: row.installed === true,
 			}
 		})
 		.filter((row) => row.id && row.name)

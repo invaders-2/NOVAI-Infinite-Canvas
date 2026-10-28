@@ -1,7 +1,7 @@
 # 首页模板卡封面 — 图片来源与许可
 
-全部素材来自 Unsplash (https://unsplash.com)，遵循 Unsplash License：可免费用于商业用途，无需署名。
-未使用任何自产素材或 assets 内素材。
+除最后一节单独注明的一张自产 AI 渲染图外，素材来自 Unsplash (https://unsplash.com)，遵循 Unsplash License：可免费用于商业用途，无需署名。
+未使用任何 assets 内素材。
 
 统一处理：16:11 居中裁剪 -> PIL LANCZOS 缩放 -> 640x440，JPEG quality=82（单张 < 120KB）。
 
@@ -52,4 +52,8 @@ batch.jpg -> https://unsplash.com/photos/rows-of-white-cars-parked-neatly-from-a
 - product-video.jpg 为 product-video.mp4 的 1.5s 帧封面（640x440，JPEG quality=82）。
 - product-video.mp4 直链：https://cdn.coverr.co/videos/coverr-pouring-coffee-in-a-mug-8901/1080p.mp4 （该直链对应的 Coverr 视频页已确认为 https://coverr.co/videos/pouring-coffee-in-a-mug-mdzz6klf1e）
 - 许可说明：Coverr License 允许商用与非商用、无需署名；禁止转售或做成同类竞品，禁止用于 AI 训练数据集。
+
+## 自产 AI 渲染图
+
+- product-swap.jpg：来源是本仓库早期测试的 AI 渲染图（_hd-test），不是 Unsplash。源图 `_hd-test/out/cmp/sheet5_B_shoe_1to1.png`（640x420，鞋子特写）；16:11 裁切从 x=75 起，避开源图左上角的方案字母标，再 LANCZOS 缩放到 640x440，JPEG quality=82（32487 字节）。
 

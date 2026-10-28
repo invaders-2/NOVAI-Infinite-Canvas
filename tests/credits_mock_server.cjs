@@ -59,9 +59,9 @@ function round(value, digits) {
 function seedTransactions(balance) {
     const base = now() - 600;
     return [
-        /* 0.0001 级流水：验证 4 位小数展示不被四舍五入掉（正负各一条） */
-        { id: 8, delta: 0.0002, balance_after: 12.5001, kind: 'refund', note: '多退少补', created_at: base + 420 },
-        { id: 7, delta: -0.0001, balance_after: 12.4999, kind: 'charge', note: 'estimate', created_at: base + 360 },
+        /* 分位流水：验证 2 位小数展示（正负各一条） */
+        { id: 8, delta: 0.02, balance_after: 12.52, kind: 'refund', note: '多退少补', created_at: base + 420 },
+        { id: 7, delta: -0.01, balance_after: 12.5, kind: 'charge', note: 'estimate', created_at: base + 360 },
         { id: 6, delta: -2.5, balance_after: 12.5, kind: 'charge', note: 'estimate', created_at: base + 300 },
         { id: 5, delta: -5, balance_after: 15, kind: 'charge', note: 'estimate', created_at: base + 240 },
         { id: 4, delta: -1.5, balance_after: 20, kind: 'charge', note: 'upstream:cost', created_at: base + 180 },
@@ -78,6 +78,9 @@ function resetState() {
         priceDelayMs: 120,
         genDelayMs: 220,
         prices: {},
+        postpaid: true,
+        /* 与后端 CREDIT_OVERDRAFT_LIMIT 一致：发起时 balance + 0.01 < 预计价 → 402 */
+        overdraftLimit: 0.01,
         balances: { 1: 100, 2: 12.5 },
         transactions: { 1: [], 2: seedTransactions() },
         nextTransactionId: 100,
@@ -189,23 +192,28 @@ function charge(userId, price, meta) {
 function priceFor(query) {
     const kind = String(query.kind || '').toLowerCase();
     const rows = Math.max(1, Math.round(Number(query.rows || 1) || 1));
-    let base = 2;
-    if (kind === 'video') base = 10;
-    else if (kind === 'audio') base = 3;
-    else if (kind === 'text' || kind === 'chat') base = 0.5;
-    else if (kind === 'table') base = 1;
+    /* 后端取整改 ceil、按 0.01 步进：文本 0.01 / 图片 0.10 / 视频 1.55 / 音频(TTS) 0.01 */
+    let base = 0.1;
+    if (kind === 'video') base = 1.55;
+    else if (kind === 'audio') base = 0.01;
+    else if (kind === 'text' || kind === 'chat') base = 0.01;
+    else if (kind === 'table') base = 0.1;
     if (state.prices && state.prices[kind] !== undefined) base = Number(state.prices[kind]);
-    /* 与后端新精度一致：最小 0.0001 积分 */
-    const price = round(base * rows, 4);
-    const cost = round(price / 1.3, 4);
+    /* 全量后付费时 price=0、estimated_price 给参考价；金额一律 2 位小数 */
+    const price = round(base * rows, 2);
+    const cost = round(price / 1.3, 2);
+    const postpaid = state.postpaid !== false;
     return {
         cost: cost,
-        price: price,
+        price: postpaid ? 0 : price,
+        estimated_price: price,
+        postpaid: postpaid,
         currency: 'credit',
         usd: { cost: round(cost * 0.1, 6), price: round(price * 0.1, 6), profit: round((price - cost) * 0.1, 6) },
         matched_spec: 'mock-default',
         pricing_fallback: false,
         unmapped: [],
+        mode: postpaid ? 'postpaid' : 'prepaid',
         model: String(query.model || 'mock-image'),
         requested_model: String(query.model || 'mock-image'),
         kind: kind || 'image',
@@ -289,16 +297,84 @@ function sseStream(req, res, user) {
     });
 }
 
-function streamGeneration(req, res, user, price) {
-    const result = charge(user.id, price);
-    if (!result.ok) {
-        json(res, 402, {
-            code: 'INSUFFICIENT_CREDITS',
-            detail: '积分不足',
-            estimate: result.estimate,
-            balance: result.balance
-        });
+/* 全量后付费：生成完成后按实际价格扣（允许扣成负数），返回契约里的 credits */
+function settlePostpaid(userId, price) {
+    const after = round(balanceOf(userId) - price, 6);
+    state.balances[String(userId)] = after;
+    state.nextChargeId += 1;
+    recordTransaction(userId, -price, after, 'charge', 'postpaid');
+    pushBalance(userId, after);
+    return {
+        estimate: round(price, 6),
+        price: round(price, 6),
+        balance_after: after,
+        cost_usd: round(price * 0.1 / 1.3, 6),
+        price_usd: round(price * 0.1, 6),
+        profit_usd: round(price * 0.1 - price * 0.1 / 1.3, 6),
+        pricing_fallback: false,
+        actual: true,
+        charge_id: state.nextChargeId,
+        status: 'settled',
+        mode: 'postpaid'
+    };
+}
+
+function quoteAmount(quote) {
+    return Number(quote && quote.estimated_price != null ? quote.estimated_price : (quote && quote.price)) || 0;
+}
+
+function canSubmit(userId, amount) {
+    return balanceOf(userId) + Number(state.overdraftLimit || 0) + 1e-9 >= amount;
+}
+
+function insufficientPayload(userId, amount) {
+    return {
+        code: 'INSUFFICIENT_CREDITS',
+        detail: '积分不足',
+        estimate: round(amount, 6),
+        balance: balanceOf(userId)
+    };
+}
+
+/* 统一的生成完成响应：postpaid 生成后扣（可为负），legacy 仍预扣/402 */
+function finishGeneration(res, user, quote, buildOk) {
+    const amount = quoteAmount(quote);
+    const payload = typeof buildOk === 'function' ? buildOk() : {};
+    if (state.postpaid !== false) {
+        if (!canSubmit(user.id, amount)) {
+            setTimeout(() => json(res, 402, insufficientPayload(user.id, amount)), Math.max(0, Math.min(state.genDelayMs, 150)));
+            return;
+        }
+        setTimeout(() => {
+            json(res, 200, Object.assign({}, payload, { credits: settlePostpaid(user.id, amount) }));
+        }, Math.max(0, state.genDelayMs));
         return;
+    }
+    const result = charge(user.id, amount);
+    setTimeout(() => {
+        if (!result.ok) {
+            json(res, 402, {
+                code: 'INSUFFICIENT_CREDITS', detail: '积分不足',
+                estimate: result.estimate, balance: result.balance
+            });
+            return;
+        }
+        json(res, 200, Object.assign({}, payload, { credits: result.credits }));
+    }, Math.max(0, state.genDelayMs));
+}
+
+function streamGeneration(req, res, user, height) {
+    let failed = false;
+    if (state.postpaid !== false && !canSubmit(user.id, height)) {
+        json(res, 402, insufficientPayload(user.id, height));
+        return;
+    }
+    if (state.postpaid === false) {
+        const result = charge(user.id, height);
+        if (!result.ok) {
+            json(res, 402, insufficientPayload(user.id, result.estimate));
+            return;
+        }
     }
     res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -314,6 +390,8 @@ function streamGeneration(req, res, user, price) {
     const timer = setInterval(() => {
         if (index >= parts.length) {
             clearInterval(timer);
+            /* 后付费：流结束才扣（扣完再发 done，余额 SSE 与流结束几乎同时到） */
+            if (state.postpaid !== false && !failed) settlePostpaid(user.id, height);
             send({ type: 'done', text: text });
             setTimeout(() => res.end(), 40);
             return;
@@ -322,7 +400,7 @@ function streamGeneration(req, res, user, price) {
         send({ type: 'delta', delta: parts[index] });
         index += 1;
     }, 60);
-    req.on('close', () => clearInterval(timer));
+    req.on('close', () => { failed = true; clearInterval(timer); });
 }
 
 async function handleMock(req, res, pathname) {
@@ -363,8 +441,11 @@ async function handleMock(req, res, pathname) {
         if (typeof body.genDelayMs === 'number') state.genDelayMs = body.genDelayMs;
         if (Array.isArray(body.transactions)) state.transactions['2'] = body.transactions;
         if (body.prices && typeof body.prices === 'object') state.prices = body.prices;
+        if (typeof body.postpaid === 'boolean') state.postpaid = body.postpaid;
+        if (typeof body.postpaidAudio === 'boolean') state.postpaid = body.postpaidAudio;
         json(res, 200, {
             ok: true,
+            postpaid: state.postpaid,
             adminCreditsInList: state.adminCreditsInList,
             priceDelayMs: state.priceDelayMs,
             genDelayMs: state.genDelayMs,
@@ -507,92 +588,69 @@ async function handleApi(req, res, pathname, query) {
         return;
     }
 
-    /* ── 生成接口：按估价扣费，响应带 credits；余额不足 402（与真实后端同形） ── */
+    /* Agent 一次跑多步、没有单一价目：前端只提示后付费，这里返回 ok（内部生成各自计费） */
+    if (method === 'POST' && pathname === '/api/agent/run') {
+        if (!user) { json(res, 401, { detail: '未登录或会话已过期', code: 'unauthorized' }); return; }
+        await readBody(req);
+        setTimeout(() => json(res, 200, { ok: true, run_id: 'mock-agent-run' }), Math.max(0, state.genDelayMs));
+        return;
+    }
+
+    /* ── 生成接口：后付费，响应带 credits（legacy 预扣路径保留） ── */
     if (method === 'POST' && /^\/api\/(canvas-llm|chat)$/.test(pathname)) {
         if (!user) { json(res, 401, { detail: '未登录或会话已过期', code: 'unauthorized' }); return; }
         const body = await readBody(req);
         const kind = generationKind(pathname);
         const quote = priceFor({ kind: kind, model: body.model || '', rows: body.n || body.count || 1 });
-        const result = charge(user.id, quote.price);
-        const delay = Math.max(0, state.genDelayMs);
-        setTimeout(() => {
-            if (!result.ok) {
-                json(res, 402, {
-                    code: 'INSUFFICIENT_CREDITS', detail: '积分不足',
-                    estimate: result.estimate, balance: result.balance
-                });
-                return;
-            }
-            json(res, 200, { text: 'mock reply', model: body.model || 'mock-chat', credits: result.credits });
-        }, delay);
+        if (body.fail) {
+            setTimeout(() => json(res, 500, { detail: 'mock 上游失败' }), Math.max(0, state.genDelayMs));
+            return;
+        }
+        finishGeneration(res, user, quote, () => ({ text: 'mock reply', model: body.model || 'mock-chat' }));
         return;
     }
     if (method === 'POST' && pathname === '/api/canvas-llm/stream') {
         if (!user) { json(res, 401, { detail: '未登录或会话已过期', code: 'unauthorized' }); return; }
         await readBody(req);
-        streamGeneration(req, res, user, priceFor({ kind: 'text' }).price);
+        streamGeneration(req, res, user, quoteAmount(priceFor({ kind: 'text' })));
         return;
     }
     if (method === 'POST' && /^\/api\/(canvas-video|video)$/.test(pathname)) {
         if (!user) { json(res, 401, { detail: '未登录或会话已过期', code: 'unauthorized' }); return; }
         const body = await readBody(req);
         const quote = priceFor({ kind: 'video', model: body.model || '' });
-        const result = charge(user.id, quote.price);
-        setTimeout(() => {
-            if (!result.ok) {
-                json(res, 402, {
-                    code: 'INSUFFICIENT_CREDITS', detail: '积分不足',
-                    estimate: result.estimate, balance: result.balance
-                });
-                return;
-            }
-            json(res, 200, { urls: [], credits: result.credits });
-        }, Math.max(0, state.genDelayMs));
+        finishGeneration(res, user, quote, () => ({ urls: [] }));
         return;
     }
-    if (method === 'POST' && /^\/api\/(canvas-audio|canvas-audio-split|audio|music|tts)$/.test(pathname)) {
+    if (method === 'POST' && /^\/api\/(canvas-audio|canvas-audio-split|canvas-tts|audio|music|tts)$/.test(pathname)) {
         if (!user) { json(res, 401, { detail: '未登录或会话已过期', code: 'unauthorized' }); return; }
         const body = await readBody(req);
         const kind = /split/.test(pathname) ? 'text' : 'audio';
         const quote = priceFor({ kind: kind, model: body.model || '' });
-        const result = charge(user.id, quote.price);
-        setTimeout(() => {
-            if (!result.ok) {
-                json(res, 402, {
-                    code: 'INSUFFICIENT_CREDITS', detail: '积分不足',
-                    estimate: result.estimate, balance: result.balance
-                });
-                return;
-            }
-            json(res, 200, { urls: [], audio: 'mock-audio', credits: result.credits });
-        }, Math.max(0, state.genDelayMs));
+        finishGeneration(res, user, quote, () => ({ urls: [], audio: 'mock-audio' }));
         return;
     }
     if (method === 'POST' && /^\/api\/(generate|canvas-image-tasks|ms\/generate)$/.test(pathname)) {
         if (!user) { json(res, 401, { detail: '未登录或会话已过期', code: 'unauthorized' }); return; }
         const body = await readBody(req);
         const quote = priceFor({ kind: 'image', model: body.model || '', rows: body.n || body.count || 1 });
-        const result = charge(user.id, quote.price);
-        setTimeout(() => {
-            if (!result.ok) {
-                json(res, 402, {
-                    code: 'INSUFFICIENT_CREDITS', detail: '积分不足',
-                    estimate: result.estimate, balance: result.balance
-                });
-                return;
-            }
-            json(res, 200, { task_id: 'mock-task-' + (state.nextTaskId++), images: [], credits: result.credits });
-        }, Math.max(0, state.genDelayMs));
+        finishGeneration(res, user, quote, () => ({ task_id: 'mock-task-' + (state.nextTaskId++), images: [] }));
         return;
     }
     if (method === 'GET' && /^\/api\/tasks\/[^/]+$/.test(pathname)) {
         if (!user) { json(res, 401, { detail: '未登录或会话已过期', code: 'unauthorized' }); return; }
         const quote = priceFor({ kind: 'image' });
-        const result = charge(user.id, quote.price);
+        const amount = quoteAmount(quote);
+        const credits = state.postpaid !== false
+            ? settlePostpaid(user.id, amount)
+            : (function () {
+                const result = charge(user.id, amount);
+                return result.ok ? result.credits : { estimate: amount, price: 0, balance_after: balanceOf(user.id), status: 'failed' };
+            })();
         json(res, 200, {
             task_id: pathname.split('/').pop(),
             status: 'succeeded',
-            credits: result.ok ? result.credits : { estimate: quote.price, price: 0, balance_after: balanceOf(user.id), status: 'failed' }
+            credits: credits
         });
         return;
     }

@@ -11,7 +11,7 @@ import type {
 	SkillChip,
 	StreamEvent,
 } from "./types"
-import { canvasId, fetchThreads, forkThread, switchThreadViaLegacy } from "./api"
+import { canvasId, fetchThreads, forkThread, rateThreadMessage, switchThreadApi, switchThreadViaLegacy } from "./api"
 import { applyEvent, createSession, isTerminal, workMs } from "./session"
 
 export interface QueueItem {
@@ -68,6 +68,11 @@ export interface AssistantStore {
 	addFolderRef(name: string, count: number): boolean
 	addFolderFiles(files: { name: string; url?: string; kind?: string }[]): number
 	branchAt(index: number): Promise<void>
+	rateMessage(index: number, rating: "up" | "down"): Promise<void>
+	enqueue(text: string): boolean
+	removeQueued(id: string): void
+	updateQueued(id: string, text: string): void
+	sendQueuedNow(id: string): void
 	removeRef(id: string): void
 	clearRefs(): void
 	planAction(action: "run" | "cancel" | "adjust"): void
@@ -117,6 +122,7 @@ const messageFromHistory = (item: Record<string, unknown>, createdAt = Date.now(
 	const text = String(item.content ?? item.text ?? "")
 	const message = historyMessage(role, text, createdAt)
 	if (item.run_id) message.runId = String(item.run_id)
+	if (item.rating === "up" || item.rating === "down") message.rating = item.rating
 	const steps = Array.isArray(item.steps) ? item.steps : []
 	const seen = new Set<string>()
 	for (const raw of steps) {
@@ -501,11 +507,31 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			const upto = state.messages.slice(0, index + 1).filter((message) => message.role !== "system")
 			const messageIndex = Math.max(0, upto.length - 1)
 			const thread = await forkThread(activeId, messageIndex)
-			await switchThreadViaLegacy(thread.id)
+			if (!(await switchThreadViaLegacy(thread.id))) await switchThreadApi(thread.id)
 			store.reloadHistory()
 			env.threadRefresh = (env.threadRefresh || 0) + 1
 			pushNotice("已创建分支对话")
 			emit()
+		},
+		async rateMessage(index, rating) {
+			const message = state.messages[index]
+			if (!message || message.role !== "assistant") return
+			const previous = message.rating
+			const next = previous === rating ? undefined : rating
+			message.rating = next
+			emit()
+			try {
+				const list = await fetchThreads()
+				const activeId = list.active_id || (list.threads[0] ? list.threads[0].id : "")
+				if (!activeId) throw new Error("还没有可评价的对话")
+				const messageIndex = state.messages.slice(0, index + 1).filter((item) => item.role !== "system").length - 1
+				await rateThreadMessage(activeId, Math.max(0, messageIndex), next || null)
+				pushNotice(next === "up" ? "已好评" : next === "down" ? "已差评" : "已取消评价")
+			} catch (error) {
+				message.rating = previous
+				emit()
+				pushNotice("评价失败：" + ((error as Error)?.message || "网络错误"))
+			}
 		},
 		removeRef(id) {
 			try { api.removeRef(String(id)) } catch {}

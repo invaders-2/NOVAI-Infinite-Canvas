@@ -42,6 +42,15 @@ def color_for(user_id: int) -> str:
     return COLORS[int(user_id) % len(COLORS)]
 
 
+def _avatar_url(user_id: int) -> str:
+    """头像读取失败不能影响协作连接：任何异常都降级为空串。"""
+    try:
+        from server import avatars
+        return avatars.url_for(int(user_id))
+    except Exception:
+        return ""
+
+
 def _owner_id(canvas: Dict[str, Any]) -> Optional[int]:
     value = (canvas or {}).get("owner_id")
     if value is None or value == "":
@@ -67,7 +76,13 @@ class Client:
         self.last_cursor_at = 0.0
 
     def public(self) -> Dict[str, Any]:
-        return {"id": self.user_id, "username": self.username, "color": self.color, "role": self.role}
+        return {
+            "id": self.user_id,
+            "username": self.username,
+            "color": self.color,
+            "role": self.role,
+            "avatar_url": _avatar_url(self.user_id),
+        }
 
 
 class Room:
@@ -216,7 +231,12 @@ async def serve(websocket: WebSocket, canvas_id: str, load_canvas: Callable[[str
         await websocket.send_json({"type": "snapshot", "doc": canvas, "revision": room.revision})
         await websocket.send_json({
             "type": "hello",
-            "self": {"id": user_id, "username": client.username, "color": client.color},
+            "self": {
+                "id": user_id,
+                "username": client.username,
+                "color": client.color,
+                "avatar_url": _avatar_url(user_id),
+            },
             "role": role,
             "users": room.users(),
             "revision": room.revision,

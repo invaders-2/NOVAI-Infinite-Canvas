@@ -145,6 +145,7 @@ body.smart-node-drag .image-wrap:hover .image-resolution-badge { opacity:0 !impo
 .image-node.smart-group-member-node .prompt-node-tools,
 .image-node.smart-group-member-node .prompt-node-split-row,
 .image-node.smart-group-member-node .prompt-node-segments,
+.image-node.smart-group-member-node .smart-input-row,
 .image-node.smart-group-member-node .prompt-split-preview-resize,
 .image-node.smart-group-member-node .smart-node-input-thumbs,
 .image-node.smart-group-member-node .prompt-node-llm,
@@ -217,14 +218,12 @@ body.smart-node-drag .image-wrap:hover .image-resolution-badge { opacity:0 !impo
 .theme-dark .prompt-node-split-control { background:rgba(28, 28, 28, .42); }
 .prompt-node-split-control input { width:46px; min-width:0; height:21px; border:0; outline:0; background:transparent; color:var(--text); font-size:11px; font-weight:800; text-align:center; }
 .prompt-node-split-count { flex:0 0 auto; height:25px; padding:0 8px; border-radius:var(--radius-md); display:inline-flex; align-items:center; justify-content:center; background:var(--soft); border:0; color:var(--muted); font-size:11px; font-weight:850; }
-.prompt-node-segments,.prompt-node-upstream-list { flex:0 0 auto; overflow:auto; display:flex; flex-direction:column; gap:5px; padding-right:2px; scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent; }
-.prompt-node-upstream-list { max-height:70px; }
+.prompt-node-segments { flex:0 0 auto; overflow:auto; display:flex; flex-direction:column; gap:5px; padding-right:2px; scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent; }
 .prompt-node-segment { display:grid; grid-template-columns:18px minmax(0,1fr); gap:6px; align-items:start; padding:6px 7px; border-radius:var(--radius-md); background:var(--soft); }
 .prompt-node-segment span { width:18px; height:18px; border-radius:var(--radius-full); display:inline-flex; align-items:center; justify-content:center; background:var(--strong); color:var(--strong-text); font-size:10px; font-weight:900; font-variant-numeric:tabular-nums; }
 .prompt-node-segment p { margin:0; min-width:0; color:var(--text); font-size:11px; line-height:1.4; white-space:pre-wrap; word-break:break-word; }
 .prompt-node-section-title { color:var(--faint); font-size:11px; font-weight:900; letter-spacing:.04em; }
-.prompt-node-upstream { grid-column:1 / -1; min-width:0; display:flex; flex-direction:column; gap:5px; padding:7px; border-radius:var(--radius-sm); background:var(--soft); }
-.prompt-node-upstream .prompt-node-segment { background:var(--card); }
+/* 上游文本缩略片：一片一段（点开看全文），不再铺整段文字。规则见文件末尾「上游文本缩略片」一段。 */
 .prompt-node-tools { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
 /* 页签并进药丸行后，table-node.css 里 .llm-tabs 自带的 margin-bottom:6px 会把这一行撑高、跟药丸对不齐 */
 .prompt-node-tools .llm-tabs { flex:0 0 auto; flex-wrap:nowrap; margin:0 0 0 3px; }
@@ -1106,6 +1105,20 @@ html.nie-editing .image-node:has(> .node-inline-editor) .mini-x { display:none; 
 .node-body { min-height:140px; padding:10px; display:flex; align-items:center; justify-content:center; }
 .empty-node .node-body { flex:1 1 auto; min-height:0; padding:10px 10px 6px; overflow:hidden; }
 .node-drop { width:100%; height:100%; min-height:0; border-radius:var(--radius-md); border:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; color:var(--faint); background:transparent; font-size:12px; font-weight:800; padding:12px; box-sizing:border-box; text-align:center; overflow:hidden; transition:background .22s var(--fluid-ease); }
+/* 空媒体节点上方的「上传」按钮：深色圆角胶囊 + 线性 upload 图标，浮在节点框正上方 8px。
+   不画 border，层级靠实底 + 柔和投影；node 与 world 都是 overflow:visible，所以不会被裁掉。 */
+.node-upload-cta {
+    position:absolute; left:50%; bottom:calc(100% + 8px); transform:translateX(-50%);
+    display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px;
+    border:0; border-radius:var(--radius-full); background:var(--strong); color:var(--strong-text);
+    font-family:inherit; font-size:12px; font-weight:700; line-height:1; white-space:nowrap;
+    box-shadow:var(--shadow-md); cursor:pointer; z-index:8;
+    transition:background .14s ease, box-shadow .14s ease, transform .14s ease;
+}
+.node-upload-cta:hover { background:var(--strong); box-shadow:var(--shadow-lg); transform:translateX(-50%) translateY(-1px); }
+.node-upload-cta:focus-visible { outline:none; box-shadow:var(--shadow-lg); }
+.node-upload-cta:active { transform:translateX(-50%); }
+.node-upload-cta i, .node-upload-cta svg { width:14px; height:14px; stroke-width:2.2; }
 .theme-dark .node-drop { background:transparent; }
 .node-drop i { width:24px; height:24px; }
 /* 空态统一的图标容器：上传 / 纯文本 / 文本生成 / 生成输入 四处共用 */
@@ -1464,6 +1477,17 @@ body.svc-fullscreen-active { overflow:hidden; }
 .input-thumb.drop-before::before { left:-4px; }
 .input-thumb.drop-after::after { right:-4px; }
 .input-thumb-count { color:var(--faint); font-size:10px; font-weight:600; letter-spacing:.05em; padding:0 6px; flex:0 0 auto; }
+/* 参考图行里的「文本」卡片（上游文本）：跟缩略图卡同一套 42px 尺寸/软底，线性 file-text 图标，
+   左上角挂同一个 .input-thumb-label 标签。它不是参考图 —— 不带 .input-thumb/data-thumb-index，
+   所以不会被拖拽排序、删除或算进发给模型的 images。 */
+.input-thumb-text {
+    position:relative; width:42px; height:42px; flex:0 0 auto;
+    display:inline-flex; align-items:center; justify-content:center;
+    border-radius:var(--radius-md); background:var(--soft); color:var(--text-2);
+    cursor:pointer; transition:transform .12s ease, box-shadow .12s ease, color .12s ease;
+}
+.input-thumb-text:hover, .input-thumb-text:focus-visible { transform:translateY(-1px); box-shadow:var(--shadow-md); color:var(--text); }
+.input-thumb-text i, .input-thumb-text svg { width:16px; height:16px; }
 .composer-head { grid-area:head; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 2px; }
 .composer-head-left { min-width:0; display:flex; align-items:center; gap:6px; }
 .engine-select {height:24px; padding:0 24px 0 9px; border-radius:var(--radius-full); appearance:none; -webkit-appearance:none; border:0; background-color:var(--soft); background-image:var(--select-caret); background-position:calc(100% - 8px) 50%; background-size:10px 10px; background-repeat:no-repeat; color:var(--text); font-size:11px; font-weight:500; cursor:pointer; outline:none; }
@@ -8060,3 +8084,195 @@ html.studio-theme-dark .nv-mcp-brand-logo { filter: invert(1); }
 .agent-run-context-retry { height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: var(--soft); color: var(--text); font: 500 10.5px/1 var(--font-sans); cursor: pointer; }
 
 .agent-artifacts-title { display: flex; align-items: center; gap: 8px; }
+
+/* ═══ 提示词节点「长文（Markdown）预览」+ 生成结果编辑弹窗 ═══
+   设计约束：不画线框/发丝线。Markdown 的标题/列表/表格/代码块一律用间距、字重、半透明底区分，
+   不用 border / inset 描边。（「输出类型」控件已按用户要求整块下线，前端不再决定生图提示词 / 长文。） */
+/* 生成结果编辑：内容是 Markdown 源码，按纯文本排（保留换行与行首缩进），不做排版渲染 */
+.smart-text-modal-input.is-raw {
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+    font-family:inherit;
+    font-size:13px;
+    line-height:1.6;
+}
+
+/* 预览块里放那颗悬浮复制键（绝对定位，不影响文字块实测高度） */
+.prompt-node-display { position:relative; }
+.prompt-node-display-copy {
+    /* 贴右下角：右上角是节点自己的悬浮操作（删除/换图），压在那儿会被它们抢走点击 */
+    position:absolute; bottom:5px; right:5px; z-index:2;
+    display:none; width:20px; height:18px; padding:0;
+    align-items:center; justify-content:center;
+    border:0; border-radius:var(--radius-sm);
+    background:var(--surface-2); color:var(--muted);
+    cursor:pointer;
+}
+.prompt-node-display:hover .prompt-node-display-copy,
+.image-node.selected .prompt-node-display-copy { display:inline-flex; }
+.prompt-node-display-copy:hover { color:var(--text); background:var(--soft); }
+.prompt-node-display-copy.copied { color:#22c55e; }
+.prompt-node-display-copy i, .prompt-node-display-copy svg { width:11px; height:11px; }
+
+/* ── Markdown 渲染（SmartMarkdown.render 的输出，只认 .is-markdown 这一层） ──
+   块级之间靠外边距分隔，标题靠字号 + 字重，引号块 / 代码块靠半透明软底，表格靠隔行软底 —— 全程无边框。 */
+.prompt-node-display-text.is-markdown { white-space:normal; }
+.prompt-node-display-text.is-markdown > *:first-child { margin-top:0; }
+.prompt-node-display-text.is-markdown > *:last-child { margin-bottom:0; }
+.prompt-node-display-text.is-markdown h1,
+.prompt-node-display-text.is-markdown h2,
+.prompt-node-display-text.is-markdown h3,
+.prompt-node-display-text.is-markdown h4,
+.prompt-node-display-text.is-markdown h5,
+.prompt-node-display-text.is-markdown h6 {
+    margin:12px 0 5px; color:var(--text); font-weight:800; line-height:1.32; letter-spacing:.005em;
+}
+.prompt-node-display-text.is-markdown h1 { font-size:1.5em; }
+.prompt-node-display-text.is-markdown h2 { font-size:1.32em; }
+.prompt-node-display-text.is-markdown h3 { font-size:1.18em; }
+.prompt-node-display-text.is-markdown h4 { font-size:1.08em; }
+.prompt-node-display-text.is-markdown h5,
+.prompt-node-display-text.is-markdown h6 { font-size:1em; color:var(--muted); }
+.prompt-node-display-text.is-markdown p { margin:0 0 7px; }
+.prompt-node-display-text.is-markdown strong { color:var(--text); font-weight:800; }
+.prompt-node-display-text.is-markdown em { font-style:italic; color:var(--muted); }
+.prompt-node-display-text.is-markdown del { color:var(--faint); text-decoration:line-through; }
+.prompt-node-display-text.is-markdown ul,
+.prompt-node-display-text.is-markdown ol { margin:0 0 7px; padding-left:16px; }
+.prompt-node-display-text.is-markdown ul { list-style:disc; }
+.prompt-node-display-text.is-markdown ol { list-style:decimal; }
+.prompt-node-display-text.is-markdown li { margin:2px 0; }
+.prompt-node-display-text.is-markdown li > ul,
+.prompt-node-display-text.is-markdown li > ol { margin:2px 0 0; }
+.prompt-node-display-text.is-markdown .md-code-inline {
+    padding:1px 4px; border-radius:4px;
+    background:color-mix(in srgb, var(--text) 7%, transparent);
+    font-family:var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size:.94em;
+}
+.prompt-node-display-text.is-markdown .md-pre {
+    margin:0 0 8px; padding:8px 9px; overflow:auto; max-height:280px;
+    border-radius:var(--radius-md);
+    background:color-mix(in srgb, var(--text) 6%, transparent);
+    scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent;
+}
+.prompt-node-display-text.is-markdown .md-pre code {
+    display:block; color:var(--text);
+    font-family:var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size:.94em; line-height:1.55; white-space:pre;
+}
+.prompt-node-display-text.is-markdown .md-quote {
+    margin:0 0 8px; padding:7px 9px;
+    border-radius:var(--radius-sm);
+    background:color-mix(in srgb, var(--text) 5%, transparent);
+    color:var(--muted);
+}
+.prompt-node-display-text.is-markdown .md-quote > *:last-child { margin-bottom:0; }
+/* 分割线：一根 1px 线属于「发丝线」，改成居中的一颗柔和小圆点（不画线） */
+.prompt-node-display-text.is-markdown .md-hr {
+    height:2px; margin:11px 0; border:0; padding:0;
+    background:radial-gradient(circle, color-mix(in srgb, var(--text) 26%, transparent) 1px, transparent 1.2px) center / 8px 2px no-repeat;
+}
+.prompt-node-display-text.is-markdown .md-table {
+    width:100%; margin:0 0 8px; border-collapse:collapse;
+    font-size:.96em; font-variant-numeric:tabular-nums;
+}
+.prompt-node-display-text.is-markdown .md-table th,
+.prompt-node-display-text.is-markdown .md-table td { padding:4px 7px; text-align:left; vertical-align:top; }
+.prompt-node-display-text.is-markdown .md-table th {
+    color:var(--text); font-weight:800;
+    background:color-mix(in srgb, var(--text) 7%, transparent);
+}
+.prompt-node-display-text.is-markdown .md-table tbody tr:nth-child(even) { background:color-mix(in srgb, var(--text) 4%, transparent); }
+.prompt-node-display-text.is-markdown .md-table th:first-child { border-radius:var(--radius-sm) 0 0 var(--radius-sm); }
+.prompt-node-display-text.is-markdown .md-table th:last-child { border-radius:0 var(--radius-sm) var(--radius-sm) 0; }
+.prompt-node-display-text.is-markdown .md-align-center { text-align:center; }
+.prompt-node-display-text.is-markdown .md-align-right { text-align:right; }
+
+/* ═══ 上游输入行：编号卡片（图片 / 视频 / 音频 / 文本 + 「+」）═══
+   提示词节点与纯文本节点共用：一个上游输入 = 一张深色圆角卡片，左上角白色圆形角标只写序号（1、2、3…）。
+   不画描边 —— 卡片靠深底 + 柔和外投影分层；末尾「+」卡片点开本地文件选择。 */
+.smart-input-row { width:100%; display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-width:0; }
+/* 提示词节点的控制台是两栏 grid：输入行要整行铺开 */
+.prompt-node-llm .smart-input-row, .prompt-node-card .smart-input-row { grid-column:1 / -1; }
+.smart-input-card {
+    position:relative; flex:0 0 auto;
+    width:44px; height:44px; padding:0; overflow:hidden;
+    display:inline-flex; align-items:center; justify-content:center;
+    border:0; border-radius:var(--radius-md);
+    background:rgba(24, 24, 24, .92);
+    color:rgba(255, 255, 255, .92);
+    font-family:inherit; font-size:11px; font-weight:700;
+    box-shadow:0 3px 8px -4px color-mix(in srgb, var(--shadow) 65%, transparent);
+    cursor:default;
+    transition:background .16s ease, transform .16s ease, box-shadow .16s ease;
+}
+.smart-input-card img, .smart-input-card video { display:block; width:100%; height:100%; object-fit:cover; }
+.smart-input-card i, .smart-input-card svg { width:15px; height:15px; flex:0 0 auto; opacity:.92; }
+.smart-input-card.is-text, .smart-input-card.is-add { cursor:pointer; }
+.smart-input-card.is-text:hover, .smart-input-card.is-add:hover {
+    background:rgba(24, 24, 24, .98);
+    box-shadow:0 6px 12px -5px color-mix(in srgb, var(--shadow) 78%, transparent);
+    transform:translateY(-1px);
+}
+/* 白色圆形角标：深色卡片上只写序号 */
+.smart-input-card-badge {
+    position:absolute; left:3px; top:3px; z-index:1;
+    min-width:15px; height:15px; padding:0 3px;
+    display:inline-flex; align-items:center; justify-content:center;
+    border-radius:var(--radius-full);
+    background:#fff; color:#0a0a0a;
+    font-size:9.5px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums;
+}
+.smart-input-card.is-more { color:rgba(255, 255, 255, .8); cursor:default; }
+/* 深色主题：深底卡片会和节点底色糊在一起，换成半透明白底，角标仍是白底黑字 */
+.theme-dark .smart-input-card,
+.studio-theme-dark .smart-input-card { background:rgba(255, 255, 255, .10); color:var(--text); box-shadow:none; }
+.theme-dark .smart-input-card.is-text:hover,
+.theme-dark .smart-input-card.is-add:hover,
+.studio-theme-dark .smart-input-card.is-text:hover,
+.studio-theme-dark .smart-input-card.is-add:hover { background:rgba(255, 255, 255, .16); }
+
+/* 纯文本节点里的输入行：克制一点，只占卡片最上面那一行 */
+.smart-text-card .smart-input-row { flex:0 0 auto; }
+.smart-text-card.has-input-row { gap:6px; }
+.smart-text-card.is-empty.has-input-row { align-items:stretch; justify-content:flex-start; }
+.smart-text-empty-state { flex:1; min-height:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; }
+.image-node.smart-group-member-node .smart-input-row { display:none; }
+
+/* 看全文浮层（fixed 单例，最高 260px 可滚动，带复制） */
+.prompt-node-upstream-view {
+    position:fixed; z-index:2500;
+    display:flex; flex-direction:column;
+    padding:0; border:0; border-radius:12px;
+    /* 小弹层例外（2026-09 审查）：盖在图片/文字上要近乎不透明，否则 78% 会透字、被背景染色 */
+    background:rgba(255,255,255,.96);
+    color:var(--text);
+    box-shadow:0 22px 54px -18px var(--shadow), 0 6px 18px -10px var(--shadow);
+    -webkit-backdrop-filter:blur(24px) saturate(160%);
+    backdrop-filter:blur(24px) saturate(160%);
+}
+.theme-dark .prompt-node-upstream-view,
+.studio-theme-dark .prompt-node-upstream-view { background:rgba(24,24,24,.95); }
+.prompt-node-upstream-view[hidden] { display:none; }
+.prompt-node-upstream-view-head { display:flex; align-items:center; gap:6px; padding:10px 10px 6px 12px; }
+.prompt-node-upstream-view-title {
+    flex:1 1 auto; min-width:0;
+    color:var(--text); font-size:11.5px; font-weight:800;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.prompt-node-upstream-view-copy,
+.prompt-node-upstream-view-close {
+    flex:0 0 auto; height:22px; padding:0 8px; border:0; border-radius:var(--radius-full);
+    background:var(--soft); color:var(--muted);
+    font-family:inherit; font-size:10.5px; font-weight:700; cursor:pointer;
+}
+.prompt-node-upstream-view-close { width:22px; padding:0; font-size:14px; font-weight:600; line-height:1; }
+.prompt-node-upstream-view-copy:hover,
+.prompt-node-upstream-view-close:hover { background:var(--card); color:var(--text); }
+.prompt-node-upstream-view-body {
+    margin:0 12px 12px; overflow:auto;
+    color:var(--text); font-size:11.2px; line-height:1.55;
+    white-space:pre-wrap; overflow-wrap:anywhere; user-select:text;
+    scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent;
+}

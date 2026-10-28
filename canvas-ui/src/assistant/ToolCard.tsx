@@ -133,8 +133,8 @@ export const ToolCard = ({ part }: { part: StepPart }) => {
 				type="button"
 			>
 				<span className="nvca-tool-state">{statusIcon(part.status)}</span>
-				<span className="nvca-tool-name">{toolDisplayName(part.tool)}</span>
-				{subtitle ? <span className="nvca-tool-sub">{subtitle}</span> : null}
+				<span className="nvca-tool-name">{part.title || toolDisplayName(part.tool)}</span>
+				{part.title ? <span className="nvca-tool-sub">{toolDisplayName(part.tool)}</span> : subtitle ? <span className="nvca-tool-sub">{subtitle}</span> : null}
 				<span className="nvca-tool-spacer" />
 				{duration ? <span className="nvca-tool-duration">{duration}</span> : null}
 				<ChevronDownIcon className={cn("nvca-tool-caret", open && "is-open")} />

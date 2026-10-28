@@ -28,7 +28,7 @@ _TMP_DATA = tempfile.mkdtemp(prefix="novai-credits-test-")
 # 合并跑（多个测试套件同一进程）时，谁先 import 谁决定数据目录；这里只用 setdefault，
 # 不覆盖别的套件已经设好的 NOVAI_DATA_DIR，也不在收尾时删目录（后面的套件还在用）。
 os.environ.setdefault("NOVAI_DATA_DIR", _TMP_DATA)
-os.environ.setdefault("NOVAI_AUTH_ENABLED", "1")
+os.environ.pop("NOVAI_AUTH_ENABLED", None)
 os.environ.pop("NOVAI_AUTH_DISABLED", None)
 os.environ.pop("NOVAI_CREDITS_DISABLED", None)
 os.environ.setdefault("NOVAI_ADMIN_USER", "admin")
@@ -40,6 +40,8 @@ os.environ["NOVAI_SSE_HEARTBEAT_SECONDS"] = "0.2"
 os.environ.pop("APIMART_TIER", None)
 os.environ.pop("NOVAI_CREDIT_USD", None)
 os.environ.pop("CREDIT_MARKUP", None)
+# 老用例覆盖 prepaid 兼容路径；全局后付费用例在各自测试里显式切换
+os.environ["CREDIT_BILLING_MODE"] = "prepaid"
 
 import main  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -70,6 +72,14 @@ def unique_user(balance: float = 0.0) -> int:
     return create_named_user(balance)[0]
 
 
+def force_balance(uid: int, value: float) -> None:
+    conn = store.connect()
+    try:
+        conn.execute("UPDATE users SET credits = ? WHERE id = ?", (float(value), int(uid)))
+    finally:
+        conn.close()
+
+
 def set_auth(enabled: bool) -> None:
     if enabled:
         os.environ["NOVAI_AUTH_ENABLED"] = "1"
@@ -92,6 +102,11 @@ def admin_client() -> TestClient:
     response = client.post("/api/auth/login", json={"username": ADMIN_USER, "password": ADMIN_PASS})
     assert response.status_code == 200, response.text
     return client
+
+
+def setUpModule():
+    set_auth(True)
+    auth_service.bootstrap_admin()
 
 
 class SchemaAndAdminTests(unittest.TestCase):
@@ -182,6 +197,16 @@ class PricingTests(unittest.TestCase):
         self.assertEqual(quote["model"], "GPT-4o Mini")
         self.assertGreater(quote["price"], quote["cost"])
 
+    def test_two_decimal_examples(self):
+        # 验收口径：文本 0.00002 成本 → 0.01；图片 0.072 → 0.10；视频 1.19 → 1.55；TTS 0.00313 → 0.01
+        self.assertAlmostEqual(pricing.price_for_cost(0.00002), 0.01)
+        self.assertAlmostEqual(pricing.price_for_cost(0.072), 0.10)
+        self.assertAlmostEqual(pricing.price_for_cost(1.19), 1.55)
+        self.assertAlmostEqual(pricing.price_for_cost(1.0), 1.30)
+        self.assertAlmostEqual(pricing.price_for_cost(0.00313), 0.01)
+        for cost in (0.0, 0.00002, 0.072, 1.0, 0.00313):
+            self.assertGreater(pricing.price_for_cost(cost), cost)
+
     def test_unmapped_falls_back_with_visibility(self):
         quote = pricing.estimate("image", "no-such-model-xyz", {"width": 1024, "height": 1024})
         self.assertTrue(quote["pricing_fallback"])
@@ -190,7 +215,7 @@ class PricingTests(unittest.TestCase):
 
     def test_markup_strictly_greater_and_step_aligned(self):
         step = config.price_step()
-        self.assertAlmostEqual(step, 0.0001)
+        self.assertAlmostEqual(step, 0.01)
         for cost in (0.0, 0.000018, 0.0001, 0.01, 0.072, 0.1, 1.0, 12.345, 99.999):
             price = pricing.price_for_cost(cost)
             self.assertGreater(price, cost)
@@ -226,7 +251,10 @@ class CoverageAndPrecisionTests(unittest.TestCase):
         rows = result["rows"]
         self.assertGreaterEqual(len(rows), 123)
         for row in rows:
-            self.assertIn(row["pricing_source"], ("direct", "proxy", "conservative"))
+            self.assertIn(row["pricing_source"], ("direct", "proxy", "conservative", "postpaid"))
+            if row["mode"] == "postpaid":
+                # 默认后付费时 price=0；显式 prepaid 兼容模式下可能展示预扣估价
+                continue
             self.assertGreater(float(row["price"]), 0, row)
             self.assertGreater(float(row["profit"]), 0, row)
         self.assertGreater(result["counts"]["proxy"], 0)
@@ -242,10 +270,9 @@ class CoverageAndPrecisionTests(unittest.TestCase):
 
     def test_text_15_tokens_precision(self):
         quote = pricing.estimate("text", "gpt-4o-mini", {"tokens_in": 15, "tokens_out": 0})
-        self.assertLessEqual(quote["price"], 0.001)
+        self.assertLessEqual(quote["price"], 0.01)
         self.assertGreater(quote["price"], quote["cost"])
-        self.assertNotEqual(quote["price"], 0.02)
-        self.assertAlmostEqual(quote["price"], 0.0001)
+        self.assertAlmostEqual(quote["price"], 0.01)
 
 
 class ChargeLifecycleTests(unittest.TestCase):
@@ -259,11 +286,11 @@ class ChargeLifecycleTests(unittest.TestCase):
             provider="apimart", pricing_source="direct",
         )
         settled = service.charge_settle(charge["id"], actual_cost_usd=0.002, actual=True)
-        # 0.002 USD = 0.02 积分成本 → ceil(0.02×1.3/0.0001)=0.026
-        self.assertAlmostEqual(settled["charged"], 0.026)
+        # 0.002 USD = 0.02 积分成本 → ceil(0.02×1.3/0.01)=0.03
+        self.assertAlmostEqual(settled["charged"], 0.03)
         self.assertAlmostEqual(settled["cost_usd"], 0.002)
         self.assertGreater(settled["profit_usd"], 0)
-        self.assertAlmostEqual(store.balance(uid), -0.016)
+        self.assertAlmostEqual(store.balance(uid), -0.02)
         self.assertLess(store.balance(uid), 0)
 
     def test_settlement_extra_charge_can_go_negative(self):
@@ -297,7 +324,7 @@ class ChargeLifecycleTests(unittest.TestCase):
         settled = service.charge_settle(charge["id"], actual_cost_usd=0.0036, actual=True)
         self.assertEqual(settled["status"], "settled")
         self.assertTrue(settled["actual"])
-        # 实际成本 0.0036 USD = 0.036 积分 → 售价 ceil(0.036×1.3/0.0001)=0.0468
+        # 实际成本 0.0036 USD = 0.036 积分 → 售价 ceil(0.036×1.3/0.01)=0.05
         expected = pricing.price_for_cost(0.036)
         self.assertAlmostEqual(settled["charged"], expected)
         self.assertAlmostEqual(store.balance(uid), 10.0 - expected)
@@ -393,6 +420,376 @@ class ChargeLifecycleTests(unittest.TestCase):
             replay = round(replay + item["delta"], 6)
             self.assertAlmostEqual(item["balance_after"], replay, places=5)
         self.assertAlmostEqual(store.balance(uid), replay, places=5)
+
+
+class GlobalPostpaidTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ["CREDIT_BILLING_MODE"] = "postpaid"
+
+    def test_default_mode_is_postpaid(self):
+        old = os.environ.pop("CREDIT_BILLING_MODE", None)
+        try:
+            self.assertEqual(config.billing_mode(), "postpaid")
+        finally:
+            os.environ["CREDIT_BILLING_MODE"] = old or "postpaid"
+
+    @classmethod
+    def tearDownClass(cls):
+        os.environ["CREDIT_BILLING_MODE"] = "prepaid"
+
+    def test_price_all_kinds_postpaid_with_estimate(self):
+        client = admin_client()
+        cases = [
+            ({"model": "flux-3-image-klein", "kind": "image", "width": 1024, "height": 1024}),
+            ({"model": "seedance-2.5", "kind": "video", "duration": 5, "height": 720}),
+            ({"model": "gpt-4o-mini", "kind": "text", "tokens_in": 100, "tokens_out": 50}),
+            ({"model": "suno", "kind": "audio"}),
+        ]
+        for params in cases:
+            params["provider"] = "apimart"
+            response = client.get("/api/credits/price", params=params)
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            self.assertEqual(payload["mode"], "postpaid")
+            self.assertTrue(payload["postpaid"])
+            self.assertAlmostEqual(float(payload["price"]), 0.0)
+            self.assertIn("生成后按实际用量扣费", payload.get("message", ""))
+            self.assertIn("estimated_cost", payload)
+            self.assertIn("estimated_price", payload)
+            self.assertAlmostEqual(payload["overdraft_limit"], 0.01)
+
+    def test_funded_image_actual_cost(self):
+        uid, username, password = create_named_user(1.0)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+
+        async def fake_image(payload):
+            return {"images": ["/output/fake.png"], "model": "flux-3-image-klein",
+                    "provider_id": "apimart", "cost": 0.0072}
+
+        with mock.patch.object(main, "build_online_image_result", fake_image):
+            response = client.post("/api/online-image", json={
+                "prompt": "cat", "provider_id": "apimart", "model": "flux-3-image-klein",
+                "size": "1024x1024", "quality": "auto", "n": 1})
+        self.assertEqual(response.status_code, 200, response.text)
+        credits = response.json().get("credits") or {}
+        self.assertEqual(credits.get("mode"), "postpaid")
+        self.assertAlmostEqual(credits.get("actual_cost_usd"), 0.0072)
+        self.assertAlmostEqual(credits.get("cost_usd"), 0.0072)
+        self.assertAlmostEqual(credits.get("price"), 0.10)
+        self.assertTrue(credits.get("actual"))
+        self.assertEqual(credits.get("cost_source"), "cost")
+        self.assertEqual(credits.get("pricing_source"), "upstream")
+        self.assertGreater(credits.get("profit_usd"), 0)
+        self.assertGreater(credits.get("balance_after"), 0)
+        self.assertAlmostEqual(store.balance(uid), 1.0 - credits["price"], places=5)
+
+    def test_zero_balance_text_allowed_twice(self):
+        uid, username, password = create_named_user(0)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+
+        async def fake_llm(payload):
+            return {"text": "hi", "model": "gpt-4o-mini",
+                    "raw_usage": {"prompt_tokens": 10, "completion_tokens": 1}}
+
+        with mock.patch.object(main, "_canvas_llm_impl", fake_llm):
+            first = client.post("/api/canvas-llm", json={
+                "message": "hi", "provider": "apimart", "model": "gpt-4o-mini"})
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertAlmostEqual(store.balance(uid), -0.01)
+            second = client.post("/api/canvas-llm", json={
+                "message": "hi", "provider": "apimart", "model": "gpt-4o-mini"})
+            self.assertEqual(second.status_code, 402, second.text)
+
+    def test_zero_balance_image_blocked_by_overdraft(self):
+        uid, username, password = create_named_user(0)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+        response = client.post("/api/online-image", json={
+            "prompt": "cat", "provider_id": "apimart", "model": "flux-3-image-klein",
+            "size": "1024x1024", "quality": "auto", "n": 1})
+        self.assertEqual(response.status_code, 402, response.text)
+        payload = response.json()
+        self.assertEqual(payload["code"], "INSUFFICIENT_CREDITS")
+        self.assertAlmostEqual(payload["balance"], 0.0)
+        self.assertAlmostEqual(payload["overdraft_limit"], 0.01)
+        self.assertGreater(payload["estimate"], 0.01)
+
+    def test_negative_balance_within_limit_can_generate(self):
+        uid, username, password = create_named_user(0)
+        force_balance(uid, -0.005)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+
+        async def fake_llm(payload):
+            return {"text": "hi", "model": "gpt-4o-mini",
+                    "raw_usage": {"prompt_tokens": 10, "completion_tokens": 1}}
+
+        with mock.patch.object(main, "_canvas_llm_impl", fake_llm):
+            response = client.post("/api/canvas-llm", json={
+                "message": "hi", "provider": "apimart", "model": "gpt-4o-mini"})
+        self.assertEqual(response.status_code, 200, response.text)
+
+        force_balance(uid, -0.02)
+        blocked = client.post("/api/canvas-llm", json={
+            "message": "hi", "provider": "apimart", "model": "gpt-4o-mini"})
+        self.assertEqual(blocked.status_code, 402, blocked.text)
+        image_blocked = client.post("/api/online-image", json={
+            "prompt": "cat", "provider_id": "apimart", "model": "flux-3-image-klein",
+            "size": "1024x1024", "quality": "auto", "n": 1})
+        self.assertEqual(image_blocked.status_code, 402, image_blocked.text)
+
+    def test_actual_cost_over_limit_marks_flag_and_blocks_next(self):
+        uid = create_named_user(0)[0]
+        # 直接构造一单实际成本 0.01 USD，结算后余额 -0.13 < -0.01
+        charge = integration.credits_charge_start("text", "gpt-4o-mini",
+                                                  {"tokens_in": 10, "tokens_out": 1}, user_id=uid,
+                                                  provider="apimart")
+        settled = service.charge_settle(charge["id"], actual_cost_usd=0.01, actual=True)
+        self.assertLess(store.balance(uid), -0.01)
+        self.assertTrue(settled["credits"]["overdrawn_over_limit"])
+        self.assertAlmostEqual(store.balance(uid), -0.13, places=2)
+        with self.assertRaises(InsufficientCredits):
+            integration.credits_charge_start("text", "gpt-4o-mini",
+                                             {"tokens_in": 10, "tokens_out": 1}, user_id=uid,
+                                             provider="apimart")
+
+    def test_debtors_endpoint_lists_negative_balance(self):
+        uid = create_named_user(0.1)[0]
+        charge = integration.credits_charge_start("image", "flux-3-image-klein",
+                                                  {"width": 1024, "height": 1024}, user_id=uid,
+                                                  provider="apimart")
+        service.charge_settle(charge["id"], actual_cost_usd=0.5, actual=True)
+        self.assertLess(store.balance(uid), 0)
+        client = admin_client()
+        response = client.get("/api/credits/debtors")
+        self.assertEqual(response.status_code, 200)
+        ids = [int(item["id"]) for item in response.json()["users"]]
+        self.assertIn(uid, ids)
+        over = client.get("/api/credits/debtors", params={"over_limit": "true"}).json()
+        self.assertIn(uid, [int(item["id"]) for item in over["users"]])
+        self.assertTrue(all(item["over_limit"] for item in over["users"]))
+
+    def test_funded_image_estimate_when_cost_missing(self):
+        uid, username, password = create_named_user(1.0)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+
+        async def fake_image(payload):
+            return {"images": ["/output/fake.png"], "model": "flux-3-image-klein"}
+
+        with mock.patch.object(main, "build_online_image_result", fake_image):
+            response = client.post("/api/online-image", json={
+                "prompt": "cat", "provider_id": "apimart", "model": "flux-3-image-klein",
+                "size": "1024x1024", "quality": "auto", "n": 1})
+        self.assertEqual(response.status_code, 200, response.text)
+        credits = response.json().get("credits") or {}
+        self.assertEqual(credits.get("mode"), "postpaid")
+        self.assertFalse(credits.get("actual"))
+        self.assertEqual(credits.get("pricing_source"), "estimate")
+        self.assertEqual(credits.get("cost_source"), "estimate")
+        self.assertGreater(credits.get("price_usd"), 0)
+        self.assertLess(credits.get("balance_after"), 1.0)
+
+    def test_zero_balance_text_actual_usage(self):
+        uid, username, password = create_named_user(0)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+
+        async def fake_llm(payload):
+            return {"text": "hi", "model": "gpt-4o-mini",
+                    "raw_usage": {"prompt_tokens": 100, "completion_tokens": 50}}
+
+        with mock.patch.object(main, "_canvas_llm_impl", fake_llm):
+            response = client.post("/api/canvas-llm", json={
+                "message": "hi", "provider": "apimart", "model": "gpt-4o-mini"})
+        self.assertEqual(response.status_code, 200, response.text)
+        credits = response.json().get("credits") or {}
+        self.assertEqual(credits.get("mode"), "postpaid")
+        self.assertTrue(credits.get("actual"))
+        self.assertEqual(credits.get("cost_source"), "usage")
+        self.assertGreater(credits.get("price_usd"), credits.get("cost_usd"))
+        self.assertLess(credits.get("balance_after"), 0)
+
+    def test_table_rows_estimate_and_charge(self):
+        uid = create_named_user(0.3)[0]
+        charge = integration.credits_charge_start(
+            "image", "flux-3-image-klein",
+            {"width": 1024, "height": 1024, "rows": 3}, user_id=uid, provider="apimart")
+        self.assertIsNotNone(charge)
+        self.assertEqual(charge["mode"], "postpaid")
+        self.assertAlmostEqual(charge["estimate"], 0.0)
+        settled = service.charge_settle(charge["id"], actual_cost_usd=0.03, actual=True)
+        self.assertTrue(settled["actual"])
+        self.assertGreater(settled["charged"], 0)
+
+    def test_funded_video_task(self):
+        uid, username, password = create_named_user(50.0)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+
+        async def fake_video(payload):
+            return {"videos": ["/output/fake.mp4"], "cost": 0.1}
+
+        with mock.patch.object(main, "canvas_video_run", fake_video):
+            response = client.post("/api/canvas-video", json={
+                "prompt": "x", "provider_id": "apimart", "model": "veo3-fast", "duration": 5})
+        self.assertEqual(response.status_code, 200, response.text)
+        credits = response.json().get("credits") or {}
+        self.assertEqual(credits.get("mode"), "postpaid")
+        self.assertAlmostEqual(credits.get("cost_usd"), 0.1)
+        self.assertGreater(credits.get("price_usd"), 0.1)
+        self.assertLess(credits.get("balance_after"), 50.0)
+
+    def test_failure_closes_pending_without_charge(self):
+        uid, username, password = create_named_user(0)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+
+        async def boom(payload):
+            raise main.HTTPException(status_code=502, detail="upstream boom")
+
+        with mock.patch.object(main, "generate_canvas_tts", boom):
+            response = client.post("/api/canvas-tts", json={
+                "provider_id": "apimart", "model": "gpt-4o-mini-tts", "input": "hi"})
+        self.assertEqual(response.status_code, 502)
+        self.assertAlmostEqual(store.balance(uid), 0.0)
+        self.assertEqual(service.charges(user_id=uid, limit=1)[0]["status"], "refunded")
+
+    def test_concurrent_postpaid_no_lost_charges(self):
+        uid = create_named_user(0)[0]
+        quote = pricing.postpaid_quote("text", "gpt-4o-mini", {"tokens_in": 10, "tokens_out": 1}, "apimart")
+        charges = []
+        lock = threading.Lock()
+        barrier = threading.Barrier(8)
+
+        def worker():
+            # 先并发建单（此时余额 0，所有单都应允许），再一起结算，验证不丢单
+            charge = service.charge_start(uid, "text", "gpt-4o-mini",
+                                          {"tokens_in": 10, "tokens_out": 1}, estimate=quote,
+                                          provider="apimart")
+            barrier.wait(timeout=5)
+            settled = service.charge_settle(charge["id"], actual_cost_usd=0.001, actual=True)
+            with lock:
+                charges.append(settled)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(len(charges), 8)
+        self.assertTrue(all(item["status"] == "settled" for item in charges))
+        self.assertLess(store.balance(uid), 0)
+        self.assertEqual(len(service.charges(user_id=uid, limit=20)), 8)
+
+    def test_prepaid_mode_still_works(self):
+        os.environ["CREDIT_BILLING_MODE"] = "prepaid"
+        try:
+            uid = create_named_user(0)[0]
+            with self.assertRaises(InsufficientCredits):
+                integration.credits_charge_start("image", "flux-3-image-klein",
+                                                  {"width": 1024, "height": 1024}, user_id=uid)
+        finally:
+            os.environ["CREDIT_BILLING_MODE"] = "postpaid"
+
+
+class PostpaidSpeechTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ["CREDIT_BILLING_MODE"] = "postpaid"
+
+    @classmethod
+    def tearDownClass(cls):
+        os.environ["CREDIT_BILLING_MODE"] = "prepaid"
+
+    def test_price_api_returns_postpaid_not_12_48(self):
+        client = admin_client()
+        response = client.get("/api/credits/price", params={
+            "model": "gpt-4o-mini-tts", "kind": "audio", "provider": "apimart"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["mode"], "postpaid")
+        self.assertTrue(payload["postpaid"])
+        self.assertEqual(float(payload["price"]), 0.0)
+        self.assertNotEqual(float(payload["price"]), 12.48)
+        self.assertIn("生成后按实际用量扣费", payload.get("message", ""))
+
+    def test_tts1_official_character_cost(self):
+        from server.credits import speech
+        info = speech.estimate_speech_cost("tts-1", {"characters": 11})
+        self.assertIsNotNone(info)
+        self.assertAlmostEqual(info["usd"], 11 * 15.0 / 1_000_000, places=10)
+        self.assertEqual(info["source"], "openai_official")
+        price = pricing.price_for_cost(info["usd"] / config.usd_per_credit())
+        self.assertAlmostEqual(price, 0.01)
+        self.assertGreater(price, info["usd"] / config.usd_per_credit())
+
+    def test_balance_zero_tts_submits_and_settles_actual_usage(self):
+        uid, username, password = create_named_user(0)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+
+        async def fake_tts(payload):
+            return {"audios": ["/output/fake.wav"], "model": "gpt-4o-mini-tts",
+                    "characters": 11,
+                    "usage": {"characters": 11, "seconds": 1.0, "bytes": 1000}}
+
+        with mock.patch.object(main, "generate_canvas_tts", fake_tts):
+            response = client.post("/api/canvas-tts", json={
+                "provider_id": "apimart", "model": "gpt-4o-mini-tts",
+                "input": "hello world", "voice": "alloy", "response_format": "wav",
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        credits = response.json().get("credits") or {}
+        self.assertEqual(credits.get("mode"), "postpaid")
+        self.assertTrue(credits.get("postpaid"))
+        self.assertAlmostEqual(credits.get("estimate"), 0.0)
+        # 1 秒 gpt-4o-mini-tts = $0.00025 → 0.0025 积分 → 售价 0.0033
+        self.assertAlmostEqual(credits.get("price"), 0.01)
+        self.assertEqual(credits.get("cost_source"), "openai_official")
+        self.assertEqual(credits.get("status"), "settled")
+        self.assertLess(credits.get("balance_after"), 0)
+        charge = service.charges(user_id=uid, limit=1)[0]
+        self.assertEqual(charge["mode"], "postpaid")
+        self.assertEqual(int(charge["actual"]), 1)
+        self.assertIn("openai_official", charge["note"])
+        self.assertAlmostEqual(store.balance(uid), -0.01)
+
+    def test_postpaid_without_usage_is_unpriced_zero_charge(self):
+        uid, username, password = create_named_user(0)
+        client = TestClient(main.app)
+        self.assertEqual(client.post("/api/auth/login",
+                                     json={"username": username, "password": password}).status_code, 200)
+
+        async def fake_tts(payload):
+            return {"audios": ["/output/fake.wav"], "model": "gpt-4o-mini-tts"}
+
+        with mock.patch.object(main, "generate_canvas_tts", fake_tts):
+            response = client.post("/api/canvas-tts", json={
+                "provider_id": "apimart", "model": "gpt-4o-mini-tts",
+                "input": "hello", "voice": "alloy", "response_format": "wav",
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        credits = response.json().get("credits") or {}
+        self.assertEqual(credits.get("mode"), "postpaid")
+        self.assertEqual(credits.get("status"), "unpriced")
+        self.assertAlmostEqual(credits.get("price"), 0.0)
+        self.assertAlmostEqual(store.balance(uid), 0.0)
+        charge = service.charges(user_id=uid, limit=1)[0]
+        self.assertEqual(charge["status"], "unpriced")
+        self.assertIn("unpriced", charge["note"])
 
 
 class ProviderVisibilityTests(unittest.TestCase):
@@ -557,12 +954,12 @@ class ApiIntegrationTests(unittest.TestCase):
             })
             self.assertEqual(response.status_code, 200, response.text)
             credits = response.json().get("credits") or {}
-            self.assertLessEqual(credits.get("price", 1), 0.001)
-            self.assertAlmostEqual(credits.get("price"), 0.0001)
+            self.assertLessEqual(credits.get("price", 1), 0.01)
+            self.assertAlmostEqual(credits.get("price"), 0.01)
             self.assertNotEqual(credits.get("price"), 0.02)
             charge = service.charges(user_id=uid, limit=1)[0]
             self.assertTrue(int(charge.get("actual") or 0))
-            self.assertLessEqual(charge["price_usd"], 0.00001)
+            self.assertLessEqual(charge["price_usd"], 0.001)
 
     def test_auth_off_disables_charging(self):
         uid = unique_user(5.0)
@@ -650,7 +1047,7 @@ class ApiIntegrationTests(unittest.TestCase):
 def tearDownModule():
     # 不删 _TMP_DATA：合并跑时它可能已是后续套件正在使用的共享库（谁先 import 谁建库）。
     # 单个套件跑完留下的临时目录由系统清理，和其他 python 测试套件的行为保持一致。
-    set_auth(True)
+    set_auth(False)
     reset_for_tests()
 
 

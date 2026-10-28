@@ -15,6 +15,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from starlette.requests import Request
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
 
@@ -54,8 +56,12 @@ def config_provider(config, provider_id):
 class ConfigViewVideoModelsTests(unittest.TestCase):
     def config(self, providers):
         with patch.object(main, "load_api_providers", return_value=providers), \
-             patch.object(main, "provider_env_key_value", return_value="sk-test"):
-            return asyncio.run(main.ai_config())
+             patch.object(main, "provider_env_key_value", return_value="sk-test"), \
+             patch.object(main, "_is_admin_actor", return_value=True):
+            return asyncio.run(main.ai_config(Request({
+                "type": "http", "method": "GET", "path": "/api/config",
+                "headers": [], "client": ("127.0.0.1", 12345),
+            })))
 
     def test_hub_models_are_normalized_and_deduplicated(self):
         source = [hub_provider(["agnes-video-2.5", "agnes-video-2.5-flash", "agnes-video-v2.0"])]
@@ -101,8 +107,12 @@ class ConfigViewVideoModelsTests(unittest.TestCase):
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             before = hashlib.sha256(path.read_bytes()).hexdigest()
             with patch.object(main, "API_PROVIDERS_FILE", str(path)), \
-                 patch.object(main, "provider_env_key_value", return_value="sk-test"):
-                config = asyncio.run(main.ai_config())
+                 patch.object(main, "provider_env_key_value", return_value="sk-test"), \
+             patch.object(main, "_is_admin_actor", return_value=True):
+                config = asyncio.run(main.ai_config(Request({
+                "type": "http", "method": "GET", "path": "/api/config",
+                "headers": [], "client": ("127.0.0.1", 12345),
+            })))
             after = hashlib.sha256(path.read_bytes()).hexdigest()
             self.assertEqual(before, after, "下发归一不能写回磁盘")
             self.assertEqual(config_provider(config, "agnes-ai")["video_models"],

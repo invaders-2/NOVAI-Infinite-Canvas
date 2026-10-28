@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "generated_at": "2026-10-24T12:23:22+0800",
+ "generated_at": "2026-10-24T20:46:12+0800",
  "source": {
   "providers": "data/api_providers.json",
   "pricing": "server/credits/apimart_pricing.json"
@@ -875,45 +875,45 @@
    "kind": "audio",
    "model": "gpt-4o-audio-preview",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|audio|gpt-4o-audio-preview-2024-10-01": {
    "provider": "apimart",
    "kind": "audio",
    "model": "gpt-4o-audio-preview-2024-10-01",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|audio|gpt-4o-mini-tts": {
    "provider": "apimart",
    "kind": "audio",
    "model": "gpt-4o-mini-tts",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|audio|gpt-audio-mini": {
    "provider": "apimart",
    "kind": "audio",
    "model": "gpt-audio-mini",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|audio|gpt-audio-mini-2025-10-06": {
    "provider": "apimart",
    "kind": "audio",
    "model": "gpt-audio-mini-2025-10-06",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|audio|suno": {
    "provider": "apimart",
@@ -929,45 +929,45 @@
    "kind": "audio",
    "model": "tts-1",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|audio|tts-1-1106": {
    "provider": "apimart",
    "kind": "audio",
    "model": "tts-1-1106",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|audio|tts-1-hd": {
    "provider": "apimart",
    "kind": "audio",
    "model": "tts-1-hd",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|audio|tts-1-hd-1106": {
    "provider": "apimart",
    "kind": "audio",
    "model": "tts-1-hd-1106",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|audio|whisper-1": {
    "provider": "apimart",
    "kind": "audio",
    "model": "whisper-1",
    "target": "",
-   "mode": "conservative",
+   "mode": "postpaid",
    "quality": "",
-   "note": "APIMart 价目表无此模型（语音）"
+   "note": "APIMart 语音后付费：生成完成后按实际用量扣"
   },
   "apimart|chat|claude-fable-5": {
    "provider": "apimart",
@@ -1309,7 +1309,8 @@
   "total_entries": 141,
   "direct": 26,
   "proxy": 100,
-  "conservative": 15,
+  "conservative": 5,
+  "postpaid": 10,
   "uncovered": 0
  }
 }

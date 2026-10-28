@@ -41,3 +41,4 @@ AI 创作工具：无限画布 + 多模型调用（OpenAI API、ComfyUI、火山
 - `docs/NOVAI_ARCHITECTURE_AUDIT.md` 位于 `docs/v2/`；`docs/IMAGE_COLOR_ADJUST_DESIGN.md` 是图像调色设计
 - `docs/superpowers/specs/`：桌面打包设计等 spec
 - `README.md` / `新手运行与使用教程.md`：安装、运行、打包
+- `docs/待推送清单.md`：**每次 push / 发版前必读**——工作树里已改完但未提交的条目、对应文件、验收命令与发版文案

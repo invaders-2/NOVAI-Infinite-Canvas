@@ -11,6 +11,11 @@ export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
+  server: {
+    proxy: {
+      "/api": "http://127.0.0.1:" + (process.env.NOVAI_PORT || 3000),
+    },
+  },
   build: {
     outDir: "../static/canvas-assistant",
     emptyOutDir: true,

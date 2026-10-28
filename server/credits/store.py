@@ -68,7 +68,10 @@ SCHEMA = (
         note TEXT NOT NULL DEFAULT '',
         provider TEXT NOT NULL DEFAULT '',
         pricing_source TEXT NOT NULL DEFAULT 'direct',
-        proxy_model TEXT NOT NULL DEFAULT ''
+        proxy_model TEXT NOT NULL DEFAULT '',
+        mode TEXT NOT NULL DEFAULT 'prepaid',
+        overdrawn_over_limit INTEGER NOT NULL DEFAULT 0,
+        cost_source TEXT NOT NULL DEFAULT ''
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_credit_charges_user ON credit_charges(user_id, id DESC)",
@@ -86,6 +89,9 @@ CHARGE_COLUMNS = (
     ("provider", "TEXT NOT NULL DEFAULT ''"),
     ("pricing_source", "TEXT NOT NULL DEFAULT 'direct'"),
     ("proxy_model", "TEXT NOT NULL DEFAULT ''"),
+    ("mode", "TEXT NOT NULL DEFAULT 'prepaid'"),
+    ("overdrawn_over_limit", "INTEGER NOT NULL DEFAULT 0"),
+    ("cost_source", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -157,7 +163,13 @@ def _now() -> int:
 
 
 def _clean_amount(value: Any) -> float:
+    """USD 金额保留 6 位（成本/利润核算用）。"""
     return round(float(value or 0), 6)
+
+
+def _credit_amount(value: Any) -> float:
+    """积分余额/预扣/售价统一 2 位小数（0.01 为最小单位）。"""
+    return round(float(value or 0), 2)
 
 
 # ---------------------------------------------------------------- 余额 / 流水
@@ -174,7 +186,7 @@ def balance(user_id: int) -> float:
         if not _table_exists(conn, "users"):
             return 0.0
         row = conn.execute("SELECT credits FROM users WHERE id = ?", (int(user_id),)).fetchone()
-        return _clean_amount(row["credits"]) if row else 0.0
+        return _credit_amount(row["credits"]) if row else 0.0
     finally:
         conn.close()
 
@@ -185,7 +197,7 @@ def _insert_transaction(conn: sqlite3.Connection, user_id: int, delta: float, ba
     cursor = conn.execute(
         "INSERT INTO credit_transactions (user_id, delta, balance_after, kind, ref, note, "
         "cost_usd, price_usd, profit_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (int(user_id), _clean_amount(delta), _clean_amount(balance_after), str(kind or ""),
+        (int(user_id), _credit_amount(delta), _credit_amount(balance_after), str(kind or ""),
          str(ref or ""), str(note or ""), _clean_amount(cost_usd), _clean_amount(price_usd),
          _clean_amount(profit_usd), _now()),
     )
@@ -203,22 +215,38 @@ def adjust_credits(user_id: int, delta: float, kind: str = "admin_adjust", ref: 
         if row is None:
             conn.execute("ROLLBACK")
             raise ValueError("user_not_found")
-        current = _clean_amount(row["credits"])
-        new_balance = round(current + float(delta), 6)
+        current = _credit_amount(row["credits"])
+        delta = _credit_amount(delta)
+        new_balance = _credit_amount(current + delta)
         if new_balance < -_EPSILON:
             conn.execute("ROLLBACK")
-            raise InsufficientBalance(current, float(delta))
-        conn.execute("UPDATE users SET credits = ? WHERE id = ?", (_clean_amount(new_balance), int(user_id)))
-        tx_id = _insert_transaction(conn, user_id, float(delta), new_balance, kind, ref, note,
+            raise InsufficientBalance(current, delta)
+        conn.execute("UPDATE users SET credits = ? WHERE id = ?", (new_balance, int(user_id)))
+        tx_id = _insert_transaction(conn, user_id, delta, new_balance, kind, ref, note,
                                     cost_usd, price_usd, profit_usd)
         conn.execute("COMMIT")
-        return {"balance": _clean_amount(new_balance), "delta": float(delta), "transaction_id": tx_id}
+        return {"balance": new_balance, "delta": delta, "transaction_id": tx_id}
     except Exception:
         try:
             conn.execute("ROLLBACK")
         except sqlite3.Error:
             pass
         raise
+    finally:
+        conn.close()
+
+
+def list_negative_balances(limit: int = 200) -> List[Dict[str, Any]]:
+    """后付费欠费用户列表：credits < 0（含 username/role，供管理员催缴）。"""
+    conn = connect()
+    try:
+        if not _table_exists(conn, "users"):
+            return []
+        rows = conn.execute(
+            "SELECT id, username, role, credits FROM users WHERE credits < ? ORDER BY credits ASC LIMIT ?",
+            (-_EPSILON, max(1, min(500, int(limit)))),
+        ).fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 
@@ -254,6 +282,7 @@ def _charge_payload(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         data["unmapped"] = json.loads(data.get("unmapped_json") or "[]")
     except ValueError:
         data["unmapped"] = []
+    data["actual_cost_usd"] = round(float(data.get("cost_usd") or 0), 6)
     return data
 
 
@@ -280,11 +309,19 @@ def create_charge(user_id: int, estimate: float, kind: str, model: str, params: 
                   price_usd: float = 0.0, profit_usd: float = 0.0, pricing_fallback: bool = False,
                   unmapped: Optional[List[str]] = None, matched_spec: str = "",
                   note: str = "", provider: str = "", pricing_source: str = "direct",
-                  proxy_model: str = "") -> Dict[str, Any]:
-    """预扣：余额不足抛 InsufficientCredits；成功返回含 balance_after 的扣费单。"""
+                  proxy_model: str = "", mode: str = "prepaid",
+                  postpaid_estimated_price=None, overdraft_limit=None) -> Dict[str, Any]:
+    """预扣/后付费建单。
+
+    mode=prepaid：余额不足抛 InsufficientCredits；
+    mode=postpaid：estimate 固定 0、不检查余额、不扣款，生成完成后按实际成本补扣。
+    """
     from server.credits.errors import InsufficientCredits
 
-    estimate = _clean_amount(estimate)
+    mode = str(mode or "prepaid")
+    if mode == "postpaid":
+        estimate = 0.0
+    estimate = _credit_amount(estimate)
     conn = connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -292,32 +329,59 @@ def create_charge(user_id: int, estimate: float, kind: str, model: str, params: 
         if row is None:
             conn.execute("ROLLBACK")
             raise InsufficientCredits(estimate, 0.0, "账户不存在")
-        current = _clean_amount(row["credits"])
-        if current + _EPSILON < estimate:
+        raw_current = float(row["credits"] or 0)
+        current = _credit_amount(raw_current)
+        if mode == "postpaid":
+            limit = _credit_amount(overdraft_limit if overdraft_limit is not None else 0.01)
+            estimated = None
+            try:
+                estimated = _credit_amount(postpaid_estimated_price) if postpaid_estimated_price is not None else None
+            except (TypeError, ValueError):
+                estimated = None
+            # 校验用未四舍五入的真实余额：-0.005 这类余额仍允许发小额文本；
+            # 展示/落库时才收敛到 2 位。
+            if raw_current <= -limit + _EPSILON:
+                conn.execute("ROLLBACK")
+                raise InsufficientCredits(
+                    estimated or 0.0, current,
+                    "欠费已达上限（可欠费 %.2f 积分）" % limit, limit)
+            # 估价不超过一个欠费上限时，只校验余额是否到上限（允许 -0.005 这类余额发文本）；
+            # 估价更高（如图片 0.10）才要求 balance + limit 足够覆盖，避免 0 余额直接透支大额。
+            if (estimated is not None and estimated > limit + _EPSILON
+                    and raw_current + limit < estimated - _EPSILON):
+                conn.execute("ROLLBACK")
+                raise InsufficientCredits(
+                    estimated, current,
+                    "积分不足：本次预计 %.2f，当前 %.2f（可欠费 %.2f）" % (estimated, current, limit),
+                    limit)
+        elif raw_current + _EPSILON < estimate:
             conn.execute("ROLLBACK")
             raise InsufficientCredits(estimate, current)
-        new_balance = round(current - estimate, 6)
-        conn.execute("UPDATE users SET credits = ? WHERE id = ?", (new_balance, int(user_id)))
+        new_balance = _credit_amount(raw_current - estimate)
+        if estimate:
+            conn.execute("UPDATE users SET credits = ? WHERE id = ?", (new_balance, int(user_id)))
         now = _now()
         cursor = conn.execute(
             "INSERT INTO credit_charges (user_id, task_ref, model, kind, params_json, estimate, charged, "
             "cost_usd, price_usd, profit_usd, status, created_at, estimate_cost, actual, pricing_fallback, "
-            "unmapped_json, matched_spec, note, provider, pricing_source, proxy_model) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)",
+            "unmapped_json, matched_spec, note, provider, pricing_source, proxy_model, mode) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)",
             (int(user_id), str(task_ref or ""), str(model or ""), str(kind or ""),
              json.dumps(params or {}, ensure_ascii=False, default=str), estimate, estimate,
              _clean_amount(cost_usd), _clean_amount(price_usd), _clean_amount(profit_usd), now,
              _clean_amount(estimate_cost), 1 if pricing_fallback else 0,
              json.dumps(unmapped or [], ensure_ascii=False), str(matched_spec or ""), str(note or ""),
-             str(provider or ""), str(pricing_source or "direct"), str(proxy_model or "")),
+             str(provider or ""), str(pricing_source or "direct"), str(proxy_model or ""), mode),
         )
         charge_id = int(cursor.lastrowid)
-        tx_id = _insert_transaction(conn, user_id, -estimate, new_balance, "charge",
-                                    str(task_ref or ("charge:%d" % charge_id)), note,
-                                    cost_usd, price_usd, profit_usd)
+        tx_id = 0
+        if estimate:
+            tx_id = _insert_transaction(conn, user_id, -estimate, new_balance, "charge",
+                                        str(task_ref or ("charge:%d" % charge_id)), note,
+                                        cost_usd, price_usd, profit_usd)
         conn.execute("COMMIT")
         charge = _charge_payload(_charge_row(conn, charge_id)) or {}
-        charge["balance_after"] = new_balance
+        charge["balance_after"] = _credit_amount(new_balance)
         charge["transaction_id"] = tx_id
         return charge
     except Exception:
@@ -332,7 +396,8 @@ def create_charge(user_id: int, estimate: float, kind: str, model: str, params: 
 
 def settle_charge(charge_id: int, actual_price: float, actual_cost_usd: float, actual_price_usd: float,
                   profit_usd: float, actual: bool = False, note: str = "",
-                  matched_spec: str = "") -> Dict[str, Any]:
+                  matched_spec: str = "", pricing_source: str = "",
+                  overdraft_limit=None, cost_source: str = "") -> Dict[str, Any]:
     """按实际结算：多退少补；同一 charge 幂等（非 pending 直接返回现状）。"""
     conn = connect()
     try:
@@ -348,25 +413,33 @@ def settle_charge(charge_id: int, actual_price: float, actual_cost_usd: float, a
             charge["noop"] = True
             return charge
         user_id = int(row["user_id"])
-        current_charge = _clean_amount(row["charged"])
-        target_charge = _clean_amount(actual_price)
-        delta = round(target_charge - current_charge, 6)
+        current_charge = _credit_amount(row["charged"])
+        target_charge = _credit_amount(actual_price)
+        delta = _credit_amount(target_charge - current_charge)
         user_row = conn.execute("SELECT credits FROM users WHERE id = ?", (user_id,)).fetchone()
-        current_balance = _clean_amount(user_row["credits"]) if user_row else 0.0
+        current_balance = _credit_amount(user_row["credits"]) if user_row else 0.0
         # 多退少补：正数补扣、负数退回。实际成本高于预扣时允许把余额扣成负数（记欠费），
         # 绝不因为余额不够就少记成本——那等于平台吞掉差额、每单亏一点。
-        new_balance = round(current_balance - delta, 6)
+        new_balance = _credit_amount(current_balance - delta)
+        limit = _credit_amount(overdraft_limit if overdraft_limit is not None else config.overdraft_limit())
+        over_limit = 1 if new_balance < -limit - _EPSILON else 0
         conn.execute("UPDATE users SET credits = ? WHERE id = ?", (new_balance, user_id))
         settled_at = _now()
         final_note = str(note or "")
         if new_balance < -_EPSILON:
             final_note = (final_note + "；" if final_note else "") + "balance_debt=%.6f" % new_balance
+        if over_limit:
+            final_note = (final_note + "；" if final_note else "") + "overdrawn_over_limit=1"
         conn.execute(
             "UPDATE credit_charges SET charged = ?, cost_usd = ?, price_usd = ?, profit_usd = ?, "
-            "status = 'settled', settled_at = ?, actual = ?, matched_spec = ?, note = ? WHERE id = ?",
-            (_clean_amount(target_charge), _clean_amount(actual_cost_usd), _clean_amount(actual_price_usd),
+            "status = 'settled', settled_at = ?, actual = ?, matched_spec = ?, note = ?, "
+            "pricing_source = CASE WHEN ? != '' THEN ? ELSE pricing_source END, "
+            "overdrawn_over_limit = ?, "
+            "cost_source = CASE WHEN ? != '' THEN ? ELSE cost_source END WHERE id = ?",
+            (_credit_amount(target_charge), _clean_amount(actual_cost_usd), _clean_amount(actual_price_usd),
              _clean_amount(profit_usd), settled_at, 1 if actual else 0, str(matched_spec or ""),
-             final_note, int(charge_id)),
+             final_note, str(pricing_source or ""), str(pricing_source or ""), over_limit,
+             str(cost_source or ""), str(cost_source or ""), int(charge_id)),
         )
         if abs(delta) > _EPSILON:
             tx_kind = "settle" if delta > 0 else "refund"
@@ -374,8 +447,8 @@ def settle_charge(charge_id: int, actual_price: float, actual_cost_usd: float, a
                                 final_note, actual_cost_usd, actual_price_usd, profit_usd)
         conn.execute("COMMIT")
         charge = _charge_payload(_charge_row(conn, charge_id)) or {}
-        charge["balance_after"] = new_balance
-        charge["delta"] = round(-delta, 6)
+        charge["balance_after"] = _credit_amount(new_balance)
+        charge["delta"] = _credit_amount(-delta)
         charge["balance_debt"] = new_balance if new_balance < -_EPSILON else 0.0
         return charge
     except Exception:
@@ -404,10 +477,10 @@ def refund_charge(charge_id: int, reason: str = "") -> Dict[str, Any]:
             charge["noop"] = True
             return charge
         user_id = int(row["user_id"])
-        refund = _clean_amount(row["charged"])
+        refund = _credit_amount(row["charged"])
         user_row = conn.execute("SELECT credits FROM users WHERE id = ?", (user_id,)).fetchone()
-        current_balance = _clean_amount(user_row["credits"]) if user_row else 0.0
-        new_balance = round(current_balance + refund, 6)
+        current_balance = _credit_amount(user_row["credits"]) if user_row else 0.0
+        new_balance = _credit_amount(current_balance + refund)
         conn.execute("UPDATE users SET credits = ? WHERE id = ?", (new_balance, user_id))
         conn.execute(
             "UPDATE credit_charges SET status = 'refunded', settled_at = ?, note = ? WHERE id = ?",
@@ -419,8 +492,43 @@ def refund_charge(charge_id: int, reason: str = "") -> Dict[str, Any]:
                                 round(refund * config.usd_per_credit(), 6), 0.0)
         conn.execute("COMMIT")
         charge = _charge_payload(_charge_row(conn, charge_id)) or {}
-        charge["balance_after"] = new_balance
+        charge["balance_after"] = _credit_amount(new_balance)
         charge["refunded"] = refund
+        return charge
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
+def settle_unpriced(charge_id: int, note: str = "") -> Dict[str, Any]:
+    """后付费拿不到任何成本/usage：0 扣费、状态标 unpriced，交管理员补价；绝不猜价。"""
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = _charge_row(conn, charge_id)
+        if row is None:
+            conn.execute("ROLLBACK")
+            raise ValueError("charge_not_found")
+        if str(row.get("status")) != "pending":
+            conn.execute("ROLLBACK")
+            charge = _charge_payload(row) or {}
+            charge["balance_after"] = balance(int(row["user_id"]))
+            charge["noop"] = True
+            return charge
+        user_id = int(row["user_id"])
+        conn.execute(
+            "UPDATE credit_charges SET status = 'unpriced', charged = 0, cost_usd = 0, price_usd = 0, "
+            "profit_usd = 0, settled_at = ?, note = ?, pricing_source = 'unpriced' WHERE id = ?",
+            (_now(), str(note or "unpriced"), int(charge_id)),
+        )
+        conn.execute("COMMIT")
+        charge = _charge_payload(_charge_row(conn, charge_id)) or {}
+        charge["balance_after"] = balance(user_id)
         return charge
     except Exception:
         try:

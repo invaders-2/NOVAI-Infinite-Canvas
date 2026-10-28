@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
 import os
@@ -36,7 +37,7 @@ import main  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from starlette.websockets import WebSocketDisconnect  # noqa: E402
 
-from server import collab  # noqa: E402
+from server import avatars, collab  # noqa: E402
 from server.auth import ratelimit, service  # noqa: E402
 
 ADMIN_USER = os.environ.get("NOVAI_ADMIN_USER", "admin")
@@ -50,6 +51,10 @@ def set_auth(enabled: bool) -> None:
         os.environ.pop("NOVAI_AUTH_DISABLED", None)
     else:
         os.environ.pop("NOVAI_AUTH_ENABLED", None)
+
+
+def tearDownModule():
+    set_auth(False)
 
 
 def fresh_client() -> TestClient:
@@ -297,6 +302,66 @@ class B_CollabTest(unittest.TestCase):
 
             viewer.send_json({"type": "ping"})
             self.assertEqual(viewer.receive_json()["type"], "pong")
+
+    # ---------------------------------------------------------------- 头像
+    def test_presence_includes_avatar_url(self) -> None:
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        )
+        admin = self.admin_client()
+        ctx = self.setup_canvas(admin)
+        owner_client, owner_user = ctx["owner"]
+        editor_client, editor_user = ctx["editor"]
+        viewer_client, viewer_user = ctx["viewer"]
+        canvas_id = ctx["canvas"]["id"]
+
+        owner_avatar = owner_client.post(
+            "/api/auth/avatar", files={"file": ("o.png", png + b"o", "image/png")}
+        ).json()["avatar_url"]
+        editor_avatar = editor_client.post(
+            "/api/auth/avatar", files={"file": ("e.png", png + b"e", "image/png")}
+        ).json()["avatar_url"]
+        self.assertEqual(owner_avatar, avatars.url_for(owner_user["id"]))
+        self.assertEqual(editor_avatar, avatars.url_for(editor_user["id"]))
+
+        with owner_client.websocket_connect(self.url(canvas_id)) as owner:
+            owner.receive_json()  # snapshot
+            owner_hello = owner.receive_json()
+            owner.receive_json()  # presence
+            self.assertEqual(owner_hello["self"]["avatar_url"], owner_avatar)
+            owner_entry = next(u for u in owner_hello["users"] if u["id"] == owner_user["id"])
+            self.assertEqual(owner_entry["avatar_url"], owner_avatar)
+
+            with editor_client.websocket_connect(self.url(canvas_id)) as editor:
+                editor.receive_json()  # snapshot
+                editor_hello = editor.receive_json()
+                editor.receive_json()  # presence
+                self.assertEqual(editor_hello["self"]["avatar_url"], editor_avatar)
+                users = {u["id"]: u for u in editor_hello["users"]}
+                self.assertEqual(users[owner_user["id"]]["avatar_url"], owner_avatar)
+                self.assertEqual(users[editor_user["id"]]["avatar_url"], editor_avatar)
+
+                owner_presence = owner.receive_json()
+                self.assertEqual(owner_presence["type"], "presence")
+                presence_users = {u["id"]: u for u in owner_presence["users"]}
+                self.assertEqual(presence_users[owner_user["id"]]["avatar_url"], owner_avatar)
+                self.assertEqual(presence_users[editor_user["id"]]["avatar_url"], editor_avatar)
+
+                with viewer_client.websocket_connect(self.url(canvas_id)) as viewer:
+                    viewer.receive_json()  # snapshot
+                    viewer_hello = viewer.receive_json()
+                    viewer.receive_json()  # presence
+                    viewer_entry = next(u for u in viewer_hello["users"] if u["id"] == viewer_user["id"])
+                    self.assertEqual(viewer_entry["avatar_url"], "")
+                    self.assertIn("avatar_url", viewer_hello["self"])
+                    self.assertEqual(viewer_hello["self"]["avatar_url"], "")
+
+                    viewer_presence = owner.receive_json()
+                    self.assertEqual(viewer_presence["type"], "presence")
+                    for entry in viewer_presence["users"]:
+                        self.assertIn("avatar_url", entry)
+                    by_id = {u["id"]: u for u in viewer_presence["users"]}
+                    self.assertEqual(by_id[viewer_user["id"]]["avatar_url"], "")
 
     # ---------------------------------------------------------------- admin
     def test_admin_can_join_any_canvas(self) -> None:

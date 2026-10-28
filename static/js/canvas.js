@@ -6519,7 +6519,8 @@ function bindOutputWrap(wrap, node){
         fileCard.onclick = e => {
             e.stopPropagation();
             const url = wrap.dataset.outputUrl;
-            if(url) downloadUrl(url, outputDownloadName(url)).catch(err => alert(err.message || '下载失败'));
+            const kind = mediaKindForOutputItem({...outputMetaFor(url, node), url});
+            if(url) downloadUrl(url, outputDownloadName(url, kind)).catch(err => alert(err.message || '下载失败'));
         };
     }
     if(del){
@@ -12337,10 +12338,14 @@ function deleteConnection(id, event){
     render();
     scheduleSave();
 }
-function outputDownloadName(url){
-    const clean = (url || '').split('?')[0];
-    const ext = clean.includes('.') ? clean.split('.').pop() : 'png';
-    return `canvas-output-${Date.now()}.${ext || 'png'}`;
+function outputDownloadName(url, mediaKind=''){
+    // 后缀只认 URL 路径末段的媒体扩展名或显式 kind；整个 URL 里带点（域名、目录名）不算。
+    const clean = (url || '').split('?')[0].split('#')[0];
+    const last = clean.split('/').filter(Boolean).pop() || '';
+    const pathExt = last.match(/\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|m4v|mkv|avi|mp3|wav|m4a|aac|ogg|flac)$/i)?.[0];
+    const kind = String(mediaKind || '').toLowerCase();
+    const ext = pathExt || (kind === 'video' ? '.mp4' : kind === 'audio' ? '.mp3' : kind === 'text' ? '.txt' : '.png');
+    return `canvas-output-${Date.now()}${ext.toLowerCase()}`;
 }
 function isVideoUrl(url){
     const clean = canvasOriginalMediaUrl(url).split('?')[0].toLowerCase();
@@ -13665,7 +13670,8 @@ function openOutputLightbox(url, out){
             if(currentOutputLightboxOutId) downloadGroupNodeImages(currentOutputLightboxOutId);
         };
     }
-    const videoMode = mediaKindForOutputItem(meta && Object.keys(meta).length ? {...meta, url} : url) === 'video';
+    const outputKind = mediaKindForOutputItem(meta && Object.keys(meta).length ? {...meta, url} : url);
+    const videoMode = outputKind === 'video';
     outputLightboxImg.style.display = videoMode ? 'none' : 'block';
     outputLightboxVideo.style.display = videoMode ? 'block' : 'none';
     outputCompareResult.style.display = videoMode ? 'none' : 'block';
@@ -13679,11 +13685,11 @@ function openOutputLightbox(url, out){
                 ? `${outputLightboxVideo.videoWidth} x ${outputLightboxVideo.videoHeight}`
                 : 'Video', meta);
         };
-        outputLightboxVideo.src = canvasDisplayMediaUrl(url, outputDownloadName(url));
+        outputLightboxVideo.src = canvasDisplayMediaUrl(url, outputDownloadName(url, outputKind));
         outputPreview.ondblclick = null;
         outputDownloadBtn.onclick = e => {
             e.stopPropagation();
-            downloadUrl(url, outputDownloadName(url)).catch(err => alert(err.message || '下载失败'));
+            downloadUrl(url, outputDownloadName(url, outputKind)).catch(err => alert(err.message || '下载失败'));
         };
         outputLightbox.classList.add('open');
         refreshIcons();
@@ -13697,9 +13703,9 @@ function openOutputLightbox(url, out){
     outputLightboxImg.onload = () => {
         outputResolutionText(`${outputLightboxImg.naturalWidth} x ${outputLightboxImg.naturalHeight}`, meta);
     };
-    outputLightboxImg.src = canvasDisplayMediaUrl(url, outputDownloadName(url));
-    outputCompareResult.src = canvasDisplayMediaUrl(url, outputDownloadName(url));
-    outputCompareOriginal.src = currentOutputCompareUrl ? canvasDisplayMediaUrl(currentOutputCompareUrl, outputDownloadName(currentOutputCompareUrl)) : '';
+    outputLightboxImg.src = canvasDisplayMediaUrl(url, outputDownloadName(url, outputKind));
+    outputCompareResult.src = canvasDisplayMediaUrl(url, outputDownloadName(url, outputKind));
+    outputCompareOriginal.src = currentOutputCompareUrl ? canvasDisplayMediaUrl(currentOutputCompareUrl, outputDownloadName(currentOutputCompareUrl, outputKind)) : '';
     outputPreview.ondblclick = e => {
         e.stopPropagation();
         if(!currentOutputCompareUrl) return;
@@ -13707,7 +13713,7 @@ function openOutputLightbox(url, out){
     };
     outputDownloadBtn.onclick = e => {
         e.stopPropagation();
-        downloadUrl(url, outputDownloadName(url)).catch(err => alert(err.message || '下载失败'));
+        downloadUrl(url, outputDownloadName(url, outputKind)).catch(err => alert(err.message || '下载失败'));
     };
     outputLightbox.classList.add('open');
     refreshIcons();

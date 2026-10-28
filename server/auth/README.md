@@ -152,6 +152,8 @@
   admin 可进任意画布；颜色按 userId 从固定 10 色调色板取，跨房间一致。
 - 新加入顺序：`snapshot`（磁盘画布 JSON）→ `hello`（self/role/users/revision）→ 补发房间历史 patch
   → `presence` 广播。owner/editor/viewer 的 role 直接下发。
+- 用户数据（`hello.self`、`hello.users[]`、`presence.users[]`）都带 `avatar_url`
+  （`/api/auth/avatar/{id}?v=...`，无头像为空串；读取失败降级空串，不影响连接）。
 - 客户端 → 服务端：
   - `{type:'cursor',x,y}`：服务端二次限速 30ms/人，转发 `{type:'cursor',userId,x,y}`（画布坐标）
   - `{type:'patch',patch}`：结构校验 + 512KB/条；通过后 revision +1 并广播给其他人

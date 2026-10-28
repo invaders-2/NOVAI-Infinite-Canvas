@@ -30,6 +30,9 @@
     var AVATAR_LIMIT = 5;
     /* 与 server/collab.py 的 COLORS 同序：同一个人在手势头像 / 光标 / 成员面板里颜色一致 */
     var PALETTE = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#59A14F', '#EDC948', '#B07AA1', '#FF9DA7', '#9C755F', '#BAB0AC'];
+    /* 协作光标统一色：与画布焦点/选中同源的蓝，不再按 userId 分色。
+       画布页的 --info 令牌被主题改写成了中性色，这里直接取设计蓝 (#0a84ff) 保证所有光标同色。 */
+    var CURSOR_COLOR = '#0a84ff';
     var PANEL_MIN_WIDTH = 360;
     var PANEL_GAP = 8;
     var PANEL_MARGIN = 12;
@@ -130,6 +133,30 @@
         return String(name == null ? '?' : name).trim().slice(0, 1).toUpperCase() || '?';
     }
 
+    function safeAvatarUrl(value) {
+        var url = String(value || '').trim();
+        if (!url) return '';
+        if (/^(?:\/|https?:\/\/|data:image\/)/i.test(url)) return url;
+        return '';
+    }
+
+    /* 首字始终垫在底层，图片加载失败就移除 img 露出首字，不裂图、不抛错 */
+    function avatarInnerHtml(avatarUrl, name) {
+        var safeUrl = safeAvatarUrl(avatarUrl);
+        var fallback = '<span class="collab-avatar-initial">' + esc(initial(name)) + '</span>';
+        if (!safeUrl) return fallback;
+        return fallback + '<img class="collab-avatar-img" src="' + esc(safeUrl) + '" alt="" draggable="false">';
+    }
+
+    function bindAvatarFallbacks(root) {
+        if (!root || typeof root.querySelectorAll !== 'function') return;
+        root.querySelectorAll('img.collab-avatar-img').forEach(function (img) {
+            if (img.dataset.fallbackBound === '1') return;
+            img.dataset.fallbackBound = '1';
+            img.addEventListener('error', function () { img.remove(); }, { once: true });
+        });
+    }
+
     function textColorOn(background) {
         var hex = safeColor(background).replace('#', '');
         if (hex.length === 3) hex = hex.split('').map(function (ch) { return ch + ch; }).join('');
@@ -177,7 +204,8 @@
             '.collab-avatars:hover,.collab-avatars[aria-expanded="true"]{background:var(--soft,rgba(0,0,0,.06));}',
             '.collab-avatars:focus-visible{outline:2px solid var(--info,#0a84ff);outline-offset:2px;}',
             '.collab-avatar.has-image{background:var(--surface-2,#fafafa);overflow:hidden;}',
-            '.collab-avatar img,.collab-member-avatar img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;}',
+            '.collab-avatar img,.collab-member-avatar img,.collab-cursor-avatar img{position:absolute;inset:0;width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;}',
+            '.collab-avatar-initial{display:grid;place-items:center;width:100%;height:100%;font:inherit;line-height:1;}',
             '.collab-member-avatar.has-image{background:var(--surface-2,#fafafa);}',
             '.collab-avatar{position:relative;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;',
             'color:#fff;font-size:10px;font-weight:700;line-height:1;border:2px solid var(--panel);margin-left:-7px;',
@@ -208,12 +236,15 @@
             '.collab-status[data-state="offline"] .collab-status-dot{background:#ff453a;box-shadow:0 0 0 3px color-mix(in srgb, #ff453a 22%, transparent);}',
             '@keyframes collab-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}',
             '.collab-cursor-layer{position:fixed;inset:0;z-index:58;pointer-events:none;overflow:hidden;}',
-            '.collab-remote-cursor{position:absolute;left:0;top:0;width:0;height:0;color:#4E79A7;will-change:transform;',
+            '.collab-remote-cursor{position:absolute;left:0;top:0;width:0;height:0;color:#0a84ff;will-change:transform;',
             'filter:drop-shadow(0 2px 3px rgba(0,0,0,.28));transition:opacity .18s ease;}',
             '.collab-remote-cursor svg{position:absolute;left:0;top:0;width:18px;height:22px;display:block;}',
-            '.collab-cursor-name{position:absolute;left:12px;top:16px;max-width:150px;overflow:hidden;text-overflow:ellipsis;',
-            'white-space:nowrap;padding:2px 7px;border-radius:6px;background:rgba(0,0,0,.72);color:#fff;font-size:11px;font-weight:600;',
-            'line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.22);text-shadow:0 1px 2px rgba(0,0,0,.4);}',
+            '.collab-cursor-name{position:absolute;left:12px;top:16px;max-width:190px;display:flex;align-items:center;gap:6px;',
+            'padding:2px 8px 2px 3px;border-radius:999px;background:#0a84ff;color:#fff;font-size:11px;font-weight:600;',
+            'line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.22);}',
+            '.collab-cursor-avatar{position:relative;width:16px;height:16px;flex:none;border-radius:50%;overflow:hidden;',
+            'display:grid;place-items:center;background:#4E79A7;color:#fff;font-size:9px;font-weight:700;line-height:1;}',
+            '.collab-cursor-name-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
             '.collab-readonly-banner{position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:70;display:flex;align-items:center;',
             'gap:7px;height:32px;padding:0 14px;border-radius:999px;background:color-mix(in srgb, var(--panel) 84%, transparent);',
             'border:1px solid var(--border-2);box-shadow:var(--shadow-sm);color:var(--text-2);font-size:12px;font-weight:600;',
@@ -251,7 +282,7 @@
             '.collab-panel-members{padding:6px;overflow-y:auto;overscroll-behavior:contain;flex:1 1 auto;min-height:0;}',
             '.collab-member{display:flex;align-items:center;gap:8px;min-height:44px;padding:5px 6px;border-radius:10px;}',
             '.collab-member:hover{background:var(--soft);}',
-            '.collab-member-avatar{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;flex:none;',
+            '.collab-member-avatar{position:relative;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;flex:none;overflow:hidden;',
             'font-size:11px;font-weight:700;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.32);}',
             '.collab-member-name{flex:1;min-width:0;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:500;',
             'color:var(--text);overflow:hidden;white-space:nowrap;}',
@@ -586,12 +617,8 @@
         var api = window.NOVAI_CREDITS;
         if (api && typeof api.format === 'function') return api.format(value);
         var num = Number(value);
-        if (!isFinite(num)) return '0';
-        var abs = Math.abs(num);
-        if (abs > 0 && abs < 0.0001) return (num < 0 ? '-' : '') + '<0.0001';
-        var rounded = Math.round(num * 10000) / 10000;
-        if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return String(Math.round(rounded));
-        return rounded.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+        if (!isFinite(num)) return '0.00';
+        return num.toFixed(2);
     }
 
     function creditsAmount(delta) {
@@ -604,7 +631,7 @@
     function transactionLabel(tx) {
         var kind = String((tx && tx.kind) || '');
         var note = String((tx && tx.note) || '').trim();
-        var technical = !note || /^(estimate|actual_cost|usage_tokens|upstream:)/i.test(note);
+        var technical = !note || /^(estimate|actual_cost|usage_tokens|upstream:|postpaid)/i.test(note);
         if (kind === 'admin_adjust') return note || '管理员分配';
         if (kind === 'charge') return technical ? '生成扣费' : note;
         if (kind === 'refund') return technical ? '退款' : note;
@@ -785,13 +812,12 @@
 
     function avatarHtml(user) {
         var tip = String(user.username || '') + (String(user.id) === String(state.selfId) ? '（你）' : '') + ' · ' + (ROLE_TEXT[user.role] || user.role || '');
-        var url = user && user.avatar_url ? String(user.avatar_url) : '';
-        var inner = url ? '<img src="' + esc(url) + '" alt="">' : esc(initial(user.username));
+        var url = safeAvatarUrl(user && user.avatar_url);
         return '<span class="collab-avatar' + (String(user.id) === String(state.selfId) ? ' is-self' : '') + (url ? ' has-image' : '') + '"' +
             ' data-user-id="' + esc(user.id) + '" data-role="' + esc(user.role || '') + '"' +
             ' data-name="' + esc(user.username || '') + '"' +
             ' data-tip="' + esc(tip) + '" title="' + esc(tip) + '"' +
-            ' style="background:' + esc(safeColor(user.color)) + '">' + inner + '</span>';
+            ' style="background:' + esc(safeColor(user.color)) + '">' + avatarInnerHtml(url, user.username) + '</span>';
     }
 
     function renderUsers() {
@@ -805,6 +831,7 @@
             html += '<span class="collab-more" data-tip="' + esc(names) + '" title="' + esc(names) + '">+' + rest.length + '</span>';
         }
         avatarsEl.innerHTML = html;
+        bindAvatarFallbacks(avatarsEl);
         avatarsEl.setAttribute('aria-label', '打开协作面板 · ' + users.length + ' 人在线');
         if (memberCountEl) {
             memberCountEl.textContent = users.length + ' 人';
@@ -976,12 +1003,12 @@
               ' data-name="' + esc(member.name) + '" title="移除 ' + esc(member.name) + '" aria-label="移除 ' + esc(member.name) + '">' +
               REMOVE_ICON + '</button>'
             : '';
-        var memberAvatarUrl = member.avatar_url ? String(member.avatar_url) : '';
+        var memberAvatarUrl = safeAvatarUrl(member.avatar_url);
         return '<div class="collab-member" role="listitem" data-uid="' + esc(member.id) + '" data-role="' + esc(member.role) + '">' +
             '<span class="collab-member-avatar' + (memberAvatarUrl ? ' has-image' : '') + '"' +
             ' data-name="' + esc(member.name) + '"' +
             ' style="background:' + esc(color) + ';color:' + esc(textColorOn(color)) + '">' +
-            (memberAvatarUrl ? '<img src="' + esc(memberAvatarUrl) + '" alt="">' : esc(initial(member.name))) + '</span>' +
+            avatarInnerHtml(memberAvatarUrl, member.name) + '</span>' +
             '<span class="collab-member-name" title="' + esc(member.name) + '"><span>' + esc(member.name) + '</span>' +
             (self ? '<span class="collab-member-you">你</span>' : '') + '</span>' +
             '<span class="collab-member-dot" data-online="' + (online ? '1' : '0') + '"' +
@@ -995,15 +1022,23 @@
         var owner = data.owner || {};
         var ownerId = owner.id == null || owner.id === '' ? '' : String(owner.id);
         if (ownerId) {
-            rows.push(memberRowHtml({ id: ownerId, name: owner.username || '创建者', role: 'owner' }, canManagePermissions(data)));
+            var ownerPresence = findUser(ownerId);
+            rows.push(memberRowHtml({
+                id: ownerId,
+                name: owner.username || '创建者',
+                role: 'owner',
+                avatar_url: (ownerPresence && ownerPresence.avatar_url) || owner.avatar_url || ''
+            }, canManagePermissions(data)));
         }
         var members = Array.isArray(data.members) ? data.members : [];
         members.forEach(function (member) {
             if (ownerId && String(member.user_id) === ownerId) return;
+            var presence = findUser(member.user_id);
             rows.push(memberRowHtml({
                 id: String(member.user_id),
                 name: member.username || ('用户 #' + member.user_id),
-                role: member.role === 'editor' ? 'editor' : 'viewer'
+                role: member.role === 'editor' ? 'editor' : 'viewer',
+                avatar_url: (presence && presence.avatar_url) || member.avatar_url || ''
             }, canManagePermissions(data)));
         });
         return rows;
@@ -1024,6 +1059,7 @@
                 var rows = memberRows(data);
                 list.innerHTML = rows.join('') +
                     (memberCount === 0 ? '<div class="collab-panel-empty">目前只有你在画布上，邀请成员一起协作</div>' : '');
+                bindAvatarFallbacks(list);
             }
         }
         var invite = panelEl.querySelector('#collab-panel-invite');
@@ -1679,6 +1715,33 @@
         if (!cursorRaf) cursorRaf = requestAnimationFrame(cursorAnimationTick);
     }
 
+    function updateRemoteCursorIdentity(entry, user) {
+        if (!entry || !entry.el || !user) return;
+        var el = entry.el;
+        el.style.color = CURSOR_COLOR;
+        var nameBox = el.querySelector('.collab-cursor-name');
+        if (nameBox) {
+            nameBox.style.background = CURSOR_COLOR;
+            nameBox.style.color = '#fff';
+        }
+        var avatar = el.querySelector('.collab-cursor-avatar');
+        if (avatar) {
+            avatar.innerHTML = avatarInnerHtml(user.avatar_url, user.username);
+            avatar.style.background = safeColor(user.color);
+            bindAvatarFallbacks(avatar);
+        }
+        var nameEl = el.querySelector('.collab-cursor-name-text');
+        if (nameEl) nameEl.textContent = String(user.username || '');
+        entry.identity = String(user.username || '') + '|' + safeAvatarUrl(user.avatar_url) + '|' + safeColor(user.color);
+    }
+
+    function refreshRemoteCursorIdentities() {
+        remoteCursors.forEach(function (entry, id) {
+            var user = findUser(id);
+            if (user) updateRemoteCursorIdentity(entry, user);
+        });
+    }
+
     function upsertRemoteCursor(userId, x, y) {
         if (String(userId) === String(state.selfId)) return;
         var user = findUser(userId);
@@ -1688,19 +1751,17 @@
             var el = document.createElement('div');
             el.className = 'collab-remote-cursor';
             el.dataset.userId = String(userId);
-            el.style.color = safeColor(user.color);
+            el.style.color = CURSOR_COLOR;
             el.innerHTML = '<svg viewBox="0 0 18 22" aria-hidden="true"><path d="M1 1l15 9-6.2 1.7L13.2 20 9.6 21.5 6 12.8 1 18V1z" fill="currentColor" stroke="rgba(255,255,255,.9)" stroke-width="1.1" stroke-linejoin="round"/></svg>' +
-                '<span class="collab-cursor-name"><span></span></span>';
-            entry = { el: el, x: 0, y: 0, seenAt: Date.now() };
-            var nameBox = el.querySelector('.collab-cursor-name');
-            if (nameBox) {
-                nameBox.style.background = safeColor(user.color);
-                nameBox.style.color = textColorOn(user.color);
-            }
-            var nameEl = el.querySelector('.collab-cursor-name span');
-            if (nameEl) nameEl.textContent = String(user.username || '');
+                '<span class="collab-cursor-name"><span class="collab-cursor-avatar"></span>' +
+                '<span class="collab-cursor-name-text"></span></span>';
+            entry = { el: el, x: 0, y: 0, seenAt: Date.now(), identity: '' };
             ensureCursorLayer().appendChild(el);
             remoteCursors.set(String(userId), entry);
+            updateRemoteCursorIdentity(entry, user);
+        } else {
+            var identity = String(user.username || '') + '|' + safeAvatarUrl(user.avatar_url) + '|' + safeColor(user.color);
+            if (entry.identity !== identity) updateRemoteCursorIdentity(entry, user);
         }
         entry.x = Number(x) || 0;
         entry.y = Number(y) || 0;
@@ -1876,6 +1937,7 @@
         state.users = nextUsers;
         applyRole();
         renderUsers();
+        refreshRemoteCursorIdentities();
         setStatus('online');
         prevDoc = captureDoc();
     }
@@ -1884,6 +1946,7 @@
         announcePresence(users);
         state.users = users;
         renderUsers();
+        refreshRemoteCursorIdentities();
     }
 
     function handleSnapshot(message) {

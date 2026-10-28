@@ -31,7 +31,7 @@ $ python3 novai_cli.py status
 服务地址：http://127.0.0.1:3931
 可达状态：可达
 画布总数：1
-版本号：1.0.137
+版本号：1.0.138
 
 $ python3 novai_cli.py canvas ls
 ID                                名称                项目     更新时间

@@ -97,10 +97,9 @@ class SkillPromptTests(unittest.TestCase):
         sid = write_skill("novai-test-skill-a", name="电商详情页",
                           prompt="先用 read_table 读表，再写三段结论。",
                           usage="动手前先向用户确认口径。")
-        base = build_prompt("")
         text = build_prompt(sid)
-        self.assertTrue(text.startswith(base))                # 既有内容一字未动
-        tail = text[len(base):]
+        tail = main._agent_skill_prompt_block(sid)
+        self.assertTrue(text.endswith(tail))
         self.assertTrue(tail.startswith("\n\n【本次运行的技能】电商详情页（技能 ID：novai-test-skill-a）"))
         self.assertIn("动手前先向用户确认口径。", tail)
         self.assertIn("—— 以下技能说明必须遵守 ——", tail)
@@ -109,7 +108,8 @@ class SkillPromptTests(unittest.TestCase):
 
     def test_usage_instruction_is_optional(self):
         sid = write_skill("novai-test-skill-b", prompt="只有正文，没有 usage_instruction。")
-        tail = build_prompt(sid)[len(build_prompt("")):]
+        tail = main._agent_skill_prompt_block(sid)
+        self.assertTrue(build_prompt(sid).endswith(tail))
         lines = tail.strip("\n").split("\n")
         self.assertEqual(lines[0], "【本次运行的技能】测试技能（技能 ID：novai-test-skill-b）")
         self.assertEqual(lines[1], "—— 以下技能说明必须遵守 ——")

@@ -69,6 +69,8 @@
         "smart.compareUseTip": { zh: "点击与该图对比", en: "Click to compare with this image" },
         "smart.compareDrag": { zh: "拖动对比", en: "Drag to compare" },
         "smart.uploadHint": { zh: "点击上传 / 拖入素材", en: "Click to upload / drop media" },
+        "smart.uploadCta": { zh: "上传", en: "Upload" },
+        "smart.uploadEmptyHint": { zh: "拖拽 / 粘贴上传", en: "Drag or paste to upload" },
         "smart.createImportNode": { zh: "上传节点", en: "Upload Node" },
         "smart.createImportNodeSub": { zh: "支持图片/音频/视频/批量上传", en: "Images, audio, video, batch upload" },
         "smart.createExportNode": { zh: "导出节点", en: "Export Node" },
@@ -240,7 +242,8 @@
         "smart.diceOn": { zh: "随机已开启，点击关闭", en: "Random ON. Click to disable." },
         "smart.diceOff": { zh: "随机已关闭，点击开启", en: "Random OFF. Click to enable." },
         "smart.inputThumbs": { zh: "输入图", en: "input" },
-        "smart.inputCount": { zh: "{n} 输入图", en: "{n} input images" },
+        "smart.inputCount": { zh: "{n} 输入", en: "{n} inputs" },
+        "smart.inputTextCardLabel": { zh: "文本", en: "Text" },
         "smart.inputNum": { zh: "输入 {n}", en: "Input {n}" },
         "smart.inputBlocked": { zh: "已屏蔽", en: "Input blocked" },
         "smart.inputClickBlock": { zh: "点击屏蔽输入", en: "Click to block input" },
@@ -536,6 +539,21 @@
         "smart.promptLlmDefaultSystem": {
             zh: "只输出一段可直接复制的生图提示词。中文提问时用约100到160个汉字，只写中文；英文提问时只写精炼英文。准确描述画面主体、数量、颜色、材质、背景、构图和光线，不臆造看不到的细节。不要分析、标题、解释、列表、Markdown、引号或多余形容词。",
             en: "Output one concise, directly usable image generation prompt. For Chinese requests, write about 100 to 160 Chinese characters in Chinese only; for English requests, write one concise paragraph in English only. Describe the visible subject, count, color, material, background, composition, and lighting accurately. Do not invent unseen details or add analysis, headings, explanations, lists, Markdown, quotes, or filler."
+        },
+        "smart.promptOutputTitle": { zh: "生成结果", en: "Generated result" },
+        "smart.promptOutputHint": { zh: "Ctrl/⌘ + Enter 保存 · Esc / 取消 放弃修改（有改动会先确认）", en: "Ctrl/⌘ + Enter to save · Esc / Cancel discards (asks first if edited)" },
+        "smart.promptOutputDiscard": { zh: "有未保存的修改，确定放弃？", en: "Discard the unsaved changes?" },
+        "smart.upstreamTextLabel": { zh: "文本", en: "Text" },
+        "smart.inputRowLabel": { zh: "输入", en: "Inputs" },
+        "smart.inputAddTip": { zh: "添加输入（本地上传图片 / 视频 / 音频）", en: "Add input (upload image / video / audio)" },
+        "smart.inputAdded": { zh: "已添加输入", en: "Input added" },
+        "smart.inputMore": { zh: "还有 {n} 个输入", en: "{n} more inputs" },
+        "smart.upstreamViewTip": { zh: "查看全文", en: "View full text" },
+        "smart.upstreamViewCopy": { zh: "复制全文", en: "Copy" },
+        "smart.upstreamViewCopied": { zh: "已复制", en: "Copied" },
+        "smart.llmDocSystem": {
+            zh: "你是一名结构化长文作者。用户给出的指令、模板、字段清单就是交付要求：按它给的结构与字段完整输出，一项都不许省略、合并或概括，也不要把内容压缩成一句生图提示词。用 Markdown 组织（# 标题、- 列表、**加粗**突出关键词、表格对齐多字段内容），层级清晰、可直接使用。忠实于用户提供的信息和原始语言，不臆造没给出的细节。只输出正文本身，不要前言，不要解释你做了什么。",
+            en: "You write structured long-form documents. The user's instruction, template or field list is the deliverable spec: output every section and field completely — never omit, merge or summarise anything, and never compress the answer into a single image-generation prompt. Organise with Markdown (# headings, - lists, **bold** for keywords, tables for multi-field content) so the result is well-structured and directly usable. Stay faithful to the information and language the user provided; do not invent details they did not give. Output the body only — no preamble, no explanation of what you did."
         },
         "smart.tableBatchNoRows": {
             zh: "表格里还没有数据行，先添加或生成分镜行",

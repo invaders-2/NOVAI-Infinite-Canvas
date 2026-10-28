@@ -51,7 +51,7 @@ ok(/if\(type === 'upload'\)\{/.test(cnfm) && /pendingMenuUploadPoint = createMen
 ok(/fileInput\?\.click\(\)/.test(cnfm) && /return null;/.test(cnfm), '上传入口打开 #fileInput 并直接返回（不建空节点）');
 ok(!/pickLocalMediaForNode|pickMediaForSmartNode|createElement\('input'\)/.test(cnfm), '图片/视频/音频入口不再打开本地上传选择器');
 ok(!/pickLocalMediaForNode/.test(js), '删除创建节点专用的 pickLocalMediaForNode');
-ok(/pickMediaForSmartNode\(id\)/.test(js), '节点自身的上传按钮保留（仍可打开选择器）');
+ok(/pickMediaForSmartNode\((id|nodeId)\)/.test(js), '节点自身的上传按钮保留（仍可打开选择器）');
 ok(/async function handleFiles/.test(js), '拖拽 / 粘贴上传入口保留');
 
 console.log('[3] 上传落点类型 + 素材库拖拽类型');

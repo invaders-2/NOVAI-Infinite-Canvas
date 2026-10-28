@@ -83,9 +83,10 @@ export type MarkdownProps = {
   children?: string
   className?: string
   animated?: boolean
+  trailing?: ReactNode
 }
 
-const MarkdownComponent = ({ children, className }: MarkdownProps) => {
+const MarkdownComponent = ({ children, className, trailing }: MarkdownProps) => {
   const source = String(children ?? "")
   if (!source.trim()) return null
   const lines = source.replace(/\r\n/g, "\n").split("\n")
@@ -156,7 +157,7 @@ const MarkdownComponent = ({ children, className }: MarkdownProps) => {
       )
       continue
     }
-    if (/^\s*([-*_])\s*\3\s*$/.test(line)) {
+    if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
       blocks.push(<hr key={key++} className="nvca-md-hr" />)
       i += 1
       continue
@@ -181,6 +182,7 @@ const MarkdownComponent = ({ children, className }: MarkdownProps) => {
             {renderInline(textLine)}
           </Fragment>
         ))}
+        {trailing && lines.slice(i).every((line) => !line.trim()) ? trailing : null}
       </p>,
     )
   }

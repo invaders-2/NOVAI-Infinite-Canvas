@@ -63,8 +63,8 @@ ok(/const emptyIcon = isSmartVideoNode\(node\) \? 'video' : 'image';/.test(empty
 ok(/isSmartAudioNode\(node\) \? SMART_AUDIO_EMPTY_ICON_SVG/.test(emptyBlock), '音频空态只是把图标换成音符，其余共用');
 ok(/<div class="node-drop" data-upload-action="files">/.test(emptyBlock), '空卡 class 与图片/视频同一个 .node-drop（圆角/底色/间距天然一致）');
 ok(/class="smart-empty-icon"/.test(emptyBlock), '图标容器同一个 .smart-empty-icon（22px 尺寸由 CSS 给）');
-ok(/<span class="upload-node-sub">拖拽 \/ 粘贴 \/ 点击上传<\/span>/.test(emptyBlock), '提示文案与图片/视频逐字一致（不造新 key）');
-ok((js.match(/拖拽 \/ 粘贴 \/ 点击上传/g) || []).length === 1, '这段提示文案全仓只有一份（复用，不复制）');
+ok(/<span class="upload-node-sub">\$\{escapeHtml\(tr\('smart\.uploadEmptyHint'\)\)\}<\/span>/.test(emptyBlock), '提示文案与图片/视频共用同一个 i18n key（不各写一份）');
+ok((js.match(/smart\.uploadEmptyHint/g) || []).length === 1, '这个 key 在 JS 里只有一处渲染（复用，不复制）');
 const iconSvg = (js.match(/const SMART_AUDIO_EMPTY_ICON_SVG = '([^']+)'/) || [])[1] || '';
 ok(/viewBox="0 0 24 24"/.test(iconSvg) && /stroke-width="2"/.test(iconSvg) && /stroke="currentColor"/.test(iconSvg),
     '音符图标与 lucide 同规格：viewBox 24 / stroke-width 2 / currentColor');

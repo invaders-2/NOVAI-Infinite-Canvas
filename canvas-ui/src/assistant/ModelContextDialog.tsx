@@ -30,7 +30,7 @@ export const ModelContextDialog = ({ runId, onClose }: { runId: string; onClose:
 		setError("")
 		fetchModelContext(runId).then((result) => {
 			if (!alive) return
-			if (result.ok) {
+			if (result.ok === true) {
 				setData(result.data)
 				setStatus("ready")
 			} else {

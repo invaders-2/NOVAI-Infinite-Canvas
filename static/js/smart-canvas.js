@@ -2125,6 +2125,8 @@ function syncSelectionUi(){
     smartSelectionUiNodeIds = nextIds;
     smartSelectionUiImage = {nodeId:selectedImage.nodeId || '', index:Number(selectedImage.index ?? -1)};
     syncSmartSelectedImageResolution(world);
+    /* 空节点的「上传」按钮跟着选中态出现/消失：这条路径只改 class，不整棵重建节点 */
+    syncNodeUploadCtas();
     /* 选中/取消选中会切换工具条的可见性：夹取位置要跟着重算（不是选中态时这里直接返回） */
     syncSmartImageToolbarBounds();
     syncRunButtonState();
@@ -2140,6 +2142,34 @@ function shouldRenderNodeToolbar(node){
 }
 function isNodeSelected(id){
     return selectedId === id || selectedIds.includes(id);
+}
+/* 空节点「上传」按钮的显隐同步：只处理「当前单选的那个空媒体节点」，
+   其它节点上残留的按钮一律摘掉 —— 多选时不会有任何一颗（不弹一排）。 */
+function syncNodeUploadCtas(){
+    if(typeof world === 'undefined' || !world) return;
+    const target = (selectedIds.length || !selectedId) ? null : nodes.find(n => n.id === selectedId);
+    const want = Boolean(target && nodeUploadCtaVisible(target));
+    world.querySelectorAll('.image-node > .node-upload-cta').forEach(btn => {
+        const owner = btn.closest('.image-node')?.dataset.id || '';
+        if(!want || owner !== target.id) btn.remove();
+    });
+    if(!want) return;
+    const el = world.querySelector(`.image-node[data-id="${CSS.escape(target.id)}"]`);
+    if(el && !el.querySelector(':scope > .node-upload-cta')) el.insertAdjacentHTML('afterbegin', nodeUploadCtaHtml(target));
+}
+/* 点「上传」按钮：选中该节点并弹系统文件选择（落到这个节点） */
+function pickMediaFromUploadCta(nodeId){
+    if(!nodeId) return;
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
+    hideRunTimerForNode(nodes.find(n => n.id === nodeId));
+    selectedId = nodeId;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    pendingGroupUploadPoint = null;
+    uploadTargetId = nodeId;
+    syncSelectionUi();
+    updateComposer();
+    pickMediaForSmartNode(nodeId);
 }
 function selectedNodeIds(){
     return selectedIds.length ? selectedIds.slice() : (selectedId ? [selectedId] : []);
@@ -3006,6 +3036,187 @@ function smartNodeInputThumbsHtml(images, opts={}){
     const more = refs.length > limit ? `<div class="smart-node-input-thumb smart-node-input-more">+${refs.length - limit}</div>` : '';
     return `<div class="smart-node-input-thumbs">${items}${more}</div>`;
 }
+/* ── 上游输入行：编号卡片（提示词节点 / 纯文本节点共用）──
+   一个上游输入 = 一张深色圆角卡片，左上角白色圆形角标只写序号（1、2、3…，不再写「图N/文本N」）：
+   图片缩略图 / 视频首帧 / 音频图标 / 文本线性图标；末尾一张「+」卡片。
+   顺序：先图片后文本；超过 10 张收成「+N」。没有上游输入时整行不渲染（不占高度）。 */
+const SMART_INPUT_CARD_LIMIT = 10;
+function smartNodeInputMediaCards(node){
+    if(isSmartPromptNode(node)) return promptNodeInputImages(node);
+    return (inputImagesFor(node) || []).filter(item => item?.url);
+}
+/* 类型中文名跟老的图片缩略片（图N/视频N/音频N）保持同一套叫法，title 里用 */
+function smartInputMediaKindLabel(item){
+    const kind = mediaKindForItem(item);
+    if(kind === 'audio') return '音频';
+    if(kind === 'video') return '视频';
+    return '图片';
+}
+function smartInputMediaCardHtml(item, index){
+    const kind = mediaKindForItem(item);
+    const inner = kind === 'audio'
+        ? '<i data-lucide="file-audio"></i>'
+        : kind === 'video'
+        ? smartVideoPreviewHtml(item, 256, 'draggable="false" alt=""')
+        : smartPreviewImgHtml(item, 256, 'draggable="false" alt=""');
+    const name = String(item?.name || item?.alias || '').trim();
+    const title = `${smartInputMediaKindLabel(item)} ${index}${name ? ' · ' + name : ''}`;
+    return `<div class="smart-input-card is-${kind}" title="${escapeAttr(title)}">${inner}<span class="smart-input-card-badge">${index}</span></div>`;
+}
+function smartInputTextCardHtml(entry, index, textIndex){
+    const label = smartUpstreamChipLabel(entry, textIndex);
+    const title = `${label} · ${tr('smart.upstreamViewTip')}`;
+    return `<button class="smart-input-card is-text" type="button" data-upstream-prompt-index="${textIndex}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}"><i data-lucide="file-text"></i><span class="smart-input-card-badge">${index}</span></button>`;
+}
+function smartInputAddCardHtml(){
+    const label = tr('smart.inputAddTip');
+    return `<button class="smart-input-card is-add" type="button" data-smart-input-add="1" title="${escapeAttr(label)}" aria-label="${escapeAttr(label)}"><i data-lucide="plus"></i></button>`;
+}
+function smartNodeInputCardsHtml(node){
+    const media = smartNodeInputMediaCards(node);
+    const texts = promptNodeUpstreamPromptEntries(node);
+    const total = media.length + texts.length;
+    if(!total) return '';
+    const cards = [];
+    let index = 0;
+    media.forEach(item => {
+        if(index >= SMART_INPUT_CARD_LIMIT) return;
+        index += 1;
+        cards.push(smartInputMediaCardHtml(item, index));
+    });
+    texts.forEach((entry, textIndex) => {
+        if(index >= SMART_INPUT_CARD_LIMIT) return;
+        index += 1;
+        cards.push(smartInputTextCardHtml(entry, index, textIndex));
+    });
+    const hidden = total - index;
+    const more = hidden > 0
+        ? `<div class="smart-input-card is-more" title="${escapeAttr(trf('smart.inputMore', {n: hidden}))}">+${hidden}</div>`
+        : '';
+    return `<div class="smart-input-row" role="group" aria-label="${escapeAttr(tr('smart.inputRowLabel'))}">${cards.join('')}${more}${smartInputAddCardHtml()}</div>`;
+}
+/* 行高度：5 列（跟图片缩略片同一节奏），每行 44 + 行距 6 + 上下 8；没有输入时整行不占高度 */
+function smartNodeInputCardCount(node){
+    return Math.min(SMART_INPUT_CARD_LIMIT, smartNodeInputMediaCards(node).length + promptNodeUpstreamPromptEntries(node).length);
+}
+function smartNodeInputRowHeight(node){
+    const count = smartNodeInputCardCount(node);
+    if(!count) return 0;
+    const rows = Math.ceil((count + 1) / 5);   // +1：末尾那张「+」卡片
+    return rows * 44 + (rows - 1) * 6 + 8;
+}
+/* 「+」：本地选图片/视频/音频 → 落成媒体节点并连到这个节点当输入。
+   复用现有 uploadFiles / appendImagesToSmartNode / connectInputNode，不新造上传链路。 */
+function pickSmartNodeInputFiles(node){
+    if(!node) return;
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,video/*,audio/*';
+    input.multiple = true;
+    input.hidden = true;
+    input.addEventListener('change', async () => {
+        const files = [...(input.files || [])].filter(isSupportedUploadFile).slice(0, SMART_UPLOAD_MAX);
+        input.remove();
+        if(!files.length) return;
+        try {
+            const uploaded = await uploadFiles(files);
+            if(!uploaded.length){ toast(tr('smart.toastUploadFail')); return; }
+            pushUndo();
+            const rect = nodeRect(node);
+            const point = {x: Math.max(24, rect.x - 200), y: rect.y + Math.max(40, rect.height / 2)};
+            const mediaNode = appendImagesToSmartNode(
+                uploaded.map((file, index) => ({...file, kind: file.kind || mediaKindForFile(files[index])})),
+                '',
+                {point}
+            );
+            if(!mediaNode) return;
+            connectInputNode(mediaNode.id, node.id);
+            selectedId = node.id;
+            render();
+            scheduleSave();
+            toast(tr('smart.inputAdded'));
+        } catch(error) {
+            toast(error?.message || tr('smart.toastUploadFail'));
+        }
+    });
+    document.body.appendChild(input);
+    input.click();
+}
+/* 输入行绑定：卡片自己吃掉鼠标事件（不触发节点选中/拖动、纯文本节点也不会因此打开大编辑器）；
+   文本卡片弹只读全文浮层，「+」弹本地文件选择。 */
+function bindSmartInputRow(root, node){
+    const row = root && root.querySelector ? root.querySelector('.smart-input-row') : null;
+    if(!row || row.dataset.smartInputBound === '1') return;
+    row.dataset.smartInputBound = '1';
+    ['mousedown', 'click', 'dblclick'].forEach(type => {
+        row.addEventListener(type, event => event.stopPropagation());
+    });
+    row.querySelectorAll('[data-upstream-prompt-index]').forEach(card => {
+        card.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            openUpstreamPromptView(node, Number(card.dataset.upstreamPromptIndex) || 0, card);
+        };
+    });
+    row.querySelectorAll('[data-smart-input-add]').forEach(btn => {
+        btn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            pickSmartNodeInputFiles(node);
+        };
+    });
+}
+/* 生成结果「双击查看 / 编辑」：只认输出区（.prompt-node-display），工具条 / 输入行 / 复制键都不触发。
+   不能只靠浏览器的 dblclick：单击会选中节点并触发布局回写，两次点击之间节点子树可能被重建，
+   浏览器就不发 dblclick 了（实测会「双击没反应」）。所以两条路：
+     ① 原生 dblclick（快路）；
+     ② 兜底：同一节点 450ms 内两次点中输出区，自己判成双击。
+   已经在编辑同一个节点时直接忽略，避免把正在改的草稿冲掉。 */
+let promptOutputClickStamp = {id:'', at:0};
+function promptOutputEditorOpenFor(nodeId){
+    return smartTextEditorOpen() && smartTextEditorNodeId === nodeId && smartTextEditorMode === 'prompt-output';
+}
+function bindPromptOutputEditor(el, node){
+    if(!el || el.dataset.promptOutputEditorBound === '1') return;
+    el.dataset.promptOutputEditorBound = '1';
+    /* 为什么按坐标判、按 mousedown 数：单击会选中节点并触发布局回写，节点子树（甚至节点元素）会被重建，
+       浏览器这时把 click/dblclick 的 target 归到共同祖先（= 节点本身），拿 target.closest 判输出区会漏。
+       mousedown 的 target 是重建前定的，坐标也是准的，所以两条都认。 */
+    const displayRect = () => {
+        const display = el.querySelector('.prompt-node-display');
+        return display ? display.getBoundingClientRect() : null;
+    };
+    const insideDisplay = event => {
+        const rect = displayRect();
+        if(!rect || !rect.width || !rect.height) return false;
+        return event.clientX >= rect.left && event.clientX <= rect.right
+            && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    };
+    const onCopyBtn = event => Boolean(event.target.closest && event.target.closest('[data-prompt-copy-markdown]'));
+    const onDisplay = event => !onCopyBtn(event) && (
+        (event.target.closest && Boolean(event.target.closest('.prompt-node-display'))) || insideDisplay(event));
+    const open = () => {
+        if(promptOutputEditorOpenFor(node.id)) return;
+        openPromptOutputEditor(node.id);
+    };
+    el.addEventListener('dblclick', event => {
+        if(!onDisplay(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        open();
+    });
+    el.addEventListener('mousedown', event => {
+        if(event.button !== 0 || !onDisplay(event)) return;
+        const now = Date.now();
+        if(promptOutputClickStamp.id === node.id && now - promptOutputClickStamp.at < 450){
+            promptOutputClickStamp = {id:'', at:0};
+            open();
+            return;
+        }
+        promptOutputClickStamp = {id: node.id, at: now};
+    }, true);
+}
 const PROMPT_LLM_INSTRUCTION_DEFAULT_H = 58;
 const PROMPT_LLM_INSTRUCTION_MIN_H = 40;
 const PROMPT_LLM_INSTRUCTION_MAX_H = 400;
@@ -3077,16 +3288,37 @@ function promptTextItemsForNode(node, ctx=smartLoopContext){
     if(node.type === 'smart-group') return smartGroupMembers(node).flatMap(member => promptTextItemsForNode(member, ctx));
     return [];
 }
-function promptNodeUpstreamPromptItems(node, ctx=smartLoopContext){
+/* 上游文本条目：[{text, node}] —— node 是这段文本的来源节点（缩略片要拿它的标题当标签）。
+   文本本身与去重顺序跟原来的 promptNodeUpstreamPromptItems 完全一致：
+   先按连线顺序取 inputNodesFor，再按每个节点自己的 promptTextItemsForNode，同文只留第一次。 */
+function promptNodeUpstreamPromptEntries(node, ctx=smartLoopContext){
     const seen = new Set();
-    return inputNodesFor(node).flatMap(input => promptTextItemsForNode(input, ctx)).map(text => String(text || '').trim()).filter(text => {
-        if(!text || seen.has(text)) return false;
-        seen.add(text);
-        return true;
+    const entries = [];
+    inputNodesFor(node).forEach(input => {
+        promptTextItemsForNode(input, ctx).forEach(raw => {
+            const text = String(raw || '').trim();
+            if(!text || seen.has(text)) return;
+            seen.add(text);
+            entries.push({text, node: input});
+        });
     });
+    return entries;
+}
+function promptNodeUpstreamPromptItems(node, ctx=smartLoopContext){
+    return promptNodeUpstreamPromptEntries(node, ctx).map(entry => entry.text);
 }
 function promptNodeUpstreamPromptText(node, ctx=smartLoopContext){
     return promptNodeUpstreamPromptItems(node, ctx).join('\n\n');
+}
+/* 上游文本缩略片的标签：优先上游节点自己的编号/标题（后端分配的 alias 就是「文本1」这种），
+   拿不到就按序号叫「文本N」—— 跟图片缩略片「图1/图2」同一套心智。 */
+const SMART_UPSTREAM_CHIP_W = 116;
+function smartUpstreamChipLabel(entry, index){
+    const source = entry?.node || {};
+    const named = String(source.alias || '').trim() || String(source.title || '').trim();
+    const base = named || tr('smart.upstreamTextLabel');
+    /* 默认标题「文本」没编号，补上序号；已经有编号（文本1 / 产品文案）就照用 */
+    return /\d/.test(base) ? base : base + (index + 1);
 }
 function promptNodeLLMInputText(node, ctx=smartLoopContext){
     const upstream = promptNodeUpstreamPromptText(node, ctx).trim();
@@ -3096,8 +3328,9 @@ function promptNodeLLMInputText(node, ctx=smartLoopContext){
 function promptNodeExpandedHeight(node){
     // 指令文本框（发送给 LLM 的内容）可拖动加高，超出默认高度的部分要叠加进节点高度。
     const extra = Math.max(0, promptLlmInstructionHeight(node) - PROMPT_LLM_INSTRUCTION_DEFAULT_H);
-    const upstreamExtra = node?.llmEnabled && promptNodeUpstreamPromptItems(node).length ? 74 : 0;
-    return 360 + smartNodeInputThumbsHeight(promptNodeInputImages(node)) + extra + upstreamExtra;
+    /* 上游输入合并成一行编号卡片（图片 + 文本 + 「+」）：高度按卡片行数算，没有输入时是 0。
+       老的两处预留（图片行单独算 + 文本 74px）都已作废。 */
+    return 360 + smartNodeInputRowHeight(node) + extra;
 }
 /* LLM 模式的提示词节点支持手动尺寸（拖右下角把手）：真的拖出去（>2px）之后 node.sizeUserSet = true，
    宽高一律听用户的（CSS 把内容区改成 flex 自适应），不再按内容估算。
@@ -15288,6 +15521,14 @@ function smartLlmDefaultSystemPrompt(){
         ? localized
         : '只输出一段可直接复制的生图提示词。中文提问时用约100到160个汉字，只写中文；英文提问时只写精炼英文。准确描述画面主体、数量、颜色、材质、背景、构图和光线，不臆造看不到的细节。不要分析、标题、解释、列表、Markdown、引号或多余形容词。';
 }
+/* 「长文」输出类型的默认 System：跟上面那条生图提示词人设是两套，互不覆盖。
+   文案走 i18n，缺失时用中文兜底。 */
+function smartLlmDocSystemPrompt(){
+    const localized = tr('smart.llmDocSystem');
+    return localized && localized !== 'smart.llmDocSystem'
+        ? localized
+        : '你是一名结构化长文作者。用户给出的指令、模板、字段清单就是交付要求：按它给的结构与字段完整输出，一项都不许省略、合并或概括，也不要把内容压缩成一句生图提示词。用 Markdown 组织（# 标题、- 列表、**加粗**突出关键词、表格对齐多字段内容），层级清晰、可直接使用。忠实于用户提供的信息和原始语言，不臆造没给出的细节。只输出正文本身，不要前言，不要解释你做了什么。';
+}
 function smartLlmNodeModeSystemPrompt(node){
     const stored = String(node?.llmSystemPrompt || '').trim();
     return !stored || stored === SMART_CHAT_LEGACY_SYSTEM_PROMPT ? smartLlmDefaultSystemPrompt() : stored;
@@ -15383,7 +15624,9 @@ function syncChatPersonaSelect(el, node){
    在选中该节点时整块搬进下方编辑栏 —— 节点上不再堆按钮。 */
 /* 空态「文本生成」的四条杆图标：lucide 子集里没有这个形状，本地自绘一份 */
 const TEXT_LINES_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M4 10h16M4 15h16M4 20h9"/></svg>';
-function promptNodePreviewHtml(node){
+/* outputKind 由 promptNodeBodyHtml 传进来（'prompt' | 'doc'）：不传就按生图提示词处理 ——
+   这样这个函数本身不依赖输出类型判定链，单独抽出来测也不会缺依赖。 */
+function promptNodePreviewHtml(node, outputKind){
     const llm = Boolean(node.llmEnabled);
     let text = '';
     if(llm && node.llmTab === 'chat'){
@@ -15399,7 +15642,27 @@ function promptNodePreviewHtml(node){
     const placeholder = llm
         ? (node.llmTab === 'chat' ? tr('smart.promptChatPreviewEmpty') : tr('smart.promptLlmPreviewEmpty'))
         : tr('smart.promptPlaceholderNode');
-    return `<div class="prompt-node-display${text ? '' : ' is-empty'}">${text ? '' : '<span class="smart-empty-icon">' + TEXT_LINES_GLYPH + '</span>'}<span class="prompt-node-display-text">${escapeHtml(text || placeholder)}</span></div>`;
+    /* 「长文」输出类型：产出按 Markdown 渲染（流式过程中仍是纯文本，见 paintPromptStreamSnapshot）。
+       渲染器缺位或抛错都退回 escapeHtml + pre-wrap 的老样子，节点不会变白板。 */
+    const markdown = Boolean(text) && Boolean(llm) && node.llmTab !== 'chat' && outputKind === 'doc';
+    /* 复制按钮复制的是 node.text —— **原始 Markdown**，不是渲染出来的 HTML。 */
+    const copyHtml = markdown
+        ? `<button class="prompt-node-display-copy prompt-node-control" type="button" data-prompt-copy-markdown="1" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>`
+        : '';
+    return `<div class="prompt-node-display${text ? '' : ' is-empty'}">${text ? '' : '<span class="smart-empty-icon">' + TEXT_LINES_GLYPH + '</span>'}<span class="prompt-node-display-text${markdown ? ' is-markdown' : ''}">${markdown ? smartMarkdownHtml(text) : escapeHtml(text || placeholder)}</span>${copyHtml}</div>`;
+}
+/* 长文渲染的唯一入口：拿不到渲染器就退回纯文本（绝不把未转义内容塞进 innerHTML）。 */
+function smartMarkdownHtml(text){
+    const mdApi = window.SmartMarkdown;
+    if(mdApi && typeof mdApi.render === 'function'){
+        try {
+            const html = mdApi.render(text);
+            if(html) return html;
+        } catch(error) {
+            console.error('[smart-markdown] 渲染失败，退回纯文本：', error);
+        }
+    }
+    return escapeHtml(text);
 }
 /* ── 上游素材 @ 引用（LLM 的 INPUT 与聊天输入框共用一套）──
    可引用的素材 = 节点上那排「图1/图2…」缩略图的同一份清单（promptNodeInputImages）；
@@ -15688,20 +15951,98 @@ const PROMPT_RUN_BUTTON_VIEW = {
     stop: { icon:'square', label:'smart.llmRunStop' },
     retry: { icon:'rotate-ccw', label:'smart.llmRunRetry' },
 };
+/* ── 上游输入「看全文」浮层（单例、只读、可滚动、可复制） ──
+   文本卡片（.smart-input-card.is-text）点开就是它；只改展示，不改发送给 LLM 的文本。 ──
+   挂在 body 上而不是节点里：节点/编辑栏都会被裁切，浮层必须能盖在画布上。
+   点外面、按 Esc、滚轮缩放画布都收起。 */
+const UPSTREAM_VIEW_BODY_MAX_H = 260;
+let upstreamPromptView = null;
+function upstreamPromptViewElement(){
+    if(upstreamPromptView && upstreamPromptView.isConnected) return upstreamPromptView;
+    const el = document.createElement('div');
+    el.className = 'prompt-node-upstream-view';
+    el.setAttribute('role', 'dialog');
+    el.hidden = true;
+    el.innerHTML = `<div class="prompt-node-upstream-view-head">
+            <span class="prompt-node-upstream-view-title"></span>
+            <button class="prompt-node-upstream-view-copy" type="button">${escapeHtml(tr('smart.upstreamViewCopy'))}</button>
+            <button class="prompt-node-upstream-view-close" type="button" aria-label="${escapeAttr(tr('common.close'))}" title="${escapeAttr(tr('common.close'))}">×</button>
+        </div>
+        <div class="prompt-node-upstream-view-body" style="max-height:${UPSTREAM_VIEW_BODY_MAX_H}px"></div>`;
+    el.querySelector('.prompt-node-upstream-view-close').addEventListener('click', closeUpstreamPromptView);
+    el.querySelector('.prompt-node-upstream-view-copy').addEventListener('click', async event => {
+        const text = String(el.dataset.copyText || '');
+        if(!text) return;
+        const btn = event.currentTarget;
+        if(!await copyTextToClipboard(text)) return;
+        btn.textContent = tr('smart.upstreamViewCopied');
+        clearTimeout(el.__copyTimer);
+        el.__copyTimer = setTimeout(() => { btn.textContent = tr('smart.upstreamViewCopy'); }, 1200);
+    });
+    document.body.appendChild(el);
+    document.addEventListener('mousedown', event => {
+        if(el.hidden) return;
+        if(el.contains(event.target)) return;
+        if(event.target.closest && event.target.closest('[data-upstream-prompt-index]')) return;
+        closeUpstreamPromptView();
+    }, true);
+    document.addEventListener('keydown', event => {
+        if(el.hidden || event.key !== 'Escape') return;
+        closeUpstreamPromptView();
+    }, true);
+    world?.addEventListener('wheel', () => closeUpstreamPromptView(), {capture:true, passive:true});
+    window.addEventListener('resize', () => closeUpstreamPromptView());
+    upstreamPromptView = el;
+    return el;
+}
+function positionUpstreamPromptView(el, anchorEl){
+    const margin = 12;
+    const width = Math.min(340, Math.max(220, window.innerWidth - margin * 2));
+    el.style.width = width + 'px';
+    const rect = anchorEl && anchorEl.getBoundingClientRect ? anchorEl.getBoundingClientRect() : null;
+    const height = el.offsetHeight || 200;
+    let left = rect ? rect.left : margin;
+    let top = rect ? rect.bottom + 8 : 80;
+    left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+    if(top + height > window.innerHeight - margin) top = Math.max(margin, (rect ? rect.top : 220) - height - 8);
+    el.style.left = Math.round(left) + 'px';
+    el.style.top = Math.round(top) + 'px';
+}
+/* 浮层的通用打开：一段文本 + 标题（提示词节点的文本卡片、生成面板的「文本」卡片都用它） */
+function openUpstreamTextView(text, title, anchorEl){
+    const value = String(text || '');
+    if(!value) return;
+    const el = upstreamPromptViewElement();
+    el.dataset.copyText = value;
+    el.querySelector('.prompt-node-upstream-view-title').textContent = String(title || '');
+    el.querySelector('.prompt-node-upstream-view-body').textContent = value;
+    el.hidden = false;
+    el.classList.add('open');
+    positionUpstreamPromptView(el, anchorEl);
+}
+function openUpstreamPromptView(node, index, anchorEl){
+    const entry = promptNodeUpstreamPromptEntries(node)[index];
+    if(!entry || !entry.text) return;
+    openUpstreamTextView(entry.text, smartUpstreamChipLabel(entry, index), anchorEl);
+}
+function closeUpstreamPromptView(){
+    if(!upstreamPromptView || upstreamPromptView.hidden) return;
+    upstreamPromptView.hidden = true;
+    upstreamPromptView.classList.remove('open');
+    upstreamPromptView.dataset.copyText = '';
+}
 function promptNodeBodyHtml(node){
     node.llmProvider = resolveChatProviderId(node.llmProvider || '');
     // 历史存档或换平台可能留下不属于当前平台的对话模型（渲染阶段不能弹提示），先静默归一。
     node.llmModel = correctedChatModelForProvider(node.llmProvider, resolveChatModel(node.llmModel || '', node.llmProvider));
     node.llmTab = node.llmTab === 'chat' ? 'chat' : 'node';
     ensureChatPersonaDefault(node);
+    /* 输出类型全自动：每次渲染都按「这次要发给 LLM 的文本」重新判（前端没有控件，也没有手动覆盖） */
+    const outputKind = smartLlmResolvedOutputKind(node);
     const chatMessages = Array.isArray(node.chatMessages) ? node.chatMessages : [];
-    const inputThumbs = smartNodeInputThumbsHtml(promptNodeInputImages(node));
+    /* 图片来源、上游文本、加号合成同一行编号卡片（放在 INPUT 上方） */
+    const inputCards = smartNodeInputCardsHtml(node);
     const templateActive = activePromptTemplateNodeId() === node.id;
-    const upstreamPromptItems = promptNodeUpstreamPromptItems(node);
-    const upstreamPromptHtml = upstreamPromptItems.length ? `<div class="prompt-node-upstream">
-        <div class="prompt-node-section-title">上游输入</div>
-        <div class="prompt-node-upstream-list">${upstreamPromptItems.map((item, index) => `<div class="prompt-node-segment"><span>${index + 1}</span><p>${escapeHtml(item)}</p></div>`).join('')}</div>
-    </div>` : '';
     /* 供应商 / 模型：两处（节点模式、聊天模式）都要用，抽出来放到底部那一行的左下角 */
     /* 运行按钮当前该显示什么：三态判据跟点击行为共用 promptRunButtonState */
     const runState = promptRunButtonState(node);
@@ -15739,7 +16080,6 @@ function promptNodeBodyHtml(node){
                 <div class="prompt-node-control prompt-llm-instruction" contenteditable="true" data-placeholder="${escapeAttr(tr('smart.promptLlmInstructionPlaceholder'))}" style="height:${promptLlmInstructionHeight(node)}px">${node.llmInstructionHtml || escapeHtml(node.llmInstruction || '')}</div>
                 <div class="prompt-llm-instruction-resize prompt-node-control" data-llm-instruction-resize="1" title="拖动调整高度"><span></span></div>
             </div>
-            ${upstreamPromptHtml}
             ${llmRunStatusHtml(node)}
             ${llmSlowProviderHintHtml(node)}
             <div class="prompt-node-bottom-row">
@@ -15752,14 +16092,14 @@ function promptNodeBodyHtml(node){
             `}
             ${smartLlmMentionPickerHtml(node)}
         </div>` : '';
-    return `${promptNodePreviewHtml(node)}
+    return `${promptNodePreviewHtml(node, outputKind)}
     <div class="prompt-node-card" data-prompt-console="1">
         <div class="prompt-node-tools">
             <button class="prompt-node-pill prompt-node-control prompt-preset-edit ${templateActive ? 'active' : ''}" type="button"><i data-lucide="library"></i><span>模板库</span></button>
             <button class="prompt-node-pill prompt-llm-toggle ${node.llmEnabled ? 'active' : ''}" type="button"><i data-lucide="sparkles"></i><span>LLM</span></button>
             ${llmTabsHtml}
         </div>
-        ${inputThumbs}
+        ${inputCards}
         ${llmParams}
     </div>`;
 }
@@ -16366,10 +16706,14 @@ function smartTextBodyHtml(node){
     const own = smartTextOwnText(node).trim();
     const upstream = own ? '' : smartTextUpstreamText(node).trim();
     const text = own || upstream;
+    /* 纯文本节点也显示同一套上游输入行（图片/视频/音频/文本 + 「+」）；
+       没有上游输入时这里返回空串 —— 不渲染、不占高度，卡片还是原来那么克制。 */
+    const inputRow = smartNodeInputCardsHtml(node);
     if(!text){
-        return `<div class="smart-text-card is-empty"><span class="smart-empty-icon"><i data-lucide="type"></i></span><div class="smart-text-empty">${escapeHtml(tr('smart.textNodeEmpty'))}</div></div>`;
+        return `<div class="smart-text-card is-empty${inputRow ? ' has-input-row' : ''}">${inputRow}<div class="smart-text-empty-state"><span class="smart-empty-icon"><i data-lucide="type"></i></span><div class="smart-text-empty">${escapeHtml(tr('smart.textNodeEmpty'))}</div></div></div>`;
     }
-    return `<div class="smart-text-card${own ? '' : ' is-generated'}">
+    return `<div class="smart-text-card${own ? '' : ' is-generated'}${inputRow ? ' has-input-row' : ''}">
+        ${inputRow}
         ${own ? '' : `<div class="smart-text-source">${escapeHtml(tr('smart.textNodeFromUpstream'))}</div>`}
         <div class="smart-text-preview">${smartTextFlowHtml(text)}</div>
         <div class="smart-text-foot"><span>${escapeHtml(trf('smart.textNodeCount', {n:text.length}))}</span>
@@ -18323,8 +18667,28 @@ function nodeBodyHtml(node, layout){
     const emptyIconHtml = isSmartAudioNode(node) ? SMART_AUDIO_EMPTY_ICON_SVG : `<i data-lucide="${emptyIcon}"></i>`;
     return `<div class="node-drop" data-upload-action="files">
         <span class="smart-empty-icon">${emptyIconHtml}</span>
-        <span class="upload-node-sub">拖拽 / 粘贴 / 点击上传</span>
+        <span class="upload-node-sub">${escapeHtml(tr('smart.uploadEmptyHint'))}</span>
     </div>`;
+}
+/* 空媒体节点（图片 / 视频 / 音频，且真的没有任何产出/排队）：空卡那条分支的判定。
+   render 里的 isEmpty 与这里的口径必须一致，否则按钮和空卡会对不上。 */
+function isEmptyMediaNode(node){
+    if(!node || !isSmartMediaNode(node)) return false;
+    if((node.images || []).length) return false;
+    if(node.pending || node.queued) return false;
+    if(node.jimengPending && node.jimengPending.submitId) return false;
+    return true;
+}
+/* 空节点上方的「上传」按钮是否显示：只有「单选当前这个空媒体节点」才浮出来 ——
+   多选时不弹一排按钮；只读画布、分组内成员也不显示（详见 node-upload-cta 的 CSS / 绑定）。 */
+function nodeUploadCtaVisible(node){
+    if(!node || !isEmptyMediaNode(node)) return false;
+    if(collabReadOnly) return false;
+    if(isSmartGroupCompactMember(node) || smartGroupContainingNode(node.id)) return false;
+    return selectedIds.length === 0 && isNodeSelected(node.id);
+}
+function nodeUploadCtaHtml(node){
+    return `<button class="node-upload-cta" type="button" data-upload-node="${escapeAttr(node.id)}" title="${escapeHtml(tr('smart.uploadCta'))}" aria-label="${escapeHtml(tr('smart.uploadCta'))}"><i data-lucide="upload"></i><span>${escapeHtml(tr('smart.uploadCta'))}</span></button>`;
 }
 /* 多图网格：已出的缩略图 + 还没出来的占位格（pendingSlots）。
    占位格只用 .loading-cell（闪底），**不能加 .thumb-item** —— 那个类会被缩略图预览/拖动处理器认领。 */
@@ -19337,6 +19701,24 @@ function smartCoverCanvas(img, width, height){
 }
 /* 工具条按钮（含懒渲染出来的菜单项）的动作委托：注册一次，之后新建的按钮自动生效。
    捕获阶段跑，保证「先收起菜单、再执行动作」，且不让事件漏到节点拖拽上。 */
+/* 空媒体节点「上传」按钮：world 上一次性委托（按钮可能在选中态变化后被补进来） */
+function initSmartNodeUploadCta(root){
+    if(!root || root.__smartNodeUploadCta) return;
+    root.__smartNodeUploadCta = true;
+    root.addEventListener('mousedown', event => {
+        const button = event.target.closest?.('[data-upload-node]');
+        if(!button || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+    }, true);
+    root.addEventListener('click', event => {
+        const button = event.target.closest?.('[data-upload-node]');
+        if(!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        pickMediaFromUploadCta(button.dataset.uploadNode || button.closest('.image-node')?.dataset.id || '');
+    }, true);
+}
 function initSmartNodeToolbarActions(root){
     if(!root || root.__smartNodeToolbarActions) return;
     root.__smartNodeToolbarActions = true;
@@ -23811,6 +24193,10 @@ function render(){
         /* 单图生成中：卡片上方顶一行「图像生成 + 计时」，卡内那份计时同时让位 */
         const genHead = isGenStageBody(body);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
+        /* 空媒体节点：选中它时才在节点框正上方浮一颗「上传」按钮（用户要求：不常驻、不靠点本体弹窗）。
+           判定集中在 nodeUploadCtaVisible：空节点 + 单选 + 非只读 + 非分组内成员。 */
+        const showUploadCta = nodeUploadCtaVisible(node);
+        const uploadCtaHtml = showUploadCta ? nodeUploadCtaHtml(node) : '';
         const batchStatus = batchRowStatusTextFor(node);
         const hint = batchStatus || (isLabel ? '' : isText ? escapeHtml(tr('smart.textNodeHint')) : isPrompt ? escapeHtml(tr('smart.promptEditHint')) : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty'))));
         /* 根节点自身的 class（选中/拖动这些**临时态**都在这里）：单独拿出来，
@@ -23819,6 +24205,7 @@ function render(){
         const rootClass = `image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isText ? 'text-smart-node' : ''} ${isLabel ? 'label-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isGroupMediaMember ? 'smart-group-media-member' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''} ${node.sizeUserSet ? 'size-user-set' : ''} ${smartLodKind(node) ? 'has-lod' : ''} ${node.type === 'table' || node.type === 'smart-batch' ? 'has-lod-band' : ''} ${node.alias ? 'has-alias' : ''} ${node.templateTitle ? 'has-template-title' : ''}`;
         const html = `<div class="${rootClass}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px;${nodeAliasStyle(node)}">
             ${nodeAliasHtml(node)}
+            ${uploadCtaHtml}
             ${node.templateTitle ? `<span class="node-template-title">${escapeHtml(node.templateTitle)}</span>` : ''}
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty ? `<div class="floating-node-actions">${imgs.some(img => img?.url) ? `<button class="mini-x node-replace" type="button" data-smart-node-action="replace" data-node-id="${escapeAttr(node.id)}" title="${escapeHtml(tr('smart.replaceMedia'))}" aria-label="${escapeHtml(tr('smart.replaceMedia'))}"><i data-lucide="image-plus"></i></button>` : ''}<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
@@ -24195,6 +24582,23 @@ function bindPromptNodeControls(el, node){
         render();
         scheduleSave();
     };
+    /* 上游输入行（图片/文本卡片 + 「+」）：点文本卡片看全文、点「+」加输入，都不改发给 LLM 的文本 */
+    bindSmartInputRow(el, node);
+    /* 生成结果：双击输出区打开可看可改的弹窗（只读协作时只提示不进编辑） */
+    bindPromptOutputEditor(el, node);
+    /* 长文预览右下角的复制：复制的是**原始 Markdown**（跟预览同一个取值顺序），不是渲染后的 HTML。 */
+    el.querySelectorAll('[data-prompt-copy-markdown]').forEach(btn => {
+        btn.addEventListener('mousedown', e => e.stopPropagation());
+        btn.onclick = async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const raw = String(node.outputText || node.llmInstruction || node.text || '');
+            if(await copyTextToClipboard(raw)){
+                btn.classList.add('copied');
+                setTimeout(() => btn.classList.remove('copied'), 1500);
+            }
+        };
+    });
     // 每段秒数（只在「视频分镜表」下渲染）：存 node.segmentSeconds，出表时按它切段
     const segmentSecondsEl = el.querySelector('.prompt-llm-segment-seconds');
     if(segmentSecondsEl) segmentSecondsEl.onchange = e => {
@@ -24746,6 +25150,8 @@ function bindNodeEvents(){
                 e.stopPropagation();
                 openSmartTextEditor(id);
             };
+            /* 纯文本节点也有上游输入行：卡片自己吃掉鼠标事件，双击卡片不会打开大编辑器 */
+            bindSmartInputRow(el, nodeForControls);
         } else if(isSmartLabelNode(nodeForControls)) {
             /* 标签节点：双击就地改文字（背景/颜色/字号走右侧样式面板） */
             el.ondblclick = e => {
@@ -24820,24 +25226,16 @@ function bindNodeEvents(){
         const nodeDrop = el.querySelector('.node-drop');
         if(nodeDrop && nodeDrop.dataset.smartNodeDropBound !== '1'){
             nodeDrop.dataset.smartNodeDropBound = '1';
+            /* 空卡本体只管「不启动拖拽」：点击冒泡给节点自己的 onclick 做选中。
+               上传改走节点上方的「上传」按钮（见 data-upload-node），不再点本体弹系统窗。 */
             nodeDrop.addEventListener('mousedown', e => {
                 if(e.button !== 0) return;
                 e.preventDefault();
                 e.stopPropagation();
             }, true);
-            nodeDrop.addEventListener('click', e => {
-                e.preventDefault(); e.stopPropagation();
-                hideRunTimerForNode(nodes.find(n => n.id === id));
-                selectedId = id;
-                selectedIds = [];
-                selectedImage = {nodeId:'', index:-1};
-                pendingGroupUploadPoint = null;
-                uploadTargetId = id;
-                syncSelectionUi();
-                updateComposer();
-                pickMediaForSmartNode(id);
-            });
         }
+        /* 「上传」按钮走 world 上的一次性事件委托（见 initSmartNodeUploadCta）：
+           它可能由 syncNodeUploadCtas 事后插进来，逐元素绑会漏。 */
         el.querySelectorAll('.node-delete').forEach(btn => {
             if(btn.dataset.smartNodeDeleteBound === '1') return;
             btn.dataset.smartNodeDeleteBound = '1';
@@ -28554,12 +28952,17 @@ function renderInputPromptPreview(node){
             + '下面选的平台 / 模型 / 尺寸 / 张数作用于整批，跑完每行会在右侧自动落一个结果节点。</div>';
         return;
     }
-    const groupText = isSmartGroupNode(node) ? textForNode(node).trim() : '';
-    const text = node ? [groupText, inputPromptTextFor(node).trim()].filter(Boolean).join('\n\n') : '';
-    inputPromptPreview.classList.toggle('has-text', Boolean(text));
-    inputPromptPreview.innerHTML = text
-        ? `<div class="input-prompt-preview-label">${escapeHtml(tr('smart.inputUpstream'))}</div><div class="input-prompt-preview-text">${escapeHtml(text)}</div>`
-        : '';
+    /* 普通节点的「上游输入」灰底大文本块已下线（用户要求）：上游文本改到上面参考图那一行里以
+       「文本」卡片展示（见 renderInputThumbsRow）。这里只留批量生成那段说明，其余清空不留空白。 */
+    inputPromptPreview.classList.remove('has-text');
+    inputPromptPreview.innerHTML = '';
+}
+/* 生成面板参考图那一行要展示的「上游文本」：与原来「上游输入」块同一份内容
+   （分组节点自己的透传文本 + 各上游节点给过来的文本）。只用于展示，绝不进发给模型的 images。 */
+function panelUpstreamInputText(node, ctx=smartLoopContext){
+    if(!node) return '';
+    const groupText = isSmartGroupNode(node) ? textForNode(node, ctx).trim() : '';
+    return [groupText, inputPromptTextFor(node, ctx).trim()].filter(Boolean).join('\n\n');
 }
 function renderInputThumbsRow(node){
     if(!inputThumbsRow) return;
@@ -28568,6 +28971,9 @@ function renderInputThumbsRow(node){
     const dedup = node ? visibleReferenceImagesFor(node) : [];
     const manualRefKeys = new Set(manualReferenceImagesFor(node).map(img => inputRefKey(img)));
     const addActive = mentionInsertMode === 'manual-ref';
+    /* 上游文本也作为一张卡片进这一行（用户截图2那个位置）；只读展示，不进 images、不参与拖拽/删除 */
+    const upstreamText = panelUpstreamInputText(node);
+    const hasTextCard = Boolean(upstreamText);
     // 仅当参考图集合/状态真正变化时才重建缩略图 DOM。否则每敲一个字都重建并重新解码所有图片，
     // 参考图多时会让输入框打字明显卡顿。
     const thumbsSignature = JSON.stringify({
@@ -28575,14 +28981,15 @@ function renderInputThumbsRow(node){
         items: dedup.map(img => `${inputRefKey(img)}@${img.url || ''}`),
         manual: [...manualRefKeys],
         add: addActive,
-        mode: node ? smartImageMode(node) : ''
+        mode: node ? smartImageMode(node) : '',
+        text: upstreamText
     });
     if(inputThumbsRow.dataset.thumbsSig === thumbsSignature) return;
     inputThumbsRow.dataset.thumbsSig = thumbsSignature;
     inputThumbsRow.classList.toggle('has-items', Boolean(node));
     if(!node){ inputThumbsRow.innerHTML = ''; return; }
     const addButton = `<button class="input-thumb-add ${addActive ? 'active' : ''}" type="button" data-input-add-reference title="${escapeHtml(addActive ? '收起参考图' : '添加参考图')}" aria-label="${escapeHtml(addActive ? '收起参考图' : '添加参考图')}"><i data-lucide="image-plus"></i></button>`;
-    if(!dedup.length){
+    if(!dedup.length && !hasTextCard){
         inputThumbsRow.innerHTML = `<div class="input-thumb-list empty"></div><div class="input-thumb-actions">${addButton}</div>`;
         bindInputThumbReferenceActions();
         refreshIcons();
@@ -28609,11 +29016,37 @@ function renderInputThumbsRow(node){
         const removeBtn = removable ? `<button class="input-thumb-remove" type="button" data-input-remove-reference="${escapeHtml(inputRefKey(img))}" title="删除参考图" aria-label="删除参考图">×</button>` : '';
         return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${removable ? 'input-manual-ref' : ''}" draggable="false" data-thumb-index="${i}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" title="${escapeHtml(`${img.name || tr('smart.inputNum').replace('{n}', String(i + 1))} · ${title}`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${removeBtn}</div>`;
     }).join('');
-    inputThumbsRow.innerHTML = `<div class="input-thumb-list">${thumbsHtml}${dedup.length > 1 ? `<span class="input-thumb-count">${escapeHtml(tr('smart.inputCount').replace('{n}', String(dedup.length)))}</span>` : ''}</div><div class="input-thumb-actions">${addButton}</div>`;
+    /* 「文本」卡片：线性 file-text 图标 + 文本标签（跟缩略图卡同一套 42px 底），点开走全站统一的全文浮层。
+       刻意不带 .input-thumb / data-thumb-index：那套会被拖拽排序、删除、发给模型的 images 认领。 */
+    const textLabel = tr('smart.inputTextCardLabel');
+    const textCardHtml = hasTextCard
+        ? `<div class="input-thumb-text" role="button" tabindex="0" data-input-text-card="1" title="${escapeAttr(textLabel + ' · ' + tr('smart.upstreamViewTip'))}"><i data-lucide="file-text"></i><span class="input-thumb-label">${escapeHtml(textLabel)}</span></div>`
+        : '';
+    const totalInputs = dedup.length + (hasTextCard ? 1 : 0);
+    const countHtml = totalInputs > 1 ? `<span class="input-thumb-count">${escapeHtml(tr('smart.inputCount').replace('{n}', String(totalInputs)))}</span>` : '';
+    inputThumbsRow.innerHTML = `<div class="input-thumb-list">${thumbsHtml}${textCardHtml}${countHtml}</div><div class="input-thumb-actions">${addButton}</div>`;
     bindSmartPreviewImageFallbacks(inputThumbsRow);
     bindInputThumbsDrag(node, dedup, manualRefKeys);
     bindInputThumbReferenceActions();
+    bindInputTextCard(upstreamText);
     refreshIcons();
+}
+/* 参考图行里的「文本」卡片：只读展示上游文本，点开全文浮层；自己吃掉鼠标事件，不触发画布拖拽/选图 */
+function bindInputTextCard(text){
+    const card = inputThumbsRow?.querySelector('[data-input-text-card]');
+    if(!card) return;
+    ['mousedown', 'click', 'dblclick'].forEach(type => {
+        card.addEventListener(type, event => event.stopPropagation());
+    });
+    card.addEventListener('click', event => {
+        event.preventDefault();
+        openUpstreamTextView(text, tr('smart.inputTextCardLabel'), card);
+    });
+    card.addEventListener('keydown', event => {
+        if(event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        openUpstreamTextView(text, tr('smart.inputTextCardLabel'), card);
+    });
 }
 function bindInputThumbReferenceActions(){
     inputThumbsRow?.querySelectorAll('[data-input-add-reference]').forEach(btn => {
@@ -33075,7 +33508,12 @@ function paintPromptStreamSnapshot(node, text){
     if(display){
         display.classList.toggle('is-empty', !String(text || '').trim());
         const target = display.querySelector('.prompt-node-display-text');
-        if(target) target.textContent = String(text || '') || tr('smart.promptPlaceholderNode');
+        if(target){
+            /* 流式过程按纯文本刷：每个 token 都重排一次 Markdown 既慢、半截语法也会闪。
+               落定后的那次 render 会按输出类型决定要不要走 SmartMarkdown。 */
+            target.classList.remove('is-markdown');
+            target.textContent = String(text || '') || tr('smart.promptPlaceholderNode');
+        }
     }
     /* 生成中的正文也显示在编辑栏里（否则用户盯着编辑栏，字全跑到背后的节点上了） */
     const preview = root?.querySelector('.prompt-node-stream-preview');
@@ -33098,6 +33536,9 @@ async function runPromptLLMNode(nodeId){
         /* 请求体统一走 callSmartCanvasLLM：与经典画布 callCanvasLLM 逐字段一致
            （system_prompt / messages / reverse / target_type / target_model / max_tokens），
            不再在这里另拼一套。 */
+        /* 输出类型在发请求这一刻定下来：按上面这段 message 自动判（同一段文本，判什么发什么）。
+           判 doc 才换成结构化长文 System + 放开 max_tokens；前端没有任何控件可以改它。 */
+        const outputKind = smartLlmResolvedOutputKind(node);
         let answer = '';
         try {
             /* 先走流式：token 一到就显示在节点上（标准 OpenAI 兼容供应商）。
@@ -33105,6 +33546,7 @@ async function runPromptLLMNode(nodeId){
             answer = await callSmartCanvasLLM(node, message, [], {
                 noPromptIntelligence: true,
                 promptOnlySystem: true,
+                outputKind,
                 onDelta: full => {
                     node.text = String(full || '');
                     node.outputText = node.text;
@@ -33113,7 +33555,7 @@ async function runPromptLLMNode(nodeId){
             });
         } catch(streamError){
             if(!streamError?.unsupported) throw streamError;
-            answer = await callSmartCanvasLLM(node, message, [], {noPromptIntelligence:true, promptOnlySystem:true});
+            answer = await callSmartCanvasLLM(node, message, [], {noPromptIntelligence:true, promptOnlySystem:true, outputKind});
         }
         const text = answer;
         node.text = String(text || '').trim();
@@ -34275,6 +34717,10 @@ function createSmartTableNode(x, y){
    节点预览在弹窗关闭时统一重绘。Esc / 点遮罩 / 保存都保留编辑，「取消」才还原打开前的文本。 */
 let smartTextEditorNodeId = '';
 let smartTextEditorOriginalText = '';
+/* 弹窗的两种用途：
+   'text'          = 纯文本节点的正文（即改即存，取消还原 —— 原有行为）
+   'prompt-output' = 提示词节点的生成结果（草稿 + 显式保存；取消/Esc/点遮罩算放弃，有改动先确认） */
+let smartTextEditorMode = 'text';
 
 function smartTextEditorEls(){
     return {
@@ -34315,6 +34761,49 @@ function smartTextModalPlain(root){
     if(!lines.length) pushLine(root.textContent || '');
     return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
+/* 生成结果的编辑框里是 **Markdown 源码**：按纯文本提取（保留换行与行首缩进），
+   不能走 smartTextModalPlain —— 那套会把行 trim 掉、把 \u0060## 标题\u0060 / 表格管道符当排版吃掉，保存回去就不是原文了。 */
+function smartTextModalRawPlain(root){
+    if(!root) return '';
+    let out = '';
+    const walk = element => {
+        [...element.childNodes].forEach(child => {
+            if(child.nodeType === Node.TEXT_NODE){ out += String(child.nodeValue || ''); return; }
+            if(child.nodeType !== Node.ELEMENT_NODE) return;
+            const tag = child.tagName;
+            if(tag === 'BR'){ out += '\n'; return; }
+            if(tag === 'DIV' || tag === 'P'){
+                if(out && !out.endsWith('\n')) out += '\n';
+                walk(child);
+                return;
+            }
+            walk(child);
+        });
+    };
+    walk(root);
+    return out.replace(/\u00a0/g, ' ');
+}
+/* 弹窗标题/底部提示按用途切换（原样文案在首次打开时快照，切回纯文本节点时还原 ——
+   不依赖改 HTML，也不用新加 id）。 */
+let smartTextModalOriginalChrome = null;
+function setSmartTextEditorChrome(promptOutput){
+    const modal = document.getElementById('smartTextModal');
+    if(!modal) return;
+    const title = modal.querySelector('.smart-text-modal-title span');
+    const tip = modal.querySelector('.smart-text-modal-tip');
+    if(!title || !tip) return;
+    if(!smartTextModalOriginalChrome){
+        smartTextModalOriginalChrome = {title: String(title.textContent || ''), tip: String(tip.textContent || '')};
+    }
+    title.textContent = promptOutput ? tr('smart.promptOutputTitle') : smartTextModalOriginalChrome.title;
+    tip.textContent = promptOutput ? tr('smart.promptOutputHint') : smartTextModalOriginalChrome.tip;
+}
+/* 当前弹窗里的文本：两种模式各自的提取口径 */
+function smartTextEditorValue(){
+    const {input} = smartTextEditorEls();
+    if(!input) return '';
+    return smartTextEditorMode === 'prompt-output' ? smartTextModalRawPlain(input) : smartTextModalPlain(input);
+}
 function focusSmartTextEditorEnd(editor){
     if(!editor) return;
     editor.focus({preventScroll:true});
@@ -34327,7 +34816,7 @@ function focusSmartTextEditorEnd(editor){
 }
 function updateSmartTextEditorCount(){
     const {input, count} = smartTextEditorEls();
-    if(input && count) count.textContent = trf('smart.textNodeCount', {n:smartTextModalPlain(input).length});
+    if(input && count) count.textContent = trf('smart.textNodeCount', {n:smartTextEditorValue().length});
 }
 function openSmartTextEditor(nodeId){
     if(collabReadOnly){ collabNotifyReadOnly(); return false; }
@@ -34336,10 +34825,36 @@ function openSmartTextEditor(nodeId){
     const {modal, input} = smartTextEditorEls();
     if(!modal || !input) return false;
     smartTextEditorNodeId = node.id;
+    smartTextEditorMode = 'text';
     smartTextEditorOriginalText = smartTextOwnText(node);
     /* 节点上显示的可能来自上游（自己没写）：打开弹窗时把它填进去，否则用户看到空框不知道内容在哪。
        保存就落成自己的文本（此后不再跟随上游），取消/Esc 仍还原成打开前的空文本。 */
+    input.classList.remove('is-raw');
+    setSmartTextEditorChrome(false);
     input.innerHTML = smartTextFlowHtml(smartTextEditorOriginalText || smartTextUpstreamText(node).trim());
+    updateSmartTextEditorCount();
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    refreshIcons();
+    focusSmartTextEditorEnd(input);
+    return true;
+}
+/* 提示词节点的「生成结果」：双击输出区打开同一个弹窗，但内容是**Markdown 原文**、可看可改。
+   与纯文本节点不同的两点（都是故意的）：
+   1. 编辑期间只改草稿，不碰 node —— 生成结果会被下游节点消费，草稿不该提前生效；
+   2. 只有「保存 / Ctrl+Enter」才写回 node.text + node.outputText；取消 / Esc / 点遮罩算放弃。 */
+function openPromptOutputEditor(nodeId){
+    if(collabReadOnly){ collabNotifyReadOnly(); return false; }
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.type !== 'smart-prompt') return false;
+    const {modal, input} = smartTextEditorEls();
+    if(!modal || !input) return false;
+    smartTextEditorNodeId = node.id;
+    smartTextEditorMode = 'prompt-output';
+    smartTextEditorOriginalText = String(node.outputText || node.text || '');
+    input.classList.add('is-raw');
+    setSmartTextEditorChrome(true);
+    input.textContent = smartTextEditorOriginalText;
     updateSmartTextEditorCount();
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
@@ -34349,19 +34864,45 @@ function openSmartTextEditor(nodeId){
 }
 function closeSmartTextEditor(save=true){
     if(!smartTextEditorNodeId) return false;
-    const {modal} = smartTextEditorEls();
+    const {modal, input} = smartTextEditorEls();
     const node = nodes.find(n => n.id === smartTextEditorNodeId);
-    if(node && !save) node.text = smartTextEditorOriginalText;
+    const promptOutput = smartTextEditorMode === 'prompt-output';
+    if(node){
+        if(promptOutput){
+            /* 生成结果：保存才写回（两者当前同值，下游读 outputText，必须一起写）；放弃就什么都不写 */
+            if(save){
+                const value = String(smartTextEditorValue() || '');
+                node.text = value;
+                node.outputText = value;
+            }
+        } else if(!save){
+            node.text = smartTextEditorOriginalText;
+        }
+    }
     smartTextEditorNodeId = '';
     smartTextEditorOriginalText = '';
+    smartTextEditorMode = 'text';
+    input?.classList.remove('is-raw');
+    setSmartTextEditorChrome(false);
     modal?.classList.remove('open');
     modal?.setAttribute('aria-hidden', 'true');
     render();
     scheduleSave();
     return true;
 }
+/* 生成结果有改动时，关闭（取消 / Esc / 点遮罩）前先确认，避免误触丢掉编辑；
+   纯文本节点保持原行为（Esc/点遮罩 = 保留，取消 = 还原）。 */
+function requestCloseSmartTextEditor(defaultSave){
+    if(smartTextEditorMode === 'prompt-output' && !defaultSave){
+        const dirty = String(smartTextEditorValue() || '').trim() !== String(smartTextEditorOriginalText || '').trim();
+        if(dirty && !window.confirm(tr('smart.promptOutputDiscard'))) return false;
+    }
+    return closeSmartTextEditor(defaultSave);
+}
 function syncSmartTextEditorNode(){
     if(!smartTextEditorNodeId) return null;
+    /* 生成结果走草稿：输入时只刷字数，不写 node（保存按钮才落地） */
+    if(smartTextEditorMode !== 'text'){ updateSmartTextEditorCount(); return null; }
     const node = nodes.find(n => n.id === smartTextEditorNodeId);
     const {input} = smartTextEditorEls();
     if(!node || !input) return null;
@@ -36022,19 +36563,22 @@ assetPanel?.addEventListener('drop', handleAssetPanelDrop);
     const input = document.getElementById('smartTextModalInput');
     if(!modal || !input) return;
     modal.addEventListener('mousedown', event => event.stopPropagation());
+    /* 「点遮罩 / Esc」的语义按用途分：纯文本节点保持「保留」（原有行为），
+       生成结果算「放弃」（它是草稿，没点保存就不该落地，有改动会先确认）。 */
+    const closeByDismiss = () => requestCloseSmartTextEditor(smartTextEditorMode !== 'prompt-output');
     modal.addEventListener('click', event => {
         event.stopPropagation();
 
         if(event.target.closest('#smartTextModalSave')){ closeSmartTextEditor(true); return; }
-        if(event.target.closest('#smartTextModalCancel')){ closeSmartTextEditor(false); return; }
-        if(event.target.closest('[data-text-modal-close]')) closeSmartTextEditor(true);
+        if(event.target.closest('#smartTextModalCancel')){ requestCloseSmartTextEditor(false); return; }
+        if(event.target.closest('[data-text-modal-close]')) closeByDismiss();
     });
     input.addEventListener('input', syncSmartTextEditorNode);
     input.addEventListener('keydown', event => {
         if(event.key === 'Escape'){
             event.preventDefault();
             event.stopPropagation();
-            closeSmartTextEditor(true);
+            closeByDismiss();
             return;
         }
         if((event.ctrlKey || event.metaKey) && event.key === 'Enter'){
@@ -36639,6 +37183,7 @@ window.onload = async () => {
     /* 放在 initSmartImageToolbar 之后：捕获阶段里它的「先收菜单」要先跑，再执行动作 */
     /* 下拉菜单挂到 body 之后不在 world 里，动作委托必须挂在 document 上才收得到菜单项的点击 */
     initSmartNodeToolbarActions(document);
+initSmartNodeUploadCta(document);
     // 尺寸策略先拉起来（不 await：没到位时 policy() 返回 free 默认值，渲染和生成都不会崩）
     window.NovaSizePolicy?.load?.();
     shell.style.touchAction = 'none';
@@ -36688,6 +37233,18 @@ window.restoreCanvasVersion = restoreCanvasVersion;
 window.sendChatMessage = sendChatMessage;
 window.abortAgentRun = abortAgentRun;
 window.runAgentStream = runAgentStream;
+window.focusSmartNode = function(nodeId){
+    const node = nodes.find(item => String(item.id) === String(nodeId) || String(item.alias || '') === String(nodeId));
+    if(!node) return false;
+    selectedId = node.id;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    const rect = nodeRect(node);
+    viewport.scale = Math.max(safeScale(viewport.scale), 0.6);
+    centerViewportOnWorldPoint({x:rect.x + rect.width / 2, y:rect.y + rect.height / 2});
+    render();
+    return true;
+};
 window.buildAgentFocus = buildAgentFocus;
 window.agentPlanAction = agentPlanAction;
 window.toggleAgentPlanConfirm = toggleAgentPlanConfirm;
@@ -38204,6 +38761,59 @@ function llmOutputModeHtml(node){
         + '</select>';
 }
 
+/* ── 输出类型：全自动（生图提示词 / 长文）──
+   前端**不再提供任何控件**，也不读 node.llmOutputKind / llmOutputKindUserSet（老画布存过也不生效）：
+   每次都用「这次要发给 LLM 的文本」（上游 + INPUT）现判一次。
+   · 生图提示词（老行为）：system 仍是那条 100~160 字的提示词，一个字都没动；
+   · 长文：system 换成 smartLlmDocSystemPrompt 且放开 max_tokens。 */
+const SMART_LLM_DOC_MAX_TOKENS = 8000;
+/* ── 自动判定的判据（可解释、保守：默认还是生图提示词） ──
+   打分：强结构词 +2 / 文本 >= 180 字 +2 / 弱结构词 +1 / 短画面描述 -2；总分 >= 2 判长文。 */
+const SMART_AUTO_DOC_SCORE_MIN = 2;
+const SMART_AUTO_DOC_MIN_CHARS = 180;
+const SMART_AUTO_PROMPT_MAX_CHARS = 80;
+/* 强信号（+2）：明显在要「结构化产出」的词 */
+const SMART_AUTO_DOC_STRONG_WORDS = ['方案','策划','脚本','分镜','大纲','清单','表格','报告','文案','逐条','结构','字段','步骤','输出以下','请输出','要求如下','每一屏','信息布局','排版形式','风格与素材'];
+const SMART_AUTO_DOC_STRONG_PATTERNS = [/第\s*[0-9一二三四五六七八九十两百]+\s*屏/];
+const SMART_AUTO_DOC_STRONG_EN = /\b(?:markdown|tables?|outline|storyboard|layout|sections?|bullets?|checklist|proposal|brief)\b/;
+/* 弱信号（+1）：沾边，但单独出现不足以判定 */
+const SMART_AUTO_DOC_WEAK_WORDS = ['标题','副标题','分析','详细','包括','包含','分别'];
+const SMART_AUTO_DOC_WEAK_EN = /\b(?:titles?|subtitles?|analysis|detail|details|includes?)\b/;
+/* 反向（-2）：短句 + 单张画面描述的样子 */
+const SMART_AUTO_PROMPT_LEADS = ['一只','一个','一位','一张','一幅','画面','镜头','特写','远景','近景','中景','合影','构图','摄影','拍一张'];
+const SMART_AUTO_PROMPT_HINTS = ['光线','背景','材质','色调','景深','虚化','构图'];
+/* 纯函数：只吃一段文本，返回 {kind, score, length, strong, weak, lead, reasons}，方便单测 */
+function smartLlmAutoOutputKindScore(text){
+    const raw = String(text == null ? '' : text);
+    const lower = raw.toLowerCase();
+    const compact = raw.replace(/\s+/g, '');
+    const length = compact.length;
+    let score = 0;
+    const reasons = [];
+    const strong = SMART_AUTO_DOC_STRONG_WORDS.filter(word => raw.indexOf(word) >= 0);
+    const strongHit = strong.length > 0 || SMART_AUTO_DOC_STRONG_PATTERNS.some(re => re.test(raw)) || SMART_AUTO_DOC_STRONG_EN.test(lower);
+    if(strongHit){ score += 2; reasons.push('strong'); }
+    if(length >= SMART_AUTO_DOC_MIN_CHARS){ score += 2; reasons.push('length'); }
+    const weak = SMART_AUTO_DOC_WEAK_WORDS.filter(word => raw.indexOf(word) >= 0);
+    if(weak.length || SMART_AUTO_DOC_WEAK_EN.test(lower)){ score += 1; reasons.push('weak'); }
+    const lead = SMART_AUTO_PROMPT_LEADS.find(word => compact.indexOf(word) === 0) || '';
+    const pictureish = Boolean(lead) || SMART_AUTO_PROMPT_HINTS.some(word => raw.indexOf(word) >= 0);
+    if(length < SMART_AUTO_PROMPT_MAX_CHARS && pictureish && !strongHit){ score -= 2; reasons.push('picture'); }
+    return {kind: score >= SMART_AUTO_DOC_SCORE_MIN ? 'doc' : 'prompt', score, length, strong, weak, lead, reasons};
+}
+function smartLlmAutoOutputKind(text){
+    return smartLlmAutoOutputKindScore(text).kind;
+}
+/* 判的就是「这次实际会发给 LLM 的文本」（上游 + INPUT），判什么就发什么 */
+function smartLlmOutputKindSourceText(node, ctx=smartLoopContext){
+    return promptNodeLLMInputText(node, ctx) || '';
+}
+/* 真正生效的输出类型（'prompt' | 'doc'）：请求体与预览都只读它。
+   全自动 —— 不读任何手动覆盖字段，老画布上残留的 llmOutputKind / llmOutputKindUserSet 一律忽略。 */
+function smartLlmResolvedOutputKind(node, ctx=smartLoopContext){
+    return smartLlmAutoOutputKind(smartLlmOutputKindSourceText(node, ctx));
+}
+
 /* 「每段秒数」：参考视频按这个秒数切成一段一行。只在「视频分镜表」下出现 ——
    别的输出形式没有分段这回事，多一个下拉只会让人猜它是干什么的。 */
 const LLM_SEGMENT_SECONDS_OPTIONS = [1, 2, 3, 4, 5];
@@ -38428,6 +39038,12 @@ async function callSmartCanvasLLM(node, message, messages=[], options={}){
     const target = options.targetType
         ? {target_type: options.targetType, target_model: ''}
         : (options.noMedia ? {target_type:'', target_model:''} : smartLLMTarget());
+    /* 「长文」只对**提示词节点的节点模式**生效：promptOnlySystem 是 runPromptLLMNode 独有的标记，
+       多维表格 / 视频分镜表（callSmartLLMText / callSmartLLMSegmentShots）、聊天、优化提示词
+       （自带 systemPrompt）都没带它 —— 那些路径的 system 与 max_tokens 一个字都不变。 */
+    /* 输出类型（自动判定 / 手动覆盖）由调用方算好、通过 options.outputKind 传进来：
+       请求体构建不依赖判定链，单独抽出来测也不会缺依赖。没传 = 生图提示词（老行为）。 */
+    const docMode = !options.chat && Boolean(options.promptOnlySystem) && options.outputKind === 'doc';
     const body = {
         message,
         model,
@@ -38444,11 +39060,17 @@ async function callSmartCanvasLLM(node, message, messages=[], options={}){
         target_model: target.target_model,
     };
     if(options.chat) body.no_prompt_intelligence = true;
+    /* 「长文」输出类型把默认 System 换成结构化那套（用户自己填的 System 仍然优先）。
+       写成请求体外面的覆写：上面那条 options.chat / promptOnlySystem 的三元一字不动，
+       生图提示词（默认类型）走的还是原来那条分支 —— 老画布打开后行为完全不变。 */
+    if(docMode) body.system_prompt = String(node.llmSystemPrompt || '').trim() || smartLlmDocSystemPrompt();
     /* 「优化提示词」这类一次性改写要自带 system：不能借聊天人设（那条要求先复述理解再输出） */
     if(options.systemPrompt) body.system_prompt = String(options.systemPrompt);
     /* 带图出表也必须关掉 Prompt Intelligence：它收到 images 就会改写 message，
        把「只返回 JSON」这类结构化提示词毁掉（后端支持这个字段）。 */
     if(options.noPromptIntelligence) body.no_prompt_intelligence = true;
+    /* 长文要留出 3000+ 字的余量：默认下发 8000（调用方显式传的 maxTokens 仍然优先，写在它后面）。 */
+    if(docMode) body.max_tokens = SMART_LLM_DOC_MAX_TOKENS;
     if(options.maxTokens) body.max_tokens = Math.max(0, Math.floor(Number(options.maxTokens) || 0));
     /* 必须带超时：模型端挂住不返回时，fetch 永远 pending → 调用方的 finally 不执行
        → node.running 一直是 true，还被保存进画布，刷新后节点永远显示「运行中」（用户报的"不显示了"）。 */

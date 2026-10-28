@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>我的账户 · NOVAI</title>
     <link rel="icon" href="/static/images/logo.png" type="image/png">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.136.1790560477">
-    <script src="/static/js/credits.js?v=1.0.136.1792815506"></script>
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.138.1790560477">
+    <script src="/static/js/credits.js?v=1.0.138.1792848048"></script>
     <script>
         (function () {
             try {
@@ -689,15 +689,20 @@
                 });
             }
 
-            /* 积分展示统一口径：最多 4 位小数、去掉无意义尾随 0；非零小额显示 <0.0001，不显示成 0 */
+            /* 积分展示统一口径：固定 2 位小数（0.01 / 0.09 / 1.30 / 100.00；负数 -0.09） */
             function formatCredits(value) {
                 var num = Number(value);
                 if (!isFinite(num)) return '—';
-                var abs = Math.abs(num);
-                if (abs > 0 && abs < 0.0001) return (num < 0 ? '-' : '') + '<0.0001';
-                var rounded = Math.round(num * 10000) / 10000;
-                if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return String(Math.round(rounded));
-                return rounded.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+                return num.toFixed(2);
+            }
+
+            /* USD 等值：负数显示 -$x.xx；非零小额不显示成 $0.00 */
+            function formatUsd(value) {
+                var num = Number(value);
+                if (!isFinite(num)) return '—';
+                var rounded = Math.round(num * 100) / 100;
+                if (rounded === 0 && num !== 0) return (num < 0 ? '-' : '') + '<$0.01';
+                return (num < 0 ? '-$' : '$') + Math.abs(rounded).toFixed(2);
             }
 
             function creditKindLabel(tx) {
@@ -708,7 +713,7 @@
             /* 扣费流水的 note 是后端的 estimate / upstream:* 这类技术标记，不往界面搬 */
             function creditNote(tx) {
                 var note = String((tx && tx.note) || '').trim();
-                if (!note || /^(estimate|actual_cost|usage_tokens|upstream:)/i.test(note)) return '';
+                if (!note || /^(estimate|actual_cost|usage_tokens|upstream:|postpaid)/i.test(note)) return '';
                 return note;
             }
 
@@ -723,7 +728,7 @@
             function renderCreditsBalance() {
                 $('credits-balance').textContent = credits.balance === null ? '–' : formatCredits(credits.balance);
                 var rate = Number(credits.usd_per_credit || 0);
-                $('credits-usd').textContent = credits.balance === null ? '—' : '≈ $' + (Number(credits.balance) * rate).toFixed(2);
+                $('credits-usd').textContent = credits.balance === null ? '—' : '≈ ' + formatUsd(Number(credits.balance) * rate);
                 $('credits-hint').textContent = '1 积分 = $' + rate.toFixed(2) + ' · 由管理员分配';
             }
 

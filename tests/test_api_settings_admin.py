@@ -43,6 +43,10 @@ def set_auth(enabled: bool) -> None:
         os.environ.pop("NOVAI_AUTH_ENABLED", None)
 
 
+def tearDownModule():
+    set_auth(False)
+
+
 def fresh_client() -> TestClient:
     return TestClient(main.app, client=("127.0.0.1", 50000), follow_redirects=False)
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from server.credits import config, pricing, service
+from server.credits import config, pricing, service, speech
 from server.credits.errors import CreditsError, InsufficientCredits
 
 COST_KEYS_USD = ("cost_usd", "costUSD", "cost")
@@ -115,7 +115,12 @@ def credits_charge_start(kind: str, model: Any = "", params: Optional[Dict[str, 
     uid = _as_user_id(user_id) or current_user_id()
     if not uid:
         return None
-    quote = estimate or credits_estimate(kind, model, params, provider=provider)
+    if estimate is not None:
+        quote = estimate
+    elif config.billing_mode() == "postpaid":
+        quote = pricing.postpaid_quote(kind, model, params or {}, provider)
+    else:
+        quote = credits_estimate(kind, model, params, provider=provider)
     charge = service.charge_start(uid, kind, model, params or {}, task_ref=task_ref, estimate=quote,
                                   provider=provider)
     charge["credits"] = service._credits_payload(charge)
@@ -129,15 +134,21 @@ def credits_charge_settle(charge: Any, result: Any = None,
     charge_id = _charge_id(charge)
     if not charge_id:
         return None
+    detail = _charge_detail(charge)
+    mode = str(detail.get("mode") or "prepaid")
     cost_usd = actual_cost_usd
     actual = False
     settle_note = note
+    settle_source = ""
+    cost_source = "caller" if actual_cost_usd is not None else ""
     if cost_usd is None and result is not None:
         found = credits_result_cost(result)
         if found:
             cost_usd = found["usd"]
             actual = True
             settle_note = note or ("upstream:%s" % found["field"])
+            settle_source = "upstream"
+            cost_source = str(found["field"])
         else:
             usage = _text_usage(result)
             if usage:
@@ -148,9 +159,51 @@ def credits_charge_settle(charge: Any, result: Any = None,
                 cost_usd = float(quote.get("cost_usd") or 0)
                 actual = True
                 settle_note = note or "usage_tokens"
+                settle_source = "usage"
+                cost_source = "usage"
+    if cost_usd is None and mode == "postpaid":
+        # APIMart 语音后付费：没有 cost 字段时用 usage（字符/秒/token）按 OpenAI 官方单价换算
+        usage = result.get("usage") if isinstance(result, dict) and isinstance(result.get("usage"), dict) else {}
+        info = speech.estimate_speech_cost(_charge_model(detail), usage, result if isinstance(result, dict) else None)
+        if info:
+            cost_usd = float(info["usd"])
+            actual = True
+            settle_note = "openai_official:%s" % info.get("basis", "")
+            settle_source = "openai_official"
+            cost_source = "openai_official"
+        else:
+            # 没有上游 cost/usage：用该模型最高档估价（actual=false, pricing_source=estimate）；
+            # 后付费语音没有每字/每秒的可靠 usage 时估价为 0，仍走 unpriced，绝不猜 12.48。
+            try:
+                fallback = pricing.estimate(
+                    str(detail.get("kind") or ""),
+                    str(detail.get("model") or ""),
+                    dict(detail.get("params") or {}),
+                    str(detail.get("provider") or ""),
+                    conservative=True,
+                )
+                fallback_cost = float(fallback.get("cost_usd") or 0)
+            except Exception as exc:  # noqa: BLE001
+                print("[credits] 后付费估价失败 charge=%s: %s" % (charge_id, exc))
+                fallback_cost = 0.0
+            if fallback_cost > 0:
+                cost_usd = fallback_cost
+                actual = False
+                settle_note = "estimate"
+                settle_source = "estimate"
+                cost_source = "estimate"
+            else:
+                # 任何成本/usage 都没有：0 扣费、标 unpriced，交给管理员补价
+                try:
+                    settled = service.charge_settle_unpriced(int(charge_id), "unpriced:no_cost_or_usage")
+                except Exception as exc:  # noqa: BLE001
+                    print("[credits] unpriced 结算失败 charge=%s: %s" % (charge_id, exc))
+                    return None
+                return settled.get("credits") or service._credits_payload(settled)
     try:
         settled = service.charge_settle(int(charge_id), actual_cost_usd=cost_usd,
-                                        actual=actual, note=settle_note)
+                                        actual=actual, note=settle_note, pricing_source=settle_source,
+                                        cost_source=cost_source)
     except Exception as exc:  # noqa: BLE001 - 生成已成功，结算失败不能把结果变成 500
         print("[credits] 结算失败 charge=%s: %s" % (charge_id, exc))
         return None
@@ -201,13 +254,28 @@ def _charge_id(charge: Any) -> Optional[int]:
 def _charge_model(charge: Any) -> str:
     if isinstance(charge, dict):
         return str(charge.get("model") or "")
-    return ""
+    detail = _charge_detail(charge)
+    return str(detail.get("model") or "") if detail else ""
 
 
 def _charge_provider(charge: Any) -> str:
     if isinstance(charge, dict):
         return str(charge.get("provider") or "")
-    return ""
+    detail = _charge_detail(charge)
+    return str(detail.get("provider") or "") if detail else ""
+
+
+def _charge_detail(charge: Any) -> Dict[str, Any]:
+    if isinstance(charge, dict):
+        return charge
+    charge_id = _charge_id(charge)
+    if not charge_id:
+        return {}
+    try:
+        from server.credits import store
+        return store.get_charge(int(charge_id)) or {}
+    except Exception:
+        return {}
 
 
 def credits_attach(result: Dict[str, Any], credits: Optional[Dict[str, Any]]) -> Dict[str, Any]:

@@ -194,7 +194,7 @@ console.log('[6] 聊天与文本生成各自跳过前置分析，出表与经典
 ok(js.includes("options.promptOnlySystem ? smartLlmDefaultSystemPrompt() : ''") && js.includes('node.llmSystemPrompt ||'), '文本生成节点忽略历史 System，聊天仍保留角色人设');
 ok(js.includes('if(options.chat) body.no_prompt_intelligence = true;'), 'no_prompt_intelligence 语义不变');
 ok(!/ensureChatPersonaDefault\(node\);\n    const message = promptNodeLLMInputText/.test(js), '节点模式入口不注入角色');
-ok(js.includes('answer = await callSmartCanvasLLM(node, message, [], {noPromptIntelligence:true, promptOnlySystem:true});') && js.includes('callSmartCanvasLLM(node, message, [], {'),
+ok(js.includes('answer = await callSmartCanvasLLM(node, message, [], {noPromptIntelligence:true, promptOnlySystem:true, outputKind});') && js.includes('callSmartCanvasLLM(node, message, [], {'),
     'runPromptLLMNode 走流式优先、退回普通接口（两条路都在）');
 ok(js.includes("const history = node.chatMessages.slice();"), '聊天历史快照逻辑不变');
 

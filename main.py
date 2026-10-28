@@ -273,7 +273,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.137"
+APP_VERSION = "1.0.138"
 GITHUB_REPO_URL = "https://github.com/invaders-2/NOVAI-Infinite-Canvas"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/invaders-2/NOVAI-Infinite-Canvas/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/invaders-2/NOVAI-Infinite-Canvas/git/trees/main?recursive=1"
@@ -11447,6 +11447,21 @@ def is_volcengine_edit_prompt(text: str) -> bool:
         return False
     return any(keyword in value for keyword in _VOLCENGINE_EDIT_PROMPT_KEYWORDS)
 
+# 视频编辑任务要求输入视频 4~30 秒；短于 4 秒上游只回一段看不懂的参数错误，
+# 所以提交前先拦下（参考视频 r2v 只限上限 15.2 秒，没有这条下限）。
+VOLCENGINE_EDIT_VIDEO_MIN_SECONDS = 4.0
+
+def ensure_volcengine_edit_video_duration(duration, is_edit_target):
+    if duration is None or not is_edit_target or duration >= VOLCENGINE_EDIT_VIDEO_MIN_SECONDS:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"这是视频编辑任务，输入视频要求 4~30 秒，当前视频只有 {duration:.1f} 秒。"
+            "素材本身很短的话，建议改用首帧/参考图生视频。"
+        ),
+    )
+
 async def volcengine_video_reference_content_items(value, max_frames=4, max_size=768, as_target=False):
     text = str(value or "").strip()
     if not text:
@@ -11741,27 +11756,76 @@ def apimart_veo31_resolution(resolution: str) -> str:
     value = aliases.get(value, value)
     return value if value in {"720p", "1080p", "4k"} else "720p"
 
-def apimart_upload_file_payload(path: str):
-    """Return (filename, bytes, content_type), keeping APIMart VEO images under the documented 10MB limit."""
-    max_bytes = 9_500_000
-    size = os.path.getsize(path)
-    if size <= max_bytes:
-        with open(path, "rb") as fh:
-            return os.path.basename(path), fh.read(), content_type_for_path(path)
-    with Image.open(path) as img:
-        img = img.convert("RGBA")
-        bg = Image.new("RGB", img.size, (255, 255, 255))
-        bg.paste(img, mask=img.split()[-1])
-        quality = 92
-        while quality >= 62:
+# 实测 apib.ai 网关（nginx）按 1MB 请求体拦截：1049620 字节回 413、1035348 字节上传成功。
+# 首档取 900KB 给 multipart 边界和表单留约 12% 余量，与 APIMART_JSON_BODY_BUDGET 的假设一致。
+APIMART_UPLOAD_TIERS = (
+    (900_000, 2048),
+    (576_000, 1536),
+    (384_000, 1280),
+    (256_000, 1024),
+)
+
+def apimart_jpeg_payload(img, budget: int, max_dim: int, stem: str):
+    """把 PIL 图压成 budget 字节以内的 RGB JPEG：带 alpha 先铺白底，长边不超过 max_dim。"""
+    if img.mode == "RGB":
+        frame = img
+    else:
+        rgba = img.convert("RGBA")
+        frame = Image.new("RGB", rgba.size, (255, 255, 255))
+        frame.paste(rgba, mask=rgba.split()[-1])
+    width, height = frame.size
+    scale = min(1.0, float(max_dim) / max(width, height))
+    if scale < 1.0:
+        frame = frame.resize((max(1, round(width * scale)), max(1, round(height * scale))), Image.LANCZOS)
+    while True:
+        low, high, best = 45, 95, None
+        while low <= high:
+            quality = (low + high) // 2
             buf = BytesIO()
-            bg.save(buf, format="JPEG", quality=quality, optimize=True)
-            data = buf.getvalue()
-            if len(data) <= max_bytes:
-                name = os.path.splitext(os.path.basename(path))[0] + ".jpg"
-                return name, data, "image/jpeg"
-            quality -= 8
-    raise ValueError("图片超过 10MB，且压缩后仍无法满足 VEO3.1 图片限制")
+            frame.save(buf, format="JPEG", quality=quality, optimize=True)
+            payload = buf.getvalue()
+            if len(payload) <= budget:
+                best = payload
+                low = quality + 1
+            else:
+                high = quality - 1
+        if best is not None:
+            return f"{stem}.jpg", best, "image/jpeg"
+        if max(frame.size) <= 256:
+            raise ValueError(f"图片压缩到 {budget} 字节以内失败")
+        frame = frame.resize((max(1, frame.size[0] // 2), max(1, frame.size[1] // 2)), Image.LANCZOS)
+
+def apimart_upload_payload_variants(path=None, data=None, mime="", name_hint="image"):
+    """按 APIMART_UPLOAD_TIERS 依次产出 (filename, bytes, content_type, 档位说明)。
+    原图已在首档上限内就原样作为第一档；之后每档都重新缩尺寸并编码 JPEG，供 413 时逐档降级。"""
+    if path is not None:
+        size = os.path.getsize(path)
+        stem = os.path.splitext(os.path.basename(path))[0]
+    else:
+        data = data or b""
+        size = len(data)
+        stem = name_hint
+    top_budget = APIMART_UPLOAD_TIERS[0][0]
+    if size <= top_budget and (path is not None or (mime or "").lower() in ("image/png", "image/jpeg", "image/webp")):
+        if path is not None:
+            with open(path, "rb") as fh:
+                raw = fh.read()
+            yield os.path.basename(path), raw, content_type_for_path(path), "原图"
+        else:
+            ext = mimetypes.guess_extension(mime or "image/png") or ".png"
+            yield f"{name_hint}{ext}", data, (mime or "image/png"), "原图"
+    source = path if path is not None else BytesIO(data)
+    with Image.open(source) as opened:
+        img = opened.copy()
+    for budget, max_dim in APIMART_UPLOAD_TIERS:
+        filename, payload, content_type = apimart_jpeg_payload(img, budget, max_dim, stem)
+        yield filename, payload, content_type, f"{budget // 1000}KB/{max_dim}px"
+
+def apimart_upload_file_payload(path: str):
+    """Return (filename, bytes, content_type) of the first upload tier for a local image path."""
+    for filename, content, content_type, _tier in apimart_upload_payload_variants(path=path):
+        return filename, content, content_type
+    raise ValueError("图片无法读取")
 
 def invalid_video_image_preview(value: str) -> str:
     text = str(value or "")
@@ -11795,29 +11859,10 @@ def extract_apimart_asset_url(payload):
     return ""
 
 def apimart_upload_payload_from_bytes(data: bytes, mime: str, name_hint: str = "image"):
-    """把内存中的图片字节按 APIMart 的 10MB 限制压缩为可上传 payload。"""
-    max_bytes = 9_500_000
-    ext = mimetypes.guess_extension(mime or "image/png") or ".png"
-    if len(data) <= max_bytes and (mime or "").lower() in ("image/png", "image/jpeg", "image/webp"):
-        return f"{name_hint}{ext}", data, (mime or "image/png")
-    with Image.open(BytesIO(data)) as img:
-        has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
-        if has_alpha:
-            base = img.convert("RGBA")
-            bg = Image.new("RGB", base.size, (255, 255, 255))
-            bg.paste(base, mask=base.split()[-1])
-            target = bg
-        else:
-            target = img.convert("RGB")
-        quality = 92
-        while quality >= 62:
-            buf = BytesIO()
-            target.save(buf, format="JPEG", quality=quality, optimize=True)
-            payload = buf.getvalue()
-            if len(payload) <= max_bytes:
-                return f"{name_hint}.jpg", payload, "image/jpeg"
-            quality -= 8
-    raise ValueError("data URL 图片超过 10MB，且压缩后仍无法满足 APIMart 限制")
+    """把内存中的图片字节按首个上传档位压缩为可上传 payload。"""
+    for filename, content, content_type, _tier in apimart_upload_payload_variants(data=data, mime=mime, name_hint=name_hint):
+        return filename, content, content_type
+    raise ValueError("图片无法读取")
 
 def apimart_upload_raw_file_payload(path: str):
     with open(path, "rb") as fh:
@@ -11858,6 +11903,30 @@ async def apimart_upload_post(client, upload_url, headers, file_tuple, timeout=6
     if last_exc:
         raise last_exc
 
+async def apimart_upload_with_shrink(client, upload_url, headers, variants):
+    """按档位依次上传，只有网关 413 才降级到下一档；其它状态码（401/500/网络异常）原样交给调用方处理。
+    返回 (最后一个响应, 尝试记录)；尝试记录每项含档位、实际字节数、上游状态码。"""
+    attempts = []
+    resp = None
+    for filename, content, content_type, tier in variants:
+        resp = await apimart_upload_post(client, upload_url, headers, (filename, content, content_type), timeout=60)
+        attempts.append({"tier": tier, "bytes": len(content), "status": resp.status_code})
+        if resp.status_code in (200, 201):
+            return resp, attempts
+        if resp.status_code != 413:
+            return resp, attempts
+        print(f"APIMart 上传 {tier}（{len(content)} 字节）被网关 413 拒绝，压缩后重试下一档")
+    return resp, attempts
+
+def apimart_upload_shrink_reason(attempts) -> str:
+    """所有档位都被 413 拒绝时的错误文案：列出试过的档位、最后一档实际字节数和上游状态码。"""
+    if not attempts:
+        return "APIMart 上传失败(413)：没有可用的图片档位"
+    last = attempts[-1]
+    tried = "；".join(f"{item['tier']}({item['bytes']} 字节) → {item['status']}" for item in attempts)
+    return (f"APIMart 上传失败({last['status']})：已按档位自动压缩重试，"
+            f"最后一档 {last['bytes']} 字节（{last['tier']}）仍被网关拒绝。尝试记录：{tried}")
+
 async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
     """把本地图片转成上游可接受的输入。
     按 APIMart 文档上传到 /v1/uploads/images，拿到可用于生成接口的 http/https URL。
@@ -11879,8 +11948,8 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
             header, encoded = ref_url.split(";base64,", 1)
             mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else "image/png"
             raw = base64.b64decode(encoded)
-            filename, content, ct = apimart_upload_payload_from_bytes(raw, mime, name_hint="canvas_image")
-            resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
+            variants = apimart_upload_payload_variants(data=raw, mime=mime, name_hint="canvas_image")
+            resp, attempts = await apimart_upload_with_shrink(client, upload_url, api_headers(json_body=False, provider=provider), variants)
             if resp.status_code in (200, 201):
                 rj = resp.json()
                 url = extract_apimart_asset_url(rj)
@@ -11889,6 +11958,8 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
                 print(f"APIMart 上传 data URL 返回中未找到可用 asset/url: {str(rj)[:300]}")
                 return "ERR:APIMart 上传响应未包含可用 URL"
             print(f"APIMart 上传 data URL 失败 ({resp.status_code}): {resp.text[:300]}")
+            if resp.status_code == 413:
+                return f"ERR:{apimart_upload_shrink_reason(attempts)}"
             return f"ERR:APIMart 上传失败({resp.status_code})"
         except ValueError as e:
             return f"ERR:{e}"
@@ -11902,8 +11973,8 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
             print(f"APIMart 上传跳过：本地文件不存在 {ref_url}")
             return "ERR:本地文件不存在或已被删除"
         try:
-            filename, content, ct = apimart_upload_file_payload(path)
-            resp = await apimart_upload_post(client, upload_url, api_headers(json_body=False, provider=provider), (filename, content, ct), timeout=60)
+            variants = apimart_upload_payload_variants(path=path)
+            resp, attempts = await apimart_upload_with_shrink(client, upload_url, api_headers(json_body=False, provider=provider), variants)
             if resp.status_code in (200, 201):
                 rj = resp.json()
                 url = extract_apimart_asset_url(rj)
@@ -11912,6 +11983,8 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
                 print(f"APIMart 文件上传返回中未找到可用 asset/url: {str(rj)[:300]}")
                 return "ERR:APIMart 上传响应未包含可用 URL"
             print(f"APIMart 文件上传失败 ({resp.status_code}): {resp.text[:300]}")
+            if resp.status_code == 413:
+                return f"ERR:{apimart_upload_shrink_reason(attempts)}"
             return f"ERR:APIMart 上传失败({resp.status_code})"
         except ValueError as e:
             return f"ERR:{e}"
@@ -21451,6 +21524,27 @@ async def canvas_audio(payload: CanvasAudioRequest):
     credits = credits_charge_settle(charge, result=result)
     return credits_attach(result, credits)
 
+def apimart_tts_duration_seconds(content, fmt=""):
+    """WAV 直接从文件头读时长；其它格式返回 None（后付费估算会用字符数兜底并标 estimated）。"""
+    try:
+        if str(fmt or "").lower() == "wav" or (content or b"")[:4] == b"RIFF":
+            import wave
+            with wave.open(io.BytesIO(content), "rb") as handle:
+                frames = handle.getnframes()
+                rate = handle.getframerate()
+                if rate:
+                    # APIMart 流式 WAV 的 data size 可能是 0x7FFFFFFF（边生成边下发）：
+                    # 用真实字节数兜底，避免算出 89478 秒这种离谱时长。
+                    frame_size = max(1, int(handle.getnchannels()) * int(handle.getsampwidth()))
+                    max_frames = max(0, len(content) - 44) // frame_size
+                    if max_frames and (frames <= 0 or frames > max_frames * 1.01):
+                        frames = max_frames
+                    return round(float(frames) / float(rate), 3)
+    except Exception:
+        return None
+    return None
+
+
 async def generate_canvas_tts(payload: CanvasTTSRequest):
     provider = get_api_provider(payload.provider_id)
     if not is_apimart_provider(provider):
@@ -21492,6 +21586,12 @@ async def generate_canvas_tts(payload: CanvasTTSRequest):
         "response_format": fmt,
         "speed": body["speed"],
         "characters": len(body["input"]),
+        "audio_bytes": len(content),
+        "usage": {
+            "characters": len(body["input"]),
+            "bytes": len(content),
+            "seconds": apimart_tts_duration_seconds(content, fmt),
+        },
         "canvas_meta": {"node_type": "audio", "title": apimart_tts_title(body["input"]), "media_url": local_url, "auto_place": True},
     }
     if fmt == "pcm":
@@ -22299,7 +22399,8 @@ APIMART_VIDEO_MODEL_CAPS = {
         "image_with_roles": False, "video_urls": False, "audio_urls": False,
     },
     "minimax-h3-max": {
-        "duration": (4, 15), "ratio_key": "aspect_ratio",
+        # 上游实测 5-15（报错文案自证）；写成 4 会把分镜表短时长夹成非法值
+        "duration": (5, 15), "ratio_key": "aspect_ratio",
         "ratios": ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16"),
         "resolution_key": "resolution", "resolutions": ("480P", "768P", "1080P"),
         "generate_audio": False, "watermark": True, "seed": False,
@@ -22527,6 +22628,40 @@ def apimart_video_duration_value(model, duration, caps=None):
     except Exception:
         value = 5
     return min(caps["durations"], key=lambda item: abs(int(item) - value))
+
+APIMART_VIDEO_DURATION_ERROR_RE = re.compile(
+    r"duration\s+must\s+be\s+an\s+integer\s+between\s+(\d+)\s+and\s+(\d+)\s+seconds",
+    re.IGNORECASE,
+)
+
+def apimart_video_duration_error_bounds(text):
+    """上游 400 会自报 duration 合法区间（MiniMax-H3-Max 实测 5-15，本地能力表曾写成 4）。"""
+    matched = APIMART_VIDEO_DURATION_ERROR_RE.search(str(text or ""))
+    if not matched:
+        return None
+    low, high = int(matched.group(1)), int(matched.group(2))
+    return (low, high) if low <= high else None
+
+def apimart_video_duration_clamp(value, low, high):
+    try:
+        number = int(value)
+    except Exception:
+        number = int(low)
+    return max(low, min(high, number))
+
+def apimart_video_duration_retry_body(body, text):
+    """按上游区间改写 body 的 duration 后返回 True；调用方原样重试一次即可（图片已上传好）。"""
+    bounds = apimart_video_duration_error_bounds(text)
+    if not bounds or not isinstance(body, dict) or "duration" not in body:
+        return False
+    low, high = bounds
+    before = body.get("duration")
+    after = apimart_video_duration_clamp(before, low, high)
+    if after == before:
+        return False
+    body["duration"] = after
+    print(f"[apimart-video] duration {before} 被上游拒绝，按上游区间 {low}-{high} 自动改为 {after} 重试", flush=True)
+    return True
 
 def apimart_video_resolution_value(model, resolution, caps):
     key = caps.get("resolution_key")
@@ -23186,7 +23321,7 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                 if payload.images and not image_with_roles and not image_payload:
                     first_url, first_reason = invalid_images[0] if invalid_images else ("", "未知错误")
                     sample = invalid_video_image_preview(first_url)
-                    raise HTTPException(status_code=400, detail=f"输入图片无法转换为视频接口支持的格式：{sample}\n原因：{first_reason}\n请确认本地文件存在且不超过 10MB；VEO3.1 需要图片是 APIMart 可访问的 http/https / asset:// / data URL。")
+                    raise HTTPException(status_code=400, detail=f"输入图片无法转换为视频接口支持的格式：{sample}\n原因：{first_reason}\n本地图片会自动压缩后上传；仍失败请换一张更小的图。VEO3.1 需要图片是 APIMart 可访问的 http/https / asset:// / data URL。")
                 # --- APIMart 请求体 ---
                 if is_veo31:
                     model = apimart_model
@@ -23346,6 +23481,10 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         # 必须先截取再公网化：截取产物是本地 /assets/ 文件，后续统一走公网 URL 检查，
                         # 否则 data URL 会绕过检查直接提交，火山报 "reference_video must be provided as a web url"。
                         video_duration = probe_local_video_duration_seconds(text_url)
+                        # 编辑目标视频有 4 秒下限：先把本条视频的编辑目标判定算好，短素材在发请求前就拦下，
+                        # 否则要等上游回一段看不懂的参数错误。
+                        is_edit_target = is_volcengine_edit_prompt(text) or explicit_role in ("video", "edit", "target")
+                        ensure_volcengine_edit_video_duration(video_duration, is_edit_target)
                         if video_duration is not None and video_duration > 15.2:
                             trimmed = volcengine_trim_video_to_seconds(text_url)
                             if trimmed and trimmed != text_url:
@@ -23388,8 +23527,8 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                                     detail=f"视频必须可通过公网 URL 访问（火山引擎限制）。请确保视频可被云上传服务处理。当前视频: {text_url[:80]}"
                                 )
                         # 视频编辑/局部替换：目标视频 role 用 reference_video（火山要求），
-                        # 通过 prompt 关键词或前端显式 role 判定（时长截取已在上方公网化前完成）。
-                        as_target = is_volcengine_edit_prompt(text) or explicit_role in ("video", "edit", "target")
+                        # 编辑目标判定已在上方时长校验处提前算好（时长截取也在公网化前完成）。
+                        as_target = is_edit_target
                         video_items = await volcengine_video_reference_content_items(media_url, as_target=as_target)
                         body["content"].extend(video_items)
                         volc_video_count += 1
@@ -23492,11 +23631,18 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
             last_response = None
             last_json_error = None
             total_candidates = len(submit_urls)
+            duration_retried = False
             for idx, candidate_url in enumerate(submit_urls):
                 submit_url = candidate_url
                 is_last = idx == total_candidates - 1
                 response = await client.post(submit_url, headers=api_headers(provider=provider), json=body)
                 last_response = response
+                # 上游时长区间可能比本地能力表更严；图片已经上传好，复用同一个 body 重试一次不会重复上传或重复建视频
+                if (is_apimart and not duration_retried and response.status_code == 400
+                        and apimart_video_duration_retry_body(body, response.text)):
+                    duration_retried = True
+                    response = await client.post(submit_url, headers=api_headers(provider=provider), json=body)
+                    last_response = response
                 if response.status_code >= 400:
                     # 404/405（或直接返回网页 HTML）通常表示该平台不支持这个端点路径——
                     # 例如有的站点只实现了统一格式的 /v2/videos/generations，而我们先试了 /v1。
@@ -32647,6 +32793,54 @@ def _agent_tool_activate_skill_run(args):
             "text": prompt}
 
 
+def _agent_tool_install_skill_validate(args):
+    url = str((args or {}).get("url") or "").strip()
+    if not url:
+        raise AgentToolError("url 不能为空（GitHub 仓库或 SKILL.md 地址）", code="invalid_args")
+    if len(url) > 2048:
+        raise AgentToolError("GitHub 地址最长 2048 字符", code="invalid_args")
+    return {
+        "url": url,
+        "path": str((args or {}).get("path") or "").strip(),
+        "ref": str((args or {}).get("ref") or "").strip(),
+        "overwrite": bool((args or {}).get("overwrite")),
+    }
+
+
+async def _agent_tool_install_skill_run(args):
+    from server.routes.agents import _import_skill_md
+    from server.skills import github_install
+
+    try:
+        fetched = await asyncio.to_thread(
+            github_install.fetch_skill_markdown,
+            args["url"],
+            path=args.get("path") or "",
+            ref=args.get("ref") or "",
+        )
+        installed = _import_skill_md(fetched["markdown"], bool(args.get("overwrite")))
+    except github_install.GitHubSkillError as exc:
+        raise AgentToolError(str(exc), code="github_skill_install_failed", status_code=exc.status_code)
+    except HTTPException as exc:
+        raise AgentToolError(str(exc.detail), code="skill_import_failed", status_code=exc.status_code)
+    skill = installed["skill"]
+    activation = _agent_tool_activate_skill_run({"name": skill["id"]})
+    return {
+        "ok": True,
+        "skill": skill,
+        "created": installed["created"],
+        "repository": fetched["repository"],
+        "ref": fetched["ref"],
+        "path": fetched["path"],
+        "activation": activation,
+    }
+
+
+def _agent_tool_install_skill_preview(args):
+    url = str((args or {}).get("url") or "").strip()
+    return {"type": "skill_install", "url": url, "title": "从 GitHub 安装技能"}
+
+
 def _agent_tool_activate_skill_preview(args):
     name = str((args or {}).get("name") or "").strip()
     if not name:
@@ -34212,6 +34406,21 @@ AGENT_TOOLS = {
         "preview": _agent_tool_activate_skill_preview,
         "mutates_canvas": False,
     },
+    "install_skill": {
+        "description": "从 GitHub 仓库或 SKILL.md 链接下载、校验并安装技能，成功后立即加载技能手册。"
+                       "只读取文本，不执行仓库脚本、git clone 或终端命令。url 支持仓库根地址、/tree/、/blob/ 和 raw 地址；"
+                       "有多个 SKILL.md 时用 path 指定，ref 可指定分支或标签，overwrite=true 才允许覆盖已有技能。",
+        "schema": {"type": "object", "properties": {
+            "url": {"type": "string", "description": "GitHub 仓库或 SKILL.md 地址"},
+            "path": {"type": "string", "description": "可选：仓库内 SKILL.md 路径"},
+            "ref": {"type": "string", "description": "可选：分支或标签"},
+            "overwrite": {"type": "boolean", "description": "是否覆盖同 ID 的已有技能，默认 false"}},
+            "required": ["url"]},
+        "validate": _agent_tool_install_skill_validate,
+        "run": _agent_tool_install_skill_run,
+        "preview": _agent_tool_install_skill_preview,
+        "mutates_canvas": False,
+    },
     "check_task": {
         "description": "查询任务状态（queued/running/provider_processing/succeeded/failed/cancelled…）与结果 URL。只读。",
         "schema": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]},
@@ -34566,29 +34775,139 @@ def _agent_extract_json(text):
     return cleaned[start:end + 1]
 
 
+# ── 对话选型（三处入口共用：Agent run / 方案生成 plan / 智能体广场）────────────
+# 口径：用户在输入框选的平台+模型优先且**原样**使用；该平台不可用才回退到别的已配置平台，
+# 回退时 model 传空（用那个平台自己的默认模型），并标 fallback。provider 为空时只走可用平台列表。
+def _agent_chat_requested(provider, model):
+    """把用户点名的平台/模型归一：平台去空格转小写，模型只去前后空格（原样保留）。"""
+    return str(provider or "").strip().lower(), str(model or "").strip()
+
+
+def _agent_chat_candidates(requested_provider):
+    """候选顺序：用户点名的平台（含历史别名 comfly）第一 → 其余可用平台（comfly 垫底），去重保序。"""
+    candidates = [requested_provider] if requested_provider else []
+    candidates += _agent_available_providers()
+    seen = set()
+    return [p for p in candidates if not (p in seen or seen.add(p))]
+
+
+def _agent_chat_candidate_model(requested_provider, requested_model, cand):
+    """只有「用户点名的那个候选」才带用户选的模型；回退一律空串 = 用该平台自己的默认模型。
+    绝不把用户的（或别的平台的）模型名硬塞给回退平台，避免必然失败。"""
+    return requested_model if (requested_provider and cand == requested_provider) else ""
+
+
+def _agent_chat_selection(cand, base, headers, mdl, requested_provider, requested_model):
+    """统一的 chat 字典。旧字段（provider/model/base/headers/provider_cfg）保持不变，
+    另加本次选型的来龙去脉，供上层展示：
+      requested_provider/requested_model：用户点的（可能为空）
+      resolved_provider/resolved_model：实际选中的候选与其模型
+      resolved_platform：真正生效的平台 id（"comfly" 是历史别名，会映射到当前首选平台）
+      fallback：是否发生了回退（请求的平台没被用上）"""
+    provider_cfg = get_api_provider(cand) if cand not in ("modelscope",) else {}
+    return {
+        "provider": cand,
+        "base": base,
+        "headers": headers,
+        "model": mdl,
+        "provider_cfg": provider_cfg,
+        "requested_provider": requested_provider,
+        "requested_model": requested_model,
+        "resolved_provider": cand,
+        "resolved_model": mdl,
+        "resolved_platform": str((provider_cfg or {}).get("id") or cand),
+        "fallback": bool(requested_provider) and cand != requested_provider,
+    }
+
+
+def _agent_chat_log_fallback(chat, log_tag="Agent", reason=""):
+    """回退时打一行日志：用户选的是谁、为什么没用上、实际用了谁。"""
+    if not isinstance(chat, dict) or not chat.get("fallback"):
+        return
+    print(f"[{log_tag}] 对话模型回退：用户选的是 {chat.get('requested_provider')}/"
+          f"{chat.get('requested_model') or '(平台默认)'}，不可用（{reason or '未知原因'}），"
+          f"改用 {chat.get('resolved_platform')}/{chat.get('resolved_model')}", flush=True)
+
+
+def _resolve_chat_with_preference(provider, model, ms_model, *, log_tag="Agent",
+                                  error_prefix="无法运行 Agent（对话模型不可用）",
+                                  allow_auto_model=False, require_model=False, joined_detail=False):
+    """公共选型（三处入口共用）。
+
+    候选顺序：
+      1) 用户显式选的 provider（含历史值 "comfly"）——用它，并且**原样**用用户选的 model；
+      2) 其余已配置的可用平台（_agent_available_providers 的顺序，comfly 垫底）——model 传空，
+         让该平台用自己的默认对话模型。
+    provider 为空时只走 2，与历史行为一致。全都不可用则 400（错误文案由 error_prefix 定制）。
+
+    allow_auto_model=True：用户没给模型时按该平台声明的 chat_models 自动挑（智能体广场用）；
+    require_model=True：解析结果里模型为空也算不可用（智能体广场用）；
+    joined_detail=True：错误详情汇总每个候选的原因（智能体广场用），否则沿用最后一个原因。
+    返回体额外带 tried / reasons，调用方要自己组织错误文案时可以直接用。"""
+    requested_provider, requested_model = _agent_chat_requested(provider, model)
+    tried, reasons, last_detail = [], [], ""
+    for cand in _agent_chat_candidates(requested_provider):
+        tried.append(cand)
+        cand_model = _agent_chat_candidate_model(requested_provider, requested_model, cand)
+        if allow_auto_model and not cand_model:
+            cand_model = _agent_auto_chat_model(cand)
+            if not cand_model:
+                last_detail = f"{cand} 未配置对话模型"
+                reasons.append(last_detail)
+                continue
+        try:
+            chat_base, chat_hdrs, mdl = resolve_chat_provider(
+                cand, cand_model, ms_model if cand == "modelscope" else "")
+        except HTTPException as exc:
+            last_detail = str(exc.detail)
+            reasons.append(f"{cand}：{exc.detail}")
+            continue
+        if not chat_base:
+            last_detail = f"{cand} 未配置 Base URL"
+            reasons.append(last_detail)
+            continue
+        if require_model and not mdl:
+            last_detail = f"{cand} 未配置可用的对话模型"
+            reasons.append(last_detail)
+            continue
+        chat = _agent_chat_selection(cand, chat_base, chat_hdrs, mdl, requested_provider, requested_model)
+        _agent_chat_log_fallback(chat, log_tag, last_detail)
+        chat["tried"] = tried
+        chat["reasons"] = reasons
+        return chat
+    if joined_detail:
+        detail = "；".join(reasons) if reasons else "无可用 provider"
+    else:
+        detail = last_detail or "无可用 provider"
+    raise HTTPException(status_code=400,
+                        detail=f"{error_prefix}：{detail}（已尝试: {'、'.join(tried)}）")
+
+
 async def agent_generate_plan(canvas_id, instruction, context, provider="comfly", model="", ms_model=""):
     """调用对话模型生成结构化计划。LLM 不可用时抛 HTTPException（400/502），绝不 mock。
     provider 不可用时自动回退到用户配置的可用 provider（动态顺序）。"""
     canvas = load_canvas(canvas_id)  # 404 校验
     summary = _agent_canvas_summary(canvas)
-    # 探测可用 provider：前端传的优先，不可用则按用户配置顺序动态尝试
+    # 选型：用户点名的平台（含 comfly）第一候选、原样用它的模型；不可用才按配置顺序回退
+    # （回退那一轮 model 传空 = 用该平台自己的默认模型）。上游报错也会继续试下一个平台。
+    requested_provider, requested_model = _agent_chat_requested(provider, model)
     tried = []
-    candidates = [provider] if provider and provider != "comfly" else []
-    candidates += _agent_available_providers()
-    seen = set()
-    candidates = [p for p in candidates if not (p in seen or seen.add(p))]
     last_detail = ""
-    for cand in candidates:
+    for cand in _agent_chat_candidates(requested_provider):
         tried.append(cand)
         try:
-            chat_base, chat_hdrs, mdl = resolve_chat_provider(cand, model if cand == provider else "", ms_model if cand == "modelscope" else "")
+            chat_base, chat_hdrs, mdl = resolve_chat_provider(
+                cand, _agent_chat_candidate_model(requested_provider, requested_model, cand),
+                ms_model if cand == "modelscope" else "")
         except HTTPException as exc:
             last_detail = str(exc.detail)
             continue
         if not chat_base:
             last_detail = f"{cand} 未配置 Base URL"
             continue
-        provider_cfg = get_api_provider(cand) if cand not in ("modelscope",) else {}
+        selection = _agent_chat_selection(cand, chat_base, chat_hdrs, mdl, requested_provider, requested_model)
+        provider_cfg = selection["provider_cfg"]
+        _agent_chat_log_fallback(selection, "AgentPlan", last_detail)
         system = _AGENT_PLAN_SYSTEM_PROMPT.format(
             tools_json=json.dumps(_agent_build_tools_catalog(), ensure_ascii=False),
             canvas_summary=json.dumps(summary, ensure_ascii=False))
@@ -35461,7 +35780,7 @@ AGENT_PLAN_GENERATION_TOOLS = {"generate_image", "generate_video", "run_generati
                                "run_downstream"}
 AGENT_PLAN_WRITE_TOOLS = {"create_node", "connect_nodes", "update_node", "disconnect_nodes", "batch_generate", "apply_template"}
 # 写操作 / 生成操作的并集：未确认时一律不落盘，先出方案等用户点执行
-AGENT_PLAN_CONFIRM_TOOLS = AGENT_PLAN_WRITE_TOOLS | AGENT_PLAN_GENERATION_TOOLS
+AGENT_PLAN_CONFIRM_TOOLS = AGENT_PLAN_WRITE_TOOLS | AGENT_PLAN_GENERATION_TOOLS | {"install_skill"}
 
 
 def agent_plan_confirmation_needed(steps, confirmed=False):
@@ -36005,10 +36324,12 @@ def _agent_thread_new_id():
 
 def _agent_thread_new_thread(title, created_at=None, forked_from="", forked_at_message=None,
                              messages=None, recent=None, skill_id=""):
+    created = float(created_at if created_at is not None else time.time())
     return {
         "id": _agent_thread_new_id(),
         "title": str(title or "对话 1")[:AGENT_THREAD_TITLE_MAX],
-        "created_at": float(created_at if created_at is not None else time.time()),
+        "created_at": created,
+        "updated_at": created,
         "forked_from": str(forked_from or ""),
         "forked_at_message": forked_at_message,
         "messages": list(messages or []),
@@ -36030,6 +36351,8 @@ def _agent_thread_normalize_thread(raw, fallback_index=0):
         recent=[str(a) for a in (raw.get("recent") or []) if a],
         skill_id=raw.get("skill_id") or "",
     )
+    last_message_at = max([float(item.get("at") or 0) for item in messages] or [0])
+    thread["updated_at"] = float(raw.get("updated_at") or last_message_at or thread["created_at"])
     if isinstance(raw.get("id"), str) and raw.get("id").strip():
         thread["id"] = raw["id"].strip()
     return thread
@@ -36246,6 +36569,7 @@ def agent_thread_append(canvas_id, records, touched=None):
                 if a not in recent:
                     recent.append(a)
             thread["recent"] = recent[:AGENT_THREAD_RECENT_LIMIT]
+            thread["updated_at"] = now
             _agent_thread_doc_save(canvas_id, doc)
     except Exception as exc:
         print(f"[Agent] 写对话记录失败 {canvas_id}: {exc}")
@@ -36254,7 +36578,7 @@ def agent_thread_append(canvas_id, records, touched=None):
 def _agent_thread_message_row(msg, text_field="text"):
     """线程消息对外形状：老字段不变，新增 steps/changes/run_id 等有才带（旧客户端兼容）。"""
     row = {"role": msg.get("role"), text_field: msg.get("text"), "at": msg.get("at")}
-    for key in ("run_id", "actions", "steps", "changes", "truncated", "session_id"):
+    for key in ("run_id", "actions", "steps", "changes", "truncated", "session_id", "rating"):
         if key in msg and msg.get(key) is not None:
             row[key] = msg[key]
     return row
@@ -36307,8 +36631,9 @@ def _agent_touched_aliases(undo_log, canvas):
 async def agent_thread_get(canvas_id: str, limit: int = 60):
     thread = agent_thread_load(canvas_id)
     limit = max(1, min(int(limit or 60), AGENT_THREAD_MAX_MESSAGES))
-    return {"canvas_id": canvas_id, "messages": [{"role": m.get("role"), "text": m.get("text"), "at": m.get("at")}
-                                                 for m in thread.get("messages", [])[-limit:]],
+    return {"canvas_id": canvas_id,
+            "messages": [_agent_thread_message_row(m, "text")
+                         for m in thread.get("messages", [])[-limit:]],
             "recent": thread.get("recent", [])}
 
 
@@ -36332,11 +36657,21 @@ class AgentThreadRenameRequest(BaseModel):
 
 
 def _agent_thread_list_row(thread):
+    messages = thread.get("messages") or []
+    last_message_at = max([float(item.get("at") or 0) for item in messages] or [0])
     return {"id": thread.get("id"), "title": thread.get("title"),
             "created_at": thread.get("created_at"),
+            "updated_at": thread.get("updated_at") or last_message_at or thread.get("created_at"),
             "forked_from": thread.get("forked_from") or "",
             "forked_at_message": thread.get("forked_at_message"),
-            "message_count": len(thread.get("messages") or [])}
+            "message_count": len(messages)}
+
+
+class AgentThreadFeedbackRequest(BaseModel):
+    canvas_id: str
+    thread_id: str = Field("", max_length=64)
+    message_index: int = 0
+    rating: Optional[str] = None
 
 
 @app.get("/api/agent/threads")
@@ -36435,8 +36770,40 @@ async def agent_threads_rename(payload: AgentThreadRenameRequest, request: Reque
         if not thread:
             raise HTTPException(status_code=404, detail="线程不存在")
         thread["title"] = title
+        thread["updated_at"] = time.time()
         _agent_thread_doc_save(canvas_id, doc)
     return {"ok": True, "thread": {"id": thread["id"], "title": thread["title"]}}
+
+
+@app.post("/api/agent/threads/feedback")
+async def agent_threads_feedback(payload: AgentThreadFeedbackRequest, request: Request):
+    canvas_id = str(payload.canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    require_canvas_access(load_canvas(canvas_id), request, "view")
+    rating = str(payload.rating or "").strip().lower()
+    if rating not in ("", "up", "down"):
+        raise HTTPException(status_code=400, detail="rating 只支持 up / down / null")
+    with _AGENT_THREAD_LOCK:
+        doc = _agent_thread_doc_load(canvas_id)
+        thread = _agent_thread_find(doc, payload.thread_id)
+        if not thread:
+            raise HTTPException(status_code=404, detail="线程不存在")
+        messages = thread.get("messages") or []
+        index = int(payload.message_index)
+        if index < 0 or index >= len(messages):
+            raise HTTPException(status_code=400,
+                                detail="message_index 越界（当前 0..%d）" % (len(messages) - 1))
+        message = messages[index]
+        if message.get("role") != "assistant":
+            raise HTTPException(status_code=400, detail="只能评价助手回复")
+        if rating:
+            message["rating"] = rating
+        else:
+            message.pop("rating", None)
+        thread["updated_at"] = time.time()
+        _agent_thread_doc_save(canvas_id, doc)
+    return {"ok": True, "thread_id": thread["id"], "message_index": index, "rating": rating or None}
 
 
 @app.delete("/api/agent/threads/{thread_id}")
@@ -36549,12 +36916,7 @@ async def agent_thread_messages(thread_id: str, request: Request, canvas_id: str
     messages = [item for item in (thread.get("messages") or []) if isinstance(item, dict)]
     total = len(messages)
     sliced = messages[-limit_value:] if limit_value < total else messages
-    rows = []
-    for msg in sliced:
-        row = {"role": msg.get("role"), "content": msg.get("text"), "at": msg.get("at")}
-        if msg.get("session_id"):
-            row["session_id"] = msg["session_id"]
-        rows.append(row)
+    rows = [_agent_thread_message_row(msg, "content") for msg in sliced]
     return {"thread_id": thread["id"], "title": thread.get("title") or "",
             "messages": rows, "count": len(rows), "has_more": total > len(rows)}
 
@@ -36768,28 +37130,12 @@ async def _agent_run_vision_setup(images, chat, emit):
 
 
 def _agent_run_resolve_chat(provider, model, ms_model):
-    """按 plan 同样的顺序挑一个可用对话 provider；全都不可用则 400（前端据此回退原聊天）。"""
-    tried, last_detail = [], ""
-    seen = set()
-    candidates = [provider] if provider and provider != "comfly" else []
-    candidates += _agent_available_providers()
-    candidates = [p for p in candidates if not (p in seen or seen.add(p))]
-    for cand in candidates:
-        tried.append(cand)
-        try:
-            chat_base, chat_hdrs, mdl = resolve_chat_provider(
-                cand, model if cand == provider else "", ms_model if cand == "modelscope" else "")
-        except HTTPException as exc:
-            last_detail = str(exc.detail)
-            continue
-        if not chat_base:
-            last_detail = f"{cand} 未配置 Base URL"
-            continue
-        return {"provider": cand, "base": chat_base, "headers": chat_hdrs, "model": mdl,
-                "provider_cfg": get_api_provider(cand) if cand not in ("modelscope",) else {}}
-    raise HTTPException(status_code=400,
-                        detail=f"无法运行 Agent（对话模型不可用）：{last_detail or '无可用 provider'}"
-                               f"（已尝试: {'、'.join(tried)}）")
+    """/api/agent/run 的对话选型：直接走公共选型（用户点的平台+模型优先且原样使用，不可用才回退）。
+    行为与 task-4 修好的版本完全一致，只是逻辑收敛到 _resolve_chat_with_preference。"""
+    return _resolve_chat_with_preference(
+        provider, model, ms_model,
+        log_tag="Agent",
+        error_prefix="无法运行 Agent（对话模型不可用）")
 
 
 def _agent_auto_chat_model(provider_id):
@@ -36808,39 +37154,17 @@ def _agent_auto_chat_model(provider_id):
 
 
 def _agents_resolve_chat(provider, model, ms_model):
-    """智能体广场专用：按顺序挑一个 base 与非空 model 都可用的对话 provider。
-    用户没显式给模型时，只从该 provider 配置的 chat_models 里自动挑；挑不出就跳过，
-    全都不行时 400 并逐个说明原因，不静默回落到一个必然失败的模型。"""
-    tried, reasons = [], []
-    seen = set()
-    candidates = [provider] if provider and provider != "comfly" else []
-    candidates += _agent_available_providers()
-    for cand in candidates:
-        if cand in seen:
-            continue
-        seen.add(cand)
-        tried.append(cand)
-        explicit = model if (cand == provider and model) else ""
-        if not explicit:
-            explicit = _agent_auto_chat_model(cand)
-            if not explicit:
-                reasons.append(f"{cand} 未配置对话模型")
-                continue
-        try:
-            base, headers, mdl = resolve_chat_provider(cand, explicit,
-                                                       ms_model if cand == "modelscope" else "")
-        except HTTPException as exc:
-            reasons.append(f"{cand}：{exc.detail}")
-            continue
-        if not base or not mdl:
-            reasons.append(f"{cand} 未配置可用的对话模型")
-            continue
-        return {"provider": cand, "base": base, "headers": headers, "model": mdl,
-                "provider_cfg": get_api_provider(cand) if cand not in ("modelscope",) else {}}
-    detail = "；".join(reasons) if reasons else "无可用 provider"
-    raise HTTPException(status_code=400,
-                        detail=f"无法运行智能体（没有可用的对话模型）：{detail}"
-                               f"（已尝试: {'、'.join(tried)}）")
+    """智能体广场专用：走同一个公共选型，额外两条更严的口径（保持原有行为）：
+      · 用户没显式给模型时，按该平台声明的 chat_models 自动挑（allow_auto_model）；
+      · 解析出来的模型为空也算不可用（require_model），绝不静默落到一个必然失败的模型；
+      · 全都不可用时把每个候选的原因汇总进错误（joined_detail）。"""
+    return _resolve_chat_with_preference(
+        provider, model, ms_model,
+        log_tag="Agents",
+        error_prefix="无法运行智能体（没有可用的对话模型）",
+        allow_auto_model=True,
+        require_model=True,
+        joined_detail=True)
 
 
 async def _agent_run_chat(chat, messages):
@@ -37105,7 +37429,9 @@ def _agent_skill_index_block():
     if not skills:
         return ""
     lines = ["\n\n【技能索引】当前可用技能（系统只给了索引；需要完整操作说明时调用 "
-             "activate_skill(name)，name 用每行开头的技能 id。没调用前不要假设技能细节）："]
+             "activate_skill(name)，name 用每行开头的技能 id。没调用前不要假设技能细节。"
+             "用户给 GitHub 仓库或 SKILL.md 链接并要求安装时调用 install_skill(url)，"
+             "只下载并校验文本，不执行仓库脚本、git clone 或终端命令）："]
     for skill in skills[:AGENT_SKILL_INDEX_MAX]:
         desc = str(skill.get("description") or "").strip().replace("\n", " ")
         lines.append("- %s | %s | %s" % (skill.get("id"), skill.get("name") or skill.get("id"), desc[:80]))

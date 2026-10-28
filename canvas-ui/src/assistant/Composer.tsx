@@ -2,7 +2,7 @@ import {
 	ArrowUpIcon,
 	CheckIcon,
 	ChevronUpIcon,
-	CircleIcon,
+	LoaderCircleIcon,
 	FolderClosedIcon,
 	HandIcon,
 	ImageIcon,
@@ -43,7 +43,10 @@ import {
 	AttachmentRemove,
 	Attachments,
 } from "../ai-elements/attachments"
+import { ModelProviderMenu } from "./ModelMenu"
 import { PlusMenu } from "./PlusMenu"
+import { RecordingMenu } from "./RecordingMenu"
+import { recordingSupported } from "./recording"
 import { ScreenshotPicker } from "./ScreenshotPicker"
 import { listFolderFiles, restoreFolder } from "./folder"
 import { cn } from "@/lib/utils"
@@ -81,10 +84,11 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 	const setText = controller.textInput.setInput
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 	const [pickMode, setPickMode] = useState(false)
-	const [shotOpen, setShotOpen] = useState(false)
 	const [plusOpen, setPlusOpen] = useState(false)
 	const addButtonRef = useRef<HTMLButtonElement | null>(null)
 	const [modelOpen, setModelOpen] = useState(false)
+	const modelMenuRef = useRef<HTMLDivElement | null>(null)
+	const modelButtonRef = useRef<HTMLButtonElement | null>(null)
 	const [mentionOpen, setMentionOpen] = useState(false)
 	const [mentionNodes, setMentionNodes] = useState<CanvasNodeSummary[]>([])
 	const [mentionLoading, setMentionLoading] = useState(false)
@@ -114,6 +118,27 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 	}, [env.chatModels, env.chatModel, env.chatProvider])
 
 	useEffect(() => {
+		if (!modelOpen) return
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setModelOpen(false)
+		}
+		const onDown = (event: PointerEvent) => {
+			const target = event.target instanceof Element ? event.target : null
+			if (!target) return
+			if (modelMenuRef.current?.contains(target)) return
+			if (target.closest("[data-nvca-model-layer]")) return
+			if (modelButtonRef.current?.contains(target)) return
+			setModelOpen(false)
+		}
+		document.addEventListener("keydown", onKey)
+		document.addEventListener("pointerdown", onDown, true)
+		return () => {
+			document.removeEventListener("keydown", onKey)
+			document.removeEventListener("pointerdown", onDown, true)
+		}
+	}, [modelOpen])
+
+	useEffect(() => {
 		store.registerComposer((value: string) => {
 			const node = textareaRef.current
 			if (node) {
@@ -136,6 +161,12 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 			try { store.exitPickMode() } catch {}
 		}
 	}, [store])
+
+	useEffect(() => {
+		const openContext = () => setContextOpen(true)
+		window.addEventListener("novai-canvas-assistant:context", openContext)
+		return () => window.removeEventListener("novai-canvas-assistant:context", openContext)
+	}, [])
 
 	useEffect(() => {
 		let alive = true
@@ -266,11 +297,6 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 		} catch {
 			store.notify("语音输入启动失败")
 		}
-	}
-
-	const captureView = () => {
-		setPlusOpen(false)
-		setShotOpen(true)
 	}
 
 	const insertBrainstorm = () => {
@@ -466,7 +492,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 				</div>
 			) : null}
 
-			<ScreenshotPicker onClose={() => setShotOpen(false)} open={shotOpen} store={store} />
+
 			<PlusMenu
 				anchor={addButtonRef.current}
 				onBrainstorm={insertBrainstorm}
@@ -705,18 +731,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 							<PlusIcon className="nvca-i-sm" />
 						</PromptInputButton>
 						<button
-							aria-label={"已选目录，当前 " + refCount + " 项"}
-							className="nvca-tap-catalog"
-							onClick={() => store.notify(refCount ? "已选 " + refCount + " 项引用" : "还没有引用，点＋从画布添加")}
-							title={"已选目录（" + refCount + "）"}
-							type="button"
-						>
-							<ShieldIcon className="nvca-i-sm" />
-						</button>
-						<button className="nvca-tap-icon is-upload" onClick={() => promptAttachments.openFileDialog()} title="上传素材" type="button">
-							<ImageUpIcon className="nvca-i-sm" />
-						</button>
-						<button
+							aria-label="手动生成"
 							aria-pressed={env.planConfirm}
 							className={cn("nvca-tap-manual", env.planConfirm && "is-on")}
 							onClick={() => store.setPlanConfirm(!env.planConfirm)}
@@ -724,12 +739,6 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 							type="button"
 						>
 							<HandIcon className="nvca-i-sm" />
-						</button>
-						<button className="nvca-tap-icon is-shot" onClick={captureView} title="截图" type="button">
-							<ScissorsIcon className="nvca-i-sm" />
-						</button>
-						<button className="nvca-tap-icon is-record" onClick={() => store.notify("截图与录屏接入中")} title="截图与录屏" type="button">
-							<ChevronUpIcon className="nvca-i-sm" />
 						</button>
 					</div>
 					<div className="nvca-tap-tools-right">
@@ -740,32 +749,30 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 							title="上下文占用"
 							type="button"
 						>
-							<CircleIcon className="nvca-i-sm" />
+							<LoaderCircleIcon className="nvca-i-sm" />
 							<span className="nvca-sr-only">上下文占用 {contextLabel}</span>
 						</button>
 						{contextOpen ? (
 							<div className="nvca-tap-menu is-context">
 								<div className="nvca-tap-menu-label">上下文占用</div>
 								<div className="nvca-tap-context-row">
-									<span>已用</span>
+									<span>已用 token</span>
 									<span className="nvca-mono">
 										{env.contextUsage && typeof env.contextUsage.used_tokens === "number"
-											? formatTokens(env.contextUsage.used_tokens)
-											: "—"}
+											? env.contextUsage.used_tokens.toLocaleString("zh-CN")
+											: "0"}
 									</span>
 								</div>
 								<div className="nvca-tap-context-row">
-									<span>上限</span>
-									<span className="nvca-mono">
-										{env.contextUsage && typeof env.contextUsage.max_tokens === "number"
-											? formatTokens(env.contextUsage.max_tokens)
-											: "未设置"}
-									</span>
+									<span>占比</span>
+									<span className="nvca-mono">{contextLabel}</span>
 								</div>
-								<div className="nvca-tap-context-row">
-									<span>本轮引用节点</span>
-									<span className="nvca-mono">{refCount}</span>
-								</div>
+								{env.contextUsage && typeof env.contextUsage.max_tokens === "number" ? (
+									<div className="nvca-tap-context-row">
+										<span>上下文总量</span>
+										<span className="nvca-mono">{env.contextUsage.max_tokens.toLocaleString("zh-CN")}</span>
+									</div>
+								) : null}
 							</div>
 						) : null}
 						<button
@@ -773,41 +780,24 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 							aria-label="Auto：模型 / 生图平台"
 							className="nvca-tap-auto"
 							onClick={() => setModelOpen((open) => !open)}
+							ref={modelButtonRef}
 							title="Auto（模型 / 生图平台）"
 							type="button"
 						>
 							<SparklesIcon className="nvca-i-sm" />
 						</button>
 						{modelOpen ? (
-							<div className="nvca-tap-menu is-model">
+							<div className="nvca-tap-menu is-model" data-nvca-model-layer="" ref={modelMenuRef}>
 								<div className="nvca-tap-menu-label">对话模型</div>
-								<div className="nvca-tap-model-list">
-									{modelGroups.length === 0 ? <div className="nvca-tap-menu-empty">没有可用模型</div> : null}
-									{modelGroups.map((group) => (
-										<div key={group.provider || group.providerName}>
-											<div className="nvca-tap-model-group">{group.providerName}</div>
-											{group.models.map((model) => (
-												<button
-													className={cn(
-														"nvca-tap-menu-item",
-														env.chatModel === model && env.chatProvider === group.provider && "is-on",
-													)}
-													key={group.provider + ":" + model}
-													onClick={() => {
-														store.setChatModel(model, group.provider)
-														setModelOpen(false)
-													}}
-													type="button"
-												>
-													<span className="nvca-tap-menu-text">{model}</span>
-													{env.chatModel === model && env.chatProvider === group.provider ? (
-														<CheckIcon className="nvca-i-xs" />
-													) : null}
-												</button>
-											))}
-										</div>
-									))}
-								</div>
+								<ModelProviderMenu
+									chatModel={env.chatModel}
+									chatProvider={env.chatProvider}
+									groups={modelGroups}
+									onPick={(model, provider) => {
+										store.setChatModel(model, provider)
+										setModelOpen(false)
+									}}
+								/>
 								{env.imageProviders.length > 0 ? (
 									<>
 										<div className="nvca-tap-menu-label">生图平台</div>

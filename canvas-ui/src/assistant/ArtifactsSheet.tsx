@@ -76,11 +76,10 @@ export const ArtifactsSheet = ({
 	const failed = state.status === "error" && !data
 
 	return (
-		<div className="nvca-artifacts-sheet" role="dialog" aria-label="助手产物">
+		<aside className="nvca-artifacts-sheet" aria-label="助手产物">
 			<div className="nvca-sheet-head">
 				<div className="nvca-sheet-title">
-					<span>产物</span>
-					{data ? <span className="nvca-sheet-count">{files.length}</span> : null}
+					<span>文件</span>
 				</div>
 				<div className="nvca-sheet-actions">
 					<button className="nvca-icon-btn" onClick={onReload} title="刷新产物" aria-label="刷新产物" type="button">
@@ -113,8 +112,7 @@ export const ArtifactsSheet = ({
 				</div>
 			) : files.length === 0 ? (
 				<div className="nvca-sheet-state">
-					<p>还没有产物</p>
-					<span>让助手写报告、表格或导出图片后，文件会出现在这里。</span>
+					<p>暂无输出</p>
 				</div>
 			) : (
 				<div className="nvca-sheet-body">
@@ -136,6 +134,6 @@ export const ArtifactsSheet = ({
 			{state.status === "error" && data ? (
 				<div className="nvca-sheet-note is-warn">刷新失败（{state.error}），下面是上一次的结果。</div>
 			) : null}
-		</div>
+		</aside>
 	)
 }

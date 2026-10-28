@@ -82,9 +82,11 @@ actual=1 表示用了上游成本字段或真实 token 数；0 表示按预扣�
 | GET | /api/credits/stream | SSE：{type:'balance', balance}；20s 心跳 ": ping" |
 | GET | /api/credits/charges（admin） | 任务扣费明细（含 pricing_fallback / unmapped） |
 | GET | /api/credits/pricing（admin） | 价目覆盖、兜底模型、未映射清单 |
+| GET | /api/credits/debtors（admin） | 后付费欠费用户（负余额）列表 |
 
-生成前余额不足：HTTP **402**，body 顶层 {code:'INSUFFICIENT_CREDITS', estimate, balance}。
-通过后响应里带 credits:{estimate, price, balance_after, cost_usd, price_usd, profit_usd, actual, charge_id}。
+默认 **全局后付费**（CREDIT_BILLING_MODE=postpaid）：生成前不预扣、不查余额、不返回 402；完成后按实际/估价结算，余额可为负。
+仅显式 `CREDIT_BILLING_MODE=prepaid` 才保留旧的预扣 + 402 流程（body 顶层 {code:'INSUFFICIENT_CREDITS', estimate, balance}）。
+响应里带 credits:{mode, postpaid, estimate, price, balance_after, cost_usd, price_usd, profit_usd, actual, pricing_source, charge_id}。
 
 rows 用于批量（多维表格）：一张表 N 行 = N 个生成单位，前端批量前可用
 GET /api/credits/price?rows=N 预估总额。
@@ -160,8 +162,8 @@ venv/bin/python -m unittest tests.test_credits tests.test_avatar tests.test_api_
 
 ## 9. 价格精度（2026-10 验收）
 
-- `CREDIT_PRICE_STEP=0.0001`（4 位小数）。售价 = `ceil(cost×markup/step)×step`，严格 > 成本。
-- 去掉 0.01/0.02 最小收费：15 个真实 token 的成本约 `$0.000002`，售价 `0.0001` 积分，而不是 0.02。
+- `CREDIT_PRICE_STEP=0.01`（2 位小数）。售价 = `ceil(cost×markup/step)×step`，最小 1 step，且严格 > 成本。
+- 验收：文本 15 token → 0.01；图片成本 0.072 积分 → 0.10；视频 1.19 → 1.55；TTS 0.00313 → 0.01。
 - 文本结算始终按上游 `usage` 的真实 token 重算；图片/视频/音频按上游 `cost` 字段重算。
 - 实际成本高于预扣时补扣差额，**允许余额变成负数（debt）**，不再把差额吞掉。
 
@@ -184,7 +186,7 @@ venv/bin/python -m unittest tests.test_credits tests.test_avatar tests.test_api_
 ## 11. 最终结算口径（2026-10 用户拍板）
 
 - `cost`：APIMart 上游真实扣除（`data.cost`，USD）；文本按 `usage` 实际 token × 单价。
-- `price`：用户实付 = `ceil(actual_cost_credits × (1+PROFIT_RATE) / step) × step`。
+- `price`：用户实付 = `ceil(actual_cost_credits × (1+PROFIT_RATE) / step) × step`（最小 0.01，只基于上游实际成本）。
 - `profit`：`price - cost`，三者同时以 USD 和积分记录。
 - `PROFIT_RATE` 默认 `0.30`（30%），可用 env 改；有 actual 时必须用 actual 重算。
 - 没有 actual 时才用估价，且估价按该模型最高档成本兜底（≥ 最高可能成本 × 1.3）。
@@ -196,3 +198,45 @@ venv/bin/python -m unittest tests.test_credits tests.test_avatar tests.test_api_
 - 非 admin 的 `/api/providers`、`/api/config`、`/api/models`、`/api/provider-registry`、`/api/image-params` 只返回 apimart 及其模型。
 - 非 admin 生成请求 provider 为空/旧默认值（comfly 等）→ 归一为 apimart；显式非 apimart → HTTP 403 `{code:'provider_not_allowed'}`。
 - admin 仍可见可配全部；auth-off 本地模式保持全量。
+
+## 13. APIMart 语音模型：后付费（postpaid）
+
+10 个语音模型（gpt-4o-audio-preview* / gpt-4o-mini-tts / gpt-audio-mini* / tts-1* / whisper-1）改为生成后付费：
+
+- 请求前不预扣、不检查余额：estimate=0，charge.mode=postpaid；余额 0 也能发起；
+- 估价接口返回 `{mode:'postpaid', postpaid:true, cost:0, price:0, message:'生成后按实际用量扣费'}`，不再返回 12.48；
+- 完成后优先用上游 `data.cost`/`data.credits_cost`；没有则用 `usage`（字符数/音频秒数/token）按 OpenAI 官方公开单价换算，`pricing_source='openai_official'`：
+  - tts-1 / tts-1-1106：$15 / 1M 字符；tts-1-hd*：$30 / 1M 字符；
+  - gpt-4o-mini-tts：$0.015 / 分钟（WAV 从文件头读真实时长，非 WAV 用 15 字符/秒估算并标记）；
+  - gpt-4o-audio-preview*：音频输入 $40 / 输出 $80 每 1M token；gpt-audio-mini*：$10 / $20 每 1M token；
+  - whisper-1：$0.006 / 分钟。
+- 结算价 = `ceil(actual_cost_credits × 1.3 / 0.01) × 0.01`（最小 0.01，严格 > 成本），余额可负；
+- 完全拿不到成本/usage：该单 0 扣费、status=`unpriced`，`pricing_source='unpriced'`，提示管理员补价，绝不猜固定值。
+
+## 14. 全局后付费（默认）
+
+- `CREDIT_BILLING_MODE=postpaid` 默认：所有类型生成前 estimate=0、不扣款、不查余额、不 402，只建 pending(mode=postpaid)。
+- 估价接口所有 kind 返回 `mode:'postpaid', postpaid:true, cost:0, price:0`，并附 `estimated_cost/estimated_price/estimated_usd` 供后台参考；message「生成后按实际用量扣费」。
+- 结算优先级：上游 cost/credits_cost → usage（文本 token / 语音字符秒 / 其它）→ 估价表（conservative，actual=false, pricing_source='estimate'）→ 全都没有才 unpriced 0 扣费。
+- 失败/取消退款只关闭 pending 单，不扣款。
+- 风险：后付费允许欠费（余额为负）。管理员监控入口：
+  - `GET /api/credits/charges`：每单 cost/price/profit/actual/pricing_source/status；
+  - `GET /api/credits/debtors`：负余额用户列表（按欠费从多到少）；
+  - `GET /api/credits/stream`：余额变化实时推送。
+
+## 15. 欠费上限（CREDIT_OVERDRAFT_LIMIT=0.01）
+
+后付费不再无限欠费：
+
+- 发起校验（事务内，postpaid）：`balance <= -overdraft_limit` → 402；`balance + overdraft_limit < estimated_price` → 402，body 带 `{code, estimate, balance, overdraft_limit}`。
+- 0 余额：文本估 0.01 可发；图片估 0.10 > 0.01 会 402。无 `estimated_price` 的类型（如部分 Agent 调用）只校验 `balance > -overdraft_limit`。
+- 结算仍按实际成本 × 1.3：实际偏差导致余额低于 -0.01 时**允许扣穿**（不 cap、不少收），扣费单标 `overdrawn_over_limit=1` 且 note 里写 `overdrawn_over_limit=1`；下一单会被 402 挡住。
+- `/api/credits/me`、`/api/credits/price`、402 body 都带 `overdraft_limit`。
+- `GET /api/credits/debtors?over_limit=true` 只看超过欠费上限的用户；返回每人的 `over_limit`。
+- 前端 402 文案建议：「积分不足：本次预计 X，当前 Y（可欠费 0.01）」；负余额照常显示。
+
+## 16. 结算必须可追溯（2026-10）
+
+- 最终价只基于上游真实扣费：`data.cost` / `data.credits_cost` → `actual_cost_usd`；再 `ceil(actual_cost_credits×1.3/0.01)×0.01`。
+- 每单记录：`actual_cost_usd`、`price_usd`、`profit_usd`、`actual=true`、`cost_source`（`cost` / `credits_cost` / `usage` / `openai_official` / `estimate` / `caller`）。
+- 只有完全拿不到实际成本时才用估价单，必须 `actual=false, cost_source='estimate'`；管理员 `/api/credits/charges` 可查完整成本/利润，前端只展示实扣积分。

@@ -9,7 +9,7 @@ import {
 	ChevronRightIcon,
 	CopyIcon,
 	FileTextIcon,
-	GitBranchIcon,
+	SplitIcon,
 	GaugeIcon,
 	ImageIcon,
 	BrainIcon,
@@ -21,6 +21,8 @@ import {
 	RefreshCcwIcon,
 	SearchIcon,
 	SparklesIcon,
+	ThumbsDownIcon,
+	ThumbsUpIcon,
 	UserIcon,
 	WorkflowIcon,
 	XIcon,
@@ -29,7 +31,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Composer } from "./Composer"
 import { ModelContextDialog } from "./ModelContextDialog"
 import { ThreadBar } from "./ThreadBar"
-import { deriveRun, formatTokens, formatWorkMs, statusLabel, toolIconKey, toolLabel } from "./format"
+import { deriveRun, formatWorkMs, liveToolLabel, messageNodeRefs, runSummary, statusLabel, toolIconKey, toolLabel } from "./format"
 import { CheckpointCard } from "./CheckpointCard"
 import { QuestionCard } from "./QuestionCard"
 import { SourcesCard } from "./SourcesCard"
@@ -104,6 +106,7 @@ export const AssistantApp = ({ store }: AssistantAppProps) => {
 					const onMove = (moveEvent: PointerEvent) => {
 						const width = Math.max(360, Math.min(window.innerWidth - 160, startWidth - (moveEvent.clientX - startX)))
 						panel.style.width = width + "px"
+						document.documentElement.style.setProperty("--nvca-panel-width", width + "px")
 					}
 					const onUp = () => {
 						window.removeEventListener("pointermove", onMove)
@@ -124,7 +127,7 @@ export const AssistantApp = ({ store }: AssistantAppProps) => {
 				<Conversation className="nvca-conversation">
 					<ConversationContent className="nvca-conversation-content">
 						{messages.map((message, index) => {
-							if (message.role === "user") return <UserBubble key={message.id} message={message} store={store} />
+							if (message.role === "user") return <UserBubble key={message.id} message={message} index={index} store={store} />
 							if (message.role === "system") return <SystemNote key={message.id} message={message} store={store} />
 							const isLast = index === lastAssistantIndex
 							const streaming = env.running && (state.streamingMessageId === message.id || (isLast && !state.streamingMessageId))
@@ -144,9 +147,34 @@ export const AssistantApp = ({ store }: AssistantAppProps) => {
 					<ConversationScrollButton className="nvca-scroll-btn" />
 				</Conversation>
 			)}
+			{messages.some((message) => message.role === "user") ? <QueryNavigator messages={messages} /> : null}
 			<Composer store={store} pendingText={pendingText} />
 			{lightbox ? <Lightbox item={lightbox} onClose={() => setLightbox(null)} /> : null}
 		</div>
+	)
+}
+
+const QueryNavigator = ({ messages }: { messages: AssistantMessage[] }) => {
+	const queries = messages
+		.map((message, index) => ({ message, index }))
+		.filter(({ message }) => message.role === "user")
+	return (
+		<nav aria-label="Conversation query locator" className="nvca-query-nav">
+			{queries.map(({ message, index }, queryIndex) => {
+				const text = message.parts.map((part) => part.type === "text" ? part.text : "").join("").trim()
+				return (
+					<button
+						aria-label={`Jump to Query ${queryIndex + 1}: ${text}`}
+						key={message.id}
+						onClick={() => document.getElementById("nvca-query-" + index)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+						title={`跳转到问题 ${queryIndex + 1}`}
+						type="button"
+					>
+						{queryIndex + 1}
+					</button>
+				)
+			})}
+		</nav>
 	)
 }
 
@@ -213,29 +241,18 @@ const EmptyState = ({ onPick }: { onPick: (text: string) => void }) => {
 	)
 }
 
-const UserBubble = ({ message, store }: { message: AssistantMessage; store: AssistantStore }) => {
+const UserBubble = ({ message, index, store }: { message: AssistantMessage; index: number; store: AssistantStore }) => {
 	const text = message.parts
 		.map((part) => (part.type === "text" ? part.text : ""))
 		.join("")
 		.trim()
 	return (
 		<Message className="nvca-user-msg" from="user">
-			<MessageContent className="nvca-user-bubble">
+			<MessageContent className="nvca-user-bubble" id={"nvca-query-" + index}>
+				<p className="nvca-user-text">{text}</p>
 				<div className="nvca-user-head">
-					<span className="nvca-user-avatar"><UserIcon className="nvca-i-xs" /></span>
-					<span className="nvca-user-name">你</span>
-					<span className="nvca-user-spacer" />
 					<button
-						aria-label="编辑这条消息"
-						className="nvca-user-icon nvca-user-edit"
-						onClick={() => store.fillComposer(text)}
-						title="编辑"
-						type="button"
-					>
-						<PencilIcon className="nvca-i-xs" />
-					</button>
-					<button
-						aria-label="复制这条消息"
+						aria-label="复制"
 						className="nvca-user-icon"
 						onClick={() => {
 							if (navigator.clipboard) void navigator.clipboard.writeText(text)
@@ -250,7 +267,6 @@ const UserBubble = ({ message, store }: { message: AssistantMessage; store: Assi
 						{formatClock(message.createdAt)}
 					</time>
 				</div>
-				<p className="nvca-user-text">{text}</p>
 			</MessageContent>
 		</Message>
 	)
@@ -302,7 +318,6 @@ const RunTurn = ({
 	store: AssistantStore
 }) => {
 	useTicker(streaming)
-	const [contextOpen, setContextOpen] = useState(false)
 	const run = deriveRun(message)
 	const texts = run.texts.map((item) => item.text)
 	const { state } = store
@@ -311,46 +326,61 @@ const RunTurn = ({
 	const outcomeLabel = run.outcome ? statusLabel(run.outcome.status, "已结束") : ""
 	const totalWork = run.outcome?.activeWorkMs || message.activeWorkMs || 0
 	const hasSteps = run.steps.length > 0 || run.tools.length > 0
+	const baseSummary = runSummary(run)
+	const liveSummary = liveToolLabel(run)
+	const summary = baseSummary
+		? baseSummary + (baseSummary !== "编辑了画布" && totalWork > 0 ? " · " + formatWorkMs(totalWork) : "")
+		: liveSummary
+	const nodeRefs = messageNodeRefs(message)
 	const confirmations = message.parts.filter((part) => part.type === "confirmation")
-	const hasBody = hasSteps || Boolean(run.thinking) || Boolean(message.plan) || confirmations.length > 0
+	const hasBody = hasSteps || run.visions.length > 0 || Boolean(run.thinking) || Boolean(message.plan) || confirmations.length > 0
+	const showRunHeader = streaming || (!hasBody && run.texts.length === 0)
+	const reasoning = run.thinking ? (
+		<Reasoning
+			className="nvca-reasoning"
+			duration={run.thinking.durationMs ? Math.max(1, Math.round(run.thinking.durationMs / 1000)) : undefined}
+			defaultOpen={false}
+			isStreaming={streaming && Boolean(run.thinking.text)}
+		>
+			<ReasoningTrigger
+				className="nvca-reasoning-trigger"
+				getThinkingMessage={(isStreaming, duration) =>
+					isStreaming ? <Shimmer duration={1.6}>思考中…</Shimmer> : <span>{duration ? "已思考 " + duration + "s" : "思考"}</span>
+				}
+			/>
+			<ReasoningContent className="nvca-reasoning-content">
+				<Markdown>{run.thinking.text}</Markdown>
+			</ReasoningContent>
+		</Reasoning>
+	) : null
+	const inlineNodeRefs = nodeRefs.length > 0 ? (
+		<span className="nvca-node-refs">
+			{nodeRefs.map((ref) => (
+				<button className="nvca-node-ref" key={ref.id} onClick={() => store.openNode(ref.id)} title={"定位到 " + ref.label} type="button">
+					{ref.label === "Text" || ref.label.startsWith("文本") ? <FileTextIcon className="nvca-i-xs" /> : <ImageIcon className="nvca-i-xs" />}
+					<span>{ref.label}</span>
+				</button>
+			))}
+		</span>
+	) : null
 
 	return (
 		<div className="nvca-turn" data-streaming={streaming ? "true" : "false"}>
-			<div className="nvca-run-head">
-				<span className={cn("nvca-run-dot", streaming && "is-live", run.error && "is-fail", outcomeLabel && !streaming && "is-done")} />
-				<span className="nvca-run-status">
-					{streaming ? <Shimmer duration={1.6}>{statusLabel(state.streamState, "正在执行…")}</Shimmer> : outcomeLabel || statusLabel(status, "运行记录")}
-				</span>
-				<span className="nvca-run-spacer" />
-				{(streaming || totalWork > 0) && <span className="nvca-run-time">处理了 {formatWorkMs(streaming ? currentWork(state) : totalWork)}</span>}
-			</div>
+			{showRunHeader ? (
+				<div className="nvca-run-head">
+					<span className={cn("nvca-run-dot", streaming && "is-live", run.error && "is-fail", outcomeLabel && !streaming && "is-done")} />
+					<span className="nvca-run-status">
+						{streaming ? <Shimmer duration={1.6}>{liveSummary || statusLabel(state.streamState, "正在执行…")}</Shimmer> : outcomeLabel || statusLabel(status, "运行记录")}
+					</span>
+					<span className="nvca-run-spacer" />
+					{!baseSummary && (streaming || totalWork > 0) ? <span className="nvca-run-time">处理了 {formatWorkMs(streaming ? currentWork(state) : totalWork)}</span> : null}
+				</div>
+			) : null}
 
 			{hasBody ? (
 				<div className="nvca-run-body">
-					{run.thinking ? (
-						<Reasoning
-							className="nvca-reasoning"
-							duration={run.thinking.durationMs ? Math.max(1, Math.round(run.thinking.durationMs / 1000)) : undefined}
-							defaultOpen={false}
-							isStreaming={streaming && Boolean(run.thinking.text)}
-						>
-							<ReasoningTrigger
-								className="nvca-reasoning-trigger"
-								getThinkingMessage={(isStreaming, duration) =>
-									isStreaming ? (
-										<Shimmer duration={1.6}>思考中…</Shimmer>
-									) : (
-										<span>{duration ? "思考了 " + duration + " 秒" : "思考"}</span>
-									)
-								}
-							/>
-							<ReasoningContent className="nvca-reasoning-content">
-								<Markdown>{run.thinking.text}</Markdown>
-							</ReasoningContent>
-						</Reasoning>
-					) : null}
-
-					{hasSteps ? <StepGroup parts={[...run.tools, ...run.steps]} /> : null}
+					{!hasSteps && !summary ? reasoning : null}
+					{hasSteps || summary ? <StepGroup parts={[...run.tools, ...run.steps]} streaming={streaming} summary={summary} thinking={reasoning} checkpoint={<CheckpointCard message={message} store={store} />} /> : null}
 					{confirmations.map((part) => (
 						<QuestionCard key={part.id} part={part} store={store} />
 					))}
@@ -369,8 +399,8 @@ const RunTurn = ({
 			{run.texts.length > 0 ? (
 				<Message className="nvca-assistant-msg" from="assistant">
 					<MessageContent className="nvca-assistant-bubble">
-						{run.texts.map((text) => (
-							<Markdown key={text.id}>{text.text}</Markdown>
+						{run.texts.map((text, textIndex) => (
+							<Markdown key={text.id} trailing={textIndex === run.texts.length - 1 ? inlineNodeRefs : null}>{text.text}</Markdown>
 						))}
 					</MessageContent>
 				</Message>
@@ -383,19 +413,9 @@ const RunTurn = ({
 				</div>
 			) : null}
 
-			{artifacts.length > 0 ? (
-				<ArtifactGrid items={artifacts} onOpen={onOpenArtifact} />
-			) : null}
-
-			{run.contextNodes > 0 || run.usage || run.steers.length > 0 || run.outcome ? (
+			{run.contextNodes > 0 || run.steers.length > 0 ? (
 				<div className="nvca-run-meta">
 					{run.contextNodes > 0 ? <span className="nvca-meta-chip">本轮引用 {run.contextNodes} 个节点</span> : null}
-					{run.usage ? (
-						<span className="nvca-meta-chip">
-							用量 {typeof run.usage.input_tokens === "number" ? "输入 " + formatTokens(run.usage.input_tokens) : ""}
-							{typeof run.usage.output_tokens === "number" ? " · 输出 " + formatTokens(run.usage.output_tokens) : ""}
-						</span>
-					) : null}
 					{run.steers.map((steer) => (
 						<span className="nvca-meta-chip is-steer" key={steer.id}>
 							{steer.status === "unread" ? "未读到（已放回输入框）：" : "已插话："}
@@ -403,80 +423,51 @@ const RunTurn = ({
 							{steer.text.length > 20 ? "…" : ""}
 						</span>
 					))}
-					{run.outcome ? (
-						<span className="nvca-meta-chip">
-							{outcomeLabel}
-							{run.outcome.activeWorkMs > 0 ? " · 处理了 " + formatWorkMs(run.outcome.activeWorkMs) : ""}
-						</span>
-					) : null}
 				</div>
 			) : null}
 
 			<SourcesCard message={message} />
 
-			<CheckpointCard message={message} store={store} />
-
-			{message.runId || texts.length > 0 ? (
+			{texts.length > 0 ? (
 				<div className="nvca-run-tools">
-					{texts.length > 0 ? (
-						<>
-							<button
-								className="nvca-link-btn"
-								onClick={() => {
-									const copyText = texts.join("\n\n")
-									if (navigator.clipboard) void navigator.clipboard.writeText(copyText)
-									store.notify("已复制这条回复")
-								}}
-								title="复制"
-								type="button"
-							>
-								<CopyIcon className="nvca-i-xs" />
-								复制
-							</button>
-							<button
-								className="nvca-link-btn"
-								onClick={() => {
-									const lastUser = [...store.state.messages].reverse().find((item) => item.role === "user")
-									const text = lastUser ? lastUser.parts.map((part) => (part.type === "text" ? part.text : "")).join("").trim() : ""
-									if (text) store.send(text)
-								}}
-								title="重试"
-								type="button"
-							>
-								<RefreshCcwIcon className="nvca-i-xs" />
-								重试
-							</button>
-							<button
-								className="nvca-link-btn"
-								onClick={() => void store.branchAt(index)}
-								title="从这里分支"
-								type="button"
-							>
-								<GitBranchIcon className="nvca-i-xs" />
-								分支
-							</button>
-						</>
-					) : null}
-					{message.runId ? (
-						<button className="nvca-link-btn" onClick={() => setContextOpen(true)} title="查看这轮发给模型的上下文规模" type="button">
-							<GaugeIcon className="nvca-i-xs" />
-							上下文
-						</button>
-					) : null}
+					<button
+						aria-label="复制"
+						className="nvca-link-btn"
+						onClick={() => {
+							const copyText = texts.join("\n\n")
+							if (navigator.clipboard) void navigator.clipboard.writeText(copyText)
+							store.notify("已复制这条回复")
+						}}
+						title="复制"
+						type="button"
+					>
+						<CopyIcon className="nvca-i-xs" />
+						<span className="nvca-sr-only">复制</span>
+					</button>
+					<button aria-label="好评" aria-pressed={message.rating === "up"} className={cn("nvca-link-btn", message.rating === "up" && "is-on")} onClick={() => void store.rateMessage(index, "up")} title="好评" type="button">
+						<ThumbsUpIcon className="nvca-i-xs" />
+						<span className="nvca-sr-only">好评</span>
+					</button>
+					<button aria-label="差评" aria-pressed={message.rating === "down"} className={cn("nvca-link-btn", message.rating === "down" && "is-on")} onClick={() => void store.rateMessage(index, "down")} title="差评" type="button">
+						<ThumbsDownIcon className="nvca-i-xs" />
+						<span className="nvca-sr-only">差评</span>
+					</button>
+					<button aria-label="分支对话" className="nvca-link-btn" onClick={() => void store.branchAt(index)} title="分支对话" type="button">
+						<SplitIcon className="nvca-i-xs" />
+						<span className="nvca-sr-only">分支对话</span>
+					</button>
+					<time className="nvca-assistant-time" dateTime={new Date(message.createdAt || Date.now()).toISOString()}>{formatClock(message.createdAt)}</time>
 				</div>
-			) : null}
-
-			{contextOpen && message.runId ? (
-				<ModelContextDialog runId={message.runId} onClose={() => setContextOpen(false)} />
 			) : null}
 		</div>
 	)
 }
 
-const StepGroup = ({ parts }: { parts: Extract<AssistantMessage["parts"][number], { type: "tool_event" }>[] }) => {
-	const [open, setOpen] = useState(true)
+const StepGroup = ({ parts, streaming, summary, thinking, checkpoint }: { parts: Extract<AssistantMessage["parts"][number], { type: "tool_event" }>[]; streaming: boolean; summary: string; thinking?: Parameters<typeof Reasoning>[0]["children"]; checkpoint?: Parameters<typeof Reasoning>[0]["children"] }) => {
+	const [open, setOpen] = useState(streaming)
 	const total = parts.length
 	const finished = parts.filter((part) => part.status === "done" || part.status === "failed").length
+	useEffect(() => setOpen(streaming), [streaming])
 	return (
 		<div className="nvca-step-group">
 			<button
@@ -485,17 +476,19 @@ const StepGroup = ({ parts }: { parts: Extract<AssistantMessage["parts"][number]
 				onClick={() => setOpen((value) => !value)}
 				type="button"
 			>
-				<ListChecksIcon className="nvca-i-sm" />
-				<span className="nvca-step-group-title">执行清单</span>
-				<span className="nvca-step-group-progress">{finished}/{total}</span>
+				{summary === "编辑了画布" ? <PencilIcon className="nvca-i-sm" /> : <ListChecksIcon className="nvca-i-sm" />}
+				<span className="nvca-step-group-title">{summary || "执行清单"}</span>
+				{streaming && total > 0 ? <span className="nvca-step-group-progress">{finished}/{total}</span> : null}
 				<span className="nvca-step-group-spacer" />
 				<ChevronDownIcon className={cn("nvca-step-group-caret", open && "is-open")} />
 			</button>
 			{open ? (
 				<div className="nvca-tool-list">
+					{thinking}
 					{parts.map((part) => (
 						<ToolCard key={part.id} part={part} />
 					))}
+					{checkpoint}
 				</div>
 			) : null}
 		</div>
@@ -518,58 +511,42 @@ const PlanCard = ({
 	const title = plan.intent || plan.summary || "按你说的改画布"
 	return (
 		<div className="nvca-plan" data-state={planState || "pending"}>
-			<div className="nvca-plan-head">
-				<span className="nvca-plan-kicker">
-					<SparklesIcon className="nvca-i-sm" />
-					方案
-				</span>
-				<span className="nvca-plan-state">
-					{planState === "running"
-						? "执行中…"
-						: planState === "applied"
-							? "已执行"
-							: planState === "aborted"
-								? "已中止"
-								: planState === "cancelled"
-									? "已取消"
-									: planState === "adjusted"
-										? "换个说法"
-										: "等你确认"}
-				</span>
-			</div>
+			{!resolved ? (
+				<div className="nvca-plan-head">
+					<span className="nvca-plan-kicker">
+						<SparklesIcon className="nvca-i-sm" />
+						方案
+					</span>
+					<span className="nvca-plan-state">{planState === "running" ? "执行中…" : "等你确认"}</span>
+				</div>
+			) : null}
 			<div className="nvca-plan-title">{title}</div>
 			<ol className="nvca-plan-steps">
 				{plan.steps.map((step, index) => (
 					<li className="nvca-plan-step" key={index}>
-						<span className="nvca-plan-num">{index + 1}</span>
+						<span className="nvca-plan-num">{index + 1}.</span>
 						<div className="nvca-plan-step-main">
-							<span className="nvca-plan-tool">{toolLabel(step.tool)}</span>
-							{step.description ? <span className="nvca-plan-desc">{step.description}</span> : null}
+							<span className="nvca-plan-tool">{step.description || toolLabel(step.tool)}</span>
 						</div>
 					</li>
 				))}
 			</ol>
-			<div className="nvca-plan-cost">
-				{generations > 0 ? "会用掉 " + generations + " 次生成" : "不消耗生成额度"}
-				{Number(plan.impact?.nodes) > 0 ? " · 新增 " + Number(plan.impact?.nodes) + " 个节点" : ""}
-			</div>
-			<div className="nvca-plan-actions">
-				<button className="nvca-btn ghost" disabled={Boolean(resolved) || running} onClick={() => onAction("cancel")} type="button">
-					取消
-				</button>
-				<button className="nvca-btn ghost" disabled={Boolean(resolved) || running} onClick={() => onAction("adjust")} type="button">
-					换个说法
-				</button>
-				<button
-					className="nvca-btn primary"
-					disabled={Boolean(resolved) || running}
-					onClick={() => onAction("run")}
-					type="button"
-				>
-					<PlayIcon className="nvca-i-sm" />
-					{generations > 0 ? "开始生成" : "开始"}
-				</button>
-			</div>
+			{!resolved ? (
+				<>
+					<div className="nvca-plan-cost">
+						{generations > 0 ? "会用掉 " + generations + " 次生成" : "不消耗生成额度"}
+						{Number(plan.impact?.nodes) > 0 ? " · 新增 " + Number(plan.impact?.nodes) + " 个节点" : ""}
+					</div>
+					<div className="nvca-plan-actions">
+						<button className="nvca-btn ghost" disabled={running} onClick={() => onAction("cancel")} type="button">取消</button>
+						<button className="nvca-btn ghost" disabled={running} onClick={() => onAction("adjust")} type="button">换个说法</button>
+						<button className="nvca-btn primary" disabled={running} onClick={() => onAction("run")} type="button">
+							<PlayIcon className="nvca-i-sm" />
+							{generations > 0 ? "开始生成" : "开始"}
+						</button>
+					</div>
+				</>
+			) : null}
 		</div>
 	)
 }

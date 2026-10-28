@@ -11,7 +11,8 @@ from server.credits.errors import CreditsError
 
 def me_payload(balance: float) -> Dict[str, Any]:
     return {
-        "balance": round(float(balance or 0), 6),
+        "balance": round(float(balance or 0), 2),
+        "overdraft_limit": round(config.overdraft_limit(), 2),
         "unit": "credit",
         "usd_per_credit": config.usd_per_credit(),
         "markup": config.markup(),
@@ -45,10 +46,13 @@ def charge_start(user_id: int, kind: str, model: Any = "", params: Optional[Dict
         pricing_fallback=bool(quote.get("pricing_fallback")),
         unmapped=list(quote.get("unmapped") or []),
         matched_spec=str(quote.get("matched_spec") or ""),
-        note="estimate",
+        note="postpaid" if quote.get("postpaid") else "estimate",
         provider=str(provider or quote.get("provider") or ""),
         pricing_source=str(quote.get("pricing_source") or "direct"),
         proxy_model=str(quote.get("proxy_model") or ""),
+        mode=str(quote.get("mode") or "prepaid"),
+        postpaid_estimated_price=quote.get("estimated_price"),
+        overdraft_limit=config.overdraft_limit(),
     )
     charge["quote"] = quote
     events.publish(user_id, charge.get("balance_after", 0))
@@ -65,13 +69,14 @@ def _actual_price(cost_usd: float) -> float:
     step = config.price_step()
     guard = 0
     while price * config.usd_per_credit() <= float(cost_usd) + 1e-12 and guard < 10000:
-        price = round(price + step, 10)
+        price = round(price + step, 2)
         guard += 1
-    return price
+    return round(price, 2)
 
 
 def charge_settle(charge_id: int, actual_cost_usd: Optional[float] = None,
-                  actual: bool = False, note: str = "") -> Dict[str, Any]:
+                  actual: bool = False, note: str = "", pricing_source: str = "",
+                  cost_source: str = "") -> Dict[str, Any]:
     """按实际成本结算：实际成本缺省时用预扣时的成本估算（actual=false）。"""
     charge = store.get_charge(int(charge_id))
     if not charge:
@@ -128,8 +133,19 @@ def charge_settle(charge_id: int, actual_cost_usd: Optional[float] = None,
         actual=bool(actual),
         note=note or ("actual_cost" if actual else "estimate_cost"),
         matched_spec=str(charge.get("matched_spec") or ""),
+        pricing_source=pricing_source,
+        overdraft_limit=config.overdraft_limit(),
+        cost_source=cost_source,
     )
     events.publish(int(settled.get("user_id") or charge["user_id"]), settled.get("balance_after", 0))
+    settled["credits"] = _credits_payload(settled)
+    return settled
+
+
+def charge_settle_unpriced(charge_id: int, note: str = "") -> Dict[str, Any]:
+    """后付费无成本/usage：0 扣费并标 unpriced。"""
+    settled = store.settle_unpriced(int(charge_id), note=note or "unpriced")
+    events.publish(int(settled.get("user_id") or 0), settled.get("balance_after", 0))
     settled["credits"] = _credits_payload(settled)
     return settled
 
@@ -141,18 +157,38 @@ def charge_refund(charge_id: int, reason: str = "") -> Dict[str, Any]:
     return refunded
 
 
+def _postpaid_message(charge: Dict[str, Any]) -> str:
+    if str(charge.get("mode") or "") != "postpaid":
+        return ""
+    status = str(charge.get("status") or "")
+    if status == "pending":
+        return "生成后按实际用量扣费"
+    if status == "unpriced":
+        return "未取得实际用量，本次未扣费（unpriced）"
+    if status == "refunded":
+        return "生成失败，未扣费"
+    return "已按实际用量扣费"
+
+
 def _credits_payload(charge: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "estimate": round(float(charge.get("estimate") or 0), 6),
-        "price": round(float(charge.get("charged") or 0), 6),
-        "balance_after": round(float(charge.get("balance_after") or 0), 6),
+        "estimate": round(float(charge.get("estimate") or 0), 2),
+        "price": round(float(charge.get("charged") or 0), 2),
+        "balance_after": round(float(charge.get("balance_after") or 0), 2),
+        "actual_cost_usd": round(float(charge.get("cost_usd") or 0), 6),
         "cost_usd": round(float(charge.get("cost_usd") or 0), 6),
         "price_usd": round(float(charge.get("price_usd") or 0), 6),
         "profit_usd": round(float(charge.get("profit_usd") or 0), 6),
+        "cost_source": str(charge.get("cost_source") or ""),
         "pricing_fallback": bool(int(charge.get("pricing_fallback") or 0)),
         "pricing_source": str(charge.get("pricing_source") or "direct"),
         "proxy_model": str(charge.get("proxy_model") or ""),
         "provider": str(charge.get("provider") or ""),
+        "mode": str(charge.get("mode") or "prepaid"),
+        "postpaid": str(charge.get("mode") or "prepaid") == "postpaid",
+        "overdraft_limit": round(config.overdraft_limit(), 2),
+        "overdrawn_over_limit": bool(int(charge.get("overdrawn_over_limit") or 0)),
+        "message": _postpaid_message(charge),
         "actual": bool(int(charge.get("actual") or 0)),
         "charge_id": int(charge.get("id") or 0),
         "status": str(charge.get("status") or ""),

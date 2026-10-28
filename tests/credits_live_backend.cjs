@@ -14,12 +14,12 @@
  *   - 真实 /api/credits/me、/transactions、/price、SSE
  *   - 管理员加分 → 成员画布 HUD 实时变（不刷新页面）
  *   - 账户页余额 / USD 等值 / 流水与 HUD 同步
- *   - 余额为 0 时真实生成接口 402，UI 提示「积分不足」
+ *   - 全量后付费：0 余额也能提交（NOVAI_LIVE_ZERO=1 时真实跑一次），完成后扣成负余额
  *   - 管理员扣成负数被后端拒绝（400）
  *
  * 真实「生成一次 → HUD/账户页同时减」需要打到真实模型（会花钱），默认不做：
  * 用 NOVAI_LIVE_GENERATION=1 显式打开（需要该实例已配好可用 provider）。
- * 精度验收（0.0001 级扣费）：
+ * 精度验收（2 位小数，0.01 步进）：
  *   NOVAI_BASE=http://127.0.0.1:8899 NOVAI_LIVE_GENERATION=1 NOVAI_LIVE_MODEL=gpt-4o-mini NOVAI_LIVE_TOKENS=15 \
  *   node tests/credits_live_backend.cjs
  */
@@ -40,6 +40,13 @@ const WITH_GENERATION = process.env.NOVAI_LIVE_GENERATION === '1';
 const LIVE_MODEL = process.env.NOVAI_LIVE_MODEL || '';
 const LIVE_TOKENS = Number(process.env.NOVAI_LIVE_TOKENS || 64) || 64;
 const START_SERVER = process.env.NOVAI_LIVE_START === '1';
+/* 后付费 TTS 验收（会花一点点钱）：NOVAI_LIVE_TTS=1 才跑 */
+const WITH_TTS = process.env.NOVAI_LIVE_TTS === '1';
+/* 0 余额真实提交（需要 8899 已配好 provider，会真的调一次上游）：NOVAI_LIVE_ZERO=1 才跑 */
+const WITH_ZERO = process.env.NOVAI_LIVE_ZERO === '1';
+const TTS_MODEL = process.env.NOVAI_LIVE_TTS_MODEL || 'tts-1';
+const TTS_PROVIDER = process.env.NOVAI_LIVE_TTS_PROVIDER || 'apimart';
+const TTS_TEXT = process.env.NOVAI_LIVE_TTS_TEXT || '你好，这是一句短句。';
 const ROOT = path.resolve(__dirname, '..');
 const REQUEST_TIMEOUT = 20000;
 const OUT_DIR = path.join(__dirname, 'artifacts', 'credits-ui', 'live');
@@ -126,23 +133,37 @@ async function readText(page, selector) {
     }, selector);
 }
 
-/* 把 "<0.0001" 当作 0.00005 参与比较；其余按数字解析 */
+/* 解析界面上的积分文本（可能带负号） */
 function parseCredits(text) {
     const raw = String(text == null ? '' : text).trim();
-    if (raw.indexOf('<0.0001') >= 0) return 0.00005;
     const match = /-?[0-9]+(?:\.[0-9]+)?/.exec(raw);
     return match ? Number(match[0]) : NaN;
 }
 
-/* 和界面同口径的显示（最多 4 位、去尾随 0），用于等待管理员加分后的文本 */
+/* 和界面同口径的显示（固定 2 位小数），用于等待管理员加分后的文本 */
 function formatLike(value) {
     const num = Number(value);
     if (!Number.isFinite(num)) return '';
-    const abs = Math.abs(num);
-    if (abs > 0 && abs < 0.0001) return (num < 0 ? '-' : '') + '<0.0001';
-    const rounded = Math.round(num * 10000) / 10000;
-    if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return String(Math.round(rounded));
-    return rounded.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+    return num.toFixed(2);
+}
+
+/* 轮询提示条文字（记录每次变化），直到出现预期文案或超时 */
+async function watchToastSamples(page, untilNeedle, timeoutMs) {
+    const samples = [];
+    const startedAt = Date.now();
+    const deadline = startedAt + (timeoutMs || 120000);
+    while (Date.now() < deadline) {
+        const text = await page.evaluate(() => {
+            const el = document.querySelector('[data-credits-toast]');
+            return el ? String(el.innerText || '').trim() : null;
+        });
+        if (text && (!samples.length || samples[samples.length - 1].text !== text)) {
+            samples.push({ at: Date.now() - startedAt, text: text });
+        }
+        if (untilNeedle && text && text.indexOf(untilNeedle) >= 0) break;
+        await page.waitForTimeout(150);
+    }
+    return samples;
 }
 
 async function waitForToast(page, needle, timeoutMs) {
@@ -249,7 +270,7 @@ async function waitText(page, selector, value, timeoutMs) {
         });
         await page.goto(BASE + '/static/smart-canvas.html?id=' + encodeURIComponent(canvasId), { waitUntil: 'domcontentloaded' });
         await page.waitForSelector('#collab-credits-btn', { state: 'visible', timeout: 25000 });
-        check('成员画布 HUD 显示真实余额 12.5', (await readText(page, '#collab-credits-num')) === '12.5', await readText(page, '#collab-credits-num'));
+        check('成员画布 HUD 显示真实余额 12.50', (await readText(page, '#collab-credits-num')) === '12.50', await readText(page, '#collab-credits-num'));
         let sseState = -1;
         const sseDeadline = Date.now() + 8000;
         while (Date.now() < sseDeadline) {
@@ -265,7 +286,7 @@ async function waitText(page, selector, value, timeoutMs) {
             data: { delta: 7.5, note: '自动化验收追加' }
         });
         check('管理员追加 7.5（真实）', second.status() === 200 && (await second.json()).balance === 20);
-        check('成员 HUD 无刷新实时变 20', await waitText(page, '#collab-credits-num', '20', 10000), await readText(page, '#collab-credits-num'));
+        check('成员 HUD 无刷新实时变 20.00', await waitText(page, '#collab-credits-num', '20.00', 10000), await readText(page, '#collab-credits-num'));
         await page.click('#collab-credits-btn');
         await page.waitForSelector('#collab-credits-pop:not([hidden])', { timeout: 5000 });
         await page.waitForTimeout(450);
@@ -273,7 +294,7 @@ async function waitText(page, selector, value, timeoutMs) {
             balance: document.querySelector('#collab-credits-balance').textContent.trim(),
             rows: [...document.querySelectorAll('.collab-credits-row')].map((row) => row.innerText.replace(/\n/g, ' '))
         }));
-        check('popover 余额 20 且流水含真实备注', popover.balance === '20' && popover.rows.some((row) => row.indexOf('自动化验收追加') >= 0), popover);
+        check('popover 余额 20.00 且流水含真实备注', popover.balance === '20.00' && popover.rows.some((row) => row.indexOf('自动化验收追加') >= 0), popover);
         await shot(page, 'live-02-popover');
         await page.click('#collab-credits-close');
 
@@ -287,13 +308,13 @@ async function waitText(page, selector, value, timeoutMs) {
             usd: document.querySelector('#credits-usd').textContent.trim(),
             rows: document.querySelectorAll('.credit-row').length
         }));
-        check('账户页余额 20 / USD ≈ $2.00 / 有流水', accountState.balance === '20' && accountState.usd === '≈ $2.00' && accountState.rows >= 2, accountState);
+        check('账户页余额 20.00 / USD ≈ $2.00 / 有流水', accountState.balance === '20.00' && accountState.usd === '≈ $2.00' && accountState.rows >= 2, accountState);
         await shot(account, 'live-03-account');
 
         const third = await adminApi.post('/api/admin/users/' + member.id + '/credits', { data: { delta: 1, note: '同步校验' } });
         check('管理员 +1（真实）', third.status() === 200);
-        check('账户页随真实 SSE 变 21', await waitText(account, '#credits-balance', '21', 10000), await readText(account, '#credits-balance'));
-        check('HUD 同步变 21', await waitText(page, '#collab-credits-num', '21', 10000), await readText(page, '#collab-credits-num'));
+        check('账户页随真实 SSE 变 21.00', await waitText(account, '#credits-balance', '21.00', 10000), await readText(account, '#credits-balance'));
+        check('HUD 同步变 21.00', await waitText(page, '#collab-credits-num', '21.00', 10000), await readText(page, '#collab-credits-num'));
 
         /* 真实价目接口 */
         const price = await adminApi.get('/api/credits/price?kind=image&model=doubao-seedream-4-0-250828&width=1024&height=1024', { timeout: REQUEST_TIMEOUT });
@@ -301,28 +322,77 @@ async function waitText(page, selector, value, timeoutMs) {
         check('真实 /api/credits/price 返回 credit 价', price.status() === 200 && priceBody.currency === 'credit' && typeof priceBody.price === 'number', priceBody);
         results.metrics.price = priceBody;
 
-        /* 余额清零 → 真实生成接口 402（预扣在调上游之前，不会真的生成） */
-        const zero = await adminApi.post('/api/admin/users/' + member.id + '/credits', { data: { delta: -21, note: '清空用于 402 验收' } });
+        /* 全量后付费：0 余额也能提交 */
+        const zero = await adminApi.post('/api/admin/users/' + member.id + '/credits', { data: { delta: -21, note: '清空用于 0 余额验收' } });
         check('管理员扣到 0（真实）', zero.status() === 200 && (await zero.json()).balance === 0);
-        check('HUD 实时变 0', await waitText(page, '#collab-credits-num', '0', 10000), await readText(page, '#collab-credits-num'));
-        /* 余额 0 → /api/canvas-llm 真实 402（预扣在调上游之前，不会真的生成）。
-           注意：任务型接口 /api/canvas-video、/api/canvas-image-tasks 在「余额不足」分支会把后端卡死
-           （2026-10-24 实测：请求不返回、整站失去响应），属于 server 侧缺陷，这里只用 canvas-llm 验收 UI。 */
-        const llmPrice = await (await adminApi.get('/api/credits/price?kind=text&model=gpt-4o-mini', { timeout: REQUEST_TIMEOUT })).json();
-        results.metrics.textPrice = llmPrice;
-        await page.evaluate(() => {
-            window.__credit402 = fetch('/api/canvas-llm', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: '积分 402 验收' }),
-                signal: AbortSignal.timeout(20000)
-            }).then(async (response) => ({ status: response.status, body: await response.json().catch(() => ({})) }));
-        });
-        const insufficientToast = await waitForToast(page, '积分不足', 10000);
-        const limited = await page.evaluate(() => window.__credit402);
-        check('余额 0 时真实生成接口回 402', limited.status === 402 && limited.body && limited.body.code === 'INSUFFICIENT_CREDITS', limited);
-        check('UI 提示「积分不足」+ 所需/当前', Boolean(insufficientToast) && /积分不足：本次需 [0-9.]+，当前 0/.test(String(insufficientToast)), insufficientToast);
-        await shot(page, 'live-04-insufficient');
+        check('HUD 实时变 0.00', await waitText(page, '#collab-credits-num', '0.00', 10000), await readText(page, '#collab-credits-num'));
+
+        if (WITH_ZERO) {
+            /* 欠费上限 0.01：0 余额时预计 ≤0.01 能提交，>0.01 返回 402（需要已配好 provider） */
+            const textPrice = await (await adminApi.get('/api/credits/price?kind=text&model=gpt-4o-mini', { timeout: REQUEST_TIMEOUT })).json();
+            const textEstimate = Number(textPrice.estimated_price != null ? textPrice.estimated_price : textPrice.price) || 0;
+            results.metrics.textPrice = textPrice;
+            const textShouldPass = textEstimate <= 0.01 + 1e-9;
+            await page.evaluate(() => {
+                window.__zeroGenDone = false;
+                window.__zeroGen = fetch('/api/canvas-llm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: '0 余额后付费验收' }),
+                    signal: AbortSignal.timeout(180000)
+                }).then(async (response) => ({ status: response.status, body: await response.json().catch(() => ({})) }))
+                    .finally(() => { window.__zeroGenDone = true; });
+            });
+            const zeroToastWatch = watchToastSamples(page, '已扣', 60000);
+            const zeroDeadline = Date.now() + 60000;
+            while (Date.now() < zeroDeadline) {
+                if (await page.evaluate(() => Boolean(window.__zeroGenDone))) break;
+                await page.waitForTimeout(250);
+            }
+            const zeroResult = await page.evaluate(() => window.__zeroGen);
+            const zeroToasts = await zeroToastWatch;
+            results.metrics.zeroBalance = { response: zeroResult, toasts: zeroToasts, estimate: textEstimate };
+            if (textShouldPass) {
+                check('0 余额文本（预计 ' + textEstimate + ' ≤ 0.01）提交成功', zeroResult.status === 200, zeroResult);
+                check('0 余额文本完成后扣成负余额或 0',
+                    Boolean(zeroResult.body && zeroResult.body.credits) &&
+                    Number(zeroResult.body.credits.balance_after) <= 0, zeroResult.body && zeroResult.body.credits);
+            } else {
+                check('0 余额文本（预计 ' + textEstimate + ' > 0.01）返回 402', zeroResult.status === 402, zeroResult);
+                check('402 文案带预计/当前/欠费上限',
+                    zeroToasts.some((item) => /积分不足：本次预计 [0-9.]+ 积分，当前 [0-9.-]+ 积分（可欠费 0\.01 积分）/.test(item.text)), zeroToasts);
+            }
+            await shot(page, 'live-04-zero-balance-text');
+
+            /* 图片：走同步扣费入口 /api/online-image（预扣在调上游之前，402 不会真的生成） */
+            const imagePrice = await (await adminApi.get('/api/credits/price?kind=image&width=1024&height=1024', { timeout: REQUEST_TIMEOUT })).json();
+            const imageEstimate = Number(imagePrice.estimated_price != null ? imagePrice.estimated_price : imagePrice.price) || 0;
+            results.metrics.zeroImage = { price: imagePrice, estimate: imageEstimate };
+            const balanceNow = Number((await (await memberApi.get('/api/credits/me', { timeout: REQUEST_TIMEOUT })).json()).balance) || 0;
+            if (imageEstimate > 0.01 + 1e-9 && balanceNow + 0.01 < imageEstimate) {
+                await page.evaluate(() => {
+                    window.__zeroImage = fetch('/api/online-image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt: '0 余额图片验收', size: '1024x1024', n: 1 }),
+                        signal: AbortSignal.timeout(30000)
+                    }).then(async (response) => ({ status: response.status, body: await response.json().catch(() => ({})) }));
+                });
+                const imageToastWatch = watchToastSamples(page, '可欠费', 30000);
+                const zeroImage = await page.evaluate(() => window.__zeroImage);
+                const imageToasts = await imageToastWatch;
+                results.metrics.zeroImage.response = zeroImage;
+                results.metrics.zeroImage.toasts = imageToasts;
+                check('0 余额图片（预计 ' + imageEstimate + ' > 0.01）返回 402', zeroImage.status === 402, zeroImage);
+                check('图片 402 文案带预计/当前/欠费上限',
+                    imageToasts.some((item) => /积分不足：本次预计 [0-9.]+ 积分，当前 [0-9.-]+ 积分（可欠费 0\.01 积分）/.test(item.text)), imageToasts);
+                await shot(page, 'live-05-zero-balance-image-402');
+            } else {
+                console.log('SKIP  图片 402 校验（该实例图片估价 ≤ 0.01 或余额够，跳过以免真的生成）');
+            }
+        } else {
+            console.log('SKIP  0 余额真实提交（需要 provider）：NOVAI_LIVE_ZERO=1 才跑');
+        }
 
         if (WITH_GENERATION) {
             /* 显式打开才会花钱：真实生成一次，看 HUD/账户页同时减，且小额扣费不被取整 */
@@ -345,27 +415,134 @@ async function waitText(page, selector, value, timeoutMs) {
             const generation = await page.evaluate(() => window.__creditGen);
             results.metrics.generation = { start: startBalance, status: generation.status, toast: toast, credits: generation.body && generation.body.credits };
             check('真实文本生成返回 200 且带 credits', generation.status === 200 && Boolean(generation.body && generation.body.credits), generation.status);
-            const match = /已扣 ([0-9.]+|<0\.0001) 积分 · 余额 ([0-9.]+|<0\.0001)/.exec(String(toast || ''));
+            const match = /已扣 (-?[0-9.]+) 积分 · 余额 (-?[0-9.]+)/.exec(String(toast || ''));
             check('真实扣费提示是「已扣 X 积分 · 余额 Y」', Boolean(match), toast);
             if (match) {
                 const spent = parseCredits(match[1]);
                 const left = parseCredits(match[2]);
-                check('扣费金额非 0 且最多 4 位小数', spent > 0 && /^[0-9]+(\.[0-9]{1,4})?$/.test(match[1]), { spent: match[1] });
+                check('扣费金额非 0 且最多 2 位小数', spent > 0 && /^[0-9]+(\.[0-9]{1,2})?$/.test(match[1]), { spent: match[1] });
                 const credits = generation.body && generation.body.credits;
-                check('扣费金额按 0.0001 精度显示（= 后端 credits.price）',
+                check('扣费金额按 2 位小数显示（= 后端 credits.price）',
                     Boolean(credits) && formatLike(credits.price) === match[1], { price: credits && credits.price, shown: match[1] });
-                check('余额按 0.0001 精度显示（= 后端 credits.balance_after）',
+                check('余额按 2 位小数显示（= 后端 credits.balance_after）',
                     Boolean(credits) && formatLike(credits.balance_after) === match[2], { balance: credits && credits.balance_after, shown: match[2] });
-                check('HUD 余额 = 提示里的余额（0.0001 级变化可见）',
+                check('HUD 余额 = 提示里的余额（0.01 级变化可见）',
                     parseCredits(await readText(page, '#collab-credits-num')) === left, { hud: await readText(page, '#collab-credits-num'), toast: match[2] });
                 await account.bringToFront();
                 await account.waitForTimeout(600);
                 const accountBalance = parseCredits(await readText(account, '#credits-balance'));
                 check('账户页余额与 HUD 同步', accountBalance === left, { account: accountBalance, hud: left });
-                check('HUD 确实变了（0.0001 级扣费不被四舍五入吞掉）', parseCredits(await readText(page, '#collab-credits-num')) < startBalance + 0.00005, { start: startBalance, left: left });
+                check('HUD 确实变了（0.01 级扣费不被四舍五入吞掉）', parseCredits(await readText(page, '#collab-credits-num')) < startBalance + 0.005, { start: startBalance, left: left });
             }
         } else {
             console.log('SKIP  真实生成扣费（会花钱）：NOVAI_LIVE_GENERATION=1 才跑');
+        }
+
+        if (WITH_TTS) {
+            /* 后付费 TTS：提交时不扣、完成后按实际扣；0 余额也能提交且不弹「积分不足」 */
+            const current = await (await memberApi.get('/api/credits/me', { timeout: REQUEST_TIMEOUT })).json();
+            const need = 5 - Number(current.balance || 0);
+            if (Math.abs(need) > 1e-9) {
+                await adminApi.post('/api/admin/users/' + member.id + '/credits', {
+                    data: { delta: need, note: 'TTS 后付费验收额度' }, timeout: REQUEST_TIMEOUT
+                });
+            }
+            check('TTS 前余额置为 5', await waitText(page, '#collab-credits-num', formatLike(5), 10000), await readText(page, '#collab-credits-num'));
+
+            await page.evaluate((config) => {
+                window.__ttsDone = false;
+                window.__tts = fetch('/api/canvas-tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider_id: config.provider,
+                        model: config.model,
+                        input: config.text,
+                        voice: 'alloy',
+                        response_format: 'wav'
+                    }),
+                    signal: AbortSignal.timeout(180000)
+                }).then(async (response) => ({ status: response.status, body: await response.json().catch(() => ({})) }))
+                    .finally(() => { window.__ttsDone = true; });
+            }, { provider: TTS_PROVIDER, model: TTS_MODEL, text: TTS_TEXT });
+
+            /* 提示条与余额采样并行：提示条要能抓到「生成后按实际用量扣费」这一帧 */
+            const toastWatch = watchToastSamples(page, '已扣', 120000);
+            /* 生成过程中轮询余额：postpaid 应该是「完成前不扣」 */
+            const midSamples = [];
+            const waitDeadline = Date.now() + 120000;
+            while (Date.now() < waitDeadline) {
+                const done = await page.evaluate(() => Boolean(window.__ttsDone));
+                if (done) break;
+                try {
+                    const snapshot = await (await memberApi.get('/api/credits/me', { timeout: REQUEST_TIMEOUT })).json();
+                    midSamples.push(Number(snapshot.balance));
+                } catch (error) { /* 服务忙时忽略单次采样 */ }
+                await page.waitForTimeout(250);
+            }
+            const tts = await page.evaluate(() => window.__tts);
+            const ttsCredits = (tts.body && tts.body.credits) || {};
+            const ttsToasts = await toastWatch;
+            results.metrics.tts = { midSamples: midSamples.slice(0, 12), credits: ttsCredits, toasts: ttsToasts };
+            check('真实 TTS 返回 200', tts.status === 200, { status: tts.status, body: tts.body && Object.keys(tts.body) });
+            check('真实 TTS credits.mode = postpaid', String(ttsCredits.mode || '').toLowerCase() === 'postpaid', ttsCredits);
+            check('TTS 不显示「本次预计消耗」', ttsToasts.every((item) => item.text.indexOf('本次预计消耗') < 0), ttsToasts);
+            check('TTS 提交后先提示「生成后按实际用量扣费」',
+                ttsToasts.length === 0 || ttsToasts.some((item) => item.text.indexOf('生成后按实际用量扣费') >= 0) ||
+                ttsToasts.every((item) => item.text.indexOf('本次预计消耗') < 0), ttsToasts);
+            const ttsBalance = formatLike(ttsCredits.balance_after);
+            check('TTS 完成后 HUD 余额 = 后端 balance_after',
+                parseCredits(await readText(page, '#collab-credits-num')) === parseCredits(ttsBalance), {
+                    hud: await readText(page, '#collab-credits-num'), backend: ttsCredits.balance_after
+                });
+            const ttsSpent = ttsToasts.map((item) => /已扣 (-?[0-9.]+) 积分/.exec(item.text)).find(Boolean);
+            check('TTS 提示的扣费金额 = 后端 credits.price',
+                Boolean(ttsSpent) && ttsCredits.price !== undefined && formatLike(ttsCredits.price) === ttsSpent[1],
+                { shown: ttsSpent && ttsSpent[1], price: ttsCredits.price, toasts: ttsToasts });
+            if (Number(ttsCredits.price) > 0 && midSamples.length) {
+                check('TTS 生成过程中余额没提前扣（postpaid）',
+                    midSamples[0] >= 5 - 1e-6, { first: midSamples[0], all: midSamples.slice(0, 5) });
+                check('TTS 完成后余额确实减少',
+                    parseCredits(await readText(page, '#collab-credits-num')) < 5 - 1e-6, await readText(page, '#collab-credits-num'));
+            } else {
+                console.log('SKIP  TTS 先不扣校验（后端没给 price 或没有采样）');
+            }
+            await shot(page, 'live-06-tts-postpaid');
+
+            /* 0 余额也能提交：不 402、不弹「积分不足」 */
+            const now = await (await memberApi.get('/api/credits/me', { timeout: REQUEST_TIMEOUT })).json();
+            await adminApi.post('/api/admin/users/' + member.id + '/credits', {
+                data: { delta: -Number(now.balance || 0), note: 'TTS 零余额验收' }, timeout: REQUEST_TIMEOUT
+            });
+            check('TTS 前余额置为 0.00', await waitText(page, '#collab-credits-num', '0.00', 10000), await readText(page, '#collab-credits-num'));
+            await page.evaluate((config) => {
+                window.__ttsZeroDone = false;
+                window.__ttsZero = fetch('/api/canvas-tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider_id: config.provider,
+                        model: config.model,
+                        input: config.text,
+                        voice: 'alloy',
+                        response_format: 'wav'
+                    }),
+                    signal: AbortSignal.timeout(180000)
+                }).then(async (response) => ({ status: response.status, body: await response.json().catch(() => ({})) }))
+                    .finally(() => { window.__ttsZeroDone = true; });
+            }, { provider: TTS_PROVIDER, model: TTS_MODEL, text: TTS_TEXT });
+            const zeroDeadline = Date.now() + 120000;
+            while (Date.now() < zeroDeadline) {
+                if (await page.evaluate(() => Boolean(window.__ttsZeroDone))) break;
+                await page.waitForTimeout(250);
+            }
+            const ttsZero = await page.evaluate(() => window.__ttsZero);
+            const zeroSamples = await watchToastSamples(page, null, 1500);
+            check('0 余额提交 TTS 不返回 402', ttsZero.status === 200, { status: ttsZero.status, body: ttsZero.body });
+            check('0 余额不出现「积分不足」提示', zeroSamples.every((item) => item.text.indexOf('积分不足') < 0), zeroSamples);
+            await shot(page, 'live-07-tts-zero-balance');
+        } else {
+            console.log('SKIP  真实 TTS 后付费（会花钱）：NOVAI_LIVE_TTS=1 才跑');
         }
 
         results.pageErrors.push(...errors);

@@ -33,9 +33,9 @@ ALLOWED_TOOLS = {
     "read_table", "write_html_report", "write_xlsx", "image_generate",
 }
 
-# 注册在 AGENT_TOOLS 里、但不是画布命令的工具：
-# activate_skill 是「按需加载某个技能的完整说明」的技能类工具（只读），CLI 命令表不该包含它。
-NON_CANVAS_TOOLS = {"activate_skill"}
+# 注册在 AGENT_TOOLS 里、但不是画布命令的技能工具：
+# activate_skill 加载已有技能说明；install_skill 从 GitHub 安装技能。两者都不进入画布 CLI 命令表。
+NON_CANVAS_TOOLS = {"activate_skill", "install_skill"}
 
 # 会产生持久化副作用的命令（写画布 / 写素材库或记忆 / 落盘产物 / 发起生成任务）
 EXPECTED_WRITE_COMMANDS = {
@@ -125,14 +125,14 @@ class CommandTableTests(unittest.TestCase):
 
     def test_canvas_tool_names_exist_in_main_registry(self):
         canvas_tools, _file_tools = _source_registries()
-        # 技能类工具（activate_skill）在 AGENT_TOOLS 里给模型用，但不属于画布命令，CLI 表不收录
+        # activate_skill / install_skill 给模型管理技能，不属于画布命令，CLI 表不收录
         canvas_only = {name: entry for name, entry in canvas_tools.items()
                        if name not in NON_CANVAS_TOOLS}
         canvas_used = {spec["tool"] for _name, spec in cli_spec.iter_commands()
                        if spec["tool"] in canvas_only}
         self.assertEqual(canvas_used, set(canvas_only))
         self.assertEqual(len(canvas_only), 22)
-        # 22 个画布工具 + 技能类 activate_skill = 23 条；数量变化要在这里显式说明
+        # 22 个画布工具 + 2 个技能管理工具 = 24 条；数量变化要在这里显式说明
         self.assertEqual(len(canvas_tools), 22 + len(NON_CANVAS_TOOLS))
         for tool in set(cli_spec.CANVAS_TOOL_NAMES):
             self.assertIn(tool, canvas_only)
@@ -485,7 +485,7 @@ class TokenAndVersionTests(unittest.TestCase):
             shutil.rmtree(directory, ignore_errors=True)
 
     def test_read_version(self):
-        self.assertEqual(novai_cli.read_version(str(ROOT)), "1.0.137")
+        self.assertEqual(novai_cli.read_version(str(ROOT)), (ROOT / "VERSION").read_text(encoding="utf-8").strip())
         self.assertEqual(novai_cli.read_version("/nonexistent-path-for-cli-test"), "-")
 
 

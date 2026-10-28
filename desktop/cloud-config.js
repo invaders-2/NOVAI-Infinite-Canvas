@@ -23,7 +23,7 @@ function normalizeBaseUrl(value) {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
   if (!parsed.hostname) return '';
   const tail = parsed.pathname.replace(/\/+$/, '');
-  return parsed.origin + tail;
+  return parsed.origin + tail + parsed.search + parsed.hash;
 }
 
 function readCloudBaseUrl(userDataDir) {

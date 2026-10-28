@@ -44,6 +44,7 @@ from server.integrations import openclaw_capability
 from server.integrations import video_sources
 from server.skills import registry as skills_registry
 from server.skills import skill_md
+from server.skills import github_install
 from server.routes.deps import deps
 
 router = APIRouter(prefix="/api")
@@ -597,6 +598,30 @@ async def skills_import(data: Dict[str, Any] = Body(...)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"skill": skills_registry.public_skill(skill, kind="skill"), "created": created}
+
+
+@router.post("/skills/import-github")
+async def skills_import_github(data: Dict[str, Any] = Body(...)):
+    """只下载并校验 GitHub 中的 SKILL.md，不执行仓库内容。"""
+    try:
+        fetched = await asyncio.to_thread(
+            github_install.fetch_skill_markdown,
+            str(data.get("url") or ""),
+            path=str(data.get("path") or ""),
+            ref=str(data.get("ref") or ""),
+        )
+    except github_install.GitHubSkillError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    installed = _import_skill_md(fetched["markdown"], bool(data.get("overwrite")))
+    return {
+        "ok": True,
+        "skill": installed["skill"],
+        "created": installed["created"],
+        "repository": fetched["repository"],
+        "ref": fetched["ref"],
+        "path": fetched["path"],
+        "source_url": fetched["source_url"],
+    }
 
 
 def _import_skill_md(markdown: Any, overwrite: bool) -> Dict[str, Any]:

@@ -14,7 +14,8 @@
  *   4. V2 侧栏账户菜单：展开有「积分 x / 管理员分配」，收起不占位
  *   5. 账户页积分卡片：余额、USD 等值、最近 20 条流水、空状态
  *   6. 管理后台：积分列 + 行内分配、分配成功刷新行余额 + toast、余额不足显示后端 detail
- *   7. 节点生成：预计消耗 / 已扣 + 余额 / 402 积分不足 / 流式穿透 + 结算
+ *   7. 节点生成（全量后付费）：提交提示「生成后按实际用量扣费 · 预计约 X」/ 完成「已扣 X · 余额 Y」（可为负）/
+ *      0 余额图片·文本·视频可提交且无「积分不足」/ 流式穿透 + 结算 / 失败「未产生扣费」
  *   8. auth-off：不渲染、不开 SSE、只探测一次
  *
  * 截图：tests/artifacts/credits-ui/*.png；报告：tests/artifacts/credits-ui/credits-ui-report.json
@@ -221,8 +222,8 @@ async function shot(page, name) {
             };
         });
         results.metrics.hud = hudState;
-        check('HUD 胶囊渲染', hudState.label === '12.5', hudState.label);
-        check('HUD 胶囊 aria-label 带余额', hudState.aria === '我的积分：12.5', hudState.aria);
+        check('HUD 胶囊渲染', hudState.label === '12.50', hudState.label);
+        check('HUD 胶囊 aria-label 带余额', hudState.aria === '我的积分：12.50', hudState.aria);
         check('信用卡片挂在协作胶囊里', hudState.hud.w <= 600 && hudState.rect.x > hudState.avatarsRect.x);
         check('胶囊在分享按钮右边（不与成员/分享重叠）',
             hudState.rect.x >= hudState.shareRect.x + hudState.shareRect.w - 1, { pill: hudState.rect, share: hudState.shareRect });
@@ -247,7 +248,7 @@ async function shot(page, name) {
             };
         });
         results.metrics.popover = popover;
-        check('popover 显示余额', popover.balance === '12.5', popover.balance);
+        check('popover 显示余额', popover.balance === '12.50', popover.balance);
         check('popover 说明是管理员分配', popover.text.indexOf('管理员分配') >= 0);
         check('popover 最多 5 条流水', popover.rows.length === 5, popover.rows);
         check('popover 流水含 +/- 与备注', popover.rows.some((row) => row.indexOf('+') >= 0) && popover.rows.some((row) => row.indexOf('−') >= 0), popover.rows);
@@ -260,8 +261,8 @@ async function shot(page, name) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId: 2, balance: 9.5 })
         });
-        check('SSE 推送后胶囊数字实时变', await waitText(hud.page, '9.5'), await readText(hud.page, '#collab-credits-num'));
-        check('popover 余额同步更新', (await readText(hud.page, '#collab-credits-balance')) === '9.5');
+        check('SSE 推送后胶囊数字实时变', await waitText(hud.page, '9.50'), await readText(hud.page, '#collab-credits-num'));
+        check('popover 余额同步更新', (await readText(hud.page, '#collab-credits-balance')) === '9.50');
         await hud.page.click('#collab-credits-close');
         check('关闭按钮能关掉 popover', await hud.page.evaluate(() => document.querySelector('#collab-credits-pop').hidden));
 
@@ -318,7 +319,7 @@ async function shot(page, name) {
         await hud.page.setViewportSize(VIEWPORT);
         await hud.page.reload({ waitUntil: 'domcontentloaded' });
         await hud.page.waitForSelector('#collab-credits-btn', { state: 'visible', timeout: 20000 });
-        await waitText(hud.page, '9.5');
+        await waitText(hud.page, '9.50');
         await hud.page.evaluate(() => {
             window.__creditGen = fetch('/api/canvas-llm', {
                 method: 'POST',
@@ -328,17 +329,21 @@ async function shot(page, name) {
         });
         const toasts = await watchToasts(hud.page, '已扣', 6000);
         results.metrics.toasts = toasts;
-        const estimate = toasts.find((item) => item.text.indexOf('本次预计消耗') >= 0);
+        const notice = toasts.find((item) => item.text.indexOf('生成后按实际用量扣费') >= 0);
         const spent = toasts.find((item) => item.text.indexOf('已扣') >= 0);
-        check('生成前提示「本次预计消耗 X 积分」', Boolean(estimate) && estimate.text === '本次预计消耗 0.5 积分', toasts);
-        check('生成完成提示「已扣 X · 余额 Y」', Boolean(spent) && /已扣 0\.5 积分 · 余额 9/.test(spent.text), spent);
-        check('预计提示在请求返回前出现', Boolean(estimate && spent) && estimate.at < spent.at, { estimate: estimate && estimate.at, spent: spent && spent.at });
+        check('提交时提示「生成后按实际用量扣费 · 预计约 X 积分」',
+            Boolean(notice) && notice.text === '生成后按实际用量扣费 · 预计约 0.01 积分', toasts);
+        check('不再显示「本次预计消耗」预扣文案', toasts.every((item) => item.text.indexOf('本次预计消耗') < 0), toasts);
+        check('生成完成提示「已扣 X · 余额 Y」（2 位小数）',
+            Boolean(spent) && spent.text === '已扣 0.01 积分 · 余额 9.49', spent);
+        check('后付费提示在请求返回前出现', Boolean(notice && spent) && notice.at < spent.at, { notice: notice && notice.at, spent: spent && spent.at });
         const gen = await hud.page.evaluate(() => window.__creditGen);
-        check('生成响应带 credits', gen.status === 200 && Boolean(gen.body.credits), gen);
-        check('HUD 随扣费实时减少', await waitText(hud.page, '9'), await readText(hud.page, '#collab-credits-num'));
+        check('生成响应带 credits 且 mode=postpaid',
+            gen.status === 200 && Boolean(gen.body.credits) && gen.body.credits.mode === 'postpaid', gen);
+        check('HUD 随扣费实时减少', await waitText(hud.page, '9.49'), await readText(hud.page, '#collab-credits-num'));
         await shot(hud.page, '06-generation-spent');
 
-        /* 再次触发一次，截「预计」那一帧 */
+        /* 再次触发一次，截「后付费提示」那一帧 */
         await hud.page.evaluate(() => {
             window.__creditGen2 = fetch('/api/canvas-llm', {
                 method: 'POST',
@@ -346,37 +351,92 @@ async function shot(page, name) {
                 body: JSON.stringify({ model: 'mock-chat', message: 'second run', max_tokens: 100 })
             }).then(async (response) => ({ status: response.status, body: await response.json() }));
         });
-        const estimateText = await waitForToastText(hud.page, '本次预计消耗', 4000);
-        await shot(hud.page, '06b-generation-estimate');
+        const noticeText = await waitForToastText(hud.page, '生成后按实际用量扣费', 4000);
+        await shot(hud.page, '06b-generation-notice');
         await hud.page.evaluate(() => window.__creditGen2);
-        check('第二次生成也先显示预计', estimateText === '本次预计消耗 0.5 积分', estimateText);
+        check('第二次生成也显示后付费提示', noticeText === '生成后按实际用量扣费 · 预计约 0.01 积分', noticeText);
 
         /* 任务轮询：响应里带 credits 时补「实际扣多少」 */
         const beforeTask = toasts.length;
         await hud.page.evaluate(() => fetch('/api/tasks/task-credit-check').then((response) => response.json()));
-        const taskToasts = await watchToasts(hud.page, '已扣 2 积分', 5000);
-        check('任务轮询拿到 credits 后提示实际扣费', taskToasts.some((item) => /已扣 2 积分/.test(item.text)), taskToasts);
-        check('HUD 同步任务扣费', await waitText(hud.page, '6.5'), await readText(hud.page, '#collab-credits-num'));
+        const taskToasts = await watchToasts(hud.page, '已扣 0.1 积分', 5000);
+        check('任务轮询拿到 credits 后提示实际扣费', taskToasts.some((item) => item.text === '已扣 0.10 积分 · 余额 9.38'), taskToasts);
+        check('HUD 同步任务扣费', await waitText(hud.page, '9.38'), await readText(hud.page, '#collab-credits-num'));
 
-        /* 余额不足 402 */
+        /* 欠费上限 0.01：0 余额时文本/小额（预计 ≤ 0.01）能提交；图片/视频这类预计 > 0.01 的 402 */
+        await mockConfig(BASE, { prices: { text: 0.01 } });
         await mockBalance(BASE, 0);
         await waitText(hud.page, '0');
         await hud.page.evaluate(() => {
-            window.__creditVideo = fetch('/api/canvas-video', {
+            window.__zeroText = fetch('/api/canvas-llm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: 'mock-chat', message: 'zero balance text', max_tokens: 16 })
+            }).then(async (response) => ({ status: response.status, body: await response.json() }));
+        });
+        const textZeroToasts = await watchToasts(hud.page, '余额 -0.01', 8000);
+        const zeroText = await hud.page.evaluate(() => window.__zeroText);
+        check('0 余额文本（预计 0.01 ≤ 0.01）提交成功', zeroText.status === 200, zeroText);
+        check('0 余额文本完成后扣成负余额（-0.01，2 位小数）',
+            textZeroToasts.some((item) => item.text === '已扣 0.01 积分 · 余额 -0.01'), textZeroToasts);
+        check('HUD 显示负余额（-0.01）', await waitText(hud.page, '-0.01'), await readText(hud.page, '#collab-credits-num'));
+        await shot(hud.page, '06c-zero-balance-text');
+
+        /* 小额图片（预计 0.01 ≤ 0.01）也能提交：欠费上限 0.01，先把余额重置到 0 */
+        await mockConfig(BASE, { prices: { text: 0.01, image: 0.01 } });
+        await mockBalance(BASE, 0);
+        await waitText(hud.page, '0');
+        await hud.page.evaluate(() => {
+            window.__zeroSmallImage = fetch('/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: 'mock-image', prompt: 'tiny image', n: 1 })
+            }).then(async (response) => ({ status: response.status, body: await response.json() }));
+        });
+        const smallImageToasts = await watchToasts(hud.page, '余额 -0.01', 8000);
+        const zeroSmallImage = await hud.page.evaluate(() => window.__zeroSmallImage);
+        check('0 余额小额图片（预计 0.01 ≤ 0.01）提交成功', zeroSmallImage.status === 200, zeroSmallImage);
+        check('小额图片完成后扣成负余额（-0.01）',
+            smallImageToasts.some((item) => item.text === '已扣 0.01 积分 · 余额 -0.01'), smallImageToasts);
+        await shot(hud.page, '06d-zero-balance-small-image');
+
+        /* 图片（预计 0.10 > 余额+0.01）→ 402 + 欠费上限文案 */
+        await mockConfig(BASE, { prices: { text: 0.01 } });
+        await hud.page.evaluate(() => {
+            window.__zeroImage = fetch('/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: 'mock-image', prompt: 'zero balance image', n: 1 })
+            }).then(async (response) => ({ status: response.status, body: await response.json() }));
+        });
+        const imageLimitToasts = await watchToasts(hud.page, '可欠费', 8000);
+        const zeroImage = await hud.page.evaluate(() => window.__zeroImage);
+        check('0 余额图片（预计 0.10 > 0.01）返回 402',
+            zeroImage.status === 402 && zeroImage.body && zeroImage.body.code === 'INSUFFICIENT_CREDITS', zeroImage);
+        check('图片 402 文案「积分不足：本次预计 0.10 积分，当前 -0.01 积分（可欠费 0.01 积分）」',
+            imageLimitToasts.some((item) => item.text === '积分不足：本次预计 0.10 积分，当前 -0.01 积分（可欠费 0.01 积分）'), imageLimitToasts);
+        check('图片 402 不扣费（余额仍 -0.01）', (await readText(hud.page, '#collab-credits-num')) === '-0.01', await readText(hud.page, '#collab-credits-num'));
+        await shot(hud.page, '06d-zero-balance-402');
+
+        /* 视频（预计 10）同样 402，文案带本次预计与当前余额 */
+        await hud.page.evaluate(() => {
+            window.__zeroVideo = fetch('/api/canvas-video', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ model: 'mock-video', duration: 5 })
             }).then(async (response) => ({ status: response.status, body: await response.json() }));
         });
-        const insufficientToasts = await watchToasts(hud.page, '积分不足', 6000);
-        const video = await hud.page.evaluate(() => window.__creditVideo);
-        check('余额不足返回 402', video.status === 402, video);
-        check('402 提示积分不足 + 所需/当前', insufficientToasts.some((item) => /积分不足：本次需 10，当前 0/.test(item.text)), insufficientToasts);
-        await shot(hud.page, '06c-generation-insufficient');
+        const videoLimitToasts = await watchToasts(hud.page, '本次预计 1.55', 8000);
+        const zeroVideo = await hud.page.evaluate(() => window.__zeroVideo);
+        check('0 余额视频（预计 1.55 > 0.01）返回 402', zeroVideo.status === 402, zeroVideo);
+        check('视频 402 文案带预计 1.55 与当前余额',
+            videoLimitToasts.some((item) => item.text === '积分不足：本次预计 1.55 积分，当前 -0.01 积分（可欠费 0.01 积分）'), videoLimitToasts);
+        check('视频 402 不扣费', (await readText(hud.page, '#collab-credits-num')) === '-0.01', await readText(hud.page, '#collab-credits-num'));
+        await mockConfig(BASE, { prices: {} });
 
         /* 流式：响应体不被拦截破坏，结束后提示结算 */
         await mockBalance(BASE, 5);
-        await waitText(hud.page, '5');
+        await waitText(hud.page, '5.00');
         const streamResult = await hud.page.evaluate(async () => {
             const response = await fetch('/api/canvas-llm/stream', {
                 method: 'POST',
@@ -389,52 +449,53 @@ async function shot(page, name) {
         check('流式响应原样透传（能读到 delta/done）', streamResult.status === 200 &&
             streamResult.text.indexOf('"type":"done"') >= 0 &&
             streamResult.text.indexOf('积分流式验收通过') >= 0, streamResult.text.slice(0, 160));
-        const streamToasts = await watchToasts(hud.page, '已扣', 6000);
-        check('流式结束后提示结算扣费', streamToasts.some((item) => /已扣 0\.5 积分/.test(item.text)), streamToasts);
-        check('HUD 随流式结算减少', await waitText(hud.page, '4.5'), await readText(hud.page, '#collab-credits-num'));
+        const streamToasts = await watchToasts(hud.page, '余额 4.99', 6000);
+        check('流式结束后提示结算扣费', streamToasts.some((item) => item.text === '已扣 0.01 积分 · 余额 4.99'), streamToasts);
+        check('流式也不显示「本次预计消耗」', streamToasts.every((item) => item.text.indexOf('本次预计消耗') < 0), streamToasts);
+        check('HUD 随流式结算减少', await waitText(hud.page, '4.99'), await readText(hud.page, '#collab-credits-num'));
 
-        /* 积分格式：最多 4 位小数（0.0001 精度），非零扣费不被取整成 0 */
+        /* 积分格式：固定 2 位小数（0.01 步进），负余额正常 */
         const formats = await hud.page.evaluate(() => {
             const f = window.NOVAI_CREDITS.format;
             return {
-                '0.0001': f(0.0001),
-                '0.0002': f(0.0002),
-                '0.02': f(0.02),
-                '0.65': f(0.65),
-                '3.72': f(3.72),
+                '0.01': f(0.01),
+                '0.09': f(0.09),
+                '1.3': f(1.3),
+                '1.30': f(1.3),
                 '12.5': f(12.5),
-                '97.47': f(97.47),
-                '97.4699': f(97.4699),
                 '100': f(100),
-                '12.50': f(12.5),
-                '0.00004': f(0.00004)
+                '97.4699': f(97.4699),
+                '0.009': f(0.009),
+                '-0.09': f(-0.09),
+                '0.5': f(0.5)
             };
         });
         results.metrics.formats = formats;
-        check('格式化 0.0001 / 0.0002 / 0.02 / 0.65 / 3.72 / 12.5 / 97.47 / 100',
-            formats['0.0001'] === '0.0001' && formats['0.0002'] === '0.0002' && formats['0.02'] === '0.02' &&
-            formats['0.65'] === '0.65' && formats['3.72'] === '3.72' && formats['12.5'] === '12.5' &&
-            formats['97.47'] === '97.47' && formats['100'] === '100', formats);
-        check('4 位小数扣费可见（97.4699 不被吞成 97.47）', formats['97.4699'] === '97.4699', formats);
-        check('格式化不出现无意义尾随 0（12.50→12.5）', formats['12.50'] === '12.5', formats);
-        check('非零小额不显示成 0（0.00004→<0.0001）', formats['0.00004'] === '<0.0001', formats);
+        check('固定 2 位小数（0.01 / 0.09 / 1.30 / 12.50 / 100.00）',
+            formats['0.01'] === '0.01' && formats['0.09'] === '0.09' && formats['1.3'] === '1.30' &&
+            formats['12.5'] === '12.50' && formats['100'] === '100.00', formats);
+        check('四舍五入到 2 位（97.4699→97.47 / 0.009→0.01）',
+            formats['97.4699'] === '97.47' && formats['0.009'] === '0.01', formats);
+        check('负余额格式（-0.09）', formats['-0.09'] === '-0.09', formats);
+        check('始终保留两位（1.30 / 0.50）', formats['1.30'] === '1.30' && formats['0.5'] === '0.50', formats);
 
-        /* 小额扣费：0.0001 / 3.72 / 0.65 三个真实量级（mock 价目覆盖） */
-        await mockConfig(BASE, { prices: { text: 0.0001, video: 3.72, audio: 0.65 } });
-        await mockBalance(BASE, 97.47);
-        check('HUD 显示 97.47（4 位精度去尾）', await waitText(hud.page, '97.47'), await readText(hud.page, '#collab-credits-num'));
+        /* 固定 2 位：文本 0.01 / 视频 1.55 / 音频 0.01，余额都按分展示 */
+        await mockConfig(BASE, { prices: { text: 0.01, video: 1.55, audio: 0.01 } });
+        await mockBalance(BASE, 12.47);
+        check('HUD 显示 12.47（2 位小数）', await waitText(hud.page, '12.47'), await readText(hud.page, '#collab-credits-num'));
         await hud.page.evaluate(() => {
             window.__smallText = fetch('/api/canvas-llm', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model: 'mock-chat', message: 'tiny charge', max_tokens: 16 })
+                body: JSON.stringify({ model: 'mock-chat', message: 'cent charge', max_tokens: 16 })
             }).then(async (response) => ({ status: response.status, body: await response.json() }));
         });
-        const smallToasts = await watchToasts(hud.page, '已扣 0.0001', 6000);
-        check('预计提示保留 0.0001（不取整）', smallToasts.some((item) => item.text === '本次预计消耗 0.0001 积分'), smallToasts);
-        check('完成提示「已扣 0.0001 积分 · 余额 97.4699」', smallToasts.some((item) => item.text === '已扣 0.0001 积分 · 余额 97.4699'), smallToasts);
+        const smallToasts = await watchToasts(hud.page, '余额 12.46', 6000);
+        check('后付费提示带参考价 0.01',
+            smallToasts.some((item) => item.text === '生成后按实际用量扣费 · 预计约 0.01 积分'), smallToasts);
+        check('完成提示「已扣 0.01 积分 · 余额 12.46」', smallToasts.some((item) => item.text === '已扣 0.01 积分 · 余额 12.46'), smallToasts);
         await hud.page.evaluate(() => window.__smallText);
-        check('扣 0.0001 后 HUD 数字确实变化（97.4700 → 97.4699）', await waitText(hud.page, '97.4699'), await readText(hud.page, '#collab-credits-num'));
+        check('扣 0.01 后 HUD 数字确实变化（12.47 → 12.46）', await waitText(hud.page, '12.46'), await readText(hud.page, '#collab-credits-num'));
         await shot(hud.page, '06d-small-deduction');
         await hud.page.click('#collab-credits-btn');
         await hud.page.waitForSelector('#collab-credits-pop:not([hidden])', { timeout: 5000 });
@@ -443,8 +504,8 @@ async function shot(page, name) {
             balance: document.querySelector('#collab-credits-balance').textContent.trim(),
             firstAmount: (document.querySelector('.collab-credits-row-amt') || {}).textContent || ''
         }));
-        check('popover 余额与流水都显示 4 位小数（97.4699 / −0.0001）',
-            popoverSmall.balance === '97.4699' && popoverSmall.firstAmount.trim() === '−0.0001', popoverSmall);
+        check('popover 余额与流水都显示 2 位小数（12.46 / −0.01）',
+            popoverSmall.balance === '12.46' && popoverSmall.firstAmount.trim() === '−0.01', popoverSmall);
         await shot(hud.page, '06e-popover-precision');
         await hud.page.click('#collab-credits-close');
 
@@ -452,23 +513,68 @@ async function shot(page, name) {
             window.__video372 = fetch('/api/canvas-video', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: 'video 3.72', duration: 5 })
+                body: JSON.stringify({ prompt: 'video 1.3', duration: 5 })
             }).then(async (response) => ({ status: response.status, body: await response.json() }));
         });
-        const videoToasts = await watchToasts(hud.page, '已扣 3.72', 6000);
-        check('视频扣费 3.72 不被取整（余额 93.7499）', videoToasts.some((item) => /已扣 3\.72 积分 · 余额 93\.7499/.test(item.text)), videoToasts);
+        const videoToasts = await watchToasts(hud.page, '余额 10.91', 6000);
+        check('视频扣费 1.55（余额 10.91）', videoToasts.some((item) => item.text === '已扣 1.55 积分 · 余额 10.91'), videoToasts);
         await hud.page.evaluate(() => window.__video372);
 
         await hud.page.evaluate(() => {
             window.__audio065 = fetch('/api/canvas-audio', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: 'audio 0.65' })
+                body: JSON.stringify({ prompt: 'audio 0.01' })
             }).then(async (response) => ({ status: response.status, body: await response.json() }));
         });
-        const audioToasts = await watchToasts(hud.page, '已扣 0.65', 6000);
-        check('音频扣费 0.65 不被取整（余额 93.0999）', audioToasts.some((item) => /已扣 0\.65 积分 · 余额 93\.0999/.test(item.text)), audioToasts);
+        const audioToasts = await watchToasts(hud.page, '余额 10.90', 6000);
+        check('音频扣费 0.01（余额 10.90）', audioToasts.some((item) => item.text === '已扣 0.01 积分 · 余额 10.90'), audioToasts);
         await hud.page.evaluate(() => window.__audio065);
+
+        /* TTS 走同一套后付费通路（/api/canvas-tts） */
+        await hud.page.evaluate(() => {
+            window.__tts = fetch('/api/canvas-tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: 'tts-1', input: '后付费语音验收', voice: 'alloy', response_format: 'wav' })
+            }).then(async (response) => ({ status: response.status, body: await response.json() }));
+        });
+        const ttsToasts = await watchToasts(hud.page, '余额 10.89', 6000);
+        const ttsResult = await hud.page.evaluate(() => window.__tts);
+        check('TTS 提交时提示生成后扣费', ttsToasts.some((item) => item.text.indexOf('生成后按实际用量扣费') >= 0), ttsToasts);
+        check('TTS 响应 mode=postpaid 且完成后扣费 0.01（余额 10.89）',
+            ttsResult.status === 200 && ttsResult.body.credits && ttsResult.body.credits.mode === 'postpaid' &&
+            ttsToasts.some((item) => item.text === '已扣 0.01 积分 · 余额 10.89'), { toasts: ttsToasts, body: ttsResult.body });
+        await hud.page.evaluate(() => window.__tts);
+
+        /* 生成失败：不预扣，所以提示「未产生扣费」 */
+        await hud.page.evaluate(() => {
+            window.__failGen = fetch('/api/canvas-llm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ model: 'mock-chat', message: 'fail case', fail: true })
+            }).then(async (response) => ({ status: response.status, body: await response.json().catch(() => ({})) }));
+        });
+        const failToasts = await watchToasts(hud.page, '生成失败', 6000);
+        const failGen = await hud.page.evaluate(() => window.__failGen);
+        check('失败响应是 500', failGen.status === 500, failGen);
+        check('失败提示「生成失败，未产生扣费」', failToasts.some((item) => item.text === '生成失败，未产生扣费'), failToasts);
+        check('失败提示不出现「积分不足」', failToasts.every((item) => item.text.indexOf('积分不足') < 0), failToasts);
+        await shot(hud.page, '06f-generation-failed');
+
+        /* Agent：没有单一价目，只提示后付费、不显示预扣数字 */
+        await hud.page.evaluate(() => {
+            window.__agentRun = fetch('/api/agent/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ goal: '做一张电商海报', canvas_id: 'credits-e2e' })
+            }).then(async (response) => ({ status: response.status, body: await response.json().catch(() => ({})) }));
+        });
+        const agentNotice = await waitForToastText(hud.page, '生成后按实际用量扣费', 4000);
+        const agentRun = await hud.page.evaluate(() => window.__agentRun);
+        check('Agent 提交也提示后付费', agentNotice === '生成后按实际用量扣费', agentNotice);
+        check('Agent 不显示预估数字', String(agentNotice).indexOf('预计约') < 0, agentNotice);
+        check('Agent 请求正常返回', agentRun.status === 200, agentRun);
         await mockConfig(BASE, { prices: {} });
         results.pageErrors.push(...hud.errors);
         check('画布页无 JS 报错', hud.errors.length === 0, hud.errors.slice(0, 3));
@@ -506,7 +612,7 @@ async function shot(page, name) {
             };
         });
         results.metrics.sidebar = menu;
-        check('侧栏账户菜单显示「积分 12.5」', menu.visible && menu.value === '积分 12.5', menu);
+        check('侧栏账户菜单显示「积分 12.50」', menu.visible && menu.value === '积分 12.50', menu);
         check('侧栏小字「管理员分配」', menu.note === '管理员分配', menu.note);
         await shot(shell.page, '03-sidebar-menu');
 
@@ -518,7 +624,7 @@ async function shot(page, name) {
         });
         await shell.page.waitForTimeout(500);
         const menuAfter = await readText(shell.page, '.acct-credits-value');
-        check('侧栏余额随 SSE 更新', menuAfter === '积分 21.5', menuAfter);
+        check('侧栏余额随 SSE 更新', menuAfter === '积分 21.50', menuAfter);
         await fetch(BASE + '/__mock/balance', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -530,10 +636,10 @@ async function shot(page, name) {
         await fetch(BASE + '/__mock/balance', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: 2, balance: 0.0001 })
+            body: JSON.stringify({ userId: 2, balance: 0.09 })
         });
         await shell.page.waitForTimeout(500);
-        check('侧栏余额显示 4 位小数（0.0001）', (await readText(shell.page, '.acct-credits-value')) === '积分 0.0001', await readText(shell.page, '.acct-credits-value'));
+        check('侧栏余额显示 2 位小数（0.09）', (await readText(shell.page, '.acct-credits-value')) === '积分 0.09', await readText(shell.page, '.acct-credits-value'));
         results.pageErrors.push(...shell.errors);
         check('V2 外壳无 JS 报错', shell.errors.length === 0, shell.errors.slice(0, 3));
         await shell.context.close();
@@ -559,10 +665,11 @@ async function shot(page, name) {
         });
         results.metrics.account = accountState;
         check('账户页积分卡片可见', accountState.cardVisible);
-        check('账户页余额 12.5', accountState.balance === '12.5', accountState.balance);
+        check('账户页余额 12.50', accountState.balance === '12.50', accountState.balance);
         check('账户页 USD 等值 ≈ $1.25', accountState.usd === '≈ $1.25', accountState.usd);
         check('账户页流水 20 条上限（此例 8 条）', accountState.rows === 8, accountState.rows);
-        check('账户页流水显示 0.0001 级金额', accountState.amounts.indexOf('−0.0001') >= 0, accountState.amounts);
+        check('账户页流水显示 2 位小数金额（−0.01 / +0.02）',
+            accountState.amounts.indexOf('−0.01') >= 0 && accountState.amounts.indexOf('+0.02') >= 0, accountState.amounts);
         check('账户页流水含类型/余额', accountState.types.indexOf('管理员分配') >= 0 && accountState.balances[0].indexOf('余额') === 0, accountState);
         await shot(account.page, '04-account-credits');
         await fetch(BASE + '/__mock/balance', {
@@ -577,14 +684,25 @@ async function shot(page, name) {
         await fetch(BASE + '/__mock/balance', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: 2, balance: 0.0001 })
+            body: JSON.stringify({ userId: 2, balance: 0.09 })
         });
         await account.page.waitForTimeout(600);
-        check('账户页余额显示 4 位小数（0.0001 / ≈ $0.00）',
-            (await readText(account.page, '#credits-balance')) === '0.0001' &&
-            (await readText(account.page, '#credits-usd')) === '≈ $0.00',
+        check('账户页余额显示 2 位小数（0.09 / ≈ $0.01）',
+            (await readText(account.page, '#credits-balance')) === '0.09' &&
+            (await readText(account.page, '#credits-usd')) === '≈ $0.01',
             { balance: await readText(account.page, '#credits-balance'), usd: await readText(account.page, '#credits-usd') });
         await shot(account.page, '04c-account-precision');
+        await fetch(BASE + '/__mock/balance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: 2, balance: -0.09 })
+        });
+        await account.page.waitForTimeout(600);
+        check('账户页显示负余额（-0.09 / ≈ -$0.01）',
+            (await readText(account.page, '#credits-balance')) === '-0.09' &&
+            (await readText(account.page, '#credits-usd')) === '≈ -$0.01',
+            { balance: await readText(account.page, '#credits-balance'), usd: await readText(account.page, '#credits-usd') });
+        await shot(account.page, '04d-account-negative');
         results.pageErrors.push(...account.errors);
         check('账户页无 JS 报错', account.errors.length === 0, account.errors.slice(0, 3));
         await account.context.close();
@@ -597,7 +715,7 @@ async function shot(page, name) {
             balance: document.querySelector('#credits-balance').textContent.trim(),
             empty: (document.querySelector('.credit-empty') || {}).textContent || ''
         }));
-        check('账户页空状态', emptyState.balance === '100' && emptyState.empty.indexOf('还没有积分记录') >= 0, emptyState);
+        check('账户页空状态', emptyState.balance === '100.00' && emptyState.empty.indexOf('还没有积分记录') >= 0, emptyState);
         await empty.context.close();
 
         /* ───────────────────────────────────────────── 4. 管理后台分配 */
@@ -612,7 +730,7 @@ async function shot(page, name) {
         }));
         results.metrics.admin = adminState;
         check('用户表有积分列', adminState.headers.indexOf('积分') >= 0, adminState.headers);
-        check('积分列显示余额', adminState.balances.join(',') === '100,12.5', adminState.balances);
+        check('积分列显示余额', adminState.balances.join(',') === '100.00,12.50', adminState.balances);
         check('每行有分配按钮', adminState.assignButtons === 2, adminState.assignButtons);
         await admin.page.click('[data-credit-user="2"]');
         await admin.page.waitForTimeout(300);
@@ -621,7 +739,7 @@ async function shot(page, name) {
             desc: document.querySelector('#credits-desc').innerText.replace(/\n/g, ' '),
             current: document.querySelector('#credits-current').textContent.trim()
         }));
-        check('分配弹窗显示当前余额', !modal.hidden && modal.current === '12.5 积分', modal);
+        check('分配弹窗显示当前余额', !modal.hidden && modal.current === '12.50 积分', modal);
         await admin.page.fill('#credits-delta', '25');
         await admin.page.fill('#credits-note', '验收加分');
         await shot(admin.page, '05-admin-assign');
@@ -632,8 +750,8 @@ async function shot(page, name) {
             balance: document.querySelector('[data-credit-balance="2"]').textContent.trim(),
             toast: document.querySelector('#toast').textContent.trim()
         }));
-        check('分配成功后关闭弹窗并刷新行余额', assigned.hidden && assigned.balance === '37.5', assigned);
-        check('分配成功 toast', /已为 member 增加 25 积分，余额 37\.5/.test(assigned.toast), assigned.toast);
+        check('分配成功后关闭弹窗并刷新行余额', assigned.hidden && assigned.balance === '37.50', assigned);
+        check('分配成功 toast', /已为 member 增加 25\.00 积分，余额 37\.50/.test(assigned.toast), assigned.toast);
 
         await admin.page.click('[data-credit-user="2"]');
         await admin.page.waitForTimeout(250);
@@ -648,7 +766,7 @@ async function shot(page, name) {
         }));
         check('余额不足显示后端 detail 且弹窗不关', !insufficient.errorHidden && !insufficient.modalHidden &&
             /余额不足/.test(insufficient.error), insufficient);
-        check('余额不足时行余额不变', insufficient.balance === '37.5', insufficient.balance);
+        check('余额不足时行余额不变', insufficient.balance === '37.50', insufficient.balance);
         await shot(admin.page, '05b-admin-assign-insufficient');
         await admin.page.click('#credits-cancel');
         await fetch(BASE + '/__mock/balance', {
@@ -663,14 +781,14 @@ async function shot(page, name) {
         await fetch(BASE + '/__mock/balance', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: 2, balance: 0.0001 })
+            body: JSON.stringify({ userId: 2, balance: 0.09 })
         });
         await admin.page.reload({ waitUntil: 'domcontentloaded' });
         await admin.page.waitForSelector('#user-rows [data-credit-balance="2"]', { timeout: 10000 });
-        check('admin 用户表显示 4 位小数（0.0001）', (await readText(admin.page, '[data-credit-balance="2"]')) === '0.0001', await readText(admin.page, '[data-credit-balance="2"]'));
+        check('admin 用户表显示 2 位小数（0.09）', (await readText(admin.page, '[data-credit-balance="2"]')) === '0.09', await readText(admin.page, '[data-credit-balance="2"]'));
         await admin.page.click('[data-credit-user="2"]');
         await admin.page.waitForTimeout(300);
-        check('admin 分配弹窗显示 4 位小数（0.0001 积分）', (await readText(admin.page, '#credits-current')) === '0.0001 积分', await readText(admin.page, '#credits-current'));
+        check('admin 分配弹窗显示 2 位小数（0.09 积分）', (await readText(admin.page, '#credits-current')) === '0.09 积分', await readText(admin.page, '#credits-current'));
         await shot(admin.page, '05d-admin-precision');
         await admin.page.click('#credits-cancel');
         results.pageErrors.push(...admin.errors);
@@ -696,7 +814,7 @@ async function shot(page, name) {
         await admin2.page.fill('#credits-delta', '8');
         await admin2.page.click('#credits-confirm');
         await admin2.page.waitForTimeout(500);
-        check('分配后回填行余额', (await readText(admin2.page, '[data-credit-balance="2"]')) === '20.5', await readText(admin2.page, '[data-credit-balance="2"]'));
+        check('分配后回填行余额', (await readText(admin2.page, '[data-credit-balance="2"]')) === '20.50', await readText(admin2.page, '[data-credit-balance="2"]'));
         await admin2.context.close();
         await mockConfig(BASE, { adminCreditsInList: true });
 

@@ -6,7 +6,7 @@
 //  4. 退出时确保结束后端进程，避免残留占用端口
 //  5. iframe 子页面注入迷你桥（postMessage 转发），前端零改动获得完整桌面能力
 
-const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen } = require('electron');
+const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen, desktopCapturer } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
@@ -88,8 +88,8 @@ function resolveBackendBinary() {
 // 用户从正式版换到 Electron 版无需迁移、无需重新下载任何数据。
 // 独立于 .app 包内部（可写、非只读、升级不丢）。
 function resolveDataDir() {
-  // 冒烟/自动验收：显式给的数据目录优先，别把探针拖出来的节点写进日常数据
-  if (isSmokeMode() && process.env.NOVAI_DATA_DIR) return process.env.NOVAI_DATA_DIR;
+  // 显式给的数据目录优先：隔离验收或自定义部署时，别把探针拖出来的节点写进日常数据
+  if (process.env.NOVAI_DATA_DIR) return process.env.NOVAI_DATA_DIR;
   if (!app.isPackaged) return path.join(__dirname, '..', 'data');
   const dir = path.join(process.env.APPDATA || require('os').homedir(), 'NOVAI');
   // 兼容早期 Electron 测试版（数据曾写到系统 appData/NOVAI，macOS 上与正式版不一致）：
@@ -368,6 +368,8 @@ const IFRAME_SHIM = `(function(){
       quit_app: function(){ return call('window', {action:'quit'}); },
       save_file: function(d,f){ return call('save-file', {dataUrl:d, filename:f}); },
       select_directory: function(){ return call('select-directory'); },
+      get_screen_sources: function(){ return call('recording-sources'); },
+      select_screen_source: function(id){ return call('recording-select-source', {sourceId: id}); },
       open_data_dir: function(){ return call('open-data-dir'); },
       get_data_dir: function(){ return call('get-data-dir'); },
       set_auto_start: function(v){ return call('set-auto-start', {value: v}); },
@@ -2075,6 +2077,63 @@ function prefetchGuestDragImage(payload) {
   }
 }
 
+// ---------- 保存文件：对话框过滤器 / 落盘路径 ----------
+// macOS 保存面板会用「当前选中的过滤器扩展名」去补全文件名：过滤器写死成图片时，
+// video_xxx.mp4 会被存成 video_xxx.mp4.png（Format 还显示「图片」）。
+// 过滤器必须跟真实媒体类型走，落盘前再把扩展名纠回原样兜底。
+
+const SAVE_FILE_KINDS = [
+  { name: '视频', mime: 'video/', extensions: ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi'] },
+  { name: '音频', mime: 'audio/', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] },
+  { name: '图片', mime: 'image/', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
+];
+
+function fileExtension(name) {
+  const match = /\.([a-z0-9]+)$/i.exec(String(name || '').split(/[?#]/)[0]);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function saveFileKind(filename, dataUrl) {
+  // 先看文件名：保存面板判断「扩展名在不在过滤器里」用的是文件名，
+  // 过滤器跟文件名不一致本身就会再造出一个 xxx.mp4.png。
+  const ext = fileExtension(filename);
+  const byExt = SAVE_FILE_KINDS.find((kind) => kind.extensions.indexOf(ext) >= 0);
+  if (byExt) return byExt;
+  const mime = (/^data:([^;,]+)/i.exec(String(dataUrl || '')) || [])[1] || '';
+  const type = mime.toLowerCase();
+  return SAVE_FILE_KINDS.find((kind) => type.indexOf(kind.mime) === 0) || null;
+}
+
+function saveDialogFilters(filename, dataUrl) {
+  const kind = saveFileKind(filename, dataUrl);
+  const filters = kind ? [{ name: kind.name, extensions: kind.extensions.slice() }] : [];
+  filters.push({ name: '全部文件', extensions: ['*'] });
+  return filters;
+}
+
+function correctSavedFilePath(filePath, filename) {
+  const target = String(filePath || '');
+  const originalExt = fileExtension(filename);
+  if (!target || !originalExt) return target;
+  const suffix = '.' + originalExt;
+  // 保存面板可能在原扩展名后面又追加了一段（video.mp4 → video.mp4.png），
+  // 用户也可能手动改成别的类型：都按原始扩展名纠正，避免存出打不开的文件。
+  let current = target;
+  for (;;) {
+    if (current.toLowerCase().endsWith(suffix)) return current;
+    const ext = fileExtension(current);
+    if (!ext) return current + suffix;
+    current = current.slice(0, current.length - ext.length - 1);
+  }
+}
+
+// 单测（desktop/__tests__/test_save_file.js）只 require 这两个纯函数；
+// 带了这个开关就不再往下走 Electron 生命周期，正常启动完全不受影响。
+if (process.env.NOVAI_MAIN_LIB_ONLY === '1') {
+  module.exports = { saveDialogFilters, correctSavedFilePath };
+  return;
+}
+
 function registerIpc() {
   // 内嵌站点拖拽时由 source-drag-preload 回传被拖元素；只接受当前 source view 的消息
   ipcMain.on('novai:guest-drag', (event, payload) => {
@@ -2133,16 +2192,14 @@ function registerIpc() {
       const result = await dialog.showSaveDialog(win, {
         title: '保存文件',
         defaultPath: filename || 'download.png',
-        filters: [
-          { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
-          { name: '全部文件', extensions: ['*'] },
-        ],
+        filters: saveDialogFilters(filename, dataUrl),
       });
       if (result.canceled || !result.filePath) return { ok: true, saved: false };
       const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl || '');
       if (!m) return { ok: true, saved: false };
-      fs.writeFileSync(result.filePath, Buffer.from(m[2], 'base64'));
-      return { ok: true, saved: true, path: result.filePath };
+      const savedPath = correctSavedFilePath(result.filePath, filename);
+      fs.writeFileSync(savedPath, Buffer.from(m[2], 'base64'));
+      return { ok: true, saved: true, path: savedPath };
     } catch (err) {
       return { ok: false, saved: false, error: String(err && err.message || err) };
     }
@@ -2156,6 +2213,46 @@ function registerIpc() {
     });
     if (res.canceled || !res.filePaths.length) return null;
     return res.filePaths[0];
+  });
+
+  let requestedDisplaySourceId = '';
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    const sourceId = requestedDisplaySourceId;
+    requestedDisplaySourceId = '';
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 0, height: 0 },
+        fetchWindowIcons: false,
+      });
+      const source = sources.find((item) => item.id === sourceId);
+      callback(source ? { video: source, audio: false } : {});
+    } catch (err) {
+      clog('recording', '选择屏幕来源失败: ' + String(err && err.message || err));
+      callback({});
+    }
+  });
+
+  ipcMain.handle('novai:recording-select-source', (_event, { sourceId }) => {
+    requestedDisplaySourceId = String(sourceId || '');
+    return Boolean(requestedDisplaySourceId);
+  });
+
+  ipcMain.handle('novai:recording-sources', async () => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 320, height: 180 },
+        fetchWindowIcons: false,
+      });
+      return sources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        thumbnail: source.thumbnail && !source.thumbnail.isEmpty() ? source.thumbnail.toDataURL() : '',
+      }));
+    } catch (err) {
+      return { error: String(err && err.message || err) };
+    }
   });
 
   ipcMain.handle('novai:get-data-dir', () => dataDir);

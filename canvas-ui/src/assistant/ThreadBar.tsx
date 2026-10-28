@@ -2,6 +2,9 @@ import {
 	CheckIcon,
 	ChevronDownIcon,
 	ChevronsLeftIcon,
+	FolderClosedIcon,
+	GaugeIcon,
+	GitBranchIcon,
 	HistoryIcon,
 	Maximize2Icon,
 	MoreHorizontalIcon,
@@ -13,6 +16,7 @@ import {
 	XIcon,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import {
 	canvasId,
 	deleteThread,
@@ -25,6 +29,9 @@ import {
 import type { ThreadRow } from "./api"
 import { ArtifactsSheet } from "./ArtifactsSheet"
 import type { ArtifactPanelState } from "./ArtifactsSheet"
+import { chooseFolder, folderSupported, forgetFolder, restoreFolder } from "./folder"
+import type { FolderInfo } from "./folder"
+import { formatRelative } from "./format"
 import type { AssistantStore } from "./store"
 
 const EMPTY_ARTIFACTS: ArtifactPanelState = { status: "idle", data: null, error: "" }
@@ -49,6 +56,9 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	const [artifactsOpen, setArtifactsOpen] = useState(false)
 	const [artifactState, setArtifactState] = useState<ArtifactPanelState>(EMPTY_ARTIFACTS)
 	const [full, setFull] = useState(false)
+	const [resetOpen, setResetOpen] = useState(false)
+	const [folderOpen, setFolderOpen] = useState(false)
+	const [folderInfo, setFolderInfo] = useState<FolderInfo | null>(null)
 	const noticeTimer = useRef<number>(0)
 
 	const showNotice = useCallback((text: string) => {
@@ -63,8 +73,8 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 			const data = await fetchThreads()
 			setThreads(data.threads)
 			setActiveId(data.active_id || (data.threads[0] ? data.threads[0].id : ""))
-		} catch {
-			/* 线程列表失败不打断对话 */
+		} catch (error) {
+			console.warn("[NVCA] 线程列表加载失败", error)
 		}
 	}, [])
 
@@ -81,6 +91,10 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	useEffect(() => {
 		void refreshThreads()
 	}, [refreshThreads, env.threadRefresh])
+
+	useEffect(() => {
+		if (menuOpen) void refreshThreads()
+	}, [menuOpen, refreshThreads])
 
 	useEffect(() => {
 		void loadArtifacts()
@@ -102,14 +116,19 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	}, [])
 
 	useEffect(() => {
-		if (!menuOpen && !moreOpen && !actionsId && !artifactsOpen) return
+		if (folderOpen) void restoreFolder().then(setFolderInfo).catch(() => setFolderInfo(null))
+	}, [folderOpen])
+
+	useEffect(() => {
+		if (!menuOpen && !moreOpen && !actionsId && !artifactsOpen && !folderOpen) return
 		const onDown = (event: MouseEvent) => {
 			const target = event.target as HTMLElement | null
-			if (target && target.closest && target.closest(".nvca-tap-header")) return
+			if (target?.closest?.(".nvca-tap-header, .nvca-artifacts-sheet, .nvca-folder-permissions, .nvca-dialog")) return
 			setMenuOpen(false)
 			setMoreOpen(false)
 			setActionsId("")
 			setArtifactsOpen(false)
+			setFolderOpen(false)
 		}
 		const onKey = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return
@@ -117,7 +136,9 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 			setMoreOpen(false)
 			setActionsId("")
 			setArtifactsOpen(false)
+			setFolderOpen(false)
 			setDeleteTarget(null)
+			setResetOpen(false)
 		}
 		window.addEventListener("mousedown", onDown, true)
 		window.addEventListener("keydown", onKey)
@@ -125,7 +146,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 			window.removeEventListener("mousedown", onDown, true)
 			window.removeEventListener("keydown", onKey)
 		}
-	}, [menuOpen, moreOpen, actionsId, artifactsOpen])
+	}, [menuOpen, moreOpen, actionsId, artifactsOpen, folderOpen])
 
 	const activeThread = threads.find((thread) => String(thread.id) === String(activeId)) || null
 	const artifactCount = artifactState.data ? artifactState.data.files.length : 0
@@ -146,7 +167,35 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	const collapse = () => {
 		setMenuOpen(false)
 		setMoreOpen(false)
+		setArtifactsOpen(false)
+		setFolderOpen(false)
 		clickHidden("canvasAssistantCollapseBtn")
+	}
+
+	const resetConversation = () => {
+		store.clearHistory()
+		setResetOpen(false)
+		setMoreOpen(false)
+		window.setTimeout(() => void refreshThreads(), 120)
+	}
+
+	const reauthorizeFolder = async () => {
+		try {
+			const info = await chooseFolder()
+			if (info) {
+				setFolderInfo(info)
+				store.addFolderRef(info.name, info.count)
+			}
+		} catch (error) {
+			if ((error as Error)?.name !== "AbortError") showNotice((error as Error)?.message || "选择文件夹失败")
+		}
+	}
+
+	const removeFolder = async () => {
+		await forgetFolder()
+		setFolderInfo(null)
+		store.removeRef("folder_last")
+		showNotice("已移除本地文件夹授权")
 	}
 
 	const toggleFull = () => {
@@ -154,7 +203,13 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 		if (!panel) return
 		panel.style.width = ""
 		panel.classList.toggle("is-full")
-		setFull(panel.classList.contains("is-full"))
+		const isFull = panel.classList.contains("is-full")
+		setFull(isFull)
+		if (isFull) {
+			setArtifactsOpen(false)
+			setFolderOpen(false)
+		}
+		document.documentElement.style.setProperty("--nvca-panel-width", panel.getBoundingClientRect().width + "px")
 		window.dispatchEvent(new Event("resize"))
 	}
 
@@ -233,7 +288,17 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	return (
 		<header className="nvca-tap-header">
 			<div className="nvca-tap-header-left">
-				<button className="nvca-tap-head-btn is-sidebar" onClick={collapse} title="侧边栏" aria-label="侧边栏" type="button">
+				<button
+					aria-label="产物侧栏"
+					aria-pressed={artifactsOpen}
+					className="nvca-tap-head-btn is-sidebar"
+					onClick={() => {
+						setArtifactsOpen((open) => !open)
+						setFolderOpen(false)
+					}}
+					title="产物侧栏"
+					type="button"
+				>
 					<PanelLeftIcon className="nvca-tap-head-icon-svg" />
 				</button>
 				<button
@@ -249,7 +314,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 					}}
 					type="button"
 				>
-					<span>新建对话</span>
+					<span className="nvca-tap-current-thread">{activeThread?.title || "新建对话"}</span>
 					<ChevronDownIcon className="nvca-i-xs" />
 				</button>
 			</div>
@@ -329,8 +394,9 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 												aria-selected={isActive}
 												type="button"
 											>
+												{thread.forked_from ? <GitBranchIcon className="nvca-i-xs nvca-tap-thread-branch" /> : null}
 												<span className="nvca-tap-thread-title">{thread.title || "对话"}</span>
-												<span className="nvca-tap-thread-count">{Number(thread.message_count) || 0}</span>
+												<span className="nvca-tap-thread-count">{formatRelative(thread.updated_at || thread.created_at)}</span>
 												{isActive ? <CheckIcon className="nvca-i-xs nvca-tap-thread-check" /> : null}
 											</button>
 											{String(actionsId) === String(thread.id) ? (
@@ -371,61 +437,56 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 
 			{moreOpen ? (
 				<div className="nvca-tap-more-menu" role="menu">
-					<button
-						className="nvca-tap-menu-item"
-						onClick={() => {
-							setMoreOpen(false)
-							setArtifactsOpen(true)
-						}}
-						role="menuitem"
-						type="button"
-					>
-						<PackageIcon className="nvca-i-sm" />
-						<span className="nvca-tap-menu-text">产物</span>
-						{artifactCount > 0 ? <span className="nvca-tap-menu-count">{artifactCount}</span> : null}
+					<button className="nvca-tap-menu-item" onClick={() => { setMoreOpen(false); window.dispatchEvent(new CustomEvent("novai-canvas-assistant:context")) }} role="menuitem" type="button">
+						<GaugeIcon className="nvca-i-sm" />
+						<span className="nvca-tap-menu-text">用量统计</span>
 					</button>
-					<button
-						className="nvca-tap-menu-item"
-						onClick={() => {
-							setMoreOpen(false)
-							store.openHistory()
-						}}
-						role="menuitem"
-						type="button"
-					>
-						<HistoryIcon className="nvca-i-sm" />
-						<span className="nvca-tap-menu-text">历史记录</span>
-					</button>
-					<button
-						className="nvca-tap-menu-item"
-						onClick={() => {
-							setMoreOpen(false)
-							store.clearHistory()
-						}}
-						role="menuitem"
-						type="button"
-					>
-						<RotateCcwIcon className="nvca-i-sm" />
-						<span className="nvca-tap-menu-text">重置对话</span>
-					</button>
-					<button
-						className="nvca-tap-menu-item"
-						onClick={collapse}
-						role="menuitem"
-						type="button"
-					>
+					<button className="nvca-tap-menu-item" onClick={collapse} role="menuitem" type="button">
 						<ChevronsLeftIcon className="nvca-i-sm" />
-						<span className="nvca-tap-menu-text">收起面板</span>
+						<span className="nvca-tap-menu-text">收起对话</span>
 					</button>
 				</div>
 			) : null}
 
-			{artifactsOpen ? (
-				<ArtifactsSheet
-					state={artifactState}
-					onClose={() => setArtifactsOpen(false)}
-					onReload={() => void loadArtifacts()}
-				/>
+			{artifactsOpen ? createPortal(
+				<ArtifactsSheet state={artifactState} onClose={() => setArtifactsOpen(false)} onReload={() => void loadArtifacts()} />,
+				document.body,
+			) : null}
+
+			{folderOpen ? (
+				<div className="nvca-folder-permissions" role="dialog" aria-label="本地文件权限">
+					<div className="nvca-sheet-head">
+						<div className="nvca-sheet-title"><FolderClosedIcon className="nvca-i-sm" /><span>本地文件权限</span></div>
+						<button className="nvca-icon-btn" onClick={() => setFolderOpen(false)} title="关闭" type="button"><XIcon className="nvca-i-sm" /></button>
+					</div>
+					<div className="nvca-folder-permission-body">
+						{folderInfo ? (
+							<>
+								<strong>{folderInfo.name}</strong>
+								<span>允许读取此目录中的文件，约 {folderInfo.count} 个项目。文件只在你主动加入时上传。</span>
+								<div className="nvca-folder-permission-actions">
+									<button className="nvca-btn ghost" onClick={() => void reauthorizeFolder()} type="button">更换目录</button>
+									<button className="nvca-btn ghost" onClick={() => void removeFolder()} type="button">移除授权</button>
+								</div>
+							</>
+						) : (
+							<>
+								<strong>还没有授权目录</strong>
+								<span>授权后可从本地文件夹选择素材；你可以随时移除。</span>
+								<button className="nvca-btn ghost" onClick={() => void reauthorizeFolder()} type="button">选择文件夹</button>
+							</>
+						)}
+					</div>
+				</div>
+			) : null}
+
+			{resetOpen ? (
+				<div className="nvca-dialog-scrim" onClick={() => setResetOpen(false)} role="presentation">
+					<div className="nvca-dialog" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="重置对话">
+						<div className="nvca-dialog-head"><div><h3 className="nvca-dialog-title">重置当前对话？</h3><p className="nvca-dialog-sub">当前线程的聊天记录会被清空，画布节点不受影响。</p></div></div>
+						<div className="nvca-dialog-actions"><button className="nvca-btn ghost" onClick={() => setResetOpen(false)} type="button">取消</button><button className="nvca-btn danger" onClick={resetConversation} type="button">重置</button></div>
+					</div>
+				</div>
 			) : null}
 
 			{deleteTarget ? (

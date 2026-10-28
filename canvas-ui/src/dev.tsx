@@ -16,6 +16,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const scriptedRun = async () => {
 	if (!handle) return
+	handle.pushEvent({ type: "vision", data: { mode: "direct", labels: ["图1", "图2"], text: "已把图1、图2直接给模型看" } })
 	handle.pushEvent({ type: "run_start", data: { run_id: "demo-run", max_steps: 6 } })
 	await wait(260)
 	handle.pushEvent({ type: "thinking", data: { text: "先看看画布上选中的图片，判断主体和风格，再决定用哪个生图平台。", duration_ms: 1200 } })
@@ -32,7 +33,7 @@ const scriptedRun = async () => {
 		],
 	} })
 	await wait(500)
-	handle.pushEvent({ type: "step_start", data: { index: 0, tool: "create_node", description: "新建提示词节点" } })
+	handle.pushEvent({ type: "step_start", data: { index: 0, tool: "create_node", description: "新建提示词节点", args: { node_id: "demo-node-1" } } })
 	await wait(700)
 	handle.pushEvent({ type: "step_result", data: { index: 0, tool: "create_node", ok: true, message: "已创建提示词节点" } })
 	handle.pushEvent({ type: "step_start", data: { index: 1, tool: "generate_image", description: "生成 1 张 1:1 主图" } })
@@ -42,7 +43,10 @@ const scriptedRun = async () => {
 		{ id: "demo-image-1", kind: "image", url: "https://picsum.photos/seed/novai-assistant/900/900", thumb: "https://picsum.photos/seed/novai-assistant/400/400", title: "主图 1:1" },
 	])
 	await wait(900)
+	handle.pushEvent({ type: "message", data: { text: "已完成主图生成，并关联到提示词节点。你可以继续调整风格，或从这条回复创建分支。" } })
 	handle.pushEvent({ type: "usage", data: { usage: { input_tokens: 4120, output_tokens: 860 } } })
+	const current = store.state.messages[store.state.messages.length - 1]
+	if (current) current.planState = "applied"
 	handle.pushEvent({ type: "done", data: { status: "ok", steps_executed: 2 } })
 }
 
@@ -69,6 +73,21 @@ const api: CanvasAssistantHostApi = {
 	},
 	clearRefs() {
 		handle?.setRefs([])
+	},
+	setChatModel(model, provider) {
+		handle?.setComposerState({ models: [], model, provider, imageProviders: [], imageProvider: "", planConfirm: true })
+	},
+	setImageProvider(imageProvider) {
+		handle?.setComposerState({ models: [], model: "", provider: "", imageProviders: [], imageProvider, planConfirm: true })
+	},
+	setPlanConfirm(on) {
+		handle?.setPlanConfirm(on)
+	},
+	async addSelectedRefs() {
+		return 1
+	},
+	pickUpload() {
+		/* noop in preview */
 	},
 	planAction(action) {
 		if (action === "run") {

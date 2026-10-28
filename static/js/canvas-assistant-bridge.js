@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.137.1792985831';
+    var ASSET_VERSION = '1.0.137.1793084421';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -47,7 +47,12 @@
     var artifactPolls = 0;
     var lastRunUrl = '';
     var canvasId = '';
-    try { canvasId = new URLSearchParams(location.search).get('id') || ''; } catch (e) {}
+    try {
+        canvasId = new URLSearchParams(location.search).get('id') || '';
+        if (!canvasId && window.SmartCanvasCollab && typeof window.SmartCanvasCollab.getCanvas === 'function') {
+            canvasId = String((window.SmartCanvasCollab.getCanvas() || {}).id || '');
+        }
+    } catch (e) {}
 
     /* ── 小工具 ─────────────────────────────────────────────── */
     function $(sel, root) { return (root || document).querySelector(sel); }
@@ -1229,9 +1234,8 @@
             if (btn) btn.click();
         },
         openNode: function (id) {
-            /* 画布没有对外暴露「选中/定位节点」的函数，这里只把节点名提示出来 */
-            var node = docNodes().filter(function (n) { return String(n.id) === String(id); })[0];
-            if (node) toastFallback('在画布上找到：' + String(node.title || node.alias || id));
+            if (typeof window.focusSmartNode === 'function' && window.focusSmartNode(id)) return;
+            toastFallback('这个节点已不在当前画布上');
         },
         toast: toastFallback
     };

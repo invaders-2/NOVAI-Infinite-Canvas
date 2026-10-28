@@ -118,6 +118,22 @@ def admin_charges(request: Request, limit: int = Query(100, ge=1, le=500),
     return {"charges": items, "total": len(items)}
 
 
+@router.get("/api/credits/debtors")
+def admin_debtors(request: Request, limit: int = Query(200, ge=1, le=500),
+                  over_limit: bool = False) -> Dict[str, Any]:
+    """后付费欠费用户（负余额）；over_limit=true 只看超过欠费上限的。"""
+    _require_admin(request)
+    users = store.list_negative_balances(limit=_limit(limit))
+    limit_value = config.overdraft_limit()
+    if over_limit:
+        users = [user for user in users if float(user.get("credits") or 0) < -limit_value + 1e-9]
+    for user in users:
+        user["overdraft_limit"] = limit_value
+        user["over_limit"] = float(user.get("credits") or 0) < -limit_value + 1e-9
+    return {"users": users, "total": len(users), "billing_mode": config.billing_mode(),
+            "overdraft_limit": limit_value}
+
+
 @router.get("/api/credits/pricing")
 def admin_pricing(request: Request) -> Dict[str, Any]:
     _require_admin(request)
@@ -176,7 +192,10 @@ def credits_price(request: Request, model: str = "", kind: str = "",
         if entry is None:
             record = pricing.resolve_model(model, "")[0]
             quote_kind = (record or {}).get("category") or "image"
-    quote = pricing.estimate(quote_kind, model, params, provider)
+    if config.billing_mode() == "postpaid":
+        quote = pricing.postpaid_quote(quote_kind, model, params, provider)
+    else:
+        quote = pricing.estimate(quote_kind, model, params, provider)
     return {
         "cost": quote["cost"],
         "price": quote["price"],
@@ -197,6 +216,13 @@ def credits_price(request: Request, model: str = "", kind: str = "",
         "pricing_source": quote.get("pricing_source", "direct"),
         "proxy_model": quote.get("proxy_model", ""),
         "provider": quote.get("provider", ""),
+        "mode": quote.get("mode", "prepaid"),
+        "postpaid": bool(quote.get("postpaid")),
+        "message": quote.get("message", ""),
+        "estimated_cost": quote.get("estimated_cost", 0.0),
+        "estimated_price": quote.get("estimated_price", 0.0),
+        "estimated_usd": quote.get("estimated_usd", {}),
+        "overdraft_limit": config.overdraft_limit(),
     }
 
 

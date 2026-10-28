@@ -3,9 +3,11 @@
 """积分计费的可配置口径（全部走环境变量，禁止把价格/汇率/加价写死在业务代码里）。
 
     NOVAI_CREDIT_USD       1 积分对应的成本美元，默认 0.1（= 1 APIMart Credit）
+    CREDIT_BILLING_MODE    计费模式：postpaid（默认，生成后按实际扣）| prepaid（兼容旧流程）
+    CREDIT_OVERDRAFT_LIMIT 后付费允许的最大欠费（积分），默认 0.01
     PROFIT_RATE            利润率，默认 0.30（售价 = 实际成本 × 1.30）
     CREDIT_MARKUP          旧变量（兼容）；显式设置时优先于 PROFIT_RATE
-    CREDIT_PRICE_STEP      售价精度（积分），默认 0.0001（4 位小数）；必须 > 1
+    CREDIT_PRICE_STEP      售价精度（积分），默认 0.01（2 位小数）；必须 > 1
     APIMART_TIER           成本档位：gold | platinum | diamond | official，默认 gold
     NOVAI_PRICING_FILE     价目 JSON 路径，默认 server/credits/apimart_pricing.json
     NOVAI_CREDITS_DISABLED 1/true 时整条计费链路关闭（auth-off 也会关闭）
@@ -23,7 +25,8 @@ DEFAULT_TIER = "gold"
 DEFAULT_USD_PER_CREDIT = 0.1
 DEFAULT_PROFIT_RATE = 0.30
 DEFAULT_MARKUP = 1.30
-DEFAULT_PRICE_STEP = 0.0001
+DEFAULT_PRICE_STEP = 0.01
+DEFAULT_OVERDRAFT_LIMIT = 0.01
 
 
 def _env_float(name: str, default: float) -> float:
@@ -48,6 +51,24 @@ def _env_int(name: str, default: int) -> int:
 
 def usd_per_credit() -> float:
     return _env_float("NOVAI_CREDIT_USD", DEFAULT_USD_PER_CREDIT)
+
+
+def billing_mode() -> str:
+    """默认全局后付费；显式 CREDIT_BILLING_MODE=prepaid 可切回预扣兼容。"""
+    raw = str(os.environ.get("CREDIT_BILLING_MODE", "") or "postpaid").strip().lower()
+    return raw if raw in ("postpaid", "prepaid") else "postpaid"
+
+
+def overdraft_limit() -> float:
+    """后付费欠费上限（积分），默认 0.01；非法/负数回退默认。"""
+    raw = os.environ.get("CREDIT_OVERDRAFT_LIMIT", "")
+    if str(raw).strip() != "":
+        try:
+            value = float(str(raw).strip())
+        except (TypeError, ValueError):
+            return DEFAULT_OVERDRAFT_LIMIT
+        return value if value >= 0 else DEFAULT_OVERDRAFT_LIMIT
+    return DEFAULT_OVERDRAFT_LIMIT
 
 
 def profit_rate() -> float:
@@ -76,7 +97,7 @@ def markup() -> float:
 
 
 def price_step() -> float:
-    """售价精度：0.0001 积分。不要再回到 0.01 的粗粒度（会误伤极便宜的 token 调用）。"""
+    """售价精度：0.01 积分（2 位小数，最小收费 0.01）。"""
     return _env_float("CREDIT_PRICE_STEP", DEFAULT_PRICE_STEP)
 
 
@@ -120,7 +141,8 @@ def image_default_side() -> int:
 
 
 def text_default_output_tokens() -> int:
-    return _env_int("NOVAI_TEXT_DEFAULT_OUTPUT_TOKENS", 800)
+    # 后付费场景下文本估价只需覆盖典型短回复；实际结算按 usage。
+    return _env_int("NOVAI_TEXT_DEFAULT_OUTPUT_TOKENS", 20)
 
 
 def image_output_tokens() -> int:

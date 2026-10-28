@@ -229,7 +229,7 @@ function chromiumExecutable() {
             cursorVisible = true;
         } catch (e) {}
         const cursorName = await owner.page.evaluate(() => {
-            const el = document.querySelector('.collab-remote-cursor .collab-cursor-name span');
+            const el = document.querySelector('.collab-remote-cursor .collab-cursor-name-text');
             return el ? el.textContent : '';
         });
         check('d1 owner sees editor cursor with name', cursorVisible && cursorName === editorName, { cursorName });

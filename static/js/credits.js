@@ -78,22 +78,19 @@
         return Math.round(Number(value || 0) * factor) / factor;
     }
 
-    /* 积分展示统一口径：最多 4 位小数、去掉无意义尾随 0（0.0001 / 0.02 / 3.72 / 12.5 / 97.4699 / 100）。
-       非零但小于 0.0001 的值显示 "<0.0001" —— 真实扣费绝不显示成 0。 */
+    /* 积分展示统一口径：固定 2 位小数（后端按 0.01 步进）：0.01 / 0.09 / 1.30 / 100.00。 */
     function format(value) {
         var num = number(value);
-        if (num === null) return '0';
-        var abs = Math.abs(num);
-        if (abs > 0 && abs < 0.0001) return (num < 0 ? '-' : '') + '<0.0001';
-        var rounded = Math.round(num * 10000) / 10000;
-        if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return String(Math.round(rounded));
-        return rounded.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+        if (num === null) return '0.00';
+        return num.toFixed(2);
     }
 
     function formatUsd(value) {
         var num = number(value);
         if (num === null) return '$0.00';
-        return '$' + num.toFixed(2);
+        var rounded = Math.round(num * 100) / 100;
+        if (rounded === 0 && num !== 0) return (num < 0 ? '-' : '') + '<$0.01';
+        return (num < 0 ? '-$' : '$') + Math.abs(rounded).toFixed(2);
     }
 
     function detail() {
@@ -411,10 +408,14 @@
 
     var GENERATION_RULES = [
         { re: /^\/api\/(?:canvas-llm|canvas-llm\/stream|chat|chat\/stream|chat\/agent|chat\/agent\/stream)(?:\/|$)/i, kind: 'text' },
-        { re: /^\/api\/(?:canvas-audio|canvas-audio-split|audio|music|tts|audio-tts)(?:\/|$)/i, kind: 'audio' },
+        /* 音频智能切分本质是一次文本 LLM 调用（后端按 text 计费），先于 audio 规则匹配 */
+        { re: /^\/api\/canvas-audio-split(?:\/|$)/i, kind: 'text' },
+        { re: /^\/api\/(?:canvas-audio|canvas-tts|audio|audio-tts|music|tts)(?:\/|$)/i, kind: 'audio' },
         { re: /^\/api\/(?:canvas-video|video)(?:\/|$)/i, kind: 'video' },
         { re: /^\/api\/(?:canvas-image-tasks|canvas-comfy-tasks|online-image|generate|ms\/generate|angle\/generate)(?:\/|$)/i, kind: 'image' },
         { re: /^\/api\/(?:canvas-table|table|table-generate)(?:\/|$)/i, kind: 'table' },
+        /* Agent 一次跑很多步、没有单一价目：只提示后付费，不报价 */
+        { re: /^\/api\/agent\/run(?:\/|$)/i, kind: 'agent' },
         { re: /^\/generate$/i, kind: 'image' }
     ];
     var TASK_POLL_RE = /^\/api\/(?:tasks|canvas-image-tasks|image-task-query|canvas-comfy-tasks)(?:\/|$)/i;
@@ -466,7 +467,7 @@
         var rows = number(body.rows) || number(body.n) || number(body.count) || number(body.videoCount) || 1;
         if (rows > 1) params.rows = Math.max(1, Math.round(rows));
         if (kind === 'text') {
-            var prompt = textValue(body.message || body.prompt || body.text || '');
+            var prompt = textValue(body.message || body.prompt || body.text || body.input || '');
             if (!prompt && Array.isArray(body.messages)) {
                 prompt = body.messages.map(function (message) {
                     return message && typeof message === 'object' ? textValue(message.content) : '';
@@ -509,12 +510,55 @@
         return new Promise(function (resolve) { setTimeout(resolve, ms); });
     }
 
+    /* 后付费：现在所有生成类型都是后付费（价目接口 mode=postpaid / postpaid=true，price=0，estimated_price 给参考价）。
+       老后端（没有 mode、price>0）仍按预扣展示，避免误报。 */
+    function isPostpaid(quoteData) {
+        if (!quoteData) return true;
+        if (quoteData.postpaid === true) return true;
+        if (quoteData.postpaid === false) return false;
+        var mode = String(quoteData.mode || quoteData.pricing_mode || '').toLowerCase();
+        if (mode) return mode === 'postpaid';
+        var price = number(quoteData.price);
+        return price === null || price === 0;
+    }
+
+    /* 后付费参考价：优先 estimated_price，其次 price（有些后端直接把估价放 price） */
+    function estimatedPrice(quoteData) {
+        if (!quoteData) return null;
+        var value = number(quoteData.estimated_price);
+        if (value !== null && value > 0) return value;
+        var price = number(quoteData.price);
+        return price !== null && price > 0 ? price : null;
+    }
+
+    /* 返回 true = 后付费（调用方据此决定 402 / 失败文案） */
     function showEstimate(quoteData, gen) {
-        if (!quoteData || typeof quoteData.price === 'undefined') return;
+        if (isPostpaid(quoteData)) {
+            var estimate = estimatedPrice(quoteData);
+            lastQuote = {
+                at: Date.now(),
+                price: estimate === null ? 0 : estimate,
+                estimated_price: estimate,
+                kind: gen.kind,
+                params: gen.params,
+                quote: quoteData,
+                postpaid: true
+            };
+            var message = '生成后按实际用量扣费';
+            if (estimate !== null) message += ' · 预计约 ' + format(estimate) + ' 积分';
+            showToast(message, { tone: 'estimate', key: 'estimate', duration: 4600 });
+            emit('novai-credits-estimate', {
+                price: null, estimated_price: estimate, postpaid: true,
+                kind: gen.kind, model: gen.params.model || '', quote: quoteData
+            });
+            return true;
+        }
+        if (!quoteData || typeof quoteData.price === 'undefined') return false;
         var price = number(quoteData.price) || 0;
         lastQuote = { at: Date.now(), price: price, kind: gen.kind, params: gen.params, quote: quoteData };
         showToast('本次预计消耗 ' + format(price) + ' 积分', { tone: 'estimate', key: 'estimate', duration: 4200 });
-        emit('novai-credits-estimate', { price: price, kind: gen.kind, model: gen.params.model || '', quote: quoteData });
+        emit('novai-credits-estimate', { price: price, postpaid: false, kind: gen.kind, model: gen.params.model || '', quote: quoteData });
+        return false;
     }
 
     function creditsFromResponse(data) {
@@ -528,7 +572,7 @@
         if (!credits) return false;
         if (typeof credits.balance_after !== 'undefined') applyBalance(credits.balance_after);
         var price = number(credits.price) || 0;
-        var key = [credits.charge_id || '', credits.status || '', Math.round(price * 10000), Math.round((number(credits.balance_after) || 0) * 10000)].join('|');
+        var key = [credits.charge_id || '', credits.status || '', Math.round(price * 100), Math.round((number(credits.balance_after) || 0) * 100)].join('|');
         if (seenCredits[key]) return false;
         seenCredits[key] = true;
         var balance = number(credits.balance_after);
@@ -545,20 +589,42 @@
         return true;
     }
 
-    function reportInsufficient(payload) {
-        var price = number(payload && payload.estimate);
-        var balance = number(payload && payload.balance);
-        if (typeof payload.balance !== 'undefined') applyBalance(payload.balance);
-        var message = '积分不足';
-        if (price !== null && balance !== null) message += '：本次需 ' + format(price) + '，当前 ' + format(balance);
-        else if (price !== null) message += '：本次需 ' + format(price) + ' 积分';
-        showToast(message, { tone: 'error', key: 'estimate', duration: 6000 });
-        emit('novai-credits-insufficient', { price: price, balance: balance });
+    /* 欠费上限：后付费发起时 balance + 0.01 < 预计价 才 402（契约 CREDIT_OVERDRAFT_LIMIT=0.01） */
+    var OVERDRAFT_LIMIT = 0.01;
+
+    function reportInsufficient(payload, gen) {
+        var data = payload || {};
+        var price = number(data.estimate);
+        if ((price === null || price <= 0) && lastQuote) {
+            price = number(lastQuote.estimated_price);
+            if (price === null || price <= 0) price = number(lastQuote.price);
+        }
+        var balance = number(data.balance);
+        if (balance === null) balance = state.balance;
+        if (typeof data.balance !== 'undefined') applyBalance(data.balance);
         refresh();
+        var limit = number(data.overdraft_limit);
+        if (limit === null) limit = OVERDRAFT_LIMIT;
+        var message = '积分不足';
+        if (price !== null && price > 0) {
+            message += '：本次预计 ' + format(price) + ' 积分，当前 ' + format(balance) + ' 积分（可欠费 ' + format(limit) + ' 积分）';
+        } else {
+            message += '（可欠费 ' + format(limit) + ' 积分）';
+        }
+        showToast(message, { tone: 'error', key: 'estimate', duration: 6000 });
+        emit('novai-credits-insufficient', {
+            price: price, balance: balance, message: message, limited: true,
+            kind: gen ? gen.kind : ''
+        });
     }
 
-    function reportFailure(gen) {
+    function reportFailure(gen, postpaid) {
         if (!state.available || !state.enabled) return;
+        if (postpaid) {
+            showToast('生成失败，未产生扣费', { tone: 'warn', key: 'estimate', duration: 4200 });
+            emit('novai-credits-refund', { price: 0, balance: state.balance, source: 'failure', kind: gen ? gen.kind : '', postpaid: true });
+            return;
+        }
         showToast('生成失败，预扣积分将自动退回', { tone: 'warn', key: 'estimate', duration: 4200 });
         emit('novai-credits-refund', { price: lastQuote && lastQuote.price ? lastQuote.price : 0, balance: state.balance, source: 'failure', kind: gen ? gen.kind : '' });
     }
@@ -613,16 +679,17 @@
         }
     }
 
-    function inspectResponse(response, before, gen) {
+    function inspectResponse(response, before, gen, postpaid) {
         if (!response) return response;
         if (response.status === 402) {
             var copy = response.clone();
-            copy.json().then(reportInsufficient).catch(function () { reportInsufficient(null); });
+            copy.json().then(function (payload) { reportInsufficient(payload, gen); })
+                .catch(function () { reportInsufficient(null, gen); });
             return response;
         }
         if (!response.ok) {
             if (response.status === 409 || response.status === 404 || response.status === 405) return response; /* 流式不支持，调用方会自动退回 */
-            reportFailure(gen);
+            reportFailure(gen, postpaid);
             return response;
         }
         var type = String((response.headers && response.headers.get('content-type')) || '').toLowerCase();
@@ -658,14 +725,24 @@
                 return rawFetch.apply(window, args);
             }
             var before = state.balance;
+            if (gen.kind === 'agent') {
+                /* Agent 没有单价：不报价，只提示后付费 */
+                showEstimate(null, gen);
+                return rawFetch.apply(window, args).then(function (response) {
+                    return inspectResponse(response, before, gen, true);
+                }, function (error) {
+                    reportFailure(gen, true);
+                    throw error;
+                });
+            }
             var quoted = quote(gen.params);
             var gate = Promise.race([quoted, wait(QUOTE_WAIT_MS)]);
             return gate.then(function (quoteData) {
-                showEstimate(quoteData, gen);
+                var postpaid = showEstimate(quoteData, gen) === true;
                 return rawFetch.apply(window, args).then(function (response) {
-                    return inspectResponse(response, before, gen);
+                    return inspectResponse(response, before, gen, postpaid);
                 }, function (error) {
-                    reportFailure(gen);
+                    reportFailure(gen, postpaid);
                     throw error;
                 });
             });

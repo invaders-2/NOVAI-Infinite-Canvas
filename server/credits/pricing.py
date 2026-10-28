@@ -346,19 +346,20 @@ def _text_tokens(params: Dict[str, Any]) -> Tuple[int, int]:
 
 
 def _price_credits(cost_credits: float) -> float:
-    """售价 = ceil(cost × markup / step) × step；严格 > 成本（不足一个 step 就 +step）。
+    """售价 = ceil(cost × markup / step) × step；最小 1 step，且严格 > 成本。
 
-    默认 step=0.0001 积分。不再有 0.01/0.02 的最小收费——否则 15 个 token 的真实成本
-    只有 0.00002 积分，会被强行收 0.02，既不准也伤用户。
+    验收口径：0.01 步进、2 位小数。图片成本 0.072 → 0.10；视频 1.19 → 1.55；
+    视频 1.0 → 1.30；文本 0.00002 / TTS 0.003 这类不足一个 step 的 → 0.01。
     """
     step = config.price_step()
     raw = max(0.0, float(cost_credits))
     units = math.ceil(round(raw * config.markup(), 12) / step - 1e-12)
-    price = units * step
+    price = round(units * step, 2)
     if price <= raw + 1e-12:
-        price = (math.floor(round(raw, 12) / step) + 1) * step
-    # 去掉二进制浮点尾巴（例如 0.30000000000000004）
-    return round(price, 10)
+        price = round((math.floor(round(raw, 12) / step) + 1) * step, 2)
+    if price < step:
+        price = round(step, 2)
+    return round(price, 2)
 
 
 def price_for_cost(cost_credits: float) -> float:
@@ -383,6 +384,12 @@ def _zero_payload(kind: str) -> Dict[str, Any]:
         "price_usd": 0.0,
         "profit_usd": 0.0,
     }
+
+
+def postpaid_quote(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None,
+                  provider: str = "") -> Dict[str, Any]:
+    from server.credits.quote import postpaid_quote as _impl
+    return _impl(kind, model, params, provider)
 
 
 def estimate(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None,

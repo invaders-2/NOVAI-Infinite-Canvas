@@ -55,7 +55,8 @@ def audit_rows() -> List[Dict[str, Any]]:
 def audit() -> Dict[str, Any]:
     rows = audit_rows()
     coverage = model_map.coverage()
-    bad = [row for row in rows if float(row["price"] or 0) <= 0]
+    postpaid = [row for row in rows if row["mode"] == "postpaid"]
+    bad = [row for row in rows if row["mode"] != "postpaid" and float(row["price"] or 0) <= 0]
     no_target = [row for row in rows if row["mode"] in ("direct", "proxy") and not row["target"]]
     return {
         "coverage": coverage,
@@ -64,6 +65,7 @@ def audit() -> Dict[str, Any]:
             "direct": sum(1 for row in rows if row["pricing_source"] == "direct"),
             "proxy": sum(1 for row in rows if row["pricing_source"] == "proxy"),
             "conservative": sum(1 for row in rows if row["pricing_source"] == "conservative"),
+            "postpaid": len(postpaid),
             "uncovered": len(no_target),
             "non_positive_price": len(bad),
         },
@@ -88,10 +90,10 @@ def main(argv=None) -> int:
             target[:36], float(row["cost"]), float(row["price"]), float(row["profit"])))
     counts = result["counts"]
     print("")
-    print("覆盖：configured=%s direct=%d proxy=%d conservative=%d uncovered=%d 非正价=%d -> %s" % (
+    print("覆盖：configured=%s direct=%d proxy=%d conservative=%d postpaid=%d uncovered=%d 非正价=%d -> %s" % (
         result["coverage"].get("configured_models"), counts["direct"], counts["proxy"],
-        counts["conservative"], counts["uncovered"], counts["non_positive_price"],
-        "OK" if result["ok"] else "FAILED"))
+        counts["conservative"], counts.get("postpaid", 0), counts["uncovered"],
+        counts["non_positive_price"], "OK" if result["ok"] else "FAILED"))
     return 0 if result["ok"] else 1
 
 

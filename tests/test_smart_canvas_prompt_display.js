@@ -33,7 +33,7 @@ console.log('[1] 节点侧：只剩只读预览，控制台留在 DOM 里等搬�
 const previewFn = topLevelFunction(js, 'promptNodePreviewHtml');
 ok(Boolean(previewFn), '有 promptNodePreviewHtml');
 const bodyFn = topLevelFunction(js, 'promptNodeBodyHtml');
-ok(/\$\{promptNodePreviewHtml\(node\)\}/.test(bodyFn), '节点正文第一块就是预览');
+ok(/\$\{promptNodePreviewHtml\(node, outputKind\)\}/.test(bodyFn), '节点正文第一块就是预览');
 ok(/data-prompt-console="1"/.test(bodyFn), '控制台仍渲染在节点里（带 data-prompt-console 标记，供搬运）');
 ok(!/class="prompt-node-text/.test(bodyFn), '节点里不再有输入框');
 ok(/is-empty/.test(previewFn), '预览带 is-empty（占位文字走浅色）');

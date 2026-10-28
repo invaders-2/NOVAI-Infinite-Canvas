@@ -83,6 +83,36 @@ def _max_token_rates(record: Dict[str, Any]) -> Tuple[Optional[float], Optional[
             max(output_rates) if output_rates else None)
 
 
+def postpaid_quote(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None,
+                  provider: str = "") -> Dict[str, Any]:
+    """全局后付费报价：不预扣；保留 estimated_* 供后台参考，cost/price 对外为 0。"""
+    base = estimate(kind, model, params, provider)
+    if base.get("postpaid"):
+        return base
+    payload = dict(base)
+    estimated_cost = float(base.get("cost") or 0)
+    estimated_price = float(base.get("price") or 0)
+    payload.update({
+        "cost": 0.0,
+        "price": 0.0,
+        "usd": {"cost": 0.0, "price": 0.0, "profit": 0.0},
+        "cost_usd": 0.0,
+        "price_usd": 0.0,
+        "profit_usd": 0.0,
+        "estimated_cost": estimated_cost,
+        "estimated_price": estimated_price,
+        "estimated_usd": base.get("usd") or {},
+        "estimated_source": base.get("pricing_source") or "estimate",
+        "pricing_source": "estimate",
+        "mode": "postpaid",
+        "postpaid": True,
+        "message": "生成后按实际用量扣费",
+        "matched_spec": base.get("matched_spec") or "",
+        "provider": str(provider or base.get("provider") or ""),
+    })
+    return payload
+
+
 def estimate(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None,
              provider: str = "", conservative: bool = False) -> Dict[str, Any]:
     params = dict(params or {})
@@ -97,6 +127,9 @@ def estimate(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None
     tier_name = config.tier()
     mapping = model_map.lookup(provider, category, model)
     mode = str((mapping or {}).get("mode") or "")
+    if mode == "postpaid" and config.billing_mode() == "prepaid":
+        # 切回预扣兼容时，语音模型也不走后付费：按类型最高价预扣
+        mode = "conservative"
     target = str((mapping or {}).get("target") or "")
     pricing_source = "direct"
     proxy_model = ""
@@ -105,6 +138,40 @@ def estimate(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None
     max_mode = False
     record = None
 
+    if mode == "postpaid":
+        # 后付费：这里不报价、不预扣；完成后按上游成本/usage 结算
+        payload = pricing._zero_payload(kind)
+        payload.update({
+            "cost": 0.0,
+            "price": 0.0,
+            "currency": "credit",
+            "usd": {"cost": 0.0, "price": 0.0, "profit": 0.0},
+            "cost_usd": 0.0,
+            "price_usd": 0.0,
+            "profit_usd": 0.0,
+            "matched_spec": "postpaid",
+            "pricing_fallback": False,
+            "unmapped": [],
+            "pricing_source": "postpaid",
+            "estimate_mode": "postpaid",
+            "proxy_model": "",
+            "scope": "postpaid",
+            "mode": "postpaid",
+            "postpaid": True,
+            "message": "生成后按实际用量扣费",
+            "model": str(model or ""),
+            "requested_model": str(model or ""),
+            "kind": kind,
+            "category": category,
+            "tier": tier_name,
+            "unit": "per_usage",
+            "quantity": rows,
+            "usd_per_credit": config.usd_per_credit(),
+            "markup": config.markup(),
+            "price_step": config.price_step(),
+            "provider": str(provider or ""),
+        })
+        return payload
     if mode in ("direct", "proxy") and target:
         candidate, _fb, _un = pricing.resolve_model(target, category)
         if candidate is not None and candidate.get("category") == category:
