@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * 零依赖测试 runner（不依赖 npm install / 不需要网络）。
+ * 测试 runner。核心用例零依赖；画布助手 TypeScript 用例需要先按 CI 配置安装 canvas-ui 开发依赖。
  *
  *   node tests/run-all.js                  跑除 live 外的全部 node 测试
  *   node tests/run-all.js --include-live   连 test_video_storyboard_live.js 一起跑

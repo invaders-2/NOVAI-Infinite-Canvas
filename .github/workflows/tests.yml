@@ -46,17 +46,12 @@ jobs:
           node --check static/js/shared/table-node.js
           node --check static/js/shared/table-model.js
 
+      - name: Install canvas assistant test deps
+        working-directory: canvas-ui
+        run: npm install --no-audit --no-fund
+
       - name: Node tests
-        shell: bash
-        run: |
-          set -o pipefail
-          set +e
-          node tests/run-all.js 2>&1 | tee node-tests.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            while IFS= read -r line; do printf '::error::%s\n' "$line"; done < <(grep -E '✗|\[FAIL\]|Error|异常|失败' node-tests.log || true)
-            exit "$status"
-          fi
+        run: node tests/run-all.js
 
       - name: Install minimal deps needed to import main.py
         run: |
