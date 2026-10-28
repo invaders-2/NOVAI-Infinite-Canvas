@@ -50,6 +50,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          set +e
           node tests/run-all.js 2>&1 | tee node-tests.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
