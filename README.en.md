@@ -186,6 +186,17 @@ The app checks all three sources for the latest version on startup, pushes updat
 
 ---
 
+## License
+
+This project is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
+
+- You may use, modify and redistribute it, including commercially;
+- If you distribute a modified version, or run a modified version as a network service for others, you must release its complete source code under AGPL-3.0 and keep the original copyright and license notices.
+
+See [LICENSE](LICENSE) for the full terms.
+
+---
+
 ## Changelog
 
 ### v1.0.128
