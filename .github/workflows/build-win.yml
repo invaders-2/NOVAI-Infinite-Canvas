@@ -46,7 +46,8 @@ jobs:
           python build-all.py 2>&1 | Tee-Object -FilePath build-win.log
           $code = $LASTEXITCODE
           if ($code -ne 0) {
-            Get-Content build-win.log -Tail 40 | ForEach-Object { Write-Host "::error::$_" }
+            $details = (Get-Content build-win.log -Tail 40) -join " | "
+            Write-Host "::error::$details"
             exit $code
           }
         env:
