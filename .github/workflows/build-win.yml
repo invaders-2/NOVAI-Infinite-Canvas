@@ -41,7 +41,14 @@ jobs:
         run: choco install nsis -y --no-progress
 
       - name: Build (PyInstaller + NSIS installer)
-        run: python build-all.py
+        shell: pwsh
+        run: |
+          python build-all.py 2>&1 | Tee-Object -FilePath build-win.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Get-Content build-win.log -Tail 40 | ForEach-Object { Write-Host "::error::$_" }
+            exit $code
+          }
         env:
           # Windows runner 默认 stdout 编码是 cp1252，build-all.py 打印中文会 UnicodeEncodeError
           PYTHONUTF8: '1'
