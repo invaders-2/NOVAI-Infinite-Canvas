@@ -54,7 +54,7 @@ jobs:
           node tests/run-all.js 2>&1 | tee node-tests.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            while IFS= read -r line; do printf '::error::%s\n' "$line"; done < <(tail -n 35 node-tests.log)
+            while IFS= read -r line; do printf '::error::%s\n' "$line"; done < <(grep -E '✗|\[FAIL\]|Error|异常|失败' node-tests.log || true)
             exit "$status"
           fi
 
