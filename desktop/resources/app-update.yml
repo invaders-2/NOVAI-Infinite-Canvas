@@ -1,0 +1,4 @@
+provider: github
+owner: invaders-2
+repo: NOVAI-Infinite-Canvas
+updaterCacheDirName: novai-desktop-updater

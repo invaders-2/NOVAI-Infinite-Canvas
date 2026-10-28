@@ -100,6 +100,22 @@ const noResponse = () => Promise.resolve({ ok: false, status: 404, json: async (
     ok(/autoUpdater\.on\('update-downloaded'/.test(main) && /showUpdateInstallPrompt\(\)/.test(main), 'update-downloaded 复用同一个安装确认框');
     ok(/manualUpdateCheck/.test(main), '手动检查才有「已是最新版本」提示（启动自动检查保持安静）');
 
+    const configFn = topLevelFunction(main, 'ensureAppUpdateConfig');
+    ok(!!configFn, '启动更新器前有 app-update.yml 缺失兜底');
+    ok(/ensureAppUpdateConfig\(\);[\s\S]*require\('electron-updater'\)/.test(topLevelFunction(main, 'setupAutoUpdate')), '先补配置再加载 electron-updater');
+    const configDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'novai-updater-config-'));
+    vm.runInNewContext(configFn + '\nensureAppUpdateConfig();', {
+        app: { isPackaged: true }, process: { resourcesPath: configDir }, path, fs, clog() {},
+    });
+    const configPath = path.join(configDir, 'app-update.yml');
+    const configText = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+    ok(configText.includes('provider: github') && configText.includes('owner: invaders-2') && configText.includes('repo: NOVAI-Infinite-Canvas'), '运行时能生成正确的 GitHub 更新配置');
+    fs.rmSync(configDir, { recursive: true, force: true });
+    const pkg = JSON.parse(read('desktop/package.json'));
+    ok(pkg.build.extraResources.some(item => item.from === 'resources/app-update.yml' && item.to === 'app-update.yml'), '安装包把 app-update.yml 放到 Resources 根目录');
+    const packagedConfig = read('desktop/resources/app-update.yml');
+    ok(packagedConfig.includes('provider: github') && packagedConfig.includes('repo: NOVAI-Infinite-Canvas'), '默认更新配置已入仓');
+
     console.log('[3] iframe shim 也暴露 novaiUpdater');
     ok(/window\.novaiUpdater = \{/.test(main), 'shim 里挂 novaiUpdater');
     ok(/call\('update-check'\)/.test(main) && /call\('update-install'\)/.test(main), 'shim 走 postMessage 转发到同一 IPC');

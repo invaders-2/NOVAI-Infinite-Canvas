@@ -2450,8 +2450,28 @@ function registerUpdaterIpc() {
   });
 }
 
+function ensureAppUpdateConfig() {
+  if (!app.isPackaged) return;
+  const target = path.join(process.resourcesPath, 'app-update.yml');
+  if (fs.existsSync(target)) return;
+  const config = [
+    'provider: github',
+    'owner: invaders-2',
+    'repo: NOVAI-Infinite-Canvas',
+    'updaterCacheDirName: novai-desktop-updater',
+    '',
+  ].join('\n');
+  try {
+    fs.writeFileSync(target, config, { encoding: 'utf8', flag: 'wx' });
+    clog('updater', '已补齐缺失的 app-update.yml');
+  } catch (err) {
+    if (!fs.existsSync(target)) clog('updater', '无法补齐 app-update.yml: ' + (err && err.message || err));
+  }
+}
+
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
+  ensureAppUpdateConfig();
   try {
     autoUpdater = autoUpdater || require('electron-updater').autoUpdater;
     if (!autoUpdater) return;

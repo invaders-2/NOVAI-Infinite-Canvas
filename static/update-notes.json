@@ -1,6 +1,6 @@
 {
-  "version": "1.0.141",
-  "updated_at": "2026-10-28T13:27:12+08:00",
+  "version": "1.0.142",
+  "updated_at": "2026-10-28T14:07:42+08:00",
   "items": [
     {
       "type": "feature",
@@ -29,6 +29,10 @@
     {
       "type": "fix",
       "text": "修复 Windows 云端安装包因中文 CLI 文件名匹配失败而中断：NSIS 安装脚本现在按 UTF-8 读取，安装即梦与登录脚本会完整打入安装包。"
+    },
+    {
+      "type": "fix",
+      "text": "修复部分旧 Electron 包点击更新时报 app-update.yml 不存在：新安装包自带 GitHub 更新配置，启动更新器前也会自动补齐缺失文件。"
     },
     {
       "type": "improvement",
