@@ -50,6 +50,10 @@ jobs:
         working-directory: canvas-ui
         run: npm install --no-audit --no-fund
 
+      - name: Install OpenArc canvas test deps
+        working-directory: openarc-canvas-ui
+        run: npm install --no-audit --no-fund
+
       - name: Node tests
         run: node tests/run-all.js
 
