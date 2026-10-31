@@ -33,6 +33,8 @@ export function normalizeItem(raw) {
         searchTerms: asArray(item.search_terms).map(neutralText),
         installed: !!item.installed,
         enabled: item.enabled !== false,
+        storeVisible: item.store_visible !== false,
+        storeAvailable: item.store_available !== false,
         raw: item,
     };
 }
@@ -48,7 +50,7 @@ export function normalizeCatalog(payload) {
         .map(cat => ({ id: str(cat.id || cat.label), label: str(cat.label || cat.id) }));
     const featured = asArray(data.featured)
         .map(ref => byKey.get(itemKey(ref && ref.kind, ref && ref.name)))
-        .filter(Boolean);
+        .filter(item => item && item.storeVisible);
     const trending = asArray(data.trending_use_cases || data.trendingUseCases).map(useCase => {
         const source = useCase && useCase.item ? byKey.get(itemKey(useCase.item.kind, useCase.item.name)) : null;
         return {
@@ -58,7 +60,7 @@ export function normalizeCatalog(payload) {
             context: str(useCase && useCase.context),
             item: source,
         };
-    }).filter(useCase => useCase.title && useCase.item);
+    }).filter(useCase => useCase.title && useCase.item && useCase.item.storeVisible);
     return {
         contentVersion: str(data.content_version || data.contentVersion || ''),
         items,

@@ -33,9 +33,8 @@ ALLOWED_TOOLS = {
     "read_table", "write_html_report", "write_xlsx", "image_generate",
 }
 
-# 注册在 AGENT_TOOLS 里、但不是画布命令的技能工具：
-# activate_skill 加载已有技能说明；install_skill 从 GitHub 安装技能。两者都不进入画布 CLI 命令表。
-NON_CANVAS_TOOLS = {"activate_skill", "install_skill"}
+# 注册在 AGENT_TOOLS 里、但不进入通用画布 CLI 命令表的专用工具。
+NON_CANVAS_TOOLS = {"activate_skill", "install_skill", "lipsync_video"}
 
 # 会产生持久化副作用的命令（写画布 / 写素材库或记忆 / 落盘产物 / 发起生成任务）
 EXPECTED_WRITE_COMMANDS = {
@@ -132,7 +131,7 @@ class CommandTableTests(unittest.TestCase):
                        if spec["tool"] in canvas_only}
         self.assertEqual(canvas_used, set(canvas_only))
         self.assertEqual(len(canvas_only), 22)
-        # 22 个画布工具 + 2 个技能管理工具 = 24 条；数量变化要在这里显式说明
+        # 22 个通用画布工具 + 3 个技能/专用工具 = 25 条；数量变化要在这里显式说明
         self.assertEqual(len(canvas_tools), 22 + len(NON_CANVAS_TOOLS))
         for tool in set(cli_spec.CANVAS_TOOL_NAMES):
             self.assertIn(tool, canvas_only)

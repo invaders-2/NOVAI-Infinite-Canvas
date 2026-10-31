@@ -87,6 +87,11 @@ function onMessage(event) {
         if (d.canvasId) openLegacyWithCanvasId(d.route, d.canvasId);
         return;
     }
+    if (d.type === 'open-settings') {
+        state.settingsTab = typeof d.tab === 'string' ? d.tab : 'general';
+        state.settingsOpen = true;
+        return;
+    }
     if (d.type === 'settings-iframe-overlay') {
         listeners.overlay.forEach(fn => fn(!!d.open, event.source));
         return;

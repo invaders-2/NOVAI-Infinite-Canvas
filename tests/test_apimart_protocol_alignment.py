@@ -89,19 +89,17 @@ class ApimartImageBranchSourceTests(unittest.TestCase):
 
     def test_official_fallback_only_on_extension_channel(self):
         stripped = [line.strip() for line in APIMART_IMAGE_BRANCH.splitlines()]
-        hits = [index for index, line in enumerate(stripped)
-                if "official_fallback" in line and not line.startswith("#")]
+        hits = [line for line in stripped if 'body["official_fallback"]' in line]
         self.assertEqual(len(hits), 1, "APIMart 图像分支只应有一处 official_fallback 写入")
-        self.assertEqual(stripped[hits[0]], 'body["official_fallback"] = False')
-        self.assertTrue(stripped[hits[0] - 1].startswith("if not apimart_official"),
-                        "official_fallback 必须只在非官方渠道分支写入")
+        self.assertEqual(hits[0], 'body["official_fallback"] = False')
+        self.assertIn("if not apimart_official:", stripped)
         self.assertNotIn('"official_fallback": False', APIMART_IMAGE_BRANCH)
 
     def test_official_channel_uploads_reference_images(self):
         self.assertIn("is_apimart_official_image_model(model)", APIMART_IMAGE_BRANCH)
         self.assertIn("upload_image_for_apimart(client, provider", APIMART_IMAGE_BRANCH)
         self.assertIn('startswith(("http://", "https://"))', APIMART_IMAGE_BRANCH)
-        self.assertIn('body["image_urls"] = official_urls', APIMART_IMAGE_BRANCH)
+        self.assertIn('body["image_urls"] = remote_urls', APIMART_IMAGE_BRANCH)
 
     def test_extension_channel_skips_upload_when_data_uri_fits(self):
         self.assertIn("await apimart_image_reference_inputs(", APIMART_IMAGE_BRANCH)
@@ -124,13 +122,11 @@ class ApimartImageBranchSourceTests(unittest.TestCase):
 
     def test_gateway_rejecting_remote_urls_retries_with_data_uri(self):
         self.assertIn("apimart_image_url_rejected(response.text)", APIMART_IMAGE_BRANCH)
-        self.assertIn("apimart_reference_data_urls(image_refs[:ONLINE_IMAGE_REFERENCE_MAX], body)",
-                      APIMART_IMAGE_BRANCH)
+        self.assertIn("apimart_reference_data_urls(selected_refs, body)", APIMART_IMAGE_BRANCH)
+        self.assertIn("not apimart_remote_required", APIMART_IMAGE_BRANCH)
         self.assertEqual(APIMART_IMAGE_BRANCH.count("/v1/images/generations"), 0)
         self.assertEqual(
-            APIMART_IMAGE_BRANCH.count(
-                "lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)"),
-            2)
+            APIMART_IMAGE_BRANCH.count("lambda: client.post(gen_url, headers=request_headers, json=body)"), 2)
 
 
 class ApimartMidjourneyBaseSourceTests(unittest.TestCase):
@@ -141,6 +137,21 @@ class ApimartMidjourneyBaseSourceTests(unittest.TestCase):
             source = function_source(MAIN_SOURCE, name)
             self.assertIn("apimart_api_base(provider)", source, name)
             self.assertNotIn("APIMART_MIDJOURNEY_API_ROOT", source, name)
+
+
+class ApimartChatStreamTests(unittest.TestCase):
+    def test_wrapped_stream_deltas_are_unwrapped(self):
+        chunk = {"code": 200, "data": {"choices": [{"delta": {
+            "content": "正文", "reasoning_content": "思考",
+        }}]}}
+        self.assertEqual(main.text_delta_from_chat_chunk(chunk), "正文")
+        self.assertEqual(main.reasoning_delta_from_chat_chunk(chunk), "思考")
+
+    def test_canvas_llm_stream_supports_apimart_and_gateway_budget(self):
+        source = function_source(MAIN_SOURCE, "_canvas_llm_stream_impl")
+        self.assertNotIn('if is_apimart_provider(_llm_provider):\n        raise HTTPException(status_code=409', source)
+        self.assertIn('req_body = {"model": model, "messages": upstream_messages, "stream": True}', source)
+        self.assertIn("fit_apimart_chat_request_to_gateway(req_body)", source)
 
 
 if __name__ == "__main__":

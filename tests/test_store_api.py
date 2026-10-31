@@ -2,13 +2,14 @@
 """应用市场（/api/store/*）：数据源是 server/store_data 里市场来源的 83 条。
 
 覆盖：
-  1. catalog：83 条、counts 自洽、categories 5 个、featured / trending 有值、封面已本地化；
-  2. 详情：5 个分支（generic / app / collection / studio / preset_wall）各自的关键字段；
-  3. launch：带 preset_id / 不带 preset（starter_prompt）/ 空 inputs 不留空行 / 参考素材 /
+  1. catalog：原始 83 条、一级 20 条、counts 自洽、categories 5 个、封面已本地化；
+  2. curation：33 条停用、30 条合集子项隐藏但可用，停用安装 / 启动返回 409；
+  3. 详情：5 个分支（generic / app / collection / studio / preset_wall）各自的关键字段；
+  4. launch：带 preset_id / 不带 preset（starter_prompt）/ 空 inputs 不留空行 / 参考素材 /
      画布真的被创建（能在 CANVAS_DIR 读回）；未知 preset → 400；
-  4. install / uninstall：落盘 data/store_installed.json、幂等、未知条目 404；
-  5. 只有市场来源这 83 条：不含 NOVAI 既有技能 / 智能体；
-  6. 回归：/api/capabilities、/api/agents 照旧。
+  5. install / uninstall：落盘 data/store_installed.json、幂等、未知条目 404；
+  6. 只有市场来源这 83 条：不含 NOVAI 既有技能 / 智能体；
+  7. 回归：/api/capabilities、/api/agents 照旧。
 
 用临时数据目录（NOVAI_DATA_DIR），安装态写临时目录；目录与详情读仓库自带的 data/store。
 """
@@ -65,6 +66,25 @@ class StoreCatalogTests(unittest.TestCase):
             self.assertTrue(item["display_name"])
             self.assertTrue(item["name"])
             self.assertIsInstance(item["installed"], bool)
+            self.assertIsInstance(item["store_visible"], bool)
+            self.assertIsInstance(item["store_available"], bool)
+
+    def test_curation_has_20_root_skills_and_33_unavailable_items(self):
+        items = self.data["items"]
+        visible = [item for item in items if item["store_visible"]]
+        unavailable = [item for item in items if not item["store_available"]]
+        hidden_children = [item for item in items if not item["store_visible"] and item["store_available"]]
+        self.assertEqual(self.data["visible_counts"], {"all": 20, "skill": 20, "app": 0})
+        self.assertEqual(len(visible), 20)
+        self.assertEqual(len(unavailable), 33)
+        self.assertEqual(len(hidden_children), 30)
+        self.assertTrue(all(item["kind"] == "skill" for item in visible))
+        self.assertTrue(all(not item["enabled"] for item in unavailable))
+        self.assertFalse(next(item for item in items if item["name"] == "hubspot")["store_available"])
+        self.assertFalse(next(item for item in items if item["name"] == "fish-audio-lab")["store_visible"])
+        child = next(item for item in items if item["name"] == "primordia-art-director")
+        self.assertFalse(child["store_visible"])
+        self.assertTrue(child["store_available"])
 
     def test_categories_featured_trending(self):
         categories = self.data["categories"]
@@ -343,7 +363,7 @@ class StoreLaunchTests(unittest.TestCase):
         item = None
         for candidate in self.c.get("/api/store/catalog").json()["items"]:
             detail = detail_of(candidate["kind"], candidate["name"])
-            if detail.get("starter_prompt"):
+            if candidate["store_available"] and detail.get("starter_prompt"):
                 item = candidate
                 break
         self.assertIsNotNone(item)
@@ -387,11 +407,10 @@ class StoreLaunchTests(unittest.TestCase):
         self.assertNotIn("【用户输入】", body["prompt"])
         self.assertLess(len(body["prompt"]), 4000)
 
-    def test_launch_without_body_returns_empty_skill_ref(self):
-        # baidupan 的 activation_skill=baidupan-files 没有正文
-        body = self.c.post("/api/store/items/app/baidupan/launch", json={}).json()
-        self.assertEqual(body["skill_ref"], "")
-        self.assertNotIn("【技能执行手册】", body["prompt"])
+    def test_unavailable_item_cannot_launch(self):
+        resp = self.c.post("/api/store/items/app/baidupan/launch", json={})
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("未开放", resp.json()["detail"])
 
     def test_launch_returns_skill_ref_for_generated_manual(self):
         body = self.c.post("/api/store/items/skill/3d-studio/launch", json={}).json()
@@ -457,10 +476,13 @@ class StoreInstallTests(unittest.TestCase):
         self.assertEqual(self._saved(), [])
         self.assertEqual(self.c.delete(url).json(), {"installed": False})    # 幂等
 
-    def test_install_app_and_mix(self):
-        self.c.post("/api/store/items/skill/trending-recast-gallery/install")
-        self.c.post("/api/store/items/app/brainstorm/install")
-        self.assertEqual(self._saved(), ["skill:trending-recast-gallery", "app:brainstorm"])
+    def test_unavailable_app_cannot_install_but_can_uninstall(self):
+        store.save_installed(["app:brainstorm"])
+        resp = self.c.post("/api/store/items/app/brainstorm/install")
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(self._saved(), ["app:brainstorm"])
+        self.assertEqual(self.c.delete("/api/store/items/app/brainstorm/install").json(), {"installed": False})
+        self.assertEqual(self._saved(), [])
 
     def test_unknown_item_is_404_and_not_written(self):
         for url in ("/api/store/items/skill/no-such-item/install",

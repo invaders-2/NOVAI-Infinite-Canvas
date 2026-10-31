@@ -360,6 +360,34 @@ class ChargeLifecycleTests(unittest.TestCase):
         self.assertAlmostEqual(store.balance(uid), before + charge["charged"])
         self.assertEqual(service.charges(user_id=uid, limit=1)[0]["status"], "refunded")
 
+    def test_task_cancel_refunds_and_blocks_late_settlement(self):
+        uid = unique_user(10.0)
+        charge = service.charge_start(uid, "image", "flux-3-image-klein", {"width": 1024, "height": 1024})
+        task = main.task_create(kind="online-image", payload={"prompt": "x"},
+                                runner_name="run_canvas_image_task", extra={"credits_charge_id": charge["id"]})
+        main.task_set_status(task["id"], "running")
+        before = store.balance(uid)
+        response = main.asyncio.run(main.task_cancel(task["id"]))
+        self.assertEqual(response["status"], "cancel_requested")
+        self.assertEqual(response["credits"]["status"], "refunded")
+        self.assertAlmostEqual(store.balance(uid), before + charge["charged"])
+
+        main._task_credit_settle(task["id"], result={"images": ["late.png"]})
+        main.task_set_status(task["id"], "succeeded")
+        self.assertEqual(main.task_get(task["id"])["status"], "cancelled")
+        self.assertAlmostEqual(store.balance(uid), before + charge["charged"])
+        self.assertEqual(service.charges(user_id=uid, limit=1)[0]["status"], "refunded")
+
+    def test_direct_cancelled_status_refunds_without_worker(self):
+        uid = unique_user(5.0)
+        charge = service.charge_start(uid, "image", "flux-3-image-klein", {"width": 1024, "height": 1024})
+        task = main.task_create(kind="online-image", payload={"prompt": "x"},
+                                runner_name="run_canvas_image_task", extra={"credits_charge_id": charge["id"]})
+        before = store.balance(uid)
+        main.task_set_status(task["id"], "cancelled", error="停止前清理")
+        self.assertAlmostEqual(store.balance(uid), before + charge["charged"])
+        self.assertEqual(service.charges(user_id=uid, limit=1)[0]["status"], "refunded")
+
     def test_failed_generation_refunds_via_api(self):
         uid = unique_user(5.0)
         client = TestClient(main.app)

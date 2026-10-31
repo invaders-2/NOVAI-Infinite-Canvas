@@ -40,21 +40,26 @@ ok(/title: '产品换图 · 换鞋'/.test(home), '标题为「产品换图 · �
 ok(/cat: '电商'/.test(home.slice(home.indexOf("id: 'product-swap'"), home.indexOf("id: 'product-swap'") + 400)), 'cat 归到「电商」');
 ok(/icon: 'camera', color: '#0f766e'/.test(home), "icon: camera / color: #0f766e");
 
-console.log('[2] 模板对象可从 home.html 切片 eval（不是另抄一份）');
+console.log('[2] 首页展示模板为空，技能工作流对象可从 home.html 切片 eval');
 const sliceStart = home.indexOf('var KEEP = ');
 const sliceEnd = home.indexOf('var TEMPLATE_MAP = {};');
 ok(sliceStart >= 0 && sliceEnd > sliceStart, '模板定义区块（var KEEP … TEMPLATE_MAP）可定位');
 let TEMPLATES = null;
+let HOME_TEMPLATES = null;
 if (sliceStart >= 0 && sliceEnd > sliceStart) {
     try {
-        TEMPLATES = new Function(home.slice(sliceStart, sliceEnd) + '\nreturn TEMPLATES;')();
+        const lists = new Function(home.slice(sliceStart, sliceEnd) + '\nreturn {home:TEMPLATES, skills:SKILL_TEMPLATES};')();
+        HOME_TEMPLATES = lists.home;
+        TEMPLATES = lists.skills;
     } catch (e) {
         ok(false, '模板定义区块 eval 失败：' + e.message);
     }
 }
-ok(Array.isArray(TEMPLATES) && TEMPLATES.length > 0, 'eval 出 TEMPLATES 数组');
+ok(Array.isArray(HOME_TEMPLATES) && HOME_TEMPLATES.length === 0, '首页展示模板列表已清空');
+ok(/id="hpTemplateSection" hidden/.test(home) && /\$\('hpTemplateSection'\)\.hidden = !list\.length/.test(home), '没有展示模板时整个模板区隐藏');
+ok(Array.isArray(TEMPLATES) && TEMPLATES.length > 0, '技能工作流列表仍然完整');
 const tpl = (TEMPLATES || []).find(t => t.id === 'product-swap');
-ok(Boolean(tpl), 'TEMPLATES 里能找到 product-swap');
+ok(Boolean(tpl), '技能工作流里能找到 product-swap');
 
 console.log('[3] 节点顺序与形态');
 const nodes = (tpl && tpl.nodes) || [];

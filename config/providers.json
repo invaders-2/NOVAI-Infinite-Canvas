@@ -1,5 +1,19 @@
 {
   "format": "novai-provider-registry/v1",
   "comment": "供应商注册表：只放“默认值与识别信息”，不放任何密钥。密钥从 API/.env 读取，每个供应商一个变量（见 key_env）。改这里不会覆盖用户在 data/api_providers.json 里的实际配置。按供应商收窄生图比例/档位的 size_overrides 字段与可复制样例见 server/protocols/SIZE_OVERRIDES.md。",
-  "providers": []
+  "providers": [
+    {
+      "id": "pixverse",
+      "name": "PixVerse",
+      "protocol": "pixverse",
+      "base_url": "https://app-api.pixverse.ai",
+      "base_url_aliases": ["https://app-api.pixverse.ai"],
+      "docs_url": "https://docs.platform.pixverse.ai/speechlip-sync-1268530m0",
+      "key_env": "PIXVERSE_API_KEY",
+      "default_models": {
+        "video": ["pixverse-lipsync"]
+      },
+      "notes": "自定义声音与 LipSync。使用原视频克隆声音前需要确认声音使用授权。"
+    }
+  ]
 }

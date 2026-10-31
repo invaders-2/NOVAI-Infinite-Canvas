@@ -14,7 +14,7 @@ const ITEMS = [
     { id: 'home', i18n: 'nav.home', label: '首页', svg: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>' },
     { id: 'online', i18n: 'nav.online', label: '在线生图', svg: '<path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>' },
     { id: 'gpt-chat', i18n: 'nav.gpt', label: 'GPT 对话', svg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' },
-    { id: 'canvas', i18n: 'nav.canvas', label: '无限画布', svg: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>' },
+    { id: 'canvas', i18n: 'nav.canvas', label: '智能画布BEAT', svg: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>' },
     { id: 'asset-manager', i18n: 'nav.assetManager', label: '素材库', svg: '<path d="M4 19.5V6.8A2.8 2.8 0 0 1 6.8 4h10.4A2.8 2.8 0 0 1 20 6.8v12.7"/><path d="M7 8h10"/><path d="M7 12h10"/><path d="M7 16h6"/>' },
     { id: 'store', i18n: 'nav.store', label: '应用市场', svg: '<rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/>' },
 ];

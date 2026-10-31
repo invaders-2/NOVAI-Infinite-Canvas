@@ -1444,6 +1444,13 @@ body.svc-fullscreen-active { overflow:hidden; }
 .input-thumbs-row.has-items { display:flex; }
 .input-prompt-preview { grid-area:prompt-preview; display:none; min-width:0; padding:8px 10px; border-radius:var(--radius-md); background:var(--soft); }
 .input-prompt-preview.has-text { display:flex; flex-direction:column; gap:4px; }
+.batch-kind-switch { position:relative; display:inline-flex; align-items:center; align-self:center; flex:0 0 auto; gap:2px; height:24px; padding:2px; border-radius:var(--radius-full); background:var(--soft); --nv-glide-bg:var(--card); --nv-glide-ms:220ms; }
+.batch-kind-switch[hidden] { display:none; }
+.batch-kind-switch.nv-glide-host .nv-glide-pill { border-radius:var(--radius-full); }
+.batch-kind-switch button { height:20px; padding:0 9px; border:0; border-radius:var(--radius-full); display:inline-flex; align-items:center; justify-content:center; gap:4px; background:transparent; color:var(--muted); cursor:pointer; font-size:11px; font-weight:500; transition:color .14s ease; }
+.batch-kind-switch button:hover,.batch-kind-switch button.active { color:var(--text); }
+.batch-kind-switch button.active { font-weight:600; }
+.batch-kind-switch button i,.batch-kind-switch button svg { width:12px; height:12px; }
 .input-prompt-preview-label { color:var(--faint); font-size:11px; font-weight:850; line-height:1.2; }
 .input-prompt-preview-text { color:var(--muted); font-size:11px; line-height:1.42; max-height:148px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; scrollbar-width:thin; }
 .input-thumb-list { display:flex; align-items:center; gap:6px; min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; padding:5px 0 0 5px; }
@@ -1456,6 +1463,8 @@ body.svc-fullscreen-active { overflow:hidden; }
 .input-thumb-add.active:hover,.input-thumb-add.active:focus-visible { background:var(--strong); color:var(--strong-text); }
 .input-thumb-add i,.input-thumb-add svg { width:15px !important; height:15px !important; stroke-width:2.2; }
 .input-thumb { position:relative; width:42px; height:42px; flex:0 0 auto; border-radius:var(--radius-md); overflow:visible; background:var(--soft); cursor:pointer; transition:transform .12s ease, box-shadow .12s ease; }
+.input-frame-empty { position:relative; width:42px; height:42px; flex:0 0 auto; border-radius:var(--radius-md); background:var(--soft); color:var(--faint); display:inline-flex; align-items:center; justify-content:center; }
+.input-frame-empty i,.input-frame-empty svg { width:17px; height:17px; }
 .input-thumb[draggable="true"] { cursor:grab; }
 .input-thumb:active { cursor:grabbing; }
 .input-thumb img, .input-thumb video { width:100%; height:100%; object-fit:cover; border-radius:inherit; background:var(--accent); display:block; pointer-events:none; }
@@ -8039,6 +8048,27 @@ html.studio-theme-dark .nv-mcp-brand-logo { filter: invert(1); }
 .chat-artifacts-skeleton { display: flex; flex-direction: column; gap: 8px; padding: 12px 7px; }
 .chat-artifacts-skeleton-row { height: 38px; border-radius: 8px; background: linear-gradient(90deg, var(--soft) 25%, color-mix(in srgb, var(--text) 6%, transparent) 50%, var(--soft) 75%); background-size: 200% 100%; animation: chatArtifactsShimmer 1.2s infinite; }
 @keyframes chatArtifactsShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ── 右侧流程模板 ── */
+.canvas-templates-search { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; margin: 0 14px 10px; padding: 0 10px; height: 32px; border-radius: 9px; background: var(--soft); color: var(--muted); }
+.canvas-templates-search svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.canvas-templates-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: none; background: transparent; color: var(--text); font: 400 11px/1 var(--font-sans); }
+.canvas-templates-search input::placeholder { color: var(--faint); }
+.canvas-templates-body { display: flex; flex-direction: column; gap: 10px; padding: 0 10px 12px; }
+.canvas-template-card { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 9px 12px; padding: 10px; border-radius: 12px; background: var(--soft); }
+.canvas-template-cover { grid-row: 1 / 3; display: flex; gap: 4px; width: 112px; height: 92px; overflow: hidden; border-radius: 9px; background: var(--panel); }
+.canvas-template-cover img { width: 100%; height: 100%; min-width: 0; object-fit: cover; }
+.canvas-template-cover.count-2 img, .canvas-template-cover.count-3 img { width: 33.333%; }
+.canvas-template-cover-empty { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: var(--faint); }
+.canvas-template-cover-empty svg { width: 25px; height: 25px; }
+.canvas-template-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding-top: 2px; }
+.canvas-template-copy strong { color: var(--text); font: 600 12px/17px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-template-copy span { color: var(--muted); font: 400 10px/15px var(--font-sans); }
+.canvas-template-apply { align-self: end; justify-self: start; height: 27px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--accent); color: var(--accent-text); font: 500 10px/1 var(--font-sans); cursor: pointer; }
+.canvas-template-apply:hover { filter: brightness(1.06); }
+.canvas-template-apply:disabled { cursor: default; opacity: .55; }
+.canvas-templates-retry { height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: var(--soft); color: var(--text); font: 500 10.5px/1 var(--font-sans); cursor: pointer; }
+@media (max-width: 520px) { .canvas-template-card { grid-template-columns: 92px minmax(0, 1fr); } .canvas-template-cover { width: 92px; height: 82px; } }
 
 /* ── run 上下文按钮 / 弹窗 ── */
 .agent-run-debug-row { display: flex; justify-content: flex-end; margin-top: 6px; }

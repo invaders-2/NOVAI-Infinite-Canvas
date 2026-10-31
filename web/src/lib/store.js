@@ -5,7 +5,7 @@ export const PAGES = [
     // 首页：按用户要求继续用原先的 home.html（iframe 承载）；Vue 版 pages/home/HomePage.vue 保留未挂载
     { id: 'home', label: '首页', i18n: 'nav.home', icon: 'home', legacy: '/static/home.html' },
     // 画布：列表已用 Vue 重写（native），打开某张画布时仍用 iframe 承载旧编辑器（frame）
-    { id: 'canvas', label: '无限画布', i18n: 'nav.canvas', icon: 'workflow', native: true, frame: true },
+    { id: 'canvas', label: '智能画布BEAT', i18n: 'nav.canvas', icon: 'workflow', native: true, frame: true },
     { id: 'online', label: '在线生图', i18n: 'nav.online', icon: 'globe', native: true },
     { id: 'gpt-chat', label: 'GPT 对话', i18n: 'nav.gpt', icon: 'chat', native: true },
     { id: 'asset-manager', label: '素材库', i18n: 'nav.assetManager', icon: 'library', native: true },

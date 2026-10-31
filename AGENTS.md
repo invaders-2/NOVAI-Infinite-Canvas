@@ -13,11 +13,11 @@ AI 创作工具：无限画布 + 多模型调用（OpenAI API、ComfyUI、火山
 ## 改之前先看的坑
 
 - `main.py` 是**单体后端**（约 2.2 万行），绝大多数路由都在里面；`server/` 下另有一层模块化代码（`server/routes/`、`server/schemas/`、`server/appRegistry.py`、`server/capabilities.py`）。找路由时两处都要看。
-- `static/js/canvas.js` 与 `static/js/smart-canvas.js` 是**两套独立画布实现**（传统节点连线式 vs 智能画布），改一边不要假设另一边同理。
-- 画布缩放/平移由 `viewport` 对象（x, y, scale）驱动，改动需同步 `applyViewport()` 与 `renderLinks()`。
-- 前端是原生 HTML/JS，无构建步骤；`index.html` 用 iframe 加载子页面，页面切换靠 `switchUI()`，跨页面通信用 `postMessage`。
+- 默认传统画布入口 `static/canvas.html` 已替换为 OpenArc `canvas-next` 无限画布，对外名称为「智能画布BEAT」：源码与 NOVAI REST 适配器在 `openarc-canvas-ui/`，`cd openarc-canvas-ui && npm install && npm run build` 输出到 `static/openarc-canvas/`（构建产物要一起提交）。`novaiBackend.ts` 负责文档/生成，`novaiBridge.ts` 负责素材库、提示词、工作流、技能与记忆；协作、共享、团队库、元素同步和桌面专用入口在 NOVAI 宿主中隐藏。`static/legacy-canvas.html` + `static/js/canvas.js` 保留传统实现作回退；`static/js/smart-canvas.js` 仍是独立智能画布，三套实现不要假设可以同步改动。
+- 传统回退页的缩放/平移由 `viewport` 对象（x, y, scale）驱动，改动需同步 `applyViewport()` 与 `renderLinks()`；OpenArc 画布使用自己的 `view`（x, y, k）与 store。
+- 旧前端页面是原生 HTML/JS，无构建步骤；`index.html` 用 iframe 加载子页面，页面切换靠 `switchUI()`，跨页面通信用 `postMessage`。`web/`、`canvas-ui/` 与 `openarc-canvas-ui/` 三个微应用分别有构建流程。
 - **NOVAI 2.0 新前端（逐页替换中）**：源码在 `web/`（Vue 3 + Vite），`cd web && npm install && npm run build` 输出到 `static/v2/`（构建产物要一起提交，桌面包不跑 Node）；后端默认入口 `/` 返回它（`/v2` 同样可用；新版未构建时 `/` 自动回退旧外壳），旧外壳保留在 `/legacy` 作为回退（设置 → 关于 →「旧版界面」可切换）。
-  - 已用 Vue 重写：外壳（侧栏 / 标题栏 / 设置弹窗全部 6 页：通用、API 设置、工作流设置、数据备份、外观、关于 / 更新弹窗 / 欢迎页）、画布列表（`web/src/pages/canvas/CanvasListPage.vue`）、在线生图 / Z-Image（`pages/online/`）、GPT 对话（`pages/chat/`）、素材库（`pages/assets/`）。还是旧页面的只剩首页（用户要求保留）和画布编辑器（smart-canvas.html / canvas.html）。
+  - 已用 Vue 重写：外壳（侧栏 / 标题栏 / 设置弹窗全部 6 页：通用、API 设置、工作流设置、数据备份、外观、关于 / 更新弹窗 / 欢迎页）、画布列表（`web/src/pages/canvas/CanvasListPage.vue`）、在线生图 / Z-Image（`pages/online/`）、GPT 对话（`pages/chat/`）、素材库（`pages/assets/`）。首页仍保留旧 `static/home.html`；传统画布由 `openarc-canvas-ui` 提供，智能画布仍用 `smart-canvas.html`。
   - 用户要求：首页继续用旧 `static/home.html`（iframe），左侧导航保持旧外壳的样式与交互（`web/src/shell/Sidebar.vue` 是旧 index.html 侧栏的移植）。进度与约定见 `web/REWRITE.md`。
   - 画布页是 native + frame：没打开画布时显示 Vue 列表；`openCanvasUrl()` 把 `frame-canvas` 指到旧编辑器，编辑器点「返回画布列表」会把 iframe 指回 `canvas-list.html`，LegacyStage 在 load 时识别到就调 `closeCanvas()` 切回 Vue 列表（旧 canvas-list.html 仍保留给旧外壳 `/` 用）。其余页面仍是旧 HTML，新外壳用 `frame-<id>` iframe 承载，消息协议与旧 `index.html` 完全一致（见 `web/src/lib/bridge.js` 顶部注释）。
   - 页面注册表在 `web/src/lib/store.js` 的 `PAGES`：重写完一页就把它的 `legacy` 换成 `native` 组件。

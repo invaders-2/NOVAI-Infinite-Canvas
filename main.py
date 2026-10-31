@@ -3956,6 +3956,8 @@ class OnlineImageRequest(BaseModel):
     quality: str = "auto"
     background: str = "auto"
     n: int = 1
+    midjourney_version: str = ""
+    midjourney_hd: bool = False
     reference_images: List[AIReference] = []
 
 class ImageTaskQueryRequest(BaseModel):
@@ -4234,6 +4236,8 @@ def task_set_status(task_id: str, status: str, error: str = None, status_code: i
             snapshot = json.loads(json.dumps(task, ensure_ascii=False, default=str))
         except Exception:
             snapshot = dict(task)
+    if status == "cancelled":
+        _task_credit_refund(task_id, "task_cancelled")
     _task_broadcast(snapshot)
     return True
 
@@ -4326,6 +4330,9 @@ def _task_credit_charge_id(task_id: str) -> int:
 
 
 def _task_credit_settle(task_id: str, result=None):
+    task = task_get(task_id) or {}
+    if task.get("cancel_requested") or task.get("status") in ("cancel_requested", "cancelled"):
+        return _task_credit_refund(task_id, "task_cancelled")
     charge_id = _task_credit_charge_id(task_id)
     if not charge_id:
         return None
@@ -4475,12 +4482,16 @@ async def task_cancel(task_id: str) -> dict:
     if task.get("status") in TASK_TERMINAL_STATUSES:
         raise HTTPException(status_code=400, detail=f"任务已结束（{task.get('status')}），无法取消")
     task_set_status(task_id, "cancel_requested")
+    credits = _task_credit_refund(task_id, "task_cancelled")
     await task_provider_cancel(task_get(task_id))
-    return {
+    response = {
         "task_id": task_id,
         "status": "cancel_requested",
         "message": "取消请求已受理：排队中的任务不会再执行，运行中的任务将尽力停止",
     }
+    if credits is not None:
+        response["credits"] = credits
+    return response
 
 
 async def task_retry(task_id: str) -> dict:
@@ -4617,6 +4628,9 @@ class CanvasVideoRequest(BaseModel):
     images: List[AIReference] = []
     videos: List[Any] = []  # 元素可为 URL 字符串，或 {url, role} 对象（role: video=编辑目标 / reference_video=多模态参考）
     audios: List[str] = []
+    speaker_id: str = ""
+    voice_sample: str = ""
+    voice_consent: bool = False
     enhance_prompt: bool = False
     enable_upsample: bool = False
     watermark: bool = False
@@ -6307,6 +6321,7 @@ def text_from_chat_response(data):
     return str(content)
 
 def text_delta_from_chat_chunk(data):
+    data = unwrap_apimart_response(data)
     choices = data.get("choices") or []
     if not choices:
         return ""
@@ -6340,6 +6355,7 @@ def reasoning_text_from_fragment(value):
 
 def reasoning_delta_from_chat_chunk(data):
     """流式思考增量：delta.reasoning_content 优先，兼容 delta.reasoning；没有就返回空串。"""
+    data = unwrap_apimart_response(data)
     choices = data.get("choices") or []
     if not choices:
         return ""
@@ -13008,15 +13024,15 @@ def is_gpt_image_background_model(model):
     )
 
 def image_supports_native_transparent_background(provider, model):
-    """光模型支持还不够：只有普通 OpenAI 协议下会真正下发 background 参数的那几条 /images/* 分支才算原生，
-    APIMart、Responses/Agnes JSON、视频代理与专用平台都是自有请求体，透明只能退回提示词，
-    否则会出现「既没传参、也没加提示词」的空档。"""
+    """只有当前协议与模型都支持原生 background 参数时才直接下发，其他情况退回提示词。"""
     if not is_gpt_image_background_model(model):
         return False
     # ModelScope 虽声明 openai 协议，但走自己的生图实现（与 generate_ai_image 的分派保持一致）
     if str(provider.get("id") or "").strip().lower() == "modelscope":
         return False
-    if is_apimart_provider(provider) or effective_protocol(provider, model) != "openai":
+    if is_apimart_provider(provider):
+        return bool((apimart_image_model_caps(model) or {}).get("native_background"))
+    if effective_protocol(provider, model) != "openai":
         return False
     return effective_image_request_mode(provider, model) == "openai"
 
@@ -13122,7 +13138,8 @@ APIMART_ASPECT_RATIOS = [
     (1, 1, "1:1"), (3, 2, "3:2"), (2, 3, "2:3"), (4, 3, "4:3"), (3, 4, "3:4"),
     (5, 4, "5:4"), (4, 5, "4:5"), (16, 9, "16:9"), (9, 16, "9:16"),
     (2, 1, "2:1"), (1, 2, "1:2"), (3, 1, "3:1"), (1, 3, "1:3"),
-    (21, 9, "21:9"), (9, 21, "9:21"),
+    (21, 9, "21:9"), (9, 21, "9:21"), (7, 5, "7:5"), (5, 7, "5:7"),
+    (9, 19.5, "9:19.5"), (19.5, 9, "19.5:9"), (9, 20, "9:20"), (20, 9, "20:9"),
 ]
 # 同一比例同一档位官方可能给两组等价像素（如 1:1 的 1k = 1024² 或 1254²），全部收录才能精确命中。
 APIMART_OFFICIAL_PIXELS = {
@@ -13209,13 +13226,32 @@ def apimart_size_notice(requested_ratio, final_ratio, requested_resolution, fina
         notices.append(f"该模型不支持 {ratio_before}，已用 {ratio_after} 生成")
     return "；".join(notices)
 
+APIMART_SPECIAL_RESOLUTION_PIXELS = {
+    "0.5K": 262144, "768SQ": 589824, "1K": 1048576, "1.5K": 2097152,
+    "2K": 4194304, "3K": 9437184, "4K": 16777216,
+}
+
+def apimart_image_resolution_from_size_for_model(size, model):
+    _ratio, resolution = apimart_size_resolution(size)
+    caps = apimart_image_model_caps(model) or {}
+    allowed = caps.get("resolutions") or ()
+    if "1.5K" not in allowed and "768SQ" not in allowed:
+        return resolution
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        return resolution
+    pixels = width * height
+    return min(allowed, key=lambda level: abs(math.log(pixels / APIMART_SPECIAL_RESOLUTION_PIXELS[level])))
+
 def apimart_image_resolution_for_model(model="", resolution="1K"):
     """按官方文档逐模型收敛分辨率档位：请求档位超过模型上限时降到该模型最高档，
     不做「静默降级成 1K」；表里没有的模型保持原有白名单透传。"""
-    text = str(resolution or "1K").strip().upper()
-    if text not in {"0.5K", "1K", "2K", "3K", "4K"}:
-        text = "1K"
     caps = apimart_image_model_caps(model)
+    if caps and caps.get("fixed_resolution"):
+        return str(caps["fixed_resolution"])
+    text = str(resolution or "1K").strip().upper()
+    if text not in {"0.5K", "768SQ", "1K", "1.5K", "2K", "3K", "4K"}:
+        text = "1K"
     if not caps:
         return text if text in {"0.5K", "1K", "2K", "4K"} else "1K"
     return apimart_clamp_image_resolution(text, caps.get("resolutions"))
@@ -13233,15 +13269,19 @@ APIMART_IMAGE_MODEL_CAPS = {
     },
     "gpt-image-2-5": {
         "ratios": ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"),
-        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": True, "base64_refs": True, "official_fallback": False,
+        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": True, "base64_refs": False,
+        "ref_max": 16, "qualities": ("low", "medium", "high", "xhigh", "max"), "exact_size": True,
+        "native_background": True, "official_fallback": False,
     },
     "gpt-image-2-5-ext": {
         "ratios": ("auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"),
-        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": False, "base64_refs": True, "official_fallback": False,
+        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": False, "base64_refs": True,
+        "ref_max": 16, "response_version": "2026-07-27", "idempotency": True, "official_fallback": False,
     },
     "gpt-image-1": {
         "ratios": ("1:1", "3:2", "2:3"), "resolutions": ("1K",), "n_max": 4,
-        "mask_url": True, "base64_refs": False, "official_fallback": False,
+        "mask_url": True, "base64_refs": False, "ref_max": 15,
+        "qualities": ("low", "medium", "high"), "native_background": True, "official_fallback": False,
     },
     "gemini-2-5-flash-image-preview": {
         "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"),
@@ -13271,13 +13311,17 @@ APIMART_IMAGE_MODEL_CAPS = {
         "ratios": ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"),
         "resolutions": ("1K",), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": True,
     },
+    "gemini-nano-banana-2-1-ext": {
+        "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": True,
+    },
     "gemini-nano-banana-2-1": {
         "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1"),
-        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": False, "base64_refs": True, "official_fallback": True,
+        "resolutions": ("1K", "2K", "4K"), "n_max": 4, "mask_url": False, "base64_refs": True, "official_fallback": False,
     },
     "imagen-4-0-apimart": {
         "ratios": ("1:1", "4:3", "3:4", "16:9", "9:16"), "resolutions": ("1K",), "n_max": 1,
-        "mask_url": False, "base64_refs": False, "official_fallback": False,
+        "mask_url": False, "base64_refs": False, "refs_none": True, "official_fallback": False,
     },
     "mai-image-2-6": {
         "ratios": (), "resolutions": ("1K", "2K"), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": False,
@@ -13316,19 +13360,47 @@ APIMART_IMAGE_MODEL_CAPS = {
     },
     "flux-3-image": {
         "ratios": ("auto", "21:9", "2:1", "16:9", "3:2", "7:5", "4:3", "5:4", "1:1", "4:5", "3:4", "5:7", "2:3", "9:16", "1:2", "9:21"),
-        "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": False,
+        "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": True, "base64_refs": True, "ref_max": 10, "official_fallback": False,
+    },
+    "flux-3-image-klein": {
+        "ratios": ("auto", "21:9", "2:1", "16:9", "3:2", "7:5", "4:3", "5:4", "1:1", "4:5", "3:4", "5:7", "2:3", "9:16", "1:2", "9:21"),
+        "resolutions": ("768SQ", "1K", "1.5K", "2K", "4K"), "n_max": 1, "mask_url": False,
+        "base64_refs": True, "ref_max": 10, "official_fallback": False,
     },
     "flux-kontext": {
         "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "9:21"),
         "resolutions": ("1K",), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": False,
     },
+    "hy-image-v3-5-preview": {
+        "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": False, "base64_refs": False,
+        "ref_max": 5, "exact_size": True, "official_fallback": False,
+    },
     "grok-imagine-2-0": {
-        "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9"),
-        "resolutions": ("1K", "2K"), "n_max": 12, "mask_url": True, "base64_refs": True, "official_fallback": False,
+        "ratios": ("1:1", "2:3", "3:2", "3:4", "4:3", "9:16", "16:9"),
+        "resolutions": ("1K",), "fixed_resolution": "quality", "n_max": 12, "mask_url": False,
+        "base64_refs": False, "refs_none": True, "response_version": "2026-07-27", "idempotency": True, "official_fallback": None,
+    },
+    "grok-imagine-image-2-0": {
+        "ratios": ("auto", "1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "9:20", "20:9", "1:2", "2:1"),
+        "resolutions": ("1K", "2K"), "n_max": 10, "mask_url": False, "base64_refs": False, "ref_max": 3,
+        "size_field": "aspect_ratio", "qualities": ("low", "medium"), "quality_text_only": True,
+        "response_version": "2026-07-27", "idempotency": True, "official_fallback": None,
+    },
+    "grok-imagine-image-quality": {
+        "ratios": ("auto", "1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "9:20", "20:9", "1:2", "2:1"),
+        "resolutions": ("1K", "2K"), "n_max": 10, "mask_url": False, "base64_refs": False, "ref_max": 3,
+        "size_field": "aspect_ratio", "response_version": "2026-07-27", "idempotency": True, "official_fallback": None,
+    },
+    "grok-imagine-image": {
+        "ratios": ("auto", "1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "9:20", "20:9", "1:2", "2:1"),
+        "resolutions": ("1K", "2K"), "n_max": 10, "mask_url": False, "base64_refs": False, "ref_max": 5,
+        "size_field": "aspect_ratio", "response_version": "2026-07-27", "idempotency": True, "official_fallback": None,
     },
     "grok-imagine": {
         "ratios": ("1:1", "16:9", "9:16", "3:2", "2:3"),
-        "resolutions": ("1K", "2K"), "n_max": 10, "mask_url": False, "base64_refs": False, "official_fallback": False,
+        "resolutions": ("1K",), "send_resolution": False, "n_max": 10, "mask_url": False,
+        "base64_refs": False, "ref_max": 5, "official_fallback": False,
     },
     "wan2-7-image-pro": {
         "ratios": ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"),
@@ -13340,7 +13412,8 @@ APIMART_IMAGE_MODEL_CAPS = {
     },
     "z-image-turbo": {
         "ratios": ("1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"),
-        "resolutions": ("1K", "2K"), "n_max": 1, "mask_url": False, "base64_refs": False, "official_fallback": False,
+        "resolutions": ("1K", "2K"), "n_max": 1, "send_n": False, "mask_url": False,
+        "base64_refs": False, "refs_none": True, "official_fallback": False,
     },
 }
 
@@ -13356,7 +13429,7 @@ def apimart_image_model_caps(model=""):
             return APIMART_IMAGE_MODEL_CAPS[key]
     return None
 
-APIMART_IMAGE_RESOLUTION_RANK = {"0.5K": 0.5, "1K": 1.0, "1.5K": 1.5, "2K": 2.0, "3K": 3.0, "4K": 4.0}
+APIMART_IMAGE_RESOLUTION_RANK = {"0.5K": 0.5, "768SQ": 0.768, "1K": 1.0, "1.5K": 1.5, "2K": 2.0, "3K": 3.0, "4K": 4.0}
 
 def apimart_clamp_image_resolution(value, allowed):
     levels = [str(item).strip().upper() for item in (allowed or ()) if str(item).strip()]
@@ -15638,11 +15711,11 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {**{"videos": local_urls, "task_id": task_id, "raw": result}, **build_canvas_meta(local_urls, payload, "video")}
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None):
+async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False):
     async with provider_slot(get_api_provider(provider_id)):
-        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out)
+        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out, n, midjourney_version, midjourney_hd)
 
-async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None):
+async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False):
     provider = get_api_provider(provider_id)
     if str(model or "").strip().lower().startswith("pixverse-image"):
         # 拍我AI 的图片模版生成要 template_id + 参考图 id（专属接口 /openapi/v2/image/template/generate），
@@ -15673,9 +15746,8 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
     is_apimart = is_apimart_provider(provider)
     # 不对 GPT 尺寸做任何缩小/拦截：用户选什么尺寸就原样发给上游；
     # 若超过 GPT 的最大像素限制被上游拒绝，再由 friendly_image_error_detail 给出友好的像素上限提示。
-    quality = str(quality or "").strip().lower()
-    if quality not in {"low", "medium", "high"}:
-        quality = ""
+    requested_quality = str(quality or "").strip().lower()
+    quality = requested_quality if requested_quality in {"low", "medium", "high"} else ""
     base_url = (provider.get("base_url") or AI_BASE_URL).rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
@@ -15684,6 +15756,9 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
     refs = [ref for ref in (reference_images or []) if ref.get("url")]
     mask_refs = [ref for ref in refs if str(ref.get("role") or "").strip().lower() == "mask" or str(ref.get("name") or "").lower().endswith("_mask.png")]
     image_refs = [ref for ref in refs if ref not in mask_refs]
+    if is_apimart and str(model or "").strip().lower() == "midjourney":
+        return await generate_apimart_midjourney_provider_image(
+            prompt, size, image_refs, provider, midjourney_version, midjourney_hd)
     image_request_mode = effective_image_request_mode(provider, model)
     request_timeout = httpx.Timeout(connect=30.0, read=1800.0, write=120.0, pool=20.0) if (is_gpt2 or is_apimart or image_request_mode in {"openai-json", "openai-video-proxy", "openai-responses"}) else AI_REQUEST_TIMEOUT
     retry_context = f"生图 provider={provider['id']} model={model}"
@@ -15769,13 +15844,15 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
                 context=retry_context,
             )
         elif is_apimart:
-            apimart_size, resolution = apimart_size_resolution(size)
-            # 官方文档逐模型限定 size 比例与 resolution 档位（Lite / Nano Banana 只有 1K），
-            # 超档按文档上限收敛，避免上游静默降级
+            apimart_size, _base_resolution = apimart_size_resolution(size)
+            resolution = apimart_image_resolution_from_size_for_model(size, model)
             apimart_requested_ratio = apimart_size
-            apimart_requested_resolution = resolution
-            apimart_caps = apimart_image_model_caps(model)
-            if apimart_caps:
+            apimart_requested_resolution = _base_resolution
+            apimart_caps = apimart_image_model_caps(model) or {}
+            exact_width, exact_height = parse_size_pair(size)
+            if apimart_caps.get("exact_size") and exact_width and exact_height:
+                apimart_size = f"{exact_width}x{exact_height}"
+            else:
                 apimart_size = apimart_clamp_ratio(apimart_size, apimart_caps.get("ratios"))
             resolution = apimart_image_resolution_for_model(model, resolution)
             if size_notice_out is not None:
@@ -15783,52 +15860,88 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
                     apimart_requested_ratio, apimart_size, apimart_requested_resolution, resolution)
                 if apimart_notice:
                     size_notice_out["size_notice"] = apimart_notice
-            # APIMart 的 GPT-Image-2 图生图仍走 /images/generations，
-            # 通过 image_urls 传参考图，不使用 OpenAI multipart /images/edits。
             apimart_official = is_apimart_official_image_model(model)
-            body = {
-                "model": model,
-                "prompt": prompt,
-                "n": 1,
-                "size": apimart_size,
-                "resolution": resolution,
-            }
-            # 官方渠道文档明确写「使用官方渠道时不能使用 official_fallback」，且参考图只收公网 URL
+            request_model = model
+            model_key = apimart_image_caps_key(model)
+            if model_key.startswith("gpt-image-2-5-ext-"):
+                request_model = "gpt-image-2.5-ext"
+            body = {"model": request_model, "prompt": prompt}
+            if model_key == "gpt-image-2-5-ext":
+                body["version"] = "flare"
+            elif model_key.startswith("gpt-image-2-5-ext-"):
+                body["version"] = "sunburst" if "sunburst" in model_key else "flare"
+            body[apimart_caps.get("size_field") or "size"] = apimart_size
+            if apimart_caps.get("send_resolution", True):
+                body["resolution"] = resolution
+            if apimart_caps.get("send_n", True):
+                body["n"] = max(1, min(int(n or 1), int(apimart_caps.get("n_max") or 1)))
+            if native_background:
+                body["background"] = "transparent"
+                body["output_format"] = "png"
+            qualities = apimart_caps.get("qualities") or ()
+            if requested_quality in qualities and not (image_refs and apimart_caps.get("quality_text_only")):
+                body["quality"] = requested_quality
             if not apimart_official:
-                body["official_fallback"] = False
+                fallback = apimart_caps.get("official_fallback", False)
+                if fallback is not None:
+                    body["official_fallback"] = False
+            if image_refs and apimart_caps.get("refs_none"):
+                raise HTTPException(status_code=400, detail=f"{model} 仅支持文生图，请移除参考图或更换支持图生图的模型。")
+            ref_max = int(apimart_caps.get("ref_max") or 0)
+            if ref_max and len(image_refs) > ref_max:
+                raise HTTPException(status_code=400, detail=f"{model} 最多支持 {ref_max} 张参考图，当前为 {len(image_refs)} 张。")
+            apimart_remote_required = apimart_official or (
+                bool(image_refs) and apimart_caps.get("base64_refs") is False)
             apimart_remote_inputs = False
+            selected_refs = image_refs[:ONLINE_IMAGE_REFERENCE_MAX]
             if image_refs:
-                if apimart_official:
-                    official_urls = []
-                    for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
+                if apimart_remote_required:
+                    remote_urls = []
+                    for ref in selected_refs:
                         up_url = await upload_image_for_apimart(client, provider, ref.get("url", ""))
                         if not str(up_url or "").strip().lower().startswith(("http://", "https://")):
                             reason = up_url[4:] if isinstance(up_url, str) and up_url.startswith("ERR:") else "上传后未返回公网 http/https 图片 URL"
                             raise HTTPException(
                                 status_code=400,
-                                detail=f"官方渠道参考图必须上传成公网可访问的图片 URL：{invalid_video_image_preview(ref.get('url', ''))}\n原因：{reason}",
+                                detail=f"{model} 参考图必须上传成公网可访问的图片 URL：{invalid_video_image_preview(ref.get('url', ''))}\n原因：{reason}",
                             )
-                        official_urls.append(up_url)
-                    body["image_urls"] = official_urls
+                        remote_urls.append(up_url)
+                    body["image_urls"] = remote_urls
                 else:
-                    apimart_inputs = await apimart_image_reference_inputs(
-                        client, provider, image_refs[:ONLINE_IMAGE_REFERENCE_MAX], body)
+                    apimart_inputs = await apimart_image_reference_inputs(client, provider, selected_refs, body)
                     body["image_urls"] = apimart_inputs
                     apimart_remote_inputs = bool(apimart_inputs) and all(
                         str(url).startswith(("http://", "https://")) for url in apimart_inputs)
-                body["image_urls"] = sanitize_apimart_image_urls(
-                    body["image_urls"], image_refs[:ONLINE_IMAGE_REFERENCE_MAX])
+                body["image_urls"] = sanitize_apimart_image_urls(body["image_urls"], selected_refs)
+            if mask_refs:
+                if not apimart_caps.get("mask_url"):
+                    raise HTTPException(status_code=400, detail=f"{model} 不支持 mask_url 蒙版局部重绘。")
+                mask_ref = mask_refs[0]
+                if apimart_remote_required:
+                    mask_url = await upload_image_for_apimart(client, provider, mask_ref.get("url", ""))
+                else:
+                    mask_url = reference_to_data_url(mask_ref, max_size=2048)
+                if not mask_url or str(mask_url).startswith("ERR:"):
+                    raise HTTPException(status_code=400, detail="蒙版图片无法转换为上游可用的 mask_url。")
+                body["mask_url"] = mask_url
+            request_headers = api_headers(provider=provider, model=model)
+            if apimart_caps.get("response_version"):
+                request_headers["X-APIMart-Response-Version"] = apimart_caps["response_version"]
+            if apimart_caps.get("idempotency"):
+                request_headers["Idempotency-Key"] = str(uuid.uuid4())
             response = await with_connect_retries(
-                lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body),
+                lambda: client.post(gen_url, headers=request_headers, json=body),
                 context=retry_context,
             )
-            if apimart_remote_inputs and response.status_code >= 400 and apimart_image_url_rejected(response.text):
+            if (apimart_remote_inputs and not apimart_remote_required and response.status_code >= 400
+                    and apimart_image_url_rejected(response.text)):
                 print(f"APIMart 中转站可能取不到外部图片 URL（{response.status_code}），改用压缩 data URL 重试一次：{response.text[:200]}")
-                body["image_urls"] = apimart_reference_data_urls(image_refs[:ONLINE_IMAGE_REFERENCE_MAX], body)
-                body["image_urls"] = sanitize_apimart_image_urls(
-                    body["image_urls"], image_refs[:ONLINE_IMAGE_REFERENCE_MAX])
+                body["image_urls"] = apimart_reference_data_urls(selected_refs, body)
+                body["image_urls"] = sanitize_apimart_image_urls(body["image_urls"], selected_refs)
+                if apimart_caps.get("idempotency"):
+                    request_headers["Idempotency-Key"] = str(uuid.uuid4())
                 response = await with_connect_retries(
-                    lambda: client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body),
+                    lambda: client.post(gen_url, headers=request_headers, json=body),
                     context=retry_context,
                 )
         elif is_gpt2 and not image_refs and not mask_refs:
@@ -20793,9 +20906,16 @@ async def build_online_image_result(payload: OnlineImageRequest):
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
     count = max(1, min(8, int(payload.n or 1)))
-    async def generate_one():
+    apimart_caps = apimart_image_model_caps(model) if is_apimart_provider(provider) else None
+    native_n_max = int((apimart_caps or {}).get("n_max") or 1)
+    if native_n_max > 1:
+        count = min(count, native_n_max)
+    async def generate_one(request_n=1):
         notice = {}
-        image_data, raw_item = await generate_ai_image(payload.prompt, payload.size, payload.quality, model, image_refs, provider["id"], payload.background, notice)
+        image_data, raw_item = await generate_ai_image(
+            payload.prompt, payload.size, payload.quality, model, image_refs,
+            provider["id"], payload.background, notice, request_n,
+            payload.midjourney_version, payload.midjourney_hd)
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
@@ -20809,7 +20929,10 @@ async def build_online_image_result(payload: OnlineImageRequest):
                 local_items.append(image_output_meta(local_url, item))
         return local_urls, local_items, raw_item, notice
     try:
-        generated = await asyncio.gather(*(generate_one() for _ in range(count)))
+        if native_n_max > 1:
+            generated = await asyncio.gather(generate_one(count))
+        else:
+            generated = await asyncio.gather(*(generate_one() for _ in range(count)))
     except httpx.HTTPStatusError as exc:
         log_net_error(f"生图 HTTP状态错误 provider={provider.get('id')} model={model} size={payload.size}", exc)
         text = exc.response.text or ''
@@ -23203,8 +23326,133 @@ async def canvas_video_run(payload: CanvasVideoRequest):
     async with provider_slot(get_api_provider(payload.provider_id)):
         return await _canvas_video_run_unlimited(payload)
 
+def is_pixverse_provider(provider) -> bool:
+    return str(provider.get("id") or "").strip().lower() == "pixverse" or str(provider.get("protocol") or "").strip().lower() == "pixverse"
+
+
+def _pixverse_local_or_public_media(value):
+    value = str(value or "").strip()
+    path = output_file_from_url(value)
+    if path:
+        if os.path.getsize(path) > 100 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="PixVerse 媒体文件不能超过 100MB")
+        return path, ""
+    if value.startswith(("http://", "https://")):
+        return "", value
+    raise HTTPException(status_code=400, detail="媒体必须是画布内已有文件或公网 http/https 地址")
+
+
+async def _pixverse_prepare_upload_video(path):
+    if not path or os.path.getsize(path) <= 900_000:
+        return "", path
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise HTTPException(status_code=400, detail="上传副本超过 APIMart 网关限制，需要 FFmpeg 压缩后再上传")
+    folder = tempfile.mkdtemp(prefix="novai-pixverse-upload-")
+    output = os.path.join(folder, "upload.mp4")
+    proc = await asyncio.to_thread(subprocess.run, [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                                                   "-i", path, "-vf", "scale=540:-2", "-c:v", "libx264",
+                                                   "-b:v", "400k", "-maxrate", "440k", "-bufsize", "880k",
+                                                   "-c:a", "aac", "-b:a", "48k", "-movflags", "+faststart", output],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode != 0 or not os.path.isfile(output):
+        shutil.rmtree(folder, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="无法压缩上传副本，请缩短视频或手动压缩后重试")
+    if os.path.getsize(output) > 950_000:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="压缩后仍超过 APIMart 网关限制，请缩短视频后重试")
+    return folder, output
+
+
+async def _pixverse_extract_voice_sample(video_url):
+    path, public_url = _pixverse_local_or_public_media(video_url)
+    if public_url:
+        saved = await save_remote_video_to_output(public_url, prefix="lipsync_source_")
+        path = output_file_from_url(saved)
+    if not path:
+        raise HTTPException(status_code=400, detail="无法读取原视频以提取人声样本")
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise HTTPException(status_code=400, detail="提取原视频人声需要 FFmpeg；也可以直接上传声音样本或成品音频")
+    folder = tempfile.mkdtemp(prefix="novai-pixverse-voice-")
+    output = os.path.join(folder, "voice-sample.wav")
+    proc = await asyncio.to_thread(subprocess.run, [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                                                   "-i", path, "-t", "15", "-vn", "-ac", "1", "-ar", "16000", output],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if proc.returncode != 0 or not os.path.isfile(output):
+        shutil.rmtree(folder, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="无法从原视频提取人声，请上传清晰的声音样本")
+    return folder, output
+
+
+async def generate_pixverse_lipsync(payload: CanvasVideoRequest, provider):
+    from server.integrations import pixverse
+
+    if not payload.videos:
+        raise HTTPException(status_code=400, detail="LipSync 需要选择一个原视频")
+    video_url = str(payload.videos[0].get("url") if isinstance(payload.videos[0], dict) else payload.videos[0] or "").strip()
+    if not video_url:
+        raise HTTPException(status_code=400, detail="LipSync 原视频地址为空")
+    duration = probe_local_video_duration_seconds(video_url)
+    if duration is not None and duration > 60:
+        raise HTTPException(status_code=400, detail="首版 LipSync 支持 60 秒以内的视频，请先裁剪后再试")
+    direct_audio = str(payload.audios[0] if payload.audios else "").strip()
+    if not direct_audio and not payload.voice_consent:
+        raise HTTPException(status_code=400, detail="克隆或复用自定义声音前，请确认你拥有该声音的使用授权")
+    if not direct_audio and len(str(payload.prompt or "").strip()) > 200:
+        raise HTTPException(status_code=400, detail="PixVerse 新台词不能超过 200 个字符")
+    base_url = str(os.getenv("PIXVERSE_BASE_URL") or provider.get("base_url") or pixverse.DEFAULT_BASE_URL).rstrip("/")
+    api_key = provider_env_key_value(provider["id"])
+    auth_mode = "bearer" if str(provider.get("id") or "") == "apimart" else "api-key"
+    video_path, video_public_url = _pixverse_local_or_public_media(video_url)
+    upload_folder, video_path = await _pixverse_prepare_upload_video(video_path)
+    voice_folder = ""
+    try:
+        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider), timeout=VIDEO_POLL_TIMEOUT) as client:
+            uploaded_video = await pixverse.upload_media(client, base_url, api_key, auth_mode, file_path=video_path or None,
+                                                        file_url=video_public_url, content_type="video/mp4")
+            audio_media_id = None
+            speaker_id = str(payload.speaker_id or "").strip()
+            if direct_audio:
+                audio_path, audio_public_url = _pixverse_local_or_public_media(direct_audio)
+                uploaded_audio = await pixverse.upload_media(client, base_url, api_key, auth_mode, file_path=audio_path or None,
+                                                             file_url=audio_public_url, content_type="audio/mpeg")
+                audio_media_id = uploaded_audio["media_id"]
+            elif not speaker_id:
+                sample_url = str(payload.voice_sample or "").strip()
+                if sample_url:
+                    sample_path, sample_public_url = _pixverse_local_or_public_media(sample_url)
+                else:
+                    voice_folder, sample_path = await _pixverse_extract_voice_sample(video_url)
+                    sample_public_url = ""
+                uploaded_sample = await pixverse.upload_media(client, base_url, api_key, auth_mode, file_path=sample_path or None,
+                                                              file_url=sample_public_url, content_type="audio/wav")
+                speaker_id = await pixverse.create_custom_voice(client, base_url, api_key, auth_mode, uploaded_sample["media_id"])
+            submitted = await pixverse.generate_lipsync(client, base_url, api_key, auth_mode,
+                                                        video_media_id=uploaded_video["media_id"],
+                                                        audio_media_id=audio_media_id, speaker_id=speaker_id,
+                                                        script=payload.prompt)
+            video_id = pixverse._resp(submitted)["video_id"]
+            result = await pixverse.wait_for_video(client, base_url, api_key, auth_mode, video_id)
+    except pixverse.PixverseError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    finally:
+        if upload_folder:
+            shutil.rmtree(upload_folder, ignore_errors=True)
+        if voice_folder:
+            shutil.rmtree(voice_folder, ignore_errors=True)
+    result_url = str(pixverse._resp(result).get("url") or "").strip()
+    if not result_url:
+        raise HTTPException(status_code=502, detail="PixVerse 未返回可下载的视频地址")
+    local_url = await save_remote_video_to_output(result_url, prefix="lipsync_")
+    return {**{"videos": [local_url], "task_id": video_id, "speaker_id": speaker_id, "raw": result},
+            **build_canvas_meta([local_url], payload, "video")}
+
+
 async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
     provider = get_api_provider(payload.provider_id)
+    if is_pixverse_provider(provider) or str(payload.model or "").strip().lower() == "pixverse-lipsync":
+        return await generate_pixverse_lipsync(payload, provider)
     if is_jimeng_provider(provider):
         return await generate_jimeng_video(payload, provider)
     if is_runninghub_provider(provider):
@@ -23363,7 +23611,16 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                     elif image_payload:
                         body["image_urls"] = image_payload[:9]
                     if video_payload:
+                        if int(payload.duration or 0) == -1:
+                            body["duration"] = -1
+                        if str(payload.aspect_ratio or "").strip().lower() == "adaptive" and video_params.get("ratio_key"):
+                            body[video_params["ratio_key"]] = "adaptive"
                         body["video_urls"] = video_payload
+                    # 首尾帧输出跟随首帧比例。能力表未登记 adaptive 时，body_params 会先吸附成 1:1，
+                    # 这里按上游 first_frame/last_frame 契约恢复 adaptive，不能再改成固定画幅。
+                    if (str(payload.aspect_ratio or "").strip().lower() == "adaptive" and video_params.get("ratio_key")
+                            and any(str(item.get("role") or "") in {"first_frame", "last_frame"} for item in image_with_roles)):
+                        body[video_params["ratio_key"]] = "adaptive"
                     audio_payload = []
                     invalid_audios = []
                     for ref_url in (payload.audios or [])[:3]:
@@ -23834,6 +24091,45 @@ async def _run_prompt_intelligence(payload):
     return await pi.run()
 
 
+def apimart_chat_request_bytes(body):
+    return len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def fit_apimart_chat_request_to_gateway(body):
+    """文本生成的图片与视频抽帧也算入 APIMart 的 1MB JSON 限制，发送前整体逐级压缩。"""
+    parts = []
+    for message in body.get("messages") or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict) or part.get("type") != "image_url":
+                continue
+            image_url = part.get("image_url")
+            url = str(image_url.get("url") or "") if isinstance(image_url, dict) else ""
+            if url.startswith("data:image/") and ";base64," in url:
+                parts.append(part)
+    total = apimart_chat_request_bytes(body)
+    if total <= APIMART_JSON_BODY_BUDGET:
+        return body
+    originals = [str(part["image_url"].get("url") or "") for part in parts]
+    for max_size, quality in apimart_fallback_compression_ladder(len(parts)):
+        for part, source in zip(parts, originals):
+            compressed = apimart_data_url_to_jpeg(source, max_size=max_size, quality=quality)
+            part["image_url"]["url"] = compressed or source
+        total = apimart_chat_request_bytes(body)
+        if total <= APIMART_JSON_BODY_BUDGET:
+            print(
+                f"[canvas-llm] APIMart 聊天参考素材压缩：{len(parts)} 张，"
+                f"max_size={max_size} quality={quality}，请求体 {total} 字节"
+            )
+            return body
+    raise HTTPException(
+        status_code=413,
+        detail="参考图片或视频帧压缩后，文本生成请求仍超过上游 1MB 限制，请减少参考素材后重试。",
+    )
+
+
 async def _canvas_llm_upstream_messages(payload, model):
     """把 /api/canvas-llm 的 system + 历史 + 多模态 user 消息拼出来。
     普通（非流式）和流式两个入口共用，保证两条路发出去的内容一字不差。"""
@@ -23937,6 +24233,7 @@ async def _canvas_llm_impl(payload: CanvasLLMRequest):
                 req_body["max_tokens"] = int(payload.max_tokens)
             if _is_apimart:
                 req_body["stream"] = False   # APIMart 默认流式，强制关闭
+                fit_apimart_chat_request_to_gateway(req_body)
             response = await client.post(
                 f"{chat_base}/chat/completions",
                 headers=chat_hdrs,
@@ -23982,7 +24279,7 @@ async def canvas_llm(payload: CanvasLLMRequest):
 
 async def _canvas_llm_stream_impl(payload: CanvasLLMRequest, charge=None):
     """流式版 /api/canvas-llm：token 一到就往前端推（SSE），节点上边生成边显示。
-    只支持标准 OpenAI 兼容供应商；codex / gemini-cli / lovart / apimart 这些不是一次补全的，
+    支持标准 OpenAI 兼容供应商与 APIMart；codex / gemini-cli / lovart 这些 agent 型供应商
     直接回 409，前端退回普通接口（行为与之前一致）。
 
     积分结算放在这个单层 generator 自己的 finally 里，不再套一层 "async for body_iterator"
@@ -23994,8 +24291,6 @@ async def _canvas_llm_stream_impl(payload: CanvasLLMRequest, charge=None):
     await _canvas_llm_apply_prompt_intelligence(payload)
     chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     _llm_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
-    if is_apimart_provider(_llm_provider):
-        raise HTTPException(status_code=409, detail="stream_unsupported")
     upstream_messages = await _canvas_llm_upstream_messages(payload, model)
 
     async def stream():
@@ -24008,6 +24303,8 @@ async def _canvas_llm_stream_impl(payload: CanvasLLMRequest, charge=None):
                 req_body = {"model": model, "messages": upstream_messages, "stream": True}
                 if int(payload.max_tokens or 0) > 0:
                     req_body["max_tokens"] = int(payload.max_tokens)
+                if is_apimart_provider(_llm_provider):
+                    fit_apimart_chat_request_to_gateway(req_body)
                 async with client.stream("POST", f"{chat_base}/chat/completions", headers=chat_hdrs, json=req_body) as response:
                     if response.status_code >= 400:
                         body = (await response.aread()).decode("utf-8", errors="ignore")
@@ -28935,7 +29232,7 @@ async def apimart_midjourney_request(provider, path, body):
         raise HTTPException(status_code=502, detail=f"Midjourney 未返回任务 ID：{json.dumps(raw, ensure_ascii=False)[:500]}")
     return raw, task_id
 
-async def midjourney_result(provider, task_id: str):
+async def midjourney_result(provider, task_id: str, download_images=True):
     safe_task_id = str(task_id or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,240}", safe_task_id):
         raise HTTPException(status_code=400, detail="Midjourney 任务 ID 不合法。")
@@ -28959,6 +29256,8 @@ async def midjourney_result(provider, task_id: str):
     remote_urls = midjourney_remote_images(raw)
     if not remote_urls:
         return {"status": "failed", "task_id": safe_task_id, "error": "Midjourney 任务成功但没有返回图片。", "raw": raw}
+    if not download_images:
+        return {"status": "succeeded", "task_id": safe_task_id, "remote_images": remote_urls, "raw": raw}
     local_urls, image_items = [], []
     for remote_url in remote_urls:
         local_url = await save_ai_image_to_output({"type": "url", "value": remote_url}, prefix="midjourney_")
@@ -28976,6 +29275,37 @@ async def midjourney_result(provider, task_id: str):
         "provider_name": provider.get("name") or provider["id"],
         "raw": raw,
     }
+
+async def generate_apimart_midjourney_provider_image(prompt, size, reference_images, provider, version="", hd=False):
+    ratio, _resolution = apimart_size_resolution(size)
+    body = {"prompt": prompt, "size": ratio, "metadata": {"source": "infinite-canvas"}}
+    version = str(version or "").strip()
+    if version:
+        if version not in {"8.2", "8.1", "7", "6.1", "5.2", "5.1"}:
+            raise HTTPException(status_code=400, detail=f"不支持的 Midjourney 版本：{version}")
+        body["version"] = version
+    if hd:
+        if version and version not in {"8.2", "8.1"}:
+            raise HTTPException(status_code=400, detail="Midjourney HD 仅支持 v8.1 或 v8.2。")
+        body["hd"] = True
+    image_urls = await midjourney_reference_urls(reference_images)
+    if image_urls:
+        body["image_urls"] = image_urls
+    _raw, task_id = await apimart_midjourney_request(provider, "/v1/midjourney/generations", body)
+    deadline = time.monotonic() + APIMART_IMAGE_TASK_TIMEOUT
+    initial_delay = APIMART_IMAGE_INITIAL_POLL_DELAY
+    while time.monotonic() < deadline:
+        if initial_delay:
+            await asyncio.sleep(min(initial_delay, max(0.0, deadline - time.monotonic())))
+            initial_delay = 0
+        result = await midjourney_result(provider, task_id, download_images=False)
+        if result.get("status") == "failed":
+            raise HTTPException(status_code=502, detail=f"Midjourney 任务失败：{result.get('error') or '未知错误'}")
+        if result.get("status") == "succeeded":
+            remote_urls = result.get("remote_images") or []
+            return {"type": "url", "value": remote_urls[0]}, result.get("raw") or {}
+        await asyncio.sleep(min(APIMART_IMAGE_POLL_INTERVAL, max(0.0, deadline - time.monotonic())))
+    raise HTTPException(status_code=504, detail=f"Midjourney 任务超时，task_id={task_id}")
 
 @app.post("/api/midjourney/submit")
 async def submit_midjourney(payload: MidjourneySubmitRequest):
@@ -31772,6 +32102,10 @@ async def _agent_tool_generate_video_run_classic(args):
         "aspect_ratio": args["ratio"],
         "images": refs,
         "videos": vids,
+        "audios": args.get("audios") or [],
+        "speaker_id": str(args.get("speaker_id") or ""),
+        "voice_sample": str(args.get("voice_sample") or ""),
+        "voice_consent": bool(args.get("voice_consent")),
         "generate_audio": False,
     }
     task = task_create(
@@ -31808,6 +32142,37 @@ async def _agent_tool_generate_video_run_classic(args):
     if args.get("model_note"):
         result["model_note"] = args["model_note"]
     return result
+
+
+def _agent_tool_lipsync_video_validate(args):
+    if not str(args.get("reference_video") or "").strip() and not isinstance(args.get("reference_video"), list):
+        raise AgentToolError("reference_video 不能为空（需要原视频）", code="invalid_args")
+    normalized = _agent_tool_generate_video_validate(dict(args, provider="pixverse", model="pixverse-lipsync"))
+    if not normalized.get("reference_video"):
+        raise AgentToolError("reference_video 不能为空（需要原视频）", code="invalid_args")
+    normalized.update({
+        "provider": "pixverse", "model": "pixverse-lipsync",
+        "speaker_id": str(args.get("speaker_id") or "").strip(),
+        "voice_sample": str(args.get("voice_sample") or "").strip(),
+        "voice_consent": bool(args.get("voice_consent")),
+        "audios": [str(args.get("audio") or "").strip()] if str(args.get("audio") or "").strip() else [],
+    })
+    if not normalized["audios"] and not normalized["voice_consent"]:
+        raise AgentToolError("克隆或复用自定义声音前必须确认声音使用授权（voice_consent=true）", code="invalid_args")
+    return normalized
+
+
+async def _agent_tool_lipsync_video_run(args):
+    result = await _agent_tool_generate_video_run_classic(args)
+    result["mode"] = "lipsync"
+    result["message"] = "已提交声音克隆与 LipSync 任务，完成后新视频自动落到画布节点"
+    return result
+
+
+def _agent_tool_lipsync_video_preview(args, canvas):
+    if str(args.get("audio") or "").strip():
+        return "将使用现成音频对原视频重新对口型，并生成一个新的视频节点"
+    return "将提取或复用授权声音朗读新台词，再对原视频重新对口型，并生成一个新的视频节点"
 
 
 def _agent_tool_generate_video_preview(args, canvas):
@@ -33641,6 +34006,63 @@ def _agent_tool_apply_template_preview(args, canvas):
     return f"按模板「{args.get('template')}」搭出整套节点" + ("并运行" if args.get("run") is not False else "")
 
 
+class CanvasTemplateApplyRequest(BaseModel):
+    canvas_id: str
+    inputs: List[str] = []
+    prompt: str = ""
+
+
+def _canvas_template_cover_urls(nodes):
+    covers = []
+    for node in nodes:
+        for media in (node.get("images") or []):
+            url = str(media.get("url") or "").strip() if isinstance(media, dict) else str(media or "").strip()
+            if url and url not in covers:
+                covers.append(url)
+            if len(covers) >= 3:
+                return covers
+    return covers
+
+
+@app.get("/api/canvas-templates")
+async def list_canvas_templates(query: str = ""):
+    templates = []
+    text = str(query or "").strip().lower()
+    for item in _agent_template_items():
+        name = str(item.get("name") or "")
+        if text and text not in name.lower():
+            continue
+        entry = {"id": item.get("id"), "name": name}
+        try:
+            nodes, conns = _agent_template_read(item)
+            roles = _agent_template_roles(nodes, conns)
+            entry.update({
+                "node_count": len(nodes),
+                "connection_count": len(conns),
+                "contains": _agent_template_summary(nodes, conns),
+                "input_count": len(roles["slots"]),
+                "generation_count": len(roles["gen"]),
+                "covers": _canvas_template_cover_urls(nodes),
+            })
+        except AgentToolError as exc:
+            entry["error"] = str(exc)
+        templates.append(entry)
+    return {"templates": templates, "total": len(templates)}
+
+
+@app.post("/api/canvas-templates/{template_id}/apply")
+async def apply_canvas_template(template_id: str, payload: CanvasTemplateApplyRequest):
+    args = _agent_tool_apply_template_validate({
+        "canvas_id": payload.canvas_id,
+        "template": template_id,
+        "inputs": payload.inputs,
+        "prompt": payload.prompt,
+        "run": False,
+    })
+    result = await _agent_tool_apply_template_run(args)
+    return {**result, "canvas_id": payload.canvas_id, "run": False}
+
+
 # ---------------------------------------------------------------------------
 # 项目记忆（P2-4，第 42 轮）：用户明确要求记住的长期偏好（比例、模型、品牌色、固定风格…）。
 # 两层：这张画布（data/agent_memory/{canvas_id}.json）、所有画布（data/agent_memory/_global.json）。
@@ -34421,6 +34843,24 @@ AGENT_TOOLS = {
         "preview": _agent_tool_install_skill_preview,
         "mutates_canvas": False,
     },
+    "lipsync_video": {
+        "description": "声音克隆与 LipSync：用授权声音朗读新台词并让原视频重新对口型。reference_video 为原视频；"
+                       "audio 可直接给成品音频跳过克隆，voice_sample 或 speaker_id 用于自定义声音，voice_consent=true 表示已获授权。",
+        "schema": {"type": "object", "properties": {
+            "canvas_id": {"type": "string"},
+            "prompt": {"type": "string", "description": "新台词（最多 200 字）"},
+            "reference_video": {"type": "string", "description": "原视频 URL 或画布素材地址"},
+            "audio": {"type": "string", "description": "可选：成品音频，提供后跳过克隆"},
+            "voice_sample": {"type": "string", "description": "可选：声音样本；缺省从原视频提取"},
+            "speaker_id": {"type": "string", "description": "可选：已有 PixVerse 自定义声音 ID"},
+            "voice_consent": {"type": "boolean", "description": "确认拥有声音使用授权"},
+            "title": {"type": "string"}},
+            "required": ["canvas_id", "prompt", "reference_video"]},
+        "validate": _agent_tool_lipsync_video_validate,
+        "run": _agent_tool_lipsync_video_run,
+        "preview": _agent_tool_lipsync_video_preview,
+        "mutates_canvas": True,
+    },
     "check_task": {
         "description": "查询任务状态（queued/running/provider_processing/succeeded/failed/cancelled…）与结果 URL。只读。",
         "schema": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]},
@@ -34494,7 +34934,10 @@ async def agent_execute_step(tool_name, args):
                     "code": "mcp_disabled", "status_code": 400}
         # stdio 子进程调用是阻塞的，丢到线程里跑，别卡事件循环
         return await asyncio.to_thread(_mcp_registry.execute_agent_step, tool_name, args or {})
-    entry = AGENT_TOOLS.get(tool_name) or _AGENT_FILE_TOOLS.get(tool_name)
+    if tool_name in ("web_search", "fetch_url") and not agent_web_enabled():
+        return {"ok": False, "tool": tool_name, "error": "画布助手联网功能未开启，请在设置 → 通用中开启后再试。",
+                "code": "web_access_disabled", "status_code": 403}
+    entry = AGENT_TOOLS.get(tool_name) or _AGENT_FILE_TOOLS.get(tool_name) or _agent_web_tool_entries().get(tool_name)
     if not entry:
         return {"ok": False, "tool": tool_name, "error": f"未知工具：{tool_name}",
                 "code": "unknown_tool", "status_code": 400}
@@ -34648,6 +35091,9 @@ _AGENT_PLAN_SYSTEM_PROMPT = (
     "用 generate_video 一步完成，motion_transfer=true，reference_urls 填角色图/外观参考（首图=主体外观），"
     "reference_video 填动作参考视频（1 个），prompt 简述用户要求即可（系统会自动套动作迁移模板，时长/比例自动按编辑任务处理）。"
     "画布摘要或素材库中有角色图 URL 与视频 URL 时直接填入。\n"
+    "5.5b 用户要求「克隆原声」「修改台词并对口型」「声音配音后重新对口型」时：用 lipsync_video，"
+    "reference_video 填原视频，prompt 填新台词；有成品音频时填 audio 跳过克隆，否则 voice_sample 可填声音样本、"
+    "speaker_id 可复用已有音色。克隆或复用自定义声音必须有 voice_consent=true，用户未明确授权时先确认。\n"
     "5.6 输入参考图 ≥2 张、或用户要多版本 / 每行一张时，必须走「多维表格 → 批量生成」这条线，"
     "不要用单个 image 节点逐张出图：第 1 步 create_node(type=table, rows=[...]) 把每个版本 / 每张图写成一行完整提示词，"
     "第 2 步 create_node(type=batch, media=image, inputs=[\"{{step0.node_id}}\"], settings={{\"provider\": \"comfly\", \"model\": \"<模型名>\", \"ratio\": \"3:4\", \"resolution\": \"2k\"}}) 逐行出图"
@@ -34668,9 +35114,63 @@ _AGENT_PLAN_SYSTEM_PROMPT = (
 )
 
 
+def agent_web_enabled() -> bool:
+    return bool(load_settings().get("agent_web_enabled") is True)
+
+
+class AgentWebAccessPayload(BaseModel):
+    enabled: bool = False
+
+
+@app.get("/api/agent/web-access")
+def get_agent_web_access():
+    return {"enabled": agent_web_enabled()}
+
+
+@app.put("/api/agent/web-access")
+def set_agent_web_access(payload: AgentWebAccessPayload):
+    cfg = load_settings()
+    cfg["agent_web_enabled"] = bool(payload.enabled)
+    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+    write_json_atomic(SETTINGS_FILE, cfg, ensure_ascii=False, indent=2)
+    return {"enabled": agent_web_enabled()}
+
+
+def _agent_web_tool_entries():
+    from server import web_access
+
+    def validate(args):
+        return dict(args or {})
+
+    async def search(args):
+        return await asyncio.to_thread(web_access.web_search, str(args.get("query") or ""), int(args.get("limit") or 5))
+
+    async def fetch(args):
+        return await asyncio.to_thread(web_access.fetch_url, str(args.get("url") or ""))
+
+    return {
+        "web_search": {
+            "description": "主动搜索互联网公开网页，返回标题、URL 和摘要。仅在用户开启画布助手联网后可用。",
+            "schema": {"type": "object", "properties": {
+                "query": {"type": "string", "description": "搜索关键词"},
+                "limit": {"type": "integer", "default": 5, "maximum": 10}}, "required": ["query"]},
+            "validate": validate, "run": search, "mutates_canvas": False,
+        },
+        "fetch_url": {
+            "description": "读取指定公开网页的正文，不执行脚本、不访问内网。仅在用户开启画布助手联网后可用。",
+            "schema": {"type": "object", "properties": {
+                "url": {"type": "string", "description": "http/https 网页地址"}}, "required": ["url"]},
+            "validate": validate, "run": fetch, "mutates_canvas": False,
+        },
+    }
+
+
 def _agent_build_tools_catalog():
     catalog = [{"name": name, "description": entry["description"], "schema": entry["schema"]}
                for name, entry in AGENT_TOOLS.items()]
+    if agent_web_enabled():
+        catalog.extend({"name": name, "description": entry["description"], "schema": entry["schema"]}
+                       for name, entry in _agent_web_tool_entries().items())
     # MCP 工具（mcp__<server>__<tool>）：未启用时 registry 返回空列表，目录与原来逐字一致
     catalog.extend({"name": item["name"], "description": item["description"], "schema": item["schema"]}
                    for item in _mcp_registry.agent_tool_entries())
@@ -35776,7 +36276,7 @@ def _agent_run_normalize_steps(raw_steps, tools=None):
     return steps, unknown
 
 
-AGENT_PLAN_GENERATION_TOOLS = {"generate_image", "generate_video", "run_generation", "batch_generate", "run_batch", "apply_template",
+AGENT_PLAN_GENERATION_TOOLS = {"generate_image", "generate_video", "lipsync_video", "run_generation", "batch_generate", "run_batch", "apply_template",
                                "run_downstream"}
 AGENT_PLAN_WRITE_TOOLS = {"create_node", "connect_nodes", "update_node", "disconnect_nodes", "batch_generate", "apply_template"}
 # 写操作 / 生成操作的并集：未确认时一律不落盘，先出方案等用户点执行
@@ -38469,7 +38969,7 @@ async def _agent_run_producer(req, queue, bus=None):
         await ctx.broadcast_if_mutated(mutated, run_id)
     except asyncio.CancelledError:
         status = "aborted"
-        message = "客户端断开连接，运行已取消"
+        message = "用户取消了本次运行" if bus is not None and bus.get("cancel_requested") else "客户端断开连接，运行已取消"
         ctx.cancel_pending(undo_log)
         raise
     except HTTPException as exc:
@@ -38605,6 +39105,9 @@ async def agent_run(payload: AgentRunRequest, request: Request):
     run_id = f"run_{uuid.uuid4().hex[:16]}"
     req["run_id"] = run_id
     bus = _agent_run_bus_new(run_id, canvas_id)
+    bus["goal"] = instruction
+    bus["model_config_id"] = f"{chat.get('provider')}::{chat.get('model')}" if chat.get("model") else None
+    bus["mode"] = mode
     # producer 放到后台任务里跑：连接断开不取消它，否则断流恢复根本等不到后续事件
     bus["task"] = asyncio.create_task(_agent_run_bus_drive(req, bus))
     headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",
@@ -38631,6 +39134,105 @@ async def agent_run_stream(run_id: str, request: Request, after: int = 0,
     headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
     return StreamingResponse(_agent_run_bus_stream(bus, resume_after), media_type="text/event-stream",
                              headers=headers)
+
+
+def _agent_run_task_status(bus):
+    if not bus.get("done"):
+        return "STOPPING" if bus.get("cancel_requested") else "RUNNING"
+    done = next((item for item in reversed(bus.get("events") or []) if item.get("name") == "done"), None)
+    status = str((done or {}).get("data", {}).get("status") or "").lower()
+    if status == "ok":
+        return "SUCCEEDED"
+    if status in ("aborted", "cancelled", "stopped"):
+        return "CANCELLED"
+    return "FAILED"
+
+
+def _agent_run_task_snapshot(bus):
+    run_id = str(bus.get("run_id") or "")
+    events = []
+    done_message = ""
+    error = ""
+    for item in bus.get("events") or []:
+        name = str(item.get("name") or "")
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        seq = int(item.get("seq") or 0)
+        event = {"eventId": f"{run_id}:{seq}", "eventType": name, "safePayload": data}
+        if name in ("step_start", "step_result"):
+            index = data.get("index")
+            ok = data.get("ok") is True
+            event["eventType"] = "tool.execution." + ("started" if name == "step_start" else "succeeded" if ok else "failed")
+            event["safePayload"] = {
+                "callId": f"step:{index}", "toolId": str(data.get("tool") or ""),
+                "description": str(data.get("description") or ""), "result": data.get("result"),
+                "error": data.get("error"),
+            }
+        elif name == "plan":
+            event["eventType"] = "harness.tool_proposed"
+            event["safePayload"] = {"callId": f"plan:{seq}", "toolId": "执行方案", "name": "执行方案"}
+        elif name == "done":
+            event["eventType"] = "task.completed"
+            done_message = str(data.get("message") or "")
+            if str(data.get("status") or "").lower() not in ("ok", "aborted", "cancelled", "stopped"):
+                error = done_message
+        elif name == "error":
+            error = str(data.get("message") or error)
+        events.append(event)
+    status = _agent_run_task_status(bus)
+    artifacts = ([{"content": done_message}] if done_message else []) + [
+        item for event in events for item in ((event.get("safePayload") or {}).get("artifacts") or [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "task": {
+            "taskId": run_id,
+            "goal": str(bus.get("goal") or ""),
+            "status": status,
+            "modelConfigId": str(bus.get("model_config_id") or "") or None,
+            "createdAt": int(float(bus.get("created_at") or 0) * 1000),
+            "updatedAt": int(float(bus.get("finished_at") or bus.get("created_at") or 0) * 1000),
+        },
+        "steps": [{"input": {"type": "canvas.task.v1", "canvasId": str(bus.get("canvas_id") or "")}}],
+        "events": events,
+        "calls": [],
+        "artifacts": artifacts,
+        "verifications": [],
+        "error": error or None,
+    }
+
+
+@app.get("/api/agent/tasks")
+async def agent_task_list(request: Request):
+    items = []
+    for bus in _AGENT_RUN_BUS.values():
+        try:
+            _agent_require_run_access(bus, request, "view")
+        except HTTPException:
+            continue
+        snapshot = _agent_run_task_snapshot(bus)
+        items.append(snapshot["task"])
+    items.sort(key=lambda item: int(item.get("createdAt") or 0), reverse=True)
+    return {"items": items}
+
+
+@app.get("/api/agent/runs/{run_id}/snapshot")
+async def agent_run_snapshot(run_id: str, request: Request):
+    bus = _agent_run_bus_get(run_id)
+    _agent_require_run_access(bus, request, "view")
+    return _agent_run_task_snapshot(bus)
+
+
+@app.post("/api/agent/runs/{run_id}/cancel")
+async def agent_run_cancel(run_id: str, request: Request):
+    bus = _agent_run_bus_get(run_id)
+    _agent_require_run_access(bus, request, "edit")
+    if bus.get("done"):
+        return JSONResponse(status_code=409, content={"error": "该运行已结束，无法取消"})
+    bus["cancel_requested"] = True
+    task = bus.get("task")
+    if task is not None and not task.done():
+        task.cancel()
+    return {"ok": True, "taskId": str(bus.get("run_id") or run_id), "status": "STOPPING"}
 
 
 class AgentRunSteerRequest(BaseModel):

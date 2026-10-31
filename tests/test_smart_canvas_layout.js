@@ -183,7 +183,7 @@ ok(/\.zoombar-slider::-webkit-slider-thumb \{[\s\S]*?width: 20px;/.test(tapCss),
 ok(/id="canvasRailTip"/.test(html) && /\.canvas-rail-tip \{[\s\S]*?background: color-mix\(in srgb, var\(--panel\) 78%, transparent\)/.test(css), '左栏 hover 胶囊提示（78% 磨砂）');
 ok(/id="canvasAddPanel"/.test(html) && /\.canvas-add-panel \{[\s\S]*?width: 360px;/.test(tapCss), 'hover + 添加节点面板');
 ok(/data-add-kind="prompt"/.test(html) && /脚本、广告词、品牌文案/.test(html), '首行文本 + 副标题');
-ok(/canvasRailTemplates/.test(html) && /promptTemplatePanel/.test(rail), '左栏模板库按钮');
+ok(/canvasRailTemplates/.test(html) && /canvasTemplatesPanel/.test(rail), '左栏流程模板按钮');
 ok(/postMessage\(payload, '\*'\)/.test(rail) && /route: 'api-settings'/.test(rail), '齿轮打开应用设置（navigate api-settings）');
 ok(/html:not\(\.studio-theme-dark\) \.asset-panel,[\s\S]*?color-mix\(in srgb, var\(--panel\) 64%, transparent\) !important;/.test(css), '浅色浮层走 64% 磨砂 color-mix');
 ok(!/rgba\(250, 250, 250, \.92\)/.test(css), '浅色不再有近实底 .92 覆盖');
@@ -227,7 +227,7 @@ ok(/\.prompt-template-panel\[data-placement="right"\] \{[\s\S]*?right: 16px;/.te
 ok(/\.prompt-template-panel\[data-placement="left"\] \{[\s\S]*?left: 16px;/.test(css), '模板库左侧定位样式');
 ok(/promptTemplatePanel\.dataset\.placement = options\.placement === 'left' \? 'left' : 'right'/.test(smart), 'openPromptTemplatePanel 默认右/显式左');
 ok(/window\.openPromptTemplatePanel = openPromptTemplatePanel;/.test(smart), '模板库开启函数已导出给左栏');
-ok(/placement: 'left'/.test(rail) && /openPromptTemplatePanel\('', '', \{ target: 'composer', placement: 'left' \}\)/.test(rail), '左栏模板库显式传 left');
+ok(/placement: 'left'/.test(rail) && /toggleCanvasTemplatesPanel\(\{ placement: 'left' \}\)/.test(rail), '左栏流程模板显式传 left');
 ok(/\['pointerdown', 'mousedown', 'touchstart', 'wheel', 'click'\]\.forEach/.test(rail), '左下容器隔离 5 类事件');
 ok(/bar\.addEventListener\(type, event => \{ event\.stopPropagation\(\); \}\);/.test(rail), '左下容器冒泡阶段 stopPropagation');
 ok(/#canvasZoomBar\.canvas-zoombar \.zoombar-slider \{[\s\S]*?flex: 1 1 auto;[\s\S]*?min-width: 72px;[\s\S]*?max-width: 110px;/.test(css), '滑杆自适应 72~110');

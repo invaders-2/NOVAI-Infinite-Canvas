@@ -602,8 +602,8 @@
             </div>
         </section>
 
-        <!-- 模板 -->
-        <section class="hp-sec">
+        <!-- 模板：列表为空时整块收起，后续逐项加入后再展示 -->
+        <section class="hp-sec" id="hpTemplateSection" hidden>
             <div class="hp-sec-head">
                 <h2>模板</h2>
                 <div class="hp-tabs" id="hpTabs" role="tablist"></div>
@@ -757,7 +757,9 @@
         var SWAP_GEN = '在模特参考图的基础上完成换鞋：只替换模特脚上的鞋子，模特、姿势、服装、场景、光线和构图全部保持原样。';
 
         var CATS = ['全部', '电商', '海报', '人像', '分镜视频', '角色设定'];
-        var TEMPLATES = [
+        // 首页模板展示区从这里逐项添加；技能入口继续使用下方已有的工作流定义。
+        var TEMPLATES = [];
+        var SKILL_TEMPLATES = [
             { id: 'product-swap', title: '产品换图 · 换鞋', cat: '电商', icon: 'camera', color: '#0f766e',
               media: '/static/images/templates/product-swap.jpg',
               desc: '多角度鞋图 + 模特图 → 只换鞋，其它不变',
@@ -888,7 +890,7 @@
                 { key: 'batch', type: 'batch', title: '批量生成', col: 1, inputs: ['table'] }] }
         ];
         var TEMPLATE_MAP = {};
-        TEMPLATES.forEach(function (t) { TEMPLATE_MAP[t.id] = t; });
+        SKILL_TEMPLATES.concat(TEMPLATES).forEach(function (t) { TEMPLATE_MAP[t.id] = t; });
 
         /* 八个技能 = 八个常用模板的快捷入口：点一下搭节点；右侧星芒 = 交给 Agent 做 */
         var SKILLS = [
@@ -1587,6 +1589,7 @@
         }
         function renderTemplates() {
             var list = TEMPLATES.filter(function (t) { return state.cat === '全部' || t.cat === state.cat; });
+            $('hpTemplateSection').hidden = !list.length;
             $('hpTemplates').innerHTML = list.map(function (t) {
                 var kind = templateKind(t);
                 var count = t.nodes.filter(function (n) { return n.type !== 'label'; }).length;
@@ -1759,7 +1762,7 @@
                             ? '<img src="' + esc(mediaPreviewUrl(c.thumbnail, 480)) + '" data-orig="' + esc(c.thumbnail) + '" width="480" height="300" loading="lazy" decoding="async" fetchpriority="low" alt="" onerror="if(this.dataset.fb){this.remove();}else{this.dataset.fb=\'1\';this.src=this.dataset.orig;}">'
                             : icon('layers');
                         html += '<div class="hp-card" role="link" tabindex="0" data-recent="' + i + '">' +
-                            '<div class="hp-thumb">' + thumb + '<span class="hp-kind">' + (c.kind === 'smart' ? '智能画布' : '画布') + '</span></div>' +
+                            '<div class="hp-thumb">' + thumb + '<span class="hp-kind">' + (c.kind === 'smart' ? '智能画布' : '智能画布BEAT') + '</span></div>' +
                             '<div class="hp-meta"><b>' + esc(c.title || c.name || '未命名画布') + '</b><span>更新于 ' + esc(formatUpdateTime(c.updated_at || c.lastOpened)) + '</span></div></div>';
                     });
                     grid.innerHTML = html;

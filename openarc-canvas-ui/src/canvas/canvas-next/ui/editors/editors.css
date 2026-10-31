@@ -1,0 +1,38 @@
+/* 扩图框 + 笔刷圆圈：只属于这两个编辑器，按 .op-* / .brush-ring 前缀命名，
+   不写进 canvas-next.css（那份文件另有并行改动），避免互相冲突。 */
+
+/* ---------- 扩图框 ---------- */
+.cn-root .op-stage{position:absolute;inset:0;z-index:26;background:rgba(0,0,0,.55);
+  animation:opFade var(--d-quick) var(--e-std);}
+@keyframes opFade{from{opacity:0}to{opacity:1}}
+
+.cn-root .op-box{position:absolute;border-radius:2px;
+  background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.075) 0 6px,transparent 6px 12px);
+  outline:1.5px solid rgba(255,255,255,.92);
+  box-shadow:0 0 0 1px rgba(0,0,0,.45),0 18px 40px rgba(0,0,0,.35);}
+.cn-root .op-box img{position:absolute;display:block;object-fit:fill;-webkit-user-drag:none;user-select:none;pointer-events:none;}
+/* 原图边界：虚线，告诉用户「从哪儿开始是扩出来的」 */
+.cn-root .op-src{position:absolute;pointer-events:none;
+  outline:1px dashed rgba(255,255,255,.55);outline-offset:-0.5px;}
+
+.cn-root .op-h{position:absolute;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:2px;
+  background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.5);touch-action:none;}
+.cn-root .op-h[data-h="nw"]{left:0;top:0;cursor:nwse-resize;}
+.cn-root .op-h[data-h="n"]{left:50%;top:0;cursor:ns-resize;}
+.cn-root .op-h[data-h="ne"]{left:100%;top:0;cursor:nesw-resize;}
+.cn-root .op-h[data-h="e"]{left:100%;top:50%;cursor:ew-resize;}
+.cn-root .op-h[data-h="se"]{left:100%;top:100%;cursor:nwse-resize;}
+.cn-root .op-h[data-h="s"]{left:50%;top:100%;cursor:ns-resize;}
+.cn-root .op-h[data-h="sw"]{left:0;top:100%;cursor:nesw-resize;}
+.cn-root .op-h[data-h="w"]{left:0;top:50%;cursor:ew-resize;}
+
+.cn-root .op-tip{position:absolute;padding:4px 8px;border-radius:8px;font-size:12px;line-height:18px;
+  color:#fff;background:rgba(20,20,22,.86);font-variant-numeric:tabular-nums;pointer-events:none;
+  box-shadow:0 6px 18px rgba(0,0,0,.45);white-space:nowrap;}
+.cn-root .op-dim{color:rgba(255,255,255,.62);}
+
+/* ---------- 笔刷圆圈 ---------- */
+.cn-root .brush-ring{position:absolute;z-index:27;border-radius:50%;pointer-events:none;
+  border:1.5px solid rgba(255,255,255,.95);
+  box-shadow:0 0 0 1px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.45);}
+.cn-root .brush-ring.eraser{border-style:dashed;border-color:rgba(255,255,255,.8);}

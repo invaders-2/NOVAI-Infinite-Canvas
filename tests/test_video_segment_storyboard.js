@@ -399,18 +399,26 @@ console.log('[9] runApiVideoGeneration：本行片段不被手动链接 / kind �
         'function videoProviderPlatform(){ return "comfly"; }',
         'function applySourceRatioToVideoAspect(){}',
         'function throwIfSmartGenerationStopped(){}',
+        'function smartGenerationStopRequestedFor(){ return false; }',
         'function resultMediaUrls(result){ return (result && result.urls) || []; }',
         'function smartResponseErrorMessage(){ return "err"; }',
         'class JimengPendingSignal extends Error {}',
+        'const activeSmartGenerationTaskIds = new Map();',
+        'function smartNodeStopContextId(){ return "n1"; }',
+        'function cancelSmartTask(){}',
+        'async function pollSmartVideoTask(){ return {urls:["out.mp4"], canvas_meta:{}}; }',
         'function manualSmartVideoLink(source){ return ((source || {}).videoTempShLinks || []).find(item => item && item.manual === true && item.url) || null; }',
         'function manualSmartMediaLinks(source){ return ((source || {}).videoTempShLinks || []).filter(item => item && item.manual === true && item.url); }',
-        'async function fetch(url, options){ payload = {url, body: JSON.parse(options.body)}; return {ok:true, json: async () => ({urls:["out.mp4"]})}; }',
+        'async function fetch(url, options){ payload = {url, body: JSON.parse(options.body)}; return {ok:true, json: async () => ({task_id:"video-task-1"})}; }',
         // runApiVideoGeneration 夹时长用的是逐模型官方区间（videoDurationBounds），沙箱要一起抠出来
         extractLine(smartSrc, 'VIDEO_DURATION_MIN'),
         smartSrc.match(/const GEMINI_RATIO_KEYS = \[[^\]]*\];/)[0],
         smartSrc.match(/const SEEDREAM_RATIO_KEYS = \[[^\]]*\];/)[0],
         smartSrc.match(/const MODEL_CAPABILITIES = \[[\s\S]*?\n\];/)[0],
         extractFn(smartSrc, 'modelCapabilityFor'),
+        smartSrc.match(/const VIDEO_FRAME_ROLE_MODEL_RE = [^;]+;/)[0],
+        extractFn(smartSrc, 'videoModelSupportsFrameRoles'),
+        extractFn(smartSrc, 'normalizeSmartVideoModeSettings'),
         extractFn(smartSrc, 'videoDurationRange'),
         extractFn(smartSrc, 'videoDurationBounds'),
         extractLine(smartSrc, 'SMART_REFERENCE_IMAGE_MAX'),
@@ -448,7 +456,7 @@ console.log('[9] runApiVideoGeneration：本行片段不被手动链接 / kind �
 
     (async () => {
         await V.run(rowRefs, Object.assign({}, manualRun, {rowRefsAuthoritative:true}));
-        eq(V.payload().url, '/api/canvas-video', '逐行生成打的是视频接口');
+        eq(V.payload().url, '/api/canvas-video?async=1', '逐行生成打的是可取消的异步视频接口');
         eq(videoUrls(), [segments[0].clip_url], '逐行批量：发给视频接口的是本行片段（手动链接不覆盖）');
         eq(V.payload().body.images.map(item => item.url), [MODEL_URL, PRODUCTS[0].url], '产品 / 模特图照常带上');
 

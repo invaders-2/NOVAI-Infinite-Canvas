@@ -21,14 +21,16 @@ const detailCache = reactive({});
 
 let carouselTimer = 0;
 
-const counts = computed(() => buildCounts(catalog.value.items, catalog.value.categories));
+const visibleItems = computed(() => catalog.value.items.filter(item => item.storeVisible));
+const counts = computed(() => buildCounts(visibleItems.value, catalog.value.categories));
 const chips = computed(() => ([
     { key: 'all', label: '全部', count: counts.value.all },
     { key: 'skill', label: '技能', count: counts.value.skill },
     { key: 'app', label: '智能体', count: counts.value.app },
-]).concat(counts.value.categories.map(cat => ({ key: 'cat:' + cat.id, label: cat.label, count: cat.count, categoryId: cat.id }))));
+].filter(chip => chip.key !== 'app' || chip.count > 0))
+    .concat(counts.value.categories.map(cat => ({ key: 'cat:' + cat.id, label: cat.label, count: cat.count, categoryId: cat.id }))));
 
-const filtered = computed(() => filterItems(catalog.value.items, {
+const filtered = computed(() => filterItems(visibleItems.value, {
     query: query.value,
     kind: kindFilter.value,
     category: categoryFilter.value,
@@ -39,7 +41,7 @@ const currentSlide = computed(() => slides.value[activeSlide.value] || null);
 
 const officialSkills = computed(() => {
     const featuredSkills = catalog.value.featured.filter(item => item.kind === 'skill');
-    const rest = catalog.value.items.filter(item => item.kind === 'skill');
+    const rest = visibleItems.value.filter(item => item.kind === 'skill');
     const seen = new Set();
     const list = [];
     for (const item of featuredSkills.concat(rest)) {
@@ -159,7 +161,7 @@ async function loadCatalog() {
         loading.value = false;
         startCarousel();
         // 只补齐首屏需要的详情（轮播模型名 / 官方技能图标 / 热门用例图标 / 全部区首屏图标），其余用渐变方块兜底
-        const firstGrid = data.items.slice(0, 12);
+        const firstGrid = visibleItems.value.slice(0, 12);
         enrich(data.featured.concat(officialSkills.value, data.trending.map(useCase => useCase.item), firstGrid));
     } catch (e) {
         loading.value = false;

@@ -7,8 +7,17 @@ NOVAI 的「应用市场」只做**结构与目录复制**：把 TapNow 市场�
 - 来源：TapNow 应用市场（app.tapnow.ai）接口抓取，原始响应见抓取工作目录 `catalog.json` / `details_all.json`
 - 抓取日期：2026-10-24
 - 数据版本：`content_version = 2a276d32834dd82a`
-- 覆盖范围：83 条（skill 60 / app 23），分类 5 个，featured 14 条，trending_use_cases 8 条
+- 原始覆盖：83 条（skill 60 / app 23），分类 5 个，featured 14 条，trending_use_cases 8 条
+- 当前一级市场：20 个 skill；33 个条目停止开放，30 个重复子场景只在合集详情中出现
 - 技能正文：26 份原始正文（合计 355,703 字）+ 22 份公开元数据整理稿（非原文，见下）
+
+## 市场运营配置
+
+`curation.json` 不改写原始目录，用 `kind:name` 控制条目的展示和开放状态：
+
+- `root_items`：一级市场、轮播和热门用例允许展示的条目；合集里的隐藏子项仍可通过详情打开和启动。
+- `unavailable_items`：当前没有真实执行链路的条目；不在一级市场展示，安装与启动接口返回 409，已安装条目仍允许卸载。
+- 接口保留全部 83 条供合集引用，另返回 `visible_counts`；每条补 `store_visible` / `store_available`，停用条目同时返回 `enabled=false`。
 
 ## 为什么放在 server/store_data（而不是 data/store）
 
@@ -24,7 +33,8 @@ NOVAI 的「应用市场」只做**结构与目录复制**：把 TapNow 市场�
 
 ```text
 server/store_data/
-├── catalog.json                 # 市场目录（抓取响应原样保存，含 {"code":200,"data":{...}} 外壳）
+├── catalog.json                 # 原始市场目录（含 {"code":200,"data":{...}} 外壳）
+├── curation.json                # 一级入口与停用条目配置
 ├── details/
 │   └── <kind>__<name>.json      # 83 个条目详情，内容是该条响应的 ["data"]（不是整个响应）
 ├── skill_instructions/
@@ -56,6 +66,7 @@ catalog item（83 条）：
 | `cover_url` / `cover_video_url` / `cover_poster_url` | 封面图（已是本地 WebP）/ 封面视频（远程，不下载）/ 视频封面兜底图（远程，见下） |
 | `search_terms` / `marketing_slots` | 搜索词 / 营销位素材 |
 | `installed` / `enabled` / `runtime_status` / `activation_skill` | 安装态（本地覆盖）/ 启用 / 运行时状态 / 激活所需 skill（可能对应技能正文） |
+| `store_visible` / `store_available` | 是否在一级市场展示 / 是否允许安装和启动（由 `curation.json` 计算） |
 
 detail 在 catalog 字段之外还会带：
 

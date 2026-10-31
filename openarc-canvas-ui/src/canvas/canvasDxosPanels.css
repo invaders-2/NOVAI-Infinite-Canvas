@@ -1,0 +1,278 @@
+/**
+ * 画布宿主 · 协作 / .dxcanvas 打包浮层（React 岛）。
+ *
+ * 与 CanvasSharePanel 同一形态：位置在画布宿主段（.canvas-share-layer 内），
+ * **只做浮层布局**，颜色 / 圆角 / 阴影 / 字号全部消费既有 token 与既有类
+ * （.canvas-share-panel / .canvas-share-section / .ds-btn / .ds-badge / .gov-row）。
+ * 不改上游 iframe 的 DOM，也不新造第二套视觉值。
+ */
+
+.canvas-host-actions {
+  position: absolute;
+  top: 66px;
+  right: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+/* 共享入口原来是绝对定位（styles.css 的 .canvas-share-entry）；并入统一动作行后
+   在同一行里按流式排布，位置与点击区仍由这一行决定。 */
+.canvas-host-actions .canvas-share-entry {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
+.canvas-dxos-entry {
+  flex: none;
+}
+.canvas-dxos-entry__label {
+  display: inline-block;
+}
+
+/* 打包面板要显示 64 位 sha256 / 相对路径，比共享面板宽一点（仍受窄窗规则约束）。
+   面板从动作行下方展开（top 112）：三个入口始终可见、可再次点击收起，不会透过玻璃
+   在面板顶部留下重影。 */
+.canvas-share-panel.canvas-dxos-panel {
+  width: 380px;
+  top: 112px;
+}
+
+.canvas-dxos-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.canvas-dxos-code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: var(--fs-micro);
+  color: var(--text);
+  word-break: break-all;
+  user-select: text;
+}
+
+.canvas-dxos-client {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+.canvas-dxos-rooms,
+.canvas-dxos-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.canvas-dxos-room,
+.canvas-dxos-event {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--text-rgb) / 0.035);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+.canvas-dxos-room.is-current {
+  background: rgb(var(--text-rgb) / 0.07);
+  color: var(--text);
+}
+
+.canvas-dxos-event__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 窄窗（与共享入口同一容器查询口径）：入口收成 40px 图标按钮，标签隐藏。 */
+@container (max-width: 900px) {
+  .canvas-dxos-entry {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+  .canvas-dxos-entry__label {
+    display: none;
+  }
+}
+
+@container (max-width: 760px) {
+  .canvas-host-actions {
+    top: 66px;
+    right: 12px;
+  }
+  .canvas-share-panel.canvas-dxos-panel--wide {
+    width: calc(100cqw - 16px);
+  }
+}
+
+/* ── 素材同步 / 邀请 / 插件（task-12）：只消费既有 token，不新造颜色或圆角 ── */
+
+.canvas-share-panel.canvas-dxos-panel--wide {
+  width: 440px;
+}
+
+.canvas-dxos-rule {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--text-rgb) / 0.035);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+.canvas-dxos-input,
+.canvas-dxos-textarea,
+.canvas-dxos-select {
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-secondary);
+}
+
+.canvas-dxos-input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.canvas-dxos-input:focus,
+.canvas-dxos-textarea:focus,
+.canvas-dxos-select:focus {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+.canvas-dxos-textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+.canvas-dxos-select {
+  max-width: 100%;
+  flex: 1 1 200px;
+}
+
+.canvas-dxos-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.canvas-dxos-source,
+.canvas-dxos-plugin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: var(--fs-secondary);
+}
+.canvas-dxos-source:hover,
+.canvas-dxos-plugin:hover {
+  background: rgb(var(--text-rgb) / 0.06);
+}
+.canvas-dxos-plugin.is-current {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+.canvas-dxos-source input[type="checkbox"] {
+  flex: none;
+  accent-color: var(--text);
+}
+.canvas-dxos-source__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-dxos-source__meta {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+.canvas-dxos-invite-code {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--text-rgb) / 0.045);
+}
+.canvas-dxos-invite-code__value {
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.08em;
+  user-select: text;
+}
+
+.canvas-dxos-pre {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.canvas-dxos-spin {
+  animation: canvas-dxos-spin 1s linear infinite;
+}
+@keyframes canvas-dxos-spin {
+  to { transform: rotate(360deg); }
+}
+.reduced .canvas-dxos-spin {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-dxos-spin {
+    animation: none;
+  }
+}

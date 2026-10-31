@@ -359,7 +359,7 @@ onBeforeUnmount(() => { clearInterval(exTimer); window.removeEventListener('nova
                         <span class="nv-tile-media">
                             <img v-if="c.thumbnail" class="thumb" :src="c.thumbnail" loading="lazy" alt="" @error="c.thumbnail = ''">
                             <NvIcon v-else name="layers" :size="22" />
-                            <span class="nv-badge on-image">{{ c.kind === 'smart' ? '智能画布' : '画布' }}</span>
+                            <span class="nv-badge on-image">{{ c.kind === 'smart' ? '智能画布' : '智能画布BEAT' }}</span>
                         </span>
                         <span class="nv-tile-title">{{ c.title || c.name || '未命名画布' }}</span>
                         <span class="nv-tile-sub">更新于 {{ formatUpdateTime(c.updated_at || c.lastOpened) }}</span>
@@ -368,8 +368,8 @@ onBeforeUnmount(() => { clearInterval(exTimer); window.removeEventListener('nova
                 </div>
             </section>
 
-            <!-- 模板 -->
-            <section class="sec">
+            <!-- 模板：列表为空时整块收起，后续逐项加入后再展示 -->
+            <section v-if="templates.length" class="sec">
                 <div class="head center">
                     <h2 class="t2">模板</h2>
                     <div ref="tabsEl" class="nv-tabs sliding" role="tablist">

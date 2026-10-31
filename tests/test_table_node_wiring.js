@@ -6,7 +6,7 @@ const canvas = canvasJsSrc + String.fromCharCode(10) + tableModuleSrc;
 const css = fs.readFileSync('static/css/table-node.css', 'utf8');
 const canvasCss = fs.readFileSync('static/css/canvas.css', 'utf8');
 const themeCss = fs.readFileSync('static/css/theme.css', 'utf8');
-const html = fs.readFileSync('static/canvas.html', 'utf8');
+const html = fs.readFileSync('static/legacy-canvas.html', 'utf8');
 const model = fs.readFileSync('static/js/shared/table-model.js', 'utf8');
 const registry = fs.readFileSync('static/js/shared/node-registry.js', 'utf8');
 let fail = 0;
@@ -140,11 +140,11 @@ console.log('[8] 改了 canvas.js / table-model.js / canvas.css，就必须同�
 const VERSIONED_ASSETS = ['static/js/canvas.js', 'static/js/shared/table-model.js', 'static/js/shared/node-registry.js', 'static/js/shared/dropdown.js', 'static/css/canvas.css', 'static/css/table-node.css', 'static/css/theme.css'];
 try {
   const dirty = require('child_process')
-    .execSync('git status --porcelain ' + VERSIONED_ASSETS.join(' ') + ' static/canvas.html', {encoding: 'utf8'})
+    .execSync('git status --porcelain ' + VERSIONED_ASSETS.join(' ') + ' static/legacy-canvas.html', {encoding: 'utf8'})
     .split('\n').map(line => line.slice(3).trim()).filter(Boolean);
   const dirtyAsset = dirty.filter(f => VERSIONED_ASSETS.includes(f));
-  ok(dirtyAsset.length === 0 || dirty.includes('static/canvas.html'),
-    '改了 ' + (dirtyAsset.join('、') || 'canvas.js') + ' 就必须同时改 static/canvas.html 的 ?v=');
+  ok(dirtyAsset.length === 0 || dirty.includes('static/legacy-canvas.html'),
+    '改了 ' + (dirtyAsset.join('、') || 'canvas.js') + ' 就必须同时改 static/legacy-canvas.html 的 ?v=');
 } catch(error) {
   ok(true, '跳过（不在 git 工作区）');
 }

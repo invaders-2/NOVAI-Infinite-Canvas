@@ -50,7 +50,7 @@
         "nav.angle": { zh: "角度控制", en: "Angle Control" },
         "nav.online": { zh: "在线生图", en: "Online Image" },
         "nav.gpt": { zh: "GPT 对话", en: "GPT Chat" },
-        "nav.canvas": { zh: "无限画布", en: "Infinite Canvas" },
+        "nav.canvas": { zh: "智能画布BEAT", en: "Smart Canvas BEAT" },
         "nav.assetManager": { zh: "素材库", en: "Assets" },
         "bulk.manage": { zh: "管理", en: "Manage" },
         "bulk.selectAll": { zh: "全选", en: "Select All" },

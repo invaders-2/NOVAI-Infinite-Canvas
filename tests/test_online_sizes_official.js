@@ -130,6 +130,13 @@ async function main() {
     eq(pixelsOf(v40, 'wide', '1k'), '1280x720', '4.0 16:9@1K=1280x720');
     eq(pixelsOf(v40, 'wide', '4k'), '5504x3040', '4.0 16:9@4K=5504x3040');
 
+    const gptExt = MODEL_SIZE_PRESETS['gpt-image-2.5-ext'];
+    eq(Object.keys(gptExt).length, 10, 'GPT-Image-2.5 Ext 只展示 10 种比例');
+    ok(!('portrait12' in gptExt) && !('ultratall' in gptExt), 'GPT-Image-2.5 Ext 不展示 1:2 / 9:21');
+    eq(pixelsOf(MODEL_SIZE_PRESETS['qwen-image-2.0'], 'wide', '1k'), '1280x720', 'Qwen 16:9@1K=1280x720');
+    eq(pixelsOf(MODEL_SIZE_PRESETS['qwen-image-2.0'], 'portrait', '2k'), '1360x2048', 'Qwen 2:3@2K=1360x2048');
+    eq(pixelsOf(MODEL_SIZE_PRESETS['z-image-turbo'], 'landscape43', '1k'), '1152x864', 'Z-Image 4:3@1K=1152x864');
+
     // 6) 真实模型名（含 Lovart 的下划线命名）要能命中对应预设
     const resolved = [
         ['gpt-image-2', 'gpt-image-2'],

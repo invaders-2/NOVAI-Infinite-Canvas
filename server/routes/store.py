@@ -3,7 +3,7 @@
 """应用市场（App Store）目录 API —— 数据源是上游应用市场的 83 条（server/store_data/）。
 
 契约：
-    GET    /api/store/catalog                      -> {items, categories, counts, featured, trending_use_cases, content_version}
+    GET    /api/store/catalog                      -> {items, categories, counts, visible_counts, featured, trending_use_cases, content_version}
     GET    /api/store/items/{kind}/{name}          -> {item}（该条详情 + installed）
     POST   /api/store/items/{kind}/{name}/install  -> {installed: true}
     DELETE /api/store/items/{kind}/{name}/install  -> {installed: false}
@@ -34,6 +34,7 @@ router = APIRouter(prefix="/api/store")
 STORE_KINDS = ("skill", "app")
 STORE_INSTALLED_FILE = "store_installed.json"
 CATALOG_FILE = "catalog.json"
+CURATION_FILE = "curation.json"
 DETAILS_DIRNAME = "details"
 # skill_ref 的内部引用前缀（不显示在界面上）：新数据一律 store:<技能id>，
 # 解析端仍兼容历史前缀（见 main.py 的 _agent_store_skill_manual）
@@ -127,6 +128,23 @@ def load_catalog_payload() -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def load_curation() -> Dict[str, Any]:
+    data = _read_json(os.path.join(store_dir(), CURATION_FILE), {})
+    return data if isinstance(data, dict) else {}
+
+
+def _curate_item(item: Dict[str, Any], curation: Dict[str, Any]) -> Dict[str, Any]:
+    key = "%s:%s" % (item.get("kind") or "", item.get("name") or "")
+    roots = set(curation.get("root_items") or [])
+    unavailable = set(curation.get("unavailable_items") or [])
+    available = key not in unavailable
+    item["store_visible"] = (key in roots) if roots else available
+    item["store_available"] = available
+    if not available:
+        item["enabled"] = False
+    return item
+
+
 def _catalog_index() -> Dict[Tuple[str, str], Dict[str, Any]]:
     index = {}
     for item in (load_catalog_payload().get("items") or []):
@@ -180,20 +198,25 @@ def _installed_flag(kind: str, name: str, installed: List[str]) -> bool:
 def build_catalog() -> Dict[str, Any]:
     """商店首页：目录条目（每条补 installed）+ 分类 + 计数 + featured / trending。"""
     data = load_catalog_payload()
+    curation = load_curation()
     installed = load_installed()
     items = []
     for raw in (data.get("items") or []):
         if not isinstance(raw, dict):
             continue
-        item = dict(raw)
+        item = _curate_item(dict(raw), curation)
         item["installed"] = _installed_flag(str(item.get("kind") or ""), str(item.get("name") or ""), installed)
         items.append(item)
+    visible = [item for item in items if item["store_visible"]]
     return {
         "items": items,
         "categories": data.get("categories") or [],
         "counts": {"all": len(items),
                    "skill": sum(1 for item in items if item.get("kind") == "skill"),
                    "app": sum(1 for item in items if item.get("kind") == "app")},
+        "visible_counts": {"all": len(visible),
+                           "skill": sum(1 for item in visible if item.get("kind") == "skill"),
+                           "app": sum(1 for item in visible if item.get("kind") == "app")},
         "featured": data.get("featured") or [],
         "trending_use_cases": data.get("trending_use_cases") or [],
         "content_version": data.get("content_version") or "",
@@ -313,6 +336,7 @@ def build_detail(kind: str, name: str) -> Dict[str, Any]:
     item = dict(detail if not unavailable else entry)
     item.setdefault("kind", entry.get("kind"))
     item.setdefault("name", entry.get("name"))
+    item = _curate_item(item, load_curation())
     item["installed"] = _installed_flag(kind, name, load_installed())
     if unavailable:
         # 上游没给详情：不假装有，前端据此渲染「暂无详情」降级页
@@ -474,7 +498,9 @@ def store_item_detail(kind: str, item_id: str):
 @router.post("/items/{kind}/{item_id}/install")
 def store_install(kind: str, item_id: str):
     """安装（幂等）：只把 "kind:name" 记进 data/store_installed.json。"""
-    entry = _resolve(kind, item_id)
+    entry = _curate_item(_resolve(kind, item_id), load_curation())
+    if not entry["store_available"]:
+        raise HTTPException(status_code=409, detail="该条目当前未开放")
     key = "%s:%s" % (kind, entry.get("name"))
     keys = load_installed()
     if key not in keys:
@@ -498,7 +524,9 @@ def store_uninstall(kind: str, item_id: str):
 @router.post("/items/{kind}/{item_id}/launch")
 def store_launch(kind: str, item_id: str, payload: StoreLaunchRequest, request: Request):
     """启动：编译提示词 + 新建一张画布并返回（不跑模型；前端拿到后跳画布助手自动发送）。"""
-    entry = _resolve(kind, item_id)
+    entry = _curate_item(_resolve(kind, item_id), load_curation())
+    if not entry["store_available"]:
+        raise HTTPException(status_code=409, detail="该条目当前未开放")
     detail = load_detail(kind, item_id) or dict(entry)
     prompt, _preset = compile_launch_prompt(detail, payload.preset_id, payload.inputs, payload.references)
     lookup = dict(detail)

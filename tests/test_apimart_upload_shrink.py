@@ -151,3 +151,76 @@ def test_non_413_is_not_retried(monkeypatch, big_png_bytes):
     result = asyncio.run(main.upload_image_for_apimart(object(), _provider(), _data_url(big_png_bytes)))
     assert result == "ERR:APIMart 上传失败(401)"
     assert len(calls) == 1
+
+
+def test_canvas_llm_chat_images_fit_gateway_budget(big_png_bytes):
+    inline = _data_url(big_png_bytes)
+    remote = "https://cdn.example.com/reference.png"
+    body = {
+        "model": "gpt-4o-mini",
+        "stream": False,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "描述参考图和视频抽帧"},
+                {"type": "image_url", "image_url": {"url": inline}},
+                {"type": "image_url", "image_url": {"url": remote}},
+            ],
+        }],
+    }
+    assert main.apimart_chat_request_bytes(body) > main.APIMART_JSON_BODY_BUDGET
+
+    result = main.fit_apimart_chat_request_to_gateway(body)
+
+    assert result is body
+    assert main.apimart_chat_request_bytes(body) <= main.APIMART_JSON_BODY_BUDGET
+    parts = body["messages"][0]["content"]
+    assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert len(parts[1]["image_url"]["url"]) < len(inline)
+    assert parts[2]["image_url"]["url"] == remote
+
+
+def test_canvas_llm_impl_sends_compressed_request_and_returns_text(monkeypatch, big_png_bytes):
+    sent = []
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, json):
+            sent.append(json)
+            request = main.httpx.Request("POST", url, headers=headers, json=json)
+            return main.httpx.Response(
+                200,
+                request=request,
+                json={"choices": [{"message": {"content": "压缩后生成成功"}}]},
+            )
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(main, "get_api_provider", lambda _provider_id: _provider())
+    monkeypatch.setattr(
+        main,
+        "resolve_chat_provider",
+        lambda _provider_id, _model, _ms_model: ("https://apib.ai/v1", {}, "gpt-4o-mini"),
+    )
+    payload = main.CanvasLLMRequest(
+        message="描述这张参考图",
+        provider="apimart",
+        model="gpt-4o-mini",
+        images=[_data_url(big_png_bytes)],
+        no_prompt_intelligence=True,
+    )
+
+    result = asyncio.run(main._canvas_llm_impl(payload))
+
+    assert result["text"] == "压缩后生成成功"
+    assert len(sent) == 1
+    assert main.apimart_chat_request_bytes(sent[0]) <= main.APIMART_JSON_BODY_BUDGET
+    image_url = sent[0]["messages"][0]["content"][1]["image_url"]["url"]
+    assert image_url.startswith("data:image/jpeg;base64,")

@@ -63,7 +63,7 @@ export const PlusMenu = ({ open, anchor, store, onClose, onPickCanvas, onUpload,
 	const normalizedSkillQuery = skillQuery.trim().toLowerCase()
 	const normalizedAppQuery = appQuery.trim().toLowerCase()
 	const skills = skillRows.filter((item) => !normalizedSkillQuery || (item.name + " " + item.id + " " + item.description).toLowerCase().includes(normalizedSkillQuery))
-	const apps = catalog.filter((item) => item.kind === "app" && item.installed && (!normalizedAppQuery || (item.name + " " + item.id + " " + item.description).toLowerCase().includes(normalizedAppQuery))).slice(0, 10)
+	const apps = catalog.filter((item) => item.kind === "app" && item.installed && item.storeVisible && (!normalizedAppQuery || (item.name + " " + item.id + " " + item.description).toLowerCase().includes(normalizedAppQuery))).slice(0, 10)
 
 	useLayoutEffect(() => {
 		if (!open) return

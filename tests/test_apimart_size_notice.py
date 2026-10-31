@@ -52,7 +52,7 @@ class ApimartSizeNoticeSourceTests(unittest.TestCase):
     def test_branch_and_online_result_carry_notice(self):
         source = Path(main.__file__).read_text(encoding="utf-8")
         self.assertIn("size_notice_out=None", source)
-        self.assertIn("apimart_requested_resolution = resolution", source)
+        self.assertIn("apimart_requested_resolution = _base_resolution", source)
         self.assertIn("apimart_size_notice(", source)
         self.assertIn('size_notice_out["size_notice"] = apimart_notice', source)
         self.assertIn("size_notice = next(", source)

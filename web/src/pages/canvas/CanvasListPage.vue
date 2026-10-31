@@ -112,7 +112,7 @@ async function create(kind) {
     if (creating.value) return;
     creating.value = kind;
     const smart = kind === 'smart';
-    const title = (smart ? '智能画布' : '画布') + ' ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    const title = (smart ? '智能画布' : '智能画布BEAT') + ' ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     try {
         const d = await getJSON('/api/canvases', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -370,7 +370,7 @@ onBeforeUnmount(() => {
             <!-- 顶部 -->
             <section class="cl-hero">
                 <div class="cl-intro">
-                    <h1 class="display">无限画布</h1>
+                    <h1 class="display">智能画布BEAT</h1>
                     <p class="p">自由布局的 AI 创作空间。在无限画布上串联图像、视频、对话节点，构建你的创意工作流。</p>
                     <div class="cl-acts">
                         <button type="button" class="nv-btn primary" @click="pickerOpen = true"><NvIcon name="plus" />开始创作</button>
@@ -428,7 +428,7 @@ onBeforeUnmount(() => {
                     <button type="button" class="cl-prev" :data-n="thumbsOf(c).length" :aria-label="'打开 ' + (c.title || '未命名画布')" @click="open(c)">
                         <img v-for="(u, k) in thumbsOf(c)" :key="k" :src="thumbSrc(u)" alt="" loading="lazy" decoding="async" fetchpriority="low" width="480" height="300" @error="onThumbError(c, u)">
                         <span v-if="!thumbsOf(c).length" class="cl-blank"><NvIcon name="grid9" :size="22" /></span>
-                        <span class="nv-badge" :class="c.kind === 'smart' ? 'strong' : 'on-image'">{{ c.kind === 'smart' ? '智能' : '画布' }}</span>
+                        <span class="nv-badge" :class="c.kind === 'smart' ? 'strong' : 'on-image'">{{ c.kind === 'smart' ? '智能' : 'BEAT' }}</span>
                     </button>
                     <div class="cl-more-wrap">
                         <button type="button" class="cl-more" aria-label="更多操作" :aria-expanded="menuFor === c.id" @click.stop="toggleMenu(c.id)"><NvIcon name="more" /></button>
@@ -480,7 +480,7 @@ onBeforeUnmount(() => {
                     <div class="cl-picks">
                         <button type="button" class="cl-pick" :disabled="!!creating" @click="create('classic')">
                             <span class="ic"><NvIcon name="grid9" /></span>
-                            <span class="tx"><b>普通画布</b><span>经典无限画布，自由拖拽布局图像与节点</span></span>
+                            <span class="tx"><b>智能画布BEAT</b><span>OpenArc 无限画布，自由拖拽布局图像与节点</span></span>
                             <span v-if="creating === 'classic'" class="spin"></span><NvIcon v-else name="arrowr" class="go" />
                         </button>
                         <button type="button" class="cl-pick" :disabled="!!creating" @click="create('smart')">

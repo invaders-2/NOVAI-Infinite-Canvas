@@ -24,6 +24,7 @@ const slashMenu = document.getElementById('slashMenu');
 const slashSub = document.getElementById('slashSub');
 const mentionPreview = document.getElementById('mentionPreview');
 const engineSelect = document.getElementById('engineSelect');
+const batchKindSwitch = document.getElementById('batchKindSwitch');
 const dynamicParams = document.getElementById('dynamicParams');
 const runBtn = document.getElementById('runBtn');
 const cascadeRunBtn = document.getElementById('cascadeRunBtn');
@@ -405,6 +406,8 @@ let settings = {
     sourceHeight:'',
     quality:'auto',
     background:'auto',
+    mjVersion:'8.2',
+    mjHd:false,
     count:1,
     videoProvider:'',
     videoModel:'',
@@ -491,11 +494,11 @@ const SIZE_MAP = {
     landscape31: {'1k':'1536x512','2k':'3072x1024','4k':'3840x1280'},
     portrait13: {'1k':'512x1536','2k':'1024x3072','4k':'1280x3840'}
 };
-const API_RES_LEVELS = ['0.5k','1k','1.5k','2k','3k','4k'];
+const API_RES_LEVELS = ['0.5k','768sq','1k','quality','1.5k','2k','3k','4k'];
 const API_RATIO_LABELS = {square:'正方形', portrait:'竖图', portrait43:'竖图', landscape:'横图', landscape43:'横图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖', portrait12:'竖图', landscape21:'横图', landscape54:'横图', portrait45:'竖图', landscape31:'横图', portrait13:'竖图'};
-const RES_LONG_SIDE = { '0.5k':768, '1k':1536, '1.5k':1920, '2k':2048, '3k':3072, '4k':3840 };
+const RES_LONG_SIDE = { '0.5k':768, '768sq':768, '1k':1536, 'quality':1536, '1.5k':1920, '2k':2048, '3k':3072, '4k':3840 };
 // 档位像素上限的唯一真值源是策略 tiers（shared/size-policy.js），这份常量只是策略取不到时的兜底
-const RES_PIXEL_LIMIT_FALLBACK = { '0.5k':262144, '1k':1572864, '1.5k':3145728, '2k':4194304, '3k':9437184, '4k':8294400 };
+const RES_PIXEL_LIMIT_FALLBACK = { '0.5k':262144, '768sq':589824, '1k':1572864, 'quality':1572864, '1.5k':3145728, '2k':4194304, '3k':9437184, '4k':8294400 };
 function resPixelLimitFor(model){
     const limits = {};
     const tiers = NovaSizePolicy.policy(model).tiers;
@@ -559,6 +562,27 @@ const MODEL_CAPABILITIES = [
     { match: 'pixverse', aspects: ['16:9', '9:16', '1:1'] },
     // ── 图片：官方分辨率档位 + 官方比例集合（含下划线/连字符两种真实模型名写法）──
     // preset 指向 MODEL_TIER_PIXELS 的键，用于 0.5K/1.5K/3K 这类 SIZE_MAP 没覆盖的官方档位像素。
+    { match: 'midjourney', resLevels: ['1k'] },
+    { match: 'gpt-image-2.5-ext', resLevels: ['1k', '2k', '4k'], ratios: ['square', 'wide', 'story', 'landscape43', 'portrait43', 'landscape', 'portrait', 'landscape54', 'portrait45', 'ultrawide'] },
+    { match: 'gpt-image-1', resLevels: ['1k'], ratios: ['square', 'landscape', 'portrait'] },
+    { match: 'imagen-4.0', resLevels: ['1k'], ratios: ['square', 'landscape43', 'portrait43', 'wide', 'story'] },
+    { match: 'qwen-image-2.0', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'qwen-image-3.0', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'Tongyi-MAI/Z-Image-Turbo', resLevels: ['1k', '2k', '4k'] },
+    { match: 'z-image-turbo', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'mai-image-2.6', resLevels: ['1k', '2k'] },
+    { match: 'flux-2', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS.concat(['ultratall']) },
+    { match: 'flux-3-image-klein', resLevels: ['768sq', '1k', '1.5k', '2k', '4k'], ratios: ['ultrawide', 'landscape21', 'wide', 'landscape', 'landscape43', 'landscape54', 'square', 'portrait45', 'portrait43', 'portrait', 'story', 'portrait12', 'ultratall'] },
+    { match: 'flux-3-image', resLevels: ['1k', '2k', '4k'], ratios: ['ultrawide', 'landscape21', 'wide', 'landscape', 'landscape43', 'landscape54', 'square', 'portrait45', 'portrait43', 'portrait', 'story', 'portrait12', 'ultratall'] },
+    { match: 'flux-kontext', resLevels: ['1k'], ratios: SEEDREAM_RATIO_KEYS.concat(['ultratall']) },
+    { match: 'hy-image-v3.5-preview', resLevels: ['1k', '2k', '4k'], ratios: ['square', 'portrait', 'landscape', 'portrait43', 'landscape43', 'portrait45', 'landscape54', 'story', 'wide', 'ultrawide'] },
+    { match: 'grok-imagine-2.0-ext', resLevels: ['quality'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'grok-imagine-image-2.0', resLevels: ['1k', '2k'], ratios: ['square', 'portrait43', 'landscape43', 'story', 'wide', 'portrait', 'landscape', 'portrait12', 'landscape21'] },
+    { match: 'grok-imagine-image-quality', resLevels: ['1k', '2k'], ratios: ['square', 'portrait43', 'landscape43', 'story', 'wide', 'portrait', 'landscape', 'portrait12', 'landscape21'] },
+    { match: 'grok-imagine-image', resLevels: ['1k', '2k'], ratios: ['square', 'portrait43', 'landscape43', 'story', 'wide', 'portrait', 'landscape', 'portrait12', 'landscape21'] },
+    { match: 'grok-imagine-1.5', resLevels: ['1k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'wan2.7-image-pro', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'wan2.7-image', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
     { match: 'nano-banana-2', resLevels: ['0.5k', '1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS, preset: 'gemini-3.1-flash-image' },
     { match: 'nano_banana_2', resLevels: ['0.5k', '1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS, preset: 'gemini-3.1-flash-image' },
     { match: 'nano-banana', resLevels: ['1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS },
@@ -610,10 +634,22 @@ function modelCapabilityFor(model, field){
     const m = String(model || '').toLowerCase();
     for(const entry of MODEL_CAPABILITIES){
         if(entry[field] === undefined || entry[field] === null) continue;
-        if(!m.includes(entry.match)) continue;
+        if(!m.includes(entry.match.toLowerCase())) continue;
         return Array.isArray(entry[field]) ? entry[field].slice() : entry[field];
     }
     return null;
+}
+const VIDEO_FRAME_ROLE_MODEL_RE = /(?:seedance|kling|veo[-_]?3[._-]1|agnes-video)/i;
+function videoModelSupportsFrameRoles(source=settings){
+    const target = source && typeof source === 'object' ? source : {videoModel:source};
+    const model = String(target.videoModel || '').trim();
+    if(!model) return false;
+    const provider = String(target.videoProvider || '').trim().toLowerCase();
+    /* Lovart 当前只上传普通附件，不传递 first_frame / last_frame，不能只看模型名就宣称支持。 */
+    if(provider === 'lovart') return false;
+    /* 即梦 3.0 / 3.5 Pro 与 Seedance 走 frames2video；3.0fast / 3.0pro 只认单首帧。 */
+    if(provider === 'jimeng') return /^(?:3\.0|3\.5pro)$/i.test(model) || /seedance/i.test(model);
+    return VIDEO_FRAME_ROLE_MODEL_RE.test(model);
 }
 function getVideoAspectRatios(model){
     return modelCapabilityFor(model, 'aspects'); // null = 支持全部
@@ -1122,7 +1158,9 @@ function settingsForStorage(source=settings){
 }
 function normalizeSmartVideoModeSettings(target, preferMultimodal=false){
     if(!target || typeof target !== 'object') return target;
-    target.videoUseFrameRoles = Boolean(target.videoUseFrameRoles);
+    /* 首尾帧是模型能力，不再靠用户猜开关：支持的模型前两张图固定赋予首帧/尾帧角色，
+       不支持的模型即使载入过旧设置也不会把这两类角色发给上游。 */
+    target.videoUseFrameRoles = videoModelSupportsFrameRoles(target);
     if(preferMultimodal && !target.videoUseFrameRoles && target._videoMultimodalUserSet !== true) target.videoMultimodal = true;
     else target.videoMultimodal = Boolean(target.videoMultimodal);
     if(target.videoUseFrameRoles) target.videoMultimodal = false;
@@ -1957,7 +1995,12 @@ function smartSettingsForNode(node){
        分组/批量节点没有类型，退回按素材内容判断；没有素材时沿用节点自己记下的模式。 */
     const mediaItems = (node?.images || []).filter(img => img?.url);
     const contentKind = mediaItems.length ? (mediaItems.some(isVideoMediaItem) ? 'video' : 'image') : '';
-    const mediaApiKind = isSmartVideoNode(node) ? 'video' : isSmartImageNode(node) ? 'image' : contentKind;
+    /* 批量节点里的 images 是历史产出，不是本次生成模式。节点本次选择优先；
+       只有还没保存过模式时才用视频分镜标记，因此视频分镜节点切回图片后仍会批量出图。 */
+    const batchApiKind = isSmartBatchNode(node)
+        ? (nodeSettings.apiKind === 'video' ? 'video' : nodeSettings.apiKind === 'image' ? 'image' : node?.tableBatchVideo ? 'video' : '')
+        : '';
+    const mediaApiKind = isSmartVideoNode(node) ? 'video' : isSmartImageNode(node) ? 'image' : batchApiKind || contentKind;
     /* 音频节点同样由类型决定参数域：audio（生成走 /api/canvas-audio，参数不再和图片/视频互串） */
     const audioApiKind = isSmartAudioNode(node) ? 'audio' : mediaApiKind;
     const recentModeKey = audioApiKind
@@ -4711,7 +4754,8 @@ function renderVideoTrustedAssetControl(){
     return html;
 }
 /* 视频开关收成一个「更多参数」弹层：底部只留一排（供应商·模型·分辨率·画幅·时长·更多参数），跟图片模式一致。
-   7 行是「标签 + iOS 胶囊开关」（renderVideoToggleRow）；面板本身在编辑栏下方展开（见 syncVideoMoreDock），不贴药丸。
+   6 行是「标签 + iOS 胶囊开关」（renderVideoToggleRow）；面板本身在编辑栏下方展开（见 syncVideoMoreDock），不贴药丸。
+   首尾帧不再放手动开关：支持的模型直接在参考素材区显示两个槽位，不支持的模型不显示。
    即梦没有可信素材这一档（原渲染就条件跳过），开着时数量也不把它算进去。 */
 function videoMoreToggleKeys(){
     const keys = [
@@ -4719,8 +4763,7 @@ function videoMoreToggleKeys(){
         ['videoEnableUpsample', tr('smart.videoUpsample')],
         ['videoCameraFixed', tr('smart.videoCameraFixed')],
         ['videoWatermark', tr('smart.videoWatermark')],
-        ['videoMultimodal', tr('smart.videoMultimodal')],
-        ['videoUseFrameRoles', tr('smart.videoUseFrameRoles')]
+        ['videoMultimodal', tr('smart.videoMultimodal')]
     ];
     if(settings.videoProvider !== 'jimeng') keys.push(['videoTrustedAsset', tr('smart.videoTrustedAsset')]);
     return keys;
@@ -5052,6 +5095,7 @@ function renderDynamicParams(){
     dynamicParams.querySelectorAll('.size-picker-control').forEach(ctrl => {
         if(ctrl.classList.contains('pinned') || ctrl.classList.contains('interacting')) fitSizePickerPopover(ctrl);
     });
+    renderInputThumbsRow(activeComposerNode());
     syncVideoMoreDock();
 }
 /* ── 平台选择合一：以前要先在左上角选「API生成 / 火山 / ModelScope / ComfyUI / RunningHub」，
@@ -5137,6 +5181,28 @@ function applyUnifiedPlatform(engine, id){
     }
     renderUnifiedPlatformControl();
 }
+function renderMidjourneyOptions(){
+    if(String(settings.model || '').toLowerCase() !== 'midjourney') return '';
+    const versions = ['8.2','8.1','7','6.1','5.2','5.1'];
+    if(!versions.includes(String(settings.mjVersion || ''))) settings.mjVersion = '8.2';
+    const hdAllowed = ['8.2','8.1'].includes(settings.mjVersion);
+    if(!hdAllowed) settings.mjHd = false;
+    return `<div class="smart-control midjourney-control">
+        <button class="smart-pill" type="button"><i data-lucide="clapperboard"></i><span class="sub">v${escapeHtml(settings.mjVersion)}${settings.mjHd ? ' · HD' : ''}</span><i data-lucide="chevron-down" class="pill-caret"></i></button>
+        <div class="smart-popover compact-popover">
+            <div class="smart-popover-title">Midjourney 版本</div>
+            <div class="model-list">
+                ${versions.map(version => `<button type="button" class="direct-option ${settings.mjVersion === version ? 'active' : ''}" data-smart-param="mjVersion" data-smart-value="${version}"><span>v${version}</span></button>`).join('')}
+            </div>
+            <div class="smart-popover-title">原生高清</div>
+            <div class="model-list">
+                <button type="button" class="direct-option ${settings.mjHd ? '' : 'active'}" data-toggle-param="mjHd" data-toggle-set="0"><span>HD 关闭</span></button>
+                <button type="button" class="direct-option ${settings.mjHd ? 'active' : ''}" data-toggle-param="mjHd" data-toggle-set="1" ${hdAllowed ? '' : 'disabled'}><span>HD 开启</span></button>
+            </div>
+            <div class="muted-note">仅 v8.1 / v8.2 支持原生 HD，不代表固定 2K / 4K 像素。</div>
+        </div>
+    </div>`;
+}
 function renderApiParams(){
     const providers = imageProviders();
     if(!settings.provider_id || !providers.some(p => p.id === settings.provider_id)) settings.provider_id = providers[0]?.id || '';
@@ -5150,10 +5216,21 @@ function renderApiParams(){
     dynamicParams.innerHTML = `
         ${renderProviderControl(providers)}
         ${renderModelControl(models)}
+        ${renderMidjourneyOptions()}
         ${renderSizePickerControl('', true)}
         ${renderQualityControl()}
         ${renderCountVisualControl()}
     `;
+}
+function renderPixverseLipsyncControl(){
+    if(settings.videoProvider !== 'pixverse' || settings.videoModel !== 'pixverse-lipsync') return '';
+    return `<div class="size-section lipsync-settings">
+        <div class="size-section-title">${escapeHtml(trd('smart.lipsyncVoiceTitle', '声音与授权'))}</div>
+        ${renderVideoToggleRow('voiceConsent', trd('smart.lipsyncVoiceConsent', '我拥有该声音的使用授权'))}
+        <input class="audio-field-input" type="text" data-lipsync-field="voiceSample" value="${escapeAttr(settings.voiceSample || '')}" placeholder="${escapeAttr(trd('smart.lipsyncVoiceSample', '声音样本 URL（留空则从原视频提取）'))}" aria-label="${escapeAttr(trd('smart.lipsyncVoiceSample', '声音样本 URL'))}">
+        <input class="audio-field-input" type="text" data-lipsync-field="speakerId" value="${escapeAttr(settings.speakerId || '')}" placeholder="${escapeAttr(trd('smart.lipsyncSpeakerId', '已有 speaker_id（可选）'))}" aria-label="${escapeAttr(trd('smart.lipsyncSpeakerId', '已有 speaker_id'))}">
+        <div class="muted-note">${escapeHtml(trd('smart.lipsyncNote', '连接成品音频时直接对口型，不再克隆声音。台词写在节点提示词里。'))}</div>
+    </div>`;
 }
 function renderApiVideoParams(){
     const providers = videoApiProviders();
@@ -5165,9 +5242,13 @@ function renderApiVideoParams(){
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
+        ${renderPixverseLipsyncControl()}
         ${renderVideoSettingsControl()}
         ${renderVideoMoreParamsControl()}
     `;
+    dynamicParams.querySelectorAll('[data-lipsync-field]').forEach(input => {
+        input.addEventListener('input', event => setDynamicSetting(event.currentTarget.dataset.lipsyncField, event.currentTarget.value));
+    });
 }
 /* ═══ 音频生成参数（Audio 节点专用）═══════════════════════════════════
    与图片/视频完全分流：平台与模型来自 providers[].audio_models（enabled / has_key 与视频同一口径），
@@ -6691,8 +6772,9 @@ function smartComfyRandomValue(field){
 }
 function setDynamicSetting(key, value){
     const numericKeys = new Set(['count','width','height','videoDuration','videoCount','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight','audioDuration','audioLength','audioBpm','audioSpeed']);
-    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','videoCount','comfyMode','comfyWorkflow','quality','background','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType','audioProvider','audioModel','audioFormat','audioVoice','audioDuration']);
+    const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','videoCount','comfyMode','comfyWorkflow','quality','background','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType','audioProvider','audioModel','audioFormat','audioVoice','audioDuration','mjVersion']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
+    if(key === 'mjVersion' && !['8.2','8.1'].includes(settings.mjVersion)) settings.mjHd = false;
     if(key === 'model' && settings.model && settings.provider_id) window.NovaUtils?.rememberProviderModel?.(settings.provider_id, settings.model);
     if(key === 'videoModel' && settings.videoModel && settings.videoProvider) window.NovaUtils?.rememberProviderVideoModel?.(settings.videoProvider, settings.videoModel);
     if(key === 'videoMultimodal') settings._videoMultimodalUserSet = true;
@@ -13209,6 +13291,28 @@ function cancelSmartTask(taskId){
         .then(() => undefined)
         .catch(() => undefined);
 }
+function cancelSmartGenerationTasks(contextId){
+    if(!contextId) return;
+    const taskIds = new Set();
+    Array.from(activeSmartGenerationTaskIds.entries()).forEach(([taskId, ownerId]) => {
+        if(ownerId === contextId) taskIds.add(taskId);
+    });
+    (nodes || []).filter(node => node && smartNodeStopContextId(node) === contextId).forEach(node => {
+        smartPendingTasks(node).forEach(task => taskIds.add(task.taskId));
+        if(node.jimengPending?.taskId) taskIds.add(node.jimengPending.taskId);
+    });
+    taskIds.forEach(taskId => {
+        cancelSmartTask(taskId);
+        activeSmartGenerationTaskIds.delete(taskId);
+    });
+}
+function stopSmartGenerationForDelete(node){
+    if(!smartNodeRunActive(node)) return;
+    const contextId = smartNodeStopContextId(node);
+    if(!contextId) return;
+    smartStopRequestedNodeIds.add(contextId);
+    cancelSmartGenerationTasks(contextId);
+}
 /* 这个停止上下文里还有没有节点在跑（含它派生的下游占位节点）。 */
 function smartStopContextActive(contextId){
     if(!contextId) return false;
@@ -13231,12 +13335,7 @@ function requestSmartGenerationStop(node=selectedNode()){
     const contextId = smartNodeStopContextId(node);
     if(!contextId || smartStopRequestedNodeIds.has(contextId)) return;
     smartStopRequestedNodeIds.add(contextId);
-    /* 只取消这个上下文自己的在途任务（排队中真取消，运行中尽力而为）。 */
-    Array.from(activeSmartGenerationTaskIds.entries()).forEach(([taskId, ownerId]) => {
-        if(ownerId !== contextId) return;
-        cancelSmartTask(taskId);
-        activeSmartGenerationTaskIds.delete(taskId);
-    });
+    cancelSmartGenerationTasks(contextId);
     /* 批量：只停这一批，别的批量节点不动。选中结果节点时停止上下文是上游那个批量节点。 */
     const targets = contextId === (node && node.id) ? [node] : [node, (nodes || []).find(n => n.id === contextId)];
     targets.forEach(target => {
@@ -25637,6 +25736,7 @@ function setDropHighlight(targetId){
 }
 function deleteNode(id){
     if(collabReadOnly){ collabNotifyReadOnly(); return; }
+    stopSmartGenerationForDelete(nodes.find(node => node.id === id));
     pushUndo();
     const deleteIds = new Set([id]);
     nodes.forEach(node => {
@@ -25659,6 +25759,7 @@ function clearNodeMediaBeforeDelete(id){
     if(!node || !isSmartMediaNode(node)) return false;
     const hadMedia = Boolean((node.images || []).length || node.pending);
     if(!hadMedia) return false;
+    stopSmartGenerationForDelete(node);
     pushUndo();
     node.images = [];
     node.pending = 0;
@@ -28927,6 +29028,9 @@ function updateComposer(){
     activeComposerSubject = subject;
     const hasPromptInput = promptInputNodesFor(node).length > 0;
     if(switchedNode){
+        /* 更多参数只属于当前节点：换节点先收起，别把它带到另一个视频节点上。 */
+        videoMoreDockOpen = false;
+        syncVideoMoreDock();
         settings = smartSettingsForNode(subject);
         loadPromptDraft(subject);
     }
@@ -28937,25 +29041,58 @@ function updateComposer(){
     const ph = Math.max(60, Math.min(380, Number(settings.promptH) || 124));
     promptInput.style.setProperty('--prompt-h', `${ph}px`);
     renderInputThumbsRow(node);
+    syncBatchKindSwitch(node);
     renderInputPromptPreview(node);
     syncCascadeRunButton(node);
     scheduleDynamicParamsRefresh(140);
 }
 function renderInputPromptPreview(node){
     if(!inputPromptPreview) return;
-    /* 批量生成节点：编辑器里不写提示词，提示词来自节点里「生成输入」的每一行。
-       这里把这件事写明白，免得用户以为编辑器跟批量内容是两张皮。 */
-    if(isSmartBatchNode(node)){
-        inputPromptPreview.classList.add('has-text');
-        inputPromptPreview.innerHTML = '<div class="input-prompt-preview-label">批量生成</div>'
-            + '<div class="input-prompt-preview-text">按节点里「生成输入」勾选的行逐行生成：每行用自己的提示词和参考素材。'
-            + '下面选的平台 / 模型 / 尺寸 / 张数作用于整批，跑完每行会在右侧自动落一个结果节点。</div>';
-        return;
-    }
-    /* 普通节点的「上游输入」灰底大文本块已下线（用户要求）：上游文本改到上面参考图那一行里以
-       「文本」卡片展示（见 renderInputThumbsRow）。这里只留批量生成那段说明，其余清空不留空白。 */
+    /* 批量节点的图片/视频切换放在顶部供应商旁，这里不再显示介绍小字。 */
     inputPromptPreview.classList.remove('has-text');
     inputPromptPreview.innerHTML = '';
+}
+function syncBatchKindSwitch(node){
+    if(!batchKindSwitch) return;
+    const visible = isSmartBatchNode(node);
+    batchKindSwitch.hidden = !visible;
+    if(!visible){
+        batchKindSwitch.__nvGlide?.destroy?.();
+        batchKindSwitch.innerHTML = '';
+        return;
+    }
+    const currentKind = settings.apiKind === 'video' ? 'video' : 'image';
+    if(batchKindSwitch.querySelectorAll('[data-batch-api-kind]').length !== 2){
+        batchKindSwitch.innerHTML = [['image', '图片'], ['video', '视频']].map(([kind, label]) => `<button type="button" data-batch-api-kind="${kind}" role="radio"><i data-lucide="${kind === 'image' ? 'image' : 'video'}"></i><span>${label}</span></button>`).join('');
+        batchKindSwitch.querySelectorAll('[data-batch-api-kind]').forEach(btn => {
+            btn.onclick = event => {
+                event.preventDefault();
+                event.stopPropagation();
+                setSmartBatchApiKind(btn.dataset.batchApiKind, node);
+            };
+        });
+        attachGlideHost(batchKindSwitch, {item:'button', orientation:'horizontal'});
+    }
+    batchKindSwitch.querySelectorAll('[data-batch-api-kind]').forEach(btn => {
+        const active = btn.dataset.batchApiKind === currentKind;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+    refreshGlideHost(batchKindSwitch);
+    refreshIcons();
+}
+function setSmartBatchApiKind(kind, node){
+    if(!isSmartBatchNode(node) || !['image', 'video'].includes(kind) || settings.apiKind === kind) return;
+    settings.apiKind = kind;
+    videoMoreDockOpen = false;
+    /* 图片/视频各自沿用上一次的平台和模型，选择立即写入当前批量节点；
+       tableRunGenerator 也读这份 apiKind，因此界面切换与实际执行保持一致。 */
+    applyRecentSmartSettingsForCurrentMode();
+    persistActiveSmartSettings();
+    renderDynamicParams();
+    syncBatchKindSwitch(node);
+    renderInputThumbsRow(node);
+    scheduleSave();
 }
 /* 生成面板参考图那一行要展示的「上游文本」：与原来「上游输入」块同一份内容
    （分组节点自己的透传文本 + 各上游节点给过来的文本）。只用于展示，绝不进发给模型的 images。 */
@@ -28971,6 +29108,11 @@ function renderInputThumbsRow(node){
     const dedup = node ? visibleReferenceImagesFor(node) : [];
     const manualRefKeys = new Set(manualReferenceImagesFor(node).map(img => inputRefKey(img)));
     const addActive = mentionInsertMode === 'manual-ref';
+    const frameMode = Boolean(node && settings.apiKind === 'video' && isApiLikeEngine(settings.engine) && videoModelSupportsFrameRoles(settings));
+    const frameIndexes = [];
+    if(frameMode) dedup.forEach((img, index) => {
+        if(mediaKindForItem(img) === 'image' && frameIndexes.length < 2) frameIndexes.push(index);
+    });
     /* 上游文本也作为一张卡片进这一行（用户截图2那个位置）；只读展示，不进 images、不参与拖拽/删除 */
     const upstreamText = panelUpstreamInputText(node);
     const hasTextCard = Boolean(upstreamText);
@@ -28982,6 +29124,7 @@ function renderInputThumbsRow(node){
         manual: [...manualRefKeys],
         add: addActive,
         mode: node ? smartImageMode(node) : '',
+        frames: frameMode ? [settings.videoProvider, settings.videoModel] : [],
         text: upstreamText
     });
     if(inputThumbsRow.dataset.thumbsSig === thumbsSignature) return;
@@ -28989,14 +29132,14 @@ function renderInputThumbsRow(node){
     inputThumbsRow.classList.toggle('has-items', Boolean(node));
     if(!node){ inputThumbsRow.innerHTML = ''; return; }
     const addButton = `<button class="input-thumb-add ${addActive ? 'active' : ''}" type="button" data-input-add-reference title="${escapeHtml(addActive ? '收起参考图' : '添加参考图')}" aria-label="${escapeHtml(addActive ? '收起参考图' : '添加参考图')}"><i data-lucide="image-plus"></i></button>`;
-    if(!dedup.length && !hasTextCard){
+    if(!dedup.length && !hasTextCard && !frameMode){
         inputThumbsRow.innerHTML = `<div class="input-thumb-list empty"></div><div class="input-thumb-actions">${addButton}</div>`;
         bindInputThumbReferenceActions();
         refreshIcons();
         return;
     }
     const mediaCounters = {image:0, video:0, audio:0, text:0, file:0};
-    const thumbsHtml = dedup.map((img, i) => {
+    const thumbCards = dedup.map((img, i) => {
         const isVid = isVideoMediaItem(img);
         const kind = mediaKindForItem(img);
         const isSelf = node ? isSelfReferenceForNode(node, img) : false;
@@ -29009,13 +29152,24 @@ function renderInputThumbsRow(node){
             ? smartVideoPreviewHtml(img, 256, 'draggable="false" alt=""')
             : smartPreviewImgHtml(img, 256, 'draggable="false"');
         const count = (mediaCounters[kind] = (mediaCounters[kind] || 0) + 1);
-        const label = kind === 'audio' ? `音频${count}` : kind === 'video' ? `视频${count}` : `图${count}`;
+        const framePosition = frameIndexes.indexOf(i);
+        const label = framePosition === 0 ? tr('smart.videoRoleFirstFrame')
+            : framePosition === 1 ? tr('smart.videoRoleLastFrame')
+            : kind === 'audio' ? `音频${count}` : kind === 'video' ? `视频${count}` : `图${count}`;
         const sourceUrl = img.originalLocalUrl || img.url || '';
         const key = inputRefKey(img);
         const removable = manualRefKeys.has(key);
         const removeBtn = removable ? `<button class="input-thumb-remove" type="button" data-input-remove-reference="${escapeHtml(inputRefKey(img))}" title="删除参考图" aria-label="删除参考图">×</button>` : '';
         return `<div class="input-thumb ${isSelf ? 'input-self' : ''} ${removable ? 'input-manual-ref' : ''}" draggable="false" data-thumb-index="${i}" data-node-id="${escapeHtml(img.nodeId || '')}" data-image-index="${img.imageIndex ?? ''}" data-url="${escapeHtml(img.url || '')}" data-source-url="${escapeHtml(sourceUrl)}" title="${escapeHtml(`${img.name || tr('smart.inputNum').replace('{n}', String(i + 1))} · ${title}`)}">${inner}<span class="input-thumb-label">${escapeHtml(label)}</span>${removeBtn}</div>`;
-    }).join('');
+    });
+    const emptyFrameSlot = label => `<div class="input-frame-empty"><i data-lucide="image"></i><span class="input-thumb-label">${escapeHtml(label)}</span></div>`;
+    const thumbsHtml = frameMode
+        ? [0, 1].map(position => {
+            const index = frameIndexes[position];
+            const label = position === 0 ? tr('smart.videoRoleFirstFrame') : tr('smart.videoRoleLastFrame');
+            return index === undefined ? emptyFrameSlot(label) : thumbCards[index];
+        }).join('') + thumbCards.filter((card, index) => !frameIndexes.includes(index)).join('')
+        : thumbCards.join('');
     /* 「文本」卡片：线性 file-text 图标 + 文本标签（跟缩略图卡同一套 42px 底），点开走全站统一的全文浮层。
        刻意不带 .input-thumb / data-thumb-index：那套会被拖拽排序、删除、发给模型的 images 认领。 */
     const textLabel = tr('smart.inputTextCardLabel');
@@ -32878,7 +33032,6 @@ async function runSmartCascade(targetNode=null){
     const endIndex = startIndex + (totalRounds - 1) * batchSize;
     const loopMode = loop?.mode === 'parallel' ? 'parallel' : 'serial';
     const parallelLimit = loopMode === 'parallel' && totalRounds > 1 ? smartCascadeParallelLimit(chain) : 1;
-    const precreateSingleSlots = singleNodeLoopRun && loopMode === 'parallel' && totalRounds > 1 && parallelLimit > 1;
     let singleLoopSlots = [];
     if(singleNodeLoopRun){
         runState.runPath = {states:{}};
@@ -32891,13 +33044,7 @@ async function runSmartCascade(targetNode=null){
             return slot ? tagLoopOutputSlot(slot, tail, loop.node, loopIndex, round) : null;
         });
         singleLoopSlots.filter(Boolean).forEach(slot => { runState.runPath.states[`${tail.id}->${slot.id}`] = 'wait'; });
-        if(precreateSingleSlots){
-            for(let slotOffset = 0; slotOffset < totalRounds; slotOffset++){
-                if(singleLoopSlots[slotOffset]) continue;
-                const loopIndex = startIndex + slotOffset * batchSize;
-                singleLoopSlots[slotOffset] = createLoopOutputSlot(tail, loopIndex, slotOffset, {queued:true, loopNode:loop.node, slotIndex:slotOffset, runState});
-            }
-        }
+        /* 一键运行只覆盖原路径的结果节点，不按轮次新建输出槽。 */
         render();
     }
     if(!singleNodeLoopRun){
@@ -32921,7 +33068,7 @@ async function runSmartCascade(targetNode=null){
                 if(directLoopTargetRun && parallelLimit === 1) showDirectLoopRoundPreview(loop.node, tail, refs, loopIndex, endIndex);
                 const slotIndex = Math.max(0, Math.floor((loopIndex - startIndex) / batchSize));
                 const outputTarget = tagLoopOutputSlot(
-                    options.outputTarget || singleLoopSlots[slotIndex] || loopOutputSlotForRound(tail, loop.node, loopIndex, slotIndex) || createLoopOutputSlot(tail, loopIndex, slotIndex, {loopNode:loop.node, slotIndex, runState}),
+                    options.outputTarget || singleLoopSlots[slotIndex] || loopOutputSlotForRound(tail, loop.node, loopIndex, slotIndex) || tail,
                     tail,
                     loop.node,
                     loopIndex,
@@ -33633,6 +33780,10 @@ async function runApiGeneration(prompt, refs, runSettings=settings, node=null){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
     const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', background:runSettings.background || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX)};
+    if(String(runSettings.model || '').toLowerCase() === 'midjourney'){
+        payload.midjourney_version = runSettings.mjVersion || '8.2';
+        payload.midjourney_hd = Boolean(runSettings.mjHd && ['8.2','8.1'].includes(payload.midjourney_version));
+    }
     const tasks = await Promise.all(Array.from({length:count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
         if(!r.ok) throw new Error(await r.text());
         return r.json();
@@ -33691,6 +33842,7 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings, node=
 }
 async function runApiVideoGeneration(prompt, refs, runSettings=settings, node=null){
     if(!runSettings.videoModel) throw new Error(tr('smart.errNoVideoModel'));
+    normalizeSmartVideoModeSettings(runSettings);
     /* 「原图比例」在这里解析成参考素材的实际比例（单节点这条路径：refs 是节点自己的参考，
        多数已经量过尺寸）。批量那条路径在 tableRunOneRow 里已经解析过，这里再兜一次底。 */
     if(runSettings.videoAspect === 'keep_ratio'){
@@ -33703,6 +33855,9 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings, node=nu
     }
     try {
         const uploadedRefs = applyUploadedUrlsToSmartRefs(refs, runSettings);
+        /* 首尾帧任务的输出跟随首帧比例，上游拒绝固定画幅（例如 9:16）。
+           只有实际带首帧图片时才强制 adaptive，普通文生视频仍沿用用户选择。 */
+        if(runSettings.videoUseFrameRoles && imageRefsOnly(uploadedRefs).length) runSettings.videoAspect = 'adaptive';
         const trustedMode = Boolean(runSettings.videoTrustedAsset);
         const trustedSource = trustedMode ? (['library','cloud','manual'].includes(runSettings.videoTrustedSource) ? runSettings.videoTrustedSource : 'library') : 'none';
         // 仅「素材库链接」来源才走 asset:// 认证地址 + 后端可信素材路由；上传云端/手动网址走普通直链。
@@ -33750,6 +33905,9 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings, node=nu
             images: refImages,
             videos: refVideos,
             audios: refAudios,
+            speaker_id: runSettings.speakerId || '',
+            voice_sample: runSettings.voiceSample || '',
+            voice_consent: Boolean(runSettings.voiceConsent),
             enhance_prompt: Boolean(runSettings.videoEnhancePrompt),
             enable_upsample: Boolean(runSettings.videoEnableUpsample),
             watermark: Boolean(runSettings.videoWatermark),
@@ -33765,12 +33923,19 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings, node=nu
         const submitCount = runSettings.videoProvider === 'jimeng' ? 1 : requestedCount;
         const submit = async () => {
             throwIfSmartGenerationStopped(node);
-            const result = await fetch('/api/canvas-video', {
+            const submission = await fetch('/api/canvas-video?async=1', {
                 method:'POST',
                 headers:{'Content-Type':'application/json'},
                 body:JSON.stringify(payload)
             }).then(async r => { if(!r.ok) throw new Error(await smartResponseErrorMessage(r, tr('smart.errRunFailed'))); return r.json(); });
-            if(result && result.jimeng_pending) throw new JimengPendingSignal({submitId:result.submit_id, kind:result.kind || 'video', queueInfo:result.queue_info, message:result.message});
+            const taskId = submission.task_id || '';
+            if(!taskId) throw new Error(tr('smart.errRunFailed'));
+            if(smartGenerationStopRequestedFor(node)){
+                cancelSmartTask(taskId);
+                throw smartGenerationStoppedError();
+            }
+            activeSmartGenerationTaskIds.set(taskId, smartNodeStopContextId(node));
+            const result = await pollSmartVideoTask(taskId, node);
             return {urls:resultMediaUrls(result), canvas_meta:(result && result.canvas_meta) || {}};
         };
         const results = await Promise.all(Array.from({length:submitCount}, submit));
@@ -33949,6 +34114,7 @@ class JimengPendingSignal extends Error {
         super(data.message || '即梦任务排队中，可继续等待或手动查询');
         this.jimengPending = true;
         this.submitId = data.submitId || data.submit_id || '';
+        this.taskId = data.taskId || data.task_id || '';
         this.kind = data.kind || 'image';
         this.queueInfo = data.queueInfo || data.queue_info || {};
     }
@@ -33983,6 +34149,7 @@ function setNodeJimengPending(node, signal){
     const prev = node.jimengPending && node.jimengPending.submitId === signal.submitId ? node.jimengPending : null;
     node.jimengPending = {
         submitId:signal.submitId,
+        taskId:signal.taskId || (prev && prev.taskId) || '',
         kind:signal.kind || (prev && prev.kind) || 'image',
         queueInfo:signal.queueInfo || (prev && prev.queueInfo) || {},
         message:signal.message || (prev && prev.message) || '',
@@ -34176,7 +34343,7 @@ async function pollSmartCanvasTask(taskId, node=null){
                 return r.json();
             });
             if(task.status === 'succeeded') return task.result || {};
-            if(task.status === 'jimeng_pending') throw new JimengPendingSignal({submitId:task.submit_id, kind:task.kind, queueInfo:task.queue_info, message:task.message});
+            if(task.status === 'jimeng_pending') throw new JimengPendingSignal({taskId, submitId:task.submit_id, kind:task.kind, queueInfo:task.queue_info, message:task.message});
             if(task.status === 'failed'){
                 const recoverTaskId = task.upstream_task_id || extractUpstreamTaskId(task.error || '');
                 if(recoverTaskId) throw new ImageTaskRecoverSignal({taskId, recoverTaskId, providerId:task.provider_id, kind:'image', message:task.error || tr('smart.errRunFailed')});
@@ -34190,6 +34357,26 @@ async function pollSmartCanvasTask(taskId, node=null){
         return await promise;
     } finally {
         activeSmartTaskPolls.delete(taskId);
+        activeSmartGenerationTaskIds.delete(taskId);
+    }
+}
+async function pollSmartVideoTask(taskId, node=null){
+    if(!taskId) throw new Error(tr('smart.errRunFailed'));
+    try {
+        for(let i = 0; i < 900; i++){
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            if(smartGenerationStopRequestedFor(node)) throw smartGenerationStoppedError();
+            const task = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`).then(async r => {
+                if(!r.ok) throw new Error(await r.text());
+                return r.json();
+            });
+            if(task.status === 'succeeded') return task.result || {};
+            if(task.status === 'jimeng_pending') throw new JimengPendingSignal({taskId, submitId:task.submit_id, kind:task.kind || 'video', queueInfo:task.queue_info, message:task.message});
+            if(task.status === 'cancelled' || task.status === 'cancel_requested') throw smartGenerationStoppedError();
+            if(task.status === 'failed') throw new Error(task.error || tr('smart.errRunFailed'));
+        }
+        throw new Error(tr('smart.errRunTimeout'));
+    } finally {
         activeSmartGenerationTaskIds.delete(taskId);
     }
 }
@@ -34392,9 +34579,14 @@ function groupSelectedNodes(){
         created_at:Date.now()
     };
     nodes.push(group);
-    // 图片成员吸收进分组网格，提示词/循环作为成员节点；随后自动整理。
+    // 图片成员吸收进分组网格，提示词/循环作为成员节点。
     selected.forEach(node => addNodeToSmartGroup(group, node));
-    arrangeSmartGroupMembers(group, {skipUndo:true});
+    /* 有连线的选区保留原来的工作流位置，不因建组改变节点间距或走向；
+       只有完全没有连接关系的选区才沿用创建分组后的自动整理。 */
+    const selectedIdSet = new Set(selected.map(node => node.id));
+    const hasConnectedNodes = (canvas?.connections || []).some(conn => selectedIdSet.has(conn.from) || selectedIdSet.has(conn.to))
+        || selected.some(node => Array.isArray(node.inputNodeIds) && node.inputNodeIds.length > 0);
+    if(!hasConnectedNodes) arrangeSmartGroupMembers(group, {skipUndo:true});
     selectedIds = [];
     selectedId = group.id;
     selectedImage = {nodeId:'', index:-1};
@@ -36001,6 +36193,31 @@ shell.ondrop = async e => {
     if(payload.type === 'none') return;
     await handleSmartImageDropPayload(payload, '', {point:p, forceNew:true});
 };
+/* 可编辑区域统一按纯文本粘贴：来源页面的字体、字号、颜色、背景、边框和 HTML 全部不带入。
+   文件与素材库粘贴仍走后面的原有分支；现有 @ chip 也不受影响。 */
+function pastePlainTextIntoSmartEditor(event){
+    const editor = event.target?.closest?.('[contenteditable="true"]');
+    if(!editor || editor.closest('.mention-image-token')) return false;
+    const text = String(event.clipboardData?.getData?.('text/plain') || '');
+    if(!text) return false;
+    event.preventDefault();
+    editor.focus?.();
+    let inserted = false;
+    try { inserted = document.execCommand('insertText', false, text); } catch(error) { inserted = false; }
+    if(!inserted){
+        const selection = window.getSelection?.();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : document.createRange();
+        range.deleteContents();
+        const textNode = document.createTextNode(text);
+        range.insertNode(textNode);
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        selection?.removeAllRanges?.();
+        selection?.addRange?.(range);
+    }
+    editor.dispatchEvent(new Event('input', {bubbles:true}));
+    return true;
+}
 window.addEventListener('paste', e => {
     if(collabReadOnly && !isEditableTarget(e.target)){
         e.preventDefault();
@@ -36008,6 +36225,7 @@ window.addEventListener('paste', e => {
         collabNotifyReadOnly();
         return;
     }
+    if(pastePlainTextIntoSmartEditor(e)) return;
     const files = [...(e.clipboardData?.files || [])].filter(isSupportedUploadFile);
     if(files.length){
         lastImagePasteAt = Date.now();
@@ -37245,6 +37463,11 @@ window.focusSmartNode = function(nodeId){
     render();
     return true;
 };
+window.addEventListener('novai-canvas-assistant:template-applied', async function(event){
+    const result = event.detail || {};
+    await loadCanvas();
+    if(result.node_id && window.focusSmartNode) window.focusSmartNode(result.node_id);
+});
 window.buildAgentFocus = buildAgentFocus;
 window.agentPlanAction = agentPlanAction;
 window.toggleAgentPlanConfirm = toggleAgentPlanConfirm;
@@ -38723,12 +38946,13 @@ async function tableRunOneRow(nodeId, options, forceVideo){
         throw error;
     }
 }
-/* 批量节点是 smart-batch（不是经典画布的 video 类型），所以 shared/table-node.js 里
-   tableBatchRunner(node) 永远挑 runGenerator。视频分镜表出表时会给批量节点打 tableBatchVideo 标记，
-   这里再分流到视频链路，否则「视频分镜表」会按图像去跑。 */
+/* 批量节点同时支持图片和视频：本次保存的 apiKind 优先；未保存过模式时，
+   tableBatchVideo 只作为视频分镜表的默认标记，不会把节点永久固定成视频。 */
 async function tableRunGenerator(nodeId, options = {}){
     const node = nodes.find(n => n.id === nodeId);
-    return await tableRunOneRow(nodeId, options, Boolean(node && node.tableBatchVideo));
+    const savedApiKind = String(node?.runSettings?.apiKind || '');
+    const forceVideo = savedApiKind ? savedApiKind === 'video' : Boolean(node?.tableBatchVideo);
+    return await tableRunOneRow(nodeId, options, forceVideo);
 }
 async function tableRunVideo(nodeId, options = {}){ return await tableRunOneRow(nodeId, options, true); }
 
@@ -38930,9 +39154,11 @@ function promptOptimizeButtonHtml(kind){
     return `<button class="prompt-node-control prompt-optimize-btn" type="button" data-optimize-prompt="${escapeAttr(kind)}" title="${label}" aria-label="${label}">${PROMPT_OPTIMIZE_ICON}</button>`;
 }
 /* 就地替换：优先 execCommand（保留浏览器原生撤销），失败再退回直接改内容；
+   @ 素材 chip 先完整克隆，文本替换后按原顺序接回末尾，图片/视频/音频/文本引用都不会退化成纯文字。
    两者都派发 input，走各框现成的 oninput（落盘 / 列表刷新）链路。 */
 function promptOptimizeReplaceText(el, text){
     if(!el) return false;
+    const preservedTokens = [...el.querySelectorAll('.mention-image-token')].map(token => token.cloneNode(true));
     el.focus?.();
     let inserted = false;
     try {
@@ -38944,6 +39170,15 @@ function promptOptimizeReplaceText(el, text){
         inserted = document.execCommand('insertText', false, text);
     } catch(e) { inserted = false; }
     if(!inserted || String(el.textContent || '') !== text) el.textContent = text;
+    if(preservedTokens.length){
+        el.appendChild(document.createTextNode(' '));
+        preservedTokens.forEach(token => {
+            el.appendChild(token);
+            el.appendChild(document.createTextNode(' '));
+        });
+        bindSmartPreviewImageFallbacks(el);
+        refreshIcons();
+    }
     el.dispatchEvent(new Event('input', { bubbles:true }));
     return true;
 }
@@ -39549,6 +39784,10 @@ function ensureTableApi(){
         showErrorModal: text => toast(String(text || '出错了'), '!'),
         runGenerator: tableRunGenerator,
         runVideoNode: tableRunVideo,
+        batchMediaLimit(node){
+            const runSettings = smartSettingsForNode(node);
+            return runSettings.apiKind === 'video' && videoModelSupportsFrameRoles(runSettings) ? 2 : 1;
+        },
         generationStopRequested: nodeId => smartGenerationStopRequestedFor(nodeId),
         onBatchSettled: () => syncRunButtonState(),
     });
@@ -40534,10 +40773,6 @@ async function rerunSmartNode(node){
     undoSuppressed = true;
     const out = createPendingOutputFromSource(source, expected, meta, {connectSource:false, selectOutput:false, refs, kind:info.kind, requestSettings:info.settings});
     undoSuppressed = false;
-    if(source === node){
-        const conn = (canvas.connections || []).find(c => c.from === node.id && c.to === out.id);
-        if(conn) conn.kind = 'history';
-    }
     selectedId = node.id;
     const runLog = {nodeId:out.id, nodeType:out.type, kind:info.kind, settings:info.settings, prompt:info.prompt,
         refs:refs.map(ref => ({url:ref.url, name:ref.name || 'image', kind:ref.kind || ''})),
@@ -41693,6 +41928,7 @@ function toggleChatArtifactsPanel(){
 }
 function openChatArtifactsPanel(){
     if(!chatArtifactsPanel) return;
+    closeCanvasTemplatesPanel();
     chatArtifactsPanel.hidden = false;
     chatArtifactsPanel.classList.add('open');
     positionChatArtifactsPanel();
@@ -41797,6 +42033,181 @@ function renderChatArtifactsBody(){
     if(foot){ foot.hidden = !chatArtifactsTruncated; foot.textContent = '只显示最近 200 个文件'; }
     refreshIcons();
 }
+
+/* ── 右侧流程模板：完整节点与连线，克隆到当前画布后才由用户决定运行 ── */
+var canvasTemplatesPanel = null;
+var canvasTemplatesItems = [];
+var canvasTemplatesLoading = false;
+var canvasTemplatesError = '';
+var canvasTemplatesApplyingId = '';
+var canvasTemplatesRequest = 0;
+function canvasTemplatesMount(){
+    if(document.getElementById('canvasTemplatesPanel')) return;
+    var actions = document.querySelector('.canvas-assistant-head-actions') || document.querySelector('.chat-head-actions');
+    if(actions && !document.getElementById('canvasTemplatesBtn')){
+        var btn = document.createElement('button');
+        btn.id = 'canvasTemplatesBtn';
+        btn.type = 'button';
+        btn.className = 'canvas-assistant-icon chat-artifacts-btn';
+        btn.title = '流程模板';
+        btn.setAttribute('aria-label', '流程模板');
+        btn.innerHTML = '<i data-lucide="layers"></i>';
+        actions.insertBefore(btn, actions.firstChild);
+        btn.addEventListener('click', function(event){
+            event.preventDefault();
+            event.stopPropagation();
+            toggleCanvasTemplatesPanel();
+        });
+    }
+    canvasTemplatesPanel = document.createElement('section');
+    canvasTemplatesPanel.id = 'canvasTemplatesPanel';
+    canvasTemplatesPanel.className = 'chat-artifacts-panel canvas-templates-panel';
+    canvasTemplatesPanel.hidden = true;
+    canvasTemplatesPanel.setAttribute('aria-label', '流程模板');
+    canvasTemplatesPanel.innerHTML = '<div class="chat-artifacts-head"><div class="chat-artifacts-heading"><h3>流程模板</h3><p>完整节点与连线，克隆后再决定运行</p></div>' +
+        '<button type="button" class="chat-artifacts-refresh">刷新</button><button type="button" class="chat-artifacts-close" aria-label="关闭">×</button></div>' +
+        '<div class="canvas-templates-search"><i data-lucide="search"></i><input type="search" placeholder="搜索流程模板" aria-label="搜索流程模板"></div>' +
+        '<div class="chat-artifacts-body canvas-templates-body"></div>';
+    document.body.appendChild(canvasTemplatesPanel);
+    canvasTemplatesPanel.querySelector('.chat-artifacts-refresh').addEventListener('click', loadCanvasTemplates);
+    canvasTemplatesPanel.querySelector('.chat-artifacts-close').addEventListener('click', closeCanvasTemplatesPanel);
+    canvasTemplatesPanel.querySelector('input').addEventListener('input', renderCanvasTemplates);
+    canvasTemplatesPanel.addEventListener('click', function(event){
+        event.stopPropagation();
+        var apply = event.target.closest('[data-template-apply]');
+        if(apply) applyCanvasTemplateToCanvas(apply.getAttribute('data-template-apply'));
+    });
+    document.addEventListener('click', function(event){
+        if(!canvasTemplatesPanel || canvasTemplatesPanel.hidden) return;
+        if(event.target.closest('#canvasTemplatesBtn, #canvasRailTemplates') || canvasTemplatesPanel.contains(event.target)) return;
+        closeCanvasTemplatesPanel();
+    });
+    document.addEventListener('keydown', function(event){ if(event.key === 'Escape') closeCanvasTemplatesPanel(); });
+    window.addEventListener('resize', function(){ if(canvasTemplatesPanel && !canvasTemplatesPanel.hidden) positionCanvasTemplatesPanel(); });
+    refreshIcons();
+}
+function positionCanvasTemplatesPanel(){
+    if(!canvasTemplatesPanel) return;
+    var fromLeft = canvasTemplatesPanel.dataset.placement === 'left';
+    var btn = document.getElementById(fromLeft ? 'canvasRailTemplates' : 'canvasTemplatesBtn');
+    var rect = btn ? btn.getBoundingClientRect() : (fromLeft ? { right:72, top:80, bottom:80 } : { right:window.innerWidth - 16, bottom:52 });
+    var width = Math.min(430, window.innerWidth - 32);
+    var left = fromLeft
+        ? Math.max(12, Math.min(rect.right + 12, window.innerWidth - width - 12))
+        : Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12));
+    var top = fromLeft ? Math.max(12, Math.min(rect.top, window.innerHeight - 300)) : Math.max(12, rect.bottom + 8);
+    var maxH = Math.max(260, window.innerHeight - top - 120);
+    canvasTemplatesPanel.style.width = width + 'px';
+    canvasTemplatesPanel.style.left = left + 'px';
+    canvasTemplatesPanel.style.top = top + 'px';
+    canvasTemplatesPanel.style.maxHeight = maxH + 'px';
+}
+function toggleCanvasTemplatesPanel(options={}){
+    if(!canvasTemplatesPanel) return;
+    if(canvasTemplatesPanel.hidden) openCanvasTemplatesPanel(options);
+    else closeCanvasTemplatesPanel();
+}
+function openCanvasTemplatesPanel(options={}){
+    if(!canvasTemplatesPanel) return;
+    closeChatArtifactsPanel();
+    canvasTemplatesPanel.dataset.placement = options.placement === 'left' ? 'left' : 'right';
+    canvasTemplatesPanel.hidden = false;
+    canvasTemplatesPanel.classList.add('open');
+    positionCanvasTemplatesPanel();
+    loadCanvasTemplates();
+}
+window.toggleCanvasTemplatesPanel = toggleCanvasTemplatesPanel;
+function closeCanvasTemplatesPanel(){
+    if(canvasTemplatesPanel){
+        canvasTemplatesPanel.hidden = true;
+        canvasTemplatesPanel.classList.remove('open');
+    }
+}
+function loadCanvasTemplates(){
+    if(!canvasTemplatesPanel) return;
+    var seq = ++canvasTemplatesRequest;
+    canvasTemplatesLoading = true;
+    canvasTemplatesError = '';
+    renderCanvasTemplates();
+    fetch('/api/canvas-templates', { headers: { Accept: 'application/json' } })
+        .then(function(res){ return res.json().catch(function(){ return {}; }).then(function(data){ if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status)); return data; }); })
+        .then(function(data){
+            if(seq !== canvasTemplatesRequest) return;
+            canvasTemplatesLoading = false;
+            canvasTemplatesItems = Array.isArray(data.templates) ? data.templates : [];
+            renderCanvasTemplates();
+        })
+        .catch(function(error){
+            if(seq !== canvasTemplatesRequest) return;
+            canvasTemplatesLoading = false;
+            canvasTemplatesError = String((error && error.message) || '加载失败');
+            renderCanvasTemplates();
+        });
+}
+function canvasTemplateCoverHtml(item){
+    var covers = Array.isArray(item.covers) ? item.covers.filter(Boolean).slice(0, 3) : [];
+    if(!covers.length) return '<div class="canvas-template-cover-empty"><i data-lucide="workflow"></i></div>';
+    return covers.map(function(url){ return '<img src="' + escapeAttr(url) + '" alt="" loading="lazy">'; }).join('');
+}
+function renderCanvasTemplates(){
+    if(!canvasTemplatesPanel) return;
+    var body = canvasTemplatesPanel.querySelector('.canvas-templates-body');
+    if(!body) return;
+    if(canvasTemplatesLoading){
+        body.innerHTML = '<div class="chat-artifacts-skeleton"><div class="chat-artifacts-skeleton-row"></div><div class="chat-artifacts-skeleton-row"></div><div class="chat-artifacts-skeleton-row"></div></div>';
+        return;
+    }
+    if(canvasTemplatesError){
+        body.innerHTML = '<div class="chat-artifacts-state"><p>模板加载失败：' + escapeHtml(canvasTemplatesError) + '</p><button type="button" class="canvas-templates-retry">重试</button></div>';
+        body.querySelector('.canvas-templates-retry').addEventListener('click', loadCanvasTemplates);
+        return;
+    }
+    var query = String(canvasTemplatesPanel.querySelector('input')?.value || '').trim().toLowerCase();
+    var items = canvasTemplatesItems.filter(function(item){ return !query || String(item.name || '').toLowerCase().includes(query) || String(item.contains || '').toLowerCase().includes(query); });
+    if(!items.length){
+        body.innerHTML = '<div class="chat-artifacts-empty"><i data-lucide="layers"></i><p>' + (query ? '没有匹配的流程模板。' : '还没有流程模板。先选中一组节点，通过助手「存成模板」。') + '</p></div>';
+        refreshIcons();
+        return;
+    }
+    body.innerHTML = items.map(function(item){
+        var id = String(item.id || '');
+        var applying = canvasTemplatesApplyingId === id;
+        var disabled = canvasTemplatesApplyingId || item.error;
+        var meta = [item.contains || '完整工作流', (Number(item.node_count) || 0) + ' 个节点'];
+        if(Number(item.input_count)) meta.push(Number(item.input_count) + ' 个素材位');
+        return '<article class="canvas-template-card">' +
+            '<div class="canvas-template-cover count-' + Math.min(3, (item.covers || []).length) + '">' + canvasTemplateCoverHtml(item) + '</div>' +
+            '<div class="canvas-template-copy"><strong>' + escapeHtml(item.name || '未命名模板') + '</strong><span>' + escapeHtml(meta.join(' · ')) + '</span></div>' +
+            '<button type="button" class="canvas-template-apply" data-template-apply="' + escapeAttr(id) + '" ' + (disabled ? 'disabled' : '') + '>' +
+                (applying ? '克隆中…' : (item.error ? '不可用' : '克隆到画布')) + '</button></article>';
+    }).join('');
+    refreshIcons();
+}
+async function applyCanvasTemplateToCanvas(templateId){
+    if(!templateId || canvasTemplatesApplyingId) return;
+    if(collabReadOnly){ collabNotifyReadOnly(); return; }
+    canvasTemplatesApplyingId = templateId;
+    renderCanvasTemplates();
+    try {
+        const res = await fetch('/api/canvas-templates/' + encodeURIComponent(templateId) + '/apply', {
+            method:'POST',
+            headers:{'Content-Type':'application/json', Accept:'application/json'},
+            body:JSON.stringify({canvas_id:canvasId})
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok) throw new Error(data.detail || data.error || '模板克隆失败');
+        closeCanvasTemplatesPanel();
+        await loadCanvas();
+        if(data.node_id && window.focusSmartNode) window.focusSmartNode(data.node_id);
+        toast('已克隆「' + String(data.template || '流程模板') + '」：' + (Number(data.node_count) || 0) + ' 个节点，未开始生成');
+    } catch(error) {
+        toast(String((error && error.message) || '模板克隆失败').slice(0, 180));
+    } finally {
+        canvasTemplatesApplyingId = '';
+        renderCanvasTemplates();
+    }
+}
+canvasTemplatesMount();
 
 
 /* ── run 模型上下文：只读调试弹窗 ── */

@@ -1215,5 +1215,68 @@
     "skill_prompt": "# 本期运行形态（NOVAI 已打通图片输入）\n- 输入：用户上传的买家秀参考图片，本次运行会给出它的绝对路径与字段 name；工作流里的「接收参考图」就是用 read 工具读取该文件。\n- 参考图：上传图片就是唯一参考图，必须基于它识别主体、场景元素、光线氛围、材质特征与构图；不得脱离参考图另起新场景。\n- 交付动作：本技能只交付提示词表格（xlsx），不生成图片、不写 HTML 报告；用 exec 调 /usr/bin/python3 + openpyxl 把三列表格写进本次产物目录。\n- 图片或字段不足时如实标注「数据不足」，不得编造结论。\n\n# 目标\n基于用户提供的参考图，输出 5 条用于图像裂变生成的提示词，保持同场景、同主体设定、同氛围，仅变化拍摄视角，并整理为 Excel 表格文件。\n\n# 工作流\n1. 读取用户提供的参考图，识别画面中的主体、场景元素、光线氛围、材质特征、道具组合与空间关系。\n2. 提炼参考图中的统一设定，明确裂变原则：保留同场景、同主体设定、同模特、同氛围、同时间感、同材质风格，仅调整拍摄机位与构图方式。\n3. 围绕参考图设计 5 个不同视角的裂变画面主题，确保每一条都基于原图延展，而不是脱离参考图重新生成新场景。\n4. 为每个画面主题编写完整提示词，将场景保留要求、主体一致性要求、构图变化要求和必要的负向约束合并为单条可直接使用的提示词内容。\n5. 将结果整理为 xlsx 表格，固定表头为：序号、画面主题、提示词。\n6. 用 exec 调 /usr/bin/python3 + openpyxl 生成并写出 xlsx 表格文件。\n\n# 必要工具调用约定\n- 读图：用 read 工具读取本次输入里列出的参考图绝对路径。\n- 写 Excel：用 exec 调 /usr/bin/python3 + openpyxl 生成 .xlsx，必须写到本次产物目录的绝对路径。\n- 文件内容必须为三列表格，表头严格固定为：序号、画面主题、提示词。\n- 表格内固定输出 5 行数据，对应 5 条裂变提示词。\n- 提示词内容应直接可用于图生图或参考图裂变场景，默认将正向描述与必要约束整合在同一单元格中。\n\n# 输出格式\n文件交付\n\n# 本期交付动作\n把基于参考图写出的 5 条裂变提示词整理成固定三列表格，用 exec 调 /usr/bin/python3 + openpyxl 写出 Excel 数据表；写完后用一句话说明交付了什么。\n",
     "enabled": true,
     "available": true
+  },
+  {
+    "id": "voice-lipsync",
+    "name": "原声改台词与对口型",
+    "category": "视频音频",
+    "icon": "🎙️",
+    "description": "保留原视频人物与声音特征，输入新台词后生成同步口型的新视频；也可直接使用成品音频。",
+    "tags": ["声音克隆", "改台词", "对口型", "数字人", "视频配音"],
+    "platforms": ["PixVerse"],
+    "scenarios": ["原声改台词", "视频配音", "口型同步"],
+    "usage_instruction": "提供原视频和新台词；可选声音样本、已有 speaker_id 或成品音频。克隆或复用声音前需要明确授权。",
+    "source_skill_code": "novai-voice-lipsync-v1",
+    "input_schema": {
+      "files": [
+        {
+          "name": "source_video",
+          "label": "原视频",
+          "required": true,
+          "accept": ["video"],
+          "description": "单人物、60 秒以内且含清晰人声的视频"
+        }
+      ],
+      "params": [
+        {
+          "name": "prompt",
+          "label": "新台词",
+          "type": "string",
+          "required": true,
+          "description": "需要人物用原声朗读的新台词，最多 200 字"
+        },
+        {
+          "name": "voice_sample",
+          "label": "声音样本",
+          "type": "string",
+          "required": false,
+          "description": "可选；缺省时从原视频提取"
+        },
+        {
+          "name": "speaker_id",
+          "label": "已有音色 ID",
+          "type": "string",
+          "required": false,
+          "description": "可选；已有 PixVerse speaker_id"
+        },
+        {
+          "name": "audio",
+          "label": "成品音频",
+          "type": "string",
+          "required": false,
+          "description": "可选；提供后跳过声音克隆，直接对口型"
+        }
+      ]
+    },
+    "deliverables": [
+      {
+        "kind": "video",
+        "name": "原声改台词与对口型.mp4",
+        "label": "口型同步视频"
+      }
+    ],
+    "skill_prompt": "# 目标\n保留原视频的人物、画面和其他内容，使用授权声音朗读新台词并重新对口型，交付一个新的视频节点。\n\n# 执行前检查\n1. 必须取得原视频和新台词。首版仅处理单人物、60 秒以内、100MB 以内的视频。\n2. 克隆或复用自定义声音前，必须确认用户拥有该声音的使用授权；用户未明确授权时先询问，不得自行填入 voice_consent=true。\n3. 检查 PixVerse 可用配置。缺少 PIXVERSE_API_KEY 时直接说明配置缺失，不要静默切换供应商、不要声称已经生成。\n\n# 三种执行方式\n- 只有原视频：调用 lipsync_video，prompt 写新台词，reference_video 填原视频；系统提取人声样本并创建 speaker_id。\n- 有声音样本或已有 speaker_id：填入 voice_sample 或 speaker_id，避免重复创建音色。\n- 有成品音频：填入 audio，跳过声音克隆，直接让原视频按成品音频对口型；此模式不要求创建 speaker_id。\n\n# 约束\n- 只调用 lipsync_video，不用普通 generate_video 冒充对口型。\n- 不改变人物、画面、台词以外的创作设定，不增加额外人物、镜头或背景音乐。\n- 生成前必须经过用户确认；voice_consent 只能来自用户明确授权。\n- 不提交测试媒体或 API 配置，不在回复里泄露密钥。\n\n# 验收\n- 查询 task_id 的真实状态，确认新视频已下载并落到画布节点，返回 node_id、task_id 和 speaker_id（如创建）。\n- 未经实际观看和试听，不宣称「口型完全对齐」；只报告任务完成及可检查的视频地址。\n- 上游报错时如实给出鉴权、上传、审核或生成阶段，不把上传成功当作生成成功。\n",
+    "enabled": true,
+    "available": true
   }
 ]

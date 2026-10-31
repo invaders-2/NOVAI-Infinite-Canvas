@@ -117,6 +117,46 @@ export const fetchArtifacts = async (): Promise<ArtifactList> => {
 	}
 }
 
+export interface CanvasTemplateItem {
+	id: string
+	name: string
+	node_count: number
+	connection_count: number
+	contains: string
+	input_count: number
+	generation_count: number
+	covers: string[]
+	error?: string
+}
+
+export interface CanvasTemplateApplyResult {
+	canvas_id: string
+	template: string
+	node_id: string
+	node_ids: string[]
+	node_count: number
+	task_ids: string[]
+	run: boolean
+}
+
+export const fetchCanvasTemplates = async (): Promise<CanvasTemplateItem[]> => {
+	const response = await fetch("/api/canvas-templates", jsonInit)
+	const data = await readJson(response)
+	if (!response.ok) throw new Error(errorText(data, "HTTP " + response.status))
+	return Array.isArray(data.templates) ? (data.templates as CanvasTemplateItem[]) : []
+}
+
+export const applyCanvasTemplate = async (templateId: string): Promise<CanvasTemplateApplyResult> => {
+	const response = await fetch("/api/canvas-templates/" + encodeURIComponent(templateId) + "/apply", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Accept: "application/json" },
+		body: JSON.stringify({ canvas_id: canvasId }),
+	})
+	const data = await readJson(response)
+	if (!response.ok) throw new Error(errorText(data, "模板克隆失败"))
+	return data as unknown as CanvasTemplateApplyResult
+}
+
 export type ModelContextResult =
 	| { ok: true; data: ModelContext }
 	| { ok: false; expired: boolean; message: string }
@@ -303,6 +343,7 @@ export interface StoreCatalogItem {
 	kind: "skill" | "app" | string
 	activationSkill: string
 	installed: boolean
+	storeVisible: boolean
 }
 
 export const fetchStoreCatalog = async (): Promise<StoreCatalogItem[]> => {
@@ -320,6 +361,7 @@ export const fetchStoreCatalog = async (): Promise<StoreCatalogItem[]> => {
 				kind: String(row.kind || ""),
 				activationSkill: String(row.activation_skill || ""),
 				installed: row.installed === true,
+				storeVisible: row.store_visible !== false,
 			}
 		})
 		.filter((row) => row.id && row.name)

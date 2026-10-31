@@ -14044,6 +14044,27 @@
    ],
    "token_rates": {}
   },
+  "pixverse-lipsync": {
+   "id": "pixverse-lipsync",
+   "name": "pixverse-lipsync",
+   "category": "video",
+   "billing": "per_second",
+   "spec_dimension": "duration",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "default",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {"usd": 0.4, "credits": 4},
+     "platinum": {"usd": 0.36, "credits": 3.6},
+     "diamond": {"usd": 0.32, "credits": 3.2},
+     "official": {"usd": 0.4, "credits": 4},
+     "source": "pixverse-official-speech"
+    }
+   ],
+   "token_rates": {}
+  },
   "pixverse-v6": {
    "id": "pixverse-v6",
    "name": "pixverse-v6",

@@ -9,7 +9,7 @@
             pushUndo, defaultPoint, mediaKindForNode, mediaKindForRef, mediaKindForUpload,
             outputUrlValue, isMissingAssetUrl, canvasPreviewImgHtml, canvasVideoPreviewHtml,
             nowMs, responseErrorMessage, refreshIcons, renderNode, runGenerator, runVideoNode,
-            showErrorModal, generationStopRequested, onBatchSettled,
+            showErrorModal, generationStopRequested, onBatchSettled, batchMediaLimit,
         } = host || {};
 
 function novaTableModel(){
@@ -814,7 +814,12 @@ function rowsFingerprint(rows){
         + (row.media || []).map(item => item.url).join(';')).join('|');
 }
 
-function tableRowInputsKey(node, state, channels, upstreamTexts, byId, explicitById){
+function tableBatchMediaLimit(gen){
+    const value = Number(typeof batchMediaLimit === 'function' ? batchMediaLimit(gen) : 1);
+    return Number.isFinite(value) && value > 0 ? Math.max(1, Math.min(20, Math.floor(value))) : 1;
+}
+
+function tableRowInputsKey(node, state, channels, upstreamTexts, byId, explicitById, mainMediaLimit){
     const incoming = tableIncomingConnections(node)
         .map(conn => String(conn.from || '') + '>' + String(conn.toPort || ''))
         .sort().join(',');
@@ -835,7 +840,8 @@ function tableRowInputsKey(node, state, channels, upstreamTexts, byId, explicitB
         (upstreamTexts || []).join('\u0001'),
         JSON.stringify(state.columns || []),
         JSON.stringify(state.rows || []),
-        explicitById ? 'byId' : ''
+        explicitById ? 'byId' : '',
+        String(mainMediaLimit || 1)
     ].join('~');
 }
 
@@ -845,16 +851,17 @@ function tableRowInputs(node, options={}){
     if(!model || !state) return [];
     const explicitById = options.nodeById || null;
     const byId = explicitById || new Map((nodes || []).map(item => [item.id, item]));
+    const mainMediaLimit = Math.max(1, Math.min(20, Math.floor(Number(options.mainMediaLimit) || 1)));
     const channels = ensureTableChannels(node, byId);
     const upstreamTexts = tableUpstreamTexts(node, byId);
-    const key = tableRowInputsKey(node, state, channels, upstreamTexts, byId, explicitById);
+    const key = tableRowInputsKey(node, state, channels, upstreamTexts, byId, explicitById, mainMediaLimit);
     const cached = rowInputsCache.get(node);
     if(cached && cached.key === key && cached.byId === explicitById){
         rowInputsHitCount += 1;
         return cached.rows;
     }
     rowInputsComputeCount += 1;
-    const rows = computeTableRowInputs(node, state, model, channels, upstreamTexts, byId);
+    const rows = computeTableRowInputs(node, state, model, channels, upstreamTexts, byId, mainMediaLimit);
     rowInputsCache.set(node, {key, rows, byId: explicitById, fingerprint: rowsFingerprint(rows)});
     return rows;
 }
@@ -881,7 +888,7 @@ function stripTrimmedMentions(model, prompt, trimmedOrdinals){
     });
 }
 
-function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId){
+function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId, mainMediaLimit=1){
     // 每个通道的条目在全局输入清单里的起始序号
     /* 「时长(秒)」列：这一行的时长要当这一行视频的 duration 发出去（不只是拼进提示词）。
        行里没有/不是纯数字时 duration = null，批量那边回退节点级 videoDuration。 */
@@ -925,11 +932,10 @@ function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId
         const texts = [];
         const references = [];
         const ordinalMap = new Map();
-        /* 一行只要 1 张主参考图：非「全部」的通道（含手动上传的那一格）整行合计
-           只保留最先遇到的那一张，其余裁掉；「全部」（多角度）通道的整组照旧全带。
-           多个非 all 通道也只合计留一张 —— 用户口径是一行一张主参考图，不是一列一张。 */
+        /* 非「全部」的通道按生成类型保留 mainMediaLimit 张主素材：普通批量仍是一行一张，
+           支持首尾帧的视频由宿主传 2，首帧和尾帧都能进入本次请求；多角度通道整组照旧全带。 */
         const trimmedOrdinals = new Map();
-        let keptMain = false;
+        let keptMain = 0;
         channelItems.forEach((list, channelIndex) => {
             const keepWholeGroup = channels[channelIndex].mode === 'all';
             list.forEach(entry => {
@@ -937,11 +943,11 @@ function computeTableRowInputs(node, state, model, channels, upstreamTexts, byId
                     if(String(entry.text || '').trim()) texts.push(String(entry.text).trim());
                     return;
                 }
-                if(!keepWholeGroup && keptMain){
+                if(!keepWholeGroup && keptMain >= mainMediaLimit){
                     trimmedOrdinals.set(entry.ordinal, entry.kind);
                     return;
                 }
-                if(!keepWholeGroup) keptMain = true;
+                if(!keepWholeGroup) keptMain += 1;
                 // 该行内的 1-based 参考图序号，就是重写后的 @图片N
                 ordinalMap.set(entry.ordinal, {position: media.length + 1, kind: entry.kind});
                 media.push(entry);
@@ -1247,7 +1253,7 @@ function renderTableBatchPanel(gen){
    面板每行 5–6 个元素（还带缩略图），节点一多每次 render 都重建会明显卡
    （用户报的「画布出现 4 个以上多维表格就开始卡顿」）。 */
 function tableBatchPanelSignature(gen, table, rows){
-    const resolvedRows = rows || tableRowInputs(table);
+    const resolvedRows = rows || tableRowInputs(table, {mainMediaLimit:tableBatchMediaLimit(gen)});
     const selection = tableBatchSelection(table);
     return [
         tableNodeSignature(table),
@@ -1271,7 +1277,7 @@ function paintTableBatchPanel(panel, gen){
     const tables = generatorUpstreamTables(gen.id);
     if(!model || !tables.length){ panel.textContent = ''; panel.dataset.batchSignature = ''; return; }
     const table = tables[0];
-    const rows = tableRowInputs(table);
+    const rows = tableRowInputs(table, {mainMediaLimit:tableBatchMediaLimit(gen)});
     const signature = tableBatchPanelSignature(gen, table, rows);
     if(panel.dataset.batchSignature === signature) return;
     panel.dataset.batchSignature = signature;
@@ -1556,7 +1562,7 @@ async function runTableBatch(genId, options={}){
 
     const say = text => { gen._batchLastMessage = text; notifyCanvas(text); repaintBatchPanel(gen); };
 
-    const rows = tableRowInputs(table);
+    const rows = tableRowInputs(table, {mainMediaLimit:tableBatchMediaLimit(gen)});
     const selection = tableBatchSelection(table);
     const startRow = model.batchStartRow(table.tableBatchStartRow, rows.length);
     const failurePolicy = model.batchFailurePolicy(table.tableBatchFailurePolicy);

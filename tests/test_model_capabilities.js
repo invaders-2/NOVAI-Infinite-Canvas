@@ -36,6 +36,27 @@ const eq = (actual, expected, msg) => {
 
 // ── 官方口径（本文件是矩阵测试的对照真值）────────────────────────────────────
 const OFFICIAL_IMAGE_RES_LEVELS = {
+    midjourney: ['1k'],
+    'gpt-image-2.5-ext': ['1k', '2k', '4k'],
+    'gpt-image-1': ['1k'],
+    'imagen-4.0': ['1k'],
+    'qwen-image-2.0': ['1k', '2k'],
+    'qwen-image-3.0': ['1k', '2k'],
+    'Tongyi-MAI/Z-Image-Turbo': ['1k', '2k', '4k'],
+    'z-image-turbo': ['1k', '2k'],
+    'mai-image-2.6': ['1k', '2k'],
+    'flux-2': ['1k', '2k', '4k'],
+    'flux-3-image-klein': ['768sq', '1k', '1.5k', '2k', '4k'],
+    'flux-3-image': ['1k', '2k', '4k'],
+    'flux-kontext': ['1k'],
+    'hy-image-v3.5-preview': ['1k', '2k', '4k'],
+    'grok-imagine-2.0-ext': ['quality'],
+    'grok-imagine-image-2.0': ['1k', '2k'],
+    'grok-imagine-image-quality': ['1k', '2k'],
+    'grok-imagine-image': ['1k', '2k'],
+    'grok-imagine-1.5': ['1k'],
+    'wan2.7-image-pro': ['1k', '2k', '4k'],
+    'wan2.7-image': ['1k', '2k'],
     'nano-banana-2': ['0.5k', '1k', '2k', '4k'],
     'nano-banana': ['1k', '2k', '4k'],
     'seedream-5.0-lite': ['2k', '3k', '4k'],
@@ -50,9 +71,9 @@ const OFFICIAL_VIDEO_ASPECTS = {
     'veo-3': ['16:9', '9:16'],
     veo: ['16:9', '9:16']
 };
-const OFFICIAL_TIERS = ['0.5k', '1k', '1.5k', '2k', '3k', '4k'];
-const OFFICIAL_LONG_SIDE = { '0.5k': 768, '1k': 1536, '1.5k': 1920, '2k': 2048, '3k': 3072, '4k': 3840 };
-const OFFICIAL_PIXEL_FALLBACK = { '0.5k': 262144, '1k': 1572864, '1.5k': 3145728, '2k': 4194304, '3k': 9437184, '4k': 8294400 };
+const OFFICIAL_TIERS = ['0.5k', '768sq', '1k', 'quality', '1.5k', '2k', '3k', '4k'];
+const OFFICIAL_LONG_SIDE = { '0.5k': 768, '768sq': 768, '1k': 1536, quality: 1536, '1.5k': 1920, '2k': 2048, '3k': 3072, '4k': 3840 };
+const OFFICIAL_PIXEL_FALLBACK = { '0.5k': 262144, '768sq': 589824, '1k': 1572864, quality: 1572864, '1.5k': 3145728, '2k': 4194304, '3k': 9437184, '4k': 8294400 };
 
 function blockOf(src, re){
     const m = src.match(re);
@@ -161,6 +182,17 @@ async function main(){
 
     // ── 5. 按模型解析：档位 / 宽高比 ─────────────────────────────────────────
     const imageCases = [
+        ['midjourney', ['1k']],
+        ['gpt-image-2.5-ext', ['1k', '2k', '4k']],
+        ['imagen-4.0-apimart', ['1k']],
+        ['qwen-image-2.0', ['1k', '2k']],
+        ['z-image-turbo', ['1k', '2k']],
+        ['flux-3-image-klein', ['768sq', '1k', '1.5k', '2k', '4k']],
+        ['grok-imagine-2.0-ext', ['quality']],
+        ['grok-imagine-image-2.0', ['1k', '2k']],
+        ['hy-image-v3.5-preview', ['1k', '2k', '4k']],
+        ['wan2.7-image-pro', ['1k', '2k', '4k']],
+        ['wan2.7-image', ['1k', '2k']],
         ['nano-banana-2', ['0.5k', '1k', '2k', '4k']],
         ['nano-banana-pro', ['1k', '2k', '4k']],
         ['gemini-2.5-flash-image', ['1k', '2k', '4k']],

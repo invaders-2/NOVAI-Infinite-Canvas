@@ -69,9 +69,9 @@ class AgentCatalogTest(unittest.TestCase):
         skill_ids = {s["id"] for s in catalog.list_skills()}
         self.assertFalse(agent_ids & skill_ids)
 
-    def test_16_skills_and_public_fields(self):
+    def test_17_skills_and_public_fields(self):
         skills = catalog.list_skills()
-        self.assertEqual(len(skills), 16)
+        self.assertEqual(len(skills), 17)
         for s in skills:
             pub = catalog.public_capability(s, "skill")
             self.assertIn("source_skill_code", pub)
@@ -89,7 +89,7 @@ class AgentCatalogTest(unittest.TestCase):
         caps = catalog.list_capabilities()
         agents = [c for c in caps if c["kind"] == "agent"]
         skills = [c for c in caps if c["kind"] == "skill"]
-        self.assertEqual(len(skills), 16)
+        self.assertEqual(len(skills), 17)
         self.assertGreaterEqual(len(agents), 27)
         self.assertEqual({c["id"] for c in agents} & {c["id"] for c in skills}, set())
 

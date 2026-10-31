@@ -90,23 +90,13 @@
             canvasRailChat(){ fire('chatToggleBtn'); },
             canvasRailHistory(){ fire('versionHistoryBtn'); },
             canvasRailTemplates(){
-                const panel = byId('promptTemplatePanel');
-                if(panel && panel.classList.contains('open')){
-                    const closeBtn = byId('promptTemplateClose');
-                    if(closeBtn) closeBtn.click();
-                    else panel.classList.remove('open');
+                const panel = byId('canvasTemplatesPanel');
+                if(panel && !panel.hidden){
+                    if(typeof window.toggleCanvasTemplatesPanel === 'function') window.toggleCanvasTemplatesPanel();
+                    else panel.hidden = true;
                     return;
                 }
-                /* 左栏入口显式 placement:left；节点/输入框入口不传，默认右侧 */
-                if(typeof window.openPromptTemplatePanel === 'function'){
-                    window.openPromptTemplatePanel('', '', { target: 'composer', placement: 'left' });
-                    return;
-                }
-                const openBtn = byId('composerTemplateBtn');
-                if(openBtn){
-                    openBtn.click();
-                    if(panel) panel.dataset.placement = 'left';
-                }
+                if(typeof window.toggleCanvasTemplatesPanel === 'function') window.toggleCanvasTemplatesPanel({ placement: 'left' });
             },
             canvasRailSettings(){
                 /* 打开应用设置：外壳监听 navigate → api-settings（不是页面时打开设置弹窗） */

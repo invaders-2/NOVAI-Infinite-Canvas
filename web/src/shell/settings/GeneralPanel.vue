@@ -204,11 +204,30 @@ function pickPromptOptimizeModel(model) {
     savePromptOptimize();
 }
 
+const webAccess = ref(false);
+async function refreshWebAccess() {
+    try {
+        const r = await fetch('/api/agent/web-access');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        webAccess.value = Boolean((await r.json()).enabled);
+    } catch (e) { webAccess.value = false; }
+}
+async function saveWebAccess(value) {
+    try {
+        const r = await fetch('/api/agent/web-access', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: value }) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        webAccess.value = Boolean((await r.json()).enabled);
+        toast(value ? '已允许画布助手联网搜索' : '已关闭画布助手联网搜索', { icon: 'check' });
+    } catch (e) { toast('保存联网设置失败', { danger: true, icon: 'alert' }); }
+    refreshWebAccess();
+}
+
 const SOURCES = [{ value: 'github', label: 'GitHub' }, { value: 'gitee', label: 'Gitee' }, { value: 'modelscope', label: '国内镜像' }];
 
 onMounted(() => {
     load();
     refreshStorage();
+    refreshWebAccess();
     refreshAsr();
     loadPromptOptimize();
     refreshPromptOptimize();
@@ -247,6 +266,11 @@ onMounted(() => {
                     <button type="button" class="nv-btn sm ghost" :disabled="!storage" @click="openOutput"><NvIcon name="folder" />打开</button>
                     <button type="button" class="nv-btn sm ghost" :disabled="!storage" @click="resetOutput"><NvIcon name="refresh" />恢复默认</button>
                 </div>
+            </SetRow>
+        </SetCard>
+        <SetCard title="画布助手联网" desc="默认关闭。开启后仅允许搜索公开网页和读取网页正文，不允许访问内网或执行代码。">
+            <SetRow label="允许联网搜索" desc="开启后画布助手可使用 web_search 和 fetch_url；MCP 与生成接口不受影响">
+                <NvSwitch :model-value="webAccess" label="允许画布助手联网搜索" @update:model-value="saveWebAccess" />
             </SetRow>
         </SetCard>
         <SetCard title="视频口播转写" desc="视频能力运行时用哪个平台与模型把口播转成文字；不启用则如实报告不可用。">

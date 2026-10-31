@@ -1715,9 +1715,43 @@ html.studio-theme-dark #sendBtn.nv-beam {
             wide: [['1280x720','1k'], ['1920x1080','2k'], ['2560x1440','4k']]
         };
 
+        function apimartChatSizeSubset(keys, levels = []) {
+            const out = {};
+            keys.forEach(key => {
+                const sizes = SIZE_OPTIONS[key] || [];
+                out[key] = levels.length ? sizes.filter(item => levels.includes(item[1])) : sizes;
+            });
+            return out;
+        }
+        const QWEN_IMAGE_SIZE_PRESET = {
+            square: [['1024x1024','1k'], ['2048x2048','2k']],
+            landscape43: [['1152x864','1k'], ['2048x1536','2k']],
+            portrait43: [['864x1152','1k'], ['1536x2048','2k']],
+            wide: [['1280x720','1k'], ['2048x1152','2k']],
+            story: [['720x1280','1k'], ['1152x2048','2k']],
+            landscape: [['1248x832','1k'], ['2048x1360','2k']],
+            portrait: [['832x1248','1k'], ['1360x2048','2k']]
+        };
+        const APIMART_CHAT_IMAGE_SIZE_KEYS = ['square','portrait','landscape','portrait43','landscape43','story','wide'];
+
         // 模型专用尺寸映射：根据模型自动匹配其 API 支持的尺寸
         // 键名按匹配优先级排列，model name 包含键名即命中
         const MODEL_SIZE_PRESETS = {
+            'gpt-image-2.5-ext': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS),
+            'hy-image-v3.5-preview': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS),
+            'flux-3-image-klein': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS),
+            'flux-3-image': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS),
+            'grok-imagine-2.0-ext': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS, ['1k']),
+            'grok-imagine-image-2.0': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS, ['1k','2k']),
+            'grok-imagine-image-quality': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS, ['1k','2k']),
+            'grok-imagine-image': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS, ['1k','2k']),
+            'grok-imagine-1.5': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS, ['1k']),
+            'qwen-image-2.0': QWEN_IMAGE_SIZE_PRESET,
+            'qwen-image-3.0': QWEN_IMAGE_SIZE_PRESET,
+            'z-image-turbo': QWEN_IMAGE_SIZE_PRESET,
+            'wan2.7-image-pro': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS),
+            'wan2.7-image': apimartChatSizeSubset(APIMART_CHAT_IMAGE_SIZE_KEYS, ['1k','2k']),
+            'imagen-4.0-apimart': apimartChatSizeSubset(['square','landscape43','portrait43','wide','story'], ['1k']),
             // ── OpenAI ──
             'gpt-image-2': {
                 square: [['1024x1024','1k'], ['2048x2048','2k']],

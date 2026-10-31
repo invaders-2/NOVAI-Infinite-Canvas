@@ -196,15 +196,15 @@ ok((listeners.mousedown || []).length > 0, 'install() 注册了 document 级 mou
     eq(body.children.length, 0, 'disabled select 不开自绘菜单');
 }
 
-/* ── 5. 接线：canvas.html 引入 + ?v= + 样式就位 ── */
+/* ── 5. 接线：legacy-canvas.html 引入 + ?v= + 样式就位 ── */
 {
     const root = path.join(__dirname, '..');
     const read = p => fs.readFileSync(path.join(root, p), 'utf8');
-    const html = read('static/canvas.html');
+    const html = read('static/legacy-canvas.html');
     const css = read('static/css/canvas.css');
     const smartHtml = read('static/smart-canvas.html');
     const smartCss = read('static/css/smart-canvas.css');
-    ok(/shared\/dropdown\.js\?v=[0-9.]+/.test(html), 'canvas.html 带 ?v= 引入 shared/dropdown.js');
+    ok(/shared\/dropdown\.js\?v=[0-9.]+/.test(html), 'legacy-canvas.html 带 ?v= 引入 shared/dropdown.js');
     ok(html.indexOf('shared/dropdown.js') < html.indexOf('/static/js/canvas.js?'), 'dropdown.js 先于 canvas.js 加载');
     ok(/shared\/dropdown\.js\?v=[0-9.]+/.test(smartHtml), 'smart-canvas.html 也带 ?v= 引入（两套画布同一套弹层）');
     ok(/\.nd-menu \{/.test(css), 'canvas.css 有 .nd-menu 弹层样式');
@@ -237,7 +237,7 @@ ok((listeners.mousedown || []).length > 0, 'install() 注册了 document 级 mou
     ok(/active\.glide\.destroy\(\)/.test(closeBody),
         'closeMenu() 里显式 destroy（菜单一移除就断开 MutationObserver）');
 
-    [['canvas.html', 'css/canvas.css'], ['smart-canvas.html', 'css/smart-canvas.css']].forEach(pair => {
+    [['legacy-canvas.html', 'css/canvas.css'], ['smart-canvas.html', 'css/smart-canvas.css']].forEach(pair => {
         const html = read('static/' + pair[0]);
         const css = read('static/' + pair[1]);
         const links = html.match(/<link[^>]+rel="stylesheet"[^>]*>/g) || [];

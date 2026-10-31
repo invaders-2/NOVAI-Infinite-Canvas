@@ -561,11 +561,11 @@ const SIZE_MAP = {
     ultrawide: { '1k':'2016x864', '2k':'2688x1152', '4k':'3840x1648' },
     ultratall: { '1k':'864x2016', '2k':'1152x2688', '4k':'1648x3840' }
 };
-const API_RES_LEVELS = ['0.5k','1k','1.5k','2k','3k','4k'];
+const API_RES_LEVELS = ['0.5k','768sq','1k','quality','1.5k','2k','3k','4k'];
 const API_RATIO_LABELS = {square:'正方形', portrait:'竖图', portrait43:'竖图', landscape:'横图', landscape43:'横图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖'};
-const RES_LONG_SIDE = { '0.5k':768, '1k':1536, '1.5k':1920, '2k':2048, '3k':3072, '4k':3840 };
+const RES_LONG_SIDE = { '0.5k':768, '768sq':768, '1k':1536, 'quality':1536, '1.5k':1920, '2k':2048, '3k':3072, '4k':3840 };
 // 档位像素上限的唯一真值源是策略 tiers（shared/size-policy.js），这份常量只是策略取不到时的兜底
-const RES_PIXEL_LIMIT_FALLBACK = { '0.5k':262144, '1k':1572864, '1.5k':3145728, '2k':4194304, '3k':9437184, '4k':8294400 };
+const RES_PIXEL_LIMIT_FALLBACK = { '0.5k':262144, '768sq':589824, '1k':1572864, 'quality':1572864, '1.5k':3145728, '2k':4194304, '3k':9437184, '4k':8294400 };
 function resPixelLimitFor(model){
     const limits = {};
     const tiers = sizePolicyFor(model).tiers;
@@ -915,6 +915,27 @@ const MODEL_CAPABILITIES = [
     { match: 'pixverse', aspects: ['16:9', '9:16', '1:1'] },
     // ── 图片：官方分辨率档位 + 官方比例集合（含下划线/连字符两种真实模型名写法）──
     // preset 指向 MODEL_TIER_PIXELS 的键，用于 0.5K/1.5K/3K 这类 SIZE_MAP 没覆盖的官方档位像素。
+    { match: 'midjourney', resLevels: ['1k'] },
+    { match: 'gpt-image-2.5-ext', resLevels: ['1k', '2k', '4k'], ratios: ['square', 'wide', 'story', 'landscape43', 'portrait43', 'landscape', 'portrait', 'landscape54', 'portrait45', 'ultrawide'] },
+    { match: 'gpt-image-1', resLevels: ['1k'], ratios: ['square', 'landscape', 'portrait'] },
+    { match: 'imagen-4.0', resLevels: ['1k'], ratios: ['square', 'landscape43', 'portrait43', 'wide', 'story'] },
+    { match: 'qwen-image-2.0', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'qwen-image-3.0', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'Tongyi-MAI/Z-Image-Turbo', resLevels: ['1k', '2k', '4k'] },
+    { match: 'z-image-turbo', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'mai-image-2.6', resLevels: ['1k', '2k'] },
+    { match: 'flux-2', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS.concat(['ultratall']) },
+    { match: 'flux-3-image-klein', resLevels: ['768sq', '1k', '1.5k', '2k', '4k'], ratios: ['ultrawide', 'landscape21', 'wide', 'landscape', 'landscape43', 'landscape54', 'square', 'portrait45', 'portrait43', 'portrait', 'story', 'portrait12', 'ultratall'] },
+    { match: 'flux-3-image', resLevels: ['1k', '2k', '4k'], ratios: ['ultrawide', 'landscape21', 'wide', 'landscape', 'landscape43', 'landscape54', 'square', 'portrait45', 'portrait43', 'portrait', 'story', 'portrait12', 'ultratall'] },
+    { match: 'flux-kontext', resLevels: ['1k'], ratios: SEEDREAM_RATIO_KEYS.concat(['ultratall']) },
+    { match: 'hy-image-v3.5-preview', resLevels: ['1k', '2k', '4k'], ratios: ['square', 'portrait', 'landscape', 'portrait43', 'landscape43', 'portrait45', 'landscape54', 'story', 'wide', 'ultrawide'] },
+    { match: 'grok-imagine-2.0-ext', resLevels: ['quality'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'grok-imagine-image-2.0', resLevels: ['1k', '2k'], ratios: ['square', 'portrait43', 'landscape43', 'story', 'wide', 'portrait', 'landscape', 'portrait12', 'landscape21'] },
+    { match: 'grok-imagine-image-quality', resLevels: ['1k', '2k'], ratios: ['square', 'portrait43', 'landscape43', 'story', 'wide', 'portrait', 'landscape', 'portrait12', 'landscape21'] },
+    { match: 'grok-imagine-image', resLevels: ['1k', '2k'], ratios: ['square', 'portrait43', 'landscape43', 'story', 'wide', 'portrait', 'landscape', 'portrait12', 'landscape21'] },
+    { match: 'grok-imagine-1.5', resLevels: ['1k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'wan2.7-image-pro', resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_RATIO_KEYS },
+    { match: 'wan2.7-image', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
     { match: 'nano-banana-2', resLevels: ['0.5k', '1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS, preset: 'gemini-3.1-flash-image' },
     { match: 'nano_banana_2', resLevels: ['0.5k', '1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS, preset: 'gemini-3.1-flash-image' },
     { match: 'nano-banana', resLevels: ['1k', '2k', '4k'], ratios: GEMINI_RATIO_KEYS },
@@ -966,7 +987,7 @@ function modelCapabilityFor(model, field){
     const m = String(model || '').toLowerCase();
     for(const entry of MODEL_CAPABILITIES){
         if(entry[field] === undefined || entry[field] === null) continue;
-        if(!m.includes(entry.match)) continue;
+        if(!m.includes(entry.match.toLowerCase())) continue;
         return Array.isArray(entry[field]) ? entry[field].slice() : entry[field];
     }
     return null;
@@ -6649,6 +6670,7 @@ const tableNodeApi = window.NovaTableNode({
     outputUrlValue, isMissingAssetUrl, canvasPreviewImgHtml, canvasVideoPreviewHtml,
     nowMs, responseErrorMessage, refreshIcons, renderNode, runGenerator, runVideoNode,
     showErrorModal,
+    batchMediaLimit: node => node && node.useFrameRoles ? 2 : 1,
 });
 const {
     novaTableModel, addTableNode, syncTableNodeWidth, tableDropPortFor, connectNodes,
@@ -8202,6 +8224,15 @@ function renderGeneratorBody(node){
                 <select class="select-lite provider-select">${providerOptions(node.apiProvider)}</select>
                 <select class="select-lite model-select">${imageModelOptions(node.model, node.apiProvider)}</select>
             </div>
+            <div class="gen-settings-row mj-generic-options" style="display:none">
+                <select class="select-lite mj-generic-version">
+                    ${['8.2','8.1','7','6.1','5.2','5.1'].map(version => `<option value="${version}">v${version}</option>`).join('')}
+                </select>
+                <select class="select-lite mj-generic-hd">
+                    <option value="0">HD 关闭</option>
+                    <option value="1">HD 开启</option>
+                </select>
+            </div>
             <div class="gen-settings-row api-size-row">
                 <select class="select-lite resolution compact-select" data-field="resolution">
                     <option value="auto">自动</option>
@@ -8271,6 +8302,28 @@ function renderGeneratorBody(node){
     `;
     const providerSelect = wrap.querySelector('.provider-select');
     const modelSelect = wrap.querySelector('.model-select');
+    const mjVersionSelect = wrap.querySelector('.mj-generic-version');
+    const mjHdSelect = wrap.querySelector('.mj-generic-hd');
+    const syncMidjourneyControls = () => {
+        const active = String(node.model || '').toLowerCase() === 'midjourney';
+        wrap.querySelector('.mj-generic-options').style.display = active ? '' : 'none';
+        if(!active) return;
+        if(!['8.2','8.1','7','6.1','5.2','5.1'].includes(String(node.mjVersion || ''))) node.mjVersion = '8.2';
+        const hdAllowed = ['8.2','8.1'].includes(node.mjVersion);
+        if(!hdAllowed) node.mjHd = false;
+        mjVersionSelect.value = node.mjVersion;
+        mjVersionSelect.onchange = event => {
+            node.mjVersion = event.target.value;
+            syncMidjourneyControls();
+            scheduleSave();
+        };
+        mjHdSelect.disabled = !hdAllowed;
+        mjHdSelect.value = node.mjHd ? '1' : '0';
+        mjHdSelect.onchange = event => {
+            node.mjHd = event.target.value === '1';
+            scheduleSave();
+        };
+    };
     providerSelect.onmousedown = e => e.stopPropagation();
     providerSelect.onclick = e => e.stopPropagation();
     providerSelect.onchange = e => {
@@ -8409,6 +8462,7 @@ function renderGeneratorBody(node){
         customHInput.value = node.customHeight || '';
         if(fitSizeBtn) fitSizeBtn.disabled = !referenceImages.some(ref => ref.url);
         syncQualityControls();
+        syncMidjourneyControls();
         if(node.ratio === 'source') updateSourceRatioFromFirstRef();
     };
     qualitySelect.onmousedown = e => e.stopPropagation();
@@ -10858,6 +10912,10 @@ async function runGeneratorLegacy(genId, opts={}){
         };
         const quality = normalizedImageQuality(gen.quality);
         if(quality) payload.quality = quality;
+        if(String(payload.model || '').toLowerCase() === 'midjourney'){
+            payload.midjourney_version = gen.mjVersion || '8.2';
+            payload.midjourney_hd = Boolean(gen.mjHd && ['8.2','8.1'].includes(payload.midjourney_version));
+        }
         const results = await Promise.all(Array.from({length:count}, () => fetch('/api/online-image', {
             method:'POST',
             headers:{'Content-Type':'application/json'},

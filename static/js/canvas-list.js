@@ -434,7 +434,7 @@ function buildCard(c){
     card.innerHTML = `
         ${coverHtml}
         <div class="ws-card-top">
-            <span class="ws-card-kind ${isSmart ? 'smart' : 'classic'}">${isSmart ? compactLabel('智能画布','智能','Smart') : compactLabel('普通画布','普通','Classic')}</span>
+            <span class="ws-card-kind ${isSmart ? 'smart' : 'classic'}">${isSmart ? compactLabel('智能画布','智能','Smart') : compactLabel('智能画布BEAT','BEAT','BEAT')}</span>
             <button class="ws-card-menu" type="button" title="${L('更多','More')}" aria-label="${L('更多','More')}"><i data-lucide="more-horizontal" class="w-4 h-4"></i></button>
         </div>
         <div class="ws-card-title">${escapeHtml(c.title)}</div>
@@ -525,7 +525,7 @@ function openCreateCard(worldPt){
         <div class="ws-create-title">${L('新建画布','New canvas')}</div>
         <input class="ws-create-input" type="text" maxlength="80" placeholder="${L('画布名称（可留空）','Canvas name (optional)')}">
         <div class="ws-create-toggle">
-            <button class="ws-create-toggle-btn active" type="button" data-kind="classic">${L('普通画布','Classic')}</button>
+            <button class="ws-create-toggle-btn active" type="button" data-kind="classic">${L('智能画布BEAT','Classic')}</button>
             <button class="ws-create-toggle-btn" type="button" data-kind="smart">${L('智能画布','Smart')}</button>
         </div>
         <div class="ws-create-actions">
@@ -555,7 +555,7 @@ function openCreateCard(worldPt){
 
 async function createCanvasOnBoard(title, kind, worldPt){
     const isSmart = kind === 'smart';
-    const base = isSmart ? L('智能画布','Smart canvas') : L('画布','Canvas');
+    const base = isSmart ? L('智能画布','Smart canvas') : L('智能画布BEAT','Smart Canvas BEAT');
     const name = title || `${base} ${new Date().toLocaleTimeString(langIsEn() ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
     closeCreateCard();
     try {
@@ -979,7 +979,7 @@ function renderTrash(){
         card.innerHTML = `
             <div class="ws-card-top">
                 <span class="ws-card-icon">${renderCanvasIcon(isSmart && /[^\x00-\x7F]/.test(c.icon || '') ? 'sparkles' : c.icon, 17)}</span>
-                <span class="ws-card-kind ${isSmart ? 'smart' : 'classic'}">${isSmart ? L('智能','Smart') : L('普通','Classic')}</span>
+                <span class="ws-card-kind ${isSmart ? 'smart' : 'classic'}">${isSmart ? L('智能','Smart') : L('BEAT','BEAT')}</span>
             </div>
             <div class="ws-card-title">${escapeHtml(c.title)}</div>
             <div class="ws-card-meta"><span class="ws-card-nodes">${escapeHtml(projName)}</span><span class="ws-card-meta-dot"></span><span class="ws-card-time">${formatCanvasTime(c.deleted_at)}</span></div>

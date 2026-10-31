@@ -84,6 +84,8 @@ class _MockHandler(BaseHTTPRequestHandler):
                 "host": self.headers.get("Host") or "",
                 "bytes": len(body),
                 "body": parsed,
+                "response_version": self.headers.get("X-APIMart-Response-Version") or "",
+                "has_idempotency_key": bool(self.headers.get("Idempotency-Key")),
             })
         return parsed
 
@@ -107,6 +109,30 @@ class _MockHandler(BaseHTTPRequestHandler):
                              "content_type": "image/png", "bytes": 123, "created_at": 1893456000})
         elif path == "/v1/images/generations":
             urls = ((entry or {}).get("image_urls") or []) if isinstance(entry, dict) else []
+            model = str((entry or {}).get("model") or "") if isinstance(entry, dict) else ""
+            if model == "grok-imagine-2.0-ext" and (
+                    urls or entry.get("resolution") != "quality" or entry.get("size") == "auto"):
+                self._send(400, {"error": {"message": "invalid grok ext parameters"}})
+                return
+            if model.startswith("grok-imagine-image") and (
+                    "aspect_ratio" not in entry or any(str(url).startswith("data:") for url in urls)):
+                self._send(400, {"error": {"message": "invalid grok official parameters"}})
+                return
+            if model in {"imagen-4.0-apimart", "z-image-turbo"} and urls:
+                self._send(400, {"error": {"message": "text-to-image only"}})
+                return
+            if model == "z-image-turbo" and "n" in entry:
+                self._send(400, {"error": {"message": "n is unsupported"}})
+                return
+            public_only = (
+                model.startswith("qwen-image-2.0")
+                or (model.startswith("gpt-image-2.5-") and model != "gpt-image-2.5-ext")
+                or model == "hy-image-v3.5-preview"
+                or model.startswith("grok-imagine-1.5")
+            )
+            if public_only and any(str(url).startswith("data:") for url in urls):
+                self._send(400, {"error": {"message": "public image URL required"}})
+                return
             rejects_remote = getattr(self.server, "reject_remote_image_urls", False)
             if rejects_remote and any(str(url).startswith(("http://", "https://")) for url in urls):
                 self._send(400, {"error": "failed to download image url: image unavailable"})
@@ -241,13 +267,15 @@ class ApimartMockUpstreamTests(unittest.TestCase):
         self.assertTrue(url.startswith("/assets/output/"), url)
         self.assertTrue(os.path.isfile(os.path.join(self.output_dir, url.split("/assets/output/", 1)[1])), url)
 
-    def generate_image(self, model, refs=None):
+    def generate_image(self, model, refs=None, quality="", size="1024x1024", background="auto", n=1,
+                       midjourney_version="", midjourney_hd=False):
         refs = [{"url": "/assets/output/ref.png", "kind": "image"}] if refs is None else refs
 
         async def run():
             image_data, _raw = await main._generate_ai_image_unlimited(
-                prompt="mock", size="1024x1024", quality="", model=model,
-                reference_images=refs, provider_id=self.provider_id)
+                prompt="mock", size=size, quality=quality, model=model,
+                reference_images=refs, provider_id=self.provider_id, background=background, n=n,
+                midjourney_version=midjourney_version, midjourney_hd=midjourney_hd)
             return image_data, await main.save_ai_image_to_output(image_data, prefix="mock_")
         return asyncio.run(run())
 
@@ -435,6 +463,117 @@ class ApimartMockUpstreamTests(unittest.TestCase):
         self.assertEqual(result.get("status"), "succeeded")
         self.assert_local_output((result.get("images") or [""])[0])
 
+    def test_generic_midjourney_uses_official_dedicated_routes(self):
+        image_data, local_url = self.generate_image("midjourney")
+        entries = self.requests()
+        self.assertFalse([item for item in entries if item["path"] == "/v1/images/generations"], entries)
+        submits = [item for item in entries if item["method"] == "POST" and item["path"] == "/v1/midjourney/generations"]
+        self.assertEqual(len(submits), 1, entries)
+        body = submits[0]["body"]
+        self.assertEqual(body.get("prompt"), "mock")
+        self.assertEqual(body.get("size"), "1:1")
+        self.assertNotIn("model", body)
+        self.assertNotIn("version", body)
+        self.assertNotIn("speed", body)
+        urls = body.get("image_urls") or []
+        self.assertEqual(len(urls), 1, urls)
+        self.assertTrue(str(urls[0]).startswith("data:image/"), str(urls[0])[:48])
+        queries = [item for item in entries if item["method"] == "GET" and item["path"] == "/v1/midjourney/" + TASK_MIDJOURNEY]
+        self.assertGreaterEqual(len(queries), 1, entries)
+        self.assertEqual(image_data.get("type"), "url")
+        self.assert_local_output(local_url)
+
+    def test_generic_midjourney_supports_version_and_hd(self):
+        _image_data, local_url = self.generate_image(
+            "midjourney", refs=[], midjourney_version="8.2", midjourney_hd=True)
+        post = next(item for item in self.requests() if item["path"] == "/v1/midjourney/generations")
+        self.assertEqual(post["body"].get("version"), "8.2")
+        self.assertIs(post["body"].get("hd"), True)
+        self.assert_local_output(local_url)
+        with self.assertRaises(main.HTTPException) as caught:
+            self.generate_image("midjourney", refs=[], midjourney_version="7", midjourney_hd=True)
+        self.assertIn("仅支持 v8.1 或 v8.2", caught.exception.detail)
+
+    def test_grok_ext_uses_quality_resolution_and_rejects_references(self):
+        _image_data, local_url = self.generate_image("grok-imagine-2.0-ext", refs=[])
+        entries = self.requests()
+        post = next(item for item in entries if item["path"] == "/v1/images/generations")
+        self.assertEqual(post["body"].get("resolution"), "quality")
+        self.assertEqual(post["body"].get("size"), "1:1")
+        self.assertNotIn("official_fallback", post["body"])
+        self.assertEqual(post["response_version"], "2026-07-27")
+        self.assertTrue(post["has_idempotency_key"])
+        self.assert_local_output(local_url)
+        with self.assertRaises(main.HTTPException) as caught:
+            self.generate_image("grok-imagine-2.0-ext")
+        self.assertIn("仅支持文生图", caught.exception.detail)
+
+    def test_grok_official_uses_aspect_ratio_and_public_references(self):
+        _image_data, local_url = self.generate_image("grok-imagine-image-2.0", quality="medium")
+        entries = self.requests()
+        self.assertEqual(sum(1 for item in entries if item["path"] == "/v1/uploads/images"), 1, entries)
+        post = next(item for item in entries if item["path"] == "/v1/images/generations")
+        self.assertEqual(post["body"].get("aspect_ratio"), "1:1")
+        self.assertNotIn("size", post["body"])
+        self.assertNotIn("quality", post["body"])
+        self.assertTrue(post["body"]["image_urls"][0].startswith(self.base + "/"))
+        self.assertEqual(post["response_version"], "2026-07-27")
+        self.assertTrue(post["has_idempotency_key"])
+        self.assert_local_output(local_url)
+
+    def test_public_url_only_models_upload_references(self):
+        for model in ("qwen-image-2.0", "gpt-image-2.5-flare", "hy-image-v3.5-preview"):
+            with self.subTest(model=model):
+                self.setUp()
+                _image_data, local_url = self.generate_image(model)
+                entries = self.requests()
+                self.assertEqual(sum(1 for item in entries if item["path"] == "/v1/uploads/images"), 1, entries)
+                post = next(item for item in entries if item["path"] == "/v1/images/generations")
+                self.assertTrue(post["body"]["image_urls"][0].startswith(self.base + "/"))
+                self.assert_local_output(local_url)
+
+    def test_text_only_models_reject_references_before_submit(self):
+        for model in ("imagen-4.0-apimart", "z-image-turbo"):
+            with self.subTest(model=model):
+                self.setUp()
+                with self.assertRaises(main.HTTPException) as caught:
+                    self.generate_image(model)
+                self.assertIn("仅支持文生图", caught.exception.detail)
+                self.assertFalse(self.requests())
+
+    def test_z_image_omits_unsupported_n(self):
+        _image_data, local_url = self.generate_image("z-image-turbo", refs=[])
+        post = next(item for item in self.requests() if item["path"] == "/v1/images/generations")
+        self.assertNotIn("n", post["body"])
+        self.assert_local_output(local_url)
+
+    def test_gpt25_quality_exact_size_background_and_native_n(self):
+        _image_data, local_url = self.generate_image(
+            "gpt-image-2.5-flare", refs=[], quality="max", size="1600x1200", background="transparent", n=3)
+        post = next(item for item in self.requests() if item["path"] == "/v1/images/generations")
+        body = post["body"]
+        self.assertEqual(body.get("size"), "1600x1200")
+        self.assertEqual(body.get("quality"), "max")
+        self.assertEqual(body.get("background"), "transparent")
+        self.assertEqual(body.get("output_format"), "png")
+        self.assertEqual(body.get("n"), 3)
+        self.assert_local_output(local_url)
+
+    def test_online_result_uses_one_native_multi_image_task(self):
+        async def run():
+            payload = main.OnlineImageRequest(
+                prompt="mock", provider_id=self.provider_id, model="gpt-image-2.5-ext",
+                size="1024x1024", quality="", n=3, reference_images=[])
+            return await main.build_online_image_result(payload)
+
+        result = asyncio.run(run())
+        posts = [item for item in self.requests() if item["path"] == "/v1/images/generations"]
+        self.assertEqual(len(posts), 1, self.requests())
+        self.assertEqual(posts[0]["body"].get("n"), 3)
+        self.assertEqual(posts[0]["body"].get("version"), "flare")
+        self.assertTrue(result.get("images"))
+        self.assertTrue(posts[0]["has_idempotency_key"])
+
 
     def _run_video(self, model, duration, ratio, resolution):
         async def run():
@@ -465,6 +604,25 @@ class ApimartMockUpstreamTests(unittest.TestCase):
             self.assertTrue(videos and videos[0].startswith("/assets/output/"), result)
             self.assertTrue(os.path.isfile(os.path.join(self.output_dir, videos[0].split("/assets/output/", 1)[1])))
         self.assertGreaterEqual(sum(1 for item in self.requests() if item["path"] == "/v1/tasks/" + TASK_VIDEO), 2)
+
+    def test_first_last_frames_keep_adaptive_ratio(self):
+        async def run():
+            payload = main.CanvasVideoRequest(
+                prompt="mock first last", provider_id=self.provider_id, model="seedance-2-5",
+                duration=5, aspect_ratio="adaptive", resolution="720p",
+                images=[
+                    {"url": "/assets/output/ref.png", "role": "first_frame"},
+                    {"url": "/assets/output/ref.png", "role": "last_frame"},
+                ])
+            return await main._canvas_video_run_unlimited(payload)
+
+        asyncio.run(run())
+        posts = [item for item in self.requests() if item["method"] == "POST" and item["path"] == "/v1/videos/generations"]
+        self.assertEqual(len(posts), 1, self.requests())
+        body = posts[0]["body"]
+        self.assertEqual(body["size"], "adaptive", body)
+        self.assertNotEqual(body["size"], "1:1", body)
+        self.assertEqual([item["role"] for item in body["image_with_roles"]], ["first_frame", "last_frame"])
 
 
     def test_audio_suno_and_flowmusic_bodies_and_files(self):

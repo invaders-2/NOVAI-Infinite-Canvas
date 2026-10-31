@@ -260,7 +260,7 @@ const G = require('../static/js/shared/glide.js');
     ok(!fs.existsSync(path.join(root, 'static/glide-verify.html')),
         'static/ 里没有开发用验证页（glide-verify.html 只允许待在 tests/artifacts/verify-scripts/）');
 
-    ['static/canvas.html', 'static/smart-canvas.html', 'static/gpt-chat.html'].forEach(page => {
+    ['static/legacy-canvas.html', 'static/smart-canvas.html', 'static/gpt-chat.html'].forEach(page => {
         const html = read(page);
         const cssTag = /<link rel="stylesheet" href="\/static\/css\/glide\.css\?v=([0-9.]+)"/.exec(html);
         const jsTag = /<script src="\/static\/js\/shared\/glide\.js\?v=([0-9.]+)"><\/script>/.exec(html);

@@ -886,6 +886,35 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(r["result"]["templates"][0]["template"], "电商主图")
         self.assertEqual(r["result"]["templates"][0]["nodes"], 3)
 
+    def test_http_list_and_clone_without_generation(self):
+        from fastapi.testclient import TestClient
+        self.save()
+        client = TestClient(main.app)
+        listing = client.get("/api/canvas-templates")
+        self.assertEqual(listing.status_code, 200)
+        item = listing.json()["templates"][0]
+        self.assertEqual(item["name"], "电商主图")
+        self.assertEqual(item["node_count"], 3)
+        self.assertEqual(item["connection_count"], 2)
+        self.assertEqual(item["input_count"], 1)
+        self.assertEqual(item["generation_count"], 1)
+        self.assertEqual(item["covers"], ["/output/shoe.png"])
+
+        start = AsyncMock(side_effect=lambda cid, nid, **kw: {"task_id": "unexpected"})
+        with patch.object(main, "_agent_start_node_generation", new=start):
+            response = client.post("/api/canvas-templates/%s/apply" % item["id"], json={"canvas_id": "c1"})
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertFalse(result["run"])
+        self.assertEqual(result["node_count"], 3)
+        self.assertEqual(result["task_ids"], [])
+        start.assert_not_called()
+        new_nodes = [self.mem.node(node_id) for node_id in result["node_ids"]]
+        self.assertEqual(len(new_nodes), 3)
+        prompt = next(n for n in new_nodes if n["type"] == "smart-prompt")
+        gen = next(n for n in new_nodes if n["type"] == "smart-image" and not n.get("images"))
+        self.assertIn({"from": prompt["id"], "to": gen["id"], "kind": "input"}, self.mem.store["c1"]["connections"])
+
     def test_apply_template_swaps_material_prompt_and_runs_first_layer(self):
         self.save()
         start = AsyncMock(side_effect=lambda cid, nid, **kw: {"task_id": "t-" + nid, "node_id": nid, "kind": "image"})

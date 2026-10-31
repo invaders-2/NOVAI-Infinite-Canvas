@@ -295,6 +295,41 @@ class EndpointTests(unittest.TestCase):
         text_all = asyncio.run(go(0))
         self.assertIn("done", frame_names(text_all))
 
+    def test_beat_task_snapshot_and_list(self):
+        bus = main._agent_run_bus_new("run_beat_snapshot", "c1")
+        bus["goal"] = "检查画布"
+        bus["model_config_id"] = "comfly::test-model"
+        drive(bus, READ_ONLY_REPLIES)
+
+        with patch.object(main, "load_canvas", return_value=canvas()):
+            snapshot = asyncio.run(main.agent_run_snapshot(bus["run_id"], object()))
+            listed = asyncio.run(main.agent_task_list(object()))
+
+        self.assertEqual(snapshot["task"]["status"], "SUCCEEDED")
+        self.assertEqual(snapshot["task"]["modelConfigId"], "comfly::test-model")
+        self.assertEqual(snapshot["steps"][0]["input"], {"type": "canvas.task.v1", "canvasId": "c1"})
+        self.assertTrue(snapshot["artifacts"])
+        types = [event["eventType"] for event in snapshot["events"]]
+        self.assertIn("tool.execution.started", types)
+        self.assertIn("tool.execution.succeeded", types)
+        self.assertIn("task.completed", types)
+        self.assertTrue(any(item["taskId"] == bus["run_id"] for item in listed["items"]))
+
+    def test_beat_task_cancel_stops_producer(self):
+        bus = main._agent_run_bus_new("run_beat_cancel", "c1")
+
+        async def go():
+            bus["task"] = asyncio.create_task(asyncio.sleep(60))
+            with patch.object(main, "load_canvas", return_value=canvas()):
+                return await main.agent_run_cancel(bus["run_id"], object())
+
+        result = asyncio.run(go())
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "STOPPING")
+        self.assertTrue(bus["cancel_requested"])
+        self.assertTrue(bus["task"].cancelled())
+
 
 if __name__ == "__main__":
     unittest.main()

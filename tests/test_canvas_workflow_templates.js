@@ -1,0 +1,33 @@
+#!/usr/bin/env node
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+const root = path.join(__dirname, '..');
+const js = fs.readFileSync(path.join(root, 'static/js/smart-canvas.js'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'canvas-ui/src/styles/index.css'), 'utf8');
+const py = fs.readFileSync(path.join(root, 'main.py'), 'utf8');
+const thread = fs.readFileSync(path.join(root, 'canvas-ui/src/assistant/ThreadBar.tsx'), 'utf8');
+const sheet = fs.readFileSync(path.join(root, 'canvas-ui/src/assistant/TemplatesSheet.tsx'), 'utf8');
+const api = fs.readFileSync(path.join(root, 'canvas-ui/src/assistant/api.ts'), 'utf8');
+const rail = fs.readFileSync(path.join(root, 'static/js/canvas-rail.js'), 'utf8');
+
+assert(rail.includes("window.toggleCanvasTemplatesPanel({ placement: 'left' })"), '左栏直接打开同一套流程模板');
+assert(js.includes("document.getElementById(fromLeft ? 'canvasRailTemplates' : 'canvasTemplatesBtn')"), '左侧面板锚定左栏按钮');
+assert(thread.includes('aria-label="流程模板"'), 'React 助手头部有流程模板入口');
+assert(thread.includes('<LayersIcon className="nvca-tap-head-icon-svg" />'), '模板入口使用线性 layers 图标');
+assert(thread.includes('setTemplatesOpen((open) => !open)'), '右侧模板面板可开合');
+assert(sheet.includes('placeholder="搜索流程模板"'), '模板搜索');
+assert(sheet.includes('克隆到画布'), '模板克隆按钮');
+assert(sheet.includes('item.covers'), '模板封面来自工作流素材');
+assert(api.includes('fetch("/api/canvas-templates"'), '面板读取统一工作流列表');
+assert(api.includes('body: JSON.stringify({ canvas_id: canvasId })'), '克隆只传当前画布，不隐式替换素材或运行');
+assert(js.includes("window.addEventListener('novai-canvas-assistant:template-applied'"), '克隆成功通过画布桥刷新');
+assert(js.includes('window.focusSmartNode(result.node_id)'), '克隆后聚焦新增节点');
+assert(thread.includes('未开始生成'), '明确提示克隆不产生生成行为');
+assert(css.includes('.nvca-template-card') && css.includes('.nvca-template-cover'), 'React 模板卡与封面样式');
+assert(!css.slice(css.indexOf('.nvca-template-card'), css.indexOf('.nvca-template-copy')).includes('border:'), '模板卡不使用描边');
+assert(py.includes('@app.get("/api/canvas-templates")'), '模板列表接口');
+assert(py.includes('@app.post("/api/canvas-templates/{template_id}/apply")'), '模板克隆接口');
+assert(py.includes('"run": False,'), '后端克隆默认不运行');
+console.log('[PASS] 右侧流程模板入口、封面、克隆与零运行契约');

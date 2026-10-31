@@ -1,4 +1,4 @@
-/* 经典画布（static/canvas.html + static/js/canvas.js）接入 NovaGlide 滑块高亮的静态断言。
+/* 经典画布（static/legacy-canvas.html + static/js/canvas.js）接入 NovaGlide 滑块高亮的静态断言。
 
    钉死四件事：
    1. 6 个弹层容器（斜杠菜单 / 子菜单 / 创建菜单 / 连线创建菜单 / 端口菜单 ×2 / 图片节点菜单）
@@ -17,7 +17,7 @@ const root = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 
 const js = read('static/js/canvas.js');
-const html = read('static/canvas.html');
+const html = read('static/legacy-canvas.html');
 const glide = read('static/js/shared/glide.js');
 const glideCss = read('static/css/glide.css');
 const canvasCss = read('static/css/canvas.css');

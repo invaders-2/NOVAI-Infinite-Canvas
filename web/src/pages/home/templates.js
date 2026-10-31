@@ -19,7 +19,9 @@ var SWAP_TEXT = '【换鞋要求】只替换模特脚上的鞋子，画面其它
 var SWAP_GEN = '在模特参考图的基础上完成换鞋：只替换模特脚上的鞋子，模特、姿势、服装、场景、光线和构图全部保持原样。';
 
 var CATS = ['全部', '电商', '海报', '人像', '分镜视频', '角色设定'];
-var TEMPLATES = [
+// 首页模板展示区从这里逐项添加；技能入口继续使用下方已有的工作流定义。
+var TEMPLATES = [];
+var SKILL_TEMPLATES = [
     { id: 'product-swap', title: '产品换图 · 换鞋', cat: '电商', icon: 'camera', color: '#0f766e',
       desc: '多角度鞋图 + 模特图 → 只换鞋，其它不变',
       agent: '帮我做产品换图：把模特脚上的鞋子换成参考鞋款，模特、姿势、服装、场景、光线和构图都不变。先看画布上的鞋子多角度图和模特图，再生成换鞋结果。',
@@ -155,5 +157,5 @@ var SEED_PREFIX = 'novai_canvas_seed:';
 
 
 export const TEMPLATE_MAP = {};
-TEMPLATES.forEach(t => { TEMPLATE_MAP[t.id] = t; });
+SKILL_TEMPLATES.concat(TEMPLATES).forEach(t => { TEMPLATE_MAP[t.id] = t; });
 export { CATS, TEMPLATES, SKILLS, MODES, MODE_KEY, SEED_PREFIX };

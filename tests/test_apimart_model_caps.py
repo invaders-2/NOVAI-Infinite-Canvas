@@ -23,10 +23,12 @@ class ApimartImageCapsTableTests(unittest.TestCase):
         for key in (
             "gpt-image-2", "gpt-image-2-5", "gpt-image-2-5-ext", "gpt-image-1",
             "gemini-2-5-flash-image-preview", "gemini-3-pro-image-preview", "gemini-3-1-flash-image-preview",
-            "gemini-3-1-flash-lite-image", "gemini-nano-banana-2-1", "imagen-4-0-apimart", "mai-image-2-6",
-            "qwen-image-2-0", "qwen-image-3-0", "seedream-4-0", "seedream-4-5", "seedream-5-0-flash",
-            "seedream-5-0-pro", "seedream-5-0-lite", "flux-2", "flux-3-image", "flux-kontext",
-            "grok-imagine-2-0", "wan2-7-image", "z-image-turbo",
+            "gemini-3-1-flash-lite-image", "gemini-nano-banana-2-1", "gemini-nano-banana-2-1-ext",
+            "imagen-4-0-apimart", "mai-image-2-6", "qwen-image-2-0", "qwen-image-3-0",
+            "seedream-4-0", "seedream-4-5", "seedream-5-0-flash", "seedream-5-0-pro", "seedream-5-0-lite",
+            "flux-2", "flux-3-image", "flux-3-image-klein", "flux-kontext", "hy-image-v3-5-preview",
+            "grok-imagine-2-0", "grok-imagine-image", "grok-imagine-image-quality", "grok-imagine-image-2-0",
+            "wan2-7-image", "z-image-turbo",
         ):
             self.assertIn(key, main.APIMART_IMAGE_MODEL_CAPS, key)
         self.assertGreaterEqual(len(main.APIMART_IMAGE_MODEL_CAPS), 20)
@@ -37,8 +39,17 @@ class ApimartImageCapsTableTests(unittest.TestCase):
         self.assertTrue(gpt2["mask_url"])
         self.assertTrue(gpt2["base64_refs"])
         self.assertTrue(gpt2["official_fallback"])
+        self.assertFalse(main.APIMART_IMAGE_MODEL_CAPS["gpt-image-2-5"]["base64_refs"])
+        self.assertEqual(main.APIMART_IMAGE_MODEL_CAPS["gpt-image-2-5"]["ref_max"], 16)
         self.assertFalse(main.APIMART_IMAGE_MODEL_CAPS["seedream-4-5"]["resolutions"].count("1K"))
         self.assertEqual(main.APIMART_IMAGE_MODEL_CAPS["gemini-3-1-flash-lite-image"]["resolutions"], ("1K",))
+        self.assertEqual(main.APIMART_IMAGE_MODEL_CAPS["gemini-nano-banana-2-1-ext"]["n_max"], 1)
+        self.assertEqual(main.APIMART_IMAGE_MODEL_CAPS["flux-3-image-klein"]["resolutions"],
+                         ("768SQ", "1K", "1.5K", "2K", "4K"))
+        self.assertFalse(main.APIMART_IMAGE_MODEL_CAPS["flux-3-image-klein"]["mask_url"])
+        self.assertEqual(main.APIMART_IMAGE_MODEL_CAPS["grok-imagine-2-0"]["fixed_resolution"], "quality")
+        self.assertTrue(main.APIMART_IMAGE_MODEL_CAPS["grok-imagine-2-0"]["refs_none"])
+        self.assertEqual(main.APIMART_IMAGE_MODEL_CAPS["grok-imagine-image-2-0"]["size_field"], "aspect_ratio")
         self.assertEqual(main.APIMART_IMAGE_MODEL_CAPS["imagen-4-0-apimart"]["ratios"],
                          ("1:1", "4:3", "3:4", "16:9", "9:16"))
 
@@ -65,6 +76,19 @@ class ApimartImageResolutionClampTests(unittest.TestCase):
     def test_min_2k_model_lifts_1k(self):
         self.assertEqual(main.apimart_image_resolution_for_model("seedream-4.5", "1K"), "2K")
         self.assertEqual(main.apimart_image_resolution_for_model("seedream-5-0-lite", "1K"), "2K")
+
+    def test_new_resolution_levels_and_fixed_quality(self):
+        self.assertEqual(main.apimart_image_resolution_for_model("seedream-5-0-pro", "1.5K"), "1.5K")
+        self.assertEqual(main.apimart_image_resolution_for_model("flux-3-image-klein", "768sq"), "768SQ")
+        self.assertEqual(main.apimart_image_resolution_for_model("flux-3-image-klein", "1.5K"), "1.5K")
+        self.assertEqual(main.apimart_image_resolution_for_model("grok-imagine-2.0-ext", "4K"), "quality")
+
+    def test_special_resolution_levels_survive_pixel_mapping(self):
+        self.assertEqual(main.apimart_image_resolution_from_size_for_model("768x768", "flux-3-image-klein"), "768SQ")
+        self.assertEqual(main.apimart_image_resolution_from_size_for_model("1536x1536", "flux-3-image-klein"), "1.5K")
+        self.assertEqual(main.apimart_image_resolution_from_size_for_model("2048x1152", "seedream-5-0-pro"), "1.5K")
+        self.assertEqual(main.apimart_image_resolution_from_size_for_model("2048x2048", "seedream-5-0-pro"), "2K")
+        self.assertEqual(main.apimart_image_resolution_from_size_for_model("2880x2880", "gpt-image-2"), "4k")
 
     def test_lite_stays_1k(self):
         self.assertEqual(main.apimart_image_resolution_for_model("nano-banana-lite", "4K"), "1K")

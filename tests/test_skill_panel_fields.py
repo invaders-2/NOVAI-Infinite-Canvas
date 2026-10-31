@@ -39,10 +39,18 @@ class SkillPanelFieldsTest(unittest.TestCase):
 
     def test_builtin_skills_are_system(self):
         skills = self.skills()
-        self.assertEqual(len(skills), 16)
+        self.assertEqual(len(skills), 17)
         for skill in skills:
             self.assertEqual(skill["skill_type"], "system")
             self.assertEqual(skill["usage_count"], 0)
+
+    def test_voice_lipsync_builtin_contract(self):
+        skill = next(item for item in self.skills() if item["id"] == "voice-lipsync")
+        self.assertEqual(skill["skill_type"], "system")
+        raw = registry.get_skill("voice-lipsync")
+        self.assertIn("lipsync_video", raw["skill_prompt"])
+        self.assertIn("voice_consent=true", raw["skill_prompt"])
+        self.assertEqual(raw["input_schema"]["files"][0]["name"], "source_video")
 
     def test_imported_skill_is_mine_and_persisted(self):
         _skill, created = registry.import_skill({"id": "my-skill", "name": "我的技能"})

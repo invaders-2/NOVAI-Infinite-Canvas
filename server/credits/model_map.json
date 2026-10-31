@@ -1274,6 +1274,15 @@
    "mode": "proxy",
    "quality": "",
    "note": "映射到 APIMart 等价模型，按最高档价"
+  },
+  "pixverse|video|pixverse-lipsync": {
+   "provider": "pixverse",
+   "kind": "video",
+   "model": "pixverse-lipsync",
+   "target": "pixverse-lipsync",
+   "mode": "direct",
+   "quality": "",
+   "note": "PixVerse 官方 LipSync，按视频秒数计费"
   }
  },
  "conservative": {
@@ -1306,8 +1315,8 @@
  "coverage": {
   "configured_models": 123,
   "builtin_models": 18,
-  "total_entries": 141,
-  "direct": 26,
+  "total_entries": 142,
+  "direct": 27,
   "proxy": 100,
   "conservative": 5,
   "postpaid": 10,

@@ -57,7 +57,7 @@ console.log('[B] 生成面板参考图行里的「文本」卡片');
     const textCardSrc = (rowFn.match(/const textCardHtml = hasTextCard[\s\S]*?: '';/) || [''])[0];
     ok(Boolean(textCardSrc) && !/class="input-thumb /.test(textCardSrc) && !/data-thumb-index/.test(textCardSrc),
         '文本卡片不带 .input-thumb / data-thumb-index（不参与拖拽/删除/进 images）');
-    ok(/if\(!dedup\.length && !hasTextCard\)/.test(rowFn), '只有文本、没有图片时这一行也渲染（不再当成空状态）');
+    ok(/if\(!dedup\.length && !hasTextCard && !frameMode\)/.test(rowFn), '只有文本、没有图片时这一行也渲染；首尾帧模型的两个空槽位同样保留');
     ok(/text: upstreamText/.test(rowFn), '上游文本变了会重建这一行（缓存签名带上文本）');
 
     const bindFn = fn('bindInputTextCard');
@@ -85,15 +85,13 @@ console.log('[B] 生成面板参考图行里的「文本」卡片');
     ok(api2({type:'smart-image'}) === '', '没有上游文本 → 空串（不渲染卡片）');
 }
 
-console.log('[C] 面板里的「上游输入」大块已删、批量说明保留');
+console.log('[C] 面板里的「上游输入」大块与批量介绍小字均已删除');
 {
     const previewFn = fn('renderInputPromptPreview');
     ok(!/smart\.inputUpstream/.test(previewFn), '不再渲染「上游输入」标签');
-    ok((previewFn.match(/input-prompt-preview-text/g) || []).length === 1, '灰底大文本块只剩批量说明那一处');
-    ok(!/input-prompt-preview-label">\$\{escapeHtml\(tr\('smart\.inputUpstream'\)\)/.test(previewFn), '普通节点不再拼「上游输入」块');
-    ok(/inputPromptPreview\.classList\.remove\('has-text'\)/.test(previewFn) && /inputPromptPreview\.innerHTML = ''/.test(previewFn), '普通节点清空（不留空白占位）');
-    ok(/isSmartBatchNode\(node\)/.test(previewFn) && /批量生成/.test(previewFn), '批量生成节点的说明块保留');
-    ok(/按节点里「生成输入」勾选的行逐行生成/.test(previewFn), '批量说明文案还在');
+    ok(!/input-prompt-preview-text|input-prompt-preview-label/.test(previewFn), '批量生成标题和介绍小字不再渲染');
+    ok(/inputPromptPreview\.classList\.remove\('has-text'\)/.test(previewFn) && /inputPromptPreview\.innerHTML = ''/.test(previewFn), '所有节点都清空预览区（不留空白占位）');
+    ok(!/按节点里「生成输入」勾选的行逐行生成/.test(previewFn), '原批量说明文案已移除');
 }
 
 console.log('[D] i18n / 样式 / 不影响请求参数');

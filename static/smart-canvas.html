@@ -7,7 +7,7 @@
     <title data-i18n="smart.title">智能画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{/* 跟随应用主题，首次默认浅色（与 canvas.html / index.html / theme.js 一致） */var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.142.1793156471">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.142.1793421882">
     <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.142.1790560477">
     <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.142.1791729997">
     <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.142.1789606971">
@@ -29,7 +29,7 @@
     <script src="/static/js/shared/workflow-utils.js?v=1.0.142.1789606971"></script>
     <script src="/static/js/shared/node-registry.js?v=1.0.142.1789606971"></script>
     <script src="/static/js/shared/table-model.js?v=1.0.142.1792228719"></script>
-    <script src="/static/js/shared/table-node.js?v=1.0.142.1792228719"></script>
+    <script src="/static/js/shared/table-node.js?v=1.0.142.1793421882"></script>
     <script src="/static/js/shared/dropdown.js?v=1.0.142.1789746233"></script>
     <script src="/static/js/shared/glide.js?v=1.0.142.1789742748"></script>
     <script src="/static/js/shared/morph-button.js?v=1.0.142.1789845865"></script>
@@ -218,6 +218,7 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
                             <option value="comfy" data-i18n="smart.engineComfy">ComfyUI生成</option>
                             <option value="runninghub" data-i18n="smart.engineRh">RunningHub</option>
                         </select>
+                        <div id="batchKindSwitch" class="batch-kind-switch" role="radiogroup" aria-label="批量生成类型" hidden></div>
                     </div>
                 </div>
                 <div id="inputThumbsRow" class="input-thumbs-row"></div>
@@ -915,13 +916,13 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
     </div>
     <script defer src="/static/js/image-adjust-engine.js?v=1.0.142.1791729997"></script>
     <script defer src="/static/js/image-adjust-editor.js?v=1.0.142.1791729997"></script>
-    <script defer src="/static/js/canvas-rail.js?v=1.0.142.1792746961"></script>
+    <script defer src="/static/js/canvas-rail.js?v=1.0.142.1793421882"></script>
     <script defer src="/static/js/online-prompt-library.js?v=1.0.142.1792337992"></script>
     <script defer src="/static/js/source-browser.js?v=1.0.142.1792373520"></script>
     <script defer src="/static/js/shared/agent-session.js?v=1.0.142.1792816544"></script>
     <!-- 长文输出用的 Markdown 渲染（离线零依赖）：必须排在 smart-canvas.js 之前 -->
     <script defer src="/static/js/smart-markdown.js?v=1.0.142.1793000645"></script>
-    <script defer src="/static/js/smart-canvas.js?v=1.0.142.1793064481"></script>
+    <script defer src="/static/js/smart-canvas.js?v=1.0.142.1793421882"></script>
     <!-- 画布助手微应用：localStorage.NOVAI_CANVAS_UI=legacy 时留在旧面板，默认加载 React 版 -->
     <script defer src="/static/js/canvas-assistant-bridge.js?v=1.0.142.1793084478"></script>
     <script defer src="/static/js/collab.js?v=1.0.142.1792849964"></script>

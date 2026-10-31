@@ -6,6 +6,7 @@ import {
 	GaugeIcon,
 	GitBranchIcon,
 	HistoryIcon,
+	LayersIcon,
 	Maximize2Icon,
 	MoreHorizontalIcon,
 	PackageIcon,
@@ -18,9 +19,11 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import {
+	applyCanvasTemplate,
 	canvasId,
 	deleteThread,
 	fetchArtifacts,
+	fetchCanvasTemplates,
 	fetchThreads,
 	renameThread,
 	switchThreadApi,
@@ -29,12 +32,15 @@ import {
 import type { ThreadRow } from "./api"
 import { ArtifactsSheet } from "./ArtifactsSheet"
 import type { ArtifactPanelState } from "./ArtifactsSheet"
+import { TemplatesSheet } from "./TemplatesSheet"
+import type { TemplatePanelState } from "./TemplatesSheet"
 import { chooseFolder, folderSupported, forgetFolder, restoreFolder } from "./folder"
 import type { FolderInfo } from "./folder"
 import { formatRelative } from "./format"
 import type { AssistantStore } from "./store"
 
 const EMPTY_ARTIFACTS: ArtifactPanelState = { status: "idle", data: null, error: "" }
+const EMPTY_TEMPLATES: TemplatePanelState = { status: "idle", items: [], error: "" }
 
 const clickHidden = (id: string) => {
 	const el = document.getElementById(id) as HTMLElement | null
@@ -55,6 +61,9 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	const [notice, setNotice] = useState("")
 	const [artifactsOpen, setArtifactsOpen] = useState(false)
 	const [artifactState, setArtifactState] = useState<ArtifactPanelState>(EMPTY_ARTIFACTS)
+	const [templatesOpen, setTemplatesOpen] = useState(false)
+	const [templateState, setTemplateState] = useState<TemplatePanelState>(EMPTY_TEMPLATES)
+	const [templateApplyingId, setTemplateApplyingId] = useState("")
 	const [full, setFull] = useState(false)
 	const [resetOpen, setResetOpen] = useState(false)
 	const [folderOpen, setFolderOpen] = useState(false)
@@ -88,6 +97,31 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 		}
 	}, [])
 
+	const loadTemplates = useCallback(async () => {
+		setTemplateState((prev) => ({ ...prev, status: "loading", error: "" }))
+		try {
+			const items = await fetchCanvasTemplates()
+			setTemplateState({ status: "ready", items, error: "" })
+		} catch (error) {
+			setTemplateState((prev) => ({ status: "error", items: prev.items, error: (error as Error)?.message || "网络错误" }))
+		}
+	}, [])
+
+	const applyTemplate = useCallback(async (templateId: string) => {
+		if (templateApplyingId) return
+		setTemplateApplyingId(templateId)
+		try {
+			const result = await applyCanvasTemplate(templateId)
+			setTemplatesOpen(false)
+			window.dispatchEvent(new CustomEvent("novai-canvas-assistant:template-applied", { detail: result }))
+			store.notify("已克隆「" + result.template + "」：" + result.node_count + " 个节点，未开始生成")
+		} catch (error) {
+			store.notify("模板克隆失败：" + ((error as Error)?.message || "网络错误"))
+		} finally {
+			setTemplateApplyingId("")
+		}
+	}, [store, templateApplyingId])
+
 	useEffect(() => {
 		void refreshThreads()
 	}, [refreshThreads, env.threadRefresh])
@@ -105,6 +139,10 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	}, [artifactsOpen, loadArtifacts])
 
 	useEffect(() => {
+		if (templatesOpen) void loadTemplates()
+	}, [templatesOpen, loadTemplates])
+
+	useEffect(() => {
 		const panel = document.getElementById("canvasAssistantPanel")
 		if (panel) setFull(panel.classList.contains("is-full"))
 	}, [])
@@ -120,7 +158,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	}, [folderOpen])
 
 	useEffect(() => {
-		if (!menuOpen && !moreOpen && !actionsId && !artifactsOpen && !folderOpen) return
+		if (!menuOpen && !moreOpen && !actionsId && !artifactsOpen && !templatesOpen && !folderOpen) return
 		const onDown = (event: MouseEvent) => {
 			const target = event.target as HTMLElement | null
 			if (target?.closest?.(".nvca-tap-header, .nvca-artifacts-sheet, .nvca-folder-permissions, .nvca-dialog")) return
@@ -128,6 +166,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 			setMoreOpen(false)
 			setActionsId("")
 			setArtifactsOpen(false)
+			setTemplatesOpen(false)
 			setFolderOpen(false)
 		}
 		const onKey = (event: KeyboardEvent) => {
@@ -136,6 +175,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 			setMoreOpen(false)
 			setActionsId("")
 			setArtifactsOpen(false)
+			setTemplatesOpen(false)
 			setFolderOpen(false)
 			setDeleteTarget(null)
 			setResetOpen(false)
@@ -146,7 +186,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 			window.removeEventListener("mousedown", onDown, true)
 			window.removeEventListener("keydown", onKey)
 		}
-	}, [menuOpen, moreOpen, actionsId, artifactsOpen, folderOpen])
+	}, [menuOpen, moreOpen, actionsId, artifactsOpen, templatesOpen, folderOpen])
 
 	const activeThread = threads.find((thread) => String(thread.id) === String(activeId)) || null
 	const artifactCount = artifactState.data ? artifactState.data.files.length : 0
@@ -294,6 +334,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 					className="nvca-tap-head-btn is-sidebar"
 					onClick={() => {
 						setArtifactsOpen((open) => !open)
+						setTemplatesOpen(false)
 						setFolderOpen(false)
 					}}
 					title="产物侧栏"
@@ -319,6 +360,20 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 				</button>
 			</div>
 			<div className="nvca-tap-header-right">
+				<button
+					aria-label="流程模板"
+					aria-pressed={templatesOpen}
+					className="nvca-tap-head-btn"
+					onClick={() => {
+						setTemplatesOpen((open) => !open)
+						setArtifactsOpen(false)
+						setFolderOpen(false)
+					}}
+					title="流程模板"
+					type="button"
+				>
+					<LayersIcon className="nvca-tap-head-icon-svg" />
+				</button>
 				<button className="nvca-tap-head-btn" onClick={newChat} title="新对话" aria-label="新对话" type="button">
 					<SquarePenIcon className="nvca-tap-head-icon-svg" />
 				</button>
@@ -450,6 +505,17 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 
 			{artifactsOpen ? createPortal(
 				<ArtifactsSheet state={artifactState} onClose={() => setArtifactsOpen(false)} onReload={() => void loadArtifacts()} />,
+				document.body,
+			) : null}
+
+			{templatesOpen ? createPortal(
+				<TemplatesSheet
+					state={templateState}
+					applyingId={templateApplyingId}
+					onApply={(id) => void applyTemplate(id)}
+					onClose={() => setTemplatesOpen(false)}
+					onReload={() => void loadTemplates()}
+				/>,
 				document.body,
 			) : null}
 
