@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import Titlebar from './shell/Titlebar.vue';
+import CanvasChrome from './shell/CanvasChrome.vue';
 import LegacyStage from './shell/LegacyStage.vue';
 import ToastHost from './shell/ToastHost.vue';
 import SettingsModal from './shell/SettingsModal.vue';
@@ -19,11 +20,13 @@ import { initUpdates } from './lib/update.js';
 import { state } from './lib/store.js';
 
 const isCanvas = computed(() => state.active === 'canvas' && state.canvasOpen);
-// 2026-11 重做：左侧导航下线，主导航进标题栏。网页版进画布编辑器时不显示标题栏（编辑器自带返回 / 标题胶囊），
-// 桌面端始终显示（要给红绿灯 / 窗口按钮留位置）
-const showBar = computed(() => !(isCanvas.value && !state.desktop));
+// 2026-11 重做：左侧导航下线，主导航进标题栏。画布编辑器打开时整条标题栏隐藏（mac / Windows / 网页一致），
+// 画布铺满到窗口最上沿；桌面端的拖动 / 窗口按钮 / 缩放手柄交给 CanvasChrome
+const showBar = computed(() => !isCanvas.value);
+// 画布页专用窗口层：只在桌面端（mac / windows）且标题栏让位时出现，网页版不渲染
+const showChrome = computed(() => !showBar.value && (state.desktop === 'mac' || state.desktop === 'windows'));
 const isHome = computed(() => state.active === 'home');
-// 首页 / 画布列表 / 素材库 / 应用市场 / 我的：页面铺满整窗，内容从标题栏下面滚过，标题栏统一用渐变磨砂（画布编辑器除外）
+// 首页 / 画布列表 / 素材库 / 应用市场 / 我的：页面铺满整窗，内容从标题栏下面滚过，标题栏统一用渐变磨砂（画布编辑器整条不显示）
 const FULL = ['home', 'canvas', 'asset-manager', 'store', 'me'];
 const isFull = computed(() => !isCanvas.value && FULL.includes(state.active));
 // 离开画布时清掉素材面板标记，避免再次进入时残留状态
@@ -48,6 +51,7 @@ onMounted(() => {
         <!-- 标题栏的渐变磨砂：三层模糊由强到弱向下淡出 + 一层底色渐变；首页 / 画布列表 / 素材库 / 应用市场 / 我的都有（内容会从标题栏下面滚过） -->
         <div v-if="showBar && isFull" class="tb-fx" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <Titlebar v-if="showBar" />
+        <CanvasChrome v-if="showChrome" />
         <div class="body">
             <main class="stage">
                 <HomePage v-if="state.visited.home" v-show="isHome" class="stage-page home-page" />

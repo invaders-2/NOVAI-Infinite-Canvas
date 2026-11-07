@@ -1217,23 +1217,25 @@ ok(/const SOURCE_INJECTED_CONTROLS = process\.env\.NOVAI_INJECTED_SOURCE_CONTROL
 ok(/const INJECTED_CONTROLS_ENABLED = true;/.test(dragPreload), 'guest preload 开关默认 true');
 ok(/\[data-visible="true"\] \{ opacity: 1 !important; visibility: visible !important; \}/.test(main), '显示态 data-visible=true → opacity 1 / visible');
 ok(/opacity: 0; visibility: hidden; transition: opacity \.2s ease, visibility \.2s ease !important/.test(main), '默认 opacity:0 / visibility:hidden（200ms 过渡）');
-ok(/\[data-visible="false"\] \.novai-controls-btn, #novai-source-controls\[data-visible="false"\] \.novai-site-item \{ pointer-events: none !important; \}/.test(main), '隐藏时 pointer-events:none，不影响页面点击');
+ok(/\[data-visible="false"\] \.novai-controls-btn \{ pointer-events: none !important; \}/.test(main), '隐藏时 pointer-events:none，不影响页面点击');
 ok(/CONTROLS_BOTTOM_ZONE = 96/.test(dragPreload) && !/CONTROLS_TOP_ZONE/.test(dragPreload), '唤醒热区仅底部 96px（顶部热区已去掉）');
 ok(/novai-controls-bottom/.test(main) && /flex-direction: row !important/.test(main), '底部一行布局 CSS');
 ok(/bottom: 16px !important/.test(main) && /height: 38px !important/.test(main) && /max-width: calc\(100vw - 24px\) !important/.test(main), '贴底 16px、高 38、限宽不溢出');
 ok(/width: 27px !important; height: 27px !important/.test(main), '按钮 27px');
-ok(/#novai-source-controls \.novai-site-item \{[^}]*font-size: 12px !important/.test(main) && /height: 26px !important/.test(main), '站点项 26px / 12px');
+ok(!/novai-site-item|novai-controls-site/.test(main) && !/novai-site-item|novai-controls-site/.test(dragPreload), '站点 pill 样式与 DOM 已移除');
 ok(!/novai-controls-left \{ top: 14px/.test(main) && !/novai-controls-right \{ top: 14px/.test(main), '去掉顶部两组控件定位');
 ok(/CONTROLS_HIDE_DELAY = 1500/.test(dragPreload) && /scheduleControlsHide/.test(dragPreload), '离开后 1500ms 淡出');
-ok(/pointerInControls/.test(dragPreload) && /querySelectorAll\('\.novai-controls-group, \.novai-controls-site-wrap, \.novai-controls-url'\)/.test(dragPreload), '指针进入控件区域保持显示（含 URL 输入行）');
+ok(/pointerInControls/.test(dragPreload) && /querySelectorAll\('\.novai-controls-group'\)/.test(dragPreload) && !/novai-controls-url/.test(dragPreload), '指针进入控件区域保持显示（仅按钮组）');
 ok(/document\.addEventListener\('mousemove', handleControlsHover, true\)/.test(dragPreload), 'mousemove capture:true');
 ok(/background: rgba\(20, 20, 20, 0\.72\) !important/.test(main) && /color: #ffffff !important/.test(main), '深色：rgba(20,20,20,.72) + 白图标');
 ok(/rgb\(250, 250, 250, 0\.88\)|rgba\(250, 250, 250, 0\.88\)/.test(main) && /data-theme="light"/.test(main), '浅色：白玻璃 + 深色图标分支');
 ok(/data-theme="light"\] \.novai-zoom-value \{ color: #111111 !important; \}/.test(main), '浅色缩放下百分比 #111');
-ok(/\[data-theme="light"\] \.novai-site-item\[data-active="true"\]/.test(main), '浅色选中站点高亮');
+ok(/\[data-theme="light"\] \.novai-controls-btn, #novai-source-controls\[data-theme="light"\] \.novai-zoom-cluster/.test(main), '浅色主题仍覆盖底部按钮与缩放');
 ok(/--novai-ui-compensate/.test(dragPreload) && /100 \/ Number\(controlsState\.zoomPercent\)/.test(dragPreload), 'zoom 补偿保留');
-ok(/action: 'site', site: site/.test(dragPreload) && /control === 'back' \|\| control === 'forward' \|\| control === 'refresh' \|\| control === 'close'/.test(dragPreload), '切站/关闭 IPC 不变');
-ok(/host\.setAttribute\('data-visible', 'false'\)/.test(dragPreload), 'buildControls 默认隐藏');
+ok(!/action: 'site'/.test(dragPreload) && /control === 'back' \|\| control === 'forward' \|\| control === 'refresh' \|\| control === 'close'/.test(dragPreload), '仅保留后退/前进/缩放/刷新/关闭 IPC');
+ok(/host\.setAttribute\('data-visible', controlsVisible \? 'true' : 'false'\)/.test(dragPreload), 'buildControls 沿用当前显示状态（重建不闪）');
+ok(!/setInterval/.test(dragPreload), '悬浮控件不再轮询重建（去掉 1.5s setInterval）');
+ok(/IS_PLAIN_NODE/.test(dragPreload) && /MutationObserver/.test(dragPreload) && /observe\(document\.documentElement, \{ childList: true \}\)/.test(dragPreload), '控件补挂改为 MutationObserver 监听 <html> 子节点');
 let injected = null;
 try {
     function makeEl(tagName) {
@@ -1305,9 +1307,7 @@ if (injected && injected.host) {
     const all = [];
     (function walk(el) { all.push(el); (el.children || []).forEach(walk); })(host);
     const controls = all.map(function (el) { return el.getAttribute ? el.getAttribute('data-novai-control') : null; }).filter(Boolean);
-    ok(controls.indexOf('back') >= 0 && controls.indexOf('zoom-reset') >= 0 && controls.indexOf('close') >= 0, '三组控件 DOM 仍在');
-    const siteItems = all.filter(function (el) { return el.getAttribute && el.getAttribute('data-site'); });
-    ok(siteItems.length === 4, '站点 pill 4 项仍在');
+    ok(['back', 'forward', 'zoom-out', 'zoom-reset', 'zoom-in', 'refresh', 'close'].every(function (name) { return controls.indexOf(name) >= 0; }), '后退/前进/缩放/刷新/关闭控件齐全');
     const hoverHandler = injected.handlers['mousemove'];
     if (typeof hoverHandler === 'function') {
         hoverHandler({ clientX: 200, clientY: 20 });
@@ -1319,71 +1319,48 @@ if (injected && injected.host) {
     }
     const stateHandler = injected.handlers['novai:source-ui-state'];
     if (typeof stateHandler === 'function') {
-        stateHandler({}, { theme: 'light', site: 'huaban', zoomPercent: 200, canGoBack: true, canGoForward: false });
+        stateHandler({}, { theme: 'light', zoomPercent: 200, canGoBack: true, canGoForward: false });
         ok(host.getAttribute('data-theme') === 'light', '主题切到浅色 data-theme=light');
         ok(host.style.props['--novai-ui-compensate'] === '0.5', 'zoom 200% 时 1/zoom 补偿');
-        const activeSite = all.filter(function (el) { return el.getAttribute && el.getAttribute('data-site') === 'huaban'; })[0];
-        ok(activeSite && activeSite.getAttribute('data-active') === 'true', '当前站点高亮');
         const backBtn = all.filter(function (el) { return el.getAttribute && el.getAttribute('data-novai-control') === 'back'; })[0];
         ok(backBtn && backBtn.disabled === false, 'canGoBack=true 后退可用');
     }
-    const huabanItem = siteItems.filter(function (el) { return el.getAttribute('data-site') === 'huaban'; })[0];
-    if (host.clickHandler && huabanItem) {
-        host.clickHandler({ target: huabanItem, stopPropagation: function () {}, preventDefault: function () {} });
-        const sentSite = injected.sends.filter(function (item) { return item.channel === 'novai:guest-control'; }).pop();
-        ok(sentSite && sentSite.payload.action === 'site' && sentSite.payload.site === 'huaban', '点站点 item 直接发对应 site');
+    const backControl = all.filter(function (el) { return el.getAttribute && el.getAttribute('data-novai-control') === 'back'; })[0];
+    if (host.clickHandler && backControl) {
+        host.clickHandler({ target: backControl, stopPropagation: function () {}, preventDefault: function () {} });
+        const sentBack = injected.sends.filter(function (item) { return item.channel === 'novai:guest-control'; }).pop();
+        ok(sentBack && sentBack.payload.action === 'back', '点后退直接发 back');
     }
-    // 自定义站点：点 pill → 弹出 URL 输入行 → 预填/校验/IPC
-    const urlRow = all.filter(function (el) { return el.className && String(el.className).indexOf('novai-controls-url') >= 0; })[0];
-    const urlInput = all.filter(function (el) { return el.className && String(el.className).indexOf('novai-url-input') >= 0; })[0];
-    const urlError = all.filter(function (el) { return el.className && String(el.className).indexOf('novai-url-error') >= 0; })[0];
-    const urlButtons = all.filter(function (el) { return el.className && String(el.className).indexOf('novai-url-btn') >= 0; });
-    ok(urlRow && urlInput && urlError && urlButtons.length === 2, 'URL 输入行 DOM（输入框 + 打开/取消 + 错误提示）');
-    if (urlRow && urlInput && urlError && urlButtons.length === 2 && host.clickHandler) {
-        if (typeof stateHandler === 'function') stateHandler({}, { recentCustomUrls: ['https://old.example.com'] });
-        const customItem = siteItems.filter(function (el) { return el.getAttribute('data-site') === 'custom'; })[0];
-        const siteSendsBefore = injected.sends.filter(function (item) { return item.channel === 'novai:guest-control' && item.payload.action === 'site'; }).length;
-        host.clickHandler({ target: customItem, stopPropagation: function () {}, preventDefault: function () {} });
-        ok(urlRow.getAttribute('data-open') === 'true', '点「自定义」→ 输入行弹出');
-        ok(urlInput.value === 'https://old.example.com', '输入框预填上次自定义 URL');
-        urlInput.value = 'abc';
-        urlButtons[0].clickHandler({ stopPropagation: function () {}, preventDefault: function () {} });
-        ok(urlError.getAttribute('data-show') === 'true', '非法地址显示「地址无效」');
-        ok(injected.sends.filter(function (item) { return item.channel === 'novai:guest-control' && item.payload.action === 'site'; }).length === siteSendsBefore, '非法地址不切换站点');
-        host.clickHandler({ target: customItem, stopPropagation: function () {}, preventDefault: function () {} });
-        urlInput.value = 'https://www.baidu.com';
-        urlButtons[0].clickHandler({ stopPropagation: function () {}, preventDefault: function () {} });
-        const customSends = injected.sends.filter(function (item) { return item.channel === 'novai:guest-control' && item.payload.action === 'site' && item.payload.site === 'custom'; });
-        const lastCustom = customSends[customSends.length - 1];
-        ok(lastCustom && lastCustom.payload.url === 'https://www.baidu.com', '合法 URL 发 site=custom+url');
-        ok(urlRow.getAttribute('data-open') === 'false', '提交后输入行收起');
-        urlButtons[1].clickHandler({ stopPropagation: function () {}, preventDefault: function () {} });
-        ok(urlRow.getAttribute('data-open') === 'false', '取消后输入行收起且不切站');
+    const closeControl = all.filter(function (el) { return el.getAttribute && el.getAttribute('data-novai-control') === 'close'; })[0];
+    if (host.clickHandler && closeControl) {
+        host.clickHandler({ target: closeControl, stopPropagation: function () {}, preventDefault: function () {} });
+        const sentClose = injected.sends.filter(function (item) { return item.channel === 'novai:guest-control'; }).pop();
+        ok(sentClose && sentClose.payload.action === 'close', '点关闭直接发 close');
     }
+    const siteItems = all.filter(function (el) { return el.getAttribute && el.getAttribute('data-site'); });
+    ok(siteItems.length === 0, '注入控件里没有站点 pill');
+    const urlNodes = all.filter(function (el) { return el.className && /novai-controls-url|novai-url-/.test(String(el.className)); });
+    ok(urlNodes.length === 0, '注入控件里没有自定义 URL 输入行');
 }
 
-console.log('[22] 自定义站点 URL 输入行（静态）');
-ok(/novai-controls-url/.test(dragPreload) && /novai-url-input/.test(dragPreload) && /novai-url-btn/.test(dragPreload) && /novai-url-error/.test(dragPreload), '注入 URL 输入行 DOM');
-ok(/输入网址（https:\/\/\.\.\.）/.test(dragPreload) || /输入网址（https:\/\//.test(dragPreload), '输入框 placeholder 提示 https://');
-ok(/function isValidCustomUrl/.test(dragPreload) && /parsed\.protocol === 'http:' \|\| parsed\.protocol === 'https:'/.test(dragPreload), '只接受 http(s) 地址');
-ok(/action: 'site', site: 'custom', url: value/.test(dragPreload), '合法后 IPC 发 site=custom+url');
-ok(/if \(site === 'custom'\) \{[\s\S]{0,80}showCustomUrlInput\(\)/.test(dragPreload), '点自定义弹出输入行（不直接切站）');
-ok(/controlsState\.recentCustomUrls/.test(dragPreload) && /urlInput\.value = preset/.test(dragPreload), '用最近自定义 URL 预填');
-ok(/recentCustomUrls: lastCustomSourceUrls\.slice\(0, 5\)/.test(main), 'state 把最近自定义 URL 发给 guest');
-ok(/const explicitUrl = normalizeCustomSourceUrl\(payload && payload\.url\)/.test(main), 'guest-control site 支持 payload.url');
+console.log('[22] 自定义站点 URL 输入行已从注入控件移除（顶部 tab 自己处理）');
+ok(!/novai-controls-url|novai-url-input|novai-url-btn|novai-url-error/.test(dragPreload), '注入控件不再有自定义 URL 输入行 DOM');
+ok(!/function isValidCustomUrl/.test(dragPreload) && !/function submitCustomUrl/.test(dragPreload) && !/function showCustomUrlInput/.test(dragPreload), '自定义 URL 校验/提交函数已移除');
+ok(!/novai-controls-url|novai-url-/.test(main), '主进程不再注入 URL 输入行样式');
+ok(/recentCustomUrls: lastCustomSourceUrls\.slice\(0, 5\)/.test(main), 'state 里仍带最近自定义 URL（顶部 tab 用）');
+ok(/const explicitUrl = normalizeCustomSourceUrl\(payload && payload\.url\)/.test(main), 'guest-control site 仍支持 payload.url（保留兼容）');
 ok(/if \(site === 'custom'\) \{[\s\S]{0,220}openSourceView\('custom'[\s\S]{0,120}url: explicitUrl/.test(main), 'source-site 支持 payload.url 并打开自定义地址');
-ok(/novai-controls-url[^}]*width: 300px/.test(main) && /font-size: 13px/.test(main) && /border-radius: 12px/.test(main), '输入行宽 300 / 圆角 12 / 字号 13');
 
-console.log('[18b] 关闭链路（内嵌控件 ×）与站点 pill 代码保留');
+console.log('[18b] 关闭链路（内嵌控件 ×），站点 pill 已移除');
 ok(/clog\('source-view', '关闭面板（来自内嵌控件）'\)/.test(main), '关闭控件点击写日志');
 ok(/const closedState = sourceViewState\(\)/.test(main) && /'novai:source-view-closed', closedState/.test(main), '关闭发送 novai:source-view-closed（payload=sourceViewState）');
 ok(/on_source_view_closed/.test(preload) && /novai:source-view-closed/.test(preload), 'preload 暴露关闭事件订阅');
 ok(/action === 'source-close'/.test(handleFn) && /\{ ok: true, open: false, source: null, state: closedState \}/.test(handleFn), 'source-close 返回 open:false + state');
-ok(/site === 'custom'/.test(main) && /lastCustomSourceUrls\[0\]/.test(main), 'custom pill 切到上次自定义地址');
+ok(/site === 'custom'/.test(main) && /lastCustomSourceUrls\[0\]/.test(main), 'main 侧自定义来源仍回落到上次地址（顶部 tab 用）');
 ok(/novai:source-custom-request/.test(main) && /on_source_custom_request/.test(preload), '没有历史自定义地址时通知画布弹输入');
-ok(/data-site/.test(dragPreload) && /action: 'site', site: site/.test(dragPreload), 'pill item 直接发被点击的 site（代码保留）');
+ok(!/data-site/.test(dragPreload) && !/action: 'site', site: site/.test(dragPreload), '注入控件不再有站点切换入口');
 ok(!/nextSite\(/.test(dragPreload), '不再循环切站');
-ok(/data-active/.test(main) && /novai-site-active/.test(main), 'CSS 支持当前站点高亮（保留）');
+ok(!/data-active/.test(main) && !/novai-site-active/.test(main), '站点高亮样式已移除');
 
 console.log('[18c] 关闭/自定义站点事件 → iframe 桥转发');
 ok(/function forwardSourceEvent\(ipcChannel, messageType\)/.test(preload), 'preload 定义通用事件转发函数');

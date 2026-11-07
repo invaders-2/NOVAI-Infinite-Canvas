@@ -140,18 +140,29 @@
 .cn-root [data-tip]:hover:after{opacity:1;visibility:visible;transition:opacity var(--d-feedback) var(--e-std) .5s,visibility 0s linear .5s}
 .cn-root .tipR[data-tip]:after{left:calc(100% + 10px);top:50%;bottom:auto;transform:translateY(-50%)}
 .cn-root .tipB[data-tip]:after{top:calc(100% + 8px);bottom:auto}
-.cn-root #tl{left:max(16px,env(safe-area-inset-left,0px));top:calc(16px + env(safe-area-inset-top,0px));height:40px;display:flex;align-items:center;gap:8px;padding:0 10px 0 6px}
+.cn-root #tl{left:max(16px,calc(16px + var(--cn-chrome-left,0px)));top:calc(var(--cn-chrome-top,16px) + env(safe-area-inset-top,0px));height:40px;display:flex;align-items:center;gap:8px;padding:0 10px 0 6px}
 .cn-root #tl .logo{width:28px;height:28px;border-radius:8px;display:grid;place-items:center}
 .cn-root #tl .sep{width:1px;height:16px;background:var(--line)}
 .cn-root #tl .ttl{font-weight:500;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 6px;border-radius:6px}
 .cn-root #tl .ttl:hover{background:var(--hover)}
 .cn-root #tl input.ttl{width:200px;background:var(--sunken)}
 .cn-root .badge-preview{font-size:11px;color:var(--fg2);padding:2px 7px;border-radius:6px;background:var(--sunken);white-space:nowrap}
-.cn-root #tr{right:max(16px,env(safe-area-inset-right,0px));top:calc(16px + env(safe-area-inset-top,0px));display:flex;gap:8px}
-.cn-root #tr .cap{height:40px;display:flex;align-items:center}
-.cn-root #tr .cap>button{height:40px;padding:0 12px;border-radius:12px;display:flex;align-items:center;gap:6px}
-.cn-root #tr .cap>button:hover{background:var(--hover)}
-.cn-root #tr .cap>button.sq{width:40px;padding:0;justify-content:center}
+.cn-root #tr{right:max(16px,calc(16px + var(--cn-chrome-right,0px)));top:calc(var(--cn-chrome-top,16px) + env(safe-area-inset-top,0px));height:40px;display:flex;align-items:center;gap:4px}
+/* 右上角一排无底色线性按钮：只有悬停才浮出半透明软底，不再有白底胶囊 */
+.cn-root #tr .ib{width:32px;height:32px;border-radius:9px;padding:0;background:transparent;color:var(--fgd)}
+.cn-root #tr .ib svg.i{width:16px;height:16px;stroke-width:1.5}
+.cn-root #tr #usage{width:auto;min-width:32px;padding:0 7px;display:flex;align-items:center;justify-content:center;gap:4px;font-size:12px;font-weight:500;letter-spacing:-.02em}
+.cn-root #tr .peers{height:32px}
+/* 顶部渐变磨砂：和首页标题栏同款配方，越往下越清楚，没有硬边。
+   只在桌面外壳里出现（根节点 has-topfx）；z-index 低于浮层（.float 20 / 弹层 60 / 弹窗 70），不接事件 */
+.cn-root .cn-topfx{position:absolute;left:0;right:0;top:0;height:88px;z-index:12;pointer-events:none;display:none}
+.cn-root.has-topfx .cn-topfx{display:block}
+.cn-root .cn-topfx i{position:absolute;inset:0;display:block}
+.cn-root .cn-topfx i:nth-child(1){backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);-webkit-mask:linear-gradient(#000 55%,transparent);mask:linear-gradient(#000 55%,transparent)}
+.cn-root .cn-topfx i:nth-child(2){backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);-webkit-mask:linear-gradient(#000 40%,transparent 80%);mask:linear-gradient(#000 40%,transparent 80%)}
+.cn-root .cn-topfx i:nth-child(3){backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);-webkit-mask:linear-gradient(#000 25%,transparent 62%);mask:linear-gradient(#000 25%,transparent 62%)}
+.cn-root .cn-topfx i:nth-child(4){background:linear-gradient(color-mix(in srgb,var(--bg) 82%,transparent),transparent)}
+.cn-root[data-theme=dark] .cn-topfx i:nth-child(4){background:linear-gradient(color-mix(in srgb,var(--bg) 78%,transparent),transparent)}
 .cn-root #lb{left:max(16px,env(safe-area-inset-left,0px));top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px;border-radius:24px}
 .cn-root #lb .primary{width:40px;height:40px;border-radius:50%;background:var(--solid);color:var(--on-solid)}
 .cn-root #lb .primary:hover{background:#fff;color:#000}

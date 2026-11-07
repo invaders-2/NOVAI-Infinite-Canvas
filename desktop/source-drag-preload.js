@@ -778,8 +778,6 @@ const { ipcRenderer } = require('electron');
 
   // ---------- 悬浮控件（WebContentsView 会盖住主窗口 HTML，所以必须注入到页面里） ----------
   const CONTROLS_ID = 'novai-source-controls';
-  const SITE_LABELS = { pinterest: 'Pinterest', huaban: '花瓣', xiaohongshu: '小红书', custom: '自定义' };
-  const SITE_CYCLE = ['pinterest', 'huaban', 'xiaohongshu', 'custom'];
   const ICONS = {
     back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 5.5 8 12l7.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     forward: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 5.5 16 12l-7.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -787,20 +785,11 @@ const { ipcRenderer } = require('electron');
     plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-    globe: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 12h18M12 3c2.5 2.4 3.8 5.4 3.8 9S14.5 18.6 12 21c-2.5-2.4-3.8-5.4-3.8-9S9.5 5.4 12 3Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
-    pinterest: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12c0 4.24 2.64 7.86 6.36 9.32-.09-.79-.17-2 .03-2.86.19-.78 1.2-5.08 1.2-5.08s-.31-.62-.31-1.53c0-1.44.83-2.51 1.87-2.51.88 0 1.31.66 1.31 1.45 0 .88-.56 2.2-.85 3.43-.24 1.02.51 1.85 1.52 1.85 1.83 0 3.23-1.93 3.23-4.71 0-2.46-1.77-4.18-4.3-4.18-2.93 0-4.65 2.2-4.65 4.47 0 .89.34 1.84.77 2.36.08.1.1.19.07.29-.08.32-.25 1.02-.29 1.16-.05.18-.15.22-.34.14-1.28-.6-2.08-2.47-2.08-3.98 0-3.24 2.35-6.21 6.77-6.21 3.56 0 6.32 2.53 6.32 5.92 0 3.54-2.23 6.38-5.32 6.38-1.04 0-2.02-.54-2.36-1.18l-.64 2.45c-.23.89-.86 2-1.28 2.68.96.3 1.98.46 3.04.46 5.52 0 10-4.48 10-10S17.52 2 12 2Z"/></svg>',
-    huaban: '<svg viewBox="0 0 41 42" aria-hidden="true"><g fill="currentColor"><path d="M0.15 11.23C0.15 27.89 13.68 41.4 30.36 41.4H41V30.77C41 14.11 27.47 0.6 10.8 0.6H0.15v10.63Z"/><path d="M17.54 32.48c12.94 0 23.44-10.75 23.44-23.65V0.6h-8.26C19.77 0.6 9.09 11.05 9.09 23.95v8.53h8.45Z"/></g></svg>',
-    xiaohongshu: '<svg viewBox="0 0 24 24" aria-hidden="true"><defs><mask id="novai-xhs-mask"><rect width="24" height="24" fill="#000"/><text x="12" y="16.2" text-anchor="middle" font-size="7.2" font-weight="700" fill="#fff" font-family="-apple-system,BlinkMacSystemFont,PingFang SC,sans-serif">小红书</text></mask></defs><rect width="24" height="24" rx="6" fill="currentColor" mask="url(#novai-xhs-mask)"/></svg>',
   };
   let controlsHost = null;
   let controlsRefs = null;
-  let controlsState = { theme: 'dark', site: 'pinterest', zoomPercent: 100, canGoBack: false, canGoForward: false };
+  let controlsState = { theme: 'dark', zoomPercent: 100, canGoBack: false, canGoForward: false };
   let controlsReadyReported = false;
-
-  function controlsSiteIcon(site) {
-    if (site === 'custom') return ICONS.globe;
-    return ICONS[site] || ICONS.globe;
-  }
 
   function makeControlButton(control, html, label, className) {
     const button = document.createElement('button');
@@ -818,7 +807,7 @@ const { ipcRenderer } = require('electron');
       const host = document.createElement('div');
       host.id = CONTROLS_ID;
       host.setAttribute('data-theme', controlsState.theme === 'light' ? 'light' : 'dark');
-      host.setAttribute('data-visible', 'false');
+      host.setAttribute('data-visible', controlsVisible ? 'true' : 'false');
 
       const left = document.createElement('div');
       left.className = 'novai-controls-group novai-controls-left';
@@ -845,78 +834,13 @@ const { ipcRenderer } = require('electron');
       right.appendChild(refreshBtn);
       right.appendChild(closeBtn);
 
-      const siteWrap = document.createElement('div');
-      siteWrap.className = 'novai-controls-site-wrap';
-      const sitePill = document.createElement('div');
-      sitePill.className = 'novai-controls-site';
-      const siteItems = [];
-      SITE_CYCLE.forEach((siteKey) => {
-        const item = document.createElement('button');
-        item.className = 'novai-site-item';
-        item.setAttribute('data-site', siteKey);
-        item.setAttribute('aria-label', SITE_LABELS[siteKey] || siteKey);
-        item.setAttribute('title', SITE_LABELS[siteKey] || siteKey);
-        const icon = document.createElement('span');
-        icon.className = 'novai-site-icon';
-        icon.innerHTML = controlsSiteIcon(siteKey);
-        const label = document.createElement('span');
-        label.className = 'novai-site-label';
-        label.textContent = SITE_LABELS[siteKey] || siteKey;
-        item.appendChild(icon);
-        item.appendChild(label);
-        sitePill.appendChild(item);
-        siteItems.push({ site: siteKey, el: item });
-      });
-      siteWrap.appendChild(sitePill);
-
-      // 底部一行：[←][→] | 站点 pill | [−][%][+][刷新][×]
+      // 底部一行：[←][→] | [−][%][+][刷新][×]
       const bottom = document.createElement('div');
       bottom.className = 'novai-controls-bottom';
       bottom.appendChild(left);
-      bottom.appendChild(siteWrap);
       bottom.appendChild(right);
       host.appendChild(bottom);
 
-      // 自定义站点 URL 输入行（pill 上方弹出）
-      const urlRow = document.createElement('div');
-      urlRow.className = 'novai-controls-url';
-      urlRow.setAttribute('data-open', 'false');
-      const urlLine = document.createElement('div');
-      urlLine.className = 'novai-url-line';
-      const urlInput = document.createElement('input');
-      urlInput.className = 'novai-url-input';
-      urlInput.setAttribute('type', 'text');
-      urlInput.setAttribute('placeholder', '输入网址（https://...）');
-      urlInput.setAttribute('spellcheck', 'false');
-      const urlOpen = document.createElement('button');
-      urlOpen.className = 'novai-url-btn';
-      urlOpen.textContent = '打开';
-      const urlCancel = document.createElement('button');
-      urlCancel.className = 'novai-url-btn';
-      urlCancel.textContent = '取消';
-      const urlError = document.createElement('div');
-      urlError.className = 'novai-url-error';
-      urlError.textContent = '地址无效';
-      urlLine.appendChild(urlInput);
-      urlLine.appendChild(urlOpen);
-      urlLine.appendChild(urlCancel);
-      urlRow.appendChild(urlLine);
-      urlRow.appendChild(urlError);
-      host.appendChild(urlRow);
-      urlOpen.addEventListener('click', function (event) {
-        try { if (event && event.stopPropagation) event.stopPropagation(); if (event && event.preventDefault) event.preventDefault(); } catch (_) {}
-        submitCustomUrl();
-      });
-      urlCancel.addEventListener('click', function (event) {
-        try { if (event && event.stopPropagation) event.stopPropagation(); if (event && event.preventDefault) event.preventDefault(); } catch (_) {}
-        hideCustomUrlInput();
-      });
-      urlInput.addEventListener('keydown', function (event) {
-        try { if (event && event.stopPropagation) event.stopPropagation(); } catch (_) {}
-        if (!event) return;
-        if (event.key === 'Enter') { try { if (event.preventDefault) event.preventDefault(); } catch (_) {} submitCustomUrl(); }
-        else if (event.key === 'Escape') { try { if (event.preventDefault) event.preventDefault(); } catch (_) {} hideCustomUrlInput(); }
-      });
       host.addEventListener('click', handleControlsClick, true);
 
       const parent = document.body || document.documentElement;
@@ -926,10 +850,6 @@ const { ipcRenderer } = require('electron');
         back: backBtn,
         forward: forwardBtn,
         zoomValue: zoomValue,
-        siteItems: siteItems,
-        urlRow: urlRow,
-        urlInput: urlInput,
-        urlError: urlError,
       };
       applyControlsState({});
       return host;
@@ -938,83 +858,13 @@ const { ipcRenderer } = require('electron');
     }
   }
 
-  let customUrlInputOpen = false;
-
-  function isValidCustomUrl(value) {
-    try {
-      const parsed = new URL(String(value || '').trim());
-      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function showUrlError() {
-    try {
-      if (controlsRefs && controlsRefs.urlError) {
-        controlsRefs.urlError.setAttribute('data-show', 'true');
-        controlsRefs.urlError.textContent = '地址无效';
-      }
-    } catch (_) {}
-  }
-
-  function hideUrlError() {
-    try {
-      if (controlsRefs && controlsRefs.urlError) controlsRefs.urlError.setAttribute('data-show', 'false');
-    } catch (_) {}
-  }
-
-  function showCustomUrlInput() {
-    try {
-      customUrlInputOpen = true;
-      if (!controlsRefs || !controlsRefs.urlRow) return;
-      controlsRefs.urlRow.setAttribute('data-open', 'true');
-      if (controlsRefs.urlRow.style) controlsRefs.urlRow.style.display = 'flex';
-      const preset = (controlsState.recentCustomUrls && controlsState.recentCustomUrls[0]) || '';
-      if (controlsRefs.urlInput) {
-        controlsRefs.urlInput.value = preset;
-        try { controlsRefs.urlInput.focus(); } catch (_) {}
-        setTimeout(function () { try { controlsRefs.urlInput.focus(); } catch (_) {} }, 30);
-      }
-      hideUrlError();
-      clearControlsHideTimer();
-      setControlsVisible(true);
-    } catch (_) {}
-  }
-
-  function hideCustomUrlInput() {
-    try {
-      customUrlInputOpen = false;
-      if (!controlsRefs || !controlsRefs.urlRow) return;
-      controlsRefs.urlRow.setAttribute('data-open', 'false');
-      if (controlsRefs.urlRow.style) controlsRefs.urlRow.style.display = 'none';
-      hideUrlError();
-    } catch (_) {}
-  }
-
-  function submitCustomUrl() {
-    try {
-      if (!controlsRefs || !controlsRefs.urlInput) return;
-      const value = String(controlsRefs.urlInput.value || '').trim();
-      if (!isValidCustomUrl(value)) {
-        showUrlError();
-        return;
-      }
-      hideUrlError();
-      hideCustomUrlInput();
-      ipcRenderer.send('novai:guest-control', { action: 'site', site: 'custom', url: value });
-    } catch (_) {}
-  }
-
   function applyControlsState(next) {
     try {
       if (next && typeof next === 'object') {
         if (next.theme) controlsState.theme = next.theme === 'light' ? 'light' : 'dark';
-        if (next.site) controlsState.site = String(next.site);
         if (typeof next.zoomPercent === 'number') controlsState.zoomPercent = next.zoomPercent;
         if (typeof next.canGoBack === 'boolean') controlsState.canGoBack = next.canGoBack;
         if (typeof next.canGoForward === 'boolean') controlsState.canGoForward = next.canGoForward;
-        if (Array.isArray(next.recentCustomUrls)) controlsState.recentCustomUrls = next.recentCustomUrls.slice(0, 5);
       }
       if (!controlsHost) return;
       controlsHost.setAttribute('data-theme', controlsState.theme === 'light' ? 'light' : 'dark');
@@ -1030,36 +880,12 @@ const { ipcRenderer } = require('electron');
         const label = controlsRefs.zoomValue.querySelector ? controlsRefs.zoomValue.querySelector('.novai-zoom-value') : null;
         if (label) label.textContent = Math.round(controlsState.zoomPercent) + '%';
       }
-      if (controlsRefs.siteItems) {
-        controlsRefs.siteItems.forEach((entry) => {
-          try {
-            const active = entry.site === controlsState.site;
-            entry.el.setAttribute('data-active', active ? 'true' : 'false');
-            if (entry.el.classList && entry.el.classList.toggle) entry.el.classList.toggle('novai-site-active', active);
-            else if (active) entry.el.className = String(entry.el.className || '') + ' novai-site-active';
-          } catch (_) {}
-        });
-      }
     } catch (_) {}
   }
 
   function handleControlsClick(event) {
     try {
       const target = event && event.target;
-      const siteItem = target && target.closest ? target.closest('[data-site]') : null;
-      if (siteItem) {
-        const site = siteItem.getAttribute ? String(siteItem.getAttribute('data-site') || '') : '';
-        if (!site) return;
-        if (typeof event.stopPropagation === 'function') event.stopPropagation();
-        if (typeof event.preventDefault === 'function') event.preventDefault();
-        if (site === 'custom') {
-          showCustomUrlInput();
-          return;
-        }
-        hideCustomUrlInput();
-        ipcRenderer.send('novai:guest-control', { action: 'site', site: site });
-        return;
-      }
       const button = target && target.closest ? target.closest('[data-novai-control]') : null;
       if (!button) return;
       const control = button.getAttribute ? String(button.getAttribute('data-novai-control') || '') : '';
@@ -1100,7 +926,6 @@ const { ipcRenderer } = require('electron');
     clearControlsHideTimer();
     controlsHideTimer = setTimeout(function () {
       controlsHideTimer = null;
-      if (customUrlInputOpen) return;  // 正在输入 URL 时不要收起
       setControlsVisible(false);
     }, CONTROLS_HIDE_DELAY);
   }
@@ -1108,7 +933,7 @@ const { ipcRenderer } = require('electron');
   function pointerInControls(x, y) {
     try {
       if (!controlsHost || !controlsHost.querySelectorAll) return false;
-      const nodes = controlsHost.querySelectorAll('.novai-controls-group, .novai-controls-site-wrap, .novai-controls-url');
+      const nodes = controlsHost.querySelectorAll('.novai-controls-group');
       for (let index = 0; index < nodes.length; index += 1) {
         const rect = nodes[index].getBoundingClientRect && nodes[index].getBoundingClientRect();
         if (rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return true;
@@ -1208,15 +1033,33 @@ const { ipcRenderer } = require('electron');
     document.addEventListener('DOMContentLoaded', ensureControls, { once: true });
   }
   setTimeout(ensureControls, 300);
-  // 站点是 SPA 时可能整体重写 body：定时检查一次，丢了就补回。
-  // 纯 Node 测试环境不要挂 interval（会阻止 node 退出）。
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('load', ensureControls, { once: true });
+  }
+  // 站点在 SPA 下可能整体换掉 body，也可能清空 body.innerHTML：监听 <html> 和当前 body 的直接子节点
+  // （不做 subtree），只有发现 #novai-source-controls 不在了才补一次；重建沿用当前显示状态，避免闪一下。
+  // 纯 Node 测试环境不挂 MutationObserver。
   const IS_PLAIN_NODE = typeof process !== 'undefined' && process && process.versions && !process.versions.electron;
-  if (!IS_PLAIN_NODE && typeof setInterval === 'function') {
-    setInterval(function () {
-      try {
-        if (!document.getElementById || !document.getElementById(CONTROLS_ID)) ensureControls();
-      } catch (_) {}
-    }, 1500);
+  let observedBody = null;
+  function observeControlsHosts(observer) {
+    try {
+      if (document.documentElement) observer.observe(document.documentElement, { childList: true });
+      if (document.body && document.body !== observedBody) {
+        observedBody = document.body;
+        observer.observe(observedBody, { childList: true });
+      }
+    } catch (_) {}
+  }
+  if (!IS_PLAIN_NODE && typeof MutationObserver === 'function' && document.documentElement) {
+    try {
+      const controlsObserver = new MutationObserver(function () {
+        try {
+          observeControlsHosts(controlsObserver);
+          if (!document.getElementById || !document.getElementById(CONTROLS_ID)) ensureControls();
+        } catch (_) {}
+      });
+      observeControlsHosts(controlsObserver);
+    } catch (_) {}
   }
   document.addEventListener('pointerdown', handlePointer, true);
   document.addEventListener('mousedown', handlePointer, true);

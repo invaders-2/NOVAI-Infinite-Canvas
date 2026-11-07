@@ -29,6 +29,21 @@ type Drag =
   | { kind: "asset"; id: string; sx: number; sy: number; orig: { x: number; y: number }; moved: boolean };
 
 const dragPath = (a: { x: number; y: number }, b: { x: number; y: number }) => { const dx = Math.max(60, Math.abs(b.x - a.x) * .5); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`; };
+/** 按几何重写受影响的边（pos 传拖动态；不传则用文档里的位置还原） */
+function paintEdges(doc: CanvasDoc, ids: Set<string>, pos?: Map<string, { x: number; y: number }>) {
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+  const svg = document.getElementById("edges");
+  for (const e of doc.edges) {
+    if (!ids.has(e.from) && !ids.has(e.to)) continue;
+    const a0 = byId.get(e.from), b0 = byId.get(e.to); if (!a0 || !b0) continue;
+    const a = pos?.get(e.from) || a0, b = pos?.get(e.to) || b0;
+    const p1 = { x: a.x + a0.w, y: a.y + 24 + a0.h / 2 }, p2 = { x: b.x, y: b.y + 24 + b0.h / 2 }, d = dragPath(p1, p2);
+    svg?.querySelectorAll(`path[data-edge="${CSS.escape(e.id)}"]`).forEach((el) => el.setAttribute("d", d));
+    const gradient = svg?.querySelector(`#${CSS.escape("cn-eg-" + e.id)}`);
+    gradient?.setAttribute("x1", String(p1.x)); gradient?.setAttribute("y1", String(p1.y)); gradient?.setAttribute("x2", String(p2.x)); gradient?.setAttribute("y2", String(p2.y));
+    svg?.querySelector(`g[data-edge-badge="${CSS.escape(e.id)}"]`)?.setAttribute("transform", `translate(${p2.x - 14},${p2.y})`);
+  }
+}
 /** 拖动中只更新合成层与 SVG，松手后才提交 React 文档，避免每个 pointermove 全树重渲染。 */
 function paintNodeDrag(doc: CanvasDoc, pos: Map<string, { x: number; y: number }>) {
   const byId = new Map(doc.nodes.map((n) => [n.id, n]));
@@ -37,20 +52,12 @@ function paintNodeDrag(doc: CanvasDoc, pos: Map<string, { x: number; y: number }
     const el = document.querySelector<HTMLElement>(`.node[data-id="${CSS.escape(id)}"]`);
     if (el) el.style.transform = `translate(${p.x - n.x}px,${p.y - n.y}px)`;
   }
-  const svg = document.getElementById("edges");
-  for (const e of doc.edges) {
-    if (!pos.has(e.from) && !pos.has(e.to)) continue;
-    const a0 = byId.get(e.from), b0 = byId.get(e.to); if (!a0 || !b0) continue;
-    const a = pos.get(e.from) || a0, b = pos.get(e.to) || b0;
-    const p1 = { x: a.x + a0.w, y: a.y + 24 + a0.h / 2 }, p2 = { x: b.x, y: b.y + 24 + b0.h / 2 }, d = dragPath(p1, p2);
-    svg?.querySelectorAll(`path[data-edge="${CSS.escape(e.id)}"]`).forEach((el) => el.setAttribute("d", d));
-    const gradient = svg?.querySelector(`#${CSS.escape("cn-eg-" + e.id)}`);
-    gradient?.setAttribute("x1", String(p1.x)); gradient?.setAttribute("y1", String(p1.y)); gradient?.setAttribute("x2", String(p2.x)); gradient?.setAttribute("y2", String(p2.y));
-    svg?.querySelector(`g[data-edge-badge="${CSS.escape(e.id)}"]`)?.setAttribute("transform", `translate(${p2.x - 14},${p2.y})`);
-  }
+  paintEdges(doc, new Set(pos.keys()), pos);
 }
-function clearNodeDrag(pos: Map<string, { x: number; y: number }>) {
+/** 节点回原位时边也要一起还原，否则冻结/落库后线还停在拖到的位置 */
+function clearNodeDrag(doc: CanvasDoc, pos: Map<string, { x: number; y: number }>) {
   for (const id of pos.keys()) { const el = document.querySelector<HTMLElement>(`.node[data-id="${CSS.escape(id)}"]`); if (el) el.style.transform = ""; }
+  paintEdges(doc, new Set(pos.keys()));
 }
 let trackpadUntil = 0;
 /** 触控板双指滑动的 deltaY 通常只有个位数到几十、deltaMode 也是 0，只有真鼠标滚轮才是一个数量级以上的台阶（老画布 ReactCanvas 用同一判据） */
@@ -309,7 +316,7 @@ export function Viewport() {
       const overPanel = overAgentPanel(e.clientX, e.clientY);
       if (overPanel !== !!d.frozen) {
         d.frozen = overPanel;
-        if (overPanel) { if (d.pos) clearNodeDrag(d.pos); setGuides([]); }
+        if (overPanel) { if (d.pos) clearNodeDrag(st.doc, d.pos); setGuides([]); }
       }
       if (overPanel) {
         const picked = [...st.ui.sel].filter((id) => !!store.node(id));
@@ -374,7 +381,7 @@ export function Viewport() {
     if (d.kind === "node") { markComposerDrop(null); clearNodeGhost(); }
     if (d.kind === "node" && d.moved && assetOverRef.current) {
       const id = d.orig[0].id; const folder = assetFolderRef.current; const folderId = assetFolderIdRef.current;
-      if (d.pos) clearNodeDrag(d.pos);
+      if (d.pos) clearNodeDrag(st.doc, d.pos);
       const orig = new Map(d.orig.map((o) => [o.id, o]));
       store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => { const o = orig.get(n.id); return o ? { ...n, x: o.x, y: o.y } : n; }) }), { history: false });
       setGuides([]); store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
@@ -382,7 +389,7 @@ export function Viewport() {
     }
     // 拖到助手面板松手：节点一律回到原处；落点在内嵌输入框里才变成引用胶囊（单个 / 多选 / 分组 / 堆叠都按节点 id 引用）
     if (d.kind === "node" && d.moved && d.frozen) {
-      if (d.pos) clearNodeDrag(d.pos);
+      if (d.pos) clearNodeDrag(st.doc, d.pos);
       clearAssetDrop(); setGuides([]); store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null); markCell(null);
       if (overComposer(e.clientX, e.clientY)) {
         const picked = [...st.ui.sel].filter((id) => !!store.node(id));
@@ -393,14 +400,14 @@ export function Viewport() {
     // ⌥ 拖动：原节点留在原处，副本落在拖到的位置
     if (d.kind === "node" && d.moved && d.copy) {
       clearAssetDrop();
-      if (d.pos) clearNodeDrag(d.pos);
+      if (d.pos) clearNodeDrag(st.doc, d.pos);
       setGuides([]); store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
       duplicateDrag(store, d.orig, d.pos, d.copy === "edges");
       return;
     }
     if (d.kind === "node" && d.moved) {
       clearAssetDrop();
-      if (d.pos) { clearNodeDrag(d.pos); store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (d.pos!.has(n.id) ? { ...n, ...d.pos!.get(n.id)! } : n)) }), { history: false }); }
+      if (d.pos) { clearNodeDrag(st.doc, d.pos); store.mutate((doc) => ({ ...doc, nodes: doc.nodes.map((n) => (d.pos!.has(n.id) ? { ...n, ...d.pos!.get(n.id)! } : n)) }), { history: false }); }
       setGuides([]); store.setUI({ dragging: false }); dropRef.current = null; setDropStack(null);
       const cell = cellUnder(e.clientX, e.clientY, d.orig); markCell(null);
       if (cell && dropImageOnCell(store, cell.dataset.mcell!, d.orig[0].id, cell.dataset.multi === "1")) { const o = d.orig[0]; store.updateNode(o.id, (n) => ({ ...n, x: o.x, y: o.y })); return; }

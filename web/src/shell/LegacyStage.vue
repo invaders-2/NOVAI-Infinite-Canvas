@@ -3,7 +3,7 @@
 // 首次进入才加载，之后常驻只切显示，和旧外壳一样保留各页状态。
 import { watch, onMounted, onBeforeUnmount, reactive, nextTick } from 'vue';
 import { state, PAGES } from '../lib/store.js';
-import { syncFrame, frameEl, closeCanvas } from '../lib/bridge.js';
+import { syncFrame, frameEl, closeCanvas, syncCanvasChrome } from '../lib/bridge.js';
 import { translateFrame } from '../lib/autoTranslate.js';
 
 const legacy = PAGES.filter(p => p.legacy || p.frame);
@@ -31,7 +31,7 @@ function onLoad(id) {
         state.canvasOpen = true;
     }
     syncFrame(el);
-    if (id === 'canvas') syncInset();
+    if (id === 'canvas') { syncInset(); syncCanvasChrome(); }
     // 首页 home.html 自己没有接 i18n：英文模式下用外壳的自动翻译接管（同源 iframe）
     if (id === 'home' && el && el.getAttribute('src')) translateFrame(el);
 }
@@ -59,9 +59,9 @@ function syncInset() {
     }
     try { el.contentDocument && el.contentDocument.documentElement.style.setProperty('--studio-sidebar-inset', (inset / s) + 'px'); } catch (e) {}
 }
-watch(() => [state.pinned, state.canvasOpen, state.active], () => nextTick(() => setTimeout(syncInset, 320)));
+watch(() => [state.pinned, state.canvasOpen, state.active], () => nextTick(() => setTimeout(() => { syncInset(); syncCanvasChrome(); }, 320)));
 // 进出画布编辑态：导航在 180ms 内收起/展开，立刻改一次让画布控件跟手，过渡结束再对一次
-watch(canvasEditorOpen, () => nextTick(() => { syncInset(); setTimeout(syncInset, 240); }));
+watch(canvasEditorOpen, () => nextTick(() => { syncInset(); syncCanvasChrome(); setTimeout(() => { syncInset(); syncCanvasChrome(); }, 240); }));
 // 旧页面（首页、素材库）会直接改 frame-canvas 的 src 打开画布：一改就切到「编辑器」状态并显示骨架
 function watchCanvasSrc() {
     const el = frameEl('canvas');

@@ -21,6 +21,33 @@ function replyViewport(source) {
     } catch (e) {}
 }
 
+// 画布编辑器里外壳没有标题栏，画布要知道顶部让出多少：mac 让开原生红绿灯，Windows 让开右上悬浮三键
+// Windows 下发 112 = 三键组 104 + 组间距 8：画布侧 #tr 是 right:max(16px, calc(16px + var))，会自己再加 16 的窗口边距，
+// 合起来正好 128 = 16 + 104 + 8，画布五颗的右边缘落在三键左边 8px
+// top 是画布工具行的上边距绝对值：mac 红绿灯中心在窗口顶约 20px，工具行 40 高要落在 top 6（中心 26）才和首页标题栏那排一致；
+// Windows 让开右上三键，保持 16（三键中心 y=36 与画布工具行同一水平线）
+function canvasChromeInsets() {
+    if (state.desktop === 'windows') return { left: 0, right: 112, top: 16 };
+    if (state.desktop === 'mac') return { left: 84, right: 0, top: 6 };
+    return { left: 0, right: 0, top: 16 };
+}
+function replyCanvasChrome(source) {
+    const target = source && typeof source.postMessage === 'function' ? source : null;
+    if (!target) return;
+    // 只在画布编辑器打开时下发；回到列表页不用清
+    if (!(state.active === 'canvas' && state.canvasOpen)) return;
+    const box = canvasChromeInsets();
+    try {
+        target.postMessage({ type: 'novai:canvas-chrome', left: box.left, right: box.right, top: box.top }, '*');
+    } catch (e) {}
+}
+
+// 画布 iframe 挂载可能晚于外壳：onLoad 之后和进出编辑态时主动推一次
+export function syncCanvasChrome() {
+    const el = frameEl('canvas');
+    if (el) replyCanvasChrome(el.contentWindow);
+}
+
 export function syncFrame(frame) {
     const theme = window.StudioTheme ? window.StudioTheme.get() : state.theme;
     post(frame, { type: 'studio-theme', theme });
@@ -107,6 +134,11 @@ function onMessage(event) {
     }
     if (d.type === 'novai:request-viewport') {
         replyViewport(event.source);
+        return;
+    }
+    // 画布首次挂载后要顶部安全区（mac 红绿灯 / Windows 右上三键）
+    if (d.type === 'novai:canvas-chrome-request') {
+        replyCanvasChrome(event.source);
         return;
     }
     forwardStudioApiChange(d);

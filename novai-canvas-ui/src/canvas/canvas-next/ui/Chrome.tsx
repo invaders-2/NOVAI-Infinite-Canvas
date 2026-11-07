@@ -68,15 +68,17 @@ export function Chrome() {
       {ctl.host.badge ? <span className="badge-preview">{ctl.host.badge}</span> : null}
     </div>
     <div id="tr" className="float">
-      <div className="cap"><button id="extBtn" className="sq tipB" data-tip="扩展" aria-label="扩展" onClick={(e) => openPop(e.currentTarget, (close) => <>
+      <button id="extBtn" className="ib tipB" data-tip="扩展" aria-label="扩展" onClick={(e) => openPop(e.currentTarget, (close) => <>
         <div className="mh">扩展</div>
         <button className="mi" data-ext="mcp" onClick={() => { close(); if (ctl.host.openMcpCenter) ctl.host.openMcpCenter(); else store.toast("MCP 中心要在桌面版里打开"); }}><Icon name="plug" size="s" />MCP 中心<span className="k">已接入的工具</span></button>
         <button className="mi" data-ext="models" onClick={() => { close(); if (ctl.host.openModelSettings) ctl.host.openModelSettings(); else store.toast("模型与 API 要在桌面版里打开"); }}><Icon name="settings" size="s" />模型与 API</button>
-      </>, "down", "right")}><Icon name="plug" /></button></div>
-      {ctl.host.features?.organization === false ? null : <div className="cap"><button id="orgBtn" className="sq tipB" data-tip="社区 · 组织治理" aria-label="社区" onClick={() => { if (ctl.host.openApp) ctl.host.openApp("organization"); else store.toast("社区 / 组织治理要在桌面版里打开"); }}><Icon name="share" /></button></div>}
-      <div className="cap"><button id="usage" className="tipB" data-tip="本画布模型调用" onClick={(e) => { const c: Record<string, number> = { image: 0, video: 0, text: 0, audio: 0 }; runs.forEach((r) => (c[r.type] = (c[r.type] || 0) + 1)); openPop(e.currentTarget, () => <><div className="mh">本画布模型调用</div>{(["image", "video", "text", "audio"] as GenKind[]).map((k) => <div key={k} className="row"><span>{TYPE_LABEL[k]}</span><b className="tnum">{c[k]} 次</b></div>)}<div className="msep" /><div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>按模型服务商的用量计费</span></div></>, "down", "right"); }}><Icon name="bolt" size="s" /><span className="tnum">{runs.length}</span></button></div>
-      {peers.length ? <div className="cap peers tipB" data-tip={`${peers.length + 1} 人在线`}>{peers.slice(0, 3).map((p, i) => <span key={p.id} className="pav">{(p.name || "协")[0]}{i === 2 && peers.length > 3 ? "+" : ""}</span>)}<span className="pav me">{ctl.host.user?.initial || "我"}</span></div> : null}
-      {ctl.host.features?.share === false ? null : <div className="cap"><AnimateIcon asChild><button id="shareBtn" className="sq tipB" data-tip="分享画布" onClick={(e) => ctl.host.openShare ? ctl.host.openShare() : shareMenu(ctl, e.currentTarget)}><Icon name="share" /></button></AnimateIcon></div>}
+      </>, "down", "right")}><Icon name="plug" /></button>
+      {ctl.host.features?.organization === false ? null : <button id="orgBtn" className="ib tipB" data-tip="社区 · 组织治理" aria-label="社区" onClick={() => { if (ctl.host.openApp) ctl.host.openApp("organization"); else store.toast("社区 / 组织治理要在桌面版里打开"); }}><Icon name="share" /></button>}
+      <button id="usage" className="ib tipB" data-tip="本画布模型调用" onClick={(e) => { const c: Record<string, number> = { image: 0, video: 0, text: 0, audio: 0 }; runs.forEach((r) => (c[r.type] = (c[r.type] || 0) + 1)); openPop(e.currentTarget, () => <><div className="mh">本画布模型调用</div>{(["image", "video", "text", "audio"] as GenKind[]).map((k) => <div key={k} className="row"><span>{TYPE_LABEL[k]}</span><b className="tnum">{c[k]} 次</b></div>)}<div className="msep" /><div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>按模型服务商的用量计费</span></div></>, "down", "right"); }}><Icon name="bolt" /><span className="tnum">{runs.length}</span></button>
+      {peers.length ? <div className="peers tipB" data-tip={`${peers.length + 1} 人在线`}>{peers.slice(0, 3).map((p, i) => <span key={p.id} className="pav">{(p.name || "协")[0]}{i === 2 && peers.length > 3 ? "+" : ""}</span>)}<span className="pav me">{ctl.host.user?.initial || "我"}</span></div> : null}
+      {ctl.host.features?.share === false ? null : <AnimateIcon asChild><button id="shareBtn" className="ib tipB" data-tip="分享画布" onClick={(e) => ctl.host.openShare ? ctl.host.openShare() : shareMenu(ctl, e.currentTarget)}><Icon name="share" /></button></AnimateIcon>}
+      <button id="themeBtn" className="ib tipB" data-tip={ui.theme === "light" ? "深色模式" : "浅色模式"} aria-label="切换深浅色" onClick={() => toggleCanvasTheme(ctl)}><Icon name={ui.theme === "light" ? "sun" : "moon"} /></button>
+      <button id="settingsBtn" className="ib tipB" data-tip="设置" aria-label="设置" onClick={() => { let sent = false; try { if (window.parent && window.parent !== window) { window.parent.postMessage({ type: "open-settings", tab: "general" }, location.origin); sent = true; } } catch { /* 跨域父窗时退回提示 */ } if (!sent) store.toast("设置要在桌面版 / 外壳里打开"); }}><Icon name="settings" /></button>
     </div>
     <div id="lb" className="float cap">
       <AnimateIcon asChild animate><button className="ib primary tipR" id="addBtn" data-tip="添加节点" onClick={(e) => addMenu(ctl, e.currentTarget, ctl.center())}><Icon name="plus" /></button></AnimateIcon>
@@ -98,8 +100,7 @@ export function Chrome() {
         <span id="zoomV" className="tnum">{zoomPct}%</span>
         <button className="ib tipT" id="zoomIn" data-tip="放大" aria-label="放大画布" onClick={() => { const r = ctl.rect(); ctl.zoomAt(view.k * 1.2, r.left + r.width / 2, r.top + r.height / 2); }}>+</button>
       </div>
-      <AnimateIcon asChild><button className="ib cap tipT" id="themeBtn" data-tip={ui.theme === "light" ? "浅色模式" : "深色模式"} onClick={(e) => themeMenu(ctl, e.currentTarget)}><Icon name={ui.theme === "light" ? "sun" : "moon"} /></button></AnimateIcon>
-      <button className="ib cap tipT" id="help" data-tip="帮助" onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">帮助</div><button className="mi" onClick={() => { close(); showKeys(ctl.store); }}><Icon name="grid" size="s" />快捷键<span className="k">?</span></button></>, "up")}><Icon name="help" /></button>
+      <button className="ib cap tipT" id="help" data-tip="帮助" onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">帮助</div><button className="mi" onClick={() => { close(); canvasSettings(ctl); }}><Icon name="settings" size="s" />画布设置</button><button className="mi" onClick={() => { close(); showKeys(ctl.store); }}><Icon name="grid" size="s" />快捷键<span className="k">?</span></button></>, "up")}><Icon name="help" /></button>
     </div>
     {showMini ? <Minimap /> : null}
     {ui.sel.size ? <MultiBar /> : null}
@@ -586,17 +587,15 @@ function connectAgentPop(ctl: Ctl, anchor: Element) {
     <div className="msep" /><div className="row" style={{ font: "12px var(--mono)", color: "var(--fg2)" }}><span>{addr}</span><button className="btn" style={{ height: 26 }} onClick={async () => { try { await navigator.clipboard.writeText(addr); ctl.store.toast("已复制连接地址"); } catch { ctl.store.toast("复制失败，请手动选中地址"); } }}>复制</button></div>
   </>, "down", "right");
 }
-function themeMenu(ctl: Ctl, anchor: Element) {
+/**
+ * 右上角那颗太阳 / 月亮：直接在当前深浅色之间切，不弹菜单。
+ * NOVAI 宿主里画布没有自己的偏好，切的是软件主题（写存储 + 通知外壳）。
+ */
+function toggleCanvasTheme(ctl: Ctl) {
   const store = ctl.store;
-  // NOVAI 宿主里画布没有自己的深浅色：点深色 / 浅色改的就是软件主题（写 storage + 通知外壳），"跟随系统"没有意义
-  const follow = followsShellTheme();
-  const opts = follow ? ([["dark", "moon", "深色"], ["light", "sun", "浅色"]] as const) : ([["dark", "moon", "深色"], ["light", "sun", "浅色"], ["system", "monitor", "跟随系统"]] as const);
-  const cur = follow ? store.state.ui.theme : store.state.ui.themePref;
-  const pick = (k: "dark" | "light" | "system") => {
-    if (follow) { requestShellTheme(k === "dark" ? "dark" : "light"); applyTheme(store); return; }
-    store.setUI({ themePref: k }); try { localStorage.setItem("novai-canvas-theme", k); } catch { /* 忽略 */ } applyTheme(store);
-  };
-  openPop(anchor, (close) => <><div className="mh">外观</div>{opts.map(([k, ic, t]) => <button key={k} className={"mi" + (cur === k ? " on" : "")} data-th={k} onClick={() => { close(); pick(k); }}><span className="ic"><Icon name={ic} size="s" /></span><span style={{ flex: 1 }}>{t}</span>{cur === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up");
+  const next = store.state.ui.theme === "light" ? "dark" : "light";
+  if (followsShellTheme()) { requestShellTheme(next); applyTheme(store); return; }
+  store.setUI({ themePref: next }); try { localStorage.setItem("novai-canvas-theme", next); } catch { /* 无存储时只影响本次渲染 */ } applyTheme(store);
 }
 export function toggleCmt(ctl: Ctl) { const on = !ctl.store.state.ui.cmtMode; ctl.store.setUI({ cmtMode: on }); if (on) ctl.store.toast("点击画布放置评论"); }
 

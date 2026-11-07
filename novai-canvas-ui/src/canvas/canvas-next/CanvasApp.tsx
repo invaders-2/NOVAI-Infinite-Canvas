@@ -36,6 +36,22 @@ function Root({ children, inset }: { children: React.ReactNode; inset?: number }
   useEffect(() => { probe(); }, []);
   // 响应式按画布自身宽度：窄 < 760 < 中 < 1280 < 宽
   useEffect(() => { const el = ref.current; if (!el) return; const ro = new ResizeObserver(() => { const w = el.clientWidth; el.dataset.w = w < 760 ? "narrow" : w < 1280 ? "mid" : "wide"; }); ro.observe(el); return () => ro.disconnect(); }, []);
+  // 嵌在外壳 iframe 里：先问一次顶部安全区（mac 红绿灯 / Windows 悬浮三键），外壳回信后写进变量给 #tl / #tr 让位
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data; if (!d || d.type !== "novai:canvas-chrome" || e.source !== parent) return;
+      const el = ref.current; if (!el) return;
+      el.style.setProperty("--cn-chrome-left", (Number(d.left) || 0) + "px");
+      el.style.setProperty("--cn-chrome-right", (Number(d.right) || 0) + "px");
+      // mac 的红绿灯中心比 16px 更高：外壳给多少就用多少，没给按 16
+      el.style.setProperty("--cn-chrome-top", (Number(d.top) || 16) + "px");
+      // 收到这条消息说明画布在桌面外壳里：顶部渐变磨砂只在这个场景出现
+      el.classList.add("has-topfx");
+    };
+    addEventListener("message", onMsg);
+    try { parent.postMessage({ type: "novai:canvas-chrome-request" }, "*"); } catch { /* 普通窗口里 parent 就是自己 */ }
+    return () => removeEventListener("message", onMsg);
+  }, []);
   return <div ref={ref} className={"cn-root" + (inset ? " in-win" : "")} data-theme={theme} data-perf={perf.mode} style={inset ? ({ ["--win-inset" as string]: inset + "px" } as React.CSSProperties) : undefined}>{children}</div>;
 }
 
@@ -99,6 +115,7 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
       <div id="app">
         <div id="stage">
           <Viewport />
+          <div className="cn-topfx" aria-hidden="true"><i /><i /><i /><i /></div>
           <div id="layer"><Chrome /><SelectionUI /><Editors /></div>
           <StackFocusHost />
         </div>
