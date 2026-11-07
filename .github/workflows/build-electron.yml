@@ -107,6 +107,16 @@ jobs:
           echo "backend smoke test OK"
           kill $BE 2>/dev/null || true
 
+      # 包装前对齐版本与更新内容：desktop/package.json 的 version 必须是合法 semver
+      # （VERSION 是显示串，可能写成 2.0.02），static/update-notes.json 也要跟上根文件，
+      # 否则更新完弹窗仍显示旧版本内容。
+      - name: Sync desktop version from VERSION
+        working-directory: desktop
+        run: node scripts/sync-version.js
+
+      - name: Sync update notes to static
+        run: python tools/sync_update_notes.py
+
       - name: Build Electron app
         working-directory: desktop
         run: npx electron-builder ${{ matrix.builder }} --publish never

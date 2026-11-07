@@ -8,6 +8,7 @@ const DISMISSED_KEY = 'novai.update.dismissedVersion';
 /* 更新成功、重启之前写入目标版本；重启后据此弹一次「已更新到 vX.Y.Z」 */
 const UPDATED_TO_KEY = 'novai.updatedTo';
 const PROJECT_URL = 'https://github.com/invaders-2/NOVAI-Infinite-Canvas';
+const RELEASE_LATEST_URL = 'https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/latest';
 
 function readLS(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 function writeLS(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
@@ -167,7 +168,8 @@ export async function startUpdate() {
         try {
             const res = await desktop.downloadAndInstall();
             if (res && res.supported === false) {
-                toast('当前桌面版不支持自动更新，请到发布页下载安装包覆盖安装', { danger: true, icon: 'alert' });
+                console.warn('[update] 桌面更新不可用', res.reason);
+                toast('当前桌面版不支持在线更新，点这里去下载新版本', { danger: true, icon: 'alert', onClick: () => window.open(RELEASE_LATEST_URL, '_blank', 'noopener') });
             } else {
                 toast('已转交桌面版更新，请按弹窗提示操作', { icon: 'arrowup' });
             }

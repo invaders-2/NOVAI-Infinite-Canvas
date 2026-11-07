@@ -1,6 +1,6 @@
 {
   "name": "novai-desktop",
-  "version": "2.0.01",
+  "version": "2.0.2",
   "description": "NOVAI 无限画布 AI 创作平台 — 桌面客户端 (Electron)",
   "main": "main.js",
   "homepage": "https://github.com/invaders-2/NOVAI",
@@ -12,11 +12,12 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
-    "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux",
+    "version:sync": "node scripts/sync-version.js",
+    "pack": "node scripts/sync-version.js && electron-builder --dir",
+    "dist": "node scripts/sync-version.js && electron-builder",
+    "dist:mac": "node scripts/sync-version.js && electron-builder --mac",
+    "dist:win": "node scripts/sync-version.js && electron-builder --win",
+    "dist:linux": "node scripts/sync-version.js && electron-builder --linux",
     "dist:publish": "electron-builder --publish always"
   },
   "dependencies": {

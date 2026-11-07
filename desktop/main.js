@@ -2416,7 +2416,7 @@ function showUpdateInstallPrompt() {
       cancelId: 1,
     }).then(({ response }) => {
       installPromptOpen = false;
-      if (response === 0) shell.openExternal('https://gitee.com/invaders/novai/releases');
+      if (response === 0) shell.openExternal('https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/latest');
     }).catch(() => { installPromptOpen = false; });
     return;
   }
@@ -2521,7 +2521,7 @@ function setupAutoUpdate() {
   try {
     autoUpdater = autoUpdater || require('electron-updater').autoUpdater;
     if (!autoUpdater) return;
-  } catch (_) { return; }
+  } catch (err) { clog('updater', 'electron-updater 初始化失败: ' + (err && err.message || err)); return; }
   autoUpdater.autoDownload = false;
   updateStage = 'checking';
   // 测试版（版本号含 -，如 1.0.112-beta.1）允许接收 prerelease 更新；正式版只看正式 Release。

@@ -138,7 +138,7 @@ const noResponse = () => Promise.resolve({ ok: false, status: 404, json: async (
     }, () => { throw new Error('桌面模式下不应发任何 fetch'); });
     await unsupportedMod.startUpdate();
     ok(unsupportedMod.calls.length === 0, '桌面版不支持时也不回落到后端自更新');
-    ok(unsupportedMod.toasts.length === 1 && unsupportedMod.toasts[0].text.includes('不支持自动更新'), '桌面版不支持时明确提示手动覆盖安装');
+    ok(unsupportedMod.toasts.length === 1 && unsupportedMod.toasts[0].text.includes('不支持在线更新') && typeof unsupportedMod.toasts[0].opts.onClick === 'function', '桌面版不支持时提示可点下载新版本');
 
     console.log('[5] update.js：浏览器版保持原逻辑');
     const browserMod = loadUpdateModule(null, (url) => (url === '/api/update-from-github'
