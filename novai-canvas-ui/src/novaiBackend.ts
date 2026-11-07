@@ -1,7 +1,7 @@
 import { hostRoot } from "./novaiBridgeRoot";
 import type { CanvasBackend, ChatMessage, EditRequest, GenEvent, GenRequest, GenResult, LoadedDoc, MattingModelStatus, SavedDoc, UpscaleResult, UpscaleRuntimeStatus } from "./canvas/canvas-next/backend/types";
 import { GenError } from "./canvas/canvas-next/backend/types";
-import { defaultParams, qualityForRequest, ratioWH, specFor, thinkingForRequest, withGen, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./canvas/canvas-next/model";
+import { defaultParams, outputFormatForRequest, qualityForRequest, ratioWH, specFor, thinkingForRequest, withGen, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./canvas/canvas-next/model";
 import { emptyDoc, hasContent, readDoc, sanitizeDoc, type CanvasDoc, type CanvasNode, type NodeKind } from "./canvas/react-canvas/reactCanvasStore";
 import { queueLocalMirror } from "./canvas/canvas-next/localMirror";
 import { clampImageSize, indexModelCaps, mergeCapsReferenceCapability, modelCapsKey, modelCapsUi, type ModelCapsItem } from "./canvas/canvas-next/modelCaps";
@@ -268,6 +268,7 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
   // 质量档 / 先思考：只有用户在面板上明确选了才下发；不传 = 跟随上游默认
   const quality = qualityForRequest(params.quality);
   const thinking = thinkingForRequest(params.thinking);
+  const outputFormat = outputFormatForRequest(params.outputFormat);
   // Midjourney 的版本 / HD 是独立字段（后端 OnlineImageRequest 只认这两个，速度与风格化走提示词 flag）
   const isMidjourneyModel = !!req.model?.mj;
   const mjVersion = isMidjourneyModel ? String(params.mj?.version || "").trim() : "";
@@ -281,6 +282,7 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
     reference_images: references,
     ...(quality ? { quality } : {}),
     ...(thinking === undefined ? {} : { thinking_mode: thinking }),
+    ...(outputFormat ? { output_format: outputFormat } : {}),
     ...(mjVersion ? { midjourney_version: mjVersion } : {}),
     ...(mjHd ? { midjourney_hd: true } : {}),
   };

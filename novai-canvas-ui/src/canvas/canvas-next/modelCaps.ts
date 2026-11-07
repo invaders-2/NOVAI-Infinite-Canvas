@@ -26,6 +26,8 @@ export type ModelCapsItem = {
   qualities?: unknown;
   /** 先思考开关（目前只有 wan2.7-image 族会声明 true）；没声明 = 不支持 */
   thinking_mode?: unknown;
+  /** 输出格式（png / jpeg / webp / gif / svg）；没声明 = 后端没给这个能力 */
+  output_formats?: unknown;
   /** 只返回提示词、不产视频（如 MiniMax-H3-Context-IR）：true 时面板不给视频参数 */
   prompt_only?: unknown;
   /** Midjourney 专属参数：{ versions, speeds, hd }（后端只给这几个数组） */
@@ -138,6 +140,8 @@ export function modelCapsUi(kind: "image" | "video", item: ModelCapsItem | null 
     // 质量档 / 先思考：后端声明什么就是什么（空数组 / 缺字段 = 不给入口，前端不按模型名猜）
     if (Array.isArray(item.qualities)) ui.qualities = strings(item.qualities);
     if (item.thinking_mode === true) ui.thinkingMode = true;
+    // 输出格式：空数组也保留（后端明确没有动图/矢量能力），面板据此不给入口
+    if (Array.isArray(item.output_formats)) ui.outputFormats = [...new Set(strings(item.output_formats).map((value) => value.toLowerCase()))];
   } else {
     if (Array.isArray(item.resolutions)) ui.res = resolutions(item.resolutions, kind);
     if (Array.isArray(item.durations)) {

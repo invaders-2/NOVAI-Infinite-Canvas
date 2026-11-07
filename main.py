@@ -4076,6 +4076,9 @@ class OnlineImageRequest(BaseModel):
     # 思考模式（仅 APIMart 的 wan2.7-image / wan2.7-image-pro 文档确证支持，布尔两态）：
     # None = 不发、跟随上游默认 true；true/false 才显式下发。其它模型/供应商忽略。
     thinking_mode: Optional[bool] = None
+    # 输出格式（GPT Image 2.6 家族支持 png/jpeg/webp/gif/svg）：'' = 平台默认静态图；
+    # 只有能力表声明 output_formats 的模型才接受，校验见 image_output_format_fields。
+    output_format: str = ""
     reference_images: List[AIReference] = []
 
 class ImageTaskQueryRequest(BaseModel):
@@ -6674,7 +6677,7 @@ def looks_like_generated_image_url(value):
     if text.startswith("data:image/"):
         return True
     clean = text.split("?", 1)[0].split("#", 1)[0].lower()
-    return text.startswith(("http://", "https://", "/output/", "/assets/")) and re.search(r"\.(png|jpe?g|webp|gif|bmp|tiff?)$", clean)
+    return text.startswith(("http://", "https://", "/output/", "/assets/")) and re.search(r"\.(png|jpe?g|webp|gif|svg|bmp|tiff?)$", clean)
 
 def extract_image_flexible(value, depth=0):
     if depth > 8 or value is None:
@@ -12840,12 +12843,9 @@ async def save_ai_image_to_output(image_data, prefix="online_", category="output
     filename = f"{prefix}{uuid.uuid4().hex[:10]}.png"
     path = output_path_for(filename, category)
     if image_data["type"] == "b64":
-        mime_type = str(image_data.get("mime_type") or "").lower()
-        if "jpeg" in mime_type or "jpg" in mime_type:
-            filename = filename[:-4] + ".jpg"
-            path = output_path_for(filename, category)
-        elif "webp" in mime_type:
-            filename = filename[:-4] + ".webp"
+        extension = image_output_extension(str(image_data.get("mime_type") or ""))
+        if extension != ".png":
+            filename = filename[:-4] + extension
             path = output_path_for(filename, category)
         with open(path, "wb") as f:
             f.write(base64.b64decode(image_data["value"]))
@@ -12860,11 +12860,10 @@ async def save_ai_image_to_output(image_data, prefix="online_", category="output
             response = await client.get(value)
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "")
-            if "jpeg" in content_type or "jpg" in content_type:
-                filename = filename[:-4] + ".jpg"
-                path = output_path_for(filename, category)
-            elif "webp" in content_type:
-                filename = filename[:-4] + ".webp"
+            # Content-Type 缺失或 octet-stream 时按 URL 扩展名兜底，别把 svg/gif 存成 .png
+            extension = image_output_extension(content_type, value)
+            if extension != ".png":
+                filename = filename[:-4] + extension
                 path = output_path_for(filename, category)
             with open(path, "wb") as f:
                 f.write(response.content)
@@ -13817,6 +13816,55 @@ def _merge_caps_table(table, override):
 def apimart_image_caps_for(provider, model=""):
     """图片能力表 + provider 的 model_caps_overrides（生成与 /api/model-caps 用同一份）。"""
     return _merge_caps_table(apimart_image_model_caps(model), _caps_override_for(provider, model, "image"))
+
+
+# 输出格式白名单：静态图不发字段（''），其余按下发值原样进请求体。
+IMAGE_OUTPUT_FORMAT_VALUES = ("png", "jpeg", "webp", "gif", "svg")
+IMAGE_OUTPUT_FORMAT_STATIC_VALUES = ("", "static", "静态图")
+
+
+def normalize_image_output_format(value):
+    """输出格式入参归一：空/静态图/未登记的值 -> ""；jpg 按 jpeg 处理，其余小写原样。"""
+    text = str(value or "").strip().lower()
+    if text in IMAGE_OUTPUT_FORMAT_STATIC_VALUES:
+        return ""
+    if text == "jpg":
+        return "jpeg"
+    return text if text in IMAGE_OUTPUT_FORMAT_VALUES else ""
+
+
+def image_output_format_fields(model, caps, output_format):
+    """输出格式请求字段：空 = 不发；能力表没声明或不在白名单 -> 400 并列出可选项。"""
+    fmt = normalize_image_output_format(output_format)
+    if not fmt:
+        return {}
+    allowed = [str(item).strip().lower() for item in ((caps or {}).get("output_formats") or ()) if str(item).strip()]
+    if fmt not in allowed:
+        options = " / ".join(allowed)
+        detail = (f"该模型不支持输出格式 {fmt}；可选：{options}" if options
+                  else f"{model or '该模型'} 不支持选择输出格式，请改用默认输出。")
+        raise HTTPException(status_code=400, detail=detail)
+    return {"output_format": fmt}
+
+
+def image_output_extension(mime_type="", url=""):
+    """落盘扩展名：MIME 优先，缺失/octet-stream 时按 URL 扩展名兜底，都不认识回退 .png。"""
+    mime = str(mime_type or "").strip().lower()
+    if "svg" in mime:
+        return ".svg"
+    if "gif" in mime:
+        return ".gif"
+    if "jpeg" in mime or "jpg" in mime:
+        return ".jpg"
+    if "webp" in mime:
+        return ".webp"
+    if "png" in mime:
+        return ".png"
+    path = str(url or "").split("?", 1)[0].split("#", 1)[0].lower()
+    extension = os.path.splitext(path)[1]
+    if extension in {".svg", ".gif", ".jpg", ".jpeg", ".webp"}:
+        return ".jpg" if extension in {".jpg", ".jpeg"} else extension
+    return ".png"
 
 
 def apimart_video_caps_for(provider, model=""):
@@ -16150,11 +16198,11 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {**{"videos": local_urls, "task_id": task_id, "raw": result}, **build_canvas_meta(local_urls, payload, "video")}
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None):
+async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format=""):
     async with provider_slot(get_api_provider(provider_id)):
-        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out, n, midjourney_version, midjourney_hd, thinking_mode)
+        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out, n, midjourney_version, midjourney_hd, thinking_mode, output_format)
 
-async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None):
+async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format=""):
     provider = get_api_provider(provider_id)
     if str(model or "").strip().lower().startswith("pixverse-image"):
         # 拍我AI 的图片模版生成要 template_id + 参考图 id（专属接口 /openapi/v2/image/template/generate），
@@ -16317,6 +16365,8 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
                 body["resolution"] = resolution
             if apimart_caps.get("send_n", True):
                 body["n"] = max(1, min(int(n or 1), int(apimart_caps.get("n_max") or 1)))
+            body.update(image_output_format_fields(model, apimart_caps, output_format))
+            # 透明背景必须 png：原生透明下覆盖用户选的输出格式
             if native_background:
                 body["background"] = "transparent"
                 body["output_format"] = "png"
@@ -22450,6 +22500,15 @@ def http_error_detail(exc):
 async def build_online_image_result(payload: OnlineImageRequest):
     provider = get_api_provider(payload.provider_id)
     model = preferred_image_model(provider, payload.model)
+    # 输出格式：静态图下发 ''（不发字段）；非 APIMart 平台没有这个能力，直接拒绝而不是悄悄忽略
+    output_format = normalize_image_output_format(getattr(payload, "output_format", ""))
+    if output_format:
+        if not is_apimart_provider(provider):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{provider.get('name') or provider['id']} 不支持选择输出格式，请改用默认输出。",
+            )
+        image_output_format_fields(model, apimart_image_caps_for(provider, model), output_format)
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
     # 张数上限与助手链路同一套 caps（direct_image_request_count），不再只认 apimart 分支里的那张表
@@ -22479,7 +22538,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
             payload.prompt, effective_size, payload.quality, model, image_refs,
             provider["id"], payload.background, notice, request_n,
             payload.midjourney_version, payload.midjourney_hd,
-            getattr(payload, "thinking_mode", None))
+            getattr(payload, "thinking_mode", None), output_format)
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
@@ -22528,7 +22587,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "provider_name": provider.get("name") or provider["id"],
         "task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
         "request_id": raw.get("id") if isinstance(raw, dict) else None,
-        "params": {"provider_id": provider["id"], "model": model, "size": effective_size, "quality": payload.quality, "background": normalize_image_background(payload.background), "n": count, "reference_images": refs},
+        "params": {"provider_id": provider["id"], "model": model, "size": effective_size, "quality": payload.quality, "background": normalize_image_background(payload.background), "n": count, "output_format": output_format, "reference_images": refs},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
     _attach_upstream_cost(result, raw)

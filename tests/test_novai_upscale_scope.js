@@ -61,6 +61,8 @@ function sh(cmd, args, fallback = '') {
 function walk(rel, acc = []) {
     const abs = path.join(root, rel);
     if (!exists(rel)) return acc;
+    // desktop/release 是本地打包输出（.gitignore），不参与源码回归扫描
+    if (rel === 'desktop/release') return acc;
     if (!fs.statSync(abs).isDirectory()) { acc.push(rel); return acc; }
     for (const entry of fs.readdirSync(abs)) {
         if (entry === 'node_modules' || entry === '.git') continue;

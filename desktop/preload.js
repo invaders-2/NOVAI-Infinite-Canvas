@@ -107,6 +107,13 @@ contextBridge.exposeInMainWorld('pywebview', {
 contextBridge.exposeInMainWorld('novaiUpdater', {
   checkNow: () => ipcRenderer.invoke('novai:update-check'),
   downloadAndInstall: () => ipcRenderer.invoke('novai:update-install'),
+  // macOS 自替换下载进度：主进程发 { stage, percent, transferred, total }，返回取消订阅函数
+  onProgress: (cb) => {
+    if (typeof cb !== 'function') return () => {};
+    const handler = (event, payload) => { try { cb(payload || {}); } catch (_) {} };
+    ipcRenderer.on('novai:update-progress', handler);
+    return () => { try { ipcRenderer.removeListener('novai:update-progress', handler); } catch (_) {} };
+  },
 });
 
 // 低层桥：iframe 子页面注入脚本通过 window.parent.postMessage 转发到这里

@@ -12,7 +12,7 @@ import { mentionable, mentionedIds, unmentionedInputs } from "../mentions";
 import { PromptEditor } from "./PromptEditor";
 import { requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
-import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, durationTiers, formatClock, genOf, isQualityDefault, NODE_BG, NODE_TAG, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
+import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, durationTiers, formatClock, genOf, isQualityDefault, NODE_BG, NODE_TAG, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatLabel, outputFormatOptions, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS } from "./ctx";
 import { keyHint } from "./shortcuts";
@@ -324,6 +324,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
   const gline: React.ReactNode[] = [<button key="seg-model" className="gp-seg model" data-p="model" data-seg="model" onClick={(e) => paramPop(ctl, node, "model", e.currentTarget)}>{m?.name || (store.modelsOf(kind).length ? "选择模型" : "未配置模型")}</button>];
   if (kind === "image") {
     const ip = p as ImageParams;
+    const formats = outputFormatOptions(m);
     // 质量档 / 先思考：只看后端 caps（qualities > 1 档才有质量档；thinking_mode 为真才有开关）
     if (qualityLevelsFor(m).length > 1) gline.push(gdot("cqual"), <button key="seg-quality" className={"gp-seg" + (isQualityDefault(ip.quality) ? "" : " on")} data-p="quality" data-seg="quality"
       aria-label={"质量：" + (isQualityDefault(ip.quality) ? "默认" : qualityLabel(ip.quality))}
@@ -333,7 +334,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       aria-label={"先思考：" + (ip.thinking === true ? "开" : ip.thinking === false ? "关" : "默认")}
       title={"先思考（" + (m?.name || "") + "）：" + (ip.thinking === true ? "开：先想再画" : ip.thinking === false ? "关：直接出图" : "默认（模型决定）")}
       onClick={(e) => paramPop(ctl, node, "thinking", e.currentTarget)}>先思考{ip.thinking === true ? " 开" : ip.thinking === false ? " 关" : " 默认"}</button>);
-    gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{/^(auto|adaptive|自适应)$/i.test(ip.ratio) ? "原图比例" : ip.ratio} · {ip.size}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
+    gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{/^(auto|adaptive|自适应)$/i.test(ip.ratio) ? "原图比例" : ip.ratio} · {ip.size}{formats.length ? " · " + outputFormatLabel(ip.outputFormat) : ""}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
     if (m?.mj) gline.push(gdot("cmj"), seg("mj", <>{mjSummary(ip.mj)}</>, !!(ip.mj && (ip.mj.version || ip.mj.hd || typeof ip.mj.stylize === "number" || (ip.mj.speed && ip.mj.speed !== "fast")))));
     // 风格 / 摄影机按「模型真的会转发」才渲染（没有能力就不给入口，不置灰）
     if (m?.style) gline.push(gdot("c2"), <button key="chip-style" ref={styleRef} type="button" data-p="style" data-chip="style"
@@ -653,6 +654,7 @@ function DraftRow({ on, disabled = false, range, onToggle }: { on: boolean; disa
   </button>;
 }
 
+const OUTPUT_FORMAT_TIP: Record<string, string> = { "": "PNG / JPG 单张图片", gif: "GIF 循环动画", svg: "SVG 矢量图，可任意放大" };
 function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?: ModelSpec; disabled?: boolean }) {
   const ctl = useCtl(); const store = ctl.store; const p = useNodeParams<ImageParams>(node); const m = model || store.modelOf(node)!;
   const source = useSourceBox(node, "image");
@@ -666,7 +668,15 @@ function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?:
   };
   const chooseSize = (size: string) => set({ size, ...(p.ratio === "自适应" && source ? { sourceSize: sourceSizeForTier(source, size) } : {}) });
   const ratios = [...new Set((m.ratios || []).map(normRatio))];
+  const formats = outputFormatOptions(m);
+  const format = outputFormatForRequest(p.outputFormat);
   return <>
+    {formats.length ? <>
+      <div className="mh">输出格式</div>
+      <div className="seg" data-p="output-format">
+        {formats.map((f) => <button key={f.value || "static"} className={format === f.value ? "on" : ""} disabled={disabled} title={OUTPUT_FORMAT_TIP[f.value]} onClick={() => set({ outputFormat: f.value || undefined })}>{f.label}</button>)}
+      </div>
+    </> : null}
     <div className="mh">分辨率</div>
     <OptCards cols={(m.sizes || []).length} items={(m.sizes || []).map((s) => ({ key: s, label: s, on: p.size === s, disabled, pick: () => chooseSize(s) }))} />
     <div className="mh">比例</div>

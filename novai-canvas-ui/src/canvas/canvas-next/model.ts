@@ -21,7 +21,7 @@ export const TYPE_ICON = { image: "image", video: "video", text: "text", audio: 
 export type CameraParams = { on: boolean; body: number; lens: number; focal: number; aperture: number };
 /** Midjourney 专属参数（只在模型规格带 mj 时出现）：version 为空 = 交给上游默认；"niji 7" 这种带 niji 前缀 */
 export type MjParams = { version?: string; speed?: string; hd?: boolean; stylize?: number };
-export type ImageParams = { model: string; ratio: string; size: string; /** 「原图比例」选中的显式 WxH（不填则沿用尺寸档） */ sourceSize?: string; count: number; search: boolean; style: string; camera: CameraParams; mj?: MjParams; /** 质量档（后端 caps.qualities 里的一档）；不填 / auto = 不传 = 上游默认 */ quality?: string; /** 先思考（只有 caps.thinking_mode 的模型有）；undefined = 不传，交给模型决定 */ thinking?: boolean };
+export type ImageParams = { model: string; ratio: string; size: string; /** 「原图比例」选中的显式 WxH（不填则沿用尺寸档） */ sourceSize?: string; count: number; search: boolean; style: string; camera: CameraParams; mj?: MjParams; /** 质量档（后端 caps.qualities 里的一档）；不填 / auto = 不传 = 上游默认 */ quality?: string; /** 先思考（只有 caps.thinking_mode 的模型有）；undefined = 不传，交给模型决定 */ thinking?: boolean; /** 输出格式（后端 caps.output_formats）：gif / svg；不填 = 静态图（不发字段） */ outputFormat?: "gif" | "svg" };
 export type VideoMode = "文生视频" | "首帧" | "首尾帧" | "参考生视频" | "视频编辑" | "视频延长" | "参考视频生视频" | "数字人";
 export type VideoParams = { model: string; mode: VideoMode; ratio: string; res: string; dur: number; sound: boolean; times: number; /** 多镜头（高级设置） */ multiShot?: boolean; /** 生成模式（4K / 标准 / 专业…，仅规格声明的模型可用） */ genMode?: string; /** 极速模式（仅规格声明的模型可用） */ turbo?: boolean; /** 草稿模式（TapNow Draft Mode）：先按最低清晰度出草稿，满意后再出成片 */ draft?: boolean };
 export type TextParams = { model: string; search: boolean; /** 输出：文本 / 多维表格 / 分镜表 */ output?: "text" | "table" | "storyboard"; /** 模型强度档位（后端 model_caps.think 里的一档）；不填 = 不传 = 模型默认 */ think?: string };
@@ -93,6 +93,8 @@ export type ModelSpec = {
   qualities?: string[];
   /** 先思考开关（后端 caps.thinking_mode）；没有这个字段 = 不支持，不给入口 */
   thinkingMode?: boolean;
+  /** 输出格式（后端 caps.output_formats，已小写去重）；没有 gif / svg = 面板不给「输出格式」入口 */
+  outputFormats?: string[];
   /** 只返回提示词、不产视频（后端 caps.prompt_only）：面板隐藏视频参数，结果按提示词说明 */
   promptOnly?: boolean;
   // video
@@ -373,6 +375,27 @@ export function promptOnlyModel(model: ModelSpec | null | undefined): boolean {
   return model?.promptOnly === true;
 }
 
+/* ---------- 图片输出格式（静态图 / GIF 动图 / SVG 矢量，只认后端 caps.output_formats） ---------- */
+/** "" = 静态图（请求不带 output_format），gif / svg 才带字段 */
+export type ImageOutputFormat = "gif" | "svg";
+export const OUTPUT_FORMAT_LABEL: Record<string, string> = { "": "静态图", gif: "GIF 动图", svg: "SVG 矢量" };
+/** 格式文案：gif / svg 认名字；其余（含空）都是静态图，和请求口径一致 */
+export function outputFormatLabel(value: unknown): string {
+  const key = String(value ?? "").trim().toLowerCase();
+  return OUTPUT_FORMAT_LABEL[key] || OUTPUT_FORMAT_LABEL[""];
+}
+/** 面板选项：静态图永远有；GIF / SVG 只在 caps 声明时才出现，一个都没有 = 返回空 = 不给入口 */
+export function outputFormatOptions(model: ModelSpec | null | undefined): Array<{ value: "" | ImageOutputFormat; label: string }> {
+  const caps = (model?.outputFormats || []).map((item) => String(item ?? "").trim().toLowerCase());
+  const extra = (["gif", "svg"] as ImageOutputFormat[]).filter((value) => caps.includes(value));
+  return extra.length ? [{ value: "", label: OUTPUT_FORMAT_LABEL[""] }, ...extra.map((value) => ({ value, label: OUTPUT_FORMAT_LABEL[value] }))] : [];
+}
+/** 发请求用的输出格式：只有 gif / svg 才带字段，静态图 / 认不出的值一律空串 */
+export function outputFormatForRequest(value: unknown): "" | ImageOutputFormat {
+  const key = String(value ?? "").trim().toLowerCase();
+  return key === "gif" || key === "svg" ? key : "";
+}
+
 /**
  * 已知模型的能力表（按名字匹配）。后端 canvas/models 只给 configId / 名称 / capabilities，
  * 比例、分辨率、生成方式这些前端控件靠这张表决定；匹配不到的模型用同类型的保守默认值。
@@ -400,7 +423,7 @@ const DEFAULTS: Record<GenKind, Partial<ModelSpec>> = {
 };
 /** 后端模型行 → 前端能力表。kind 由 capabilities 决定，能力细节按名字套预设。 */
 /** 服务商适配器给的面板规格（canvas/models 的 uiSpec）里，前端认的字段 */
-const UI_KEYS = ["ratios", "sizes", "batch", "batchUnknown", "maxRefs", "refNote", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo", "mj", "qualities", "thinkingMode", "promptOnly"] as const;
+const UI_KEYS = ["ratios", "sizes", "batch", "batchUnknown", "maxRefs", "refNote", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo", "mj", "qualities", "thinkingMode", "promptOnly", "outputFormats"] as const;
 function fromProvider(kind: GenKind, ui?: Record<string, unknown> | null): Partial<ModelSpec> {
   if (!ui || typeof ui !== "object" || (ui.kind && ui.kind !== kind)) return {};
   const out: Record<string, unknown> = {};
@@ -530,6 +553,10 @@ export function clampParams(kind: GenKind, p: AnyParams, m: ModelSpec): AnyParam
     if (quality) q.quality = quality; else delete q.quality;
     const thinking = clampThinking(thinkingAvailable(m), q.thinking);
     if (thinking === undefined) delete q.thinking; else q.thinking = thinking;
+    // 输出格式：新模型没声明就清掉（也顺手把空串 / 脏值挡在参数外）
+    const outputFormat = outputFormatForRequest(q.outputFormat);
+    const outputFormats = (m.outputFormats || []).map((item) => String(item ?? "").trim().toLowerCase());
+    if (outputFormat && outputFormats.includes(outputFormat)) q.outputFormat = outputFormat; else delete q.outputFormat;
     return q;
   }
   if (kind === "video") {

@@ -157,6 +157,41 @@ assert.deepStrictEqual(plan.videoRatioOptions(videoCapsSpec), ['adaptive', '16:9
 assert.deepStrictEqual(plan.videoResOptions(videoCapsSpec), ['720p', '1080p']);
 assert.deepStrictEqual(plan.durationOptions(videoCapsSpec), [5, 10]);
 
+// ---- 5b. 图片输出格式：caps.output_formats → 面板选项 / 请求字段 ----
+const formatCaps = {
+    provider: 'apimart', model: 'gpt-image-2.6-sunburst', kind: 'image',
+    ratios: ['1:1', '3:4'], resolutions: ['1K', '2K'], n_max: 1,
+    output_formats: ['PNG', 'jpeg', 'webp', 'SVG', 'gif', 'gif'],
+};
+const formatUi = caps.modelCapsUi('image', formatCaps);
+assert.deepStrictEqual(formatUi.outputFormats, ['png', 'jpeg', 'webp', 'svg', 'gif'], 'output_formats 规范成小写去重');
+const staticFormatUi = caps.modelCapsUi('image', { provider: 'apimart', model: 'only-webp', kind: 'image', ratios: ['1:1'], output_formats: ['webp'] });
+assert.deepStrictEqual(staticFormatUi.outputFormats, ['webp'], '只有静态格式也原样保留');
+assert.deepStrictEqual(caps.modelCapsUi('image', { provider: 'apimart', model: 'none', kind: 'image', ratios: ['1:1'], output_formats: [] }).outputFormats, [], '空数组保留：后端明确没有动图/矢量');
+const formatSpec = model.specFor({ configId: 'apimart::gpt-image-2.6-sunburst', label: 'gpt-image-2.6-sunburst', vendor: 'APIMART', kind: 'image', ui: formatUi, specSource: 'spec' });
+assert.deepStrictEqual(formatSpec.outputFormats, ['png', 'jpeg', 'webp', 'svg', 'gif'], 'specFor 保留 outputFormats');
+assert.deepStrictEqual(model.outputFormatOptions(formatSpec), [
+    { value: '', label: '静态图' },
+    { value: 'gif', label: 'GIF 动图' },
+    { value: 'svg', label: 'SVG 矢量' },
+], '含 gif / svg → 静态图 + GIF + SVG 三项');
+const staticFormatSpec = model.specFor({ configId: 'apimart::only-webp', label: 'only-webp', vendor: 'APIMART', kind: 'image', ui: staticFormatUi, specSource: 'spec' });
+assert.deepStrictEqual(model.outputFormatOptions(staticFormatSpec), [], '不含 gif / svg → 返回空，不给入口');
+assert.deepStrictEqual(model.outputFormatOptions(imageSpec), [], '旧 spec 没 outputFormats → 不给入口');
+assert.strictEqual(model.outputFormatLabel('gif'), 'GIF 动图');
+assert.strictEqual(model.outputFormatLabel(''), '静态图');
+assert.strictEqual(model.outputFormatForRequest('gif'), 'gif', 'gif 原样下发');
+assert.strictEqual(model.outputFormatForRequest('SVG'), 'svg', '大小写归一');
+assert.strictEqual(model.outputFormatForRequest(''), '', '静态图不发字段');
+assert.strictEqual(model.outputFormatForRequest('png'), '', '静态格式不发字段');
+assert.strictEqual(model.outputFormatForRequest(undefined), '');
+const gifParams = model.clampParams('image', { model: formatSpec.id, ratio: '1:1', size: '2K', count: 1, search: false, style: '无', camera: { ...model.DEFAULT_CAMERA }, outputFormat: 'gif' }, formatSpec);
+assert.strictEqual(gifParams.outputFormat, 'gif', '支持的模型保留 outputFormat');
+const noGifParams = model.clampParams('image', { ...gifParams }, staticFormatSpec);
+assert.strictEqual('outputFormat' in noGifParams, false, '换到不支持 gif 的模型清掉 outputFormat');
+const dirtyParams = model.clampParams('image', { model: formatSpec.id, ratio: '1:1', size: '2K', count: 1, search: false, style: '无', camera: { ...model.DEFAULT_CAMERA }, outputFormat: '' }, formatSpec);
+assert.strictEqual('outputFormat' in dirtyParams, false, '空串不落参数');
+
 // ---- 6. 后端接线静态断言 ----
 const backend = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/novaiBackend.ts'), 'utf8');
 const card = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/agent/TaskPlanCard.tsx'), 'utf8');
@@ -171,5 +206,7 @@ assert.ok(card.includes('上限未知，以实际为准'), 'n_max 缺失时方�
 assert.ok(card.includes('生成方式：自动选择'), '视频步骤在方案卡上说明自动选择方式');
 assert.ok(genPanel.includes('mm.batchUnknown ? [1] : [4, 2, 1]') && genPanel.includes('上限未知，以实际为准'), '图片面板 n_max 缺失只给 1 张并提示');
 assert.ok(card.includes('spec?.specSource !== "spec"'), '提示按 ModelSpec.specSource 判定');
+assert.ok(backend.includes('outputFormatForRequest') && backend.includes('output_format: outputFormat'), '生成请求只对 gif / svg 下发 output_format');
+assert.ok(genPanel.includes('data-p="output-format"') && genPanel.includes('输出格式'), '图片参数弹层有「输出格式」段');
 
-console.log('[PASS] model-caps 映射 / 未验证回落 / 方案卡选项与纠正 / 后端接线（6 组）');
+console.log('[PASS] model-caps 映射 / 未验证回落 / 方案卡选项与纠正 / 图片输出格式 / 后端接线（7 组）');

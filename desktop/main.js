@@ -6,11 +6,13 @@
 //  4. 退出时确保结束后端进程，避免残留占用端口
 //  5. iframe 子页面注入迷你桥（postMessage 转发），前端零改动获得完整桌面能力
 
-const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen, desktopCapturer, nativeImage } = require('electron');
-const { spawn } = require('child_process');
+const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen, desktopCapturer, nativeImage, net } = require('electron');
+const { spawn, execFile } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const macUpdater = require('./mac-updater');
 const { resolveBaseUrl } = require('./cloud-config');
 const { trayIconCandidates, firstExistingTrayIcon } = require('./tray-icon');
 
@@ -2366,7 +2368,7 @@ function registerIpc() {
 
 // ---------- 自动更新 ----------
 let autoUpdater = null;
-// idle | checking | available | downloading | downloaded
+// idle | checking | available | downloading | downloaded | installing
 // 原生对话框和网页端「一键更新」共用这一份状态，避免重复检查 / 重复下载 / 重复弹窗。
 let updateStage = 'idle';
 let pendingUpdateInfo = null;
@@ -2406,20 +2408,6 @@ function showUpdateAvailablePrompt(info) {
 function showUpdateInstallPrompt() {
   if (installPromptOpen) return;
   installPromptOpen = true;
-  if (process.platform === 'darwin') {
-    dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: '更新已就绪',
-      message: '新版本已下载完成，但 macOS 未签名构建不支持自动安装，请手动下载安装包覆盖安装（数据不会丢失）。',
-      buttons: ['打开发布页', '稍后'],
-      defaultId: 0,
-      cancelId: 1,
-    }).then(({ response }) => {
-      installPromptOpen = false;
-      if (response === 0) shell.openExternal('https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/latest');
-    }).catch(() => { installPromptOpen = false; });
-    return;
-  }
   dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: '更新已就绪',
@@ -2435,6 +2423,277 @@ function showUpdateInstallPrompt() {
   }).catch(() => { installPromptOpen = false; });
 }
 
+// ---------- macOS 自替换更新（不依赖 Developer ID） ----------
+// 检查更新仍走 electron-updater；发现新版本后自己下载 zip → 校验 sha512 → ditto 解压 →
+// 生成 install.sh，退出应用后由分离的 shell 脚本替换 .app、清 quarantine、ad-hoc 重签并重新打开。
+// 两个环境变量只用于离线自测（tests/e2e_mac_updater.js），正常安装包不会设置它们：
+//   NOVAI_UPDATE_ZIP   直接使用本地 zip，跳过下载（sha512 仍按文件校验）
+//   NOVAI_UPDATE_TARGET 直接指定要替换的 .app（默认由 app.getPath('exe') 反推）
+//   NOVAI_UPDATE_WAIT  替换脚本等待主进程退出的秒数（默认 120）
+const MAC_UPDATE_ZIP_OVERRIDE = process.env.NOVAI_UPDATE_ZIP || '';
+const MAC_UPDATE_TARGET_OVERRIDE = process.env.NOVAI_UPDATE_TARGET || '';
+const MAC_UPDATE_WAIT_SECONDS = Number(process.env.NOVAI_UPDATE_WAIT) > 0 ? Math.floor(Number(process.env.NOVAI_UPDATE_WAIT)) : 120;
+let macUpdateRunning = false;
+
+function macUpdatesDir() {
+  return path.join(app.getPath('userData'), 'updates');
+}
+
+function sendUpdateProgress(payload) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('novai:update-progress', payload || {});
+  } catch (_) {}
+}
+
+function showMacUpdateFallback(title, detail) {
+  if (!mainWindow) return;
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: title || '自动替换未完成',
+    message: '本次自动更新没有完成，数据不受影响。',
+    detail: String(detail || '') + '\n可以到发布页手动下载安装包覆盖安装。',
+    buttons: ['打开发布页', '稍后'],
+    defaultId: 0,
+    cancelId: 1,
+  }).then(({ response }) => {
+    if (response === 0) shell.openExternal('https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/latest');
+  }).catch(() => {});
+}
+
+function macZipSizeMb(info) {
+  try {
+    const zipFile = macUpdater.pickMacZipFile(info && info.files);
+    const bytes = Number(zipFile && zipFile.size);
+    if (bytes > 0) return Math.max(1, Math.round(bytes / 1024 / 1024));
+  } catch (_) {}
+  return 210;
+}
+
+function showMacUpdateAvailablePrompt(info) {
+  if (availablePromptOpen) return;
+  const current = app.getVersion();
+  const next = String(info && info.version || '');
+  if (!next || next === current) return;
+  availablePromptOpen = true;
+  const sizeMb = macZipSizeMb(info);
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: '发现新版本',
+    message: '发现新版本 v' + next + '（当前 v' + current + '），下载约 ' + sizeMb + 'MB 的安装包并自动替换安装？',
+    detail: '下载完成后 NOVAI 会自动退出、替换当前应用并重新打开；用户数据不会丢失。',
+    buttons: ['立即更新', '稍后'],
+    defaultId: 0,
+    cancelId: 1,
+  }).then(({ response }) => {
+    availablePromptOpen = false;
+    if (response === 0) startMacSelfUpdate(info, true);
+  }).catch(() => { availablePromptOpen = false; });
+}
+
+function runCommand(command, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout: timeoutMs || 0, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        const detail = String(stderr || err.message || err).trim().slice(0, 400);
+        return reject(new Error(command + ' 执行失败: ' + detail));
+      }
+      resolve({ stdout: String(stdout || ''), stderr: String(stderr || '') });
+    });
+  });
+}
+
+// 用 Chromium 网络栈下载（会自动跟随 GitHub 302 到 objects.githubusercontent.com）。
+// 边下边算 sha512，落盘前校验；不匹配就删掉临时文件。
+function downloadMacUpdateZip(url, dest, expectedSha512, expectedSize) {
+  return new Promise((resolve, reject) => {
+    let parsed = null;
+    try { parsed = new URL(url); } catch (_) { return reject(new Error('安装包地址无效')); }
+    if (parsed.protocol !== 'https:') return reject(new Error('安装包地址必须是 https'));
+    const partPath = dest + '.part';
+    let settled = false;
+    let transferred = 0;
+    let total = Number(expectedSize) || 0;
+    let lastSentAt = 0;
+    const hash = crypto.createHash('sha512');
+    let outFile = null;
+    try { outFile = fs.createWriteStream(partPath); } catch (err) { return reject(err); }
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { if (outFile) outFile.destroy(); } catch (_) {}
+      try { fs.rmSync(partPath, { force: true }); } catch (_) {}
+      reject(err);
+    };
+    outFile.on('error', fail);
+    const request = net.request({ url: url, method: 'GET', redirect: 'follow' });
+    request.on('response', (response) => {
+      const status = Number(response.statusCode) || 0;
+      if (status < 200 || status >= 300) {
+        try { response.destroy(); } catch (_) {}
+        return fail(new Error('下载失败 HTTP ' + status));
+      }
+      const contentLength = Number(response.headers && response.headers['content-length']);
+      if (contentLength > 0) total = contentLength;
+      sendUpdateProgress({ stage: 'downloading', percent: 0, transferred: 0, total: total });
+      response.on('data', (chunk) => {
+        if (settled) return;
+        transferred += chunk.length;
+        hash.update(chunk);
+        outFile.write(chunk);
+        const now = Date.now();
+        if (now - lastSentAt >= 300) {
+          lastSentAt = now;
+          const percent = total > 0 ? Math.min(100, Math.round((transferred * 1000) / total) / 10) : 0;
+          sendUpdateProgress({ stage: 'downloading', percent: percent, transferred: transferred, total: total });
+        }
+      });
+      response.on('error', fail);
+      response.on('end', () => {
+        if (settled) return;
+        outFile.end(() => {
+          if (settled) return;
+          const digest = hash.digest('base64');
+          if (expectedSha512 && digest !== String(expectedSha512)) {
+            return fail(new Error('安装包 sha512 校验失败'));
+          }
+          try { fs.renameSync(partPath, dest); } catch (err) { return fail(err); }
+          settled = true;
+          sendUpdateProgress({ stage: 'downloading', percent: 100, transferred: transferred, total: total });
+          resolve(dest);
+        });
+      });
+    });
+    request.on('error', fail);
+    request.end();
+  });
+}
+
+// 主流程：下载/复用缓存 → 解压 → 校验 .app → 生成安装脚本 → 启动脚本 → 停后端并退出。
+async function startMacSelfUpdate(info, skipPrompt) {
+  if (process.platform !== 'darwin') return { ok: false, supported: false, reason: 'not-darwin' };
+  if (macUpdateRunning) return { ok: true, supported: true, stage: updateStage };
+  if (!skipPrompt && info) { showMacUpdateAvailablePrompt(info); return { ok: true, supported: true, stage: updateStage }; }
+  macUpdateRunning = true;
+  const updatesDir = macUpdatesDir();
+  let tmpDir = '';
+  let version = '';
+  try {
+    fs.mkdirSync(updatesDir, { recursive: true });
+    let zipPath = '';
+    if (MAC_UPDATE_ZIP_OVERRIDE) {
+      zipPath = MAC_UPDATE_ZIP_OVERRIDE;
+      if (!fs.existsSync(zipPath)) throw new Error('测试钩子指定的 zip 不存在: ' + zipPath);
+      version = process.env.NOVAI_UPDATE_VERSION || macUpdater.versionFromZipName(zipPath);
+    } else {
+      if (!info) throw new Error('缺少更新信息');
+      version = String(info.version || '');
+      const updateTag = info && info.tag;   // electron-updater 给的真实 Release tag，如 v2.0.03
+      const zipFile = macUpdater.pickMacZipFile(info && info.files);
+      if (!zipFile) throw new Error('更新信息里没有 zip 安装包');
+      const zipUrl = macUpdater.resolveMacZipUrl(zipFile.url, version, updateTag);
+      const fileName = path.basename(new URL(zipUrl).pathname) || ('NOVAI-' + version + '-arm64-mac.zip');
+      zipPath = path.join(updatesDir, fileName);
+      const expectedSha = String(zipFile.sha512 || '');
+      const expectedSize = Number(zipFile.size) || 0;
+      const cached = fs.existsSync(zipPath)
+        && (!expectedSize || fs.statSync(zipPath).size === expectedSize)
+        && (!expectedSha || await macUpdater.verifySha512(zipPath, expectedSha));
+      if (cached) {
+        clog('updater', '复用已下载的安装包: ' + zipPath + '（tag=' + (updateTag || '') + '）');
+        sendUpdateProgress({ stage: 'downloading', percent: 100, transferred: expectedSize, total: expectedSize, cached: true });
+      } else {
+        updateStage = 'downloading';
+        try { fs.rmSync(zipPath, { force: true }); } catch (_) {}
+        // 主地址用真实 tag；下载返回非 2xx 时，再用「版本号补零」的 tag 兜底试一次
+        const attemptUrls = [zipUrl];
+        const altTag = macUpdater.releaseTagFromVersion(version);
+        if (altTag) {
+          const altUrl = macUpdater.resolveMacZipUrl(zipFile.url, version, altTag);
+          if (altUrl && altUrl !== zipUrl) attemptUrls.push(altUrl);
+        }
+        clog('updater', '开始下载 macOS 更新包: ' + attemptUrls[0] + '（tag=' + (updateTag || '') + '）');
+        for (let attempt = 0; attempt < attemptUrls.length; attempt += 1) {
+          if (attempt > 0) clog('updater', '改用备用 tag 重试(' + attempt + '/' + (attemptUrls.length - 1) + '): ' + attemptUrls[attempt]);
+          try {
+            await downloadMacUpdateZip(attemptUrls[attempt], zipPath, expectedSha, expectedSize);
+            clog('updater', '更新包下载完成: ' + attemptUrls[attempt]);
+            break;
+          } catch (err) {
+            const message = String(err && err.message || err);
+            clog('updater', '下载失败(' + (attempt + 1) + '/' + attemptUrls.length + '): ' + attemptUrls[attempt] + ' → ' + message);
+            if (!/HTTP \d+/.test(message) || attempt === attemptUrls.length - 1) throw err;
+          }
+        }
+      }
+      if (expectedSha && !(await macUpdater.verifySha512(zipPath, expectedSha))) {
+        try { fs.rmSync(zipPath, { force: true }); } catch (_) {}
+        throw new Error('安装包 sha512 校验失败');
+      }
+      if (expectedSize) {
+        const actualSize = fs.statSync(zipPath).size;
+        if (actualSize !== expectedSize) {
+          try { fs.rmSync(zipPath, { force: true }); } catch (_) {}
+          throw new Error('安装包大小校验失败: ' + actualSize + ' != ' + expectedSize);
+        }
+      }
+    }
+
+    updateStage = 'installing';
+    sendUpdateProgress({ stage: 'installing', percent: 100 });
+    tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'novai-update-'));
+    clog('updater', '解压更新包: ' + zipPath + ' → ' + tmpDir);
+    await runCommand('ditto', ['-x', '-k', zipPath, tmpDir], 10 * 60 * 1000);
+    const newApp = macUpdater.findAppBundleInDir(tmpDir);
+    if (!newApp) throw new Error('安装包里没有找到 .app');
+    const expectedVersion = process.env.NOVAI_UPDATE_VERSION || version || '';
+    const appCheck = macUpdater.validateAppBundle(newApp, expectedVersion);
+    if (!appCheck.ok) throw new Error('新版本校验失败: ' + appCheck.reason);
+
+    const targetApp = MAC_UPDATE_TARGET_OVERRIDE || macUpdater.appBundleFromExe(app.getPath('exe'));
+    if (!targetApp) throw new Error('无法从可执行路径反推 .app 位置');
+    if (!fs.existsSync(path.join(targetApp, 'Contents', 'Info.plist'))) throw new Error('目标不是完整的 .app: ' + targetApp);
+    try {
+      fs.accessSync(path.dirname(targetApp), fs.constants.W_OK);
+    } catch (_) {
+      throw new Error('目标目录不可写: ' + path.dirname(targetApp));
+    }
+
+    const logPath = path.join(updatesDir, 'install.log');
+    const scriptPath = path.join(updatesDir, 'install.sh');
+    const script = macUpdater.buildInstallScript({
+      pid: process.pid,
+      targetApp: targetApp,
+      newApp: newApp,
+      tmpDir: tmpDir,
+      logPath: logPath,
+      waitSeconds: MAC_UPDATE_WAIT_SECONDS,
+    });
+    fs.writeFileSync(scriptPath, script, { encoding: 'utf8', mode: 0o755 });
+    try { fs.chmodSync(scriptPath, 0o755); } catch (_) {}
+    try { fs.writeFileSync(logPath, '[' + new Date().toISOString() + '] 安装脚本已生成，等待进程 ' + process.pid + ' 退出\n'); } catch (_) {}
+
+    const child = spawn('/bin/sh', [scriptPath], { detached: true, stdio: 'ignore' });
+    child.unref();
+    clog('updater', 'mac 自替换脚本已启动: ' + scriptPath + ' target=' + targetApp + ' version=' + (version || appCheck.version || ''));
+    sendUpdateProgress({ stage: 'installing', percent: 100, restarting: true });
+    updateStage = 'installing';
+    // 先让后端收尾再退：直接 app.exit 会留下半截进程/端口，替换脚本也可能被占用。
+    setTimeout(() => {
+      stopBackendForUpdate().then(() => { app.quit(); });
+    }, 300);
+    return { ok: true, supported: true, stage: 'installing', version: version };
+  } catch (err) {
+    macUpdateRunning = false;
+    try { if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    updateStage = 'available';
+    const reason = String(err && err.message || err);
+    clog('updater', 'mac 自替换更新失败: ' + reason);
+    sendUpdateProgress({ stage: 'error', percent: 0, error: reason });
+    showMacUpdateFallback('自动替换未完成', reason);
+    return { ok: false, supported: true, reason: reason };
+  }
+}
+
 // 网页端「一键更新」在桌面版转交到这里：只复用 electron-updater 流程。
 // 绝不能回落到后端 /api/update-from-github——那会让后端自重启，主进程会当成后端崩溃弹窗。
 function registerUpdaterIpc() {
@@ -2448,7 +2707,8 @@ function registerUpdaterIpc() {
     if (updateStage === 'downloading') return { ok: true, supported: true, stage: updateStage };
     if (updateStage === 'checking') return { ok: true, supported: true, stage: updateStage };
     if (updateStage === 'available') {
-      showUpdateAvailablePrompt(pendingUpdateInfo);
+      if (process.platform === 'darwin') showMacUpdateAvailablePrompt(pendingUpdateInfo);
+      else showUpdateAvailablePrompt(pendingUpdateInfo);
       return { ok: true, supported: true, stage: updateStage };
     }
     manualUpdateCheck = true;
@@ -2465,6 +2725,22 @@ function registerUpdaterIpc() {
 
   ipcMain.handle('novai:update-install', async () => {
     if (!updaterSupported()) return { ok: false, supported: false, reason: 'unavailable' };
+    if (process.platform === 'darwin') {
+      // 测试钩子：直接拿本地 zip 走完解压/替换，不需要先 check 到新版本
+      if (MAC_UPDATE_ZIP_OVERRIDE) return await startMacSelfUpdate(null, true);
+      if (updateStage === 'downloading' || updateStage === 'installing') return { ok: true, supported: true, stage: updateStage };
+      if (updateStage === 'available') return await startMacSelfUpdate(pendingUpdateInfo, true);
+      manualUpdateCheck = true;
+      updateStage = 'checking';
+      try {
+        autoUpdater.checkForUpdates();
+      } catch (err) {
+        manualUpdateCheck = false;
+        updateStage = 'idle';
+        return { ok: false, supported: true, reason: String(err && err.message || err) };
+      }
+      return { ok: true, supported: true, stage: 'checking' };
+    }
     if (updateStage === 'downloaded') {
       showUpdateInstallPrompt();
       return { ok: true, supported: true, stage: updateStage };
@@ -2551,13 +2827,15 @@ function setupAutoUpdate() {
     if (!next || next === app.getVersion()) { updateStage = 'idle'; return; }
     updateStage = 'available';
     pendingUpdateInfo = info;
+    if (process.platform === 'darwin') { showMacUpdateAvailablePrompt(info); return; }
     showUpdateAvailablePrompt(info);
   });
   autoUpdater.on('download-progress', () => { updateStage = 'downloading'; });
   autoUpdater.on('update-downloaded', () => {
     updateStage = 'downloaded';
     manualUpdateCheck = false;
-    showUpdateInstallPrompt();
+    // macOS 走自替换链路（见 startMacSelfUpdate），不再弹旧的「手动覆盖安装」对话框
+    if (process.platform !== 'darwin') showUpdateInstallPrompt();
   });
   autoUpdater.on('error', (err) => {
     // 后面还要按失败阶段选文案，先把阶段存下来（错误处理里会复位状态）

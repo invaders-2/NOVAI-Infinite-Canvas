@@ -53,6 +53,10 @@ class ApimartImageCapsTableTests(unittest.TestCase):
         self.assertEqual(main.APIMART_IMAGE_MODEL_CAPS["imagen-4-0-apimart"]["ratios"],
                          ("1:1", "4:3", "3:4", "16:9", "9:16"))
 
+    def test_gpt_image_2_6_output_formats(self):
+        caps = main.model_caps_for({"id": "apimart", "protocol": "apimart"}, "gpt-image-2.6-sunburst", "image")
+        self.assertEqual(caps["output_formats"], ["png", "jpeg", "webp", "svg", "gif"])
+
     def test_alias_lookup(self):
         self.assertEqual(main.apimart_image_model_caps("gemini-3-pro-image-preview-official"),
                          main.APIMART_IMAGE_MODEL_CAPS["gemini-3-pro-image-preview"])

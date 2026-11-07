@@ -148,7 +148,7 @@ async function poll() {
 /* 进度只说人话：具体在传哪个文件对用户没意义 */
 export function stageText(p) {
     const s = (p && p.stage) || '';
-    return ({ downloading: '下载中', backup: '正在备份', applying: '正在安装', restarting: '正在重启', done: '更新完成', error: '更新失败' })[s] || '正在准备';
+    return ({ preparing: '准备下载', downloading: '下载中', backup: '正在备份', applying: '正在安装', installing: '正在替换安装', restarting: '正在重启', done: '更新完成', error: '更新失败' })[s] || '正在准备';
 }
 async function waitAndReload() {
     const deadline = Date.now() + 90000;
@@ -165,17 +165,47 @@ export async function startUpdate() {
     const desktop = desktopUpdater();
     if (desktop) {
         upd.error = '';
+        /* macOS 走主进程自替换：下载百分比由 novai:update-progress 推过来，
+           这里接到弹窗进度条（Windows 仍是 electron-updater，没有进度事件）。 */
+        let offProgress = null;
+        if (typeof desktop.onProgress === 'function') {
+            offProgress = desktop.onProgress((p) => {
+                const payload = p || {};
+                if (payload.stage === 'error') {
+                    upd.running = false;
+                    upd.phase = 'error';
+                    upd.error = '自动更新没有完成，请稍后重试';
+                    return;
+                }
+                const percent = Math.max(0, Math.min(100, Number(payload.percent) || 0));
+                upd.running = true;
+                upd.phase = 'running';
+                upd.progress = {
+                    stage: payload.stage || 'downloading',
+                    percent,
+                    transferred: Number(payload.transferred) || 0,
+                    total: Number(payload.total) || 0,
+                };
+            });
+        }
         try {
             const res = await desktop.downloadAndInstall();
             if (res && res.supported === false) {
                 console.warn('[update] 桌面更新不可用', res.reason);
                 toast('当前桌面版不支持在线更新，点这里去下载新版本', { danger: true, icon: 'alert', onClick: () => window.open(RELEASE_LATEST_URL, '_blank', 'noopener') });
+            } else if (res && res.ok === false) {
+                upd.running = false;
+                upd.phase = 'error';
+                upd.error = '自动更新没有完成，请稍后重试';
+                toast('桌面版更新没有完成，请稍后重试', { danger: true, icon: 'alert' });
             } else {
                 toast('已转交桌面版更新，请按弹窗提示操作', { icon: 'arrowup' });
             }
         } catch (e) {
             console.error('[update] 转交桌面版更新失败：', e);
             toast('桌面版更新暂时不可用，请稍后重试', { danger: true, icon: 'alert' });
+        } finally {
+            if (offProgress) { try { offProgress(); } catch (e) {} }
         }
         return;
     }
