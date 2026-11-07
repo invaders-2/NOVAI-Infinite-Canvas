@@ -10,8 +10,7 @@ import ThinkPicker from './ThinkPicker.vue';
 import AssetPicker from './agents/AssetPicker.vue';
 import { S, setMode, thinkLevels } from './chatState.js';
 import { C, send, stop, uploadFiles, removeRef, isImageRef, attachmentName } from './session.js';
-import { CAP, selectCapability, selectGenerateImage, capabilityForSuggestion } from './agents/capState.js';
-import SuggestedQuestions from './agents/SuggestedQuestions.vue';
+import { CAP, selectGenerateImage } from './agents/capState.js';
 import { usePop, closeAllPops, POP_Z } from './usePop.js';
 import { t, toast } from '../../lib/store.js';
 
@@ -52,21 +51,6 @@ function pickGenerateImage() {
     if (S.mode !== 'image') setMode('image');
     selectGenerateImage(3);
     focus();
-}
-// 猜你想问：填进输入框，并按 capability 类型挂能力（能力不可用时只填文案，不假装能跑）
-function onSuggestion(s) {
-    if (!s) return;
-    const cap = s.capability || {};
-    if (cap.type === 'generate-image') {
-        if (S.mode !== 'image') setMode('image');
-        selectGenerateImage(cap.cardType);
-    } else {
-        const found = capabilityForSuggestion(s);
-        if (found && found.available) selectCapability(found);
-        else if (found) toast('「' + found.name + '」即将上线，问题已填入输入框', { icon: 'alert' });
-        else toast('该能力暂不可用，问题已填入输入框', { icon: 'alert' });
-    }
-    fill(s.text);
 }
 // 选择素材库文件：以同源 URL 取回字节再走既有上传链路挂成附件
 async function onAssetPick(item) {
@@ -155,7 +139,6 @@ onBeforeUnmount(() => window.removeEventListener('paste', onPaste));
             </div>
         </div>
 
-        <SuggestedQuestions @pick="onSuggestion" />
 
         <Teleport to="#nv-layer">
             <Transition name="pop">

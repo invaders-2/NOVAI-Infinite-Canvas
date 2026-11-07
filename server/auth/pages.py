@@ -50,7 +50,7 @@ def _page(filename: str) -> FileResponse:
 @router.get("/account", include_in_schema=False)
 @router.get("/account.html", include_in_schema=False)
 def account_page(request: Request):
-    if not service.auth_enabled():
+    if not service.accounts_enabled():
         raise HTTPException(status_code=404, detail="Not Found")
     if not _session_user(request):
         return RedirectResponse(url="/login?next=/account", status_code=302)
@@ -60,6 +60,9 @@ def account_page(request: Request):
 @router.get("/reset", include_in_schema=False)
 @router.get("/reset.html", include_in_schema=False)
 def reset_page():
-    if not service.auth_enabled():
+    if not service.accounts_enabled():
         raise HTTPException(status_code=404, detail="Not Found")
+    # 新版界面（static/v2）在 /reset 路径下直接打开「忘记密码」；没构建出来时退回旧页
+    if os.path.isfile(_static_page(os.path.join("v2", "index.html"))):
+        return _page(os.path.join("v2", "index.html"))
     return _page("reset.html")

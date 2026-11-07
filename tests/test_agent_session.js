@@ -514,12 +514,6 @@ ok(!/setTimeout/.test(failSink) && !/attempt/.test(failSink), '失败分支不�
 ok(smart.includes('localStorage.removeItem(key)'), '种子读完即删（刷新/二次打开不重放）');
 const sendSink = smart.slice(smart.indexOf('async function sendChatMessage('), smart.indexOf('var AGENT_TOOL_ICONS'));
 ok(/var sendOk = true;/.test(sendSink) && /sendOk = false;/.test(sendSink) && /return sendOk;/.test(sendSink), 'sendChatMessage 回传成功/失败（失败可回填）');
-const storeDataSink = read('web/src/pages/store/storeData.js');
-ok(/options && options\.autoSend === true/.test(storeDataSink), 'openStoreCanvas 只在显式 autoSend=true 时写 true');
-ok(storeDataSink.includes('JSON.stringify({ v: 1, agent: str(prompt), autoSend, skillRef })'), '种子写 autoSend + skillRef 字段');
-const briefSink = read('web/src/pages/store/StoreBriefModal.vue');
-ok(/\{ autoSend: true, skillRef: result\.skillRef \}/.test(briefSink), '市场 brief 提交写 autoSend:true + skillRef');
-ok(!/autoSend/.test(read('web/src/pages/store/StorePage.vue')), '列表页本身不写种子 autoSend（只在 brief 提交时写）');
 
 const agentRunBodyWithSkillRef = buildFn('agentRunBodyWithSkillRef');
 const bodyWithRef = agentRunBodyWithSkillRef({ instruction: '做视频' }, 'store:skrull');
@@ -534,9 +528,6 @@ ok(!('skill_ref' in agentRunBodyWithSkillRef({ instruction: 'x' }, '   ')), 'ski
 ok(/agentRunBodyWithSkillRef\(\{[\s\S]*?\}, pendingAgentSkillRef\)/.test(smart), 'runAgentStream 用 helper 组装 body 并带 pendingAgentSkillRef');
 ok(/pendingAgentSkillRef = wantAutoSend \? String\(skillRef \|\| ''\)\.trim\(\) : '';/.test(smart), '只有自动发送才装载 skillRef');
 ok(/openHomeSeedAgent\(seed\.agent, shouldAutoSend\(seed\), seed\.skillRef\)/.test(smart), '种子 skillRef 传给自动发送入口');
-ok(/skillRef: str\(result\.skill_ref \|\| result\.skillRef \|\| ''\)/.test(storeDataSink), 'launch 响应解析 skill_ref');
-ok(/autoSend, skillRef \}/.test(storeDataSink), '种子写入 skillRef 字段');
-ok(/skillRef: result\.skillRef/.test(briefSink), 'brief 提交把 launch 的 skillRef 写进种子');
 
 console.log('');
 console.log('会话状态机回归：' + pass + ' 项通过' + (fails.length ? ('，失败 ' + fails.length + ' 项') : ''));

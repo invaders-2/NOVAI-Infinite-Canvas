@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 「专业调色 → 对比 → 放大」图片重叠的静态回归检查。
 //
-// 现象：点「拖动对比」后放大图片，对比区出现两张大小不一致的同一张图（重叠）。
+// 现象：点「对比原图」后放大图片，对比区出现两张大小不一致的同一张图（重叠）。
 // 成因：对比用的原图层 .iaj-orig 靠 inset:0 + 100%/100% 跟随 #cropCanvas，但 .crop-canvas img 上的
 //   max-width/max-height（1300x840 上限）会把这层单独卡小；缩放超过该上限后原图层不再铺满，
 //   底下同一张 #cropImage 透出来，左右两半各显示一张、大小不同。
@@ -53,15 +53,37 @@ console.log('[2] 两个编辑器给 #cropImage 的基准 fit 上限保持不变�
     }
 });
 
-console.log('[3] 缩放/对比实现不变：缩放只改 #cropImage，对比按 holder 百分比定位');
+console.log('[3] 缩放只改 #cropImage；对比沿用同一层原图，靠切结果画布可见性');
 const zoomLine = 'img.style.width=Math.round(imageEditBaseW*imageEditZoom)+\'px\'';
 ['static/js/smart-canvas.js', 'static/js/canvas.js'].forEach(p => {
     ok(compact(read(p)).includes(zoomLine), p + ' 的缩放仍只改 #cropImage 像素宽（applyImageEditZoom 行为未变）');
 });
 const editor = read('static/js/image-adjust-editor.js');
-ok(editor.includes("S.cv.style.clipPath = S.compare === 'split'"), '拖动对比仍用 clipPath 切分调整后画布');
-ok(editor.includes("div.style.left = S.splitX + '%'"), '分割线仍按 holder 百分比定位');
 ok(editor.includes("orig.id = 'iajOrigImg'"), '原图层仍是同一层 #iajOrigImg（未新增图层）');
+ok(editor.includes("S.cv.style.visibility = S.cmpOrig ? 'hidden' : ''"), '对比改成切结果画布可见性（原图层不动，仍按 holder 铺满）');
+ok(!/clipPath|splitX|iaj-vbar|iaj-sideview|adjustCompareDivider|setHold/.test(editor), '旧的拖动对比 / 并排 / 按住看原图已删干净');
+
+console.log('[4] 图片右下角「对比原图」按钮：点击切换、不误触取色、剪切三角默认不显示');
+const cmpRule = ruleBody(adjust, '.crop-canvas .iaj-cmp');
+ok(Boolean(cmpRule), '有 .crop-canvas .iaj-cmp 按钮规则');
+if (cmpRule) {
+    ok(cmpRule.includes('position:absolute') && cmpRule.includes('right:10px') && cmpRule.includes('bottom:10px'), '按钮绝对定位贴在图片右下角 10px');
+    ok(Number((cmpRule.match(/z-index:(\d+)/) || [0, 0])[1]) > 3, 'z-index 盖过结果画布（.image-edit-canvas-adjust z-index:3）');
+    ok(cmpRule.includes('border:0'), '不画边框（层级靠底和投影）');
+    ok(cmpRule.includes('box-shadow:'), '近实底 + 柔和投影');
+    ok(cmpRule.includes('border-radius:99px'), '胶囊圆角');
+}
+ok(/\.crop-canvas \.iaj-cmp\.on\{[^}]*background:var\(--cmp-on-bg\)/.test(adjust), '选中态用反色实底');
+ok(adjust.includes('.crop-canvas.iaj-picking .iaj-cmp{cursor:pointer !important}'), '取色（crosshair）时按钮光标保持 pointer');
+ok(editor.includes("if (e.target.closest && e.target.closest('.iaj-cmp')) return;"), '取色 pointerdown 忽略按钮（holder 上是捕获阶段，必须这样兜）');
+ok(editor.includes("['pointerdown', 'pointerup', 'mousedown', 'click'].forEach(t => btn.addEventListener(t, e => e.stopPropagation()))"), '按钮自己 stopPropagation（含 mousedown：两个宿主的平移都别从按钮上起来）');
+ok(editor.includes('function toggleCompare()') && editor.includes('if (!e.repeat) toggleCompare();'), '点按钮 / 按 \\ 键都是同一个切换函数（长按不连跳）');
+const clipRule = ruleBody(adjust, '.iaj-clip');
+ok(Boolean(clipRule) && clipRule.includes('opacity:0'), '剪切三角默认 opacity:0（没剪切时完全不出现）');
+ok(/\.iaj-clip\.on\{opacity:1\}/.test(adjust), '只有 .on 才 opacity:1');
+ok(editor.includes("$('.iaj-clip.lo', S.panel).classList.toggle('on', h.clipLo)"), '暗部三角由分析结果的 clipLo 驱动');
+ok(editor.includes("$('.iaj-clip.hi', S.panel).classList.toggle('on', h.clipHi)"), '高光三角由分析结果的 clipHi 驱动');
+ok(editor.includes('继续编辑上次的调色 · 基于原图'), '「继续编辑上次的调色 · 基于原图」提示没丢（挪到面板内）');
 
 console.log('通过 ' + pass + '/' + (pass + fails.length));
 if (fails.length) { console.log('失败:'); fails.forEach(f => console.log('  - ' + f)); process.exit(1); }

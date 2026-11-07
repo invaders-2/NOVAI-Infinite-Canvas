@@ -1,0 +1,504 @@
+/**
+ * 画布助手「参考图选择卡」样式（WebImageCard，T11 HextaUI 版）。
+ * 3 张一排的方图网格（AspectRatio 自带骨架/失败占位）、Attachment 承载选中态、
+ * ButtonGroup 放全选/展开、Carousel 做灯箱翻页。公共卡面（标题/badge/底部）在 message-cards.css。
+ * 颜色沿用 .cn-root 的主题变量，亮/暗两套自动跟随；不画 border / hairline。
+ */
+
+/* ══ 卡片内容区 ══════════════════════════════════════════════════════ */
+.cn-root .webimg-desc {
+  margin: 0;
+  color: var(--fg2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.cn-root .webimg-q {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cn-root .webimg-q span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--fg3);
+  font-size: 11px;
+}
+
+/* 来源筛选 */
+.cn-root .webimg-srcchips {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.cn-root .webimg-srcchips > span {
+  color: var(--fg3);
+  font-size: 11px;
+}
+.cn-root .webimg-chip {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--fg2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--d-feedback) var(--e-std), color var(--d-feedback) var(--e-std);
+}
+.cn-root .webimg-chip:hover { background: var(--hover); color: var(--hi); }
+.cn-root .webimg-chip.on { background: var(--solid); color: var(--on-solid); font-weight: 500; }
+
+/* ══ 3 列方图网格 ════════════════════════════════════════════════════ */
+.cn-root .webimg-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.cn-root .webimg-cell {
+  position: relative;
+  min-width: 0;
+}
+
+/* 一格 = HextaUI Attachment（纵向），去掉它的卡面底色与内边距，只留下图片 + 两行 meta */
+.cn-root .webimg-cell [data-slot="attachment"] {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: none;
+  overflow: hidden;
+  transition: background-color var(--d-feedback) var(--e-std);
+}
+.cn-root .webimg-cell:hover [data-slot="attachment"] { background: var(--s2); }
+.cn-root .webimg-cell.on [data-slot="attachment"] { background: var(--s4); }
+.cn-root .webimg-cell.added [data-slot="attachment"] { background: var(--card); }
+
+/* 图片：AspectRatio 负责 1:1、骨架与失败占位 */
+.cn-root .webimg-media {
+  width: 100%;
+  border-radius: 10px 10px 0 0;
+  overflow: hidden;
+  background: var(--sunken);
+}
+.cn-root .webimg-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cn-root .webimg-media [data-slot="aspect-ratio-placeholder"] { background: var(--sunken); }
+
+.cn-root .webimg-noimg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--fg3);
+  font-size: 10.5px;
+}
+.cn-root .webimg-noimg em { font-style: normal; }
+
+/* 两行 meta */
+.cn-root .webimg-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 6px 5px;
+  min-width: 0;
+  text-align: left;
+}
+.cn-root .webimg-size {
+  color: var(--fg2);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 14px;
+  transition: color var(--d-feedback);
+}
+.cn-root .webimg-cell.on .webimg-size { color: var(--hi); font-weight: 600; }
+.cn-root .webimg-srcname {
+  min-width: 0;
+  color: var(--fg3);
+  font-size: 10.5px;
+  line-height: 14px;
+}
+.cn-root .webimg-srcname span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 点击面（整格）与角标 */
+.cn-root .webimg-tap {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  outline: none;
+}
+.cn-root .webimg-tap:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--solid) 70%, transparent);
+}
+.cn-root .webimg-cell:active .webimg-tap { transform: scale(0.99); }
+
+.cn-root .webimg-tools {
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  z-index: 12;
+  display: flex;
+  padding: 0;
+  pointer-events: none;
+}
+.cn-root .webimg-pick {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  opacity: 0.55;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transition: opacity var(--d-feedback), background-color var(--d-feedback);
+}
+.cn-root .webimg-cell:hover .webimg-pick { opacity: 1; }
+.cn-root .webimg-cell.on .webimg-pick { background: var(--solid); color: var(--on-solid); opacity: 1; }
+.cn-root .webimg-cell.added .webimg-pick { background: var(--s4); color: var(--hi); opacity: 1; }
+
+.cn-root .webimg-src {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  z-index: 13;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  opacity: 0;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transition: opacity var(--d-feedback);
+}
+.cn-root .webimg-cell:hover .webimg-src,
+.cn-root .webimg-src:focus-visible { opacity: 1; }
+
+.cn-root .webimg-err {
+  display: block;
+  padding: 4px 2px 0;
+  color: var(--bad);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+/* ══ 空态 / 骨架 / 搜索中 ═══════════════════════════════════════════ */
+.cn-root .webimg-empty[data-slot="empty"] {
+  gap: 8px;
+  padding: 26px 12px;
+}
+.cn-root .webimg-empty[data-slot="empty"] [data-slot="empty-media"] {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 0;
+  border-radius: 12px;
+  background: var(--sunken);
+  color: var(--fg3);
+}
+.cn-root .webimg-empty[data-slot="empty"] [data-slot="empty-title"] {
+  color: var(--fg2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.cn-root .webimg-empty[data-slot="empty"] [data-slot="empty-description"] {
+  max-width: 280px;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.cn-root .webimg-skeleton {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+.cn-root .webimg-skeleton-cell[data-slot="skeleton"] {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  background: var(--sunken);
+}
+.cn-root .webimg-load {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 联网关闭 / 搜索失败 */
+.cn-root .webimg-off[data-slot="alert"],
+.cn-root .webimg-failed[data-slot="alert"] {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--sunken);
+  box-shadow: none;
+}
+.cn-root .webimg-off[data-slot="alert"] [data-slot="alert-title"],
+.cn-root .webimg-failed[data-slot="alert"] [data-slot="alert-title"] {
+  color: var(--hi);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.cn-root .webimg-off[data-slot="alert"] [data-slot="alert-description"],
+.cn-root .webimg-failed[data-slot="alert"] [data-slot="alert-description"] {
+  color: var(--fg2);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.cn-root .webimg-failed[data-slot="alert"] {
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+}
+.cn-root .webimg-failed[data-slot="alert"] [data-slot="alert-title"] { color: var(--bad); }
+
+/* ══ 底部操作条 ══════════════════════════════════════════════════════ */
+.cn-root .webimg-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cn-root .webimg-bar-l,
+.cn-root .webimg-bar-r {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.cn-root .webimg-bar .sp { flex: 1; }
+.cn-root .webimg-count {
+  color: var(--fg3);
+  font-size: 11px;
+  line-height: 16px;
+}
+.cn-root .webimg-added {
+  color: var(--fg3);
+  font-size: 11px;
+}
+.cn-root .webimg-actions[data-slot="button-group"] { gap: 2px; }
+.cn-root .webimg-actions[data-slot="button-group"] [data-slot="button"] {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg3);
+  font-size: 11px;
+  box-shadow: none;
+}
+.cn-root .webimg-actions[data-slot="button-group"] [data-slot="button"]:hover { background: var(--hover); color: var(--fg); }
+.cn-root .webimg-bar-r [data-slot="button"] {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--solid);
+  color: var(--on-solid);
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: none;
+}
+.cn-root .webimg-bar-r [data-slot="button"]:hover { background: var(--hi); }
+.cn-root .webimg-bar-r [data-slot="button"]:disabled { opacity: 0.5; cursor: default; }
+
+/* ══ 灯箱：HextaUI Carousel 翻页 ═════════════════════════════════════ */
+.cn-root .webimg-lb {
+  position: fixed;
+  inset: 0;
+  z-index: 78;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 64px 132px;
+  background: rgba(0, 0, 0, 0.86);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  animation: lbIn var(--d-std) var(--e-std);
+}
+.cn-root .webimg-lb-shell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(80vw, 1080px);
+  max-height: 100%;
+  min-width: 0;
+}
+.cn-root .webimg-lb-carousel {
+  width: 100%;
+  max-height: 100%;
+}
+.cn-root .webimg-lb-content {
+  display: flex;
+  align-items: center;
+}
+.cn-root .webimg-lb-content::-webkit-scrollbar { display: none; }
+.cn-root .webimg-lb-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+.cn-root .webimg-lb-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 160px;
+}
+.cn-root .webimg-lb-stage img {
+  display: block;
+  max-width: 100%;
+  max-height: 80vh;
+  border-radius: 14px;
+  object-fit: contain;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6), 0 2px 10px rgba(0, 0, 0, 0.4);
+  cursor: default;
+}
+.cn-root .webimg-lb-skeleton {
+  width: min(80vh, 80vw);
+  height: min(60vh, 60vw);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.cn-root .webimg-lb-broken {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 36px 44px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+}
+
+.cn-root .webimg-lb-info {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  width: min(80vw, 640px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(28, 28, 30, 0.92);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  color: #f5f5f7;
+}
+.cn-root .webimg-lb-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.cn-root .webimg-lb-head b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.cn-root .webimg-lb-head span {
+  flex: none;
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.cn-root .webimg-lb-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: rgba(255, 255, 255, 0.69);
+  font-size: 12px;
+}
+.cn-root .webimg-lb-meta a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  text-decoration: none;
+}
+.cn-root .webimg-lb-meta a:hover { background: rgba(255, 255, 255, 0.24); }
+.cn-root .webimg-lb-note { color: var(--warn); }
+.cn-root .webimg-lb-hint { color: rgba(255, 255, 255, 0.4); font-size: 11px; }
+
+.cn-root .webimg-lb-close {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.cn-root .webimg-lb-close:hover { background: rgba(255, 255, 255, 0.26); }
+
+/* CarouselPrevious / CarouselNext 默认挂在内容两侧 -12，这里贴到灯箱左右 */
+.cn-root .webimg-lb-nav[data-slot="carousel-previous"],
+.cn-root .webimg-lb-nav[data-slot="carousel-next"] {
+  z-index: 2;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  box-shadow: none;
+}
+.cn-root .webimg-lb-nav[data-slot="carousel-previous"] { inset-inline-start: 16px; }
+.cn-root .webimg-lb-nav[data-slot="carousel-next"] { inset-inline-end: 16px; }
+.cn-root .webimg-lb-nav[data-slot="carousel-previous"]:hover,
+.cn-root .webimg-lb-nav[data-slot="carousel-next"]:hover { background: rgba(255, 255, 255, 0.26); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cn-root .webimg-lb { animation: none; }
+  .cn-root .webimg-cell [data-slot="attachment"],
+  .cn-root .webimg-pick { transition: none; }
+}

@@ -1,5 +1,7 @@
 /* === NOVAI Design Token System (marvis-shared.css) === */
 /* 单一真实来源：所有颜色、字体、阴影、圆角、动效的语义化变量 */
+/* 图标动效层（三端共用）：必须排在任何规则之前 */
+@import url("nv-icons.css");
 
 :root {
     /* ── 字体 ── */

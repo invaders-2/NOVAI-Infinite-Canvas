@@ -3112,9 +3112,6 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .adjust-group-title{font-size:var(--text-base);font-weight:var(--font-weight-semibold);color:var(--text);margin:var(--space-4) 0 var(--space-2);}
 .adjust-curve-panel{flex-direction:column;gap:var(--space-3);width:100%;align-items:flex-start;}
 .adjust-curve-canvas{background:transparent;border:none;border-radius:var(--radius-sm);cursor:crosshair;touch-action:none;display:block;width:100%;}
-.adjust-compare-divider{display:none;position:absolute;top:0;bottom:0;width:2px;background:#ffffff;mix-blend-mode:difference;cursor:ew-resize;z-index:6;opacity:.95;touch-action:none;}
-.crop-canvas.adjust-mode .adjust-compare-divider{display:block;}
-.adjust-compare-divider::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:var(--space-6);height:var(--space-6);border-radius:var(--radius-full);background:var(--surface);box-shadow:var(--shadow-md);}
 
 
 
@@ -8306,3 +8303,33 @@ html.studio-theme-dark .nv-mcp-brand-logo { filter: invert(1); }
     white-space:pre-wrap; overflow-wrap:anywhere; user-select:text;
     scrollbar-width:thin; scrollbar-color:var(--scrollbar) transparent;
 }
+
+/* ═══ 低性能模式（body.smart-low-perf / body.smart-reduce-motion）═══
+   默认不生效：只有「自动探测判定低配」或用户在左栏「更多 → 流畅优先」里手动打开时才挂 smart-low-perf；
+   系统开启「减少动效」时挂 smart-reduce-motion，只关装饰动画、不动磨砂。
+   降级只关最贵的合成/滤镜/动画，不改布局、配色、图标与任何交互入口。 */
+body.smart-low-perf .image-node.group-node,
+body.smart-low-perf .image-node.prompt-smart-node,
+body.smart-low-perf .image-node.loop-smart-node,
+body.smart-low-perf .smart-group-node,
+body.smart-low-perf .media-audio-card,
+body.smart-low-perf .media-file-card {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+body.smart-low-perf .connection-layer .conn-pending,
+body.smart-low-perf .connection-layer .conn-cascade-active { animation: none; }
+body.smart-low-perf .gen-beam,
+body.smart-low-perf .thought-line__glyph,
+body.smart-low-perf .thought-line__breath,
+body.smart-low-perf .chat-welcome-icon,
+body.smart-reduce-motion .gen-beam,
+body.smart-reduce-motion .thought-line__breath { animation: none !important; }
+/* 注：试过手势期间给 .world 加 will-change:transform（想让它变纯合成），实测反而更慢
+   （6x 降速平移帧均值 33.5ms vs 28.1ms）：world 是 6000×4000 的大层，提升后整层重新栅格化。
+   结论：不要加。这条留作记录，避免以后有人再试。 */
+/* 「更多」菜单里「流畅优先」的开启状态：一颗小圆点（不画线框、不加描边，沿用画布既有选中态语言） */
+.canvas-more-item .smart-perf-state,
+.canvas-anchored-item .smart-perf-state { margin-left: auto; width: 6px; height: 6px; border-radius: 999px; background: currentColor; opacity: 0; }
+body.smart-low-perf .canvas-more-item .smart-perf-state,
+body.smart-low-perf .canvas-anchored-item .smart-perf-state { opacity: .85; }

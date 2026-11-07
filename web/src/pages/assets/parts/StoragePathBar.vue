@@ -52,7 +52,7 @@ defineExpose({ load });
 </template>
 
 <style scoped>
-.am-pathbar { flex: none; display: flex; align-items: center; gap: 10px; height: 44px; margin-top: 14px; padding: 0 8px 0 14px; border-radius: 14px; background: var(--solid); box-shadow: var(--shadow-float); font: 400 12px/1 var(--font-sans); }
+.am-pathbar { flex: none; display: flex; align-items: center; gap: 10px; height: 44px; margin: 0 0 14px; padding: 0 8px 0 14px; border-radius: 12px; background: var(--fill-1); font: 400 12px/1 var(--font-sans); }
 .am-pathbar > .nv-i { width: 14px; height: 14px; color: var(--ink-3); flex: none; }
 .k { color: var(--ink-3); flex: none; }
 .v { flex: 1; min-width: 0; font: 400 11.5px/1 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

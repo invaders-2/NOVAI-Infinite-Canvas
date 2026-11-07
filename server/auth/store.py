@@ -64,6 +64,12 @@ SCHEMA = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at)",
     """
+    CREATE TABLE IF NOT EXISTS auth_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS reset_codes (
         user_id INTEGER PRIMARY KEY,
         code_hash TEXT NOT NULL,
@@ -460,6 +466,58 @@ def register_with_invite(username: str, password_hash: str, invite_code: str, no
             raise AuthError("用户名已被占用", 400, "username_taken")
         user_id = int(cursor.lastrowid)
         conn.execute("UPDATE invite_codes SET used = used + 1 WHERE code = ?", (str(invite_code),))
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        conn.close()
+    return get_user_by_id(user_id) or {}
+
+
+# ---------------------------------------------------------------- settings / 开放注册（2026-11-07）
+
+def get_setting(key: str, default: str = "") -> str:
+    conn = connect()
+    try:
+        row = conn.execute("SELECT value FROM auth_settings WHERE key = ?", (str(key),)).fetchone()
+        return str(row["value"]) if row is not None else default
+    finally:
+        conn.close()
+
+
+def set_setting(key: str, value: str) -> None:
+    conn = connect()
+    try:
+        conn.execute(
+            "INSERT INTO auth_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(key), str(value)),
+        )
+    finally:
+        conn.close()
+
+
+def register_open(username: str, password_hash: str, now: int, first_user_role: str = "admin") -> Dict[str, Any]:
+    """不需要邀请码的注册：库里还没有任何用户时，第一个账号直接是管理员（本机第一个人管这台 NOVAI）；
+    数用户和建用户放在同一事务里，两个人同时抢第一个注册也只会有一个管理员。"""
+    conn = connect()
+    user_id = 0
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        total = int(conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"])
+        role = str(first_user_role) if total == 0 else "user"
+        try:
+            cursor = conn.execute(
+                "INSERT INTO users (username, password_hash, role, status, created_at) VALUES (?, ?, ?, 'active', ?)",
+                (str(username), str(password_hash), role, int(now)),
+            )
+        except sqlite3.IntegrityError:
+            raise AuthError("用户名已被占用", 400, "username_taken")
+        user_id = int(cursor.lastrowid)
         conn.execute("COMMIT")
     except Exception:
         try:

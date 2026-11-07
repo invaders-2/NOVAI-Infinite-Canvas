@@ -10,7 +10,9 @@ import StorageView from './api/parts/StorageView.vue';
 import ApiConfirm from './api/parts/ApiConfirm.vue';
 import { createApiStore } from './api/core/useApiStore.js';
 
-const store = createApiStore();
+// 2026-11：设置里的「API 与模型」先显示平台总览，点平台再打开管理弹窗；弹窗和总览共用同一个 store（由总览传进来）
+const props = defineProps({ store: { type: Object, default: null } });
+const store = props.store || createApiStore();
 const S = store.S;
 const scroller = ref(null);
 
@@ -24,7 +26,7 @@ provide('apiSettings', { save: store.save, reload: store.reload, setDirty: child
 
 function onScroll() { const el = scroller.value; S.stuck = !!el && el.scrollTop > 4; }
 function onViewEnter() { if (scroller.value) scroller.value.scrollTop = 0; }
-onMounted(() => { store.load(); });
+onMounted(() => { if (!props.store || !S.loaded) store.load(); });
 </script>
 
 <template>

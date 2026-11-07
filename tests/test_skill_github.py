@@ -51,7 +51,7 @@ class GithubFetchTests(unittest.TestCase):
                 return FakeResponse(json.dumps({"tree": [{"type": "blob", "path": "SKILL.md"}]}).encode())
             return FakeResponse(MARKDOWN.encode())
 
-        with mock.patch("urllib.request.urlopen", side_effect=fake_open), \
+        with mock.patch("server.skills.github_install.urlopen", side_effect=fake_open), \
                 mock.patch.dict("os.environ", {"NOVAI_GITHUB_TOKEN": "secret-token"}):
             result = github_install.fetch_skill_markdown("https://github.com/acme/tools")
         self.assertEqual(result["markdown"], MARKDOWN)
@@ -62,13 +62,13 @@ class GithubFetchTests(unittest.TestCase):
 
     def test_multiple_candidates_require_path(self):
         payload = {"tree": [{"type": "blob", "path": "a/SKILL.md"}, {"type": "blob", "path": "b/SKILL.md"}]}
-        with mock.patch("urllib.request.urlopen", return_value=FakeResponse(json.dumps(payload).encode())):
+        with mock.patch("server.skills.github_install.urlopen", return_value=FakeResponse(json.dumps(payload).encode())):
             with self.assertRaisesRegex(github_install.GitHubSkillError, "多个 SKILL.md"):
                 github_install._resolve_source(github_install.GitHubSource("acme", "tools", "main", ""), "")
 
     def test_oversize_markdown_is_rejected(self):
         source = github_install.GitHubSource("acme", "tools", "main", "SKILL.md")
-        with mock.patch("urllib.request.urlopen", return_value=FakeResponse(b"x" * (github_install.MAX_MARKDOWN_BYTES + 1))):
+        with mock.patch("server.skills.github_install.urlopen", return_value=FakeResponse(b"x" * (github_install.MAX_MARKDOWN_BYTES + 1))):
             with self.assertRaisesRegex(github_install.GitHubSkillError, "1MB"):
                 github_install._json("https://raw.githubusercontent.com/acme/tools/main/SKILL.md", "")
         self.assertEqual(source.path, "SKILL.md")

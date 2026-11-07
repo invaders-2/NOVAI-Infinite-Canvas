@@ -1622,9 +1622,15 @@ function clampZoomBarScale(value){
 function updateZoomBarLevel(){
     const label = document.getElementById('canvasZoomLevel');
     if(!label) return;
-    label.textContent = `${Math.round((viewport.scale || 1) * 100)}%`;
+    // 每个 wheel/pointermove 都写一次 textContent 会白白制造样式/布局脏标记，值没变就不写
+    const text = `${Math.round((viewport.scale || 1) * 100)}%`;
+    if(label.textContent !== text) label.textContent = text;
 }
 // 以可视区中心为锚点缩放，避免内容跳走。
+/* 纯视口变化（平移/缩放/适应画布/全屏）只改 #world 的 transform：节点与连线都在 #world 内，
+   连线层会跟着一起变换，不需要每次重建（原来 10 处 viewport 变更后都跟一次 renderLinks()，
+   每次 2×连线数 次 getBoundingClientRect + 3×连线数 个 SVG 节点重建，还会触发 tailwind 的 DOM 观察器）。
+   节点/连线本身变化时仍由 renderLinks()/refreshGeometry() 重建。 */
 function zoomBarApplyScale(nextScale){
     const target = clampZoomBarScale(nextScale);
     const oldScale = viewport.scale || 1;
@@ -1639,7 +1645,6 @@ function zoomBarApplyScale(nextScale){
     viewport.y = cy - (cy - viewport.y) * (target / oldScale);
     viewport.scale = target;
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
 }
@@ -1670,7 +1675,6 @@ function zoomBarFitAll(){
     viewport.x = rect.width / 2 - (minX + maxX) / 2 * nextScale;
     viewport.y = rect.height / 2 - (minY + maxY) / 2 * nextScale;
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
 }
@@ -1728,12 +1732,58 @@ function currentWorldViewRect(){
         h:rect.height / scale
     };
 }
-function minimapBounds(){
-    const rects = (nodes || []).map(estimatedNodeRect);
-    rects.push(currentWorldViewRect());
-    if(!rects.length) return {x:0, y:0, w:1000, h:700};
+/* —— 小地图几何缓存 ——
+   平移/缩放的每个事件都会 scheduleMinimapRender()，而 minimapBounds() 原来对每个节点调
+   estimatedNodeRect()（一次 .node[data-id] querySelector + offsetWidth/offsetHeight 强制布局），
+   100 节点就是每帧 100 次。这里把「节点矩形」缓存起来，只在 render()/refreshNodes()（增删/重排）
+   或拖拽、缩放节点时按模型增量刷新；视口矩形仍然每帧实算（它就是会动）。 */
+let minimapRectCache = null;
+function invalidateMinimapRects(){
+    minimapRectCache = null;
+}
+function minimapNodeRects(){
+    if(minimapRectCache) return minimapRectCache;
+    const map = new Map();
+    for(const el of (nodesEl?.children || [])){
+        const id = el?.dataset?.id;
+        if(id && !map.has(id)) map.set(id, el);
+    }
+    minimapRectCache = (nodes || []).map(n => {
+        const el = map.get(n.id);
+        const size = defaultNodeSize(n.type);
+        return {
+            id: n.id,
+            x: Number(n.x) || 0,
+            y: Number(n.y) || 0,
+            w: el?.offsetWidth || n.w || size.w || 260,
+            h: el?.offsetHeight || n.h || size.h || 160
+        };
+    });
+    return minimapRectCache;
+}
+// 拖拽/缩放节点时模型已经是最新坐标，按模型增量刷新缓存，避免整份重建（那会重新读 offsetWidth）
+function syncMinimapRectsFromModel(withSize=false){
+    const rects = minimapRectCache;
+    if(!rects) return;
+    const byId = new Map();
+    for(const r of rects) byId.set(r.id, r);
+    for(const n of nodes || []){
+        const r = byId.get(n.id);
+        if(!r) continue;
+        r.x = Number(n.x) || 0;
+        r.y = Number(n.y) || 0;
+        if(withSize){
+            if(Number(n.w)) r.w = Number(n.w);
+            if(Number(n.h)) r.h = Number(n.h);
+        }
+    }
+}
+function minimapBounds(rects, viewRect){
+    const list = (rects || []).slice();
+    list.push(viewRect || currentWorldViewRect());
+    if(!list.length) return {x:0, y:0, w:1000, h:700};
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    rects.forEach(r => {
+    list.forEach(r => {
         minX = Math.min(minX, r.x);
         minY = Math.min(minY, r.y);
         maxX = Math.max(maxX, r.x + r.w);
@@ -1759,10 +1809,47 @@ function scheduleLinksRender(){
         renderLinks();
     });
 }
+let minimapNodeEls = [];
+let minimapEmptyEl = null;
+let minimapStructureDirty = true;
+function setMinimapStylePx(el, prop, value){
+    const text = (Math.round(value * 1000) / 1000) + 'px';
+    if(el.style[prop] !== text) el.style[prop] = text;
+}
+/* 结构（每个节点的格子 + 视口框）只在节点增删/重排时重建一次；之后每帧只写变化的几何值。
+   原来每帧 innerHTML 重建 54~N 个 .minimap-node：① 每帧销毁重建 DOM；
+   ② 每次 childList 变更都会触发 vendor/js/tailwindcss-cdn.js 的 MutationObserver 重新扫描并生成 CSS
+   （6x 降速实测占平移 CPU 13~19%、编辑 render() 的 37%）。 */
+function rebuildMinimapStructure(rects){
+    minimapContent.textContent = '';
+    const frag = document.createDocumentFragment();
+    minimapNodeEls = rects.map(r => {
+        const el = document.createElement('div');
+        el.className = 'minimap-node';
+        el.dataset.id = r.id;
+        el.dataset.sel = '';
+        frag.appendChild(el);
+        return el;
+    });
+    minimapEmptyEl = document.createElement('div');
+    minimapEmptyEl.className = 'minimap-empty';
+    minimapEmptyEl.textContent = 'EMPTY';
+    minimapEmptyEl.style.display = 'none';
+    frag.appendChild(minimapEmptyEl);
+    minimapViewport = document.createElement('div');
+    minimapViewport.id = 'minimapViewport';
+    minimapViewport.className = 'minimap-viewport';
+    frag.appendChild(minimapViewport);
+    minimapContent.appendChild(frag);
+    minimapStructureDirty = false;
+}
 function renderMinimap(){
-    if(!minimapContent || !minimapViewport) return;
+    if(!minimapContent) return;
     canvasArrangeBtn?.classList.toggle('visible', selected.size > 0);
-    const bounds = minimapBounds();
+    // 先读（视口矩形要 board.getBoundingClientRect）再写，避免写后读触发强制重排
+    const viewRect = currentWorldViewRect();
+    const rects = minimapNodeRects();
+    const bounds = minimapBounds(rects, viewRect);
     const cw = minimapContent.clientWidth || 172;
     const ch = minimapContent.clientHeight || 110;
     const scale = Math.min(cw / bounds.w, ch / bounds.h);
@@ -1771,22 +1858,38 @@ function renderMinimap(){
     const ox = (cw - mapW) / 2;
     const oy = (ch - mapH) / 2;
     minimapState = {bounds, scale, ox, oy, cw, ch};
-    const nodeHtml = (nodes || []).map(n => {
-        const r = estimatedNodeRect(n);
-        return `<div class="minimap-node ${selected.has(n.id) ? 'selected' : ''}" style="left:${ox + (r.x - bounds.x) * scale}px;top:${oy + (r.y - bounds.y) * scale}px;width:${Math.max(3, r.w * scale)}px;height:${Math.max(3, r.h * scale)}px"></div>`;
-    }).join('');
-    minimapContent.innerHTML = `${nodeHtml}${nodes?.length ? '' : '<div class="minimap-empty">EMPTY</div>'}<div id="minimapViewport" class="minimap-viewport"></div>`;
-    minimapViewport = document.getElementById('minimapViewport');
-    updateMinimapViewport();
+    let idsChanged = minimapStructureDirty || rects.length !== minimapNodeEls.length;
+    if(!idsChanged){
+        for(let i = 0; i < rects.length; i++){
+            if(minimapNodeEls[i].dataset.id !== rects[i].id){ idsChanged = true; break; }
+        }
+    }
+    if(idsChanged) rebuildMinimapStructure(rects);
+    for(let i = 0; i < rects.length; i++){
+        const r = rects[i];
+        const el = minimapNodeEls[i];
+        if(!el) continue;
+        setMinimapStylePx(el, 'left', ox + (r.x - bounds.x) * scale);
+        setMinimapStylePx(el, 'top', oy + (r.y - bounds.y) * scale);
+        setMinimapStylePx(el, 'width', Math.max(3, r.w * scale));
+        setMinimapStylePx(el, 'height', Math.max(3, r.h * scale));
+        const on = selected.has(r.id) ? '1' : '';
+        if(el.dataset.sel !== on){
+            el.dataset.sel = on;
+            el.classList.toggle('selected', on === '1');
+        }
+    }
+    if(minimapEmptyEl) minimapEmptyEl.style.display = rects.length ? 'none' : 'flex';
+    updateMinimapViewport(viewRect);
 }
-function updateMinimapViewport(){
+function updateMinimapViewport(viewRect){
     if(!minimapViewport || !minimapState) return;
-    const r = currentWorldViewRect();
+    const r = viewRect || currentWorldViewRect();
     const {bounds, scale, ox, oy} = minimapState;
-    minimapViewport.style.left = `${ox + (r.x - bounds.x) * scale}px`;
-    minimapViewport.style.top = `${oy + (r.y - bounds.y) * scale}px`;
-    minimapViewport.style.width = `${Math.max(8, r.w * scale)}px`;
-    minimapViewport.style.height = `${Math.max(8, r.h * scale)}px`;
+    setMinimapStylePx(minimapViewport, 'left', ox + (r.x - bounds.x) * scale);
+    setMinimapStylePx(minimapViewport, 'top', oy + (r.y - bounds.y) * scale);
+    setMinimapStylePx(minimapViewport, 'width', Math.max(8, r.w * scale));
+    setMinimapStylePx(minimapViewport, 'height', Math.max(8, r.h * scale));
 }
 function minimapEventToWorld(e){
     if(!minimapState) renderMinimap();
@@ -1801,7 +1904,6 @@ function centerViewportOnWorldPoint(point){
     viewport.x = rect.width / 2 - point.x * viewport.scale;
     viewport.y = rect.height / 2 - point.y * viewport.scale;
     applyViewport();
-    renderLinks();
     renderSelectionHub();
 }
 function safeViewportScale(value){
@@ -1814,7 +1916,6 @@ function fitAllNodesViewport(){
         viewport.x = rect.width / 2;
         viewport.y = rect.height / 2;
         applyViewport();
-        renderLinks();
         renderSelectionHub();
         scheduleViewportSave();
         return;
@@ -1834,7 +1935,6 @@ function fitAllNodesViewport(){
     viewport.x = rect.width / 2 - cx * viewport.scale;
     viewport.y = rect.height / 2 - cy * viewport.scale;
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
 }
@@ -1863,7 +1963,6 @@ function exitZoomPreview(point=null){
         viewport.y = prev.y;
     }
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
     return true;
@@ -1892,7 +1991,6 @@ function exitZoomPreviewToNode(nodeId){
     viewport.x = boardRect.width / 2 - cx * viewport.scale;
     viewport.y = boardRect.height / 2 - cy * viewport.scale;
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
     return true;
@@ -6012,6 +6110,7 @@ function render(){
     });
     restoreMediaPlaybackStates(mediaStates);
     restoreOutputScrolls(outputScrolls);
+    invalidateMinimapRects();
     refreshGeometry();
     refreshGeometryAfterLayout();
     refreshIcons();
@@ -6043,6 +6142,7 @@ function refreshNodes(ids=[]){
         }
     }
     restoreOutputScrolls(outputScrolls);
+    invalidateMinimapRects();
     refreshGeometry();
     refreshGeometryAfterLayout();
     refreshIcons();
@@ -14437,6 +14537,7 @@ function onNodeDrag(e){
     scheduleLinksRender();
     renderSelectionHub();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
+    syncMinimapRectsFromModel();
     scheduleMinimapRender();
 }
 /* 拖手柄缩放时锁死宽高比的节点：图片 / 视频 / 输出是「媒体框」；
@@ -14517,6 +14618,7 @@ function onNodeResize(e){
     if(resizeNode.node.type === 'group') arrangeCanvasGroupMembers(resizeNode.node, {fitBox:true});
     scheduleLinksRender();
     renderSelectionHub();
+    syncMinimapRectsFromModel(true);
     scheduleMinimapRender();
 }
 function startLink(e, originId, originKind){
@@ -15326,6 +15428,10 @@ function applyKnifeCut(from, to){
     scheduleSave();
 }
 function setKnifeMode(active){
+    // 这个函数挂在 board 的每个 mousemove 上（canvas.js:15471）。无条件走完下面的
+    // renderLinks() 会让「平移/悬停」也每帧重建整层连线：实测 6x 降速下 getBoundingClientRect
+    // 占平移 CPU 7.6%、renderLinks 每事件 2×连线数 次强制布局。非刀模式时它本来就是空操作，直接返回。
+    if(!active && !knifeActive && !document.body.classList.contains('canvas-knife')) return;
     document.body.classList.toggle('canvas-knife', Boolean(active && canvas));
     if(!active){
         knifeActive = false;
@@ -15550,7 +15656,6 @@ document.addEventListener('gesturechange', e => {
     viewport.x = gestureState.originX - gestureState.worldX * newScale;
     viewport.y = gestureState.originY - gestureState.worldY * newScale;
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
 }, { capture: true });
@@ -15641,7 +15746,6 @@ board.onwheel = e => {
         viewport.y -= e.deltaY;
     }
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
 };
@@ -15827,6 +15931,73 @@ function hasImageDropData(dataTransfer){
 function hasOutputImageDrag(dataTransfer){ return [...(dataTransfer?.types || [])].includes('application/x-canvas-output-image'); }
 function escapeHtml(str){ return window.NovaUtils ? NovaUtils.escapeHtml(str) : String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 function escapeAttr(str){ return window.NovaUtils ? NovaUtils.escapeAttr(str) : escapeHtml(str); }
+
+/* ═══ 低性能模式「流畅优先」═══
+   默认 auto：弱机（≤4 核 / ≤4GB）或系统开了「减少动态效果」时自动降级；手动覆盖写 localStorage：
+     novai_legacy_perf_mode = 'full'   强制画质优先（不降级）
+                             'smooth' 强制流畅优先
+   只降效果、不降功能：关掉全部 backdrop-filter 与装饰动画，布局/交互/配色不变。
+   入口：快捷工具栏最左的「画质优先 / 流畅优先」按钮（运行时注入，避免动 legacy-canvas.html 的静态结构）。 */
+const LEGACY_PERF_MODE_KEY = 'novai_legacy_perf_mode';
+function legacyPrefersReducedMotion(){
+    try { return Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch(e) { return false; }
+}
+function legacyPerfModeChoice(){
+    try {
+        const raw = localStorage.getItem(LEGACY_PERF_MODE_KEY);
+        if(raw === 'full' || raw === 'smooth') return raw;
+    } catch(e) {}
+    return 'auto';
+}
+function legacyPerfSmoothActive(){
+    const choice = legacyPerfModeChoice();
+    if(choice === 'smooth') return true;
+    if(choice === 'full') return false;
+    if(legacyPrefersReducedMotion()) return true;
+    const cores = Number(navigator.hardwareConcurrency) || 0;
+    const mem = Number(navigator.deviceMemory) || 0;
+    return (cores > 0 && cores <= 4) || (mem > 0 && mem <= 4);
+}
+function applyLegacyPerfMode(){
+    if(!document.body) return false;
+    const smooth = legacyPerfSmoothActive();
+    document.body.classList.toggle('legacy-perf-smooth', smooth);
+    const btn = document.getElementById('canvasPerfToggle');
+    if(btn){
+        const label = smooth ? '流畅优先' : '画质优先';
+        const span = btn.querySelector('span');
+        if(span && span.textContent !== label) span.textContent = label;
+        btn.classList.toggle('is-on', smooth);
+        btn.setAttribute('aria-pressed', smooth ? 'true' : 'false');
+        btn.title = `性能：${label}${legacyPerfModeChoice() === 'auto' ? '（自动）' : '（手动）'} —— 点击切换`;
+        btn.setAttribute('aria-label', btn.title);
+        btn.dataset.perfMode = smooth ? 'smooth' : 'full';
+    }
+    return smooth;
+}
+function toggleLegacyPerfMode(){
+    const next = legacyPerfSmoothActive() ? 'full' : 'smooth';
+    try { localStorage.setItem(LEGACY_PERF_MODE_KEY, next); } catch(e) {}
+    applyLegacyPerfMode();
+}
+function mountLegacyPerfToggle(){
+    const host = document.querySelector('#quickToolbar .toolbar-fixed');
+    if(!host || document.getElementById('canvasPerfToggle')) return;
+    const btn = document.createElement('button');
+    btn.id = 'canvasPerfToggle';
+    btn.className = 'tool-btn toolbar-perf';
+    btn.type = 'button';
+    btn.innerHTML = '<i data-lucide="zap" class="w-4 h-4"></i><span>画质优先</span>';
+    btn.addEventListener('click', toggleLegacyPerfMode);
+    host.insertBefore(btn, host.firstChild);
+    refreshIcons();
+}
+mountLegacyPerfToggle();
+applyLegacyPerfMode();
+try {
+    const motionQuery = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if(motionQuery?.addEventListener) motionQuery.addEventListener('change', () => applyLegacyPerfMode());
+} catch(e) {}
 
 window.onload = async () => {
     NovaSizePolicy.load();

@@ -238,6 +238,53 @@ html.embed .stage { background-image: none; }
 .empty-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-3); font-size: 11px; }
 .empty-note svg { width: 13px; height: 13px; }
 
+/* ═══ BEAT 宿主外观（html[data-beat]，只对带 beat=1 的宿主生效）═══
+   1) 窗底统一：html/body 与舞台都用宿主 --beat-panel（= 宿主 --bg，图片区底色）
+   2) 右侧面板做成贴边分栏：宽 400、贴死对话框右边缘，无外边距/圆角/阴影/发丝线，
+      靠 --bg（图片区）与 --beat-raised（面板）的底色差分隔；内边距统一 16，底部预留 72px 给宿主「应用」 */
+html[data-beat], html[data-beat] body { background: var(--beat-panel, var(--bg)); }
+html[data-beat] .stage { background-color: var(--beat-panel, var(--bg)); }
+html[data-beat].embed .panel {
+  flex: 0 0 400px;
+  width: 400px;
+  height: auto;
+  align-self: stretch;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--beat-raised, var(--panel-bg));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  overflow: hidden;
+  padding-bottom: 72px;
+}
+/* 贴边分栏里面板内边距统一 16；导出区和上面内容用留白分隔（不画发丝线） */
+html[data-beat].embed .panel-body { padding: 16px; }
+html[data-beat].embed .panel-bottom { padding: 16px; border-top: 0; }
+/* 「合成 PNG」降为浅底次要按钮：宿主「应用」是唯一主按钮（深色用 8% 白） */
+html[data-beat].embed #btnExportPng {
+  background: rgba(0, 0, 0, .06);
+  color: var(--text);
+  border-color: transparent;
+  font-weight: 500;
+  box-shadow: none;
+}
+html[data-beat].embed #btnExportPng:hover:not(:disabled) { background: rgba(0, 0, 0, .09); }
+html[data-theme="dark"][data-beat].embed #btnExportPng { background: rgba(255, 255, 255, .08); }
+html[data-theme="dark"][data-beat].embed #btnExportPng:hover:not(:disabled) { background: rgba(255, 255, 255, .12); }
+
+/* 窄 iframe 嵌入（BEAT 小窗对话框）：右侧面板固定 324px，横排两张 232px 卡片需要
+   iframe >= 890px 才放得下，所以 <=900px 改成竖排紧凑版；只在嵌入模式 + 窄宽度生效。 */
+@media (max-width: 900px) {
+  html.embed .stage-empty { padding: 12px; gap: 14px; }
+  html.embed .empty-cards { flex-direction: column; width: 100%; gap: 8px; }
+  html.embed .pick-join { display: none; }
+  html.embed .pick-card { width: min(220px, 100%); height: 112px; }
+  html.embed .empty-brand b { font-size: 17px; }
+  html.embed .empty-brand span { font-size: 11px; }
+}
+
 /* ---------------- overlays ---------------- */
 .busy-overlay {
   position: absolute;
@@ -24125,7 +24172,9 @@ function fitView() {
   const cw = stage.clientWidth;
   const ch = stage.clientHeight;
   if (!cw || !ch) return;
-  const pad = state.embed ? 16 : 24; // 嵌入时四周各留 8px，尽量铺满（原版取向）
+  /* BEAT 贴边分栏：图片区四周留 24（pad 是总留白，左右/上下各自相等，靠 tx/ty 居中）；
+     旧画布嵌入沿用四周 8px，非嵌入 12px。 */
+  const pad = document.documentElement.dataset.beat === '1' ? 48 : (state.embed ? 16 : 24);
   const s = Math.min((cw - pad) / state.W, (ch - pad) / state.H);
   state.view.scale = s;
   state.view.tx = (cw - state.W * s) / 2;
@@ -24843,6 +24892,9 @@ window.addEventListener('message', async (event) => {
   }
   if (data.type === 'theme') {
     if (data.theme === 'light' || data.theme === 'dark') setTheme(data.theme);
+    /* 宿主传真实 token：窗底 / 面板底色跟宿主完全一致（没传就退回本页 fallback） */
+    if (typeof data.panel === 'string' && data.panel) document.documentElement.style.setProperty('--beat-panel', data.panel);
+    if (typeof data.raised === 'string' && data.raised) document.documentElement.style.setProperty('--beat-raised', data.raised);
     return;
   }
   if (data.type === 'pick-result') {
@@ -24863,6 +24915,8 @@ window.addEventListener('message', async (event) => {
     window.__novaiEmbed = true;
     document.documentElement.classList.add('embed');
   }
+  // BEAT 宿主专用外观（窗底统一 + 右侧浮窗）；只认带 beat=1 的宿主，旧画布宽 iframe 不受影响
+  if (params.get('beat') === '1') document.documentElement.dataset.beat = '1';
   const themeParam = params.get('theme');
   if (themeParam === 'light' || themeParam === 'dark') setTheme(themeParam);
   bindAccordion();

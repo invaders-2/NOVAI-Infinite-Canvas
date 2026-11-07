@@ -254,19 +254,24 @@ class CollectImagesTests(unittest.TestCase):
         self.assertEqual([p["url"] for p in picked], ["/output/style.png", "/output/subject.png"])
 
     def test_cap_respects_vision_max_images(self):
-        canvas = canvas_with_extra_images(8)
-        focus = {"references": [{"id": "cap_%d" % i} for i in range(8)]}
+        # 夹具必须比 cap 多，否则测到的是夹具上限而不是代码上限
+        canvas = canvas_with_extra_images(main.AGENT_VISION_MAX_IMAGES + 2)
+        focus = {"references": [{"id": "cap_%d" % i} for i in range(main.AGENT_VISION_MAX_IMAGES)]}
         picked = collect(focus, canvas)
         self.assertEqual(len(picked), main.AGENT_VISION_MAX_IMAGES)
         self.assertEqual([p["url"] for p in picked],
                          ["/output/cap_%d.png" % i for i in range(main.AGENT_VISION_MAX_IMAGES)])
 
     def test_cap_counts_selected_and_legacy_together(self):
-        canvas = canvas_with_extra_images(4)
+        cap = main.AGENT_VISION_MAX_IMAGES
+        canvas = canvas_with_extra_images(cap + 2)
+        # 选中 1 张 + references (cap-2) 张 = cap-1，第 cap 位正好轮到第一张 legacy 图
         focus = {"selected_node_ids": ["cap_0"],
-                 "references": [{"id": "cap_1"}, {"id": "cap_2"}],
-                 "reference_images": ["/assets/a.png", "/assets/b.png"]}
-        self.assertEqual(len(collect(focus, canvas)), main.AGENT_VISION_MAX_IMAGES)
+                 "references": [{"id": "cap_%d" % i} for i in range(1, cap - 1)],
+                 "reference_images": ["/assets/a.png", "/assets/b.png", "/assets/c.png"]}
+        picked = collect(focus, canvas)
+        self.assertEqual(len(picked), cap)
+        self.assertEqual([p["url"] for p in picked][-1], "/assets/a.png")
 
 
 if __name__ == "__main__":

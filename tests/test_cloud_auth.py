@@ -50,10 +50,24 @@ def set_auth(enabled: bool) -> None:
         os.environ.pop("NOVAI_AUTH_DISABLED", None)
     else:
         os.environ.pop("NOVAI_AUTH_ENABLED", None)
+    # 2026-11-07 起默认是「可选登录」；这里的 auth 关闭用例要的是完全没有账号体系
+    if enabled:
+        os.environ.pop("NOVAI_AUTH_MODE", None)
+    else:
+        os.environ["NOVAI_AUTH_MODE"] = "off"
+
+
+def _assert_reset_page(case, html: str) -> None:
+    """2026-11-07：/reset 由新版界面（static/v2，前端渲染「忘记密码」）提供；没构建新版时是旧的静态页。"""
+    if 'id="app"' in html:
+        return
+    case.assertIn("重置码", html)
+    case.assertIn("向管理员索取", html)
 
 
 def tearDownModule():
     set_auth(False)
+    os.environ.pop("NOVAI_AUTH_MODE", None)
 
 
 def unique_name(prefix: str = "u") -> str:
@@ -695,8 +709,7 @@ class E_AccountPageTest(unittest.TestCase):
     def test_reset_page_is_public_and_explains_invite_flow(self) -> None:
         response = fresh_client("127.0.0.1").get("/reset", headers={"accept": "text/html"})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn("重置码", response.text)
-        self.assertIn("向管理员索取", response.text)
+        _assert_reset_page(self, response.text)
 
 
 class F_AuthOffPagesTest(unittest.TestCase):
@@ -803,7 +816,7 @@ class G_PageDetectionTest(unittest.TestCase):
     def test_reset_page_is_public_without_accept(self) -> None:
         response = fresh_client("127.0.0.1").get("/reset")
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn("重置码", response.text)
+        _assert_reset_page(self, response.text)
 
 
 if __name__ == "__main__":

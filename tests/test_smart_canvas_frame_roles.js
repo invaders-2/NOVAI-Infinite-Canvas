@@ -42,7 +42,7 @@ const settingsForNode = new Function(
     'stripOutpaintDisplaySettings', 'isSmartBatchNode', 'isSmartVideoNode', 'isSmartImageNode', 'isSmartAudioNode',
     'cloneSmartSettings', 'canvasDefaultSmartSettings', 'initialSmartSettings', 'settings', 'recentSmartSettingsForMode',
     'smartSettingsModeKey', 'normalizeSmartVideoModeSettings', 'withOutpaintDisplaySettings', 'isVideoMediaItem', 'isApiLikeEngine',
-    fn('smartSettingsForNode') + '\nreturn smartSettingsForNode;'
+    fn('smartSettingsBaseForNode') + '\nreturn node => smartSettingsBaseForNode(node, {});'
 )(
     value => ({...value}), node => node.type === 'smart-batch', () => false, () => false, () => false,
     value => JSON.parse(JSON.stringify(value || {})), {engine:'api', apiKind:'image'}, {}, {}, () => ({}),

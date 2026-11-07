@@ -169,6 +169,90 @@ class WriteGatePureTests(unittest.TestCase):
         self.assertEqual(result["tools"], ["connect_nodes", "generate_image"])
 
 
+class FreeSearchStepsTests(unittest.TestCase):
+    """搜图是只读操作：只含搜索/搜图步骤的计划免确认直接跑；写操作仍然要确认。"""
+
+    READ_ONLY_SEARCH = ("search_images", "find_similar_images", "web_search", "fetch_url")
+
+    def test_search_only_steps_are_free(self):
+        for tool in self.READ_ONLY_SEARCH:
+            with self.subTest(tool=tool):
+                self.assertIn(tool, main.AGENT_FREE_TOOLS)
+                self.assertNotIn(tool, main.AGENT_PLAN_CONFIRM_TOOLS)
+                self.assertTrue(main._agent_steps_are_free([{"tool": tool, "args": {}}]))
+
+    def test_multi_step_search_plan_is_free(self):
+        self.assertTrue(main._agent_steps_are_free([
+            {"tool": "find_similar_images", "args": {"image_url": "/assets/uploads/a.jpg"}},
+            {"tool": "search_images", "args": {"query": "同款 白底"}},
+        ]))
+
+    def test_search_plus_write_is_not_free(self):
+        for write_tool in ("create_node", "add_image_to_canvas", "generate_image", "batch_generate"):
+            with self.subTest(tool=write_tool):
+                self.assertFalse(main._agent_steps_are_free([
+                    {"tool": "search_images", "args": {"query": "北欧风客厅"}},
+                    {"tool": write_tool, "args": {}},
+                ]))
+                self.assertTrue(main.agent_plan_confirmation_needed([{"tool": write_tool}])["needed"])
+
+    def test_add_image_to_canvas_alone_still_needs_confirmation(self):
+        self.assertFalse(main._agent_steps_are_free([{"tool": "add_image_to_canvas", "args": {}}]))
+        self.assertTrue(main.agent_plan_confirmation_needed([{"tool": "add_image_to_canvas"}])["needed"])
+
+    def test_empty_or_unknown_steps_are_not_free(self):
+        self.assertFalse(main._agent_steps_are_free([]))
+        self.assertFalse(main._agent_steps_are_free([{"tool": "totally_unknown", "args": {}}]))
+
+
+class SearchPlanProducerTests(unittest.TestCase):
+    """plan 模式：用户说「帮我搜几张图」时直接执行只读搜图，不再等点「执行这些步骤」。"""
+
+    def setUp(self):
+        self.execute = AsyncMock(return_value={
+            "ok": True,
+            "result": {"engine": "merged", "query": "北欧风客厅", "items": []},
+            "message": "执行成功",
+        })
+
+    def test_plan_mode_search_images_runs_without_confirmation(self):
+        with patch.object(main, "load_settings", return_value={"agent_web_enabled": True}):
+            events = drain(agent_request(instruction="帮我搜几张北欧风客厅的参考图", mode="plan"), [
+                {"thought": "搜参考图是只读操作，直接搜",
+                 "steps": [{"tool": "search_images", "args": {"query": "北欧风客厅"}}], "done": False},
+                {"done": True, "message": "已搜到一批参考图候选"},
+            ], self.execute)
+        pending = [data for name, data in events if name == "plan" and data.get("requires_confirmation")]
+        self.assertEqual(pending, [])
+        self.execute.assert_awaited()
+        self.assertEqual(self.execute.await_args_list[0].args[0], "search_images")
+        self.assertTrue([data for name, data in events if name == "step_result"])
+
+    def test_plan_mode_search_plus_create_node_does_not_run(self):
+        with patch.object(main, "load_settings", return_value={"agent_web_enabled": True}):
+            events = drain(agent_request(instruction="搜图并加到画布", mode="plan"), [
+                {"thought": "先搜再加",
+                 "steps": [{"tool": "search_images", "args": {"query": "北欧风客厅"}},
+                           {"tool": "create_node", "args": {"type": "image"}}], "done": False},
+            ], self.execute)
+        self.assertEqual(self.execute.await_count, 0)
+        plans = [data for name, data in events if name == "plan"]
+        self.assertTrue(plans)
+        self.assertEqual([step["tool"] for step in plans[-1]["steps"]], ["search_images", "create_node"])
+
+    def test_run_mode_mixed_steps_still_go_through_write_gate(self):
+        with patch.object(main, "load_settings", return_value={"agent_web_enabled": True}):
+            events = drain(agent_request(instruction="搜图并加到画布", mode="run"), [
+                {"thought": "先搜再加",
+                 "steps": [{"tool": "search_images", "args": {"query": "北欧风客厅"}},
+                           {"tool": "create_node", "args": {"type": "image"}}], "done": False},
+            ], self.execute)
+        self.assertEqual(self.execute.await_count, 0)
+        pending = [data for name, data in events if name == "plan" and data.get("requires_confirmation")]
+        self.assertTrue(pending)
+        self.assertIn("create_node", pending[-1].get("blocked_tools") or [])
+
+
 class WriteGateProducerTests(unittest.TestCase):
     """闸门落在 agent 循环执行收口处：未确认的写操作不会真的落盘。"""
 

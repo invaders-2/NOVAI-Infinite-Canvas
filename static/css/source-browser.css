@@ -1,0 +1,536 @@
+/* NOVAI · 在线素材面板（智能画布BEAT 复用旧版 source-browser 的 DOM / JS，只在这里换外观）
+   ────────────────────────────────────────────────────────────────
+   结构（纵向 flex，从上到下）：
+     40px 统一工具栏    ← → ＋「在线素材」标题 ＋ 当前来源（muted 小字）｜右侧 刷新 / 系统浏览器 / ×
+     34px 来源分段控件  Pinterest / 花瓣 / 小红书 / 自定义（选中 = 半透明软底 + 文字提亮 + 字重 600）
+     可选自定义地址栏  只有选「自定义」才出现，出现时把下面的网页区往下推（flex 布局，不叠层）
+     网页区 stage      圆角 16、底色 --s0、flex 吃满剩余高度（桌面端原生 WebContentsView 就叠在这里）
+
+   两种形态：
+     · 桌面端（有 window.pywebview）：宽 520 / top64 / 底部留 60 / 全高，工具栏 + tabs + 网页区；
+     · 网页版降级（is-fallback）：紧凑卡片 440 宽、高度由内容决定（约 300），隐藏三个 resize 热区，
+       空态是「图标 + 标题 + 说明 + 在系统浏览器打开 / 关闭」，两个按钮的点击在 static/canvas.html 里代理。
+
+   约束：不 import smart-canvas.css（会污染画布）；面板在 .cn-root 之外，所以这里自带一份 token；
+   视觉照项目硬规则——不画边框/发丝线，层级靠磨砂底 + 两层柔和投影，图标保持线性。 */
+
+/* ── 组件 token（对照 marvis-shared.css；深色跟画布/外壳写的那几个 class）── */
+#sourceBrowserPanel {
+    --page: #f5f5f5;
+    --panel: rgba(255, 255, 255, .92);
+    --card: #ffffff;
+    --s0: #f7f7f8;
+    --soft: rgba(0, 0, 0, .045);
+    --hover: rgba(0, 0, 0, .07);
+    --ink: 0, 0, 0;
+    --text: #0a0a0a;
+    --muted: #737373;
+    --faint: #8a8a8a;
+    --strong: #171717;
+    --strong-text: #fafafa;
+    --shadow-1: 0 8px 24px rgba(0, 0, 0, .08);
+    --shadow-2: 0 24px 64px rgba(0, 0, 0, .12);
+    --scrollbar: rgba(0, 0, 0, .12);
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --radius-full: 999px;
+    --nv-glide-ms: 260ms;
+    --nv-glide-bg: rgba(0, 0, 0, .07);
+}
+html.dark #sourceBrowserPanel,
+html.theme-dark #sourceBrowserPanel,
+html.studio-theme-dark #sourceBrowserPanel,
+html[data-shell-theme="dark"] #sourceBrowserPanel {
+    --page: #0a0a0a;
+    --panel: rgba(20, 20, 20, .92);
+    --card: #0f0f0f;
+    --s0: #141416;
+    --soft: rgba(255, 255, 255, .06);
+    --hover: rgba(255, 255, 255, .10);
+    --ink: 255, 255, 255;
+    --text: #fafafa;
+    --muted: #a3a3a3;
+    --faint: #8a8a8a;
+    --strong: #fafafa;
+    --strong-text: #0a0a0a;
+    --shadow-1: 0 8px 24px rgba(0, 0, 0, .34);
+    --shadow-2: 0 24px 64px rgba(0, 0, 0, .42);
+    --scrollbar: rgba(255, 255, 255, .16);
+    --nv-glide-bg: rgba(255, 255, 255, .12);
+}
+
+/* 旧页面靠全局 reset，这里收进面板作用域（不碰画布） */
+#sourceBrowserPanel,
+#sourceBrowserPanel * { box-sizing: border-box; }
+/* 基座 reset 必须压掉 ID 权重：写成 "#sourceBrowserPanel button" 是 (1,0,0)，
+   会把 .sb-btn-primary / .source-browser-custom-open / .source-browser-custom-recent-item 的 padding / 底色 / 字色
+   全部压平（空态两个按钮会变成两行灰字、打开按钮白底白字）。这里统一用 :where() 把 ID 归零，
+   各组件 class 自己负责颜色和底色，需要透明的按钮各自写 background: transparent。 */
+#sourceBrowserPanel :where(button, input) { font-family: inherit; }
+:where(#sourceBrowserPanel) button { border: 0; padding: 0; background: transparent; cursor: pointer; }
+#sourceBrowserPanel i[data-lucide] { display: inline-flex; align-items: center; justify-content: center; }
+#sourceBrowserPanel i[data-lucide] svg { width: 1em; height: 1em; }
+
+/* 入口按钮由 React 左栏提供；这份 DOM 里的同名按钮只用来让旧 JS 绑上事件 */
+#sourceBrowserToggle { display: none !important; }
+
+/* ═══ 面板外框：磨砂浮层，贴画布左上（left16 / top64 / 底部留 60）═══ */
+.source-browser-panel {
+    position: fixed;
+    left: 16px;
+    top: 64px;
+    right: auto;
+    bottom: auto;
+    z-index: 70;
+    width: var(--source-browser-width, 520px);
+    height: var(--source-browser-height, calc(100vh - 124px));
+    max-width: min(900px, 90vw);
+    max-height: calc(100vh - 80px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 12px 12px;
+    border: 0;
+    border-radius: 24px;
+    background: color-mix(in srgb, var(--panel) 70%, transparent);
+    box-shadow: var(--shadow-1), var(--shadow-2);
+    -webkit-backdrop-filter: blur(44px) saturate(190%);
+    backdrop-filter: blur(44px) saturate(190%);
+    color: var(--text);
+    overflow: hidden;
+    transform: translateX(-100%);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity .18s ease, transform .18s ease, visibility .18s ease;
+}
+html:not(.studio-theme-dark):not(.theme-dark):not(.dark) .source-browser-panel {
+    background: color-mix(in srgb, var(--panel) 78%, transparent);
+}
+.source-browser-panel.open { opacity: 1; visibility: visible; pointer-events: auto; transform: translateX(0); }
+.source-browser-panel [hidden] { display: none !important; }
+.source-browser-panel.is-resizing,
+.source-browser-panel.is-resizing-height,
+.source-browser-panel.is-resizing-corner { user-select: none; -webkit-user-select: none; }
+
+/* ═══ 40px 统一工具栏 ═══ */
+.source-browser-head {
+    flex: 0 0 40px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 0 0 0 2px;
+    background: transparent;
+}
+.source-browser-nav { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.source-browser-nav[hidden] { display: none !important; }
+.source-browser-head-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; }
+
+/* 工具栏按钮：28×28、无边框、hover 只给半透明软底（图标保持线性 15px） */
+.source-browser-nav-btn,
+.source-browser-mini-btn,
+.source-browser-close {
+    width: 28px; height: 28px; flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 0; border-radius: var(--radius-md);
+    background: transparent; color: var(--muted);
+    transition: background-color .14s ease, color .14s ease;
+}
+.source-browser-nav-btn:hover:not(:disabled),
+.source-browser-mini-btn:hover,
+.source-browser-close:hover { background: var(--soft); color: var(--text); }
+.source-browser-nav-btn:disabled { opacity: .32; cursor: default; }
+.source-browser-mini-btn:disabled { opacity: .45; cursor: default; pointer-events: none; }
+.source-browser-nav-btn i, .source-browser-nav-btn svg,
+.source-browser-mini-btn i, .source-browser-mini-btn svg,
+.source-browser-close i, .source-browser-close svg { width: 15px; height: 15px; }
+
+.source-browser-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 0 1 auto;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.source-browser-title > i, .source-browser-title > svg { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.source-browser-title > span:first-of-type { overflow: hidden; text-overflow: ellipsis; }
+.sb-src-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 500;
+}
+.sb-src-name:empty { display: none; }
+/* 缩放控件只在桌面端的原生视图可用时才由 JS 打开 */
+.source-browser-zoom {
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    height: 26px;
+    padding: 0 2px;
+    border-radius: var(--radius-full);
+    background: var(--soft);
+}
+.source-browser-zoom[hidden] { display: none !important; }
+.source-browser-zoom-btn,
+.source-browser-zoom-reset {
+    height: 22px; min-width: 22px; padding: 0 6px;
+    border: 0; border-radius: var(--radius-full);
+    background: transparent; color: var(--muted);
+    font-size: 11.5px; font-weight: 600; line-height: 1;
+}
+.source-browser-zoom-btn:hover,
+.source-browser-zoom-reset:hover { background: var(--hover); color: var(--text); }
+/* 桌面端是 input（可直接输入 30–300），智能画布旧面板仍是 span */
+.source-browser-zoom-percent {
+    width: 46px; min-width: 46px;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    text-align: center;
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0;
+    border-radius: 6px;
+    font-variant-numeric: tabular-nums;
+}
+.source-browser-zoom-percent:focus { background: var(--soft); }
+/* 「在系统浏览器打开」只在网页版降级时出现在工具栏（桌面端用原生视图，不需要） */
+.source-browser-panel:not(.is-fallback) #sourceBrowserExternalBtn { display: none !important; }
+
+/* ═══ 34px 来源分段控件（选中底由 glide 滑块给，tab 自己只负责文字色/字重）═══ */
+.source-browser-tabs {
+    position: relative;
+    flex: 0 0 34px;
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    padding: 3px;
+    border-radius: var(--radius-full);
+    background: var(--soft);
+    --nv-glide-ms: 260ms;
+}
+.source-browser-tabs.nv-glide-host .nv-glide-pill { border-radius: var(--radius-full); }
+.source-browser-tab {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 0;
+    min-width: 0;
+    height: 28px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: color .14s ease;
+}
+.source-browser-tab > span { overflow: hidden; text-overflow: ellipsis; }
+.source-browser-tab i, .source-browser-tab svg { width: 14px; height: 14px; flex: none; }
+/* 品牌 logo 保留原色（不单色化），14px */
+.source-browser-logo {
+    width: 14px; height: 14px; flex: 0 0 auto;
+    object-fit: contain; border-radius: 3px; display: inline-block;
+}
+.source-browser-tab > i.source-browser-logo {
+    width: 14px; height: 14px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--muted);
+}
+.source-browser-tab:hover { color: var(--text); }
+.source-browser-tab[aria-selected="true"] { color: var(--text); font-weight: 600; }
+.source-browser-tab[aria-selected="true"] i.source-browser-logo { color: var(--text); }
+.source-browser-tab:disabled { opacity: .45; cursor: default; }
+/* 当前选中的来源即使不可用（网页版降级时）也保持清晰：它标的是"你现在在哪一档" */
+.source-browser-tab[aria-selected="true"]:disabled { opacity: 1; }
+
+/* ═══ 自定义地址栏（hidden 时不占位；出现时把网页区往下推）═══ */
+.source-browser-custom {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.source-browser-custom[hidden] { display: none !important; }
+.source-browser-custom-row { display: flex; align-items: center; gap: 6px; }
+#sourceBrowserCustomUrl {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--soft);
+    color: var(--text);
+    font-size: 12px;
+    outline: 0;
+}
+#sourceBrowserCustomUrl::placeholder { color: var(--faint); }
+.source-browser-custom-open {
+    flex: 0 0 auto;
+    height: 30px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--strong);
+    color: var(--strong-text);
+    font-size: 12px;
+    font-weight: 600;
+}
+.source-browser-custom-open:hover { opacity: .9; }
+.source-browser-custom-recent { display: flex; flex-wrap: wrap; gap: 6px; }
+.source-browser-custom-recent[hidden] { display: none !important; }
+.source-browser-custom-recent-item {
+    max-width: 100%;
+    height: 22px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: var(--soft);
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.source-browser-custom-recent-item:hover { color: var(--text); }
+
+/* ═══ 网页区：圆角 16、底色 --s0，flex 吃满剩余高度；原生 WebContentsView 就叠在这块矩形上 ═══ */
+.source-browser-stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    border-radius: 16px;
+    background: var(--s0);
+    overflow: hidden;
+}
+.source-browser-morph {
+    position: absolute;
+    left: 0; top: 0;
+    z-index: 2;
+    width: 100%; height: 100%;
+    border-radius: 16px;
+    background: var(--nv-glide-bg, var(--soft));
+    opacity: 0;
+    pointer-events: none;
+    transform-origin: top left;
+    transition: opacity .16s ease;
+    will-change: transform, border-radius;
+}
+.source-browser-surface {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    border-radius: 16px;
+    background: var(--s0);
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity .2s ease, transform .2s ease;
+}
+.source-browser-panel.is-revealed .source-browser-surface { opacity: 1; transform: none; }
+.source-browser-view {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border: 0;
+    border-radius: 16px;
+    background: transparent;
+    pointer-events: none;
+}
+.source-browser-placeholder,
+.source-browser-unsupported,
+.source-browser-status {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px 18px;
+    text-align: center;
+    color: var(--faint);
+    font-size: 12px;
+    line-height: 1.6;
+    font-weight: 500;
+}
+.source-browser-placeholder-icon,
+.source-browser-status-icon {
+    width: 40px; height: 40px; flex: 0 0 auto;
+    border-radius: var(--radius-full);
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--soft); color: var(--muted);
+}
+.source-browser-placeholder-icon i, .source-browser-placeholder-icon svg,
+.source-browser-status-icon i, .source-browser-status-icon svg { width: 18px; height: 18px; }
+.source-browser-placeholder strong { color: var(--text); font-size: 13px; font-weight: 600; }
+.source-browser-status-text { max-width: 380px; color: var(--muted); font-size: 12px; }
+.source-browser-status.is-loading .source-browser-status-icon { animation: sourceBrowserPulse 1.2s ease-in-out infinite; }
+.source-browser-retry {
+    height: 28px; padding: 0 14px;
+    border: 0; border-radius: var(--radius-full);
+    background: var(--strong); color: var(--strong-text);
+    font-size: 12px; font-weight: 600;
+}
+.source-browser-retry:hover { opacity: .9; }
+@keyframes sourceBrowserPulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* ═══ 网页版空态：44 圆底图标 + 标题 + 说明 + 两个按钮 ═══ */
+.source-browser-unsupported { gap: 7px; padding: 14px 18px; }
+.sb-empty-icon {
+    width: 44px; height: 44px;
+    flex: 0 0 auto;
+    margin-bottom: 1px;
+    border-radius: var(--radius-full);
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--soft);
+    color: var(--muted);
+}
+.sb-empty-icon i, .sb-empty-icon svg { width: 20px; height: 20px; }
+.sb-empty-title {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+.sb-empty-desc {
+    margin: 0;
+    max-width: 330px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.55;
+}
+.sb-empty-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 3px;
+}
+.sb-btn {
+    height: 30px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 600;
+    transition: background-color .14s ease, color .14s ease, opacity .14s ease;
+}
+.sb-btn-primary { background: var(--strong); color: var(--strong-text); }
+.sb-btn-primary:hover { opacity: .9; }
+.sb-btn-ghost { background: var(--soft); color: var(--text); }
+.sb-btn-ghost:hover { background: var(--hover); }
+
+/* ═══ 网页版降级：紧凑卡片（440 宽、高度由内容决定、隐藏三个拖拽热区）═══ */
+.source-browser-panel.is-fallback {
+    width: min(440px, 92vw);
+    height: auto;
+    max-height: calc(100vh - 80px);
+}
+.source-browser-panel.is-fallback .source-browser-stage { flex: 0 0 190px; }
+.source-browser-panel.is-fallback .source-browser-resize,
+.source-browser-panel.is-fallback .source-browser-resize-bottom,
+.source-browser-panel.is-fallback .source-browser-resize-corner { display: none !important; }
+
+/* ═══ 桌面端拖拽热区：只调宽高，不画可见边框 ═══ */
+.source-browser-resize {
+    position: absolute;
+    top: 0; right: 0;
+    z-index: 3;
+    width: 6px; height: 100%;
+    border: 0;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+}
+.source-browser-resize-bottom {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    z-index: 3;
+    height: 6px;
+    border: 0;
+    background: transparent;
+    cursor: row-resize;
+    touch-action: none;
+}
+.source-browser-resize-corner {
+    position: absolute;
+    right: 8px; bottom: 8px;
+    z-index: 4;
+    width: 20px; height: 20px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: 2px;
+    background: transparent;
+    color: var(--muted);
+    opacity: .45;
+    cursor: nwse-resize;
+    touch-action: none;
+}
+.source-browser-resize-corner:hover { opacity: .85; }
+.source-browser-corner-icon { display: block; pointer-events: none; }
+/* 悬停时的一点位置提示：文字色细线，不是描边 */
+.source-browser-resize::after,
+.source-browser-resize-bottom::after {
+    content: '';
+    position: absolute;
+    background: var(--text);
+    opacity: 0;
+    border-radius: var(--radius-full);
+    transition: opacity .14s ease;
+    pointer-events: none;
+}
+.source-browser-resize::after { top: 50%; right: 2px; width: 2px; height: 40px; transform: translateY(-50%); }
+.source-browser-resize:hover::after,
+.source-browser-panel.is-resizing .source-browser-resize::after { opacity: .3; }
+.source-browser-resize-bottom::after { left: 50%; bottom: 2px; width: 40px; height: 2px; transform: translateX(-50%); }
+.source-browser-resize-bottom:hover::after,
+.source-browser-panel.is-resizing-height .source-browser-resize-bottom::after { opacity: .3; }
+
+/* 旧版 footer 提示已删（DOM 里也移除了），保留兜底隐藏 */
+.source-browser-foot { display: none !important; }
+
+/* 统一细滚动条 */
+.source-browser-panel { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+.source-browser-panel::-webkit-scrollbar { width: 8px; height: 8px; }
+.source-browser-panel::-webkit-scrollbar-track { background: transparent; }
+.source-browser-panel::-webkit-scrollbar-thumb {
+    background: var(--scrollbar);
+    border-radius: var(--radius-full);
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+@media (max-width: 760px) {
+    .source-browser-panel { width: min(520px, 92vw); }
+    .source-browser-panel.is-fallback { width: min(440px, 92vw); }
+    .source-browser-tab > span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .source-browser-panel, .source-browser-surface, .source-browser-tab { transition: none; }
+    .source-browser-morph { display: none; }
+    .source-browser-status.is-loading .source-browser-status-icon { animation: none; }
+}

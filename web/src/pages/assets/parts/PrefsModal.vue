@@ -5,6 +5,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
 import MenuSelect from './MenuSelect.vue';
+import StoragePathBar from './StoragePathBar.vue';
 import { S, setStatus, fail, ask, captionProviders, captionModels, setCaptionProvider, setCaptionModel, writeCaptionSettings, normalizeCaption } from '../lib/state.js';
 import { apiJson, jsonBody, formatFileSize } from '../lib/util.js';
 
@@ -152,6 +153,8 @@ async function deleteFiles() {
                             </section>
                         </template>
                         <template v-else>
+                            <!-- 2026-11：原来在素材库页底部的「素材保存路径」挪到这里 -->
+                            <StoragePathBar class="pm-path" />
                             <section class="ps">
                                 <b><NvIcon name="folder" />保存目录</b>
                                 <div class="dirs">

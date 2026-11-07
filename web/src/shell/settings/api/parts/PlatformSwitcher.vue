@@ -9,6 +9,8 @@ import { providerGroupOf } from '../core/useApiStore.js';
 const store = inject('apiStore');
 const S = store.S;
 const emit = defineEmits(['close']);
+// inline：嵌在管理弹窗左栏里（不是下拉），去掉浮层外观、不自动抢焦点
+const props = defineProps({ inline: { type: Boolean, default: false } });
 const q = ref('');
 const searchEl = ref(null);
 const addOpen = ref(false);
@@ -37,6 +39,9 @@ const groups = computed(() => {
     })).filter(g => g.items.length);
 });
 function pick(id) { store.select(id); emit('close'); }
+// 配置/协议可更新（接口没下发 available=true 的平台不显示）
+function updOf(p) { return store.updateOf(p.id); }
+function openUpd(p) { if (store.openUpdate(p.id)) emit('close'); }
 function onEnter() { const first = groups.value[0] && groups.value[0].items[0]; if (first) pick(first.id); }
 
 /* 拖拽排序（只在非内置平台之间） */
@@ -73,11 +78,11 @@ watch(() => S.cliFlash, () => {
         requestAnimationFrame(() => { flash.value = true; setTimeout(() => { flash.value = false; }, 1200); });
     });
 });
-onMounted(() => { setTimeout(() => searchEl.value && searchEl.value.focus({ preventScroll: true }), 30); });
+onMounted(() => { if (!props.inline) setTimeout(() => searchEl.value && searchEl.value.focus({ preventScroll: true }), 30); });
 </script>
 
 <template>
-    <div class="sw nv-root nv-glass-pop" data-glide=".prow, .opt" role="dialog" aria-label="切换平台" @mousedown="onMenuDown" @keydown="onKey">
+    <div class="sw nv-root" :class="{ 'nv-glass-pop': !props.inline, inline: props.inline }" data-glide=".prow, .opt" role="dialog" aria-label="切换平台" @mousedown="onMenuDown" @keydown="onKey">
         <label class="search"><AIcon name="search" /><input ref="searchEl" v-model="q" type="search" placeholder="搜索平台" autocomplete="off" @keydown.enter.prevent="onEnter"></label>
         <div class="list">
             <template v-for="g in groups" :key="g.key">
@@ -93,6 +98,7 @@ onMounted(() => { setTimeout(() => searchEl.value && searchEl.value.focus({ prev
                         <span class="nm"><b>{{ p.name || p.id }}</b><span v-if="!isFixedProvider(p)">{{ meta(p) }}</span></span>
                         <span v-if="p.primary" class="prim">{{ t('api.primaryBadge', '首选') }}</span>
                         <button v-else type="button" class="setprim" :title="t('api.setPrimary', '设为首选')" :aria-label="t('api.setPrimary', '设为首选')" @click.stop="store.setPrimary(p.id)"><AIcon name="star" /></button>
+                        <span v-if="updOf(p)" class="upd" role="button" tabindex="0" title="协议/配置可更新" @click.stop="openUpd(p)" @keydown.enter.stop.prevent="openUpd(p)"><i></i>可更新</span>
                         <span class="dot" :aria-label="statusText(p)"></span>
                         <span class="proto">{{ pill(p) }}</span>
                     </div>
@@ -133,6 +139,11 @@ onMounted(() => { setTimeout(() => searchEl.value && searchEl.value.focus({ prev
 <style scoped>
 .sw { position: relative; width: 300px; max-height: min(640px, calc(100vh - 180px)); overflow-y: auto; overscroll-behavior: contain; padding: 8px; border-radius: 16px; background: var(--solid); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; gap: 2px; scrollbar-width: none; }
 .sw::-webkit-scrollbar { display: none; }
+.sw.inline { width: 100%; max-height: none; height: 100%; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.sw.inline .search { background: var(--fill-2); }
+.sw.inline .prow.on { background: var(--solid); box-shadow: var(--shadow-float); }
+.sw.inline .foot { margin-top: auto; }
+.sw.inline .proto { display: none; }
 .search { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: 9px; background: var(--fill-1); color: var(--ink-3); flex: none; }
 .search .nv-i { width: 14px; height: 14px; }
 .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: 400 12.5px/1 var(--font-sans); color: var(--ink); }
@@ -155,6 +166,10 @@ onMounted(() => { setTimeout(() => searchEl.value && searchEl.value.focus({ prev
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink); flex: none; }
 .prow.miss .dot { background: transparent; box-shadow: inset 0 0 0 1.2px var(--ink-4); }
 .prow.off .dot { background: var(--ink-4); }
+/* 配置/协议可更新：半透明软底 + 文字提亮 + 小圆点，不描边 */
+.upd { display: inline-flex; align-items: center; gap: 4px; height: 17px; padding: 0 6px; border-radius: 9px; background: var(--fill-2); font: 500 10px/1 var(--font-sans); color: var(--ink); flex: none; cursor: pointer; transition: background var(--duration-fast); }
+.upd i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.upd:hover { background: var(--fill-3); }
 .proto { height: 18px; padding: 0 6px; border-radius: 5px; background: var(--fill-2); font: 400 11px/18px var(--font-mono); letter-spacing: .04em; color: var(--ink-2); text-transform: uppercase; flex: none; }
 .prim { height: 18px; padding: 0 6px; border-radius: 5px; background: var(--accent); color: var(--on-accent); font: 400 10.5px/18px var(--font-sans); flex: none; }
 .setprim { width: 22px; height: 22px; border: 0; padding: 0; border-radius: 6px; background: transparent; color: var(--ink-3); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: opacity 120ms, background 120ms; flex: none; }

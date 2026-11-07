@@ -1,6 +1,7 @@
 /* 素材库页共享样式（各子组件共用，所以不用 scoped；全部以 am- 前缀隔离）。颜色只用 ds.css tokens，
    图片上的遮罩 / 白字除外。深色由 tokens 自动切换。 */
-.am { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 22px 28px 18px; box-sizing: border-box; background: transparent; color: var(--ink); overflow: hidden; }
+.am { position: absolute; inset: 0; display: flex; flex-direction: column; padding: calc(var(--tbh, 0px) + 26px) 40px 30px; box-sizing: border-box; background: transparent; color: var(--ink); overflow: hidden; --rail-h: 56px; }
+.am.is-media { --rail-h: 186px; }
 .am * { box-sizing: border-box; }
 .am-grow { flex: 1; }
 
@@ -13,13 +14,26 @@
 .am-tabsrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex: none; min-height: 32px; }
 .am-tabsrow .nv-seg button em { font: 400 10.5px/1 var(--font-mono); font-style: normal; color: var(--ink-4); margin-left: 4px; }
 
+/* ───────── 左栏顶部：分区 + 素材来源（压在各面板自己的左栏上方，左栏用 --rail-h 让位） ───────── */
+.am-rail { position: absolute; left: 40px; top: calc(var(--tbh, 0px) + 26px); width: 228px; z-index: 2; display: flex; flex-direction: column; gap: 14px; }
+.am-seg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 3px; border-radius: 12px; background: var(--fill-1); }
+.am-seg3 button { height: 30px; border: 0; border-radius: 9px; background: transparent; font: 500 12.5px/1 var(--font-sans); color: var(--ink-3); cursor: pointer; transition: background var(--duration-fast), color var(--duration-fast), box-shadow var(--duration-fast); }
+.am-seg3 button:hover { color: var(--ink); }
+.am-seg3 button.on { background: var(--solid); color: var(--ink); box-shadow: var(--shadow-float); }
+.am-src { display: flex; flex-direction: column; gap: 2px; }
+.am-srch { padding: 0 10px 4px; font: 400 11px/14px var(--font-sans); color: var(--ink-3); }
+.am-cols > .am-nav { margin-top: var(--rail-h); }
+.am-ct .am-tools { margin-left: 2px; }
+@media (max-width: 1180px) { .am-rail { width: 200px; } }
+@media (max-width: 960px) { .am-rail { width: 180px; } }
+
 /* ───────── 三栏 ───────── */
-.am-cols { flex: 1; min-height: 0; margin-top: 18px; display: grid; grid-template-columns: 228px minmax(0, 1fr) 320px; gap: 28px; }
+.am-cols { flex: 1; min-height: 0; margin-top: 0; display: grid; grid-template-columns: 228px minmax(0, 1fr) 320px; gap: 28px; }
 .am-nav { display: flex; flex-direction: column; gap: 2px; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 16px; scrollbar-width: none; }
 .am-nav > * { flex-shrink: 0; }
 .am-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 0; }
 .am-main > * { flex-shrink: 0; }
-.am-scroll { position: relative; flex: 1 1 auto !important; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 4px 24px; margin: -4px -4px 0; scrollbar-width: thin; }
+.am-scroll { position: relative; flex: 1 1 auto !important; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 4px 64px; margin: -4px -4px 0; scrollbar-width: thin; }
 .am-det { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--solid); border-radius: 18px; box-shadow: var(--shadow-float); overflow: hidden; }
 .am-det > .am-ph { padding: 16px 12px 0 18px; margin-bottom: 4px; }
 .am-dsc { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 18px 18px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; }

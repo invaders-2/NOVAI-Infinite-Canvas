@@ -27,7 +27,7 @@ def list_skills() -> List[Dict[str, Any]]:
 
 def list_agents() -> List[Dict[str, Any]]:
     """智能体目录：剔除与内置技能同 id 的条目（历史 data/agents/keyword-money.json 等）。"""
-    taken = set(skills_registry.skill_ids())
+    taken = set(skills_registry.skill_ids()) | set(skills_registry.RETIRED_SKILL_IDS)
     return [a for a in agents_registry.load_agents() if a.get("id") not in taken]
 
 

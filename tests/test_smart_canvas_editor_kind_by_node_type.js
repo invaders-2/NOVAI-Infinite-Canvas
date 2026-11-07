@@ -44,7 +44,7 @@ ok(/if\(settings\.apiKind === 'video'\) renderApiVideoParams\(\);\s*else renderA
 ok(/if\(settings\.apiKind === 'video'\) renderVolcengineVideoParams\(\);\s*else renderVolcengineParams\(\);/.test(rdp), 'engine=volcengine：同样按 apiKind 分流');
 
 console.log('[3] 媒体节点按类型决定 apiKind，批量节点按本次设置决定');
-const sfn = topLevelFunction(js, 'smartSettingsForNode');
+const sfn = topLevelFunction(js, 'smartSettingsBaseForNode');   /* 参数解析主体（smartSettingsForNode 只是按节点类型包一层） */
 ok(/const mediaApiKind = isSmartVideoNode\(node\) \? 'video' : isSmartImageNode\(node\) \? 'image' : batchApiKind \|\| contentKind;/.test(sfn),
    'smart-video → video / smart-image → image（分组按素材回退，批量优先本次设置）');
 ok(/nodeSettings\.apiKind === 'video' \? 'video' : nodeSettings\.apiKind === 'image' \? 'image' : node\?\.tableBatchVideo \? 'video' : ''/.test(sfn),

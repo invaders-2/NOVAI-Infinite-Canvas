@@ -1,0 +1,163 @@
+/* 扩图框 + 笔刷圆圈：只属于这两个编辑器，按 .op-* / .brush-ring 前缀命名，
+   不写进 canvas-next.css（那份文件另有并行改动），避免互相冲突。 */
+
+/* ---------- 扩图框 ---------- */
+.cn-root .op-stage{position:absolute;inset:0;z-index:26;background:rgba(0,0,0,.55);
+  animation:opFade var(--d-quick) var(--e-std);}
+@keyframes opFade{from{opacity:0}to{opacity:1}}
+
+.cn-root .op-box{position:absolute;border-radius:2px;
+  background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.075) 0 6px,transparent 6px 12px);
+  outline:1.5px solid rgba(255,255,255,.92);
+  box-shadow:0 0 0 1px rgba(0,0,0,.45),0 18px 40px rgba(0,0,0,.35);}
+.cn-root .op-box img{position:absolute;display:block;object-fit:fill;-webkit-user-drag:none;user-select:none;pointer-events:none;}
+/* 原图边界：虚线，告诉用户「从哪儿开始是扩出来的」 */
+.cn-root .op-src{position:absolute;pointer-events:none;
+  outline:1px dashed rgba(255,255,255,.55);outline-offset:-0.5px;}
+
+.cn-root .op-h{position:absolute;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:2px;
+  background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.5);touch-action:none;}
+.cn-root .op-h[data-h="nw"]{left:0;top:0;cursor:nwse-resize;}
+.cn-root .op-h[data-h="n"]{left:50%;top:0;cursor:ns-resize;}
+.cn-root .op-h[data-h="ne"]{left:100%;top:0;cursor:nesw-resize;}
+.cn-root .op-h[data-h="e"]{left:100%;top:50%;cursor:ew-resize;}
+.cn-root .op-h[data-h="se"]{left:100%;top:100%;cursor:nwse-resize;}
+.cn-root .op-h[data-h="s"]{left:50%;top:100%;cursor:ns-resize;}
+.cn-root .op-h[data-h="sw"]{left:0;top:100%;cursor:nesw-resize;}
+.cn-root .op-h[data-h="w"]{left:0;top:50%;cursor:ew-resize;}
+
+.cn-root .op-tip{position:absolute;padding:4px 8px;border-radius:8px;font-size:12px;line-height:18px;
+  color:#fff;background:rgba(20,20,22,.86);font-variant-numeric:tabular-nums;pointer-events:none;
+  box-shadow:0 6px 18px rgba(0,0,0,.45);white-space:nowrap;}
+.cn-root .op-dim{color:rgba(255,255,255,.62);}
+
+/* ---------- 笔刷圆圈：直径 = 笔迹直径（1:1 屏幕像素），border-box 保证描边不把直径撑大 ---------- */
+.cn-root .brush-ring{position:absolute;z-index:27;box-sizing:border-box;border-radius:50%;pointer-events:none;
+  border:1.5px solid rgba(255,255,255,.95);
+  box-shadow:0 0 0 1px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.45);}
+.cn-root .brush-ring.eraser{border-style:dashed;border-color:rgba(255,255,255,.8);}
+
+/* ---------- 画笔大小滑杆（圆圈和笔迹一起变） ---------- */
+.cn-root .edbar .brush-size{-webkit-appearance:none;appearance:none;width:104px;height:4px;margin:0 2px;
+  border-radius:99px;background:rgba(var(--ink),.18);accent-color:var(--solid);cursor:pointer;}
+.cn-root .edbar .brush-size::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;
+  border-radius:50%;background:var(--solid);box-shadow:0 2px 6px rgba(0,0,0,.45);}
+.cn-root .edbar .brush-size::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;
+  background:var(--solid);box-shadow:0 2px 6px rgba(0,0,0,.45);}
+.cn-root .edbar .brush-size+ .est{min-width:38px;text-align:right;}
+
+/* 多角度：角度改成滑杆后，预览框不再可拖 */
+.cn-root .angle-stage{cursor:default;}
+
+/* ---------- 本地抠图模型下载弹窗 ---------- */
+.cn-root .modal.mm{width:min(420px,100%);}
+.cn-root .mm-text{margin:0 0 6px;color:var(--fg2);font-size:12px;line-height:1.7;}
+.cn-root .mm-bar{height:6px;margin:12px 0 8px;border-radius:99px;background:rgba(var(--ink),.12);overflow:hidden;}
+.cn-root .mm-bar i{display:block;height:100%;border-radius:99px;background:var(--solid);transition:width .4s ease;}
+.cn-root .mm-meta{display:flex;justify-content:space-between;gap:10px;color:var(--fg3);font-size:12px;font-variant-numeric:tabular-nums;}
+.cn-root .mm-hint{margin:8px 0 0;color:var(--fg3);font-size:11px;line-height:1.6;}
+.cn-root .mm-err{display:flex;align-items:center;gap:6px;margin:10px 0 0;color:var(--bad);font-size:12px;line-height:1.6;}
+.cn-root .mm-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
+
+/* ---------- 编辑对话框外壳：无损改图 / 调色共用 ----------
+   铺满屏幕（四周 16）：图片区用宿主 --bg、右侧面板贴边用 --raised，靠底色差分隔；圆角 18、柔和投影。
+   层级只用间距/底色和投影表达，不画 border / 发丝线。
+   深色下 --bg 是纯黑、和 50% 黑遮罩糊在一起，所以对话框壳在深色退回 --panel（图片区仍是 --bg，由 .ie-frame 决定）。 */
+.cn-root .ie-scrim{position:fixed;inset:0;z-index:74;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:rgba(0,0,0,.5);animation:fadeIn var(--d-std) var(--e-std);}
+.cn-root .ie-dialog{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;
+  border-radius:18px;background:var(--panel);
+  box-shadow:0 32px 90px rgba(0,0,0,.5),0 8px 28px rgba(0,0,0,.35);animation:popIn var(--d-std) var(--e-std);}
+.cn-root[data-theme=light] .ie-dialog{background:var(--bg);}
+/* 两个工具都铺满：四周 16（= 100vw/vh - 32） */
+.cn-root .ie-dialog.le{width:calc(100vw - 32px);height:calc(100vh - 32px);}
+.cn-root .ie-dialog.ca{width:calc(100vw - 32px);height:calc(100vh - 32px);}
+.cn-root .ie-head{display:flex;align-items:center;gap:10px;padding:10px 12px;flex:0 0 auto;}
+.cn-root .ie-title{font-size:14px;font-weight:600;color:var(--fg);}
+.cn-root .ie-hint{font-size:12px;color:var(--fg3);}
+.cn-root .ie-sp{flex:1;min-width:0;}
+.cn-root .ie-body{position:relative;flex:1 1 auto;min-height:0;display:flex;}
+.cn-root .ie-frame{flex:1 1 auto;width:100%;height:100%;min-height:0;display:block;border:0;background:var(--bg);}
+/* 主按钮「应用」：在右侧贴边面板内部底部（面板 400 → 按钮 368、左右各 16），是唯一主按钮；
+   面板底部预留 72px = 16(下) + 40(按钮) + 16(间隔)，调色/无损同一套，不再有 .ca 单独宽度 */
+.cn-root .ie-apply{position:absolute;right:16px;bottom:16px;z-index:4;width:368px;height:40px;border-radius:12px;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;
+  background:var(--solid);color:var(--on-solid);
+  transition:background-color var(--d-feedback) var(--e-std),opacity var(--d-quick) var(--e-std);}
+.cn-root .ie-apply:hover{background:var(--hi);}
+.cn-root .ie-apply:disabled{opacity:.42;cursor:not-allowed;}
+.cn-root .ie-load{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;gap:8px;
+  color:var(--fg2);font-size:12px;pointer-events:none;
+  background:color-mix(in srgb,var(--bg) 88%,transparent);}
+
+/* 素材槽选择器：浮在 iframe 之上；同样用磨砂玻璃，不用近实底例外 */
+.cn-root .le-pick{position:absolute;inset:0;z-index:3;display:flex;align-items:center;justify-content:center;padding:20px;
+  background:rgba(0,0,0,.32);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);}
+.cn-root .le-pick-panel{display:flex;flex-direction:column;gap:10px;width:min(680px,100%);max-height:100%;padding:14px;
+  border-radius:var(--r-l);background:var(--glass-bg);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);border:0;box-shadow:var(--glass-shadow);}
+.cn-root .le-pick-head{display:flex;align-items:center;gap:10px;flex:0 0 auto;}
+.cn-root .le-pick-title{font-size:13px;font-weight:600;color:var(--fg);white-space:nowrap;}
+.cn-root .le-pick-search{flex:0 1 240px;height:32px;padding:0 12px;border-radius:999px;background:var(--sunken);color:var(--fg);font-size:12px;}
+.cn-root .le-pick-search::placeholder{color:var(--fg3);}
+.cn-root .le-pick-list{flex:1 1 auto;min-height:0;overflow:auto;padding:2px;scrollbar-width:thin;}
+.cn-root .le-pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;}
+.cn-root .le-pick-item{display:flex;flex-direction:column;gap:6px;padding:6px;border-radius:10px;background:var(--sunken);
+  color:var(--fg2);text-align:left;font-size:11px;line-height:1.3;overflow:hidden;
+  transition:background-color var(--d-feedback) var(--e-std),color var(--d-feedback) var(--e-std);}
+.cn-root .le-pick-item:hover{background:var(--hover);color:var(--fg);}
+.cn-root .le-pick-item img{display:block;width:100%;aspect-ratio:1 / 1;object-fit:cover;border-radius:8px;background:var(--card);}
+.cn-root .le-pick-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cn-root .le-pick-empty{padding:28px 8px;text-align:center;color:var(--fg3);font-size:12px;}
+.cn-root .le-pick-foot{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex:0 0 auto;}
+/* 层 / 选择器面板是程序化聚焦的容器（tabIndex=-1），焦点描边不该出现 */
+.cn-root .ie-dialog:focus,.cn-root .le-pick-panel:focus{outline:none;}
+
+/* ---------- 裁剪：像素读数 / 比例面板 ---------- */
+.cn-root .crop-px{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);padding:2px 8px;border-radius:6px;font-size:11px;color:#fff;background:rgba(0,0,0,.55);pointer-events:none;white-space:nowrap}
+.cn-root .crop-ratios{max-width:260px;padding:6px}
+
+/* ---------- 本地标注（涂鸦 / 文字 / 马赛克） ---------- */
+.cn-root .mk-colors{display:inline-flex;align-items:center;gap:5px;padding:0 4px}
+.cn-root .mk-c{width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25);transition:transform var(--d-feedback) var(--e-std)}
+.cn-root .mk-c.on{transform:scale(1.25);box-shadow:0 0 0 2px var(--menu),0 0 0 3.5px var(--fg)}
+.cn-root .mk-circle{display:block;width:15px;height:15px;border-radius:50%;border:1.7px solid currentColor}
+.cn-root .mk-text{position:absolute;z-index:3;min-width:120px;min-height:1.4em;padding:0 2px;font-weight:600;line-height:1.25;background:rgba(0,0,0,.28);border-radius:4px;resize:none;overflow:hidden;white-space:pre;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+.cn-root .mk-done{gap:6px;padding:5px 5px 5px 10px}
+.cn-root .mk-done .pill{height:30px}
+.cn-root .mk-done .mk-ok{background:var(--solid);color:var(--on-solid)}
+.cn-root .mk-done .mk-ok:hover:not(:disabled){background:var(--solid);opacity:.88}
+
+/* ---------- 「更多」菜单的行 + 子浮层（旋转 / 快速切分 / 增强共用一套样式） ----------
+   子浮层不单独开二级弹层（openPop 会顶掉父菜单），改成挂在「更多」菜单内部的绝对定位浮层，
+   JS 用行 / #pop 的实测矩形定位，父菜单保持展开。浮层盖在图片上、又嵌在节点里，
+   按 AGENTS.md 的「弹层底色例外」给实底（不靠磨砂）；面板不画 border / 发丝线，层级只靠底色、
+   圆角和柔和投影；格子本身是「表示画幅的图形」，允许描边，高亮色的明暗两套主题都由 --fg 经
+   color-mix 推出来。 */
+.cn-root .mi.split-menu,.cn-root .mi.rotate-menu,.cn-root .mi.enhance-menu{gap:8px;cursor:pointer;white-space:nowrap;-webkit-user-select:none;user-select:none;}
+.cn-root .mi.split-menu .chev,.cn-root .mi.rotate-menu .chev,.cn-root .mi.enhance-menu .chev{flex:none;margin-left:auto;color:var(--fg3);transition:color var(--d-feedback) var(--e-std);}
+.cn-root .mi.split-menu:hover .chev,.cn-root .mi.rotate-menu:hover .chev,.cn-root .mi.enhance-menu:hover .chev{color:var(--fg2);}
+/* 展开时整行软底 + 文字提亮（不描边）；.mi.on 自带的勾选标记在这几行不适用，停掉 */
+.cn-root #pop.split-menu-pop .mi.split-menu.on,.cn-root #pop.split-menu-pop .mi.rotate-menu.on,.cn-root #pop.split-menu-pop .mi.enhance-menu.on{background:color-mix(in srgb,var(--fg) 10%,transparent);color:var(--fg);}
+.cn-root #pop.split-menu-pop .mi.split-menu.on:after,.cn-root #pop.split-menu-pop .mi.rotate-menu.on:after,.cn-root #pop.split-menu-pop .mi.enhance-menu.on:after{content:none;}
+.cn-root .mi.split-menu.on .chev,.cn-root .mi.rotate-menu.on .chev,.cn-root .mi.enhance-menu.on .chev{color:var(--fg);}
+/* 子浮层要能溢出菜单盒子，否则会被 #pop 的 overflow 裁掉 */
+.cn-root #pop.split-menu-pop{overflow:visible;}
+
+/* 浮层外壳（旋转 / 快速切分 / 增强共用）：近实底 + 圆角 + 柔和投影 */
+.cn-root .split-flyout,.cn-root .rotate-flyout{position:absolute;z-index:2;max-width:calc(100vw - 24px);
+  border-radius:16px;background:rgba(24,24,24,.95);
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+  box-shadow:0 24px 60px rgba(0,0,0,.38),0 8px 20px rgba(0,0,0,.24);
+  animation:popIn var(--d-quick) var(--e-std);}
+.cn-root[data-theme="light"] .split-flyout,.cn-root[data-theme="light"] .rotate-flyout{background:rgba(255,255,255,.96);
+  box-shadow:0 24px 60px rgba(0,0,0,.16),0 8px 20px rgba(0,0,0,.1);}
+.cn-root .split-flyout{width:max-content;padding:16px;}
+/* 旋转 / 增强子菜单：一列 .mi 行，宽 168–190，内边距跟 #pop 一样是 6 */
+.cn-root .rotate-flyout{width:max-content;min-width:168px;max-width:190px;padding:6px;}
+.cn-root .split-flyout .sg-cells{display:grid;grid-template-columns:repeat(8,22px);gap:9px;}
+.cn-root .split-flyout .sg-c{width:22px;height:22px;border-radius:6px;background:rgba(var(--ink),.07);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 14%,transparent);
+  transition:background-color var(--d-quick) var(--e-std),box-shadow var(--d-quick) var(--e-std);}
+.cn-root .split-flyout .sg-c.on{background:color-mix(in srgb,var(--fg) 30%,transparent);
+  box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--fg) 80%,transparent);}
+.cn-root .split-flyout .sg-label{margin-top:12px;text-align:center;font-size:18px;line-height:1.2;font-weight:640;letter-spacing:.3px;color:var(--fg);}

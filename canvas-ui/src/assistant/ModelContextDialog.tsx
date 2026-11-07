@@ -1,5 +1,9 @@
-import { AlertCircleIcon, Loader2Icon, XIcon } from "lucide-react"
+import { AlertCircleIcon, XIcon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/hexta/dialog"
+import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/hexta/empty"
+import { Progress } from "@/components/hexta/progress"
+import { Spinner } from "@/components/hexta/spinner"
 import { fetchModelContext } from "./api"
 import type { ModelContext } from "./api"
 import { formatTokens, sectionLabel } from "./format"
@@ -14,14 +18,6 @@ export const ModelContextDialog = ({ runId, onClose }: { runId: string; onClose:
 	const [expired, setExpired] = useState(false)
 	const [toolsOpen, setToolsOpen] = useState(false)
 	const [tick, setTick] = useState(0)
-
-	useEffect(() => {
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === "Escape") onClose()
-		}
-		document.addEventListener("keydown", onKey)
-		return () => document.removeEventListener("keydown", onKey)
-	}, [onClose])
 
 	useEffect(() => {
 		let alive = true
@@ -50,32 +46,43 @@ export const ModelContextDialog = ({ runId, onClose }: { runId: string; onClose:
 	const shownTools = toolsOpen ? tools.slice(0, CONTEXT_MAX_TOOLS) : tools.slice(0, CONTEXT_COLLAPSED_TOOLS)
 
 	return (
-		<div className="nvca-dialog-scrim" onClick={onClose} role="presentation">
-			<div className="nvca-dialog nvca-context-dialog" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="本轮上下文">
+		<Dialog
+			onOpenChange={(next) => {
+				if (!next) onClose()
+			}}
+			open
+		>
+			<DialogContent aria-label="本轮上下文" className="nvca-dialog nvca-context-dialog" showCloseButton={false}>
 				<div className="nvca-dialog-head">
 					<div>
-						<h3 className="nvca-dialog-title">本轮上下文</h3>
-						<p className="nvca-dialog-sub">看这轮实际发给模型的内容规模</p>
+						<DialogTitle className="nvca-dialog-title">本轮上下文</DialogTitle>
+						<DialogDescription className="nvca-dialog-sub">看这轮实际发给模型的内容规模</DialogDescription>
 					</div>
-					<button className="nvca-icon-btn" onClick={onClose} title="关闭" aria-label="关闭上下文" type="button">
+					<button aria-label="关闭上下文" className="nvca-icon-btn" onClick={onClose} title="关闭" type="button">
 						<XIcon className="nvca-i-sm" />
 					</button>
 				</div>
 
 				{status === "loading" ? (
 					<div className="nvca-context-loading">
-						<Loader2Icon className="nvca-i-sm nvca-spin" />
+						<Spinner aria-hidden size="sm" />
 						<span>正在读取上下文摘要…</span>
 					</div>
 				) : status === "error" ? (
-					<div className="nvca-context-error">
-						<AlertCircleIcon className="nvca-i-lg" />
-						<p>{expired ? "这轮已过期，无法查看上下文" : "上下文读取失败"}</p>
-						{expired ? null : <span>{error}</span>}
+					<Empty className="nvca-context-error" size="sm">
+						<EmptyMedia>
+							<AlertCircleIcon className="nvca-i-lg" />
+						</EmptyMedia>
+						<EmptyHeader>
+							<EmptyTitle>{expired ? "这轮已过期，无法查看上下文" : "上下文读取失败"}</EmptyTitle>
+							{expired ? null : <EmptyDescription>{error}</EmptyDescription>}
+						</EmptyHeader>
 						{expired ? null : (
-							<button className="nvca-btn ghost" onClick={() => setTick((value) => value + 1)} type="button">重试</button>
+							<EmptyContent>
+								<button className="nvca-btn ghost" onClick={() => setTick((value) => value + 1)} type="button">重试</button>
+							</EmptyContent>
 						)}
-					</div>
+					</Empty>
 				) : data ? (
 					<div className="nvca-context-body">
 						<div className="nvca-context-row">
@@ -90,9 +97,7 @@ export const ModelContextDialog = ({ runId, onClose }: { runId: string; onClose:
 							</span>
 						</div>
 						{typeof data.context_max === "number" ? (
-							<div className="nvca-context-bar">
-								<span className="nvca-context-bar-fill" style={{ width: (percent ?? 0) + "%" }} />
-							</div>
+							<Progress className="nvca-context-progress" size="sm" value={percent ?? 0} />
 						) : (
 							<div className="nvca-context-hint">未设置上下文上限，只显示估算值。</div>
 						)}
@@ -145,7 +150,7 @@ export const ModelContextDialog = ({ runId, onClose }: { runId: string; onClose:
 						<div className="nvca-context-foot">本地估算，不等于计费口径；不展示提示词原文</div>
 					</div>
 				) : null}
-			</div>
-		</div>
+			</DialogContent>
+		</Dialog>
 	)
 }

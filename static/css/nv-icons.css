@@ -1,0 +1,284 @@
+/* 图标动效层（三端共用）
+   只动 transform / stroke-dashoffset / opacity；不动 fill 与颜色、尺寸，只给描边宽度兜底 1.5（--nv-i-stroke）。
+   挂点：svg.nv-i、svg.lucide、svg[data-icon]。
+   变量：--nv-i-speed（默认 1）、--nv-i-delay（默认 0ms）、--nv-i-loop（默认 1）。 */
+
+:root {
+    --nv-i-speed: 1;
+    --nv-i-delay: 0ms;
+    --nv-i-loop: 1;
+}
+
+svg.nv-i,
+svg.lucide,
+svg[data-icon] {
+    --nv-i-default-anim: nv-i-pop;
+    --nv-i-dur: calc(480ms / var(--nv-i-speed, 1));
+    --nv-i-ease: cubic-bezier(.22, 1, .36, 1);
+    --nv-i-dir: 1;
+    stroke-width: var(--nv-i-stroke, 1.5);
+    transform-origin: center;
+    transform-box: view-box;
+}
+
+/* 手动 / 自动挂点：类名开关，配合 CSS 变量传速。 */
+:is(svg.nv-i, svg.lucide, svg[data-icon]).nv-i-loop,
+.nv-i-loop {
+    --nv-i-loop: infinite;
+}
+
+/* ---- 具名映射：按 lucide kebab 名 + 业务名等价类 ---- */
+
+/* rotate：加号转 90°、关闭/太阳/月亮旋转 */
+svg:is(.lucide-plus, .nv-i-plus, .lucide-x, .nv-i-x, .nv-i-close, .lucide-sun, .nv-i-sun, .nv-i-sunm, .lucide-moon, .nv-i-moon) {
+    --nv-i-default-anim: nv-i-rotate-90;
+}
+
+/* spin：刷新 / 历史 / 旋转 / 同步 / 加载 */
+svg:is(.lucide-refresh-cw, .nv-i-refresh, .nv-i-refresh2, .lucide-rotate-cw, .nv-i-rotate, .lucide-history, .nv-i-history, .nv-i-history2, .lucide-loader, .lucide-loader-circle, .nv-i-loader, .lucide-sync, .nv-i-sync) {
+    --nv-i-default-anim: nv-i-spin;
+}
+
+/* settings 慢转：时长翻倍，speed 变量仍然生效 */
+svg:is(.lucide-settings, .nv-i-settings, .lucide-settings-2, .nv-i-settings2) {
+    --nv-i-default-anim: nv-i-spin;
+    --nv-i-dur: calc(960ms / var(--nv-i-speed, 1));
+}
+
+/* bounceY 向上：上箭头 / 上传 / 发送 / 分享 / 外链 */
+svg:is(.lucide-arrow-up, .nv-i-arrowup, .nv-i-up, .lucide-chevron-up, .nv-i-chevu, .lucide-upload, .nv-i-upload, .lucide-send, .nv-i-send, .lucide-share, .lucide-share-2, .nv-i-share, .lucide-external-link, .nv-i-ext) {
+    --nv-i-default-anim: nv-i-bounce;
+    --nv-i-dir: -1;
+}
+
+/* bounceY 向下：下箭头 / 下载 */
+svg:is(.lucide-arrow-down, .nv-i-arrowdown, .lucide-chevron-down, .nv-i-chev, .lucide-download, .nv-i-download) {
+    --nv-i-default-anim: nv-i-bounce;
+    --nv-i-dir: 1;
+}
+
+/* slideX 向左：左箭头 / 返回 / 撤销 */
+svg:is(.lucide-arrow-left, .nv-i-arrowl, .nv-i-back, .lucide-chevron-left, .nv-i-chevl, .lucide-undo-2, .nv-i-undo) {
+    --nv-i-default-anim: nv-i-slide;
+    --nv-i-dir: -1;
+}
+
+/* slideX 向右：右箭头 / 重做 */
+svg:is(.lucide-arrow-right, .nv-i-arrow, .nv-i-arrowr, .lucide-chevron-right, .nv-i-chevr, .lucide-redo-2, .nv-i-redo) {
+    --nv-i-default-anim: nv-i-slide;
+    --nv-i-dir: 1;
+}
+
+/* wiggle：钥匙 / 键盘 / 剪刀 / 图钉 / 手 / 麦克风 / 指针 */
+svg:is(.lucide-key-round, .nv-i-key, .lucide-keyboard, .nv-i-keyboard, .lucide-scissors, .nv-i-scissors, .lucide-pin, .nv-i-pin, .lucide-hand, .nv-i-hand, .lucide-mic, .nv-i-mic, .lucide-mouse-pointer, .nv-i-cursor) {
+    --nv-i-default-anim: nv-i-wiggle;
+}
+
+/* wiggle：垃圾桶（盖子单独上掀，见下方子元素规则） */
+svg:is(.lucide-trash-2, .lucide-trash, .nv-i-trash) {
+    --nv-i-default-anim: nv-i-wiggle;
+}
+
+/* pop：星标 / 闪光 / 闪电 / 徽章 / 复制 / 文件夹 / 图片 / 胶片 / 相机 / 书本 / 宫格 */
+svg:is(.lucide-star, .nv-i-star, .lucide-sparkles, .nv-i-sparkles, .nv-i-spark, .lucide-zap, .nv-i-bolt, .lucide-badge-check, .nv-i-badge, .lucide-copy, .nv-i-copy, .lucide-folder, .nv-i-folder, .lucide-folder-plus, .nv-i-folderplus, .lucide-image, .nv-i-image, .nv-i-bg, .lucide-film, .nv-i-film, .lucide-camera, .nv-i-camera, .lucide-book, .nv-i-book, .lucide-layout-grid, .nv-i-grid, .lucide-grid-3x3, .nv-i-grid9) {
+    --nv-i-default-anim: nv-i-pop;
+}
+
+/* blink：眼睛 */
+svg:is(.lucide-eye, .nv-i-eye, .lucide-eye-off, .nv-i-eyeoff) {
+    --nv-i-default-anim: nv-i-blink;
+}
+
+/* draw：描画（依赖 path 上的 pathLength="1"，无则退到 200） */
+svg:is(.lucide-check, .nv-i-check, .lucide-link, .nv-i-link, .lucide-pencil, .nv-i-pencil, .nv-i-edit3, .lucide-pen, .nv-i-pen, .lucide-search, .nv-i-search, .lucide-type, .nv-i-type, .lucide-hash, .nv-i-hash, .lucide-code, .lucide-code-xml, .nv-i-code, .lucide-paperclip, .nv-i-clip, .nv-i-clip2) {
+    --nv-i-default-anim: nv-i-draw;
+}
+
+/* draw 的 path 需要虚线段；圆/矩形保持实线，避免被切成点 */
+svg:is(.lucide-check, .nv-i-check, .lucide-link, .nv-i-link, .lucide-pencil, .nv-i-pencil, .nv-i-edit3, .lucide-pen, .nv-i-pen, .lucide-search, .nv-i-search, .lucide-type, .nv-i-type, .lucide-hash, .nv-i-hash, .lucide-code, .lucide-code-xml, .nv-i-code, .lucide-paperclip, .nv-i-clip, .nv-i-clip2) path[pathLength] {
+    stroke-dasharray: 1;
+}
+
+svg:is(.lucide-check, .nv-i-check, .lucide-link, .nv-i-link, .lucide-pencil, .nv-i-pencil, .nv-i-edit3, .lucide-pen, .nv-i-pen, .lucide-search, .nv-i-search, .lucide-type, .nv-i-type, .lucide-hash, .nv-i-hash, .lucide-code, .lucide-code-xml, .nv-i-code, .lucide-paperclip, .nv-i-clip, .nv-i-clip2) path:not([pathLength]) {
+    stroke-dasharray: 200;
+}
+
+/* tilt：盒子 / 立方 / 图层 / 画布 / 表格 / 编组 / 翻转 */
+svg:is(.lucide-box, .nv-i-box, .lucide-boxes, .nv-i-cube, .lucide-layers, .nv-i-layers, .lucide-layout-dashboard, .nv-i-canvas, .lucide-table, .nv-i-table, .lucide-group, .nv-i-group, .lucide-flip-horizontal, .nv-i-flip) {
+    --nv-i-default-anim: nv-i-tilt;
+}
+
+/* ---- 显式动画类：svg.nv-i-a-*（特异度 0,1,1，晚于具名映射）
+   优先级：data-animation > .nv-i-a-* 显式类 > 图标名默认 > default 兜底 ---- */
+svg.nv-i-a-default { --nv-i-default-anim: nv-i-pop; }
+svg.nv-i-a-pop { --nv-i-default-anim: nv-i-pop; }
+svg.nv-i-a-rotate { --nv-i-default-anim: nv-i-rotate-90; }
+svg.nv-i-a-spin { --nv-i-default-anim: nv-i-spin; }
+svg.nv-i-a-bounceY { --nv-i-default-anim: nv-i-bounce; }
+svg.nv-i-a-slideX { --nv-i-default-anim: nv-i-slide; }
+svg.nv-i-a-wiggle { --nv-i-default-anim: nv-i-wiggle; }
+svg.nv-i-a-blink { --nv-i-default-anim: nv-i-blink; }
+svg.nv-i-a-draw { --nv-i-default-anim: nv-i-draw; }
+svg.nv-i-a-path { --nv-i-default-anim: nv-i-draw; }
+svg.nv-i-a-path-loop { --nv-i-default-anim: nv-i-draw; --nv-i-loop: infinite; }
+svg.nv-i-a-tilt { --nv-i-default-anim: nv-i-tilt; }
+
+/* 显式指定动画（data-animation）：既可写在图标自身，也可写在任意祖先（AnimateIcon）。
+   祖先下发靠继承 --nv-i-anim；写在 svg 自身时特异度 0,1,1 且排在最后，优先级最高。
+   speed / delay / loop 用 CSS 变量传，属性本身不带数值语义。 */
+[data-animation="default"] { --nv-i-anim: nv-i-pop; }
+[data-animation="pop"] { --nv-i-anim: nv-i-pop; }
+[data-animation="rotate"] { --nv-i-anim: nv-i-rotate-90; }
+[data-animation="spin"] { --nv-i-anim: nv-i-spin; }
+[data-animation="bounceY"] { --nv-i-anim: nv-i-bounce; }
+[data-animation="slideX"] { --nv-i-anim: nv-i-slide; }
+[data-animation="wiggle"] { --nv-i-anim: nv-i-wiggle; }
+[data-animation="blink"] { --nv-i-anim: nv-i-blink; }
+[data-animation="draw"] { --nv-i-anim: nv-i-draw; }
+[data-animation="path"] { --nv-i-anim: nv-i-draw; }
+[data-animation="path-loop"] { --nv-i-anim: nv-i-draw; --nv-i-loop: infinite; }
+[data-animation="tilt"] { --nv-i-anim: nv-i-tilt; }
+
+svg[data-animation="default"] { --nv-i-anim: nv-i-pop; }
+svg[data-animation="pop"] { --nv-i-anim: nv-i-pop; }
+svg[data-animation="rotate"] { --nv-i-anim: nv-i-rotate-90; }
+svg[data-animation="spin"] { --nv-i-anim: nv-i-spin; }
+svg[data-animation="bounceY"] { --nv-i-anim: nv-i-bounce; }
+svg[data-animation="slideX"] { --nv-i-anim: nv-i-slide; }
+svg[data-animation="wiggle"] { --nv-i-anim: nv-i-wiggle; }
+svg[data-animation="blink"] { --nv-i-anim: nv-i-blink; }
+svg[data-animation="draw"] { --nv-i-anim: nv-i-draw; }
+svg[data-animation="path"] { --nv-i-anim: nv-i-draw; }
+svg[data-animation="path-loop"] { --nv-i-anim: nv-i-draw; --nv-i-loop: infinite; }
+svg[data-animation="tilt"] { --nv-i-anim: nv-i-tilt; }
+
+/* ---- 触发：自身 hover / focus-visible，或最近可交互祖先 hover / focus-visible ---- */
+@media (hover: hover) {
+    svg:is(.nv-i, .lucide, [data-icon]):not([data-nv-no-hover]):hover,
+    :is(button, a, [role="button"], [data-icon-trigger], .nv-i-host):hover svg:is(.nv-i, .lucide, [data-icon]):not([data-nv-no-hover]) {
+        animation: var(--nv-i-anim, var(--nv-i-default-anim, nv-i-pop)) var(--nv-i-dur) var(--nv-i-ease) var(--nv-i-delay, 0ms) var(--nv-i-loop, 1) backwards;
+    }
+}
+
+/* 键盘聚焦与 hover 同效 */
+svg:is(.nv-i, .lucide, [data-icon]):not([data-nv-no-hover]):focus-visible,
+:is(button, a, [role="button"], [data-icon-trigger], .nv-i-host):focus-visible svg:is(.nv-i, .lucide, [data-icon]):not([data-nv-no-hover]) {
+    animation: var(--nv-i-anim, var(--nv-i-default-anim, nv-i-pop)) var(--nv-i-dur) var(--nv-i-ease) var(--nv-i-delay, 0ms) var(--nv-i-loop, 1) backwards;
+}
+
+/* 手动 / 自动触发：类名由 NvIcon / AnimateIcon 开关 */
+svg:is(.nv-i, .lucide, [data-icon]):is(.nv-i-play, .nv-i-always, .nv-i-tapped, .nv-i-view),
+:is(.nv-i-play, .nv-i-always, .nv-i-view) svg:is(.nv-i, .lucide, [data-icon]) {
+    animation: var(--nv-i-anim, var(--nv-i-default-anim, nv-i-pop)) var(--nv-i-dur) var(--nv-i-ease) var(--nv-i-delay, 0ms) var(--nv-i-loop, 1) backwards;
+}
+
+/* 垃圾桶盖：只有第一段横线绕右端上掀 */
+@media (hover: hover) {
+    :is(button, a, [role="button"], [data-icon-trigger], .nv-i-host):hover svg:is(.lucide-trash-2, .lucide-trash, .nv-i-trash) > :first-child,
+    svg:is(.lucide-trash-2, .lucide-trash, .nv-i-trash):hover > :first-child {
+        animation: nv-i-trash-lid var(--nv-i-dur) var(--nv-i-ease) var(--nv-i-delay, 0ms) var(--nv-i-loop, 1) backwards;
+        transform-box: fill-box;
+        transform-origin: 100% 50%;
+    }
+}
+
+:is(button, a, [role="button"], [data-icon-trigger], .nv-i-host):focus-visible svg:is(.lucide-trash-2, .lucide-trash, .nv-i-trash) > :first-child,
+svg:is(.lucide-trash-2, .lucide-trash, .nv-i-trash):focus-visible > :first-child {
+    animation: nv-i-trash-lid var(--nv-i-dur) var(--nv-i-ease) var(--nv-i-delay, 0ms) var(--nv-i-loop, 1) backwards;
+    transform-box: fill-box;
+    transform-origin: 100% 50%;
+}
+
+/* 手动 / 自动触发的垃圾桶盖 */
+svg:is(.lucide-trash-2, .lucide-trash, .nv-i-trash):is(.nv-i-play, .nv-i-always, .nv-i-tapped, .nv-i-view) > :first-child,
+:is(.nv-i-play, .nv-i-always, .nv-i-view) svg:is(.lucide-trash-2, .lucide-trash, .nv-i-trash) > :first-child {
+    animation: nv-i-trash-lid var(--nv-i-dur) var(--nv-i-ease) var(--nv-i-delay, 0ms) var(--nv-i-loop, 1) backwards;
+    transform-box: fill-box;
+    transform-origin: 100% 50%;
+}
+
+/* ---- 退出：自身或祖先带 data-no-icon-anim 时不动（含 svg 子元素，如垃圾桶盖子） ---- */
+svg:is(.nv-i, .lucide, [data-icon])[data-no-icon-anim],
+[data-no-icon-anim] svg:is(.nv-i, .lucide, [data-icon]),
+[data-no-icon-anim] svg:is(.nv-i, .lucide, [data-icon]) > *,
+svg:is(.nv-i, .lucide, [data-icon])[data-no-icon-anim] > * {
+    animation: none !important;
+}
+
+/* ---- 关键帧：只出现 transform / stroke-dashoffset / opacity ---- */
+@keyframes nv-i-pop {
+    0% { transform: scale(.92); }
+    55% { transform: scale(1.06); }
+    100% { transform: scale(1); }
+}
+
+@keyframes nv-i-rotate-90 {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(90deg); }
+}
+
+@keyframes nv-i-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes nv-i-bounce {
+    0% { transform: translateY(0); }
+    35% { transform: translateY(calc(3px * var(--nv-i-dir, 1))); }
+    70% { transform: translateY(calc(-1px * var(--nv-i-dir, 1))); }
+    100% { transform: translateY(0); }
+}
+
+@keyframes nv-i-slide {
+    0% { transform: translateX(0); }
+    40% { transform: translateX(calc(3px * var(--nv-i-dir, 1))); }
+    100% { transform: translateX(0); }
+}
+
+@keyframes nv-i-wiggle {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(-8deg); }
+    55% { transform: rotate(6deg); }
+    80% { transform: rotate(-3deg); }
+}
+
+@keyframes nv-i-blink {
+    0%, 100% { transform: scaleY(1); opacity: 1; }
+    45% { transform: scaleY(.82); opacity: .85; }
+}
+
+@keyframes nv-i-draw {
+    0% { stroke-dashoffset: var(--nv-i-dash, 200); }
+    100% { stroke-dashoffset: 0; }
+}
+
+@keyframes nv-i-tilt {
+    0%, 100% { transform: perspective(120px) rotateX(0deg) rotateY(0deg); }
+    50% { transform: perspective(120px) rotateX(6deg) rotateY(-8deg); }
+}
+
+@keyframes nv-i-trash-lid {
+    0% { transform: rotate(0deg); }
+    45% { transform: rotate(-26deg); }
+    100% { transform: rotate(0deg); }
+}
+
+/* NvIcon 渲染会给 path 加 pathLength="1"，描画用归一化虚线；其余来源退到 200 */
+svg.nv-i {
+    --nv-i-dash: 1;
+}
+
+svg.lucide:not(.nv-i),
+svg[data-icon]:not(.nv-i) {
+    --nv-i-dash: 200;
+}
+
+/* ---- 无障碍：减少动态效果时全部关掉 ---- */
+@media (prefers-reduced-motion: reduce) {
+    svg:is(.nv-i, .lucide, [data-icon]),
+    svg:is(.nv-i, .lucide, [data-icon]) > *,
+    :is(button, a, [role="button"], [data-icon-trigger], .nv-i-host) svg:is(.nv-i, .lucide, [data-icon]),
+    :is(button, a, [role="button"], [data-icon-trigger], .nv-i-host) svg:is(.nv-i, .lucide, [data-icon]) > * {
+        animation: none !important;
+    }
+}

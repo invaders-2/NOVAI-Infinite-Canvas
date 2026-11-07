@@ -1,0 +1,99 @@
+{
+  "style_name": "胶片暗房放大（v1.1：零文字+油润质感）",
+  "profile_id": "film-darkroom-cn",
+  "source": "用户 2026-09-01 提供的 17 张参考图（含 ROSE LING LING / DAYIN STUDIO / VIZA VIZA / MIRROR VISUAL 系列）",
+  "version": "v1.1",
+  "locked_at": "2026-09-01",
+  "revised_at": "2026-09-01 v1.1：① 画面零文字——杂志标题/品牌字（ROSE LING LING 等）从可选边框元素中移除，negative_prompt 强化 any text/typography/magazine title/brand name 等禁项；② 核验并新增\"油润色彩质感\"（用户行话，核验准确：暗房彩放 C-print 染料层厚度感，英文 oily lustrous color rendition / waxy-smooth tonal transitions / dense creamy color saturation，加入 style_keywords/single_line/texture_material/consistency_notes，negative 补 dry flat washed-out colors）",
+  "zh_summary": "35mm/中画幅模拟胶片拍摄、手放银盐照片质感的欧洲时尚编辑大片。大量自然光（窗光、侧光、林荫斑驳），低饱和粉调色（类 Portra 400 / Fuji 400H 的褪色感），柔和相纸白边与轻微暗角为画面签名；构图安静、亲密，常带场景叙事（厨房、街头、花园、蓝色房间等）；皮肤保留真实纹理，整体氛围内省、安静、电影感。**画面绝对零文字**——绝不复刻参考图的杂志标题/品牌字；色彩呈现\"油润感\"（暗房 C-print 染料层厚度感，色彩浓密而过渡平滑、有蜡质油彩般的光泽深度）。",
+  "style_keywords": [
+    "35mm analog film",
+    "hand-enlarged silver gelatin print",
+    "fine analog film grain",
+    "matte non-glossy surface",
+    "subtle gentle vignette at print edges",
+    "soft natural window light or sidelight",
+    "long cast shadow on wall or floor",
+    "dappled leaf-shadow patches on background",
+    "Mediterranean white stucco wall",
+    "moody muted low-saturation palette",
+    "milky desaturated cream tones",
+    "Kodak Portra 400 color signature",
+    "faded film stock palette",
+    "subtle cool cyan in shadows",
+    "warm cream highlight rolloff",
+    "lush deep tone without clipping",
+    "oily lustrous color rendition",
+    "waxy-smooth tonal transitions",
+    "dense creamy color saturation",
+    "rich color depth like layered oil paint",
+    "darkroom C-print dye density",
+    "polaroid-style white border with slight yellowing",
+    "camera data strip at bottom edge (Nikon/Canon EXIF look)",
+    "intimate editorial composition",
+    "vertical or 4:3 frame ratio",
+    "honest skin texture with visible pores",
+    "no airbrushed plastic skin",
+    "deliberate negative space",
+    "environmental storytelling",
+    "European fashion editorial mood",
+    "introspective quiet atmosphere",
+    "soft fabric motion blur on edges",
+    "dreamy but not blurry"
+  ],
+  "single_line": "35mm film, matte silver gelatin print, soft natural window light, milky low-saturation tones with oily lustrous color depth, gentle vignette, fine analog grain, European editorial fashion mood",
+  "color_palette": [
+    "高光：暖白 / 燕麦白 / 奶白（不是纯白、不是冷白）",
+    "阴影：冷青 / 轻度蓝紫（不是纯黑 / 不是深灰）",
+    "肤色：暖中性偏粉，绝不瓷白、绝不塑料",
+    "重点色：低饱和粉 / 雾紫 / 淡蓝 / 灰金",
+    "整体：褪色 Portra 400 调性，远离数码饱和，远离 teal-and-orange"
+  ],
+  "composition": [
+    "竖向构图或 4:3 比例",
+    "亲密距离（人物在画面里占比大，不远景）",
+    "环境叙事（厨房 / 街头 / 花园 / 蓝色房间 / 巴黎店面 / 石墙）",
+    "允许 5-10° 轻微倾斜制造生活感",
+    "单一主体 + 大量留白（不要堆叠道具）"
+  ],
+  "lighting": [
+    "90% 自然光（窗光 / 侧光 / 林荫斑驳）",
+    "绝不影楼硬闪、绝不环形灯",
+    "保留墙地投影，保留窗户光带",
+    "允许微弱补光但绝不破坏方向性"
+  ],
+  "texture_material": [
+    "银盐相纸 matte 表面（不反光、不锐利）",
+    "明显但不夸张的胶片颗粒",
+    "暗角：四角柔和压暗，中心保留亮度",
+    "轻微显影不均（平涂区域云朵状不均）",
+    "白底为相纸白（非屏幕白）",
+    "皮肤保留毛孔纹理，绝不塑料感",
+    "织物纹理清晰（毛衫的毛圈、亚麻的褶皱、雪纺的透光）",
+    "色彩呈\"油润感\"：色彩浓密而过渡平滑、有蜡质油彩般的光泽深度，切忌数码感的高对比色块分离（来自暗房 C-print 染料层的厚度）"
+  ],
+  "border_overlay": [
+    "可选 Polaroid 白边（边缘轻微泛黄、轻微压花）",
+    "可选相机数据条（Nikon/Canon EXIF 风格：焦段/光圈/快门/ISO/曝光补偿）位于画面下沿",
+    "**画面绝对零文字**——不得出现杂志标题、品牌名、工作室名、wordmark、logo 等任何文字或排版元素（参考图中的杂志标题仅为风格来源的签名特征，不得复刻到生成图）",
+    "以上两类边框（Polaroid 白边 / 数据条）最多同时出现 1 类；不出现也完全成立"
+  ],
+  "negative_prompt": "any text, typography, letters, magazine title, brand name, wordmark, logo, captions, type overlay, headlines, written words in frame, clean digital rendering, HDR look, oversaturated colors, glossy magazine retouching, digital sharpening halos, clinical perfection, 3D render look, plastic airbrushed skin, beauty filter, anime, cartoon, illustration, oil painting, studio strobe, ring light, neon lights, cyberpunk, deep pure black shadows, lens flare, bokeh balls, Instagram filter, modern smartphone photo, raw unprocessed digital photo, watermark corner badge, stock photo look, dry flat washed-out colors, thin digital color separation, blurry out of focus subject, deformed hands, extra fingers, identical twin symmetry, studio white seamless backdrop, generic AI glow, magenta color cast, teal-and-orange Hollywood grading, sun-drenched commercial warmth, high fashion haute couture runway",
+  "consistency_notes": [
+    "影调不靠滤镜堆，靠的是低饱和褪色感 + 暖白高光 + 冷青阴影的胶片色调三件套",
+    "光线必须是自然光或环境光，绝不能是影楼硬闪；保留墙地投影是关键",
+    "服装面料/织物质感必须能被读出（毛圈、褶皱、透光），不要塑料化",
+    "皮肤保留真实纹理，可见毛孔和微微的不均；不磨皮",
+    "画面零文字——必须排除杂志标题/品牌字/wordmark 等所有字体元素，即使参考图里有也不能复刻",
+    "环境物件不要过载，保持安静、亲密的叙事感；避免商场、霓虹、派对等高刺激场景",
+    "色彩呈\"油润感\"：浓密色彩+平滑过渡+蜡质光泽，避免数码感的高对比色块分离"
+  ],
+  "reference_signature_examples": [
+    "Polaroid 白边 + 边缘泛黄（白 T 半身那张）",
+    "相机数据条（白袍+红袜那张）",
+    "强方向光投影（绿瓷砖沙发金裙那张）",
+    "Mediterranean 蓝窗与石墙（蓝格纹那张）",
+    "Paris 街头 + 飘逸风衣（卷发那张）",
+    "油润色彩质感参照：绿瓷砖沙发金裙、蓝窗石墙两张的浓密油彩感"
+  ]
+}

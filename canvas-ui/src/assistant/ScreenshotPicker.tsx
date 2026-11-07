@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react"
 import type { PointerEvent as ReactPointerEvent } from "react"
 import { createPortal } from "react-dom"
 import { CheckIcon, RotateCcwIcon, XIcon } from "lucide-react"
+import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/hexta/item"
+import { Kbd } from "@/components/hexta/kbd"
+import { Spinner } from "@/components/hexta/spinner"
 import type { AssistantStore } from "./store"
 
 type Rect = { x: number; y: number; w: number; h: number }
@@ -98,7 +101,7 @@ export const ScreenshotPicker = ({ open, onClose, store }: { open: boolean; onCl
 			}}
 			ref={overlayRef}
 		>
-			<div className="nvca-shot-label">拖拽框选截图区域 · Esc 取消</div>
+			<div className="nvca-shot-label">拖拽框选截图区域 · <Kbd size="sm">Esc</Kbd> 取消</div>
 			{rect && rect.w > 2 && rect.h > 2 ? (
 				<div
 					className="nvca-shot-select"
@@ -108,35 +111,43 @@ export const ScreenshotPicker = ({ open, onClose, store }: { open: boolean; onCl
 				</div>
 			) : null}
 			{phase === "confirm" && preview ? (
-				<div className="nvca-shot-confirm" onPointerDown={(event) => event.stopPropagation()}>
-					<img alt="截图预览" src={preview.url} />
-					<div className="nvca-shot-confirm-text">
-						<strong>使用这张截图？</strong>
-						<span>{preview.width} × {preview.height}</span>
-					</div>
-					<button className="nvca-shot-btn" onClick={() => { setPhase("select"); setPreview(null); setRect(null) }} type="button">
-						<RotateCcwIcon className="nvca-i-xs" />
-						重选
-					</button>
-					<button className="nvca-shot-btn" onClick={onClose} type="button">
-						<XIcon className="nvca-i-xs" />
-						取消
-					</button>
-					<button
-						className="nvca-shot-btn is-primary"
-						disabled={busy}
-						onClick={() => {
-							if (!preview) return
-							const ok = store.addCaptureRef(preview.url, preview.width, preview.height)
-							store.notify(ok ? "已加入截图引用" : "截图引用添加失败")
-							if (ok) onClose()
-						}}
-						type="button"
-					>
-						<CheckIcon className="nvca-i-xs" />
-						使用这张
-					</button>
-				</div>
+				<Item
+					className="nvca-shot-confirm"
+					onPointerDown={(event) => event.stopPropagation()}
+					size="sm"
+				>
+					<ItemMedia className="nvca-shot-thumb" variant="image">
+						<img alt="截图预览" src={preview.url} />
+					</ItemMedia>
+					<ItemContent className="nvca-shot-confirm-text">
+						<ItemTitle>使用这张截图？</ItemTitle>
+						<ItemDescription>{preview.width} × {preview.height}</ItemDescription>
+					</ItemContent>
+					<ItemActions>
+						<button className="nvca-shot-btn" onClick={() => { setPhase("select"); setPreview(null); setRect(null) }} type="button">
+							<RotateCcwIcon className="nvca-i-xs" />
+							重选
+						</button>
+						<button className="nvca-shot-btn" onClick={onClose} type="button">
+							<XIcon className="nvca-i-xs" />
+							取消
+						</button>
+						<button
+							className="nvca-shot-btn is-primary"
+							disabled={busy}
+							onClick={() => {
+								if (!preview) return
+								const ok = store.addCaptureRef(preview.url, preview.width, preview.height)
+								store.notify(ok ? "已加入截图引用" : "截图引用添加失败")
+								if (ok) onClose()
+							}}
+							type="button"
+						>
+							{busy ? <Spinner aria-hidden size="sm" /> : <CheckIcon className="nvca-i-xs" />}
+							使用这张
+						</button>
+					</ItemActions>
+				</Item>
 			) : null}
 		</div>,
 		document.body,

@@ -1,0 +1,196 @@
+/* BEAT 助手头像 · 扁平双条 + 三层发光 + 12 状态。
+   权威实现是 _beat-icon-final/beat-avatar.snippet.html：几何、颜色、光强、动画时长逐字沿用，只做三处必要适配——
+   1) 类名与关键帧加 nvca-beat- 前缀：微应用注入宿主页面，裸 beat-* 会和画布页撞名；
+   2) 浅色主题原本靠祖先 [data-theme="light"]，组件里没有这样的祖先可挂，改为挂在图标自己身上；
+   3) 末尾补两条面板内定位（空态槽位 / 顶栏位），不碰图标自身的几何。
+   盘的内描边是这个图形本身的一部分（属于「本身是图形」的例外），不是给面板画的层级线。 */
+
+@property --beat-lit { syntax: "<number>"; inherits: true; initial-value: 1 }
+@property --beat-progress { syntax: "<number>"; inherits: true; initial-value: .5 }
+
+/* 尺寸/几何全用百分比，父容器给多宽图标就多大 */
+.nvca-beat-avatar {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  --accent: #7C86E8;
+  --eye: #F7F8FA;
+  --disc: #15171B;
+  --ring: inset 0 0 0 1px rgba(255, 255, 255, .07);
+  --shadow: none;
+  --gm: 1;
+  --g: 1;
+  --ehS: 1;
+  --ewS: 1;
+  --gs: 1;
+  --glow: 1;
+  --beat-lit: 1;
+  --beat-progress: .5;
+  --scanDur: calc(1.6s - var(--beat-progress) * .8s);
+  transition: --beat-progress 250ms ease, scale 180ms ease;
+}
+/* 白底上光看着更亮，整体乘数压到 0.55 才不脏；盘用近黑才压得住白 */
+.nvca-beat-avatar[data-theme="light"] { --disc: #0E1013; --ring: none; --shadow: 0 6px 18px rgba(15, 18, 24, .18); --gm: .55 }
+/* 小图标上用大半径会糊成一团光，所以半径跟着尺寸缩 */
+.nvca-beat-avatar[data-size="28"] { --gs: .55 }
+.nvca-beat-avatar[data-size="40"] { --gs: .8 }
+
+/* 状态只决定「几何 + 光强」，动起来靠下面的 animation：静态帧会让人以为组件卡死 */
+.nvca-beat-avatar[data-state="blink"] { --ewS: 1.08; --g: .5 }
+.nvca-beat-avatar[data-state="happy"] { --ehS: .7; --ewS: 1.06; --g: 1.4 }
+.nvca-beat-avatar[data-state="listening"] { --ehS: .85; --ewS: 1.08 }
+.nvca-beat-avatar[data-state="generating"] { --g: calc(.6 + .55 * var(--beat-progress)) }
+.nvca-beat-avatar[data-state="waiting"] { --ehS: .7 }
+.nvca-beat-avatar[data-state="focus"] { --g: .55 }
+.nvca-beat-avatar[data-state="sleepy"] { --ehS: .45; --g: .3 }
+.nvca-beat-avatar[data-state="surprised"] { --ehS: 1.18; --ewS: .9 }
+.nvca-beat-avatar[data-state="error"] { --ehS: .45; --accent: #E46A5A }
+
+.nvca-beat-face { position: absolute; inset: 6%; border-radius: 50%; overflow: hidden; background: var(--disc); box-shadow: var(--ring), var(--shadow) }
+/* 分三层是为了不打架：eyes 只做鼠标跟随（JS 写 transform），group 做整张脸的位移/缩放动画，eye 做单只眼的几何动画 */
+.nvca-beat-eyes { position: absolute; inset: 6%; pointer-events: none; will-change: transform }
+.nvca-beat-group { position: absolute; inset: 0; will-change: transform }
+/* 眼睛是一块纯色，光只从 box-shadow 出来；加渐变或内阴影就会变成「立体」而不是「光」 */
+.nvca-beat-eye {
+  position: absolute;
+  top: 46%;
+  left: 28%;
+  width: calc(10.5% * var(--ewS));
+  height: calc(21% * var(--ehS));
+  margin-top: calc(-10.5% * var(--ehS));
+  border-radius: 999px;
+  background: var(--eye);
+  transform-origin: 50% 50%;
+  will-change: transform;
+  transition: height 240ms cubic-bezier(.3, .7, .3, 1), width 240ms cubic-bezier(.3, .7, .3, 1), margin-top 240ms cubic-bezier(.3, .7, .3, 1), box-shadow 240ms ease;
+  box-shadow: 0 0 calc(6px * var(--gs)) color-mix(in srgb, var(--accent) calc(70% * var(--g) * var(--beat-lit) * var(--glow) * var(--gm)), transparent),
+    0 0 calc(16px * var(--gs)) color-mix(in srgb, var(--accent) calc(42% * var(--g) * var(--beat-lit) * var(--glow) * var(--gm)), transparent),
+    0 0 calc(34px * var(--gs)) color-mix(in srgb, var(--accent) calc(22% * var(--g) * var(--beat-lit) * var(--glow) * var(--gm)), transparent);
+}
+.nvca-beat-eye:nth-child(2) { left: 61.5% }
+
+/* idle：呼吸 4s + 漂移 7s；随机眨眼交给 JS，因为间隔要随状态变，静态关键帧做不到 */
+.nvca-beat-avatar[data-state="idle"] .nvca-beat-eye { animation: nvca-beat-idleBreath 4s ease-in-out infinite }
+.nvca-beat-avatar[data-state="idle"] .nvca-beat-group { animation: nvca-beat-idleDrift 7s ease-in-out infinite }
+@keyframes nvca-beat-idleBreath {
+  0%, 100% { height: calc(21% * var(--ehS) * 1.03); margin-top: calc(-10.5% * var(--ehS) * 1.03) }
+  50% { height: calc(21% * var(--ehS) * .97); margin-top: calc(-10.5% * var(--ehS) * .97) }
+}
+@keyframes nvca-beat-idleDrift { 0%, 100% { transform: translateX(-1.5%) } 50% { transform: translateX(1.5%) } }
+
+/* blink：压到 16% 停 180ms 再弹回；被持续设置时按 4.5s 循环，而不是播一次就凝固 */
+.nvca-beat-avatar[data-state="blink"] .nvca-beat-eye { animation: nvca-beat-blinkAct 4.5s cubic-bezier(.3, .7, .3, 1) infinite }
+@keyframes nvca-beat-blinkAct {
+  0% { transform: scaleY(1) }
+  2% { transform: scaleY(.16) }
+  6% { transform: scaleY(.16) }
+  11% { transform: scaleY(1.04) }
+  16%, 100% { transform: scaleY(1) }
+}
+
+/* happy：两下小跳各 420ms（1.68s 的 25%），常驻时按 1.68s 重播；双眨由 JS 的 blink 队列补 */
+.nvca-beat-avatar[data-state="happy"] .nvca-beat-group { animation: nvca-beat-happyJump 1.68s ease-out infinite }
+@keyframes nvca-beat-happyJump {
+  0% { transform: translateY(0) }
+  12.5% { transform: translateY(-8%) }
+  25% { transform: translateY(0) }
+  37.5% { transform: translateY(-8%) }
+  50%, 100% { transform: translateY(0) }
+}
+
+/* thinking：左右眼反相变矮 + 视线整体上瞟 + 光呼吸，三层各动各的，互不覆盖 */
+.nvca-beat-avatar[data-state="thinking"] .nvca-beat-eye { animation: nvca-beat-think 2.2s ease-in-out infinite }
+.nvca-beat-avatar[data-state="thinking"] .nvca-beat-eye:nth-child(2) { animation-delay: -1.1s }
+.nvca-beat-avatar[data-state="thinking"] .nvca-beat-group { animation: nvca-beat-thinkUp 3.5s ease-in-out infinite }
+.nvca-beat-avatar[data-state="thinking"] { animation: nvca-beat-thinkLit 2.2s ease-in-out infinite }
+@keyframes nvca-beat-think { 0%, 100% { height: 21% } 50% { height: 17.2% } }
+@keyframes nvca-beat-thinkUp { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-2%) } }
+@keyframes nvca-beat-thinkLit { 0%, 100% { --beat-lit: 1 } 50% { --beat-lit: 1.18 } }
+
+/* listening：明暗脉冲 1.6s + 上下 1% 点头 2.4s；眨眼间隔在 JS 里减半 */
+.nvca-beat-avatar[data-state="listening"] .nvca-beat-eye { animation: nvca-beat-pulse 1.6s ease-in-out infinite }
+.nvca-beat-avatar[data-state="listening"] .nvca-beat-group { animation: nvca-beat-nod 2.4s ease-in-out infinite }
+@keyframes nvca-beat-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .55 } }
+@keyframes nvca-beat-nod { 0%, 100% { transform: translateY(-1%) } 50% { transform: translateY(1%) } }
+
+/* generating：扫描周期由 progress 推出来（1.6s → 0.8s），光强同步从 0.6 爬到 1.15 */
+.nvca-beat-avatar[data-state="generating"] .nvca-beat-group { animation: nvca-beat-genScan var(--scanDur) ease-in-out infinite }
+@keyframes nvca-beat-genScan { 0%, 100% { transform: translateX(-6%) } 50% { transform: translateX(6%) } }
+
+/* tool：机械短促压到 40% 再弹回，每 1.1s 一次；同一拍里光打一发短脉冲 */
+.nvca-beat-avatar[data-state="tool"] .nvca-beat-eye { animation: nvca-beat-toolTick 1.1s cubic-bezier(.2, .8, .3, 1) infinite }
+.nvca-beat-avatar[data-state="tool"] .nvca-beat-group { animation: nvca-beat-toolBob 2.2s ease-in-out infinite }
+.nvca-beat-avatar[data-state="tool"] { animation: nvca-beat-toolLit 1.1s ease-out infinite }
+@keyframes nvca-beat-toolTick {
+  0% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+  5% { height: calc(8.4% * var(--ehS)); margin-top: calc(-4.2% * var(--ehS)) }
+  10% { height: calc(21.8% * var(--ehS)); margin-top: calc(-10.9% * var(--ehS)) }
+  16%, 100% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+}
+@keyframes nvca-beat-toolBob { 0%, 100% { transform: translateY(-1.1%) scaleY(.98) } 50% { transform: translateY(1.1%) scaleY(1.02) } }
+@keyframes nvca-beat-toolLit { 0% { --beat-lit: 1.45 } 14%, 100% { --beat-lit: 1 } }
+
+/* waiting：半睁 + 慢呼吸，每 3.5s 往一侧看 0.6s 再回来；alternate 让两侧轮流看 */
+.nvca-beat-avatar[data-state="waiting"] .nvca-beat-eye { animation: nvca-beat-waitBreath 5s ease-in-out infinite }
+.nvca-beat-avatar[data-state="waiting"] .nvca-beat-group { animation: nvca-beat-waitLook 3.5s ease-in-out infinite alternate }
+@keyframes nvca-beat-waitBreath {
+  0%, 100% { height: calc(21% * var(--ehS) * 1.02); margin-top: calc(-10.5% * var(--ehS) * 1.02) }
+  50% { height: calc(21% * var(--ehS) * .98); margin-top: calc(-10.5% * var(--ehS) * .98) }
+}
+@keyframes nvca-beat-waitLook {
+  0%, 68% { transform: translateX(0) }
+  85% { transform: translateX(8%) }
+  90% { transform: translateX(8%) }
+  100% { transform: translateX(0) }
+}
+
+/* focus：只剩极缓的 2% 扫视，别的装饰全关，免得跟正事抢注意力 */
+.nvca-beat-avatar[data-state="focus"] .nvca-beat-group { animation: nvca-beat-focusScan 6s ease-in-out infinite }
+@keyframes nvca-beat-focusScan { 0%, 100% { transform: translateX(-2%) } 50% { transform: translateX(2%) } }
+
+/* sleepy：上下浮动 1%，眨眼在 JS 里放慢到 4~6s */
+.nvca-beat-avatar[data-state="sleepy"] .nvca-beat-group { animation: nvca-beat-sleepFloat 5s ease-in-out infinite }
+@keyframes nvca-beat-sleepFloat { 0%, 100% { transform: translateY(-1%) } 50% { transform: translateY(1%) } }
+
+/* surprised / error：一次性动作放进 1.8s / 2s 的长周期里，被持续设置就每周期重播一次 */
+.nvca-beat-avatar[data-state="surprised"] .nvca-beat-group { animation: nvca-beat-popLoop 1.8s cubic-bezier(.2, .9, .3, 1) infinite }
+.nvca-beat-avatar[data-state="surprised"] { animation: nvca-beat-flashLit 1.8s ease-out infinite }
+@keyframes nvca-beat-popLoop { 0% { transform: scale(1) } 8% { transform: scale(1.12) } 21% { transform: scale(1) } 100% { transform: scale(1) } }
+@keyframes nvca-beat-flashLit { 0% { --beat-lit: 2.4 } 12%, 100% { --beat-lit: 1 } }
+.nvca-beat-avatar[data-state="error"] .nvca-beat-group { animation: nvca-beat-shakeLoop 2s ease-out infinite }
+.nvca-beat-avatar[data-state="error"] .nvca-beat-eye { animation: nvca-beat-errorBlink 2s cubic-bezier(.3, .7, .3, 1) infinite }
+@keyframes nvca-beat-shakeLoop {
+  0% { transform: translateX(0) }
+  4% { transform: translateX(-6%) }
+  9% { transform: translateX(6%) }
+  14% { transform: translateX(-3%) }
+  17%, 100% { transform: translateX(0) }
+}
+@keyframes nvca-beat-errorBlink {
+  0% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+  3% { height: calc(10.5% * var(--ehS)); margin-top: calc(-5.25% * var(--ehS)) }
+  6% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+  9% { height: calc(10.5% * var(--ehS)); margin-top: calc(-5.25% * var(--ehS)) }
+  12%, 100% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+}
+
+/* 用 scale 而不是 transform 做 hover，是为了不跟上面任何一层动画抢 transform */
+@media (hover: hover) { .nvca-beat-avatar:hover { scale: .94 } }
+
+/* 系统关了动效就真不动：动画全停，只留静态几何 */
+@media (prefers-reduced-motion: reduce) {
+  .nvca-beat-avatar, .nvca-beat-avatar * { animation: none !important; transition: none !important }
+  /* 动画停掉后 blink 要保留「压成一条线」的样子，否则它就等同于 idle */
+  .nvca-beat-avatar[data-state="blink"] { --ehS: .16 }
+}
+
+/* ── 面板内的两个落位（只定位置，不改图标几何）───────────────────
+   空态原来那个 28px 浅底方块是给 16px logo 垫底的；换成实心盘后四角会露出来，
+   所以只把底去掉，尺寸/对齐仍由原 .nvca-thread-empty-logo 决定。 */
+.nvca-root .nvca-thread-empty-logo.nvca-beat-logo-slot {
+  background: transparent;
+  border-radius: 0;
+}
+/* 顶栏里不参与 flex 收缩，宽度交给组件自己的 size */
+.nvca-beat-head { flex: none; }

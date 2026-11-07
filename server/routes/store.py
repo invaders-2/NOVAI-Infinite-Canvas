@@ -10,9 +10,11 @@
     POST   /api/store/items/{kind}/{name}/launch   -> {canvas_id, prompt, auto_send}
 
 数据与落盘：
-- 目录/详情只读 data/store/（catalog.json + details/<kind>__<name>.json），**不再读**
-  server/skills/registry 与 server/agents/registry —— 应用市场里只有上游这 83 条；
-- 安装态落 <DATA_DIR>/store_installed.json（数组，元素 "kind:name"）；
+- 目录/详情读 server/store_data/（catalog.json + details/<kind>__<name>.json）里的上游 83 条；
+- 在这 83 条之外并入技能注册表里的系统 / 内置技能（skill_type=system 或带内置技能包），
+  映射成同形的 item（builtin=true、已安装、可见可用）；同名条目以注册表为准（去重）；
+- 安装态落 <DATA_DIR>/store_installed.json（数组，元素 "kind:name"）；市场技能 install 时还会
+  按 Agent Skills 规范写进 <DATA_DIR>/skills/<id>.json，画布助手（/api/skills）就能直接用它；
 - launch 只做「编译提示词 + 新建画布并返回」，不在这里跑模型、不调用上游。
 
 Python 3.9 约束：注解用 Optional/Dict/List，禁止 X | Y 联合写法。
@@ -28,6 +30,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from server.routes.deps import deps
+from server.skills import registry as skills_registry
 
 router = APIRouter(prefix="/api/store")
 
@@ -44,6 +47,12 @@ SKILL_GENERATED_DIRNAME = "generated"      # 没有原始正文的条目：由�
 SKILL_INDEX_FILE = "_index.json"
 SKILL_BODY_MAX_CHARS = 30000          # 正文超过 3 万字截断（原始最大 61627 字）
 SKILL_BODY_TRUNCATED_NOTE = "（已截断）"
+# 注册表里的系统 / 内置技能并进市场时用的默认分类与列表副标题长度
+BUILTIN_CATEGORY_FALLBACK = "官方技能"
+MARKETING_LINE_MAX_CHARS = 90
+# 市场技能写进 data/skills/<id>.json 时：skill_type 记「我的技能」，来源记在 store_ref
+STORE_SKILL_TYPE = "mine"
+STORE_REF_FIELD = "store_ref"
 
 
 # ---------------------------------------------------------------- 路径
@@ -178,17 +187,114 @@ def load_detail(kind: str, name: str) -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
-def _resolve(kind: str, name: str) -> Dict[str, Any]:
-    """按 (kind, name) 取目录条目；非法 kind / 不存在的 name 一律 404。"""
+# ---------------------------------------------------------------- 内置 / 系统技能
+
+def load_builtin_skills() -> List[Dict[str, Any]]:
+    """技能注册表里的系统 / 内置技能（含随安装包分发的技能包）。
+
+    注册表读失败只打日志并返回空列表：市场目录不能因为技能注册表坏掉就 500。
+    """
+    try:
+        skills = skills_registry.load_skills()
+    except Exception as exc:
+        print("[Store] 读取技能注册表失败，内置技能本次不并入市场: %s" % exc)
+        return []
+    selected = []
+    for skill in skills:
+        if not isinstance(skill, dict):
+            continue
+        if not str(skill.get("id") or "").strip():
+            continue
+        skill_type = str(skill.get("skill_type") or "").strip().lower()
+        pack = str(skill.get("builtin_pack") or "").strip()
+        if skill_type == "system" or pack:
+            selected.append(skill)
+    return selected
+
+
+def _short_line(value: Any, limit: int = MARKETING_LINE_MAX_CHARS) -> str:
+    """列表副标题：压掉换行，超长截断并加省略号。"""
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
+def builtin_cover_url(skill_id: str) -> str:
+    """内置技能的封面：tools/gen_store_covers.py 生成过就用它，没生成过留空（前端退回图标）。"""
+    clean = str(skill_id or "").strip()
+    if not clean or not all(ch.isalnum() or ch in "._-" for ch in clean):
+        return ""
+    filename = "gen-%s.webp" % clean
+    if os.path.isfile(os.path.join(_repo_root(), "static", "store", "covers", filename)):
+        return "/static/store/covers/" + filename
+    return ""
+
+
+def builtin_store_item(skill: Dict[str, Any]) -> Dict[str, Any]:
+    """注册表技能 → 与市场条目同形的 item（前端按同一套字段渲染）。"""
+    sid = str(skill.get("id") or "").strip()
+    display = str(skill.get("name") or "").strip() or sid
+    description = str(skill.get("description") or "").strip()
+    category = str(skill.get("category") or "").strip() or BUILTIN_CATEGORY_FALLBACK
+    raw_tags = skill.get("tags")
+    tags = [str(tag).strip() for tag in raw_tags if str(tag or "").strip()] if isinstance(raw_tags, list) else []
+    return {
+        "kind": "skill",
+        "name": sid,
+        "display_name": display,
+        "description": description,
+        "category": category,
+        "marketing_line": _short_line(description),
+        "cover_url": builtin_cover_url(sid),
+        "cover_poster_url": builtin_cover_url(sid),
+        "cover_video_url": "",
+        "icon_url": "",
+        "icon": str(skill.get("icon") or "").strip(),
+        "business_scenario": "",
+        "search_terms": tags,
+        "tags": tags,
+        "installed": True,          # 内置技能本来就在画布助手里
+        "builtin": True,
+        "store_available": True,
+        "store_visible": True,
+        "enabled": True,
+        "skill_type": str(skill.get("skill_type") or "system").strip() or "system",
+        "builtin_pack": str(skill.get("builtin_pack") or "").strip(),
+    }
+
+
+def builtin_index() -> Dict[str, Dict[str, Any]]:
+    """内置技能按 id 建索引，供目录合并与详情 / 安装 / 启动按名取整。"""
+    index = {}
+    for skill in load_builtin_skills():
+        item = builtin_store_item(skill)
+        index[item["name"]] = item
+    return index
+
+
+def _lookup(kind: str, name: str) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """按 (kind, name) 取条目，返回 (条目, 是否内置)；内置技能优先（同名以注册表为准）。"""
     clean_kind = str(kind or "").strip().lower()
     clean_name = str(name or "").strip()
     if clean_kind not in STORE_KINDS or not clean_name:
-        raise HTTPException(status_code=404,
-                            detail="商店条目不存在：%s/%s" % (clean_kind or "<空>", clean_name or "<空>"))
-    entry = _catalog_index().get((clean_kind, clean_name))
-    if not entry:
-        raise HTTPException(status_code=404, detail="商店条目不存在：%s/%s" % (clean_kind, clean_name))
-    return entry
+        return None, False
+    if clean_kind == "skill":
+        builtin = builtin_index().get(clean_name)
+        if builtin:
+            return builtin, True
+    return _catalog_index().get((clean_kind, clean_name)), False
+
+
+def _resolve(kind: str, name: str) -> Dict[str, Any]:
+    """按 (kind, name) 取条目；非法 kind / 不存在的 name 一律 404。"""
+    found, _builtin = _lookup(kind, name)
+    if found:
+        return found
+    clean_kind = str(kind or "").strip().lower()
+    clean_name = str(name or "").strip()
+    raise HTTPException(status_code=404,
+                        detail="商店条目不存在：%s/%s" % (clean_kind or "<空>", clean_name or "<空>"))
 
 
 def _installed_flag(kind: str, name: str, installed: List[str]) -> bool:
@@ -196,17 +302,28 @@ def _installed_flag(kind: str, name: str, installed: List[str]) -> bool:
 
 
 def build_catalog() -> Dict[str, Any]:
-    """商店首页：目录条目（每条补 installed）+ 分类 + 计数 + featured / trending。"""
+    """商店首页：市场 83 条 + 内置技能（每条补 installed）+ 分类 + 计数 + featured / trending。"""
     data = load_catalog_payload()
     curation = load_curation()
     installed = load_installed()
     items = []
+    position = {}
     for raw in (data.get("items") or []):
         if not isinstance(raw, dict):
             continue
         item = _curate_item(dict(raw), curation)
         item["installed"] = _installed_flag(str(item.get("kind") or ""), str(item.get("name") or ""), installed)
+        item.setdefault("builtin", False)
+        position[(str(item.get("kind") or ""), str(item.get("name") or ""))] = len(items)
         items.append(item)
+    # 内置 / 系统技能并进来：同名条目整条换成注册表的（去重，以注册表为准）
+    for entry in builtin_index().values():
+        key = (entry["kind"], entry["name"])
+        if key in position:
+            items[position[key]] = entry
+        else:
+            position[key] = len(items)
+            items.append(entry)
     visible = [item for item in items if item["store_visible"]]
     return {
         "items": items,
@@ -328,9 +445,36 @@ def skill_manual_text(body: Any) -> str:
 DETAIL_UNAVAILABLE_REASON = "该应用详情由上游暂不提供"
 
 
+def builtin_detail(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """内置技能详情：市场字段 + 注册表里的技能信息（正文走 /api/skills/<id>/export）。"""
+    item = dict(entry)
+    item["installed"] = True
+    skill = {}
+    try:
+        skill = skills_registry.get_skill(str(item.get("name") or "")) or {}
+    except Exception as exc:
+        print("[Store] 读取内置技能失败 %s: %s" % (item.get("name"), exc))
+    prompt = str(skill.get("skill_prompt") or "")
+    item["has_skill_body"] = bool(prompt)
+    item["skill_body_chars"] = len(prompt)
+    item["skill_body_source"] = "registry" if prompt else ""
+    item["skill_export_url"] = "/api/skills/%s/export" % item.get("name")
+    if isinstance(skill.get("deliverables"), list) and skill["deliverables"]:
+        item["deliverables"] = skill["deliverables"]
+    usage = str(skill.get("usage_instruction") or "").strip()
+    if usage:
+        item["usage_instruction"] = usage
+    return item
+
+
 def build_detail(kind: str, name: str) -> Dict[str, Any]:
-    """详情：上游 detail 优先；上游 404（本地 null）时回退成 catalog 条目 + 明确的降级标记。"""
-    entry = _resolve(kind, name)
+    """详情：内置技能走注册表；市场条目上游 detail 优先，上游 404 时回退成 catalog 条目 + 降级标记。"""
+    entry, builtin = _lookup(kind, name)
+    if not entry:
+        _resolve(kind, name)          # 不存在的条目按统一文案 404
+        raise HTTPException(status_code=404, detail="商店条目不存在")
+    if builtin:
+        return builtin_detail(entry)
     detail = load_detail(kind, name)
     unavailable = not isinstance(detail, dict)
     item = dict(detail if not unavailable else entry)
@@ -481,39 +625,138 @@ def _new_canvas(title: str, request: Request) -> Dict[str, Any]:
     return fn(title, _canvas_owner_id(request))
 
 
+# ---------------------------------------------------------------- 市场技能 → 画布助手
+
+def _market_skill_id(name: Any) -> str:
+    """市场条目名直接当技能 id：不合法返回空串（非法 id 不写进注册表）。"""
+    text = str(name or "").strip()
+    return text if text and skills_registry._ID_RE.match(text) else ""
+
+
+def store_skill_ref(entry: Dict[str, Any]) -> str:
+    """「kind:name」来源标记，写进技能定义的 store_ref（卸载时据此判断是不是本店装的）。"""
+    return "%s:%s" % (entry.get("kind") or "skill", entry.get("name") or "")
+
+
+def register_market_skill(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """把市场技能写进 <DATA_DIR>/skills/<id>.json，让 /api/skills 与画布助手立刻能用。
+
+    字段口径复用注册表的 _normalize_skill；只写「空位」或「本店之前装过的同一条」，
+    内置技能与用户自有技能一律不覆盖。返回 {skill_id, skill_registered, skill_message}。
+    """
+    sid = _market_skill_id(entry.get("name"))
+    if not sid:
+        return {"skill_id": "", "skill_registered": False,
+                "skill_message": "条目名不能当技能 id，市场记录已保存，但没有导入画布助手"}
+    ref = store_skill_ref(entry)
+    builtin_ids = set()
+    try:
+        builtin_ids = {str(item.get("id") or "") for item in skills_registry.load_builtin()}
+    except Exception as exc:
+        print("[Store] 读取内置技能清单失败（安装照常继续）: %s" % exc)
+    if sid in builtin_ids:
+        return {"skill_id": sid, "skill_registered": True,
+                "skill_message": "同名内置技能已经在画布助手里可用，没有覆盖"}
+    path = os.path.join(skills_registry.skills_dir(), "%s.json" % sid)
+    existing = _read_json(path, {})
+    if isinstance(existing, dict) and existing and str(existing.get(STORE_REF_FIELD) or "") != ref:
+        return {"skill_id": sid, "skill_registered": False,
+                "skill_message": "已经有同名技能「%s」，没有覆盖" % sid}
+    definition = skills_registry._normalize_skill({
+        "id": sid,
+        "name": entry.get("display_name") or sid,
+        "category": entry.get("category") or "市场技能",
+        "description": entry.get("description") or "",
+        "tags": entry.get("search_terms") or [],
+        "skill_prompt": load_skill_body(entry) or "",
+        "enabled": True,
+        "available": True,
+        "skill_type": STORE_SKILL_TYPE,
+    })
+    if not definition:
+        raise ValueError("技能定义不合法：缺少 id")
+    definition[STORE_REF_FIELD] = ref
+    os.makedirs(skills_registry.skills_dir(), exist_ok=True)
+    _atomic_writer()(path, definition, indent=2)
+    return {"skill_id": sid, "skill_registered": True, "skill_message": ""}
+
+
+def unregister_market_skill(entry: Dict[str, Any]) -> bool:
+    """卸载时删掉「本店装的」那条技能；用户自有 / 内置技能不动，返回是否真的删了。"""
+    sid = _market_skill_id(entry.get("name"))
+    if not sid:
+        return False
+    path = os.path.join(skills_registry.skills_dir(), "%s.json" % sid)
+    existing = _read_json(path, {})
+    if not isinstance(existing, dict) or str(existing.get(STORE_REF_FIELD) or "") != store_skill_ref(entry):
+        return False
+    os.remove(path)
+    return True
+
+
 # ---------------------------------------------------------------- 路由
 
 @router.get("/catalog")
 def store_catalog():
-    """商店首页：83 条目录（每条带 installed）+ 分类/计数 + featured / trending。"""
+    """商店首页：市场 83 条 + 内置技能（每条带 installed）+ 分类/计数 + featured / trending。"""
     return build_catalog()
 
 
 @router.get("/items/{kind}/{item_id}")
 def store_item_detail(kind: str, item_id: str):
     """详情：该条上游详情 + installed（上游 404 的条目回退成目录条目，不 500）。"""
-    return {"item": build_detail(kind, item_id)}
+    item = build_detail(kind, item_id)
+    body = {"item": item}
+    if item.get("builtin"):
+        body["detail"] = item          # 内置技能的详情就是注册表条目本身
+    return body
 
 
 @router.post("/items/{kind}/{item_id}/install")
 def store_install(kind: str, item_id: str):
-    """安装（幂等）：只把 "kind:name" 记进 data/store_installed.json。"""
-    entry = _curate_item(_resolve(kind, item_id), load_curation())
+    """安装（幂等）：记 "kind:name" 到 store_installed.json；市场技能同时写进画布助手。"""
+    entry, builtin = _lookup(kind, item_id)
+    if not entry:
+        _resolve(kind, item_id)       # 不存在的条目按统一文案 404
+        raise HTTPException(status_code=404, detail="商店条目不存在")
+    if builtin:
+        return {"installed": True, "builtin": True}
+    entry = _curate_item(entry, load_curation())
     if not entry["store_available"]:
         raise HTTPException(status_code=409, detail="该条目当前未开放")
     key = "%s:%s" % (kind, entry.get("name"))
+    registered = None
+    if str(entry.get("kind") or "") == "skill":
+        try:
+            registered = register_market_skill(entry)
+        except Exception as exc:
+            print("[Store] 市场技能 %s 导入画布助手失败: %s" % (key, exc))
+            raise HTTPException(status_code=500, detail="找到该技能，但导入画布助手失败：%s" % exc)
     keys = load_installed()
     if key not in keys:
         keys.append(key)
         save_installed(keys)
-    return {"installed": True}
+    body = {"installed": True}
+    if registered and registered.get("skill_message"):
+        body["skill_message"] = registered["skill_message"]
+    return body
 
 
 @router.delete("/items/{kind}/{item_id}/install")
 def store_uninstall(kind: str, item_id: str):
     """卸载（幂等）：条目不存在同样 404，避免把拼错的 id 当成「已卸载」。"""
-    entry = _resolve(kind, item_id)
+    entry, builtin = _lookup(kind, item_id)
+    if not entry:
+        _resolve(kind, item_id)
+        raise HTTPException(status_code=404, detail="商店条目不存在")
+    if builtin:
+        return {"installed": True, "builtin": True}
     key = "%s:%s" % (kind, entry.get("name"))
+    if str(entry.get("kind") or "") == "skill":
+        try:
+            unregister_market_skill(entry)
+        except Exception as exc:
+            print("[Store] 市场技能 %s 从画布助手移除失败（安装记录继续清）: %s" % (key, exc))
     keys = load_installed()
     if key in keys:
         keys = [item for item in keys if item != key]
@@ -521,10 +764,29 @@ def store_uninstall(kind: str, item_id: str):
     return {"installed": False}
 
 
+def _launch_builtin(entry: Dict[str, Any], payload: StoreLaunchRequest, request: Request) -> Dict[str, Any]:
+    """内置技能：提示词只写「用哪个技能」，技能正文由画布助手按技能 id 自己读。"""
+    sid = str(entry.get("name") or "")
+    display = _text(entry.get("display_name")) or sid
+    starter = "请使用技能「%s」（技能 ID：%s）来完成。" % (display, sid)
+    detail = dict(entry)
+    detail["starter_prompt"] = starter
+    prompt, _preset = compile_launch_prompt(detail, payload.preset_id, payload.inputs, payload.references)
+    canvas = _new_canvas(display or sid, request)
+    return {"canvas_id": str(canvas.get("id") or ""), "prompt": prompt, "auto_send": True,
+            "skill_ref": sid, "builtin": True}
+
+
 @router.post("/items/{kind}/{item_id}/launch")
 def store_launch(kind: str, item_id: str, payload: StoreLaunchRequest, request: Request):
     """启动：编译提示词 + 新建一张画布并返回（不跑模型；前端拿到后跳画布助手自动发送）。"""
-    entry = _curate_item(_resolve(kind, item_id), load_curation())
+    entry, builtin = _lookup(kind, item_id)
+    if not entry:
+        _resolve(kind, item_id)       # 不存在的条目按统一文案 404
+        raise HTTPException(status_code=404, detail="商店条目不存在")
+    if builtin:
+        return _launch_builtin(entry, payload, request)
+    entry = _curate_item(entry, load_curation())
     if not entry["store_available"]:
         raise HTTPException(status_code=409, detail="该条目当前未开放")
     detail = load_detail(kind, item_id) or dict(entry)

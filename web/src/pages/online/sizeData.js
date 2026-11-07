@@ -163,12 +163,23 @@ const QWEN_IMAGE_SIZE_PRESET = {
 
 const APIMART_IMAGE_SIZE_KEYS = ['square','portrait','landscape','portrait43','landscape43','story','wide'];
 const APIMART_FLUX3_SIZE_KEYS = ['ultrawide','landscape21','wide','landscape','landscape43','landscape54','square','portrait45','portrait43','portrait','story','portrait12','ultratall'];
+// GPT-Image-2.6（REPORT A.2，2026-11-06 文档确证）：ext 与 flare/sunburst 能力不同，所以是三条独立条目。
+// 匹配是「模型名包含 key 即命中」，这三条必须排在通用 'gpt-image-2' 之前，否则 ext 会落到老家族表（错误允许 2K/4K）。
+// ext：size = auto + 10 比例，分辨率只有 1K（2K/4K 上游 403 model_price_not_configured）。
+const APIMART_GPT26_EXT_SIZE_KEYS = ['square','wide','story','landscape43','portrait43','landscape','portrait','landscape54','portrait45','ultrawide'];
+// flare / sunburst：auto + 15 比例（10 + 2:1 / 1:2 / 21:9 / 9:21 / 3:1 / 1:3），分辨率 1K/2K/4K；
+// 支持精确像素（16 的倍数、长边 ≤3840、长短边比 ≤3:1、总像素 655360–8294400），
+// 像素边界由 /api/model-caps 的 max_long_edge / max_pixels / min_pixels 表达，自定义尺寸走 size-policy 收敛。
+const APIMART_GPT26_FULL_SIZE_KEYS = ['square','portrait','portrait43','landscape43','landscape','story','wide','ultrawide','ultratall','portrait12','landscape21','landscape54','portrait45','landscape31','portrait13'];
 const APIMART_GROK_SIZE_KEYS = ['square','portrait43','landscape43','story','wide','portrait','landscape','portrait12','landscape21'];
 
 // 模型专用尺寸映射：根据模型自动匹配其 API 支持的尺寸
 // 键名按匹配优先级排列，model name 包含键名即命中（更具体的 key 排在通用 key 前面）
 export const MODEL_SIZE_PRESETS = {
     'gpt-image-2.5-ext': apimartSizeSubset(['square','wide','story','landscape43','portrait43','landscape','portrait','landscape54','portrait45','ultrawide']),
+    'gpt-image-2.6-ext': apimartSizeSubset(APIMART_GPT26_EXT_SIZE_KEYS, ['1k']),
+    'gpt-image-2.6-flare': apimartSizeSubset(APIMART_GPT26_FULL_SIZE_KEYS),
+    'gpt-image-2.6-sunburst': apimartSizeSubset(APIMART_GPT26_FULL_SIZE_KEYS),
     'hy-image-v3.5-preview': apimartSizeSubset(['square','portrait','landscape','portrait43','landscape43','portrait45','landscape54','story','wide','ultrawide']),
     'flux-3-image-klein': apimartSizeSubset(APIMART_FLUX3_SIZE_KEYS),
     'flux-3-image': apimartSizeSubset(APIMART_FLUX3_SIZE_KEYS),

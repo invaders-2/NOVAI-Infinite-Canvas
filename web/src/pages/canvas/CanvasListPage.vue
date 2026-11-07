@@ -480,7 +480,7 @@ onBeforeUnmount(() => {
                     <div class="cl-picks">
                         <button type="button" class="cl-pick" :disabled="!!creating" @click="create('classic')">
                             <span class="ic"><NvIcon name="grid9" /></span>
-                            <span class="tx"><b>智能画布BEAT</b><span>OpenArc 无限画布，自由拖拽布局图像与节点</span></span>
+                            <span class="tx"><b>智能画布BEAT</b><span>NOVAI 无限画布，自由拖拽布局图像与节点</span></span>
                             <span v-if="creating === 'classic'" class="spin"></span><NvIcon v-else name="arrowr" class="go" />
                         </button>
                         <button type="button" class="cl-pick" :disabled="!!creating" @click="create('smart')">
@@ -535,7 +535,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .cl { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; }
-.cl-in { width: min(1180px, calc(100% - 96px)); margin: 0 auto; padding: 40px 0 96px; display: flex; flex-direction: column; gap: 32px; }
+.cl-in { width: min(1180px, calc(100% - 96px)); margin: 0 auto; padding: calc(var(--tbh, 0px) + 40px) 0 96px; display: flex; flex-direction: column; gap: 32px; }
 .grow { flex: 1; }
 
 /* 顶部 */

@@ -164,6 +164,32 @@ Mcp-Session-Id: sess_xxx
 ## 方向区别：MCP Server vs MCP Client
 
 - **本文件（Server 方向）**：外部 Agent → NOVAI。入口 `novai_mcp_server.py`，NOVAI 是被调用方。
-- **Client 方向**：NOVAI → 外部工具。配置在 `data/mcp_servers.json`（顶层键 `mcpServers`，`type` 为 `stdio` 或 `http`），需要环境变量 `NOVAI_MCP_ENABLED=1` 才启用；NOVAI 用这些配置去 spawn/连接外部 MCP 服务，把它们的工具并进画布助手的工具目录。
+- **Client 方向**：NOVAI → 外部工具。配置在 `data/mcp_servers.json`（顶层键 `mcpServers`，`type` 为 `stdio` 或 `http`）；**默认关闭，可在设置里直接打开**（开关落盘到 `data/mcp_settings.json`，重启后保持），环境变量 `NOVAI_MCP_ENABLED` 仍可作为高级覆盖。NOVAI 用这些配置去 spawn/连接外部 MCP 服务，把它们的工具并进画布助手的工具目录。
 
 两者方向相反、互不影响；可以同时开启。
+
+## MCP 客户端开关（Client 方向）
+
+总开关不再要求改环境变量：
+
+| 来源 | 优先级 | 说明 |
+| --- | --- | --- |
+| `NOVAI_MCP_ENABLED` | 高 | `1/true/yes/on` 强制开启；`0/false/no/off` 强制关闭。设了就完全以它为准，界面开关会被忽略（接口返回 409） |
+| `data/mcp_settings.json` | 低 | 界面开关的落盘点，形如 `{"enabled": true}`；文件不存在或内容损坏都当关闭 |
+
+- 数据目录跟随 `NOVAI_DATA_DIR`（默认 `~/.NOVAI`），所以开关和 `mcp_servers.json` 在同一个数据目录里。
+- 总开关关着时所有服务显示「未启用」，NOVAI 不会去连任何外部进程。
+
+### 相关接口
+
+| 接口 | 作用 |
+| --- | --- |
+| `GET /api/mcp/servers` | 列表 + 状态，附带 `enabled`、`env_override`（`""`/`"on"`/`"off"`）、`config_path` |
+| `PUT /api/mcp/servers/switch` | 总开关落盘，body `{"enabled": bool, "confirm": bool}`。开启必须 `confirm: true`（会真的连外部进程），关闭不需要；环境变量覆盖时返回 409 |
+| `POST /api/mcp/servers` | 新增一条服务配置（body 含 `name/type/command/args/url/env/headers/timeout/enabled`）；重名 409 |
+| `PUT /api/mcp/servers/{name}` | 覆盖一条服务配置；body 里的 `name` 和路径不同即改名；路径不存在 404。body 缺 `env`/`headers` 时保留原值（显式传 `{}` 才清空），改名按原路径名取旧值 |
+| `DELETE /api/mcp/servers/{name}` | 删除一条服务配置；不存在 404 |
+| `POST /api/mcp/servers/{name}/enable`、`POST /api/mcp/servers/{name}/disable` | 单条服务启停（enable 需要 `confirm: true`） |
+| `POST /api/mcp/reload` | 清缓存并重新发现工具 |
+
+增 / 改 / 删只写盘、不主动连服务；要靠 `POST /api/mcp/reload`（或等 60 秒缓存过期）才刷新工具目录。配置非法时返回 400 并给出具体原因（`command 必填`、`url 必须…` 等），已有的坏配置文件不会被静默覆盖。

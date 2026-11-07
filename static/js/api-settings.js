@@ -3766,7 +3766,7 @@ function renderModelPicker(){
         return `
             <div class="picker-row ${checked?'has-sel':''}" onclick="togglePickerRowByIndex(${index})">
                 <div class="picker-checkbox ${checked?'checked':''}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    <svg data-icon="check" class="nv-i nv-i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 </div>
                 <div class="picker-model-badge">${escapeHtml(badge)}</div>
                 <div class="picker-model-name" title="${escapeAttr(id)}">

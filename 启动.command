@@ -15,8 +15,12 @@ xattr -r -d com.apple.quarantine main.py 2>/dev/null
 chmod +x *.command 2>/dev/null
 
 # ---- 定位 Python ----
+# 优先用项目自带 venv：PATH 里的 python3 可能是别的工具链（如 hermes/uv），
+# 缺 onnxruntime / cv2 等依赖时会表现为「本地抠图缺少推理组件」。
 PYEXE=""
-if command -v python3 &>/dev/null; then
+if [ -x "venv/bin/python3" ]; then
+    PYEXE="venv/bin/python3"
+elif command -v python3 &>/dev/null; then
     PYEXE="python3"
 elif command -v python &>/dev/null; then
     PYEXE="python"

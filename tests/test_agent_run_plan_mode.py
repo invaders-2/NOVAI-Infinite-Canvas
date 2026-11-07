@@ -125,7 +125,7 @@ class AgentRunPlanModeTests(unittest.TestCase):
 
         plan = [data for name, data in events if name == "plan"][0]
         self.assertEqual(set(plan.keys()),
-                         {"intent", "steps", "expected_output", "impact", "summary"})
+                         {"intent", "reason", "assumptions", "steps", "expected_output", "impact", "summary"})
         self.assertEqual(plan["intent"], "出两张 3:4 海报")
         self.assertEqual(plan["steps"], plan_steps())
         self.assertEqual(plan["expected_output"], "两张 3:4 海报落到画布上")
@@ -364,7 +364,9 @@ class AgentPlanImpactTests(unittest.TestCase):
     def test_plan_event_always_has_the_full_contract_shape(self):
         event = main._agent_plan_event("", [])
         self.assertEqual(set(event.keys()),
-                         {"intent", "steps", "expected_output", "impact", "summary"})
+                         {"intent", "reason", "assumptions", "steps", "expected_output", "impact", "summary"})
+        self.assertEqual(event["reason"], "")
+        self.assertEqual(event["assumptions"], [])
         self.assertEqual(event["steps"], [])
         self.assertEqual(event["expected_output"], "")
         self.assertEqual(event["impact"], self.ZERO)

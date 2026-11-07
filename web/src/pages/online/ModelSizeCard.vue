@@ -1,18 +1,13 @@
 <script setup>
 // 「模型」卡片内容：平台 / 模型（RunningHub 为 模型 API·工作流·应用）、质量（仅 OpenAI 系）、数量（RunningHub 隐藏）、
 // 尺寸档位（含自定义尺寸 + 适配图片）、比例（含比例为空 / 自定义比例）、换档提示
-import { computed } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import OnSelect from './OnSelect.vue';
 import { t } from '../../lib/store.js';
-import { S, badge, isRunningHub, showQuality, providerOptions, modelOptions, ratioOptions, resOptions, firstRefDim, setProvider, setModel, setQuality, setCount, setRatio, setResolution, setCustomSize, setCustomRatio, fitToImage, } from './useOnline.js';
+import { S, badge, isRunningHub, showQuality, providerOptions, modelOptions, ratioOptions, resOptions, qualityOptions, firstRefDim, setProvider, setModel, setQuality, setCount, setRatio, setResolution, setCustomSize, setCustomRatio, fitToImage, } from './useOnline.js';
 
-const qualityOptions = computed(() => [
-    { value: 'auto', label: t('online.qualityAuto', '自动') },
-    { value: 'low', label: t('online.qualityLow', '低') },
-    { value: 'medium', label: t('online.qualityMedium', '中') },
-    { value: 'high', label: t('online.qualityHigh', '高') },
-]);
+// 质量档：GPT-Image-2.5 / 2.6 系六档（auto…max），其余模型维持四档；真值源是 /api/model-caps 的 qualities，
+// 拿不到时按模型名兜底（见 useOnline.js qualityOptions）
 const countOptions = [1, 2, 3, 4].map(n => ({ value: n, label: '×' + n }));
 </script>
 

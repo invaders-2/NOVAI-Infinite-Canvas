@@ -222,12 +222,36 @@ async function saveWebAccess(value) {
     refreshWebAccess();
 }
 
+/* 网络：走系统代理 / 跳过 SSL 校验。存 settings.json、保存即生效；
+   环境变量 NOVAI_USE_PROXY / NOVAI_SKIP_SSL_VERIFY 设了则以环境变量为准（界面开关置灰提示）。 */
+const network = reactive({ use_system_proxy: false, skip_ssl_verify: false, proxy_source: 'default', ssl_source: 'default' });
+async function refreshNetwork() {
+    try {
+        const r = await fetch('/api/settings/network');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = (await r.json()) || {};
+        network.use_system_proxy = Boolean(d.use_system_proxy);
+        network.skip_ssl_verify = Boolean(d.skip_ssl_verify);
+        network.proxy_source = String(d.proxy_source || 'default');
+        network.ssl_source = String(d.ssl_source || 'default');
+    } catch (e) { /* 接口不可用时保持默认 */ }
+}
+async function saveNetwork(key, value) {
+    try {
+        const r = await fetch('/api/settings/network', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: value }) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        toast('已保存网络设置', { icon: 'check' });
+    } catch (e) { toast('保存网络设置失败', { danger: true, icon: 'alert' }); }
+    refreshNetwork();
+}
+
 const SOURCES = [{ value: 'github', label: 'GitHub' }, { value: 'gitee', label: 'Gitee' }, { value: 'modelscope', label: '国内镜像' }];
 
 onMounted(() => {
     load();
     refreshStorage();
     refreshWebAccess();
+    refreshNetwork();
     refreshAsr();
     loadPromptOptimize();
     refreshPromptOptimize();
@@ -271,6 +295,14 @@ onMounted(() => {
         <SetCard title="画布助手联网" desc="默认关闭。开启后仅允许搜索公开网页和读取网页正文，不允许访问内网或执行代码。">
             <SetRow label="允许联网搜索" desc="开启后画布助手可使用 web_search 和 fetch_url；MCP 与生成接口不受影响">
                 <NvSwitch :model-value="webAccess" label="允许画布助手联网搜索" @update:model-value="saveWebAccess" />
+            </SetRow>
+        </SetCard>
+        <SetCard title="网络" desc="接口请求的网络行为，保存后立即生效；设了对应环境变量时以环境变量为准。">
+            <SetRow label="走系统代理" :desc="network.proxy_source === 'env' ? '当前由环境变量 NOVAI_USE_PROXY 覆盖，此开关暂不生效' : '开启后接口请求使用系统代理（VPN/Clash 用户按线路需要开关）'">
+                <NvSwitch :model-value="network.use_system_proxy" label="走系统代理" @update:model-value="v => saveNetwork('use_system_proxy', v)" />
+            </SetRow>
+            <SetRow label="跳过 SSL 校验" :desc="network.ssl_source === 'env' ? '当前由环境变量 NOVAI_SKIP_SSL_VERIFY 覆盖，此开关暂不生效' : '代理做 HTTPS 中间人导致证书校验失败时再开；日常保持关闭'">
+                <NvSwitch :model-value="network.skip_ssl_verify" label="跳过 SSL 校验" @update:model-value="v => saveNetwork('skip_ssl_verify', v)" />
             </SetRow>
         </SetCard>
         <SetCard title="视频口播转写" desc="视频能力运行时用哪个平台与模型把口播转成文字；不启用则如实报告不可用。">

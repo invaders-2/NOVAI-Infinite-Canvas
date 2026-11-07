@@ -44,8 +44,10 @@ echo "本机访问： http://127.0.0.1:$PORT/"
 echo "============================================"
 echo ""
 
-# 优先使用 Homebrew Python，避免部分工具管理的 Python 签名问题
-if [ -x /opt/homebrew/bin/python3 ]; then
+# 优先项目自带 venv（依赖齐、版本固定），其次 Homebrew Python，避免部分工具管理的 Python 签名问题
+if [ -x venv/bin/python3 ]; then
+    venv/bin/python3 main.py
+elif [ -x /opt/homebrew/bin/python3 ]; then
     /opt/homebrew/bin/python3 main.py
 elif [ -x /usr/local/bin/python3 ]; then
     /usr/local/bin/python3 main.py

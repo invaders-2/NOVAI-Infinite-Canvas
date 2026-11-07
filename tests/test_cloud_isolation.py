@@ -53,9 +53,15 @@ def set_auth(enabled: bool) -> None:
         os.environ.pop("NOVAI_AUTH_DISABLED", None)
     else:
         os.environ.pop("NOVAI_AUTH_ENABLED", None)
+    # 2026-11-07 起默认「可选登录」；auth 关闭用例要的是完全没有账号体系
+    if enabled:
+        os.environ.pop("NOVAI_AUTH_MODE", None)
+    else:
+        os.environ["NOVAI_AUTH_MODE"] = "off"
 
 
 def tearDownModule():
+    os.environ.pop("NOVAI_AUTH_MODE", None)
     set_auth(False)
 
 

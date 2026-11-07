@@ -178,7 +178,7 @@ def delete_my_avatar(request: Request) -> Dict[str, Any]:
 @router.get("/api/auth/avatar/{user_id}")
 def get_avatar(user_id: int, request: Request):
     """登录用户可读任意用户头像；带 ETag/Last-Modified，URL 带 ?v= 便于缓存。"""
-    if not service.auth_enabled():
+    if not service.accounts_enabled():
         raise HTTPException(status_code=404, detail="Not Found")
     user = service.session_user(request.cookies.get(service.COOKIE_NAME, ""))
     if not user:
@@ -272,15 +272,50 @@ def account(request: Request) -> Dict[str, Any]:
 
 @router.get("/api/auth/me")
 def me(request: Request) -> Dict[str, Any]:
-    if not service.auth_enabled():
-        # auth 关闭时前端也能安全探测：明确告诉它没有登录体系
-        return {"auth_enabled": False, "id": None, "username": None, "role": None}
+    """auth_enabled 只在「必须登录」时为 true（前端据此做管理员门禁）；
+    可选登录下 auth_enabled=false、auth_mode=optional，登录了再带上 logged_in + 用户信息。"""
+    mode = service.auth_mode()
+    if mode == "off":
+        # 没有账号体系时前端也能安全探测：明确告诉它没有登录体系
+        return {"auth_enabled": False, "auth_mode": "off", "logged_in": False, "id": None, "username": None, "role": None}
     user = service.session_user(request.cookies.get(service.COOKIE_NAME, ""))
+    if mode == "optional":
+        payload: Dict[str, Any] = {"auth_enabled": False, "auth_mode": "optional", "logged_in": bool(user)}
+        if user:
+            payload.update(user)
+        else:
+            payload.update({"id": None, "username": None, "role": None})
+        return payload
     if not user:
         raise AuthError("未登录或会话已过期", 401, "unauthorized")
-    payload: Dict[str, Any] = {"auth_enabled": True}
+    payload = {"auth_enabled": True, "auth_mode": "required", "logged_in": True}
     payload.update(user)
     return payload
+
+
+@router.get("/api/auth/config")
+def auth_config() -> Dict[str, Any]:
+    """公开：登录 / 注册页据此决定显示什么（模式、注册要不要邀请码、是否还没有任何账号）。"""
+    return service.public_config()
+
+
+class AuthSettingsPayload(BaseModel):
+    invite_required: bool = True
+
+
+@router.get("/api/admin/auth-settings")
+def admin_get_auth_settings(request: Request) -> Dict[str, Any]:
+    _admin_user(request)
+    return {"invite_required": service.invite_required(), "auth_mode": service.auth_mode()}
+
+
+@router.put("/api/admin/auth-settings")
+def admin_put_auth_settings(payload: AuthSettingsPayload, request: Request) -> Dict[str, Any]:
+    """管理员切换注册方式：需要邀请码 / 开放注册。"""
+    actor = _admin_user(request)
+    value = service.set_invite_required(bool(payload.invite_required))
+    _audit(actor, "auth_settings", "invite_required", "ok", "1" if value else "0")
+    return {"invite_required": value, "auth_mode": service.auth_mode()}
 
 
 # ---------------------------------------------------------------- 管理面
@@ -456,6 +491,11 @@ def admin_reset_code(user_id: int, request: Request) -> Dict[str, Any]:
 @router.get("/login", include_in_schema=False)
 @router.get("/login.html", include_in_schema=False)
 def login_page() -> FileResponse:
+    # 2026-11-07：登录 / 注册 / 忘记密码由新版界面（static/v2，路径 /login 时只渲染登录界面）提供；
+    # 新版没构建出来时退回旧的 static/login.html
+    v2 = _static_page(os.path.join("v2", "index.html"))
+    if os.path.isfile(v2):
+        return FileResponse(v2, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"})
     path = _login_page_path()
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="登录页缺失：static/login.html")
@@ -469,8 +509,8 @@ def login_page() -> FileResponse:
 @router.get("/admin", include_in_schema=False)
 @router.get("/admin.html", include_in_schema=False)
 def admin_page(request: Request):
-    """管理员后台：auth 未开启不存在；未登录由中间件 302；非 admin 也 302 到登录页。"""
-    if not service.auth_enabled():
+    """管理员后台：没有账号体系时不存在；未登录由中间件 302；非 admin 也 302 到登录页。"""
+    if not service.accounts_enabled():
         raise HTTPException(status_code=404, detail="Not Found")
     user = service.session_user(request.cookies.get(service.COOKIE_NAME, ""))
     if not user or str(user.get("role")) != "admin":

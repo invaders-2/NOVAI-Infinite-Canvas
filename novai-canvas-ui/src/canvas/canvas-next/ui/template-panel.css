@@ -1,0 +1,156 @@
+/* 模板面板：卡片动作排版修复 + 模板预览窗（首页模板的可交互只读画布）。
+   只覆盖画布端模板面板与预览窗，不动 canvas-next.css。 */
+
+/* ── 卡片动作：封面内侧底部居中的磨砂胶囊（面板与「浏览全部」库卡共用同一套） ── */
+.cn-root .tpl .tpl-acts,
+.cn-root .tpl-lib .tpl-acts{position:absolute;left:50%;bottom:10px;top:auto;right:auto;transform:translateX(-50%);
+  display:inline-flex;align-items:center;gap:2px;padding:3px;border:0;border-radius:999px;isolation:isolate;
+  background:color-mix(in srgb,var(--panel) 70%,transparent);
+  backdrop-filter:blur(30px) saturate(190%);-webkit-backdrop-filter:blur(30px) saturate(190%);
+  box-shadow:0 2px 8px rgba(0,0,0,.22),0 14px 36px rgba(0,0,0,.28);
+  filter:saturate(1.05);pointer-events:auto}
+.cn-root .tpl .tpl-acts::before,
+.cn-root .tpl-lib .tpl-acts::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.04) 45%,transparent)}
+.cn-root .tpl .tpl-acts button,
+.cn-root .tpl-lib .tpl-acts button{position:relative;z-index:1;width:auto;min-width:0;flex:0 0 auto;height:28px;padding:0 10px;border-radius:999px;background:transparent;color:var(--fg);font-size:12px;line-height:1;white-space:nowrap}
+.cn-root .tpl .tpl-acts button:hover,
+.cn-root .tpl-lib .tpl-acts button:hover{background:var(--hover);color:var(--fg)}
+.cn-root[data-theme=light] .tpl .tpl-acts,
+.cn-root[data-theme=light] .tpl-lib .tpl-acts{background:color-mix(in srgb,var(--panel) 72%,transparent);box-shadow:0 2px 8px rgba(15,23,42,.1),0 14px 32px rgba(15,23,42,.16)}
+.cn-root[data-theme=light] .tpl .tpl-acts::before,
+.cn-root[data-theme=light] .tpl-lib .tpl-acts::before{background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,.16) 45%,transparent)}
+
+/* ── 预览窗：居中大浮层，磨砂玻璃 + 柔和投影，不画描边 ── */
+.cn-root .tplpv-scrim{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.42);pointer-events:auto}
+.cn-root .tplpv{pointer-events:auto;position:fixed;left:50%;top:50%;z-index:61;width:min(1080px,calc(100vw - 64px));height:min(700px,calc(100vh - 80px));transform:translate(-50%,-50%);display:flex;flex-direction:column;border-radius:20px;overflow:hidden;isolation:isolate;background:color-mix(in srgb,var(--panel) 70%,transparent);backdrop-filter:blur(48px) saturate(190%);-webkit-backdrop-filter:blur(48px) saturate(190%);box-shadow:0 10px 30px rgba(0,0,0,.3),0 40px 90px rgba(0,0,0,.36);color:var(--fg);animation:tplpvIn .22s var(--ease) both}
+.cn-root .tplpv::before{content:"";position:absolute;left:0;right:0;top:0;height:120px;border-radius:20px 20px 0 0;pointer-events:none;z-index:3;background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.04) 55%,transparent)}
+.cn-root[data-theme=light] .tplpv::before{background:linear-gradient(180deg,rgba(255,255,255,.6),rgba(255,255,255,.18) 55%,transparent)}
+@keyframes tplpvIn{from{opacity:0;transform:translate(-50%,-48%) scale(.985)}}
+.cn-root .tplpv-h{position:relative;z-index:1;display:flex;align-items:center;gap:10px;padding:12px 14px 12px 20px;flex-wrap:wrap;background:transparent}
+.cn-root .tplpv-h h3{margin:0;font-size:15px;font-weight:600;line-height:1.3;color:var(--fg)}
+.cn-root .tplpv-chip{height:20px;padding:0 8px;border-radius:10px;background:var(--sunken);font-size:11px;color:var(--fg2);display:inline-flex;align-items:center}
+.cn-root .tplpv-note{font-size:12px;color:var(--fg3)}
+.cn-root .tplpv-sp{flex:1}
+.cn-root .tplpv-btn{height:30px;padding:0 12px;border-radius:15px;background:var(--sunken);color:var(--fg);font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:5px}
+.cn-root .tplpv-btn:hover{background:var(--hover)}
+.cn-root .tplpv-btn.pri{background:var(--solid);color:var(--on-solid)}
+.cn-root .tplpv-btn.pri:hover{opacity:.88}
+.cn-root .tplpv-btn:disabled{opacity:.42;cursor:not-allowed}
+.cn-root .tplpv-x{width:30px;height:30px;border-radius:15px;display:grid;place-items:center;color:var(--fg3)}
+.cn-root .tplpv-x:hover{background:var(--hover);color:var(--fg)}
+
+.cn-root .tplpv-c{position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none;cursor:grab;background:transparent}
+.cn-root .tplpv-c:active{cursor:grabbing}
+.cn-root .tplpv-world{position:absolute;left:0;top:0;transform-origin:0 0}
+.cn-root .tplpv-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
+.cn-root .tplpv-e{fill:none;stroke:var(--edge);stroke-width:1.6}
+.cn-root .tplpv-e.on{stroke:var(--hi);stroke-width:2}
+
+.cn-root .tplpv-nd{position:absolute;border-radius:16px;background:var(--card);box-shadow:0 2px 10px rgba(0,0,0,.22);cursor:pointer;user-select:none;overflow:visible}
+.cn-root .tplpv-nd:hover{box-shadow:0 4px 18px rgba(0,0,0,.3)}
+.cn-root .tplpv-nd.on{box-shadow:0 0 0 1.5px var(--hi),0 8px 24px rgba(0,0,0,.3)}
+.cn-root .tplpv-nd.t-label{background:transparent;box-shadow:none;cursor:default}
+.cn-root .tplpv-lbl{display:inline-flex;align-items:center;height:30px;padding:0 14px;border-radius:15px;background:var(--sunken);font-size:13px;font-weight:600;color:var(--fg)}
+.cn-root .tplpv-al{position:absolute;left:2px;top:-21px;display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:500;color:var(--fg2);white-space:nowrap;max-width:100%;overflow:hidden}
+.cn-root .tplpv-al .ex{margin-left:4px;height:17px;padding:0 6px;border-radius:9px;background:var(--sunken);font-size:10.5px;color:var(--fg3);display:inline-flex;align-items:center}
+.cn-root .tplpv-im{position:absolute;inset:0;border-radius:16px;overflow:hidden;background:var(--card-hi)}
+.cn-root .tplpv-im img,.cn-root .tplpv-im video{width:100%;height:100%;object-fit:cover;display:block}
+.cn-root .tplpv-vbar{position:absolute;left:8px;right:8px;bottom:8px;height:26px;border-radius:13px;background:rgba(0,0,0,.45);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:flex;align-items:center;gap:8px;padding:0 10px;color:#fff;font-size:10.5px}
+.cn-root .tplpv-vbar button{color:#fff;display:flex}
+.cn-root .tplpv-txt{height:100%;overflow:hidden;padding:14px 16px;font-size:12px;line-height:1.65;color:var(--fg2);white-space:pre-wrap;border-radius:16px}
+.cn-root .tplpv-draft{height:100%;padding:14px;display:flex;flex-direction:column;gap:8px;color:var(--fg3);border-radius:16px}
+.cn-root .tplpv-draft p{margin:0;flex:1;overflow:hidden;font-size:12px;line-height:1.6;color:var(--fg2)}
+.cn-root .tplpv-draft span{align-self:flex-start;height:20px;padding:0 7px;border-radius:10px;background:var(--sunken);font-size:11px;display:inline-flex;align-items:center}
+.cn-root .tplpv-drop{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--fg3);font-size:11.5px;text-align:center;padding:0 16px;border-radius:16px}
+.cn-root .tplpv-tbl{height:100%;padding:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;border-radius:16px}
+.cn-root .tplpv-tbl i{border-radius:4px;background:var(--sunken)}
+.cn-root .tplpv-tbl i:nth-child(-n+3){background:var(--hover)}
+.cn-root .tplpv-port{position:absolute;top:50%;width:18px;height:18px;margin-top:-9px;border-radius:50%;background:var(--solid);display:grid;place-items:center;color:var(--fg3);opacity:0;transition:opacity .14s var(--ease)}
+.cn-root .tplpv-nd:hover .tplpv-port,.cn-root .tplpv-nd.on .tplpv-port{opacity:1}
+.cn-root .tplpv-port.l{left:-9px}.cn-root .tplpv-port.r{right:-9px}
+
+.cn-root .tplpv-panel{position:absolute;z-index:5;border-radius:18px;background:var(--card);box-shadow:0 18px 44px rgba(0,0,0,.34);padding:12px 14px;cursor:default}
+.cn-root .tplpv-refs{display:flex;flex-wrap:wrap;gap:6px}
+.cn-root .tplpv-ref{height:24px;padding:0 9px;border-radius:12px;background:var(--sunken);font-size:11.5px;display:inline-flex;align-items:center;gap:5px;color:var(--fg2)}
+.cn-root .tplpv-ref.muted{color:var(--fg3)}
+.cn-root .tplpv-prompt{margin:10px 2px 12px;font-size:13px;line-height:1.6;color:var(--fg2);max-height:64px;overflow:auto}
+.cn-root .tplpv-bar{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg2)}
+.cn-root .tplpv-bar .sp{flex:1}
+.cn-root .tplpv-bar b{color:var(--fg);font-weight:600}
+
+.cn-root .tplpv-zoom{position:absolute;left:15px;bottom:15px;z-index:5;height:40px;padding:0 8px;border-radius:20px;background:var(--card);box-shadow:0 8px 24px rgba(0,0,0,.3);display:flex;align-items:center;gap:4px}
+.cn-root .tplpv-zoom button{height:32px;min-width:32px;padding:0 6px;border-radius:16px;color:var(--fg3);display:flex;align-items:center;justify-content:center;font-size:12px;font-variant-numeric:tabular-nums}
+.cn-root .tplpv-zoom button:hover{background:var(--sunken);color:var(--fg)}
+.cn-root .tplpv-zoom input{width:96px;accent-color:var(--hi)}
+.cn-root .tplpv-tip{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:4;height:30px;padding:0 12px;border-radius:15px;background:var(--card);box-shadow:0 8px 24px rgba(0,0,0,.26);font-size:11.5px;color:var(--fg3);display:flex;align-items:center;white-space:nowrap}
+
+@media (max-width:720px){
+  .cn-root .tplpv{width:calc(100vw - 16px);height:calc(100vh - 32px);border-radius:16px}
+  .cn-root .tplpv-note{display:none}
+  .cn-root .tplpv-zoom input{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .cn-root .tplpv{animation:none}
+}
+
+/* ── 「浏览全部」模板库：与模板面板/预览窗统一成浮起玻璃卡（覆盖 canvas-next.css，不改它） ── */
+.cn-root .tpl-lib{background:rgba(0,0,0,.42)}
+.cn-root .tpl-lib .tpl-lib-box{position:relative;isolation:isolate;width:min(1100px,100%);height:min(700px,100%);border:0;border-radius:20px;
+  background:color-mix(in srgb,var(--panel) 70%,transparent);
+  backdrop-filter:blur(48px) saturate(190%);-webkit-backdrop-filter:blur(48px) saturate(190%);
+  box-shadow:0 10px 30px rgba(0,0,0,.3),0 40px 90px rgba(0,0,0,.36);overflow:hidden}
+.cn-root[data-theme=light] .tpl-lib .tpl-lib-box{background:color-mix(in srgb,var(--panel) 72%,transparent);box-shadow:0 10px 30px rgba(15,23,42,.14),0 40px 90px rgba(15,23,42,.2)}
+.cn-root .tpl-lib .tpl-lib-box::before{content:"";position:absolute;left:0;right:0;top:0;height:120px;border-radius:20px 20px 0 0;pointer-events:none;z-index:3;
+  background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.04) 55%,transparent)}
+.cn-root[data-theme=light] .tpl-lib .tpl-lib-box::before{background:linear-gradient(180deg,rgba(255,255,255,.6),rgba(255,255,255,.18) 55%,transparent)}
+.cn-root .tpl-lib .tpl-lib-side{position:relative;z-index:1;background:transparent;border-right:0}
+.cn-root .tpl-lib .tpl-lib-main{position:relative;z-index:1;background:transparent}
+.cn-root .tpl-lib .tpl-lib-hd,
+.cn-root .tpl-lib .tpl-lib-tools,
+.cn-root .tpl-lib .tpl-lib-grid{background:transparent}
+
+/* 侧栏：选中=半透明软底 + 文字提亮 + 600；hover 更淡；数字弱化 */
+.cn-root .tpl-lib .tpl-lib-cat{border-radius:10px;font-size:14px;font-weight:500;color:var(--fg2);transition:background-color .12s var(--ease),color .12s var(--ease)}
+.cn-root .tpl-lib .tpl-lib-cat:hover{background:color-mix(in srgb,var(--fg) 6%,transparent);color:var(--fg)}
+.cn-root .tpl-lib .tpl-lib-cat.on{background:color-mix(in srgb,var(--fg) 10%,transparent);color:var(--fg);font-weight:600}
+.cn-root .tpl-lib .tpl-lib-n{font-size:11px;font-weight:400;color:var(--fg3)}
+.cn-root .tpl-lib .tpl-lib-cat.on .tpl-lib-n{color:var(--fg2)}
+
+/* 搜索：软底、无描边、圆角 12；关闭按钮 ghost */
+.cn-root .tpl-lib .tpl-lib-search{border:0;border-radius:12px;background:var(--sunken)}
+.cn-root .tpl-lib .tpl-lib-search input{background:transparent}
+.cn-root .tpl-lib .tpl-lib-x{width:30px;height:30px;border-radius:999px;color:var(--fg3)}
+.cn-root .tpl-lib .tpl-lib-x:hover{background:var(--hover);color:var(--fg)}
+
+/* 底部两个按钮：胶囊化；主按钮实底，次按钮透明 hover 软底 */
+.cn-root .tpl-lib .tpl-lib-create,
+.cn-root .tpl-lib .tpl-lib-save-current{border-radius:999px}
+.cn-root .tpl-lib .tpl-lib-save-current{background:transparent;color:var(--fg2)}
+.cn-root .tpl-lib .tpl-lib-save-current:hover{background:var(--hover);color:var(--fg)}
+
+/* 库卡与面板卡一致：封面 12 圆角、标题 12.5/500、动作胶囊沿用 T32 的磨砂规格 */
+.cn-root .tpl-lib .tpl-cover{border-radius:12px}
+.cn-root .tpl-lib .tpl-name{font-size:12.5px;font-weight:500;line-height:16px}
+.cn-root .tpl-lib .tpl-card:hover .tpl-name{color:var(--fg)}
+
+/* 深色下预览窗叠在黑底上边界容易糊掉：提高深色面板不透明度 + 更长的顶部高光 + 大半径低透明度外圈光晕（仍然不用描边） */
+.cn-root[data-theme=dark] .tplpv{
+  background:color-mix(in srgb,var(--panel) 72%,transparent);
+  box-shadow:0 24px 80px rgba(0,0,0,.55),0 10px 30px rgba(0,0,0,.42)}
+.cn-root[data-theme=dark] .tplpv::before{height:110px;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015) 40%,transparent)}
+
+/* 模板库窗口同一套深色规则：不要白高光/白光晕，边界交给纯黑大半径投影 */
+.cn-root[data-theme=dark] .tpl-lib .tpl-lib-box{
+  background:color-mix(in srgb,var(--panel) 72%,transparent);
+  box-shadow:0 24px 80px rgba(0,0,0,.55),0 10px 30px rgba(0,0,0,.42)}
+.cn-root[data-theme=dark] .tpl-lib .tpl-lib-box::before{height:110px;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015) 40%,transparent)}
+
+/* 预览窗「删除」：仅个人模板出现，ghost 软底、hover 弱红（与「应用」并列） */
+.cn-root .tplpv-btn.danger{background:transparent;color:var(--fg3)}
+.cn-root .tplpv-btn.danger:hover{background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--bad)}
+.cn-root .tplpv-btn.danger:disabled{opacity:.42;cursor:not-allowed}
+
+/* 预览窗内的删除确认层：复用画布 .folder-dialog 的排版，自己给一层软底卡（预览窗不是 modal 容器） */
+.cn-root .tplpv-confirm{position:absolute;inset:0;z-index:8;display:grid;place-items:center;padding:24px;border-radius:inherit;background:rgba(0,0,0,.36)}
+.cn-root .tplpv-confirm .folder-dialog{width:min(380px,100%);background:var(--card);border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.42)}

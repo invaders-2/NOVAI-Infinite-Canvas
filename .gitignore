@@ -47,6 +47,7 @@ data/persona_library.json
 data/stub_jobs.json
 data/stub_provider.json
 history.json
+/config.json
 static/runninghub/api_providers.json
 
 # 日志
@@ -104,3 +105,27 @@ _preview/
 # Electron 桌面端构建产物
 desktop/release/
 desktop/dist/
+
+# 本地临时/验证目录（不是产品代码，禁止入库）
+_tmp/
+_tmp_build/
+_to_delete/
+_diagnostics/
+_perf/
+_rename-verify/
+_verification-*/
+_fix-*/
+_ui-ratio-*/
+_case-*/
+_beat-*/
+_grid-refine/
+_evidence-*/
+_e2e-*/
+_e2e-swap-*
+_claude_backup*/
+_preview*/
+_self_restart*
+_diagnostics*
+:memory:*.ses
+# Electron 打包时的后端副本
+desktop/resources/

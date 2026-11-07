@@ -15,6 +15,7 @@ import {
     applyRegistryPresets,
 } from './helpers.js';
 import { installNetwork } from './apiNetwork.js';
+import { installProtocolUpdates } from './protocolUpdates.js';
 import { refreshSizePolicy } from './sizePolicySync.js';
 
 // 与旧 broadcastStudioApiChange 一致：BroadcastChannel + 外壳转发给所有旧页面 iframe
@@ -56,6 +57,8 @@ export function createApiStore() {
         dirty: false,
         childDirty: false,
         confirm: null,             // { title, desc, ok, danger, resolve }
+        protocolUpdates: { items: [], loaded: false, loading: false, failed: false, error: '' },  // 配置/协议可更新的真值源（GET /api/providers/protocol-updates）
+        updateDlg: '',             // 正在查看「配置/协议可更新」弹窗的平台 id
     });
 
     /* ── 选中平台 / 派生状态 ── */
@@ -227,6 +230,8 @@ export function createApiStore() {
 
     /* ── 载入 / 保存 ── */
     async function load() {
+        // 更新清单与平台列表并行拉取；更新接口未就绪/失败都不阻断设置页（loadProtocolUpdates 内静默降级）
+        if (typeof api.loadProtocolUpdates === 'function') api.loadProtocolUpdates();
         try {
             const data = await fetch('/api/providers').then(r => r.json());
             applyRegistryPresets(data.registry_presets);
@@ -615,5 +620,6 @@ export function createApiStore() {
         addLora, updateLora, removeLora, resetFetched,
     };
     installNetwork(api);
+    installProtocolUpdates(api);
     return api;
 }

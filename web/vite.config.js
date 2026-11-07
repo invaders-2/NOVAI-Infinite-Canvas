@@ -21,6 +21,7 @@ export default defineConfig({
     },
     server: {
         port: 5173,
+        fs: { allow: ['..'] },
         proxy: {
             '/api': BACKEND_HTTP,
             '/ws': { target: BACKEND_WS, ws: true },

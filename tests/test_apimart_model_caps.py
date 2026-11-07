@@ -134,9 +134,10 @@ class ApimartImageBranchSourceTests(unittest.TestCase):
 
     def test_branch_clamps_through_caps(self):
         source = Path(main.__file__).read_text(encoding="utf-8")
-        self.assertIn("apimart_caps = apimart_image_model_caps(model)", source)
+        self.assertIn("apimart_caps = apimart_image_caps_for(provider, model) or {}", source)
         self.assertIn('apimart_size = apimart_clamp_ratio(apimart_size, apimart_caps.get("ratios"))', source)
-        self.assertIn("resolution = apimart_image_resolution_for_model(model, resolution)", source)
+        self.assertIn("apimart_image_resolution_from_size_for_model(size, model, caps=apimart_caps)", source)
+        self.assertIn("apimart_image_resolution_for_model(model, resolution, caps=apimart_caps)", source)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+@import "../../../static/css/nv-icons.css";
 /* 外壳级样式：整窗布局 */
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
 #app { height: 100%; }
@@ -11,3 +12,7 @@ html.studio-route-booting #app { opacity: 0; }
    （在线生图提示词框右侧溢出就是这样）。外壳 #app 和弹层 #nv-layer 统一 border-box。 */
 #app, #app *, #app *::before, #app *::after,
 #nv-layer, #nv-layer *, #nv-layer *::before, #nv-layer *::after { box-sizing: border-box; }
+
+/* 2026-11：整个窗口不显示滚动条（仍可滚动）。只作用于新外壳与弹层，iframe 里的旧页面不受影响 */
+html, body, #app, #app *, #nv-layer, #nv-layer * { scrollbar-width: none; -ms-overflow-style: none; }
+html::-webkit-scrollbar, body::-webkit-scrollbar, #app *::-webkit-scrollbar, #nv-layer *::-webkit-scrollbar { width: 0; height: 0; display: none; }

@@ -6,12 +6,25 @@ import type {
 	CanvasAssistantHandle,
 	CanvasAssistantHostApi,
 	ContextUsage,
+	InsertImageRequest,
+	InsertImagesResult,
 	Message,
+	Part,
 	RefChip,
 	SkillChip,
 	StreamEvent,
 } from "./types"
-import { canvasId, fetchThreads, forkThread, rateThreadMessage, switchThreadApi, switchThreadViaLegacy } from "./api"
+import {
+	canvasId,
+	fetchThreads,
+	forkThread,
+	importImages,
+	rateThreadMessage,
+	reverseImages,
+	switchThreadApi,
+	switchThreadViaLegacy,
+} from "./api"
+import { isLocalImageUrl, referenceSourceRows } from "./reference"
 import { applyEvent, createSession, isTerminal, workMs } from "./session"
 
 export interface QueueItem {
@@ -84,6 +97,12 @@ export interface AssistantStore {
 	togglePlanConfirm(): void
 	openHistory(): void
 	openNode(id: string): void
+	/** 把已经落成本地文件的图交给宿主建画布节点，返回真实结果（失败不兜底） */
+	insertReferenceImages(items: InsertImageRequest[]): Promise<InsertImagesResult>
+	/** 以图搜图：反图结果直接以参考图选择卡的形式进消息流 */
+	reverseImageSearch(input: { url: string; title?: string }): Promise<boolean>
+	/** 画布上当前选中的图片节点（没有就返回 null） */
+	selectedCanvasImage(): { url: string; title: string } | null
 	clearHistory(): void
 	removeMessage(id: string): void
 	reloadHistory(): void
@@ -288,7 +307,7 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 						env.running = false
 						env.streamState = "idle"
 						state.streamState = "idle"
-						pushSystem("发送失败：没有拿到运行回执，请检查模型与网络后重试", "error")
+						pushSystem("发送失败：请确认已在「设置 › API 设置」配置好模型与 Key，并检查网络后重试", "error")
 						return false
 					}
 					return true
@@ -623,6 +642,114 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 				api.openNode(String(id))
 			} catch {
 				/* ignore */
+			}
+		},
+		insertReferenceImages(items) {
+			const list = (Array.isArray(items) ? items : []).filter((item) => item && item.url)
+			if (!list.length) {
+				pushNotice("没有可加入画布的图片")
+				return Promise.resolve({ ok: false, created: 0, message: "没有可加入画布的图片" })
+			}
+			const insert = api.insertImages
+			if (typeof insert !== "function") {
+				const message = "画布插入入口不可用，请刷新页面后重试"
+				pushNotice(message)
+				return Promise.resolve({ ok: false, created: 0, message })
+			}
+			return Promise.resolve()
+				.then(() => insert(list))
+				.then((result) => {
+					const created = Number(result && result.created) || 0
+					const ok = Boolean(result && result.ok) && created > 0
+					const message = ok ? "已加入 " + created + " 张参考图" : String((result && result.message) || "加入画布失败")
+					pushNotice(message)
+					return { ok, created, message }
+				})
+				.catch((error) => {
+					const message = (error as Error)?.message || "加入画布失败"
+					pushNotice(message)
+					return { ok: false, created: 0, message }
+				})
+		},
+		selectedCanvasImage() {
+			try {
+				const pick = api.getSelectedImage
+				if (typeof pick !== "function") return null
+				const value = pick()
+				if (!value || !value.url) return null
+				return { url: String(value.url), title: String(value.title || "画布选中的图") }
+			} catch {
+				return null
+			}
+		},
+		async reverseImageSearch(input) {
+			const url = String((input && input.url) || "").trim()
+			if (!url) {
+				pushSystem("以图搜图缺少图片：先在画布上选中一张图，或上传一张", "warn")
+				return false
+			}
+			const message: Message = {
+				id: uid("msg"),
+				role: "assistant",
+				parts: [],
+				status: "",
+				activeWorkMs: 0,
+				createdAt: Date.now(),
+				planState: "",
+			}
+			const part: Extract<Part, { type: "reference_images" }> = {
+				type: "reference_images",
+				id: uid("refimg"),
+				source: "reverse",
+				status: "loading",
+				items: [],
+				engine: "",
+				query: "",
+				queries: [],
+				description: "",
+				note: "",
+				message: "",
+				code: "",
+				imageUrl: url,
+				title: String((input && input.title) || ""),
+				sources: [],
+			}
+			message.parts.push(part)
+			state.messages.push(message)
+			emit()
+			const fail = (text: string, disabled: boolean) => {
+				part.status = "failed"
+				part.message = text
+				part.code = disabled ? "web_access_disabled" : ""
+				emit()
+				return false
+			}
+			try {
+				let imageUrl = url
+				/* 外链先落成本地文件，反图接口就不必再拉一次外链 */
+				if (!isLocalImageUrl(url)) {
+					/* 画布节点没有出处页，只送 url */
+					const imported = await importImages([{ url }], "reverse")
+					if (!imported.ok) return fail(imported.message, imported.disabled)
+					const row = imported.items.find((entry) => entry.source_url === url) || imported.items[0]
+					if (!row || !row.ok || !row.url) return fail((row && row.error) || "这张图没能导入成本地文件", false)
+					imageUrl = row.url
+				}
+				const result = await reverseImages(imageUrl, 12)
+				if (!result.ok) return fail(result.message, result.disabled)
+				part.status = "done"
+				part.imageUrl = imageUrl
+				part.engine = result.data.engine
+				part.query = result.data.query
+				part.queries = result.data.queries
+				part.description = result.data.description
+				part.note = result.data.note
+				part.items = result.data.items
+				part.sources = referenceSourceRows(part.items, null)
+				emit()
+				return true
+			} catch (error) {
+				return fail((error as Error)?.message || "反图失败", false)
 			}
 		},
 		removeMessage(id) {

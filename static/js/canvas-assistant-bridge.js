@@ -8,7 +8,7 @@
     'use strict';
 
     var MODE_KEY = 'NOVAI_CANVAS_UI';
-    var ASSET_VERSION = '1.0.137.1793084421';
+    var ASSET_VERSION = '1.0.137.1793941063';
     var ROOT_ID = 'novaiCanvasAssistantRoot';
     var mode = 'new';
     try { mode = localStorage.getItem(MODE_KEY) === 'legacy' ? 'legacy' : 'new'; } catch (e) {}
@@ -1141,6 +1141,64 @@
         });
     }
 
+    /* ── 参考图入画布：微应用只传本地 url，建节点仍复用 smart-canvas 的原有实现 ── */
+    function selectedCanvasImage() {
+        try {
+            var el = document.querySelector('.image-node.selected[data-id]');
+            if (!el) return null;
+            var id = String(el.getAttribute('data-id') || '');
+            if (!id) return null;
+            var node = docNodes().filter(function (item) { return String(item.id) === id; })[0];
+            var images = node && Array.isArray(node.images) ? node.images : [];
+            var image = images.filter(function (img) { return img && img.url; })[0];
+            if (!image) return null;
+            return {
+                url: String(image.url),
+                title: String(node.title || node.alias || '画布选中的图')
+            };
+        } catch (error) {
+            log('selectedImage', (error && error.message) || error);
+            return null;
+        }
+    }
+    function insertImages(list) {
+        var items = (Array.isArray(list) ? list : []).map(function (item) {
+            if (typeof item === 'string') return { url: String(item) };
+            if (!item || typeof item !== 'object') return null;
+            return {
+                url: String(item.url || ''),
+                name: String(item.name || ''),
+                width: Number(item.width) || 0,
+                height: Number(item.height) || 0
+            };
+        }).filter(function (item) { return item && item.url; });
+        if (!items.length) return Promise.resolve({ ok: false, created: 0, message: '没有可加入画布的图片' });
+        var insert = window.SmartCanvasInsertImages;
+        if (typeof insert !== 'function') {
+            var missing = '画布插入入口不可用，请刷新页面后重试';
+            toastFallback(missing);
+            log('insertImages', missing);
+            return Promise.resolve({ ok: false, created: 0, message: missing });
+        }
+        try {
+            var created = insert(items);
+            var ids = Array.isArray(created) ? created : [];
+            if (!ids.length) {
+                var empty = '画布没有创建节点（只读协作模式或画布还没就绪）';
+                log('insertImages', empty);
+                return Promise.resolve({ ok: false, created: 0, message: empty });
+            }
+            toastFallback('已加入 ' + ids.length + ' 张参考图');
+            log('insertImages', 'created ' + ids.length);
+            return Promise.resolve({ ok: true, created: ids.length, message: '' });
+        } catch (error) {
+            var reason = String((error && error.message) || error || '加入画布失败');
+            toastFallback(reason);
+            log('insertImages', reason);
+            return Promise.resolve({ ok: false, created: 0, message: reason });
+        }
+    }
+
     function toastFallback(text) {
         try {
             var toastEl = document.getElementById('toast');
@@ -1237,6 +1295,8 @@
             if (typeof window.focusSmartNode === 'function' && window.focusSmartNode(id)) return;
             toastFallback('这个节点已不在当前画布上');
         },
+        insertImages: insertImages,
+        getSelectedImage: selectedCanvasImage,
         toast: toastFallback
     };
 

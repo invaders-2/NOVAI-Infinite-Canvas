@@ -1,5 +1,8 @@
-import { Loader2Icon, MonitorIcon, SquareIcon, VideoIcon, XIcon } from "lucide-react"
+import { MonitorIcon, SquareIcon, VideoIcon, XIcon } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { Dialog, DialogContent } from "@/components/hexta/dialog"
+import { Item, ItemMedia, ItemTitle } from "@/components/hexta/item"
+import { Spinner } from "@/components/hexta/spinner"
 import { getDesktopScreenSources, startDisplayRecording } from "./recording"
 import type { DisplayRecording, ScreenSource } from "./recording"
 import type { AssistantStore } from "./store"
@@ -90,37 +93,65 @@ export const RecordingMenu = ({ store, onClose }: { store: AssistantStore; onClo
 		onClose()
 	}
 
+	const title = phase === "recording" ? "正在录屏" : phase === "saving" ? "正在保存" : "屏幕录制"
+
 	return (
-		<div className="nvca-recording" role="dialog" aria-label="屏幕录制">
-			<div className="nvca-recording-head">
-				<span><VideoIcon className="nvca-i-sm" />{phase === "recording" ? "正在录屏" : phase === "saving" ? "正在保存" : "屏幕录制"}</span>
-				<button aria-label="关闭录屏" disabled={phase === "saving"} onClick={() => void cancel()} type="button"><XIcon className="nvca-i-sm" /></button>
-			</div>
-			{phase === "choose" ? (
-				<div className="nvca-recording-body">
-					{sources === null && !sourceError ? <div className="nvca-recording-hint">正在读取可录制的屏幕和窗口…</div> : null}
-					{browserDirect ? (
-						<button className="nvca-recording-source is-primary" onClick={() => void begin()} type="button"><MonitorIcon className="nvca-i-sm" />选择屏幕或窗口</button>
-					) : (
-						<div className="nvca-recording-sources">
-							{sources?.length === 0 && !sourceError ? <div className="nvca-recording-hint">没有可用来源</div> : null}
-							{sources?.map((source) => (
-								<button className="nvca-recording-source" key={source.id} onClick={() => void begin(source.id)} type="button">
-									{source.thumbnail ? <img alt="" src={source.thumbnail} /> : <MonitorIcon className="nvca-i-sm" />}
-									<span>{source.name}</span>
-								</button>
-							))}
-						</div>
-					)}
+		<Dialog
+			onOpenChange={(next) => {
+				if (next || phase === "saving") return
+				void cancel()
+			}}
+			open
+		>
+			<DialogContent aria-label="屏幕录制" className="nvca-recording" showCloseButton={false}>
+				<div className="nvca-recording-head">
+					<span><VideoIcon className="nvca-i-sm" />{title}</span>
+					<button aria-label="关闭录屏" disabled={phase === "saving"} onClick={() => void cancel()} type="button"><XIcon className="nvca-i-sm" /></button>
 				</div>
-			) : (
-				<div className="nvca-recording-active">
-					{phase === "recording" ? <span className="nvca-recording-dot" /> : <Loader2Icon className="nvca-i-sm nvca-spin" />}
-					<strong>{phase === "recording" ? clock(seconds) : "上传并加入引用…"}</strong>
-					{phase === "recording" ? <button aria-label="停止并保存录屏" onClick={() => void finish()} title="停止并保存" type="button"><SquareIcon className="nvca-i-sm" /></button> : null}
-				</div>
-			)}
-			{sourceError ? <div className="nvca-recording-error">{sourceError}</div> : null}
-		</div>
+				{phase === "choose" ? (
+					<div className="nvca-recording-body">
+						{sources === null && !sourceError ? <div className="nvca-recording-hint">正在读取可录制的屏幕和窗口…</div> : null}
+						{browserDirect ? (
+							<Item
+								className="nvca-recording-source is-primary"
+								onClick={() => void begin()}
+								render={<button type="button" />}
+								size="xs"
+							>
+								<ItemMedia>
+									<MonitorIcon className="nvca-i-sm" />
+								</ItemMedia>
+								<ItemTitle>选择屏幕或窗口</ItemTitle>
+							</Item>
+						) : (
+							<div className="nvca-recording-sources">
+								{sources?.length === 0 && !sourceError ? <div className="nvca-recording-hint">没有可用来源</div> : null}
+								{sources?.map((source) => (
+									<Item
+										className="nvca-recording-source"
+										key={source.id}
+										onClick={() => void begin(source.id)}
+										render={<button type="button" />}
+										size="xs"
+									>
+										<ItemMedia className="nvca-recording-thumb" variant={source.thumbnail ? "image" : "default"}>
+											{source.thumbnail ? <img alt="" src={source.thumbnail} /> : <MonitorIcon className="nvca-i-sm" />}
+										</ItemMedia>
+										<ItemTitle>{source.name}</ItemTitle>
+									</Item>
+								))}
+							</div>
+						)}
+					</div>
+				) : (
+					<div className="nvca-recording-active">
+						{phase === "recording" ? <span className="nvca-recording-dot" /> : <Spinner aria-hidden size="sm" />}
+						<strong>{phase === "recording" ? clock(seconds) : "上传并加入引用…"}</strong>
+						{phase === "recording" ? <button aria-label="停止并保存录屏" onClick={() => void finish()} title="停止并保存" type="button"><SquareIcon className="nvca-i-sm" /></button> : null}
+					</div>
+				)}
+				{sourceError ? <div className="nvca-recording-error">{sourceError}</div> : null}
+			</DialogContent>
+		</Dialog>
 	)
 }

@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import urllib.parse
 import uuid
 import zipfile
@@ -90,6 +91,8 @@ class AssetLibraryCategoryRequest(BaseModel):
     name: str = "新文件夹"
     type: str = "image"
     library_id: str = ""
+    # 父分类 id（空 = 顶级）；子文件夹功能入口
+    parent_id: str = ""
 
 
 class AssetLibraryRequest(BaseModel):
@@ -101,12 +104,15 @@ class AssetLibraryAddRequest(BaseModel):
     url: str = ""
     name: str = ""
     library_id: str = ""
+    # false = 跳过 AI 分类（只落库立即返回）；默认 true 但分类在后台跑，不阻塞保存
+    classify: bool = True
 
 
 class AssetLibraryBatchAddRequest(BaseModel):
     category_id: str = ""
     library_id: str = ""
     items: List[AssetLibraryAddRequest] = []
+    classify: bool = True
 
 
 def _generation_sidecar(rel):
@@ -129,6 +135,10 @@ class SharedFolderImport(BaseModel):
 class AssetLibraryRenameRequest(BaseModel):
     name: str = ""
     library_id: str = ""
+    # 可选：改名同时改分类类型（image/video/audio；workflow 不允许改）
+    type: str = ""
+    # 可选：移动分类（None=不改；""=移到顶级；其它=挂到该父分类下）
+    parent_id: Optional[str] = None
 
 
 class AssetLibraryBatchDeleteRequest(BaseModel):
@@ -371,9 +381,42 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
 
 
 @router.get("/local-assets")
-async def list_local_assets():
+async def list_local_assets(folder: str = "", q: str = "", limit: int = 0):
     tree, items = deps._local_upload_tree_and_items()
-    return {"items": items, "tree": tree}
+    items = [item for item in (items or []) if isinstance(item, dict)]
+    # folders 汇总（不改既有 items/tree 契约）：前端可直接拿它渲染文件夹列表，不用自己扫 tree
+    folder_counts = {}
+    for item in items:
+        path = str(item.get("folder") or "").replace("\\", "/").strip("/")
+        folder_counts[path] = folder_counts.get(path, 0) + 1
+    folders = [{"path": path, "name": path.rsplit("/", 1)[-1] if path else "全部上传", "count": count}
+               for path, count in sorted(folder_counts.items())]
+    folder_key = str(folder or "").replace("\\", "/").strip().strip("/")
+    query = str(q or "").strip().lower()
+    try:
+        limit_value = max(0, min(int(limit or 0), 2000))
+    except (TypeError, ValueError):
+        limit_value = 0
+
+    def _match(item):
+        item_folder = str(item.get("folder") or "").replace("\\", "/").strip("/")
+        if folder_key and folder_key not in ("__root__", "root"):
+            if item_folder != folder_key and not item_folder.startswith(folder_key + "/"):
+                return False
+        elif folder_key:
+            if item_folder:
+                return False
+        if query:
+            haystack = " ".join(str(item.get(key) or "") for key in
+                                ("name", "caption", "file", "classification")).lower()
+            if query not in haystack:
+                return False
+        return True
+
+    filtered = [item for item in items if _match(item)]
+    limited = filtered[:limit_value] if limit_value else filtered
+    return {"items": limited, "tree": tree, "folders": folders,
+            "count": len(limited), "total": len(items)}
 
 
 @router.post("/local-assets/folders")
@@ -617,6 +660,163 @@ async def save_local_asset_caption(payload: LocalAssetCaptionSaveRequest):
 
 # ===== asset-library / prompt-libraries / shared-folders 族 =====
 
+_ASSET_LIBRARY_MEDIA_TYPES = ("image", "video", "audio")
+_ASSET_LIBRARY_MEDIA_LABELS = {"image": "图片", "video": "视频", "audio": "音频"}
+_ASSET_LIBRARY_AUTO_CATEGORY = {"video": ("videos", "视频"), "audio": ("audios", "音频")}
+
+
+def _asset_library_parent_id(cat) -> str:
+    return str((cat or {}).get("parent_id") or "").strip()
+
+
+def _asset_library_children(categories, category_id):
+    return [cat for cat in categories if _asset_library_parent_id(cat) == category_id]
+
+
+def _asset_library_descendants(categories, category_id):
+    """返回该分类下的所有子孙分类 id（不含自己），用于递归删除/防环。"""
+    descendants = set()
+    frontier = {category_id}
+    guard = 0
+    while frontier and guard < 1000:
+        guard += 1
+        next_frontier = set()
+        for cat in categories:
+            cat_id = str(cat.get("id") or "")
+            if cat_id and cat_id not in descendants and cat_id != category_id and _asset_library_parent_id(cat) in frontier:
+                descendants.add(cat_id)
+                next_frontier.add(cat_id)
+        frontier = next_frontier
+    return descendants
+
+
+def _asset_library_subtree(categories, category_id):
+    """该分类自己 + 所有子孙分类（父在前）。"""
+    ids = {category_id} | _asset_library_descendants(categories, category_id)
+    return [cat for cat in categories if str(cat.get("id") or "") in ids]
+
+
+def _asset_library_child_dir(library, parent_cat, name, current_id=""):
+    """子分类的磁盘目录：父 dir + 唯一子目录名，真正嵌套在 library/<父>/<子>/。"""
+    parent_dir = str(parent_cat.get("dir") or "").strip("/").strip()
+    base = deps.sanitize_asset_name(name or "子文件夹", "子文件夹").strip(" .") or "子文件夹"
+    siblings = {
+        str(cat.get("dir") or "").rstrip("/").rsplit("/", 1)[-1]
+        for cat in (library.get("categories") or [])
+        if _asset_library_parent_id(cat) == str(parent_cat.get("id") or "") and str(cat.get("id") or "") != current_id
+    }
+    candidate = base
+    index = 2
+    while candidate in siblings or os.path.exists(os.path.join(deps.ASSET_LIBRARY_DIR, parent_dir, candidate)):
+        candidate = f"{base}_{index}"
+        index += 1
+    return f"{parent_dir}/{candidate}".strip("/") if parent_dir else candidate
+
+
+def _asset_library_media_type(cat) -> str:
+    """分类的媒体类型：image/video/audio；workflow 与未知都按 image 处理（兼容老分类）。"""
+    cat_type = str((cat or {}).get("type") or "image").strip().lower()
+    return cat_type if cat_type in _ASSET_LIBRARY_MEDIA_TYPES else "image"
+
+
+def _ensure_asset_library_media_category(lib, library, media_kind):
+    """按媒体类型找分类；视频/音频没有就自动建「视频」「音频」。
+    只在真正需要时追加，不动 characters/scenes/workflows 的结构与 type。"""
+    categories = library.setdefault("categories", [])
+    category = next((cat for cat in categories if _asset_library_media_type(cat) == media_kind), None)
+    if category:
+        return category
+    preset = _ASSET_LIBRARY_AUTO_CATEGORY.get(media_kind)
+    if not preset:
+        return None
+    base_id, label = preset
+    existing_ids = {str(cat.get("id") or "") for cat in categories}
+    category_id = base_id if base_id not in existing_ids else f"cat_{uuid.uuid4().hex[:12]}"
+    category = {"id": category_id, "name": label, "type": media_kind, "items": []}
+    categories.append(category)
+    if (library.get("id") or "") == (lib.get("active_library_id") or ""):
+        lib["categories"] = categories
+    return category
+
+
+def _resolve_asset_library_target_category(lib, library, category_id, media_kind):
+    """返回 (category, error)。category_id 为空/auto 时按媒体类型自动选或建分类；
+    指定分类时校验类型匹配：图片分类不能收视频/音频，反之亦然。"""
+    wanted = str(category_id or "").strip()
+    if not wanted or wanted.lower() in ("auto", "auto_media", "auto:media"):
+        return _ensure_asset_library_media_category(lib, library, media_kind), ""
+    category = deps.find_asset_category_in_library(lib, wanted, library.get("id") or "")
+    if not category:
+        return None, "分类不存在"
+    category_type = _asset_library_media_type(category)
+    if category_type != media_kind:
+        want_label = _ASSET_LIBRARY_MEDIA_LABELS.get(media_kind, media_kind)
+        cat_label = _ASSET_LIBRARY_MEDIA_LABELS.get(category_type, category_type)
+        return None, (f"分类「{category.get('name') or category_type}」是{cat_label}分类，"
+                      f"不能存{want_label}；请换到{want_label}分类（没有时留空 category_id 会自动创建）")
+    return category, ""
+
+
+def _find_asset_library_item(lib, item_id, library_id=""):
+    library = deps.find_asset_library(lib, library_id)
+    if not library:
+        return None
+    for cat in library.get("categories") or []:
+        for item in cat.get("items") or []:
+            if isinstance(item, dict) and item.get("id") == item_id:
+                return item
+    return None
+
+
+_ASSET_LIBRARY_CLASSIFY_LOCK = threading.Lock()
+
+
+def _classify_asset_item_background(item_id, src, library_id=""):
+    """后台跑 AI 分类：完成后重新加载资产库更新该条目并落盘（save_asset_library 内部会广播 ws）。
+    分类失败只打日志，条目保持可用，前端仍可手动点分类。"""
+    if not item_id or not src:
+        return
+    try:
+        classification = asyncio.run(deps.classify_asset_image_best_effort(src))
+    except Exception as exc:
+        print(f"[AssetLibrary] 后台分类失败 item={item_id}: {exc}", flush=True)
+        return
+    if not classification:
+        return
+    try:
+        with _ASSET_LIBRARY_CLASSIFY_LOCK:
+            lib = deps.load_asset_library()
+            item = _find_asset_library_item(lib, item_id, library_id)
+            if not item:
+                return
+            item["classification"] = classification
+            deps.save_asset_library(lib)
+        print(f"[AssetLibrary] 后台分类完成 item={item_id}", flush=True)
+    except Exception as exc:
+        print(f"[AssetLibrary] 后台分类写库失败 item={item_id}: {exc}", flush=True)
+
+
+def _spawn_asset_library_classification(item, src, library_id=""):
+    """图片条目落库后异步触发分类（daemon 线程），请求不等它。"""
+    if not isinstance(item, dict) or item.get("kind") != "image" or not item.get("id"):
+        return False
+    path = deps.output_file_from_url(item.get("url") or "") or src
+    if not path:
+        return False
+    threading.Thread(target=_classify_asset_item_background,
+                     args=(str(item.get("id") or ""), path, library_id), daemon=True).start()
+    return True
+
+
+def _asset_library_src_or_error(url):
+    src = deps.output_file_from_url(url)
+    if not src:
+        raise HTTPException(status_code=400, detail="只支持保存本地 /assets 或 /output 媒体（图片/视频/音频）")
+    media_kind = deps.asset_library_media_kind(src)
+    if media_kind not in _ASSET_LIBRARY_MEDIA_TYPES:
+        raise HTTPException(status_code=400, detail="该文件类型不能存进素材库（工作流请用工作流上传接口）")
+    return src, media_kind
+
 @router.post("/asset-library/workflows/upload")
 async def upload_asset_library_workflows(
     files: List[UploadFile] = File(...),
@@ -644,6 +844,46 @@ async def upload_asset_library_workflows(
 @router.get("/asset-library")
 async def get_asset_library():
     return {"library": deps.load_asset_library()}
+
+
+@router.get("/asset-library/items/{item_id}/workflow")
+async def get_asset_library_item_workflow(item_id: str):
+    """读回工作流条目的 JSON 内容（模板面板/个人模板用）。
+
+    浏览器端原来直接 fetch item.url（/assets/library/...）：生产同源能取到，
+    但 vite dev 只代理 /api，静态路径 404 → 模板读不出来。这里统一走 API，
+    dev / 生产行为一致；文件只允许落在 ASSET_LIBRARY_DIR 下。
+    """
+    lib = deps.load_asset_library()
+    found = None
+    for library in lib.get("libraries", []):
+        for cat in library.get("categories", []):
+            for item in cat.get("items", []):
+                if str(item.get("id") or "") == item_id:
+                    found = item
+                    break
+            if found:
+                break
+        if found:
+            break
+    if not found or str(found.get("kind") or "") != "workflow":
+        raise HTTPException(status_code=404, detail="工作流条目不存在")
+    raw_url = urllib.parse.unquote(str(found.get("url") or "").split("?")[0])
+    name = os.path.basename(raw_url)
+    base = os.path.abspath(deps.ASSET_LIBRARY_DIR)
+    path = os.path.abspath(os.path.join(base, name))
+    if not name or not path.startswith(base + os.sep):
+        raise HTTPException(status_code=404, detail="工作流文件不存在")
+    if path.lower().endswith(".zip"):
+        raise HTTPException(status_code=415, detail="压缩包格式的模板暂不支持读取")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="工作流文件不存在")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            workflow = json.load(f)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="工作流文件不是合法 JSON：%s" % exc)
+    return {"ok": True, "workflow": workflow}
 
 
 # ===== 智能体/技能产物（只读）：让资产库也能看到能力运行生成的文件 =====
@@ -972,16 +1212,37 @@ async def create_asset_library_category(payload: AssetLibraryCategoryRequest):
     library = deps.find_asset_library(lib, payload.library_id)
     if not library:
         raise HTTPException(status_code=404, detail="资产库不存在")
-    cat_type = "workflow" if str(payload.type or "").lower() == "workflow" else "image"
-    category = {"id": f"cat_{uuid.uuid4().hex[:12]}", "name": deps.sanitize_asset_name(payload.name, "新文件夹"), "type": cat_type, "items": []}
+    categories = library.setdefault("categories", [])
+    parent_id = str(payload.parent_id or "").strip()
+    parent = None
+    raw_type = str(payload.type or "").strip().lower()
+    if parent_id:
+        parent = next((cat for cat in categories if str(cat.get("id") or "") == parent_id), None)
+        if not parent:
+            raise HTTPException(status_code=404, detail="父分类不存在")
+        parent_raw_type = str(parent.get("type") or "image").strip().lower()
+        cat_type = parent_raw_type if parent_raw_type in ("workflow", "video", "audio") else "image"
+        if raw_type and raw_type != cat_type:
+            raise HTTPException(status_code=400,
+                                detail=f"子分类类型必须与父分类一致（父分类是 {cat_type}）")
+    else:
+        cat_type = raw_type if raw_type in ("workflow", "video", "audio") else "image"
+    category = {"id": f"cat_{uuid.uuid4().hex[:12]}",
+                "name": deps.sanitize_asset_name(payload.name, "新文件夹"),
+                "type": cat_type, "parent_id": parent_id, "items": []}
     if cat_type == "image":
-        # 图片分组在 library/ 下建一个真实文件夹，之后该分组的资产都存进这个文件夹，便于在磁盘上管理。
-        category["dir"] = deps.unique_asset_category_dir(library, payload.name)
+        # 图片分组在 library/ 下建真实文件夹；子分类建在父分类目录里面（真正嵌套）
+        if parent is not None:
+            if not str(parent.get("dir") or "").strip():
+                parent["dir"] = deps.unique_asset_category_dir(library, parent.get("name") or "分组")
+            category["dir"] = _asset_library_child_dir(library, parent, payload.name)
+        else:
+            category["dir"] = deps.unique_asset_category_dir(library, payload.name)
         try:
             os.makedirs(os.path.join(deps.ASSET_LIBRARY_DIR, category["dir"]), exist_ok=True)
         except Exception as exc:
             print(f"创建分组文件夹失败: {exc}")
-    library.setdefault("categories", []).append(category)
+    categories.append(category)
     lib["active_library_id"] = library.get("id") or lib.get("active_library_id")
     deps.save_asset_library(lib)
     return {"library": lib, "category": category}
@@ -990,89 +1251,170 @@ async def create_asset_library_category(payload: AssetLibraryCategoryRequest):
 @router.patch("/asset-library/categories/{category_id}")
 async def rename_asset_library_category(category_id: str, payload: AssetLibraryRenameRequest):
     lib = deps.load_asset_library()
-    _, cat = deps.find_asset_category_with_library(lib, category_id, payload.library_id)
+    library, cat = deps.find_asset_category_with_library(lib, category_id, payload.library_id)
     if not cat:
         raise HTTPException(status_code=404, detail="分类不存在")
-    cat["name"] = deps.sanitize_asset_name(payload.name, cat.get("name") or "新文件夹")
+    if payload.name:
+        cat["name"] = deps.sanitize_asset_name(payload.name, cat.get("name") or "新文件夹")
+    wanted_type = str(payload.type or "").strip().lower()
+    if wanted_type:
+        raw_current_type = str(cat.get("type") or "").strip().lower()
+        current_type = _asset_library_media_type(cat)
+        if wanted_type not in _ASSET_LIBRARY_MEDIA_TYPES:
+            raise HTTPException(status_code=400, detail="分类类型只能是 image/video/audio")
+        if wanted_type == "workflow" or raw_current_type == "workflow":
+            raise HTTPException(status_code=400, detail="工作流分类不能改类型")
+        if wanted_type != current_type:
+            if cat.get("items"):
+                raise HTTPException(status_code=400, detail="分类下还有素材，不能改类型；请先清空该分类")
+            cat["type"] = wanted_type
+    if payload.parent_id is not None:
+        categories = library.setdefault("categories", [])
+        target_parent_id = str(payload.parent_id or "").strip()
+        current_parent_id = _asset_library_parent_id(cat)
+        if target_parent_id != current_parent_id:
+            if target_parent_id == category_id:
+                raise HTTPException(status_code=400, detail="不能把分类挂到自己下面")
+            if target_parent_id in _asset_library_descendants(categories, category_id):
+                raise HTTPException(status_code=400, detail="不能把分类移动到它自己的子分类下")
+            parent = None
+            if target_parent_id:
+                parent = next((c for c in categories if str(c.get("id") or "") == target_parent_id), None)
+                if not parent:
+                    raise HTTPException(status_code=404, detail="父分类不存在")
+                if _asset_library_media_type(parent) != _asset_library_media_type(cat):
+                    raise HTTPException(status_code=400, detail="父子分类类型不一致，不能移动")
+            if _asset_library_children(categories, category_id):
+                raise HTTPException(status_code=400, detail="分类下还有子分类，暂不支持移动；请先删除或移走子分类")
+            if cat.get("items"):
+                raise HTTPException(status_code=400, detail="分类下还有素材，暂不支持移动；请先移走素材")
+            old_dir = str(cat.get("dir") or "").strip("/").strip()
+            if _asset_library_media_type(cat) == "image":
+                if parent is None:
+                    new_dir = deps.unique_asset_category_dir(library, cat.get("name") or "分组")
+                else:
+                    if not str(parent.get("dir") or "").strip():
+                        parent["dir"] = deps.unique_asset_category_dir(library, parent.get("name") or "分组")
+                    new_dir = _asset_library_child_dir(library, parent, cat.get("name") or "分组", current_id=category_id)
+                if old_dir and new_dir and old_dir != new_dir:
+                    old_abs = os.path.join(deps.ASSET_LIBRARY_DIR, old_dir)
+                    new_abs = os.path.join(deps.ASSET_LIBRARY_DIR, new_dir)
+                    try:
+                        os.makedirs(os.path.dirname(new_abs), exist_ok=True)
+                        if os.path.isdir(old_abs):
+                            os.rename(old_abs, new_abs)
+                    except Exception as exc:
+                        raise HTTPException(status_code=500, detail=f"移动分组文件夹失败：{exc}")
+                cat["dir"] = new_dir or old_dir
+            cat["parent_id"] = target_parent_id
     deps.save_asset_library(lib)
     return {"library": lib, "category": cat}
 
 
 @router.delete("/asset-library/categories/{category_id}")
-async def delete_asset_library_category(category_id: str, library_id: str = ""):
+async def delete_asset_library_category(category_id: str, library_id: str = "", force: Optional[bool] = None):
     lib = deps.load_asset_library()
     library, cat = deps.find_asset_category_with_library(lib, category_id, library_id)
     if not cat:
         raise HTTPException(status_code=404, detail="分类不存在")
     if cat.get("type") == "workflow" and category_id == "workflows" and (library.get("id") or "") == "default":
         raise HTTPException(status_code=400, detail="默认工作流分类不能删除")
-    # 删除分组时一并清理该分组下的本地文件 + 分组文件夹，避免磁盘残留。
-    for item in (cat.get("items") or []):
-        deps.remove_asset_library_file(item)
-    cat_dir = str(cat.get("dir") or "").strip("/").strip()
-    if cat_dir:
+    categories = library.setdefault("categories", [])
+    subtree = _asset_library_subtree(categories, category_id)
+    subtree_items = [item for node in subtree for item in (node.get("items") or []) if isinstance(item, dict)]
+    child_count = len(subtree) - 1
+    # 显式 force=false：分类（或其子分类）里还有素材/子分类时拒绝，给出计数
+    if force is False and (subtree_items or child_count):
+        parts = []
+        if subtree_items:
+            parts.append(f"{len(subtree_items)} 个素材")
+        if child_count:
+            parts.append(f"{child_count} 个子分类")
+        raise HTTPException(status_code=400,
+                            detail="分类下还有 " + "、".join(parts) + "，请先移走或删除，或传 force=true 强制删除（会连同子分类一起删）")
+    # 递归删除：先清素材文件，再从深到浅删磁盘目录，最后从分类树里移除整棵子树
+    for node in subtree:
+        for item in (node.get("items") or []):
+            deps.remove_asset_library_file(item)
+    for node in sorted(subtree, key=lambda c: len(str(c.get("dir") or "")), reverse=True):
+        node_dir = str(node.get("dir") or "").strip("/").strip()
+        if not node_dir:
+            continue
         try:
-            target = os.path.join(deps.ASSET_LIBRARY_DIR, cat_dir)
+            target = os.path.join(deps.ASSET_LIBRARY_DIR, node_dir)
             if os.path.isdir(target) and os.path.abspath(target).startswith(os.path.abspath(deps.ASSET_LIBRARY_DIR) + os.sep):
                 shutil.rmtree(target, ignore_errors=True)
         except Exception as exc:
             print(f"删除分组文件夹失败: {exc}")
-    library["categories"] = [c for c in library.get("categories", []) if c.get("id") != category_id]
+    removed_ids = {str(node.get("id") or "") for node in subtree}
+    library["categories"] = [c for c in categories if str(c.get("id") or "") not in removed_ids]
     deps.save_asset_library(lib)
-    return {"library": lib}
+    return {"library": lib, "deleted_categories": len(subtree), "deleted_items": len(subtree_items)}
 
 
 @router.post("/asset-library/items")
 async def add_asset_library_item(payload: AssetLibraryAddRequest):
     lib = deps.load_asset_library()
-    cat = deps.find_asset_category_in_library(lib, payload.category_id, payload.library_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="分类不存在")
-    if cat.get("type") != "image":
-        raise HTTPException(status_code=400, detail="该分类暂不支持添加媒体")
-    src = deps.output_file_from_url(payload.url)
-    if not src:
-        raise HTTPException(status_code=400, detail="只支持保存本地 /assets 或 /output 媒体")
+    library = deps.find_asset_library(lib, payload.library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="资产库不存在")
+    src, media_kind = _asset_library_src_or_error(payload.url)
+    cat, error = _resolve_asset_library_target_category(lib, library, payload.category_id, media_kind)
+    if error:
+        raise HTTPException(status_code=404 if error == "分类不存在" else 400, detail=error)
     _, item = deps.make_asset_library_item(src, payload.name or os.path.basename(src), subdir=cat.get("dir") or "")
     gen = await asyncio.to_thread(deps.generation_meta_for_url, payload.url)
     if gen:
         item["generation"] = gen
-    if item.get("kind") == "image":
-        classification = await deps.classify_asset_image_best_effort(deps.output_file_from_url(item.get("url") or "") or src)
-        if classification:
-            item["classification"] = classification
     cat.setdefault("items", []).append(item)
+    # 先落库并返回（save 内部会广播 ws），AI 分类改到后台线程：不再让保存等几秒
     deps.save_asset_library(lib)
-    return {"library": lib, "item": item}
+    pending = False
+    if payload.classify and item.get("kind") == "image":
+        pending = _spawn_asset_library_classification(item, src, payload.library_id)
+    return {"library": lib, "item": item, "category": cat, "classification_pending": pending}
 
 
 @router.post("/asset-library/items/batch")
 async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest):
     added = []
+    errors = []
     lib = deps.load_asset_library()
-    cat = deps.find_asset_category_in_library(lib, payload.category_id, payload.library_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="分类不存在")
-    if cat.get("type") != "image":
-        raise HTTPException(status_code=400, detail="该分类暂不支持添加媒体")
+    library = deps.find_asset_library(lib, payload.library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="资产库不存在")
+    # 目标分类允许为空/auto：按每个条目的媒体类型自动落到图片/视频/音频分类，混合批量也能一次存
+    target = str(payload.category_id or "").strip()
     for entry in (payload.items or [])[:200]:
-        entry.category_id = payload.category_id
         entry.library_id = payload.library_id
         src = deps.output_file_from_url(entry.url)
         if not src:
+            errors.append({"url": entry.url, "error": "只支持保存本地 /assets 或 /output 媒体"})
             continue
+        media_kind = deps.asset_library_media_kind(src)
+        if media_kind not in _ASSET_LIBRARY_MEDIA_TYPES:
+            errors.append({"url": entry.url, "error": "该文件类型不能存进素材库"})
+            continue
+        cat, error = _resolve_asset_library_target_category(lib, library, target, media_kind)
+        if error:
+            errors.append({"url": entry.url, "error": error})
+            continue
+        entry.category_id = cat.get("id") or ""
         _, item = deps.make_asset_library_item(src, entry.name or os.path.basename(src), subdir=cat.get("dir") or "")
         gen = await asyncio.to_thread(deps.generation_meta_for_url, entry.url)
         if gen:
             item["generation"] = gen
-        if item.get("kind") == "image":
-            classification = await deps.classify_asset_image_best_effort(deps.output_file_from_url(item.get("url") or "") or src)
-            if classification:
-                item["classification"] = classification
         cat.setdefault("items", []).append(item)
-        added.append(item)
+        added.append((item, src, entry))
+    # 先落库并返回（save 内部广播一次 ws），图片分类全部丢到后台，批量保存不再逐张等 AI
     deps.save_asset_library(lib)
-    return {"library": lib, "items": added}
+    pending = 0
+    for item, src, entry in added:
+        if payload.classify and entry.classify and item.get("kind") == "image":
+            if _spawn_asset_library_classification(item, src, payload.library_id):
+                pending += 1
+    return {"library": lib, "items": [item for item, _src, _entry in added], "errors": errors,
+            "classification_pending": pending}
 
 
 @router.get("/shared-folders")
@@ -1457,11 +1799,115 @@ async def batch_crop_asset_library_items(payload: AssetLibraryBatchCropRequest):
 
 # ===== canvas-assets 族 =====
 
+_canvas_asset_dims_cache: Dict[str, tuple] = {}
+
+
+def _canvas_asset_image_dims(url: str):
+    """读本地图片真实尺寸（老画布节点没写 natural_w/h 时兜底）；远程/读不到返回 None。"""
+    if url in _canvas_asset_dims_cache:
+        return _canvas_asset_dims_cache[url]
+    dims = None
+    try:
+        path = deps.output_file_from_url(url)
+        if path and os.path.isfile(path):
+            with Image.open(path) as img:
+                width, height = img.size
+            if width > 0 and height > 0:
+                dims = (int(width), int(height))
+    except Exception:
+        dims = None
+    if dims:
+        _canvas_asset_dims_cache[url] = dims
+    return dims
+
 @router.get("/canvas-assets")
-async def list_canvas_assets():
+async def list_canvas_assets(canvas: str = "", category: str = "", q: str = "", limit: int = 0):
     # canvas_assets_index 会同步遍历并解析所有画布 JSON，放进线程池避免阻塞事件循环
     # （否则画布多时一次请求就会卡住整个 asyncio loop，连 WebSocket 一起掉线）。
-    return await asyncio.to_thread(deps.canvas_assets_index)
+    index = await asyncio.to_thread(deps.canvas_assets_index)
+    items = index.get("items") or []
+    canvases = index.get("canvases") or []
+    # 老资产的 natural_w/natural_h 可能没写进画布节点：从资产注册表按 url 补齐一次。
+    # 字段名和类型保持 natural_w/natural_h（int），前端仍可自己解码兜底。
+    try:
+        registry = deps.load_assets_registry() or {}
+    except Exception:
+        registry = {}
+    dimensions = {}
+    for record in (registry.get("assets") or []):
+        if not isinstance(record, dict) or not str(record.get("url") or "").strip():
+            continue
+        try:
+            width = int(record.get("natural_w") or 0)
+            height = int(record.get("natural_h") or 0)
+        except (TypeError, ValueError):
+            continue
+        if width > 0 and height > 0:
+            dimensions[str(record["url"])] = (width, height)
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if int(item.get("natural_w") or 0) > 0 and int(item.get("natural_h") or 0) > 0:
+            continue
+        url = str(item.get("url") or "")
+        size_pair = dimensions.get(url)
+        if not size_pair and url:
+            # 注册表和画布节点都没有尺寸的老数据：直接读本地图片头，字段仍是 natural_w/natural_h（int）
+            size_pair = _canvas_asset_image_dims(url)
+        if size_pair:
+            item["natural_w"], item["natural_h"] = size_pair
+    canvas_key = str(canvas or "").strip().lower()
+    category_key = str(category or "").strip().lower()
+    query = str(q or "").strip().lower()
+    try:
+        limit_value = max(0, min(int(limit or 0), 2000))
+    except (TypeError, ValueError):
+        limit_value = 0
+
+    def _match(canvas_id, title, kinds, haystack, check_query=True):
+        if canvas_key and canvas_key not in str(canvas_id or "").lower() and canvas_key not in str(title or "").lower():
+            return False
+        if category_key and category_key not in ("all", "全部") and category_key not in kinds:
+            return False
+        if check_query and query and query not in haystack:
+            return False
+        return True
+
+    filtered_items = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        kinds = {str(item.get("kind") or "").lower(), str(item.get("canvas_kind") or "").lower()}
+        haystack = " ".join(str(item.get(key) or "") for key in
+                            ("name", "url", "canvas_title", "node_title", "gen_prompt", "gen_model")).lower()
+        if _match(item.get("canvas_id"), item.get("canvas_title"), kinds, haystack):
+            filtered_items.append(item)
+    # 素材类目（image/video/audio/text）不是画布种类：这时只保留「含该素材的画布」，
+    # 避免 category=image 把画布列表过滤成空；画布种类（smart/classic）仍按画布自身匹配
+    asset_kind_category = category_key not in ("", "all", "全部", "smart", "classic")
+    matching_canvas_ids = {str(item.get("canvas_id") or "") for item in filtered_items}
+    filtered_canvases = []
+    for record in canvases:
+        if not isinstance(record, dict):
+            continue
+        if asset_kind_category and str(record.get("id") or "") not in matching_canvas_ids:
+            continue
+        kinds = {str(record.get("kind") or "").lower()}
+        haystack = " ".join(str(record.get(key) or "") for key in ("id", "title", "owner")).lower()
+        # q 搜的是素材名，画布列表应保留「含命中的素材」的画布（或标题/id 本身命中），不能因为
+        # 素材名不匹配画布标题就被过滤成空
+        if query and str(record.get("id") or "") not in matching_canvas_ids and query not in haystack:
+            continue
+        record_kinds = kinds if not asset_kind_category else {category_key}
+        if _match(record.get("id"), record.get("title"), record_kinds, haystack, check_query=False):
+            filtered_canvases.append(record)
+    result = dict(index)
+    result["canvases"] = filtered_canvases
+    result["items"] = filtered_items[:limit_value] if limit_value else filtered_items
+    # 新增字段（不改既有字段含义）：过滤后数量 + 过滤前总数，方便前端显示「已筛选 N / 共 M」
+    result["count"] = len(result["items"])
+    result["total"] = len(items)
+    return result
 
 
 @router.post("/canvas-assets/check")

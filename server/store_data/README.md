@@ -179,3 +179,7 @@ python3 tools/fetch_store_assets.py --resize 1024 --quality 75 --target-mb 10
 python3 tools/build_store_manuals.py
 python3 tools/build_store_manuals.py --dry-run
 ```
+
+## 2026-11-07 清空上游条目
+- 应用市场只保留内置技能「服装大片 · 胶片暗房」（server/skills/builtin_packs/fashion-editorial），上游 83 条连同 details / skill_instructions 全部移除，后续再按需逐条添加。
+- 移除前的完整 store_data 备份在 `_claude_backup/20261107-store-catalog-before/`。

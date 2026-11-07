@@ -782,6 +782,20 @@ function _localSmartMediaPreviewUrl(itemOrUrl, size=512){
     return `/api/media-preview?w=${width}&url=${encodeURIComponent(raw)}`;
 }
 function smartPreviewImgHtml(itemOrUrl, size=512, attrs=''){ return window.NovaMedia ? NovaMedia.previewImgHtmlFromItem(itemOrUrl, size, attrs) : _localSmartPreviewImgHtml(itemOrUrl, size, attrs); }
+/* 节点内大图的预览宽度：屏幕显示框 = 世界尺寸 × 画布缩放，所以按缩放档位量化（>0.8 / 0.4~0.8 / <0.4），
+   一档之内宽度不变 —— 缩放时不会因为每帧换 URL 触发重新解码；真要换档也要等下一次 render。
+   原来无条件要 768 宽：真实画布单图 5562×7140、节点显示框只有 250px 左右，解码内存白花 4 倍以上。 */
+function smartPreviewScaleBucket(){
+    const scale = safeScale(viewport.scale);
+    return scale > 0.8 ? 1 : scale > 0.4 ? 0.6 : 0.35;
+}
+function smartNodePreviewWidth(worldPx){
+    const dpr = Math.min(2, Math.max(1, Number(window.devicePixelRatio) || 1));
+    const screen = Math.max(0, Number(worldPx) || 0) * smartPreviewScaleBucket() * dpr * 1.15;
+    const tiers = [256, 384, 512, 768];
+    for(const tier of tiers){ if(tier >= screen) return tier; }
+    return 768;
+}
 function _localSmartPreviewImgHtml(itemOrUrl, size=512, attrs=''){
     const original = smartOriginalMediaUrl(itemOrUrl);
     const preview = smartMediaPreviewUrl(itemOrUrl, size);
@@ -1241,6 +1255,44 @@ function ensureAllSmartNodeAssetIds(){
     (nodes || []).forEach(n => {
         if(Array.isArray(n.images)) n.images.forEach(img => ensureSmartImageAssetId(img));
     });
+}
+/* saveCanvas 专用：不深拷整张画布。
+   深拷（JSON.parse(JSON.stringify(canvas))）在 140 节点画布上要序列化 + 反序列化全部节点，
+   而保存真正需要的只是「剥掉节点上的临时字段」。这里改成逐节点浅拷 + 同一份删除清单：
+   交给 JSON.stringify 的结果与 canvasForStorage() 等价，但省掉整轮 parse。
+   （节点里的 images / runSettings 在 saveCanvas 上游已经就地换成新对象，浅拷不会污染运行态） */
+function canvasForStorageShallow(){
+    const source = canvas || {};
+    const clean = {...source};
+    clean.settings = settingsForStorage(canvasDefaultSmartSettings || initialSmartSettings);
+    clean.nodes = (Array.isArray(source.nodes) ? source.nodes : nodes)
+        .filter(node => node && node.id !== SMART_LOG_PREVIEW_NODE_ID)
+        .map(node => {
+            const copy = {...node};
+            if(Array.isArray(copy.images)) copy.images = copy.images.map(mediaItemForStorage);
+            if(copy.runSettings) copy.runSettings = settingsForStorage(copy.runSettings);
+            delete copy._batchRunning;
+            delete copy._batchProgress;
+            delete copy._batchRunCount;
+            delete copy._batchRunRows;
+            delete copy._batchRunConcurrency;
+            delete copy._batchStopRequested;
+            delete copy._stopContextId;
+            delete copy.tableBatchRunning;
+            delete copy.batchRunExpected;
+            delete copy.batchRunLanded;
+            delete copy.batchRunFailed;
+            delete copy.batchRunConcurrency;
+            delete copy.batchRowOrder;
+            delete copy.batchRowStates;
+            delete copy.__renderHtml;
+            delete copy.__renderKey;
+            delete copy.running;
+            delete copy.chatStickBottom;
+            delete copy.chatFocusInput;
+            return copy;
+        });
+    return clean;
 }
 function canvasForStorage(){
     const clean = JSON.parse(JSON.stringify(canvas || {}));
@@ -1989,7 +2041,9 @@ function stripOutpaintDisplaySettings(settingsObj, node=null){
     delete clean.outpaintResolutionLocked;
     return clean;
 }
-function smartSettingsForNode(node){
+/* 节点参数解析：节点自己的 runSettings 是唯一权威，已存在的节点不再读「按类型记住的最近一次设置」。
+   includeRecent 只给「新建节点 / 旧画布迁移」用：那一刻还没有自己的 runSettings，才允许继承最近一次设置。 */
+function smartSettingsBaseForNode(node, options={}){
     const nodeSettings = stripOutpaintDisplaySettings(node?.runSettings || {}, node);
     /* 生成模式由节点类型决定：图片节点只出图片参数、视频节点只出视频参数，两类互不串。
        分组/批量节点没有类型，退回按素材内容判断；没有素材时沿用节点自己记下的模式。 */
@@ -2006,7 +2060,10 @@ function smartSettingsForNode(node){
     const recentModeKey = audioApiKind
         ? smartSettingsModeKey({engine:(canvasDefaultSmartSettings || initialSmartSettings || settings).engine, apiKind:audioApiKind})
         : '';
-    const recentSettings = Object.keys(nodeSettings).length ? {} : recentSmartSettingsForMode(recentModeKey);
+    /* 只有新节点（或迁移）才允许叠加最近一次设置；已有节点一律以自己写死的 runSettings 为准 */
+    const recentSettings = (options.includeRecent === true && !Object.keys(nodeSettings).length)
+        ? recentSmartSettingsForMode(recentModeKey)
+        : {};
     const base = {
         ...cloneSmartSettings(canvasDefaultSmartSettings || initialSmartSettings),
         ...recentSettings,
@@ -2016,6 +2073,43 @@ function smartSettingsForNode(node){
     if(isSmartAudioNode(node) && isApiLikeEngine(base.engine)) base.apiKind = 'audio';
     normalizeSmartVideoModeSettings(base, true);
     return withOutpaintDisplaySettings(node, base);
+}
+function smartSettingsForNode(node){
+    /* 非生成类节点（如 Prompt 节点）没有自己的 runSettings 语义，保持原来的最近设置兜底，避免影响它们。 */
+    return smartSettingsBaseForNode(node, {includeRecent: !isSmartRunnableNode(node)});
+}
+/* 新建节点：还没有 runSettings，用「最近一次设置」补齐一份自己的 */
+function smartSettingsForNewNode(node){
+    return smartSettingsBaseForNode(node, {includeRecent: true});
+}
+function hasSmartNodeRunSettings(node){
+    const own = node && node.runSettings;
+    return Boolean(own && typeof own === 'object' && !Array.isArray(own) && Object.keys(own).length);
+}
+/* 这个类型的设置有没有可用的模型/工作流：没有就不写，别塞一份空设置把节点变成「未配置」。 */
+function smartSettingsHasUsableSelection(source){
+    const candidate = cloneSmartSettings(source);
+    try { sanitizeSmartApiSelection(candidate); } catch(e) { /* provider 列表还没到：按现有字段判断 */ }
+    const engine = String(candidate.engine || 'api');
+    if(engine === 'comfy') return Boolean(candidate.comfyWorkflow || (comfyWorkflows || [])[0]?.name);
+    if(engine === 'runninghub') return Boolean(candidate.rhConfigKey);
+    if(engine === 'modelscope') return Boolean(candidate.msgenModel);
+    if(candidate.apiKind === 'video') return Boolean(candidate.videoModel);
+    if(candidate.apiKind === 'audio') return Boolean(candidate.audioModel);
+    return Boolean(candidate.model);
+}
+/* 把一个节点缺的 runSettings 一次性写死（深拷贝）。返回是否写入；已写死的一律不动（幂等）。 */
+function seedSmartNodeRunSettings(node){
+    if(!isSmartRunnableNode(node) || hasSmartNodeRunSettings(node)) return false;
+    const candidate = smartSettingsForNewNode(node);
+    if(!smartSettingsHasUsableSelection(candidate)) return false;
+    node.runSettings = settingsForStorage(candidate);
+    return true;
+}
+function seedMissingSmartNodeRunSettings(){
+    let changed = false;
+    (nodes || []).forEach(node => { if(seedSmartNodeRunSettings(node)) changed = true; });
+    return changed;
 }
 function activeSettingsSubject(){
     const active = activeComposerSubject?.id
@@ -2358,6 +2452,7 @@ function absorbImageNodeIntoSmartGroup(group, child){
     rerouteSmartConnections(child.id, group.id);
     nodes = nodes.filter(n => n.id !== child.id);
     nodes.forEach(g => { if(isSmartGroupNode(g) && Array.isArray(g.items)) g.items = g.items.filter(id => id !== child.id); });
+    invalidateSmartGroupOwnerCache();
     return true;
 }
 function smartImageMustRemainGroupMember(child){
@@ -2389,12 +2484,14 @@ function addNodeToSmartGroup(group, child){
         rerouteSmartConnections(child.id, group.id);
         nodes = nodes.filter(n => n.id !== child.id);
         nodes.forEach(g => { if(isSmartGroupNode(g) && Array.isArray(g.items)) g.items = g.items.filter(id => id !== child.id); });
+    invalidateSmartGroupOwnerCache();
         return true;
     }
     // 纯静态媒体仍沿用缩略图吸收；工作流节点、生成位和有连线图片必须保留真实 ID。
     if(isSmartMediaNode(child) && !smartImageMustRemainGroupMember(child)) return absorbImageNodeIntoSmartGroup(group, child);
     if(items.includes(child.id)) return false;
     group.items = [...items, child.id];
+    invalidateSmartGroupOwnerCache();
     scaleSmartGroupMemberToZoom(group, child, zoom);
     return true;
 }
@@ -2404,10 +2501,33 @@ function smartMediaNodeIsGroupContainer(node){
     if((node.images || []).length > 1 || node.mediaGroup || isHistoryGroupNode(node)) return true;
     return ['Group', 'Videos', 'Audios', '历史分组'].includes(String(node.title || ''));
 }
+/* 分组归属表（nodeId → 分组对象）：一次 O(节点数 + 成员数) 建好，供 imageLayout / cull / 渲染整轮复用。
+   原来每次 smartGroupContainingNode 都 nodes.find + items.includes（O(n)），而 imageLayout 对每个媒体节点都会问一次 ——
+   250 节点就是每帧 6 万级次扫描（perf-lab profile：平移 3.1%、渲染更大）。
+   失效条件：nodes 数组换人 / 节点数变化（自动），以及分组 items 被改（显式调 invalidateSmartGroupOwnerCache；
+   render() 开头也会清一次，所以即使漏了某个改动点，下一次渲染就自愈）。 */
+var smartGroupOwnerCache = {map:null, nodesRef:null, count:-1};
+function invalidateSmartGroupOwnerCache(){ smartGroupOwnerCache.map = null; }
+function smartGroupOwnerMap(){
+    const cache = smartGroupOwnerCache;
+    if(cache.map && cache.nodesRef === nodes && cache.count === nodes.length) return cache.map;
+    const map = new Map();
+    for(let i = 0; i < nodes.length; i++){
+        const group = nodes[i];
+        if(!group || group.type !== 'smart-group' || !Array.isArray(group.items)) continue;
+        for(let j = 0; j < group.items.length; j++){
+            const id = group.items[j];
+            if(id && !map.has(id)) map.set(id, group);   /* 与旧实现同序：第一个包含它的分组胜出 */
+        }
+    }
+    cache.map = map; cache.nodesRef = nodes; cache.count = nodes.length;
+    smartRectCacheStats.groupMapBuilds = (smartRectCacheStats.groupMapBuilds || 0) + 1;
+    return map;
+}
 // 找到把某个节点作为成员的智能分组（用于双击组内图片时按整组左右切换）。
 function smartGroupContainingNode(nodeId){
     if(!nodeId) return null;
-    return nodes.find(n => isSmartGroupNode(n) && Array.isArray(n.items) && n.items.includes(nodeId)) || null;
+    return smartGroupOwnerMap().get(nodeId) || null;
 }
 // 节点所属的“分组作用域”ID：成员返回其分组，分组本体返回自身，否则空。
 // 用于连线合并/隐藏：同一作用域内部的连线属于分组内部关系，无需画出。
@@ -3976,6 +4096,10 @@ function syncNodeUiInverseScale(){
     world.style.setProperty('--nv-nodeui-inv', next);
 }
 function applyViewport(){
+    /* 这里只做「跟随指针必须立刻发生」的事：world 的 transform 本身。
+       其余外围同步（小地图 / 缩放条 / 浮动菜单 / 工具条夹取 / 编辑栏锚定）全部推迟到本帧末尾的
+       一次 rAF —— 它们原来逐个 pointermove 跑，6x 降速实测占平移 CPU 的 40% 以上
+       （小地图 29% + world 全量 querySelector 9%），而人眼对「晚一帧」毫无感知。 */
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
     syncNodeUiInverseScale();
     // world 被 transform:scale 缩放后，其内部带 backdrop-filter 的卡片（参数设置/合成卡等）
@@ -3984,10 +4108,28 @@ function applyViewport(){
     // 观感几乎无差），让卡片随矢量重新栅格化，保持清晰。
     world.classList.toggle('canvas-scaled', Math.abs(viewport.scale - 1) > 0.001);
     syncCanvasLod();
-    scheduleOffscreenCull();
-    shell.style.backgroundSize = '24px 24px';
-    shell.style.backgroundPosition = '0 0';
-    renderMinimap();
+    if(shell.style.backgroundSize !== '24px 24px') shell.style.backgroundSize = '24px 24px';
+    if(shell.style.backgroundPosition !== '0 0') shell.style.backgroundPosition = '0 0';
+    scheduleViewportFrameWork();
+}
+/* 视口变化的收尾工作：分两档。
+   ① chrome（小地图 / 缩放条 / 浮动菜单 / 工具条夹取）一帧一次 —— 它们跟着指针走，晚一帧就看得出来；
+   ② 视口外裁剪（nv-offscreen）单独节流：它只影响合成/绘制，不影响坐标、命中、导出，
+      连续缩放/平移时每帧都算 140 个 nodeRect（imageLayout 要解析媒体 URL）纯属浪费 ——
+      perf-lab 实测 100 节点 6x 缩放下 cull 自占 61%（550ms）、zoom p95 208.9ms。
+      现在：连续变化期间最多每 150ms 跑一次，视口停稳 150ms 后一定补跑一次兜底。 */
+var viewportFrameRaf = 0;
+function scheduleViewportFrameWork(){
+    if(viewportFrameRaf) return;
+    viewportFrameRaf = requestAnimationFrame(ts => {
+        viewportFrameRaf = 0;
+        noteSmartFrameInterval(ts);
+        syncViewportChrome(nodeRectFrameCache());
+        scheduleOffscreenCull();
+    });
+}
+function syncViewportChrome(rectOf){
+    renderMinimap(rectOf);
     updateZoomBarLevel();
     /* 菜单是 fixed + 挂 body 的浮层，不跟节点走：画布缩放/平移后重新贴回锚点 */
     if(document.querySelector('.smart-tool-portal-host')) syncSmartToolPortals();
@@ -4028,18 +4170,23 @@ function viewportCenter(){
         y:(shell.clientHeight / 2 - viewport.y) / viewport.scale
     };
 }
-function renderMinimap(){
+/* 小地图默认是隐藏的（smart-canvas.css 末尾 #minimap{display:none}，只有 body 带 canvas-minimap-visible
+   才显示）。隐藏时 renderMinimap 仍会把 140 个 .minimap-node 重建一遍 —— 6x 降速实测占平移 CPU 的 29%，
+   全部是白干。可见性只看 body class（不量尺寸、不碰 getComputedStyle），隐藏态直接 0 工作量。 */
+function smartMinimapVisible(){ return document.body.classList.contains('canvas-minimap-visible'); }
+function renderMinimap(rectOf){
     if(!minimapContent || !minimapViewport) return;
     smartArrangeBtn?.classList.toggle('visible', selectedNodeIds().length > 0);
     syncConcatVideosButton();
     syncPickSelectedButton();
+    if(!smartMinimapVisible()) return;
     const width = minimapContent.clientWidth || 170;
     const height = minimapContent.clientHeight || 108;
     const viewW = shell.clientWidth / viewport.scale;
     const viewH = shell.clientHeight / viewport.scale;
     const viewX = -viewport.x / viewport.scale;
     const viewY = -viewport.y / viewport.scale;
-    const rects = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID).map(nodeRect);
+    const rects = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID).map(n => rectOf ? rectOf(n) : nodeRect(n));
     rects.push({x:viewX, y:viewY, width:viewW, height:viewH});
     const minX = Math.min(...rects.map(r => r.x), -200);
     const minY = Math.min(...rects.map(r => r.y), -200);
@@ -4063,6 +4210,18 @@ function renderMinimap(){
     minimapContent.innerHTML = `${nodeHtml}<div id="minimapViewport" class="smart-minimap-viewport" style="left:${view.left}px;top:${view.top}px;width:${view.width}px;height:${view.height}px"></div>`;
     minimapViewport = document.getElementById('minimapViewport');
 }
+/* 小地图开关在 canvas-rail.js 里只切 body class，不会回调本文件：这里盯一下，打开时立刻补画一次
+   （否则要等到下一次平移/渲染才有内容）。只在 class 真变化时干活。 */
+(function watchSmartMinimapVisibility(){
+    if(!document.body || typeof MutationObserver === 'undefined') return;
+    let wasVisible = smartMinimapVisible();
+    new MutationObserver(() => {
+        const visible = smartMinimapVisible();
+        if(visible === wasVisible) return;
+        wasVisible = visible;
+        if(visible) renderMinimap();
+    }).observe(document.body, {attributes:true, attributeFilter:['class']});
+})();
 function minimapEventToWorld(event){
     if(!smartMinimapState) renderMinimap();
     const state = smartMinimapState;
@@ -7352,9 +7511,12 @@ function initChatModel(){
     var allModels = [];
     (apiProviders||[]).forEach(function(p){
         if(!p.enabled) return;
+        /* 与视频/音频下拉同一口径：没配 Key 的平台不进对话模型列表（has_key 缺省的老数据不过滤） */
+        if(p.has_key === false) return;
+        /* 对话下拉只放能对话的模型：chat_models → 平台自声明的 models；
+           不再拿 image_models 兜底（生图模型不能对话，选上去必然报「模型错误」） */
         var models = p.chat_models || [];
         if(!models.length) models = p.models || [];
-        if(!models.length && p.image_models) models = p.image_models;
         if(!models.length && p.model_protocols) models = Object.keys(p.model_protocols);
         models.forEach(function(m){
             if(!allModels.some(function(x){ return x.name === m && x.provider === p.id; })) allModels.push({name:m, provider:p.id});
@@ -8032,7 +8194,7 @@ function createChatMsgEl(role){
     actions.innerHTML = '<button type="button" class="chat-msg-act" data-chat-act="copy" title="复制这条消息">复制</button>' +
         (role === 'user' ? '<button type="button" class="chat-msg-act" data-chat-act="edit" title="编辑后重发" hidden>编辑</button>' : '') +
         (role === 'assistant' ? '<button type="button" class="chat-msg-act" data-chat-act="retry" title="重试上一条消息" hidden>重试</button>' : '') +
-        (role === 'assistant' ? '<button type="button" class="chat-msg-act" data-chat-act="branch" title="从此处分支"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8.2 6h7.6M6 8.2v2.6a3 3 0 0 0 3 3h1.8M18 8.2v2.6a3 3 0 0 1-3 3h-1.8"/></svg>从此处分支</button>' : '');
+        (role === 'assistant' ? '<button type="button" class="chat-msg-act" data-chat-act="branch" title="从此处分支"><svg data-icon="branch" class="nv-i nv-i-branch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8.2 6h7.6M6 8.2v2.6a3 3 0 0 0 3 3h1.8M18 8.2v2.6a3 3 0 0 1-3 3h-1.8"/></svg>从此处分支</button>' : '');
     div.appendChild(actions);
     return {div:div, bubble:bubble};
 }
@@ -8636,7 +8798,7 @@ function typewriteText(el, text, done){
     }, 22);
 }
 // ── 思考动画：闪光图标（呼吸）+ 微光扫过的文案 + 秒表（ThoughtLine 风格，纯原生实现）──
-const THOUGHT_LINE_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>';
+const THOUGHT_LINE_GLYPH = '<svg viewBox="0 0 24 24" data-icon="sparkles" class="nv-i nv-i-sparkles" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>';
 /* 计时起点放模块级 Map：render 会重建节点 DOM，而 node 字段会被 canvasForStorage 落盘。
    key = 聊天节点 id / 'agent'（智能画布助手气泡），运行结束时由调用方 delete。 */
 const thoughtLineStarts = new Map();
@@ -8848,7 +9010,8 @@ chatArtifactsMount(); // 助手顶部「产物」入口 + 画布产物面板
 ensureChatSkillMentions(); // @ 技能候选：先预取 capabilities，打开 @ 时直接分组
 initAgentMemoryUi();
 // ── V2 Phase 5C: /api/agent/run 流式 Agent（SSE + 逐步落图）──
-var AGENT_RUN_MAX_STEPS = 12;
+/* 0 = 不限步数：长任务由服务端「运行时长 + 轮次 + 连续无进展」刹车，不再有 12 步硬上限 */
+var AGENT_RUN_MAX_STEPS = 0;
 /* 断流续传策略：最多 5 次，退避 1s/2s/4s/8s/15s（纯常量 + 纯函数，便于单测） */
 var AGENT_RESUME_MAX_ATTEMPTS = 5;
 var AGENT_RESUME_DELAYS = [1000, 2000, 4000, 8000, 15000];
@@ -9817,10 +9980,61 @@ function agentRunAssistantBubble(card, text){
     document.getElementById('chatMessages').appendChild(parts.div);
     parts.div.scrollIntoView({behavior:'smooth', block:'end'});
 }
+/* ── 流式画布 ops（助手 / 合成面板下发的 nodes_patch）──
+   以前每来一个增量就 render() 整画布：250 节点下每次都要给全部节点重算 HTML 模板 + 重建图标 + 重新量尺寸，
+   perf-lab 在 6x 下测得流式 p95 数百 ms。这里分两档：
+   ① 纯文字增量（只改 text/outputText 的已有节点）：不动结构，直接刷该节点的文字 DOM（1ms 级），零 render；
+   ② 其它（结构/连线/新增/删除）：用 rAF 合并，一帧最多一次 render()。
+   文字增量结束后再过 200ms 补一次 render()，让 Markdown、节点自动高度、角标这些跟着落定。 */
+const SMART_OPS_TEXT_KEYS = ['text', 'outputText'];
+const SMART_OPS_TEXT_SETTLE_MS = 200;
+var smartOpsRenderRaf = 0;
+var smartOpsSettleTimer = 0;
+function scheduleAgentOpsRender(){
+    if(smartOpsRenderRaf) return;
+    smartOpsRenderRaf = requestAnimationFrame(function(){
+        smartOpsRenderRaf = 0;
+        render();
+    });
+}
+function scheduleStreamingTextSettle(){
+    if(smartOpsSettleTimer) clearTimeout(smartOpsSettleTimer);
+    smartOpsSettleTimer = setTimeout(function(){
+        smartOpsSettleTimer = 0;
+        render();
+    }, SMART_OPS_TEXT_SETTLE_MS);
+}
+/* 只刷一个节点的文字 DOM，返回是否刷成功（刷不动就由调用方退回整画布 render）。 */
+function paintStreamingNodeText(node){
+    if(!node) return false;
+    const el = world.querySelector('.image-node[data-id="' + CSS.escape(node.id) + '"]');
+    if(!el) return false;
+    if(node.type === 'smart-prompt'){
+        /* 聊天模式显示的是对话记录，不是这段文字，交给整画布 render */
+        if(node.llmTab === 'chat') return false;
+        paintPromptStreamSnapshot(node, String(node.outputText || node.llmInstruction || node.text || ''));
+        return true;
+    }
+    if(node.type === 'smart-text'){
+        const card = el.querySelector('.smart-text-card');
+        const preview = el.querySelector('.smart-text-preview');
+        if(!card || !preview) return false;
+        const own = smartTextOwnText(node).trim();
+        const text = own || smartTextUpstreamText(node).trim();
+        card.classList.toggle('is-empty', !text);
+        preview.innerHTML = smartTextFlowHtml(text);
+        const foot = card.querySelector('.smart-text-foot span');
+        if(foot) foot.textContent = trf('smart.textNodeCount', {n: text.length});
+        return true;
+    }
+    return false;
+}
 function applyAgentCanvasOps(ops){
     // 立即落图：把服务端 ops 合进本地 nodes/connections，复用 render()，不另造渲染
     if(!ops || typeof ops !== 'object') return 0;
     var changed = 0;
+    var textOnlyPatch = true;
+    var patchedNodeIds = [];
     var removes = Array.isArray(ops.nodes_remove) ? ops.nodes_remove.map(String) : [];
     if(removes.length && Array.isArray(nodes)){
         var dead = new Set(removes);
@@ -9852,6 +10066,10 @@ function applyAgentCanvasOps(ops){
         if(!p || !p.id) return;
         var set = (p.set && typeof p.set === 'object') ? p.set : {};
         var unset = Array.isArray(p.unset) ? p.unset : [];
+        /* 快路径只认「纯文字字段、无 unset」；其它字段一律走整画布 render（保守） */
+        if(unset.length) textOnlyPatch = false;
+        Object.keys(set).forEach(function(k){ if(SMART_OPS_TEXT_KEYS.indexOf(k) === -1) textOnlyPatch = false; });
+        patchedNodeIds.push(p.id);
         // 基线跟着服务器走（就算本地因为用户在打字没应用，基线也要是服务器的样子）
         var baseRaw = smartServerBaseNodes.get(p.id);
         if(baseRaw){
@@ -9905,13 +10123,28 @@ function applyAgentCanvasOps(ops){
         });
         changed += before - canvas.connections.length;
     }
+    if(removes.length || upserts.length || connUp.length || connRm.length) textOnlyPatch = false;
     if(changed){
+        invalidateSmartGroupOwnerCache();
         if(refreshActive){
             // 编辑栏正开着被改的节点：重新从节点读一遍提示词和参数（先清掉当前绑定，避免把旧输入存回节点）
             lastComposerNodeId = '';
             updateComposer();
         }
-        render();
+        var fastPathDone = false;
+        if(textOnlyPatch && patchedNodeIds.length){
+            var painted = 0;
+            patchedNodeIds.forEach(function(id){
+                var node = nodes.find(function(n){ return n.id === id; });
+                if(node && paintStreamingNodeText(node)) painted += 1;
+            });
+            fastPathDone = painted === patchedNodeIds.length;
+            if(fastPathDone){
+                smartRectCacheStats.textPatches = (smartRectCacheStats.textPatches || 0) + 1;
+                scheduleStreamingTextSettle();
+            }
+        }
+        if(!fastPathDone) scheduleAgentOpsRender();
         if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
         // 助手登记的生成任务：节点上立刻显示进度，并由前端自己轮询收尾
         if(typeof resumeSmartPendingTasks === 'function') resumeSmartPendingTasks().catch(error => console.error('[smart-canvas] 待处理任务恢复入口失败', error));
@@ -10103,13 +10336,28 @@ function agentRunHandleEvent(card, name, data){
         refreshIcons();
         return;
     }
-    if(name === 'round_start'){ agentRunRound(card, ev.round); return; }
+    if(name === 'waiting'){
+        // 服务端在等生成任务出结果（经典画布自动等待）：先回一句进度，别让卡片停在「正在执行」
+        agentRunSetStatus(card, 'waiting', ev.text || '等待生成结果…');
+        return;
+    }
+    if(name === 'round_start'){
+        // 上一轮可能停在 waiting：新一轮开始就说明已经恢复执行
+        agentRunSetStatus(card, 'running', agentRunStatusText('running'));
+        agentRunRound(card, ev.round);
+        return;
+    }
     if(name === 'vision'){
         // 看图说明：直接给模型看 / 先转成文字 / 看不了，都在运行卡里写一句，不让用户以为模型看过图
         if(ev.text){ card._run.visionText = ev.text; agentRunNote(card, ev.text, ev.mode === 'direct' ? '' : 'warn'); }
         return;
     }
-    if(name === 'step_start'){ agentRunStepStart(card, ev); return; }
+    if(name === 'step_start'){
+        // 等待结果之后开始下一步：状态从 waiting 恢复成执行中
+        agentRunSetStatus(card, 'running', agentRunStatusText('running'));
+        agentRunStepStart(card, ev);
+        return;
+    }
     if(name === 'step_result'){ agentRunStepResult(card, ev); return; }
     if(name === 'artifact_updated'){
         agentArtifactsAdd(card, ev.files);
@@ -14149,6 +14397,9 @@ async function loadCanvas(){
         if(settings.comfy_workflow && !settings.comfyWorkflow) settings.comfyWorkflow = settings.comfy_workflow;
         if(settings.comfy_params && !settings.comfyParams) settings.comfyParams = settings.comfy_params;
         updateProviderModels();
+        /* 旧画布迁移：可运行节点没有 runSettings 时，用“这个类型的最近设置 / 画布默认设置”深拷贝写死一份。
+           不提示、不进撤销；有改动随自动保存落盘；已经写死的节点不动（重复载入幂等）。 */
+        const seededNodeSettings = seedMissingSmartNodeRunSettings();
         // 旧版本可保存几乎不可见的视口：缩放极小（<0.1 时节点已无法看清和操作）时，重新适配内容
         /* 视口缩得太小，或者恢复的位置上一个节点都看不到（例如停在 200% 的空白处），都重新适配全部内容 */
         if(nodes.length && (viewport.scale < 0.1 || !viewportShowsAnySmartNode())) fitAllNodesViewport();
@@ -14165,10 +14416,10 @@ async function loadCanvas(){
             centerViewportOnWorldPoint({x:r.x + r.width / 2, y:r.y + r.height / 2});
         }
         render();
-        if(cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers || healedGroupFrames) scheduleSave();
+        if(cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers || healedGroupFrames || seededNodeSettings) scheduleSave();
         /* 记下刚加载的内容签名：之后只有内容真的变了才会保存。载入时做过自愈的，签名留空，保证自愈结果一定落盘 */
         canvas.nodes = nodes;
-        lastSavedContentSig = (cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers || healedGroupFrames)
+        lastSavedContentSig = (cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers || healedGroupFrames || seededNodeSettings)
             ? '' : canvasContentSignature(canvasForStorage());
         resumeSmartPendingTasks().catch(error => console.error('[smart-canvas] 待处理任务恢复入口失败', error));
         resumeJimengPendingNodes();
@@ -14241,29 +14492,32 @@ async function saveCanvas(){
     canvas.nodes = nodes;
     canvas.settings = settingsForStorage(canvasDefaultSmartSettings || initialSmartSettings);
     canvas.viewport = {...viewport};
-    const storageCanvas = canvasForStorage();
+    const storageCanvas = canvasForStorageShallow();
+    /* 签名和请求体都从同一份 storageCanvas 出：没变化时只花这一次签名序列化就返回
+       （原来固定 3 次全量序列化：深拷 1 次 + 签名 1 次 + 请求体 1 次）。 */
     const contentSig = canvasContentSignature(storageCanvas);
     if(contentSig && contentSig === lastSavedContentSig){
         persistViewportLocally();
         return;
     }
+    const saveBodyText = JSON.stringify({
+        title: storageCanvas.title || tr('smart.title'),
+        icon: storageCanvas.icon || 'sparkles',
+        nodes: storageCanvas.nodes || [],
+        connections: storageCanvas.connections || [],
+        viewport: storageCanvas.viewport || {x:0, y:0, scale:1},
+        logs: storageCanvas.logs || [],
+        settings: storageCanvas.settings,
+        base_updated_at: storageCanvas.updated_at || canvas.updated_at || 0,
+        client_id: smartClientId
+    });
     setSmartSaveState('saving');
     canvasSyncInFlight = true;
     try {
         const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}`, {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                title:storageCanvas.title || tr('smart.title'),
-                icon:storageCanvas.icon || 'sparkles',
-                nodes:storageCanvas.nodes || [],
-                connections:storageCanvas.connections || [],
-                viewport:storageCanvas.viewport || {x:0,y:0,scale:1},
-                logs:storageCanvas.logs || [],
-                settings:storageCanvas.settings,
-                base_updated_at:storageCanvas.updated_at || canvas.updated_at || 0,
-                client_id:smartClientId
-            })
+            body:saveBodyText
         });
         if(res.ok){
             lastSavedContentSig = contentSig;
@@ -14525,6 +14779,44 @@ function pasteAssetsFromInbox(){
     toast(`已粘贴 ${created.length} 个素材到画布`);
     return true;
 }
+/* 画布助手「参考图入画布」：外部（canvas-assistant-bridge.js）只调 window.SmartCanvasInsertImages，
+   内部仍走 createImageNodeAt（视口中心铺开、整批一次撤销、建完选中）。传进来的 url 必须是已落库的本地地址。 */
+function insertSmartImagesFromExternal(list){
+    if(collabReadOnly){ collabNotifyReadOnly(); return []; }
+    const items = (Array.isArray(list) ? list : [])
+        .map(item => (typeof item === 'string' ? {url:item} : item))
+        .filter(item => item && item.url);
+    if(!items.length) return [];
+    const center = viewportCenter();
+    const cell = 300; // 世界坐标下的格距：多张按网格铺开，不叠在一起
+    const cols = Math.max(1, Math.min(items.length, Math.ceil(Math.sqrt(items.length))));
+    const rows = Math.ceil(items.length / cols);
+    const startX = center.x - (cols - 1) * cell / 2;
+    const startY = center.y - (rows - 1) * cell / 2;
+    pushUndo();
+    const created = [];
+    items.forEach((item, index) => {
+        const row = Math.floor(index / cols), col = index % cols;
+        const image = assetNodeImageFromItem({
+            url:item.url,
+            name:String(item.name || '').trim() || smartImageNameFromUrl(item.url),
+            width:Number(item.width) || undefined,
+            height:Number(item.height) || undefined,
+            kind:'image'
+        });
+        const node = createImageNodeAt({x:startX + col * cell, y:startY + row * cell}, [image], {skipUndo:true, select:false});
+        if(node) created.push(node.id);
+    });
+    if(!created.length) return [];
+    selectedId = created.length === 1 ? created[0] : '';
+    selectedIds = created.length > 1 ? created : [];
+    selectedImage = {nodeId:'', index:-1};
+    render();
+    scheduleSave();
+    return created;
+}
+window.SmartCanvasInsertImages = insertSmartImagesFromExternal;
+
 function duplicateForAltDrag(node, preserveConnections=false){
     const ids = (isNodeSelected(node.id) ? selectedNodeIds() : [node.id]);
     const sourceNodes = ids.map(id => nodes.find(n => n.id === id)).filter(Boolean);
@@ -15056,7 +15348,7 @@ function singleMediaHtml(img, w, h){
     if(isFileMediaItem(img) || isTextMediaItem(img)) return `<div class="node-img media-card media-file-card" style="width:${w}px;height:${h}px"><div class="media-card-icon"><i data-lucide="${isTextMediaItem(img) ? 'file-text' : 'file'}"></i></div><div class="media-card-title">${escapeHtml(img.name || (isTextMediaItem(img) ? 'Text' : 'File'))}</div><div class="media-card-sub">${isTextMediaItem(img) ? 'TEXT' : 'FILE'}</div></div>`;
     if(isAudioMediaItem(img)) return `<div class="node-img media-card media-audio-card" style="width:${w}px;height:${h}px"><div class="media-card-icon"><i data-lucide="file-audio"></i></div><div class="media-card-title">${escapeHtml(img.name || 'Audio')}</div><div class="media-card-sub">AUDIO</div><audio src="${escapeAttr(img.url || '')}" data-url="${escapeAttr(img.url || '')}" controls preload="metadata"></audio></div>`;
     if(isVideoMediaItem(img)) return `<div class="node-img media-card media-video-card" style="width:${w}px;height:${h}px">${isInlineVideoActive(img) ? smartVideoPlayerHtml(img.url || '') : `${smartVideoPreviewHtml(img, 768, 'alt=""')}<button class="smart-video-play" type="button" title="播放"><i data-lucide="play"></i></button>`}</div>`;
-    return smartPreviewImgHtml(img, 768, `class="node-img" draggable="false" style="width:${w}px;height:${h}px"`);
+    return smartPreviewImgHtml(img, smartNodePreviewWidth(Math.max(w, h)), `class="node-img" draggable="false" decoding="async" style="width:${w}px;height:${h}px"`);
 }
 function smartNodeHasLiveMedia(node){
     return Boolean(!node?.pending && (node?.images || []).some(img => img?.url));
@@ -15722,7 +16014,7 @@ function syncChatPersonaSelect(el, node){
    控制台（工具药丸 / INPUT / OUTPUT / 输出形式 / 运行）由 syncPromptConsoleToComposer
    在选中该节点时整块搬进下方编辑栏 —— 节点上不再堆按钮。 */
 /* 空态「文本生成」的四条杆图标：lucide 子集里没有这个形状，本地自绘一份 */
-const TEXT_LINES_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M4 10h16M4 15h16M4 20h9"/></svg>';
+const TEXT_LINES_GLYPH = '<svg data-icon="lines" class="nv-i nv-i-lines" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M4 10h16M4 15h16M4 20h9"/></svg>';
 /* outputKind 由 promptNodeBodyHtml 传进来（'prompt' | 'doc'）：不传就按生图提示词处理 ——
    这样这个函数本身不依赖输出类型判定链，单独抽出来测也不会缺依赖。 */
 function promptNodePreviewHtml(node, outputKind){
@@ -16841,7 +17133,7 @@ function smartLabelBodyHtml(node){
 }
 /* 空音频节点里的音符图标：lucide 子集没有 music，用同规格内联 SVG —— viewBox 24 / stroke-width 2 /
    currentColor / 圆头圆角，和 lucide 的摄像机（video）图标同一视觉；尺寸由 .smart-empty-icon 统一给 22px。 */
-const SMART_AUDIO_EMPTY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>';
+const SMART_AUDIO_EMPTY_ICON_SVG = '<svg data-icon="music" class="nv-i nv-i-music" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>';
 /* ── 音频播放器（结果态）─────────────────────────────────────────────
    整张卡片就是播放器：中间波形（细竖条，真实音频峰值）+ 细蓝色播放头，底部 上一首 / 播放 / 下一首。
    没有文件名、没有时长文字、也没有原生 <audio controls> 的样子 —— 音源是挂在 body 上的隐藏 audio。 */
@@ -24242,7 +24534,12 @@ function nodeAliasStyle(node){
     return `--alias-w:${Math.ceil(w)}px`;
 }
 function render(){
+    invalidateSmartGroupOwnerCache();
+    smartRectCacheStats.renders = (smartRectCacheStats.renders || 0) + 1;
     if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
+    /* 任意入口（新建 / 复制 / 模板 / 批量 / 助手建节点）把节点放进 nodes 后，第一次渲染就给它写死一份自己的设置；
+       之后“最近一次设置”只影响再往后新建的节点，已有节点不再跟着变。 */
+    if(seedMissingSmartNodeRunSettings()) scheduleSave();
     /* 节点 DOM 这一轮要重建：先把挂到 body 的菜单收回原位，避免浮层留在 body 上变成孤儿 */
     closeAllSmartToolPortals();
     rememberInlineVideoActivations();
@@ -25721,6 +26018,7 @@ function pruneSmartGroupMembershipsForNode(node){
     nodes.forEach(group => {
         if(!isSmartGroupNode(group) || !Array.isArray(group.items) || !group.items.includes(node.id)) return;
         group.items = group.items.filter(id => id !== node.id);
+        invalidateSmartGroupOwnerCache();
         changed = true;
     });
     return changed;
@@ -25747,6 +26045,7 @@ function deleteNode(id){
     nodes.forEach(node => {
         if(Array.isArray(node.inputNodeIds)) node.inputNodeIds = node.inputNodeIds.filter(inputId => !deleteIds.has(inputId));
         if(isSmartGroupNode(node) && Array.isArray(node.items)) node.items = node.items.filter(itemId => !deleteIds.has(itemId));
+        invalidateSmartGroupOwnerCache();
     });
     if(selectedId === id) selectedId = '';
     selectedIds = selectedIds.filter(selected => !deleteIds.has(selected));
@@ -29436,6 +29735,7 @@ function reorderInputThumb(currentNode, items, from, to, placement='before'){
         if(!sameOrderedIds(currentNode.items, next)){
             pushUndo();
             currentNode.items = next;
+            invalidateSmartGroupOwnerCache();
             if(inputThumbsRow) delete inputThumbsRow.dataset.thumbsSig;
             render();
             scheduleSave();
@@ -31717,6 +32017,8 @@ function createPendingOutputFromSource(sourceNode, expectedCount, meta, options=
         scale:MEDIA_NODE_DEFAULT_SCALE,
         created_at:Date.now()
     };
+    /* 结果槽：把本次请求的设置深拷贝一份写死，后续不再读别的节点/最近设置 */
+    output.runSettings = settingsForStorage(options.requestSettings || (hasSmartNodeRunSettings(sourceNode) ? sourceNode.runSettings : smartSettingsForNewNode(output)));
     output._selectAfterRunId = options.selectOutput ? output.id : sourceNode.id;
     nodes.push(output);
     if(options.connectSource === false) addConnection(sourceNode.id, output.id, 'flow');
@@ -34625,6 +34927,7 @@ function ungroupNode(groupId){
         nodes.forEach(node => {
             if(Array.isArray(node.inputNodeIds)) node.inputNodeIds = node.inputNodeIds.filter(id => id !== groupId);
             if(isSmartGroupNode(node) && Array.isArray(node.items)) node.items = node.items.filter(id => id !== groupId);
+            invalidateSmartGroupOwnerCache();
         });
         selectedIds = [...created.map(n => n.id), ...memberIds].filter(id => nodes.some(n => n.id === id));
         selectedId = selectedIds.length === 1 ? selectedIds[0] : '';
@@ -36863,7 +37166,7 @@ function syncComposerOptimizeButton(){
 /* 「优化提示词」的自绘图标：本地 lucide 子集里没有「文档 + 闪光」这个形状，直接内联 SVG，
    不走 data-lucide（refreshIcons 只认 [data-lucide]，不会把它换掉）。
    必须在下面那个立即执行的挂载之前定义：挂载时就要读它，const 有 TDZ。 */
-const PROMPT_OPTIMIZE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.2 3.2H5.6a2.4 2.4 0 0 0-2.4 2.4v12.8a2.4 2.4 0 0 0 2.4 2.4h12.8a2.4 2.4 0 0 0 2.4-2.4V9"/><path d="M6.4 8.8h7.4M6.4 12.8h10.4M6.4 16.8h6.2"/><path d="M18.4 0.5 19.67 4.03 23.2 5.3 19.67 6.57 18.4 10.1 17.13 6.57 13.6 5.3 17.13 4.03Z" fill="currentColor" stroke="none"/></svg>';
+const PROMPT_OPTIMIZE_ICON = '<svg viewBox="0 0 24 24" data-icon="optimize" class="nv-i nv-i-optimize" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.2 3.2H5.6a2.4 2.4 0 0 0-2.4 2.4v12.8a2.4 2.4 0 0 0 2.4 2.4h12.8a2.4 2.4 0 0 0 2.4-2.4V9"/><path d="M6.4 8.8h7.4M6.4 12.8h10.4M6.4 16.8h6.2"/><path d="M18.4 0.5 19.67 4.03 23.2 5.3 19.67 6.57 18.4 10.1 17.13 6.57 13.6 5.3 17.13 4.03Z" fill="currentColor" stroke="none"/></svg>';
 /* 编辑栏主输入框的「优化提示词」按钮：插在「运行」左边。HTML 里不新增节点，运行时挂上去。 */
 (function mountComposerOptimizeButton(){
     if(!runBtn || document.getElementById('composerOptimizeBtn')) return;
@@ -37818,7 +38121,11 @@ function canvasFxScheduleScanner(){
 }
 // 常驻低频兜底：任何节点进入生成态即可自举 rAF 特效循环（不依赖连线光束触发），
 // 特效循环运行时 canvasFxRunning 为 true 会自动跳过本扫描，开销可忽略
-canvasFxWatchTimer = setInterval(canvasFxScanner, 500);
+canvasFxWatchTimer = setInterval(() => {
+    /* 低性能模式：没有任何节点在生成 → 这次扫描无事可做（生成结束后的 .sb-frame 收尾由 render 触发的那次扫描负责） */
+    if(smartLowPerfActive && !nodes.some(node => node.running)) return;
+    canvasFxScanner();
+}, 500);
 /* ═══ 专业调色（image-adjust-editor.js）桥接：暴露 IIFE 内部能力 ═══ */
 window.imageAdjust = {
     currentSource: function () {
@@ -39778,7 +40085,23 @@ function ensureTableApi(){
         mediaKindForUpload: file => tableMediaKindForUrl(file && file.name),
         outputUrlValue: item => (typeof item === 'string' ? item : (item && item.url) || ''),
         isMissingAssetUrl: () => false,
-        canvasPreviewImgHtml: (url, size) => '<img src="' + tableEscapeUrl(url) + '"' + (size ? ' style="max-width:' + Number(size) + 'px"' : '') + '>',
+        /* 表格单元格里的图改走节点同款缩略图接口：真实画布里这些原图能到 5562×7140（解码约 159MB/张），
+           一个表格节点几十格就把集显显存打满。w 按格子显示尺寸×dpr 归一到 128/256/384/512（封顶 512）；
+           缩略图取不到时 onerror 回退原图。原图仍是唯一真源：导出 / lightbox / 生成都读 node.images，不受影响。 */
+        canvasPreviewImgHtml: (url, size, attrs) => {
+            const box = Math.max(16, Math.round(Number(size) || 256));
+            const dpr = Math.min(2, Math.max(1, Number(window.devicePixelRatio) || 1));
+            const tiers = [128, 256, 384, 512];
+            const want = box * dpr;
+            const px = tiers.find(t => t >= want) || 512;
+            const preview = tableEscapeUrl(smartMediaPreviewUrl(url, px));
+            const original = tableEscapeUrl(url);
+            const shrunk = preview !== original;
+            return '<img src="' + preview + '" data-preview-src="' + preview + '" data-original-src="' + original + '"'
+                + (size ? ' style="max-width:' + Number(size) + 'px"' : '')
+                + (shrunk ? ' loading="lazy" decoding="async" onerror="this.onerror=null;this.src=this.dataset.originalSrc"' : '')
+                + (attrs ? ' ' + attrs : '') + '>';
+        },
         canvasVideoPreviewHtml: url => '<video src="' + tableEscapeUrl(url) + '" muted playsinline></video>',
         responseErrorMessage,
         showErrorModal: text => toast(String(text || '出错了'), '!'),
@@ -39982,7 +40305,7 @@ function ensureTableApi(){
         codex: '<span class="nv-brand-mark is-openai" role="img" aria-label="Codex"></span>',
         workbuddy: '<img class="nv-brand-img is-workbuddy" src="/static/images/brands/workbuddy.svg" alt="WorkBuddy" width="16" height="16">',
         novai: '<img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="20" height="20">',
-        more: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-label="更多 Agent" role="img"><rect x="4" y="4" width="6" height="6" rx="1.2"/><rect x="14" y="4" width="6" height="6" rx="1.2"/><rect x="4" y="14" width="6" height="6" rx="1.2"/><rect x="14" y="14" width="6" height="6" rx="1.2"/></svg>'
+        more: '<svg data-icon="grid" class="nv-i nv-i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-label="更多 Agent" role="img"><rect x="4" y="4" width="6" height="6" rx="1.2"/><rect x="14" y="4" width="6" height="6" rx="1.2"/><rect x="4" y="14" width="6" height="6" rx="1.2"/><rect x="14" y="14" width="6" height="6" rx="1.2"/></svg>'
     };
     function logoOf(agent){ return AGENT_LOGOS[agent] || AGENT_LOGOS.more; }
     var agents = {
@@ -39999,7 +40322,7 @@ function ensureTableApi(){
     launch.setAttribute('role', 'menuitem');
     launch.title = '在 Agent 中打开';
     launch.setAttribute('aria-label', '在 Agent 中打开');
-    launch.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg><span>在 Agent 中打开</span><span class="nv-mcp-menu-state" hidden></span>';
+    launch.innerHTML = '<svg data-icon="sprout" class="nv-i nv-i-sprout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg><span>在 Agent 中打开</span><span class="nv-mcp-menu-state" hidden></span>';
     var morePanel = document.getElementById('canvasLeftMorePanel');
     var moreHead = morePanel ? morePanel.querySelector('.canvas-more-head') : null;
     if(morePanel) morePanel.insertBefore(launch, moreHead ? moreHead.nextSibling : morePanel.firstChild);
@@ -40010,7 +40333,7 @@ function ensureTableApi(){
     launchFallback.type = 'button';
     launchFallback.title = '在 Agent 中打开';
     launchFallback.setAttribute('aria-label', '在 Agent 中打开');
-    launchFallback.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg>';
+    launchFallback.innerHTML = '<svg data-icon="sprout" class="nv-i nv-i-sprout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg>';
     document.body.appendChild(launchFallback);
 
     var panel = document.createElement('section');
@@ -41219,12 +41542,162 @@ function smartLodCardHtml(node){
         ${text && !band ? `<div class="nv-lod-text">${escapeHtml(smartLodClip(text))}</div>` : ''}
     </div></div>`;
 }
-var smartCullRaf = 0;
-function scheduleOffscreenCull(){
-    if(smartCullRaf) return;
-    smartCullRaf = requestAnimationFrame(() => { smartCullRaf = 0; cullOffscreenNodes(); });
+/* ═══ 低性能模式（「流畅优先」）═══
+   目标机器：4 核 / 集显 / 8G。开不开由三处决定：
+   ① auto（默认）：hardwareConcurrency ≤ 4 或 deviceMemory ≤ 4，或首屏后一次性帧率采样的中位帧 > 22ms；
+   ② 用户手动：右上「更多 → 流畅优先」，写 localStorage 持久化（smooth = 强制开，full = 强制关）；
+   ③ 尊重 prefers-reduced-motion：系统要求减少动效时只关装饰动画（class smart-reduce-motion），
+      不替你决定要不要关磨砂。
+   开启后只做「降级不换脸」的三件事：节点卡片的磨砂关掉（底色本来就接近不透明）、
+   装饰性无限动画与生成光束停掉（进度 spinner 保留）、小地图在平移中降频。
+   关闭时只摘 class，不改任何 DOM 结构与样式规则。 */
+const SMART_PERF_MODE_KEY = 'novai_smart_perf_mode';
+const SMART_PERF_SAMPLE_FRAMES = 40;
+const SMART_PERF_SLOW_FRAME_MS = 24;
+var smartLowPerfActive = false;
+var smartPerfSampled = false;
+var smartPerfSampleSlow = false;
+function smartPerfStoredMode(){
+    try {
+        const value = localStorage.getItem(SMART_PERF_MODE_KEY);
+        return value === 'smooth' || value === 'full' ? value : 'auto';
+    } catch(e) { return 'auto'; }
 }
-function cullOffscreenNodes(){
+function smartPerfLowEndHardware(){
+    const cores = Number(navigator.hardwareConcurrency) || 8;
+    const memory = Number(navigator.deviceMemory) || 8;
+    return cores <= 4 || memory <= 4;
+}
+function smartPerfReducedMotion(){
+    try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e) { return false; }
+}
+function syncSmartPerfMenuState(){
+    const item = document.querySelector('[data-smart-perf-toggle]');
+    if(!item) return;
+    item.setAttribute('aria-checked', smartLowPerfActive ? 'true' : 'false');
+}
+function setSmartLowPerf(on){
+    const next = Boolean(on);
+    if(next === smartLowPerfActive) return;
+    smartLowPerfActive = next;
+    if(document.body) document.body.classList.toggle('smart-low-perf', next);
+    syncSmartPerfMenuState();
+}
+function applySmartPerfMode(){
+    const mode = smartPerfStoredMode();
+    if(mode === 'smooth'){ setSmartLowPerf(true); return; }
+    if(mode === 'full'){ setSmartLowPerf(false); return; }
+    setSmartLowPerf(smartPerfLowEndHardware() || smartPerfSampleSlow);
+}
+/* 首屏后只采样一次（40 帧，约 0.7s），之后不再常驻采样：避免探测自己耗电/掉帧。
+   采样要避开「刚渲染完」的抖动：延迟 1.5s 再开始，并丢掉 >100ms 的尖峰（GC / 首次布局），
+   剩下的算中位帧 —— 只有持续跟不上才判低配，避免高配机因为偶发抖动被误判。 */
+function sampleSmartPerfOnce(){
+    if(smartPerfSampled || smartPerfStoredMode() !== 'auto') return;
+    smartPerfSampled = true;
+    let last = 0;
+    const deltas = [];
+    const step = ts => {
+        if(last){
+            const delta = ts - last;
+            if(delta < 100) deltas.push(delta);
+        }
+        last = ts;
+        if(deltas.length < SMART_PERF_SAMPLE_FRAMES){ requestAnimationFrame(step); return; }
+        deltas.sort((a, b) => a - b);
+        smartPerfSampleSlow = deltas[Math.floor(deltas.length / 2)] > SMART_PERF_SLOW_FRAME_MS;
+        applySmartPerfMode();
+    };
+    setTimeout(() => requestAnimationFrame(step), 1500);
+}
+function initSmartPerfMode(){
+    if(smartPerfReducedMotion() && document.body) document.body.classList.add('smart-reduce-motion');
+    applySmartPerfMode();
+    const item = document.querySelector('[data-smart-perf-toggle]');
+    if(item){
+        item.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            /* 入口在左栏「更多」面板里（右上那组按钮在画布页被 #canvasTopRight{display:none} 收起了） */
+            const morePanel = document.getElementById('canvasLeftMorePanel');
+            if(morePanel) morePanel.hidden = true;
+            const menu = document.getElementById('canvasMoreMenu');
+            if(menu) menu.hidden = true;
+            const moreBtn = document.getElementById('canvasMoreBtn');
+            if(moreBtn){ moreBtn.setAttribute('aria-expanded', 'false'); moreBtn.classList.remove('is-open'); }
+            const next = !smartLowPerfActive;
+            try { localStorage.setItem(SMART_PERF_MODE_KEY, next ? 'smooth' : 'full'); } catch(e) {}
+            setSmartLowPerf(next);
+            toast(next ? '已开启「流畅优先」：减少模糊与动效' : '已关闭「流畅优先」');
+        });
+    }
+    syncSmartPerfMenuState();
+    setTimeout(sampleSmartPerfOnce, 0);
+}
+initSmartPerfMode();
+/* 同一次界面同步里 cull 和 minimap 都要 140 个 nodeRect；nodeRect 内部要 imageLayout（解析媒体 URL、
+   算分组归属），同一帧算两遍是纯浪费。缓存实例只活在一次同步调用栈里（不跨帧），不会拿到过期值。
+   hits/misses 可用 window.__smartPerfStats 查（自查用，不参与逻辑）。 */
+var smartRectCacheStats = {hits:0, misses:0};
+window.__smartPerfStats = smartRectCacheStats;
+function nodeRectFrameCache(){
+    const cache = new Map();
+    return node => {
+        const hit = cache.get(node.id);
+        if(hit){ smartRectCacheStats.hits += 1; return hit; }
+        smartRectCacheStats.misses += 1;
+        const rect = nodeRect(node);
+        cache.set(node.id, rect);
+        return rect;
+    };
+}
+/* 视口外裁剪的节流器：连续视口变化期间最多每 SMART_CULL_MIN_INTERVAL 跑一次，
+   停稳 SMART_CULL_SETTLE_DELAY 后补跑一次（保证最后一次视口位置被正确裁剪）。
+   首次进入画布仍由 render() 末尾直接跑一次，不受节流影响。
+   跳过 selected / dragging / 聚焦中节点的规则在 cullOffscreenNodes 内部，原样未动。 */
+const SMART_CULL_MIN_INTERVAL = 150;   /* 快机器：150ms（≈每 9 帧一次） */
+const SMART_CULL_SETTLE_DELAY = 150;
+/* 慢机器按实测帧长放大间隔：一次裁剪最多占掉约 1/3 帧时间。
+   6x 降速时 rAF 只有 6~8fps，固定 150ms 几乎等于「每帧都跑」——perf-lab 实测那正是缩放阶段
+   61% 的耗时来源；帧长 ~130ms 时间隔自动放到 ~380ms（≈3s 内 8 次），快机器仍是 150ms。 */
+const SMART_CULL_FRAME_BUDGET = 0.15;   /* 一次裁剪最多占 ~1/7 帧：6x 下约 450ms 一次 */
+const SMART_CULL_MAX_INTERVAL = 450;   /* 上限：离屏节点最多晚 450ms 收起，远小于半屏的裁剪余量 */
+var smartCullFrameEma = 16.7;
+var smartCullLastFrameTs = 0;
+function noteSmartFrameInterval(ts){
+    if(!ts) return;
+    if(smartCullLastFrameTs){
+        const delta = ts - smartCullLastFrameTs;
+        if(delta > 0 && delta < 600) smartCullFrameEma = smartCullFrameEma * 0.7 + delta * 0.3;
+    }
+    smartCullLastFrameTs = ts;
+}
+function smartCullMinInterval(){
+    const adaptive = Math.round(smartCullFrameEma / SMART_CULL_FRAME_BUDGET);
+    return Math.min(SMART_CULL_MAX_INTERVAL, Math.max(SMART_CULL_MIN_INTERVAL, adaptive));
+}
+var smartCullRaf = 0;
+var smartCullLastRunAt = 0;
+var smartCullSettleTimer = 0;
+function scheduleOffscreenCull(){
+    const now = performance.now();
+    if(now - smartCullLastRunAt >= smartCullMinInterval()) runOffscreenCull();
+    clearTimeout(smartCullSettleTimer);
+    smartCullSettleTimer = setTimeout(() => {
+        smartCullSettleTimer = 0;
+        runOffscreenCull();
+    }, SMART_CULL_SETTLE_DELAY);
+}
+function runOffscreenCull(){
+    if(smartCullRaf) return;
+    smartCullRaf = requestAnimationFrame(() => {
+        smartCullRaf = 0;
+        smartCullLastRunAt = performance.now();
+        smartRectCacheStats.cullRuns = (smartRectCacheStats.cullRuns || 0) + 1;
+        cullOffscreenNodes(nodeRectFrameCache());
+    });
+}
+function cullOffscreenNodes(rectOf){
     if(!world || !shell || smartExportingNow) return;
     const scale = safeScale(viewport.scale);
     const vw = shell.clientWidth / scale, vh = shell.clientHeight / scale;
@@ -41236,7 +41709,7 @@ function cullOffscreenNodes(){
         const node = byId.get(el.dataset.id);
         let off = false;
         if(node && !el.classList.contains('selected') && !el.classList.contains('dragging') && !el.contains(document.activeElement)){
-            const r = nodeRect(node);
+            const r = rectOf ? rectOf(node) : nodeRect(node);
             /* 工具条、外置文件名、生成中的标题行会伸出节点框外，四周再放 80px */
             off = r.x + r.width + 80 < x0 || r.x - 80 > x1 || r.y + r.height + 80 < y0 || r.y - 80 > y1;
         }
@@ -41254,6 +41727,14 @@ window.__smartAgentTestHooks = {
     busy: () => Boolean(chatSending || agentRunAbort),
     setLocal: (id, key, value) => { const n = nodes.find(x => x.id === id); if(n) n[key] = value; return Boolean(n); },
     applyOps: ops => applyAgentCanvasOps(ops),
+    /* 同步版：结构变化会等下一帧才 render（rAF 合并），要立刻断言 DOM 的测试用这个。 */
+    applyOpsNow: ops => { const n = applyAgentCanvasOps(ops); if(smartOpsRenderRaf){ cancelAnimationFrame(smartOpsRenderRaf); smartOpsRenderRaf = 0; } render(); return n; },
+    /* 保存等价性自检（只读）：同一次调用里分别给出深拷版和浅拷版的序列化结果，
+       用来证明 canvasForStorageShallow 与 canvasForStorage 的 JSON 逐字段一致。 */
+    storageJson: () => ({
+        deep: JSON.stringify(canvasForStorage()),
+        shallow: JSON.stringify(canvasForStorageShallow())
+    }),
     save: () => saveCanvas()
 };
 
@@ -41365,7 +41846,7 @@ function openSmartNodeMenu(event, nodeId){
     const rows = [];
     if(multi){
         const alignable = smartAlignableNodes().length;
-        const btn = mode => `<button type="button" class="nv-ctx-align" data-ctx-align="${mode}" title="${SMART_ALIGN_LABELS[mode]}" ${(mode.endsWith('dist') ? alignable < 3 : alignable < 2) ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${SMART_ALIGN_ICONS[mode]}</svg></button>`;
+        const btn = mode => `<button type="button" class="nv-ctx-align" data-ctx-align="${mode}" title="${SMART_ALIGN_LABELS[mode]}" ${(mode.endsWith('dist') ? alignable < 3 : alignable < 2) ? 'disabled' : ''}><svg data-icon="align-${mode}" class="nv-i nv-i-align-${mode}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${SMART_ALIGN_ICONS[mode]}</svg></button>`;
         rows.push(`<div class="nv-ctx-head">已选 ${ids.length} 个节点</div>`);
         rows.push(`<div class="nv-ctx-aligns">${['left','hcenter','right','top','vcenter','bottom'].map(btn).join('')}<span class="nv-ctx-sep"></span>${btn('hdist')}${btn('vdist')}</div>`);
         rows.push(smartMenuRow('arrange', 'layout-grid', '整理成网格'));

@@ -44,7 +44,8 @@ Content-Type: application/json
 * `focus` 可为空对象、可省略、可以是 `null`；它是「用户此刻的注意力」提示，后端**不据此做任何正确性判断**，
   只在 system prompt 里标注（选中节点会核对是否真实存在，不存在的单独提示「可能已过期」）。
 * 画布权威状态一律由后端 `load_canvas(canvas_id)` 读取，不信任前端传来的图。
-* `max_steps` 会被收敛到 `1..24`（默认 12），`run_start` 里回显的是生效值。
+* `max_steps` 缺省 / `null` / 0 / 负数 = **不限步数**（现在就是默认）；正数仍生效并收敛到 `AGENT_RUN_MAX_STEPS_CAP=24`，
+  `run_start` 里回显的是生效值（不限步数时是 0）。
 * 请求阶段的错误直接用 HTTP 状态码返回（此时还没开始流）：
   * 画布不存在/已删除 → 404 `{"detail":"画布不存在"}`
   * `instruction` 为空 → 422（pydantic 校验）
@@ -104,8 +105,12 @@ X-Accel-Buffering: no
 1. 每轮把 ①用户指令 ②最新画布摘要 ③本轮之前已执行的步骤与结果摘要（成功给关键返回字段，
    失败给 `error`+`code`）④最近一次失败原因 ⑤focus 回灌模型；模型返回：
    `{"thought":"…","steps":[{…}],"done":false,"message":""}` 或 `{"done":true,"message":"给用户的总结"}`。
-2. 上限：`max_steps`（默认 12，硬上限 24）+ 最多 **6 轮**模型调用；超限立即 `done`，
-   `status:"aborted"`，message 说明中断原因。
+2. 刹车：单次运行时长上限 `AGENT_RUN_MAX_SECONDS`（默认 3600 秒，env `NOVAI_AGENT_MAX_SECONDS`）
+   + 最多 **20 轮**模型调用（env `NOVAI_AGENT_MAX_ROUNDS`）；超限立即 `done`，`status:"aborted"`，
+   message 说明中断原因（时长超限的文案是「已达到运行时长上限 N 分钟，停止后续步骤」）。
+   步数默认不限；请求显式给正数 `max_steps` 时仍按 1..24 限制。纯等待/只读工具
+   （`check_task` / `get_canvas` / `list_canvases` / `list_templates` / `use_asset`，见 `AGENT_RUN_STEP_FREE_TOOLS`）
+   成功执行不占步数。
 3. 工具失败：错误回灌模型允许换招；**同一 `tool+args` 连续失败 2 次**后，后续相同调用直接发
    `step_result(ok:false, code:"skipped_after_failures")` 跳过，继续后面的步骤。
 4. **连续两轮没有任何成功步骤** → 结束，`status:"failed"`，message 如实说明（不会死循环）。
@@ -173,6 +178,11 @@ POST /api/agent/plan|preview|apply|rollback → 全部 200，响应结构与改�
 心跳（桩生产者空闲 16.5s）                 → 15.0s 收到注释行 ": ping"
 前端解析器联调（node 提取 __SSE_PARSER_START__ 段，7 字节小块喂真实流）→ 23/23 事件全解析、0 丢帧
 ```
+
+> 上面这组记录是「步数上限」改造之前跑的：当时 `max_steps` 默认 12、`check_task` 每轮都算一步。
+> 现在步数默认不限（缺省/0/负数），`check_task` 等只读/等待工具不计步，生成结果由服务端自动等出结果回灌
+> （经典画布 = 轮询 `task_get`；BEAT 仍由画布引擎的 `wait_canvas_results` 等），
+> 所以「round_start×5 → check_task×4」这类多次轮询不会再出现。`max_steps=1` 那条仍然成立（正数照旧生效）。
 
 ### 环境备注（与代码无关）
 

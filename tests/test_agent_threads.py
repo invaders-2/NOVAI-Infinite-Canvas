@@ -157,6 +157,81 @@ class ThreadForkTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class ThreadNewTests(unittest.TestCase):
+    """POST /api/agent/threads/new：新建空线程并切为当前；旧线程与消息不丢。"""
+
+    def setUp(self):
+        self.canvas_id = new_canvas("新对话画布")
+
+    def _new(self, canvas_id=None):
+        return CLIENT.post("/api/agent/threads/new",
+                           json={"canvas_id": canvas_id if canvas_id is not None else self.canvas_id})
+
+    def _threads(self):
+        return CLIENT.get("/api/agent/threads", params={"canvas_id": self.canvas_id}).json()
+
+    def test_seeds_first_thread_on_empty_canvas(self):
+        resp = self._new()
+        self.assertEqual(resp.status_code, 200, resp.text)
+        thread = resp.json()["thread"]
+        self.assertEqual(thread["title"], "对话 1")
+        self.assertEqual(thread["message_count"], 0)
+        self.assertEqual(thread["forked_from"], "")
+        self.assertEqual(resp.json()["active_id"], thread["id"])
+        self.assertEqual(self._threads()["active_id"], thread["id"])
+
+    def test_keeps_old_thread_and_messages(self):
+        seed_messages(self.canvas_id, 2)
+        old_id = self._threads()["threads"][0]["id"]
+        new_id = self._new().json()["thread"]["id"]
+        rows = self._threads()
+        self.assertEqual(rows["active_id"], new_id)
+        self.assertEqual([item["id"] for item in rows["threads"]], [old_id, new_id])
+        self.assertEqual([item["message_count"] for item in rows["threads"]], [2, 0])
+        old_rows = CLIENT.get("/api/agent/threads/%s/messages" % old_id,
+                              params={"canvas_id": self.canvas_id}).json()
+        self.assertEqual(old_rows["count"], 2)
+        self.assertEqual([item["content"] for item in old_rows["messages"]],
+                         ["第 1 句", "第 2 句"])
+
+    def test_append_lands_on_new_thread(self):
+        seed_messages(self.canvas_id, 1)
+        old_id = self._threads()["threads"][0]["id"]
+        new_id = self._new().json()["thread"]["id"]
+        main.agent_thread_append(self.canvas_id, [{"role": "user", "text": "新线程第一句"}])
+        new_rows = CLIENT.get("/api/agent/threads/%s/messages" % new_id,
+                              params={"canvas_id": self.canvas_id}).json()
+        self.assertEqual([item["content"] for item in new_rows["messages"]], ["新线程第一句"])
+        old_rows = CLIENT.get("/api/agent/threads/%s/messages" % old_id,
+                              params={"canvas_id": self.canvas_id}).json()
+        self.assertEqual([item["content"] for item in old_rows["messages"]], ["第 1 句"])
+
+    def test_titles_increment_without_collision(self):
+        self.assertEqual(self._new().json()["thread"]["title"], "对话 1")
+        self.assertEqual(self._new().json()["thread"]["title"], "对话 2")
+        rows = self._threads()["threads"]
+        renamed = CLIENT.post("/api/agent/threads/rename", json={
+            "canvas_id": self.canvas_id, "thread_id": rows[0]["id"], "title": "对话 3"})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        # 现有标题是「对话 3」「对话 2」：按数量算出来的「对话 3」已被占用，必须让开
+        self.assertEqual(self._new().json()["thread"]["title"], "对话 4")
+
+    def test_thread_cap_is_20(self):
+        with main._AGENT_THREAD_LOCK:
+            doc = main._agent_thread_doc_load(self.canvas_id)
+            while len(doc["threads"]) < main.AGENT_THREAD_MAX_THREADS:
+                doc["threads"].append(main._agent_thread_new_thread("占位线程"))
+            main._agent_thread_doc_save(self.canvas_id, doc)
+        resp = self._new()
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("线程过多", resp.json()["detail"])
+        self.assertEqual(len(self._threads()["threads"]), main.AGENT_THREAD_MAX_THREADS)
+
+    def test_validation_errors(self):
+        self.assertEqual(self._new(canvas_id="no-such-canvas").status_code, 404)
+        self.assertEqual(self._new(canvas_id="   ").status_code, 400)
+
+
 class ThreadHistoryPriorityTests(unittest.TestCase):
     """run 带的 thread_id 优先于请求里的 history。"""
 
@@ -415,10 +490,12 @@ class ThreadMessagesTests(unittest.TestCase):
         self.thread_id = CLIENT.get("/api/agent/threads",
                                     params={"canvas_id": self.canvas_id}).json()["threads"][0]["id"]
 
-    def _messages(self, thread_id=None, limit=None, canvas_id=None):
+    def _messages(self, thread_id=None, limit=None, canvas_id=None, before=None):
         params = {"canvas_id": canvas_id if canvas_id is not None else self.canvas_id}
         if limit is not None:
             params["limit"] = limit
+        if before is not None:
+            params["before"] = before
         return CLIENT.get("/api/agent/threads/%s/messages" % (thread_id or self.thread_id),
                           params=params)
 
@@ -460,6 +537,12 @@ class ThreadMessagesTests(unittest.TestCase):
         self.assertEqual(body["count"], 200)
         self.assertTrue(body["has_more"])
         self.assertEqual(body["messages"][-1]["content"], "m249")
+        self.assertEqual(body["start"], 50)
+        # 往上翻：before=50 拿更早的一页，翻到头 has_more=False
+        earlier = self._messages(limit=60, before=50).json()
+        self.assertEqual([earlier["messages"][0]["content"], earlier["messages"][-1]["content"]], ["m000", "m049"])
+        self.assertEqual(earlier["start"], 0)
+        self.assertFalse(earlier["has_more"])
 
     def test_thread_and_canvas_404(self):
         missing_thread = self._messages(thread_id="no-such-thread")

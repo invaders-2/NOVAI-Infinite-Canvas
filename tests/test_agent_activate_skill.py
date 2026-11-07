@@ -56,6 +56,18 @@ def write_custom_skill(skill_id, prompt_text, enabled=True):
 
 
 class SkillIndexPromptTests(unittest.TestCase):
+    # 内置技能 2026-11 已全部下线：索引 / 全文注入改用两条自定义技能来测
+
+    def setUp(self):
+        self._paths = [write_custom_skill("index-skill-a", "技能 A 的执行手册：" + "甲" * 300),
+                       write_custom_skill("index-skill-b", "技能 B 的执行手册：" + "乙" * 300)]
+
+    def tearDown(self):
+        for path in self._paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     def test_index_mode_lists_enabled_skills_and_instruction(self):
         skills = [s for s in SKILLS.load_skills() if s.get("enabled")]

@@ -270,3 +270,18 @@
 - 素材的独立分享（不经过画布引用、按素材粒度授权/公开链接）仍不做；旧素材（不在 users/ 下）仍公共只读。
 - M7 只收口 API 设置入口；ComfyUI / RunningHub 等独立设置页及其接口本轮未改。
 - 头像只支持 png/jpg/webp、≤2MB，无裁剪/多尺寸；前端按 `avatar_url` 自行缩放展示。
+
+## 可选登录（2026-11-07）
+
+- 新增模式 `NOVAI_AUTH_MODE=off|optional|required`，**默认 optional**：
+  - optional：不登录照常本机使用（不拦截、不按账号隔离，行为同原来的 auth-off）；能注册 / 登录，登录只带上身份；
+  - required：等同原来的 `NOVAI_AUTH_ENABLED=1`（全站拦截 + 按账号隔离）；
+  - off：没有账号体系（`NOVAI_AUTH_DISABLED=1` 也是 off，优先级最高）。
+- `service.auth_enabled()` 只在 required 为真（所有门禁 / 隔离代码不变）；账号接口改用 `service.accounts_enabled()`。
+- 注册：`auth_settings.invite_required`（默认需要邀请码）；管理员 `GET/PUT /api/admin/auth-settings {invite_required}` 切换开放注册；
+  开放注册时填了邀请码仍按邀请码角色注册；库里还没有任何账号时第一个注册的直接是管理员（不需要邀请码）。
+- 公开 `GET /api/auth/config` → `{auth_mode, accounts_enabled, invite_required, has_users}`；
+  `/api/auth/me` 增加 `auth_mode`、`logged_in`（optional 下 auth_enabled 仍为 false）。
+- `/login`、`/reset` 改由新版界面（static/v2，`web/src/shell/AuthDialog.vue`）提供，没构建出 v2 时退回旧静态页；
+  外壳里「我的」页可打开登录 / 注册弹层，管理员在「注册设置」里切换开放注册、生成邀请码。
+- 测试：`tests/test_auth_optional.py`；原来的 auth-off 用例显式设 `NOVAI_AUTH_MODE=off`。

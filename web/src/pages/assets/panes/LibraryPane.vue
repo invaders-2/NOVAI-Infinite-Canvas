@@ -2,6 +2,7 @@
 // 「素材 / 资产库」：左树 + 中间网格（上传卡、管理条、剪贴板条、分批渲染、框选）+ 右侧详情
 import { ref, computed, watch } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
+import AmTools from '../parts/AmTools.vue';
 import AssetCard from '../parts/AssetCard.vue';
 import UploadCard from '../parts/UploadCard.vue';
 import MenuSelect from '../parts/MenuSelect.vue';
@@ -45,6 +46,7 @@ function move(target) { if (target) run(A.moveSelected(target)); }
                 <div class="ch"><b>{{ A.viewTitle() }}</b><span>{{ A.viewSubtitle(items.length) }}</span></div>
                 <label class="nv-field"><NvIcon name="search" /><input v-model="L.query" type="search" placeholder="搜索素材" aria-label="搜索素材"></label>
                 <button type="button" class="nv-btn sm" :class="{ primary: L.manage }" @click="A.toggleManage()"><NvIcon name="list" />{{ L.manage ? '完成管理' : '批量管理' }}</button>
+                <AmTools />
             </div>
 
             <KindBar v-model="S.kind" :tabs="ktabs" />

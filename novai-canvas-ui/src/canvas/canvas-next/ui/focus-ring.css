@@ -1,0 +1,115 @@
+/* BEAT 焦点框：鼠标/触摸聚焦不画描边，键盘（Tab / Enter / 空格）仍保留可见焦点。
+   canvas-next.css 的 `.cn-root :focus-visible{outline:2px solid rgba(var(--ink),.7)}` 保持原样不动，
+   这里只做「输入模态」抑制：main.tsx 在 pointerdown 时给 <html> 打 data-input="pointer"，
+   keydown 时移除该属性；指针模态下清掉聚焦描边与 HextaUI 的 focus ring 变量。
+   规则只作用于 .cn-root（BEAT 画布），不影响智能画布 / 列表页等其他页面。 */
+:root[data-input="pointer"] .cn-root :is(button, a, summary, [role="button"], [tabindex]):focus,
+:root[data-input="pointer"] .cn-root :focus:not(:focus-visible) {
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000;
+}
+
+/* 发送/生成按钮（.send / .gp-act .send）例外：任何时候都不画外圈（鼠标、键盘 Tab、程序 focus 都不要）。
+   它本身已有柔影（.gp-act .send{box-shadow:0 1px 2px #00000029}），这里只去掉描边，不加任何 ring。 */
+.cn-root .send:focus,
+.cn-root .send:focus-visible,
+.cn-root .gp-act .send:focus,
+.cn-root .gp-act .send:focus-visible {
+  outline: none !important;
+}
+
+/* Tailwind 的 .ring 工具类（box-shadow: --tw-ring-shadow ... currentColor）和 BEAT 自己的转圈
+   .ring（canvas-next.css）同名，会在生成按钮的圆弧外面多画一个方框。hexta.css 已把同名 utility
+   重定义为空操作，这里再兜一层，保证产物里即使还有那条规则也不生效。 */
+.cn-root .send .ring,
+.cn-root i.ring {
+  box-shadow: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+}
+
+/* 生成中（.busy）只留旋转圆弧：不要圆形底、不要外框、不要阴影，hover/active/focus 各态一并压平。
+   背景来源是 agent-panel-v2.css 里 `#agent.ap2-agent .ap2-send.busy{background:var(--card-hi)}`
+   （特异性高于 canvas-next.css 的 .send.busy），所以这里统一用 !important 压掉；
+   hover 提示只走透明度，弧→停止方块的切换沿用 canvas-next.css 的 .ring/.sqr。空闲态黑圆按钮不受影响。 */
+.cn-root .send.busy,
+.cn-root .send.busy:hover,
+.cn-root .send.busy:active,
+.cn-root .send.busy:focus,
+.cn-root .send.busy:focus-visible {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  outline: none !important;
+  translate: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-inset-shadow: 0 0 #0000 !important;
+  --tw-inset-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+  --tw-shadow: 0 0 #0000 !important;
+}
+.cn-root .send.busy:hover { opacity: 0.82 !important; }
+
+/* 节点版本条（右上角）：空闲时贴右上角 8px；hover / 选中才让位 38px 给收藏星。
+   canvas-next.css 里 `.node:has(.favstar) .vstrip{right:38px}` 因为 .favstar 常驻 DOM（只是 display:none）
+   会一直命中，导致版本条永远被推到中间。这里只覆盖定位，不改 canvas-next.css 的既有规则。 */
+.cn-root .node:has(.favstar):not(:hover):not(.sel) .vstrip { right: 8px; }
+
+/* 悬浮球轮播气泡（#orbTip）：原来三层投影最外层 35% 黑，盖在画布上太沉；
+   改成两层更淡更贴的投影。只覆盖投影，圆角 / 内边距 / 字号不动，也不加描边。 */
+.cn-root #orbTip.float {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1), 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+.cn-root[data-theme="dark"] #orbTip.float {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+/* 连线浮出的操作条（#ebadge）：原来是接近实底的 var(--menu) + 一层 40% 黑影，盖在画布上太硬。
+   改成磨砂玻璃：半透底 + blur(24px) saturate(180%) + 两层柔和投影；圆角/内边距/字号/按钮都不动。 */
+.cn-root .ebadge {
+  background: color-mix(in srgb, var(--panel) 74%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 0;
+}
+.cn-root[data-theme="dark"] .ebadge {
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.34), 0 2px 8px rgba(0, 0, 0, 0.22);
+}
+
+/* 左上角标题胶囊（#tl）：原来是半透明浮层底，改成磨砂玻璃；高度 40 / 内边距 / 圆角都不动。 */
+.cn-root #tl.float.cap {
+  background: color-mix(in srgb, var(--panel) 74%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.07);
+  border: 0;
+}
+.cn-root[data-theme="dark"] #tl.float.cap {
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+/* 品牌 logo：20×20、contain、圆角 6；logo 本身纯黑，深色主题下反相成白 */
+.cn-root #tl .logo img.brand-logo { display: block; width: 20px; height: 20px; object-fit: contain; border-radius: 6px; }
+.cn-root[data-theme="dark"] #tl .logo img.brand-logo { filter: invert(1); }
+
+/* 左侧竖排工具栏（#lb）：原来近乎实底（浅色纯白 / 深色 #171717），改成和标题胶囊一致的磨砂玻璃；
+   圆角 24 / padding 6 / gap 6 不动，按钮 hover 的软底也不动。 */
+.cn-root #lb.float.cap {
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 0;
+}
+.cn-root[data-theme="dark"] #lb.float.cap {
+  background: color-mix(in srgb, var(--panel) 75%, transparent);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32), 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+/* 键盘模态下保持可见焦点：显式重申一次，避免以后有人用 :focus 规则盖掉 canvas-next.css 的 :focus-visible */
+:root:not([data-input="pointer"]) .cn-root :is(button, a, summary, [role="button"]):focus-visible {
+  outline: 2px solid rgba(var(--ink), 0.7);
+  outline-offset: 2px;
+}

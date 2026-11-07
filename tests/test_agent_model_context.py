@@ -121,7 +121,12 @@ class ModelContextTests(unittest.TestCase):
         self.assertIn("role", body["system_prompt_sections"])
         self.assertIn("canvas", body["system_prompt_sections"])
         self.assertIn("tools", body["system_prompt_sections"])
-        self.assertIn("skill_index", body["system_prompt_sections"])   # 没选中技能 → 索引模式
+        # 没选中技能 → 有可用技能时走索引模式；内置技能 2026-11 已下线，没有自定义技能时就不出索引段
+        has_skills = any(s.get("enabled") for s in main._skills_registry.load_skills())
+        if has_skills:
+            self.assertIn("skill_index", body["system_prompt_sections"])
+        else:
+            self.assertNotIn("skill_index", body["system_prompt_sections"])
         self.assertEqual(body["instruction_chars"], len(instruction))
         self.assertIsInstance(body["history_chars"], int)
         self.assertGreater(body["estimated_tokens"], 0)

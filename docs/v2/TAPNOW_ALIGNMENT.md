@@ -53,7 +53,7 @@
 | `history` | array | `[{role, text}]`，只认 user/assistant |
 | `provider` / `model` / `ms_model` | str | 对话模型选择 |
 | `image_provider` / `image_model` | str | 生图平台缺省值 |
-| `max_steps` | int | 默认 12，上限 `AGENT_RUN_MAX_STEPS_CAP=24` |
+| `max_steps` | int | 缺省 / 0 / 负数 = **不限步数**（默认）；正数仍生效并收敛到 `AGENT_RUN_MAX_STEPS_CAP=24`；纯等待/只读工具（`AGENT_RUN_STEP_FREE_TOOLS`）不计步 |
 | `mode` | str | `plan`（默认）/ `run` |
 | `approved_steps` | array | 用户点「执行」带回来的步骤 |
 | `skill_id` | str | 可选，最长 64；缺省空串 |
@@ -115,7 +115,8 @@ data: {"status": "placed", "text": "背景换成夜景，比例 16:9", "id": "ru
 | 事件保留 | `AGENT_RUN_BUS_MAX_EVENTS=1000` / `AGENT_RUN_BUS_TTL_SECONDS=600` / `AGENT_RUN_BUS_MAX_FINISHED=200` | 每 run 留最近 1000 条；已结束的 run 留 10 分钟且最多 200 个，谁先到清谁；运行中的不清 |
 | 插话上限 | `AGENT_RUN_STEER_MAX=10` / `AGENT_RUN_STEER_TEXT_MAX=2000` | 队列满 → 409 |
 | 心跳 | `AGENT_RUN_HEARTBEAT_SECONDS=15` | 空闲发 `: ping` 注释帧 |
-| 轮次/步数 | `AGENT_RUN_MAX_ROUNDS=6` / `AGENT_RUN_MAX_STEPS_CAP=24` | 超限以 `status=aborted` + 原因结束 |
+| 轮次/时长/步数 | `AGENT_RUN_MAX_ROUNDS=20`（env `NOVAI_AGENT_MAX_ROUNDS`）/ `AGENT_RUN_MAX_SECONDS=3600`（env `NOVAI_AGENT_MAX_SECONDS`，默认 60 分钟）/ `AGENT_RUN_MAX_STEPS_CAP=24` | 步数默认不限；每轮开头检查时长与轮次，超限以 `status=aborted` + 原因结束 |
+| 等生成结果 | `AGENT_RUN_TASK_WAIT_SECONDS`（image 600 / video 1800 / audio 300，其他 600）+ 3 秒轮询、15 秒 `waiting` 提示 | 经典画布（非 BEAT）一轮结束后服务端自动轮询 `task_get` 到终态，把「生成结果」写进 history 再进下一轮；BEAT 仍走 `wait_canvas_results` |
 | 总线生命周期 | 进程内字典 `_AGENT_RUN_BUS` | **单进程**；多 worker / 多机部署时续传会打到没有该 run 的进程 → 需要换外部存储（Redis 等） |
 | 会话/线程落盘 | `DATA_DIR/agent_sessions/*.json`、`DATA_DIR/agent_threads/{canvas_id}.json` | 运行记录与画布会话分开存 |
 

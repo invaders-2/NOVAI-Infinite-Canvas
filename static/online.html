@@ -6,16 +6,16 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>在线生图</title>
     <script>(function(){try{var u=new URLSearchParams(location.search).get('theme');var t=u||localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.143.1789606971"></script>
-    <script src="/static/vendor/js/lucide-subset.js?v=1.0.143.1789606971"></script>
-    <script src="/static/js/shared/icons.js?v=1.0.143.1792330467"></script>
-    <script src="/static/js/theme.js?v=1.0.143.1792474521"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.143.1790560477"></script>
-    <script src="/static/js/shared/size-policy.js?v=1.0.143.1792185305"></script>
-    <script src="/static/js/i18n.js?v=1.0.143.1790130330"></script>
-    <script src="/static/js/image-preview.js?v=1.0.143.1789606971"></script>
-    <script src="/static/js/history-bulk-manager.js?v=1.0.143.1789606971"></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.143.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2.0.00.1789606971"></script>
+    <script src="/static/vendor/js/lucide-subset.js?v=2.0.00.1789606971"></script>
+    <script src="/static/js/shared/icons.js?v=2.0.00.1793785599"></script>
+    <script src="/static/js/theme.js?v=2.0.00.1792474521"></script>
+    <script src="/static/js/shared/utils.js?v=2.0.00.1790560477"></script>
+    <script src="/static/js/shared/size-policy.js?v=2.0.00.1792185305"></script>
+    <script src="/static/js/i18n.js?v=2.0.00.1790130330"></script>
+    <script src="/static/js/image-preview.js?v=2.0.00.1789606971"></script>
+    <script src="/static/js/history-bulk-manager.js?v=2.0.00.1789606971"></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2.0.00.1789606971">
     <style>
         :root { --accent: #1c1c1e; --bg: #f9fafb; --card: #fff; --easing:cubic-bezier(0.4,0,0.2,1); }
         /* body 被 UI 缩放 transform 后底部可能露出 html 根区域，显式铺背景避免露出黑色底框 */
@@ -79,7 +79,7 @@
         .gallery-lightbox { background:rgba(255,255,255,.99); backdrop-filter:blur(33px) saturate(1.05); }
         @keyframes fadeIn { from{opacity:0} to{opacity:1} }
     </style>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.143.1790560477">
+    <link rel="stylesheet" href="/static/css/theme.css?v=2.0.00.1790560477">
     <style>
         html:not(.studio-theme-dark) body:not(.studio-theme-dark) #lightbox.gallery-lightbox {
             background: rgba(255,255,255,.99) !important;
@@ -87,7 +87,7 @@
             -webkit-backdrop-filter: blur(33px) saturate(1.05) !important;
         }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.143.1790560477">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.00.1793785603">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         body { background: var(--bg) !important; color: var(--text) !important; }
@@ -478,6 +478,8 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
                                 <option value="low" data-i18n="online.qualityLow">低</option>
                                 <option value="medium" data-i18n="online.qualityMedium">中</option>
                                 <option value="high" data-i18n="online.qualityHigh">高</option>
+                                <option value="xhigh" data-i18n="online.qualityXhigh">极高</option>
+                                <option value="max" data-i18n="online.qualityMax">Max</option>
                             </select>
                         </label>
                         <label id="countField" class="size-field">
@@ -787,6 +789,11 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
         // 键名按匹配优先级排列，model name 包含键名即命中
         const MODEL_SIZE_PRESETS = {
             'gpt-image-2.5-ext': apimartSizeSubset(['square','wide','story','landscape43','portrait43','landscape','portrait','landscape54','portrait45','ultrawide']),
+            // GPT-Image-2.6（REPORT A.2 文档确证）：ext 与 flare/sunburst 能力不同，三条独立条目、必须排在通用 'gpt-image-2' 之前。
+            // ext：10 比例、分辨率只有 1k（2k/4k 上游 403）；flare / sunburst：15 比例、1k/2k/4k，支持精确像素。
+            'gpt-image-2.6-ext': apimartSizeSubset(['square','wide','story','landscape43','portrait43','landscape','portrait','landscape54','portrait45','ultrawide'], ['1k']),
+            'gpt-image-2.6-flare': apimartSizeSubset(['square','portrait','portrait43','landscape43','landscape','story','wide','ultrawide','ultratall','portrait12','landscape21','landscape54','portrait45','landscape31','portrait13']),
+            'gpt-image-2.6-sunburst': apimartSizeSubset(['square','portrait','portrait43','landscape43','landscape','story','wide','ultrawide','ultratall','portrait12','landscape21','landscape54','portrait45','landscape31','portrait13']),
             'hy-image-v3.5-preview': apimartSizeSubset(['square','portrait','landscape','portrait43','landscape43','portrait45','landscape54','story','wide','ultrawide']),
             'flux-3-image-klein': apimartSizeSubset(APIMART_FLUX3_SIZE_KEYS),
             'flux-3-image': apimartSizeSubset(APIMART_FLUX3_SIZE_KEYS),
@@ -1201,13 +1208,32 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
             const qf = document.getElementById('qualityField');
             if(qf) qf.style.display = QUALITY_PROTOCOLS.has(proto) ? '' : 'none';
             const qs = document.getElementById('qualitySelect');
-            if(qs) qs.value = quality;
+            if(qs){ syncQualityOptions(); qs.value = quality; }
             // RunningHub 每次出图都是一次完整工作流运行，隐藏数量并固定为 1，避免误触发多次昂贵任务。
             if(proto === 'runninghub') outputCount = 1;
             const cf = document.getElementById('countField');
             if(cf) cf.style.display = (proto === 'runninghub') ? 'none' : '';
             const cs = document.getElementById('countSelect');
             if(cs) cs.value = String(outputCount);
+        }
+        // 质量档按模型名给：GPT-Image-2.5 / 2.6 系六档（auto/low/medium/high/xhigh/max），其余维持四档。
+        // 与 web/src/pages/online 的兜底规则一致（那边能拿到 /api/model-caps 时以接口 qualities 为准）。
+        const QUALITY_LEVELS_RICH = ['auto','low','medium','high','xhigh','max'];
+        const QUALITY_LEVELS_BASE = ['auto','low','medium','high'];
+        function qualityLevelsFor(model){
+            return /gpt-image-2\.[56]/.test(String(model || '').toLowerCase()) ? QUALITY_LEVELS_RICH : QUALITY_LEVELS_BASE;
+        }
+        function syncQualityOptions(){
+            const sel = document.getElementById('qualitySelect');
+            if(!sel) return;
+            const levels = qualityLevelsFor(selectedModel);
+            for(const opt of Array.from(sel.options)){
+                const on = levels.indexOf(opt.value) >= 0;
+                opt.hidden = !on;
+                opt.disabled = !on;
+            }
+            if(levels.indexOf(quality) < 0) quality = 'auto';
+            sel.value = quality;
         }
         function setQuality(next){ quality = next || 'auto'; }
         function setCount(next){ outputCount = Math.max(1, Math.min(4, parseInt(next, 10) || 1)); }
@@ -1330,6 +1356,7 @@ html.theme-dark #loadMoreTrigger:hover, html.studio-theme-dark #loadMoreTrigger:
         }
 
         function updateSizeUI(){
+            syncQualityOptions();
             const ratioSelect = document.getElementById('ratioSelect');
             const ratioField = document.getElementById('ratioField');
             const ratioCustomWidthInput = document.getElementById('ratioCustomWidth');

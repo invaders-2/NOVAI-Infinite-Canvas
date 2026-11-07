@@ -9,6 +9,9 @@ import {
 	RefreshCwIcon,
 	XIcon,
 } from "lucide-react"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/hexta/empty"
+import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/hexta/item"
+import { Skeleton } from "@/components/hexta/skeleton"
 import type { ArtifactList, ArtifactFile } from "./api"
 import { ARTIFACT_GROUPS, formatBytes, formatRelative } from "./format"
 
@@ -32,28 +35,30 @@ const GroupIcon = ({ kind }: { kind: string }) => {
 }
 
 const FileRow = ({ file }: { file: ArtifactFile }) => (
-	<div className="nvca-artifact-row">
-		<span className="nvca-artifact-kind">
+	<Item className="nvca-artifact-row" size="xs">
+		<ItemMedia className="nvca-artifact-kind">
 			<GroupIcon kind={file.kind} />
-		</span>
-		<div className="nvca-artifact-main">
-			<span className="nvca-artifact-name" title={file.name}>{file.name}</span>
-			<span className="nvca-artifact-meta">
+		</ItemMedia>
+		<ItemContent className="nvca-artifact-main">
+			<ItemTitle className="nvca-artifact-name" title={file.name}>{file.name}</ItemTitle>
+			<ItemDescription className="nvca-artifact-meta">
 				{formatBytes(file.size)}
 				{formatRelative(file.mtime) ? " · " + formatRelative(file.mtime) : ""}
-			</span>
-		</div>
-		<a
-			className="nvca-artifact-download"
-			href={file.url}
-			target="_blank"
-			rel="noreferrer noopener"
-			title={"在新标签打开 " + file.name}
-			aria-label={"下载 " + file.name}
-		>
-			<ChevronDownIcon className="nvca-i-xs nvca-artifact-download-icon" />
-		</a>
-	</div>
+			</ItemDescription>
+		</ItemContent>
+		<ItemActions>
+			<a
+				className="nvca-artifact-download"
+				href={file.url}
+				target="_blank"
+				rel="noreferrer noopener"
+				title={"在新标签打开 " + file.name}
+				aria-label={"下载 " + file.name}
+			>
+				<ChevronDownIcon className="nvca-i-xs nvca-artifact-download-icon" />
+			</a>
+		</ItemActions>
+	</Item>
 )
 
 export const ArtifactsSheet = ({
@@ -75,11 +80,14 @@ export const ArtifactsSheet = ({
 	const loading = state.status === "loading" && !data
 	const failed = state.status === "error" && !data
 
+	/* 侧栏贴右邻助手面板、不遮罩不抢焦点，所以外壳沿用非模态 aside；
+	   HextaUI 的 sheet/dialog 会强制遮罩 + 焦点陷阱，会把侧栏变成模态。 */
 	return (
-		<aside className="nvca-artifacts-sheet" aria-label="助手产物">
+		<aside className="nvca-artifacts-sheet nvca-sheet-v2" aria-label="助手产物">
 			<div className="nvca-sheet-head">
 				<div className="nvca-sheet-title">
 					<span>文件</span>
+					{files.length > 0 ? <span className="nvca-sheet-count">{files.length}</span> : null}
 				</div>
 				<div className="nvca-sheet-actions">
 					<button className="nvca-icon-btn" onClick={onReload} title="刷新产物" aria-label="刷新产物" type="button">
@@ -95,25 +103,37 @@ export const ArtifactsSheet = ({
 				<div className="nvca-sheet-skeleton" aria-label="正在加载产物">
 					{[0, 1, 2].map((index) => (
 						<div className="nvca-skeleton-row" key={index}>
-							<span className="nvca-skeleton-block nvca-skeleton-icon" />
-							<span className="nvca-skeleton-lines">
-								<span className="nvca-skeleton-block nvca-skeleton-line" />
-								<span className="nvca-skeleton-block nvca-skeleton-line is-short" />
-							</span>
+							<Skeleton className="nvca-skeleton-icon" />
+							<div className="nvca-skeleton-lines">
+								<Skeleton className="nvca-skeleton-line" />
+								<Skeleton className="nvca-skeleton-line is-short" />
+							</div>
 						</div>
 					))}
 				</div>
 			) : failed ? (
-				<div className="nvca-sheet-state is-error">
-					<AlertCircleIcon className="nvca-i-lg" />
-					<p>产物加载失败</p>
-					<span>{state.error || "网络错误"}</span>
-					<button className="nvca-btn ghost" onClick={onReload} type="button">重试</button>
-				</div>
+				<Empty className="nvca-sheet-state is-error" size="sm">
+					<EmptyMedia>
+						<AlertCircleIcon className="nvca-sheet-empty-icon" />
+					</EmptyMedia>
+					<EmptyHeader>
+						<EmptyTitle>产物加载失败</EmptyTitle>
+						<EmptyDescription>{state.error || "网络错误"}</EmptyDescription>
+					</EmptyHeader>
+					<EmptyContent>
+						<button className="nvca-btn ghost" onClick={onReload} type="button">重试</button>
+					</EmptyContent>
+				</Empty>
 			) : files.length === 0 ? (
-				<div className="nvca-sheet-state">
-					<p>暂无输出</p>
-				</div>
+				<Empty className="nvca-sheet-state" size="sm">
+					<EmptyMedia>
+						<FileIcon className="nvca-sheet-empty-icon" />
+					</EmptyMedia>
+					<EmptyHeader>
+						<EmptyTitle>暂无输出</EmptyTitle>
+						<EmptyDescription>助手生成的 HTML、表格、文档和图片会出现在这里</EmptyDescription>
+					</EmptyHeader>
+				</Empty>
 			) : (
 				<div className="nvca-sheet-body">
 					{groups.map((group) => (

@@ -36,18 +36,18 @@
     var PANEL_MIN_WIDTH = 360;
     var PANEL_GAP = 8;
     var PANEL_MARGIN = 12;
-    var USERS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 19v-1.6a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V19"/><circle cx="9" cy="7.4" r="3.4"/><path d="M22 19v-1.6a4 4 0 0 0-3-3.8"/><path d="M16.5 4.2a3.4 3.4 0 0 1 0 6.4"/></svg>';
-    var CLOSE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-    var REMOVE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-    var COPY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
-    var CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 6.5"/></svg>';
+    var USERS_ICON = '<svg data-icon="users" class="nv-i nv-i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 19v-1.6a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4V19"/><circle cx="9" cy="7.4" r="3.4"/><path d="M22 19v-1.6a4 4 0 0 0-3-3.8"/><path d="M16.5 4.2a3.4 3.4 0 0 1 0 6.4"/></svg>';
+    var CLOSE_ICON = '<svg data-icon="x" class="nv-i nv-i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    var REMOVE_ICON = '<svg data-icon="x" class="nv-i nv-i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    var COPY_ICON = '<svg data-icon="copy" class="nv-i nv-i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
+    var CHECK_ICON = '<svg data-icon="check" class="nv-i nv-i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 6.5"/></svg>';
     var EXPIRY_OPTIONS = [
         { days: 7, label: '7 天有效' },
         { days: 1, label: '1 天有效' },
         { days: 30, label: '30 天有效' },
         { days: 0, label: '永久有效' }
     ];
-    var CREDITS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 6.8v10.4"/><path d="M15 9.4c-.6-.9-1.7-1.3-3-1.3-1.8 0-3.1.8-3.1 2.1 0 2.8 6.2 1.4 6.2 4.1 0 1.3-1.3 2.1-3.1 2.1-1.3 0-2.4-.4-3-1.3"/></svg>';
+    var CREDITS_ICON = '<svg data-icon="credit" class="nv-i nv-i-credit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.4"/><path d="M12 6.8v10.4"/><path d="M15 9.4c-.6-.9-1.7-1.3-3-1.3-1.8 0-3.1.8-3.1 2.1 0 2.8 6.2 1.4 6.2 4.1 0 1.3-1.3 2.1-3.1 2.1-1.3 0-2.4-.4-3-1.3"/></svg>';
 
     var params = new URLSearchParams(location.search);
     var canvasId = params.get('id') || '';
@@ -514,7 +514,7 @@
             '<div class="collab-avatars" id="collab-avatars" aria-label="在线成员"></div>' +
             '<span class="collab-member-count" id="collab-member-count">0 人</span>' +
             '<button class="collab-share" id="collab-share-btn" type="button" aria-haspopup="dialog" title="分享与成员管理" aria-label="分享与成员管理">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.7l6.8-4.1"/><path d="M8.6 13.3l6.8 4.1"/></svg>' +
+            '<svg data-icon="share" class="nv-i nv-i-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.7l6.8-4.1"/><path d="M8.6 13.3l6.8 4.1"/></svg>' +
             '<span>分享</span></button>' +
             '<button class="collab-credits" id="collab-credits-btn" type="button" hidden aria-haspopup="dialog" aria-expanded="false" title="我的积分" aria-label="我的积分">' +
             CREDITS_ICON + '<span class="collab-credits-num" id="collab-credits-num">–</span></button>' +
@@ -871,7 +871,7 @@
             document.body.appendChild(banner);
         }
         banner.innerHTML =
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>' +
+            '<svg data-icon="lock" class="nv-i nv-i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>' +
             '<span>只读 · 由 <b>' + esc(ownerName || '画布所有者') + '</b> 分享</span>';
     }
 

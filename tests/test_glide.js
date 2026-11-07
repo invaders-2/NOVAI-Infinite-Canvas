@@ -263,7 +263,9 @@ const G = require('../static/js/shared/glide.js');
     ['static/legacy-canvas.html', 'static/smart-canvas.html', 'static/gpt-chat.html'].forEach(page => {
         const html = read(page);
         const cssTag = /<link rel="stylesheet" href="\/static\/css\/glide\.css\?v=([0-9.]+)"/.exec(html);
-        const jsTag = /<script src="\/static\/js\/shared\/glide\.js\?v=([0-9.]+)"><\/script>/.exec(html);
+        /* 允许 <script> 与 src 之间有属性（defer / async / crossorigin 等都要能用），
+           断言本意不变：页面引入了 glide.js，且 ?v= 是「VERSION.mtime」形式。 */
+        const jsTag = /<script\s+[^>]*src="\/static\/js\/shared\/glide\.js\?v=([0-9.]+)"/.exec(html);
         ok(!!cssTag, page + ' 引入 glide.css 且带 ?v= 版本号');
         ok(!!jsTag, page + ' 引入 shared/glide.js 且带 ?v= 版本号');
         /* 版本串的约定（main.py:2357 versioned_static_html / 2377 sync_static_html_versions）：

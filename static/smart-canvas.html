@@ -7,34 +7,38 @@
     <title data-i18n="smart.title">智能画布</title>
     <!-- 关键渲染路径优化：CSS 先于 JS 加载，浏览器可并行下载 CSS 和 JS -->
     <script>(function(){try{/* 跟随应用主题，首次默认浅色（与 canvas.html / index.html / theme.js 一致） */var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=1.0.143.1793421882">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.143.1790560477">
-    <link rel="stylesheet" href="/static/css/table-node.css?v=1.0.143.1791729997">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.143.1789606971">
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2.0.00.1793777416">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.00.1793785603">
+    <link rel="stylesheet" href="/static/css/table-node.css?v=2.0.00.1791729997">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2.0.00.1789606971">
     <!-- NOVAI 2.0 外观统一层：配色 / 状态色 / 字重对齐新前端，放在 glide.css 前面（glide.css 按约定必须最后），其余样式表之后 -->
-    <link rel="stylesheet" href="/static/css/nv2-skin.css?v=1.0.143.1791729997">
-    <link rel="stylesheet" href="/static/css/image-adjust.css?v=1.0.143.1791729997">
-    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.143.1789742566">
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.143.1789606971"></script>
-    <script defer src="/static/vendor/js/html-to-image.js?v=1.0.143.1789615756"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.143.1792330467"></script>
-    <script src="/static/js/theme.js?v=1.0.143.1792474521"></script>
-    <script defer src="/static/js/credits.js?v=1.0.143.1792848048"></script>
-    <script src="/static/js/user-menu.js?v=1.0.143.1792776481" defer></script>
-    <script src="/static/js/shared/utils.js?v=1.0.143.1790560477"></script>
-    <script src="/static/js/shared/size-policy.js?v=1.0.143.1792185305"></script>
-    <script src="/static/js/shared/media.js?v=1.0.143.1789606971"></script>
-    <script src="/static/js/shared/psd-writer.js?v=1.0.143.1790560477"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.143.1789606971"></script>
-    <script src="/static/js/shared/workflow-utils.js?v=1.0.143.1789606971"></script>
-    <script src="/static/js/shared/node-registry.js?v=1.0.143.1789606971"></script>
-    <script src="/static/js/shared/table-model.js?v=1.0.143.1792228719"></script>
-    <script src="/static/js/shared/table-node.js?v=1.0.143.1793421882"></script>
-    <script src="/static/js/shared/dropdown.js?v=1.0.143.1789746233"></script>
-    <script src="/static/js/shared/glide.js?v=1.0.143.1789742748"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.143.1789845865"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.143.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.143.1790130330"></script>
+    <link rel="stylesheet" href="/static/css/nv2-skin.css?v=2.0.00.1791729997">
+    <link rel="stylesheet" href="/static/css/image-adjust.css?v=2.0.00.1793777400">
+    <link rel="stylesheet" href="/static/css/glide.css?v=2.0.00.1789742566">
+    <script defer src="/static/vendor/js/lucide-subset.js?v=2.0.00.1789606971"></script>
+    <script defer src="/static/vendor/js/html-to-image.js?v=2.0.00.1789615756"></script>
+    <script defer src="/static/js/shared/icons.js?v=2.0.00.1793785599"></script>
+    <!-- 下面这批是纯全局定义（IIFE 只挂 window.X，执行时不读 DOM、不依赖首屏元素），
+         统一加 defer：HTML 解析不再被 13 个串行下载+执行的脚本卡住（首屏 body 里的 defer 脚本
+         也能更早被发现）。defer 之间严格按文档顺序执行，依赖顺序与原来一致；
+         唯一保留同步的是 theme.js（首屏上色要在 CSS 生效前跑完，避免闪白）。 -->
+    <script src="/static/js/theme.js?v=2.0.00.1792474521"></script>
+    <script defer src="/static/js/credits.js?v=2.0.00.1792848048"></script>
+    <script src="/static/js/user-menu.js?v=2.0.00.1793785628" defer></script>
+    <script defer src="/static/js/shared/utils.js?v=2.0.00.1790560477"></script>
+    <script defer src="/static/js/shared/size-policy.js?v=2.0.00.1792185305"></script>
+    <script defer src="/static/js/shared/media.js?v=2.0.00.1789606971"></script>
+    <script defer src="/static/js/shared/psd-writer.js?v=2.0.00.1790560477"></script>
+    <script defer src="/static/js/shared/viewport.js?v=2.0.00.1789606971"></script>
+    <script defer src="/static/js/shared/workflow-utils.js?v=2.0.00.1789606971"></script>
+    <script defer src="/static/js/shared/node-registry.js?v=2.0.00.1789606971"></script>
+    <script defer src="/static/js/shared/table-model.js?v=2.0.00.1792228719"></script>
+    <script defer src="/static/js/shared/table-node.js?v=2.0.00.1793421882"></script>
+    <script defer src="/static/js/shared/dropdown.js?v=2.0.00.1789746233"></script>
+    <script defer src="/static/js/shared/glide.js?v=2.0.00.1789742748"></script>
+    <script defer src="/static/js/shared/morph-button.js?v=2.0.00.1789845865"></script>
+    <script defer src="/static/js/touch-mouse.js?v=2.0.00.1789606971"></script>
+    <script defer src="/static/js/i18n.js?v=2.0.00.1790130330"></script>
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
 /* ═══ 隐藏滚动条 & 防止双滚动条 ═══ */
@@ -280,6 +284,7 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
             <button type="button" class="canvas-anchored-item" role="menuitem" data-left-more="export"><i data-lucide="image-down"></i><span>导出</span></button>
             <button type="button" class="canvas-anchored-item" role="menuitem" data-left-more="shortcut"><i data-lucide="keyboard"></i><span>快捷键</span></button>
             <button type="button" class="canvas-anchored-item" role="menuitem" data-left-more="center"><i data-lucide="locate-fixed"></i><span>定位居中</span></button>
+            <button type="button" class="canvas-anchored-item" role="menuitemcheckbox" aria-checked="false" data-smart-perf-toggle title="低性能机器上减少模糊与装饰动效"><i data-lucide="zap"></i><span>流畅优先</span><em class="smart-perf-state" aria-hidden="true"></em></button>
             <button type="button" class="canvas-anchored-item" role="menuitem" data-left-more="undo"><i data-lucide="undo-2"></i><span>撤销</span></button>
             <button type="button" class="canvas-anchored-item" role="menuitem" data-left-more="redo"><i data-lucide="redo-2"></i><span>重做</span></button>
         </div>
@@ -288,7 +293,7 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
             <button type="button" class="canvas-add-item" data-add-kind="prompt"><span class="canvas-add-icon"><i data-lucide="text-cursor-input"></i></span><span class="canvas-add-text"><strong>文本</strong><em>脚本、广告词、品牌文案</em></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
             <button type="button" class="canvas-add-item" data-add-kind="image"><span class="canvas-add-icon"><i data-lucide="image"></i></span><span class="canvas-add-text"><strong>图片</strong><em>上传或生成图片节点</em></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
             <button type="button" class="canvas-add-item" data-add-kind="video"><span class="canvas-add-icon"><i data-lucide="video"></i></span><span class="canvas-add-text"><strong>视频</strong><em>上传或生成视频节点</em></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
-            <button type="button" class="canvas-add-item" data-add-kind="audio"><span class="canvas-add-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></span><span class="canvas-add-text"><strong>音频</strong><em>生成音乐或音效</em></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
+            <button type="button" class="canvas-add-item" data-add-kind="audio"><span class="canvas-add-icon"><svg data-icon="music" class="nv-i nv-i-music" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></span><span class="canvas-add-text"><strong>音频</strong><em>生成音乐或音效</em></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
             <div class="canvas-add-section-title">辅助工具</div>
             <button type="button" class="canvas-add-item" data-add-kind="table"><span class="canvas-add-icon"><i data-lucide="table"></i></span><span class="canvas-add-text"><strong>多维表格</strong></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
             <button type="button" class="canvas-add-item" data-add-kind="group"><span class="canvas-add-icon"><i data-lucide="group"></i></span><span class="canvas-add-text"><strong>分组</strong></span><i data-lucide="chevron-right" class="canvas-add-arrow"></i></button>
@@ -301,7 +306,7 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
         <div id="createMenu" class="create-menu">
             <button class="menu-btn" type="button" data-create-type="image"><i data-lucide="image" class="w-4 h-4"></i><span>图片节点</span></button>
             <button class="menu-btn" type="button" data-create-type="video"><i data-lucide="video" class="w-4 h-4"></i><span>视频节点</span></button>
-            <button class="menu-btn" type="button" data-create-type="audio"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg><span>音频节点</span></button>
+            <button class="menu-btn" type="button" data-create-type="audio"><svg data-icon="music" class="w-4 h-4 nv-i nv-i-music" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg><span>音频节点</span></button>
             <button class="menu-btn" type="button" data-create-type="upload"><i data-lucide="upload" class="w-4 h-4"></i><span>上传…</span></button>
             <button class="menu-btn" type="button" data-create-type="group"><i data-lucide="group" class="w-4 h-4"></i><span>分组</span></button>
             <button class="menu-btn" type="button" data-create-type="prompt"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span>文本生成</span></button>
@@ -914,17 +919,17 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
         </div>
         <div id="versionList" class="version-list"></div>
     </div>
-    <script defer src="/static/js/image-adjust-engine.js?v=1.0.143.1791729997"></script>
-    <script defer src="/static/js/image-adjust-editor.js?v=1.0.143.1791729997"></script>
-    <script defer src="/static/js/canvas-rail.js?v=1.0.143.1793421882"></script>
-    <script defer src="/static/js/online-prompt-library.js?v=1.0.143.1792337992"></script>
-    <script defer src="/static/js/source-browser.js?v=1.0.143.1792373520"></script>
-    <script defer src="/static/js/shared/agent-session.js?v=1.0.143.1792816544"></script>
+    <script defer src="/static/js/image-adjust-engine.js?v=2.0.00.1791729997"></script>
+    <script defer src="/static/js/image-adjust-editor.js?v=2.0.00.1793785654"></script>
+    <script defer src="/static/js/canvas-rail.js?v=2.0.00.1793421882"></script>
+    <script defer src="/static/js/online-prompt-library.js?v=2.0.00.1792337992"></script>
+    <script defer src="/static/js/source-browser.js?v=2.0.00.1793698287"></script>
+    <script defer src="/static/js/shared/agent-session.js?v=2.0.00.1792816544"></script>
     <!-- 长文输出用的 Markdown 渲染（离线零依赖）：必须排在 smart-canvas.js 之前 -->
-    <script defer src="/static/js/smart-markdown.js?v=1.0.143.1793000645"></script>
-    <script defer src="/static/js/smart-canvas.js?v=1.0.143.1793421882"></script>
+    <script defer src="/static/js/smart-markdown.js?v=2.0.00.1793000645"></script>
+    <script defer src="/static/js/smart-canvas.js?v=2.0.00.1793785791"></script>
     <!-- 画布助手微应用：localStorage.NOVAI_CANVAS_UI=legacy 时留在旧面板，默认加载 React 版 -->
-    <script defer src="/static/js/canvas-assistant-bridge.js?v=1.0.143.1793084478"></script>
-    <script defer src="/static/js/collab.js?v=1.0.143.1792849964"></script>
+    <script defer src="/static/js/canvas-assistant-bridge.js?v=2.0.00.1793945957"></script>
+    <script defer src="/static/js/collab.js?v=2.0.00.1793785628"></script>
 </body>
 </html>

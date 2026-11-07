@@ -42,6 +42,7 @@ export type Part =
 	| { type: "user_steer"; id: string; text: string; status: string }
 	| { type: "context_nodes"; id: string; nodeIds: string[]; nodeCount: number }
 	| { type: "agent_error"; id: string; message: string; code: string }
+	| ({ type: "reference_images" } & ReferenceCardData)
 
 export interface UsageTotals {
 	input_tokens?: number
@@ -109,6 +110,66 @@ export interface SkillChip {
 	name: string
 	icon?: string
 	description?: string
+}
+
+/** 联网搜图 / 反图的一张参考图（契约 docs/agent-web-image-search.md 的 ImageItem，字段名不许改） */
+export interface ReferenceImage {
+	id: string
+	title: string
+	/** 原图直链：只有它允许进画布 / 进生成 */
+	original_url: string
+	/** 缩略图：只允许在面板里做预览 */
+	thumb_url: string
+	width: number | null
+	height: number | null
+	source_page: string
+	source_site: string
+	/** 素材站标识（bing / 360 / huaban / zcool / nipic / duitang / tuchong；老数据可能为空） */
+	source_kind: string
+}
+
+/** 来源筛选 chips 的一行：数量取 result.sources，老数据没有就按 items 现算 */
+export interface ReferenceSourceRow {
+	kind: string
+	label: string
+	count: number
+}
+
+/** 参考图选择卡的渲染数据：工具结果与反图接口都归一到这一份 */
+export interface ReferenceCardData {
+	/** 卡片的稳定标识（工具事件/反图 part 的 id） */
+	id: string
+	source: "search" | "reverse"
+	status: "loading" | "done" | "failed" | "disabled"
+	items: ReferenceImage[]
+	engine: string
+	query: string
+	queries: string[]
+	description: string
+	/** 后端给的真实原因（搜不到 / 被限流等） */
+	note: string
+	/** 失败原因（失败态与关闭联网态都用它） */
+	message: string
+	code: string
+	/** 反图入口那张图，卡片顶部回显 */
+	imageUrl: string
+	title: string
+	/** 来源筛选；多来源才显示那排 chips */
+	sources: ReferenceSourceRow[]
+}
+
+/** 加入画布的请求条目：url 必须是 /api/agent/images/import 返回的本地 url */
+export interface InsertImageRequest {
+	url: string
+	name?: string
+	width?: number | null
+	height?: number | null
+}
+
+export interface InsertImagesResult {
+	ok: boolean
+	created: number
+	message?: string
 }
 
 export interface ChatModelOption {
@@ -189,6 +250,10 @@ export interface CanvasAssistantHostApi {
 	openHistory(): void
 	openNode(id: string): void
 	toast?(message: string): void
+	/** 把已经落库成本地文件的图片建成画布 image 节点（视口中心、一次撤销、建完选中） */
+	insertImages?(items: InsertImageRequest[]): Promise<InsertImagesResult>
+	/** 画布上当前选中的图片节点；没选中或不是图片节点时返回 null */
+	getSelectedImage?(): { url: string; title?: string } | null
 }
 
 export interface CanvasAssistantHandle {

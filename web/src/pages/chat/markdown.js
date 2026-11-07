@@ -10,7 +10,7 @@ export function esc(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-const COPY_SVG = `<svg class="nv-i" viewBox="0 0 24 24" aria-hidden="true">${ICONS.copy}</svg>`;
+const COPY_SVG = `<svg class="nv-i nv-i-copy nv-i-a-pop" viewBox="0 0 24 24" data-icon="copy" aria-hidden="true">${ICONS.copy}</svg>`;
 
 /* ───────── 行内 ───────── */
 function inline(text) {

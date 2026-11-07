@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from server.agents import catalog  # noqa: E402
+from server.skills import registry as skills_registry  # noqa: E402
 
 # (sealseek 智能体 id, 本项目 id, 名称, 描述) —— 顺序即目录展示顺序
 EXPECTED_AGENTS = [
@@ -69,13 +70,12 @@ class AgentCatalogTest(unittest.TestCase):
         skill_ids = {s["id"] for s in catalog.list_skills()}
         self.assertFalse(agent_ids & skill_ids)
 
-    def test_17_skills_and_public_fields(self):
+    def test_builtin_skills_retired(self):
+        # 2026-11：17 个内置技能全部下线，目录里不再有任何下线 id
         skills = catalog.list_skills()
-        self.assertEqual(len(skills), 17)
+        self.assertEqual({s["id"] for s in skills} & set(skills_registry.RETIRED_SKILL_IDS), set())
         for s in skills:
-            pub = catalog.public_capability(s, "skill")
-            self.assertIn("source_skill_code", pub)
-            self.assertTrue(pub["source_skill_code"], "技能 %s 缺少 source_skill_code" % s["id"])
+            self.assertIn("source_skill_code", catalog.public_capability(s, "skill"))
 
     def test_public_agent_optional_fields(self):
         for a in catalog.list_agents():
@@ -89,7 +89,7 @@ class AgentCatalogTest(unittest.TestCase):
         caps = catalog.list_capabilities()
         agents = [c for c in caps if c["kind"] == "agent"]
         skills = [c for c in caps if c["kind"] == "skill"]
-        self.assertEqual(len(skills), 17)
+        self.assertEqual({c["id"] for c in caps} & set(skills_registry.RETIRED_SKILL_IDS), set())
         self.assertGreaterEqual(len(agents), 27)
         self.assertEqual({c["id"] for c in agents} & {c["id"] for c in skills}, set())
 
@@ -102,14 +102,12 @@ class AgentCatalogTest(unittest.TestCase):
 
     def test_suggestions_descriptors(self):
         ss = catalog.list_suggestions()
-        self.assertEqual(len(ss), 5)
+        self.assertEqual(len(ss), 4)
         by_id = {s["id"]: s for s in ss}
         self.assertEqual(by_id["keyword-insight-blue-ocean"]["capability"],
                          {"type": "agent", "capabilityId": "keyword-insight", "agentId": 5, "name": "关键词洞察"})
         self.assertEqual(by_id["promotion-roi"]["capability"]["agentId"], 15)
-        self.assertEqual(by_id["buyer-show-graphic"]["capability"]["type"], "skill")
-        self.assertEqual(by_id["buyer-show-graphic"]["capability"]["skillCode"],
-                         "45e740b5-073e-43f1-b23a-4a6ad0483547")
+        self.assertNotIn("buyer-show-graphic", by_id)   # 买家秀技能已下线
         self.assertEqual(by_id["generate-image-scene"]["capability"],
                          {"type": "generate-image", "cardType": 3})
         for s in ss:

@@ -22,8 +22,6 @@ DEFAULT_SUGGESTIONS = [
      "icon_type": "new", "capability_id": "viral-image-teardown"},
     {"id": "promotion-roi", "text": "我的推广投产比为什么上不去？",
      "icon_type": "hot", "capability_id": "promotion-analysis"},
-    {"id": "buyer-show-graphic", "text": "技能：帮我生成真实的买家秀图文",
-     "icon_type": "skill", "capability_id": "buyer-show-graphic"},
     {"id": "generate-image-scene", "text": "AI生图：给我的商品生成2张不同风格的场景图",
      "icon_type": "generate-image", "card_type": 3},
 ]

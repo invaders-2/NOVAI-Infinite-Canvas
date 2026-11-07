@@ -21,7 +21,13 @@ echo ""
 # Open browser after 3 seconds
 sleep 3 && open "${APP_URL}" &
 
-python3 main.py
+# 优先项目自带 venv：PATH 里的 python3 可能缺 onnxruntime（本地抠图会报缺少推理组件）
+if [ -x "venv/bin/python3" ]; then
+    PY="venv/bin/python3"
+else
+    PY="python3"
+fi
+"$PY" main.py
 
 echo ""
 echo "Server stopped."

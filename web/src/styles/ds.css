@@ -384,3 +384,6 @@ html.theme-dark,[data-theme=dark]{--bg:#0a0a0a;--canvas:#0e0e0e;--canvas-grid:rg
 }
 @media (prefers-reduced-motion: reduce) { .nv-glide-pill { transition: none; } }
 .np.nv-glass-pop { animation: nv-pop .14s ease both !important; }
+
+[role="dialog"],[role="dialog"] *,.nv-menu,.nv-menu *,.nv-glass-pop,.nv-glass-pop * { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+[role="dialog"]::-webkit-scrollbar,[role="dialog"] *::-webkit-scrollbar,.nv-menu::-webkit-scrollbar,.nv-menu *::-webkit-scrollbar,.nv-glass-pop::-webkit-scrollbar,.nv-glass-pop *::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }

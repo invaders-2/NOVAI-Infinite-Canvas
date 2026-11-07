@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""应用市场（/api/store/*）：数据源是 server/store_data 里市场来源的 83 条。
+"""应用市场（/api/store/*）：市场来源的 83 条 + 技能注册表并入的系统 / 内置技能。
 
 覆盖：
-  1. catalog：原始 83 条、一级 20 条、counts 自洽、categories 5 个、封面已本地化；
+  1. catalog：市场原始 83 条、一级 20 条、counts 自洽（含内置技能）、categories 5 个、封面已本地化；
   2. curation：33 条停用、30 条合集子项隐藏但可用，停用安装 / 启动返回 409；
   3. 详情：5 个分支（generic / app / collection / studio / preset_wall）各自的关键字段；
   4. launch：带 preset_id / 不带 preset（starter_prompt）/ 空 inputs 不留空行 / 参考素材 /
      画布真的被创建（能在 CANVAS_DIR 读回）；未知 preset → 400；
   5. install / uninstall：落盘 data/store_installed.json、幂等、未知条目 404；
-  6. 只有市场来源这 83 条：不含 NOVAI 既有技能 / 智能体；
+  6. 市场那 83 条之外只多出注册表的系统技能（builtin=true），不含已下线的 NOVAI 智能体；
   7. 回归：/api/capabilities、/api/agents 照旧。
 
 用临时数据目录（NOVAI_DATA_DIR），安装态写临时目录；目录与详情读仓库自带的 data/store。
@@ -35,6 +35,24 @@ if "main" not in sys.modules:
 import main
 from server.routes import store
 
+# 2026-11-07：仓库里的应用市场只保留内置技能，上游 83 条快照挪到 tests/fixtures/store_upstream，
+# 这些测试仍然针对那份快照验证目录 / 详情 / 安装逻辑。
+_FIXTURE_STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "store_upstream")
+_ORIG_STORE_DIR = store.store_dir
+_store_dir_patch = None
+
+
+def setUpModule():
+    global _store_dir_patch
+    _store_dir_patch = patch.object(store, "store_dir", return_value=_FIXTURE_STORE)
+    _store_dir_patch.start()
+
+
+def tearDownModule():
+    if _store_dir_patch:
+        _store_dir_patch.stop()
+
+
 
 def tearDownModule():
     shutil.rmtree(_TMP_DATA, ignore_errors=True)
@@ -42,6 +60,11 @@ def tearDownModule():
 
 def client():
     return TestClient(main.app)
+
+
+def builtin_count():
+    """随注册表并进市场的系统 / 内置技能条数（数据目录是临时目录，装的是仓库自带技能包）。"""
+    return len(store.load_builtin_skills())
 
 
 def detail_of(kind, name):
@@ -55,12 +78,15 @@ class StoreCatalogTests(unittest.TestCase):
         store.save_installed([])
         self.data = self.c.get("/api/store/catalog").json()
 
-    def test_catalog_has_83_items(self):
+    def test_catalog_has_83_market_items_plus_builtin(self):
         items = self.data["items"]
-        self.assertEqual(len(items), 83)
-        self.assertEqual(self.data["counts"], {"all": 83, "skill": 60, "app": 23})
+        market = [item for item in items if not item.get("builtin")]
+        self.assertEqual(len(market), 83)
+        self.assertEqual(len(items), 83 + builtin_count())
+        self.assertEqual(self.data["counts"], {"all": 83 + builtin_count(),
+                                               "skill": 60 + builtin_count(), "app": 23})
         keys = {(item["kind"], item["name"]) for item in items}
-        self.assertEqual(len(keys), 83)                       # 没有重复条目
+        self.assertEqual(len(keys), len(items))               # 没有重复条目
         for item in items:
             self.assertIn(item["kind"], ("skill", "app"))
             self.assertTrue(item["display_name"])
@@ -74,11 +100,14 @@ class StoreCatalogTests(unittest.TestCase):
         visible = [item for item in items if item["store_visible"]]
         unavailable = [item for item in items if not item["store_available"]]
         hidden_children = [item for item in items if not item["store_visible"] and item["store_available"]]
-        self.assertEqual(self.data["visible_counts"], {"all": 20, "skill": 20, "app": 0})
-        self.assertEqual(len(visible), 20)
+        # 内置技能也是可见可用的技能，计入可见数
+        self.assertEqual(self.data["visible_counts"],
+                         {"all": 20 + builtin_count(), "skill": 20 + builtin_count(), "app": 0})
+        self.assertEqual(len(visible), 20 + builtin_count())
         self.assertEqual(len(unavailable), 33)
         self.assertEqual(len(hidden_children), 30)
         self.assertTrue(all(item["kind"] == "skill" for item in visible))
+        self.assertTrue(all(item["store_available"] for item in visible if item.get("builtin")))
         self.assertTrue(all(not item["enabled"] for item in unavailable))
         self.assertFalse(next(item for item in items if item["name"] == "hubspot")["store_available"])
         self.assertFalse(next(item for item in items if item["name"] == "fish-audio-lab")["store_visible"])
@@ -120,21 +149,25 @@ class StoreCatalogTests(unittest.TestCase):
         self.assertGreater(len(poster), 0)
         self.assertTrue(all(p.endswith(".webp") for p in (item["cover_poster_url"] for item in poster)))
 
-    def test_no_novai_builtin_entries(self):
-        names = {item["name"] for item in self.data["items"]}
-        # 这些是 NOVAI 自带技能/智能体的 id（见 server/skills/builtin_skills.json），市场里不应出现
+    def test_no_retired_novai_entries(self):
+        items = self.data["items"]
+        names = {item["name"] for item in items}
+        # 已下线的 NOVAI 内置技能 / 智能体 id 不该回到市场里
         for novai_id in ("advantage-money", "keyword-money", "keyword-money-model"):
             self.assertNotIn(novai_id, names)
-        self.assertEqual(len(names), 83)                      # 只有从市场抓下来的 83 个 id
+        market = [item for item in items if not item.get("builtin")]
+        self.assertEqual(len(market), 83)                     # 市场来源仍是 83 条
+        self.assertTrue(all(item.get("builtin") for item in items if item["name"] not in
+                            {row["name"] for row in market}))
 
 
 class StoreDataLocationTests(unittest.TestCase):
     """数据放在可提交的 server/store_data；data/store 已不存在（data/ 被 .gitignore 忽略）。"""
 
     def test_store_dir_is_committable_location(self):
-        self.assertEqual(store.store_dir(), os.path.join(str(ROOT), "server", "store_data"))
-        self.assertTrue(os.path.isfile(os.path.join(store.store_dir(), "catalog.json")))
-        self.assertEqual(len(os.listdir(os.path.join(store.store_dir(), "details"))), 83)
+        self.assertEqual(_ORIG_STORE_DIR(), os.path.join(str(ROOT), "server", "store_data"))
+        self.assertTrue(os.path.isfile(os.path.join(_ORIG_STORE_DIR(), "catalog.json")))
+        self.assertEqual(len(os.listdir(os.path.join(store.store_dir(), "details"))), 83)   # 上游快照（fixture）
         self.assertFalse(os.path.isdir(os.path.join(str(ROOT), "data", "store")))
 
     def test_skill_instructions_copied(self):

@@ -1,0 +1,18 @@
+{
+  "prompt_llm": {
+    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    "api_key": "填入你的 API Key",
+    "model": "视觉语言模型接入点 ID（用于镜头编排）",
+    "vision_model": "视觉语言模型接入点 ID（用于身份锁提取，需支持图片输入）",
+    "timeout": 180
+  },
+  "image_backend": {
+    "type": "openai",
+    "base_url": "出图模型按用户要求填（如火山方舟 https://ark.cn-beijing.volces.com/api/v3）",
+    "api_key": "填入你的 API Key",
+    "model": "出图模型按用户要求填（需支持多参考图输入以保证一致性，如 Seedream 4.0 接入点；也可运行时用 --model 覆盖）",
+    "default_size": "832x1472",
+    "timeout": 300,
+    "image_as_list": true
+  }
+}

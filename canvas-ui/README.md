@@ -16,7 +16,7 @@ npm run build
 - `static/canvas-assistant/assistant-ui.js`（IIFE，暴露 `window.NovaiCanvasAssistant`）
 - `static/canvas-assistant/assistant-ui.css`
 
-当前产物：JS 约 419KB / gzip 133KB，CSS 约 63KB / gzip 12KB。
+当前产物：JS 约 799KB（gzip 252KB），CSS 约 342KB（gzip 51KB）。HextaUI 未用组件已用 `@source not` 排除出 CSS 扫描（详见下面 HextaUI 一节）。
 
 ## 挂载与切换
 
@@ -74,8 +74,66 @@ planAction / confirmAction / togglePlanConfirm / openHistory / openNode / toast`
   conversation/message/tool/confirmation/artifact/prompt-input/reasoning/task/queue/context/plan），
   仅替换了重依赖：streamdown→`markdown.tsx`、motion→CSS shimmer、tokenlens→去掉成本估算、code-block→轻量版。
 - `src/ui/`：按需拷来的 shadcn / Base UI 基础件。
+- `src/components/hexta/` + `src/hooks/hexta/` + `src/lib/{hotkey,motion}.ts`：HextaUI 免费全家桶（66 组件 / 9 hooks / 2 utility）。
 - `src/assistant/`：NOVAI 会话模型（session/store/format）与面板组合（AssistantApp/Composer）、技能菜单、产物侧栏和录屏。
 - `src/styles/index.css`：NOVAI Glass v2 令牌映射（浅色/深色），不画边框发丝线。
+- `src/styles/hexta-theme.css`：HextaUI 主题令牌 → NOVAI Glass 的桥接；`hexta-thread.css` / `hexta-overlays.css` 是助手重构用的空占位。
+
+## HextaUI 组件库（免费全家桶）
+
+HextaUI（https://hextaui.com）整套免费组件（66 组件 + 9 hooks + 2 utility）已接进 canvas-ui，
+作为助手面板重构的组件底座；当前界面还没换，这一层只是基建与主题桥接。
+
+- **组件位置**：`src/components/hexta/`（66 个 TSX）、`src/hooks/hexta/`（9 个 hook）、
+  `src/lib/hotkey.ts` 与 `src/lib/motion.ts`（registry:lib 的两个共享 utility）。
+  原有 `src/components/ui/`（21 个既有 shadcn 件）与 `src/ui/` 原样保留；HextaUI 内部引用已全部
+  指向 `@/components/hexta/*`、`@/hooks/hexta/*`，两个目录不交叉。
+- **组件落盘规则**：`components.json` 里 `aliases.ui → @/components/hexta`、
+  `aliases.hooks → @/hooks/hexta`、`aliases.lib → @/lib`、`aliases.utils → @/lib/utils`，
+  所以用 CLI 增量装组件时会自动落到 hexta 目录，不会覆盖既有的 `src/components/ui/`。
+- **主题桥接**：`src/styles/hexta-theme.css`（在 `index.css` 顶部 import，紧跟两条 tailwind import）。
+  它把 HextaUI `theme.json` 的令牌接到 NOVAI Glass：状态色映射到 `--nvca-success / --nvca-info /
+  --nvca-warning`，`--ease-* / --animate-*` 令牌、组件关键帧、`text-hero / border-hairline /
+  text-shimmer` 三个 utility 原样搬入。
+  - **`--hairline: 0px`**：HextaUI 的线框/发丝线全走这个变量（1px，按 dpr 递减到 0.25px），
+    项目硬规则「不画线框、不画发丝线」，所以一律归零；`--color-border` 保持 transparent
+    （`index.css` 已定义），`--default-border-width` 也跟着归零。
+  - **字号**：`text-xs / text-sm / text-base` 不采用 theme.json 的 11/13/15px，沿用 `index.css` 的
+    11/12.5/13.5px，否则会改掉现有面板排版；`text-lg` 及以上才用 HextaUI 的字号。
+  - theme.json 的 `@layer base`（body position / touch-action）没搬，那会污染画布宿主页。
+  - `hexta-thread.css` / `hexta-overlays.css` 是空占位，助手重构（会话流 / 浮层）往里填。
+- **图标策略**：HextaUI 自带组件用 `@tabler/icons-react`（线性描边），助手既有组件继续用
+  `lucide-react`（同为线性描边）；两边都保持描边风格，不改成实心填充。
+- **配套依赖只贡献 CSS**：`tw-animate-css`（动画 utility）与 `shadcn`（只取它 `tailwind.css` 里的
+  no-scrollbar / scroll-fade-* / accordion 关键帧等 utility）都是 **devDependency**，
+  只参与 CSS 构建，不是 NOVAI 运行时依赖；产物 `assistant-ui.js` 里不含它们的代码
+  （`recharts` / `@tanstack/react-table` / `react-day-picker` 同理，未被入口引用就不进 JS）。
+- **npm 缓存坑**：这台机器 `~/.npm/_cacache` 里有 root 权限文件，npm 默认缓存会报 EPERM。
+  跑 npm / npx 都要带独立缓存目录：
+
+  ```bash
+  npm_config_cache=/tmp/npm-cache npx shadcn@latest add https://hextaui.com/r/<组件名>.json
+  ```
+
+- **增量装单个组件**（别名已配好，直接落到 `src/components/hexta/`）：
+
+  ```bash
+  cd canvas-ui
+  npm_config_cache=/tmp/npm-cache npx shadcn@latest add https://hextaui.com/r/accordion.json
+  ```
+
+  装完照样跑 `npm run typecheck`；CLI 会顺带装 npm 依赖（`@base-ui/react` / `cn` / `@tabler/icons-react` 等）。
+- **CSS 体积与 `@source not` 清单**：`@source "../components"` 会把 66 个 HextaUI 组件的类名全扫一遍，
+  没被 entry 引用的组件也会生成大量用不到的 utility。现在用 `@source not` 把「从 `src/entry.tsx` 出发
+  不可达的组件」排除出扫描（源文件全部保留，整体引入不变），清单在 `src/styles/hexta-theme.css` 末尾：
+  - 仍在扫描（21 个，助手实际引用）：`alert-dialog`、`aspect-ratio`、`attachment`、`bubble`、`button`、`combobox`、`empty`、`input-group`、`input`、`item`、`kbd`、`marker`、`message-scroller`、`message`、`number-flow`、`popover`、`progress`、`scroll-area`、`sheet`、`skeleton`、`spinner`
+  - 已排除（45 个，当前不可达）：`accordion`、`alert`、`avatar`、`badge`、`breadcrumb`、`button-group`、`calendar`、`card`、`carousel`、`chart`、`checkbox`、`collapsible`、`command`、`context-menu`、`data-table`、`date-picker`、`dialog`、`drawer`、`dropdown-menu`、`field`、`hover-card`、`input-otp`、`label`、`menubar`、`native-select`、`navigation-menu`、`pagination`、`questionnaire`、`radio-group`、`resizable`、`safe-area`、`select`、`separator`、`sidebar`、`slider`、`switch`、`table`、`tabs`、`textarea`、`toast`、`toggle-group`、`toggle`、`tooltip`、`tree`、`video-player`
+
+  **使用规则（重要）**：新增/恢复对某个被排除组件的 import 时，必须先删掉 `hexta-theme.css` 里它对应的
+  `@source not "../components/hexta/<文件>.tsx";` 那一行，否则它的类名不会生成 CSS，界面直接掉样式。
+  可达分析只认静态 import 与字面量 `import()`；用其它间接方式（比如运行时拼组件名）引入时同样要手动删行。
+  效果：CSS 从约 600KB（gzip 85KB）回落到约 340KB（gzip 51KB）；HextaUI 接入前的基线是 158KB（gzip 23.5KB），
+  剩余增量来自那 21 个实际用到的组件（Base UI 的 popover/combobox/sheet/scroll-area 与 message-scroller 本身就重）。
 
 ## 设计约束
 

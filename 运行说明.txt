@@ -41,3 +41,7 @@ API使用教程：https://xcnk45dd0a92.feishu.cn/wiki/DRuEwOd8mi9d0sknkxPcCzTjn1
 ---mac运行---
 
 新增了3个mac的使用说明/修复全选/启动服务，如果运行仍然失败，建议安装https://opencode.ai/zh/download，选中这个项目文件夹，让他运行程序
+
+注意：mac 启动脚本现在优先使用项目自带的 venv/bin/python3。
+如果用 PATH 里的 python3 启动，可能缺少 onnxruntime / cv2 等依赖，表现为「本地抠图缺少推理组件 onnxruntime」。
+遇到这个提示，请用双击「启动.command」启动，或手动执行：venv/bin/python3 main.py

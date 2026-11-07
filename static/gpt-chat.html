@@ -6,14 +6,14 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png" data-page-node-id="d2lTaxgg4dwHWvOR7TLKCK">
     <title>GPT 对话</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.143.1789606971"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.143.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.143.1792330467"></script>
-    <script src="/static/js/theme.js?v=1.0.143.1792474521"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.143.1790560477"></script>
-    <script src="/static/js/i18n.js?v=1.0.143.1790130330"></script>
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.143.1790560477" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.143.1789606971" data-page-node-id="sBSjKrFOadAKo0d0aaQqPR">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2.0.00.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=2.0.00.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=2.0.00.1793785599"></script>
+    <script src="/static/js/theme.js?v=2.0.00.1792474521"></script>
+    <script src="/static/js/shared/utils.js?v=2.0.00.1790560477"></script>
+    <script src="/static/js/i18n.js?v=2.0.00.1790130330"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=2.0.00.1790560477" data-page-node-id="JTGvAal8uI6j7wTHI5wwho">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2.0.00.1789606971" data-page-node-id="sBSjKrFOadAKo0d0aaQqPR">
     <style>
         :root {
             --ease:cubic-bezier(.4,0,.2,1);
@@ -183,7 +183,7 @@
         .system-prompt-popover .memory-tag.global:hover { background:color-mix(in srgb, var(--text) 10%, transparent); color:color-mix(in srgb, var(--text) 70%, transparent); }
         .messages { width:min(var(--chat-width),calc(100% - 60px)); min-height:0; margin:0 auto; overflow-y:auto; overflow-x:hidden; padding:24px 0 18px; display:flex; flex-direction:column; align-items:center; gap:16px; scroll-behavior:smooth; scrollbar-gutter:stable; }
         .empty-state { margin:auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:var(--chat-faint); text-align:center; }
-        .empty-state i,.empty-state svg { width:54px; height:54px; stroke-width:1.2; }
+        .empty-state i,.empty-state svg { width:54px; height:54px; stroke-width: var(--nv-i-stroke, 1.5); }
         .empty-state-text { font-size:11px; line-height:1; font-weight:950; letter-spacing:.22em; text-transform:uppercase; }
         .bubble-row { width:100%; display:flex; gap:10px; align-items:flex-end; justify-content:flex-start; }
         .bubble-row.user { justify-content:flex-end; }
@@ -543,7 +543,7 @@
             background:transparent !important;
         }
     </style>
-<link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.143.1790560477" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
+<link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.00.1793785603" data-page-node-id="lND75BMHLe1XsRqMwb55T7">
 <style>
 /* --- 页面特定 Marvis 覆盖 --- */
         html body,
@@ -983,7 +983,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
         box-shadow: none;
         transition: background .26s var(--ease), color .26s var(--ease);
     }
-    .welcome-card-ic svg { width: 15px; height: 15px; color: var(--muted); stroke-width: 1.8; }
+    .welcome-card-ic svg { width: 15px; height: 15px; color: var(--muted); stroke-width: var(--nv-i-stroke, 1.5); }
     .welcome-card:hover .welcome-card-ic { color: var(--text); background: color-mix(in srgb, var(--text) 11%, transparent); }
     .welcome-card-title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
     .welcome-card-desc { font-size: 11.5px; font-weight: 400; color: var(--muted); line-height: 1.5; }
@@ -1086,7 +1086,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
     }
     .action-btn:hover { background: color-mix(in srgb, var(--text) 7%, transparent) !important; color: var(--text) !important; }
     .action-btn:active { background: color-mix(in srgb, var(--text) 12%, transparent) !important; }
-    .action-btn i, .action-btn svg { width: 18px !important; height: 18px !important; stroke-width: 1.8 !important; }
+    .action-btn i, .action-btn svg { width: 18px !important; height: 18px !important; stroke-width: var(--nv-i-stroke, 1.5); }
 
     /* —— 输入框：玻璃面板、无嵌套内框、底部工具行 —— */
     .composer {
@@ -1161,7 +1161,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
     }
     .model-picker-provider, .model-picker-dot { display: none !important; }
     .model-picker-model { color: inherit !important; font-size: 14px !important; font-weight: 500 !important; }
-    .model-picker-button i, .model-picker-button svg { width: 14px !important; height: 14px !important; stroke-width: 1.8 !important; }
+    .model-picker-button i, .model-picker-button svg { width: 14px !important; height: 14px !important; stroke-width: var(--nv-i-stroke, 1.5); }
 
     /* —— 分辨率选择器（“自动”）：与模型 / 思考 chip 统一（透明紧凑 + 子菜单弹窗一致） —— */
     .resolution-picker { width: auto !important; min-width: 0 !important; max-width: none !important; flex: 0 0 auto !important; }
@@ -1174,7 +1174,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
     .resolution-picker-button:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
     .resolution-picker-button > :first-child { display: none !important; }
     .resolution-picker-type { display: none !important; }
-    .resolution-picker-button i, .resolution-picker-button svg { width: 14px !important; height: 14px !important; stroke-width: 1.8 !important; }
+    .resolution-picker-button i, .resolution-picker-button svg { width: 14px !important; height: 14px !important; stroke-width: var(--nv-i-stroke, 1.5); }
     .resolution-picker-value { color: inherit !important; font-size: 14px !important; font-weight: 500 !important; }
     .resolution-picker-popover { border-radius: 14px !important; background: var(--chat-panel) !important; box-shadow: 0 14px 36px var(--chat-shadow) !important; }
 
@@ -1206,7 +1206,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
         width: 36px !important; height: 36px !important; border-radius: 50% !important;
         background: var(--text) !important; color: var(--bg) !important;
     }
-    .send-btn svg { width: 16px !important; height: 16px !important; stroke-width: 2 !important; }
+    .send-btn svg { width: 16px !important; height: 16px !important; stroke-width: var(--nv-i-stroke, 1.5); }
     .send-btn:hover { transform: scale(1.08) !important; }
     .send-btn:active { transform: scale(.94) !important; }
 
@@ -1225,7 +1225,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
     .model-picker-provider-btn .p-name { flex: 1 1 auto !important; min-width: 0; }
     .model-picker-provider-btn .p-count { display: none !important; }
     .model-picker-provider-btn .p-check,
-    .model-picker-provider-btn .p-arrow { width: 13px !important; height: 13px !important; flex: 0 0 auto !important; stroke-width: 1.8 !important; }
+    .model-picker-provider-btn .p-arrow { width: 13px !important; height: 13px !important; flex: 0 0 auto !important; stroke-width: var(--nv-i-stroke, 1.5); }
     .model-picker-provider-btn .p-arrow { color: var(--muted) !important; opacity: .55 !important; }
     .model-picker-provider-btn:hover .p-arrow,
     .model-picker-provider-btn.hovered .p-arrow { opacity: 1 !important; color: var(--text) !important; }
@@ -1245,7 +1245,7 @@ html.studio-theme-dark #sendBtn.nv-beam {
     .model-picker-model-btn { font-size: 13px !important; font-weight: 500 !important; min-height: 32px !important; padding: 5px 8px !important; border-radius: 8px !important; color: var(--text) !important; }
     .model-picker-model-btn:hover { background: var(--nav-hover-bg) !important; color: var(--text) !important; }
     .model-picker-model-btn.active { background: var(--nav-hover-bg) !important; color: var(--text) !important; font-weight: 600 !important; }
-    .model-picker-model-btn i, .model-picker-model-btn svg { width: 13px !important; height: 13px !important; stroke-width: 1.8 !important; }
+    .model-picker-model-btn i, .model-picker-model-btn svg { width: 13px !important; height: 13px !important; stroke-width: var(--nv-i-stroke, 1.5); }
     .model-picker-model-btn span { flex: 1 1 auto !important; }
     .model-picker-empty { padding: 14px 8px !important; font-size: 12px !important; font-weight: 500 !important; color: var(--faint) !important; }
     .model-picker-title { font-size: 12px !important; font-weight: 500 !important; color: var(--muted) !important; }
@@ -1430,9 +1430,9 @@ html.studio-theme-dark #sendBtn.nv-beam {
     .nv-glide-host .resolution-picker-scope button.active { color: var(--nv-glide-fg, var(--text)); }
 
     </style>
-    <link rel="stylesheet" href="/static/css/glide.css?v=1.0.143.1789742566">
-    <script src="/static/js/shared/glide.js?v=1.0.143.1789742748"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.143.1789845865"></script>
+    <link rel="stylesheet" href="/static/css/glide.css?v=2.0.00.1789742566">
+    <script src="/static/js/shared/glide.js?v=2.0.00.1789742748"></script>
+    <script src="/static/js/shared/morph-button.js?v=2.0.00.1789845865"></script>
 </head>
 <body data-page-node-id="B0FSrTLRPPotTcEryWhCSp">
     <div class="chat-shell" data-page-node-id="MRDi657CZfPyLahTJpQS7R">
@@ -3369,11 +3369,11 @@ html.studio-theme-dark #sendBtn.nv-beam {
         /* ═══ 思考条（ReactBits ThoughtLine 风格）+ 可折叠思考 trace ═══
            视觉与智能画布 .thought-line 同款：闪光图标呼吸 + 文案微光 + 秒表。
            计时起点放 Map（key = 气泡编号），结尾处 delete；全局 ticker 没有秒表时自清理。 */
-        const THOUGHT_LINE_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>';
-        const THOUGHT_CHECK_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
-        const THOUGHT_CARET_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+        const THOUGHT_LINE_GLYPH = '<svg viewBox="0 0 24 24" data-icon="sparkles" class="nv-i nv-i-sparkles" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>';
+        const THOUGHT_CHECK_GLYPH = '<svg data-icon="check" class="nv-i nv-i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+        const THOUGHT_CARET_GLYPH = '<svg data-icon="chev" class="nv-i nv-i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
         /* status 事件的图标（闪电 = 正在跑的动作），与「已完成的勾」区分 */
-        const THOUGHT_STEP_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>';
+        const THOUGHT_STEP_GLYPH = '<svg data-icon="bolt" class="nv-i nv-i-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>';
         const thoughtLineStarts = new Map();
         /* 已结束的思考耗时（十分之一秒）：done 事件后整表重建时用它渲染「已思考 x.xs」 */
         const thoughtDurations = new Map();

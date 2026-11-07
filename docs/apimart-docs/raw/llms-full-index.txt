@@ -1,0 +1,190 @@
+# llms-full.txt 页面索引（title -> 行号 -> Source URL）
+
+由 llms-full.txt 自动抽取；行号用于在本文件里定位，便于复核 REPORT.md 的引用。
+
+- L0 | FLUX.2 Image Generation | https://docs.apimart.ai/en/api-reference/images/flux-2/generation
+- L382 | FLUX 3 Image Klein Generation | https://docs.apimart.ai/en/api-reference/images/flux-3-image-klein/generation
+- L723 | FLUX 3 Image Generation | https://docs.apimart.ai/en/api-reference/images/flux-3-image/generation
+- L1042 | FLUX Kontext Image Generation and Editing | https://docs.apimart.ai/en/api-reference/images/flux-kontext/generation
+- L1388 | Nano banana Image Generation | https://docs.apimart.ai/en/api-reference/images/gemini-2.5-flash/generation
+- L2087 | Nano banana Pro Image Generation | https://docs.apimart.ai/en/api-reference/images/gemini-3-pro/generation
+- L2762 | Nano banana2 Image Generation | https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation
+- L3455 | Nano Banana Lite Image Generation | https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation-lite
+- L4133 | Nano banana 2.1 Image Generation | https://docs.apimart.ai/en/api-reference/images/gemini-nano-banana-2.1/generation
+- L4386 | GPT-Image(1/1.5) Image Generation | https://docs.apimart.ai/en/api-reference/images/gpt-image-1/generation
+- L5041 | GPT-Image-2.5 Ext Image Generation | https://docs.apimart.ai/en/api-reference/images/gpt-image-2.5-ext/generation
+- L5371 | GPT-Image-2.5 Image Generation | https://docs.apimart.ai/en/api-reference/images/gpt-image-2.5/generation
+- L5856 | GPT-Image-2.6 Ext Image Generation | https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6-ext/generation
+- L6199 | GPT-Image-2.6 Image Generation | https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation
+- L6583 | GPT-Image-2 Image Generation | https://docs.apimart.ai/en/api-reference/images/gpt-image-2/generation
+- L7275 | GPT-Image-2 Official Channel Image Generation | https://docs.apimart.ai/en/api-reference/images/gpt-image-2/official
+- L8070 | Grok Imagine 2.0 Ext Image Generation | https://docs.apimart.ai/en/api-reference/images/grok-imagine-2.0-ext/generation
+- L8513 | Grok Imagine 2.0 Ext Layers and Region Editing | https://docs.apimart.ai/en/api-reference/images/grok-imagine-2.0-ext/layer-region-edit
+- L8948 | Grok Imagine Image 2.0 Official Generation and Editing | https://docs.apimart.ai/en/api-reference/images/grok-imagine-2.0-ext/official
+- L9047 | Grok Imagine Image Generation | https://docs.apimart.ai/en/api-reference/images/grok-imagine/generation
+- L9757 | Hy-Image-3.5 Preview Image Generation | https://docs.apimart.ai/en/api-reference/images/hy-image-v3.5-preview/generation
+- L10008 | Imagen 4.0 Apimart Image Generation | https://docs.apimart.ai/en/api-reference/images/imagen-4.0-apimart/generation
+- L10593 | MAI-Image-2.6 Image Generation | https://docs.apimart.ai/en/api-reference/images/mai-image-2.6/generation
+- L10895 | Best Practices | https://docs.apimart.ai/en/api-reference/images/midjourney/best-practices
+- L11065 | Blend (multi-image blend) | https://docs.apimart.ai/en/api-reference/images/midjourney/blend
+- L11675 | Describe (image to text) | https://docs.apimart.ai/en/api-reference/images/midjourney/describe
+- L12250 | Edits (image edit) | https://docs.apimart.ai/en/api-reference/images/midjourney/edits
+- L12879 | Midjourney API overview | https://docs.apimart.ai/en/api-reference/images/midjourney/generation
+- L13026 | High Variation | https://docs.apimart.ai/en/api-reference/images/midjourney/high-variation
+- L13576 | Imagine (text-to-image) | https://docs.apimart.ai/en/api-reference/images/midjourney/imagine
+- L14242 | Inpaint | https://docs.apimart.ai/en/api-reference/images/midjourney/inpaint
+- L14795 | Low Variation | https://docs.apimart.ai/en/api-reference/images/midjourney/low-variation
+- L15345 | Modal (submit parameters) | https://docs.apimart.ai/en/api-reference/images/midjourney/modal
+- L15922 | Pan | https://docs.apimart.ai/en/api-reference/images/midjourney/pan
+- L16472 | Get task | https://docs.apimart.ai/en/api-reference/images/midjourney/query
+- L16929 | Remix (reshape, v8.1 / v8.2 only) | https://docs.apimart.ai/en/api-reference/images/midjourney/remix
+- L17500 | Reroll | https://docs.apimart.ai/en/api-reference/images/midjourney/reroll
+- L18044 | Upscale | https://docs.apimart.ai/en/api-reference/images/midjourney/upscale
+- L18641 | Variation | https://docs.apimart.ai/en/api-reference/images/midjourney/variation
+- L19199 | Video (image-to-video) | https://docs.apimart.ai/en/api-reference/images/midjourney/video
+- L19839 | End-to-End Workflow Examples | https://docs.apimart.ai/en/api-reference/images/midjourney/workflow
+- L20053 | Zoom | https://docs.apimart.ai/en/api-reference/images/midjourney/zoom
+- L20607 | Muse Image Ext Image Generation | https://docs.apimart.ai/en/api-reference/images/muse-image-ext/generation
+- L20839 | Qwen Image 3.0 Image Generation | https://docs.apimart.ai/en/api-reference/images/qwen-image-3.0/generation
+- L21170 | Qwen Image 2.0 Image Generation | https://docs.apimart.ai/en/api-reference/images/qwen-image/generation
+- L21448 | Seedream-4.5 Image Generation | https://docs.apimart.ai/en/api-reference/images/seedream-4.5/generation
+- L22250 | Seedream-4.0 Image Generation | https://docs.apimart.ai/en/api-reference/images/seedream-4/generation
+- L23070 | Seedream-5.0-Flash Image Generation | https://docs.apimart.ai/en/api-reference/images/seedream-5-0-flash/generation
+- L24192 | Seedream-5.0-Pro Image Generation | https://docs.apimart.ai/en/api-reference/images/seedream-5-0-pro/generation
+- L25314 | Seedream-5.0-Lite Image Generation | https://docs.apimart.ai/en/api-reference/images/seedream-5-lite/generation
+- L26087 | wan2.7 Image Generation & Editing | https://docs.apimart.ai/en/api-reference/images/wan2.7-image/generation
+- L26648 | Z-Image-Turbo Image Generation | https://docs.apimart.ai/en/api-reference/images/z-image-turbo/generation
+- L26899 | Gemini Context Caching Guide | https://docs.apimart.ai/en/api-reference/texts/gemini/context-cache
+- L27313 | Gemini Native Format | https://docs.apimart.ai/en/api-reference/texts/gemini/quickstart
+- L27994 | General Chat API (Default Streaming) | https://docs.apimart.ai/en/api-reference/texts/general/chat-completions
+- L28929 | General Chat API (Default Non-Streaming) | https://docs.apimart.ai/en/api-reference/texts/general/chat-completions-nostream
+- L29870 | Claude Context Caching Guide | https://docs.apimart.ai/en/api-reference/texts/general/claude-context-cache
+- L30250 | Claude Messages API | https://docs.apimart.ai/en/api-reference/texts/general/claude-messages
+- L31616 | Models List Metadata API | https://docs.apimart.ai/en/api-reference/texts/models/list
+- L31806 | OpenAI Context Caching Guide | https://docs.apimart.ai/en/api-reference/texts/openai/context-cache
+- L31978 | OpenAI Multimodal Responses API | https://docs.apimart.ai/en/api-reference/texts/openai/responses
+- L33387 | qwen3.8-max Integration Guide | https://docs.apimart.ai/en/api-reference/texts/qwen3.8-max/guide
+- L33679 | Model Pricing API | https://docs.apimart.ai/en/api-reference/texts/qwen3.8-max/pricing
+- L33934 | seedance-1-0-pro Video Generation | https://docs.apimart.ai/en/api-reference/videos/doubao/generation
+- L34457 | FLUX 3 Video Generation | https://docs.apimart.ai/en/api-reference/videos/flux-3-video/generation
+- L34900 | Grok Imagine 1.5 Video Generation | https://docs.apimart.ai/en/api-reference/videos/grok-imagine/generation
+- L35199 | HappyHorse 1.0 Video Generation | https://docs.apimart.ai/en/api-reference/videos/happyhorse-1.0/generation
+- L35844 | HappyHorse 1.1 Video Generation | https://docs.apimart.ai/en/api-reference/videos/happyhorse-1.1/generation
+- L36426 | Kling 3.0 Turbo Video Generation | https://docs.apimart.ai/en/api-reference/videos/kling-3.0-turbo/generation
+- L36956 | Kling 2.6 Video Generation | https://docs.apimart.ai/en/api-reference/videos/kling-v2-6/generation
+- L37522 | Kling v2.6 Motion Control Video Generation | https://docs.apimart.ai/en/api-reference/videos/kling-v2-6/kling-v2-6-motion-control-generation
+- L37822 | Kling v3 Omni Video Generation | https://docs.apimart.ai/en/api-reference/videos/kling-v3-omni/generation
+- L38502 | Kling v3 Video Generation | https://docs.apimart.ai/en/api-reference/videos/kling-v3/generation
+- L39200 | Kling V4 Video Generation | https://docs.apimart.ai/en/api-reference/videos/kling-v4/generation
+- L39520 | Kling Video O1 Video Generation | https://docs.apimart.ai/en/api-reference/videos/kling-video-o1/generation
+- L40096 | MiniMax-H3 Context-IR Prompt Enhancement | https://docs.apimart.ai/en/api-reference/videos/minimax-h3/context-ir
+- L40348 | MiniMax-H3 Video Generation | https://docs.apimart.ai/en/api-reference/videos/minimax-h3/generation
+- L41031 | MiniMax-H3-Max Video Generation | https://docs.apimart.ai/en/api-reference/videos/minimax-h3/max
+- L41500 | MiniMax-H3 Regeneration | https://docs.apimart.ai/en/api-reference/videos/minimax-h3/regeneration
+- L41750 | MiniMax-Hailuo-2.3 Video Generation | https://docs.apimart.ai/en/api-reference/videos/minimax-hailuo-2.3/generation
+- L42327 | MiniMax-Hailuo-02 Video Generation | https://docs.apimart.ai/en/api-reference/videos/minimax-hailuo/generation
+- L42892 | seedance-1-5-pro Video Generation | https://docs.apimart.ai/en/api-reference/videos/seedance-1-5-pro/generation
+- L43483 | seedance-2.0 Video Generation | https://docs.apimart.ai/en/api-reference/videos/seedance-2-0/generation
+- L44332 | Virtual Avatar Assets | https://docs.apimart.ai/en/api-reference/videos/seedance-2-0/private-avatar
+- L44856 | seedance-2.5 Video Generation | https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation
+- L45805 | SkyReels V4 Video Generation | https://docs.apimart.ai/en/api-reference/videos/skyreels-v4/generation
+- L46543 | VEO3 Video Generation | https://docs.apimart.ai/en/api-reference/videos/veo3/generation
+- L47220 | VEO3 Official Video Generation | https://docs.apimart.ai/en/api-reference/videos/veo3/generation-official
+- L47800 | VEO3 Video Remix | https://docs.apimart.ai/en/api-reference/videos/veo3/remix
+- L48458 | Vidu Q3(pro/turbo) Video Generation | https://docs.apimart.ai/en/api-reference/videos/vidu-q3-pro/generation
+- L49006 | Vidu Q3(mix/standard) Reference-to-Video | https://docs.apimart.ai/en/api-reference/videos/vidu-q3/generation
+- L49548 | Vidu Q4 Preview Video Generation | https://docs.apimart.ai/en/api-reference/videos/vidu-q4-preview/generation
+- L49916 | wan2.5-preview Video Generation | https://docs.apimart.ai/en/api-reference/videos/wan2.5/generation
+- L50531 | Wan2.6 Video Generation | https://docs.apimart.ai/en/api-reference/videos/wan2.6/generation
+- L51139 | wan2.6-i2v-flash Image-to-Video | https://docs.apimart.ai/en/api-reference/videos/wan2.6/i2v-flash-generation
+- L51733 | Wan2.7-R2V Reference-to-Video | https://docs.apimart.ai/en/api-reference/videos/wan2.7-r2v/generation
+- L52323 | Wan2.7-VideoEdit Video Editing | https://docs.apimart.ai/en/api-reference/videos/wan2.7-videoedit/generation
+- L52884 | Wan2.7 Video Generation | https://docs.apimart.ai/en/api-reference/videos/wan2.7/generation
+- L53512 | Wan3.0 Video Generation | https://docs.apimart.ai/en/api-reference/videos/wan3.0-video/generation
+- L54007 | APIMart — OpenAI-Compatible API Gateway (GPT-5, Claude, Gemini) | https://docs.apimart.ai/en/index
+- L54180 | Query Token Balance | https://docs.apimart.ai/en/api-reference/account/token-balance
+- L54577 | Query Usage and Spending | https://docs.apimart.ai/en/api-reference/account/usage
+- L54909 | Query User Balance | https://docs.apimart.ai/en/api-reference/account/user-balance
+- L55277 | Cover Rearrangement | https://docs.apimart.ai/en/api-reference/audios/flow-music/cover
+- L55523 | Lyria 3.5 Cover Rearrangement | https://docs.apimart.ai/en/api-reference/audios/flow-music/cover-lyria-3-5
+- L55782 | Download Audio | https://docs.apimart.ai/en/api-reference/audios/flow-music/download-audio
+- L55996 | Extend Music | https://docs.apimart.ai/en/api-reference/audios/flow-music/extend
+- L56243 | Lyria 3.5 Extend Music | https://docs.apimart.ai/en/api-reference/audios/flow-music/extend-lyria-3-5
+- L56502 | Generate Lyrics | https://docs.apimart.ai/en/api-reference/audios/flow-music/lyrics
+- L56716 | Generate Music | https://docs.apimart.ai/en/api-reference/audios/flow-music/music
+- L56981 | Lyria 3.5 Generate Music | https://docs.apimart.ai/en/api-reference/audios/flow-music/music-lyria-3-5
+- L57259 | Query Task | https://docs.apimart.ai/en/api-reference/audios/flow-music/query
+- L57472 | Replace Section | https://docs.apimart.ai/en/api-reference/audios/flow-music/replace
+- L57715 | Lyria 3.5 Replace Section | https://docs.apimart.ai/en/api-reference/audios/flow-music/replace-lyria-3-5
+- L57970 | Stem Separation | https://docs.apimart.ai/en/api-reference/audios/flow-music/stems
+- L58170 | Upload Audio | https://docs.apimart.ai/en/api-reference/audios/flow-music/upload-audio
+- L58374 | Music Video Rendering | https://docs.apimart.ai/en/api-reference/audios/flow-music/video-clip
+- L58586 | Add accompaniment | https://docs.apimart.ai/en/api-reference/audios/suno/add-instrumental
+- L59239 | Add stem (add stem) | https://docs.apimart.ai/en/api-reference/audios/suno/add-stem
+- L59902 | Add vocals | https://docs.apimart.ai/en/api-reference/audios/suno/add-vocals
+- L60569 | Adjust speed | https://docs.apimart.ai/en/api-reference/audios/suno/adjust-speed
+- L61156 | Lyrics timeline | https://docs.apimart.ai/en/api-reference/audios/suno/aligned-lyrics
+- L61717 | BPM analysis | https://docs.apimart.ai/en/api-reference/audios/suno/bpm
+- L62278 | Full song synthesis / concatenation | https://docs.apimart.ai/en/api-reference/audios/suno/concat
+- L62855 | Style cover | https://docs.apimart.ai/en/api-reference/audios/suno/cover-song
+- L63547 | Create a Custom Model | https://docs.apimart.ai/en/api-reference/audios/suno/create-model
+- L63699 | Create voice | https://docs.apimart.ai/en/api-reference/audios/suno/create-voice
+- L64242 | Crop audio | https://docs.apimart.ai/en/api-reference/audios/suno/crop
+- L64839 | Continuation and extension | https://docs.apimart.ai/en/api-reference/audios/suno/extend
+- L65518 | Fade in | https://docs.apimart.ai/en/api-reference/audios/suno/fade-in
+- L66101 | Fade out | https://docs.apimart.ai/en/api-reference/audios/suno/fade-out
+- L66684 | Generate music video (MV) | https://docs.apimart.ai/en/api-reference/audios/suno/generate-mp4
+- L67245 | Generate music | https://docs.apimart.ai/en/api-reference/audios/suno/generation
+- L67904 | Inspiration generation (inspo) | https://docs.apimart.ai/en/api-reference/audios/suno/inspo
+- L68538 | Generate lyrics | https://docs.apimart.ai/en/api-reference/audios/suno/lyrics
+- L69080 | Generate mashup (mashup) | https://docs.apimart.ai/en/api-reference/audios/suno/mashup
+- L69741 | Generate MIDI | https://docs.apimart.ai/en/api-reference/audios/suno/midi
+- L70302 | Suno V6 General Agreements and Task Inquiry | https://docs.apimart.ai/en/api-reference/audios/suno/overview
+- L70512 | Persona | https://docs.apimart.ai/en/api-reference/audios/suno/persona
+- L71125 | Mastering | https://docs.apimart.ai/en/api-reference/audios/suno/remaster
+- L71698 | Remove segment | https://docs.apimart.ai/en/api-reference/audios/suno/remove-section
+- L72295 | Section replacement | https://docs.apimart.ai/en/api-reference/audios/suno/replace-music
+- L72946 | Sample to song (sample) | https://docs.apimart.ai/en/api-reference/audios/suno/sample
+- L73671 | Sound effect generation | https://docs.apimart.ai/en/api-reference/audios/suno/sounds
+- L74229 | Stem extraction | https://docs.apimart.ai/en/api-reference/audios/suno/stems
+- L74832 | Full stem separation | https://docs.apimart.ai/en/api-reference/audios/suno/stems-all
+- L75397 | Upload audio | https://docs.apimart.ai/en/api-reference/audios/suno/upload
+- L75917 | Upload Audio and Create a Cover | https://docs.apimart.ai/en/api-reference/audios/suno/upload-cover
+- L76098 | Upload and Extend Audio | https://docs.apimart.ai/en/api-reference/audios/suno/upload-extend
+- L76271 | Tag enhancement | https://docs.apimart.ai/en/api-reference/audios/suno/upsample-tags
+- L76809 | Extract Vox (deprecated) | https://docs.apimart.ai/en/api-reference/audios/suno/vox
+- L77410 | Download Audio Files | https://docs.apimart.ai/en/api-reference/audios/suno/wav
+- L77762 | TTS Text-to-Speech | https://docs.apimart.ai/en/api-reference/audios/tts
+- L78396 | Whisper-1 Audio Transcription | https://docs.apimart.ai/en/api-reference/audios/whisper-1
+- L79084 | omni-moderation-latest Content Moderation | https://docs.apimart.ai/en/api-reference/moderations/omni-moderation-latest/generation
+- L79316 | Get Task Status | https://docs.apimart.ai/en/api-reference/tasks/status
+- L79832 | Task Completion Callback (Webhook) | https://docs.apimart.ai/en/api-reference/tasks/webhook
+- L80027 | Upload Audio | https://docs.apimart.ai/en/api-reference/uploads/audios
+- L80242 | Upload Image | https://docs.apimart.ai/en/api-reference/uploads/images
+- L80457 | Upload Video | https://docs.apimart.ai/en/api-reference/uploads/videos
+- L80672 | Gemini Omni 1.1 Flash Video Generation | https://docs.apimart.ai/en/api-reference/videos/gemini-omni-1.1-flash/generation
+- L81135 | Gemini Omni Flash Video Generation | https://docs.apimart.ai/en/api-reference/videos/gemini-omni-flash-preview/generation
+- L81454 | Grok Official Video Models | https://docs.apimart.ai/en/api-reference/videos/grok-imagine/official
+- L81928 | Muse Video Ext Video Generation | https://docs.apimart.ai/en/api-reference/videos/muse-video-ext/generation
+- L82176 | gemini-omni-1.1-flash-ext Video Generation | https://docs.apimart.ai/en/api-reference/videos/omni-flash-ext/generation
+- L82631 | PixVerse V6 Max Video Generation | https://docs.apimart.ai/en/api-reference/videos/pixverse-v6-max/generation
+- L82812 | Pixverse v6 Video Generation | https://docs.apimart.ai/en/api-reference/videos/pixverse-v6/generation
+- L83254 | Development Guide | https://docs.apimart.ai/en/development
+- L83346 | FAQs | https://docs.apimart.ai/en/faqs
+- L83406 | Account Management | https://docs.apimart.ai/en/faqs/account-management
+- L83429 | Connection & Usage | https://docs.apimart.ai/en/faqs/connection-usage
+- L83464 | Cost Optimization | https://docs.apimart.ai/en/faqs/cost-optimization
+- L83493 | Features & Capabilities | https://docs.apimart.ai/en/faqs/features
+- L83546 | Security & Configuration | https://docs.apimart.ai/en/faqs/security-configuration
+- L83569 | Using APIMart in AnythingLLM | https://docs.apimart.ai/en/integrations/chat/anythingllm
+- L84061 | Using APIMart in ChatBox | https://docs.apimart.ai/en/integrations/chat/chatbox
+- L84373 | Using APIMart in Cherry Studio | https://docs.apimart.ai/en/integrations/chat/cherry-studio
+- L84588 | Using APIMart in CC-Switch | https://docs.apimart.ai/en/integrations/dev-tool/cc-switch
+- L84813 | Using APIMart in Claude Code | https://docs.apimart.ai/en/integrations/dev-tool/claude-code
+- L85168 | Integrate APIMart with Cline in VSCode | https://docs.apimart.ai/en/integrations/dev-tool/cline
+- L85799 | Using APIMart in Codex CLI | https://docs.apimart.ai/en/integrations/dev-tool/codex-cli
+- L86074 | Using APIMart in Cursor | https://docs.apimart.ai/en/integrations/dev-tool/cursor
+- L86324 | Using APIMart with Gemini CLI | https://docs.apimart.ai/en/integrations/dev-tool/gemini
+- L86852 | Using APIMart in Dify | https://docs.apimart.ai/en/integrations/platform/dify
+- L87407 | Using APIMart in Immersive Translate | https://docs.apimart.ai/en/integrations/platform/immersive-translate
+- L87792 | Quick Start | https://docs.apimart.ai/en/quickstart

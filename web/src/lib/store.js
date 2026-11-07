@@ -2,16 +2,16 @@ import { reactive } from 'vue';
 
 // 页面注册表：native = 已用 Vue 重写；legacy = 还没重写，用 iframe 承载旧页面（逐页替换时改这里）
 export const PAGES = [
-    // 首页：按用户要求继续用原先的 home.html（iframe 承载）；Vue 版 pages/home/HomePage.vue 保留未挂载
-    { id: 'home', label: '首页', i18n: 'nav.home', icon: 'home', legacy: '/static/home.html' },
+    // 首页：2026-11 重做为 Vue 版（pages/home/HomePage.vue）；旧 home.html 保留作回退，不再挂载
+    { id: 'home', label: '首页', i18n: 'nav.home', icon: 'home', native: true },
     // 画布：列表已用 Vue 重写（native），打开某张画布时仍用 iframe 承载旧编辑器（frame）
     { id: 'canvas', label: '智能画布BEAT', i18n: 'nav.canvas', icon: 'workflow', native: true, frame: true },
-    { id: 'online', label: '在线生图', i18n: 'nav.online', icon: 'globe', native: true },
-    { id: 'gpt-chat', label: 'GPT 对话', i18n: 'nav.gpt', icon: 'chat', native: true },
     { id: 'asset-manager', label: '素材库', i18n: 'nav.assetManager', icon: 'library', native: true },
-    { id: 'store', label: '应用市场', i18n: 'nav.store', icon: 'grid9', native: true },
-    // 不在侧栏，但旧页面会 navigate 过来
-    { id: 'zimage', label: 'Z-Image', icon: 'image', native: true, hidden: true },
+    // 应用市场：2026-11 按原型重做（pages/market/MarketPage.vue），数据走 /api/store/* + /api/skills + MCP
+    { id: 'store', label: '应用市场', i18n: 'nav.store', icon: 'bag', native: true },
+    // 我的：个人中心（pages/me/MePage.vue），资料 / 好友 / 账户原来在右上角头像菜单里，2026-11 拆出来独立成页
+    { id: 'me', label: '我的', i18n: 'nav.me', icon: 'user', native: true },
+    // 在线生图 / GPT 对话 / Z-Image 已下线（2026-11）：旧页面 navigate 过来时 bridge 会回落到首页；后端接口保留，画布仍在用
     // 旧页面 navigate 到这两个 id 时改为打开设置弹窗对应页（bridge.navigate 里处理）
     { id: 'api-settings', label: 'API 设置', icon: 'key', settingsTab: true, hidden: true },
     { id: 'comfyui-settings', label: '工作流设置', icon: 'workflow', settingsTab: true, hidden: true },

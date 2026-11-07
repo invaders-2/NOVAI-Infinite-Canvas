@@ -1,0 +1,209 @@
+/* T51 局域网好友 / 聊天：入口红点 + 右侧浮层 + 会话气泡。
+   颜色全走 .cn-root 令牌；大面板磨砂玻璃、小控件软底，不画 border / 1px 描边。 */
+
+/* ── 入口按钮的未读红点 ── */
+.cn-root #lanBtn,.cn-root #chatBtn{position:relative}
+.cn-root #lanBtn .lan-dot,.cn-root #chatBtn .lan-dot{position:absolute;top:-2px;right:-2px;min-width:15px;height:15px;padding:0 4px;border-radius:8px;
+  background:var(--bad);color:#fff;font-size:9.5px;font-weight:600;line-height:15px;text-align:center;pointer-events:none;
+  box-shadow:0 1px 4px rgba(0,0,0,.32)}
+/* 放进左侧栏 #lb 后按钮从 40px 的 .sq 换成 38px 的 .ib、34px 的 .av，红点按格子尺寸收进右上角内侧 */
+.cn-root #lb #avatar{position:relative}
+.cn-root #lb #chatBtn .lan-dot,.cn-root #lb #lanBtn .lan-dot,.cn-root #lb #avatar .lan-dot{position:absolute;top:2px;right:2px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;font-size:9px;line-height:14px}
+.cn-root #lb #avatar .lan-dot{top:0;right:0}
+
+/* ── 根容器：只做定位与主题，本身不吃点击 ── */
+.cn-root.lan-root{position:fixed;inset:0;z-index:50;background:transparent;overflow:visible;pointer-events:none}
+.cn-root.lan-root > *{pointer-events:auto}
+
+/* ── 面板：贴着左侧栏 #lb（宽 52px）的右边缘浮起，再留 12px 间隙 ── */
+.cn-root .lan-panel{position:fixed;left:calc(max(16px,env(safe-area-inset-left,0px)) + 52px + 12px);right:auto;
+  top:auto;bottom:calc(66px + env(safe-area-inset-bottom,0px));width:364px;max-height:min(660px,calc(100vh - 120px));
+  display:flex;flex-direction:column;isolation:isolate;border-radius:20px;overflow:hidden;color:var(--fg);
+  background:color-mix(in srgb,var(--panel) 78%,transparent);
+  backdrop-filter:blur(44px) saturate(190%);-webkit-backdrop-filter:blur(44px) saturate(190%);
+  box-shadow:0 10px 30px rgba(0,0,0,.24),0 36px 84px rgba(0,0,0,.32);
+  transform-origin:0 100%;animation:lanIn .2s var(--ease) both}
+.cn-root[data-theme=light] .lan-panel{background:color-mix(in srgb,var(--panel) 82%,transparent);
+  box-shadow:0 10px 30px rgba(15,23,42,.12),0 36px 84px rgba(15,23,42,.18)}
+@keyframes lanIn{from{opacity:0;transform:translateX(-10px) scale(.99)}}
+
+.cn-root .lan-head{display:flex;align-items:center;gap:6px;padding:10px 10px 8px 14px;flex:none}
+.cn-root .lan-head-ic{width:22px;display:grid;place-items:center;color:var(--fg2)}
+.cn-root .lan-title{display:flex;flex-direction:column;gap:1px;font-size:13.5px;font-weight:600;line-height:1.25;min-width:0}
+.cn-root .lan-title small{font-size:11px;font-weight:400;color:var(--fg3)}
+.cn-root .lan-title small.on{color:var(--ok)}
+.cn-root .lan-head .lan-title{flex:1}
+
+.cn-root .lan-ib{width:28px;height:28px;border-radius:14px;display:grid;place-items:center;color:var(--fg2);flex:none}
+.cn-root .lan-ib:hover:not(:disabled){background:var(--hover);color:var(--fg)}
+.cn-root .lan-ib:disabled{opacity:.4;cursor:not-allowed}
+
+.cn-root .lan-err{padding:0 14px 8px;font-size:11.5px;line-height:1.55;color:var(--bad)}
+.cn-root .lan-note{padding:0 14px 8px;font-size:11.5px;line-height:1.55;color:var(--fg2)}
+
+/* ── 好友列表 ── */
+.cn-root .lan-body{flex:1;min-height:0;overflow:auto;padding:2px 10px 12px;display:flex;flex-direction:column;gap:2px}
+.cn-root .lan-friend{display:flex;align-items:center;gap:10px;width:100%;height:52px;padding:0 8px;border-radius:12px;text-align:left}
+.cn-root .lan-friend:hover{background:var(--hover)}
+.cn-root .lan-avatar{position:relative;width:34px;height:34px;border-radius:50%;flex:none;display:grid;place-items:center;
+  background:var(--sunken);font-size:16px;line-height:1;color:var(--fg);overflow:hidden}
+.cn-root .lan-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.cn-root .lan-avatar.big{width:52px;height:52px;font-size:24px}
+.cn-root .lan-avatar[data-online]::after{content:"";position:absolute;right:0;bottom:0;width:9px;height:9px;border-radius:50%;
+  background:var(--ok);box-shadow:0 0 0 2px var(--panel)}
+.cn-root .lan-friend-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.cn-root .lan-friend-name{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .lan-friend-status{display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;color:var(--fg3)}
+.cn-root .lan-friend-sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .lan-friend-code{flex:none;font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;color:var(--fg3);opacity:.8}
+.cn-root .lan-friend.on .lan-friend-status{color:var(--ok)}
+.cn-root .lan-unread{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;
+  font-size:10.5px;font-weight:600;line-height:18px;text-align:center;flex:none}
+
+.cn-root .lan-empty{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:28px 20px;color:var(--fg3)}
+.cn-root .lan-empty-ic{width:52px;height:52px;border-radius:26px;display:grid;place-items:center;background:var(--sunken);color:var(--fg2);margin-bottom:2px}
+.cn-root .lan-empty-ic svg.i{width:24px;height:24px}
+.cn-root .lan-empty b{font-size:13px;font-weight:600;color:var(--fg)}
+.cn-root .lan-empty span{font-size:11.5px;line-height:1.6;max-width:250px}
+.cn-root .lan-empty .lan-btn{margin-top:6px}
+.cn-root .lan-empty.small{padding:18px 12px}
+
+/* ── 会话 ── */
+.cn-root .lan-list{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:2px 12px 8px}
+.cn-root .lan-day{align-self:center;margin:8px 0 4px;height:20px;padding:0 10px;border-radius:10px;background:var(--sunken);
+  font-size:10.5px;color:var(--fg2);display:inline-flex;align-items:center}
+.cn-root .lan-msg{display:flex;flex-direction:column;align-items:flex-start;max-width:100%;margin:3px 0}
+.cn-root .lan-msg.me{align-items:flex-end}
+.cn-root .lan-bubble{max-width:80%;padding:8px 12px;border-radius:16px;background:var(--card);color:var(--fg);
+  box-shadow:0 2px 8px rgba(0,0,0,.14);font-size:13px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.cn-root .lan-msg.me .lan-bubble{background:var(--solid);color:var(--on-solid);border-bottom-right-radius:6px;box-shadow:0 2px 10px rgba(0,0,0,.18)}
+.cn-root .lan-meta{display:flex;align-items:center;gap:8px;padding:2px 4px 0;font-size:10.5px;color:var(--fg3)}
+.cn-root .lan-retry{font-size:10.5px;color:var(--bad);padding:0 4px;border-radius:6px}
+.cn-root .lan-retry:hover{background:color-mix(in srgb,var(--bad) 12%,transparent)}
+
+/* 本地系统提示（加好友等），居中灰字不占气泡 */
+.cn-root .lan-sys{align-self:center;margin:7px 0 4px;padding:0 10px;font-size:10.5px;color:var(--fg3);text-align:center}
+
+/* 画布卡片 */
+.cn-root .lan-card{display:flex;align-items:center;gap:10px;max-width:84%;padding:8px 12px 8px 8px;border-radius:14px;
+  background:var(--card);color:var(--fg);text-align:left;box-shadow:0 2px 10px rgba(0,0,0,.16)}
+.cn-root .lan-card:hover{background:var(--card-hi)}
+.cn-root .lan-card:disabled{opacity:.55;cursor:not-allowed}
+.cn-root .lan-card-ic{width:34px;height:34px;border-radius:10px;flex:none;display:grid;place-items:center;background:var(--sunken);color:var(--fg2)}
+.cn-root .lan-card-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cn-root .lan-card-txt b{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px}
+.cn-root .lan-card-txt small{font-size:11px;color:var(--fg3)}
+
+/* 输入区 */
+.cn-root .lan-composer{display:flex;align-items:flex-end;gap:4px;flex:none;margin:0 10px 10px;padding:6px 6px 6px 12px;border-radius:16px;
+  background:color-mix(in srgb,var(--card) 88%,transparent);box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.cn-root .lan-composer textarea{flex:1;min-width:0;max-height:96px;min-height:28px;padding:6px 0;resize:none;background:transparent;
+  color:var(--fg);font-size:13px;line-height:1.5}
+.cn-root .lan-composer textarea::placeholder{color:var(--fg3)}
+.cn-root .lan-send{width:30px;height:30px;border-radius:15px;flex:none;display:grid;place-items:center;
+  background:var(--solid);color:var(--on-solid)}
+.cn-root .lan-send:hover:not(:disabled){opacity:.88}
+.cn-root .lan-send:disabled{opacity:.35;cursor:not-allowed}
+
+/* ── 加好友 / 我的资料 ── */
+.cn-root .lan-hint{padding:2px 2px 10px;font-size:11.5px;line-height:1.65;color:var(--fg3)}
+.cn-root .lan-input{display:block;width:100%;height:34px;padding:0 10px;border-radius:10px;background:var(--sunken);
+  color:var(--fg);font-size:12.5px;margin-bottom:10px}
+.cn-root .lan-label{display:block;padding:2px 2px 5px;font-size:11px;color:var(--fg3)}
+.cn-root .lan-foot{display:flex;gap:8px;justify-content:flex-end;padding-top:4px}
+.cn-root .lan-btn{height:32px;padding:0 12px;border-radius:10px;background:var(--sunken);color:var(--fg);font-size:12px;
+  display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.cn-root .lan-btn:not(.pri):hover:not(:disabled){background:var(--hover)}
+.cn-root .lan-btn.pri{background:var(--solid);color:var(--on-solid)}
+.cn-root .lan-btn.pri:hover:not(:disabled){opacity:.88}
+.cn-root .lan-btn:disabled{opacity:.42;cursor:not-allowed}
+
+.cn-root .lan-me{display:flex;gap:12px;align-items:center;padding:4px 2px 10px}
+.cn-root .lan-me-fields{flex:1;min-width:0}
+.cn-root .lan-avatar-row{display:flex;align-items:center;gap:6px;min-width:0}
+.cn-root .lan-avatar-row .lan-input{flex:1;min-width:0}
+.cn-root .lan-avatar-file{flex:1;min-width:0;height:34px;padding:0 10px;border-radius:10px;display:flex;align-items:center;
+  background:var(--sunken);font-size:11.5px;color:var(--fg3);white-space:nowrap}
+.cn-root button.lan-avatar-recrop{text-align:left;color:var(--fg);cursor:pointer;transition:background-color var(--d-quick) var(--e-std)}
+.cn-root button.lan-avatar-recrop:hover{background:var(--hover)}
+.cn-root .lan-ident{display:flex;align-items:center;gap:8px;padding:0 2px 10px}
+.cn-root .lan-ident-label{flex:none;font-size:11px;color:var(--fg3)}
+.cn-root .lan-ident-code{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:9px;
+  background:var(--sunken);color:var(--fg);font-family:var(--mono);font-size:12px}
+.cn-root .lan-ident-code b{font-weight:600;letter-spacing:.06em}
+.cn-root .lan-ident-code:hover{background:var(--hover)}
+.cn-root .lan-ident-code svg.i{color:var(--fg3)}
+.cn-root .lan-code{display:flex;align-items:center;gap:6px}
+.cn-root .lan-code input{flex:1;min-width:0;height:32px;padding:0 10px;border-radius:10px;background:var(--sunken);
+  color:var(--fg);font-size:11.5px;font-family:var(--mono)}
+
+/* ── 头像裁切：240 圆预览靠底色 + 柔和投影立起来（不画边框 / 发丝线），深浅色走 .cn-root 令牌；
+     拖动 / 滚轮 / 双指 / 滑块都只改同一套 {zoom, ox, oy}，导出按 256/240 换算 ── */
+.cn-root .lan-crop{display:flex;flex-direction:column;align-items:center;gap:12px;padding:6px 2px 4px}
+.cn-root .lan-crop-stage{position:relative;width:240px;height:240px;border-radius:50%;overflow:hidden;flex:none;
+  background:var(--sunken);box-shadow:0 10px 28px rgba(0,0,0,.22),0 2px 8px rgba(0,0,0,.14);
+  cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+.cn-root[data-theme=light] .lan-crop-stage{box-shadow:0 10px 28px rgba(15,23,42,.12),0 2px 8px rgba(15,23,42,.08)}
+.cn-root .lan-crop-stage:active{cursor:grabbing}
+.cn-root .lan-crop-stage img{position:absolute;display:block;max-width:none;max-height:none;pointer-events:none;-webkit-user-drag:none}
+.cn-root .lan-crop-zoom{display:flex;align-items:center;gap:10px;width:240px}
+.cn-root .lan-crop-zoom-val{flex:none;min-width:34px;font-size:11px;line-height:1;color:var(--fg3);font-variant-numeric:tabular-nums}
+.cn-root .lan-crop-zoom input[type=range]{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:20px;background:transparent;cursor:pointer}
+.cn-root .lan-crop-zoom input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:var(--sunken)}
+.cn-root .lan-crop-zoom input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;margin-top:-6px;border:0;border-radius:50%;
+  background:var(--fg);box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.cn-root .lan-crop-zoom input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:var(--sunken)}
+.cn-root .lan-crop-zoom input[type=range]::-moz-range-thumb{width:16px;height:16px;border:0;border-radius:50%;
+  background:var(--fg);box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.cn-root .lan-crop-hint{margin:0;font-size:11px;line-height:1.6;color:var(--fg3);text-align:center}
+.cn-root .lan-crop-error{margin:0;font-size:11.5px;line-height:1.6;color:var(--bad);text-align:center}
+.cn-root .lan-crop-acts{display:flex;align-items:center;justify-content:flex-end;gap:8px;width:100%;padding-top:2px}
+.cn-root .lan-crop-acts .lan-btn:first-child{margin-right:auto}
+
+/* ── 画布卡片只读预览：复用 T49 的 ShareView（它自带 scrim + 窗口 z-index） ── */
+.cn-root .lan-preview{position:fixed;inset:0;z-index:70;pointer-events:none}
+.cn-root .lan-preview > *{pointer-events:auto}
+
+@media (max-width:720px){
+  .cn-root .lan-panel{left:8px;right:8px;top:56px;bottom:auto;width:auto;max-height:calc(100vh - 76px)}
+}
+@media (prefers-reduced-motion:reduce){
+  .cn-root .lan-panel{animation:none}
+}
+
+/* ── 账户菜单顶部的身份行：头像 + 昵称，整行进「我的资料」 ── */
+.cn-root .lan-id-av{width:26px;height:26px;font-size:14px}
+.cn-root .lan-id-name{flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .lan-id-role{flex:none;font-size:11px;color:var(--fg3)}
+
+/* ── 左侧栏「我」的头像：图片按圆裁切铺满；emoji / 首字单独放大字号、换软底（.av 的 13px + 深灰底装 emoji 太小） ── */
+.cn-root #lb #avatar .lan-face{display:block;width:100%;height:100%;border-radius:50%;object-fit:cover}
+.cn-root #lb #avatar{font-size:20px;line-height:1;font-weight:500;background:rgba(var(--ink),.1)}
+
+/* ── 右下角新消息通知：让开 #orb（bottom 18、56/64px 高）和 #zb（bottom 16、40px 高）；
+     Agent 面板展开时 #agent 占掉右侧 380px，卡片整体左移，别压到面板上 ── */
+.cn-root.lan-root .lan-notices{position:fixed;right:max(16px,env(safe-area-inset-right,0px));
+  bottom:calc(96px + env(safe-area-inset-bottom,0px));z-index:2;display:flex;flex-direction:column-reverse;gap:8px;pointer-events:none}
+.cn-root.lan-root .lan-notices > *{pointer-events:auto}
+.cn-root .lan-notice{position:relative;display:flex;align-items:center;gap:10px;width:300px;max-width:calc(100vw - 32px);
+  padding:10px 12px;border-radius:16px;text-align:left;cursor:pointer;color:var(--fg);background:rgba(24,24,24,.95);
+  box-shadow:0 10px 28px rgba(0,0,0,.34),0 2px 8px rgba(0,0,0,.22);animation:lanNoticeIn .22s var(--ease) both}
+.cn-root[data-theme=light] .lan-notice{background:rgba(255,255,255,.96);
+  box-shadow:0 10px 28px rgba(15,23,42,.16),0 2px 8px rgba(15,23,42,.08)}
+.cn-root .lan-notice:hover{background:rgba(34,34,36,.98)}
+.cn-root[data-theme=light] .lan-notice:hover{background:#fff}
+.cn-root .lan-notice[data-leaving="1"]{pointer-events:none;animation:none;opacity:0;transform:translateY(6px) scale(.98);
+  transition:opacity .18s var(--e-std),transform .18s var(--e-std)}
+.cn-root .lan-notice-av{width:32px;height:32px;font-size:15px}
+.cn-root .lan-notice-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.cn-root .lan-notice-name{font-size:13px;font-weight:600;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .lan-notice-text{font-size:12px;line-height:1.3;color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .lan-notice-go{flex:none;font-size:12px;font-weight:600;color:var(--fg)}
+.cn-root .lan-notice-x{flex:none;width:20px;height:20px;border-radius:7px;display:grid;place-items:center;color:var(--fg3);opacity:.65;
+  transition:opacity var(--d-quick) var(--e-std),background-color var(--d-quick) var(--e-std),color var(--d-quick) var(--e-std)}
+.cn-root .lan-notice-x:hover{background:var(--hover);color:var(--fg);opacity:1}
+@keyframes lanNoticeIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .cn-root .lan-notice{animation:none}
+  .cn-root .lan-notice[data-leaving="1"]{transition:none}
+}

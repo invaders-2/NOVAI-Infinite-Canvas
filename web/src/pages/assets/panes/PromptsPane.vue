@@ -2,6 +2,7 @@
 // 「提示词库」：词库 / 分组树（树内编辑、二次确认删除）+ 提示词列表（搜索、批量管理、框选）+ 右侧预览 / 编辑 / 新增
 import { ref, computed, watch } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
+import AmTools from '../parts/AmTools.vue';
 import TreeEdit from '../parts/TreeEdit.vue';
 import PromptDetail from './PromptDetail.vue';
 import { run } from '../lib/state.js';
@@ -84,6 +85,7 @@ function rowClick(id) { if (!X.manage) P.clickRow(id); }
                 <label class="nv-field wide"><NvIcon name="search" /><input v-model="X.query" type="search" placeholder="搜索名称、说明或正文" aria-label="搜索提示词"></label>
                 <button type="button" class="nv-btn sm primary" :disabled="readonly" @click="P.startCreate()"><NvIcon name="plus" />新增</button>
                 <button type="button" class="nv-btn sm" :class="{ primary: X.manage }" @click="P.toggleManage()"><NvIcon name="list" />{{ X.manage ? '完成管理' : '批量管理' }}</button>
+                <AmTools />
             </div>
             <div v-if="X.manage" class="am-mbar">
                 <div class="am-mrow">

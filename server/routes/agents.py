@@ -7,6 +7,9 @@
     GET  /api/capabilities/{id}           -> {capability:{...含 input_schema}}
     GET  /api/skills                      -> {skills:[...]}（等价 kind='skill'）
     GET  /api/skills/{id}/export          -> text/markdown（SKILL.md：frontmatter + 正文），Content-Disposition <id>.md
+    PATCH /api/skills/{id}                -> body {enabled: bool} 启用/停用，写回 data/skills/<id>.json
+                                             -> {ok, skill}；不存在 404
+    DELETE /api/skills/{id}               -> 删除 data/skills/<id>.json -> {ok, deleted}；不存在 404、纯内置 400
     POST /api/skills/import               -> body {markdown, overwrite?} 导入 SKILL.md（也兼容旧的 JSON 定义）
                                              -> {ok, skill, created}；name 非法 400、已存在未 overwrite 409
     GET  /api/agents                      -> {agents:[...]}（等价 kind='agent'，原字段不变）
@@ -45,6 +48,7 @@ from server.integrations import video_sources
 from server.skills import registry as skills_registry
 from server.skills import skill_md
 from server.skills import github_install
+from server.skills import token_store
 from server.routes.deps import deps
 
 router = APIRouter(prefix="/api")
@@ -367,11 +371,12 @@ def _build_run_request(cap: Dict[str, Any], record: Dict[str, Any], files: List[
     normalize_focus = deps.get("AGENT_RUN_NORMALIZE_FOCUS")
     focus = normalize_focus(None) if normalize_focus else {}
     cap_steps = int(deps.get("AGENT_RUN_MAX_STEPS_CAP") or 24)
+    # 缺省 / 0 / 负数 = 不限步数（默认）；正数仍生效并收敛到上限，与 /api/agent/run 同一口径
     try:
-        max_steps = int(payload.get("max_steps") or 12)
+        max_steps = int(payload.get("max_steps") or 0)
     except (TypeError, ValueError):
-        max_steps = 12
-    max_steps = max(1, min(max_steps, cap_steps))
+        max_steps = 0
+    max_steps = min(max_steps, cap_steps) if max_steps > 0 else 0
     return {
         "context": ctx,
         "canvas_id": "",
@@ -510,6 +515,140 @@ async def skills_export_md(skill_id: str):
     filename = "%s.md" % (skill.get("id") or skill_id)
     return Response(content=markdown, media_type="text/markdown; charset=utf-8",
                     headers={"Content-Disposition": 'attachment; filename="%s"' % filename})
+
+
+def _github_token_state() -> Dict[str, Any]:
+    """令牌状态（任何响应都不带明文）：configured / source / masked。"""
+    return token_store.public_state()
+
+
+# 这组固定段必须先于 /skills/{skill_id} 注册，否则 DELETE 会被当成删技能
+@router.get("/skills/github-token")
+async def skills_github_token_get():
+    return _github_token_state()
+
+
+@router.put("/skills/github-token")
+async def skills_github_token_save(data: Dict[str, Any] = Body(...)):
+    """保存令牌：先本地校验，再用 /rate_limit 只读验证；网络失败也照样保存。"""
+    try:
+        token = token_store.validate_token((data or {}).get("token"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    info = None
+    warning = ""
+    try:
+        info = await asyncio.to_thread(github_install.check_token, token)
+    except github_install.GitHubSkillError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    except Exception as exc:
+        warning = "已保存，但验证时出错：%s: %s" % (type(exc).__name__, exc)
+    if not isinstance(info, dict):
+        info = None
+    verified = info is not None
+    token_store.save_token(token)
+    state = _github_token_state()
+    state.update({
+        "saved": True,
+        "verified": verified,
+        "limit": (info or {}).get("limit"),
+        "remaining": (info or {}).get("remaining"),
+    })
+    if not verified:
+        state["message"] = warning or ("已保存，但没能连上 GitHub 验证（可能没网或被代理拦截）；"
+                                       "先按未验证存下，安装技能时会用到")
+    return state
+
+
+@router.delete("/skills/github-token")
+async def skills_github_token_clear():
+    had_saved = bool(token_store.saved_token())
+    token_store.clear_token()
+    state = _github_token_state()
+    if state["source"] == "env":
+        state["message"] = "环境变量优先（NOVAI_GITHUB_TOKEN / GITHUB_TOKEN），界面无法清除"
+    elif had_saved:
+        state["message"] = "已清除后台保存的令牌"
+    else:
+        state["message"] = "后台本来没有保存令牌"
+    return state
+
+
+@router.get("/skills/github-relay")
+async def skills_github_relay_get():
+    """令牌中转状态（不含明文密钥）。"""
+    return token_store.relay_state()
+
+
+@router.put("/skills/github-relay")
+async def skills_github_relay_save(data: Dict[str, Any] = Body(...)):
+    """保存中转地址：只存地址和可选密钥，令牌留在中转服务上。"""
+    payload = data or {}
+    secret = payload.get("secret") if "secret" in payload else None
+    try:
+        state = token_store.save_relay(payload.get("url"), secret)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    state["saved"] = True
+    if token_store.relay_source() == "env":
+        state["message"] = "环境变量优先（NOVAI_GITHUB_RELAY），已保存的地址暂不生效"
+    return state
+
+
+@router.delete("/skills/github-relay")
+async def skills_github_relay_clear():
+    had_saved = bool(token_store.saved_relay_url())
+    token_store.clear_relay()
+    state = token_store.relay_state()
+    if state["configured"] and token_store.relay_source() == "env":
+        state["message"] = "环境变量优先（NOVAI_GITHUB_RELAY / NOVAI_GITHUB_RELAY_TOKEN），界面无法清除"
+    elif had_saved:
+        state["message"] = "已清除后台保存的中转配置"
+    else:
+        state["message"] = "后台本来没有中转配置"
+    return state
+
+
+def _skill_file_path(skill_id: str) -> str:
+    folder = os.path.abspath(skills_registry.skills_dir())
+    path = os.path.abspath(os.path.join(folder, "%s.json" % skill_id))
+    if not path.startswith(folder + os.sep):        # 防路径穿越（id 来自注册表，这里再兜一层）
+        raise HTTPException(status_code=400, detail="非法的技能名")
+    return path
+
+
+@router.patch("/skills/{skill_id}")
+async def skills_update(skill_id: str, data: Dict[str, Any] = Body(...)):
+    """启用 / 停用：把合并后的技能连同 enabled 写回 data/skills/<id>.json。"""
+    skill = skills_registry.get_skill(skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="技能不存在：%s" % (skill_id or "<空>"))
+    enabled = (data or {}).get("enabled")
+    if not isinstance(enabled, bool):
+        raise HTTPException(status_code=400, detail="enabled 必须是布尔值")
+    definition = dict(_raw_skill_json(str(skill.get("id") or skill_id)))
+    definition.update(skill)                        # 合并后定义覆盖原文，导出用的 license/metadata 等额外字段保留
+    definition["enabled"] = enabled
+    _write_skill_definition(definition)
+    saved = skills_registry.get_skill(skill_id) or definition
+    counts = store.usage_counts()
+    return {"ok": True, "skill": skills_registry.public_skill(
+        saved, kind="skill", usage_count=counts.get(str(saved.get("id")), 0))}
+
+
+@router.delete("/skills/{skill_id}")
+async def skills_delete(skill_id: str):
+    """删除用户技能；随安装包分发的内置技能包只能停用，不能删。"""
+    skill = skills_registry.get_skill(skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="技能不存在：%s" % (skill_id or "<空>"))
+    if skill.get("builtin_pack"):
+        raise HTTPException(status_code=400, detail="内置技能不能删除（可以停用）")
+    path = _skill_file_path(str(skill.get("id") or skill_id))
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=400, detail="内置技能不能删除")
+    os.remove(path)
+    return {"ok": True, "deleted": True}
 
 
 def _skill_md_json_meta(metadata: Dict[str, Any], key: str, fallback: Any) -> Any:

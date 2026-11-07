@@ -1,0 +1,664 @@
+/* 画布助手浮层（弹层 / 菜单 / 抽屉 / 提示）HextaUI 适配层（T3）。
+   这个文件在 index.css 顶部被 @import，位置早于 NOVAI 自己的 .nvca-* 规则，
+   所以这里的覆盖一律比 index.css 的同类选择器多一层限定，靠特异性取胜；
+   Tailwind utility 在 @layer 里，未分层规则天然压过它们。
+   只放适配：摆放交给 Base UI Positioner、层级、去描边、给 NOVAI 行样式让路。 */
+
+/* ── 弹层本体不再自己定位：Base UI 的 Positioner 负责摆，弹层回到普通流 ── */
+[data-slot="popover-content"].nvca-plus-menu,
+[data-slot="popover-content"].nvca-revmenu,
+[data-slot="combobox-content"].nvca-model-flyout,
+[data-slot="combobox-content"].nvca-plus-submenu {
+  position: static;
+  max-height: var(--available-height, 70vh);
+  border: 0;
+  outline: none;
+}
+/* 旧 keyframe 入场 + Base UI 的 data-starting-style 过渡会叠两遍，交回 HextaUI */
+[data-slot="popover-content"].nvca-plus-menu,
+[data-slot="popover-content"].nvca-revmenu {
+  gap: 0;
+  animation: none;
+}
+[data-slot="combobox-content"].nvca-model-flyout,
+[data-slot="combobox-content"].nvca-plus-submenu { animation: none; }
+/* 内边距从弹层搬到 sizer：弹层的 max-height 是 sizer 高度算出来的，
+   留在弹层上会在「内容顶满 max-height」时把底部按钮裁掉 5-10px。 */
+[data-slot="popover-content"].nvca-plus-menu,
+[data-slot="combobox-content"].nvca-model-flyout,
+[data-slot="combobox-content"].nvca-plus-submenu { padding: 0; }
+[data-slot="popover-content"].nvca-plus-menu [data-slot="popover-content-sizer"],
+[data-slot="popover-content"].nvca-revmenu [data-slot="popover-content-sizer"],
+[data-slot="combobox-content"].nvca-model-flyout [data-slot="combobox-content-sizer"],
+[data-slot="combobox-content"].nvca-plus-submenu [data-slot="combobox-content-sizer"] {
+  gap: 0;
+  padding: 5px;
+  box-sizing: border-box;
+}
+
+/* ── 层级：沿用改造前的 z-index 顺序（子弹层 92 > 技能二级 91 > 加号 90 > 侧栏 85 > 截图 82 > 弹窗 61） ── */
+[data-slot="combobox-positioner"]:has(> [data-slot="combobox-content"].nvca-model-flyout) { z-index: 92; }
+[data-slot="combobox-positioner"]:has(> [data-slot="combobox-content"].nvca-plus-submenu) { z-index: 91; }
+[data-slot="popover-positioner"]:has(> [data-slot="popover-content"].nvca-plus-menu) { z-index: 90; }
+[data-slot="popover-positioner"]:has(> [data-slot="popover-content"].nvca-revmenu) { z-index: 46; }
+[data-slot="sheet-overlay"] { z-index: 60; }
+[data-slot="sheet-viewport"] { z-index: 61; }
+
+/* 滑动高亮条是 List 里的绝对定位块，List 自己得是定位祖先 */
+[data-slot="combobox-content"] .nvca-combo-list { position: relative; }
+
+/* ── 原生表单控件：HextaUI 只画 inset-ring（--hairline 已归零），没有 border reset；
+   浮层 portal 到 body 后也不再被 .nvca-root 的局部重置兜住，UA 的 2px inset 会露成硬边框。 ── */
+[data-combo-panel] :is(input, textarea, select),
+[data-slot="combobox-content"] :is(input, textarea, select),
+[data-slot="popover-content"] :is(input, textarea, select),
+[data-slot="dialog-content"] :is(input, textarea, select),
+[data-slot="sheet-content"] :is(input, textarea, select),
+.nvca-model-flyout :is(input, textarea, select),
+.nvca-plus-submenu :is(input, textarea, select),
+.nvca-plus-menu :is(input, textarea, select),
+.nvca-revmenu :is(input, textarea, select),
+.nvca-dialog :is(input, textarea, select),
+.nvca-recording :is(input, textarea, select),
+[data-slot="combobox-input"],
+[data-slot="native-select"],
+/* HextaUI 的 Input/Textarea 只有 inset-ring；用 data-size 区分 HextaUI 版和旧 shadcn 版（后者带 border-input） */
+[data-slot="input"][data-size] {
+  border: 0;
+}
+
+/* ── 硬规则：不画线框、不发丝线；选中态仍用软底 + 文字提亮 ── */
+[data-slot="item"].nvca-shot-confirm { border: 0; }
+[data-slot="item-separator"].nvca-plus-separator {
+  height: 0;
+  margin: 5px 8px;
+  background: transparent;
+}
+.nvca-dialog[data-slot="dialog-content"],
+.nvca-context-dialog[data-slot="dialog-content"] { outline: none; }
+
+/* ── 行样式交给 .nvca-* 自己画：去掉 HextaUI Item 的悬停软层 + 焦点环，避免两层底色叠加 ── */
+[data-slot="item"].nvca-model-provider,
+[data-slot="item"].nvca-plus-item,
+[data-slot="item"].nvca-plus-subitem,
+[data-slot="item"].nvca-artifact-row,
+[data-slot="item"].nvca-revmenu-item,
+[data-slot="item"].nvca-recording-source,
+[data-slot="item"].nvca-template-card,
+[data-slot="item"].nvca-shot-confirm {
+  flex-wrap: nowrap;
+}
+[data-slot="item"].nvca-model-provider::before,
+[data-slot="item"].nvca-plus-item::before,
+[data-slot="item"].nvca-plus-subitem::before,
+[data-slot="item"].nvca-artifact-row::before,
+[data-slot="item"].nvca-revmenu-item::before,
+[data-slot="item"].nvca-recording-source::before,
+[data-slot="item"].nvca-template-card::before,
+[data-slot="item"].nvca-shot-confirm::before {
+  display: none;
+}
+[data-slot="item"].nvca-model-provider:focus-visible,
+[data-slot="item"].nvca-plus-item:focus-visible,
+[data-slot="item"].nvca-plus-subitem:focus-visible,
+[data-slot="item"].nvca-artifact-row:focus-visible,
+[data-slot="item"].nvca-revmenu-item:focus-visible,
+[data-slot="item"].nvca-recording-source:focus-visible,
+[data-slot="item"].nvca-template-card:focus-visible {
+  box-shadow: none;
+}
+
+/* ── 弹窗（本轮上下文） ── */
+.nvca-dialog[data-slot="dialog-content"] { border: 0; }
+.nvca-dialog[data-slot="dialog-content"] [data-slot="sheet-inner"] { gap: 10px; }
+.nvca-context-dialog[data-slot="dialog-content"] [data-slot="sheet-inner"] > :last-child { padding-bottom: 0; }
+.nvca-context-progress [data-slot="progress-track"] {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--nvca-fill-2);
+  overflow: hidden;
+}
+.nvca-context-progress [data-slot="progress-indicator"] {
+  background: var(--nvca-accent);
+  transition: width 0.3s var(--nvca-ease);
+}
+.nvca-context-error [data-slot="empty-media"] { margin-bottom: 0; }
+.nvca-context-error [data-slot="empty-title"] { font-size: 12.5px; font-weight: 600; color: var(--nvca-danger); }
+.nvca-context-error [data-slot="empty-description"] { font-size: 11px; line-height: 1.5; color: var(--nvca-ink-3); }
+
+/* ── 录屏弹窗：原来的绝对定位面板搬进 HextaUI Dialog，位置与尺寸交回 Dialog ── */
+[data-slot="dialog-content"].nvca-recording {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 32px));
+  max-width: min(360px, calc(100vw - 32px));
+  max-height: 82vh;
+  border-radius: 16px;
+  background: var(--nvca-solid);
+  color: var(--nvca-ink);
+  overflow: hidden;
+}
+[data-slot="dialog-content"].nvca-recording [data-slot="sheet-inner"] { gap: 0; }
+[data-slot="item"].nvca-recording-source [data-slot="item-media"] {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 7px;
+  overflow: hidden;
+}
+[data-slot="item"].nvca-recording-source.is-primary [data-slot="item-media"] {
+  width: auto;
+  height: auto;
+  aspect-ratio: auto;
+}
+[data-slot="item"].nvca-recording-source [data-slot="item-title"] {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--nvca-ink);
+}
+
+/* ── 侧栏状态与产物行 ── */
+.nvca-sheet-state[data-slot="empty"],
+.nvca-context-error[data-slot="empty"] {
+  gap: 6px;
+  padding: 26px 18px;
+}
+.nvca-sheet-state[data-slot="empty"] [data-slot="empty-media"] { margin-bottom: 0; }
+.nvca-sheet-state[data-slot="empty"] [data-slot="empty-title"] {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--nvca-ink-2);
+}
+.nvca-sheet-state[data-slot="empty"] [data-slot="empty-description"] {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--nvca-ink-3);
+}
+.nvca-sheet-state.is-error[data-slot="empty"] [data-slot="empty-title"] { color: var(--nvca-danger); }
+.nvca-artifacts-sheet .nvca-sheet-state[data-slot="empty"] .nvca-btn { margin-top: 4px; }
+[data-slot="item"].nvca-artifact-row [data-slot="item-media"] { flex: 0 0 auto; }
+
+/* ── 模板卡：封面是 112×92 的多图拼贴，ItemMedia 默认的小方格要放开 ── */
+[data-slot="item"].nvca-template-card .nvca-template-cover {
+  width: 112px;
+  height: 92px;
+  flex: 0 0 112px;
+  border-radius: 9px;
+}
+[data-slot="item"].nvca-template-card .nvca-template-apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+@media (max-width: 520px) {
+  [data-slot="item"].nvca-template-card .nvca-template-cover { width: 92px; height: 82px; flex-basis: 92px; }
+}
+
+/* ── 截图确认条：预览图维持 72×46 ── */
+[data-slot="item"].nvca-shot-confirm {
+  width: auto;
+}
+[data-slot="item"].nvca-shot-confirm [data-slot="item-media"] {
+  width: 72px;
+  height: 46px;
+  flex: 0 0 72px;
+  border-radius: 8px;
+}
+[data-slot="item"].nvca-shot-confirm [data-slot="item-actions"] { gap: 6px; }
+[data-slot="item"].nvca-shot-confirm [data-slot="item-title"] { font-size: 12.5px; font-weight: 600; }
+[data-slot="item"].nvca-shot-confirm [data-slot="item-description"] {
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.45);
+}
+html:not(.theme-dark) [data-slot="item"].nvca-shot-confirm [data-slot="item-description"] { color: rgba(0, 0, 0, 0.45); }
+
+/* ── 小弹层里的 Kbd / 提示条 ── */
+.nvca-shot-label [data-slot="kbd"] {
+  height: 17px;
+  min-width: 0;
+  margin: 0 2px;
+  padding: 0 5px;
+  background: rgba(255, 255, 255, 0.16);
+  color: inherit;
+  box-shadow: none;
+  vertical-align: 1px;
+}
+
+/* ==================================================================
+   T6 可见升级：侧栏卡面 / 浮层卡面 / 行密度 / 确认弹窗
+   portal 挂在 body 下读不到 .nvca-root 的 --tn-*，这里用全局 --nvca-* 复刻
+   hexta-thread.css 的同一套配方；index.css 的规则排在本文件之后，所以需要
+   压过的规则统一加一层 .nvca-sheet-v2 / .is-t6 限定来提特异性。
+   ================================================================== */
+
+:root {
+  --nvca-ov-surface: #ffffff;
+  --nvca-ov-surface-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 14px 40px rgba(15, 23, 42, 0.10);
+  --nvca-ov-pop-solid: rgba(255, 255, 255, 0.97);
+  --nvca-ov-pop-shadow: 0 18px 44px rgba(15, 23, 42, 0.16), 0 2px 10px rgba(15, 23, 42, 0.07);
+  --nvca-ov-chip-bg: color-mix(in srgb, var(--nvca-ink) 6%, transparent);
+  --nvca-ov-hover: color-mix(in srgb, var(--nvca-ink) 5%, transparent);
+}
+html.theme-dark,
+html.studio-theme-dark,
+body.theme-dark,
+body.studio-theme-dark,
+[data-theme="dark"] {
+  --nvca-ov-surface: color-mix(in srgb, #f5f5f5 7%, #1a1a1a);
+  --nvca-ov-surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), 0 14px 40px rgba(0, 0, 0, 0.34);
+  --nvca-ov-pop-solid: rgba(24, 24, 24, 0.96);
+  --nvca-ov-pop-shadow: 0 18px 44px rgba(0, 0, 0, 0.36), 0 2px 10px rgba(0, 0, 0, 0.2);
+  --nvca-ov-chip-bg: rgba(255, 255, 255, 0.08);
+  --nvca-ov-hover: rgba(255, 255, 255, 0.07);
+}
+
+/* ── 产物 / 模板侧栏：浮起卡面，不再是全高白板 ───────────────── */
+.nvca-artifacts-sheet.nvca-sheet-v2 {
+  border: 0;
+  border-radius: 20px 10px 10px 20px;
+  background: var(--nvca-ov-surface);
+  box-shadow: var(--nvca-ov-surface-shadow);
+}
+html:not(.theme-dark) .nvca-artifacts-sheet.nvca-sheet-v2 { background: #ffffff; }
+
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-head {
+  flex: 0 0 54px;
+  padding: 15px 16px 8px;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-title {
+  gap: 8px;
+  color: var(--nvca-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--nvca-ov-chip-bg);
+  color: var(--nvca-ink-2);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-actions .nvca-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-icon-btn:hover { background: var(--nvca-ov-hover); }
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-body {
+  gap: 14px;
+  padding: 4px 8px 14px;
+}
+
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-group { gap: 2px; }
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-group-head {
+  padding: 8px 10px 4px;
+  color: var(--nvca-ink-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-group-count {
+  font-family: inherit;
+  font-size: 10px;
+  opacity: 0.75;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-row {
+  min-height: 46px;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: 12px;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-row:hover { background: var(--nvca-ov-hover); }
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-kind {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--nvca-ov-chip-bg);
+  color: var(--nvca-ink-2);
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 17px;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-meta {
+  color: var(--nvca-ink-3);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-download {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  color: var(--nvca-ink-3);
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-artifact-download:hover {
+  background: var(--nvca-ov-chip-bg);
+  color: var(--nvca-ink);
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-note {
+  padding: 8px 10px 2px;
+  color: var(--nvca-ink-3);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* 骨架：HextaUI Skeleton（[data-slot="skeleton"]）——圆角 10 的浅灰条，不画边框 */
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-skeleton { gap: 10px; padding: 10px 10px 16px; }
+.nvca-artifacts-sheet.nvca-sheet-v2 [data-slot="skeleton"] {
+  border-radius: 10px;
+  background: var(--nvca-ov-chip-bg);
+  box-shadow: none;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-skeleton-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-skeleton-line { height: 10px; }
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-skeleton-line.is-short { height: 9px; }
+
+/* 空态：52 线性图标 + 13 主文案 + 12 副文案 */
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-state[data-slot="empty"] {
+  gap: 10px;
+  padding: 36px 20px;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-state[data-slot="empty"] [data-slot="empty-media"] { margin-bottom: 2px; }
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-state[data-slot="empty"] [data-slot="empty-title"] {
+  color: var(--nvca-ink-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-state[data-slot="empty"] [data-slot="empty-description"] {
+  max-width: 250px;
+  color: var(--nvca-ink-3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-empty-icon {
+  width: 52px;
+  height: 52px;
+  color: var(--nvca-ink-3);
+  stroke-width: 1.35;
+  opacity: 0.75;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-state.is-error[data-slot="empty"] .nvca-sheet-empty-icon {
+  color: var(--nvca-danger);
+  opacity: 0.9;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-sheet-state[data-slot="empty"] .nvca-btn {
+  height: 32px;
+  margin-top: 6px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+/* 模板侧栏：搜索条 / 卡面 / 封面 */
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-template-search.nvca-plus-search {
+  flex: 0 0 32px;
+  height: 32px;
+  margin: 0 14px 10px;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: var(--nvca-ov-chip-bg);
+  color: var(--nvca-ink-3);
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-template-search input { font-size: 12.5px; }
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-template-list {
+  gap: 10px;
+  padding: 2px 12px 14px;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-template-card {
+  gap: 9px 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--nvca-ov-chip-bg);
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-template-card:hover { background: var(--nvca-ov-hover); }
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-template-copy strong { font-size: 12.5px; font-weight: 600; }
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-template-copy [data-slot="item-description"] {
+  color: var(--nvca-ink-3);
+  font-size: 11px;
+}
+.nvca-artifacts-sheet.nvca-sheet-v2 .nvca-template-apply {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 11px;
+}
+
+/* ── 小弹层卡面：加号 / 子弹层 / 二级 / 反查 ─────────────────── */
+.nvca-plus-menu.is-t6,
+.nvca-revmenu.is-t6,
+.nvca-model-flyout.is-t6,
+.nvca-plus-submenu.is-t6 {
+  border: 0;
+  border-radius: 16px;
+  background: var(--nvca-ov-pop-solid);
+  color: var(--nvca-ink);
+  box-shadow: var(--nvca-ov-pop-shadow);
+}
+html:not(.theme-dark) .nvca-plus-menu.is-t6,
+html:not(.theme-dark) .nvca-revmenu.is-t6,
+html:not(.theme-dark) .nvca-model-flyout.is-t6,
+html:not(.theme-dark) .nvca-plus-submenu.is-t6 { background: rgba(255, 255, 255, 0.97); }
+html.theme-dark .nvca-plus-menu.is-t6,
+html.theme-dark .nvca-revmenu.is-t6,
+html.theme-dark .nvca-model-flyout.is-t6,
+html.theme-dark .nvca-plus-submenu.is-t6 { background: rgba(24, 24, 24, 0.96); }
+.nvca-plus-menu.is-t6 [data-slot="popover-content-sizer"],
+.nvca-revmenu.is-t6 [data-slot="popover-content-sizer"],
+.nvca-model-flyout.is-t6 [data-slot="combobox-content-sizer"],
+.nvca-plus-submenu.is-t6 [data-slot="combobox-content-sizer"] { padding: 6px; }
+
+/* 行密度：40 高 / radius 10 / 24 图标 chip */
+.nvca-plus-menu.is-t6 .nvca-plus-item {
+  height: 40px;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.nvca-plus-menu.is-t6 .nvca-plus-item.is-active,
+.nvca-plus-menu.is-t6 .nvca-plus-item:hover { background: var(--nvca-ov-hover); }
+.nvca-plus-menu.is-t6 .nvca-plus-icon,
+.nvca-plus-submenu.is-t6 .nvca-plus-icon,
+.nvca-revmenu.is-t6 .nvca-plus-icon {
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--nvca-ov-chip-bg);
+  color: var(--nvca-ink-2);
+  stroke-width: 1.6;
+}
+.nvca-plus-menu.is-t6 .nvca-plus-chevron {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  color: var(--nvca-ink-3);
+  opacity: 0.8;
+}
+.nvca-plus-menu.is-t6 .nvca-plus-separator { margin: 4px 10px; }
+
+.nvca-plus-submenu.is-t6 .nvca-plus-subitem {
+  min-height: 40px;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: 10px;
+}
+.nvca-plus-submenu.is-t6 .nvca-plus-subname { font-size: 13px; line-height: 18px; }
+.nvca-plus-submenu.is-t6 .nvca-plus-subdesc { color: var(--nvca-ink-3); font-size: 11px; }
+.nvca-plus-submenu.is-t6 .nvca-combo-footer { gap: 2px; padding-top: 6px; }
+.nvca-plus-submenu.is-t6 .nvca-combo-action:hover { background: var(--nvca-ov-hover); }
+
+/* 搜索框：32 高 / radius 10 / 软底无边框 */
+.nvca-plus-submenu.is-t6 [data-slot="combobox-input-group"],
+.nvca-model-flyout.is-t6 [data-slot="combobox-input-group"] {
+  height: 32px;
+  margin: 0 0 6px;
+  padding-inline: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--nvca-ov-chip-bg);
+  box-shadow: none;
+}
+.nvca-plus-submenu.is-t6 [data-slot="combobox-input"],
+.nvca-model-flyout.is-t6 [data-slot="combobox-input"] {
+  color: var(--nvca-ink);
+  font-size: 12.5px;
+}
+.nvca-plus-submenu.is-t6 [data-slot="combobox-list"],
+.nvca-model-flyout.is-t6 [data-slot="combobox-list"] { padding: 0; }
+.nvca-plus-submenu.is-t6 [data-slot="combobox-empty"],
+.nvca-model-flyout.is-t6 [data-slot="combobox-empty"] {
+  padding: 14px 10px;
+  color: var(--nvca-ink-3);
+  font-size: 12px;
+}
+
+/* 模型子弹层：行 38 高 */
+.nvca-model-flyout.is-t6 .nvca-model-option {
+  min-height: 38px;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: 10px;
+}
+.nvca-model-flyout.is-t6 .nvca-model-option.is-on { background: var(--nvca-ov-hover); font-weight: 500; }
+.nvca-model-flyout.is-t6 .nvca-model-option-name { font-size: 12.5px; }
+
+/* 以图搜图：行 44 高 */
+.nvca-revmenu.is-t6 .nvca-revmenu-label {
+  padding: 6px 10px 4px;
+  color: var(--nvca-ink-3);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.nvca-revmenu.is-t6 .nvca-revmenu-item {
+  min-height: 44px;
+  gap: 10px;
+  padding: 0 8px;
+  border-radius: 10px;
+}
+.nvca-revmenu.is-t6 .nvca-revmenu-item:hover { background: var(--nvca-ov-hover); }
+.nvca-revmenu.is-t6 .nvca-revmenu-title { font-size: 12.5px; }
+.nvca-revmenu.is-t6 .nvca-revmenu-desc { color: var(--nvca-ink-3); font-size: 11px; }
+
+/* ── 面板内的模型菜单（.nvca-tap-menu 外壳在 Composer） ──────── */
+.nvca-root .nvca-tap-menu.is-model {
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--nvca-ov-pop-solid);
+  box-shadow: var(--nvca-ov-pop-shadow);
+}
+html:not(.theme-dark) .nvca-root .nvca-tap-menu.is-model { background: rgba(255, 255, 255, 0.97); }
+/* index.css 的 #canvasAssistantPanel .nvca-tap-menu.is-model 是 ID 选择器（还有 html 前缀版本），
+   普通类压不住，这里同样用 ID 前缀 + .nvca-root 提一层，把小弹层拉回近不透明实底。 */
+#canvasAssistantPanel .nvca-root .nvca-tap-menu.is-model { background: var(--nvca-ov-pop-solid); }
+html:not(.theme-dark) #canvasAssistantPanel .nvca-root .nvca-tap-menu.is-model { background: rgba(255, 255, 255, 0.97); }
+html.theme-dark #canvasAssistantPanel .nvca-root .nvca-tap-menu.is-model,
+html.studio-theme-dark #canvasAssistantPanel .nvca-root .nvca-tap-menu.is-model { background: rgba(24, 24, 24, 0.96); }
+.nvca-root .nvca-tap-menu.is-model .nvca-tap-menu-label,
+.nvca-root .nvca-tap-menu.is-context .nvca-tap-menu-label {
+  padding: 8px 10px 4px;
+  color: var(--nvca-ink-3);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.nvca-root .nvca-tap-menu.is-model .nvca-tap-menu-item {
+  min-height: 40px;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+.nvca-root .nvca-tap-menu.is-model .nvca-tap-menu-item.is-on {
+  background: color-mix(in srgb, var(--nvca-ink) 8%, transparent);
+  font-weight: 500;
+}
+.nvca-root .nvca-tap-menu.is-model .nvca-tap-menu-item:hover { background: var(--nvca-ov-hover); }
+.nvca-root .nvca-tap-menu.is-model .nvca-tap-model-list { padding: 0; }
+.nvca-root .nvca-tap-menu.is-model .nvca-model-provider {
+  min-height: 40px;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 10px;
+}
+.nvca-root .nvca-tap-menu.is-model .nvca-model-provider-name { font-size: 12.5px; line-height: 17px; }
+.nvca-root .nvca-tap-menu.is-model .nvca-model-provider-hint { font-size: 10.5px; }
+.nvca-root .nvca-tap-menu.is-model .nvca-tap-menu-empty {
+  padding: 14px 10px;
+  color: var(--nvca-ink-3);
+  font-size: 12px;
+}
+
+/* ── 确认弹窗（删除 / 重置 / 上下文） ───────────────────────── */
+.nvca-dialog.nvca-dialog {
+  gap: 12px;
+  padding: 18px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--nvca-ov-pop-solid);
+  color: var(--nvca-ink);
+  box-shadow: var(--nvca-ov-pop-shadow);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+.nvca-dialog.nvca-dialog [data-slot="sheet-inner"] { gap: 12px; }
+.nvca-dialog.nvca-dialog .nvca-dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+.nvca-dialog.nvca-dialog .nvca-dialog-sub {
+  margin-top: 4px;
+  color: var(--nvca-ink-3);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.nvca-dialog.nvca-dialog .nvca-dialog-actions { gap: 8px; margin-top: 4px; }
+.nvca-dialog.nvca-dialog .nvca-dialog-actions .nvca-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.nvca-dialog.nvca-dialog .nvca-dialog-actions .nvca-btn.ghost {
+  background: var(--nvca-ov-chip-bg);
+  color: var(--nvca-ink-2);
+}
+.nvca-dialog.nvca-dialog .nvca-dialog-actions .nvca-btn.ghost:hover {
+  background: var(--nvca-ov-hover);
+  color: var(--nvca-ink);
+}
+.nvca-dialog.nvca-dialog .nvca-dialog-actions .nvca-btn.danger {
+  background: color-mix(in srgb, var(--nvca-danger) 14%, transparent);
+  color: var(--nvca-danger);
+  box-shadow: none;
+}
+.nvca-dialog.nvca-dialog .nvca-dialog-actions .nvca-btn.danger:hover {
+  background: color-mix(in srgb, var(--nvca-danger) 20%, transparent);
+}

@@ -559,6 +559,61 @@ class ApimartMockUpstreamTests(unittest.TestCase):
         self.assertEqual(body.get("n"), 3)
         self.assert_local_output(local_url)
 
+
+    def test_gpt_image_26_flare_quality_levels(self):
+        # 文档确证 flare/sunburst 支持 auto/low/medium/high/xhigh/max；auto 不发字段
+        for quality, expected in (("max", "max"), ("xhigh", "xhigh"), ("high", "high")):
+            with self.server.log_lock:
+                self.server.requests.clear()
+            _image_data, local_url = self.generate_image(
+                "gpt-image-2.6-flare", refs=[], quality=quality, size="1024x1024")
+            post = next(item for item in self.requests() if item["path"] == "/v1/images/generations")
+            body = post["body"]
+            self.assertEqual(body.get("quality"), expected, quality)
+            self.assertEqual(body.get("n"), 1)
+            self.assertEqual(body.get("resolution"), "1K")
+            self.assert_local_output(local_url)
+        # auto / 空 = 不发 quality（跟随上游默认）
+        for quality in ("auto", ""):
+            with self.server.log_lock:
+                self.server.requests.clear()
+            _image_data, local_url = self.generate_image(
+                "gpt-image-2.6-flare", refs=[], quality=quality, size="1024x1024")
+            post = next(item for item in self.requests() if item["path"] == "/v1/images/generations")
+            self.assertNotIn("quality", post["body"], quality)
+            self.assert_local_output(local_url)
+
+
+    def test_model_caps_overrides_affect_generation_body(self):
+        # 协议更新包的参数覆盖不只影响 /api/model-caps：生成请求体也按覆盖后的 caps 收敛
+        import json as _json
+        path = main.API_PROVIDERS_FILE
+        with open(path, encoding="utf-8") as fh:
+            original = fh.read()
+        try:
+            data = _json.loads(original)
+            data[0]["model_caps_overrides"] = {
+                "gpt-image-2.6-flare": {
+                    "model": "gpt-image-2.6-flare", "kind": "image",
+                    "caps": {"qualities": ["low"], "resolutions": ["2K"], "n_max": 2},
+                }
+            }
+            with open(path, "w", encoding="utf-8") as fh:
+                _json.dump(data, fh, ensure_ascii=False)
+            main.invalidate_model_caps_cache()
+            _image_data, local_url = self.generate_image(
+                "gpt-image-2.6-flare", refs=[], quality="high", size="1024x1024", n=4)
+            post = next(item for item in self.requests() if item["path"] == "/v1/images/generations")
+            body = post["body"]
+            self.assertNotIn("quality", body)          # 覆盖后只允许 low，high 不发
+            self.assertEqual(body.get("n"), 2)         # n_max 覆盖为 2
+            self.assertEqual(body.get("resolution"), "2K")  # 分辨率按覆盖收敛
+            self.assert_local_output(local_url)
+        finally:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(original)
+            main.invalidate_model_caps_cache()
+
     def test_online_result_uses_one_native_multi_image_task(self):
         async def run():
             payload = main.OnlineImageRequest(
@@ -575,13 +630,30 @@ class ApimartMockUpstreamTests(unittest.TestCase):
         self.assertTrue(posts[0]["has_idempotency_key"])
 
 
-    def _run_video(self, model, duration, ratio, resolution):
+    def _run_video(self, model, duration, ratio, resolution, watermark=False):
         async def run():
             payload = main.CanvasVideoRequest(
                 prompt="mock video", provider_id=self.provider_id, model=model,
-                duration=duration, aspect_ratio=ratio, resolution=resolution)
+                duration=duration, aspect_ratio=ratio, resolution=resolution,
+                watermark=watermark)
             return await main._canvas_video_run_unlimited(payload)
         return asyncio.run(run())
+
+
+    def test_minimax_h3_max_1080p_omits_watermark(self):
+        # 文档：H3-Max 1080P 不能带 watermark / aigc_watermark（连 false 都不行）
+        self._run_video("minimax-h3-max", 10, "16:9", "1080p", watermark=True)
+        body = next(item for item in self.requests() if item["path"] == "/v1/videos/generations")["body"]
+        self.assertNotIn("watermark", body)
+        self.assertNotIn("aigc_watermark", body)
+        self.assertEqual(body.get("resolution"), "1080P")
+        with self.server.log_lock:
+            self.server.requests.clear()
+        # 非 1080P / 其它模型：用户开就发 true
+        self._run_video("minimax-h3-max", 10, "16:9", "768P", watermark=True)
+        body = next(item for item in self.requests() if item["path"] == "/v1/videos/generations")["body"]
+        self.assertIs(body.get("watermark"), True)
+        self.assertNotIn("aigc_watermark", body)
 
     def test_video_body_follows_document_fields(self):
         seedance = self._run_video("seedance-2.0", 20, "21:9", "4k")

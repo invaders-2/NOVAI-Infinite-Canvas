@@ -1,0 +1,580 @@
+/**
+ * BEAT 画布助手消息区四张卡（T11）：方案卡 / 问答卡 / 技能安装卡 / 参考图卡的公共卡面语言。
+ * 工程里 canvas-next.css 是无 layer 的手写规则且先于本文件进包，等特异性会赢，所以这里
+ * 每条选择器都抬到 .cn-root .mc-xxx[class]（比 .cn-root .xxx 高一级）；参考图卡自己的网格
+ * 仍留在 agent-webimg.css。只用填充 / 柔影 / 间距表达层级，不画 border / hairline。
+ */
+
+/* ══ 卡面 ══════════════════════════════════════════════════════════ */
+.cn-root .message-card[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16), 0 10px 22px rgba(0, 0, 0, 0.16);
+  color: var(--fg);
+  overflow: hidden;
+}
+.cn-root[data-theme="light"] .message-card[class] {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+/* 头部：图标 chip + 标题 + 右侧 badge */
+.cn-root .message-card[class] .mc-head[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px 8px;
+}
+.cn-root .message-card[class] .mc-head-row[class] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cn-root .message-card[class] .mc-glyph[class] {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 8px;
+  background: var(--sunken);
+  color: var(--fg2);
+}
+.cn-root .message-card[class] .mc-glyph[class] svg {
+  width: 14px;
+  height: 14px;
+}
+.cn-root .message-card[class] .mc-title[class] {
+  flex: 1;
+  min-width: 0;
+  color: var(--hi);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 18px;
+}
+.cn-root .message-card[class] .mc-badge[class] {
+  height: 19px;
+  flex: 0 0 auto;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--sunken);
+  color: var(--fg2);
+  font-size: 10px;
+  font-weight: 500;
+  box-shadow: none;
+}
+.cn-root .message-card[class] .mc-badge[class][data-variant="info"] { background: rgba(10, 132, 255, 0.12); color: var(--info, #0a84ff); }
+.cn-root .message-card[class] .mc-badge[class][data-variant="success"] { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.cn-root .message-card[class] .mc-badge[class][data-variant="warning"] { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.cn-root .message-card[class] .mc-badge[class][data-variant="destructive"] { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+
+/* 进度：方案就绪度 / 安装 / 问答第几题 */
+.cn-root .message-card[class] .mc-progress-row[class] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cn-root .message-card[class] .mc-progress[class] {
+  flex: 1;
+  min-width: 0;
+}
+.cn-root .message-card[class] .mc-progress[class] [data-slot="progress-track"] { background: var(--sunken); }
+.cn-root .message-card[class] .mc-progress[class] [data-slot="progress-indicator"] { background: var(--solid); }
+.cn-root .message-card[class] .mc-progress-label[class] {
+  flex: 0 0 auto;
+  color: var(--fg3);
+  font-size: 10.5px;
+  line-height: 14px;
+}
+
+/* 主体与底部 */
+.cn-root .message-card[class] .mc-body[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px 10px;
+}
+.cn-root .message-card[class] .mc-foot[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px 12px;
+}
+.cn-root .message-card[class] .mc-actions[class] {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cn-root .message-card[class] .mc-actions-split[class] { justify-content: space-between; }
+.cn-root .message-card[class] .mc-note[class] {
+  margin: 0;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.cn-root .message-card[class] .mc-why[class] {
+  margin: 0;
+  color: var(--fg3);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.cn-root .message-card[class] .mc-summary[class] {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: var(--sunken);
+  color: var(--fg2);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* 按钮：卡内统一 30 高 / 9 圆角 */
+.cn-root .message-card[class] .mc-actions[class] [data-slot="button"] {
+  height: 30px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: none;
+}
+.cn-root .message-card[class] .mc-actions[class] .mc-btn-solid[data-slot="button"] {
+  background: var(--solid);
+  color: var(--on-solid);
+}
+.cn-root .message-card[class] .mc-actions[class] .mc-btn-solid[data-slot="button"]:hover { background: var(--hi); }
+.cn-root .message-card[class] .mc-actions[class] .mc-btn-ghost[data-slot="button"] {
+  background: var(--sunken);
+  color: var(--fg2);
+}
+.cn-root .message-card[class] .mc-actions[class] .mc-btn-ghost[data-slot="button"]:hover { background: var(--hover); color: var(--fg); }
+.cn-root .message-card[class] .mc-actions[class] [data-slot="button"]:disabled { opacity: 0.5; cursor: default; }
+
+/* ══ 方案卡 ══════════════════════════════════════════════════════════ */
+.cn-root .plan-card[class] .plan-body[class] { gap: 4px; padding-bottom: 8px; }
+.cn-root .plan-card[class] .plan-steps[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cn-root .plan-card[class] .plan-step[data-slot="item"] {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  transition: background-color var(--d-quick) var(--e-std);
+}
+.cn-root .plan-card[class] .plan-step[data-slot="item"]:hover { background: var(--hover); }
+.cn-root .plan-card[class] .plan-step.is-off {
+  opacity: 0.45;
+}
+.cn-root .plan-card[class] .plan-step-check[data-slot="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  border-radius: 5px;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 0 transparent;
+  color: var(--on-solid);
+}
+.cn-root .plan-card[class] .plan-step-check[data-slot="checkbox"][data-checked] { background: var(--solid); }
+.cn-root .plan-card[class] .plan-step-num[class] {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 7px;
+  background: var(--sunken);
+  color: var(--fg2);
+  font-size: 10.5px;
+  line-height: 1;
+}
+.cn-root .plan-card[class] .plan-step-body[data-slot="item-content"] { gap: 0; }
+.cn-root .plan-card[class] .plan-step-head[class] {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.cn-root .plan-card[class] .plan-step-head[class] b {
+  color: var(--hi);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+}
+.cn-root .plan-card[class] .plan-params[class] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+}
+/* 模型一项文字最长，独占一行，避免下拉被挤成省略号 */
+.cn-root .plan-card[class] .plan-params[class] > .pr:first-child { grid-column: 1 / -1; }
+.cn-root .plan-card[class] .plan-params[class] .pr[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-size: 10.5px;
+  line-height: 14px;
+  color: var(--fg3);
+}
+.cn-root .plan-card[class] .plan-params[class] select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--sunken);
+  color: var(--fg);
+  font-size: 11.5px;
+  outline: none;
+  box-shadow: none;
+}
+.cn-root .plan-card[class] .plan-params[class] .pnote[class] {
+  grid-column: 1 / -1;
+  color: var(--fg3);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+/* ══ 问答卡（HextaUI questionnaire 分步表单） ═══════════════════════ */
+.cn-root .qa-card[class] .mc-body[class] { padding-bottom: 10px; }
+.cn-root .qa-card[class] .mc-qa-progress[class] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cn-root .qa-card[class] .mc-qa-progress[class] [data-slot="questionnaire-progress-track"] { background: var(--sunken); }
+.cn-root .qa-card[class] .mc-qa-progress[class] [data-slot="questionnaire-progress-track"] > span { background: var(--solid); }
+.cn-root .qa-card[class] .mc-qa-progress[class] [data-slot="questionnaire-progress-label"] { color: var(--fg3); font-size: 10.5px; }
+.cn-root .qa-card[class] .qa-questionnaire[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-item"] { gap: 8px; }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-title"] {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 0 2px;
+  color: var(--hi);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 17px;
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-title"] .tnum {
+  flex: 0 0 auto;
+  color: var(--fg3);
+  font-size: 10.5px;
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-title"] em {
+  font-style: normal;
+  color: var(--fg3);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choices"] { gap: 6px; }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--sunken);
+  color: var(--fg1, var(--fg));
+  font-size: 12px;
+  line-height: 17px;
+  box-shadow: none;
+  transition: background-color var(--d-feedback) var(--e-std), color var(--d-feedback) var(--e-std);
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"]:hover { background: var(--hover); }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"][data-checked] {
+  background: var(--s4, var(--s2));
+  color: var(--hi);
+  font-weight: 500;
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice-indicator"] {
+  width: 15px;
+  height: 15px;
+  border: 0;
+  background: rgba(var(--ink), 0.14);
+  box-shadow: none;
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-checked] [data-slot="questionnaire-choice-indicator"] { background: var(--solid); color: var(--on-solid); }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"] {
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--sunken);
+  color: var(--fg);
+  font-size: 12px;
+  box-shadow: none;
+  outline: none;
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"]::placeholder { color: var(--fg3); }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"]:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(var(--ink), 0.18);
+}
+.cn-root .qa-card[class] .qa-nav[class] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cn-root .qa-card[class] .qa-nav[class] .sp { flex: 1; }
+.cn-root .qa-card[class] .qa-nav[class] [data-slot^="questionnaire-"] {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 11.5px;
+  box-shadow: none;
+}
+.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-next"] { background: var(--sunken); color: var(--fg); }
+.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-previous"],
+.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-skip"] { background: transparent; color: var(--fg3); }
+.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-previous"]:hover,
+.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-skip"]:hover { background: var(--hover); color: var(--fg); }
+.cn-root .qa-card[class] .mc-qa-q[class] { display: flex; flex-direction: column; gap: 4px; }
+.cn-root .qa-card[class] .mc-qa-q[class] .mc-qa-title[class] {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--hi);
+  font-size: 12px;
+  line-height: 17px;
+}
+.cn-root .qa-card[class] .mc-qa-q[class] .mc-qa-title[class] .tnum { color: var(--fg3); font-size: 10.5px; }
+.cn-root .qa-card[class] .mc-qa-q[class] .mc-qa-title[class] em { font-style: normal; color: var(--fg3); font-size: 10.5px; }
+.cn-root .qa-card[class] .mc-qa-answer[class] {
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: var(--sunken);
+  color: var(--fg2);
+  font-size: 12px;
+  line-height: 17px;
+}
+.cn-root .qa-card[class].is-done { opacity: 0.86; }
+
+/* ══ 技能安装卡 ══════════════════════════════════════════════════════ */
+.cn-root .skill-card[class] .skill-meta[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  line-height: 17px;
+}
+.cn-root .skill-card[class] .skill-meta[class] > div {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+.cn-root .skill-card[class] .skill-meta[class] span { color: var(--fg3); }
+.cn-root .skill-card[class] .skill-meta[class] b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+  font-weight: 500;
+}
+.cn-root .skill-card[class] .skill-docs[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.cn-root .skill-card[class] .skill-doc[data-slot="item"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--sunken);
+  box-shadow: none;
+}
+.cn-root .skill-card[class] .skill-doc[data-slot="item"] [data-slot="item-media"] {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 7px;
+  background: rgba(var(--ink), 0.06);
+  color: var(--fg2);
+  box-shadow: none;
+}
+.cn-root .skill-card[class] .skill-doc[data-slot="item"] [data-slot="item-media"] svg { width: 12px; height: 12px; }
+.cn-root .skill-card[class] .skill-doc[data-slot="item"] [data-slot="item-title"] { color: var(--hi); font-size: 12px; font-weight: 600; line-height: 16px; }
+.cn-root .skill-card[class] .skill-doc[data-slot="item"] [data-slot="item-description"] { color: var(--fg2); font-size: 11px; line-height: 15px; }
+.cn-root .skill-card[class] .skill-doc-path[class] {
+  color: var(--fg3);
+  font-size: 10.5px;
+  line-height: 15px;
+  overflow-wrap: anywhere;
+}
+.cn-root .skill-card[class] .skill-scripts[class] { color: var(--fg2); font-size: 11.5px; line-height: 1.55; }
+.cn-root .skill-card[class] .skill-scripts[class] summary { cursor: pointer; color: var(--fg2); }
+.cn-root .skill-card[class] .skill-scripts[class] ul { max-height: 150px; overflow: auto; margin: 6px 0 0; padding-left: 18px; }
+.cn-root .skill-card[class] .skill-scripts[class] code { color: var(--fg3); font-size: 10.5px; overflow-wrap: anywhere; }
+.cn-root .skill-card[class] .skill-error[data-slot="alert"] {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bad) 10%, transparent);
+  box-shadow: none;
+}
+.cn-root .skill-card[class] .skill-error[data-slot="alert"] [data-slot="alert-title"] {
+  color: var(--bad);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.cn-root .skill-card[class] .skill-error[data-slot="alert"] [data-slot="alert-description"] {
+  color: var(--fg2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cn-root .plan-card[class] .plan-step[data-slot="item"],
+  .cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"] { transition: none; }
+}
+
+/* 方案卡 · 整体方案（多阶段路线图）：序号 + 阶段名 + 说明，第一阶段（本次要执行的）提亮 */
+.cn-root .plan-card[class] .plan-roadmap[class] { display: flex; flex-direction: column; gap: 6px; margin: 0 0 8px; }
+.cn-root .plan-card[class] .plan-roadmap-hd[class] { color: var(--fg3); font-size: 11px; line-height: 1.5; }
+.cn-root .plan-card[class] .plan-roadmap-list[class] { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 4px; }
+.cn-root .plan-card[class] .plan-roadmap-list[class] li { color: var(--fg3); font-size: 11.5px; line-height: 1.55; }
+.cn-root .plan-card[class] .plan-roadmap-list[class] li b { color: var(--fg2); font-weight: 600; margin-right: 6px; }
+.cn-root .plan-card[class] .plan-roadmap-list[class] li span { color: var(--fg3); }
+.cn-root .plan-card[class] .plan-roadmap-list[class] li.is-now b { color: var(--hi); }
+
+/* 待生成卡片：每个节点一行（种类徽标 + 标题 + 提示词摘要 + 模型 / 比例 / 分辨率 / 张数或时长），无描边 */
+.cn-root .gen-card[class] .gen-sub { margin-top: 2px; color: var(--fg3); font-size: 11px; line-height: 1.5; }
+.cn-root .gen-card[class] .gen-body { display: flex; flex-direction: column; gap: 8px; }
+.cn-root .gen-card[class] .gen-bulk { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg3); }
+.cn-root .gen-card[class] .gen-list { display: flex; flex-direction: column; gap: 6px; }
+.cn-root .gen-card[class] .gen-row { padding: 8px 10px; border-radius: 12px; background: color-mix(in srgb, var(--fg) 3.5%, transparent); }
+.cn-root .gen-card[class] .gen-row.is-pending { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.cn-root .gen-card[class] .gen-row-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cn-root .gen-card[class] .gen-row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cn-root .gen-card[class] .gen-kind { flex: none; }
+.cn-root .gen-card[class] .gen-title { border: 0; background: transparent; padding: 0; color: var(--hi); font-size: 12px; font-weight: 600; line-height: 17px; cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cn-root .gen-card[class] .gen-title:hover { text-decoration: underline; text-underline-offset: 2px; }
+.cn-root .gen-card[class] .gen-prompt { color: var(--fg3); font-size: 11px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cn-root .gen-card[class] .gen-params { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.cn-root .gen-card[class] .gen-field { display: inline-flex; align-items: center; gap: 4px; color: var(--fg3); font-size: 11px; }
+.cn-root .gen-card[class] .gen-select { height: 26px; min-height: 26px; padding: 0 8px; font-size: 11.5px; border: 0; box-shadow: none; border-radius: 8px; background: color-mix(in srgb, var(--fg) 6%, transparent); color: var(--fg2); }
+.cn-root .gen-card[class] .gen-select:focus, .cn-root .gen-card[class] .gen-select:focus-visible { outline: none; box-shadow: none; }
+.cn-root .gen-card[class] .gen-model { min-width: 150px; max-width: 100%; }
+.cn-root .gen-card[class] .gen-model.is-empty { color: var(--hi); font-weight: 600; background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.cn-root .gen-card[class] .gen-note { width: 100%; color: var(--fg3); font-size: 11px; }
+/* 参数按钮：和模型按钮同一套外观，点开的是 #pop 里的 .opt-grid 卡片（不再是下拉框） */
+.cn-root .gen-card[class] .gen-param { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; max-width: 100%; cursor: pointer; }
+.cn-root .gen-card[class] .gen-param:disabled { opacity: .5; cursor: default; }
+/* 卡片在助手面板里，全屏助手 (#agent.full, z-index 65) 打开时弹层要盖在它上面 */
+.cn-root #pop.gen-pop { z-index: 70; }
+/* 下拉：盖过助手面板；不画描边 */
+.cn-root [data-slot="select-positioner"]:has(> .nv-gen-select) { z-index: 400 !important; }
+.cn-root .nv-gen-select[class] { border: 0; box-shadow: 0 10px 32px rgba(0, 0, 0, .18), 0 2px 8px rgba(0, 0, 0, .08); font-size: 12px; }
+
+/* 问答卡题目里的「可多选」不换行（窄面板下被挤成竖排） */
+.cn-root .qa-card[class] .mc-qa-title em { white-space: nowrap; flex: none; }
+
+/* 待生成卡片 · 第二版：勾选 / 改提示词 / 视频方式；种类用淡底小字，不用实心徽标 */
+.cn-root .gen-card[class] .gen-kind { flex: none; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 6px; color: var(--fg2); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.cn-root .gen-card[class] .gen-check { flex: none; }
+.cn-root .gen-card[class] .gen-title { flex: 1; min-width: 0; }
+.cn-root .gen-card[class] .gen-edit { flex: none; border: 0; background: transparent; padding: 0 2px; color: var(--fg3); font-size: 11px; cursor: pointer; }
+.cn-root .gen-card[class] .gen-edit:hover:not(:disabled) { color: var(--fg); }
+.cn-root .gen-card[class] .gen-row.is-off { opacity: .55; }
+.cn-root .gen-card[class] .gen-row.is-off .gen-title { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--fg) 30%, transparent); }
+.cn-root .gen-card[class] .gen-prompt-edit { font-size: 12px; line-height: 1.6; border: 0; box-shadow: none; border-radius: 10px; background: color-mix(in srgb, var(--fg) 5%, transparent); color: var(--fg); }
+/* 输入框获得焦点：不出焦点环、不加阴影、不浮起 */
+.cn-root .gen-card[class] .gen-prompt-edit:focus, .cn-root .gen-card[class] .gen-prompt-edit:focus-visible { outline: none; box-shadow: none; transform: none; border: 0; }
+/* 全屏聊天：参数在一行里排开，模型下拉更宽 */
+.cn-root #agent.full .gen-card[class] .gen-model { min-width: 220px; }
+
+/* ── 卡片底部：说明文字左对齐，按钮一律右对齐（HextaUI CardFooter 自带居中，这里压回去） ── */
+.cn-root .message-card[class] .mc-foot[class] { align-items: stretch; text-align: left; }
+.cn-root .message-card[class] .mc-foot[class] .mc-note,
+.cn-root .message-card[class] .mc-foot[class] .mc-summary,
+.cn-root .message-card[class] .mc-foot[class] .mc-why { text-align: left; }
+.cn-root .message-card[class] .mc-actions[class],
+.cn-root .message-card[class] .mc-actions-split[class] { justify-content: flex-end; width: 100%; }
+
+/* ── 选择框：磨砂玻璃（无描边；底色约 70% 不透明 + 背景模糊 + 极轻投影） ── */
+.cn-root .gen-card[class] .gen-select[class],
+.cn-root .plan-card[class] .plan-params[class] select {
+  border: 0;
+  background-color: color-mix(in srgb, var(--panel) 70%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 2px 8px rgba(0, 0, 0, .05);
+  color: var(--fg);
+}
+.cn-root .gen-card[class] .gen-select[class]:hover,
+.cn-root .plan-card[class] .plan-params[class] select:hover { background-color: color-mix(in srgb, var(--panel) 82%, transparent); }
+.cn-root .gen-card[class] .gen-model.is-empty[class] { background-color: color-mix(in srgb, var(--panel) 82%, transparent); color: var(--hi); }
+/* 下拉弹层：标准磨砂玻璃配方，底色约 82% 不透明（常压在图片 / 文字上，不能太透） */
+.cn-root .nv-gen-select[class] {
+  border: 0;
+  background-color: color-mix(in srgb, var(--panel) 82%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+}
+.cn-root .nv-gen-select[class] [data-slot="select-item"][data-highlighted] { background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); }
+
+/* 下拉弹层：比触发框宽（模型名不被挤成多行），小字号单行，分组标题是平台名 */
+.cn-root .nv-gen-select[class] { min-width: max(var(--anchor-width, 0px), 180px); max-width: min(340px, 90vw); padding: 4px; border-radius: 12px; font-size: 12px; }
+.cn-root .nv-gen-models[class] { min-width: max(var(--anchor-width, 0px), 260px); max-height: min(360px, var(--available-height, 360px)); }
+.cn-root .nv-gen-select[class] [data-slot="select-item"] { min-height: 28px; padding-top: 4px; padding-bottom: 4px; border-radius: 8px; font-size: 12px; line-height: 18px; }
+.cn-root .nv-gen-select[class] [data-slot="select-item-text"] { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cn-root .nv-gen-select[class] .nv-gen-group[class] { padding: 6px 8px 2px; font-size: 10.5px; font-weight: 600; color: var(--fg3); }
+
+/* 模型两级菜单：触发框里「供应商 · 模型」单行省略；一级是供应商 + 数量，二级是模型名 */
+.cn-root .gen-card[class] .gen-model[class] { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; height: 26px; padding: 0 8px; border-radius: 8px; font-size: 11.5px; cursor: pointer; max-width: 260px; }
+.cn-root .gen-card[class] .gen-model-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cn-root .gen-card[class] .gen-model-text em { font-style: normal; color: var(--fg3); margin-right: 4px; }
+.cn-root .gen-card[class] .gen-model[class]:disabled { opacity: .5; cursor: default; }
+.cn-root div:has(> .nv-gen-select) { z-index: 400 !important; }
+.cn-root .nv-gen-vendors[class] { min-width: 180px; max-width: 240px; }
+.cn-root .nv-gen-models[class] { min-width: 220px; max-width: 320px; max-height: min(360px, var(--available-height, 360px)); overflow-y: auto; }
+.cn-root .nv-gen-select[class] [data-slot="dropdown-menu-item"],
+.cn-root .nv-gen-select[class] [data-slot="dropdown-menu-sub-trigger"] { min-height: 28px; padding: 4px 8px; border-radius: 8px; font-size: 12px; line-height: 18px; gap: 8px; }
+.cn-root .nv-gen-select[class] [data-highlighted],
+.cn-root .nv-gen-select[class] [data-popup-open] { background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); }
+.cn-root .nv-gen-vendor-name, .cn-root .nv-gen-model-name { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cn-root .nv-gen-count { flex: none; font-size: 10.5px; color: var(--fg3); }
+.cn-root .nv-gen-vendor.is-on .nv-gen-vendor-name, .cn-root .nv-gen-model.is-on .nv-gen-model-name { font-weight: 600; color: var(--hi); }

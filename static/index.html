@@ -33,15 +33,15 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.143.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.143.1792474521"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.143.1790560477"></script>
-    <script src="/static/js/shared/morph-button.js?v=1.0.143.1789845865"></script>
-    <script src="/static/js/i18n.js?v=1.0.143.1790130330"></script>
-    <script defer src="/static/js/credits.js?v=1.0.143.1792848048"></script>
-    <script src="/static/js/user-menu.js?v=1.0.143.1792776481" defer></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.143.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.143.1790560477">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2.0.00.1789606971"></script>
+    <script src="/static/js/theme.js?v=2.0.00.1792474521"></script>
+    <script src="/static/js/shared/utils.js?v=2.0.00.1790560477"></script>
+    <script src="/static/js/shared/morph-button.js?v=2.0.00.1789845865"></script>
+    <script src="/static/js/i18n.js?v=2.0.00.1790130330"></script>
+    <script defer src="/static/js/credits.js?v=2.0.00.1792848048"></script>
+    <script src="/static/js/user-menu.js?v=2.0.00.1793785628" defer></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2.0.00.1789606971">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.00.1793785603">
     <style>
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -3108,19 +3108,19 @@
         </div>
         <div class="titlebar-actions">
             <button class="titlebar-btn theme-toggle" id="titlebarThemeBtn" onclick="toggleTitlebarTheme()" title="切换主题" type="button">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+                <svg data-icon="sun" class="nv-i nv-i-sun" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
             </button>
             <button class="titlebar-btn" id="titlebarSettingsBtn" onclick="openTitlebarSettings()" title="设置" type="button">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.36 1.08V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.08-.36H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .36-1.08V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.22.38.58.69 1 .86.2.08.42.13.65.14H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path></svg>
+                <svg data-icon="settings" class="nv-i nv-i-settings" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.36 1.08V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.08-.36H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .36-1.08V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.22.38.58.69 1 .86.2.08.42.13.65.14H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path></svg>
             </button>
             <button class="titlebar-btn" onclick="minimizeTitlebarWindow()" title="最小化" type="button">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path></svg>
+                <svg data-icon="minus" class="nv-i nv-i-minus" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path></svg>
             </button>
             <button class="titlebar-btn" onclick="maximizeTitlebarWindow()" title="最大化" type="button">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+                <svg data-icon="stop" class="nv-i nv-i-stop" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
             </button>
             <button class="titlebar-btn close" onclick="closeTitlebarWindow()" title="关闭" type="button">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+                <svg data-icon="x" class="nv-i nv-i-x" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
             </button>
         </div>
     </div>
@@ -3146,7 +3146,7 @@
             <div class="homepage-features">
                 <div class="homepage-feature">
                     <div class="homepage-feature-icon">
-                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="globe" class="nv-i nv-i-globe" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/>
                             <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
                         </svg>
@@ -3156,7 +3156,7 @@
                 </div>
                 <div class="homepage-feature">
                     <div class="homepage-feature-icon">
-                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="message" class="nv-i nv-i-message" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                         </svg>
                     </div>
@@ -3165,7 +3165,7 @@
                 </div>
                 <div class="homepage-feature">
                     <div class="homepage-feature-icon">
-                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="grid" class="nv-i nv-i-grid" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="7" height="7"/>
                             <rect x="14" y="3" width="7" height="7"/>
                             <rect x="14" y="14" width="7" height="7"/>
@@ -3188,7 +3188,7 @@
             <div class="onboarding-features">
                 <div class="onboarding-feature">
                     <div class="onboarding-feature-icon">
-                        <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="globe" class="nv-i nv-i-globe" width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/>
                             <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
                         </svg>
@@ -3198,7 +3198,7 @@
                 </div>
                 <div class="onboarding-feature">
                     <div class="onboarding-feature-icon">
-                        <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="message" class="nv-i nv-i-message" width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                         </svg>
                     </div>
@@ -3207,7 +3207,7 @@
                 </div>
                 <div class="onboarding-feature">
                     <div class="onboarding-feature-icon">
-                        <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="grid" class="nv-i nv-i-grid" width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="7" height="7"/>
                             <rect x="14" y="3" width="7" height="7"/>
                             <rect x="14" y="14" width="7" height="7"/>
@@ -3239,7 +3239,7 @@
                 <div class="nav-divider" style="width:32px;height:1px;background:transparent;margin:8px auto;transition:width 0.35s var(--fluid-ease);"></div>
 
                 <div class="nav-item active" data-route="home" onclick="switchUI(this, 'home')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg data-icon="home" class="w-5 h-5 flex-shrink-0 nv-i nv-i-home" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
                         <polyline points="9 22 9 12 15 12 15 22"></polyline>
                     </svg>
@@ -3247,20 +3247,20 @@
                 </div>
 
                 <div class="nav-item" onclick="switchUI(this, 'online')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg data-icon="globe" class="w-5 h-5 flex-shrink-0 nv-i nv-i-globe" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"></path>
                         <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
                     </svg>
                     <span class="nav-text" data-i18n="nav.online">在线生图</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'gpt-chat')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg data-icon="message" class="w-5 h-5 flex-shrink-0 nv-i nv-i-message" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                     </svg>
                     <span class="nav-text" data-i18n="nav.gpt">GPT 对话</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'canvas')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg data-icon="grid" class="w-5 h-5 flex-shrink-0 nv-i nv-i-grid" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="3" width="7" height="7"></rect>
                         <rect x="14" y="3" width="7" height="7"></rect>
                         <rect x="14" y="14" width="7" height="7"></rect>
@@ -3269,7 +3269,7 @@
                     <span class="nav-text" data-i18n="nav.canvas">智能画布BEAT</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'asset-manager')">
-                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg data-icon="book" class="w-5 h-5 flex-shrink-0 nv-i nv-i-book" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M4 19.5V6.8A2.8 2.8 0 0 1 6.8 4h10.4A2.8 2.8 0 0 1 20 6.8v12.7"></path>
                         <path d="M7 8h10"></path>
                         <path d="M7 12h10"></path>
@@ -3281,7 +3281,7 @@
 
             <div class="side-actions">
                 <button class="side-pill settings-toggle" id="settings-toggle-btn" onclick="openSettingsModal()" type="button" title="设置">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg data-icon="settings" class="nv-i nv-i-settings" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"></circle>
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.36 1.08V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.08-.36H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .36-1.08V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.22.38.58.69 1 .86.2.08.42.13.65.14H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path>
                     </svg>
@@ -3316,11 +3316,11 @@
             <!-- 右上角快捷操作 -->
             <div class="stage-actions">
                 <button class="stage-action-btn" onclick="toggleTheme()" title="切换主题" type="button" aria-label="切换主题">
-                    <svg class="stage-action-icon-sun" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
-                    <svg class="stage-action-icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                    <svg data-icon="sun" class="stage-action-icon-sun nv-i nv-i-sun" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+                    <svg data-icon="moon" class="stage-action-icon-moon nv-i nv-i-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
                 </button>
                 <button class="stage-action-btn" onclick="openSettingsModal()" title="设置" type="button" aria-label="设置">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.36 1.08V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.08-.36H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .36-1.08V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.22.38.58.69 1 .86.2.08.42.13.65.14H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path></svg>
+                    <svg data-icon="settings" class="nv-i nv-i-settings" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.36 1.08V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.08-.36H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .36-1.08V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.22.38.58.69 1 .86.2.08.42.13.65.14H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path></svg>
                 </button>
             </div>
 
@@ -3337,21 +3337,21 @@
                     <div class="skeleton-card"></div>
                 </div>
             </div>
-            <iframe id="frame-home" src="/static/home.html?v=1.0.143.1793421882" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=1.0.143.1793167696" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=1.0.143.1793421882" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=1.0.143.1793421882" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=1.0.143.1793167696" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=1.0.143.1793167696" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=1.0.143.1793167696" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=1.0.143.1793421882" scrolling="yes"></iframe>
+            <iframe id="frame-home" src="/static/home.html?v=2.0.00.1793785831" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=2.0.00.1793785831" scrolling="yes"></iframe>
+            <iframe id="frame-online" data-src="/static/online.html?v=2.0.00.1793958850" scrolling="yes"></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2.0.00.1793793583" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2.0.00.1793785831" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2.0.00.1793785831" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=2.0.00.1793785831" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2.0.00.1793945528" scrolling="yes"></iframe>
 
         </main>
     </div>
 
     <div id="update-reminder" class="update-reminder" role="status" aria-live="polite">
         <span class="update-reminder-icon" aria-hidden="true">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg data-icon="download" class="nv-i nv-i-download" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 3v12"></path>
                 <path d="M7 10l5 5 5-5"></path>
                 <path d="M5 21h14"></path>
@@ -3367,7 +3367,7 @@
             </div>
         </div>
         <button class="update-reminder-close" id="update-reminder-close" type="button" onclick="dismissUpdateReminder()" title="忽略此版本" aria-label="忽略此版本">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg data-icon="x" class="nv-i nv-i-x" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <line x1="18" y1="6" x2="6" y2="18"></line>
                 <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
@@ -3382,7 +3382,7 @@
                     <h2 id="project-update-title" class="studio-modal-title">一键更新</h2>
                 </div>
                 <button class="studio-modal-close" type="button" onclick="closeProjectUpdateModal()" title="关闭" aria-label="关闭">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg data-icon="x" class="nv-i nv-i-x" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
                     </svg>
@@ -3407,7 +3407,7 @@
                             </div>
                             <div class="update-source-head-right">
                                 <span class="update-source-check" aria-hidden="true">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                    <svg data-icon="check" class="nv-i nv-i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                                 </span>
                                 <span class="update-source-badge">待测试</span>
                             </div>
@@ -3422,7 +3422,7 @@
                             </div>
                             <div class="update-source-head-right">
                                 <span class="update-source-check" aria-hidden="true">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                    <svg data-icon="check" class="nv-i nv-i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                                 </span>
                                 <span class="update-source-badge">待测试</span>
                             </div>
@@ -3437,7 +3437,7 @@
                             </div>
                             <div class="update-source-head-right">
                                 <span class="update-source-check" aria-hidden="true">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                    <svg data-icon="check" class="nv-i nv-i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                                 </span>
                                 <span class="update-source-badge">待测试</span>
                             </div>
@@ -3465,7 +3465,7 @@
             </div>
             <div class="studio-modal-actions">
                 <button id="connectivity-test-btn" class="studio-modal-btn" type="button" onclick="runUpdateConnectivityTest()">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg data-icon="refresh" class="nv-i nv-i-refresh" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
                         <path d="M21 3v6h-6"></path>
                     </svg>
@@ -3475,7 +3475,7 @@
                     <span id="project-update-cancel-text">取消</span>
                 </button>
                 <button id="project-update-confirm-btn" class="studio-modal-btn primary" type="button" data-morph data-morph-keep-width onclick="confirmProjectUpdate()">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <svg data-icon="refresh" class="nv-i nv-i-refresh" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
                         <path d="M21 3v6h-6"></path>
                     </svg>
@@ -3495,7 +3495,7 @@
                 </div>
                 <div class="settings-tabs" role="tablist" aria-label="设置分类">
                     <button class="settings-tab active" data-settings-tab="general" onclick="switchSettingsTab('general')" role="tab" aria-selected="true" aria-controls="settings-panel-general" type="button">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="monitor" class="nv-i nv-i-monitor" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
                             <line x1="8" y1="21" x2="16" y2="21"></line>
                             <line x1="12" y1="17" x2="12" y2="21"></line>
@@ -3503,7 +3503,7 @@
                         <span data-i18n="common.general">通用</span>
                     </button>
                     <button class="settings-tab" data-settings-tab="api-settings" onclick="switchSettingsTab('api-settings')" role="tab" aria-selected="false" type="button">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="link" class="nv-i nv-i-link" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M15 7h3a5 5 0 0 1 0 10h-3"></path>
                             <path d="M9 17H6A5 5 0 0 1 6 7h3"></path>
                             <line x1="8" y1="12" x2="16" y2="12"></line>
@@ -3511,7 +3511,7 @@
                         <span data-i18n="common.apiSettings">API 设置</span>
                     </button>
                     <button class="settings-tab" data-settings-tab="comfyui-settings" onclick="switchSettingsTab('comfyui-settings')" role="tab" aria-selected="false" type="button">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="grid" class="nv-i nv-i-grid" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="7" height="7" rx="1"></rect>
                             <rect x="14" y="3" width="7" height="7" rx="1"></rect>
                             <rect x="3" y="14" width="7" height="7" rx="1"></rect>
@@ -3520,7 +3520,7 @@
                         <span data-i18n="common.comfyuiSettings">工作流设置</span>
                     </button>
                     <button class="settings-tab" data-settings-tab="backup" onclick="switchSettingsTab('backup')" role="tab" aria-selected="false" aria-controls="settings-panel-backup" type="button">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="archive" class="nv-i nv-i-archive" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="3" width="20" height="5" rx="1"></rect>
                             <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
                             <path d="M10 12h4"></path>
@@ -3528,14 +3528,14 @@
                         <span data-i18n="common.backup">数据备份</span>
                     </button>
                     <button class="settings-tab" data-settings-tab="appearance" onclick="switchSettingsTab('appearance')" role="tab" aria-selected="false" aria-controls="settings-panel-appearance" type="button">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="settings" class="nv-i nv-i-settings" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="12" cy="12" r="3"></circle>
                             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.36 1.08V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.08-.36H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .36-1.08V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.22.38.58.69 1 .86.2.08.42.13.65.14H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path>
                         </svg>
                         <span data-i18n="common.appearance">外观</span>
                     </button>
                     <button class="settings-tab" data-settings-tab="about" onclick="switchSettingsTab('about')" role="tab" aria-selected="false" aria-controls="settings-panel-about" type="button">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg data-icon="info" class="nv-i nv-i-info" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="12" cy="12" r="10"></circle>
                             <line x1="12" y1="16" x2="12" y2="12"></line>
                             <line x1="12" y1="8" x2="12.01" y2="8"></line>
@@ -3552,7 +3552,7 @@
                         <p id="settings-panel-desc" class="settings-panel-desc" data-i18n="common.generalDesc">管理 NOVAI 的常用偏好与入口。</p>
                     </div>
                     <button class="settings-content-header-close" type="button" onclick="closeSettingsModal()" title="关闭" aria-label="关闭">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <svg data-icon="x" class="nv-i nv-i-x" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
                             <line x1="6" y1="6" x2="18" y2="18"></line>
                         </svg>
@@ -3749,7 +3749,7 @@
                                 </div>
                                 <div class="bk-actions">
                                     <button class="bk-primary" id="bk-create-btn" type="button" onclick="startBackupExport()">
-                                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                        <svg data-icon="download" class="nv-i nv-i-download" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                                         <span>创建备份</span>
                                     </button>
                                     <span class="bk-hint" id="bk-create-hint"></span>
@@ -3785,7 +3785,7 @@
                             <div class="settings-card-body">
                                 <div class="bk-actions">
                                     <button class="settings-path-btn bk-soft-btn" id="bk-pick-btn" type="button" onclick="document.getElementById('bk-file-input').click()">
-                                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                        <svg data-icon="upload" class="nv-i nv-i-upload" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                                         <span>选择备份文件（.zip）</span>
                                     </button>
                                     <input type="file" id="bk-file-input" accept=".zip,application/zip" hidden onchange="uploadBackupFile(this)">
@@ -3810,7 +3810,7 @@
                             <div class="settings-card-body">
                                 <div class="settings-pill-group" id="settings-theme-pills" role="group" aria-label="主题模式">
                                     <button class="settings-pill" data-theme="light" onclick="setTheme('light')" type="button">
-                                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <svg data-icon="sun" class="nv-i nv-i-sun" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <circle cx="12" cy="12" r="5"></circle>
                                             <line x1="12" y1="1" x2="12" y2="3"></line>
                                             <line x1="12" y1="21" x2="12" y2="23"></line>
@@ -3824,7 +3824,7 @@
                                         <span data-i18n="common.light">浅色</span>
                                     </button>
                                     <button class="settings-pill" data-theme="dark" onclick="setTheme('dark')" type="button">
-                                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <svg data-icon="moon" class="nv-i nv-i-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                                         </svg>
                                         <span data-i18n="common.dark">深色</span>
@@ -3858,7 +3858,7 @@
                                 </div>
                                 <div class="settings-divider"></div>
                                 <button class="settings-row" onclick="checkForUpdates(true); closeSettingsModal();" type="button">
-                                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <svg data-icon="refresh" class="nv-i nv-i-refresh" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <polyline points="23 4 23 10 17 10"></polyline>
                                         <polyline points="1 20 1 14 7 14"></polyline>
                                         <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
@@ -3866,7 +3866,7 @@
                                     <span data-i18n="common.checkUpdate">检查更新</span>
                                 </button>
                                 <button id="settings-update-now-btn" class="settings-row settings-update-row" onclick="runProjectUpdate(); closeSettingsModal();" type="button">
-                                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <svg data-icon="refresh" class="nv-i nv-i-refresh" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
                                         <path d="M21 3v6h-6"></path>
                                     </svg>
@@ -3889,7 +3889,7 @@
                     <div class="settings-detail" id="settings-detail" hidden role="region" aria-label="设置详情">
                         <div class="settings-detail-header">
                             <button class="settings-detail-back" type="button" onclick="closeSettingsDetail()" title="返回" aria-label="返回">
-                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <svg data-icon="chevl" class="nv-i nv-i-chevl" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <polyline points="15 18 9 12 15 6"></polyline>
                                 </svg>
                                 <span data-i18n="common.back">返回</span>

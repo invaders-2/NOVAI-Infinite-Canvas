@@ -2,6 +2,7 @@
 // 「工作流」：工作流分组树（新建 / 重命名 / 二次确认删除）+ 工作流网格（上传 JSON / ZIP、批量导出 / 删除）+ 详情
 import { ref, computed, watch } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
+import AmTools from '../parts/AmTools.vue';
 import AssetCard from '../parts/AssetCard.vue';
 import UploadCard from '../parts/UploadCard.vue';
 import MediaThumb from '../parts/MediaThumb.vue';
@@ -60,6 +61,7 @@ async function rename(id) {
                 <div class="ch"><b>{{ cat?.name || '工作流管理' }}</b><span>工作流库 / {{ items.length }} 个工作流</span></div>
                 <label class="nv-field"><NvIcon name="search" /><input v-model="W.query" type="search" placeholder="搜索工作流" aria-label="搜索工作流"></label>
                 <button type="button" class="nv-btn sm" :class="{ primary: W.manage }" @click="F.toggleManage()"><NvIcon name="list" />{{ W.manage ? '完成管理' : '批量管理' }}</button>
+                <AmTools />
             </div>
             <div v-if="W.manage" class="am-mbar">
                 <div class="am-mrow">

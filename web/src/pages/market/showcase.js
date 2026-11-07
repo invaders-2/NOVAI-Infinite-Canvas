@@ -1,0 +1,59 @@
+// 应用市场「最新上线」轮播的内容：我们自己的技能 / 应用 / 最新模型。
+// 封面是 tools/market-art/build.cjs 生成的真实素材（官方模型示例图 + 真实产品截图），无文字覆盖。
+// to：点中间那张卡要去的地方（'skills' 由页面转成 openSettings('skills')）。
+export const SHOWCASE = [
+    {
+        id: 'seedream',
+        title: 'Seedream 5.0',
+        desc: '2K/4K 超清文生图，细节和质感一步到位',
+        tag: '最新模型 · 图像',
+        icon: 'image',
+        cover: '/static/images/market/showcase-seedream.jpg',
+        to: 'canvas',
+    },
+    {
+        id: 'seedance',
+        title: 'Seedance 2.5',
+        desc: '首尾帧直出，几秒钟把静图变成镜头',
+        tag: '最新模型 · 视频',
+        icon: 'film',
+        cover: '/static/images/market/showcase-seedance.jpg',
+        to: 'canvas',
+    },
+    {
+        id: 'gemini',
+        title: 'Gemini 3 Pro',
+        desc: '多模态长上下文，看图、写作、规划一起做',
+        tag: '最新模型 · 对话',
+        icon: 'chat',
+        cover: '/static/images/market/showcase-gemini.jpg',
+        to: 'canvas',
+    },
+    {
+        id: 'minimax',
+        title: 'MiniMax H3',
+        desc: '多模态视频生成，一段描述直接出片',
+        tag: '最新模型 · 视频',
+        icon: 'film',
+        cover: '/static/images/market/showcase-minimax.jpg',
+        to: 'canvas',
+    },
+    {
+        id: 'gpt26',
+        title: 'GPT-Image 2.6',
+        desc: 'OpenAI 图像新版本，细节和文字更稳',
+        tag: '最新模型 · 图像',
+        icon: 'image',
+        cover: '/static/images/market/showcase-gpt26.jpg',
+        to: 'canvas',
+    },
+    {
+        id: 'fashion',
+        title: '服装大片 · 胶片暗房',
+        desc: '模特 look 图 + 空镜，批量合成胶片暗房风格时尚大片',
+        tag: '技能',
+        icon: 'wand2',
+        cover: '/static/images/market/showcase-fashion.jpg',
+        to: 'skills',
+    },
+];

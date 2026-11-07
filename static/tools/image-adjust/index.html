@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>专业调色</title>
+<!-- 旧智能画布的专业调色面板（原样复用，不复制/改写 engine / editor / css） -->
+<link rel="stylesheet" href="/static/css/image-adjust.css">
+<style>
+  /* ═══ 页面级 token（亮 / 暗两套）：editor 的基样式只认这几个通用变量 ═══ */
+  :root{
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,monospace;
+    --text:#1d1d1f; --muted:#6e6e73; --faint:#8e8e93;
+    --soft:#f2f2f4; --card:#ffffff; --surface:#ffffff; --surface-2:#ececee; --panel:#fbfbfc;
+    --strong:#1d1d1f; --strong-text:#ffffff; --overlay:rgba(0,0,0,.5); --border-2:rgba(0,0,0,.08);
+    --text-sm:12px; --text-lg:15px;
+    --radius-sm:8px; --radius-md:12px; --radius-lg:16px; --radius-xl:20px; --radius-full:999px;
+    --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px;
+    --shadow-sm:0 1px 3px rgba(0,0,0,.12); --shadow-md:0 8px 24px rgba(0,0,0,.14); --shadow-lg:0 18px 48px rgba(0,0,0,.18);
+  }
+  html[data-theme="dark"]{
+    --text:#f5f5f7; --muted:#a3a3a3; --faint:#8a8a8a;
+    --soft:#141416; --card:#1c1c1e; --surface:#171717; --surface-2:#2a2a2d; --panel:#0e0e0f;
+    --strong:#f5f5f7; --strong-text:#000000; --overlay:rgba(0,0,0,.6); --border-2:rgba(255,255,255,.1);
+    --shadow-sm:0 1px 3px rgba(0,0,0,.5); --shadow-md:0 8px 24px rgba(0,0,0,.5); --shadow-lg:0 18px 48px rgba(0,0,0,.55);
+  }
+  /* ═══ 只补 editor 需要的基样式（从 smart-canvas.css 精简移植，不整份加载） ═══ */
+  html,body{height:100%;margin:0;background:var(--beat-panel, var(--panel));overflow:hidden;}
+  body{font:13px/1.45 var(--font);color:var(--text);-webkit-font-smoothing:antialiased;}
+  #imageEditModal{position:relative;height:100%;display:flex;}
+  .image-edit-panel{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;min-height:0;background:transparent;}
+  .image-edit-stage{position:relative;flex:1 1 auto;min-height:0;display:flex;overflow:hidden;background:transparent;}
+  /* 图片区四周 24 内边距，图片靠 flex 水平+垂直居中（左右留白相等） */
+  .image-edit-stage-inner{width:100%;height:100%;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;margin:0;}
+  .crop-canvas{position:relative;display:inline-block;line-height:0;user-select:none;max-width:100%;background:var(--soft);}
+  /* iframe 里的上限只跟自己的视口走，不用旧页面的 100vw - 100px（那会把图压得很小） */
+  .crop-canvas img{display:block;width:auto;height:auto;max-width:100%;max-height:calc(100vh - 48px);border-radius:0;background:transparent;}
+  .adjust-row{display:flex;flex-direction:row;flex:1 1 auto;min-width:0;min-height:0;}
+  .adjust-row > .image-edit-stage{flex:1 1 auto;min-width:0;min-height:0;}
+  /* 贴边分栏：面板贴死对话框右边缘，图片区和面板之间不留缝，靠 --bg / --raised 的底色差分隔 */
+  .adjust-row.iaj-row{gap:0;}
+  .crop-canvas.adjust-mode .image-edit-canvas-adjust{display:block;}
+  .crop-canvas.adjust-mode .crop-box{display:none;}
+  .crop-canvas.adjust-mode img{border-radius:0;background:transparent;}
+  .image-edit-canvas-adjust{display:none;position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:3;}
+  .image-edit-tools{min-height:48px;height:auto;flex:0 0 auto;display:none;align-items:center;gap:var(--space-3);padding:var(--space-2) 0;background:transparent;border:none;flex-wrap:wrap;overflow:hidden;}
+  .image-edit-tools.active{display:flex;}
+  /* 右侧面板做成贴边分栏（与无损改图同一套结构）：宽 400、贴死对话框右边缘，无外边距/圆角/阴影/发丝线，
+     靠宿主 --bg（图片区）与 --raised（面板）的底色差分隔；内边距统一 16，底部预留 72px 给宿主「应用」 */
+  .image-adjust-tools.iaj{
+    flex: 0 0 400px !important;width:400px !important;height:auto !important;align-self:stretch !important;box-sizing:border-box !important;
+    margin:0 !important;padding:16px 16px 72px !important;
+    border:0 !important;border-radius:0 !important;
+    background:var(--beat-raised, var(--surface)) !important;
+    -webkit-backdrop-filter:none !important;backdrop-filter:none !important;
+    box-shadow:none !important;
+    overflow:hidden !important;
+  }
+  /* 工具页自己的错误提示：宿主 toast 之外，页面里也要看得见 */
+  .iaj-boot{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--muted);font-size:13px;line-height:1.7;}
+  .iaj-boot.show{display:flex;}
+</style>
+</head>
+<body>
+<!-- editor 硬要求：常驻 #imageEditModal.open、#imageEditStage.image-edit-stage、#cropCanvas.crop-canvas.adjust-mode > #cropImage。
+     #imageAdjustRow 会被 enterAdjustMode 插到 .image-edit-panel 里，并把 #imageEditStage 移进去。 -->
+<div id="imageEditModal" class="image-edit-modal open">
+  <div class="image-edit-panel">
+    <div id="imageEditStage" class="image-edit-stage">
+      <div class="image-edit-stage-inner">
+        <div id="cropCanvas" class="crop-canvas adjust-mode">
+          <img id="cropImage" alt="" draggable="false">
+        </div>
+      </div>
+    </div>
+    <div id="iajBoot" class="iaj-boot"></div>
+  </div>
+</div>
+
+<script src="/static/js/image-adjust-engine.js"></script>
+<script src="/static/js/image-adjust-editor.js"></script>
+<script>
+/* ═══ 宿主桥接（iframe 独立页）═══
+   协议（source 固定）：工具→宿主 ready / result{dataUrl,params,width,height} / error{message}
+                        宿主→工具 init{src,adjust?} / apply / theme
+   图片不走 URL 参数：调色结果/原图可能是 data URL，塞进 query 会超长，ready 之后用 init 传。 */
+(function () {
+  'use strict';
+  var SRC = 'novai-image-adjust', HOST = 'novai-image-adjust-host';
+  var qs = new URLSearchParams(location.search);
+  var theme = qs.get('theme') === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = theme;
+
+  var ready = false, inited = false, booted = false, initMsg = null, pending = null, applied = false;
+  var srcName = 'image', initAdjust = null, lastError = '';
+
+  function hostOrigin() { return /^https?:$/.test(location.protocol) ? location.origin : '*'; }
+  function post(msg) { try { parent.postMessage(Object.assign({ source: SRC }, msg), hostOrigin()); } catch (e) { /* 独立打开时 parent 就是自己 */ } }
+  function showBoot(text) {
+    var el = document.getElementById('iajBoot');
+    if (el) { el.textContent = text; el.classList.add('show'); }
+  }
+  /** 出错一律告诉宿主（宿主 toast），同时在页面里留一句人话，别让用户对着空面板 */
+  function fail(message) {
+    lastError = String(message || '调色工具出错');
+    showBoot(lastError);
+    post({ type: 'error', message: lastError });
+  }
+
+  function blobToDataUrl(blob) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(String(fr.result || '')); };
+      fr.onerror = function () { reject(new Error('读取调色结果失败')); };
+      fr.readAsDataURL(blob);
+    });
+  }
+  function imageSize(blob) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () { var s = { width: img.naturalWidth || 0, height: img.naturalHeight || 0 }; URL.revokeObjectURL(url); resolve(s); };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve({ width: 0, height: 0 }); };
+      img.src = url;
+    });
+  }
+
+  /* editor 通过 window.imageAdjust 取原图 / 上传 / 交结果（就旧画布那一套接口） */
+  window.imageAdjust = {
+    currentSource: function () {
+      var img = document.getElementById('cropImage');
+      return { url: (img && img.src) || '', name: srcName, adjust: initAdjust };
+    },
+    upload: function (blob, name) {
+      pending = { blob: blob, name: name || 'adjust.png' };
+      return Promise.resolve({ url: 'host', name: pending.name });
+    },
+    addResult: function (file, fromAI, meta) {
+      var item = pending; pending = null;
+      if (!item || !item.blob) { fail('没有可上传的调色结果'); return Promise.resolve(); }
+      return Promise.all([blobToDataUrl(item.blob), imageSize(item.blob)]).then(function (out) {
+        applied = true;
+        post({
+          type: 'result',
+          dataUrl: out[0],
+          params: (meta && meta.adjust && meta.adjust.params) || null,
+          width: out[1].width,
+          height: out[1].height
+        });
+      }).catch(function (e) { fail(e && e.message ? e.message : e); });
+    },
+    finish: function () { /* 关对话框由宿主负责 */ }
+  };
+
+  function applyInit(msg) {
+    if (!booted) { initMsg = msg; return; }
+    var src = (msg && msg.src) || {};
+    if (!src.url) { fail('没有可调色的图片'); return; }
+    srcName = src.name || 'image';
+    initAdjust = msg.adjust || null;
+    var img = document.getElementById('cropImage');
+    if (!img) { fail('调色画布没准备好'); return; }
+    if (typeof window.imageAdjustEnterMode !== 'function') { fail('调色面板没加载完，请关闭后重试'); return; }
+    inited = false;
+    img.onload = function () {
+      img.onload = null; img.onerror = null;
+      Promise.resolve(window.imageAdjustEnterMode()).then(function () { inited = true; }, function (e) {
+        fail('调色面板初始化失败：' + (e && e.message ? e.message : e));
+      });
+    };
+    img.onerror = function () { img.onload = null; img.onerror = null; fail('原图加载失败，换一张图再试'); };
+    img.src = src.url;
+  }
+
+  window.addEventListener('message', function (event) {
+    var d = event.data;
+    if (!d || d.source !== HOST) return;
+    if (d.type === 'init') { applyInit(d); return; }
+    if (d.type === 'theme') {
+      if (d.theme === 'dark' || d.theme === 'light') document.documentElement.dataset.theme = d.theme;
+      /* 宿主传真实 token：窗底 / 浮层底色与 BEAT 弹窗完全一致 */
+      if (typeof d.panel === 'string' && d.panel) document.documentElement.style.setProperty('--beat-panel', d.panel);
+      if (typeof d.raised === 'string' && d.raised) document.documentElement.style.setProperty('--beat-raised', d.raised);
+      return;
+    }
+    if (d.type === 'apply') {
+      if (!booted || !inited || typeof window.applyImageAdjust !== 'function') { fail('调色面板还没准备好，请稍后再试'); return; }
+      applied = false; lastError = '';
+      Promise.resolve().then(function () { return window.applyImageAdjust(); }).then(function () {
+        /* 导出/上传失败时 editor 只在自己面板里写状态、不抛错，这里补一句可感知的失败 */
+        if (!applied && !lastError) fail('调色导出失败，请重试');
+      }).catch(function (e) { fail(e && e.message ? e.message : e); });
+    }
+  });
+
+  /* 脚本就位后再报 ready：engine / editor 缺失时直接报错，宿主那边不会一直转圈 */
+  (function boot() {
+    if (!window.NovaAdjustEngine) { fail('调色引擎未加载，请关闭后重试'); return; }
+    if (typeof window.imageAdjustEnterMode !== 'function') { fail('调色面板未加载，请关闭后重试'); return; }
+    booted = true;
+    post({ type: 'ready' });
+    if (initMsg) { var m = initMsg; initMsg = null; applyInit(m); }
+  })();
+})();
+</script>
+</body>
+</html>

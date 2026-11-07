@@ -1,0 +1,935 @@
+{
+  "format": "novai-doc-model-params/v1",
+  "generated_by": "task-17 docs-researcher",
+  "doc_corpus": {
+    "source": "https://docs.apimart.ai/llms-full.txt",
+    "bytes": 2332676,
+    "lines": 87909,
+    "sha256": "da7f038a4cf98a3f09c2c9fdd960c2276885ed00c084aae551aebada968387fc",
+    "locator_note": "citations.locator 里的 L<行号> 指该 sha256 的文件；复核前先比对 sha256。"
+  },
+  "field_semantics": {
+    "ratios": "比例白名单（原样保留文档大小写）；null = 文档没有枚举 / 不适用",
+    "resolutions": "分辨率档位白名单；null = 文档不提供可选档位（模型自定或不适用）",
+    "qualities": "质量档白名单；null = 文档没有该参数。midjourney 的 0.25/0.5/1/2 是 --q 取值，语义与 OpenAI quality 不同",
+    "n_max": "单次请求最多几张/几个；null = 文档未给或不适用",
+    "durations": "允许的时长（秒）枚举；null = 不适用",
+    "modes": "支持的生成方式；null = 文档不区分或不适用",
+    "ref_max": "参考图上限；null = 文档未给固定上限",
+    "exact_size": "true = 文档支持精确像素；false = 文档明确只收比例；null = 文档没写",
+    "max_long_edge/max_pixels/min_pixels": "精确像素约束；null = 文档没写"
+  },
+  "models": [
+    {
+      "provider": "apimart",
+      "model": "gemini-3-pro-image-preview",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3-pro/generation",
+      "ratios": [
+        "auto",
+        "1:1",
+        "2:3",
+        "3:2",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9"
+      ],
+      "resolutions": [
+        "1K",
+        "2K",
+        "4K"
+      ],
+      "qualities": null,
+      "n_max": 1,
+      "durations": null,
+      "modes": null,
+      "ref_max": null,
+      "exact_size": false,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "n 只能是 1（文档 Range: 1）。size 只接受比例或 auto，文档没有像素尺寸写法（exact_size=false）。参考图张数：文档明说平台没有固定上限（no fixed reference image count limit），超模型能力会任务失败并退款，故 ref_max=null。resolution 默认 1K。official_fallback 可选，官方版不支持该字段。",
+      "citations": [
+        {
+          "quote": "Ratios: auto, 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9",
+          "locator": "llms-full L2667"
+        },
+        {
+          "quote": "1K - 1K resolution (default) / 2K - 2K resolution / 4K - 4K resolution",
+          "locator": "llms-full L2689-L2691"
+        },
+        {
+          "quote": "n ... Range: 1",
+          "locator": "llms-full L2677"
+        },
+        {
+          "quote": "The platform has no fixed reference image count limit",
+          "locator": "llms-full L4258"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "gemini-nano-banana-2.1",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-nano-banana-2.1/generation",
+      "ratios": [
+        "auto",
+        "1:4",
+        "4:1",
+        "1:8",
+        "8:1",
+        "1:1",
+        "2:3",
+        "3:2",
+        "3:4",
+        "4:3",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9",
+        "21:9"
+      ],
+      "resolutions": [
+        "1K",
+        "2K",
+        "4K"
+      ],
+      "qualities": null,
+      "n_max": 4,
+      "durations": null,
+      "modes": null,
+      "ref_max": null,
+      "exact_size": false,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "官方版 n=1-4（n_max=4）；-ext 版 n 只能是 1，传 2-4 会执行期失败并全额退款，所以两条 ID 的 n_max 必须分开。0.5K 与 512 不支持（提交即 400）；其它未知值（如 3K）按 1K 生成并按 1K 计费。14 个比例 + auto，官方版与 ext 版在 1K/2K/4K 都支持全部 14 个。参考图：官方版单图<=20MB；ext 单图<=20MB、合计<=50MB；张数无固定上限。",
+      "citations": [
+        {
+          "quote": "Output aspect ratio. Supports 1:4, 4:1, 1:8, 8:1, 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, and 21:9.",
+          "locator": "llms-full L4231"
+        },
+        {
+          "quote": "All 14 ratios are supported by both the official and Ext versions at 1K, 2K, and 4K.",
+          "locator": "llms-full L4235"
+        },
+        {
+          "quote": "0.5K and 512 are not supported and return HTTP 400 on submission.",
+          "locator": "llms-full L4241"
+        },
+        {
+          "quote": "Number of output images: 1-4 for the official version; only 1 for Ext.",
+          "locator": "llms-full L4245"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "gpt-image-2.5-ext",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.5-ext/generation",
+      "ratios": [
+        "auto",
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "3:2",
+        "2:3",
+        "5:4",
+        "4:5",
+        "21:9"
+      ],
+      "resolutions": [
+        "1K",
+        "2K",
+        "4K"
+      ],
+      "qualities": null,
+      "n_max": 4,
+      "durations": null,
+      "modes": null,
+      "ref_max": 16,
+      "exact_size": null,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "文档只写 10 个比例 + auto、1K/2K/4K、n=1-4、参考图<=16；没有质量(quality)参数，也没有精确像素规则（qualities/exact_size/max_* 一律 null）。支持幂等头 Idempotency-Key。文档未提 mask 局部重绘，按不支持处理。",
+      "citations": [
+        {
+          "quote": "Choose auto or one of the following 10 ratios: 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 5:4, 4:5, 21:9.",
+          "locator": "llms-full L5208-L5210"
+        },
+        {
+          "quote": "The number of images to generate per request. Must be an integer from 1 to 4.",
+          "locator": "llms-full L5214"
+        },
+        {
+          "quote": "An array of up to 16 reference images.",
+          "locator": "llms-full L5218"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "gpt-image-2.5-flare",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.5/generation",
+      "ratios": [
+        "auto",
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "5:4",
+        "4:5",
+        "16:9",
+        "9:16",
+        "2:1",
+        "1:2",
+        "21:9",
+        "9:21",
+        "3:1",
+        "1:3"
+      ],
+      "resolutions": [
+        "1K",
+        "2K",
+        "4K"
+      ],
+      "qualities": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "auto"
+      ],
+      "n_max": 4,
+      "durations": null,
+      "modes": null,
+      "ref_max": 16,
+      "exact_size": true,
+      "max_long_edge": 3840,
+      "max_pixels": 8294400,
+      "min_pixels": 655360,
+      "notes": "flare 与 sunburst 参数完全相同（文档：identical token usage and pricing for the same parameters），差异只在速度与细节取向。quality 含 auto（默认 auto）；xhigh/max 只有 2.5/2.6 支持，发给 gpt-image-2 会 400 且不会静默降级。精确像素：宽高都是 16 的倍数、单边<=3840、长短边比<=3:1、总像素 655360-8294400。支持 mask_url 局部重绘（掩膜<4MB 更稳妥）。",
+      "citations": [
+        {
+          "quote": "Supports 15 aspect ratios, exact pixel dimensions, and 1K / 2K / 4K resolution tiers",
+          "locator": "llms-full L5379"
+        },
+        {
+          "quote": "Image quality: low, medium, high, xhigh, max, or auto.",
+          "locator": "llms-full L5547"
+        },
+        {
+          "quote": "Width and height are both multiples of 16 ... Neither side exceeds 3840 pixels ... ratio is at most 3:1 ... Total pixel count is between 655,360 and 8,294,400",
+          "locator": "llms-full L5614-L5617"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "gpt-image-2.5-sunburst",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.5/generation",
+      "ratios": [
+        "auto",
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "5:4",
+        "4:5",
+        "16:9",
+        "9:16",
+        "2:1",
+        "1:2",
+        "21:9",
+        "9:21",
+        "3:1",
+        "1:3"
+      ],
+      "resolutions": [
+        "1K",
+        "2K",
+        "4K"
+      ],
+      "qualities": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "auto"
+      ],
+      "n_max": 4,
+      "durations": null,
+      "modes": null,
+      "ref_max": 16,
+      "exact_size": true,
+      "max_long_edge": 3840,
+      "max_pixels": 8294400,
+      "min_pixels": 655360,
+      "notes": "flare 与 sunburst 参数完全相同（文档：identical token usage and pricing for the same parameters），差异只在速度与细节取向。quality 含 auto（默认 auto）；xhigh/max 只有 2.5/2.6 支持，发给 gpt-image-2 会 400 且不会静默降级。精确像素：宽高都是 16 的倍数、单边<=3840、长短边比<=3:1、总像素 655360-8294400。支持 mask_url 局部重绘（掩膜<4MB 更稳妥）。",
+      "citations": [
+        {
+          "quote": "Supports 15 aspect ratios, exact pixel dimensions, and 1K / 2K / 4K resolution tiers",
+          "locator": "llms-full L5379"
+        },
+        {
+          "quote": "Image quality: low, medium, high, xhigh, max, or auto.",
+          "locator": "llms-full L5547"
+        },
+        {
+          "quote": "Width and height are both multiples of 16 ... Neither side exceeds 3840 pixels ... ratio is at most 3:1 ... Total pixel count is between 655,360 and 8,294,400",
+          "locator": "llms-full L5614-L5617"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "gpt-image-2.6-ext",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6-ext/generation",
+      "ratios": [
+        "auto",
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "5:4",
+        "4:5",
+        "16:9",
+        "9:16",
+        "21:9"
+      ],
+      "resolutions": [
+        "1K"
+      ],
+      "qualities": [
+        "auto",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "n_max": 1,
+      "durations": null,
+      "modes": null,
+      "ref_max": 16,
+      "exact_size": false,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "ext 版只支持 1k：2k/4k 返回 403 model_price_not_configured；size 只接受 auto + 10 个比例，传 1024x1024 之类像素会 400（exact_size=false）。n 只能是 1。另有 version=flare|sunburst、complexity=low|medium|high、output_format=png|jpeg|webp|svg|gif、svg{model, reasoning{effort}}=none|minimal|low|medium|high|xhigh|max，以及幂等头 Idempotency-Key。",
+      "citations": [
+        {
+          "quote": "Only 1k is currently available ... 2k / 4k return HTTP 403 with model_price_not_configured",
+          "locator": "llms-full L6018"
+        },
+        {
+          "quote": "Accepts auto or the 10 ratios below, not pixels such as 1024x1024.",
+          "locator": "llms-full L6022"
+        },
+        {
+          "quote": "Currently use integer 1 ... requests with 2-4 create a task that later fails with a full refund.",
+          "locator": "llms-full L6030"
+        },
+        {
+          "quote": "Quality: auto / low / medium / high / xhigh / max",
+          "locator": "llms-full L6034"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "gpt-image-2.6-flare",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation",
+      "ratios": [
+        "auto",
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "5:4",
+        "4:5",
+        "16:9",
+        "9:16",
+        "2:1",
+        "1:2",
+        "21:9",
+        "9:21",
+        "3:1",
+        "1:3"
+      ],
+      "resolutions": [
+        "1K",
+        "2K",
+        "4K"
+      ],
+      "qualities": [
+        "auto",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "n_max": 4,
+      "durations": null,
+      "modes": null,
+      "ref_max": 16,
+      "exact_size": true,
+      "max_long_edge": 3840,
+      "max_pixels": 8294400,
+      "min_pixels": 655360,
+      "notes": "flare 与 sunburst 在同一页，尺寸/质量/n 规则完全一致，只差速度与细节取向。与 2.5 同一套尺寸规则（16 的倍数、单边<=3840、比<=3:1、655360-8294400）；resolution 1k/2k/4k 只接受小写。n=1-4；SVG 输出要求 n=1 且不能带参考图/mask/markup/output_compression；GIF 用 frame_count=2-16、frame_duration_ms>=20。另支持 markup_url 引导编辑（不能与 mask_url 同时用）、complexity=low|medium|high、output_format=png|jpeg|webp|gif|svg。",
+      "citations": [
+        {
+          "quote": "Still images and SVG support 15 aspect ratios, exact pixels such as 1600x1200, or auto.",
+          "locator": "llms-full L6305"
+        },
+        {
+          "quote": "1k / 2k / 4k, in lowercase.",
+          "locator": "llms-full L6309"
+        },
+        {
+          "quote": "Exact pixel dimensions must be multiples of 16 on both axes, with each edge at most 3840, a longest-to-shortest edge ratio at most 3:1, and 655,360-8,294,400 total pixels.",
+          "locator": "llms-full L6355"
+        },
+        {
+          "quote": "Integer from 1 to 4; for GIF, this is the number of animations. SVG requires 1.",
+          "locator": "llms-full L6319"
+        },
+        {
+          "quote": "frame_count ... Integer 2-16. APIMart currently caps this at 16",
+          "locator": "llms-full L6420"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "gpt-image-2.6-sunburst",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation",
+      "ratios": [
+        "auto",
+        "1:1",
+        "3:2",
+        "2:3",
+        "4:3",
+        "3:4",
+        "5:4",
+        "4:5",
+        "16:9",
+        "9:16",
+        "2:1",
+        "1:2",
+        "21:9",
+        "9:21",
+        "3:1",
+        "1:3"
+      ],
+      "resolutions": [
+        "1K",
+        "2K",
+        "4K"
+      ],
+      "qualities": [
+        "auto",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "n_max": 4,
+      "durations": null,
+      "modes": null,
+      "ref_max": 16,
+      "exact_size": true,
+      "max_long_edge": 3840,
+      "max_pixels": 8294400,
+      "min_pixels": 655360,
+      "notes": "flare 与 sunburst 在同一页，尺寸/质量/n 规则完全一致，只差速度与细节取向。与 2.5 同一套尺寸规则（16 的倍数、单边<=3840、比<=3:1、655360-8294400）；resolution 1k/2k/4k 只接受小写。n=1-4；SVG 输出要求 n=1 且不能带参考图/mask/markup/output_compression；GIF 用 frame_count=2-16、frame_duration_ms>=20。另支持 markup_url 引导编辑（不能与 mask_url 同时用）、complexity=low|medium|high、output_format=png|jpeg|webp|gif|svg。",
+      "citations": [
+        {
+          "quote": "Still images and SVG support 15 aspect ratios, exact pixels such as 1600x1200, or auto.",
+          "locator": "llms-full L6305"
+        },
+        {
+          "quote": "1k / 2k / 4k, in lowercase.",
+          "locator": "llms-full L6309"
+        },
+        {
+          "quote": "Exact pixel dimensions must be multiples of 16 on both axes, with each edge at most 3840, a longest-to-shortest edge ratio at most 3:1, and 655,360-8,294,400 total pixels.",
+          "locator": "llms-full L6355"
+        },
+        {
+          "quote": "Integer from 1 to 4; for GIF, this is the number of animations. SVG requires 1.",
+          "locator": "llms-full L6319"
+        },
+        {
+          "quote": "frame_count ... Integer 2-16. APIMart currently caps this at 16",
+          "locator": "llms-full L6420"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "muse-image-ext",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/muse-image-ext/generation",
+      "ratios": [
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "3:2",
+        "2:3"
+      ],
+      "resolutions": null,
+      "qualities": null,
+      "n_max": 1,
+      "durations": null,
+      "modes": null,
+      "ref_max": 9,
+      "exact_size": false,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "有 7 个比例（aspect_ratio），但「自动」要省略字段、不能传 auto（会报错）；兼容字段 size 接受这 7 个比例或 auto（只传 size:auto 等价于不指定）。不能选像素，也不能选 1K/2K/4K（resolutions=null），不要发非空 resolution 或任何时长字段；输出固定 WebP，尺寸由模型决定。n 只能是 1。参考图<=9 张，全部参考图原始体积合计<=11 MiB（是总量限制，不是单张）。支持 Idempotency-Key / webhook / language。",
+      "citations": [
+        {
+          "quote": "Supports the seven ratios below ... For automatic selection, omit this field; do not send auto.",
+          "locator": "llms-full L20713"
+        },
+        {
+          "quote": "1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3",
+          "locator": "llms-full L20715"
+        },
+        {
+          "quote": "Only one result per request. The only accepted value is the number 1.",
+          "locator": "llms-full L20723"
+        },
+        {
+          "quote": "Returns a WebP URL. The model determines image dimensions; pixel sizes and 1K / 2K / 4K tiers cannot be selected.",
+          "locator": "llms-full L20727"
+        },
+        {
+          "quote": "The combined original size of all reference images must not exceed 11 MiB",
+          "locator": "llms-full L20709"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "midjourney",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/midjourney/generation",
+      "ratios": null,
+      "resolutions": null,
+      "qualities": [
+        "0.25",
+        "0.5",
+        "1",
+        "2"
+      ],
+      "n_max": null,
+      "durations": null,
+      "modes": [
+        "imagine",
+        "blend",
+        "describe",
+        "edits",
+        "variation",
+        "upscale",
+        "pan",
+        "zoom",
+        "reroll",
+        "remix",
+        "inpaint",
+        "modal",
+        "video"
+      ],
+      "ref_max": null,
+      "exact_size": false,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "完全不是 OpenAI 图像参数那套：走 /v1/midjourney/generations* 系列子路径，请求体可混用 MJ 原生 flag 与结构化字段，结构化字段优先于 prompt 里的 flag。比例用 size（等于 --ar，如 16:9），文档没有枚举合法比例（由 MJ 原生解析）-> ratios=null。quality 是 MJ 的 --q，取值 0.25/0.5/1/2，与 OpenAI 的 low/medium/high 语义不同。另有 version、speed=relax|fast|turbo、stylize(0-1000)、chaos(0-100)、weird(0-3000)、tile、niji、iw(0-3)、cw、sw、cref/sref/dref、dw、repeat(2-40)、raw、draft、hd、stop(10-100)、extra。一次 imagine 固定产 4 张（grid_image_url + 4 张 image_urls），不是 n 参数。单图<=12 MiB；inpaint 的 MODAL 状态 30 分钟超时自动取消并退款。",
+      "citations": [
+        {
+          "quote": "New /v1/midjourney/... routes automatically inject model=midjourney",
+          "locator": "llms-full L12892"
+        },
+        {
+          "quote": "| size | string | --ar | e.g. 16:9, 1:1, 9:16 |",
+          "locator": "llms-full L14130"
+        },
+        {
+          "quote": "| quality | string | --q | 0.25, 0.5, 1, 2 |",
+          "locator": "llms-full L14131"
+        },
+        {
+          "quote": "You can set these in the JSON body or in prompt (e.g. --ar 16:9). Body values override prompt.",
+          "locator": "llms-full L14126"
+        },
+        {
+          "quote": "| repeat | int | --repeat | 2-40 |",
+          "locator": "llms-full L14148"
+        },
+        {
+          "quote": "imagine produces 4 images ... includes grid_image_url + 4 image_urls",
+          "locator": "llms-full L19861-L19865"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "MiniMax-H3",
+      "kind": "video",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-h3/generation",
+      "ratios": [
+        "21:9",
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16"
+      ],
+      "resolutions": [
+        "2K",
+        "768P"
+      ],
+      "qualities": null,
+      "n_max": 1,
+      "durations": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "modes": [
+        "text_to_video",
+        "image_to_video",
+        "start_end_to_video",
+        "reference_to_video",
+        "reference_video_to_video"
+      ],
+      "ref_max": null,
+      "exact_size": null,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "resolution 只有 2K（默认）/768P；duration 整数 4-15；比例 21:9/16:9/4:3/1:1/3:4/9:16。没有 mode 字段：T2V/I2V/R2V 由字段自动判定（first_frame_image/last_frame_image -> I2V；image_urls/video_urls/audio_urls -> R2V）。T2V 省略比例或传 adaptive 会回落 16:9。audio_urls 不能单独用，必须配参考图或参考视频。参考视频：单条 2-15s、最多 3 条、合计<=15s。不支持 1080P。",
+      "citations": [
+        {
+          "quote": "Supports 2K / 768P resolution, duration 4 ~ 15 seconds, with audio track",
+          "locator": "llms-full L40354"
+        },
+        {
+          "quote": "Allowed ratios: 21:9, 16:9, 4:3, 1:1, 3:4, 9:16",
+          "locator": "llms-full L40770"
+        },
+        {
+          "quote": "MiniMax-H3 routes to the matching mode from request fields automatically. You do not need a mode field",
+          "locator": "llms-full L40707"
+        },
+        {
+          "quote": "duration ... Integer from 4 to 15 only",
+          "locator": "llms-full L40924"
+        },
+        {
+          "quote": "resolution ... 2K (default) or 768P",
+          "locator": "llms-full L40925"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "MiniMax-H3-Max",
+      "kind": "video",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-h3/max",
+      "ratios": [
+        "21:9",
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16"
+      ],
+      "resolutions": [
+        "480P",
+        "768P",
+        "1080P"
+      ],
+      "qualities": null,
+      "n_max": 1,
+      "durations": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "modes": [
+        "text_to_video",
+        "image_to_video",
+        "start_end_to_video",
+        "reference_to_video",
+        "reference_video_to_video"
+      ],
+      "ref_max": null,
+      "exact_size": null,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "resolution 480P/768P（默认）/1080P，不支持 2K（文档明说）；duration 5-15（传 4 或 >15 会 400）；比例同 H3。1080P 时必须省略 watermark 和 aigc_watermark（连 false 都不能带）；水印只在 480P/768P 支持。1080P 输出不能作为 H3-Regeneration 的源。参考视频最多 3 条、单条 2-15s、合计<=15s。",
+      "citations": [
+        {
+          "quote": "Supports 480P / 768P / 1080P, durations of 5-15 seconds, with audio",
+          "locator": "llms-full L41037"
+        },
+        {
+          "quote": "MiniMax-H3-Max does not support 2K and its output cannot be used as the source for Regeneration",
+          "locator": "llms-full L41166"
+        },
+        {
+          "quote": "Only 5-15 seconds are supported",
+          "locator": "llms-full L41290"
+        },
+        {
+          "quote": "Watermarks are only supported at 480P / 768P. At 1080P, omit both watermark and its alias aigc_watermark, even when the value is false.",
+          "locator": "llms-full L41270"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "MiniMax-H3-Context-IR",
+      "kind": "video",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-h3/context-ir",
+      "ratios": [
+        "21:9",
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16"
+      ],
+      "resolutions": null,
+      "qualities": null,
+      "n_max": null,
+      "durations": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "modes": null,
+      "ref_max": null,
+      "exact_size": null,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "这个模型不产视频：它做多模态理解并输出一段结构化提示词，结果在 result.prompt（不是 result.videos），再把该 prompt 原样喂给 MiniMax-H3 去生成。duration(4-15，默认5) 只影响提示词里的节奏描述；aspect_ratio 在纯文本输入时必填且不能是 adaptive；媒体字段校验规则与 H3 生成一致（帧/参考互斥、音频不能单独）。因此把它当普通视频模型渲染（给分辨率档位/n）是错的：resolutions/n_max/modes 一律 null。",
+      "citations": [
+        {
+          "quote": "Multimodal context understanding that produces an enhanced structured prompt (text only, no video)",
+          "locator": "llms-full L40100"
+        },
+        {
+          "quote": "No video is produced. Result is in result.prompt (not result.videos)",
+          "locator": "llms-full L40225"
+        },
+        {
+          "quote": "Target aspect ratio. Required for text-only input, and cannot be adaptive.",
+          "locator": "llms-full L40280"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "seedance-2.5",
+      "kind": "video",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation",
+      "ratios": [
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16",
+        "21:9",
+        "adaptive"
+      ],
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "qualities": null,
+      "n_max": 1,
+      "durations": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30
+      ],
+      "modes": [
+        "text_to_video",
+        "image_to_video",
+        "start_end_to_video",
+        "reference_to_video",
+        "reference_video_to_video"
+      ],
+      "ref_max": 30,
+      "exact_size": null,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "resolution 只有 480p/720p/1080p（默认 720p），文档明说 2k/4k 会同步 400（2.0 的 4k 在 2.5 上没有）。size（等价字段 aspect_ratio）默认 adaptive，取值 16:9/4:3/1:1/3:4/9:16/21:9/adaptive。duration 4-30，另有 -1 = 模型自选时长（预扣 30s 上限、按实际结算）；省略则按 5s。草稿模式：draft=true 只能 480p；draft_task_id 只能用 1080p，两者互斥。omni_reference_task_type=auto|reference|edit|extend 可把异步约束提前成同步 400（edit 要求 size=adaptive 且 duration=-1）。参考媒体上限：30 张图 / 10 段视频 / 10 段音频（图片单张<30MB、边长 300-6000px、比例 0.4-2.5；视频单条<=200MB、单条 2-30s、合计<=30s；音频<=15MB）。输出 mp4 或 mov。tools 支持 web_search。",
+      "citations": [
+        {
+          "quote": "Resolution supports 480p / 720p / 1080p; mp4 or mov output",
+          "locator": "llms-full L44863"
+        },
+        {
+          "quote": "Note: resolution supports 480p / 720p / 1080p (2.0's 4k is not available on 2.5)",
+          "locator": "llms-full L44868"
+        },
+        {
+          "quote": "Unsupported values like 2k / 4k return a sync 400.",
+          "locator": "llms-full L45203"
+        },
+        {
+          "quote": "Values: 16:9, 4:3, 1:1, 3:4, 9:16, 21:9, adaptive (default)",
+          "locator": "llms-full L45211"
+        },
+        {
+          "quote": "4 ~ 30 ... -1: model picks duration",
+          "locator": "llms-full L45221-L45222"
+        },
+        {
+          "quote": "Images: <=30 ... Video: Max 10; total duration <= 30s",
+          "locator": "llms-full L45345, L45311"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "muse-video-ext",
+      "kind": "video",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/muse-video-ext/generation",
+      "ratios": [
+        "1:1",
+        "16:9",
+        "9:16",
+        "4:3",
+        "3:4",
+        "3:2",
+        "2:3"
+      ],
+      "resolutions": [
+        "720p"
+      ],
+      "qualities": null,
+      "n_max": 1,
+      "durations": [
+        10
+      ],
+      "modes": [
+        "text_to_video",
+        "image_to_video"
+      ],
+      "ref_max": 9,
+      "exact_size": null,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "有 7 个比例（aspect_ratio），「自动」要省略字段、不能传 auto；兼容字段 size 接受 7 比例或 auto。resolution 只有 720p（不支持 1080p/4k）；duration 固定约 10 秒，只接受数字 10 或字符串 10/10s（推荐数字），别名 seconds / duration_seconds，只能用一个时长字段。n 只能是 1。参考图<=9 张。声音固定开启：audio=true 不改变行为，audio=false 会被拒绝，所以不要发 audio 字段。返回 MP4，实际时长/尺寸以返回的媒体元数据为准。支持 Idempotency-Key。",
+      "citations": [
+        {
+          "quote": "Generate one MP4 video from text or up to 9 reference images: approximately 10 seconds, 720p, with sound.",
+          "locator": "llms-full L81932"
+        },
+        {
+          "quote": "1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3",
+          "locator": "llms-full L82039"
+        },
+        {
+          "quote": "Fixed at approximately 10 seconds. Accepts the number 10 or strings 10 and 10s",
+          "locator": "llms-full L82051"
+        },
+        {
+          "quote": "Only 720p is supported, not 1080p or 4k.",
+          "locator": "llms-full L82055"
+        },
+        {
+          "quote": "Videos include sound by default; omit this field. true does not change this behavior, and false is rejected.",
+          "locator": "llms-full L82059"
+        }
+      ]
+    }
+  ]
+}

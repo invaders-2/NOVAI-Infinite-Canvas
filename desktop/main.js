@@ -6,12 +6,13 @@
 //  4. 退出时确保结束后端进程，避免残留占用端口
 //  5. iframe 子页面注入迷你桥（postMessage 转发），前端零改动获得完整桌面能力
 
-const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen, desktopCapturer } = require('electron');
+const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen, desktopCapturer, nativeImage } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const { resolveBaseUrl } = require('./cloud-config');
+const { trayIconCandidates, firstExistingTrayIcon } = require('./tray-icon');
 
 // 后端端口：与正式版一致使用 3000（数据目录也相同，Electron 版就是正式版的桌面壳）。
 // 若 3000 上已有 NOVAI 后端在跑（正式版/网页版），直接复用而不重复启动；
@@ -20,6 +21,8 @@ const DEFAULT_PORT = 3000;
 let backendProc = null;
 let mainWindow = null;
 let tray = null;
+// 最近一次确定的应用地址：窗口被销毁后（托盘/二次启动）靠它重建窗口。
+let appBaseUrl = '';
 let isQuitting = false;
 // 主动停后端（更新重启/正常退出）期间不把退出当崩溃报错；每次 startBackend 都会复位。
 let backendStopExpected = false;
@@ -303,11 +306,46 @@ function stopBackendForUpdate(timeoutMs) {
 }
 
 // ---------- 托盘 ----------
+function trayIconDirs() {
+  const dirs = [];
+  // 打包后图标在 Resources/icons（extraResources，asar 之外）；开发时在 desktop/icons。
+  if (process.resourcesPath) dirs.push(path.join(process.resourcesPath, 'icons'));
+  dirs.push(path.join(__dirname, 'icons'));
+  return dirs;
+}
+
+function loadTrayImage() {
+  const dirs = trayIconDirs();
+  const probe = (candidatePath) => {
+    // 用和真正加载一样的路径探测：文件在但解不出图（损坏/格式不支持）时继续回退到下一个候选
+    try {
+      const image = nativeImage.createFromPath(candidatePath);
+      return !!image && !image.isEmpty();
+    } catch (_) {
+      return false;
+    }
+  };
+  const found = firstExistingTrayIcon(process.platform, dirs, probe);
+  if (!found) {
+    const tried = trayIconCandidates(process.platform, dirs).map((item) => item.path).join(' | ');
+    clog('tray', '找不到可用托盘图标，已尝试: ' + tried);
+    return null;
+  }
+  let image = nativeImage.createFromPath(found.path);
+  if (found.resize) image = image.resize({ width: found.resize, height: found.resize });
+  clog('tray', '托盘图标: ' + found.path + (found.resize ? '（缩放到 ' + found.resize + 'px）' : ''));
+  return image;
+}
+
 function createTray() {
-  if (tray) return;
+  if (tray) return true;
+  const image = loadTrayImage();
+  if (!image) {
+    clog('tray', '托盘不可用：图标加载失败（此时关闭窗口会直接退出应用）');
+    return false;
+  }
   try {
-    const iconPath = path.join(__dirname, 'icons', 'icon.png');
-    tray = new Tray(fs.existsSync(iconPath) ? iconPath : path.join(__dirname, 'icons', 'icon.png'));
+    tray = new Tray(image);
     tray.setToolTip('NOVAI — 无限画布');
     const menu = Menu.buildFromTemplate([
       { label: '显示主界面', click: () => { showMainWindow(); } },
@@ -322,16 +360,40 @@ function createTray() {
     ]);
     tray.setContextMenu(menu);
     tray.on('click', () => showMainWindow());
+    // Windows 用户习惯双击托盘图标回到主界面
+    tray.on('double-click', () => showMainWindow());
+    clog('tray', '托盘已创建');
+    return true;
   } catch (err) {
-    clog('tray', '托盘创建失败: ' + err.message);
+    tray = null;
+    clog('tray', '托盘创建失败: ' + (err && err.message || err));
+    return false;
   }
 }
 
+function ensureTray() {
+  if (tray) return true;
+  return createTray();
+}
+
 function showMainWindow() {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    if (process.platform === 'darwin' && app.dock && typeof app.dock.show === 'function') {
+      try { app.dock.show(); } catch (_) {}
+    }
+    return true;
+  }
+  // 窗口已被销毁（例如关窗后进程仍在跑）：用最近一次的地址重建，而不是「点了没反应」
+  if (appBaseUrl) {
+    clog('win', '窗口不存在，重建窗口: ' + appBaseUrl);
+    createWindow(appBaseUrl);
+    return true;
+  }
+  clog('win', '没有可显示的窗口，且应用地址尚未确定（可能仍在启动）');
+  return false;
 }
 
 // ---------- iframe 子页面迷你桥注入 ----------
@@ -2176,7 +2238,15 @@ function registerIpc() {
         else mainWindow.maximize();
         break;
       case 'close':
-        mainWindow.hide();
+        // 标题栏自绘关闭按钮走同一条「关闭到托盘」路径，和系统关闭按钮行为一致
+        if (isQuitting) break;
+        if (ensureTray()) {
+          mainWindow.hide();
+          clog('win', '已收进托盘（进程保持运行，可从托盘重新打开）');
+        } else {
+          clog('win', '关闭窗口：托盘不可用，按普通关闭处理');
+          mainWindow.close();
+        }
         break;
       case 'quit': isQuitting = true; app.quit(); break;
       case 'start-drag': startWindowDrag(); break;
@@ -2649,6 +2719,7 @@ function startWindowDrag() {
 
 // ---------- 窗口 ----------
 function createWindow(url) {
+  appBaseUrl = url;
   clog('win', '创建窗口，加载 ' + url);
   const isWindows = process.platform === 'win32';
   mainWindow = new BrowserWindow({
@@ -2713,10 +2784,16 @@ function createWindow(url) {
   });
 
   mainWindow.on('close', (e) => {
-    if (!isQuitting && tray) {
-      e.preventDefault();
-      mainWindow.hide();
+    if (isQuitting) return;
+    // 关窗 = 收进托盘（进程继续跑）；只有托盘真的不可用时才按普通关闭处理，
+    // 否则窗口会「藏到一个不存在的托盘里」，用户既关不掉也打不开。
+    if (!ensureTray()) {
+      clog('win', '关闭窗口：托盘不可用，按普通关闭处理');
+      return;
     }
+    e.preventDefault();
+    mainWindow.hide();
+    clog('win', '已收进托盘（进程保持运行，可从托盘重新打开）');
   });
 
   mainWindow.on('closed', () => {
@@ -2730,19 +2807,28 @@ function createWindow(url) {
 }
 
 // ---------- 生命周期 ----------
+// Windows 用 AppUserModelID 归组任务栏/托盘图标；缺省会落到 electron.exe 的标识上，图标与通知都错。
+if (process.platform === 'win32') {
+  try { app.setAppUserModelId('com.novai.desktop'); } catch (_) {}
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   clog('lock', '已有实例在运行，本实例退出');
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) { showMainWindow(); }
+    // 用户又双击了一次图标：隐藏的窗口要 show/focus，已被销毁的要重建。
+    clog('lock', '收到第二次启动请求，唤起已有实例');
+    if (!showMainWindow()) clog('lock', '第二次启动时还没有可用窗口（应用可能仍在启动中）');
   });
 
   app.whenReady().then(async () => {
     dataDir = resolveDataDir();
     installWebviewSecurityPolicy();
     registerIpc();
+    // 托盘不依赖窗口与后端：先建好，窗口创建失败/被关闭时用户仍能打开或退出应用。
+    createTray();
 
     const requested = Number(process.env.NOVAI_PORT) || DEFAULT_PORT;
     // 云端模式：NOVAI_URL 或 <userData>/novai-cloud.json 指向合法 http(s) 地址时，
@@ -2762,9 +2848,7 @@ if (!gotLock) {
       clog('boot', '使用云端地址(' + target.source + '): ' + target.baseUrl + '，跳过本地后端');
       createWindow(target.baseUrl);
       setupAutoUpdate();
-      app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow(target.baseUrl);
-      });
+      app.on('activate', () => { showMainWindow(); });
       return;
     }
 
@@ -2810,9 +2894,7 @@ if (!gotLock) {
       return;
     }
 
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow(baseUrl);
-    });
+    app.on('activate', () => { showMainWindow(); });
   });
 
   app.on('before-quit', () => {
@@ -2821,6 +2903,13 @@ if (!gotLock) {
     shutdownBackend();
   });
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
+    // macOS 本来就常驻；Windows/Linux 只要托盘还在就保持进程，用户能从托盘再次打开。
+    if (process.platform === 'darwin') return;
+    if (tray) {
+      clog('lifecycle', '窗口已全部关闭，托盘可用：保持进程运行');
+      return;
+    }
+    clog('lifecycle', '窗口已全部关闭且托盘不可用：退出进程');
+    app.quit();
   });
 }

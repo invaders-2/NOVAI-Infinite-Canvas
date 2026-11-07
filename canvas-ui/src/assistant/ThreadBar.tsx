@@ -31,13 +31,16 @@ import {
 } from "./api"
 import type { ThreadRow } from "./api"
 import { ArtifactsSheet } from "./ArtifactsSheet"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "@/components/hexta/alert-dialog"
 import type { ArtifactPanelState } from "./ArtifactsSheet"
 import { TemplatesSheet } from "./TemplatesSheet"
 import type { TemplatePanelState } from "./TemplatesSheet"
 import { chooseFolder, folderSupported, forgetFolder, restoreFolder } from "./folder"
 import type { FolderInfo } from "./folder"
+import { BeatAvatar } from "./beat/BeatAvatar"
 import { formatRelative } from "./format"
 import type { AssistantStore } from "./store"
+import type { BeatActivity } from "./useBeatActivity"
 
 const EMPTY_ARTIFACTS: ArtifactPanelState = { status: "idle", data: null, error: "" }
 const EMPTY_TEMPLATES: TemplatePanelState = { status: "idle", items: [], error: "" }
@@ -47,7 +50,7 @@ const clickHidden = (id: string) => {
 	if (el) el.click()
 }
 
-export const ThreadBar = ({ store }: { store: AssistantStore }) => {
+export const ThreadBar = ({ store, activity }: { store: AssistantStore; activity: BeatActivity }) => {
 	const { env } = store
 	const [threads, setThreads] = useState<ThreadRow[]>([])
 	const [activeId, setActiveId] = useState("")
@@ -328,6 +331,7 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 	return (
 		<header className="nvca-tap-header">
 			<div className="nvca-tap-header-left">
+				<BeatAvatar className="nvca-beat-head" size={22} state={activity.state} />
 				<button
 					aria-label="产物侧栏"
 					aria-pressed={artifactsOpen}
@@ -546,37 +550,38 @@ export const ThreadBar = ({ store }: { store: AssistantStore }) => {
 				</div>
 			) : null}
 
-			{resetOpen ? (
-				<div className="nvca-dialog-scrim" onClick={() => setResetOpen(false)} role="presentation">
-					<div className="nvca-dialog" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="重置对话">
-						<div className="nvca-dialog-head"><div><h3 className="nvca-dialog-title">重置当前对话？</h3><p className="nvca-dialog-sub">当前线程的聊天记录会被清空，画布节点不受影响。</p></div></div>
-						<div className="nvca-dialog-actions"><button className="nvca-btn ghost" onClick={() => setResetOpen(false)} type="button">取消</button><button className="nvca-btn danger" onClick={resetConversation} type="button">重置</button></div>
+			<AlertDialog disablePointerDismissal={false} onOpenChange={(open) => { if (!open) setResetOpen(false) }} open={resetOpen}>
+				<AlertDialogContent className="nvca-dialog nvca-thread-alert">
+					<div className="nvca-dialog-head">
+						<div>
+							<AlertDialogTitle className="nvca-dialog-title">重置当前对话？</AlertDialogTitle>
+							<AlertDialogDescription className="nvca-dialog-sub">当前线程的聊天记录会被清空，画布节点不受影响。</AlertDialogDescription>
+						</div>
 					</div>
-				</div>
-			) : null}
+					<div className="nvca-dialog-actions">
+						<AlertDialogCancel className="nvca-btn ghost" onClick={() => setResetOpen(false)}>取消</AlertDialogCancel>
+						<AlertDialogAction className="nvca-btn danger" onClick={() => resetConversation()}>重置</AlertDialogAction>
+					</div>
+				</AlertDialogContent>
+			</AlertDialog>
 
-			{deleteTarget ? (
-				<div className="nvca-dialog-scrim" onClick={() => setDeleteTarget(null)} role="presentation">
-					<div className="nvca-dialog" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="删除对话">
-						<div className="nvca-dialog-head">
-							<div>
-								<h3 className="nvca-dialog-title">删除对话「{deleteTarget.title || "对话"}」？</h3>
-								<p className="nvca-dialog-sub">该对话的历史会一并删除，不可恢复。</p>
-							</div>
-							<button className="nvca-icon-btn" onClick={() => setDeleteTarget(null)} title="关闭" aria-label="取消删除" type="button">
-								<XIcon className="nvca-i-sm" />
-							</button>
-						</div>
-						<div className="nvca-dialog-actions">
-							<button className="nvca-btn ghost" onClick={() => setDeleteTarget(null)} type="button">取消</button>
-							<button className="nvca-btn danger" disabled={busy || onlyOne} onClick={() => void confirmDelete()} type="button">
-								<Trash2Icon className="nvca-i-sm" />
-								删除
-							</button>
+			<AlertDialog disablePointerDismissal={false} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }} open={Boolean(deleteTarget)}>
+				<AlertDialogContent className="nvca-dialog nvca-thread-alert">
+					<div className="nvca-dialog-head">
+						<div>
+							<AlertDialogTitle className="nvca-dialog-title">删除对话「{deleteTarget ? deleteTarget.title || "对话" : ""}」？</AlertDialogTitle>
+							<AlertDialogDescription className="nvca-dialog-sub">该对话的历史会一并删除，不可恢复。</AlertDialogDescription>
 						</div>
 					</div>
-				</div>
-			) : null}
+					<div className="nvca-dialog-actions">
+						<AlertDialogCancel className="nvca-btn ghost" onClick={() => setDeleteTarget(null)}>取消</AlertDialogCancel>
+						<AlertDialogAction className="nvca-btn danger" disabled={busy || onlyOne} onClick={() => void confirmDelete()}>
+							<Trash2Icon className="nvca-i-sm" />
+							删除
+						</AlertDialogAction>
+					</div>
+				</AlertDialogContent>
+			</AlertDialog>
 
 			{notice ? <div className="nvca-bar-notice">{notice}</div> : null}
 		</header>

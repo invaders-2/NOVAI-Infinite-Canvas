@@ -1,0 +1,210 @@
+{
+  "youtube-product-video": {
+    "id": "c817c13c-a0a0-44e2-bd37-d61477027c42",
+    "chars": 10605,
+    "provider": "system",
+    "version": 2,
+    "status": "enabled",
+    "description": "YouTube Brand Film Studio. Plan and make a brand-led YouTube film from a brand or product page URL: a paid YouTube ad reviewed against Google ABCD, or organic b"
+  },
+  "whitebox-to-film": {
+    "id": "38e783bb-bbe7-42e0-b631-e38f227399eb",
+    "chars": 8257,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Turn low-fidelity 3D previs into natural, cinematic Seedance video. In the canvas, write whitebox scenes in raw WebGL, present them through show_widget, rehearse an"
+  },
+  "social-media-content-studio": {
+    "id": "1c78a9cb-cb6b-4d9f-aeb4-d24fbcda528c",
+    "chars": 9028,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when creating business-oriented social media packages from an accepted source, including short video/image assets for Instagram, TikTok, LinkedIn, or cross-"
+  },
+  "skrull": {
+    "id": "7a479d37-36eb-4e60-9113-c7cc3ed4d075",
+    "chars": 11649,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Make one-tap viral and meme videos from Skrull templates. Route the request to its template, generate only the material the video needs (images, voice, c"
+  },
+  "skill-creator": {
+    "id": "d4ccd800-34e6-4243-9ec9-ea42dd035ec4",
+    "chars": 39977,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Create, update, and refine skills. Use when users want to capture a workflow as a reusable skill, create or edit SKILL.md and reference files, install a skill f"
+  },
+  "seedance-2-prompt-copilot": {
+    "id": "1508ee5f-b6b7-4345-880c-eca840eb7ee7",
+    "chars": 4227,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when the user names Seedance, Dreamina, or ByteDance video generation, or asks for a high-quality video prompt, storyboard, reference-aware video bri"
+  },
+  "seedance-2-5-prompt-copilot": {
+    "id": "f19bb60f-de90-4073-a8d9-d551d12b5ec4",
+    "chars": 10924,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use for every Seedance 2.5 video task: prompt creation or rewrite, large multimodal reference packs, R2V, storyboards and previss, first/last-frame interpolatio"
+  },
+  "primordia-shot-planning": {
+    "id": "3dbc2009-7778-4f28-abab-b5ed18e9f07a",
+    "chars": 26292,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "In the canvas, turn a complete screenplay, a single scene, or short-form content into a Primordia shot-list node and plan.md, covering emotional rhythm, shot-by-sho"
+  },
+  "primordia-character-asset-pack": {
+    "id": "b31262bf-7d9f-4861-bd9a-1400ade3276c",
+    "chars": 23539,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "In the canvas, build an independent Primordia character pack from a screenplay, character notes, or existing assets, with a white-background three-view, fixed appea"
+  },
+  "primordia-art-director": {
+    "id": "4aeb0122-a25b-4586-a56b-2dd7e5713f93",
+    "chars": 61627,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "In the canvas, single reference image → fixed-camera comparison / real independent-object transform restoration, and screenplay → complete scene assets / Tripo and"
+  },
+  "plugin-guide": {
+    "id": "555189ea-95c2-4412-9748-6195fd27dcb6",
+    "chars": 1599,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Explain the canvas plugins to users and guide them to install, connect, and use third-party tools such as Feishu, Lark, Notion, Slack, Linear, Asana, HubSpot, Airta"
+  },
+  "opus55-motion-icon": {
+    "id": "00e83433-b091-4f6d-9e50-bcfc1a7d74f2",
+    "chars": 11255,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when a Agent user asks Opus 5.5 to create a small animated icon or looping icon video from a prompt or still, including UI, product, technology, bran"
+  },
+  "minimax-h3-prompt-copilot": {
+    "id": "1f0ff648-c8a1-440c-b000-18fa19215e29",
+    "chars": 10793,
+    "provider": "system",
+    "version": 2,
+    "status": "enabled",
+    "description": "Use for every MiniMax H3, Hailuo H3, or Hailuo 3 video task: prompt creation or rewrite, multimodal reference planning, first/last-frame interpolation, storyboa"
+  },
+  "kling-prompt-copilot": {
+    "id": "25190dc0-39b9-4d3e-9c40-d507d4672533",
+    "chars": 4146,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when the user names Kling or asks for a high-quality video generation prompt, storyboard, prompt rewrite, reference-aware video brief, dialogue-led video br"
+  },
+  "html-beat-morph-video": {
+    "id": "2537020c-3da1-4406-a65d-ebacb02c149e",
+    "chars": 5501,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when creating a deterministic HTML/CSS/JavaScript motion video in which one visual subject morphs across beat-synced states for UI, product or commercial pr"
+  },
+  "gpt-image2-prompt-copilot": {
+    "id": "8a3e2672-1921-412c-ae49-5cbe789beecb",
+    "chars": 4075,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when the user names GPT Image 2, GPT image, OpenAI image generation, ChatGPT image, or asks for a high-quality image prompt, image edit prompt, typog"
+  },
+  "gemini-argon-studio": {
+    "id": "1c0de714-6f22-41b5-ba2d-8601f530db52",
+    "chars": 6400,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when a creator opens Argon Studio or names one of its playbooks (`how-it-works-3d`, `photo-to-3d-world`, `sketch-to-game`, `3d-web-page`, `kinetic-type-loop"
+  },
+  "fish-audio-lab": {
+    "id": "05c66a97-115a-47c6-95e7-e05a213161a9",
+    "chars": 7563,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when a creator wants directed, expressive spoken audio made with Fish Audio Drama 3: an audiobook chapter with acted character voices, a two-host podcast, a"
+  },
+  "explain-how-it-made": {
+    "id": "77e45942-6054-4b53-8783-83e6cc6dcaaa",
+    "chars": 16293,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Give a one-time, read-only explanation of how an existing Canvas or cloned TapTV project was made: its creative intent, workflow, key nodes, model choice"
+  },
+  "digital-human-video": {
+    "id": "87e126eb-ce92-4f9e-a321-875ec72e1ea1",
+    "chars": 24941,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when creating a presenter-led digital-human video for a product, property, lesson, knowledge explainer, social message, course, market bulletin, or news bul"
+  },
+  "depth-video-studio": {
+    "id": "6b74048e-241e-421c-b0e0-6a072647a31b",
+    "chars": 6215,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "The depth-video workflow skill. Reuse an existing clip's motion, staging and camera while replacing who is in it and where it happens. Convert the source clip i"
+  },
+  "commerce-ad-studio": {
+    "id": "b46e95c8-8cb8-4095-8052-2caf1da7d53a",
+    "chars": 6916,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "The e-commerce ad creative workflow skill. Starting from what the user already has — product photos, an approved ad, a reference video, customer reviews or camp"
+  },
+  "client-surface-routing": {
+    "id": "1e5112cc-0f26-478b-b881-affc00a2f0c6",
+    "chars": 15151,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Route requests safely between Desktop local-computer capabilities and Web or cloud capabilities. Use whenever a request involves local files or fo"
+  },
+  "banana-prompt-copilot": {
+    "id": "6ceaf656-4690-4aba-8f48-9a50c8dcaa94",
+    "chars": 4009,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when the user names Banana, Nano Banana, Gemini image generation, or asks for a high-quality image prompt, image edit prompt, reference-aware image b"
+  },
+  "ai-influencer-studio": {
+    "id": "8835c50f-f82e-4a38-b624-5761891fac3d",
+    "chars": 15751,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Use when the user wants to create a virtual or AI influencer, a recurring synthetic creator, photoreal pet or animal, or brand mascot with a social persona, or "
+  },
+  "3d-scene-director": {
+    "id": "a927d728-3493-4b48-b9e5-64c163c37fcd",
+    "chars": 8970,
+    "provider": "system",
+    "version": 1,
+    "status": "enabled",
+    "description": "Present a 3D scene in the conversation or in an artifact only when the user explicitly asks for that surface. Use show_widget, HTML, or a written prompt or plan"
+  }
+}

@@ -1655,13 +1655,31 @@ body.canvas-node-resize .node .llm-chat-log { pointer-events:none !important; }
 .adjust-group-title{font-size:var(--text-base);font-weight:var(--font-weight-semibold);color:var(--text);margin:var(--space-4) 0 var(--space-2);}
 .adjust-curve-panel{flex-direction:column;gap:var(--space-3);width:100%;align-items:flex-start;}
 .adjust-curve-canvas{background:transparent;border:none;border-radius:var(--radius-sm);cursor:crosshair;touch-action:none;display:block;width:100%;}
-.adjust-compare-divider{display:none;position:absolute;top:0;bottom:0;width:2px;background:#ffffff;mix-blend-mode:difference;cursor:ew-resize;z-index:6;opacity:.95;touch-action:none;}
-.crop-canvas.adjust-mode .adjust-compare-divider{display:block;}
-.adjust-compare-divider::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:var(--space-6);height:var(--space-6);border-radius:var(--radius-full);background:var(--surface);box-shadow:var(--shadow-md);}
 
 
 
 /* 图片编辑区拖动平移光标 */
 .image-edit-stage.panning { cursor:grabbing; }
 .image-edit-stage.panning * { cursor:grabbing !important; }
+
+/* ── 低性能模式「流畅优先」（canvas.js: applyLegacyPerfMode / localStorage.novai_legacy_perf_mode）──
+   只关「磨砂采样」与装饰动画，不动布局、字号、配色与选中态的表达方式：
+   .node 的 backdrop-filter:blur(20px) 在 100 节点画布上就是 100 层实时背景采样，
+   平移/缩放时每帧都要重算；关掉后节点仍是同一套半透明底 + 柔和投影（配方里的 border:0）。 */
+body.legacy-perf-smooth *,
+body.legacy-perf-smooth *::before,
+body.legacy-perf-smooth *::after {
+    backdrop-filter:none !important;
+    -webkit-backdrop-filter:none !important;
+}
+body.legacy-perf-smooth .link.link-flow,
+body.legacy-perf-smooth .node-run-status.running .dot { animation:none; }
+/* 开关按钮（运行时注入到快捷工具栏最左）：开 = 实底反白，和 .llm-mode button.active 同一套表达 */
+.toolbar-perf.is-on,
+.toolbar-perf.is-on:hover { background:var(--strong); color:var(--strong-text); }
+/* 系统级「减少动态效果」：装饰动画一律停，磨砂是否关由 auto 档决定（见 canvas.js） */
+@media (prefers-reduced-motion: reduce) {
+    .link.link-flow { animation:none; }
+    .node-run-status.running .dot { animation:none; }
+}
 

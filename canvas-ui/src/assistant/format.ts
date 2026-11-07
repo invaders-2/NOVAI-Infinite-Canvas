@@ -149,7 +149,7 @@ export const deriveRun = (message: Message): DerivedRun => {
 const CANVAS_READ_TOOLS = new Set(["get_canvas", "list_canvases", "use_asset"])
 const DOCUMENT_TOOLS = new Set(["read_file", "read_table"])
 const CANVAS_WRITE_TOOLS = new Set(["create_node", "update_node", "delete_node", "connect_nodes", "disconnect_nodes", "arrange_canvas", "node_create", "node_update", "node_delete", "node_connect"])
-const GENERATION_TOOLS = new Set(["generate_image", "generate_video", "run_generation", "run_batch"])
+export const GENERATION_TOOLS = new Set(["generate_image", "generate_video", "run_generation", "run_batch"])
 
 export const runSummary = (run: DerivedRun): string => {
 	const imageLabels = new Set<string>()

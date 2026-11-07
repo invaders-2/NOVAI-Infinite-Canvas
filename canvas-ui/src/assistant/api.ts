@@ -1,6 +1,9 @@
 // 画布助手微应用里直接调用的只读/管理接口（全部相对 /api/...，不写死后端地址）。
 // 桥接层只转发 SSE，这里不碰 agent 协议本身。
 
+import type { ReferenceImage } from "./types"
+import { normalizeReferenceImageList } from "./reference"
+
 export const canvasId = (() => {
 	try {
 		const fromUrl = new URLSearchParams(location.search).get("id")
@@ -103,6 +106,12 @@ const readJson = async (response: Response): Promise<Record<string, unknown>> =>
 
 const errorText = (data: Record<string, unknown>, fallback: string): string =>
 	String(data.detail || data.message || fallback)
+
+/* 失败卡要把真实原因说清楚：带上 HTTP 状态；服务端有 detail 就原样带上（例如 403 的中文原因） */
+const httpErrorText = (data: Record<string, unknown>, status: number): string => {
+	const detail = String(data.detail || data.message || "").trim()
+	return detail ? "HTTP " + status + " · " + detail : "HTTP " + status
+}
 
 export const fetchArtifacts = async (): Promise<ArtifactList> => {
 	if (!canvasId) return { canvas_id: "", files: [], counts: {}, truncated: false }
@@ -294,6 +303,185 @@ export const rateThreadMessage = async (threadId: string, messageIndex: number, 
 	})
 	const data = await readJson(response)
 	if (!response.ok) throw new Error(errorText(data, "HTTP " + response.status))
+}
+
+/* ── 画布助手联网搜图 / 反图 / 原图入画布（契约：docs/agent-web-image-search.md 第 4 节） ── */
+
+const toSize = (value: unknown): number | null => {
+	const n = Number(value)
+	return Number.isFinite(n) && n > 0 ? Math.round(n) : null
+}
+
+export interface ImportedImageRow {
+	source_url: string
+	ok: boolean
+	url: string
+	width: number | null
+	height: number | null
+	bytes: number
+	error: string
+}
+
+export interface ImportImagesResult {
+	ok: boolean
+	items: ImportedImageRow[]
+	/** 失败时的真实原因（HTTP 状态 / 服务端 detail） */
+	message: string
+	/** 关闭联网（HTTP 403）时置 true，卡片显示指引而不是「失败」 */
+	disabled: boolean
+}
+
+/** 导入一条原图：source_page 是出处页，服务端拿它的 origin 当 Referer（防盗链站点靠它才拿得到原图） */
+export interface ImportImageSource {
+	url: string
+	source_page?: string
+}
+
+/** POST /api/agent/images/import：服务端逐条下载原图（只认原图直链，绝不拿缩略图兜底） */
+export const importImages = async (sources: (ImportImageSource | string)[], name = ""): Promise<ImportImagesResult> => {
+	const list = (Array.isArray(sources) ? sources : [])
+		.map((entry) => {
+			if (typeof entry === "string") return { url: entry.trim(), source_page: "" }
+			return { url: String(entry?.url || "").trim(), source_page: String(entry?.source_page || "").trim() }
+		})
+		.filter((entry) => entry.url)
+		.slice(0, 12)
+	if (!list.length) return { ok: false, items: [], message: "没有要导入的图片", disabled: false }
+	try {
+		const response = await fetch("/api/agent/images/import", {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "application/json" },
+			/* 有出处页才带 source_page（空字符串会让服务端算出一个空 origin 的 Referer） */
+			body: JSON.stringify({
+				items: list.map((entry) => (entry.source_page ? { url: entry.url, source_page: entry.source_page } : { url: entry.url })),
+				name,
+			}),
+		})
+		const data = await readJson(response)
+		if (!response.ok) {
+			return {
+				ok: false,
+				items: [],
+				message: httpErrorText(data, response.status),
+				disabled: response.status === 403,
+			}
+		}
+		const rows = Array.isArray(data.items) ? data.items : []
+		const items: ImportedImageRow[] = rows.map((raw) => {
+			const row = (raw || {}) as Record<string, unknown>
+			return {
+				source_url: String(row.source_url || ""),
+				ok: row.ok === true,
+				url: String(row.url || ""),
+				width: toSize(row.width),
+				height: toSize(row.height),
+				bytes: Number(row.bytes) || 0,
+				error: String(row.error || ""),
+			}
+		})
+		return { ok: true, items, message: "", disabled: false }
+	} catch (error) {
+		return { ok: false, items: [], message: (error as Error)?.message || "网络错误", disabled: false }
+	}
+}
+
+export interface ReverseImagesData {
+	engine: string
+	query: string
+	queries: string[]
+	description: string
+	note: string
+	items: ReferenceImage[]
+}
+
+export interface ReverseImagesResult {
+	ok: boolean
+	data: ReverseImagesData
+	message: string
+	disabled: boolean
+}
+
+const emptyReverseData = (): ReverseImagesData => ({
+	engine: "",
+	query: "",
+	queries: [],
+	description: "",
+	note: "",
+	items: [],
+})
+
+/** POST /api/agent/images/reverse：视觉模型生成检索词再走图搜，返回与 find_similar_images 同构 */
+export const reverseImages = async (imageUrl: string, count = 12): Promise<ReverseImagesResult> => {
+	const url = String(imageUrl || "").trim()
+	if (!url) return { ok: false, data: emptyReverseData(), message: "没拿到要做反图的那张图", disabled: false }
+	try {
+		const response = await fetch("/api/agent/images/reverse", {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Accept: "application/json" },
+			body: JSON.stringify({ image_url: url, count }),
+		})
+		const data = await readJson(response)
+		if (!response.ok) {
+			return {
+				ok: false,
+				data: emptyReverseData(),
+				message: httpErrorText(data, response.status),
+				disabled: response.status === 403,
+			}
+		}
+		return {
+			ok: true,
+			disabled: false,
+			message: "",
+			data: {
+				engine: String(data.engine || ""),
+				query: String(data.query || ""),
+				queries: Array.isArray(data.queries) ? data.queries.map(String).filter(Boolean) : [],
+				description: String(data.description || ""),
+				note: String(data.note || ""),
+				items: normalizeReferenceImageList(data.items),
+			},
+		}
+	} catch (error) {
+		return { ok: false, data: emptyReverseData(), message: (error as Error)?.message || "网络错误", disabled: false }
+	}
+}
+
+export interface UploadImageResult {
+	ok: boolean
+	url: string
+	name: string
+	width: number | null
+	height: number | null
+	message: string
+}
+
+const failedUpload = (message: string): UploadImageResult => ({ ok: false, url: "", name: "", width: null, height: null, message })
+
+/** 上传一张本地图片到素材库（复用现有 /api/local-assets/upload），返回它在服务端的本地地址 */
+export const uploadImageFile = async (file: File): Promise<UploadImageResult> => {
+	if (!file) return failedUpload("没有选中图片")
+	try {
+		const form = new FormData()
+		form.append("files", file, file.name || "image")
+		const response = await fetch("/api/local-assets/upload", { method: "POST", body: form })
+		const data = await readJson(response)
+		if (!response.ok) return failedUpload(httpErrorText(data, response.status))
+		const rows = Array.isArray(data.files) ? data.files : []
+		const row = (rows[0] || {}) as Record<string, unknown>
+		const url = String(row.url || "")
+		if (!url) return failedUpload("上传接口没有返回图片地址")
+		return {
+			ok: true,
+			url,
+			name: String(row.name || file.name || "图片"),
+			width: toSize(row.width),
+			height: toSize(row.height),
+			message: "",
+		}
+	} catch (error) {
+		return failedUpload((error as Error)?.message || "网络错误")
+	}
 }
 
 export interface SkillRow {

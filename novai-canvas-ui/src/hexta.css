@@ -1,0 +1,441 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* HextaUI theme 的配套 CSS（动画 utility / shimmer / scroll-fade / no-scrollbar），
+   只贡献 CSS，不进 canvas.js；两个包都只在 devDependencies。 */
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* Tailwind 的 .ring 工具类（box-shadow: --tw-ring-shadow ... currentColor）和 BEAT 自己的转圈
+   .ring（canvas-next.css：.send.busy .ring{position:absolute;inset:0}）撞名，会在圆弧外面多画一个方框。
+   候选类名来源是 hexta/spinner.tsx 的 variant 字面量 "ring"，以及 GenPanel/AgentPanel 里 BEAT 自己的
+   className="ring"；v4.3.4 的 @import 没有 source(none) 参数、@source not 也压不住显式 @source 里的候选，
+   所以把同名 utility 重定义成空操作：产物里 .ring 不再画 ring 阴影，BEAT 的转圈规则照常生效
+   （focus-ring.css 里还有一层 !important 兜底）。 */
+@utility ring {
+  --tw-ring-shadow: 0 0 #0000 !important;
+  box-shadow: none !important;
+}
+
+/* 只扫这两处：HextaUI 组件自身 + 画布助手面板，不要扫整个工程（否则 canvas.css 会被画布自己的类名撑爆）。 */
+@source "./components/hexta";
+@source "./canvas/tapnow";
+@source "./canvas/canvas-next/agent";
+
+
+/* 未从 src/main.tsx 出发可达的 HextaUI 组件不参与 Tailwind 扫描（上面 @source 会全扫 66 个）。
+   源文件全部保留、只是不生成它们的 utility CSS。**要用被排除的组件，先删掉它对应的那一行 @source not**，
+   否则组件会掉样式（这条规则同样适用于运行时动态引用的场景）。
+   当前可达（27 个，从 src/main.tsx 出发实测）：
+   alert、aspect-ratio、attachment、badge、bubble、button-group、button、card、carousel、checkbox、collapsible、empty、input-group、input、item、kbd、marker、message-scroller、message、number-flow、progress、questionnaire、scroll-area、separator、skeleton、spinner、tooltip
+   说明：dialog / popover / sheet / tabs / toast 只被 date-picker、dialog、alert-dialog、drawer 这些「本身不可达」的组件引用，
+   不会进 bundle，所以也排除；scroll-area 经 attachment 可达，已放行。
+@source not "./components/hexta/accordion.tsx";
+@source not "./components/hexta/alert-dialog.tsx";
+@source not "./components/hexta/avatar.tsx";
+@source not "./components/hexta/breadcrumb.tsx";
+@source not "./components/hexta/calendar.tsx";
+@source not "./components/hexta/chart.tsx";
+@source not "./components/hexta/combobox.tsx";
+@source not "./components/hexta/command.tsx";
+@source not "./components/hexta/context-menu.tsx";
+@source not "./components/hexta/data-table.tsx";
+@source not "./components/hexta/date-picker.tsx";
+@source not "./components/hexta/dialog.tsx";
+@source not "./components/hexta/drawer.tsx";
+@source not "./components/hexta/field.tsx";
+@source not "./components/hexta/hover-card.tsx";
+@source not "./components/hexta/input-otp.tsx";
+@source not "./components/hexta/label.tsx";
+@source not "./components/hexta/menubar.tsx";
+@source not "./components/hexta/native-select.tsx";
+@source not "./components/hexta/navigation-menu.tsx";
+@source not "./components/hexta/pagination.tsx";
+@source not "./components/hexta/popover.tsx";
+@source not "./components/hexta/radio-group.tsx";
+@source not "./components/hexta/resizable.tsx";
+@source not "./components/hexta/safe-area.tsx";
+@source not "./components/hexta/sheet.tsx";
+@source not "./components/hexta/sidebar.tsx";
+@source not "./components/hexta/slider.tsx";
+@source not "./components/hexta/switch.tsx";
+@source not "./components/hexta/table.tsx";
+@source not "./components/hexta/tabs.tsx";
+@source not "./components/hexta/toast.tsx";
+@source not "./components/hexta/toggle-group.tsx";
+@source not "./components/hexta/toggle.tsx";
+@source not "./components/hexta/tree.tsx";
+@source not "./components/hexta/video-player.tsx";
+
+/* BEAT 把主题写在 .cn-root 的 data-theme 上（dark / light），HextaUI 组件的 dark: 类要跟着它切。 */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --hairline: 0px;
+}
+
+/* HextaUI 的 input/textarea 只画 inset-ring，没有 border reset；BEAT 的 .cn-root 已统一
+   input/textarea{border:0}，这里再兜一层，只作用于 HextaUI 自己的节点。 */
+:where([data-slot="input"], [data-slot="textarea"], [data-slot="input-group-control"]):not([class*="border-input"]) {
+  border: 0;
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--card);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--solid);
+  --color-primary-foreground: var(--on-solid);
+  --color-secondary: var(--s2);
+  --color-secondary-foreground: var(--fg);
+  --color-muted: var(--sunken);
+  --color-muted-foreground: var(--fg2);
+  --color-accent: var(--hover);
+  --color-accent-foreground: var(--fg);
+  --color-destructive: var(--bad);
+  --color-destructive-foreground: #ffffff;
+  --color-success: var(--ok);
+  --color-success-foreground: #ffffff;
+  --color-warning: var(--warn);
+  --color-warning-foreground: #0a0a0a;
+  --color-info: #0a84ff;
+  --color-info-foreground: #ffffff;
+  --color-border: transparent;
+  --color-input: var(--sunken);
+  --color-ring: var(--line-hi);
+  --color-focus-ring: var(--line-hi);
+  --color-sidebar: var(--panel);
+  --color-sidebar-foreground: var(--fg);
+  --color-canvas: Canvas;
+  --color-canvas-text: CanvasText;
+  --color-highlight: Highlight;
+  --color-highlight-text: HighlightText;
+  --color-gray-text: GrayText;
+  --default-border-width: var(--hairline);
+
+  --radius-xs: 4px;
+  --radius-sm: var(--r-s);
+  --radius-md: var(--r-m);
+  --radius-lg: var(--r-l);
+  --radius-xl: calc(var(--r-l) + 4px);
+  --radius-2xl: calc(var(--r-l) + 10px);
+  --radius-3xl: calc(var(--r-l) + 14px);
+
+  --text-xs: 11px;
+  --text-xs--line-height: 15px;
+  --text-sm: 12px;
+  --text-sm--line-height: 18px;
+  --text-base: 13px;
+  --text-base--line-height: 19px;
+  --text-lg: 14px;
+  --text-lg--line-height: 20px;
+  --text-xl: 16px;
+  --text-xl--line-height: 22px;
+  --text-2xl: 18px;
+  --text-2xl--line-height: 24px;
+  --text-touch: max(16px, 1rem);
+
+  --font-weight-book: 520;
+  --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-quart: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-spring: linear(0, 0.015 2%, 0.0532 4%, 0.1065 6%, 0.1686 8%, 0.2351 10%, 0.3363 13%, 0.4332 16%, 0.5495 20%, 0.648 24%, 0.7287 28%, 0.807 33%, 0.8646 38%, 0.9128 44%, 0.9447 50%, 0.968 57%, 0.9834 65%, 0.9924 74%, 0.9975 85%, 1);
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-skeleton-pulse: skeleton-pulse 2s ease-in-out infinite;
+  --animate-button-state-in: button-state-in 220ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-button-state-out: button-state-out 220ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-button-draw-circle: button-draw 240ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-button-draw-check: button-draw 180ms cubic-bezier(0.2, 0, 0, 1) 180ms both;
+  --animate-spinner-rotate: spinner-rotate 0.9s linear infinite;
+  --animate-spinner-dash: spinner-dash 1.5s ease-in-out infinite;
+  --animate-spinner-ticks: spinner-rotate 0.8s steps(8, end) infinite;
+  --animate-spinner-pulse: spinner-pulse 1.6s ease-in-out infinite;
+  --animate-progress-slide: progress-slide 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  --animate-checkbox-draw: button-draw 200ms cubic-bezier(0.2, 0, 0, 1) 40ms both;
+  --animate-button-shake: button-shake 320ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  --animate-avatar-badge-pulse: avatar-badge-pulse 700ms cubic-bezier(0.215, 0.61, 0.355, 1) both;
+  --animate-menu-blink: menu-blink 120ms steps(1, end) both;
+  --animate-input-otp-wave: input-otp-wave 1.2s ease-in-out infinite;
+  --animate-input-otp-pulse: input-otp-pulse 1.2s ease-in-out infinite;
+  --animate-input-otp-pop: input-otp-pop 360ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-empty-in: empty-in 480ms cubic-bezier(0.23, 1, 0.32, 1) var(--empty-delay, 0ms) both;
+  --animate-message-in: message-in 420ms linear(0, 0.015 2%, 0.0532 4%, 0.1065 6%, 0.1686 8%, 0.2351 10%, 0.3363 13%, 0.4332 16%, 0.5495 20%, 0.648 24%, 0.7287 28%, 0.807 33%, 0.8646 38%, 0.9128 44%, 0.9447 50%, 0.968 57%, 0.9834 65%, 0.9924 74%, 0.9975 85%, 1) both;
+  --animate-video-player-flash: video-player-flash 650ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --ease-island-expand: linear(0, 0.0063 1.5%, 0.0238 3%, 0.0558 4.8%, 0.104 6.8%, 0.2083 10.2%, 0.4514 17.5%, 0.5551 20.8%, 0.6562 24.2%, 0.7384 27.5%, 0.8035 30.5%, 0.8624 33.8%, 0.9101 37%, 0.9475 40.2%, 0.9796 44%, 1.0029 48%, 1.0187 52.5%, 1.0268 57.5%, 1.0267 66.5%, 1);
+  --ease-island-snappy: linear(0, 0.0048 1.2%, 0.0217 2.8%, 0.0535 4.5%, 0.0953 6.2%, 0.1899 9.5%, 0.4093 16.2%, 0.5097 19.5%, 0.6077 23%, 0.6873 26.2%, 0.7555 29.5%, 0.8126 32.8%, 0.8628 36.2%, 0.9025 39.8%, 0.9387 44%, 0.9656 48.5%, 0.9849 53.5%, 0.9973 59%, 1.0062 72.5%, 1);
+  --ease-island-collapse: linear(0, 0.0052 1.2%, 0.0194 2.5%, 0.0458 4%, 0.0797 5.5%, 0.1622 8.5%, 0.3617 15%, 0.4562 18.2%, 0.5484 21.8%, 0.629 25.2%, 0.6934 28.5%, 0.7521 32%, 0.804 35.8%, 0.846 39.5%, 0.8855 44%, 0.9182 49%, 0.944 54.5%, 0.9639 60.8%, 0.9875 75.5%, 1);
+  --ease-island-exit: linear(0, 0.0052 1.2%, 0.0195 2.5%, 0.0459 4%, 0.0799 5.5%, 0.1625 8.5%, 0.3622 15%, 0.4569 18.2%, 0.5491 21.8%, 0.6297 25.2%, 0.6941 28.5%, 0.7527 32%, 0.8045 35.8%, 0.8465 39.5%, 0.8859 44%, 0.9186 49%, 0.9442 54.5%, 0.964 60.8%, 0.9876 75.5%, 1);
+  --ease-island-bump: linear(0, 0.2143 1.2%, 0.4342 2.8%, 0.6144 4.2%, 0.7568 5.8%, 0.8636 7.2%, 0.9376 8.8%, 0.9818 10.2%, 0.9999 12%, 0.9682 14.8%, 0.8602 18%, 0.7183 21%, 0.2816 29.2%, 0.0771 34%, -0.058 38.5%, -0.1348 43%, -0.1613 47%, -0.155 51.7%, -0.0209 69%, 0.0192 78%, 0.0245 89%, 0);
+  --ease-island-shake: linear(0, 0.2731 1.2%, 0.4629 2.2%, 0.625 3.2%, 0.7579 4.2%, 0.8612 5.2%, 0.9352 6.2%, 0.9808 7.2%, 1 8.5%, 0.9877 9.5%, 0.9535 10.5%, 0.8109 12.8%, 0.6306 14.8%, 0.0949 20%, -0.1525 23%, -0.2437 24.5%, -0.301 25.8%, -0.3674 28.5%, -0.3681 30.5%, -0.3303 32.8%, -0.2631 35%, 0.0353 43.2%, 0.1036 46.2%, 0.1355 49.2%, 0.1234 53.8%, -0.0127 64.2%, -0.0493 69.8%, -0.0461 74.8%, 0.0167 89.5%, 0.0151 97.2%, 0);
+  --animate-island-bump: island-bump 480ms linear(0, 0.2143 1.2%, 0.4342 2.8%, 0.6144 4.2%, 0.7568 5.8%, 0.8636 7.2%, 0.9376 8.8%, 0.9818 10.2%, 0.9999 12%, 0.9682 14.8%, 0.8602 18%, 0.7183 21%, 0.2816 29.2%, 0.0771 34%, -0.058 38.5%, -0.1348 43%, -0.1613 47%, -0.155 51.7%, -0.0209 69%, 0.0192 78%, 0.0245 89%, 0);
+  --animate-island-shake: island-shake 450ms linear(0, 0.2731 1.2%, 0.4629 2.2%, 0.625 3.2%, 0.7579 4.2%, 0.8612 5.2%, 0.9352 6.2%, 0.9808 7.2%, 1 8.5%, 0.9877 9.5%, 0.9535 10.5%, 0.8109 12.8%, 0.6306 14.8%, 0.0949 20%, -0.1525 23%, -0.2437 24.5%, -0.301 25.8%, -0.3674 28.5%, -0.3681 30.5%, -0.3303 32.8%, -0.2631 35%, 0.0353 43.2%, 0.1036 46.2%, 0.1355 49.2%, 0.1234 53.8%, -0.0127 64.2%, -0.0493 69.8%, -0.0461 74.8%, 0.0167 89.5%, 0.0151 97.2%, 0);
+  --animate-island-flash: island-flash 400ms cubic-bezier(0.23, 1, 0.32, 1);
+  --animate-island-check: button-draw 260ms cubic-bezier(0.23, 1, 0.32, 1) 140ms both;
+  --animate-island-text-in: island-text-in 240ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  --animate-text-shimmer: text-shimmer 2s linear infinite;
+}
+
+/* HextaUI 组件动画用的关键帧（上面 animate-* 令牌引用） */
+@keyframes island-bump {
+  to {
+    scale: 1.04;
+  }
+}
+
+@keyframes island-shake {
+  to {
+    translate: 8px 0;
+  }
+}
+
+@keyframes island-flash {
+  0%, 50%, 100% {
+    opacity: 0;
+  }
+  25%, 75% {
+    opacity: 1;
+  }
+}
+
+@keyframes island-text-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    scale: 0.96;
+  }
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    translate: 0 0.5rem;
+    scale: 0.96;
+  }
+}
+
+@keyframes video-player-flash {
+  from {
+    opacity: 0;
+    scale: var(--video-player-flash-from, 0.9);
+  }
+  20%, 55% {
+    opacity: 1;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: var(--video-player-flash-to, 1.08);
+  }
+}
+
+@keyframes empty-in {
+  from {
+    opacity: 0;
+    translate: 0 0.375rem;
+    filter: blur(2px);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    translate: calc(-100% * var(--skeleton-dir, 1)) 0;
+  }
+  to {
+    translate: calc(100% * var(--skeleton-dir, 1)) 0;
+  }
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes button-state-in {
+  from {
+    opacity: 0;
+    transform: perspective(220px) rotateX(90deg) translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(220px) rotateX(0) translateY(0);
+  }
+}
+
+@keyframes button-state-out {
+  from {
+    opacity: 1;
+    transform: perspective(220px) rotateX(0) translateY(0);
+  }
+  50% {
+    opacity: 0;
+  }
+  to {
+    opacity: 0;
+    transform: perspective(220px) rotateX(-90deg) translateY(-0.75rem);
+  }
+}
+
+@keyframes spinner-rotate {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes spinner-dash {
+  0% {
+    stroke-dasharray: 1 60;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 34 60;
+    stroke-dashoffset: -12;
+  }
+  100% {
+    stroke-dasharray: 34 60;
+    stroke-dashoffset: -56;
+  }
+}
+
+@keyframes progress-slide {
+  from {
+    translate: calc(-100% * var(--progress-dir, 1)) 0;
+  }
+  to {
+    translate: calc(250% * var(--progress-dir, 1)) 0;
+  }
+}
+
+@keyframes spinner-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes button-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes avatar-badge-pulse {
+  from {
+    scale: 1;
+    opacity: 0.5;
+  }
+  to {
+    scale: 2.6;
+    opacity: 0;
+  }
+}
+
+@keyframes menu-blink {
+  0% {
+    background-color: transparent;
+  }
+  50%, 100% {
+    background-color: var(--menu-blink, var(--color-accent));
+  }
+}
+
+@keyframes input-otp-wave {
+  0%, 60%, 100% {
+    translate: 0 0;
+    opacity: 1;
+  }
+  30% {
+    translate: 0 -0.18em;
+    opacity: 0.45;
+  }
+}
+
+@keyframes input-otp-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes input-otp-pop {
+  0% {
+    scale: 1;
+  }
+  40% {
+    scale: 1.16;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+@keyframes button-shake {
+  0%, 100% {
+    translate: 0;
+  }
+  20% {
+    translate: -3px;
+  }
+  40% {
+    translate: 3px;
+  }
+  60% {
+    translate: -2px;
+  }
+  80% {
+    translate: 2px;
+  }
+}
+
+@keyframes text-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes testimonial-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@utility text-hero {
+  font-size: min(calc((100vw - 1.5rem) / 15.75), 2.6875rem);
+  line-height: 1.3;
+}
+
+@utility border-hairline {
+  border-width: var(--hairline);
+}
+
+@utility text-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 25%,
+    var(--info) 40%,
+    color-mix(in oklab, var(--info) 45%, white) 50%,
+    var(--info) 60%,
+    var(--muted-foreground) 75%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: var(--animate-text-shimmer);
+}

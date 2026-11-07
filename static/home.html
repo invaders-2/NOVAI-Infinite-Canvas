@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NOVAI - 首页</title>
     <script>(function(){try{var t=localStorage.getItem('studio_theme')||localStorage.getItem('canvas_theme')||'light';if(t==='dark'){document.documentElement.classList.add('studio-theme-dark');document.documentElement.classList.add('theme-dark');}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=1.0.143.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.143.1790560477">
-    <link rel="stylesheet" href="/static/css/nv-beam.css?v=1.0.143.1790240038">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2.0.00.1789606971">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.00.1793785603">
+    <link rel="stylesheet" href="/static/css/nv-beam.css?v=2.0.00.1790240038">
     <style>
         /* ═══ 首页 · 创作台 —— 沿用 V4 磨砂玻璃设计语言：无描边、柔和底色 + 文字强调表达选中 ═══ */
         :root {
@@ -625,21 +625,21 @@
         <div class="lan-notice" id="lanNotice">
             <div class="lan-notice-text">
                 <div class="lan-notice-title">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+                    <svg data-icon="wifi" class="nv-i nv-i-wifi" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
                     <span>手机 / iPad 访问</span>
                 </div>
                 <div class="lan-notice-url" id="lanNoticeUrl"></div>
             </div>
             <div class="lan-notice-actions">
                 <button class="lan-qr-btn" id="lanQrBtn" title="显示二维码" type="button">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="14.01"/><line x1="20" y1="14" x2="20" y2="14.01"/><line x1="14" y1="20" x2="14" y2="20.01"/><line x1="17" y1="17" x2="17" y2="17.01"/><line x1="20" y1="20" x2="20" y2="20.01"/></svg>
+                    <svg data-icon="qr-code" class="nv-i nv-i-qr-code" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="14.01"/><line x1="20" y1="14" x2="20" y2="14.01"/><line x1="14" y1="20" x2="14" y2="20.01"/><line x1="17" y1="17" x2="17" y2="17.01"/><line x1="20" y1="20" x2="20" y2="20.01"/></svg>
                     <div class="lan-qr-popup" id="lanQrPopup">
                         <img id="lanQrImg" alt="二维码"/>
                         <div class="lan-qr-popup-label">扫码访问</div>
                     </div>
                 </button>
                 <button class="lan-close-btn" id="lanCloseBtn" title="关闭" type="button">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    <svg data-icon="x" class="nv-i nv-i-x" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
             </div>
         </div>
@@ -682,7 +682,7 @@
             music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>'
         };
         function icon(name, cls) {
-            return '<svg class="i ' + (cls || '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
+            return '<svg data-icon="' + name + '" class="i nv-i nv-i-' + name + ' ' + (cls || '') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
         }
         function esc(str) {
             return String(str == null ? '' : str).replace(/[&<>"']/g, function (c) {

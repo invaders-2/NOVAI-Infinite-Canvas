@@ -1,0 +1,29 @@
+/* 「导入导出工作流」弹窗：对齐旧智能画布的两分区卡片版式（BEAT 专用，不改 canvas-next.css）。
+   层级用软底 + 间距表达；唯一允许的虚线是导入拖拽区。 */
+
+.cn-root .wf2{display:flex;flex-direction:column;gap:14px}
+.cn-root .wf2-sub{margin:0 2px;font-size:12px;line-height:1.5;color:var(--fg3)}
+.cn-root .wf2-card{display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:var(--card-hi)}
+.cn-root .wf2-card-head{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:var(--fg)}
+.cn-root .wf2-badge{margin-left:auto;height:20px;padding:0 8px;border-radius:10px;background:var(--sunken);color:var(--fg3);font-size:11px;display:inline-flex;align-items:center;white-space:nowrap}
+.cn-root .wf2-desc{margin:0;font-size:12px;line-height:1.6;color:var(--fg2)}
+.cn-root .wf2-status{margin:0;padding:9px 12px;border-radius:10px;background:var(--sunken);color:var(--fg2);font-size:12px;line-height:1.45}
+.cn-root .wf2-status b{color:var(--fg);font-weight:600}
+.cn-root .wf2-acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:2px}
+/* 按钮沿用既有 .btn 类名（源码契约/测试依赖），这里只做视觉覆盖：次要=软底，主=深色实底 */
+.cn-root .wf2 .btn[data-wf="export-json"],
+.cn-root .wf2 .btn[data-wf="export-assets"]{height:34px;padding:0 15px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap;background:var(--sunken);color:var(--fg)}
+.cn-root .wf2 .btn[data-wf="export-json"]:hover:not(:disabled),
+.cn-root .wf2 .btn[data-wf="export-assets"]:hover:not(:disabled){background:var(--hover)}
+.cn-root .wf2 .btn.solid[data-wf="export-assets"]{background:var(--solid);color:var(--on-solid)}
+.cn-root .wf2 .btn.solid[data-wf="export-assets"]:hover:not(:disabled){background:var(--solid);opacity:.88}
+.cn-root .wf2 .btn:disabled{opacity:.42;cursor:not-allowed}
+.cn-root .wf2-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:100%;min-height:136px;padding:18px;border-radius:14px;
+  border:1px dashed color-mix(in srgb,var(--fg) 26%,transparent);background:var(--sunken);color:var(--fg2);cursor:pointer;
+  transition:background-color var(--d-quick) var(--e-std),border-color var(--d-quick) var(--e-std),color var(--d-quick) var(--e-std)}
+.cn-root .wf2-drop:hover:not(:disabled),
+.cn-root .wf2-drop.on{background:var(--hover);border-color:color-mix(in srgb,var(--fg) 46%,transparent);color:var(--fg)}
+.cn-root .wf2-drop:disabled{opacity:.55;cursor:default}
+.cn-root .wf2-drop-t{font-size:13px;font-weight:500;color:var(--fg)}
+.cn-root .wf2-drop-s{font-size:11.5px;color:var(--fg3)}
+.cn-root .wf2-note{margin:0;padding:9px 12px;border-radius:10px;background:var(--sunken);color:var(--fg2);font-size:12px;line-height:1.6}

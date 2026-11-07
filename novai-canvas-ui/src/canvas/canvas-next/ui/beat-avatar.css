@@ -1,0 +1,196 @@
+/* BEAT 助手头像 · 扁平双条 + 三层发光 + 12 状态。
+   权威实现是 _beat-icon-final/beat-avatar.snippet.html：几何、颜色、光强、动画时长逐字沿用，
+   只把类名与关键帧加上 beat-av- 前缀（两个微应用注入同一宿主页面，裸 beat-* 会撞名）。
+   主题：画布把深浅色写在 .cn-root[data-theme] 上，组件把它投影到图标自己的 data-theme，
+   所以下面按「自己」匹配而不是祖先。盘的内描边属于「本身是图形」的例外，不是面板的层级线。 */
+
+@property --beat-lit { syntax: "<number>"; inherits: true; initial-value: 1 }
+@property --beat-progress { syntax: "<number>"; inherits: true; initial-value: .5 }
+
+/* 尺寸/几何全用百分比，父容器给多宽图标就多大 */
+.beat-av {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  --accent: #7C86E8;
+  --eye: #F7F8FA;
+  --disc: #15171B;
+  /* 这三个必须永远是「合法的阴影列表」：以前 --shadow 写成 none，整条 box-shadow 会被判无效，
+     非浅色主题下本来想要的 1px 内描边其实一次都没画出来过。全零透明阴影等于不画，且不破坏语法。 */
+  --halo: 0 0 0 0 transparent;
+  --ring: inset 0 0 0 1px rgba(255, 255, 255, .07);
+  /* 抬升阴影跟尺寸走：56px 档（--gs:1）是 0 2px 6px /.10，20~28px 小图标（--gs:.55）自动约一半，
+     免得小图标底下带一坨灰 */
+  --lift: 0 0 0 0 transparent;
+  --liftSmall: 0 calc(2px * var(--gs)) calc(6px * var(--gs)) rgba(15, 18, 24, calc(.10 * var(--gs)));
+  --gm: 1;
+  --g: 1;
+  --ehS: 1;
+  --ewS: 1;
+  --gs: 1;
+  --glow: 1;
+  --beat-lit: 1;
+  --beat-progress: .5;
+  --scanDur: calc(1.6s - var(--beat-progress) * .8s);
+  transition: --beat-progress 250ms ease, scale 180ms ease;
+}
+/* 白底上光看着更亮，整体乘数压到 0.55 才不脏；盘用近黑才压得住白。
+   浅色只留一层很薄很贴的抬升阴影（随尺寸缩），不加白色泛光（白底会糊），盘也不描边 */
+.beat-av[data-theme="light"] { --disc: #0E1013; --ring: inset 0 0 0 0 transparent; --gm: .55; --lift: var(--liftSmall) }
+/* 近黑画布上盘会"消失"，只剩两只眼：用外发光把盘托出来（不是描边），盘色提半档，
+   眼睛的光整体 ×1.15（状态系数 --g 不动，只动主题乘数 --gm）。
+   泛光半径同样乘 --gs：小图标自然收敛，56px 上才是满亮的一颗发光球；浅色一丁点白光都不要 */
+.beat-av[data-theme="dark"] { --disc: #22262D; --gm: 1.15; --halo: 0 0 calc(14px * var(--gs)) rgba(255, 255, 255, .22), 0 0 calc(36px * var(--gs)) rgba(255, 255, 255, .12), 0 0 calc(72px * var(--gs)) rgba(255, 255, 255, .05) }
+/* 小图标上用大半径会糊成一团光，所以半径跟着尺寸缩 */
+.beat-av[data-size="28"] { --gs: .55 }
+.beat-av[data-size="40"] { --gs: .8 }
+
+/* 状态只决定「几何 + 光强」，动起来靠下面的 animation：静态帧会让人以为组件卡死 */
+.beat-av[data-state="blink"] { --ewS: 1.08; --g: .5 }
+.beat-av[data-state="happy"] { --ehS: .7; --ewS: 1.06; --g: 1.4 }
+.beat-av[data-state="listening"] { --ehS: .85; --ewS: 1.08 }
+.beat-av[data-state="generating"] { --g: calc(.6 + .55 * var(--beat-progress)) }
+.beat-av[data-state="waiting"] { --ehS: .7 }
+.beat-av[data-state="focus"] { --g: .55 }
+.beat-av[data-state="sleepy"] { --ehS: .45; --g: .3 }
+.beat-av[data-state="surprised"] { --ehS: 1.18; --ewS: .9 }
+.beat-av[data-state="error"] { --ehS: .45; --accent: #E46A5A }
+
+.beat-av-face { position: absolute; inset: 6%; border-radius: 50%; overflow: hidden; background: var(--disc); box-shadow: var(--halo), var(--ring), var(--lift) }
+/* 分三层是为了不打架：eyes 只做鼠标跟随（JS 写 transform），group 做整张脸的位移/缩放动画，eye 做单只眼的几何动画 */
+.beat-av-eyes { position: absolute; inset: 6%; pointer-events: none; will-change: transform }
+.beat-av-group { position: absolute; inset: 0; will-change: transform }
+/* 眼睛是一块纯色，光只从 box-shadow 出来；加渐变或内阴影就会变成「立体」而不是「光」 */
+.beat-av-eye {
+  position: absolute;
+  top: 46%;
+  left: 28%;
+  width: calc(10.5% * var(--ewS));
+  height: calc(21% * var(--ehS));
+  margin-top: calc(-10.5% * var(--ehS));
+  border-radius: 999px;
+  background: var(--eye);
+  transform-origin: 50% 50%;
+  will-change: transform;
+  transition: height 240ms cubic-bezier(.3, .7, .3, 1), width 240ms cubic-bezier(.3, .7, .3, 1), margin-top 240ms cubic-bezier(.3, .7, .3, 1), box-shadow 240ms ease;
+  box-shadow: 0 0 calc(6px * var(--gs)) color-mix(in srgb, var(--accent) calc(70% * var(--g) * var(--beat-lit) * var(--glow) * var(--gm)), transparent),
+    0 0 calc(16px * var(--gs)) color-mix(in srgb, var(--accent) calc(42% * var(--g) * var(--beat-lit) * var(--glow) * var(--gm)), transparent),
+    0 0 calc(34px * var(--gs)) color-mix(in srgb, var(--accent) calc(22% * var(--g) * var(--beat-lit) * var(--glow) * var(--gm)), transparent);
+}
+.beat-av-eye:nth-child(2) { left: 61.5% }
+
+/* idle：呼吸 4s + 漂移 7s；随机眨眼交给 JS，因为间隔要随状态变，静态关键帧做不到 */
+.beat-av[data-state="idle"] .beat-av-eye { animation: beat-av-idleBreath 4s ease-in-out infinite }
+.beat-av[data-state="idle"] .beat-av-group { animation: beat-av-idleDrift 7s ease-in-out infinite }
+@keyframes beat-av-idleBreath {
+  0%, 100% { height: calc(21% * var(--ehS) * 1.03); margin-top: calc(-10.5% * var(--ehS) * 1.03) }
+  50% { height: calc(21% * var(--ehS) * .97); margin-top: calc(-10.5% * var(--ehS) * .97) }
+}
+@keyframes beat-av-idleDrift { 0%, 100% { transform: translateX(-1.5%) } 50% { transform: translateX(1.5%) } }
+
+/* blink：压到 16% 停 180ms 再弹回；被持续设置时按 4.5s 循环，而不是播一次就凝固 */
+.beat-av[data-state="blink"] .beat-av-eye { animation: beat-av-blinkAct 4.5s cubic-bezier(.3, .7, .3, 1) infinite }
+@keyframes beat-av-blinkAct {
+  0% { transform: scaleY(1) }
+  2% { transform: scaleY(.16) }
+  6% { transform: scaleY(.16) }
+  11% { transform: scaleY(1.04) }
+  16%, 100% { transform: scaleY(1) }
+}
+
+/* happy：两下小跳各 420ms（1.68s 的 25%），常驻时按 1.68s 重播；双眨由 JS 的 blink 队列补 */
+.beat-av[data-state="happy"] .beat-av-group { animation: beat-av-happyJump 1.68s ease-out infinite }
+@keyframes beat-av-happyJump {
+  0% { transform: translateY(0) }
+  12.5% { transform: translateY(-8%) }
+  25% { transform: translateY(0) }
+  37.5% { transform: translateY(-8%) }
+  50%, 100% { transform: translateY(0) }
+}
+
+/* thinking：左右眼反相变矮 + 视线整体上瞟 + 光呼吸，三层各动各的，互不覆盖 */
+.beat-av[data-state="thinking"] .beat-av-eye { animation: beat-av-think 2.2s ease-in-out infinite }
+.beat-av[data-state="thinking"] .beat-av-eye:nth-child(2) { animation-delay: -1.1s }
+.beat-av[data-state="thinking"] .beat-av-group { animation: beat-av-thinkUp 3.5s ease-in-out infinite }
+.beat-av[data-state="thinking"] { animation: beat-av-thinkLit 2.2s ease-in-out infinite }
+@keyframes beat-av-think { 0%, 100% { height: 21% } 50% { height: 17.2% } }
+@keyframes beat-av-thinkUp { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-2%) } }
+@keyframes beat-av-thinkLit { 0%, 100% { --beat-lit: 1 } 50% { --beat-lit: 1.18 } }
+
+/* listening：明暗脉冲 1.6s + 上下 1% 点头 2.4s；眨眼间隔在 JS 里减半 */
+.beat-av[data-state="listening"] .beat-av-eye { animation: beat-av-pulse 1.6s ease-in-out infinite }
+.beat-av[data-state="listening"] .beat-av-group { animation: beat-av-nod 2.4s ease-in-out infinite }
+@keyframes beat-av-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .55 } }
+@keyframes beat-av-nod { 0%, 100% { transform: translateY(-1%) } 50% { transform: translateY(1%) } }
+
+/* generating：扫描周期由 progress 推出来（1.6s → 0.8s），光强同步从 0.6 爬到 1.15 */
+.beat-av[data-state="generating"] .beat-av-group { animation: beat-av-genScan var(--scanDur) ease-in-out infinite }
+@keyframes beat-av-genScan { 0%, 100% { transform: translateX(-6%) } 50% { transform: translateX(6%) } }
+
+/* tool：机械短促压到 40% 再弹回，每 1.1s 一次；同一拍里光打一发短脉冲 */
+.beat-av[data-state="tool"] .beat-av-eye { animation: beat-av-toolTick 1.1s cubic-bezier(.2, .8, .3, 1) infinite }
+.beat-av[data-state="tool"] .beat-av-group { animation: beat-av-toolBob 2.2s ease-in-out infinite }
+.beat-av[data-state="tool"] { animation: beat-av-toolLit 1.1s ease-out infinite }
+@keyframes beat-av-toolTick {
+  0% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+  5% { height: calc(8.4% * var(--ehS)); margin-top: calc(-4.2% * var(--ehS)) }
+  10% { height: calc(21.8% * var(--ehS)); margin-top: calc(-10.9% * var(--ehS)) }
+  16%, 100% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+}
+@keyframes beat-av-toolBob { 0%, 100% { transform: translateY(-1.1%) scaleY(.98) } 50% { transform: translateY(1.1%) scaleY(1.02) } }
+@keyframes beat-av-toolLit { 0% { --beat-lit: 1.45 } 14%, 100% { --beat-lit: 1 } }
+
+/* waiting：半睁 + 慢呼吸，每 3.5s 往一侧看 0.6s 再回来；alternate 让两侧轮流看 */
+.beat-av[data-state="waiting"] .beat-av-eye { animation: beat-av-waitBreath 5s ease-in-out infinite }
+.beat-av[data-state="waiting"] .beat-av-group { animation: beat-av-waitLook 3.5s ease-in-out infinite alternate }
+@keyframes beat-av-waitBreath {
+  0%, 100% { height: calc(21% * var(--ehS) * 1.02); margin-top: calc(-10.5% * var(--ehS) * 1.02) }
+  50% { height: calc(21% * var(--ehS) * .98); margin-top: calc(-10.5% * var(--ehS) * .98) }
+}
+@keyframes beat-av-waitLook {
+  0%, 68% { transform: translateX(0) }
+  85% { transform: translateX(8%) }
+  90% { transform: translateX(8%) }
+  100% { transform: translateX(0) }
+}
+
+/* focus：只剩极缓的 2% 扫视，别的装饰全关，免得跟正事抢注意力 */
+.beat-av[data-state="focus"] .beat-av-group { animation: beat-av-focusScan 6s ease-in-out infinite }
+@keyframes beat-av-focusScan { 0%, 100% { transform: translateX(-2%) } 50% { transform: translateX(2%) } }
+
+/* sleepy：上下浮动 1%，眨眼在 JS 里放慢到 4~6s */
+.beat-av[data-state="sleepy"] .beat-av-group { animation: beat-av-sleepFloat 5s ease-in-out infinite }
+@keyframes beat-av-sleepFloat { 0%, 100% { transform: translateY(-1%) } 50% { transform: translateY(1%) } }
+
+/* surprised / error：一次性动作放进 1.8s / 2s 的长周期里，被持续设置就每周期重播一次 */
+.beat-av[data-state="surprised"] .beat-av-group { animation: beat-av-popLoop 1.8s cubic-bezier(.2, .9, .3, 1) infinite }
+.beat-av[data-state="surprised"] { animation: beat-av-flashLit 1.8s ease-out infinite }
+@keyframes beat-av-popLoop { 0% { transform: scale(1) } 8% { transform: scale(1.12) } 21% { transform: scale(1) } 100% { transform: scale(1) } }
+@keyframes beat-av-flashLit { 0% { --beat-lit: 2.4 } 12%, 100% { --beat-lit: 1 } }
+.beat-av[data-state="error"] .beat-av-group { animation: beat-av-shakeLoop 2s ease-out infinite }
+.beat-av[data-state="error"] .beat-av-eye { animation: beat-av-errorBlink 2s cubic-bezier(.3, .7, .3, 1) infinite }
+@keyframes beat-av-shakeLoop {
+  0% { transform: translateX(0) }
+  4% { transform: translateX(-6%) }
+  9% { transform: translateX(6%) }
+  14% { transform: translateX(-3%) }
+  17%, 100% { transform: translateX(0) }
+}
+@keyframes beat-av-errorBlink {
+  0% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+  3% { height: calc(10.5% * var(--ehS)); margin-top: calc(-5.25% * var(--ehS)) }
+  6% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+  9% { height: calc(10.5% * var(--ehS)); margin-top: calc(-5.25% * var(--ehS)) }
+  12%, 100% { height: calc(21% * var(--ehS)); margin-top: calc(-10.5% * var(--ehS)) }
+}
+
+/* 用 scale 而不是 transform 做 hover，是为了不跟上面任何一层动画抢 transform */
+@media (hover: hover) { .beat-av:hover { scale: .94 } }
+
+/* 系统关了动效就真不动：动画全停，只留静态几何 */
+@media (prefers-reduced-motion: reduce) {
+  .beat-av, .beat-av * { animation: none !important; transition: none !important }
+  /* 动画停掉后 blink 要保留「压成一条线」的样子，否则它就等同于 idle */
+  .beat-av[data-state="blink"] { --ehS: .16 }
+}

@@ -13,11 +13,12 @@ AI 创作工具：无限画布 + 多模型调用（OpenAI API、ComfyUI、火山
 ## 改之前先看的坑
 
 - `main.py` 是**单体后端**（约 2.2 万行），绝大多数路由都在里面；`server/` 下另有一层模块化代码（`server/routes/`、`server/schemas/`、`server/appRegistry.py`、`server/capabilities.py`）。找路由时两处都要看。
-- 默认传统画布入口 `static/canvas.html` 已替换为 OpenArc `canvas-next` 无限画布，对外名称为「智能画布BEAT」：源码与 NOVAI REST 适配器在 `openarc-canvas-ui/`，`cd openarc-canvas-ui && npm install && npm run build` 输出到 `static/openarc-canvas/`（构建产物要一起提交）。`novaiBackend.ts` 负责文档/生成，`novaiBridge.ts` 负责素材库、提示词、工作流、技能与记忆；协作、共享、团队库、元素同步和桌面专用入口在 NOVAI 宿主中隐藏。`static/legacy-canvas.html` + `static/js/canvas.js` 保留传统实现作回退；`static/js/smart-canvas.js` 仍是独立智能画布，三套实现不要假设可以同步改动。
-- 传统回退页的缩放/平移由 `viewport` 对象（x, y, scale）驱动，改动需同步 `applyViewport()` 与 `renderLinks()`；OpenArc 画布使用自己的 `view`（x, y, k）与 store。
-- 旧前端页面是原生 HTML/JS，无构建步骤；`index.html` 用 iframe 加载子页面，页面切换靠 `switchUI()`，跨页面通信用 `postMessage`。`web/`、`canvas-ui/` 与 `openarc-canvas-ui/` 三个微应用分别有构建流程。
+- 默认传统画布入口 `static/canvas.html` 已替换为 NOVAI `canvas-next` 无限画布，对外名称为「智能画布BEAT」：源码与 NOVAI REST 适配器在 `novai-canvas-ui/`，`cd novai-canvas-ui && npm install && npm run build` 输出到 `static/novai-canvas/`（构建产物要一起提交）。`novaiBackend.ts` 负责文档/生成，`novaiBridge.ts` 负责素材库、提示词、工作流、技能与记忆；协作、共享、团队库、元素同步和桌面专用入口在 NOVAI 宿主中隐藏。`static/legacy-canvas.html` + `static/js/canvas.js` 保留传统实现作回退；`static/js/smart-canvas.js` 仍是独立智能画布，三套实现不要假设可以同步改动。
+- **两个画布别搞混（命名坑）**：智能画布BEAT = `/static/canvas.html` → `novai-canvas-ui`（原 `openarc-canvas-ui`，构建到 `static/novai-canvas/`）；旧智能画布 = `/static/smart-canvas.html` → `canvas-ui`（构建到 `static/canvas-assistant/`）。改画布相关 UI 一律先确认在哪一个 app。
+- 传统回退页的缩放/平移由 `viewport` 对象（x, y, scale）驱动，改动需同步 `applyViewport()` 与 `renderLinks()`；NOVAI 画布使用自己的 `view`（x, y, k）与 store。
+- 旧前端页面是原生 HTML/JS，无构建步骤；`index.html` 用 iframe 加载子页面，页面切换靠 `switchUI()`，跨页面通信用 `postMessage`。`web/`、`canvas-ui/` 与 `novai-canvas-ui/` 三个微应用分别有构建流程。
 - **NOVAI 2.0 新前端（逐页替换中）**：源码在 `web/`（Vue 3 + Vite），`cd web && npm install && npm run build` 输出到 `static/v2/`（构建产物要一起提交，桌面包不跑 Node）；后端默认入口 `/` 返回它（`/v2` 同样可用；新版未构建时 `/` 自动回退旧外壳），旧外壳保留在 `/legacy` 作为回退（设置 → 关于 →「旧版界面」可切换）。
-  - 已用 Vue 重写：外壳（侧栏 / 标题栏 / 设置弹窗全部 6 页：通用、API 设置、工作流设置、数据备份、外观、关于 / 更新弹窗 / 欢迎页）、画布列表（`web/src/pages/canvas/CanvasListPage.vue`）、在线生图 / Z-Image（`pages/online/`）、GPT 对话（`pages/chat/`）、素材库（`pages/assets/`）。首页仍保留旧 `static/home.html`；传统画布由 `openarc-canvas-ui` 提供，智能画布仍用 `smart-canvas.html`。
+  - 已用 Vue 重写：外壳（侧栏 / 标题栏 / 设置弹窗全部 6 页：通用、API 设置、工作流设置、数据备份、外观、关于 / 更新弹窗 / 欢迎页）、画布列表（`web/src/pages/canvas/CanvasListPage.vue`）、在线生图 / Z-Image（`pages/online/`）、GPT 对话（`pages/chat/`）、素材库（`pages/assets/`）。首页仍保留旧 `static/home.html`；传统画布由 `novai-canvas-ui` 提供，智能画布仍用 `smart-canvas.html`。
   - 用户要求：首页继续用旧 `static/home.html`（iframe），左侧导航保持旧外壳的样式与交互（`web/src/shell/Sidebar.vue` 是旧 index.html 侧栏的移植）。进度与约定见 `web/REWRITE.md`。
   - 画布页是 native + frame：没打开画布时显示 Vue 列表；`openCanvasUrl()` 把 `frame-canvas` 指到旧编辑器，编辑器点「返回画布列表」会把 iframe 指回 `canvas-list.html`，LegacyStage 在 load 时识别到就调 `closeCanvas()` 切回 Vue 列表（旧 canvas-list.html 仍保留给旧外壳 `/` 用）。其余页面仍是旧 HTML，新外壳用 `frame-<id>` iframe 承载，消息协议与旧 `index.html` 完全一致（见 `web/src/lib/bridge.js` 顶部注释）。
   - 页面注册表在 `web/src/lib/store.js` 的 `PAGES`：重写完一页就把它的 `legacy` 换成 `native` 组件。
@@ -32,6 +33,7 @@ AI 创作工具：无限画布 + 多模型调用（OpenAI API、ComfyUI、火山
   - **小弹层 / 下拉 / 工具面板例外**（2026-09 起）：它们常盖在图片或文字上，且嵌在编辑栏、节点这些 backdrop root 里时模糊采样不到后面的内容，78% 会透字、被图片染色。统一用近乎不透明的实底（浅 `rgba(255,255,255,.96)`、深 `rgba(24,24,24,.95)`），规则集中在 `smart-canvas.css` 末尾「弹层底色加厚」一段；大面积的编辑栏仍用磨砂。
 - 例外只有「本身是图形/图标」的描边，例如比例格子里表示画幅的小方框。
 - **图标一律保持线性（描边）风格**：下拉三角、比例/画幅图标、播放三角、缩放把手、端口 ⊕、对勾、spinner 这些是「图形/图标」，用描边（border / currentColor 笔画 / lucide 线性图标）画，**不要**改成实心填充、也不要去掉它们的笔画。改 UI 时这部分原样保留。
+  图标动效由三端共用的 static/css/nv-icons.css 提供（vite 构建用 @import 引入），图标数据由 tools/icons/gen.mjs 从 lucide 生成到 web/src/lib/icons.js 与 tools/icons/canonical.json，改图标先改生成器再重跑，别手改产物；React 画布端对应 novai-canvas-ui/src/canvas/canvas-next/ui/iconData.ts（改了 nv-icons.css 要通知重建 static/novai-canvas）。
 - **select 的自绘下拉箭头统一用线性人字**：`background-image: var(--select-caret)`（变量定义在 `marvis-shared.css`，亮/暗各一条 SVG data URI，跟 lucide chevron-down 同款描边），位置 `calc(100% - 8px) 50%`、大小 10px、`padding-right:24px`。**不要**再用两条 `linear-gradient` 拼的实心三角。
 - **另一个明确例外：`.nv-beam` / `.nv-beam-wrap` 的动态光束边框**（home / online / gpt-chat 三页的「开始创作」「生成」按钮用的 border-beam 动效，实现在 `static/css/nv-beam.css` 与三页的内联副本里）。它是产品要的效果，用 `mask-composite` 收成 2px 环、**不要**改成模糊外发光，清扫线框时跳过它。
 

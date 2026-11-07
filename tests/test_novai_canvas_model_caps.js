@@ -1,0 +1,175 @@
+#!/usr/bin/env node
+/* task-11：后端 /api/model-caps → ModelSpec.ui 映射。
+   覆盖：图片 ratios/sizes/batch(n_max 上限 8)/maxRefs；视频 ratios/res/durs/modes；
+   空/坏字段回落、未验证标记、方案卡换模型纠正参数、后端接线静态断言。 */
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+const esbuild = require('../novai-canvas-ui/node_modules/esbuild');
+const root = path.join(__dirname, '..');
+
+function load(entry) {
+    const result = esbuild.buildSync({ entryPoints: [path.join(root, entry)], bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent' });
+    const module = { exports: {} };
+    new Function('module', 'exports', 'require', result.outputFiles[0].text)(module, module.exports, require);
+    return module.exports;
+}
+
+const caps = load('novai-canvas-ui/src/canvas/canvas-next/modelCaps.ts');
+const model = load('novai-canvas-ui/src/canvas/canvas-next/model.ts');
+const plan = load('novai-canvas-ui/src/canvas/canvas-next/agent/planParams.ts');
+
+// ---- 1. 图片 caps ----
+const imageCaps = {
+    provider: 'apimart', model: 'gemini-3-pro-image-preview', kind: 'image',
+    ratios: ['auto', '1:1', '3:4'], resolutions: ['1k', '2k'], n_max: 10, max_refs: 5,
+};
+const imageUi = caps.modelCapsUi('image', imageCaps);
+assert.deepStrictEqual(imageUi.ratios, ['自适应', '1:1', '3:4'], 'auto → 自适应');
+assert.deepStrictEqual(imageUi.sizes, ['1K', '2K'], '分辨率统一大写');
+assert.deepStrictEqual(imageUi.batch, [1, 2, 3, 4, 5, 6, 7, 8], 'n_max=10 只展开到 8');
+assert.strictEqual(imageUi.maxRefs, 5, 'max_refs 有就填');
+assert.strictEqual('i2i' in imageUi, false, '没有的能力不编');
+
+const imageSpec = model.specFor({ configId: 'apimart::gemini-3-pro-image-preview', label: 'gemini-3-pro-image-preview', vendor: 'APIMART', kind: 'image', ui: imageUi, specSource: 'spec' });
+assert.strictEqual(imageSpec.specSource, 'spec', '拉到 caps → 已验证规格');
+assert.deepStrictEqual(imageSpec.ratios, ['自适应', '1:1', '3:4']);
+assert.deepStrictEqual(imageSpec.sizes, ['1K', '2K']);
+assert.deepStrictEqual(imageSpec.batch, [1, 2, 3, 4, 5, 6, 7, 8]);
+assert.strictEqual(imageSpec.maxRefs, 5);
+assert.strictEqual(imageSpec.style, false, '规格没声明风格 → 不猜');
+assert.strictEqual(imageSpec.camera, false, '规格没声明摄影机 → 不猜');
+
+const small = caps.modelCapsUi('image', { kind: 'image', ratios: ['9:16'], resolutions: ['4K'], n_max: 2 });
+assert.deepStrictEqual(small.batch, [1, 2], 'n_max=2 → [1,2]');
+const one = caps.modelCapsUi('image', { kind: 'image', n_max: 1 });
+assert.deepStrictEqual(one.batch, [1], 'n_max=1 → [1]');
+const noBatch = caps.modelCapsUi('image', { kind: 'image', ratios: ['1:1'] });
+assert.strictEqual('batch' in noBatch, false, '没有 n_max 不编 batch');
+assert.strictEqual('maxRefs' in noBatch, false, '没有 maxRefs 不编');
+assert.strictEqual(caps.modelCapsUi('image', { kind: 'video', ratios: ['16:9'] }), null, 'kind 不符直接忽略');
+assert.strictEqual(caps.modelCapsUi('image', {}), null, '空 caps 返回 null');
+
+// ---- 2. 视频 caps ----
+const videoUi = caps.modelCapsUi('video', {
+    provider: 'apimart', model: 'seedance-2.5', kind: 'video',
+    ratios: ['adaptive', '16:9', '9:16'], resolutions: ['720P', '1080P'], durations: [10, 5, 5],
+    modes: ['text_to_video', 'image_to_video', '不存在的模式'], qualities: ['standard'],
+});
+assert.deepStrictEqual(videoUi.ratios, ['自适应', '16:9', '9:16']);
+assert.deepStrictEqual(videoUi.res, ['720p', '1080p']);
+assert.deepStrictEqual(videoUi.durs, [5, 10], '时长去重排序');
+assert.deepStrictEqual(videoUi.modes, ['文生视频', '首帧'], '接口值翻译成 VMODES 中文名，未知名丢弃');
+const videoSpec = model.specFor({ configId: 'apimart::seedance-2.5', label: 'seedance-2.5', vendor: 'APIMART', kind: 'video', ui: videoUi, specSource: 'spec' });
+assert.strictEqual(videoSpec.specSource, 'spec');
+assert.deepStrictEqual(videoSpec.ratios, ['自适应', '16:9', '9:16']);
+assert.deepStrictEqual(videoSpec.res, ['720p', '1080p']);
+assert.deepStrictEqual(videoSpec.durs, [5, 10]);
+assert.deepStrictEqual(videoSpec.modes, ['文生视频', '首帧']);
+
+// ---- 3. 无 caps：保持 guess（未验证）----
+const guessed = model.specFor({ configId: 'x::some-image', label: 'some-image', kind: 'image', ui: null });
+assert.strictEqual(guessed.specSource, 'guess', '没有 caps 仍标 guess');
+assert.ok(Array.isArray(guessed.ratios) && guessed.ratios.length, 'guess 仍有可选项（兜底）');
+
+// ---- 3a0. n_max 缺失：张数只给 1 张 + 上限未知提示 ----
+const unknownUi = caps.modelCapsUi('image', { provider: 'agnes-ai', model: 'agnes-image-2.5-flash', kind: 'image', ratios: ['1:1'], resolutions: ['1K', '2K'], n_max: null });
+assert.strictEqual(unknownUi.batchUnknown, true, 'n_max=null → batchUnknown');
+assert.strictEqual('batch' in unknownUi, false, 'n_max 缺失不编 batch 上限');
+const unknownSpec = model.specFor({ configId: 'agnes-ai::agnes-image-2.5-flash', label: 'agnes-image-2.5-flash', vendor: 'Agnes AI', kind: 'image', ui: unknownUi, specSource: 'spec' });
+assert.strictEqual(unknownSpec.batchUnknown, true);
+assert.deepStrictEqual(unknownSpec.batch, [1], '缺失上限时只保留 1 张');
+assert.deepStrictEqual(plan.countOptions(unknownSpec), [1], '方案卡张数只给 1 张');
+const unknownStep = { tool: 'generate_image', args: { canvas_id: 'c', provider: 'agnes-ai', model: 'agnes-image-2.5-flash', ratio: '1:1', size: '1024x1024', count: 4 } };
+assert.strictEqual(plan.readPlanParams(unknownStep, 'image', [unknownSpec]).count, 1, '显示值也收回 1');
+const knownSpec = model.specFor({ configId: 'apimart::gemini-3-pro-image-preview', label: 'gemini-3-pro-image-preview', kind: 'image', ui: imageUi, specSource: 'spec' });
+assert.strictEqual(knownSpec.batchUnknown, undefined, '有 n_max=10 不标未知');
+// 明确 n_max=1 的模型：计划里写了 4 张，也要显示/批准成 1 张
+const oneSpec = model.specFor({ configId: 'apimart::gpt-image-2.5-ext', label: 'gpt-image-2.5-ext', kind: 'image', ui: caps.modelCapsUi('image', { provider: 'apimart', model: 'gpt-image-2.5-ext', kind: 'image', ratios: ['1:1'], resolutions: ['2K'], n_max: 1 }), specSource: 'spec' });
+const fourStep = { tool: 'generate_image', args: { canvas_id: 'c', provider: 'apimart', model: 'gpt-image-2.5-ext', ratio: '1:1', size: '2048x2048', count: 4 } };
+assert.strictEqual(plan.readPlanParams(fourStep, 'image', [oneSpec]).count, 1, 'n_max=1 时显示也收回 1');
+assert.deepStrictEqual(plan.countOptions(oneSpec), [1]);
+assert.strictEqual(plan.patchPlanStep(fourStep, 'image', [oneSpec], {}).args.count, 1, '批准前归一到 1 张');
+
+// ---- 3a. 参考图能力：caps 不含 maxRefs/i2i 时沿用官方/预设，不能被权威参数误关 ----
+const noRefUi = { ratios: imageUi.ratios, sizes: imageUi.sizes, batch: imageUi.batch };
+const mergedUi = caps.mergeCapsReferenceCapability('image', noRefUi, { maxRefs: 14, i2i: true });
+const mergedSpec = model.specFor({ configId: 'apimart::gemini-3-pro-image-preview', label: 'gemini-3-pro-image-preview', kind: 'image', ui: mergedUi, specSource: 'spec' });
+assert.strictEqual(mergedSpec.maxRefs, 14, 'caps 没给 maxRefs → 沿用预设的参考图上限');
+assert.strictEqual(mergedSpec.i2i, true, 'caps 没给 i2i → 不把所有模型误标成仅文生图');
+assert.deepStrictEqual(mergedSpec.ratios, imageSpec.ratios, '参考图能力回填不影响 caps 的比例');
+const capsWins = caps.mergeCapsReferenceCapability('image', { ...imageUi, maxRefs: 2, i2i: false }, { maxRefs: 14, i2i: true });
+assert.strictEqual(capsWins.maxRefs, 2, 'caps 明确给 maxRefs 时以 caps 为准');
+assert.strictEqual(capsWins.i2i, false, 'caps 明确给 i2i 时以 caps 为准');
+
+// ---- 3b. 后端明确给空数组：不能补默认档位/能力 ----
+const emptyRes = caps.modelCapsUi('image', { provider: 'jimeng', model: '5.0', kind: 'image', ratios: ['1:1', '3:4'], resolutions: [] });
+assert.deepStrictEqual(emptyRes.sizes, [], 'resolutions: [] 原样保留为空');
+const emptyResSpec = model.specFor({ configId: 'jimeng::5.0', label: '5.0', vendor: '即梦 CLI', kind: 'image', ui: emptyRes, specSource: 'spec' });
+assert.deepStrictEqual(emptyResSpec.sizes, [], 'specFor 不再用 DEFAULTS 把空 sizes 补成 1K/2K');
+assert.deepStrictEqual(plan.imageResolutionOptions(emptyResSpec), [], '方案卡分辨率不补默认档位');
+const emptyVideo = caps.modelCapsUi('video', { provider: 'apimart', model: 'MiniMax-H3', kind: 'video', ratios: ['16:9'], resolutions: [], durations: [], modes: [] });
+assert.deepStrictEqual(emptyVideo.res, []);
+assert.deepStrictEqual(emptyVideo.durs, []);
+assert.deepStrictEqual(emptyVideo.modes, []);
+const emptyVideoSpec = model.specFor({ configId: 'apimart::MiniMax-H3', label: 'MiniMax-H3', vendor: 'APIMART', kind: 'video', ui: emptyVideo, specSource: 'spec' });
+assert.deepStrictEqual(emptyVideoSpec.modes, [], 'modes: [] 不再补通用生成方式');
+assert.deepStrictEqual(emptyVideoSpec.durs, [], 'durations: [] 不再补 5/10 秒');
+assert.deepStrictEqual(plan.durationOptions(emptyVideoSpec), [], '方案卡时长不补默认值');
+assert.deepStrictEqual(plan.videoResOptions(emptyVideoSpec), [], '方案卡视频分辨率不补默认值');
+
+// ---- 3c. 视频换模型：方式/清晰度/时长被 clampParams 纠正 ----
+const seedanceSpec = model.specFor({ configId: 'apimart::seedance-2.5', label: 'seedance-2.5', vendor: 'APIMART', kind: 'video', ui: caps.modelCapsUi('video', { provider: 'apimart', model: 'seedance-2.5', kind: 'video', ratios: ['16:9', '9:16'], resolutions: ['720p'], durations: [5, 10], modes: ['text_to_video', 'reference_to_video'] }), specSource: 'spec' });
+const minimaxSpec = model.specFor({ configId: 'apimart::MiniMax-H3', label: 'MiniMax-H3', vendor: 'APIMART', kind: 'video', ui: caps.modelCapsUi('video', { provider: 'apimart', model: 'MiniMax-H3', kind: 'video', ratios: ['16:9'], resolutions: ['1080p'], durations: [5], modes: ['image_to_video'] }), specSource: 'spec' });
+assert.deepStrictEqual(seedanceSpec.modes, ['文生视频', '参考生视频']);
+assert.deepStrictEqual(minimaxSpec.modes, ['首帧']);
+const clamped = model.clampParams('video', { model: seedanceSpec.id, mode: '参考生视频', ratio: '16:9', res: '720p', dur: 10, sound: false, times: 1 }, minimaxSpec);
+assert.strictEqual(clamped.mode, '首帧', '换到不支持当前方式的模型 → 纠正为第一个支持的方式');
+assert.strictEqual(clamped.res, '1080p', '清晰度跟着新模型变');
+assert.strictEqual(clamped.dur, 5, '时长跟着新模型变');
+
+// ---- 4. 索引按 provider::model ----
+const index = caps.indexModelCaps([imageCaps, { provider: 'APIMART', model: 'gemini-3-pro-image-preview', kind: 'image', ratios: ['1:1'] }, { provider: '', model: 'bad' }]);
+assert.strictEqual(index.size, 1, '只索引合法且有 provider/model 的项；大小写 provider 合并');
+const hit = index.get(caps.modelCapsKey('apimart', 'gemini-3-pro-image-preview'));
+assert.ok(hit && hit.kind === 'image');
+assert.strictEqual(caps.modelCapsKey('APIMART', 'gemini-3-pro-image-preview'), 'apimart::gemini-3-pro-image-preview');
+
+// ---- 5. 方案卡：选项与换模型纠正都来自 ModelSpec ----
+const imageStep = { tool: 'generate_image', args: { canvas_id: 'c', prompt: '鞋', provider: 'apimart', model: 'gemini-3-pro-image-preview', ratio: '9:16', size: '2160x3840', count: 4 } };
+const read = plan.readPlanParams(imageStep, 'image', [imageSpec]);
+assert.strictEqual(read.ratio, '9:16', '原步骤值先保留');
+const fixed = plan.patchPlanStep(imageStep, 'image', [imageSpec], { modelConfigId: imageSpec.id });
+assert.strictEqual(fixed.args.ratio, '自适应', '新模型不支持 9:16 → 纠正到第一个合法比例（caps 里 auto 排第一）');
+assert.strictEqual('size' in fixed.args, false, '自适应不写显式 size');
+assert.strictEqual(fixed.args.count, 4, '新模型 batch 1..8 支持 4 张，保持');
+const strictSpec = model.specFor({ configId: 'apimart::strict-image', label: 'strict-image', vendor: 'APIMART', kind: 'image', ui: { ratios: ['1:1', '3:4'], sizes: ['1K'], batch: [1, 2] }, specSource: 'spec' });
+const strictFixed = plan.patchPlanStep(imageStep, 'image', [strictSpec], { modelConfigId: strictSpec.id });
+assert.strictEqual(strictFixed.args.ratio, '1:1', '没有 auto 的模型纠正到第一个合法比例');
+assert.strictEqual(strictFixed.args.size, '1024x1024', '分辨率落到新模型的 1K');
+assert.strictEqual(strictFixed.args.count, 1, '张数落到新模型 batch 首个');
+assert.deepStrictEqual(plan.imageRatioOptions(imageSpec), ['自适应', '1:1', '3:4'], '卡片比例来自 ModelSpec');
+assert.deepStrictEqual(plan.imageResolutionOptions(imageSpec), ['1K', '2K'], '卡片分辨率来自 ModelSpec');
+assert.deepStrictEqual(plan.countOptions(imageSpec), [1, 2, 3, 4, 5, 6, 7, 8], '卡片张数来自 ModelSpec.batch');
+const videoCapsSpec = videoSpec;
+assert.deepStrictEqual(plan.videoRatioOptions(videoCapsSpec), ['adaptive', '16:9', '9:16'], '原图比例在方案卡写成接口值 adaptive');
+assert.deepStrictEqual(plan.videoResOptions(videoCapsSpec), ['720p', '1080p']);
+assert.deepStrictEqual(plan.durationOptions(videoCapsSpec), [5, 10]);
+
+// ---- 6. 后端接线静态断言 ----
+const backend = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/novaiBackend.ts'), 'utf8');
+const card = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/agent/TaskPlanCard.tsx'), 'utf8');
+const genPanel = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/GenPanel.tsx'), 'utf8');
+assert.ok(backend.includes('fetch("/api/model-caps"'), 'listModels 会 best-effort 拉 /api/model-caps');
+assert.ok(backend.includes('MODEL_CAPS_TIMEOUT_MS = 1000') && backend.includes('AbortController'), '接口带短超时，不拖死模型列表');
+assert.ok(backend.includes('capsCache = null') && backend.includes('capsCache = null; cb()'), 'caps 缓存与 config 一起失效');
+assert.ok(backend.indexOf('const capsPromise = loadCaps()') >= 0 && backend.indexOf('const caps = await capsPromise') >= 0, '模型列表与 caps 并发加载');
+assert.ok(backend.includes('let capsUi =') && backend.includes('const ui = capsUi ||') && backend.includes('mergeCapsReferenceCapability'), 'caps 优先于官方硬编码，并保留参考图能力');
+assert.ok(card.includes('该模型未提供规格，比例/分辨率为推断'), '未验证模型在方案卡上有提示');
+assert.ok(card.includes('上限未知，以实际为准'), 'n_max 缺失时方案卡提示上限未知');
+assert.ok(card.includes('生成方式：自动选择'), '视频步骤在方案卡上说明自动选择方式');
+assert.ok(genPanel.includes('mm.batchUnknown ? [1] : [4, 2, 1]') && genPanel.includes('上限未知，以实际为准'), '图片面板 n_max 缺失只给 1 张并提示');
+assert.ok(card.includes('spec?.specSource !== "spec"'), '提示按 ModelSpec.specSource 判定');
+
+console.log('[PASS] model-caps 映射 / 未验证回落 / 方案卡选项与纠正 / 后端接线（6 组）');

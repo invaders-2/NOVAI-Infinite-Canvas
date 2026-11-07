@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """MCP 工具注册表：按需发现（缓存 60s）、工具映射、调用。
 
-- 只有 NOVAI_MCP_ENABLED=1 才会真正连服务；否则一律返回空目录（避免误连）。
+- 总开关关闭（config.enabled() 为假）时一律返回空目录（避免误连）。
 - 发现结果缓存 60 秒，可 POST /api/mcp/reload 手动刷新。
 - 工具映射：能力 id = <server>.<tool>；模型可见名 = mcp__<server>__<tool>。
 - risk 优先看 MCP 的 annotations（readOnlyHint / destructiveHint），缺省按关键词推断。
@@ -38,7 +38,7 @@ _cache: Dict[str, Any] = {"at": 0.0, "config_path": "", "entries": [], "servers"
 
 
 def enabled() -> bool:
-    return config.env_enabled()
+    return config.enabled()
 
 
 def reset_cache() -> None:

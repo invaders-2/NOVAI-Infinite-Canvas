@@ -30,6 +30,7 @@
     },
     "files": [
       "main.js",
+      "tray-icon.js",
       "cloud-config.js",
       "preload.js",
       "source-drag-preload.js",
@@ -40,6 +41,14 @@
       {
         "from": "resources/app-update.yml",
         "to": "app-update.yml"
+      },
+      {
+        "from": "icons/icon.png",
+        "to": "icons/icon.png"
+      },
+      {
+        "from": "icons/icon.ico",
+        "to": "icons/icon.ico"
       },
       {
         "from": "resources/backend",

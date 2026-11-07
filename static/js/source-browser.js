@@ -27,6 +27,8 @@
     const FALLBACK_EXTERNAL_TIP = '{name} 已在独立窗口打开，把图片拖进画布即可';
     const FALLBACK_RELOAD_FAILED = '刷新失败';
     const MORPH_MS_FALLBACK = 260;
+    const ZOOM_MIN = 30;
+    const ZOOM_MAX = 300;
     const PANEL_MIN_WIDTH = 380;
     const PANEL_MAX_WIDTH = 900;
     const PANEL_WIDTH_KEY = 'novai-source-panel-width';
@@ -60,6 +62,7 @@
     let zoomOutBtn = null;
     let zoomInBtn = null;
     let zoomResetBtn = null;
+    let lastZoom = 100;
     let customBarEl = null;
     let customUrlInput = null;
     let customOpenBtn = null;
@@ -856,12 +859,24 @@
         return Boolean(api && (typeof api.set_source_zoom === 'function' || typeof api.source_zoom_in === 'function' || typeof api.source_zoom_out === 'function'));
     }
 
-    function applySourceZoom(action){
+    function isZoomInput(){
+        return Boolean(zoomPercentEl) && String(zoomPercentEl.tagName || '').toLowerCase() === 'input';
+    }
+
+    /* 缩放比例标签：桌面端是 input（可直接输入），智能画布旧面板仍是 span */
+    function setZoomLabel(percent){
+        if(!zoomPercentEl) return;
+        const text = Math.round(Number(percent) || 100) + '%';
+        if(isZoomInput()) zoomPercentEl.value = text;
+        else zoomPercentEl.textContent = text;
+    }
+
+    function applySourceZoom(action, value){
         const api = rawApi();
         if(!api) return;
         let pending = null;
         try {
-            if(typeof api.set_source_zoom === 'function') pending = api.set_source_zoom(action);
+            if(typeof api.set_source_zoom === 'function') pending = value === undefined ? api.set_source_zoom(action) : api.set_source_zoom(action, value);
             else if(action === 'in' && typeof api.source_zoom_in === 'function') pending = api.source_zoom_in();
             else if(action === 'out' && typeof api.source_zoom_out === 'function') pending = api.source_zoom_out();
             else if(action === 'reset' && typeof api.source_zoom_reset === 'function') pending = api.source_zoom_reset();
@@ -871,11 +886,55 @@
         }
         Promise.resolve(pending).then(result => {
             if(result && result.ok === false) return;
-            if(zoomPercentEl && result && result.percent !== undefined){
-                zoomPercentEl.textContent = Math.round(Number(result.percent) || 100) + '%';
+            if(!result) return;
+            if(result.percent !== undefined){
+                lastZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(Number(result.percent) || 100)));
+                setZoomLabel(lastZoom);
+            } else if(action === 'set' && Number(value) > 0){
+                /* 宿主没回百分比时按输入值落标签，避免输入框停在没带 % 的原文 */
+                lastZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(Number(value))));
+                setZoomLabel(lastZoom);
             }
         }).catch(error => {
             console.debug('[source-browser] source zoom failed: ' + (error && error.message ? error.message : error));
+        });
+    }
+
+    function submitZoomInput(){
+        if(!isZoomInput()) return;
+        const digits = String(zoomPercentEl.value || '').replace(/[^0-9]/g, '');
+        const percent = digits ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, parseInt(digits, 10))) : 0;
+        if(!percent || percent === lastZoom){
+            setZoomLabel(lastZoom);
+            return;
+        }
+        lastZoom = percent;
+        applySourceZoom('set', percent);
+    }
+
+    function bindZoomInput(){
+        if(!isZoomInput()) return;
+        /* 输入框自己处理 Enter/Escape：别让画布快捷键（⌘J / 空格 / Delete…）收到 */
+        zoomPercentEl.addEventListener('focus', () => {
+            try { zoomPercentEl.select(); } catch(_) {}
+        });
+        zoomPercentEl.addEventListener('keydown', event => {
+            if(event.key === 'Enter'){
+                event.preventDefault();
+                event.stopPropagation();
+                submitZoomInput();
+                zoomPercentEl.blur();
+                return;
+            }
+            if(event.key === 'Escape'){
+                event.preventDefault();
+                event.stopPropagation();
+                setZoomLabel(lastZoom);
+                zoomPercentEl.blur();
+            }
+        });
+        zoomPercentEl.addEventListener('blur', () => {
+            submitZoomInput();
         });
     }
 
@@ -1169,6 +1228,23 @@
             window.addEventListener('pointercancel', onEnd, true);
         };
         cornerResizeHandle.addEventListener('pointerdown', onStart);
+        /* 双击角把手：清掉记忆尺寸，回到 CSS 默认（520 × calc(100vh - 124px)） */
+        cornerResizeHandle.addEventListener('dblclick', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+                if(window.localStorage){
+                    window.localStorage.removeItem(PANEL_WIDTH_KEY);
+                    window.localStorage.removeItem(PANEL_HEIGHT_KEY);
+                }
+            } catch(_) {}
+            panelWidthPref = 0;
+            panelHeightPref = 0;
+            panel.style.removeProperty('--source-browser-width');
+            panel.style.removeProperty('--source-browser-height');
+            scheduleRealignTabs();
+            scheduleSyncBounds();
+        });
     }
 
     function init(){
@@ -1307,6 +1383,7 @@
             bindPanelHeightResize();
             bindPanelCornerResize();
         }
+        bindZoomInput();
         renderCustomRecent();
         if(document.body) document.body.classList.remove('source-browser-open');
         setActiveTab(selectedKey, { instant: true });

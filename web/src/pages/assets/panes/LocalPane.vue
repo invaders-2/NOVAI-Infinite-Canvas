@@ -3,6 +3,7 @@
 // AI 处理（平台、模型、反推要求、智能分类、提示词反推、分类追加要求）、卡片名点击即改名、框选
 import { ref, computed, watch, nextTick } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
+import AmTools from '../parts/AmTools.vue';
 import AssetCard from '../parts/AssetCard.vue';
 import UploadCard from '../parts/UploadCard.vue';
 import MenuSelect from '../parts/MenuSelect.vue';
@@ -92,6 +93,7 @@ async function renameFolder() {
                 <label class="nv-field"><NvIcon name="search" /><input v-model="X.query" type="search" placeholder="搜索本地上传" aria-label="搜索本地上传"></label>
                 <button type="button" class="nv-btn sm primary" @click="uploader && uploader.pick()"><NvIcon name="upload" />上传文件</button>
                 <button type="button" class="nv-btn sm" :class="{ primary: X.manage }" :disabled="!total" @click="U.toggleManage()"><NvIcon name="list" />{{ X.manage ? '完成管理' : '批量管理' }}</button>
+                <AmTools />
             </div>
 
             <KindBar v-model="S.kind" :tabs="ktabs" />

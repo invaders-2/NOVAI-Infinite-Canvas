@@ -7,25 +7,35 @@ import GeneralPanel from './settings/GeneralPanel.vue';
 import BackupPanel from './settings/BackupPanel.vue';
 import AppearancePanel from './settings/AppearancePanel.vue';
 import AboutPanel from './settings/AboutPanel.vue';
-import ApiSettingsPanel from './settings/ApiSettingsPanel.vue';
+import ApiOverview from './settings/ApiOverview.vue';
+import SkillsPanel from './settings/SkillsPanel.vue';
 import WorkflowSettingsPanel from './settings/WorkflowSettingsPanel.vue';
 import MemoryPanel from './settings/MemoryPanel.vue';
-import McpSettingsPanel from './settings/McpSettingsPanel.vue';
+import PluginsPanel from './settings/PluginsPanel.vue';
 import { state, t } from '../lib/store.js';
 import { versionLabel } from '../lib/update.js';
 import { onSettingsOverlay, syncFrame } from '../lib/bridge.js';
 
 const emit = defineEmits(['quickstart']);
-const TABS = [
-    { id: 'general', icon: 'monitor', i18n: 'common.general', label: '通用', desc: '管理 NOVAI 的常用偏好与入口。', descKey: 'common.generalDesc' },
-    { id: 'memory', icon: 'brain', i18n: 'common.memory', label: '记忆', desc: '管理长期记忆，会由服务端自动注入到对话与生成请求里。', descKey: 'common.memoryDesc' },
-    { id: 'mcp', icon: 'server', i18n: 'common.mcp', label: 'MCP', desc: '管理本机 MCP 服务与工具。', descKey: 'mcp.subtitle' },
-    { id: 'api-settings', icon: 'key', i18n: 'common.apiSettings', label: 'API 设置', desc: '管理平台地址、模型列表和 Key。', descKey: 'api.subtitle' },
-    { id: 'comfyui-settings', icon: 'workflow', i18n: 'common.comfyuiSettings', label: '工作流设置', desc: '管理 ComfyUI 后端与工作流。', descKey: 'comfy.subtitle' },
-    { id: 'backup', icon: 'box', i18n: 'common.backup', label: '数据备份', desc: '备份画布、素材和设置，换电脑时一键导回。', descKey: 'common.backupDesc' },
-    { id: 'appearance', icon: 'palette', i18n: 'common.appearance', label: '外观', desc: '主题、语言与界面缩放。', descKey: 'common.appearanceDesc' },
-    { id: 'about', icon: 'badge', i18n: 'common.about', label: '关于', desc: '版本、更新与回滚。', descKey: 'common.aboutDesc' },
+// 2026-11 按原型改为分组导航：常规 / 创作能力 / 数据；右侧数字是各页的现状（平台数、开启的插件数…）
+const GROUPS = [
+    { id: 'base', label: '常规', tabs: [
+        { id: 'general', icon: 'monitor', i18n: 'common.general', label: '通用', desc: '窗口、启动、缓存、网络和更新。', descKey: 'common.generalDesc' },
+        { id: 'appearance', icon: 'palette', i18n: 'common.appearance', label: '外观', desc: '主题、语言与界面缩放。', descKey: 'common.appearanceDesc' },
+        { id: 'memory', icon: 'brain', i18n: 'common.memory', label: '记忆', desc: '长期记忆会由服务端自动带进对话与生成请求。', descKey: 'common.memoryDesc' },
+    ] },
+    { id: 'create', label: '创作能力', tabs: [
+        { id: 'api-settings', icon: 'key', label: 'API 与模型', desc: '平台地址、Key 和模型列表。点一个平台打开管理窗口。' },
+        { id: 'comfyui-settings', icon: 'workflow', i18n: 'common.comfyuiSettings', label: '工作流', desc: 'ComfyUI 后端与工作流。', descKey: 'comfy.subtitle' },
+        { id: 'mcp', icon: 'plug', label: '插件', desc: '本机 MCP 服务与工具，给画布助手调用。' },
+        { id: 'skills', icon: 'wand2', label: '技能', desc: '内置技能与自己导入的技能，画布助手按需调用。' },
+    ] },
+    { id: 'data', label: '数据', tabs: [
+        { id: 'backup', icon: 'box', i18n: 'common.backup', label: '数据备份', desc: '备份画布、素材和设置，换电脑时一键导回。', descKey: 'common.backupDesc' },
+        { id: 'about', icon: 'badge', i18n: 'common.about', label: '关于', desc: '版本、更新与回滚。', descKey: 'common.aboutDesc' },
+    ] },
 ];
+const TABS = GROUPS.flatMap(g => g.tabs);
 /* API 设置只给管理员：auth 开启时按 /api/auth/me 的 role 判断；auth 关闭（本地单机）保持原样可见。
    meReady 之前一律先隐藏，避免非管理员看到一眼再消失。 */
 const me = ref(null);
@@ -37,6 +47,23 @@ const canApi = computed(() => {
     return !!(me.value && me.value.role === 'admin');
 });
 const tabs = computed(() => (canApi.value ? TABS : TABS.filter(x => x.id !== 'api-settings')));
+const q = ref('');
+const groups = computed(() => {
+    const n = q.value.trim().toLowerCase();
+    return GROUPS.map(g => ({ ...g, tabs: g.tabs.filter(x => tabs.value.includes(x) && (!n || (x.label + x.desc).toLowerCase().includes(n))) })).filter(g => g.tabs.length);
+});
+/* 导航右侧的现状数字：打开设置时拉一次，失败就不显示 */
+const stats = ref({});
+async function loadStats() {
+    const next = {};
+    const get = url => fetch(url, { headers: { Accept: 'application/json' } }).then(r => (r.ok ? r.json() : null)).catch(() => null);
+    const [prov, mcp, skills] = await Promise.all([canApi.value ? get('/api/providers') : null, get('/api/mcp/servers'), get('/api/skills')]);
+    if (prov && Array.isArray(prov.providers)) next['api-settings'] = prov.providers.length + ' 个平台';
+    if (mcp && Array.isArray(mcp.servers)) next.mcp = mcp.servers.filter(x => x.enabled).length + ' 个开启';
+    if (skills && Array.isArray(skills.skills)) next.skills = skills.skills.length + ' 个';
+    stats.value = next;
+}
+function stat(x) { return x.id === 'about' ? (state.version ? versionLabel(state.version) : '') : (stats.value[x.id] || ''); }
 const tab = computed(() => tabs.value.find(x => x.id === state.settingsTab) || tabs.value[0]);
 
 function enforceAllowedTab() {
@@ -62,7 +89,7 @@ const panelEl = ref(null);
 const tabsEl = ref(null);
 const pill = ref({ y: 0, h: 0 });
 
-watch(() => [state.settingsOpen, state.settingsTab], ([open]) => {
+watch(() => [state.settingsOpen, state.settingsTab, q.value], ([open]) => {
     veil.value = false;
     enforceAllowedTab();
     if (!open) return;
@@ -77,7 +104,7 @@ function pickTab(id) {
 }
 function placePill() {
     const el = tabsEl.value && tabsEl.value.querySelector('.tab.is-on');
-    if (el) pill.value = { y: el.offsetTop, h: el.offsetHeight };
+    pill.value = el ? { y: el.offsetTop, h: el.offsetHeight } : { y: 0, h: 0 };
 }
 onSettingsOverlay((open, source) => { if (frameEl.value && source === frameEl.value.contentWindow) veil.value = open; });
 
@@ -115,6 +142,8 @@ onMounted(() => {
     loadMe();
 });
 watch(canApi, () => enforceAllowedTab());
+watch(() => state.settingsOpen, open => { if (open) { q.value = ''; loadStats(); } }, { immediate: true });
+watch(() => state.settingsTab, (id, prev) => { if (prev === 'mcp' || prev === 'skills' || prev === 'api-settings') loadStats(); });
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 </script>
 
@@ -123,28 +152,34 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
         <div v-if="state.settingsOpen" class="scrim" @mousedown.self="close">
             <div ref="panelEl" class="smodal" :class="{ veiled: veil }" role="dialog" aria-modal="true" aria-labelledby="sm-title">
                 <aside class="aside">
-                    <div class="aside-top"><h2 id="sm-title">{{ t('common.settings', '设置') }}</h2><span class="mono">{{ versionLabel(state.version) }}</span></div>
+                    <div class="aside-top"><h2 id="sm-title">{{ t('common.settings', '设置') }}</h2></div>
+                    <label class="psearch"><NvIcon name="search" /><input v-model="q" type="search" placeholder="搜索设置" autocomplete="off" aria-label="搜索设置"></label>
                     <div ref="tabsEl" class="tabs" role="tablist" aria-label="设置分类">
-                        <span class="tab-pill" :style="{ transform: `translateY(${pill.y}px)`, height: pill.h + 'px' }"></span>
-                        <button v-for="x in tabs" :key="x.id" type="button" role="tab" class="tab" :class="{ 'is-on': x.id === state.settingsTab }" :aria-selected="x.id === state.settingsTab" @click="pickTab(x.id)">
-                            <NvIcon :name="x.icon" />{{ t(x.i18n, x.label) }}
-                        </button>
+                        <span class="tab-pill" :style="{ transform: `translateY(${pill.y}px)`, height: pill.h + 'px', opacity: pill.h ? 1 : 0 }"></span>
+                        <template v-for="g in groups" :key="g.id">
+                            <div class="grp">{{ g.label }}</div>
+                            <button v-for="x in g.tabs" :key="x.id" type="button" role="tab" class="tab" :class="{ 'is-on': x.id === state.settingsTab }" :aria-selected="x.id === state.settingsTab" @click="pickTab(x.id)">
+                                <NvIcon :name="x.icon" /><span class="lb">{{ x.i18n ? t(x.i18n, x.label) : x.label }}</span><span class="st">{{ stat(x) }}</span>
+                            </button>
+                        </template>
+                        <div v-if="!groups.length" class="none">没有匹配「{{ q.trim() }}」的设置</div>
                     </div>
                 </aside>
                 <section class="content">
-                    <header class="c-head" :class="{ slim: tab.id === 'api-settings' }">
-                        <div v-if="tab.id !== 'api-settings'"><h3>{{ t(tab.i18n, tab.label) }}</h3><p>{{ t(tab.descKey, tab.desc) }}</p></div>
+                    <header class="c-head">
+                        <div><h3>{{ tab.i18n ? t(tab.i18n, tab.label) : tab.label }}</h3><p>{{ tab.descKey ? t(tab.descKey, tab.desc) : tab.desc }}</p></div>
                         <button type="button" class="nv-icon-btn sm round close" title="关闭" aria-label="关闭" @click="close"><NvIcon name="x" /></button>
                     </header>
-                    <div v-if="tab.id === 'api-settings'" class="c-frame"><ApiSettingsPanel /></div>
-                    <div v-else-if="tab.frame" class="c-frame">
+                    <div v-if="tab.frame" class="c-frame">
                         <iframe ref="frameEl" :key="frameSrc" :src="frameSrc" :title="tab.label" allow="fullscreen; clipboard-read; clipboard-write" @load="onFrameLoad"></iframe>
                     </div>
                     <div v-else class="c-body">
                         <Transition name="panel" mode="out-in">
                             <GeneralPanel v-if="tab.id === 'general'" />
                             <MemoryPanel v-else-if="tab.id === 'memory'" />
-                            <McpSettingsPanel v-else-if="tab.id === 'mcp'" />
+                            <ApiOverview v-else-if="tab.id === 'api-settings'" />
+                            <PluginsPanel v-else-if="tab.id === 'mcp'" />
+                            <SkillsPanel v-else-if="tab.id === 'skills'" />
                             <BackupPanel v-else-if="tab.id === 'backup'" />
                             <AppearancePanel v-else-if="tab.id === 'appearance'" />
                             <AboutPanel v-else-if="tab.id === 'about'" @quickstart="emit('quickstart')" />
@@ -165,19 +200,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 /* 内嵌页打开浮层时，整块设置界面一起压暗，避免只有 iframe 那块变暗 */
 .smodal.veiled::after { content: ""; position: absolute; inset: 0; background: var(--scrim); pointer-events: none; z-index: 1; }
 .smodal.veiled .c-frame { z-index: 2; }
-.aside { width: 200px; flex: none; padding: 26px 12px; background: var(--fill-1); display: flex; flex-direction: column; }
-.aside-top { display: flex; align-items: baseline; justify-content: space-between; padding: 0 10px 18px; }
+.aside { width: 224px; flex: none; padding: 24px 10px 16px; background: var(--fill-1); display: flex; flex-direction: column; overflow-y: auto; }
+.aside-top { display: flex; align-items: baseline; justify-content: space-between; padding: 0 8px 12px; }
+.psearch { display: flex; align-items: center; gap: 8px; height: 32px; margin: 0 0 6px; padding: 0 10px; border-radius: 10px; background: var(--fill-2); color: var(--ink-3); flex: none; }
+.psearch .nv-i { width: 14px; height: 14px; }
+.psearch input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: 400 12.5px/1 var(--font-sans); color: var(--ink); }
+.psearch input::placeholder { color: var(--ink-4); }
+.psearch input::-webkit-search-cancel-button { display: none; }
+.grp { padding: 14px 10px 4px; font: 400 11px/14px var(--font-sans); color: var(--ink-3); }
+.tab .lb { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab .st { font: 400 11px/1 var(--font-sans); color: var(--ink-4); white-space: nowrap; }
+.tab .nv-i { width: 15px; height: 15px; }
+.none { padding: 16px 10px; font: 400 12px/16px var(--font-sans); color: var(--ink-3); }
 .aside-top h2 { margin: 0; font: 500 16px/22px var(--font-sans); letter-spacing: -.01em; }
 .aside-top .mono { font: 400 11px/1 var(--font-mono); color: var(--ink-3); }
 .tabs { position: relative; display: flex; flex-direction: column; gap: 2px; }
-.tab-pill { position: absolute; left: 0; right: 0; top: 0; border-radius: 10px; background: var(--solid); box-shadow: var(--shadow-float); transition: transform 220ms cubic-bezier(.23,1,.32,1), height 220ms cubic-bezier(.23,1,.32,1); }
-.tab { position: relative; z-index: 1; height: 36px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--ink-2); font: 400 13px/1 var(--font-sans); text-align: left; transition: color var(--duration-fast); }
-.tab:hover { color: var(--ink); }
-.tab.is-on { color: var(--ink); font-weight: 500; }
+.tab-pill { position: absolute; left: 0; right: 0; top: 0; border-radius: 10px; background: var(--fill-3); transition: transform 220ms cubic-bezier(.23,1,.32,1), height 220ms cubic-bezier(.23,1,.32,1); }
+.tab { position: relative; z-index: 1; height: 34px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--ink-2); font: 400 13px/1 var(--font-sans); text-align: left; transition: color var(--duration-fast), background var(--duration-fast); }
+.tab:hover { background: var(--fill-2); color: var(--ink); }
+.tab.is-on, .tab.is-on:hover { background: transparent; color: var(--ink); font-weight: 500; }
 .content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .c-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 26px 32px 18px; flex: none; }
-/* API 设置页的吸顶页头 z-index 是 30，关闭按钮要压在它上面，不然左半边被挡住 */
-.c-head.slim { position: absolute; right: 0; top: 0; z-index: 50; padding: 14px 16px; }
 .c-head h3 { margin: 0; font: 500 18px/26px var(--font-sans); letter-spacing: -.015em; }
 .c-head p { margin: 2px 0 0; font: 400 12.5px/18px var(--font-sans); color: var(--ink-3); }
 /* 关闭按钮只留图标不画底框；用复合选择器压过共用的 .nv-icon-btn:hover 底色，不动其它图标按钮 */

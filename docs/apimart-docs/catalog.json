@@ -1,0 +1,1334 @@
+{
+  "_meta": {
+    "generated_by": "task-1 docs-researcher（APIMart 官方文档调研）",
+    "channel": "docs.apimart.ai（/en 与 /cn 内容一致）",
+    "corpus": "llms-full.txt 2327937 bytes / 87909 lines, sha256 da7f038a4cf98a3f09c2c9fdd960c2276885ed00c084aae551aebada968387fc",
+    "report": "docs/apimart-docs/REPORT.md",
+    "rules": [
+      "只收文档里能确证的模型 ID；别名单独成条并在 notes 里写 = 哪个正式 ID。",
+      "efforts 只写 low/mid/high/xhigh/max 的子集，空数组 = 不下发该字段；条目的档位建议与 VENDOR-REASONING.md §4 保持一致（按上游真实能区分的档数收敛，不是一律 5 档）。",
+      "wire_mapping（可选）= 我们档位 -> 上游 reasoning_effort 实际取值；没有该字段时按 1:1 同名字段发送。Claude 系不适用（wire 是 thinking.budget_tokens）。",
+      "chat 条目带 inferred: 文档没给档位枚举，efforts 是推荐值，传法见 REPORT.md 段 C.4（可能被上游忽略或 400，需降级重发）。",
+      "image/video/audio 的 efforts 恒为 []（这几类没有 think 档位；图像侧的 thinking_mode/quality 档位写在 notes 里，不要当 think_level 用）。",
+      "拿不准的字段留空并在 REPORT.md 标『未知』。"
+    ],
+    "vendor_alignment": "VENDOR-REASONING.md §4（task-11）；OpenAI/Gemini/DeepSeek/Qwen/Claude 的档位建议已按厂商官方文档对齐"
+  },
+  "chat": [
+    {
+      "id": "gpt-5",
+      "name": "GPT-5",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh"
+      ],
+      "notes": "老一代 ID（OpenAI 官方已无对应模型页）。UI 给 4 档，但 wire 要整体下移一档：low->minimal、mid->low、high->medium、xhigh->high（推断：老一代 reasoning_effort 只到 high）。见 VENDOR-REASONING.md §4.1",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "minimal",
+        "mid": "low",
+        "high": "medium",
+        "xhigh": "high"
+      }
+    },
+    {
+      "id": "gpt-5.1",
+      "name": "GPT-5.1",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh"
+      ],
+      "notes": "老一代 ID（OpenAI 官方已无对应模型页）。UI 给 4 档，但 wire 要整体下移一档：low->minimal、mid->low、high->medium、xhigh->high（推断：老一代 reasoning_effort 只到 high）。见 VENDOR-REASONING.md §4.1",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "minimal",
+        "mid": "low",
+        "high": "medium",
+        "xhigh": "high"
+      }
+    },
+    {
+      "id": "gpt-5-chat-latest",
+      "name": "GPT-5 Chat Latest",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh"
+      ],
+      "notes": "老一代 ID（OpenAI 官方已无对应模型页）。UI 给 4 档，但 wire 要整体下移一档：low->minimal、mid->low、high->medium、xhigh->high（推断：老一代 reasoning_effort 只到 high）。见 VENDOR-REASONING.md §4.1",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "minimal",
+        "mid": "low",
+        "high": "medium",
+        "xhigh": "high"
+      }
+    },
+    {
+      "id": "gpt-5-mini",
+      "name": "GPT-5 Mini",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh"
+      ],
+      "notes": "老一代 ID（OpenAI 官方已无对应模型页）。UI 给 4 档，但 wire 要整体下移一档：low->minimal、mid->low、high->medium、xhigh->high（推断：老一代 reasoning_effort 只到 high）。见 VENDOR-REASONING.md §4.1",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "minimal",
+        "mid": "low",
+        "high": "medium",
+        "xhigh": "high"
+      }
+    },
+    {
+      "id": "gpt-5.2-pro",
+      "name": "GPT-5.2 Pro",
+      "efforts": [
+        "mid",
+        "high",
+        "xhigh"
+      ],
+      "notes": "pro 家族官方档位是 medium/high/xhigh（gpt-5.4-pro、gpt-5.5-pro 文档原文）-> chat 侧收敛 3 档。**注意：OpenAI 文档写明 gpt-5.2-pro \"available in the Responses API only\"，走 /chat/completions 属未验证**。见 VENDOR-REASONING.md §4.1",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/openai/responses",
+      "inferred": true,
+      "wire_mapping": {
+        "mid": "medium",
+        "high": "high",
+        "xhigh": "xhigh"
+      }
+    },
+    {
+      "id": "gpt-5.2-codex",
+      "name": "GPT-5.2 Codex",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "codex 系在当前 OpenAI 文档里没有独立模型页，无 effort 枚举可引用 -> 保守 3 档（推断）。见 VENDOR-REASONING.md §4.1",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/openai/responses",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "mid": "medium",
+        "high": "high"
+      }
+    },
+    {
+      "id": "gpt-6.1-terra",
+      "name": "GPT-6.1 Terra",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "OpenAI 官方模型页原文：reasoning.effort supports none, low, medium (default), high, xhigh, and max -> 原生 5 档直映。见 VENDOR-REASONING.md §4.1",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/openai/context-cache",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "mid": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "id": "claude-opus-4-8",
+      "name": "Claude Opus 4.8",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored（忽略），**不能发 reasoning_effort**；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，N>=1024 且 < max_tokens (low=1024/mid=4096/high=8192/xhigh=16384/max=32768，推断)；真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-opus-4-7",
+      "name": "Claude Opus 4.7",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-opus-4-6",
+      "name": "Claude Opus 4.6",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "同上；平台另有 -thinking 别名模型，文档推荐用标准名+thinking 参数",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-opus-4-5-20251101",
+      "name": "Claude Opus 4.5",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "gemini-3-pro-preview-thinking",
+      "name": "Gemini 3 Pro 深度思考预览版",
+      "efforts": [
+        "low",
+        "high"
+      ],
+      "notes": "Gemini 官方 thinking 表原文：gemini-3-pro-preview 只支持 low / high 两档（默认 high）-> 只给 2 档，不能给 5 档；-thinking 后缀只是\"思考版模型\"，不增加档位。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "high": "high"
+      }
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "name": "Gemini 3.5 Flash",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "mid": "medium",
+        "high": "high"
+      }
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "name": "Gemini 3.1 Pro Preview",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "mid": "medium",
+        "high": "high"
+      }
+    },
+    {
+      "id": "gemini-3-pro-preview",
+      "name": "Gemini 3 Pro Preview",
+      "efforts": [
+        "low",
+        "high"
+      ],
+      "notes": "Gemini 官方 thinking 表原文：gemini-3-pro-preview 只支持 low / high 两档（默认 high）-> 只给 2 档，不能给 5 档；-thinking 后缀只是\"思考版模型\"，不增加档位。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "high": "high"
+      }
+    },
+    {
+      "id": "gemini-3-flash-preview",
+      "name": "Gemini 3 Flash Preview",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "mid": "medium",
+        "high": "high"
+      }
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "name": "Gemini 2.5 Pro",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "mid": "medium",
+        "high": "high"
+      }
+    },
+    {
+      "id": "gemini-2.5-flash",
+      "name": "Gemini 2.5 Flash",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "mid": "medium",
+        "high": "high"
+      }
+    },
+    {
+      "id": "gemini-2.5-flash-lite",
+      "name": "Gemini 2.5 Flash Lite",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "mid": "medium",
+        "high": "high"
+      }
+    },
+    {
+      "id": "deepseek-r1-250528",
+      "name": "DeepSeek R1",
+      "efforts": [],
+      "notes": "文档原文『DeepSeek R1 推理模型』→ 确证是推理模型，但文档没写任何档位参数；R1 系通常不接受 effort，建议不下发该字段",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": false
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "notes": "DeepSeek 官方文档：OpenAI 格式 reasoning_effort 取 low/high/max（默认 high），medium/xhigh 会被映射成 high -> 只有 3 个真实档，不能给 5 档。文档声明的模型是 deepseek-flash / deepseek-v4-pro，此处 ID 属同族推断。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.4/§4.4",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "high": "high",
+        "max": "max"
+      }
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "notes": "DeepSeek 官方文档：OpenAI 格式 reasoning_effort 取 low/high/max（默认 high），medium/xhigh 会被映射成 high -> 只有 3 个真实档，不能给 5 档。文档声明的模型是 deepseek-flash / deepseek-v4-pro，此处 ID 属同族推断。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.4/§4.4",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "high": "high",
+        "max": "max"
+      }
+    },
+    {
+      "id": "deepseek-v3.2",
+      "name": "DeepSeek V3.2",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": false
+    },
+    {
+      "id": "deepseek-v3.2-exp",
+      "name": "DeepSeek V3.2 Exp",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": false
+    },
+    {
+      "id": "deepseek-v3-0324",
+      "name": "DeepSeek V3 0324",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": false
+    },
+    {
+      "id": "qwen3.8-max",
+      "name": "Qwen3.8 Max",
+      "efforts": [
+        "low",
+        "mid",
+        "xhigh"
+      ],
+      "notes": "APIMart 文档没有推理参数，但厂商（阿里云百炼）官方文档确认 qwen3.8-max 支持 reasoning_effort = low/medium/xhigh（默认 xhigh），high 与 max 均映射为 xhigh -> 只暴露 3 档（低/中/极高），不能给 5 档；reasoning_effort 与 thinking_budget 互斥，不能同时发。详见 VENDOR-REASONING.md §2.5/§4.5",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/qwen3.8-max/guide",
+      "inferred": true,
+      "vendor_documented": {
+        "parameter": "reasoning_effort",
+        "values": [
+          "low",
+          "medium",
+          "xhigh"
+        ],
+        "default": "xhigh",
+        "mapping": "high -> xhigh; max -> xhigh",
+        "in_openai_compatible": true,
+        "source_url": "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions"
+      }
+    },
+    {
+      "id": "claude-sonnet-5",
+      "name": "Claude Sonnet 5",
+      "efforts": [],
+      "notes": "只出现在 Claude Context Caching 指南示例里（证据弱）；未见 thinking 文档 → 不下发",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-context-cache",
+      "inferred": true
+    },
+    {
+      "id": "gemini-3.6-flash",
+      "name": "Gemini 3.6 Flash",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/gemini/context-cache",
+      "inferred": true,
+      "wire_mapping": {
+        "low": "low",
+        "mid": "medium",
+        "high": "high"
+      }
+    }
+  ],
+  "image": [
+    {
+      "id": "flux-2-flex",
+      "name": "FLUX.2 Flex",
+      "efforts": [],
+      "notes": "端点 POST /v1/images/generations；size(默认1:1)/resolution(默认2MP)/width+height(各≥64px，合计≤4MP)/image_urls(≤8，合计9MP)/output_format(默认jpeg)/n(仅1)/seed/prompt_upsampling/safety_tolerance/steps(1–50)/guidance(默认5.0)",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/flux-2/generation"
+    },
+    {
+      "id": "flux-2-pro",
+      "name": "FLUX.2 Pro",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/flux-2/generation"
+    },
+    {
+      "id": "flux-2-max",
+      "name": "FLUX.2 Max",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/flux-2/generation"
+    },
+    {
+      "id": "flux-3-image-klein",
+      "name": "FLUX 3 Image Klein",
+      "efforts": [],
+      "notes": "prompt/image_urls/aspect_ratio(默认auto)/size/resolution(默认1k)/steps(默认16)/output_format(默认jpeg)/n/safety_tolerance/seed",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/flux-3-image-klein/generation"
+    },
+    {
+      "id": "flux-3-image",
+      "name": "FLUX 3 Image",
+      "efforts": [],
+      "notes": "同上，另有 grounding(默认true)，无 steps",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/flux-3-image/generation"
+    },
+    {
+      "id": "flux-kontext-pro",
+      "name": "FLUX Kontext Pro",
+      "efforts": [],
+      "notes": "prompt/image_urls(≤4，合计9MP)/size(默认1:1)/output_format(默认png)/n/seed/safety_tolerance/nsfw_check",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/flux-kontext/generation"
+    },
+    {
+      "id": "flux-kontext-max",
+      "name": "FLUX Kontext Max",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/flux-kontext/generation"
+    },
+    {
+      "id": "gemini-2.5-flash-image-preview",
+      "name": "Nano banana（标准版）",
+      "efforts": [],
+      "notes": "兼容别名 nano-banana-ext，原文说明两个名字完全等价、结果一致",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-2.5-flash/generation"
+    },
+    {
+      "id": "nano-banana-ext",
+      "name": "Nano banana（别名）",
+      "efforts": [],
+      "notes": "= gemini-2.5-flash-image-preview",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-2.5-flash/generation"
+    },
+    {
+      "id": "gemini-2.5-flash-image-preview-official",
+      "name": "Nano banana 官方版",
+      "efforts": [],
+      "notes": "兼容别名 nano-banana",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-2.5-flash/generation"
+    },
+    {
+      "id": "nano-banana",
+      "name": "Nano banana 官方版（别名）",
+      "efforts": [],
+      "notes": "= gemini-2.5-flash-image-preview-official",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-2.5-flash/generation"
+    },
+    {
+      "id": "gemini-3-pro-image-preview",
+      "name": "Nano banana Pro",
+      "efforts": [],
+      "notes": "兼容别名 nano-banana-pro-ext；n 必须纯数字（带引号会报错）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3-pro/generation"
+    },
+    {
+      "id": "nano-banana-pro-ext",
+      "name": "Nano banana Pro（别名）",
+      "efforts": [],
+      "notes": "= gemini-3-pro-image-preview",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3-pro/generation"
+    },
+    {
+      "id": "gemini-3-pro-image-preview-official",
+      "name": "Nano banana Pro 官方版",
+      "efforts": [],
+      "notes": "兼容别名 nano-banana-pro",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3-pro/generation"
+    },
+    {
+      "id": "nano-banana-pro",
+      "name": "Nano banana Pro 官方版（别名）",
+      "efforts": [],
+      "notes": "= gemini-3-pro-image-preview-official",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3-pro/generation"
+    },
+    {
+      "id": "gemini-3.1-flash-image-preview",
+      "name": "Nano banana2",
+      "efforts": [],
+      "notes": "兼容别名 nano-banana-2-ext；google_search 需配合 google_search:true",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation"
+    },
+    {
+      "id": "nano-banana-2-ext",
+      "name": "Nano banana2（别名）",
+      "efforts": [],
+      "notes": "= gemini-3.1-flash-image-preview",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation"
+    },
+    {
+      "id": "gemini-3.1-flash-image-preview-official",
+      "name": "Nano banana2 官方版",
+      "efforts": [],
+      "notes": "兼容别名 nano-banana-2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation"
+    },
+    {
+      "id": "nano-banana-2",
+      "name": "Nano banana2 官方版（别名）",
+      "efforts": [],
+      "notes": "= gemini-3.1-flash-image-preview-official",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation"
+    },
+    {
+      "id": "gemini-3.1-flash-lite-image",
+      "name": "Nano Banana Lite",
+      "efforts": [],
+      "notes": "兼容别名 nano-banana-2-lite",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation-lite"
+    },
+    {
+      "id": "nano-banana-2-lite",
+      "name": "Nano Banana Lite（别名）",
+      "efforts": [],
+      "notes": "= gemini-3.1-flash-lite-image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation-lite"
+    },
+    {
+      "id": "gemini-3.1-flash-lite-image-ext",
+      "name": "Nano Banana Lite Ext",
+      "efforts": [],
+      "notes": "兼容别名 nano-banana-2-lite-ext",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation-lite"
+    },
+    {
+      "id": "nano-banana-2-lite-ext",
+      "name": "Nano Banana Lite Ext（别名）",
+      "efforts": [],
+      "notes": "= gemini-3.1-flash-lite-image-ext",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation-lite"
+    },
+    {
+      "id": "gemini-nano-banana-2.1",
+      "name": "Nano banana 2.1（官方版）",
+      "efforts": [],
+      "notes": "size(默认auto)/resolution(默认1K)/n(1–4)/image_urls(单图≤20MB)/official_fallback/webhook；按实际 token 计费",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-nano-banana-2.1/generation"
+    },
+    {
+      "id": "gemini-nano-banana-2.1-ext",
+      "name": "Nano banana 2.1 Ext",
+      "efforts": [],
+      "notes": "同上但 n 仅 1；image_urls 单图≤20MB、合计≤50MB；按张·按分辨率计费",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gemini-nano-banana-2.1/generation"
+    },
+    {
+      "id": "gpt-image-1-official",
+      "name": "GPT-Image-1 官方渠道",
+      "efforts": [],
+      "notes": "size(默认1:1)/quality(默认auto)/background/moderation/output_format(默认png)/output_compression/image_urls/mask_url/n/nsfw_check",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-1/generation"
+    },
+    {
+      "id": "gpt-image-1.5-official",
+      "name": "GPT-Image-1.5 官方渠道",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-1/generation"
+    },
+    {
+      "id": "gpt-image-2.5-ext",
+      "name": "GPT-Image-2.5 Ext",
+      "efforts": [],
+      "notes": "n(1–4)；支持 Idempotency-Key 头（1–191 可见ASCII，约24h保留，重放回 Idempotency-Replayed:true）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.5-ext/generation"
+    },
+    {
+      "id": "gpt-image-2.5-flare",
+      "name": "GPT-Image-2.5 Flare",
+      "efforts": [],
+      "notes": "size(默认auto)/resolution(默认1k)/quality/n/output_format(默认png)/output_compression/background/moderation(默认low)/image_urls/mask_url",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.5/generation"
+    },
+    {
+      "id": "gpt-image-2.5-sunburst",
+      "name": "GPT-Image-2.5 Sunburst",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.5/generation"
+    },
+    {
+      "id": "gpt-image-2.6-ext",
+      "name": "GPT-Image-2.6 Ext",
+      "efforts": [],
+      "notes": "[文档独有] version(flare|sunburst)/resolution(仅1k；2k/4k 回 403 model_price_not_configured)/size(10种比例，不接受像素)/aspect_ratio/n(仅1)/quality(auto|low|medium|high|xhigh|max)/output_format(png|jpeg|webp|svg|gif)/complexity(low|medium|high)/image_urls(≤16，各≤20MB)/svg{model,reasoning{effort(none|minimal|low|medium|high|xhigh|max)}}",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6-ext/generation"
+    },
+    {
+      "id": "gpt-image-2.6-flare",
+      "name": "GPT-Image-2.6 Flare",
+      "efforts": [],
+      "notes": "[文档确证] size=auto + 15 个比例（1:1/3:2/2:3/4:3/3:4/5:4/4:5/16:9/9:16/2:1/1:2/21:9/9:21/3:1/1:3），也支持精确像素（多张 16 的倍数，边≤3840，长短边比≤3:1，总像素 655360–8294400）；resolution=1k/2k/4k；quality=auto/low/medium/high/xhigh/max；n=1–4；output_format=png/jpeg/webp/gif/svg；参考图≤16",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation"
+    },
+    {
+      "id": "gpt-image-2.6-sunburst",
+      "name": "GPT-Image-2.6 Sunburst",
+      "efforts": [],
+      "notes": "[文档独有] 同 flare（同一文档页）：[文档确证] size=auto + 15 个比例（1:1/3:2/2:3/4:3/3:4/5:4/4:5/16:9/9:16/2:1/1:2/21:9/9:21/3:1/1:3），也支持精确像素（多张 16 的倍数，边≤3840，长短边比≤3:1，总像素 655360–8294400）；resolution=1k/2k/4k；quality=auto/low/medium/high/xhigh/max；n=1–4；output_format=png/jpeg/webp/gif/svg；参考图≤16",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation"
+    },
+    {
+      "id": "gpt-image-2",
+      "name": "GPT-Image-2",
+      "efforts": [],
+      "notes": "兼容别名 gpt-image-2-ext，原文说明完全等价",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2/generation"
+    },
+    {
+      "id": "gpt-image-2-ext",
+      "name": "GPT-Image-2（别名）",
+      "efforts": [],
+      "notes": "= gpt-image-2",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2/generation"
+    },
+    {
+      "id": "gpt-image-2-official",
+      "name": "GPT-Image-2 官方渠道",
+      "efforts": [],
+      "notes": "size(默认1:1)/resolution(默认1k)/quality(默认auto)/moderation/output_format(默认png)/output_compression/n/image_urls/mask_url/nsfw_check",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2/official"
+    },
+    {
+      "id": "grok-imagine-2.0-ext",
+      "name": "Grok Imagine 2.0 Ext",
+      "efforts": [],
+      "notes": "n/size/resolution/response_format(默认url)/nsfw_check/webhook；另有图层与区域编辑页：selection_regions/boxes/object_indices 至少一个非空，坐标 0–1",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/grok-imagine-2.0-ext/generation"
+    },
+    {
+      "id": "grok-imagine-image-2.0",
+      "name": "Grok Imagine Image 2.0 官方",
+      "efforts": [],
+      "notes": "aspect_ratio(默认auto)/resolution(默认1k)/quality/image_urls/n(1–10)/nsfw_check",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/grok-imagine-2.0-ext/official"
+    },
+    {
+      "id": "grok-imagine-1.5-apimart",
+      "name": "Grok Imagine 1.5",
+      "efforts": [],
+      "notes": "兼容别名 grok-imagine-1.5-ext；另有 grok-imagine-image / grok-imagine-image-quality 两个版本名",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/grok-imagine/generation"
+    },
+    {
+      "id": "grok-imagine-1.5-ext",
+      "name": "Grok Imagine 1.5（别名）",
+      "efforts": [],
+      "notes": "= grok-imagine-1.5-apimart",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/grok-imagine/generation"
+    },
+    {
+      "id": "hy-image-v3.5-preview",
+      "name": "Hy-Image-3.5 Preview",
+      "efforts": [],
+      "notes": "size(默认auto)/resolution(默认1K)/width+height/image_urls/negative_prompt/seed/n(必须1)",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/hy-image-v3.5-preview/generation"
+    },
+    {
+      "id": "imagen-4.0-apimart",
+      "name": "Imagen 4.0",
+      "efforts": [],
+      "notes": "n/size(默认16:9)/nsfw_check",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/imagen-4.0-apimart/generation"
+    },
+    {
+      "id": "mai-image-2.6",
+      "name": "MAI-Image-2.6",
+      "efforts": [],
+      "notes": "size(默认1:1)/resolution(默认1K)/width+height(短边≥768，按32取整)/image_urls/auto_aspect_ratio/web_grounding/n",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/mai-image-2.6/generation"
+    },
+    {
+      "id": "mai-image-2.6-flash",
+      "name": "MAI-Image-2.6 Flash",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/mai-image-2.6/generation"
+    },
+    {
+      "id": "muse-image-ext",
+      "name": "Muse Image Ext",
+      "efforts": [],
+      "notes": "[文档独有] 单请求生成 1 张 WebP；≤9 张参考图；aspect_ratio/size/n/webhook/language/Idempotency-Key",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/muse-image-ext/generation"
+    },
+    {
+      "id": "qwen-image-3.0",
+      "name": "Qwen Image 3.0",
+      "efforts": [],
+      "notes": "resolution(默认1K)/size(默认1:1)/n/negative_prompt/prompt_extend(默认false)/prompt_extend_mode/image_urls/nsfw_check",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/qwen-image-3.0/generation"
+    },
+    {
+      "id": "qwen-image-3.0-pro",
+      "name": "Qwen Image 3.0 Pro",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/qwen-image-3.0/generation"
+    },
+    {
+      "id": "qwen-image-2.0",
+      "name": "Qwen Image 2.0",
+      "efforts": [],
+      "notes": "size(默认1:1)/resolution(默认1K)/n/negative_prompt/image_urls/nsfw_check",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/qwen-image/generation"
+    },
+    {
+      "id": "qwen-image-2.0-pro",
+      "name": "Qwen Image 2.0 Pro",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/qwen-image/generation"
+    },
+    {
+      "id": "seedream-4.5",
+      "name": "Seedream-4.5",
+      "efforts": [],
+      "notes": "文档 model 值写作 seedream-4.5，项目目录是 seedream-4-5（ID 形式不同，需确认）；size(默认1:1)/resolution(默认2K)/n/image_urls/sequential_image_generation/sequential_image_generation_options/watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/seedream-4.5/generation"
+    },
+    {
+      "id": "seedream-4.0",
+      "name": "Seedream-4.0",
+      "efforts": [],
+      "notes": "文档 model 值写作 seedream-4.0，项目目录是 seedream-4-0；另有 optimize_prompt_options(默认standard)",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/seedream-4/generation"
+    },
+    {
+      "id": "seedream-5-0-flash",
+      "name": "Seedream-5.0 Flash",
+      "efforts": [],
+      "notes": "resolution(默认1K)/size(默认auto)/background(默认opaque)/layer_decomposition/optimize_prompt_options(默认{mode:standard})/n(默认1)/image_urls/output_format(默认jpeg)/watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/seedream-5-0-flash/generation"
+    },
+    {
+      "id": "seedream-5-0-pro",
+      "name": "Seedream-5.0 Pro",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/seedream-5-0-pro/generation"
+    },
+    {
+      "id": "seedream-5-0-lite",
+      "name": "Seedream-5.0 Lite",
+      "efforts": [],
+      "notes": "size(默认1:1)/resolution(默认2K)/n/image_urls/output_format(默认jpeg)/sequential_image_generation/sequential_image_generation_options/watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/seedream-5-lite/generation"
+    },
+    {
+      "id": "wan2.7-image",
+      "name": "Wan2.7 Image",
+      "efforts": [],
+      "notes": "image_urls(≤9，240–8000px，比例1:8~8:1，各≤20MB)/n(标准1–4；sequential 1–12)/size(1K|2K|4K 或比例或像素)/resolution/negative_prompt/watermark/seed/thinking_mode(布尔，默认true)/enable_sequential/bbox_list/color_palette(3–10项，ratio 合计100%)",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/wan2.7-image/generation"
+    },
+    {
+      "id": "wan2.7-image-pro",
+      "name": "Wan2.7 Image Pro",
+      "efforts": [],
+      "notes": "文生图支持到 4K；编辑/sequential 只到 2K；其余同 wan2.7-image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/wan2.7-image/generation"
+    },
+    {
+      "id": "z-image-turbo",
+      "name": "Z-Image-Turbo",
+      "efforts": [],
+      "notes": "轻量快速，支持 1K/2K、中英文、智能提示词改写；端点 POST /v1/images/generations",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/z-image-turbo/generation"
+    },
+    {
+      "id": "midjourney",
+      "name": "Midjourney",
+      "efforts": [],
+      "notes": "独立族：POST /v1/midjourney/generations(imagine)、/blend、/describe、/edits、/variation、/high-variation、/low-variation、/upscale、/pan、/zoom、/reroll、/remix-strong、/inpaint(+ /modal)、/video；查询 GET /v1/midjourney/{task_id}；单图≤12MiB；inpaint 的 MODAL 状态 30 分钟超时自动取消并退款",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/midjourney/generation"
+    }
+  ],
+  "video": [
+    {
+      "id": "seedance-1-0-pro-quality",
+      "name": "Seedance 1.0 Pro Quality",
+      "efforts": [],
+      "notes": "duration(默认5)/aspect_ratio(默认16:9)/resolution(默认1080p)/seed/image_with_roles[{url,role}]",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/doubao/generation"
+    },
+    {
+      "id": "seedance-1-0-pro-fast",
+      "name": "Seedance 1.0 Pro Fast",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/doubao/generation"
+    },
+    {
+      "id": "flux-3-video",
+      "name": "FLUX 3 Video",
+      "efforts": [],
+      "notes": "duration(默认5)/resolution(默认hd)/aspect_ratio(默认auto)/image_urls/video_url/video_urls/audio(默认true)/draft/draft_from_task_id/safety_tolerance/mode",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/flux-3-video/generation"
+    },
+    {
+      "id": "grok-imagine-1.5-video-ext",
+      "name": "Grok Imagine 1.5 Video",
+      "efforts": [],
+      "notes": "文档写明 model 固定为该值",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/grok-imagine/generation"
+    },
+    {
+      "id": "happyhorse-1.0",
+      "name": "HappyHorse 1.0",
+      "efforts": [],
+      "notes": "prompt/first_frame_image/image_urls/video_url/audio_setting(默认auto)/resolution(默认1080P)/duration(默认5)/size(默认16:9)/watermark/seed",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/happyhorse-1.0/generation"
+    },
+    {
+      "id": "happyhorse-1.1",
+      "name": "HappyHorse 1.1",
+      "efforts": [],
+      "notes": "prompt/first_frame_image/image_urls/resolution(默认1080P)/duration(默认5)/size(默认16:9)/watermark/seed",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/happyhorse-1.1/generation"
+    },
+    {
+      "id": "kling-3.0-turbo",
+      "name": "Kling 3.0 Turbo",
+      "efforts": [],
+      "notes": "prompt/first_frame_image/aspect_ratio(默认16:9)/resolution(默认720p)/duration(默认5)/watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/kling-3.0-turbo/generation"
+    },
+    {
+      "id": "kling-v2-6",
+      "name": "Kling 2.6",
+      "efforts": [],
+      "notes": "mode(默认std)/duration(默认5)/aspect_ratio(默认16:9)/negative_prompt/image_urls/audio(默认false)/watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/kling-v2-6/generation"
+    },
+    {
+      "id": "kling-v2-6-motion-control",
+      "name": "Kling v2.6 Motion Control",
+      "efforts": [],
+      "notes": "image_url+video_url 必填/keep_original_sound(默认yes)/character_orientation 必填/mode 必填/watermark_info.enabled(默认false)",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/kling-v2-6/kling-v2-6-motion-control-generation"
+    },
+    {
+      "id": "kling-v3-motion-control",
+      "name": "Kling v3 Motion Control",
+      "efforts": [],
+      "notes": "同上页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/kling-v2-6/kling-v2-6-motion-control-generation"
+    },
+    {
+      "id": "kling-v3-omni",
+      "name": "Kling v3 Omni",
+      "efforts": [],
+      "notes": "prompt/negative_prompt/mode(默认std)/duration(默认5)/aspect_ratio(默认16:9)/image_urls/image_with_roles/video_list/multi_shot(默认false)/shot_type/multi_prompt/element_list/watermark/audio(默认false)",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/kling-v3-omni/generation"
+    },
+    {
+      "id": "kling-v3",
+      "name": "Kling v3",
+      "efforts": [],
+      "notes": "同上，无 video_list",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/kling-v3/generation"
+    },
+    {
+      "id": "kling-v4",
+      "name": "Kling V4",
+      "efforts": [],
+      "notes": "prompt/duration/resolution(默认720p)/aspect_ratio/image_urls/image_with_roles/first_frame_image/last_frame_image/video_url(s)/audio_urls/omni_reference_task_type(默认auto)/audio_setting",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/kling-v4/generation"
+    },
+    {
+      "id": "kling-video-o1",
+      "name": "Kling Video O1",
+      "efforts": [],
+      "notes": "原文称其为 reasoning-enhanced 最高质量视频模型；mode/duration/aspect_ratio/image_urls/image_with_roles/video_list",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/kling-video-o1/generation"
+    },
+    {
+      "id": "MiniMax-H3",
+      "name": "MiniMax-H3",
+      "efforts": [],
+      "notes": "duration(默认5)/resolution(默认2K)/aspect_ratio/watermark(默认false)/webhook/first_frame_image/last_frame_image/image_urls/video_urls/audio_urls/image_with_roles[{url,role}]",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-h3/generation"
+    },
+    {
+      "id": "MiniMax-H3-Max",
+      "name": "MiniMax-H3 Max",
+      "efforts": [],
+      "notes": "resolution 默认 768P，其余同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-h3/max"
+    },
+    {
+      "id": "MiniMax-H3-Context-IR",
+      "name": "MiniMax-H3 Context-IR",
+      "efforts": [],
+      "notes": "专用于提示词增强(Context-IR)；prompt/duration/aspect_ratio/first_frame_image/last_frame_image/image_urls/image_with_roles/video_urls/audio_urls",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-h3/context-ir"
+    },
+    {
+      "id": "MiniMax-H3-Regeneration",
+      "name": "MiniMax-H3 Regeneration",
+      "efforts": [],
+      "notes": "source_task_id 必填",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-h3/regeneration"
+    },
+    {
+      "id": "MiniMax-Hailuo-2.3",
+      "name": "MiniMax-Hailuo 2.3",
+      "efforts": [],
+      "notes": "duration(默认6)/resolution(默认768p)/first_frame_image/prompt_optimizer(默认true)/fast_pretreatment/watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-hailuo-2.3/generation"
+    },
+    {
+      "id": "MiniMax-Hailuo-2.3-Fast",
+      "name": "MiniMax-Hailuo 2.3 Fast",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-hailuo-2.3/generation"
+    },
+    {
+      "id": "MiniMax-Hailuo-02",
+      "name": "MiniMax-Hailuo 02",
+      "efforts": [],
+      "notes": "duration(默认5)/resolution(默认768p)/first_frame_image/last_frame_image/prompt_optimizer(默认true)/fast_pretreatment/watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-hailuo/generation"
+    },
+    {
+      "id": "seedance-1-5-pro",
+      "name": "Seedance 1.5 Pro",
+      "efforts": [],
+      "notes": "duration(默认5)/aspect_ratio(默认16:9)/resolution(默认720p)/seed/audio(默认true)/camerafixed/image_urls/image_with_roles",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-1-5-pro/generation"
+    },
+    {
+      "id": "seedance-2.0",
+      "name": "Seedance 2.0",
+      "efforts": [],
+      "notes": "prompt/duration(默认5)/size(默认16:9)/resolution(默认720p)/seed/generate_audio(默认true)/return_last_frame/tools[{type}]/image_urls/image_with_roles/video_urls/audio_urls",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-0/generation"
+    },
+    {
+      "id": "seedance-2.0-fast",
+      "name": "Seedance 2.0 Fast",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-0/generation"
+    },
+    {
+      "id": "seedance-2.0-mini",
+      "name": "Seedance 2.0 Mini",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-0/generation"
+    },
+    {
+      "id": "seedance-2.0-face",
+      "name": "Seedance 2.0 Face",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-0/generation"
+    },
+    {
+      "id": "seedance-2.0-fast-face",
+      "name": "Seedance 2.0 Fast Face",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-0/generation"
+    },
+    {
+      "id": "seedance-2.5",
+      "name": "Seedance 2.5",
+      "efforts": [],
+      "notes": "draft/draft_task_id/prompt/resolution(默认720p)/size(默认adaptive)/duration(默认5)/generate_audio(默认true)/watermark/seed/output_format(默认mp4)/omni_reference_task_type(默认auto)/image_urls/image_with_roles/video_urls/audio_urls/return_last_frame/tools",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation"
+    },
+    {
+      "id": "skyreels-v4-fast",
+      "name": "SkyReels V4 Fast",
+      "efforts": [],
+      "notes": "duration(默认5)/resolution(默认1080p)/aspect_ratio(默认16:9)/prompt_optimizer(默认true)/first_frame_image/end_frame_image/mid_frame_images/ref_images/ref_videos/audio_url",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/skyreels-v4/generation"
+    },
+    {
+      "id": "skyreels-v4-std",
+      "name": "SkyReels V4 Std",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/skyreels-v4/generation"
+    },
+    {
+      "id": "veo3.1-fast",
+      "name": "VEO3.1 Fast",
+      "efforts": [],
+      "notes": "文档原文：model 可用 veo3.1-fast 或兼容别名 veo3.1-fast-ext",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/veo3/generation"
+    },
+    {
+      "id": "veo3.1-fast-ext",
+      "name": "VEO3.1 Fast Ext（别名）",
+      "efforts": [],
+      "notes": "= veo3.1-fast",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/veo3/generation"
+    },
+    {
+      "id": "veo3.1-quality",
+      "name": "VEO3.1 Quality",
+      "efforts": [],
+      "notes": "文档原文：可用 veo3.1-quality 或别名 veo3.1-quality-ext",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/veo3/generation"
+    },
+    {
+      "id": "veo3.1-quality-ext",
+      "name": "VEO3.1 Quality Ext（别名）",
+      "efforts": [],
+      "notes": "= veo3.1-quality",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/veo3/generation"
+    },
+    {
+      "id": "veo3.1-lite",
+      "name": "VEO3.1 Lite",
+      "efforts": [],
+      "notes": "文档原文：可用 veo3.1-lite 或别名 veo3.1-lite-ext",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/veo3/generation"
+    },
+    {
+      "id": "veo3.1-lite-ext",
+      "name": "VEO3.1 Lite Ext（别名）",
+      "efforts": [],
+      "notes": "= veo3.1-lite",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/veo3/generation"
+    },
+    {
+      "id": "veo3.1-fast-official",
+      "name": "VEO3.1 Fast 官方渠道",
+      "efforts": [],
+      "notes": "negative_prompt/duration(默认8)/aspect_ratio(默认16:9)/resolution(默认720p)/first_frame_image/last_frame_image/seed/sample_count(默认1)/generate_audio(默认false)/person_generation(默认allow_adult)/resize_mode(默认pad)/enhance_prompt(默认true)",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/veo3/generation-official"
+    },
+    {
+      "id": "veo3.1-quality-official",
+      "name": "VEO3.1 Quality 官方渠道",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/veo3/generation-official"
+    },
+    {
+      "id": "viduq3-pro",
+      "name": "Vidu Q3 Pro",
+      "efforts": [],
+      "notes": "duration(默认5)/resolution(默认720p)/aspect_ratio/image_urls/audio(默认true)/seed",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/vidu-q3-pro/generation"
+    },
+    {
+      "id": "viduq3-turbo",
+      "name": "Vidu Q3 Turbo",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/vidu-q3-pro/generation"
+    },
+    {
+      "id": "viduq3-mix",
+      "name": "Vidu Q3 Mix",
+      "efforts": [],
+      "notes": "image_urls 必填/duration(默认5)/resolution(默认720p)/aspect_ratio/seed",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/vidu-q3/generation"
+    },
+    {
+      "id": "viduq3",
+      "name": "Vidu Q3",
+      "efforts": [],
+      "notes": "同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/vidu-q3/generation"
+    },
+    {
+      "id": "viduq4-preview",
+      "name": "Vidu Q4 Preview",
+      "efforts": [],
+      "notes": "image_urls/image_with_roles/first_frame_image/audio_urls/audio_url/aspect_ratio(默认16:9)/size/duration(默认5)/resolution(默认720p)/audio(默认true)/seed",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/vidu-q4-preview/generation"
+    },
+    {
+      "id": "wan2.5-preview",
+      "name": "Wan2.5 Preview",
+      "efforts": [],
+      "notes": "prompt/image_urls/negative_prompt/resolution(默认720p)/duration(默认5)/size(默认16:9)/seed/prompt_extend(默认true)/audio(默认true)/audio_url/watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/wan2.5/generation"
+    },
+    {
+      "id": "wan2.6",
+      "name": "Wan2.6",
+      "efforts": [],
+      "notes": "prompt/image_urls/negative_prompt/aspect_ratio(默认16:9)/resolution(默认720p)/duration(默认5)/seed/prompt_extend/audio/audio_url/shot_type/watermark/template",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/wan2.6/generation"
+    },
+    {
+      "id": "wan2.6-i2v-flash",
+      "name": "Wan2.6 i2v Flash",
+      "efforts": [],
+      "notes": "image_urls 必填/resolution(默认1080p)/duration(默认5)/audio(默认true)/audio_url/prompt_extend(默认true)/shot_type/seed/watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/wan2.6/i2v-flash-generation"
+    },
+    {
+      "id": "wan2.7",
+      "name": "Wan2.7",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/wan2.7/generation"
+    },
+    {
+      "id": "wan2.7-r2v",
+      "name": "Wan2.7 R2V",
+      "efforts": [],
+      "notes": "参考生视频",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/wan2.7-r2v/generation"
+    },
+    {
+      "id": "wan2.7-videoedit",
+      "name": "Wan2.7 VideoEdit",
+      "efforts": [],
+      "notes": "视频编辑",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/wan2.7-videoedit/generation"
+    },
+    {
+      "id": "wan3.0-video",
+      "name": "Wan3.0 Video",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/wan3.0-video/generation"
+    },
+    {
+      "id": "wan3.0-video-prime",
+      "name": "Wan3.0 Video Prime",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/wan3.0-video/generation"
+    },
+    {
+      "id": "gemini-omni-1.1-flash",
+      "name": "Gemini Omni 1.1 Flash",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/gemini-omni-1.1-flash/generation"
+    },
+    {
+      "id": "gemini-omni-1.1-flash-ext",
+      "name": "Gemini Omni 1.1 Flash Ext",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/omni-flash-ext/generation"
+    },
+    {
+      "id": "gemini-omni-flash-preview",
+      "name": "Gemini Omni Flash Preview",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/gemini-omni-flash-preview/generation"
+    },
+    {
+      "id": "grok-imagine-video",
+      "name": "Grok Imagine Video（官方）",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/grok-imagine/official"
+    },
+    {
+      "id": "grok-imagine-video-1.5",
+      "name": "Grok Imagine Video 1.5（官方）",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/grok-imagine/official"
+    },
+    {
+      "id": "muse-video-ext",
+      "name": "Muse Video Ext",
+      "efforts": [],
+      "notes": "[文档独有] 约 10 秒 / 720p / 带声音 / ≤9 张参考图；aspect_ratio/duration/resolution/Idempotency-Key",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/muse-video-ext/generation"
+    },
+    {
+      "id": "pixverse-v6",
+      "name": "PixVerse V6",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/pixverse-v6/generation"
+    },
+    {
+      "id": "pixverse-v6-max",
+      "name": "PixVerse V6 Max",
+      "efforts": [],
+      "notes": "见页面",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/pixverse-v6-max/generation"
+    }
+  ],
+  "audio": [
+    {
+      "id": "suno",
+      "name": "Suno（model 默认值 suno）",
+      "efforts": [],
+      "notes": "版本仅 v6/v6-wild/v6-mini；40+ 操作各走独立子路径：POST /v1/music/generations/<op>（addInstrumental/addStem/addVocals/adjustSpeed/alignedLyrics/bpm/concat/coverSong/createModel/createVoice/crop/download/extend/fadeIn/fadeOut/generateMp4/inspo/lyrics/mashup/midi/persona/remaster/removeSection/replaceMusic/sample/sounds/stems/stemsAll/upload/uploadCover/uploadExtend/upsampleTags/vox(已弃用)…），生成走 POST /v1/music/generations；查询 GET /v1/music/tasks/{task_id}（不是 /v1/tasks/{id}）；variety=off|normal|high|extra|max；max_mode 2× 计费；audio_format=mp3|m4a|wav；duration 10–360s",
+      "source_url": "https://docs.apimart.ai/en/api-reference/audios/suno/overview"
+    },
+    {
+      "id": "flowmusic",
+      "name": "FlowMusic",
+      "efforts": [],
+      "notes": "生成 POST /v1/music/generations（model=flowmusic，字段 title/sound_prompt/bpm/length 等）；其余操作 /coverFlowMusic、/extendFlowMusic、/lyricsFlowMusic、/replaceFlowMusic、/stemsFlowMusic、/uploadAudioFlowMusic、/videoClipFlowMusic、/downloadAudioFlowMusic；查询 GET /v1/music/tasks/{task_id}",
+      "source_url": "https://docs.apimart.ai/en/api-reference/audios/flow-music/music"
+    },
+    {
+      "id": "lyria-3.5",
+      "name": "Lyria 3.5",
+      "efforts": [],
+      "notes": "[文档独有] FlowMusic 的 Lyria 3.5 专用版：generate/cover/extend/replace 四页，version 字段必填；项目 apimart_pricing.json 没有该 ID",
+      "source_url": "https://docs.apimart.ai/en/api-reference/audios/flow-music/music-lyria-3-5"
+    },
+    {
+      "id": "flowmusic-lyria-3.5",
+      "name": "Lyria 3.5（别名形式）",
+      "efforts": [],
+      "notes": "[文档独有] 同上",
+      "source_url": "https://docs.apimart.ai/en/api-reference/audios/flow-music/music-lyria-3-5"
+    },
+    {
+      "id": "gpt-4o-mini-tts",
+      "name": "TTS（gpt-4o-mini-tts）",
+      "efforts": [],
+      "notes": "[文档独有] POST /v1/audio/speech（OpenAI 兼容 TTS）；项目 apimart_pricing.json 没有该 ID",
+      "source_url": "https://docs.apimart.ai/en/api-reference/audios/tts"
+    },
+    {
+      "id": "whisper-1",
+      "name": "Whisper-1 转写",
+      "efforts": [],
+      "notes": "[文档独有] POST /v1/audio/transcriptions，multipart/form-data；项目 apimart_pricing.json 没有该 ID",
+      "source_url": "https://docs.apimart.ai/en/api-reference/audios/whisper-1"
+    }
+  ]
+}

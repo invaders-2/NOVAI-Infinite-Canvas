@@ -1,0 +1,954 @@
+/* 画布助手会话流 HextaUI 重构（T2）
+   只在这里写新样式：index.css 与 hexta-theme.css 一行不动。
+   index.css 的规则排在本文件之后（@import 在前、规则在后），同等特异性会被它盖掉，
+   所以这里统一用 .nvca-root 前缀提一层特异性；小弹层走 portal 时拿不到 .nvca-root 的 --tn-*，
+   另起 --nvca-thread-* 兜底。硬规则：不画 border/hairline，层级靠填充 + 柔影 + 间距。 */
+
+/* ── 会话流骨架 ───────────────────────────────────────────── */
+.nvca-root .nvca-thread-scroller {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.nvca-root .nvca-thread-viewport {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--tn-line-strong) transparent;
+  outline: none;
+}
+.nvca-root .nvca-thread-content {
+  display: flex;
+  min-height: 100%;
+  height: max-content;
+  flex-direction: column;
+  gap: 14px;
+  padding: 10px 20px 18px;
+}
+.nvca-root .nvca-thread-item {
+  min-width: 0;
+  flex-shrink: 0;
+}
+.nvca-root .nvca-thread-item[data-role="user"] { display: flex; justify-content: flex-end; }
+
+/* 回到底部：小弹层近不透明实底 + 柔影，不描边 */
+.nvca-root .nvca-thread-jump {
+  z-index: 12;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--nvca-thread-pop-solid);
+  color: var(--nvca-thread-pop-ink);
+  font-size: 11.5px;
+  box-shadow: var(--nvca-thread-pop-shadow), var(--nvca-shadow-float);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* ── 气泡 ────────────────────────────────────────────────── */
+.nvca-root .nvca-thread-msg { width: 100%; }
+.nvca-root .nvca-thread-bubble {
+  max-width: min(520px, 86%);
+  border: 0;
+  box-shadow: none;
+}
+.nvca-root .nvca-thread-bubble[data-variant] { --bubble-border: transparent; }
+.nvca-root .nvca-thread-bubble-user {
+  --bubble-bg: var(--tn-user-bg);
+  --bubble-fg: var(--tn-user-text);
+  --bubble-radius: 16px;
+}
+.nvca-root .nvca-thread-bubble-assistant {
+  --bubble-bg: var(--nvca-thread-surface);
+  --bubble-fg: var(--tn-text);
+  --bubble-radius: 16px;
+  max-width: 100%;
+  box-shadow: var(--nvca-thread-surface-shadow);
+}
+.nvca-root .nvca-thread-bubble-assistant .nvca-thread-bubble-body {
+  padding: 9px 12px;
+  font-size: 13.5px;
+  line-height: 1.68;
+}
+.nvca-root .nvca-thread-bubble-user .nvca-thread-bubble-body {
+  padding: 8px 12px 6px;
+  font-size: 13.5px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+}
+/* 连续同角色消息：接缝那侧收圆角，视觉上合成一组 */
+.nvca-root .nvca-thread-bubble.is-merged-top { --bubble-radius-top: var(--radius-sm); }
+.nvca-root .nvca-thread-bubble.is-merged-bottom { --bubble-radius-bottom: var(--radius-sm); }
+.nvca-root .nvca-thread-bubble-user .nvca-user-head { margin-top: 2px; }
+.nvca-root .nvca-thread-bubble-user .nvca-user-text { margin: 0; }
+.nvca-root .nvca-thread-bubble-user .nvca-user-icon { color: var(--tn-user-time); }
+.nvca-root .nvca-thread-bubble-user .nvca-user-time {
+  display: block;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--tn-user-time);
+}
+
+/* ── marker：日期分隔 / 系统事件 ───────────────────────────── */
+.nvca-root .nvca-thread-day {
+  position: sticky;
+  top: calc(var(--marker-sticky-top, 6px) - 1px);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 18px;
+  padding: 2px 0;
+  color: var(--tn-desc);
+  font-size: 11px;
+  pointer-events: none;
+}
+.nvca-root .nvca-thread-day [data-slot="marker-content"] {
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: var(--nvca-thread-day-pill);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  color: var(--tn-desc);
+  font-size: 11px;
+  line-height: 16px;
+  box-shadow: none;
+}
+.nvca-root .nvca-thread-system {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--nvca-thread-notice-bg);
+  color: var(--tn-sys-title);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.nvca-root .nvca-thread-system > svg { flex: 0 0 auto; margin-top: 2px; }
+.nvca-root .nvca-thread-system.is-warn > svg { color: var(--nvca-warning); }
+.nvca-root .nvca-thread-system.is-error > svg { color: var(--nvca-danger); }
+.nvca-root .nvca-thread-system-main { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.nvca-root .nvca-thread-system-title { color: var(--tn-text); font-weight: 500; }
+.nvca-root .nvca-thread-system-body { margin: 0; color: var(--tn-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nvca-root .nvca-thread-system-btn {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--tn-hover);
+  color: var(--tn-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.16s var(--nvca-ease), color 0.16s var(--nvca-ease);
+}
+.nvca-root .nvca-thread-system-btn:hover { background: var(--tn-line-strong); color: var(--tn-text); }
+
+/* ── 运行卡 / 步骤 / 工具：容器靠填充和柔影 ─────────────────── */
+.nvca-root .nvca-thread-turn { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
+.nvca-root .nvca-thread-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--nvca-thread-panel-bg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 28px rgba(0, 0, 0, 0.06);
+}
+html.theme-dark .nvca-root .nvca-thread-panel,
+html.studio-theme-dark .nvca-root .nvca-thread-panel {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24), 0 12px 30px rgba(0, 0, 0, 0.3);
+}
+.nvca-root .nvca-thread-card {
+  border: 0;
+  border-radius: 14px;
+  background: var(--nvca-thread-surface);
+  box-shadow: var(--nvca-thread-surface-shadow);
+}
+
+/* ── 输入区：大面积磨砂玻璃 ───────────────────────────────── */
+.nvca-root .nvca-thread-composer {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 7px;
+}
+.nvca-root .nvca-thread-composer-shell {
+  width: 100%;
+  background: transparent;
+  box-shadow: none;
+}
+/* index.css 的 .nvca-prompt-form 给输入卡留了 0.5px 描边 + 实底，这里换成磨砂玻璃 */
+.nvca-root .nvca-prompt-form [data-slot="input-group"] {
+  height: auto;
+  border: 0;
+  border-radius: 18px;
+  background: var(--nvca-glass-bg);
+  -webkit-backdrop-filter: var(--nvca-glass-blur);
+  backdrop-filter: var(--nvca-glass-blur);
+  box-shadow: var(--nvca-thread-composer-shadow);
+}
+html.theme-dark .nvca-root .nvca-prompt-form [data-slot="input-group"] {
+  border: 0;
+  background: var(--nvca-glass-bg);
+}
+.nvca-root .nvca-prompt-form [data-slot="input-group"]:focus-within {
+  border: 0;
+  box-shadow: var(--nvca-thread-composer-shadow), 0 0 0 3px color-mix(in srgb, var(--tn-text) 8%, transparent);
+}
+.nvca-root .nvca-thread-composer-shell [data-slot="input-group-control"] {
+  min-height: 44px;
+  max-height: 168px;
+  padding: 9px 12px 2px;
+  border: 0;
+  background: transparent;
+  font-size: 13.5px;
+  line-height: 1.6;
+  outline: none;
+  box-shadow: none;
+  resize: none;
+}
+.nvca-root .nvca-thread-composer-shell [data-slot="input-group-addon"] {
+  padding-inline: 8px;
+  border: 0;
+}
+.nvca-root .nvca-thread-composer-shell [data-slot="input-group-addon"][data-align="block-start"] { padding-top: 8px; }
+.nvca-root .nvca-thread-composer-shell [data-slot="input-group-addon"][data-align="block-end"] { padding-bottom: 7px; }
+.nvca-root .nvca-thread-tools {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+}
+.nvca-root .nvca-thread-tools-left,
+.nvca-root .nvca-thread-tools-right { display: flex; min-width: 0; align-items: center; gap: 2px; }
+.nvca-root .nvca-thread-toolbar-btn {
+  border: 0;
+  background: transparent;
+  color: var(--tn-muted);
+}
+.nvca-root .nvca-thread-toolbar-btn:hover { background: var(--tn-hover); color: var(--tn-text); }
+.nvca-root .nvca-thread-toolbar-btn.is-on {
+  background: color-mix(in srgb, var(--tn-text) 10%, transparent);
+  color: var(--tn-text);
+}
+.nvca-root .nvca-thread-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--tn-send-bg);
+  color: var(--tn-send-fg);
+  transition: transform 0.16s var(--nvca-ease), box-shadow 0.16s var(--nvca-ease), opacity 0.16s var(--nvca-ease);
+}
+.nvca-root .nvca-thread-send:hover { transform: translateY(-1px); box-shadow: var(--nvca-shadow-float); }
+.nvca-root .nvca-thread-send:disabled { opacity: 0.45; cursor: default; transform: none; box-shadow: none; }
+.nvca-root .nvca-thread-send.is-running { background: var(--tn-text); color: var(--tn-bg); }
+
+/* chips：文件夹 / 技能 / 应用 / 节点引用 */
+.nvca-root .nvca-thread-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 1px 0;
+  scrollbar-width: none;
+}
+.nvca-root .nvca-thread-chips::-webkit-scrollbar { display: none; }
+.nvca-root .nvca-thread-chip {
+  display: inline-flex;
+  max-width: 190px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 5px 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--tn-hover);
+  color: var(--tn-muted);
+  font-size: 11px;
+  line-height: 16px;
+  cursor: default;
+}
+.nvca-root .nvca-thread-chip.is-folder { cursor: pointer; }
+.nvca-root .nvca-thread-chip:hover { background: var(--tn-line-strong); color: var(--tn-text); }
+.nvca-root .nvca-thread-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nvca-root .nvca-thread-chip-thumb { width: 16px; height: 16px; border-radius: 4px; object-fit: cover; }
+.nvca-root .nvca-thread-chip-x {
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--tn-arrow);
+  cursor: pointer;
+}
+.nvca-root .nvca-thread-chip-x:hover { background: var(--tn-line-strong); color: var(--tn-text); }
+
+/* 附件卡（Hexta Attachment 落进输入区的密度） */
+.nvca-root .nvca-thread-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+.nvca-root .nvca-thread-attach-card {
+  border: 0;
+  border-radius: 11px;
+  background: var(--tn-card);
+  box-shadow: none;
+}
+.nvca-root .nvca-thread-attach-card:hover { background: var(--tn-hover); }
+.nvca-root .nvca-thread-attach-card [data-slot="attachment-media"] { border-radius: 8px; }
+.nvca-root .nvca-thread-attach-card [data-slot="attachment-title"] { font-size: 11.5px; font-weight: 400; color: var(--tn-text); }
+.nvca-root .nvca-thread-attach-card [data-slot="attachment-action"] { color: var(--tn-arrow); }
+.nvca-root .nvca-thread-attach-card [data-slot="attachment-action"]:hover { color: var(--tn-text); }
+
+/* index.css 的 .nvca-prompt-attachments 用 !important 写了 1px 描边，这里同样 !important 归零 */
+.nvca-root .nvca-prompt-attachments [data-slot="attachment"] {
+  border: 0 !important;
+  background: var(--tn-card) !important;
+  border-radius: 9px !important;
+}
+.nvca-root .nvca-prompt-attachments [data-slot="attachment"]:hover { background: var(--tn-hover) !important; }
+
+/* ── 小弹层：近不透明实底，去掉 index.css 的 1px 描边 ───────── */
+.nvca-root .nvca-tap-menu,
+.nvca-root .nvca-tap-thread-menu,
+.nvca-root .nvca-tap-more-menu,
+.nvca-root .nvca-slash,
+.nvca-root .nvca-tap-mention {
+  border: 0;
+  background: var(--nvca-thread-pop-solid);
+  color: var(--nvca-thread-pop-ink);
+  box-shadow: var(--nvca-thread-pop-shadow);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+}
+.nvca-root .nvca-tap-menu-label {
+  padding: 6px 8px 4px;
+  color: var(--tn-desc);
+  font-size: 10.5px;
+}
+.nvca-root .nvca-tap-menu-item {
+  border: 0;
+  border-radius: 9px;
+  color: var(--tn-text);
+  transition: background 0.14s var(--nvca-ease), color 0.14s var(--nvca-ease);
+}
+.nvca-root .nvca-tap-menu-item:hover,
+.nvca-root .nvca-tap-menu-item.is-active { background: var(--tn-hover); }
+.nvca-root .nvca-tap-menu-item.is-on {
+  background: color-mix(in srgb, var(--tn-text) 9%, transparent);
+  color: var(--tn-text);
+  font-weight: 500;
+}
+.nvca-root .nvca-thread-kbd-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px;
+  color: var(--tn-arrow);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+/* ── toast：store.notify 的容器（4s 后本地收起） ─────────────── */
+.nvca-root .nvca-thread-toast {
+  position: relative;
+  z-index: 7;
+  align-self: center;
+  margin: 0 20px 2px;
+  display: flex;
+  max-width: min(420px, calc(100% - 32px));
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--nvca-thread-pop-solid);
+  color: var(--nvca-thread-pop-ink);
+  font-size: 11.5px;
+  line-height: 1.5;
+  box-shadow: var(--nvca-thread-pop-shadow), var(--nvca-shadow-float);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  animation: nvca-thread-toast-in 0.2s var(--nvca-ease) both;
+}
+.nvca-root .nvca-thread-toast-text { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.nvca-root .nvca-thread-toast-x {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.nvca-root .nvca-thread-toast-x:hover { opacity: 1; background: var(--tn-hover); }
+@keyframes nvca-thread-toast-in {
+  from { opacity: 0; translate: 0 6px; }
+}
+
+/* ── Hexta AlertDialog 落成 .nvca-dialog 后的密度统一 ─────────── */
+.nvca-thread-alert.nvca-dialog {
+  width: 100%;
+  max-width: 380px;
+  gap: 10px;
+  padding: 16px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--nvca-solid);
+  box-shadow: var(--nvca-shadow-pop);
+}
+.nvca-thread-alert .nvca-dialog-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* ── 令牌兜底 ─────────────────────────────────────────────── */
+.nvca-root.nvca-tap {
+  position: relative;
+  --nvca-thread-pop-solid: var(--tn-menu);
+  --nvca-thread-pop-ink: var(--tn-text);
+  --nvca-thread-pop-shadow: 0 18px 44px rgba(0, 0, 0, 0.36), 0 2px 10px rgba(0, 0, 0, 0.2);
+  --nvca-thread-surface: color-mix(in srgb, var(--tn-text) 7%, var(--tn-card));
+  --nvca-thread-surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.22), 0 10px 26px rgba(0, 0, 0, 0.26);
+  --nvca-thread-panel-bg: var(--tn-card);
+  --nvca-thread-card-bg: var(--tn-card);
+  --nvca-thread-notice-bg: color-mix(in srgb, var(--tn-text) 5%, transparent);
+  --nvca-thread-day-pill: color-mix(in srgb, var(--tn-bg) 72%, transparent);
+  --nvca-thread-composer-shadow: 0 1px 2px rgba(0, 0, 0, 0.16), 0 12px 32px rgba(0, 0, 0, 0.24);
+}
+html:not(.theme-dark) .nvca-root.nvca-tap {
+  --nvca-thread-pop-solid: rgba(255, 255, 255, 0.97);
+  --nvca-thread-pop-ink: #111111;
+  --nvca-thread-pop-shadow: 0 18px 44px rgba(15, 23, 42, 0.16), 0 2px 10px rgba(15, 23, 42, 0.07);
+  --nvca-thread-day-pill: color-mix(in srgb, #ffffff 78%, transparent);
+  --nvca-thread-composer-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 12px 30px rgba(15, 23, 42, 0.09);
+  /* 浅色：卡面用纯白，否则 #f5f5f5 落在 #fafafa 上等于没有壳 */
+  --nvca-thread-surface: #ffffff;
+  --nvca-thread-surface-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 24px rgba(15, 23, 42, 0.07);
+}
+
+/* 空态沿用 TapNow 卡片，只对齐 Hexta 的圆角/动效语言 */
+.nvca-root .nvca-tap-cards { animation: nvca-thread-empty-in 0.28s var(--nvca-ease) both; }
+@keyframes nvca-thread-empty-in {
+  from { opacity: 0; translate: 0 6px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nvca-root .nvca-thread-toast,
+  .nvca-root .nvca-tap-cards { animation: none; }
+}
+
+/* 卡片内边距与去描边（index.css 里 .nvca-question-btn 仍带 1px 线，这里按硬规则去掉） */
+.nvca-root .nvca-step-group.nvca-thread-card { padding: 8px 10px; }
+.nvca-root .nvca-plan.nvca-thread-card { padding: 10px 11px; }
+.nvca-root .nvca-question-btn {
+  border: 0;
+  background: var(--tn-hover);
+  color: var(--tn-muted);
+}
+.nvca-root .nvca-question-btn:hover { background: var(--tn-line-strong); color: var(--tn-text); }
+.nvca-root .nvca-question-btn.primary { background: var(--tn-text); color: var(--tn-bg); }
+.nvca-root .nvca-question-btn.danger { background: var(--nvca-danger-fill); color: var(--nvca-danger); }
+.nvca-root .nvca-question-btn:disabled { opacity: 0.55; }
+
+/* 空态建议卡与输入区在窄面板下不顶满 */
+.nvca-root .nvca-tap-empty { padding-inline: 20px; }
+
+/* 右上角「添加画布内容」+ 快捷键提示：文字不折行、不被输入框挤压；
+   容器窄到放不下时先藏键帽、再整块隐藏，绝不压住发送按钮 */
+.nvca-root .nvca-tap-composer { container-type: inline-size; }
+.nvca-root .nvca-tap-composer-hint {
+  width: auto;
+  max-width: calc(100% - 16px);
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.nvca-root .nvca-tap-composer-hint > * { flex: 0 0 auto; white-space: nowrap; }
+.nvca-root .nvca-tap-hint-btn { width: auto; min-width: 0; white-space: nowrap; }
+@container (max-width: 360px) {
+  .nvca-root .nvca-thread-kbd-hint { display: none; }
+}
+@container (max-width: 240px) {
+  .nvca-root .nvca-tap-composer-hint { display: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   T5 视觉升级：空态 / 顶栏 / 输入区 / 对话态 / 卡片
+   目标：和旧版并排时一眼能分辨。仍然只有填充、柔影、间距，没有描边。
+   ══════════════════════════════════════════════════════════════ */
+
+.nvca-root.nvca-tap {
+  --nvca-thread-chip-bg: color-mix(in srgb, var(--tn-text) 9%, transparent);
+  --nvca-thread-surface: color-mix(in srgb, #ffffff 7%, #1f1f1f);
+  --nvca-thread-surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 14px 34px rgba(0, 0, 0, 0.42);
+  --nvca-thread-surface-shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.34), 0 22px 48px rgba(0, 0, 0, 0.52);
+  --nvca-thread-composer-shadow: 0 2px 8px rgba(0, 0, 0, 0.34), 0 24px 56px rgba(0, 0, 0, 0.5);
+  --nvca-thread-user-bubble-bg: var(--nvca-accent);
+  --nvca-thread-user-bubble-fg: var(--nvca-on-accent);
+  --nvca-thread-user-bubble-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+}
+html:not(.theme-dark) .nvca-root.nvca-tap {
+  --nvca-thread-chip-bg: #f0f0f3;
+  --nvca-thread-surface: #ffffff;
+  --nvca-thread-surface-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 12px 28px rgba(15, 23, 42, 0.09);
+  --nvca-thread-surface-shadow-lift: 0 6px 16px rgba(15, 23, 42, 0.08), 0 22px 46px rgba(15, 23, 42, 0.14);
+  --nvca-thread-composer-shadow: 0 2px 6px rgba(15, 23, 42, 0.05), 0 20px 48px rgba(15, 23, 42, 0.1);
+  --nvca-thread-user-bubble-shadow: 0 10px 26px rgba(15, 23, 42, 0.18);
+}
+
+/* ── 空态 ─────────────────────────────────────────────────── */
+.nvca-root .nvca-thread-empty {
+  display: flex;
+  width: 100%;
+  max-width: 480px;
+  margin: auto;
+  padding: 4px 22px 14px;
+  flex-direction: column;
+  gap: 16px;
+}
+.nvca-root .nvca-thread-empty-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nvca-root .nvca-thread-empty-logo {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--nvca-thread-chip-bg);
+}
+.nvca-root .nvca-thread-empty-logo img { width: 16px; height: 16px; object-fit: contain; }
+html.theme-dark .nvca-root .nvca-thread-empty-logo img,
+html.studio-theme-dark .nvca-root .nvca-thread-empty-logo img { filter: invert(1); }
+.nvca-root .nvca-thread-empty-hi {
+  color: var(--tn-desc);
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.01em;
+}
+.nvca-root .nvca-thread-empty-shuffle {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--tn-muted);
+  cursor: pointer;
+  transition: background 0.14s var(--nvca-ease), color 0.14s var(--nvca-ease), transform 0.14s var(--nvca-ease);
+}
+.nvca-root .nvca-thread-empty-shuffle:hover {
+  background: var(--nvca-thread-chip-bg);
+  color: var(--tn-text);
+}
+.nvca-root .nvca-thread-empty-shuffle:active { transform: scale(0.94); }
+.nvca-root .nvca-thread-empty-title {
+  margin: 0;
+  color: var(--tn-text);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.022em;
+}
+.nvca-root .nvca-thread-empty-sub {
+  margin: -6px 0 2px;
+  color: var(--tn-desc);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.nvca-root .nvca-thread-empty-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.nvca-root .nvca-thread-suggest {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  border: 0;
+  border-radius: 18px;
+  background: var(--nvca-thread-surface);
+  color: var(--tn-text);
+  box-shadow: var(--nvca-thread-surface-shadow);
+  transition: transform 0.14s var(--nvca-ease), box-shadow 0.14s var(--nvca-ease);
+}
+.nvca-root .nvca-thread-suggest:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--nvca-thread-surface-shadow-lift);
+}
+.nvca-root .nvca-thread-suggest:active { transform: translateY(0) scale(0.995); }
+.nvca-root .nvca-thread-suggest-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--nvca-thread-chip-bg);
+  color: var(--tn-text);
+}
+.nvca-root .nvca-thread-suggest-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+.nvca-root .nvca-thread-suggest-title {
+  color: var(--tn-title);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 19px;
+}
+.nvca-root .nvca-thread-suggest-desc {
+  color: var(--tn-desc);
+  font-size: 12px;
+  line-height: 17px;
+}
+.nvca-root .nvca-thread-suggest-arrow {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--tn-arrow);
+  transition: transform 0.14s var(--nvca-ease), color 0.14s var(--nvca-ease);
+}
+.nvca-root .nvca-thread-suggest:hover .nvca-thread-suggest-arrow {
+  transform: translateX(2px);
+  color: var(--tn-muted);
+}
+
+/* ── 顶栏：线程名做胶囊，右侧图标收成一组 ─────────────────── */
+.nvca-root .nvca-tap-header {
+  flex: 0 0 56px;
+  height: 56px;
+  padding: 0 12px;
+  gap: 8px;
+  background: transparent;
+}
+.nvca-root .nvca-tap-header-left { gap: 6px; }
+.nvca-root .nvca-tap-head-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+}
+.nvca-root .nvca-tap-head-btn.is-sidebar { width: 34px; height: 34px; margin-left: 0; }
+.nvca-root .nvca-tap-head-btn:hover { background: var(--nvca-thread-chip-bg); }
+.nvca-root .nvca-tap-header-right {
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--nvca-thread-chip-bg);
+}
+.nvca-root .nvca-tap-header-right .nvca-tap-head-btn { width: 30px; height: 30px; border-radius: 999px; }
+.nvca-root .nvca-tap-header-right .nvca-tap-head-btn:hover {
+  background: color-mix(in srgb, var(--tn-text) 10%, transparent);
+}
+.nvca-root .nvca-tap-newchat {
+  width: auto;
+  min-width: 0;
+  max-width: 240px;
+  height: 34px;
+  padding: 0 12px;
+  gap: 6px;
+  border-radius: 999px;
+  background: var(--nvca-thread-chip-bg);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: background 0.14s var(--nvca-ease);
+}
+.nvca-root .nvca-tap-newchat:hover {
+  background: color-mix(in srgb, var(--tn-text) 13%, transparent);
+}
+.nvca-root .nvca-tap-current-thread { font-size: 13px; font-weight: 600; }
+
+/* ── 输入区：更大的圆角卡 + 更强两级柔影 ─────────────────── */
+.nvca-root .nvca-prompt-form [data-slot="input-group"] {
+  border-radius: 22px;
+  padding: 8px 8px 6px;
+  background: var(--nvca-thread-surface);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--nvca-thread-composer-shadow);
+}
+html.theme-dark .nvca-root .nvca-prompt-form [data-slot="input-group"] {
+  background: var(--nvca-thread-surface);
+}
+.nvca-root .nvca-prompt-form .nvca-prompt-textarea {
+  min-height: 44px !important;
+  max-height: 132px !important;
+  padding: 10px 10px 2px !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
+}
+.nvca-root .nvca-prompt-header[data-slot="input-group-addon"] { padding: 6px 6px 0 !important; }
+.nvca-root .nvca-prompt-footer[data-slot="input-group-addon"] { padding: 4px 4px 4px !important; }
+.nvca-root .nvca-thread-composer .nvca-tap-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  color: var(--tn-muted);
+}
+.nvca-root .nvca-thread-composer .nvca-tap-icon:hover { background: var(--nvca-thread-chip-bg); color: var(--tn-text); }
+.nvca-root .nvca-thread-composer .nvca-tap-icon.is-add {
+  background: var(--nvca-thread-chip-bg);
+  color: var(--tn-text);
+}
+.nvca-root .nvca-thread-composer .nvca-tap-manual,
+.nvca-root .nvca-thread-composer .nvca-tap-context,
+.nvca-root .nvca-thread-composer .nvca-tap-auto {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  color: var(--tn-muted);
+}
+.nvca-root .nvca-thread-composer .nvca-tap-manual:hover,
+.nvca-root .nvca-thread-composer .nvca-tap-context:hover,
+.nvca-root .nvca-thread-composer .nvca-tap-auto:hover { background: var(--nvca-thread-chip-bg); color: var(--tn-text); }
+.nvca-root .nvca-thread-composer .nvca-tap-manual.is-on {
+  background: color-mix(in srgb, var(--tn-text) 14%, transparent);
+  color: var(--tn-text);
+}
+.nvca-root .nvca-thread-composer .nvca-tap-send {
+  width: 34px;
+  height: 34px;
+  background: var(--tn-send-bg);
+  color: var(--tn-send-fg);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+}
+.nvca-root .nvca-thread-composer .nvca-tap-send svg { width: 16px; height: 16px; }
+.nvca-root .nvca-thread-composer .nvca-tap-chips { padding: 2px 2px 4px; gap: 6px; }
+.nvca-root .nvca-thread-composer .nvca-tap-chip {
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: var(--nvca-thread-chip-bg);
+  color: var(--tn-muted);
+  font-size: 11.5px;
+}
+.nvca-root .nvca-thread-composer .nvca-tap-chip:hover { color: var(--tn-text); }
+.nvca-root .nvca-thread-composer .nvca-tap-chip-thumb { width: 18px; height: 18px; border-radius: 5px; }
+.nvca-root .nvca-thread-composer .nvca-tap-hint-btn { font-size: 12px; color: var(--tn-desc); }
+.nvca-root .nvca-thread-composer .nvca-thread-kbd-hint { font-size: 12px; color: var(--tn-desc); }
+/* 老式上传附件 chip → 小卡（缩略/首字/文件名/×） */
+.nvca-root .nvca-thread-composer .nvca-attachment {
+  height: 30px;
+  padding: 0 4px 0 3px;
+  gap: 6px;
+  border-radius: 10px;
+  background: var(--nvca-thread-chip-bg);
+}
+.nvca-root .nvca-thread-composer .nvca-attachment-preview { width: 24px; height: 24px; border-radius: 7px; }
+.nvca-root .nvca-thread-composer .nvca-attachment-name { font-size: 11.5px; color: var(--tn-muted); }
+
+/* ── 对话态 ──────────────────────────────────────────────── */
+.nvca-root .nvca-thread-bubble-user {
+  --bubble-bg: var(--nvca-thread-user-bubble-bg);
+  --bubble-fg: var(--nvca-thread-user-bubble-fg);
+  --bubble-radius: 18px;
+  --bubble-radius-bottom: 6px;
+  max-width: 88%;
+  box-shadow: var(--nvca-thread-user-bubble-shadow);
+}
+.nvca-root .nvca-thread-bubble-user .nvca-thread-bubble-body {
+  padding: 10px 14px 8px;
+  font-size: 13.5px;
+  line-height: 1.62;
+}
+.nvca-root .nvca-thread-bubble-user .nvca-user-icon { color: inherit; opacity: 0.6; }
+.nvca-root .nvca-thread-bubble-user .nvca-user-icon:hover { background: rgba(255, 255, 255, 0.16); opacity: 1; }
+html:not(.theme-dark) .nvca-root .nvca-thread-bubble-user .nvca-user-icon:hover { background: rgba(255, 255, 255, 0.16); }
+.nvca-root .nvca-thread-bubble-user .nvca-user-time { color: inherit; opacity: 0.72; }
+.nvca-root .nvca-thread-bubble-assistant {
+  --bubble-bg: transparent;
+  --bubble-fg: var(--tn-text);
+  max-width: 100%;
+  box-shadow: none;
+}
+.nvca-root .nvca-thread-bubble-assistant .nvca-thread-bubble-body {
+  padding: 0;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.nvca-root .nvca-thread-bubbles { gap: 6px; }
+.nvca-root .nvca-thread-day [data-slot="marker-content"] {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--nvca-thread-chip-bg);
+  color: var(--tn-desc);
+  font-size: 11px;
+  line-height: 16px;
+  box-shadow: none;
+}
+.nvca-root .nvca-thread-system {
+  gap: 8px;
+  padding: 2px 0;
+  background: transparent;
+  color: var(--tn-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.nvca-root .nvca-thread-system > svg { width: 14px; height: 14px; margin-top: 2px; }
+.nvca-root .nvca-thread-system-title { color: var(--tn-muted); font-weight: 500; }
+.nvca-root .nvca-thread-system-body { color: var(--tn-desc); }
+.nvca-root .nvca-thread-system-btn { background: transparent; color: var(--tn-desc); }
+.nvca-root .nvca-thread-system-btn:hover { background: var(--nvca-thread-chip-bg); color: var(--tn-text); }
+
+/* 步骤卡 / 方案卡 / 确认卡 / 参考图卡：统一到 16 圆角卡面 */
+.nvca-root .nvca-thread-card,
+.nvca-root .nvca-question,
+.nvca-root .nvca-refimgs,
+.nvca-root .nvca-tool-card {
+  border: 0;
+  border-radius: 16px;
+  background: var(--nvca-thread-surface);
+  box-shadow: var(--nvca-thread-surface-shadow);
+}
+.nvca-root .nvca-step-group.nvca-thread-card,
+.nvca-root .nvca-plan.nvca-thread-card { padding: 12px 13px; }
+.nvca-root .nvca-step-group-head { min-height: 30px; }
+.nvca-root .nvca-step-group-title { font-size: 13px; font-weight: 600; }
+.nvca-root .nvca-step-group-caret { width: 15px; height: 15px; }
+.nvca-root .nvca-plan-title { font-size: 13px; line-height: 1.7; }
+.nvca-root .nvca-plan-step { gap: 8px; }
+.nvca-root .nvca-plan-tool { font-size: 12.5px; line-height: 1.7; }
+.nvca-root .nvca-tool-card { box-shadow: none; border-radius: 12px; background: color-mix(in srgb, var(--tn-text) 4%, transparent); }
+.nvca-root .nvca-tool-head { min-height: 34px; }
+.nvca-root .nvca-tool-name { font-size: 12.5px; font-weight: 500; }
+.nvca-root .nvca-tool-sub { font-size: 11.5px; }
+
+/* 操作条：图标 16、间距 14、hover 软底圆角 */
+.nvca-root .nvca-run-tools { gap: 14px; margin-top: 2px; }
+.nvca-root .nvca-run-tools .nvca-link-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--tn-arrow);
+  transition: background 0.14s var(--nvca-ease), color 0.14s var(--nvca-ease);
+}
+.nvca-root .nvca-run-tools .nvca-link-btn:hover { background: var(--nvca-thread-chip-bg); color: var(--tn-text); }
+.nvca-root .nvca-run-tools .nvca-link-btn svg { width: 16px; height: 16px; }
+.nvca-root .nvca-assistant-time { font-size: 11px; color: var(--tn-arrow); }
+
+/* 消息进入：8px 上移 + 淡入 180ms（尊重 reduce motion） */
+.nvca-root .nvca-thread-item[data-entering] { animation: nvca-thread-msg-in 180ms var(--nvca-ease) both; }
+@keyframes nvca-thread-msg-in {
+  from { opacity: 0; translate: 0 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nvca-root .nvca-thread-item[data-entering] { animation: none; }
+  .nvca-root .nvca-thread-suggest { transition: none; }
+}
+
+.nvca-root .nvca-thread-empty-copy { display: flex; flex-direction: column; gap: 6px; }
+.nvca-root .nvca-thread-empty-copy .nvca-thread-empty-sub { margin: 0; }
+
+/* 旧版把 .nvca-user-text 当气泡本体（自带 padding/圆角/底色/投影），
+   现在气泡由 Hexta Bubble 负责，正文必须让位，否则会出现「深色气泡里套浅色小卡」 */
+.nvca-root .nvca-thread-bubble-user .nvca-user-text {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-size: 13.5px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.nvca-root .nvca-thread-bubble-user .nvca-user-icon {
+  background: transparent;
+  border-radius: 7px;
+  color: inherit;
+  opacity: 0.72;
+}
+.nvca-root .nvca-thread-bubble-user .nvca-user-icon:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: inherit;
+  opacity: 1;
+}
+.nvca-root .nvca-thread-bubble-user .nvca-user-icon svg { width: 13px; height: 13px; }
+
+/* ══════════════════════════════════════════════════════════════
+   面板本体：从「贴边白板」变成浮起来的玻璃卡
+   只改面板自身 inset / 圆角 / 底色 / 柔影，不动 index.css、不动 .shell 宽度断言。
+   ══════════════════════════════════════════════════════════════ */
+html body #canvasAssistantPanel.canvas-assistant.open:not(.is-full) {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  left: auto;
+  border: 0;
+  border-radius: 20px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--nvca-panel) 88%, transparent);
+  -webkit-backdrop-filter: var(--nvca-glass-blur);
+  backdrop-filter: var(--nvca-glass-blur);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04), 0 18px 44px rgba(15, 23, 42, 0.1);
+}
+/* 深色：宿主给的 --canvas-assistant-bg 是 #000，直接用会成一块硬黑边，
+   这里换成略亮的炭灰玻璃，仍然走同一条 blur 配方 */
+html.theme-dark body #canvasAssistantPanel.canvas-assistant.open:not(.is-full),
+html.studio-theme-dark body #canvasAssistantPanel.canvas-assistant.open:not(.is-full) {
+  background: color-mix(in srgb, #1c1c1c 88%, transparent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.34), 0 20px 48px rgba(0, 0, 0, 0.46);
+}
+/* 面板内三块跟着圆角重新对齐：顶栏 16 / 消息区 20 / 输入区 12 */
+body #canvasAssistantPanel .nvca-tap-header { padding-left: 16px; padding-right: 16px; }
+body #canvasAssistantPanel .nvca-thread-content { padding-left: 20px; padding-right: 20px; padding-bottom: 16px; }
+body #canvasAssistantPanel .nvca-thread-empty { padding-left: 24px; padding-right: 24px; }
+body #canvasAssistantPanel .nvca-tap-composer { width: calc(100% - 24px); margin: 0 12px 12px; }
+body #canvasAssistantPanel .nvca-prompt-form { width: 100%; margin-left: 0; }
+
+/* 用户气泡是唯一的底色：外部 message 行/内容层一律透明无内边距，
+   避免 index.css 里旧的气泡样式再给套一层浅底 */
+.nvca-root .nvca-thread-item[data-role="user"] .nvca-thread-msg,
+.nvca-root .nvca-thread-item[data-role="user"] [data-slot="message-content"] {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+}

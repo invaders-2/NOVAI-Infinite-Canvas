@@ -1,0 +1,16 @@
+/* 画布助手拖拽调宽（仅在 BEAT 画布页生效） */
+.cn-root #agent{width:var(--agent-w,380px)}
+.cn-root #agent.closed{margin-right:calc(-1 * var(--agent-w,380px))}
+.cn-root #agent.full{width:auto}
+.agent-resize-handle{position:fixed;z-index:66;width:10px;background:transparent;cursor:col-resize;display:none;touch-action:none}
+.agent-resize-handle.is-on{display:block}
+.agent-resize-handle:after{content:"";position:absolute;left:4px;top:50%;transform:translateY(-50%);width:2px;height:46px;border-radius:999px;background:rgba(127,127,127,.38);opacity:.18;transition:opacity .14s ease;pointer-events:none}
+.agent-resize-handle:hover:after,.agent-resize-handle.is-dragging:after{opacity:1}
+body.agent-resizing{cursor:col-resize;user-select:none;-webkit-user-select:none}
+.cn-root[data-w=narrow] #agent{width:100%}
+
+/* 助手的弹出菜单（选模型、技能等）打开时，拖宽把手不接鼠标：它是一条贯穿面板左缘的 10px 竖条，
+   二级菜单正好压在它上面时会把点击吃掉，导致选不中模型 */
+body:has(#pop) .agent-resize-handle,
+body:has(.model-flyout) .agent-resize-handle,
+body:has(.nv-gen-select) .agent-resize-handle { pointer-events: none; }

@@ -3,8 +3,13 @@
 """MCP 服务管理接口（P0）。
 
 契约：
-    GET  /api/mcp/servers                     -> {enabled, servers:[{name, command, args, timeout, enabled,
+    GET  /api/mcp/servers                     -> {enabled, env_override, config_path,
+                                                  servers:[{name, command, args, timeout, enabled,
                                                   env_keys, status, error, tool_count, tools:[{id,name,description,risk}]}]}
+    PUT  /api/mcp/servers/switch              -> 总开关落盘，body {enabled, confirm}，返回 {ok, enabled, env_override, servers}
+    POST /api/mcp/servers                     -> 新增一条服务配置，返回 {ok, server}
+    PUT  /api/mcp/servers/{name}              -> 覆盖/改名一条服务配置（body 缺 env/headers 时保留原值），返回 {ok, server}
+    DELETE /api/mcp/servers/{name}            -> 删除一条服务配置，返回 {ok, deleted}
     POST /api/mcp/servers/{name}/enable       -> 必须带 {"confirm": true} 才落盘启用，返回 {ok, server}
     POST /api/mcp/servers/{name}/disable      -> 落盘停用（不需要 confirm），返回 {ok, server}
     POST /api/mcp/reload                      -> 清缓存并重新发现，返回 {enabled, servers}
@@ -14,7 +19,9 @@ enable / disable 的差异：
 - disable 只是把配置里的 enabled 改成 false（立刻断开、之后不再连），没有副作用，因此不需要 confirm。
 两者都写回配置文件，重启/重新加载后保持；disable 后 reload 仍是「未启用」，不会自己恢复。
 
-开关口径：NOVAI_MCP_ENABLED=1 才启用；否则所有服务显示「未启用」，接口不连任何进程。
+开关口径：总开关默认关闭，可在设置里打开（落盘 <数据目录>/mcp_settings.json，重启保持）；
+环境变量 NOVAI_MCP_ENABLED=on/off 显式给出时以环境变量为准，此时界面开关返回 409 被忽略。
+总开关关着时所有服务显示「未启用」，接口不连任何进程。
 环境变量永远只返回键名（env_keys），不返回值。
 
 Python 3.9 约束：注解用 Optional/Dict/List，禁止 X | Y 联合写法。
@@ -58,9 +65,117 @@ class McpEnableRequest(BaseModel):
     confirm: bool = False
 
 
+class McpSwitchRequest(BaseModel):
+    enabled: bool = False
+    confirm: bool = False
+
+
 @router.get("/servers")
 def mcp_list_servers(force: bool = False) -> Dict[str, Any]:
-    return {"enabled": registry.enabled(), "servers": registry.servers_view(force=force)}
+    return {"enabled": registry.enabled(), "env_override": config.env_override(),
+            "config_path": config.config_path(), "servers": registry.servers_view(force=force)}
+
+
+@router.put("/servers/switch")
+def mcp_switch(payload: McpSwitchRequest) -> Dict[str, Any]:
+    """总开关：开启要 confirm（会真的去连外部进程），关闭不需要；返回落盘后的状态。"""
+    if payload.enabled and not payload.confirm:
+        raise HTTPException(status_code=400, detail="需要 confirm: true 才会开启 MCP 总开关")
+    override = config.env_override()
+    if override:
+        raise HTTPException(
+            status_code=409,
+            detail=("MCP 总开关由环境变量 NOVAI_MCP_ENABLED=%s 控制，界面开关已忽略；"
+                    "要改请先去掉该环境变量" % override))
+    config.set_enabled(bool(payload.enabled))
+    registry.reset_cache()
+    return {"ok": True, "enabled": config.enabled(), "env_override": config.env_override(),
+            "servers": registry.servers_view(force=False)}
+
+
+def _server_payload() -> Dict[str, Any]:
+    """读现有服务配置并返回可写的 payload；文件坏了先报 400，不静默覆盖用户配置。"""
+    config.ensure_user_config()
+    cfg = config.load_config()
+    for item in cfg.get("errors") or []:
+        if str(item.get("name") or "") == "<file>":
+            raise HTTPException(status_code=400,
+                                detail="现有 MCP 配置不可用：%s" % (item.get("error") or "无法读取"))
+    payload = cfg.get("raw")
+    if not isinstance(payload, dict):
+        payload = {config.TOP_KEY: {}}
+    servers = payload.get(config.TOP_KEY)
+    if not isinstance(servers, dict):
+        servers = {}
+        payload[config.TOP_KEY] = servers
+    return payload
+
+
+def _disk_entry(server: Dict[str, Any]) -> Dict[str, Any]:
+    """落盘用：name 是字典键，不重复写进条目。"""
+    entry = dict(server)
+    entry.pop("name", None)
+    return entry
+
+
+@router.post("/servers")
+def mcp_create_server(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """新增一条服务配置（只写盘，不触发工具发现，避免顺手连进程）。"""
+    name = str(payload.get("name") or "").strip()
+    server, error = config.normalize_server(name, payload)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    body = _server_payload()
+    servers = body[config.TOP_KEY]
+    if name in servers:
+        raise HTTPException(status_code=409, detail="MCP 服务已存在：%s" % name)
+    servers[name] = _disk_entry(server)
+    config.save_raw(body)
+    registry.reset_cache()
+    return {"ok": True, "server": config.redacted(server)}
+
+
+@router.put("/servers/{name}")
+def mcp_update_server(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """覆盖一条服务配置；body 的 name 和路径不同时等于改名（旧键删掉）。
+
+    env / headers 缺省视为「保留原值」：GET 只回键名，编辑弹窗回填不了值，整条替换会把它们清空；
+    要清空就显式传 {}。改名时按原路径名取旧值。
+    """
+    old_name = str(name or "").strip()
+    body = _server_payload()
+    servers = body[config.TOP_KEY]
+    if old_name not in servers:
+        raise HTTPException(status_code=404, detail="MCP 服务不存在：%s" % (old_name or "<空>"))
+    new_name = str(payload.get("name") or old_name).strip()
+    merged = dict(payload)
+    existing = servers.get(old_name)
+    if isinstance(existing, dict):
+        for key in ("env", "headers"):
+            if key not in payload and key in existing:
+                merged[key] = existing[key]
+    server, error = config.normalize_server(new_name, merged)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    servers.pop(old_name, None)
+    servers[server["name"]] = _disk_entry(server)
+    config.save_raw(body)
+    registry.reset_cache()
+    return {"ok": True, "server": config.redacted(server)}
+
+
+@router.delete("/servers/{name}")
+def mcp_delete_server(name: str) -> Dict[str, Any]:
+    """删除一条服务配置（只写盘，不触发工具发现）。"""
+    server_name = str(name or "").strip()
+    body = _server_payload()
+    servers = body[config.TOP_KEY]
+    if server_name not in servers:
+        raise HTTPException(status_code=404, detail="MCP 服务不存在：%s" % (server_name or "<空>"))
+    servers.pop(server_name, None)
+    config.save_raw(body)
+    registry.reset_cache()
+    return {"ok": True, "deleted": server_name}
 
 
 @router.post("/servers/{name}/enable")

@@ -826,7 +826,7 @@ class OpenClawGatewayClient(object):
 
 
 def backend_enabled() -> bool:
-    return _env("NOVAI_CHAT_BACKEND", "openclaw").lower() == "openclaw"
+    return _env("NOVAI_CHAT_BACKEND", "local").lower() == "openclaw"
 
 
 def _fallback_sse(data: Dict[str, Any]) -> str:

@@ -5,11 +5,123 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>智能画布BEAT</title>
-    <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/openarc-canvas/canvas.css?v=1.0.143.1793426877">
+    <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("dark");document.documentElement.classList.add("theme-dark");document.documentElement.classList.add("studio-theme-dark");}}catch(e){}})();</script>
+    <link rel="stylesheet" href="/static/novai-canvas/canvas.css?v=2.0.00.1794038574">
+    <link rel="stylesheet" href="/static/css/glide.css?v=2.0.00.1789742566">
+    <link rel="stylesheet" href="/static/css/source-browser.css?v=2.0.00.1793698294">
+    <link rel="stylesheet" href="/static/css/canvas-agent-resize.css?v=2.0.00.1794019983">
+    <link rel="stylesheet" href="/static/css/nv-icons.css?v=2.0.00.1793788093">
 </head>
 <body>
     <div id="root"></div>
-    <script type="module" src="/static/openarc-canvas/canvas.js?v=1.0.143.1793426877"></script>
+    <!-- 在线素材面板（旧版智能画布那一套 DOM / JS，挂在 React 根之外；桌面端把原生 WebContentsView 叠在 #sourceBrowserView 上） -->
+    <button id="sourceBrowserToggle" class="asset-toggle source-browser-toggle" type="button" aria-expanded="false" title="在线素材" aria-label="在线素材" hidden style="display:none" data-i18n-title="source.panelTitle"><i data-lucide="images"></i><span data-i18n="source.panelTitle">在线素材</span></button>
+    <aside id="sourceBrowserPanel" class="source-browser-panel" role="dialog" aria-label="在线素材">
+        <div class="source-browser-head">
+            <div id="sourceBrowserNav" class="source-browser-nav" hidden>
+                <button id="sourceBrowserBack" class="source-browser-nav-btn" type="button" title="后退" aria-label="后退" disabled><i data-lucide="arrow-left"></i></button>
+                <button id="sourceBrowserForward" class="source-browser-nav-btn" type="button" title="前进" aria-label="前进" disabled><i data-lucide="arrow-right"></i></button>
+            </div>
+            <div class="source-browser-title"><i data-lucide="images"></i><span data-i18n="source.panelTitle">在线素材</span><span id="sourceBrowserSourceName" class="sb-src-name"></span></div>
+            <div class="source-browser-head-actions">
+                <div id="sourceBrowserZoom" class="source-browser-zoom" hidden>
+                    <button id="sourceBrowserZoomOut" class="source-browser-zoom-btn" type="button" title="缩小" aria-label="缩小">−</button>
+                    <input id="sourceBrowserZoomPercent" class="source-browser-zoom-percent" type="text" inputmode="numeric" value="100%" aria-label="网页缩放比例" spellcheck="false" autocomplete="off">
+                    <button id="sourceBrowserZoomIn" class="source-browser-zoom-btn" type="button" title="放大" aria-label="放大">+</button>
+                    <button id="sourceBrowserZoomReset" class="source-browser-zoom-reset" type="button" data-i18n="source.zoomReset">重置</button>
+                </div>
+                <button id="sourceBrowserReloadBtn" class="source-browser-mini-btn" type="button" title="刷新" data-i18n-title="source.reload" aria-label="刷新" hidden><i data-lucide="refresh-cw"></i></button>
+                <button id="sourceBrowserExternalBtn" class="source-browser-mini-btn" type="button" title="在系统浏览器打开" data-i18n-title="source.openExternal" aria-label="在系统浏览器打开"><i data-lucide="external-link"></i></button>
+                <button id="sourceBrowserCloseBtn" class="source-browser-close" type="button" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+            </div>
+        </div>
+        <div id="sourceBrowserTabs" class="source-browser-tabs" role="tablist" aria-label="素材来源">
+            <button class="source-browser-tab" type="button" role="tab" aria-selected="true" data-source-key="pinterest" title="灵感图片站，登录后把图片拖进画布" data-i18n-title="source.pinterestDesc"><img class="source-browser-logo" src="/static/images/brands/pinterest.svg" alt="" draggable="false" loading="lazy"><span data-i18n="source.pinterest">Pinterest</span></button>
+            <button class="source-browser-tab" type="button" role="tab" aria-selected="false" data-source-key="huaban" title="国内设计灵感，采集后拖进画布" data-i18n-title="source.huabanDesc"><img class="source-browser-logo" src="/static/images/brands/huaban.svg" alt="" draggable="false" loading="lazy"><span data-i18n="source.huaban">花瓣</span></button>
+            <button class="source-browser-tab" type="button" role="tab" aria-selected="false" data-source-key="xiaohongshu" title="笔记配图，登录后拖进画布" data-i18n-title="source.xiaohongshuDesc"><img class="source-browser-logo" src="/static/images/brands/xiaohongshu.png" alt="" draggable="false" loading="lazy"><span data-i18n="source.xiaohongshu">小红书</span></button>
+            <button class="source-browser-tab" type="button" role="tab" aria-selected="false" data-source-key="custom" title="打开任意网页，拖入图片" data-i18n-title="source.customDesc"><i data-lucide="earth" class="source-browser-logo"></i><span data-i18n="source.custom">自定义</span></button>
+        </div>
+        <div id="sourceBrowserCustomBar" class="source-browser-custom" hidden>
+            <div class="source-browser-custom-row">
+                <input id="sourceBrowserCustomUrl" type="text" inputmode="url" spellcheck="false" placeholder="输入网页地址（http/https），例如 https://www.pinterest.com/" data-i18n-placeholder="source.customPlaceholder">
+                <button id="sourceBrowserCustomOpen" class="source-browser-custom-open" type="button" data-i18n="source.customOpen">打开</button>
+            </div>
+            <div id="sourceBrowserCustomRecent" class="source-browser-custom-recent"></div>
+        </div>
+        <div id="sourceBrowserStage" class="source-browser-stage">
+            <div id="sourceBrowserMorph" class="source-browser-morph" aria-hidden="true"></div>
+            <div id="sourceBrowserSurface" class="source-browser-surface">
+                <!-- 原生视图（WebContentsView）的占位锚点：只用来量矩形，真正的浏览内容由主进程叠在这块区域上 -->
+                <div id="sourceBrowserView" class="source-browser-view" aria-hidden="true"></div>
+                <div id="sourceBrowserPlaceholder" class="source-browser-placeholder">
+                    <span class="source-browser-placeholder-icon"><i data-lucide="images"></i></span>
+                    <strong data-i18n="source.viewPlaceholderTitle">内嵌浏览器还没就绪</strong>
+                    <span data-i18n="source.viewPlaceholder">点上方来源，这里会直接显示 Pinterest / 花瓣 / 小红书。</span>
+                </div>
+                <!-- 网页版（无 window.pywebview）空态。文案写在 DOM 里，不用 data-i18n：i18n 表里没有这组新文案，会把它盖掉 -->
+                <div id="sourceBrowserUnsupported" class="source-browser-unsupported" hidden>
+                    <span class="sb-empty-icon"><i data-lucide="images"></i></span>
+                    <strong class="sb-empty-title">网页版暂不支持内嵌浏览器</strong>
+                    <p class="sb-empty-desc">桌面版打开 Pinterest / 花瓣 / 小红书，或直接把图片从当前浏览器拖进画布。</p>
+                    <div class="sb-empty-actions">
+                        <button id="sourceBrowserEmptyExternal" class="sb-btn sb-btn-primary" type="button">在系统浏览器打开</button>
+                        <button id="sourceBrowserEmptyClose" class="sb-btn sb-btn-ghost" type="button">关闭</button>
+                    </div>
+                </div>
+                <div id="sourceBrowserStatus" class="source-browser-status" hidden>
+                    <span class="source-browser-status-icon"><i data-lucide="earth"></i></span>
+                    <span id="sourceBrowserStatusText" class="source-browser-status-text"></span>
+                    <button id="sourceBrowserRetryBtn" class="source-browser-retry" type="button" data-i18n="source.retry" hidden>重试</button>
+                </div>
+            </div>
+        </div>
+        <!-- 右缘/底边透明拖拽热区：只调宽高，不画可见边框 -->
+        <div id="sourceBrowserResizeHandle" class="source-browser-resize" role="separator" aria-orientation="vertical" aria-label="调整面板宽度"></div>
+        <div id="sourceBrowserBottomResize" class="source-browser-resize-bottom" role="separator" aria-orientation="horizontal" aria-label="调整面板高度"></div>
+        <div id="sourceBrowserCornerResize" class="source-browser-resize-corner" role="separator" aria-label="调整面板大小" title="拖动调整窗口大小，双击复位">
+            <svg class="source-browser-corner-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                <path d="M5 14 H14 V5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+                <path d="M9 14 H14 V9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+            </svg>
+        </div>
+    </aside>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=2.0.00.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=2.0.00.1793785599"></script>
+    <script src="/static/js/shared/glide.js?v=2.0.00.1789742748"></script>
+    <script defer src="/static/js/source-browser.js?v=2.0.00.1793698287"></script>
+    <script>
+        /* 点面板外面收起在线素材：旧 JS 只处理 Esc / 关闭按钮，画布是 React 的，得在这里补一层。
+           面板自己的操作由 source-browser.js 内部 stopPropagation，锚点按钮（左栏入口）不在这里关，
+           那个按钮走 toggle。 */
+        document.addEventListener('pointerdown', function (event) {
+            var api = window.__novaSourceBrowser;
+            if (!api || typeof api.isOpen !== 'function' || !api.isOpen()) return;
+            var target = event.target;
+            if (!target || typeof target.closest !== 'function') return;
+            if (target.closest('#sourceBrowserPanel, #sourceBrowserBtn, #sourceBrowserToggle')) return;
+            api.close();
+        }, true);
+
+        /* 网页版空态的两个按钮：不碰 source-browser.js 的逻辑，只把点击转给已有的按钮 / 公开 API */
+        document.getElementById('sourceBrowserEmptyExternal').addEventListener('click', function () {
+            var btn = document.getElementById('sourceBrowserExternalBtn');
+            if (btn) btn.click();
+        });
+        document.getElementById('sourceBrowserEmptyClose').addEventListener('click', function () {
+            if (window.__novaSourceBrowser) window.__novaSourceBrowser.close();
+        });
+
+        /* 工具栏标题旁显示当前来源（muted 小字）。切换仍由 source-browser.js 处理，这里只同步文案；
+           用捕获阶段——旧 JS 的 tab 处理器会 stopPropagation，冒泡收不到。 */
+        document.getElementById('sourceBrowserTabs').addEventListener('click', function (event) {
+            var tab = event.target && event.target.closest ? event.target.closest('[data-source-key]') : null;
+            if (!tab) return;
+            var names = { pinterest: 'Pinterest', huaban: '花瓣', xiaohongshu: '小红书', custom: '自定义' };
+            var label = document.getElementById('sourceBrowserSourceName');
+            if (label) label.textContent = names[tab.getAttribute('data-source-key')] || '';
+        }, true);
+    </script>
+    <script type="module" src="/static/novai-canvas/canvas.js?v=2.0.00.1794038574"></script>
+    <script defer src="/static/js/canvas-agent-resize.js?v=2.0.00.1793754290"></script>
 </body>
 </html>

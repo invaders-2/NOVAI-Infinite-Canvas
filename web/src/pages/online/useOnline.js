@@ -13,6 +13,7 @@ export const PAGE_SIZE = 24;
 export const S = reactive({
     apiProviders: [], models: { gpt: 'gpt-image-2', nano: 'nano-banana-pro' },
     provider: 'comfly', model: 'gpt-image-2', quality: 'auto', count: 1,
+    modelCaps: {}, capsTick: 0,
     ratio: 'square', resolution: '1k', customRatioWidth: '', customRatioHeight: '', customWidth: '', customHeight: '',
     notice: '', policyTick: 0,
     prompt: '',
@@ -27,6 +28,55 @@ export const currentProvider = computed(() => providerById(S.apiProviders, S.mod
 export const protocol = computed(() => protocolOf(currentProvider.value));
 export const isRunningHub = computed(() => protocol.value === 'runninghub');
 export const showQuality = computed(() => QUALITY_PROTOCOLS.has(protocol.value));
+
+/* ───────── 模型规格：质量档 ───────── */
+// 真值源是 GET /api/model-caps 的 qualities（后端权威表 + 协议更新写入的覆盖层）。
+// 拿不到时按模型名兜底：GPT-Image-2.5 / 2.6 系六档（auto/low/medium/high/xhigh/max），其余维持旧的四档。
+const QUALITY_ALL = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'];
+const QUALITY_BASE = ['auto', 'low', 'medium', 'high'];
+const QUALITY_LABEL = {
+    auto: ['online.qualityAuto', '自动'], low: ['online.qualityLow', '低'], medium: ['online.qualityMedium', '中'],
+    high: ['online.qualityHigh', '高'], xhigh: ['online.qualityXhigh', '极高'], max: ['online.qualityMax', 'Max'],
+};
+function capsKey(provider, model) { return String(provider || '') + '|' + String(model || '').trim().toLowerCase(); }
+export function capsFor(model, provider = S.provider) {
+    void S.capsTick;
+    return S.modelCaps[capsKey(provider, model)] || null;
+}
+// 质量档：接口下发过就用接口的（auto 永远保留，后端对 auto 不发 quality 字段），没下发再按模型名兜底
+function qualityLevelsFor(model, provider) {
+    const caps = capsFor(model, provider);
+    const documented = (caps && Array.isArray(caps.qualities) ? caps.qualities : [])
+        .map(v => String(v || '').trim().toLowerCase())
+        .filter(v => QUALITY_ALL.indexOf(v) >= 0);
+    if (documented.length) return ['auto', ...QUALITY_ALL.filter(v => v !== 'auto' && documented.indexOf(v) >= 0)];
+    return /gpt-image-2\.[56]/.test(String(model || '').toLowerCase()) ? QUALITY_ALL.slice() : QUALITY_BASE.slice();
+}
+export const qualityOptions = computed(() => {
+    void S.capsTick;
+    return qualityLevelsFor(S.model, S.provider).map(v => ({ value: v, label: t(QUALITY_LABEL[v][0], QUALITY_LABEL[v][1]) }));
+});
+// 切模型/平台后，原来选的质量档可能不合法（如从 2.6 换回 gpt-image-2 的 max）→ 回到「自动」
+function normalizeQuality() {
+    const levels = qualityOptions.value.map(o => o.value);
+    if (levels.indexOf(S.quality) < 0) S.quality = 'auto';
+}
+// 拉模型规格（best-effort）：接口未就绪 / 失败都安静退回按模型名兜底
+export function loadModelCaps() {
+    return fetch('/api/model-caps', { headers: { Accept: 'application/json' } })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+            const next = {};
+            (Array.isArray(data && data.items) ? data.items : []).forEach(item => {
+                if (!item || !item.model || item.kind !== 'image') return;
+                next[capsKey(item.provider, item.model)] = item;
+            });
+            S.modelCaps = next;
+            S.capsTick++;
+            normalizeQuality();
+        })
+        .catch(() => {});
+}
 export const badge = computed(() => { const b = PROTOCOL_BADGE[protocol.value] || PROTOCOL_BADGE.api; return t(b[0], b[1]); });
 
 export const providerOptions = computed(() => providers.value.map(p => {
@@ -50,12 +100,15 @@ function syncControls() {
     const keys = modelOptions.value.map(o => o.value);
     if (!keys.includes(S.model)) S.model = keys[0] || (isRunningHub.value ? '' : S.models.gpt);
     if (isRunningHub.value) S.count = 1;
+    normalizeQuality();
 }
 
 async function readConfig() {
     const cfg = await fetch('/api/config').then(r => r.json());
     S.models = modelsFromConfig(cfg);
     S.apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
+    // 模型规格跟着配置一起刷新；不 await（best-effort，接口慢也不拖慢页面）
+    loadModelCaps();
 }
 export async function initModels() {
     try { await readConfig(); S.model = providerModels(S.apiProviders, S.models, S.provider)[0] || S.models.gpt; } catch (e) {}
@@ -76,8 +129,9 @@ export function setProvider(id) {
     S.provider = id;
     S.model = providerModels(S.apiProviders, S.models, id)[0] || S.model;
     syncControls(); applySize();
+    normalizeQuality();
 }
-export function setModel(v) { S.notice = ''; S.model = v; applySize(); }
+export function setModel(v) { S.notice = ''; S.model = v; applySize(); normalizeQuality(); }
 export function setQuality(v) { S.quality = v || 'auto'; }
 export function setCount(v) { S.count = Math.max(1, Math.min(4, parseInt(v, 10) || 1)); }
 

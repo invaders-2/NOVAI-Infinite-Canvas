@@ -6,6 +6,8 @@
 - 空模板：config/mcp_servers.json（仓库自带，方便用户抄格式）
 - 路径覆盖：环境变量 NOVAI_MCP_CONFIG（绝对路径或相对当前工作目录）
 - 顶层键必须是 mcpServers（兼容从别的 MCP 客户端直接粘贴）
+- 总开关：data/mcp_settings.json（界面里开关后落盘，重启保持）；环境变量
+  NOVAI_MCP_ENABLED 显式给了 on/off 时以环境变量为准
 
 校验口径（P0）：
     name     只允许 [a-z0-9_-]
@@ -29,6 +31,9 @@ from typing import Any, Dict, List, Optional, Tuple
 ENV_ENABLED = "NOVAI_MCP_ENABLED"
 ENV_CONFIG_PATH = "NOVAI_MCP_CONFIG"
 CONFIG_FILENAME = "mcp_servers.json"
+SETTINGS_FILENAME = "mcp_settings.json"
+ENV_ON_VALUES = ("1", "true", "yes", "on")
+ENV_OFF_VALUES = ("0", "false", "no", "off")
 TOP_KEY = "mcpServers"
 NAME_RE = re.compile(r"^[a-z0-9_-]+$")
 DEFAULT_TIMEOUT = 30
@@ -66,8 +71,49 @@ def template_path() -> str:
     return os.path.join(repo_root(), "config", CONFIG_FILENAME)
 
 
+def settings_path() -> str:
+    """界面开关的落盘位置：<数据目录>/mcp_settings.json。"""
+    return os.path.join(data_dir(), SETTINGS_FILENAME)
+
+
+def read_settings() -> Dict[str, Any]:
+    """读界面设置；文件不存在、坏 JSON、非对象一律当空设置。"""
+    try:
+        with open(settings_path(), "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def env_override() -> str:
+    """环境变量的显式覆盖："on" / "off"，没设或取值不认识时返回空串。"""
+    raw = os.environ.get(ENV_ENABLED, "").strip().lower()
+    if raw in ENV_ON_VALUES:
+        return "on"
+    if raw in ENV_OFF_VALUES:
+        return "off"
+    return ""
+
+
+def enabled() -> bool:
+    """总开关：环境变量显式覆盖时听环境变量，否则看界面设置（缺省关闭）。"""
+    override = env_override()
+    if override:
+        return override == "on"
+    return read_settings().get("enabled") is True
+
+
+def set_enabled(flag: bool) -> Dict[str, Any]:
+    """写总开关到 mcp_settings.json（原子写，保留其它键）。返回落盘后的设置。"""
+    payload = read_settings()
+    payload["enabled"] = bool(flag)
+    _atomic_write_json(settings_path(), payload)
+    return payload
+
+
 def env_enabled() -> bool:
-    """总开关：只有 NOVAI_MCP_ENABLED=1 才连 MCP 服务。"""
+    """兼容旧调用：只有 NOVAI_MCP_ENABLED=1 才为真（不看界面设置）。"""
     return os.environ.get(ENV_ENABLED, "").strip() == "1"
 
 

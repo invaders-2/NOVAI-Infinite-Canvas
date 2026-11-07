@@ -21,7 +21,7 @@ import {
 	InputGroupAddon,
 	InputGroupButton,
 	InputGroupTextarea,
-} from "@/ui/input-group"
+} from "@/components/hexta/input-group"
 import {
 	Select,
 	SelectContent,
@@ -994,7 +994,7 @@ export const PromptInputActionMenuItem = ({
 // Note: Actions that perform side-effects (like opening a file dialog)
 // are provided in opt-in modules (e.g., prompt-input-attachments).
 
-export type PromptInputSubmitProps = ComponentProps<typeof InputGroupButton> & {
+export type PromptInputSubmitProps = Omit<ComponentProps<typeof InputGroupButton>, "status"> & {
 	status?: ChatStatus
 	onStop?: () => void
 }

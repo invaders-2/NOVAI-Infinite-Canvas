@@ -1,7 +1,7 @@
 """画布助手对话记忆：/api/agent/run 的 history 清洗、提示词注入与反问分支（模型调用全部打桩）。
 
 覆盖：
-  1. 清洗：role 白名单、单条 2000 字截断、最近 20 条、总 6000 字从最旧丢、空/脏历史不报错；
+  1. 清洗：role 白名单、单条 4000 字截断、最近 20 条、总 16000 字从最旧丢、空/脏历史不报错；
   2. 提示词：有历史时历史段出现在画布快照之后；无历史时整段（含标题）不出现；
   3. 反问：模型返回 done=true + message 时 SSE 以 done 收尾、message 原样透出、不产生任何工具调用。
 """
@@ -85,10 +85,10 @@ class AgentRunHistoryNormalizeTests(unittest.TestCase):
                          [{"role": "user", "text": "把这张图改成竖版"},
                           {"role": "assistant", "text": "好的，已记下"}])
 
-    def test_single_item_is_truncated_to_2000_chars(self):
-        out = main._agent_run_normalize_history([{"role": "user", "text": "长" * 2500}])
+    def test_single_item_is_truncated_to_4000_chars(self):
+        out = main._agent_run_normalize_history([{"role": "user", "text": "长" * 4500}])
         self.assertEqual(len(out), 1)
-        self.assertEqual(len(out[0]["text"]), 2000)
+        self.assertEqual(len(out[0]["text"]), 4000)
 
     def test_only_latest_20_items_are_kept(self):
         raw = [{"role": "user", "text": f"第{i}句"} for i in range(25)]
@@ -97,12 +97,13 @@ class AgentRunHistoryNormalizeTests(unittest.TestCase):
         self.assertEqual(out[0]["text"], "第5句")
         self.assertEqual(out[-1]["text"], "第24句")
 
-    def test_total_chars_over_6000_drops_from_oldest(self):
-        raw = [{"role": "user", "text": "A" * 2000}, {"role": "assistant", "text": "B" * 2000},
-               {"role": "user", "text": "C" * 2000}, {"role": "assistant", "text": "D" * 2000}]
+    def test_total_chars_over_16000_drops_from_oldest(self):
+        raw = [{"role": "user", "text": "A" * 4000}, {"role": "assistant", "text": "B" * 4000},
+               {"role": "user", "text": "C" * 4000}, {"role": "assistant", "text": "D" * 4000},
+               {"role": "user", "text": "E" * 4000}]
         out = main._agent_run_normalize_history(raw)
-        self.assertEqual([rec["text"][0] for rec in out], ["B", "C", "D"])
-        self.assertEqual(sum(len(rec["text"]) for rec in out), 6000)
+        self.assertEqual([rec["text"][0] for rec in out], ["B", "C", "D", "E"])
+        self.assertEqual(sum(len(rec["text"]) for rec in out), 16000)
 
     def test_empty_or_garbage_history_never_raises(self):
         for value in ([], None, "不是数组", {}, [None], [{"role": 1, "text": 2}], [object()]):
@@ -155,10 +156,13 @@ class AgentRunPromptTests(unittest.TestCase):
         self.assertNotIn("用户：", system)
         self.assertEqual(main._agent_run_history_prompt([]), "")
 
-    def test_prompt_has_clarify_rule(self):
-        self.assertIn("7) 信息不足", main._AGENT_RUN_SYSTEM_PROMPT)
+    def test_prompt_forbids_asking_instead_of_deciding(self):
+        """产品改了：智能体自己拿主意，不再用问答卡片反问（旧的「信息不足先问」规则 7 已删除）。"""
+        self.assertNotIn("openarc-questions", main._AGENT_RUN_SYSTEM_PROMPT)
+        self.assertIn("不要反问", main._AGENT_RUN_SYSTEM_PROMPT)
+        self.assertIn("assumptions", main._AGENT_RUN_SYSTEM_PROMPT)
         self.assertIn("message", main._AGENT_RUN_SYSTEM_PROMPT)
-        self.assertIn("done=true", main._AGENT_RUN_SYSTEM_PROMPT)
+        self.assertIn('"done": true', main._AGENT_RUN_SYSTEM_PROMPT)   # 直接回答仍走 done + message 形状
 
 
 class AgentRunClarifyTests(unittest.TestCase):

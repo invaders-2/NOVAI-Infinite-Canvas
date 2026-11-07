@@ -45,15 +45,15 @@ import {
 } from "../ai-elements/attachments"
 import { ModelProviderMenu } from "./ModelMenu"
 import { PlusMenu } from "./PlusMenu"
-import { RecordingMenu } from "./RecordingMenu"
-import { recordingSupported } from "./recording"
-import { ScreenshotPicker } from "./ScreenshotPicker"
+import { ReverseImageMenu } from "./ReverseImageMenu"
 import { listFolderFiles, restoreFolder } from "./folder"
+import { Kbd } from "@/components/hexta/kbd"
 import { cn } from "@/lib/utils"
 import { fetchCanvasNodes } from "./api"
 import type { CanvasNodeSummary } from "./api"
 import { formatTokens } from "./format"
 import type { AssistantStore } from "./store"
+import { setBeatDrafting } from "./useBeatActivity"
 
 interface SlashCommand {
 	name: string
@@ -89,6 +89,16 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 	const [modelOpen, setModelOpen] = useState(false)
 	const modelMenuRef = useRef<HTMLDivElement | null>(null)
 	const modelButtonRef = useRef<HTMLButtonElement | null>(null)
+	useEffect(() => {
+		const panel = document.querySelector<HTMLElement>("#canvasAssistantPanel")
+		panel?.classList.toggle("is-model-open", modelOpen)
+		return () => panel?.classList.remove("is-model-open")
+	}, [modelOpen])
+	/* 草稿只存在 prompt-input 的 controller 里，没进 store；同步给头像判断「用户正在输入」 */
+	useEffect(() => {
+		setBeatDrafting(Boolean(text.trim()))
+	}, [text])
+	useEffect(() => () => setBeatDrafting(false), [])
 	const [mentionOpen, setMentionOpen] = useState(false)
 	const [mentionNodes, setMentionNodes] = useState<CanvasNodeSummary[]>([])
 	const [mentionLoading, setMentionLoading] = useState(false)
@@ -413,7 +423,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 	const nodeRefs = env.refs.filter((ref) => !isUpload(ref))
 
 	return (
-		<div className="nvca-tap-composer">
+		<div className="nvca-tap-composer nvca-thread-composer">
 			{env.queue.length > 0 ? (
 				<div className="nvca-queue">
 					<div className="nvca-queue-head">
@@ -462,7 +472,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 			) : null}
 
 			{attachments.length > 0 ? (
-				<div className="nvca-attach-row">
+				<div className="nvca-attach-row nvca-thread-attach-row">
 					{attachments.map((ref) => (
 						<div className="nvca-attachment" key={ref.id}>
 							<button
@@ -532,6 +542,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 					)
 				: null}
 			<div className="nvca-tap-composer-hint">
+				<span className="nvca-thread-kbd-hint"><Kbd size="sm" variant="flat">Enter</Kbd> 发送</span>
 				<button className="nvca-tap-hint-btn" onClick={() => setPlusOpen((value) => !value)} type="button">
 					{pickMode ? "正在从画布添加…" : "添加画布内容"}
 				</button>
@@ -591,7 +602,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 			) : null}
 
 			<PromptInput
-				className="nvca-prompt-form"
+				className="nvca-prompt-form nvca-thread-composer-shell"
 				multiple
 				onSubmit={handlePromptSubmit}
 			>
@@ -608,10 +619,10 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 						</Attachments>
 					) : null}
 			{nodeRefs.length > 0 ? (
-				<div className="nvca-tap-chips">
+				<div className="nvca-tap-chips nvca-thread-chips scroll-fade-x">
 					{nodeRefs.map((ref) => (
 						<span
-							className={"nvca-tap-chip" + (ref.type === "folder" ? " is-folder" : ref.type === "skill" ? " is-skill" : ref.type === "app" ? " is-app" : "")}
+							className={"nvca-tap-chip nvca-thread-chip" + (ref.type === "folder" ? " is-folder" : ref.type === "skill" ? " is-skill" : ref.type === "app" ? " is-app" : "")}
 							key={ref.id}
 							onClick={() => {
 								if (ref.type === "folder") void openFolderFiles()
@@ -623,7 +634,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 							}
 						>
 							{ref.thumbUrl ? (
-								<img alt="" className="nvca-tap-chip-thumb" src={ref.thumbUrl} />
+								<img alt="" className="nvca-tap-chip-thumb nvca-thread-chip-thumb" src={ref.thumbUrl} />
 							) : ref.type === "skill" ? (
 								<PuzzleIcon className="nvca-i-xs" />
 							) : ref.type === "app" ? (
@@ -639,7 +650,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 							) : (
 								<FolderClosedIcon className="nvca-i-xs" />
 							)}
-							<span className="nvca-tap-chip-name">{ref.name}</span>
+							<span className="nvca-tap-chip-name nvca-thread-chip-name">{ref.name}</span>
 							<button
 								aria-label={"移除引用 " + ref.name}
 								onClick={(event) => {
@@ -718,8 +729,8 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 				/>
 				</PromptInputBody>
 				<PromptInputFooter className="nvca-prompt-footer">
-				<div className="nvca-tap-toolbar">
-					<div className="nvca-tap-tools-left">
+				<div className="nvca-tap-toolbar nvca-thread-tools">
+					<div className="nvca-tap-tools-left nvca-thread-tools-left">
 						<PromptInputButton
 							aria-expanded={plusOpen}
 							aria-haspopup="menu"
@@ -740,8 +751,9 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 						>
 							<HandIcon className="nvca-i-sm" />
 						</button>
+						<ReverseImageMenu store={store} />
 					</div>
-					<div className="nvca-tap-tools-right">
+					<div className="nvca-tap-tools-right nvca-thread-tools-right">
 						<button
 							aria-expanded={contextOpen}
 							className="nvca-tap-context"
@@ -858,7 +870,6 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 					</div>
 				</div>
 			) : null}
-			{env.notice ? <div className="nvca-tap-notice">{env.notice}</div> : null}
 		</div>
 	)
 }

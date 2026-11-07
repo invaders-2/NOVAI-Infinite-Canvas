@@ -1,76 +1,65 @@
 <script setup>
-// 首页：一句话开始。功能与旧 home.html 一一对应——
-//   输入框（Agent / 图片 / 视频 三种方式、参考图上传≤6 张、粘贴 / 拖入、回车发送）、8 个技能（点一下搭节点 / 星芒交给 Agent）、
-//   最近项目（新建 + 最近 4 张，点开直接进画布）、模板（分类 + 节点示意封面）、更多工具、局域网访问条、队列状态。
-import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
+// 首页（2026-11 重做）：标题打字机 → 输入框（参考素材 / 技能 / 插件 / 素材库）→ 快速开始 → 模板库（点卡片先预览）。
+// 建画布与种子协议沿用旧 home.html：POST /api/canvases 建空白画布，再把种子写进 localStorage
+// （novai_canvas_seed:<画布 id>），画布侧读一次即删。改种子字段要同步智能画布BEAT 的种子翻译（canvas-next）。
+// 首页所有入口（输入框发送 / 快速开始 / 模板 / 最近项目）都进「智能画布BEAT」（kind=classic → /static/canvas.html）：
+// 种子规格两边一致，由 BEAT 侧翻译成节点；旧智能画布（/static/smart-canvas.html）只剩旧页面与外链在用。
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
+import NvVeilBg from '../../components/NvVeilBg.vue';
 import { state, toast } from '../../lib/store.js';
-import { navigate, openCanvasUrl } from '../../lib/bridge.js';
-import { useGlide } from '../../lib/glide.js';
-import { CATS, TEMPLATES, TEMPLATE_MAP, SKILLS, MODES, MODE_KEY, SEED_PREFIX } from './templates.js';
-import { diagram, templateKind, formatUpdateTime } from './layout.js';
+import { openCanvasUrl, navigate } from '../../lib/bridge.js';
+import { CATS, TEMPLATES, TEMPLATE_MAP, SEED_PREFIX } from './templates.js';
+import TemplatePreview from './TemplatePreview.vue';
+import { ICONS } from '../../lib/icons.js';
 
-/* ───────── 问候语 ───────── */
-const h = new Date().getHours();
-const greeting = (h < 6 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好') + '，今天想创作点什么';
+/* ───────── 标题：逐字打出 → 停顿 → 逐字删除 → 下一句 ───────── */
+const LINES = ['今天想创作点什么？', '给新品做一套电商主图？', '把一句剧情变成分镜？', '让产品图动起来？', '给角色做一套三视图？'];
+const typed = ref(LINES[0]);
+const typing = ref(false);
+let ttTimer = null;
+function startTypewriter() {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    let li = 0, ci = LINES[0].length, del = true;
+    const step = () => {
+        const full = LINES[li];
+        if (state.active !== 'home' || document.hidden) { ttTimer = setTimeout(step, 600); return; }
+        if (!del) {
+            if (ci < full.length) { ci++; typed.value = full.slice(0, ci); typing.value = true; ttTimer = setTimeout(step, 85 + Math.random() * 60); }
+            else { typing.value = false; del = true; ttTimer = setTimeout(step, 2600); }
+        } else if (ci > 0) { ci--; typed.value = full.slice(0, ci); typing.value = true; ttTimer = setTimeout(step, 38); }
+        else { del = false; li = (li + 1) % LINES.length; ttTimer = setTimeout(step, 350); }
+    };
+    ttTimer = setTimeout(step, 3000);   // 第一句先完整停 3 秒
+}
 
 /* ───────── 输入框 ───────── */
-const EXAMPLES = {
-    agent: ['给这双鞋做一套电商主图，白底 + 户外场景', '一句话剧情：雨夜便利店的相遇，出 9 宫格分镜', '为新品茶饮做一张竖版海报，夏日清爽感', '把这张人像做成三种风格的写真'],
-    image: ['清晨海边的咖啡馆，胶片质感', '极简白色展台上的香水瓶，柔和棚拍光', '赛博朋克风格的雨夜街道，霓虹倒影'],
-    video: ['镜头缓慢推近一杯冒着热气的咖啡', '产品在转台上缓慢旋转，光线在表面流动', '航拍清晨的山谷，云雾缓缓流动'],
-};
-const savedMode = (() => { try { return localStorage.getItem(MODE_KEY); } catch (e) { return null; } })();
-const mode = ref(MODES.some(m => m.id === savedMode) ? savedMode : 'agent');
 const text = ref('');
-const refs = ref([]);           // {id, url, name, preview, loading}
+const refs = ref([]);           // {id, url, name, kind, preview, loading}
+const skill = ref(null);        // {id, name, description}
 const busy = ref(false);
-const sendPhase = ref('');      // '' | loading | done
-const focus = ref(false);
 const drag = ref(false);
 const shaking = ref(false);
 const inputEl = ref(null);
 const fileEl = ref(null);
-const composerEl = ref(null);
-const segEl = ref(null);
-const segGlide = useGlide(segEl, 'button');
-
-const modeInfo = computed(() => MODES.find(m => m.id === mode.value) || MODES[0]);
 const uploading = computed(() => refs.value.some(r => r.loading));
-const canSend = computed(() => !busy.value && !uploading.value && (text.value.trim().length > 0 || refs.value.length > 0));
+const canSend = computed(() => !busy.value && !uploading.value && (text.value.trim().length > 0 || refs.value.length > 0 || !!skill.value));
 
-// 空输入时轮播示例：旧文字上移淡出，新文字从下方进入（Text States）
-const ex = reactive({ i: 0, phase: '' });
-const exText = computed(() => { const list = EXAMPLES[mode.value] || EXAMPLES.agent; return list[ex.i % list.length]; });
-function swapPhase(obj, apply) {
-    obj.phase = 'out';
-    setTimeout(() => { apply && apply(); obj.phase = 'pre'; setTimeout(() => { obj.phase = ''; }, 40); }, 150);
-}
-let exTimer = null;
-const hint = reactive({ phase: '', text: '⇧↵ 换行' });
-function setHint(v) { if (hint.text === v) return; swapPhase(hint, () => { hint.text = v; }); }
-watch([text, sendPhase], () => {
-    setHint(sendPhase.value === 'loading' ? '正在建画布…' : sendPhase.value === 'done' ? '已打开画布' : (text.value ? '↵ 发送' : '⇧↵ 换行'));
-});
-
-function pickMode(id) {
-    mode.value = id;
-    try { localStorage.setItem(MODE_KEY, id); } catch (e) {}
-    ex.i = 0;
-    segGlide.refresh();
-    inputEl.value && inputEl.value.focus();
-}
-function autoGrow() {
-    const el = inputEl.value; if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = Math.min(200, Math.max(56, el.scrollHeight)) + 'px';
-}
+function autoGrow() { /* 输入区是 contenteditable，高度由 CSS（min/max-height）控制 */ }
 function onKey(e) {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
+    if (onMentionKey(e)) return;
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
+        e.preventDefault();
+        if (e.shiftKey) { document.execCommand('insertLineBreak'); syncText(); } else submit();
+    }
 }
 function onPaste(e) {
     const files = Array.from((e.clipboardData && e.clipboardData.items) || []).map(it => (it.kind === 'file' ? it.getAsFile() : null)).filter(Boolean);
-    if (files.length) { e.preventDefault(); addFiles(files); }
+    e.preventDefault();
+    if (files.length) { addFiles(files); return; }
+    // 只收纯文本，别把网页里的格式 / 图片标签贴进来
+    const plain = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+    if (plain) { document.execCommand('insertText', false, plain); syncText(); }
 }
 function hasFiles(e) { const ty = e.dataTransfer && e.dataTransfer.types; return !!(ty && Array.from(ty).includes('Files')); }
 let dragDepth = 0;
@@ -79,79 +68,93 @@ function onDragOver(e) { if (hasFiles(e)) e.preventDefault(); }
 function onDragLeave() { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) drag.value = false; }
 function onDrop(e) { if (!hasFiles(e)) return; e.preventDefault(); dragDepth = 0; drag.value = false; addFiles(e.dataTransfer.files); }
 
+function guessKind(f) {
+    const ty = String(f.type || '');
+    if (ty.startsWith('image/')) return 'image';
+    if (ty.startsWith('video/')) return 'video';
+    if (ty.startsWith('audio/')) return 'audio';
+    return 'file';
+}
 function addFiles(files) {
-    let list = Array.from(files || []).filter(f => f && /^image\//.test(f.type));
-    const room = 6 - refs.value.length;
+    let list = Array.from(files || []).filter(f => f && (typeof f.size !== 'number' || f.size > 0));
     if (!list.length) return;
-    if (room <= 0) { toast('最多 6 张参考图'); return; }
-    if (list.length > room) toast('最多 6 张参考图，已取前 ' + room + ' 张');
+    const room = 6 - refs.value.length;
+    if (room <= 0) { toast('最多 6 个参考素材'); return; }
+    if (list.length > room) toast('最多 6 个参考素材，已取前 ' + room + ' 个');
     list = list.slice(0, room);
-    const entries = list.map((f, i) => reactive({ id: 'r' + Date.now() + '_' + i, url: '', name: f.name || '参考图', preview: URL.createObjectURL(f), loading: true }));
+    const entries = list.map((f, i) => {
+        const kind = guessKind(f);
+        return reactive({ id: 'r' + Date.now() + '_' + i, url: '', name: f.name || '素材', kind, preview: (kind === 'image' || kind === 'video') ? URL.createObjectURL(f) : '', loading: true });
+    });
     refs.value = refs.value.concat(entries);
     const form = new FormData();
-    list.forEach(f => form.append('files', f, f.name || 'image.png'));
+    list.forEach(f => form.append('files', f, f.name || 'file'));
     fetch('/api/ai/upload', { method: 'POST', body: form })
         .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(data => {
             const out = (data && data.files) || [];
             entries.forEach((entry, i) => {
                 const f = out[i];
-                if (f && f.url) { entry.url = f.url; entry.name = f.name || entry.name; entry.loading = false; }
+                if (f && f.url) { entry.url = f.url; entry.name = f.name || entry.name; entry.kind = f.kind || entry.kind; entry.loading = false; }
                 else refs.value = refs.value.filter(r => r !== entry);
             });
         })
         .catch(() => {
             refs.value = refs.value.filter(r => !entries.includes(r));
-            toast('参考图上传失败，请重试', { danger: true, icon: 'alert' });
+            toast('素材上传失败，请重试', { danger: true, icon: 'alert' });
         });
 }
+function addLibraryAsset(a) {
+    if (refs.value.length >= 6) { toast('最多 6 个参考素材'); return; }
+    if (refs.value.some(r => r.url === a.url)) return;
+    refs.value = refs.value.concat([reactive({ id: 'lib_' + Date.now(), url: a.url, name: a.name, kind: a.kind, preview: a.thumb || a.url, loading: false })]);
+}
 function removeRef(id) { refs.value = refs.value.filter(r => r.id !== id); }
-function readyRefs() { return refs.value.filter(r => r.url && !r.loading).map(r => ({ url: r.url, name: r.name })); }
+function readyRefs() { return refs.value.filter(r => r.url && !r.loading).map(r => ({ url: r.url, name: r.name, kind: r.kind || 'image' })); }
 function shake() {
     shaking.value = false;
     requestAnimationFrame(() => { shaking.value = true; setTimeout(() => { shaking.value = false; }, 420); });
     inputEl.value && inputEl.value.focus();
 }
 
-/* ───────── 画布：新建 / 打开 ───────── */
-function canvasUrl(c) {
+/* ───────── 画布：新建 / 打开（与旧首页同一套） ───────── */
+function canvasUrl(c, opts = {}) {
     const enc = encodeURIComponent(c.id);
     const project = encodeURIComponent(c.project || 'default');
-    return (c.kind === 'smart' ? '/static/smart-canvas.html' : '/static/canvas.html') + '?id=' + enc + '&project=' + project;
+    const beat = opts.ctx === 'beat' || c.kind !== 'smart';
+    return (beat ? '/static/canvas.html' : '/static/smart-canvas.html') + '?id=' + enc + '&project=' + project;
 }
-function openCanvas(c) { openCanvasUrl(canvasUrl(c)); }
 function timeTitle(prefix) { return prefix + ' ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); }
-async function createCanvas(title) {
+async function createCanvas(title, opts = {}) {
+    const beat = opts.ctx === 'beat';
     const r = await fetch('/api/canvases', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: String(title || '').slice(0, 60) || timeTitle('智能画布'), icon: 'layers', kind: 'smart', project: 'default' }),
+        body: JSON.stringify({ title: String(title || '').slice(0, 60) || timeTitle('智能画布'), icon: beat ? '🧩' : 'layers', kind: beat ? 'classic' : 'smart', project: 'default' }),
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     if (!data || !data.canvas) throw new Error('no canvas');
     return data.canvas;
 }
-async function launch(title, seed) {
-    if (busy.value) return;
-    busy.value = true; sendPhase.value = 'loading';
+async function launch(title, seed, opts) {
+    if (busy.value) return false;
+    busy.value = true;
     try {
-        const c = await createCanvas(title);
+        const c = await createCanvas(title, opts);
         if (seed) { try { localStorage.setItem(SEED_PREFIX + c.id, JSON.stringify(seed)); } catch (e) {} }
-        text.value = ''; refs.value = [];
+        clearEditor(); refs.value = []; skill.value = null;
         nextTick(autoGrow);
-        sendPhase.value = 'done';
-        setTimeout(() => { sendPhase.value = ''; }, 900);
-        openCanvas(c);
-        loadRecent();
+        openCanvasUrl(canvasUrl(c, opts));
+        return true;
     } catch (e) {
-        sendPhase.value = '';
         toast('创建画布失败，请检查服务是否在运行', { danger: true, icon: 'alert' });
+        return false;
     } finally {
         busy.value = false;
     }
 }
-// 把模板变成种子：首页的参考图放进 ref 节点、输入框文字放进 brief 节点
+// 把模板变成种子：首页的参考素材放进 ref 节点、输入框文字放进 brief 节点
 function seedFromTemplate(t, opts = {}) {
     const rs = readyRefs();
     const tx = text.value.trim();
@@ -164,301 +167,906 @@ function seedFromTemplate(t, opts = {}) {
     const seed = { v: 1, nodes, toast: t.toast };
     if (opts.agent) {
         seed.agent = t.agent + (tx ? '\n\n补充要求：' + tx : '');
-        seed.autoSend = Boolean(tx || rs.length);
+        seed.autoSend = true;
         seed.toast = '';
     }
     return seed;
 }
 function useTemplate(id, opts) {
     const t = TEMPLATE_MAP[id];
-    if (t) launch(timeTitle(t.title), seedFromTemplate(t, opts));
+    if (t) return launch(timeTitle(t.title), seedFromTemplate(t, opts), { ctx: 'beat' });
+    return Promise.resolve(false);
 }
+// 发送 = 新建画布，交给画布助手（Agent）规划执行；挂了技能时在第一句点名技能，助手会用 activate_skill 载入完整说明
 function submit() {
     if (busy.value) return;
-    if (uploading.value) { toast('参考图还在上传…'); return; }
+    if (uploading.value) { toast('参考素材还在上传…'); return; }
     const tx = text.value.trim();
     const rs = readyRefs();
-    if (!tx && !rs.length) { shake(); return; }
-    const title = tx ? tx.replace(/\s+/g, ' ').slice(0, 20) : timeTitle('智能画布');
+    if (!tx && !rs.length && !skill.value) { shake(); return; }
+    const title = tx ? tx.replace(/\s+/g, ' ').slice(0, 20) : (skill.value ? skill.value.name : timeTitle('智能画布'));
     const nodes = [];
     if (rs.length) nodes.push({ key: 'ref', type: 'image', title: '参考图', images: rs, col: 0 });
-    if (mode.value === 'agent') {
-        launch(title, { v: 1, nodes, agent: tx || '看看画布上的参考图，帮我规划可以做什么', autoSend: true });
-        return;
-    }
-    if (!tx) { shake(); toast('写一句画面描述再发送'); return; }
-    const video = mode.value === 'video';
-    nodes.push({ key: 'gen', type: 'gen', title: video ? '视频' : '图片', prompt: tx, video, ratio: video ? '16:9' : '', inputs: rs.length ? ['ref'] : [], col: rs.length ? 1 : 0 });
-    launch(title, { v: 1, nodes, autoRun: true });
+    let agent = tx || (rs.length ? '看看画布上的参考素材，帮我规划可以做什么' : '');
+    const sk = skill.value;
+    if (sk && sk.ref) agent = `请使用技能「${sk.name}」来完成。\n` + (agent || '先告诉我这个技能需要我提供什么。');
+    else if (sk) agent = `请使用技能「${sk.name}」（技能 ID：${sk.id}）来完成。\n` + (agent || '先告诉我这个技能需要我提供什么。');
+    const seed = { v: 1, nodes, agent, autoSend: true, renderer: 'beat' };
+    if (sk && sk.ref) seed.skillRef = sk.ref;
+    launch(title, seed, { ctx: 'beat' });
 }
 
-/* ───────── 技能 ───────── */
-const skills = SKILLS.map(s => ({ ...s, t: TEMPLATE_MAP[s.id], d: diagram(TEMPLATE_MAP[s.id]) }));
-const peek = ref('');
-let peekTimer = null;
-function hoverSkill(id) { clearTimeout(peekTimer); peekTimer = setTimeout(() => { peek.value = id; }, 120); }
-function leaveSkill() { clearTimeout(peekTimer); peek.value = ''; }
+/* ───────── 快速开始 ───────── */
+function quickStart(kind) {
+    const tx = text.value.trim();
+    const rs = readyRefs();
+    const nodes = [];
+    if (rs.length) nodes.push({ key: 'ref', type: 'image', title: '参考图', images: rs, col: 0 });
+    if (kind === 'blank') { launch(timeTitle('智能画布'), nodes.length ? { v: 1, nodes } : null, { ctx: 'beat' }); return; }
+    if (kind === 'batch') { useTemplate('batch'); return; }
+    const video = kind === 'video';
+    nodes.push({ key: 'gen', type: 'gen', title: video ? '视频' : '图片', prompt: tx, video, ratio: video ? '16:9' : '', inputs: rs.length ? ['ref'] : [], col: rs.length ? 1 : 0 });
+    launch(tx ? tx.replace(/\s+/g, ' ').slice(0, 20) : timeTitle(video ? '视频创作' : '图片创作'),
+        { v: 1, nodes, toast: tx ? '' : (video ? '在视频节点里写下画面描述，再点运行' : '在图片节点里写下画面描述，再点运行') }, { ctx: 'beat' });
+}
 
-/* ───────── 最近项目 ───────── */
+/* ───────── 最新项目（输入框下面）：新建 + 最近编辑的 3 张画布；画布不够 3 张时用快速开始补位 ───────── */
 const recent = ref([]);
-const recentLoaded = ref(false);
-const canvasCount = ref(0);
+const recentReady = ref(false);
+const QUICK_FILL = [
+    { kind: 'image', label: '图片创作', desc: '提示词 → 出图' },
+    { kind: 'video', label: '视频创作', desc: '图片 / 文字 → 视频' },
+    { kind: 'batch', label: '批量出图', desc: '多维表格一行一张' },
+];
+const fillers = computed(() => (recentReady.value ? QUICK_FILL.slice(0, Math.max(0, 3 - recent.value.length)) : []));
+const tsOf = c => { const v = Number(c.updated_at || c.created_at || 0); return v < 1e10 ? v * 1000 : v; };
+function ago(c) {
+    const t = tsOf(c); if (!t) return '';
+    const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    if (m < 1) return '刚刚';
+    if (m < 60) return m + ' 分钟前';
+    const h = Math.round(m / 60); if (h < 24) return h + ' 小时前';
+    const d = Math.round(h / 24); if (d < 30) return d + ' 天前';
+    return new Date(t).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+}
+const GENERIC_THREAD = /^(新对话|新的对话|新会话|对话\s*\d*|untitled|new chat)$/i;
 async function loadRecent() {
     try {
-        const r = await fetch('/api/recent-canvases', { cache: 'no-store' });
+        const r = await fetch('/api/canvases', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error();
+        const d = await r.json();
+        const list = (d.canvases || []).slice().sort((a, b) => tsOf(b) - tsOf(a)).slice(0, 3);
+        recent.value = list.map(c => ({ ...c, chip: '' }));
+        // 卡片底部那条：这张画布当前对话的标题（画布助手最后在做的事），拿不到就显示「继续创作」
+        list.forEach(async c => {
+            try {
+                const t = await fetch('/api/agent/threads?canvas_id=' + encodeURIComponent(c.id), { headers: { Accept: 'application/json' } });
+                if (!t.ok) return;
+                const td = await t.json();
+                const ths = (td.threads || []).filter(x => x && x.title && !GENERIC_THREAD.test(String(x.title).trim()) && x.message_count !== 0);
+                const th = ths.find(x => x.id === td.active_id) || ths.sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))[0];
+                const row = recent.value.find(x => x.id === c.id);
+                if (th && row) row.chip = String(th.title).trim();
+            } catch (e) {}
+        });
+    } catch (e) { /* 服务没起来时保持空 */ }
+    recentReady.value = true;
+}
+function coverOf(c) { const u = (c.thumbnails || []).filter(Boolean)[0]; return u ? thumbUrl(u) : ''; }
+function onCoverError(c) { c.thumbnails = (c.thumbnails || []).slice(1); }
+function openProject(c) { openCanvasUrl(canvasUrl(c, { ctx: 'beat' })); }
+function allProjects() { navigate('canvas'); }
+function onPageFocus(e) { if (e.detail && e.detail.id === 'home') { loadRecent(); loadPlugins(); } }
+// 在设置 / 应用市场里改了插件或技能，回到首页时同步
+watch(() => state.settingsOpen, open => { if (!open) { loadPlugins(); if (skillsState.value === 'ready') loadSkills(); } });
+
+/* ───────── 弹层：添加 / 技能 / 插件 ───────── */
+const pop = ref('');            // '' | add | skill | plugin
+function togglePop(id) { closeMention(); pop.value = pop.value === id ? '' : id; if (pop.value === 'skill') loadSkills(); if (pop.value === 'plugin') loadPlugins(); }
+function closePop() { pop.value = ''; }
+function onDocDown(e) {
+    if (pop.value && !e.target.closest('.hp-pop, .hp-chip')) closePop();
+    if (mention.open && !e.target.closest('.hp-mention, .hp-input')) closeMention();
+}
+function onEsc(e) { if (e.key !== 'Escape') return; if (preview.value) return; if (picker.open) { picker.open = false; return; } closePop(); }
+
+// 技能 = 自己导入的技能（/api/capabilities kind=skill）+ 应用市场里「添加到助手」的技能（/api/store/catalog installed）。
+// 每次打开都重新拉，跟设置 / 应用市场里的改动保持同步。市场技能走 skillRef（store:<name>），由后端把技能手册注入系统提示。
+const skills = ref([]);
+const apps = ref([]);           // 应用市场里的应用（目前都没开放，/ 菜单里显示「即将上线」）
+const skillsState = ref('idle');
+const skillQ = ref('');
+async function loadSkills() {
+    if (skillsState.value === 'loading') return;
+    if (skillsState.value !== 'ready') skillsState.value = 'loading';
+    const get = url => fetch(url, { headers: { Accept: 'application/json' } }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    const [caps, cat] = await Promise.allSettled([get('/api/capabilities'), get('/api/store/catalog')]);
+    if (caps.status === 'rejected' && cat.status === 'rejected') { if (skillsState.value !== 'ready') skillsState.value = 'error'; return; }
+    const mine = caps.status === 'fulfilled' ? ((caps.value && caps.value.capabilities) || []).filter(c => c && c.kind === 'skill' && c.enabled !== false && c.id)
+        .map(c => ({ id: String(c.id), name: String(c.name || c.id), description: String(c.description || ''), source: 'mine' })) : [];
+    const data = cat.status === 'fulfilled' ? ((cat.value && cat.value.data) || cat.value || {}) : {};
+    const items = Array.isArray(data.items) ? data.items : [];
+    const market = items.filter(it => it && it.kind === 'skill' && it.installed && it.store_available !== false && it.name)
+        .map(it => ({ id: 'store:' + it.name, ref: 'store:' + it.name, name: String(it.display_name || it.name), description: String(it.marketing_line || it.description || ''), source: 'market' }));
+    apps.value = items.filter(it => it && it.kind === 'app' && it.name)
+        .map(it => ({ id: 'app:' + it.name, name: String(it.display_name || it.name), description: String(it.marketing_line || it.description || ''), available: it.store_available !== false }));
+    skills.value = market.concat(mine);
+    skillsState.value = 'ready';
+}
+const shownSkills = computed(() => {
+    const q = skillQ.value.trim().toLowerCase();
+    return q ? skills.value.filter(s => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)) : skills.value;
+});
+function pickSkill(s) { closePop(); setSkillToken(s); }
+
+// 插件：画布助手能调用的外部工具 = 联网搜索 + 已启用的 MCP 服务
+const web = ref(null);          // null 未知 / true / false
+const mcp = ref([]);
+const mcpBusy = ref('');
+async function loadPlugins() {
+    try { const r = await fetch('/api/agent/web-access'); if (r.ok) web.value = Boolean((await r.json()).enabled); } catch (e) {}
+    try { const r = await fetch('/api/mcp/servers', { headers: { Accept: 'application/json' } }); if (r.ok) { const d = await r.json(); mcp.value = Array.isArray(d && d.servers) ? d.servers : []; } } catch (e) {}
+}
+const pluginCount = computed(() => (web.value ? 1 : 0) + mcp.value.filter(s => s.enabled).length);
+async function toggleWeb() {
+    const next = !web.value;
+    try {
+        const r = await fetch('/api/agent/web-access', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }) });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        const list = await r.json();
-        recent.value = Array.isArray(list) ? list.slice(0, 4) : [];
-    } catch (e) { recent.value = []; }
-    recentLoaded.value = true;
+        web.value = Boolean((await r.json()).enabled);
+        toast(web.value ? '已允许画布助手联网搜索' : '已关闭画布助手联网搜索', { icon: 'check' });
+    } catch (e) { toast('保存联网设置失败', { danger: true, icon: 'alert' }); }
+}
+// 停用可以直接做；启用要确认它会在本机运行命令，交给设置里的 MCP 页（那里有确认弹窗）
+async function toggleMcp(s) {
+    if (!s.enabled) { openSettings('mcp'); return; }
+    if (mcpBusy.value) return;
+    mcpBusy.value = s.name;
     try {
-        const r = await fetch('/api/canvases', { cache: 'no-store' });
+        const r = await fetch('/api/mcp/servers/' + encodeURIComponent(s.name) + '/disable', { method: 'POST', headers: { Accept: 'application/json' } });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.detail || ('HTTP ' + r.status));
+        mcp.value = mcp.value.map(row => row.name === s.name ? (body.server || { ...row, enabled: false }) : row);
+        toast('已停用 ' + s.name);
+    } catch (e) { toast((e && e.message) || '停用失败', { danger: true, icon: 'alert' }); }
+    finally { mcpBusy.value = ''; }
+}
+function openSettings(tab) { closePop(); state.settingsTab = tab; state.settingsOpen = true; }
+
+/* ───────── 输入框里的 @ 和 / ─────────
+   @  引用素材：已经加进来的参考素材 + 素材库里的图片 / 视频（选库里的会顺手加进参考素材）
+   /  调用插件、技能和应用：插件 = 联网搜索 + MCP 服务（没开的顺手打开），技能挂到输入框，应用目前只显示「即将上线」 */
+const mention = reactive({ open: false, type: '', q: '', start: 0, index: 0, x: 14, y: 0 });
+let mNode = null;               // 触发 @ / 的那个文本节点（DOM 节点不放进响应式）
+
+/* ── 输入区：contenteditable。@ 引用的素材、/ 选的技能 / 插件在里面是不可编辑的小标签（data-tk），
+   提交时序列化成纯文本：素材 → @名字（图N），插件 → /名字，技能不进正文（走 skill / skillRef）。 ── */
+const editorEmpty = ref(true);
+function iconSvg(name) { return '<svg class="nv-i" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>'; }
+function escHtml(v) { return String(v || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function tokenText(t) {
+    const k = t.dataset.tk;
+    if (k === 'ref') { const i = refs.value.findIndex(r => r.id === t.dataset.id); return '@' + (t.dataset.name || '') + (i >= 0 ? '（图' + (i + 1) + '）' : ''); }
+    if (k === 'plugin') return '/' + (t.dataset.name || '');
+    return '';
+}
+function serialize(el) {
+    let out = '';
+    const walk = n => {
+        n.childNodes.forEach(c => {
+            if (c.nodeType === 3) out += c.nodeValue;
+            else if (c.nodeType === 1) {
+                if (c.dataset && c.dataset.tk) out += tokenText(c);
+                else if (c.tagName === 'BR') out += '\n';
+                else { if ((c.tagName === 'DIV' || c.tagName === 'P') && out && !out.endsWith('\n')) out += '\n'; walk(c); }
+            }
+        });
+    };
+    walk(el);
+    return out.replace(/ /g, ' ');
+}
+function syncText() {
+    const el = inputEl.value; if (!el) return;
+    text.value = serialize(el);
+    const hasTk = !!el.querySelector('[data-tk]');
+    editorEmpty.value = !hasTk && !el.textContent.replace(/ /g, ' ').trim();
+    if (editorEmpty.value && el.innerHTML && !el.textContent) el.innerHTML = '';
+    // 技能标签被删掉了 → 取消技能
+    if (skill.value && !el.querySelector('[data-tk="skill"]')) skill.value = null;
+}
+function clearEditor() { const el = inputEl.value; if (el) el.innerHTML = ''; text.value = ''; editorEmpty.value = true; }
+const LONG = 3;   // 标签里名字最多露 3 个字，多出来的渐隐
+function makeToken(kind, o) {
+    const t = document.createElement('span');
+    t.className = 'hp-tk ' + kind;
+    t.contentEditable = 'false';
+    t.dataset.tk = kind;
+    t.dataset.name = o.name || '';
+    if (o.id) t.dataset.id = o.id;
+    t.title = o.name || '';
+    const long = [...String(o.name || '')].length > LONG ? ' long' : '';
+    if (kind === 'ref') {
+        t.innerHTML = (o.thumb ? '<img class="th" alt="" src="' + escHtml(o.thumb) + '">' : '<span class="th ic">' + iconSvg(o.icon || 'file') + '</span>')
+            + '<span class="nm' + long + '">' + escHtml(o.name) + '</span><span class="ix"></span>';
+        const img = t.querySelector('img');
+        if (img) img.onerror = () => { const sp = document.createElement('span'); sp.className = 'th ic'; sp.innerHTML = iconSvg(o.icon || 'image'); img.replaceWith(sp); };
+    } else {
+        t.innerHTML = iconSvg(o.icon || 'wand2') + '<span class="nm' + long + '">' + escHtml(o.name) + '</span>';
+    }
+    return t;
+}
+// 参考素材变了（删了 / 顺序变了 / 上传完成）：同步输入区里的素材标签，删掉失效的，序号「图N」重排
+function syncRefTokens() {
+    const el = inputEl.value; if (!el) return;
+    el.querySelectorAll('[data-tk="ref"]').forEach(t => {
+        const i = refs.value.findIndex(r => r.id === t.dataset.id);
+        if (i < 0) { const nx = t.nextSibling; if (nx && nx.nodeType === 3 && /^ /.test(nx.nodeValue)) nx.nodeValue = nx.nodeValue.slice(1); t.remove(); return; }
+        const ix = t.querySelector('.ix'); if (ix) ix.textContent = '图' + (i + 1);
+    });
+    syncText();
+}
+watch(() => refs.value.map(r => r.id).join('|'), () => nextTick(syncRefTokens));
+function placeCaretAfter(node) {
+    const sel = window.getSelection(); const r = document.createRange();
+    r.setStartAfter(node); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+}
+// 在 range 处插入标签 + 一个不换行空格，光标落到空格后面
+function insertTokenAt(range, tk) {
+    const sp = document.createTextNode(' ');
+    range.insertNode(sp);
+    range.insertNode(tk);
+    placeCaretAfter(sp);
+    syncText();
+}
+let lastRange = null;
+function rememberRange() {
+    const el = inputEl.value; const sel = window.getSelection();
+    if (el && sel.rangeCount && el.contains(sel.getRangeAt(0).startContainer)) lastRange = sel.getRangeAt(0).cloneRange();
+}
+function rangeForInsert() {
+    const el = inputEl.value;
+    if (lastRange && el && el.contains(lastRange.startContainer)) return lastRange.cloneRange();
+    const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); return r;
+}
+function setSkillToken(s) {
+    const el = inputEl.value; if (!el) { skill.value = s; return; }
+    el.querySelectorAll('[data-tk="skill"]').forEach(t => t.remove());   // 一次只挂一个技能
+    skill.value = s;
+    el.focus();
+    const r = document.createRange(); r.setStart(el, 0); r.collapse(true);   // 技能放在最前面
+    insertTokenAt(r, makeToken('skill', { name: s.name, icon: 'wand2', id: s.id }));
+    skill.value = s;
+    const end = document.createRange(); end.selectNodeContents(el); end.collapse(false);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(end);
+}
+
+// 弹层贴着 @ / 字符出现：取那个字符的屏幕位置，换算到输入框容器坐标（界面缩放时按比例还原）
+function placeMention() {
+    const el = inputEl.value; if (!el || !mNode) return;
+    const box = el.closest('.hp-composer'); if (!box) return;
+    const r = document.createRange();
+    const len = mNode.nodeValue.length;
+    r.setStart(mNode, Math.min(mention.start, len)); r.setEnd(mNode, Math.min(mention.start + 1, len));
+    const rc = r.getBoundingClientRect(), bc = box.getBoundingClientRect();
+    const k = box.offsetWidth ? bc.width / box.offsetWidth : 1;
+    const w = mention.type === '@' ? 372 : 340;
+    const maxX = Math.max(8, box.clientWidth - w - 8);
+    mention.x = Math.min(maxX, Math.max(8, (rc.left - bc.left) / k - 10));
+    mention.y = (rc.bottom - bc.top) / k + 6;
+}
+function closeMention() { mention.open = false; }
+function detectMention() {
+    const el = inputEl.value; if (!el) return;
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !sel.isCollapsed) { closeMention(); return; }
+    const node = sel.anchorNode, off = sel.anchorOffset;
+    if (!node || node.nodeType !== 3 || !el.contains(node)) { closeMention(); return; }
+    const m = node.nodeValue.slice(0, off).match(/(^|[\s ])([@/])([^\s @/]{0,24})$/);
+    if (!m) { closeMention(); return; }
+    const reopen = !mention.open || mention.type !== m[2];
+    mNode = node;
+    Object.assign(mention, { open: true, type: m[2], q: m[3], start: off - m[3].length - 1 });
+    if (reopen) { mention.index = 0; pop.value = ''; if (m[2] === '@') ensureAssets(); else { loadSkills(); loadPlugins(); } }
+    else mention.index = Math.min(mention.index, Math.max(0, mentionItems.value.filter(x => !x.head).length - 1));
+    placeMention();
+}
+function onInput() { syncText(); detectMention(); rememberRange(); }
+function onSelect() { rememberRange(); if (mention.open) detectMention(); }
+async function ensureAssets() {
+    if (picker.items.length || picker.loading) return;
+    picker.loading = true;
+    try {
+        const r = await fetch('/api/asset-library', { headers: { Accept: 'application/json' } });
         const data = await r.json();
-        canvasCount.value = Array.isArray(data && data.canvases) ? data.canvases.length : 0;
-    } catch (e) {}
+        const out = [];
+        flattenAssets(data && data.library, out, new Set());
+        picker.items = out;
+    } catch (e) { picker.items = []; }
+    picker.loading = false;
 }
-// Number Ticker：每一位滚到目标值
-const tickDigits = computed(() => String(Math.min(999, canvasCount.value)).split('').map(Number));
+const KIND_ICON = { image: 'image', video: 'video', audio: 'music', file: 'file' };
+// 缩略图：先走预览接口（小图），失败退回原图，原图也失败就显示类型图标
+const thumbFail = reactive(new Set());
+function onThumbErr(e, row) {
+    const img = e.target;
+    const raw = row.data && row.data.url;
+    if (raw && img.dataset.fallback !== '1' && img.getAttribute('src') !== raw && row.kind !== 'ref') { img.dataset.fallback = '1'; img.src = raw; return; }
+    thumbFail.add(row.key);
+}
+const KIND_NAME = { image: '图片', video: '视频', audio: '音频', file: '文件' };
+// 扁平列表（含分组标题行 head），键盘上下只在可选项之间移动
+const mentionItems = computed(() => {
+    if (!mention.open) return [];
+    const q = mention.q.trim().toLowerCase();
+    const hit = (...xs) => !q || xs.some(x => String(x || '').toLowerCase().includes(q));
+    const out = [];
+    const group = (title, rows) => { if (rows.length) { out.push({ head: true, title }); rows.forEach(r => out.push(r)); } };
+    if (mention.type === '@') {
+        const attached = refs.value.filter(r => !r.loading && hit(r.name));
+        group('已添加的素材', attached.map(r => ({ key: 'ref:' + r.id, group: '已添加的素材', kind: 'ref', icon: KIND_ICON[r.kind] || 'file', thumb: r.kind === 'image' ? (r.preview || thumbUrl(r.url)) : '', badge: r.kind === 'video' ? 'play' : '', name: r.name, sub: KIND_NAME[r.kind] || '文件', data: r })));
+        const urls = new Set(refs.value.map(r => r.url));
+        const lib = picker.items.filter(a => !urls.has(a.url) && hit(a.name)).slice(0, 16);
+        group('素材库', lib.map(a => ({ key: 'lib:' + a.id, group: '素材库', kind: 'lib', icon: KIND_ICON[a.kind] || 'image', thumb: a.thumb || (a.kind === 'image' ? thumbUrl(a.url) : ''), badge: a.kind === 'video' ? 'play' : '', name: a.name, sub: KIND_NAME[a.kind] + ' · 素材库', data: a })));
+    } else {
+        const plugs = [];
+        if (hit('联网搜索', 'web', '网页')) plugs.push({ key: 'web', kind: 'web', icon: 'globe', name: '联网搜索', sub: web.value ? '已开启 · 搜索公开网页、读取正文' : '未开启 · 选中后自动打开' });
+        mcp.value.filter(s => hit(s.name)).forEach(s => plugs.push({ key: 'mcp:' + s.name, kind: 'mcp', icon: 'plug', name: s.name, sub: s.enabled ? 'MCP 服务 · ' + (s.tool_count || 0) + ' 个工具' : 'MCP 服务 · 未启用，选中去设置里启用', data: s }));
+        group('插件', plugs);
+        group('技能', skills.value.filter(s => hit(s.name, s.description)).slice(0, 8).map(s => ({ key: 'sk:' + s.id, kind: 'skill', icon: 'wand2', name: s.name, sub: s.description || (s.source === 'market' ? '应用市场技能' : '我导入的技能'), data: s })));
+        group('应用', apps.value.filter(a => hit(a.name, a.description)).slice(0, 6).map(a => ({ key: a.id, kind: 'app', icon: 'grid9', name: a.name, sub: a.available ? a.description : '即将上线', disabled: !a.available, data: a })));
+    }
+    return out;
+});
+const mentionRows = computed(() => mentionItems.value.filter(x => !x.head));
+// 用标签替换掉「@查询词」/「/查询词」
+function replaceWithToken(tk) {
+    const el = inputEl.value;
+    closeMention();
+    if (!el || !mNode || !el.contains(mNode)) return;
+    const sel = window.getSelection();
+    const caret = sel.rangeCount && sel.anchorNode === mNode ? sel.anchorOffset : mNode.nodeValue.length;
+    const r = document.createRange();
+    r.setStart(mNode, Math.min(mention.start, mNode.nodeValue.length));
+    r.setEnd(mNode, Math.max(Math.min(caret, mNode.nodeValue.length), Math.min(mention.start, mNode.nodeValue.length)));
+    r.deleteContents();
+    el.focus();
+    if (tk) insertTokenAt(r, tk);
+    else { const s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(r); syncText(); }
+}
+function pickMention(row) {
+    if (!row || row.head || row.disabled) return;
+    if (row.kind === 'ref' || row.kind === 'lib') {
+        let ref = row.kind === 'ref' ? row.data : null;
+        if (!ref) {
+            if (refs.value.length >= 6) { toast('最多 6 个参考素材'); return; }
+            addLibraryAsset(row.data);
+            ref = refs.value.find(r => r.url === row.data.url);
+        }
+        if (!ref) return;
+        replaceWithToken(makeToken('ref', { id: ref.id, name: ref.name, thumb: ref.kind === 'image' ? (ref.preview || thumbUrl(ref.url)) : '', icon: KIND_ICON[ref.kind] || 'file' }));
+        nextTick(syncRefTokens);
+        return;
+    }
+    if (row.kind === 'web') { if (!web.value) toggleWeb(); replaceWithToken(makeToken('plugin', { name: '联网搜索', icon: 'globe' })); return; }
+    if (row.kind === 'mcp') {
+        if (!row.data.enabled) { replaceWithToken(null); openSettings('mcp'); return; }
+        replaceWithToken(makeToken('plugin', { name: row.name, icon: 'plug' }));
+        return;
+    }
+    if (row.kind === 'skill') {
+        const el = inputEl.value;
+        if (el) el.querySelectorAll('[data-tk="skill"]').forEach(t => t.remove());
+        skill.value = row.data;
+        replaceWithToken(makeToken('skill', { name: row.data.name, icon: 'wand2', id: row.data.id }));
+        skill.value = row.data;
+        return;
+    }
+    if (row.kind === 'app') { replaceWithToken(makeToken('app', { name: row.name, icon: 'grid9' })); }
+}
+function onMentionKey(e) {
+    if (!mention.open) return false;
+    const rows = mentionRows.value;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMention(); return true; }
+    if (!rows.length) return false;
+    const grid = mention.type === '@';
+    const step = { ArrowDown: grid ? 4 : 1, ArrowUp: grid ? -4 : -1, ArrowRight: grid ? 1 : 0, ArrowLeft: grid ? -1 : 0 }[e.key];
+    if (step) { e.preventDefault(); mention.index = Math.min(rows.length - 1, Math.max(0, mention.index + step)); return true; }
+    if ((e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) || e.key === 'Tab') { e.preventDefault(); pickMention(rows[mention.index]); return true; }
+    return false;
+}
 
-/* ───────── 模板 ───────── */
-const cat = ref('全部');
-const tabsEl = ref(null);
-const tabGlide = useGlide(tabsEl, '.nv-tab', { line: true });
-const templates = computed(() => TEMPLATES.filter(t => cat.value === '全部' || t.cat === cat.value).map(t => ({ ...t, d: diagram(t), kind: templateKind(t) })));
-function pickCat(c) { cat.value = c; tabGlide.refresh(); }
-
-/* ───────── 更多工具 ───────── */
-const TOOLS = [
-    { route: 'online', icon: 'globe', title: '在线生图', desc: '文生图、图生图，多平台多模型' },
-    { route: 'gpt-chat', icon: 'chat', title: 'GPT 对话', desc: '构思创意、优化提示词' },
-    { route: 'asset-manager', icon: 'library', title: '素材库', desc: '管理生成作品、上传素材与提示词' },
-];
-
-/* ───────── 局域网访问条 ───────── */
-const lan = reactive({ show: false, url: '', qr: '', qrOpen: false });
-async function loadLan() {
-    try { if (localStorage.getItem('lan_notice_closed') === '1') return; } catch (e) {}
+/* ───────── 素材库选择（右侧抽屉） ───────── */
+const picker = reactive({ open: false, loading: false, items: [], q: '', kind: 'all' });
+function assetKindOf(item) {
+    const url = String(item.url || '').toLowerCase();
+    const kind = String(item.kind || item.type || '').toLowerCase();
+    if (kind.includes('video') || /\.(mp4|webm|mov|m4v)(\?|#|$)/.test(url)) return 'video';
+    if (kind.includes('audio') || /\.(mp3|wav|flac|ogg|m4a)(\?|#|$)/.test(url)) return 'audio';
+    return 'image';
+}
+// /api/asset-library 是「库 → 分组 → 条目」的树：这里只要扁平的带 url 的条目
+function flattenAssets(node, out, seen) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(n => flattenAssets(n, out, seen)); return; }
+    if (typeof node.url === 'string' && node.url && !seen.has(node.url)) {
+        seen.add(node.url);
+        out.push({ id: node.id || node.url, url: node.url, name: node.name || node.title || '素材', kind: assetKindOf(node), thumb: node.thumb || node.thumbnail || node.preview || '' });
+    }
+    Object.keys(node).forEach(k => { const v = node[k]; if (v && typeof v === 'object') flattenAssets(v, out, seen); });
+}
+async function openPicker() {
+    closePop();
+    picker.open = true;
+    if (picker.items.length || picker.loading) return;
+    picker.loading = true;
     try {
-        const data = await (await fetch('/api/lan-info')).json();
-        if (!data || !data.available || !data.url) return;
-        lan.url = data.url; lan.qr = data.qr_data_url || ''; lan.show = true;
-    } catch (e) {}
+        const r = await fetch('/api/asset-library', { headers: { Accept: 'application/json' } });
+        const data = await r.json();
+        const out = [];
+        flattenAssets(data && data.library, out, new Set());
+        picker.items = out;
+    } catch (e) { picker.items = []; }
+    picker.loading = false;
 }
-function closeLan() { lan.show = false; try { localStorage.setItem('lan_notice_closed', '1'); } catch (e) {} }
-function copyLan() { try { navigator.clipboard.writeText(lan.url); toast('已复制访问地址', { icon: 'check' }); } catch (e) {} }
+const pickerItems = computed(() => {
+    const q = picker.q.trim();
+    return picker.items.filter(a => (picker.kind === 'all' || a.kind === picker.kind) && (!q || a.name.includes(q)));
+});
+function pickAsset(a) { addLibraryAsset(a); picker.open = false; inputEl.value && inputEl.value.focus(); }
+function thumbUrl(u) { return u && /^\/(output|assets)\//.test(u) ? '/api/media-preview?url=' + encodeURIComponent(u) + '&w=360' : u; }
 
-/* ───────── 状态 ───────── */
-const statusText = computed(() => (state.queue.position > 0 ? `排队中 ${state.queue.position}/${state.queue.total}` : state.queue.total > 0 ? `正在生成 ${state.queue.total} 个任务` : '系统就绪'));
+/* ───────── 模板库 ───────── */
+const cat = ref('全部');
+const tplQ = ref('');
+const templates = computed(() => {
+    const q = tplQ.value.trim().toLowerCase();
+    return TEMPLATES.filter(t => (cat.value === '全部' || t.cat === cat.value)
+        && (!q || [t.title, t.desc, t.cat].some(x => x && String(x).toLowerCase().includes(q))));
+});
+const preview = ref(null);      // 正在预览的模板
+function openPreview(t) { preview.value = t; }
 
-function onFocusHome() { loadRecent(); }
+/* 带视频的模板卡：移上去才播，移出暂停回第一帧（只叠一层同尺寸 video，不动布局） */
+function cardVideoIn(e) { const v = e.currentTarget.querySelector('video'); if (v) { v.currentTime = 0; v.play().catch(() => {}); } }
+function cardVideoOut(e) { const v = e.currentTarget.querySelector('video'); if (v) { v.pause(); v.currentTime = 0; } }
+async function usePreviewed(opts) { const t = preview.value; if (!t) return; const ok = await useTemplate(t.id, opts); if (ok) preview.value = null; }
+
+/* ───────── 生命周期 ───────── */
 onMounted(() => {
     autoGrow();
+    startTypewriter();
+    loadPlugins();
     loadRecent();
-    loadLan();
-    exTimer = setInterval(() => { if (!text.value && !busy.value) swapPhase(ex, () => { ex.i++; }); }, 3200);
-    window.addEventListener('novai-home-focus', onFocusHome);
+    window.addEventListener('novai-page-focus', onPageFocus);
+    window.addEventListener('novai-canvas-focus', loadRecent);
+    document.addEventListener('mousedown', onDocDown, true);
+    document.addEventListener('keydown', onEsc);
 });
-onBeforeUnmount(() => { clearInterval(exTimer); window.removeEventListener('novai-home-focus', onFocusHome); });
+onBeforeUnmount(() => {
+    clearTimeout(ttTimer);
+    document.removeEventListener('mousedown', onDocDown, true);
+    document.removeEventListener('keydown', onEsc);
+    window.removeEventListener('novai-page-focus', onPageFocus);
+    window.removeEventListener('novai-canvas-focus', loadRecent);
+});
 </script>
 
 <template>
-    <div class="home">
-        <div class="home-in nv-enter">
-            <!-- 局域网访问 -->
-            <div v-if="lan.show" class="lan">
-                <NvIcon name="wifi" />
-                <span class="w5">手机 / iPad 访问</span>
-                <button type="button" class="url" title="复制地址" @click="copyLan">{{ lan.url }}</button>
-                <span class="grow"></span>
-                <span class="qr-wrap" @mouseenter="lan.qrOpen = true" @mouseleave="lan.qrOpen = false">
-                    <button type="button" class="nv-icon-btn sm" title="显示二维码" @click="lan.qrOpen = !lan.qrOpen"><NvIcon name="qr" /></button>
-                    <div v-if="lan.qrOpen && lan.qr" class="qr-pop"><img :src="lan.qr" alt="访问二维码"><span>同一局域网下扫码打开</span></div>
-                </span>
-                <button type="button" class="nv-icon-btn sm" title="不再显示" @click="closeLan"><NvIcon name="x" /></button>
-            </div>
+    <div class="hp">
+        <NvVeilBg />
+        <div class="hp-scroll">
+            <div class="hp-inner">
+                <h1 class="hp-title" aria-label="今天想创作点什么？"><span aria-hidden="true">{{ typed }}</span><span class="hp-caret" :class="{ typing }" aria-hidden="true"></span></h1>
 
-            <header class="hero">
-                <h1 class="display">{{ greeting }}</h1>
-                <p class="p sub">写一句需求、选一个技能，画布上的节点会帮你搭好</p>
-            </header>
-
-            <div class="compose-col">
-                <div ref="composerEl" class="nv-composer" :class="{ 'is-focus': focus, 'is-drag': drag, shake: shaking }"
-                     @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
-                    <div v-if="refs.length" class="refs">
-                        <span v-for="r in refs" :key="r.id" class="hp-ref" :class="{ loading: r.loading }" :title="r.name" :style="{ backgroundImage: `url(${r.preview || r.url})` }">
-                            <button type="button" class="x" aria-label="移除" @click="removeRef(r.id)"><NvIcon name="x" /></button>
+                <!-- 输入框 -->
+                <div class="hp-composer" :class="{ drag, shaking }" @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
+                    <div v-if="refs.length" class="hp-attached">
+                        <span v-for="r in refs" :key="r.id" class="hp-att" :class="{ loading: r.loading }">
+                            <img v-if="r.preview && r.kind === 'image'" :src="r.preview" alt="" />
+                            <span v-else class="gi"><NvIcon :name="r.kind === 'video' ? 'video' : r.kind === 'audio' ? 'music' : 'file'" /></span>
+                            <span>{{ r.loading ? '上传中…' : r.name }}</span>
+                            <button type="button" aria-label="移除" @click="removeRef(r.id)"><NvIcon name="x" /></button>
                         </span>
                     </div>
-                    <label for="hp-input" class="sr">需求</label>
-                    <div class="ta-wrap">
-                        <textarea id="hp-input" ref="inputEl" v-model="text" rows="1" @input="autoGrow" @keydown="onKey" @paste="onPaste" @focus="focus = true" @blur="focus = false"></textarea>
-                        <div v-if="!text" class="tw-ph"><span class="swap" :class="ex.phase">{{ exText }}</span></div>
-                    </div>
-                    <div class="nv-composer-bar">
-                        <button type="button" class="nv-icon-btn sm" :title="refs.length ? `参考图 ${refs.length}/6` : '添加参考图（也可粘贴或拖入）'" @click="fileEl.click()"><NvIcon name="clip" /></button>
-                        <input ref="fileEl" type="file" accept="image/*" multiple hidden @change="addFiles($event.target.files); $event.target.value = ''">
-                        <div ref="segEl" class="nv-seg" role="radiogroup" aria-label="生成方式">
-                            <span class="thumb-slide" data-glide-pill></span>
-                            <button v-for="m in MODES" :key="m.id" type="button" role="radio" :aria-checked="m.id === mode" :class="{ 'is-on': m.id === mode }" :title="m.tip" @click="pickMode(m.id)">{{ m.label }}</button>
+                    <div ref="inputEl" class="hp-input" :class="{ empty: editorEmpty }" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="false"
+                         aria-label="描述你想做的东西" data-placeholder="描述你想做的东西，例如「给这双鞋做一套电商主图，白底 + 户外场景各 3 张」&#10;输入 @ 引用素材和文件，输入 / 调用插件、技能和应用；也可以直接拖入或粘贴图片"
+                         @input="onInput" @keydown="onKey" @keyup="onSelect" @paste="onPaste" @click="onSelect" @blur="rememberRange(); closeMention()"></div>
+                    <div class="hp-row">
+                        <div class="hp-left">
+                            <button type="button" class="hp-chip ic" :class="{ open: pop === 'add' }" title="添加图片 / 视频 / 文档" aria-label="添加" @click="togglePop('add')"><NvIcon name="plus" /></button>
+                            <button type="button" class="hp-chip" :class="{ open: pop === 'skill' }" @click="togglePop('skill')"><NvIcon name="wand2" />技能</button>
+                            <button type="button" class="hp-chip" :class="{ open: pop === 'plugin' }" @click="togglePop('plugin')"><NvIcon name="plug" />插件<span v-if="pluginCount" class="n">{{ pluginCount }}</span></button>
+                            <button type="button" class="hp-chip ghost" @click="openPicker"><NvIcon name="library" />素材</button>
                         </div>
-                        <span class="hint"><span class="swap" :class="hint.phase">{{ hint.text }}</span></span>
-                        <button type="button" class="nv-icon-btn send send-live send-morph" :class="{ on: canSend || sendPhase }" :disabled="!canSend && !sendPhase" aria-label="发送" @click="submit">
-                            <span class="ico" :class="{ hide: sendPhase }"><NvIcon name="arrowup" /></span>
-                            <span class="ico" :class="{ hide: sendPhase !== 'loading' }"><span class="spin"></span></span>
-                            <span class="ico" :class="{ hide: sendPhase !== 'done' }"><NvIcon name="check" /></span>
+                        <button type="button" class="hp-send" :disabled="!canSend" aria-label="发送" title="新建画布，交给画布助手" @click="submit">
+                            <span v-if="busy" class="hp-spin"></span><NvIcon v-else name="up" />
                         </button>
                     </div>
-                    <span class="beam-edge" aria-hidden="true"></span>
-                    <div v-if="drag" class="drop-veil"><NvIcon name="image" />松手添加参考图</div>
-                </div>
+                    <input ref="fileEl" type="file" multiple hidden accept="image/*,video/*,audio/*,.pdf,.txt,.md,.doc,.docx,.xlsx,.xls,.csv" @change="e => { addFiles(e.target.files); e.target.value = ''; }" />
 
-                <!-- 技能：点一下搭节点；右侧星芒交给 Agent -->
-                <div class="skills">
-                    <span v-for="s in skills" :key="s.id" class="skill-wrap" @mouseenter="hoverSkill(s.id)" @mouseleave="leaveSkill">
-                        <button type="button" class="nv-link" :class="{ 'is-hot': peek === s.id }" @click="useTemplate(s.id)">{{ s.label }}</button>
-                        <button type="button" class="agent-dot" :aria-label="'让 Agent 做' + s.label" title="让 Agent 做：打开画布并交给 Agent 规划执行" @click="useTemplate(s.id, { agent: true })"><NvIcon name="sparkles" /></button>
-                        <div v-if="peek === s.id" class="skill-peek" role="tooltip">
-                            <div class="diagram">
-                                <svg viewBox="0 0 100 100" preserveAspectRatio="none"><path v-for="(w, i) in s.d.wires" :key="i" class="w" :d="w" vector-effect="non-scaling-stroke" /></svg>
-                                <span v-for="(b, i) in s.d.boxes" :key="b.key" class="box" :class="{ g: b.gen }"
-                                      :style="{ left: b.x + '%', top: b.y + '%', width: b.w + '%', height: b.h + '%', animationDelay: i * 45 + 'ms' }"></span>
+                    <Transition name="hp-pop">
+                        <div v-if="mention.open" class="hp-pop hp-mention" :class="{ grid: mention.type === '@' }" :style="{ left: mention.x + 'px', top: mention.y + 'px' }" role="listbox" :aria-label="mention.type === '@' ? '引用素材' : '插件、技能和应用'" @mousedown.prevent>
+                            <div v-if="mention.type === '@'" class="hp-list">
+                                <template v-for="g in ['已添加的素材', '素材库']" :key="g">
+                                    <div v-if="mentionRows.some(r => r.group === g)" class="hp-grp">{{ g }}</div>
+                                    <div v-if="mentionRows.some(r => r.group === g)" class="hp-tiles">
+                                        <button v-for="row in mentionRows.filter(r => r.group === g)" :key="row.key" type="button" class="hp-tile" role="option" :class="{ cur: mentionRows[mention.index] === row }" :aria-selected="mentionRows[mention.index] === row" :title="row.name"
+                                                @mouseenter="mention.index = mentionRows.indexOf(row)" @click="pickMention(row)">
+                                            <span class="tm"><img v-if="row.thumb && !thumbFail.has(row.key)" :src="row.thumb" alt="" loading="lazy" @error="e => onThumbErr(e, row)"><NvIcon v-else :name="row.icon" /><i v-if="row.badge" class="bd"><NvIcon :name="row.badge" /></i></span>
+                                            <span class="nm">{{ row.name }}</span>
+                                        </button>
+                                    </div>
+                                </template>
+                                <div v-if="!mentionRows.length" class="hp-empty">{{ picker.loading ? '正在读取素材…' : (mention.q ? '没有匹配的素材' : '还没有素材，可以先上传或拖入文件') }}</div>
                             </div>
-                            <b>{{ s.label }}</b>
-                            <span>{{ s.t.desc }} · 点击搭好节点</span>
+                            <div v-else class="hp-list">
+                                <template v-for="row in mentionItems" :key="row.head ? 'h:' + row.title : row.key">
+                                    <div v-if="row.head" class="hp-grp">{{ row.title }}</div>
+                                    <button v-else type="button" class="hp-it" role="option" :class="{ cur: mentionRows[mention.index] === row }" :aria-selected="mentionRows[mention.index] === row" :disabled="row.disabled"
+                                            @mouseenter="mention.index = mentionRows.indexOf(row)" @click="pickMention(row)">
+                                        <span class="ic" :class="{ th: row.thumb }"><img v-if="row.thumb" :src="row.thumb" alt=""><NvIcon v-else :name="row.icon" /></span>
+                                        <span class="tx"><b>{{ row.name }}</b><small>{{ row.sub }}</small></span>
+                                        <NvIcon v-if="row.kind === 'skill' && skill && skill.id === row.data.id" class="chk" name="check" />
+                                    </button>
+                                </template>
+                                <div v-if="!mentionRows.length" class="hp-empty">
+                                    {{ mention.type === '@' ? (picker.loading ? '正在读取素材…' : (mention.q ? '没有匹配的素材' : '还没有素材，可以先上传或拖入文件')) : '没有匹配的插件、技能或应用' }}
+                                </div>
+                            </div>
+                            <div class="hp-foot"><span>{{ mention.type === '@' ? '方向键选择 · 回车引用' : '↑↓ 选择 · 回车使用' }}</span><span>Esc 关闭</span></div>
                         </div>
-                    </span>
+                    </Transition>
+                    <Transition name="hp-pop">
+                        <div v-if="pop === 'add'" class="hp-pop" style="left: 14px; width: 240px">
+                            <button type="button" class="hp-it" @click="closePop(); fileEl && fileEl.click()"><span class="ic"><NvIcon name="upload" /></span><span class="tx"><b>上传本地文件</b><small>图片、视频、音频或文档</small></span></button>
+                            <button type="button" class="hp-it" @click="openPicker"><span class="ic"><NvIcon name="library" /></span><span class="tx"><b>从素材库选</b><small>生成作品与上传的素材</small></span></button>
+                        </div>
+                    </Transition>
+                    <Transition name="hp-pop">
+                        <div v-if="pop === 'skill'" class="hp-pop" style="left: 52px">
+                            <label class="hp-search"><NvIcon name="search" /><input v-model="skillQ" placeholder="搜索技能" autocomplete="off" /></label>
+                            <div class="hp-list">
+                                <div v-if="skillsState === 'loading'" class="hp-empty">正在读取技能…</div>
+                                <div v-else-if="skillsState === 'error'" class="hp-empty">技能列表读取失败</div>
+                                <template v-else>
+                                    <div v-if="shownSkills.length" class="hp-grp">可用技能 · {{ shownSkills.length }} 个</div>
+                                    <button v-for="s in shownSkills" :key="s.id" type="button" class="hp-it" @click="pickSkill(s)">
+                                        <span class="ic"><NvIcon name="wand2" /></span><span class="tx"><b>{{ s.name }}</b><small>{{ s.description }}</small></span>
+                                        <NvIcon v-if="skill && skill.id === s.id" class="chk" name="check" />
+                                    </button>
+                                    <div v-if="!shownSkills.length" class="hp-empty">{{ skills.length ? '没有找到相关技能' : '还没有技能，可以在设置 → 技能里导入，或去应用市场添加' }}</div>
+                                </template>
+                            </div>
+                            <div class="hp-foot"><button type="button" @click="closePop(); navigate('store')">去应用市场添加技能</button><button type="button" @click="openSettings('skills')">管理技能</button></div>
+                        </div>
+                    </Transition>
+                    <Transition name="hp-pop">
+                        <div v-if="pop === 'plugin'" class="hp-pop" style="left: 128px">
+                            <div class="hp-grp">画布助手可以调用的工具</div>
+                            <button type="button" class="hp-it" :aria-pressed="web === true" @click="toggleWeb">
+                                <span class="ic"><NvIcon name="globe" /></span><span class="tx"><b>联网搜索</b><small>搜索公开网页、读取网页正文</small></span><span class="hp-sw"></span>
+                            </button>
+                            <button v-for="s in mcp" :key="s.name" type="button" class="hp-it" :aria-pressed="!!s.enabled" :disabled="mcpBusy === s.name" @click="toggleMcp(s)">
+                                <span class="ic"><NvIcon name="plug" /></span><span class="tx"><b>{{ s.name }}</b><small>{{ s.enabled ? ('MCP 服务 · ' + (s.tool_count || 0) + ' 个工具') : 'MCP 服务 · 未启用，点开去设置里启用' }}</small></span><span class="hp-sw"></span>
+                            </button>
+                            <div v-if="!mcp.length" class="hp-empty" style="padding: 10px 8px">还没有添加 MCP 服务</div>
+                            <div class="hp-foot"><button type="button" @click="openSettings('mcp')">管理插件</button><button type="button" @click="openSettings('mcp')">添加 MCP 服务</button></div>
+                        </div>
+                    </Transition>
                 </div>
-            </div>
 
-            <!-- 最近项目 -->
-            <section class="sec">
-                <div class="head">
-                    <h2 class="t2">最近项目</h2>
-                    <button type="button" class="nv-link" @click="navigate('canvas')">
-                        全部画布
-                        <span v-if="canvasCount" class="ticker" aria-label="画布数量">
-                            <span v-for="(d, n) in tickDigits" :key="n" class="col" :style="{ transform: `translateY(${-d * 1.25}em)`, transitionDelay: n * 80 + 'ms' }">
-                                <span v-for="k in 10" :key="k">{{ k - 1 }}</span>
-                            </span>
-                        </span>
-                        <NvIcon name="arrowr" class="arrow" />
+                <!-- 快速开始 -->
+                <!-- 最新项目：新建 + 最近编辑的画布（不足 3 张用快速开始补位）+ 所有项目 -->
+                <div class="hp-recent">
+                    <button type="button" class="hp-new" @click="quickStart('blank')"><NvIcon name="plus" /><span>新建项目</span></button>
+                    <button v-for="c in recent" :key="c.id" type="button" class="hp-pj" :title="c.title || '未命名画布'" @click="openProject(c)">
+                        <span class="cv"><img v-if="coverOf(c)" :src="coverOf(c)" alt="" loading="lazy" decoding="async" @error="onCoverError(c)"><span v-else class="ph"><NvIcon name="grid9" /></span></span>
+                        <span class="mt"><b>{{ c.title || '未命名画布' }}</b><em>编辑于 {{ ago(c) }}</em></span>
+                        <span class="go"><span>{{ c.chip || '继续创作' }}</span><NvIcon name="arrowdr" class="ne" /></span>
+                    </button>
+                    <button v-for="q in fillers" :key="q.kind" type="button" class="hp-pj fill" @click="quickStart(q.kind)">
+                        <span class="cv art"><template v-if="q.kind === 'image'"><svg viewBox="0 0 150 84"><rect x="8" y="24" width="48" height="36" rx="6" class="n"/><path d="M16 34h28M16 42h22M16 50h26" class="ln" stroke-width="2" stroke-linecap="round"/><path d="M58 42c14 0 14-18 30-18" class="ln" fill="none" stroke-width="1.5"/><circle cx="58" cy="42" r="3" class="pt"/><rect x="88" y="8" width="54" height="68" rx="7" class="n"/><rect x="94" y="14" width="42" height="46" rx="4" class="f"/><path d="m96 56 12-14 8 8 6-5 12 11" class="ln" fill="none" stroke-width="1.5"/><circle cx="124" cy="25" r="3.5" class="d"/></svg></template><template v-else-if="q.kind === 'video'"><svg viewBox="0 0 150 84"><rect x="8" y="18" width="44" height="48" rx="6" class="n"/><rect x="13" y="23" width="34" height="38" rx="3" class="f"/><path d="m15 58 10-11 7 6 5-4 9 9" class="ln" fill="none" stroke-width="1.5"/><path d="M54 42h26" class="ln" stroke-width="1.5"/><circle cx="54" cy="42" r="3" class="pt"/><rect x="82" y="16" width="62" height="52" rx="7" class="n"/><rect x="88" y="22" width="50" height="32" rx="4" class="f"/><path d="m109 31 9 7-9 7z" class="d"/><rect x="88" y="59" width="50" height="3" rx="1.5" class="f"/><rect x="88" y="59" width="22" height="3" rx="1.5" class="d"/></svg></template><template v-else><svg viewBox="0 0 150 84"><rect x="6" y="14" width="62" height="56" rx="6" class="n"/><path d="M6 28h62M6 42h62M6 56h62M26 14v56" class="ln" stroke-width="1"/><path d="M70 42h16" class="ln" stroke-width="1.5"/><circle cx="70" cy="42" r="3" class="pt"/><rect x="100" y="10" width="40" height="40" rx="5" class="f2"/><rect x="94" y="20" width="40" height="40" rx="5" class="f2"/><rect x="88" y="30" width="40" height="40" rx="5" class="n"/><path d="m92 64 9-10 6 5 5-4 12 9" class="ln" fill="none" stroke-width="1.5"/></svg></template></span>
+                        <span class="mt"><b>{{ q.label }}</b><em>快速开始</em></span>
+                        <span class="go"><span>{{ q.desc }}</span><NvIcon name="arrowdr" class="ne" /></span>
                     </button>
                 </div>
-                <div class="gallery5">
-                    <button type="button" class="nv-tile new" @click="launch(timeTitle('智能画布'), null)">
-                        <span class="nv-tile-media"><NvIcon name="plus" :size="20" /></span>
-                        <span class="nv-tile-title">新建画布</span>
-                        <span class="nv-tile-sub">空白智能画布</span>
-                    </button>
-                    <template v-if="!recentLoaded">
-                        <div v-for="i in 4" :key="'s' + i" class="skel-wrap loading" style="aspect-ratio: 4 / 3"><span class="skel"></span></div>
-                    </template>
-                    <template v-else>
-                    <button v-for="c in recent" :key="c.id" type="button" class="nv-tile" @click="openCanvas(c)">
-                        <span class="nv-tile-media">
-                            <img v-if="c.thumbnail" class="thumb" :src="c.thumbnail" loading="lazy" alt="" @error="c.thumbnail = ''">
-                            <NvIcon v-else name="layers" :size="22" />
-                            <span class="nv-badge on-image">{{ c.kind === 'smart' ? '智能画布' : '智能画布BEAT' }}</span>
-                        </span>
-                        <span class="nv-tile-title">{{ c.title || c.name || '未命名画布' }}</span>
-                        <span class="nv-tile-sub">更新于 {{ formatUpdateTime(c.updated_at || c.lastOpened) }}</span>
-                    </button>
-                    </template>
-                </div>
-            </section>
+                <div class="hp-all"><button type="button" @click="allProjects">所有项目<NvIcon name="arrowr" /></button></div>
 
-            <!-- 模板：列表为空时整块收起，后续逐项加入后再展示 -->
-            <section v-if="templates.length" class="sec">
-                <div class="head center">
-                    <h2 class="t2">模板</h2>
-                    <div ref="tabsEl" class="nv-tabs sliding" role="tablist">
-                        <span class="tab-line" data-glide-pill></span>
-                        <button v-for="c in CATS" :key="c" type="button" role="tab" class="nv-tab" :class="{ 'is-on': c === cat }" :aria-selected="c === cat" @click="pickCat(c)">{{ c }}</button>
+                <!-- 模板库 -->
+                <section class="hp-tpl">
+                    <div class="hp-tpl-head">
+                        <h2>模板库</h2>
+                        <div class="hp-tabs" role="tablist">
+                            <button v-for="c in CATS" :key="c" type="button" role="tab" :aria-selected="cat === c" :class="{ on: cat === c }" @click="cat = c">{{ c }}</button>
+                        </div>
+                        <label class="hp-tpl-search"><NvIcon name="search" /><input v-model="tplQ" type="search" placeholder="搜索模板" aria-label="搜索模板" autocomplete="off" /><button v-if="tplQ" type="button" aria-label="清空" @click="tplQ = ''"><NvIcon name="x" /></button></label>
                     </div>
-                </div>
-                <TransitionGroup name="tpl" tag="div" class="gallery4">
-                    <button v-for="t in templates" :key="t.id" type="button" class="nv-tile tilt" @click="useTemplate(t.id)">
-                        <span class="nv-tile-media tpl-media">
-                            <svg class="tpl-wires" viewBox="0 0 100 100" preserveAspectRatio="none"><path v-for="(w, i) in t.d.wires" :key="i" class="wire" :d="w" vector-effect="non-scaling-stroke" /></svg>
-                            <span v-for="b in t.d.boxes" :key="b.key" class="mini" :class="{ gen: b.gen }" :style="{ left: b.x + '%', top: b.y + '%', width: b.w + '%', height: b.h + '%' }">
-                                <NvIcon v-if="b.video" name="play" class="mk" />
-                            </span>
-                            <span class="nv-badge"><NvIcon :name="t.kind.icon" class="sm" />{{ t.kind.label }}</span>
-                            <span class="use-tpl"><NvIcon name="plus" />用这个模板</span>
-                        </span>
-                        <span class="nv-tile-title">{{ t.title }}</span>
-                        <span class="nv-tile-sub">{{ t.d.count }} 个节点 · {{ t.desc }}</span>
-                    </button>
-                </TransitionGroup>
-            </section>
-
-            <!-- 更多工具 -->
-            <section class="sec">
-                <div class="head"><h2 class="t2">更多工具</h2></div>
-                <div class="tool-row">
-                    <button v-for="tl in TOOLS" :key="tl.route" type="button" class="tool-card" @click="navigate(tl.route)">
-                        <span class="ic"><NvIcon :name="tl.icon" /></span>
-                        <span><b>{{ tl.title }}</b><span>{{ tl.desc }}</span></span>
-                    </button>
-                </div>
-            </section>
-
-            <div class="status"><span class="dot" :class="{ busy: state.queue.total > 0 }"></span><span class="cap">{{ statusText }}</span></div>
+                    <p v-if="!templates.length" class="hp-tpl-empty">没有找到「{{ tplQ }}」相关的模板</p>
+                    <div class="hp-grid">
+                        <button v-for="t in templates" :key="t.id" type="button" class="hp-card" :title="t.desc" @pointerenter="cardVideoIn" @pointerleave="cardVideoOut" @click="openPreview(t)">
+                            <img :src="t.media" alt="" loading="lazy" />
+                            <video v-if="t.video" :src="t.video" muted loop playsinline preload="none" aria-hidden="true"></video>
+                            <span class="tag">{{ t.cat }}</span>
+                            <span class="use" title="直接用这个模板新建画布" @click.stop="useTemplate(t.id)"><NvIcon name="plus" />用这个模板</span>
+                            <span class="t"><b>{{ t.title }}</b><small>{{ t.desc }}</small></span>
+                        </button>
+                    </div>
+                </section>
+            </div>
         </div>
+        <!-- 底部同款渐变磨砂 -->
+        <!-- 底部渐变磨砂已挪到外壳（App.vue 的 .bt-fx），首页 / 画布列表 / 素材库 / 应用市场共用 -->
+
+        <!-- 素材库选择 -->
+        <Teleport to="#nv-layer">
+            <Transition name="hp-fade"><div v-if="picker.open" class="hp-scrim" @click="picker.open = false"></div></Transition>
+            <Transition name="hp-drawer">
+                <aside v-if="picker.open" class="hp-drawer" aria-label="从素材库选择">
+                    <div class="hd"><h3>从素材库选择<small>点一下加进输入框</small></h3><button type="button" class="hp-x" aria-label="关闭" @click="picker.open = false"><NvIcon name="x" /></button></div>
+                    <div class="tools">
+                        <div class="hp-seg"><button v-for="k in [['all','全部'],['image','图片'],['video','视频']]" :key="k[0]" type="button" :class="{ on: picker.kind === k[0] }" @click="picker.kind = k[0]">{{ k[1] }}</button></div>
+                        <label class="hp-search grow"><NvIcon name="search" /><input v-model="picker.q" placeholder="搜索素材" autocomplete="off" /></label>
+                    </div>
+                    <div class="body">
+                        <div v-if="picker.loading" class="hp-empty">正在读取素材库…</div>
+                        <div v-else-if="!pickerItems.length" class="hp-empty">{{ picker.items.length ? '没有匹配的素材' : '素材库还是空的，可以先在「素材库」里上传' }}</div>
+                        <div v-else class="grid">
+                            <button v-for="a in pickerItems" :key="a.id" type="button" class="as" :title="a.name" @click="pickAsset(a)">
+                                <video v-if="a.kind === 'video'" :src="a.url" muted preload="metadata"></video>
+                                <img v-else :src="thumbUrl(a.thumb || a.url)" alt="" loading="lazy" />
+                                <span class="k">{{ a.kind === 'video' ? '视频' : a.kind === 'audio' ? '音频' : '图片' }}</span>
+                            </button>
+                        </div>
+                    </div>
+                </aside>
+            </Transition>
+        </Teleport>
+
+        <TemplatePreview v-if="preview" :template="preview" :busy="busy" @close="preview = null" @use="usePreviewed()" @agent="usePreviewed({ agent: true })" />
     </div>
 </template>
 
 <style scoped>
-.home { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; }
-.home-in { width: min(1080px, calc(100% - 96px)); margin: 0 auto; padding: 28px 0 64px; display: flex; flex-direction: column; }
-.lan { margin-bottom: 44px; position: relative; }
-.lan .url { border: 0; background: none; padding: 0; cursor: pointer; font: 400 12px/1 var(--font-mono); color: var(--ink-3); }
-.lan .url:hover { color: var(--ink); }
-.w5 { font-weight: 500; }
-.grow { flex: 1; }
-.qr-wrap { position: relative; }
-.qr-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; width: 184px; padding: 12px; border-radius: 14px; background: var(--solid); box-shadow: var(--shadow-pop); display: flex; flex-direction: column; align-items: center; gap: 8px; animation: nv-pop var(--duration-base) var(--ease-out) both; }
-.qr-pop img { width: 160px; height: 160px; border-radius: 8px; background: #fff; }
-.qr-pop span { font: 400 11px/16px var(--font-sans); color: var(--ink-3); }
-.hero { text-align: center; margin-top: 36px; }
-.hero .sub { margin-top: 8px; color: var(--ink-3); }
-.compose-col { display: flex; flex-direction: column; align-items: center; gap: 22px; margin-top: 28px; }
-.nv-composer { width: min(680px, 100%); }
-.nv-composer.is-drag { box-shadow: var(--shadow-rim), var(--shadow-lift); }
-.nv-composer.shake { animation: shake 400ms var(--ease-out); }
-@keyframes shake { 20% { transform: translateX(-6px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
-.refs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.hp-ref .x { border: 0; padding: 0; cursor: pointer; opacity: 0; transition: opacity var(--duration-fast); }
-.hp-ref:hover .x { opacity: 1; }
-.hp-ref .x :deep(.nv-i) { width: 10px; height: 10px; }
-.ta-wrap { position: relative; }
-.ta-wrap textarea { display: block; }
-.ta-wrap .tw-ph { left: 0; top: 2px; right: 0; }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-.drop-veil { position: absolute; inset: 0; border-radius: inherit; background: var(--glass-strong); backdrop-filter: var(--material-thin); display: flex; align-items: center; justify-content: center; gap: 8px; font: 500 13px/1 var(--font-sans); color: var(--ink); pointer-events: none; }
-.skills { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 34px; max-width: 980px; }
-.skill-wrap .agent-dot { border: 0; padding: 0; cursor: pointer; }
-.sec { margin-top: 64px; display: flex; flex-direction: column; gap: 18px; }
-.sec:first-of-type { margin-top: 80px; }
-.head.center { align-items: center; }
-.nv-tile.new .nv-tile-media { color: var(--ink-3); }
-.nv-tile.new:hover .nv-tile-media { color: var(--ink); }
-.thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 600ms var(--ease-out); }
-.nv-tile:hover .thumb { transform: scale(1.03); }
-.tpl-media { background: var(--fill-1); }
-.tpl-wires { position: absolute; inset: 0; width: 100%; height: 100%; }
-.mini { display: flex; align-items: center; justify-content: center; }
-.mini .mk { width: 12px; height: 12px; color: var(--ink-3); }
-.tpl-media .nv-badge { left: 10px; top: 10px; }
-.tpl-media .nv-badge .nv-i { width: 11px; height: 11px; }
-.tool-card { border: 0; cursor: pointer; text-align: left; color: var(--ink); font: inherit; }
-.status { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 56px; }
-.status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
-.status .dot.busy { animation: nv-breathe 1.6s var(--ease-in-out) infinite; }
-.tpl-enter-active, .tpl-leave-active { transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out); }
-.tpl-enter-from, .tpl-leave-to { opacity: 0; transform: translateY(6px); }
-.tpl-leave-active { position: absolute; visibility: hidden; }
-.tpl-move { transition: transform 320ms var(--ease-out); }
-@media (max-width: 1100px) { .gallery5 { grid-template-columns: repeat(3, minmax(0, 1fr)); } .gallery4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.hp { position: absolute; inset: 0; background: var(--shell-bg); color: var(--ink); --hp-panel: rgba(255,255,255,.82); --hp-card: rgba(0,0,0,.04); --hp-card-h: rgba(0,0,0,.07); --hp-pop: #fff; --hp-ill: #c7c7cc; --hp-ill-2: #e5e5ea; --hp-ill-n: #fff; --hp-glass: rgba(255,255,255,.55); --hp-glass-h: rgba(255,255,255,.72); }
+.hp-scroll { position: absolute; inset: 0; overflow: auto; }
+.hp-inner { max-width: 1180px; margin: 0 auto; padding: calc(var(--tbh) + 36px) 24px 96px; display: flex; flex-direction: column; align-items: center; }
+
+/* 标题打字机 */
+.hp-title { margin: 20px 0 22px; min-height: 1.4em; font: 600 26px/1.3 var(--font-sans); letter-spacing: -.01em; display: flex; align-items: center; justify-content: center; text-align: center; }
+.hp-title > span:first-child { white-space: pre; }
+.hp-caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 4px; border-radius: 1px; background: var(--ink); animation: hpBlink 1s steps(1) infinite; }
+.hp-caret.typing { animation: none; }
+@keyframes hpBlink { 50% { opacity: 0; } }
+
+/* 输入框：BEAT 助手 composer 放大版，磨砂浮卡 */
+.hp-composer { position: relative; z-index: 10; width: 100%; max-width: 780px; border-radius: 20px; background: var(--hp-panel); backdrop-filter: var(--material-thick); -webkit-backdrop-filter: var(--material-thick);
+    box-shadow: var(--shadow-lift); padding: 14px 14px 12px; transition: box-shadow var(--duration-fast) var(--ease-out); }
+.hp-composer.drag { box-shadow: var(--shadow-lift), 0 0 0 2px var(--ink-4); }
+.hp-composer.shaking { animation: hpShake .4s; }
+@keyframes hpShake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+.hp-attached { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px 8px; }
+.hp-att { height: 30px; max-width: 220px; padding: 0 6px 0 3px; border-radius: 9px; background: var(--hp-card); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.hp-att img, .hp-att .gi { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.hp-att .gi { background: var(--hp-card-h); display: flex; align-items: center; justify-content: center; color: var(--ink-3); }
+.hp-att .gi .nv-i, .hp-att.skill > .nv-i { width: 13px; height: 13px; }
+.hp-att.skill { padding-left: 9px; }
+.hp-att.skill > .nv-i { color: var(--ink-3); }
+.hp-att.loading { opacity: .6; }
+.hp-att > span:not(.gi) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hp-att button { width: 18px; height: 18px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-3); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.hp-att button:hover { background: var(--hp-card-h); color: var(--ink); }
+.hp-att button .nv-i { width: 11px; height: 11px; }
+.hp-input { position: relative; display: block; width: 100%; box-sizing: border-box; min-height: 86px; max-height: 240px; overflow-y: auto; border: 0; outline: none; background: transparent; padding: 4px 6px; color: var(--ink); font: 400 14px/1.75 var(--font-sans); box-shadow: none; white-space: pre-wrap; word-break: break-word; cursor: text; }
+.hp-input:focus { outline: none; box-shadow: none; background: transparent; }
+.hp-input.empty::before { content: attr(data-placeholder); position: absolute; left: 6px; right: 6px; top: 4px; color: var(--ink-4); pointer-events: none; white-space: pre-wrap; }
+.hp-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.hp-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hp-chip { height: 30px; padding: 0 10px; border: 0; border-radius: 15px; background: var(--hp-card); color: var(--ink-2); display: inline-flex; align-items: center; gap: 5px; font: 500 12px/1 var(--font-sans); cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.hp-chip .nv-i { width: 14px; height: 14px; }
+.hp-chip:hover, .hp-chip.open { background: var(--hp-card-h); color: var(--ink); }
+.hp-chip.ghost { background: transparent; }
+.hp-chip.ic { width: 30px; padding: 0; justify-content: center; }
+.hp-chip .n { font-size: 11px; color: var(--ink-4); }
+.hp-send { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: opacity var(--duration-fast), transform var(--duration-instant); }
+.hp-send:active { transform: scale(.94); }
+.hp-send:disabled { opacity: .3; cursor: default; transform: none; }
+.hp-send .nv-i { width: 16px; height: 16px; }
+.hp-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: hpSpin .7s linear infinite; }
+@keyframes hpSpin { to { transform: rotate(360deg); } }
+
+/* 弹层：实底 + 投影，无描边；opacity + 4px 位移 */
+.hp-pop { position: absolute; top: calc(100% - 6px); z-index: 30; width: 340px; max-width: calc(100vw - 48px); padding: 8px; border-radius: 16px; background: var(--hp-pop); box-shadow: var(--shadow-pop); }
+.hp-pop-enter-active, .hp-pop-leave-active { transition: opacity .14s ease, transform .14s ease; }
+.hp-pop-enter-from, .hp-pop-leave-to { opacity: 0; transform: translateY(4px); }
+.hp-search { height: 32px; border-radius: 10px; background: var(--hp-card); display: flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--ink-4); margin-bottom: 4px; }
+.hp-search .nv-i { width: 13px; height: 13px; flex-shrink: 0; }
+.hp-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--ink); font: 400 12px/1 var(--font-sans); box-shadow: none; }
+.hp-search:focus-within { background: var(--hp-card-h); }
+.hp-list { max-height: 300px; overflow: auto; }
+.hp-grp { font-size: 11px; color: var(--ink-4); padding: 8px 8px 4px; }
+.hp-it { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; font-family: var(--font-sans); }
+.hp-it:hover { background: var(--hp-card-h); }
+.hp-mention .hp-it:hover { background: transparent; }
+.hp-mention .hp-it.cur { background: var(--hp-card-h); }
+.hp-mention .hp-it:disabled { cursor: default; opacity: .55; }
+.hp-mention .ic.th { overflow: hidden; padding: 0; }
+.hp-mention .ic.th img { width: 100%; height: 100%; object-fit: cover; }
+.hp-mention.grid { width: 372px; }
+.hp-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 2px 4px 6px; }
+.hp-tile { min-width: 0; padding: 4px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; color: var(--ink); font-family: var(--font-sans); display: flex; flex-direction: column; gap: 4px; }
+.hp-tile.cur { background: var(--hp-card-h); }
+.hp-tile .tm { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--hp-card); color: var(--ink-3); }
+.hp-tile .tm img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hp-tile .tm > .nv-i { width: 18px; height: 18px; }
+.hp-tile .tm .bd { position: absolute; right: 4px; bottom: 4px; width: 16px; height: 16px; border-radius: 5px; background: rgba(0,0,0,.5); color: #fff; display: flex; align-items: center; justify-content: center; }
+.hp-tile .tm .bd .nv-i { width: 9px; height: 9px; }
+.hp-tile .nm { font-size: 11px; line-height: 14px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+.hp-tile.cur .tm { box-shadow: 0 0 0 2px var(--ink); }
+.hp-mention .hp-foot span { color: var(--ink-4); font: 400 11px/1.4 var(--font-sans); }
+.hp-it:disabled { opacity: .5; cursor: default; }
+.hp-it .ic { width: 28px; height: 28px; border-radius: 8px; background: var(--hp-card); display: flex; align-items: center; justify-content: center; color: var(--ink-3); flex-shrink: 0; }
+.hp-it .ic .nv-i { width: 14px; height: 14px; }
+.hp-it .tx { flex: 1; min-width: 0; }
+.hp-it b { display: block; font-size: 12px; font-weight: 500; }
+.hp-it small { display: block; font-size: 11px; color: var(--ink-3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hp-it .chk { width: 14px; height: 14px; }
+.hp-sw { width: 26px; height: 15px; border-radius: 8px; background: var(--fill-3); position: relative; flex-shrink: 0; transition: background .14s ease; }
+.hp-sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--solid); transition: transform .14s ease; }
+.hp-it[aria-pressed="true"] .hp-sw { background: var(--ink); }
+.hp-it[aria-pressed="true"] .hp-sw::after { transform: translateX(11px); }
+.hp-foot { display: flex; justify-content: space-between; gap: 8px; padding: 8px 8px 2px; margin-top: 4px; }
+.hp-foot button { border: 0; background: transparent; padding: 0; color: var(--ink-3); font: 400 11px/1.4 var(--font-sans); cursor: pointer; }
+.hp-foot button:hover { color: var(--ink); }
+.hp-empty { padding: 18px 8px; text-align: center; color: var(--ink-4); font-size: 12px; }
+
+/* 快速开始 */
+.hp-quick { width: 100%; max-width: 780px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }
+.hp-q { border: 0; background: transparent; padding: 0; text-align: left; color: var(--ink); cursor: pointer; font-family: var(--font-sans); }
+.hp-q .art { height: 108px; border-radius: 14px; background: var(--hp-card); display: flex; align-items: center; justify-content: center; transition: background var(--duration-fast), transform var(--duration-base) var(--ease-out); }
+.hp-q:hover .art { background: var(--hp-card-h); transform: translateY(-2px); }
+.hp-q .art svg { width: 150px; height: 84px; max-width: 90%; }
+.hp-q .art.plus .nv-i { width: 28px; height: 28px; color: var(--ink-3); }
+.hp-q .art .n { fill: var(--hp-ill-n); stroke: var(--hp-ill); }
+.hp-q .art .f { fill: var(--hp-ill-2); }
+.hp-q .art .f2 { fill: var(--hp-ill-2); stroke: var(--hp-ill); }
+.hp-q .art .ln { stroke: var(--hp-ill); }
+.hp-q .art .pt { fill: var(--shell-bg); stroke: var(--hp-ill); }
+.hp-q .art .d { fill: var(--hp-ill); }
+.hp-q .lb { display: block; font-size: 12px; font-weight: 500; margin-top: 8px; padding-left: 2px; }
+.hp-q .ds { display: block; font-size: 11px; color: var(--ink-3); padding-left: 2px; margin-top: 2px; }
+
+/* 最新项目 */
+.hp-recent { width: 100%; max-width: 780px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }
+.hp-new, .hp-pj { min-width: 0; border: 0; border-radius: 18px; background: var(--hp-glass); backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%); color: var(--ink); cursor: pointer; font-family: var(--font-sans); text-align: left; transition: background var(--duration-fast), transform var(--duration-base) var(--ease-out); }
+.hp-new:hover, .hp-pj:hover { background: var(--hp-glass-h); transform: translateY(-2px); }
+.hp-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 196px; font: 500 13px/1 var(--font-sans); }
+.hp-new .nv-i { width: 22px; height: 22px; color: var(--ink-2); }
+.hp-pj { display: flex; flex-direction: column; gap: 8px; padding: 6px; }
+.hp-pj .cv { position: relative; display: block; aspect-ratio: 16 / 10; border-radius: 12px; overflow: hidden; background: var(--hp-card); }
+.hp-pj .cv img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hp-pj .cv .ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--ink-4); }
+.hp-pj .cv .ph .nv-i { width: 20px; height: 20px; }
+.hp-pj .cv.art { display: flex; align-items: center; justify-content: center; }
+.hp-pj .cv.art svg { width: 130px; height: 74px; max-width: 86%; }
+.hp-pj .cv.art .n { fill: var(--hp-ill-n); stroke: var(--hp-ill); }
+.hp-pj .cv.art .f { fill: var(--hp-ill-2); }
+.hp-pj .cv.art .f2 { fill: var(--hp-ill-2); stroke: var(--hp-ill); }
+.hp-pj .cv.art .ln { stroke: var(--hp-ill); }
+.hp-pj .cv.art .pt { fill: var(--shell-bg); stroke: var(--hp-ill); }
+.hp-pj .cv.art .d { fill: var(--hp-ill); }
+.hp-pj .mt { display: flex; align-items: baseline; gap: 8px; padding: 0 4px; min-width: 0; }
+.hp-pj .mt b { flex: 1; min-width: 0; font: 500 12px/16px var(--font-sans); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hp-pj .mt em { font: normal 400 11px/16px var(--font-sans); color: var(--ink-3); white-space: nowrap; flex: none; }
+.hp-pj .go { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: 10px; background: var(--hp-card); }
+.hp-pj:hover .go { background: var(--hp-card-h); }
+.hp-pj .go span { flex: 1; min-width: 0; font: 500 12px/1 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hp-pj .go .ne { width: 13px; height: 13px; color: var(--ink-3); transform: rotate(-90deg); flex: none; transition: transform var(--duration-fast) var(--ease-out), color var(--duration-fast); }
+.hp-pj:hover .go .ne { color: var(--ink); transform: rotate(-90deg) translate(1px, 1px); }
+.hp-all { width: 100%; max-width: 780px; display: flex; justify-content: flex-end; margin-top: 10px; }
+.hp-all button { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; border: 0; border-radius: 8px; background: transparent; font: 400 12px/1 var(--font-sans); color: var(--ink-3); cursor: pointer; }
+.hp-all button:hover { color: var(--ink); }
+.hp-all .nv-i { width: 13px; height: 13px; }
+
+/* 模板库 */
+.hp-tpl { width: 100%; margin-top: 56px; }
+.hp-tpl-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.hp-tpl-head h2 { margin: 0; font: 600 15px/1.3 var(--font-sans); }
+.hp-tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+/* 模板库右上角搜索（磨砂玻璃；点进去无描边/阴影/上浮） */
+.hp-tpl-search { margin-left: auto; width: 220px; max-width: 100%; height: 32px; border-radius: 16px; padding: 0 6px 0 12px; display: flex; align-items: center; gap: 6px; color: var(--ink-4);
+    background: var(--hp-glass); backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%); transition: background var(--duration-fast); }
+.hp-tpl-search:focus-within { background: var(--hp-glass-h); }
+.hp-tpl-search .nv-i { width: 13px; height: 13px; flex: none; }
+.hp-tpl-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; box-shadow: none; background: transparent; color: var(--ink); font: 400 12px/1 var(--font-sans); -webkit-appearance: none; appearance: none; }
+.hp-tpl-search input::-webkit-search-cancel-button { display: none; }
+.hp-tpl-search button { width: 22px; height: 22px; border: 0; border-radius: 11px; background: transparent; color: var(--ink-3); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+.hp-tpl-search button:hover { background: var(--hp-card-h); color: var(--ink); }
+.hp-tpl-search button .nv-i { width: 11px; height: 11px; }
+.hp-tpl-empty { margin: 24px 0; text-align: center; font-size: 12px; color: var(--ink-3); }
+@media (max-width: 720px) { .hp-tpl-search { margin-left: 0; width: 100%; } }
+.hp-tabs button { height: 28px; padding: 0 12px; border: 0; border-radius: 14px; background: transparent; color: var(--ink-3); font: 500 12px/1 var(--font-sans); cursor: pointer; }
+.hp-tabs button:hover { color: var(--ink); }
+.hp-tabs button.on { background: var(--hp-card-h); color: var(--ink); }
+.hp-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.hp-card { position: relative; display: block; width: 100%; aspect-ratio: 3 / 4; border: 0; padding: 0; border-radius: 16px; overflow: hidden; background: var(--hp-card); text-align: left; cursor: pointer;
+    transition: transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out); }
+.hp-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hp-card video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; pointer-events: none; transition: opacity var(--duration-fast); }
+.hp-card:hover video, .hp-card:focus-visible video { opacity: 1; }
+.hp-card::after { content: ''; position: absolute; inset: 45% 0 0; background: linear-gradient(transparent, rgba(0,0,0,.62)); }
+.hp-card .t { position: absolute; left: 14px; right: 14px; bottom: 12px; z-index: 1; color: #fff; }
+.hp-card .t b { display: block; font: 600 13px/1.3 var(--font-sans); }
+.hp-card .t small { display: block; font-size: 11px; opacity: .8; margin-top: 3px; }
+.hp-card .tag { position: absolute; top: 10px; left: 10px; z-index: 1; height: 22px; padding: 0 8px; border-radius: 11px; font-size: 11px; color: #fff; background: rgba(0,0,0,.32); backdrop-filter: blur(12px); display: flex; align-items: center; }
+.hp-card .use { position: absolute; right: 10px; top: 10px; z-index: 1; height: 26px; padding: 0 10px; border-radius: 13px; background: #fff; color: #0a0a0a; font: 500 11px/1 var(--font-sans); display: flex; align-items: center; gap: 4px;
+    opacity: 0; transform: translateY(-3px); transition: opacity .16s, transform .16s; }
+.hp-card .use .nv-i { width: 12px; height: 12px; }
+.hp-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+.hp-card:hover .use, .hp-card:focus-visible .use { opacity: 1; transform: none; }
+
+/* 底部渐变磨砂（与标题栏同款，方向相反） */
+.hp-bfx { position: absolute; left: 0; right: 0; bottom: 0; height: 72px; z-index: 5; pointer-events: none; }
+.hp-bfx i { position: absolute; inset: 0; display: block; }
+.hp-bfx i:nth-child(1) { backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); -webkit-mask: linear-gradient(to top, #000 45%, transparent); mask: linear-gradient(to top, #000 45%, transparent); }
+.hp-bfx i:nth-child(2) { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); -webkit-mask: linear-gradient(to top, #000 30%, transparent 75%); mask: linear-gradient(to top, #000 30%, transparent 75%); }
+.hp-bfx i:nth-child(3) { backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%); -webkit-mask: linear-gradient(to top, #000 15%, transparent 55%); mask: linear-gradient(to top, #000 15%, transparent 55%); }
+.hp-bfx i:nth-child(4) { background: linear-gradient(to top, var(--tb-tint), transparent 85%); }
+
+@media (max-width: 1100px) { .hp-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 860px) { .hp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+    .hp-inner { padding-left: 16px; padding-right: 16px; }
+    .hp-quick, .hp-recent { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .hp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .hp-pop { left: 0 !important; width: calc(100vw - 48px) !important; }
+}
+@media (prefers-reduced-motion: reduce) { .hp-caret { display: none; } .hp-card, .hp-q .art { transition: none; } }
+</style>
+
+<style>
+/* 深色：放非 scoped 块（scoped 下 :global(html.theme-dark) .x 会把整条选择器编译成 html.theme-dark） */
+html.theme-dark .hp { --hp-panel: rgba(26,26,26,.74); --hp-card: rgba(255,255,255,.04); --hp-card-h: rgba(255,255,255,.07); --hp-pop: #1e1e20; --hp-ill: #4a4a4f; --hp-ill-2: #2a2a2d; --hp-ill-n: #1f1f22; --hp-glass: rgba(38,38,40,.52); --hp-glass-h: rgba(48,48,50,.62); }
+
+/* 输入区里的标签：用 DOM API 插进 contenteditable，拿不到 scoped 属性，所以放这里 */
+.hp-input .hp-tk { --tk-bg: #fff; --tk-bd: rgba(0,0,0,.12); --tk-ref: rgba(0,0,0,.05); display: inline-flex; align-items: center; gap: 5px; height: 24px; margin: 0 2px; padding: 0 8px 0 6px; vertical-align: middle; position: relative; top: -1px;
+    border-radius: 8px; border: 1px solid var(--tk-bd); background: var(--tk-bg); color: var(--ink); font: 500 12.5px/1 var(--font-sans); white-space: nowrap; user-select: none; -webkit-user-select: none; cursor: default; }
+.hp-input .hp-tk .nv-i { width: 13px; height: 13px; color: var(--ink-2); flex: none; }
+.hp-input .hp-tk .nm { display: inline-block; white-space: nowrap; overflow: hidden; }
+.hp-input .hp-tk .nm.long { max-width: 3.4em; -webkit-mask-image: linear-gradient(to right, #000 52%, transparent); mask-image: linear-gradient(to right, #000 52%, transparent); }
+.hp-input .hp-tk.ref { padding-left: 3px; background: var(--tk-ref); border-color: transparent; box-shadow: inset 0 0 0 1px var(--tk-bd); }
+.hp-input .hp-tk.ref .th { width: 18px; height: 18px; border-radius: 5px; object-fit: cover; flex: none; display: block; }
+.hp-input .hp-tk.ref .th.ic { display: inline-flex; align-items: center; justify-content: center; background: var(--tk-bg); }
+.hp-input .hp-tk.ref .th.ic .nv-i { width: 11px; height: 11px; }
+.hp-input .hp-tk.ref .ix { font-weight: 400; font-size: 11.5px; color: var(--ink-3); }
+html.theme-dark .hp-input .hp-tk { --tk-bg: #252528; --tk-bd: rgba(255,255,255,.14); --tk-ref: rgba(255,255,255,.06); }
+
+/* 素材库选择抽屉：teleport 到 #nv-layer，样式不能 scoped */
+.hp-scrim { position: fixed; inset: 0; z-index: 70; background: var(--scrim); }
+.hp-drawer { position: fixed; z-index: 71; top: 12px; right: 12px; bottom: 12px; width: 420px; max-width: calc(100vw - 24px); border-radius: 18px; background: var(--solid); box-shadow: var(--shadow-dialog); display: flex; flex-direction: column; color: var(--ink); font-family: var(--font-sans); }
+.hp-drawer .hd { display: flex; align-items: center; gap: 8px; padding: 16px 16px 10px; }
+.hp-drawer h3 { margin: 0; flex: 1; font: 600 15px/1.3 var(--font-sans); }
+.hp-drawer h3 small { margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--ink-3); }
+.hp-drawer .tools { display: flex; gap: 8px; align-items: center; padding: 0 16px 10px; }
+.hp-drawer .hp-search { height: 32px; border-radius: 16px; background: var(--fill-1); display: flex; align-items: center; gap: 6px; padding: 0 12px; color: var(--ink-4); flex: 1; min-width: 0; }
+.hp-drawer .hp-search .nv-i { width: 13px; height: 13px; }
+.hp-drawer .hp-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--ink); font: 400 12px/1 var(--font-sans); box-shadow: none; }
+.hp-drawer .hp-search:focus-within { background: var(--fill-2); }
+.hp-seg { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--fill-1); flex-shrink: 0; }
+.hp-seg button { height: 26px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font: 500 12px/1 var(--font-sans); cursor: pointer; }
+.hp-seg button.on { background: var(--solid); color: var(--ink); box-shadow: var(--shadow-float); }
+.hp-drawer .body { flex: 1; overflow: auto; padding: 0 16px 16px; }
+.hp-drawer .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.hp-drawer .as { position: relative; aspect-ratio: 1; border: 0; padding: 0; border-radius: 12px; overflow: hidden; background: var(--fill-1); cursor: pointer; }
+.hp-drawer .as img, .hp-drawer .as video { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .3s; }
+.hp-drawer .as:hover img, .hp-drawer .as:hover video { transform: scale(1.04); }
+.hp-drawer .as .k { position: absolute; left: 6px; bottom: 6px; height: 18px; padding: 0 6px; border-radius: 9px; font-size: 10.5px; color: #fff; background: rgba(0,0,0,.4); display: flex; align-items: center; }
+.hp-drawer .hp-empty { padding: 40px 8px; text-align: center; color: var(--ink-4); font-size: 12px; }
+.hp-x { width: 30px; height: 30px; border: 0; border-radius: 15px; background: transparent; color: var(--ink-3); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.hp-x:hover { background: var(--fill-1); color: var(--ink); }
+.hp-x .nv-i { width: 16px; height: 16px; }
+.hp-fade-enter-active, .hp-fade-leave-active { transition: opacity .2s; }
+.hp-fade-enter-from, .hp-fade-leave-to { opacity: 0; }
+.hp-drawer-enter-active, .hp-drawer-leave-active { transition: transform .28s cubic-bezier(.2,.8,.2,1); }
+.hp-drawer-enter-from, .hp-drawer-leave-to { transform: translateX(calc(100% + 24px)); }
 </style>

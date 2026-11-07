@@ -2,6 +2,7 @@
 // 「素材 / 画布里的」：画布分类树 → 各画布；时间 / 模型筛选、排序（画布名称时按画布分组）、批量下载、框选
 import { ref, computed, watch } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
+import AmTools from '../parts/AmTools.vue';
 import AssetCard from '../parts/AssetCard.vue';
 import MenuSelect from '../parts/MenuSelect.vue';
 import ProgressiveMore from '../parts/ProgressiveMore.vue';
@@ -64,6 +65,7 @@ const modelValue = computed(() => (C.model && C.model !== '__none__' && !models.
                 <label class="nv-field"><NvIcon name="search" /><input v-model="C.query" type="search" placeholder="搜索画布资产" aria-label="搜索画布资产"></label>
                 <MenuSelect v-model="C.sort" :options="K.SORTS" title="排序方法" @update:model-value="C.sel = ''" />
                 <button type="button" class="nv-btn sm" :class="{ primary: C.manage }" :disabled="!total" @click="K.toggleManage()"><NvIcon name="list" />{{ C.manage ? '完成管理' : '批量管理' }}</button>
+                <AmTools />
             </div>
             <KindBar v-model="S.kind" :tabs="ktabs" />
             <div class="am-fbar">

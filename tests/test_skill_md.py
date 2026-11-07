@@ -40,19 +40,9 @@ def skill_md_text(name="md-test-skill", description="一句话说明这个技能
 
 class SkillMdExportTests(unittest.TestCase):
 
-    def test_export_existing_skill(self):
-        resp = CLIENT.get("/api/skills/advantage-money/export")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("text/markdown", resp.headers["content-type"])
-        self.assertIn('filename="advantage-money.md"', resp.headers["content-disposition"])
-        text = resp.text
-        self.assertTrue(text.startswith("---\nname: advantage-money"))
-        parsed = skill_md.parse_skill_md(text)
-        self.assertEqual(parsed["name"], "advantage-money")
-        skill = main._skills_registry.get_skill("advantage-money")
-        self.assertEqual(parsed["description"], skill["description"])
-        self.assertEqual(parsed["body"], skill["skill_prompt"])
-        self.assertEqual(parsed["metadata"].get("display_name"), skill["name"])
+    def test_export_retired_builtin_is_404(self):
+        # 2026-11：内置技能全部下线，导出它们应当 404
+        self.assertEqual(CLIENT.get("/api/skills/advantage-money/export").status_code, 404)
 
     def test_export_unknown_is_404(self):
         self.assertEqual(CLIENT.get("/api/skills/no-such-skill/export").status_code, 404)

@@ -6,6 +6,8 @@ import PlatformSwitcher from './PlatformSwitcher.vue';
 
 defineProps({ crumb: String, title: String, url: String, urlEmpty: Boolean });
 const store = inject('apiStore');
+// 管理弹窗左侧已经有平台列表，页头就不再放切换下拉
+const inline = inject('apiInline', false);
 const S = store.S;
 const root = ref(null);
 
@@ -28,7 +30,7 @@ onBeforeUnmount(() => { document.removeEventListener('mousedown', onDown, true);
             <div class="crumb">{{ crumb }}</div>
             <div class="ttl">
                 <b>{{ title }}</b>
-                <button type="button" class="sw-btn" :class="{ on: S.switcherOpen }" title="切换平台" aria-haspopup="true" :aria-expanded="S.switcherOpen" @click="toggle"><AIcon name="chev" /></button>
+                <button v-if="!inline" type="button" class="sw-btn" :class="{ on: S.switcherOpen }" title="切换平台" aria-haspopup="true" :aria-expanded="S.switcherOpen" @click="toggle"><AIcon name="chev" /></button>
                 <slot name="badges" />
                 <Transition name="pop">
                     <div v-if="S.switcherOpen" class="pop"><PlatformSwitcher @close="S.switcherOpen = false" /></div>

@@ -38,11 +38,67 @@ def _truthy(value: Optional[str]) -> bool:
     return str(value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def auth_enabled() -> bool:
-    """NOVAI_AUTH_DISABLED 优先（强制关闭），其次 NOVAI_AUTH_ENABLED；默认关闭。"""
+AUTH_MODES = ("off", "optional", "required")
+
+
+def auth_mode() -> str:
+    """登录模式（2026-11-07 起默认 optional）：
+    - off：没有账号体系（NOVAI_AUTH_DISABLED=1 或 NOVAI_AUTH_MODE=off）；
+    - optional：可选登录——不登录照常本机使用，不拦截、不按账号隔离；登录只是带上身份
+      （共享 / 协作 / 团队资产等以后按账号开放的功能用）；
+    - required：必须登录（NOVAI_AUTH_ENABLED=1 或 NOVAI_AUTH_MODE=required），
+      全站拦截 + 画布 / 素材按账号隔离，即原来的「邀请制登录」。
+    NOVAI_AUTH_DISABLED 优先级最高，其次 NOVAI_AUTH_ENABLED，再其次 NOVAI_AUTH_MODE。"""
     if _truthy(os.getenv("NOVAI_AUTH_DISABLED")):
-        return False
-    return _truthy(os.getenv("NOVAI_AUTH_ENABLED"))
+        return "off"
+    if _truthy(os.getenv("NOVAI_AUTH_ENABLED")):
+        return "required"
+    mode = str(os.getenv("NOVAI_AUTH_MODE") or "").strip().lower()
+    return mode if mode in AUTH_MODES else "optional"
+
+
+def auth_enabled() -> bool:
+    """「必须登录」模式：全站拦截、按账号隔离都只认这个（可选登录下保持本机单用户行为）。"""
+    return auth_mode() == "required"
+
+
+def accounts_enabled() -> bool:
+    """账号体系是否可用（注册 / 登录 / 我的账户 / 管理面）：必须登录、可选登录两种模式都算。"""
+    return auth_mode() != "off"
+
+
+# 注册是否需要邀请码：管理员在「我的」页切换，存在 users.db 的 auth_settings 里；默认需要（保持原行为）
+INVITE_REQUIRED_KEY = "invite_required"
+
+
+def invite_required() -> bool:
+    try:
+        return store.get_setting(INVITE_REQUIRED_KEY, "1") != "0"
+    except Exception as exc:
+        print("[auth] 读取注册设置失败，按需要邀请码处理：%s" % exc)
+        return True
+
+
+def set_invite_required(required: bool) -> bool:
+    store.set_setting(INVITE_REQUIRED_KEY, "1" if required else "0")
+    return invite_required()
+
+
+def public_config() -> Dict[str, Any]:
+    """登录页需要知道的公开信息：模式、注册要不要邀请码、是不是还一个账号都没有（第一个注册的是管理员）。"""
+    mode = auth_mode()
+    has_users = True
+    if mode != "off":
+        try:
+            has_users = store.count_users() > 0
+        except Exception:
+            has_users = True
+    return {
+        "auth_mode": mode,
+        "accounts_enabled": mode != "off",
+        "invite_required": invite_required() if mode != "off" else False,
+        "has_users": has_users,
+    }
 
 
 # ---------------------------------------------------------------- 校验
@@ -162,21 +218,27 @@ def change_username(user: Dict[str, Any], new_username: Any, password: Any) -> D
 # ---------------------------------------------------------------- 注册 / 登录
 
 def register(username: Any, password: Any, invite_code: Any, ip: str = "", ua: str = "") -> Tuple[Dict[str, Any], str]:
-    if not auth_enabled():
+    if not accounts_enabled():
         raise AuthError("登录体系未启用", 403, "auth_disabled")
     name = validate_username(normalize_username(username))
     pwd = validate_password(password)
     code = normalize_invite_code(invite_code)
-    if not code:
+    first = store.count_users() == 0
+    if not code and invite_required() and not first:
         raise AuthError("必须填写邀请码", 400, "invite_required")
     # 限流必须在 scrypt 之前：否则枚举者用错误码也能把 CPU 打满
     ratelimit.check(ip)
-    user = store.register_with_invite(name, passwords.hash_password(pwd), code, now_seconds())
+    if code and not first:
+        # 填了邀请码就按邀请码走（开放注册时也能用邀请码拿到 team / admin 角色）
+        user = store.register_with_invite(name, passwords.hash_password(pwd), code, now_seconds())
+    else:
+        # 开放注册，或者这台 NOVAI 还没有任何账号：第一个账号是管理员
+        user = store.register_open(name, passwords.hash_password(pwd), now_seconds())
     return user, _issue_session(user["id"], ip, ua)
 
 
 def login(username: Any, password: Any, ip: str = "", ua: str = "") -> Tuple[Dict[str, Any], str]:
-    if not auth_enabled():
+    if not accounts_enabled():
         raise AuthError("登录体系未启用", 403, "auth_disabled")
     name = normalize_username(username)
     user = store.get_user_by_username(name) if name else None
@@ -246,8 +308,8 @@ def create_invite(role: str = "user", uses: int = 1, days: Optional[int] = INVIT
 
 
 def bootstrap_admin() -> Optional[Dict[str, Any]]:
-    """启动时引导首个管理员：仅在 auth 开启、users 为空、环境变量齐全时执行。"""
-    if not auth_enabled():
+    """启动时引导首个管理员：仅在账号体系可用、users 为空、环境变量齐全时执行。"""
+    if not accounts_enabled():
         return None
     username = os.getenv("NOVAI_ADMIN_USER", "").strip()
     password = os.getenv("NOVAI_ADMIN_PASSWORD", "")
@@ -267,7 +329,8 @@ def bootstrap_admin() -> Optional[Dict[str, Any]]:
 # ---------------------------------------------------------------- 管理面
 
 def ensure_auth_enabled() -> None:
-    if not auth_enabled():
+    """账号相关接口（我的账户 / 改密码 / 管理面）：可选登录、必须登录两种模式都可用。"""
+    if not accounts_enabled():
         raise AuthError("登录体系未启用", 403, "auth_disabled")
 
 

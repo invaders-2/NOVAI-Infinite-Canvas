@@ -30,9 +30,6 @@
         undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
         redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
         wand: '<path d="m15 4-1 1M4 20l11-11M18 3l-1 1M21 6l-1 1M14 2v2M22 10h-2M20 14h-1"/><path d="m15 9-1-1"/>',
-        split: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>',
-        side: '<rect x="2" y="5" width="9" height="14" rx="1.5"/><rect x="13" y="5" width="9" height="14" rx="1.5"/>',
-        single: '<rect x="3" y="4" width="18" height="16" rx="2"/>',
         plus: '<path d="M12 5v14M5 12h14"/>',
         x: '<path d="M18 6 6 18M6 6l12 12"/>',
         copy: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/>',
@@ -40,7 +37,7 @@
         pick: '<path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/>',
         target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>'
     };
-    const ic = (n, s) => `<svg class="iaj-ic" width="${s || 16}" height="${s || 16}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
+    const ic = (n, s) => `<svg data-icon="${n}" class="iaj-ic nv-i nv-i-${n}" width="${s || 16}" height="${s || 16}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
 
     /* ── 预设（只写与中性值不同的参数）── */
     const C = (pts) => pts;
@@ -71,7 +68,7 @@
     /* ── 状态 ── */
     const S = {
         active: false, eng: null, cv: null, img: null, origImg: null, srcUrl: '', srcName: 'image', reedit: false,
-        params: E.neutral(), compare: 'single', splitX: 50, hold: false,
+        params: E.neutral(), cmpOrig: false,
         hist: [], hidx: -1, commitTimer: 0, raf: 0, anaTimer: 0,
         preset: null, presetMine: false, strength: 80, presetTab: 'builtin',
         open: lsGet(LS_OPEN, { basic: true, presence: true }), curveCh: 'l', hslTab: 'h', gradeTab: '3',
@@ -195,7 +192,6 @@
             S.raf = 0;
             if (!S.eng) return;
             try { S.eng.render(S.params); } catch (e) { status('渲染失败：' + (e.message || e)); return; }
-            if (S.compare === 'side') syncSide();
             clearTimeout(S.anaTimer);
             S.anaTimer = setTimeout(analyze, 90);
         });
@@ -400,6 +396,7 @@ ${sliderHTML(`grade.${region}.l`, '明度', -100, 100, { cls: 'mini' })}</div>`;
 <div class="iaj-top">
   <div class="iaj-hist"><canvas></canvas><span class="iaj-clip lo" title="暗部剪切：有纯黑像素"></span><span class="iaj-clip hi" title="高光剪切：有过曝像素"></span></div>
   <div class="iaj-hmeta"><span class="rgb">R — G — B —</span><span class="sp"></span><span class="dim"></span></div>
+  <div class="iaj-note"></div>
   <div class="iaj-tools">
     <button type="button" class="iaj-pill" data-act="auto" title="自动白平衡 + 自动色阶">${ic('wand', 14)}自动</button>
     <span class="sp"></span>
@@ -576,6 +573,8 @@ ${sliderHTML(`grade.${region}.l`, '明度', -100, 100, { cls: 'mini' })}</div>`;
         holder._iaj = true;
         let hslDrag = null;
         holder.addEventListener('pointerdown', e => {
+            /* 右下角的「对比原图」按钮长在 holder 里，捕获阶段也会被这里收到：按钮自己处理，不取样 */
+            if (e.target.closest && e.target.closest('.iaj-cmp')) return;
             if (!S.active || !S.pick || e.button !== 0) return;
             e.stopPropagation(); e.preventDefault();
             const [fx, fy] = relPos(e), rgb = sampleOriginal(fx, fy);
@@ -667,70 +666,35 @@ ${sliderHTML(`grade.${region}.l`, '明度', -100, 100, { cls: 'mini' })}</div>`;
         paintSegs(); renderPresets(); status('已保存为「' + name + '」');
     }
 
-    /* ═════════ 对比视图 ═════════ */
-    function buildViewBar(col) {
-        const bar = document.createElement('div');
-        bar.className = 'iaj-vbar';
-        bar.innerHTML = `<span class="iaj-seg mini" data-view><b data-v="single">${ic('single', 13)}单图</b><b data-v="split">${ic('split', 13)}拖动对比</b><b data-v="side">${ic('side', 13)}并排</b></span>
-<button type="button" class="iaj-hold" title="按住查看原图（也可按住 \\ 键）">按住看原图</button><span class="sp"></span><span class="iaj-note"></span>`;
-        col.insertBefore(bar, col.firstChild);
-        /* 并排视图：独立一层盖在图片区上（左原图 / 右调整后），不去动编辑器自己的缩放层 */
-        const side = document.createElement('div');
-        side.className = 'iaj-sideview';
-        side.innerHTML = '<div class="half"><img class="o" alt=""><span class="iaj-tag2">原图</span></div><div class="half"><canvas class="a"></canvas><span class="iaj-tag2">调整后</span></div>';
-        col.appendChild(side);
-        bar.querySelector('[data-view]').addEventListener('click', e => { const b = e.target.closest('b[data-v]'); if (b) setCompare(b.dataset.v); });
-        const hold = bar.querySelector('.iaj-hold');
-        hold.addEventListener('pointerdown', e => { setHold(true); hold.setPointerCapture(e.pointerId); });
-        hold.addEventListener('pointerup', () => setHold(false));
-        hold.addEventListener('pointercancel', () => setHold(false));
-        return bar;
+    /* ═════════ 对比原图（图片右下角按钮，点一下切换）═════════ */
+    function applyCompare() {
+        /* 原图本来就在 #cropCanvas 里（.iaj-orig 垫在图下层）：切对比只是把结果画布藏起来，不新造图层 */
+        if (S.cv) S.cv.style.visibility = S.cmpOrig ? 'hidden' : '';
+        const btn = document.getElementById('iajCmpBtn');
+        if (!btn) return;
+        btn.classList.toggle('on', S.cmpOrig);
+        btn.setAttribute('aria-pressed', String(S.cmpOrig));
+        const tx = btn.querySelector('.tx');
+        if (tx) tx.textContent = S.cmpOrig ? '看调色后' : '对比原图';
+        btn.title = (S.cmpOrig ? '看调色后' : '对比原图') + '（\\）';
     }
-    function setCompare(v) {
-        S.compare = v;
-        const holder = document.getElementById('cropCanvas');
-        if (holder) holder.classList.toggle('iaj-split', v === 'split');
-        const sv = $('.iaj-sideview'), stage = document.getElementById('imageEditStage');
-        if (sv) sv.classList.toggle('on', v === 'side');
-        if (stage) stage.style.visibility = v === 'side' ? 'hidden' : '';
-        if (v === 'side') syncSide();
-        const bar = $('.iaj-vbar'); if (bar) bar.querySelectorAll('[data-view] b').forEach(b => b.classList.toggle('on', b.dataset.v === v));
-        updateCompare();
-    }
-    function syncSide() {
-        const sv = $('.iaj-sideview'); if (!sv || !S.cv || !S.origImg) return;
-        const o = sv.querySelector('img.o'); if (o.src !== S.origImg.src) o.src = S.origImg.src;
-        const a = sv.querySelector('canvas.a');
-        if (a.width !== S.cv.width || a.height !== S.cv.height) { a.width = S.cv.width; a.height = S.cv.height; }
-        a.getContext('2d').drawImage(S.cv, 0, 0);
-    }
-    function setHold(on) { S.hold = on; if (S.cv) S.cv.style.visibility = on ? 'hidden' : ''; const l = $('.iaj-tag.r'); if (l) l.style.visibility = on ? 'hidden' : ''; }
-    function ensureDivider() {
+    function toggleCompare() { if (!S.active) return; S.cmpOrig = !S.cmpOrig; applyCompare(); }
+    function ensureCompareBtn() {
         const holder = document.getElementById('cropCanvas');
         if (!holder) return;
-        let div = document.getElementById('adjustCompareDivider');
-        if (!div) {
-            div = document.createElement('div');
-            div.id = 'adjustCompareDivider'; div.className = 'adjust-compare-divider iaj-divider';
-            div.innerHTML = '<b></b>';
-            holder.appendChild(div);
-            let dragging = false;
-            div.addEventListener('pointerdown', e => { dragging = true; div.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation(); });
-            div.addEventListener('pointermove', e => {
-                if (!dragging) return;
-                const r = holder.getBoundingClientRect(); if (r.width < 1) return;
-                S.splitX = clamp((e.clientX - r.left) / r.width, 0, 1) * 100; updateCompare();
-            });
-            div.addEventListener('pointerup', () => { dragging = false; }); div.addEventListener('pointercancel', () => { dragging = false; });
+        let btn = document.getElementById('iajCmpBtn');
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.id = 'iajCmpBtn'; btn.type = 'button'; btn.className = 'iaj-cmp';
+            btn.setAttribute('aria-pressed', 'false');
+            btn.innerHTML = `${ic('eye', 14)}<span class="tx">对比原图</span>`;
+            /* 按钮自己吃掉指针事件：取色（holder 上是捕获阶段 pointerdown，另在 bindStagePointer 里按 target
+               提前返回）不会误取样；两个画布宿主的平移（mousedown / pointerdown）也不会从按钮上起来 */
+            ['pointerdown', 'pointerup', 'mousedown', 'click'].forEach(t => btn.addEventListener(t, e => e.stopPropagation()));
+            btn.addEventListener('click', () => toggleCompare());
+            holder.appendChild(btn);
         }
-        if (!holder.querySelector('.iaj-tag')) {
-            holder.insertAdjacentHTML('beforeend', '<span class="iaj-tag l">原图</span><span class="iaj-tag r">调整后</span>');
-        }
-    }
-    function updateCompare() {
-        const div = document.getElementById('adjustCompareDivider');
-        if (S.cv) S.cv.style.clipPath = S.compare === 'split' ? `inset(0 0 0 ${S.splitX}%)` : 'none';
-        if (div) { div.style.left = S.splitX + '%'; div.style.display = S.compare === 'split' ? '' : 'none'; }
+        applyCompare();
     }
 
     /* ═════════ 进入 / 离开 / 应用 ═════════ */
@@ -746,13 +710,13 @@ ${sliderHTML(`grade.${region}.l`, '明度', -100, 100, { cls: 'mini' })}</div>`;
     async function enterAdjustMode() {
         const stage = document.getElementById('imageEditStage'), holder = document.getElementById('cropCanvas');
         if (!stage || !holder) return;
-        /* 布局：[左列：视图条 + 图片区] [右侧面板] */
+        /* 布局：[左列：图片区（右下角「对比原图」按钮）] [右侧面板] */
         let row = document.getElementById('imageAdjustRow');
         if (!row) {
             row = document.createElement('div'); row.id = 'imageAdjustRow'; row.className = 'adjust-row iaj-row';
             stage.parentNode.insertBefore(row, stage);
             const col = document.createElement('div'); col.className = 'iaj-col'; row.appendChild(col);
-            col.appendChild(stage); buildViewBar(col);
+            col.appendChild(stage);
         }
         let wrap = document.getElementById('imageAdjustTools');
         if (!wrap) { wrap = document.createElement('div'); wrap.id = 'imageAdjustTools'; }
@@ -775,8 +739,10 @@ ${sliderHTML(`grade.${region}.l`, '明度', -100, 100, { cls: 'mini' })}</div>`;
         holder.appendChild(orig);
         if (!S.cv) { S.cv = document.createElement('canvas'); S.cv.id = 'imageAdjustCanvas'; S.cv.className = 'image-edit-canvas-adjust iaj-canvas'; }
         holder.appendChild(S.cv);
-        ensureDivider(); bindStagePointer(); setCompare('single'); setHold(false);
-        const note = $('.iaj-vbar .iaj-note'); if (note) note.textContent = S.reedit ? '继续编辑上次的调色 · 基于原图' : '';
+        S.cmpOrig = false;
+        bindStagePointer(); ensureCompareBtn();
+        const note = $('.iaj-note', S.panel);
+        if (note) { note.textContent = S.reedit ? '继续编辑上次的调色 · 基于原图' : ''; note.classList.toggle('show', S.reedit); }
         try {
             S.origImg = await loadImage(S.srcUrl);
             if (!S.active) return;
@@ -792,12 +758,12 @@ ${sliderHTML(`grade.${region}.l`, '明度', -100, 100, { cls: 'mini' })}</div>`;
         requestAnimationFrame(drawCurve);
     }
     function leaveAdjustMode() {
-        S.active = false; setPick(null); setHold(false);
+        S.active = false; setPick(null);
         if (S.raf) { cancelAnimationFrame(S.raf); S.raf = 0; }
-        const holder = document.getElementById('cropCanvas');
-        if (holder) { holder.classList.remove('iaj-side', 'iaj-split'); holder.querySelectorAll('.iaj-tag').forEach(t => t.remove()); }
+        S.cmpOrig = false; applyCompare();
+        const cmpBtn = document.getElementById('iajCmpBtn'); if (cmpBtn) cmpBtn.remove();
         const stg = document.getElementById('imageEditStage'); if (stg) stg.style.visibility = '';
-        ['adjustCompareDivider', 'iajOrigImg'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+        const orig = document.getElementById('iajOrigImg'); if (orig) orig.remove();
         if (S.cv && S.cv.parentNode) S.cv.parentNode.removeChild(S.cv);
         const row = document.getElementById('imageAdjustRow');
         if (row && row.parentNode) {
@@ -829,10 +795,9 @@ ${sliderHTML(`grade.${region}.l`, '明度', -100, 100, { cls: 'mini' })}</div>`;
         const tag = (e.target && e.target.tagName) || '';
         if (tag === 'INPUT' || tag === 'TEXTAREA') return;
         if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.stopImmediatePropagation(); if (e.shiftKey) redo(); else undo(); }
-        else if (e.key === '\\') { e.preventDefault(); e.stopImmediatePropagation(); setHold(true); }
+        else if (e.key === '\\') { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) toggleCompare(); }
         else if (e.key === 'Escape' && S.pick) { e.stopImmediatePropagation(); setPick(null); }
     }, true);
-    window.addEventListener('keyup', e => { if (S.active && e.key === '\\') setHold(false); }, true);
 
     /* 编辑弹窗被关掉（应用后 finish / 点关闭 / Esc）时自动退出调色模式，释放状态 */
     (function watchModal() {
