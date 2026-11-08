@@ -146,7 +146,7 @@ body {
 <!-- Sidebar -->
 <aside class="sidebar">
   <div class="sidebar-title">帮助文档</div>
-  <p class="sidebar-version">NOVAI v1.0.124 — 无限画布 AI 创作平台</p>
+  <p class="sidebar-version">NOVAI v2.0.05 — 无限画布 AI 创作平台</p>
 
       <div class="sidebar-section">
         <div class="sidebar-section-title">目录</div>
@@ -195,8 +195,8 @@ body {
 
   <h3>推荐：下载安装包</h3>
   <p>无需安装 Python、无需配置环境，下载安装包双击即用。</p>
-  <p><strong>Windows</strong>：下载 <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/download/v1.0.124/NOVAI-Setup-1.0.124.exe"><code>NOVAI-Setup-1.0.124.exe</code></a>，双击安装，桌面自动创建快捷方式。</p>
-  <p><strong>macOS</strong>：下载 <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/download/v1.0.124/NOVAI-Setup-1.0.124.dmg"><code>NOVAI-Setup-1.0.124.dmg</code></a>，拖入 Applications 文件夹即可。首次启动若提示"无法验证开发者"，请前往 <strong>系统设置 → 隐私与安全性</strong> 中点击"仍要打开"。</p>
+  <p><strong>Windows</strong>：下载 <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/download/v2.0.05/NOVAI-Electron-Setup-2.0.5.exe"><code>NOVAI-Electron-Setup-2.0.5.exe</code></a>，双击安装，桌面自动创建快捷方式。</p>
+  <p><strong>macOS</strong>：下载 <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/download/v2.0.05/NOVAI-2.0.5-arm64.dmg"><code>NOVAI-2.0.5-arm64.dmg</code></a>，拖入 Applications 文件夹即可。首次启动若提示"无法验证开发者"，请前往 <strong>系统设置 → 隐私与安全性</strong> 中点击"仍要打开"。</p>
 
   <div class="note">
     <strong>注意</strong>：macOS 版本需要 macOS 12.0 及以上系统；Windows 版本需要 Windows 10 及以上。
@@ -573,7 +573,7 @@ python main.py</code></pre>
 
   <h3>Q: macOS 提示"无法验证开发者"或"已损坏，无法打开"怎么办？</h3>
   <p>这两个提示都是因为安装包<strong>没有 Apple 开发者签名</strong>，不是文件坏了。任选一种处理：右键点 <code>NOVAI.app</code> → 「打开」→ 再点「打开」；或者到 <strong>系统设置 → 隐私与安全性</strong> 点「仍要打开」；也可以直接在终端执行 <code>sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app</code>。</p>
-  <p>想先确认下载是否完整：<code>shasum -a 256 NOVAI-Setup-1.0.124.dmg</code> 与 Release 页上的 sha256 对照，或 <code>hdiutil verify NOVAI-Setup-1.0.124.dmg</code>。如果清掉隔离属性后仍报损坏，再补一步 <code>sudo codesign --force --deep --sign - /Applications/NOVAI.app</code>。</p>
+  <p>想先确认下载是否完整：<code>shasum -a 256 NOVAI-2.0.5-arm64.dmg</code> 与 Release 页上的 sha256 对照，或 <code>hdiutil verify NOVAI-2.0.5-arm64.dmg</code>。如果清掉隔离属性后仍报损坏，再补一步 <code>sudo codesign --force --deep --sign - /Applications/NOVAI.app</code>。</p>
 
   <h3>Q: Windows 上点更新后提示失败怎么办？</h3>
   <p>在线更新需要往安装目录写文件：如果 NOVAI 装在 <code>C:\Program Files</code> 这类需要管理员权限的目录，普通权限下会写不进去，界面会提示「安装目录不可写」。处理办法：以管理员身份运行 NOVAI 后再更新，或者到 <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases" target="_blank">GitHub Releases</a> 下载最新安装包覆盖安装（用户数据不会丢）。更新失败时也可以在「设置 → 关于」里回滚到更新前的备份。</p>
@@ -601,6 +601,14 @@ python main.py</code></pre>
   <section class="doc-module" data-section-id="changelog">
 <!-- ===== 更新日志 ===== -->
   <h2 id="changelog">更新日志</h2>
+
+  <h3>v2.0.05 (2026-11-08)</h3>
+  <ul>
+    <li>生图支持 GIF 动图输出（可选帧数与每帧时长，每帧尺寸按上游拼版上限自动缩小）与 SVG 矢量输出（自动补上游必需的文本模型参数，产出无脚本、无外链的静态 .svg）</li>
+    <li>画布节点提示词与画布助手输入框支持语音输入；设置 → 通用新增「语音转写」，平台与模型自选，视频口播与语音输入共用</li>
+    <li>应用市场：官方技能默认不再自动启用，需在市场添加（卸载只停用、不删本地文件）；新增 4 个 RedSkill 技能</li>
+    <li>首页导航选中块改成液态玻璃，跟随指针滑动；市场竖版封面不再被压成窄条</li>
+  </ul>
 
   <h3>v1.0.124 (2026-10-11)</h3>
   <ul>
