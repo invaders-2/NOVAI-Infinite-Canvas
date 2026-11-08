@@ -27,7 +27,7 @@ const fileEl = ref(null);
 
 const view = computed(() => d.value || props.item);
 const available = computed(() => !isStore.value || props.item.storeAvailable !== false);
-const cover = computed(() => isStore.value ? (view.value.coverUrl || '') : '');
+const cover = computed(() => isStore.value ? (view.value.posterUrl || view.value.coverUrl || '') : '');
 const coverVideo = computed(() => isStore.value ? (view.value.coverVideoUrl || '') : '');
 const title = computed(() => isStore.value ? view.value.displayName : view.value.name);
 const desc = computed(() => isStore.value ? (view.value.description || view.value.marketingLine) : view.value.description);
@@ -51,6 +51,8 @@ const coverStyle = computed(() => {
     if (!size) return {};
     return { maxWidth: Math.round(size.w * 1.5) + 'px', maxHeight: Math.round(size.h * 1.5) + 'px' };
 });
+// 竖版海报走竖框：横框 contain 会把 853×1280 的图缩到只有框高（316px），两边全是空底
+const coverTall = computed(() => !!coverSize.value && coverSize.value.h > coverSize.value.w);
 
 async function loadDetail() {
     if (!isStore.value) return;
@@ -95,7 +97,7 @@ async function useBuiltin() {
     launching.value = 'main';
     try {
         const s = props.item;
-        const res = await fetch('/api/canvases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: String(s.name || '技能').slice(0, 60), icon: 'layers', kind: 'smart', project: 'default' }) });
+        const res = await fetch('/api/canvases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: String(s.name || '技能').slice(0, 60), icon: 'layers', kind: 'classic', project: 'default' }) });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         const c = data && data.canvas;
@@ -131,7 +133,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true));
                     <button type="button" class="nv-icon-btn sm round" aria-label="关闭" @click="emit('close')"><NvIcon name="x" /></button>
                 </header>
                 <div class="md-b">
-                    <div v-if="cover || coverVideo" class="cv">
+                    <div v-if="cover || coverVideo" class="cv" :class="{ tall: coverTall && !coverVideo }">
                         <video v-if="coverVideo" :src="coverVideo" :poster="cover" autoplay muted loop playsinline></video>
                         <img v-else :src="cover" alt="" :style="coverStyle" @load="onCoverLoad">
                         <span v-if="!available" class="soon">即将上线</span>
@@ -233,6 +235,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true));
 .cv { position: relative; aspect-ratio: 16 / 8; border-radius: 14px; overflow: hidden; background: var(--fill-1); margin-bottom: 16px; display: flex; align-items: center; justify-content: center; }
 .cv img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .cv video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cv.tall { aspect-ratio: 3 / 4; width: auto; max-width: calc(460px * 3 / 4); max-height: 460px; margin-left: auto; margin-right: auto; }
 .cv.ico { aspect-ratio: auto; height: 120px; display: flex; align-items: center; justify-content: center; color: var(--ink-2); }
 .cv.ico .nv-i { width: 36px; height: 36px; }
 .soon { position: absolute; left: 12px; top: 12px; height: 22px; padding: 0 9px; border-radius: 11px; background: rgba(0,0,0,.45); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #fff; font: 400 11px/22px var(--font-sans); }

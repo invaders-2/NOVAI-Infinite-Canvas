@@ -204,8 +204,11 @@ def _extract_link_text(raw: bytes, content_type: str) -> Dict[str, Any]:
 
 
 _ASR_CONFIG_FILE = os.path.join(input_sources._project_root(), "config", "capability_inputs.json")
-_ASR_PROMPT = ("把这段音频里的话逐字转写成中文（保留数字与专有名词）。只输出转写文本；"
-               "如果没有语音，只输出：无语音。")
+_ASR_PROMPT = ("把这段录音里的话逐字转写出来，不要翻译、不要总结；说话人说什么语言就写什么语言。"
+               "中英文混说时保留英文原词和正确拼写；人名、品牌名、产品名、缩写等专有名词按常见写法保留"
+               "（例如 NOVAI、Midjourney、ChatGPT、iPhone）；中文人名、地名保留正确用字。"
+               "保留数字和标点，只输出转写文本，不要输出时间戳、序号或说话人标签。"
+               "如果没有人说话，只输出：无语音。")
 
 
 def _config_asr_settings() -> Dict[str, str]:
@@ -301,7 +304,8 @@ def _extract_audio(path: str, target: str) -> Optional[str]:
     return None
 
 
-async def _provider_transcript(audio_path: str, provider: str, model: str) -> Dict[str, Any]:
+async def _provider_transcript(audio_path: str, provider: str, model: str,
+                               prompt: str = "") -> Dict[str, Any]:
     from server.routes.deps import deps
 
     resolver = deps.get("resolve_chat_provider")
@@ -319,7 +323,7 @@ async def _provider_transcript(audio_path: str, provider: str, model: str) -> Di
         "model": resolved_model,
         "stream": False,
         "messages": [{"role": "user", "content": [
-            {"type": "text", "text": _ASR_PROMPT},
+            {"type": "text", "text": prompt or _ASR_PROMPT},
             {"type": "input_audio", "input_audio": {"data": encoded, "format": fmt}},
         ]}],
     }

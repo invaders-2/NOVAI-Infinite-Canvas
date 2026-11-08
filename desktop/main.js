@@ -2281,6 +2281,30 @@ function registerIpc() {
     }
   });
 
+  // 画布助手的语音输入要录音，而渲染进程只加载本机后端页面：media 权限只对本机来源放行，
+  // 其它权限保持默认放行，免得剪贴板、通知、全屏这些既有能力被一起拦掉。
+  function isLocalAppOrigin(url) {
+    try {
+      const host = new URL(url).hostname;
+      return host === '127.0.0.1' || host === 'localhost';
+    } catch (_) {
+      return false;
+    }
+  }
+  function isMediaPermissionAllowed(details) {
+    const types = Array.isArray(details && details.mediaTypes) ? details.mediaTypes : [];
+    return types.length > 0 && types.every((type) => type === 'audio' || type === 'video');
+  }
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+    if (permission !== 'media') { callback(true); return; }
+    callback(isLocalAppOrigin(wc.getURL()) && isMediaPermissionAllowed(details));
+  });
+  // navigator.permissions 查询走这条：本机来源的 media 直接放行；其它权限维持默认放行
+  session.defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin) => {
+    if (permission !== 'media') return true;
+    return isLocalAppOrigin(requestingOrigin || (wc && wc.getURL()) || '');
+  });
+
   ipcMain.handle('novai:recording-select-source', (_event, { sourceId }) => {
     requestedDisplaySourceId = String(sourceId || '');
     return Boolean(requestedDisplaySourceId);

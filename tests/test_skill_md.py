@@ -48,6 +48,81 @@ class SkillMdExportTests(unittest.TestCase):
         self.assertEqual(CLIENT.get("/api/skills/no-such-skill/export").status_code, 404)
 
 
+class SkillMdUnknownFieldsTests(unittest.TestCase):
+    """未知顶层字段（version / author 等）整段忽略，已知字段与结构校验不变。"""
+
+    def test_unknown_fields_are_ignored_and_kept_out_of_body(self):
+        markdown = (
+            "---\n"
+            "version: 2.4.1\n"
+            "author: someone\n"
+            "name: unknown-fields-skill\n"
+            "description: 带未知字段的技能\n"
+            "license: MIT\n"
+            "metadata:\n"
+            "  category: 测试\n"
+            "allowed-tools:\n"
+            "  - read_table\n"
+            "tags:\n"
+            "  - 时装\n"
+            "  - 摄影\n"
+            "homepage: https://example.com/skill\n"
+            "---\n"
+            "正文第一段\n"
+        )
+        parsed = skill_md.parse_skill_md(markdown)
+        self.assertEqual(parsed["name"], "unknown-fields-skill")
+        self.assertEqual(parsed["description"], "带未知字段的技能")
+        self.assertEqual(parsed["license"], "MIT")
+        self.assertEqual(parsed["metadata"], {"category": "测试"})
+        self.assertEqual(parsed["allowed_tools"], ["read_table"])
+        self.assertEqual(parsed["body"], "正文第一段\n")
+        for unknown in ("version", "author", "tags", "homepage"):
+            self.assertNotIn(unknown, parsed)
+            self.assertNotIn(unknown, parsed["body"])
+
+    def test_unknown_fields_do_not_override_known_fields(self):
+        markdown = (
+            "---\n"
+            "name: known-name\n"
+            "version: 9.9.9\n"
+            "description: 已知描述\n"
+            "author:\n"
+            "  name: fake\n"
+            "  email: fake@example.com\n"
+            "compatibility: agent-skills\n"
+            "metadata:\n"
+            "  author: 内部作者\n"
+            "---\n正文\n"
+        )
+        parsed = skill_md.parse_skill_md(markdown)
+        self.assertEqual(parsed["name"], "known-name")
+        self.assertEqual(parsed["description"], "已知描述")
+        self.assertEqual(parsed["compatibility"], "agent-skills")
+        self.assertEqual(parsed["metadata"], {"author": "内部作者"})
+        self.assertEqual(sorted(parsed),
+                         ["allowed_tools", "body", "compatibility", "description",
+                          "license", "metadata", "name"])
+
+    def test_structural_errors_still_raise(self):
+        cases = [
+            # 未知字段也必须是合法的 key: value（缺冒号是结构错误，不是「忽略」）
+            "---\nname: known-name\ndescription: x\nversion 1.0\n---\n正文",
+            # 已知字段后面的裸缩进仍是顶层缩进错误
+            "---\nname: known-name\ndescription: x\n  stray: indent\n---\n正文",
+            # metadata 子项格式错误照旧报错
+            "---\nname: known-name\ndescription: x\nmetadata:\n  - list\n---\n正文",
+            # 已知字段类型错误照旧报错
+            "---\nname:\n  - bad\ndescription: x\n---\n正文",
+            "---\nname: known-name\ndescription: x\nallowed-tools: read_table\n---\n正文",
+        ]
+        for markdown in cases:
+            with self.subTest(markdown=markdown[:60]):
+                with self.assertRaises(skill_md.SkillMdError) as ctx:
+                    skill_md.parse_skill_md(markdown)
+                self.assertTrue(str(ctx.exception).strip())
+
+
 class SkillMdImportTests(unittest.TestCase):
 
     def setUp(self):
@@ -129,7 +204,7 @@ class SkillMdImportTests(unittest.TestCase):
         cases = [
             "没有 frontmatter 的纯文本",
             "---\nname md-test\n---\n正文",                                   # 缺冒号
-            "---\nname: ok-name\ndescription: x\nunknown_key: y\n---\n正文",  # 未知字段
+            "---\nname: ok-name\ndescription: x\n  stray: indent\n---\n正文",  # 顶层缩进
             "---\nname: ok-name\n---\n正文",                                  # 缺 description
             "---\n name: indented\n---\n正文",                                # 顶层缩进
         ]
@@ -138,6 +213,23 @@ class SkillMdImportTests(unittest.TestCase):
                 resp = self._import(markdown)
                 self.assertEqual(resp.status_code, 400)
                 self.assertTrue(resp.json()["detail"])
+
+    def test_import_with_unknown_top_level_fields_succeeds(self):
+        markdown = skill_md_text(
+            name="md-versioned-skill",
+            extra="version: 2.4.1\nauthor: someone\nlicense: MIT\n")
+        resp = self._import(markdown)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        body = resp.json()["skill"]
+        self.assertEqual(body["id"], "md-versioned-skill")
+        exported = CLIENT.get("/api/skills/md-versioned-skill/export")
+        self.assertEqual(exported.status_code, 200)
+        self.assertNotIn("version:", exported.text)
+        self.assertNotIn("author:", exported.text)
+        parsed = skill_md.parse_skill_md(exported.text)
+        self.assertEqual(parsed["name"], "md-versioned-skill")
+        self.assertEqual(parsed["description"], "一句话说明这个技能")
+        self.assertEqual(parsed["body"], "正文第一段\n\n正文第二段")
 
     def test_json_import_still_works(self):
         payload = {"id": "json-import-skill", "name": "JSON 导入", "description": "旧格式",

@@ -21,7 +21,7 @@ export const TYPE_ICON = { image: "image", video: "video", text: "text", audio: 
 export type CameraParams = { on: boolean; body: number; lens: number; focal: number; aperture: number };
 /** Midjourney 专属参数（只在模型规格带 mj 时出现）：version 为空 = 交给上游默认；"niji 7" 这种带 niji 前缀 */
 export type MjParams = { version?: string; speed?: string; hd?: boolean; stylize?: number };
-export type ImageParams = { model: string; ratio: string; size: string; /** 「原图比例」选中的显式 WxH（不填则沿用尺寸档） */ sourceSize?: string; count: number; search: boolean; style: string; camera: CameraParams; mj?: MjParams; /** 质量档（后端 caps.qualities 里的一档）；不填 / auto = 不传 = 上游默认 */ quality?: string; /** 先思考（只有 caps.thinking_mode 的模型有）；undefined = 不传，交给模型决定 */ thinking?: boolean; /** 输出格式（后端 caps.output_formats）：gif / svg；不填 = 静态图（不发字段） */ outputFormat?: "gif" | "svg" };
+export type ImageParams = { model: string; ratio: string; size: string; /** 「原图比例」选中的显式 WxH（不填则沿用尺寸档） */ sourceSize?: string; count: number; search: boolean; style: string; camera: CameraParams; mj?: MjParams; /** 质量档（后端 caps.qualities 里的一档）；不填 / auto = 不传 = 上游默认 */ quality?: string; /** 先思考（只有 caps.thinking_mode 的模型有）；undefined = 不传，交给模型决定 */ thinking?: boolean; /** 输出格式（后端 caps.output_formats）：gif / svg；不填 = 静态图（不发字段） */ outputFormat?: "gif" | "svg"; /** GIF 帧数（只有 outputFormat=gif 时下发）；不填 = caps 默认 9 */ frameCount?: number; /** GIF 每帧时长 ms（只有 outputFormat=gif 时下发）；不填 = 200 */ frameDuration?: number };
 export type VideoMode = "文生视频" | "首帧" | "首尾帧" | "参考生视频" | "视频编辑" | "视频延长" | "参考视频生视频" | "数字人";
 export type VideoParams = { model: string; mode: VideoMode; ratio: string; res: string; dur: number; sound: boolean; times: number; /** 多镜头（高级设置） */ multiShot?: boolean; /** 生成模式（4K / 标准 / 专业…，仅规格声明的模型可用） */ genMode?: string; /** 极速模式（仅规格声明的模型可用） */ turbo?: boolean; /** 草稿模式（TapNow Draft Mode）：先按最低清晰度出草稿，满意后再出成片 */ draft?: boolean };
 export type TextParams = { model: string; search: boolean; /** 输出：文本 / 多维表格 / 分镜表 */ output?: "text" | "table" | "storyboard"; /** 模型强度档位（后端 model_caps.think 里的一档）；不填 = 不传 = 模型默认 */ think?: string };
@@ -45,7 +45,7 @@ export type GenOutput = {
   draft?: boolean;
   /** 音频波形（0~1），后端不给时前端从音频解码或用占位 */
   bars?: number[];
-  meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string; /** 上传文档的文件名 */ doc?: string };
+  meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string; /** 上传文档的文件名 */ doc?: string; /** 后端返回的尺寸收敛说明（如 GIF 每帧尺寸被拼版上限缩小），写回后 toast 一次 */ notice?: string };
 };
 
 export type GenData = {
@@ -95,6 +95,8 @@ export type ModelSpec = {
   thinkingMode?: boolean;
   /** 输出格式（后端 caps.output_formats，已小写去重）；没有 gif / svg = 面板不给「输出格式」入口 */
   outputFormats?: string[];
+  /** GIF 帧参数（后端 caps.gif_frames；缺失时用 GIF_FRAME_FALLBACK，面板照常给控件） */
+  gifFrames?: GifFrameSpec;
   /** 只返回提示词、不产视频（后端 caps.prompt_only）：面板隐藏视频参数，结果按提示词说明 */
   promptOnly?: boolean;
   // video
@@ -396,6 +398,42 @@ export function outputFormatForRequest(value: unknown): "" | ImageOutputFormat {
   return key === "gif" || key === "svg" ? key : "";
 }
 
+/* ---------- GIF 帧参数（只有 outputFormat=gif 才生效） ---------- */
+/** 后端 caps.gif_frames 缺省 / 请求失败时的兜底：2–16 帧、默认 9、每帧 200ms、时长 20–2000 步进 10 */
+export const GIF_FRAME_FALLBACK = { min: 2, max: 16, default: 9, durationDefault: 200, durationMin: 20, durationMax: 2000, durationStep: 10 } as const;
+export type GifFrameSpec = { min: number; max: number; default: number; durationDefault: number };
+/** 这个模型的 GIF 帧参数；没有 caps 也照样给兜底（控件不能因为读不到就消失） */
+export function gifFrameSpec(model: ModelSpec | null | undefined): GifFrameSpec {
+  const raw = model?.gifFrames;
+  const num = (value: unknown, fallback: number) => {
+    const parsed = Math.floor(Number(value));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  const min = Math.max(2, num(raw?.min, GIF_FRAME_FALLBACK.min));
+  const max = Math.max(min, num(raw?.max, GIF_FRAME_FALLBACK.max));
+  return { min, max, default: Math.max(min, Math.min(max, num(raw?.default, GIF_FRAME_FALLBACK.default))), durationDefault: num(raw?.durationDefault, GIF_FRAME_FALLBACK.durationDefault) };
+}
+/** 帧数：按 caps 夹在 2–16（缓存里的非法值 / 空值回默认） */
+export function gifFrameCountFor(value: unknown, model?: ModelSpec | null): number {
+  const spec = gifFrameSpec(model);
+  const raw = Number(value);
+  const count = Number.isFinite(raw) && raw > 0 ? Math.round(raw) : spec.default;
+  return Math.max(spec.min, Math.min(spec.max, count));
+}
+/** 每帧时长 ms：20–2000、10ms 取整（不发小数；空值回默认） */
+export function gifFrameDurationFor(value: unknown, model?: ModelSpec | null): number {
+  const spec = gifFrameSpec(model);
+  const raw = Number(value);
+  const ms = Number.isFinite(raw) && raw > 0 ? raw : spec.durationDefault;
+  const stepped = Math.round(ms / GIF_FRAME_FALLBACK.durationStep) * GIF_FRAME_FALLBACK.durationStep;
+  return Math.max(GIF_FRAME_FALLBACK.durationMin, Math.min(GIF_FRAME_FALLBACK.durationMax, stepped));
+}
+/** 请求体里的 GIF 帧字段：只有 outputFormat=gif 才带，且按 caps 夹好；静态图 / SVG 返回空对象（不发这两个字段） */
+export function gifFrameFieldsForRequest(params: Pick<ImageParams, "outputFormat" | "frameCount" | "frameDuration">, model?: ModelSpec | null): { frame_count?: number; frame_duration_ms?: number } {
+  if (outputFormatForRequest(params.outputFormat) !== "gif") return {};
+  return { frame_count: gifFrameCountFor(params.frameCount, model), frame_duration_ms: gifFrameDurationFor(params.frameDuration, model) };
+}
+
 /**
  * 已知模型的能力表（按名字匹配）。后端 canvas/models 只给 configId / 名称 / capabilities，
  * 比例、分辨率、生成方式这些前端控件靠这张表决定；匹配不到的模型用同类型的保守默认值。
@@ -423,7 +461,7 @@ const DEFAULTS: Record<GenKind, Partial<ModelSpec>> = {
 };
 /** 后端模型行 → 前端能力表。kind 由 capabilities 决定，能力细节按名字套预设。 */
 /** 服务商适配器给的面板规格（canvas/models 的 uiSpec）里，前端认的字段 */
-const UI_KEYS = ["ratios", "sizes", "batch", "batchUnknown", "maxRefs", "refNote", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo", "mj", "qualities", "thinkingMode", "promptOnly", "outputFormats"] as const;
+const UI_KEYS = ["ratios", "sizes", "batch", "batchUnknown", "maxRefs", "refNote", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo", "mj", "qualities", "thinkingMode", "promptOnly", "outputFormats", "gifFrames"] as const;
 function fromProvider(kind: GenKind, ui?: Record<string, unknown> | null): Partial<ModelSpec> {
   if (!ui || typeof ui !== "object" || (ui.kind && ui.kind !== kind)) return {};
   const out: Record<string, unknown> = {};
@@ -557,6 +595,11 @@ export function clampParams(kind: GenKind, p: AnyParams, m: ModelSpec): AnyParam
     const outputFormat = outputFormatForRequest(q.outputFormat);
     const outputFormats = (Array.isArray(m.outputFormats) ? m.outputFormats : []).map((item) => String(item ?? "").trim().toLowerCase());
     if (outputFormat && outputFormats.includes(outputFormat)) q.outputFormat = outputFormat; else delete q.outputFormat;
+    // GIF 帧参数只跟 gif 一起存在：非 gif 一律删掉（请求 / 持久化都不留），gif 时按 caps 夹成合法值
+    if (outputFormatForRequest(q.outputFormat) === "gif") {
+      q.frameCount = gifFrameCountFor(q.frameCount, m);
+      q.frameDuration = gifFrameDurationFor(q.frameDuration, m);
+    } else { delete q.frameCount; delete q.frameDuration; }
     return q;
   }
   if (kind === "video") {

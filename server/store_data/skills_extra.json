@@ -1,0 +1,157 @@
+{
+  "items": [
+    {
+      "kind": "skill",
+      "name": "redskill-avant-garde-chromatic-fashion",
+      "display_name": "先锋色块时装大片",
+      "category": "时尚",
+      "description": "把一句人物/服装描述或参考图扩写成先锋实验时装大片提示词，支持即梦中文或 Midjourney 英文，可出 1/5/10 张系列。",
+      "marketing_line": "一句描述扩写成先锋色块时装大片提示词，中英文都能出系列。",
+      "tags": [
+        "时尚",
+        "时装大片",
+        "提示词",
+        "RedSkill"
+      ],
+      "search_terms": [
+        "先锋",
+        "色块",
+        "时装大片",
+        "提示词",
+        "即梦",
+        "Midjourney"
+      ],
+      "source": {
+        "type": "redskill",
+        "identifier": "avant-garde-chromatic-fashion"
+      },
+      "cover_url": "/static/store/covers/redskill-avant-garde-chromatic-fashion-sq.webp",
+      "cover_poster_url": "/static/store/covers/redskill-avant-garde-chromatic-fashion.webp",
+      "cover_video_url": "",
+      "icon_url": "",
+      "icon": "wand2",
+      "business_scenario": "",
+      "activation_skill": "avant-garde-chromatic-fashion",
+      "installed": false,
+      "builtin": false,
+      "store_visible": true,
+      "store_available": true,
+      "enabled": true
+    },
+    {
+      "kind": "skill",
+      "name": "redskill-retro-romantic-garden-lookbook",
+      "display_name": "复古英伦花园写真",
+      "category": "时尚",
+      "description": "把照片或一句话变成 70 年代英伦浪漫复古花园时装大片，直接闪光 + Portra 400 胶片质感，3:4 竖版。",
+      "marketing_line": "照片变 70 年代英伦花园大片，直接闪光加 Portra 胶片质感。",
+      "tags": [
+        "时尚",
+        "复古",
+        "花园写真",
+        "胶片",
+        "RedSkill"
+      ],
+      "search_terms": [
+        "复古",
+        "英伦",
+        "花园",
+        "写真",
+        "Portra",
+        "闪光灯"
+      ],
+      "source": {
+        "type": "redskill",
+        "identifier": "retro-romantic-garden-lookbook"
+      },
+      "cover_url": "/static/store/covers/redskill-retro-romantic-garden-lookbook-sq.webp",
+      "cover_poster_url": "/static/store/covers/redskill-retro-romantic-garden-lookbook.webp",
+      "cover_video_url": "",
+      "icon_url": "",
+      "icon": "wand2",
+      "business_scenario": "",
+      "activation_skill": "retro-romantic-garden-lookbook",
+      "installed": false,
+      "builtin": false,
+      "store_visible": true,
+      "store_available": true,
+      "enabled": true
+    },
+    {
+      "kind": "skill",
+      "name": "redskill-create-y2k-fashion-images",
+      "display_name": "千禧 Y2K 时尚大片",
+      "category": "时尚",
+      "description": "把照片或一句话变成千禧年反叛街拍风格的先锋奢侈品时尚摄影，极端视角、硬闪光、雕塑感配饰。",
+      "marketing_line": "一句话生成千禧年反叛街拍，硬闪光、极端视角、雕塑感配饰。",
+      "tags": [
+        "时尚",
+        "Y2K",
+        "街拍",
+        "大片",
+        "RedSkill"
+      ],
+      "search_terms": [
+        "千禧",
+        "Y2K",
+        "街拍",
+        "奢侈品",
+        "硬闪光"
+      ],
+      "source": {
+        "type": "redskill",
+        "identifier": "create-y2k-fashion-images"
+      },
+      "cover_url": "/static/store/covers/redskill-create-y2k-fashion-images-sq.webp",
+      "cover_poster_url": "/static/store/covers/redskill-create-y2k-fashion-images.webp",
+      "cover_video_url": "",
+      "icon_url": "",
+      "icon": "wand2",
+      "business_scenario": "",
+      "activation_skill": "create-y2k-fashion-images",
+      "installed": false,
+      "builtin": false,
+      "store_visible": true,
+      "store_available": true,
+      "enabled": true
+    },
+    {
+      "kind": "skill",
+      "name": "redskill-0867678-avant-fashion-editorial",
+      "display_name": "先锋档案时尚摄影",
+      "category": "时尚",
+      "description": "把写实照片或文字转成先锋奢侈品时尚杂志编辑摄影，35mm 负片、纪实光线、自然肤质、档案式构图。",
+      "marketing_line": "写实照片转先锋杂志编辑大片，35mm 负片与纪实光线。",
+      "tags": [
+        "时尚",
+        "编辑摄影",
+        "档案感",
+        "35mm",
+        "RedSkill"
+      ],
+      "search_terms": [
+        "先锋",
+        "档案",
+        "编辑摄影",
+        "35mm",
+        "负片"
+      ],
+      "source": {
+        "type": "redskill",
+        "identifier": "0867678"
+      },
+      "cover_url": "/static/store/covers/redskill-0867678-avant-fashion-editorial-sq.webp",
+      "cover_poster_url": "/static/store/covers/redskill-0867678-avant-fashion-editorial.webp",
+      "cover_video_url": "",
+      "icon_url": "",
+      "icon": "wand2",
+      "business_scenario": "",
+      "activation_skill": "0867678",
+      "installed": false,
+      "builtin": false,
+      "store_visible": true,
+      "store_available": true,
+      "enabled": true
+    }
+  ]
+}

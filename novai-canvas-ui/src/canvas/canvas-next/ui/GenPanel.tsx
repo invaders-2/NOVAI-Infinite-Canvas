@@ -12,9 +12,10 @@ import { mentionable, mentionedIds, unmentionedInputs } from "../mentions";
 import { PromptEditor } from "./PromptEditor";
 import { requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
-import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, durationTiers, formatClock, genOf, isQualityDefault, NODE_BG, NODE_TAG, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatLabel, outputFormatOptions, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
+import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, durationTiers, formatClock, genOf, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatLabel, outputFormatOptions, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS } from "./ctx";
+import { startVoiceCapture, transcribeVoice, voiceErrorText, type VoiceCapture, type VoicePhase } from "../voiceInput";
 import { keyHint } from "./shortcuts";
 import { ratioDisplayLabel, sourceBoxForNode, sourceSizeForTier, type SourceBox } from "../originalRatio";
 import { ComboMenu } from "./combo";
@@ -22,7 +23,7 @@ import { FloatMenuBar, FloatMenuButton } from "./FloatMenu";
 import { Icon, type IconName } from "./Icon";
 import { download } from "./menus";
 import { saveNodeToLibrary } from "./Library";
-import { closePop, openPop } from "./overlay";
+import { openPop } from "./overlay";
 import { ThumbImg } from "./thumb";
 import { OptCards, normRatio, ratioShape } from "./OptCards";
 import { OptimizeButton } from "./OptimizeButton";
@@ -171,6 +172,67 @@ function GenPanel({ node }: { node: CanvasNode }) {
     return () => removeEventListener("keydown", on);
   }, [kind, node.id, store]);
   const commitPrompt = (v: string) => { if (v !== genOf(store.node(node.id)!).prompt) store.patchGen(node.id, { prompt: v }); };
+  /* 语音输入：录音 → WAV → 后端转写，成功后接在当前提示词后面 */
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
+  const voiceCap = useRef<VoiceCapture | null>(null);
+  const voiceStarting = useRef(false);
+  const voiceToken = useRef(0);
+  /** 卸载时权限弹窗可能还没回来：回来后再拿到的 cap 要立刻取消 */
+  const voiceAlive = useRef(true);
+  const applyVoiceText = (text: string) => {
+    const cur = genOf(store.node(node.id)!).prompt;
+    const next = (cur ? cur + "，" : "") + text;
+    setDraft(next);
+    commitPrompt(next);
+  };
+  const transcribeIntoPrompt = async (blob: Blob) => {
+    const token = voiceToken.current;
+    const result = await transcribeVoice(blob);
+    if (token !== voiceToken.current) return;
+    if (result.ok && result.text) applyVoiceText(result.text);
+    else store.toast(voiceErrorText(result.code, result.error));
+    setVoicePhase("idle");
+  };
+  const voice = async () => {
+    if (voicePhase === "transcribing" || voiceStarting.current) return;
+    if (voicePhase === "recording") {
+      const cap = voiceCap.current;
+      // 到时长上限自动结束时回调已经接管，这次点击直接忽略
+      if (!cap) return;
+      voiceCap.current = null;
+      setVoicePhase("transcribing");
+      let blob: Blob | null = null;
+      try { blob = await cap.stop(); } catch { blob = null; }
+      if (!blob) { setVoicePhase("idle"); return; }
+      await transcribeIntoPrompt(blob);
+      return;
+    }
+    voiceStarting.current = true;
+    try {
+      const cap = await startVoiceCapture({
+        maxSeconds: 90,
+        onAutoStop: (blob) => { voiceCap.current = null; setVoicePhase("transcribing"); void transcribeIntoPrompt(blob); },
+      });
+      if (!voiceAlive.current) { cap.cancel(); return; }
+      voiceCap.current = cap;
+      setVoicePhase("recording");
+    } catch (error) {
+      const err = error as { name?: string; message?: string } | null;
+      store.toast(voiceErrorText(err?.name, err?.message));
+    } finally {
+      voiceStarting.current = false;
+    }
+  };
+  // 面板关掉 / 切节点时释放麦克风
+  useEffect(() => {
+    voiceAlive.current = true;
+    return () => {
+      voiceAlive.current = false;
+      voiceToken.current += 1;
+      voiceCap.current?.cancel();
+      voiceCap.current = null;
+    };
+  }, []);
   /** 编辑器每次改动：插入 @ 引用时立刻写回并切到引用模式（其余改动失焦时写回） */
   const onPrompt = (v: string, o?: { mention?: boolean }) => { setDraft(v); if (o?.mention) store.patchGen(node.id, { prompt: v, refMode: "mention" }); };
 
@@ -335,7 +397,9 @@ function GenPanel({ node }: { node: CanvasNode }) {
       aria-label={"先思考：" + (ip.thinking === true ? "开" : ip.thinking === false ? "关" : "默认")}
       title={"先思考（" + (m?.name || "") + "）：" + (ip.thinking === true ? "开：先想再画" : ip.thinking === false ? "关：直接出图" : "默认（模型决定）")}
       onClick={(e) => paramPop(ctl, node, "thinking", e.currentTarget)}>先思考{ip.thinking === true ? " 开" : ip.thinking === false ? " 关" : " 默认"}</button>);
+    const gifOn = outputFormatForRequest(ip.outputFormat) === "gif";
     gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{/^(auto|adaptive|自适应)$/i.test(ip.ratio) ? "原图比例" : ip.ratio} · {ip.size}{formats.length ? " · " + outputFormatLabel(ip.outputFormat) : ""}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
+    if (gifOn) gline.push(gdot("cgif"), seg("gifframes", <>{gifFrameCountFor(ip.frameCount, m)} 帧 · {gifFrameDurationFor(ip.frameDuration, m)}ms</>));
     if (m?.mj) gline.push(gdot("cmj"), seg("mj", <>{mjSummary(ip.mj)}</>, !!(ip.mj && (ip.mj.version || ip.mj.hd || typeof ip.mj.stylize === "number" || (ip.mj.speed && ip.mj.speed !== "fast")))));
     // 风格 / 摄影机按「模型真的会转发」才渲染（没有能力就不给入口，不置灰）
     if (m?.style) gline.push(gdot("c2"), <button key="chip-style" ref={styleRef} type="button" data-p="style" data-chip="style"
@@ -388,7 +452,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       {/* 动作区三个独立元素（不再用一个药丸包住耗时+发送）：同一中线、间距 8、发送不压药丸 */}
       <div className="gp-act">
         <OptimizeButton node={node} draft={draft} setDraft={setDraft} className="mic opt" />
-        <button className="mic" data-p="mic" title="语音输入" onClick={(e) => voice(ctl, node, e.currentTarget, (v) => { setDraft(v); commitPrompt(v); })}><Icon name="mic" size="s" /></button>
+        <button className={"mic" + (voicePhase === "recording" ? " rec" : "")} data-p="mic" data-voice-phase={voicePhase} aria-pressed={voicePhase === "recording"} disabled={voicePhase === "transcribing"} title={voicePhase === "recording" ? "结束并转写" : voicePhase === "transcribing" ? "正在转写…" : "语音输入"} onClick={() => void voice()}><Icon name="mic" size="s" /></button>
         {/* 没配模型时 est 为空：不渲染空药丸（否则看起来像没渲染完），也不占位 */}
         {est ? <span className="est tnum" title="预计耗时">{est}{m?.local ? " · 本机" : ""}</span> : null}
         {run ? <button className="send busy" data-p="stop" title="停止生成" onClick={() => stopNode(store, node.id)}><i className="ring"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" /></svg></i><span className="sqr" /></button>
@@ -602,6 +666,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   });
   if (k === "ratio") return pop(() => <RatioPop node={node} model={mm} disabled={dis} />);
   if (k === "mj") return pop(() => <MjPop node={node} model={mm} disabled={dis} />);
+  if (k === "gifframes") return pop(() => <GifFramePop node={node} model={mm} disabled={dis} />, "gif-frame-pop");
   if (k === "count") return pop((close) => {
     const options = mm.batchUnknown ? [1] : [4, 2, 1];
     return <><div className="mh">一次生成几张</div>{options.map((c) => <button key={c} className={"mi" + ((cur().g.params as ImageParams).count === c ? " on" : "")} disabled={dis || !mm.batch?.includes(c)} onClick={() => { close(); set({ count: c }); }}>{c}×<span className="k">{!dis && mm.batch?.includes(c) ? (c > 1 ? (store.state.ui.batchMode === "stack" ? "堆叠在本节点" : "铺开成新节点") : "") : "该模型不支持"}</span></button>)}
@@ -657,6 +722,60 @@ function DraftRow({ on, disabled = false, range, onToggle }: { on: boolean; disa
 }
 
 const OUTPUT_FORMAT_TIP: Record<string, string> = { "": "PNG / JPG 单张图片", gif: "GIF 循环动画", svg: "SVG 矢量图，可任意放大" };
+/** 数字输入：编辑过程只存本地草稿（不夹取、不写回），失焦 / Enter 才 clamp 写回，Esc 回退，上下箭头按 step 立即写回 */
+function GifNumberRow({ dataP, label, value, min, max, step, unit, disabled, normalize, onCommit }: {
+  dataP: string; label: string; value: number; min: number; max: number; step: number; unit: string; disabled?: boolean;
+  normalize: (raw: unknown) => number; onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = (raw: string | null) => {
+    setDraft(null);
+    const parsed = Number(String(raw ?? "").trim());
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    onCommit(normalize(parsed));
+  };
+  const nudge = (delta: number) => {
+    const parsed = Number(String(draft ?? value).trim());
+    const base = Number.isFinite(parsed) && parsed > 0 ? parsed : value;
+    setDraft(null);
+    onCommit(normalize(base + delta * step));
+  };
+  return <div className="gif-row" data-p={dataP}>
+    <span className="lbl">{label}</span>
+    <span className="val">
+      <input type="number" min={min} max={max} step={step} value={draft ?? String(value)} disabled={disabled} aria-label={"GIF " + label}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => commit(draft)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(draft); }
+          else if (e.key === "Escape") { e.preventDefault(); setDraft(null); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); nudge(1); }
+          else if (e.key === "ArrowDown") { e.preventDefault(); nudge(-1); }
+        }} />
+      <span className="unit">{unit}</span>
+    </span>
+  </div>;
+}
+/** GIF 帧参数（只有输出格式选到 GIF 时才渲染）：帧数 2–16、每帧时长 20–2000 步进 10；灰字说明每帧尺寸会被拼版上限缩小 */
+function GifFrameRows({ model, params, disabled, onPatch }: { model?: ModelSpec; params: ImageParams; disabled?: boolean; onPatch: (patch: Partial<ImageParams>) => void }) {
+  const spec = gifFrameSpec(model);
+  return <>
+    <div className="mh">GIF 帧</div>
+    <GifNumberRow dataP="gif-frame-count" label="帧数" value={gifFrameCountFor(params.frameCount, model)} min={spec.min} max={spec.max} step={1} unit={spec.min + "–" + spec.max + " 帧"} disabled={disabled}
+      normalize={(raw) => gifFrameCountFor(raw, model)} onCommit={(next) => onPatch({ frameCount: next })} />
+    <GifNumberRow dataP="gif-frame-duration" label="每帧时长" value={gifFrameDurationFor(params.frameDuration, model)}
+      min={GIF_FRAME_FALLBACK.durationMin} max={GIF_FRAME_FALLBACK.durationMax} step={GIF_FRAME_FALLBACK.durationStep}
+      unit={"ms · " + GIF_FRAME_FALLBACK.durationMin + "–" + GIF_FRAME_FALLBACK.durationMax} disabled={disabled}
+      normalize={(raw) => gifFrameDurationFor(raw, model)} onCommit={(next) => onPatch({ frameDuration: next })} />
+    <div className="gif-tip">每帧尺寸会按拼版上限自动缩小（整版 ≤3840 单边、约 829 万像素）。</div>
+  </>;
+}
+/** GIF 帧参数弹层（底栏「N 帧 · Nms」打开）：参数弹层太长要滚动，帧控件与灰字说明单独一屏 */
+function GifFramePop({ node, model, disabled }: { node: CanvasNode; model?: ModelSpec; disabled?: boolean }) {
+  const store = useCtl().store; const p = useNodeParams<ImageParams>(node);
+  const set = (patch: Partial<ImageParams>) => store.patchGen(node.id, (g) => ({ params: { ...(g.params as ImageParams), ...patch } }));
+  return <GifFrameRows model={model} params={p} disabled={disabled} onPatch={set} />;
+}
 function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?: ModelSpec; disabled?: boolean }) {
   const ctl = useCtl(); const store = ctl.store; const p = useNodeParams<ImageParams>(node); const m = model || store.modelOf(node)!;
   const source = useSourceBox(node, "image");
@@ -687,6 +806,7 @@ function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?:
         {formats.map((f) => <button key={f.value || "static"} className={format === f.value ? "on" : ""} disabled={disabled} title={OUTPUT_FORMAT_TIP[f.value]} onClick={() => set({ outputFormat: f.value || undefined })}>{f.label}</button>)}
       </div>
     </> : null}
+    {format === "gif" ? <GifFrameRows model={m} params={p} disabled={disabled} onPatch={set} /> : null}
     {ratios.includes("自适应") && !hasSource ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>原图比例需要有参考图</span></div> : null}
   </>;
 }
@@ -786,15 +906,7 @@ function VRatioPop({ node, m, disabled = false }: { node: CanvasNode; m: ModelSp
   </>;
 }
 
-/* ---------------- 语音输入 ---------------- */
-function voice(ctl: ReturnType<typeof useCtl>, node: CanvasNode, btn: HTMLElement, onText: (v: string) => void) {
-  const SR = (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any }).SpeechRecognition || (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition;
-  if (!SR) { ctl.store.toast("当前环境没有语音识别服务，可以用系统听写（按两下 Fn）输入"); return; }
-  const r = new SR(); r.lang = "zh-CN"; r.interimResults = false; btn.classList.add("rec"); ctl.store.toast("正在听…说完会自动填进提示词", 2000);
-  r.onresult = (e: any) => { const t = String(e.results?.[0]?.[0]?.transcript || ""); const cur = genOf(ctl.store.node(node.id)!).prompt; onText((cur ? cur + "，" : "") + t); };
-  r.onerror = () => ctl.store.toast("没有听清，可以再试一次"); r.onend = () => btn.classList.remove("rec"); r.start();
-  void closePop;
-}
+
 
 /* ---------------- 风格 / 摄影机（对齐 TapNow：4 轮盘浮层 + 风格资产模态） ---------------- */
 type CamKey = "body" | "lens" | "focal" | "aperture";

@@ -10,14 +10,18 @@
 - API 被限流（60 次/小时/IP）时降级到 jsDelivr Data API 猜分支 + 枚举 SKILL.md，成功就正常安装；
 - 配了「令牌中转」（token_store.github_relay）时全部经中转走，客户端不再读本地令牌也不直连 GitHub。
 
-安全口径不变：只访问白名单主机的 https，1MB 上限，不执行仓库内容，重定向不出白名单。
+安全口径：GitHub 链路仍只访问白名单主机的 https，重定向不出白名单；其它 HTTPS 直链要求
+主机解析出的所有 IP 都是公网地址、逐跳手动校验重定向（最多 3 跳）；1MB 上限，不执行仓库
+内容，绝不把 GitHub 令牌发给非 GitHub 主机。
 """
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import os
 import re
+import socket
 import ssl
 import subprocess
 import sys
@@ -41,7 +45,11 @@ _RETRY_DELAYS = (0.4, 0.9)
 _DEFAULT_BRANCH_GUESSES = ("main", "master")
 _ALLOWED_HOSTS = frozenset(("github.com", "raw.githubusercontent.com", "api.github.com",
                             "cdn.jsdelivr.net", "data.jsdelivr.com"))
-# 只给 GitHub 自己回令牌，避免粘贴的 GITHUB_TOKEN 漏给 CDN
+# 用户直接粘贴、走上面这套 GitHub 专用流程的主机；其余 https 主机走通用直链下载
+_GITHUB_URL_HOSTS = frozenset(("github.com", "www.github.com", "raw.githubusercontent.com", "api.github.com"))
+_MAX_REDIRECTS = 3
+_REDIRECT_CODES = frozenset((301, 302, 303, 307, 308))
+# 只给 GitHub 自己回令牌，避免粘贴的 GITHUB_TOKEN 漏给 CDN 或任意直链主机
 _TOKEN_HOSTS = frozenset(("raw.githubusercontent.com", "api.github.com"))
 _JSON_ACCEPT = "application/vnd.github+json"
 _RAW_ACCEPT = "application/vnd.github.raw"
@@ -254,6 +262,13 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return request
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """通用直链：不自动跟随，30x 以 HTTPError 抛回给调用方逐跳校验。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def _ssl_context():
     global _SSL_CONTEXT
     if _SSL_CONTEXT is None:
@@ -261,20 +276,22 @@ def _ssl_context():
     return _SSL_CONTEXT
 
 
-def _build_opener(url):
+def _build_opener(url, follow_redirects=True):
     """显式装 ProxyHandler：传空字典即直连，避免 urllib 悄悄用上别的环境代理。"""
     proxy = _proxy_for(url)
     proxies = {"https": proxy, "http": proxy} if proxy else {}
+    redirect = _SafeRedirectHandler() if follow_redirects else _NoRedirectHandler()
     return urllib.request.build_opener(
         urllib.request.ProxyHandler(proxies),
         urllib.request.HTTPSHandler(context=_ssl_context()),
-        _SafeRedirectHandler(),
+        redirect,
     )
 
 
-def urlopen(request, timeout=TIMEOUT_SECONDS):
+def urlopen(request, timeout=TIMEOUT_SECONDS, follow_redirects=True):
     """带代理与重定向校验的 urlopen（测试里 monkeypatch 它模拟网络故障）。"""
-    return _build_opener(request.full_url).open(request, timeout=timeout)
+    return _build_opener(request.full_url, follow_redirects=follow_redirects).open(
+        request, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -814,7 +831,129 @@ def _fetch_via_relay(source, relay_url, secret):
     return _markdown_result(source, ref, path, markdown, target)
 
 
+# ---------------------------------------------------------------------------
+# 任意 HTTPS 直链：正文就是 SKILL.md（不走 GitHub 解析，也不带任何令牌）
+# ---------------------------------------------------------------------------
+
+def is_github_url(url):
+    """用户粘贴的是不是 GitHub 专用流程的地址；其余主机走通用直链下载。"""
+    return _host_of(url) in _GITHUB_URL_HOSTS
+
+
+def _is_public_ip(ip):
+    """公网地址判定：loopback / private / link_local / multicast / reserved / unspecified 全拒。"""
+    for flag in ("is_loopback", "is_private", "is_link_local", "is_multicast",
+                 "is_reserved", "is_unspecified"):
+        if getattr(ip, flag, False):
+            return False
+    return bool(getattr(ip, "is_global", True))
+
+
+def _public_https_target(url):
+    """校验一个跳转目标：https、无账号口令、有主机名；返回 (host, port)。"""
+    raw = str(url or "").strip()
+    try:
+        parsed = urllib.parse.urlparse(raw)
+    except ValueError:
+        raise GitHubSkillError("地址不合法：%s" % raw, 400)
+    scheme = (parsed.scheme or "").lower()
+    if scheme == "http":
+        raise GitHubSkillError("只支持 HTTPS 直链：请把链接里的 http:// 改成 https:// 再试", 400)
+    if scheme != "https":
+        label = "%s://" % scheme if scheme else "无协议"
+        raise GitHubSkillError("只支持 HTTPS 直链（不支持 %s 链接）：%s" % (label, raw), 400)
+    if parsed.username or parsed.password:
+        raise GitHubSkillError("地址里不能带用户名或密码（凭据会随请求发出）：%s" % raw, 400)
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise GitHubSkillError("地址缺少主机名：%s" % raw, 400)
+    try:
+        port = parsed.port or 443
+    except ValueError:
+        raise GitHubSkillError("地址端口不合法：%s" % raw, 400)
+    return host, port
+
+
+def _resolve_public_host(host, port):
+    """解析主机名；所有 IP 必须都是公网地址，解析失败给可读错误。返回校验过的地址列表。"""
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError, OSError) as exc:
+        raise GitHubSkillError("无法解析主机名 %s：%s（请检查链接里的域名和本机网络/DNS）"
+                               % (host, _describe_network_error(exc)), 502)
+    addresses = [str(info[4][0] or "").strip() for info in infos if info[4] and info[4][0]]
+    if not addresses:
+        raise GitHubSkillError("无法解析主机名 %s：没有返回任何地址" % host, 502)
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address.split("%")[0])
+        except ValueError:
+            raise GitHubSkillError("主机 %s 解析出的地址不合法：%s" % (host, address), 502)
+        if not _is_public_ip(ip):
+            raise GitHubSkillError("拒绝访问内网或保留地址：%s 解析到 %s（只允许公网地址）"
+                                   % (host, address), 400)
+    return addresses
+
+
+def _direct_headers():
+    """直链请求头：只放 UA 和 Accept，任何令牌都不带。"""
+    return {"User-Agent": "NOVAI-Skill-Installer/1.0", "Accept": "text/plain, */*"}
+
+
+def _fetch_direct_markdown(url):
+    """GET 任意 https 直链的 SKILL.md 原文；重定向手动逐跳校验，最多 3 跳。"""
+    target = str(url or "").strip()
+    hops = 0
+    while True:
+        host, port = _public_https_target(target)
+        _resolve_public_host(host, port)
+        try:
+            request = urllib.request.Request(target, headers=_direct_headers())
+        except ValueError as exc:
+            raise GitHubSkillError("地址不合法：%s（%s）" % (target, exc), 400)
+        try:
+            with urlopen(request, timeout=TIMEOUT_SECONDS, follow_redirects=False) as response:
+                raw = response.read(MAX_MARKDOWN_BYTES + 1)
+                break
+        except urllib.error.HTTPError as exc:
+            code = exc.code
+            location = _header_value(exc.headers, "Location")
+            try:
+                exc.close()
+            except Exception:
+                pass
+            if code in _REDIRECT_CODES and location:
+                hops += 1
+                if hops > _MAX_REDIRECTS:
+                    raise GitHubSkillError("重定向超过 %d 跳，已停止（请直接填最终地址）"
+                                           % _MAX_REDIRECTS, 400)
+                target = urllib.parse.urljoin(target, location)
+                continue
+            if code == 404:
+                raise GitHubSkillError("该地址不存在（HTTP 404）：请确认链接是否写对、文件是否已被删除", 404)
+            if code in (401, 403):
+                raise GitHubSkillError("该地址拒绝访问（HTTP %s）：可能需要登录或没有公开访问权限" % code, 403)
+            if code >= 500:
+                raise GitHubSkillError("该地址的服务器出错（HTTP %s），请稍后重试" % code, 502)
+            raise GitHubSkillError("该地址返回 HTTP %s" % code, 502)
+        except GitHubSkillError:
+            raise
+        except _NETWORK_ERRORS as exc:
+            raise GitHubSkillError("无法下载 SKILL.md：%s；%s"
+                                   % (_describe_network_error(exc), _PROXY_HINT), 502)
+    markdown = _decode_markdown(raw)
+    return {
+        "markdown": markdown,
+        "repository": host,
+        "ref": "",
+        "path": "",
+        "source_url": target,
+    }
+
+
 def fetch_skill_markdown(url, path="", ref=""):
+    if not is_github_url(url):
+        return _fetch_direct_markdown(url)
     source = parse_github_url(url, path=path, ref=ref)
     relay_url = token_store.relay_url()
     if relay_url:

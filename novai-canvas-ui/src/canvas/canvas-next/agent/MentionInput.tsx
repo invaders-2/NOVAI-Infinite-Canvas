@@ -33,6 +33,8 @@ export type MentionInputProps = {
   onEscape?: () => void;
   /** 光标前刚打出 @ 或 /：外部据此打开选择面板 */
   onTrigger?: (ch: "@" | "/") => void;
+  /** 已记录在 trigger.current 的触发字符被删掉 / 替换：上层据此关掉对应的面板（目前只对 / 回调） */
+  onTriggerGone?: () => void;
   /** 记号 → 胶囊内容；拿不到时按「已移除」渲染 */
   resolve: (kind: MentionKind, id: string) => MentionChip | null;
   /** 胶囊被删（退格 / Delete / 点 ×）时同步上层引用 */
@@ -289,7 +291,14 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(fu
     if ((e.nativeEvent as InputEvent).isComposing) return;
     emit();
     const el = ref.current!;
+    // 记录过的触发字符还在不在（先算，下面 paint 重建 DOM 会换掉文本节点）
+    const t = trigger.current;
+    const alive = !t || (el.contains(t.text) && (t.text.nodeValue || "")[t.at] === t.ch);
     if (el.querySelector("div,p")) { paint(serialize(el)); caretToEnd(); }
+    if (t && !alive) {
+      trigger.current = null;
+      if (t.ch === "/") propsRef.current.onTriggerGone?.();
+    }
     detectTrigger();
   };
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {

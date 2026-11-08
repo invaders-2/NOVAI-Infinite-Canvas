@@ -5,6 +5,7 @@
 """
 import os
 import re
+import socket
 import ssl
 import sys
 import time
@@ -730,6 +731,204 @@ class RelayClientTests(unittest.TestCase):
             result = fetch(github_install.fetch_skill_markdown, path="SKILL.md", ref="main")
         self.assertEqual(result["markdown"], MARKDOWN)
         self.assertTrue(calls[0].startswith("https://raw.githubusercontent.com/"))
+
+PUBLIC_IP = "93.184.216.34"
+DIRECT_URL = "https://redskill.xiaohongshu.net/install.md"
+
+
+def dns_addresses(*addresses):
+    """把 socket.getaddrinfo 固定成给定地址（测试不打真实 DNS）。"""
+    infos = [(socket.AF_INET6 if ":" in address else socket.AF_INET,
+              socket.SOCK_STREAM, 6, "", (address, 443)) for address in addresses]
+    return mock.patch.object(github_install.socket, "getaddrinfo", return_value=infos)
+
+
+def dns_map(mapping):
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        address = mapping.get(host)
+        if address is None:
+            raise AssertionError("未预期的解析：%s" % host)
+        family = socket.AF_INET6 if ":" in address else socket.AF_INET
+        return [(family, socket.SOCK_STREAM, 6, "", (address, port))]
+    return mock.patch.object(github_install.socket, "getaddrinfo", side_effect=fake_getaddrinfo)
+
+
+class DirectLinkTests(unittest.TestCase):
+    """任意 HTTPS 直链：只收公网、逐跳校验重定向、1MB 上限、不带任何令牌。"""
+
+    def direct(self, handler):
+        calls = []
+
+        def fake(request, timeout=None, follow_redirects=True):
+            calls.append({"url": request.full_url, "headers": dict(request.headers),
+                          "timeout": timeout, "follow_redirects": follow_redirects})
+            return handler(request.full_url)
+
+        return fake, calls
+
+    def test_https_direct_link_returns_markdown(self):
+        fake, calls = self.direct(lambda url: FakeResponse(MARKDOWN))
+        env = {"NOVAI_GITHUB_TOKEN": "ghp_should_not_leak"}
+        with dns_addresses(PUBLIC_IP), mock.patch.dict(os.environ, env, clear=False), \
+                mock.patch.object(github_install, "urlopen", side_effect=fake):
+            result = fetch(github_install.fetch_skill_markdown, url=DIRECT_URL)
+
+        self.assertEqual(result["markdown"], MARKDOWN)
+        self.assertEqual(result["source_url"], DIRECT_URL)
+        self.assertEqual(result["repository"], "redskill.xiaohongshu.net")
+        self.assertEqual([call["url"] for call in calls], [DIRECT_URL])
+        self.assertFalse(calls[0]["follow_redirects"])
+        self.assertEqual(calls[0]["timeout"], github_install.TIMEOUT_SECONDS)
+        lowered = {key.lower() for key in calls[0]["headers"]}
+        self.assertNotIn("authorization", lowered)
+        self.assertNotIn("x-github-api-version", lowered)
+
+    def test_plain_http_and_other_schemes_rejected(self):
+        fake, calls = self.direct(lambda url: FakeResponse(MARKDOWN))
+        with mock.patch.object(github_install, "urlopen", side_effect=fake):
+            with self.assertRaises(github_install.GitHubSkillError) as ctx:
+                fetch(github_install.fetch_skill_markdown,
+                      url="http://redskill.xiaohongshu.net/install.md")
+            self.assertEqual(ctx.exception.status_code, 400)
+            self.assertIn("HTTPS", str(ctx.exception))
+            with self.assertRaises(github_install.GitHubSkillError) as ctx:
+                fetch(github_install.fetch_skill_markdown,
+                      url="ftp://redskill.xiaohongshu.net/install.md")
+            self.assertIn("HTTPS", str(ctx.exception))
+            with self.assertRaises(github_install.GitHubSkillError) as ctx:
+                fetch(github_install.fetch_skill_markdown,
+                      url="https://user:pass@redskill.xiaohongshu.net/install.md")
+            self.assertIn("用户名或密码", str(ctx.exception))
+        self.assertEqual(calls, [])
+
+    def test_private_loopback_and_reserved_addresses_rejected(self):
+        for address in ("127.0.0.1", "::1", "10.1.2.3", "192.168.1.8", "169.254.9.9",
+                        "fe80::1", "0.0.0.0", "224.0.0.1", "255.255.255.255"):
+            with self.subTest(address=address):
+                fake, calls = self.direct(lambda url: FakeResponse(MARKDOWN))
+                with dns_addresses(address), mock.patch.object(github_install, "urlopen", side_effect=fake):
+                    with self.assertRaises(github_install.GitHubSkillError) as ctx:
+                        fetch(github_install.fetch_skill_markdown, url=DIRECT_URL)
+                self.assertIn("内网或保留地址", str(ctx.exception))
+                self.assertEqual(calls, [])
+
+    def test_mixed_public_and_private_records_rejected(self):
+        fake, calls = self.direct(lambda url: FakeResponse(MARKDOWN))
+        with dns_addresses(PUBLIC_IP, "10.0.0.5"), \
+                mock.patch.object(github_install, "urlopen", side_effect=fake):
+            with self.assertRaises(github_install.GitHubSkillError) as ctx:
+                fetch(github_install.fetch_skill_markdown, url=DIRECT_URL)
+        self.assertIn("内网或保留地址", str(ctx.exception))
+        self.assertEqual(calls, [])
+
+    def test_dns_failure_is_readable(self):
+        with mock.patch.object(github_install.socket, "getaddrinfo",
+                               side_effect=socket.gaierror(-2, "Name or service not known")), \
+                mock.patch.object(github_install, "urlopen",
+                                  side_effect=AssertionError("解析失败就不该发请求")):
+            with self.assertRaises(github_install.GitHubSkillError) as ctx:
+                fetch(github_install.fetch_skill_markdown, url=DIRECT_URL)
+        self.assertEqual(ctx.exception.status_code, 502)
+        self.assertIn("无法解析主机名", str(ctx.exception))
+        self.assertIn("redskill.xiaohongshu.net", str(ctx.exception))
+
+    def test_redirect_to_internal_address_rejected(self):
+        calls = []
+
+        def fake(request, timeout=None, follow_redirects=True):
+            calls.append(request.full_url)
+            raise http_error(request.full_url, 302, {"Location": "https://internal.example.com/SKILL.md"})
+
+        with dns_map({"redskill.xiaohongshu.net": PUBLIC_IP,
+                      "internal.example.com": "10.0.0.5"}), \
+                mock.patch.object(github_install, "urlopen", side_effect=fake):
+            with self.assertRaises(github_install.GitHubSkillError) as ctx:
+                fetch(github_install.fetch_skill_markdown, url=DIRECT_URL)
+
+        self.assertIn("内网或保留地址", str(ctx.exception))
+        self.assertEqual(calls, [DIRECT_URL])          # 校验不过就不发第二个请求
+
+    def test_redirect_to_public_host_is_followed_manually(self):
+        def handler(url):
+            if url == DIRECT_URL:
+                raise http_error(url, 302, {"Location": "/real/SKILL.md"})
+            return FakeResponse(MARKDOWN)
+
+        fake, calls = self.direct(handler)
+        with dns_map({"redskill.xiaohongshu.net": PUBLIC_IP}), \
+                mock.patch.object(github_install, "urlopen", side_effect=fake):
+            result = fetch(github_install.fetch_skill_markdown, url=DIRECT_URL)
+
+        self.assertEqual(result["markdown"], MARKDOWN)
+        self.assertEqual(result["source_url"], "https://redskill.xiaohongshu.net/real/SKILL.md")
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(any(call["follow_redirects"] for call in calls))
+
+    def test_too_many_redirects_rejected(self):
+        calls = []
+
+        def fake(request, timeout=None, follow_redirects=True):
+            calls.append(request.full_url)
+            raise http_error(request.full_url, 302, {"Location": "https://hop.example.com/%d.md" % len(calls)})
+
+        with dns_map({"redskill.xiaohongshu.net": PUBLIC_IP,
+                      "hop.example.com": PUBLIC_IP}), \
+                mock.patch.object(github_install, "urlopen", side_effect=fake):
+            with self.assertRaises(github_install.GitHubSkillError) as ctx:
+                fetch(github_install.fetch_skill_markdown, url=DIRECT_URL)
+
+        self.assertIn("重定向超过 3 跳", str(ctx.exception))
+        self.assertEqual(len(calls), 4)
+
+    def test_oversize_direct_link_rejected(self):
+        body = b"x" * (github_install.MAX_MARKDOWN_BYTES + 1)
+        fake, _calls = self.direct(lambda url: FakeResponse(body))
+        with dns_addresses(PUBLIC_IP), mock.patch.object(github_install, "urlopen", side_effect=fake):
+            with self.assertRaisesRegex(github_install.GitHubSkillError, "1MB"):
+                fetch(github_install.fetch_skill_markdown, url=DIRECT_URL)
+
+    def test_direct_404_is_readable(self):
+        def fake(request, timeout=None, follow_redirects=True):
+            raise http_error(request.full_url, 404)
+
+        with dns_addresses(PUBLIC_IP), mock.patch.object(github_install, "urlopen", side_effect=fake):
+            with self.assertRaises(github_install.GitHubSkillError) as ctx:
+                fetch(github_install.fetch_skill_markdown, url=DIRECT_URL)
+
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertIn("404", str(ctx.exception))
+        self.assertIn("链接", str(ctx.exception))
+
+    def test_github_hosts_still_use_github_pipeline(self):
+        fake, calls = install(lambda url: FakeResponse(MARKDOWN))
+        with mock.patch.object(github_install.socket, "getaddrinfo",
+                               side_effect=AssertionError("GitHub 链路不该做公网解析")), \
+                mock.patch.object(github_install, "urlopen", side_effect=fake):
+            result = fetch(github_install.fetch_skill_markdown,
+                           url="https://github.com/anthropics/skills/tree/main/skills/pdf")
+
+        self.assertEqual(result["ref"], "main")
+        self.assertEqual(result["path"], "skills/pdf/SKILL.md")
+        self.assertTrue(result["source_url"].startswith("https://raw.githubusercontent.com/"))
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(github_install.is_github_url("https://raw.githubusercontent.com/a/b/main/SKILL.md"))
+        self.assertFalse(github_install.is_github_url(DIRECT_URL))
+
+    def test_direct_opener_does_not_follow_redirects(self):
+        request = urllib.request.Request(DIRECT_URL)
+        handler = github_install._NoRedirectHandler()
+        self.assertIsNone(handler.redirect_request(
+            request, None, 302, "Found", {}, "https://internal.example.com/SKILL.md"))
+        with mock.patch.object(github_install, "_proxy_for", return_value=""):
+            opener = github_install._build_opener(DIRECT_URL, follow_redirects=False)
+            opener_with_redirects = github_install._build_opener(DIRECT_URL)
+        self.assertTrue(any(isinstance(item, github_install._NoRedirectHandler)
+                            for item in opener.handlers))
+        self.assertFalse(any(isinstance(item, github_install._NoRedirectHandler)
+                             for item in opener_with_redirects.handlers))
+        self.assertTrue(any(isinstance(item, github_install._SafeRedirectHandler)
+                            for item in opener_with_redirects.handlers))
+
 
 class SecurityTests(unittest.TestCase):
     DATA_URL = "https://data.jsdelivr.com/v1/packages/gh/a/b@main?structure=flat"

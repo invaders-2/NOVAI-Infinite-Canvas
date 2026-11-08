@@ -10,11 +10,15 @@
     POST   /api/store/items/{kind}/{name}/launch   -> {canvas_id, prompt, auto_send}
 
 数据与落盘：
-- 目录/详情读 server/store_data/（catalog.json + details/<kind>__<name>.json）里的上游 83 条；
-- 在这 83 条之外并入技能注册表里的系统 / 内置技能（skill_type=system 或带内置技能包），
-  映射成同形的 item（builtin=true、已安装、可见可用）；同名条目以注册表为准（去重）；
-- 安装态落 <DATA_DIR>/store_installed.json（数组，元素 "kind:name"）；市场技能 install 时还会
+- 目录/详情读 server/store_data/（catalog.json + details/<kind>__<name>.json）里的上游条目，
+  以及 skills_extra.json 里的 RedSkill 补充条目（kind=skill、source.type=redskill）；
+- 在这之外并入技能注册表里的系统 / 内置技能（skill_type=system 或带内置技能包），
+  映射成同形的 item（builtin=true、installed 取真实安装态）；同名条目以注册表为准（去重）；
+- 官方技能默认不可用：首次启动把 data/skills 下 skill_type=system 的 enabled 置 false，
+  并写 <DATA_DIR>/store/.skills_gate_v1（一次性迁移，标记存在就不再跑）；
+- 安装态落 <DATA_DIR>/store_installed.json（数组，元素 "kind:name"）；技能 install 时还会
   按 Agent Skills 规范写进 <DATA_DIR>/skills/<id>.json，画布助手（/api/skills）就能直接用它；
+  RedSkill 条目装好后 name 改成中文显示名，卸载只停用不删文件；
 - launch 只做「编译提示词 + 新建画布并返回」，不在这里跑模型、不调用上游。
 
 Python 3.9 约束：注解用 Optional/Dict/List，禁止 X | Y 联合写法。
@@ -24,6 +28,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Request
@@ -37,7 +43,12 @@ router = APIRouter(prefix="/api/store")
 STORE_KINDS = ("skill", "app")
 STORE_INSTALLED_FILE = "store_installed.json"
 CATALOG_FILE = "catalog.json"
+SKILLS_EXTRA_FILE = "skills_extra.json"
 CURATION_FILE = "curation.json"
+# RedSkill 补充条目：来源类型 + 首次启动的「官方技能默认不可用」迁移标记
+REDSKILL_SOURCE_TYPE = "redskill"
+SKILLS_GATE_MARKER = ".skills_gate_v1"
+SKILLS_GATE_VERSION = 1
 DETAILS_DIRNAME = "details"
 # skill_ref 的内部引用前缀（不显示在界面上）：新数据一律 store:<技能id>，
 # 解析端仍兼容历史前缀（见 main.py 的 _agent_store_skill_manual）
@@ -75,10 +86,11 @@ def store_dir() -> str:
     """商店数据目录：优先运行时 DATA_DIR/store，其次仓库自带的 server/store_data。
 
     data/ 整个目录在 .gitignore 里（防止误提交用户数据），所以可提交的数据副本放在
-    server/store_data/；运行时若数据目录下已有 store/（部署时拷进去），以它为准。
+    server/store_data/；运行时只有数据目录下确实有 catalog.json（部署时拷进去）才以它为准，
+    否则 <DATA_DIR>/store/ 里只有技能闸门标记这类运行时文件，会把整个市场读空。
     """
     runtime = os.path.join(data_dir(), "store")
-    if os.path.isdir(runtime):
+    if os.path.isfile(os.path.join(runtime, CATALOG_FILE)):
         return runtime
     return os.path.join(_repo_root(), "server", "store_data")
 
@@ -128,6 +140,176 @@ def save_installed(keys: List[str]) -> None:
     _atomic_writer()(installed_path(), [str(k) for k in keys], indent=2)
 
 
+# ---------------------------------------------------------------- 补充技能条目
+
+def load_extra_items() -> Dict[str, Dict[str, Any]]:
+    """市场补充条目（server/store_data/skills_extra.json）：目前是 4 个 RedSkill 技能。
+
+    文件缺失/损坏一律当空：补充数据坏掉不能让整个市场打不开。同名条目以 catalog 为准
+    （见 _catalog_index / build_catalog）。
+    """
+    payload = _read_json(os.path.join(store_dir(), SKILLS_EXTRA_FILE), {})
+    raw_items = payload.get("items") if isinstance(payload, dict) else payload
+    if not isinstance(raw_items, list):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip()
+        kind = str(raw.get("kind") or "skill").strip().lower()
+        if kind != "skill" or not name or name in out:
+            continue
+        item = dict(raw)
+        item["kind"] = "skill"
+        item["display_name"] = str(item.get("display_name") or name).strip()
+        item["builtin"] = False
+        item["store_visible"] = True
+        item["store_available"] = True
+        item["enabled"] = True
+        item["installed"] = False
+        out[name] = item
+    return out
+
+
+def extra_skill_entry(name: str) -> Optional[Dict[str, Any]]:
+    return load_extra_items().get(str(name or "").strip())
+
+
+# ---------------------------------------------------------------- 官方技能闸门
+
+_SKILLS_GATE_LOCK = threading.Lock()
+
+
+def skills_gate_marker_path() -> str:
+    """迁移标记：<DATA_DIR>/store/.skills_gate_v1（属于用户数据，不写进仓库）。"""
+    return os.path.join(data_dir(), "store", SKILLS_GATE_MARKER)
+
+
+def skills_gate_initialized() -> bool:
+    return os.path.isfile(skills_gate_marker_path())
+
+
+def _write_gate_marker() -> None:
+    path = skills_gate_marker_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = "%s.tmp-%d" % (path, os.getpid())
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"version": SKILLS_GATE_VERSION, "migrated_at": time.time()}, fh)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _disable_system_skills() -> int:
+    """把 data/skills 下所有 skill_type=system 的定义 enabled 置 false；返回改动条数。"""
+    folder = skills_registry.skills_dir()
+    if not os.path.isdir(folder):
+        return 0
+    try:
+        names = sorted(name for name in os.listdir(folder) if name.endswith(".json"))
+    except OSError as exc:
+        print("[Store] 读取技能目录失败（技能闸门迁移跳过）: %s" % exc)
+        return 0
+    changed = 0
+    failed = 0
+    for name in names:
+        path = os.path.join(folder, name)
+        data = _read_json(path, None)
+        if not isinstance(data, dict):
+            continue
+        if str(data.get("skill_type") or "").strip().lower() != "system":
+            continue
+        if not bool(data.get("enabled", True)):
+            continue
+        data["enabled"] = False
+        try:
+            skills_registry._write_definition(path, data)
+            changed += 1
+        except Exception as exc:
+            failed += 1
+            print("[Store] 关闭官方技能 %s 失败: %s" % (name, exc))
+    if failed:
+        raise RuntimeError("%d 个官方技能关闭失败" % failed)
+    return changed
+
+
+def ensure_skills_gate() -> bool:
+    """一次性迁移：官方技能默认不可用，必须先到应用市场添加。
+
+    标记不存在时把 data/skills 下所有 skill_type=system 的 enabled 置 false，再写标记。
+    标记存在直接返回；并发用模块锁 + 临时文件 + os.replace；任何异常只打日志，
+    迁移失败不能让服务 / 市场起不来，下次调用还会重试。
+    """
+    if skills_gate_initialized():
+        return False
+    with _SKILLS_GATE_LOCK:
+        if skills_gate_initialized():
+            return False
+        # 全新数据目录里官方技能包还没落盘，先让注册表把内置技能包装上再扫
+        try:
+            skills_registry.load_skills()
+        except Exception as exc:
+            print("[Store] 技能闸门迁移前读取注册表失败（继续处理已有技能文件）: %s" % exc)
+        try:
+            changed = _disable_system_skills()
+        except Exception as exc:
+            print("[Store] 技能闸门迁移未完成（官方技能维持原状态，下次重试）: %s" % exc)
+            return False
+        try:
+            _write_gate_marker()
+        except Exception as exc:
+            print("[Store] 技能闸门标记写入失败（下次会重试）: %s" % exc)
+            return False
+        print("[Store] 已关闭 %d 个官方技能的默认可用状态：需在应用市场添加后使用" % changed)
+        return True
+
+
+# ---------------------------------------------------------------- 技能定义读写
+
+def _definition_path(skill_id: str) -> str:
+    return os.path.join(skills_registry.skills_dir(), "%s.json" % skill_id)
+
+
+def _read_definition(skill_id: str) -> Dict[str, Any]:
+    data = _read_json(_definition_path(skill_id), {})
+    return data if isinstance(data, dict) else {}
+
+
+def _write_definition(skill_id: str, definition: Dict[str, Any]) -> None:
+    if not skill_id or not skills_registry._ID_RE.match(skill_id):
+        raise ValueError("技能 id 不合法：%s" % (skill_id or "<空>"))
+    os.makedirs(skills_registry.skills_dir(), exist_ok=True)
+    skills_registry._write_definition(_definition_path(skill_id), definition)
+
+
+def _find_definition_by_store_ref(ref: str) -> Tuple[str, Dict[str, Any]]:
+    """按 store_ref 找本店装过的技能定义，返回 (路径, 定义)；找不到返回 ("", {})。"""
+    folder = skills_registry.skills_dir()
+    if not os.path.isdir(folder):
+        return "", {}
+    try:
+        names = sorted(name for name in os.listdir(folder) if name.endswith(".json"))
+    except OSError:
+        return "", {}
+    for name in names:
+        path = os.path.join(folder, name)
+        data = _read_json(path, None)
+        if isinstance(data, dict) and str(data.get(STORE_REF_FIELD) or "") == ref:
+            return path, data
+    return "", {}
+
+
 # ---------------------------------------------------------------- 目录与详情
 
 def load_catalog_payload() -> Dict[str, Any]:
@@ -163,6 +345,9 @@ def _catalog_index() -> Dict[Tuple[str, str], Dict[str, Any]]:
         name = str(item.get("name") or "").strip()
         if kind in STORE_KINDS and name:
             index[(kind, name)] = item
+    # 补充条目（RedSkill）与上游条目同权：同名以上游为主，不覆盖
+    for name, item in load_extra_items().items():
+        index.setdefault(("skill", name), item)
     return index
 
 
@@ -194,6 +379,7 @@ def load_builtin_skills() -> List[Dict[str, Any]]:
 
     注册表读失败只打日志并返回空列表：市场目录不能因为技能注册表坏掉就 500。
     """
+    ensure_skills_gate()
     try:
         skills = skills_registry.load_skills()
     except Exception as exc:
@@ -231,7 +417,17 @@ def builtin_cover_url(skill_id: str) -> str:
     return ""
 
 
-def builtin_store_item(skill: Dict[str, Any]) -> Dict[str, Any]:
+def builtin_installed(skill: Dict[str, Any], installed: List[str], gate_initialized: bool) -> bool:
+    """官方技能的真实安装态：本店标记优先；迁移标记还没写成功时沿用老的 enabled 状态。"""
+    sid = str(skill.get("id") or "").strip()
+    if ("skill:%s" % sid) in installed:
+        return True
+    if not gate_initialized:
+        return bool(skill.get("enabled", True))
+    return False
+
+
+def builtin_store_item(skill: Dict[str, Any], installed: bool = False) -> Dict[str, Any]:
     """注册表技能 → 与市场条目同形的 item（前端按同一套字段渲染）。"""
     sid = str(skill.get("id") or "").strip()
     display = str(skill.get("name") or "").strip() or sid
@@ -254,11 +450,11 @@ def builtin_store_item(skill: Dict[str, Any]) -> Dict[str, Any]:
         "business_scenario": "",
         "search_terms": tags,
         "tags": tags,
-        "installed": True,          # 内置技能本来就在画布助手里
+        "installed": bool(installed),      # 真实安装态：必须在市场添加后才可用
         "builtin": True,
         "store_available": True,
         "store_visible": True,
-        "enabled": True,
+        "enabled": bool(skill.get("enabled", True)),
         "skill_type": str(skill.get("skill_type") or "system").strip() or "system",
         "builtin_pack": str(skill.get("builtin_pack") or "").strip(),
     }
@@ -266,9 +462,11 @@ def builtin_store_item(skill: Dict[str, Any]) -> Dict[str, Any]:
 
 def builtin_index() -> Dict[str, Dict[str, Any]]:
     """内置技能按 id 建索引，供目录合并与详情 / 安装 / 启动按名取整。"""
+    installed = load_installed()
+    gate_done = skills_gate_initialized()
     index = {}
     for skill in load_builtin_skills():
-        item = builtin_store_item(skill)
+        item = builtin_store_item(skill, builtin_installed(skill, installed, gate_done))
         index[item["name"]] = item
     return index
 
@@ -315,6 +513,16 @@ def build_catalog() -> Dict[str, Any]:
         item["installed"] = _installed_flag(str(item.get("kind") or ""), str(item.get("name") or ""), installed)
         item.setdefault("builtin", False)
         position[(str(item.get("kind") or ""), str(item.get("name") or ""))] = len(items)
+        items.append(item)
+    # 补充技能（RedSkill）并进来：与上游条目同名时不重复追加
+    for name, extra in load_extra_items().items():
+        key = ("skill", name)
+        if key in position:
+            continue
+        item = dict(extra)
+        item["installed"] = _installed_flag("skill", name, installed)
+        item["enabled"] = extra_skill_enabled(item)
+        position[key] = len(items)
         items.append(item)
     # 内置 / 系统技能并进来：同名条目整条换成注册表的（去重，以注册表为准）
     for entry in builtin_index().values():
@@ -448,7 +656,6 @@ DETAIL_UNAVAILABLE_REASON = "该应用详情由上游暂不提供"
 def builtin_detail(entry: Dict[str, Any]) -> Dict[str, Any]:
     """内置技能详情：市场字段 + 注册表里的技能信息（正文走 /api/skills/<id>/export）。"""
     item = dict(entry)
-    item["installed"] = True
     skill = {}
     try:
         skill = skills_registry.get_skill(str(item.get("name") or "")) or {}
@@ -467,6 +674,25 @@ def builtin_detail(entry: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
+def extra_skill_enabled(entry: Dict[str, Any]) -> bool:
+    """RedSkill 条目的真实可用态：装了且定义 enabled=true 才算启用（目录/详情同一口径）。"""
+    _path, definition = _find_definition_by_store_ref(store_skill_ref(entry))
+    return bool(definition.get("enabled", True)) if definition else False
+
+
+def extra_detail(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """RedSkill 补充条目详情：返回目录字段；装过之后补正文信息（正文在技能定义里）。"""
+    item = dict(entry)
+    item["installed"] = _installed_flag("skill", str(item.get("name") or ""), load_installed())
+    _path, definition = _find_definition_by_store_ref(store_skill_ref(item))
+    item["enabled"] = bool(definition.get("enabled", True)) if definition else False
+    prompt = str(definition.get("skill_prompt") or "") if definition else ""
+    item["has_skill_body"] = bool(prompt)
+    item["skill_body_chars"] = len(prompt)
+    item["skill_body_source"] = "store" if prompt else ""
+    return item
+
+
 def build_detail(kind: str, name: str) -> Dict[str, Any]:
     """详情：内置技能走注册表；市场条目上游 detail 优先，上游 404 时回退成 catalog 条目 + 降级标记。"""
     entry, builtin = _lookup(kind, name)
@@ -475,6 +701,8 @@ def build_detail(kind: str, name: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="商店条目不存在")
     if builtin:
         return builtin_detail(entry)
+    if extra_skill_entry(entry.get("name")):
+        return extra_detail(entry)
     detail = load_detail(kind, name)
     unavailable = not isinstance(detail, dict)
     item = dict(detail if not unavailable else entry)
@@ -694,6 +922,135 @@ def unregister_market_skill(entry: Dict[str, Any]) -> bool:
     return True
 
 
+def _add_installed(key: str) -> None:
+    keys = load_installed()
+    if key not in keys:
+        keys.append(key)
+        save_installed(keys)
+
+
+def _discard_installed(key: str) -> None:
+    keys = load_installed()
+    if key in keys:
+        save_installed([item for item in keys if item != key])
+
+
+# ---------------------------------------------------------------- 官方技能 / RedSkill 安装
+
+def _redskill_identifier(entry: Dict[str, Any]) -> str:
+    source = entry.get("source")
+    if not isinstance(source, dict):
+        return ""
+    if str(source.get("type") or "").strip().lower() != REDSKILL_SOURCE_TYPE:
+        return ""
+    return str(source.get("identifier") or "").strip()
+
+
+def install_builtin_skill(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """官方技能：只把 data/skills/<id>.json 的 enabled 置 true，不重建定义。"""
+    sid = str(entry.get("name") or "").strip()
+    definition = _read_definition(sid)
+    if not definition:
+        print("[Store] 内置技能 %s 的定义文件缺失，无法启用" % sid)
+        raise HTTPException(status_code=500, detail="技能定义缺失，请重启后重试：%s" % sid)
+    if not bool(definition.get("enabled", True)):
+        definition["enabled"] = True
+        _write_definition(sid, definition)
+    return {"installed": True, "builtin": True}
+
+
+def uninstall_builtin_skill(entry: Dict[str, Any]) -> bool:
+    """官方技能卸载：只停用、保留用户数据（不删 JSON）。"""
+    sid = str(entry.get("name") or "").strip()
+    definition = _read_definition(sid)
+    if not definition:
+        return False
+    if bool(definition.get("enabled", True)):
+        definition["enabled"] = False
+        _write_definition(sid, definition)
+    return True
+
+
+def install_redskill_skill(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """RedSkill 条目：取包 → _import_skill_md 入库 → 改中文名/分类/标签并启用。
+
+    已经装过（定义里 store_ref 命中）不重复取包，只重新启用，避免覆盖用户编辑。
+    """
+    ref = store_skill_ref(entry)
+    display = str(entry.get("display_name") or entry.get("name") or "").strip()
+    _path, definition = _find_definition_by_store_ref(ref)
+    fetched = None
+    if not definition:
+        identifier = _redskill_identifier(entry)
+        if not identifier:
+            raise HTTPException(status_code=400, detail="该条目缺少 RedSkill 技能标识")
+        from server.skills import redskill_install
+        try:
+            fetched = redskill_install.fetch_skill_bundle(identifier)
+        except redskill_install.RedSkillError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        markdown = str(fetched.get("markdown") or "")
+        try:
+            from server.skills import skill_md as skill_md_module
+            parsed = skill_md_module.parse_skill_md(markdown)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="RedSkill 技能包解析失败：%s" % exc)
+        sid = str(parsed.get("name") or "").strip()
+        if not sid or not skills_registry._ID_RE.match(sid):
+            raise HTTPException(status_code=502, detail="RedSkill 技能名不能作为技能 id：%s" % (sid or "<空>"))
+        existing = _read_definition(sid)
+        if existing and str(existing.get(STORE_REF_FIELD) or "") != ref:
+            raise HTTPException(status_code=409, detail="已经有同名技能「%s」，没有覆盖" % sid)
+        from server.routes.agents import _import_skill_md
+        try:
+            _import_skill_md(markdown, True)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="技能导入失败：%s" % exc)
+        definition = _read_definition(sid)
+        if not definition:
+            raise HTTPException(status_code=500, detail="技能导入后没有找到定义文件")
+    else:
+        sid = str(definition.get("id") or "").strip()
+    if not sid:
+        raise HTTPException(status_code=500, detail="技能 id 缺失，安装未完成")
+    definition["id"] = sid
+    definition["name"] = display or str(definition.get("name") or sid)
+    category = str(entry.get("category") or "").strip()
+    if category:
+        definition["category"] = category
+    tags = entry.get("tags")
+    if isinstance(tags, list):
+        definition["tags"] = [str(tag) for tag in tags if str(tag or "").strip()]
+    definition["enabled"] = True
+    definition["available"] = True
+    definition[STORE_REF_FIELD] = ref
+    if fetched is not None:
+        definition["store_source"] = {
+            "type": REDSKILL_SOURCE_TYPE,
+            "identifier": str(fetched.get("identifier") or ""),
+            "version": str(fetched.get("version") or ""),
+            "sha256": str(fetched.get("sha256") or ""),
+        }
+    _write_definition(sid, definition)
+    return {"installed": True, "skill_id": sid}
+
+
+def uninstall_redskill_skill(entry: Dict[str, Any]) -> bool:
+    """RedSkill 卸载：只置 enabled=false，保留文件（用户可能改过正文）。"""
+    _path, definition = _find_definition_by_store_ref(store_skill_ref(entry))
+    if not definition:
+        return False
+    sid = str(definition.get("id") or "").strip()
+    if not sid:
+        return False
+    if bool(definition.get("enabled", True)):
+        definition["enabled"] = False
+        _write_definition(sid, definition)
+    return True
+
+
 # ---------------------------------------------------------------- 路由
 
 @router.get("/catalog")
@@ -720,7 +1077,13 @@ def store_install(kind: str, item_id: str):
         _resolve(kind, item_id)       # 不存在的条目按统一文案 404
         raise HTTPException(status_code=404, detail="商店条目不存在")
     if builtin:
-        return {"installed": True, "builtin": True}
+        result = install_builtin_skill(entry)
+        _add_installed(store_skill_ref(entry))
+        return result
+    if extra_skill_entry(entry.get("name")):
+        result = install_redskill_skill(entry)
+        _add_installed(store_skill_ref(entry))
+        return result
     entry = _curate_item(entry, load_curation())
     if not entry["store_available"]:
         raise HTTPException(status_code=409, detail="该条目当前未开放")
@@ -750,7 +1113,13 @@ def store_uninstall(kind: str, item_id: str):
         _resolve(kind, item_id)
         raise HTTPException(status_code=404, detail="商店条目不存在")
     if builtin:
-        return {"installed": True, "builtin": True}
+        uninstall_builtin_skill(entry)
+        _discard_installed(store_skill_ref(entry))
+        return {"installed": False, "builtin": True}
+    if extra_skill_entry(entry.get("name")):
+        uninstall_redskill_skill(entry)
+        _discard_installed(store_skill_ref(entry))
+        return {"installed": False}
     key = "%s:%s" % (kind, entry.get("name"))
     if str(entry.get("kind") or "") == "skill":
         try:

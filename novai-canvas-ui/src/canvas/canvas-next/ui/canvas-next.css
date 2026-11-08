@@ -380,6 +380,14 @@
 .cn-root .draft-row .sp{flex:1}
 .cn-root .draft-row:hover:not(:disabled) .t{color:var(--hi)}
 .cn-root .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px}
+/* GIF 帧参数（输出格式 = GIF 时才出现）：数值控件沿用 sunken 底、不加边框 */
+.cn-root .gif-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 10px}
+.cn-root .gif-row .lbl{font-size:12px;color:var(--fg2)}
+.cn-root .gif-row .val{display:flex;align-items:center;gap:6px}
+.cn-root .gif-row input[type=number]{width:64px;padding:5px 6px;border-radius:8px;background:var(--sunken);border:0;color:var(--fg);font-size:12px;text-align:center}
+.cn-root .gif-row input[type=number]:disabled{opacity:.5}
+.cn-root .gif-row .unit{font-size:11px;color:var(--fg3);white-space:nowrap}
+.cn-root .gif-tip{padding:4px 10px 8px;font-size:11px;color:var(--fg3);line-height:1.5}
 .cn-root .sw{width:36px;height:20px;border-radius:10px;background:var(--s4);position:relative;flex:none}
 .cn-root .sw:after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:var(--hi);transition:transform .2s var(--ease)}
 .cn-root .sw.on{background:var(--solid)}

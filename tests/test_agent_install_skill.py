@@ -64,6 +64,26 @@ class AgentInstallSkillTests(unittest.TestCase):
         self.assertEqual(body["skill"]["id"], "github-test-skill")
         fetch.assert_called_once_with("https://github.com/acme/tools", path="", ref="")
 
+    def test_copy_mentions_https_direct_links(self):
+        preview = main._agent_tool_install_skill_preview({"url": "https://redskill.xiaohongshu.net/install.md"})
+        self.assertIn("SKILL.md", preview["title"])
+        self.assertNotIn("从 GitHub 安装技能", preview["title"])
+        with self.assertRaises(main.AgentToolError) as ctx:
+            main._agent_tool_install_skill_validate({"url": ""})
+        self.assertIn("HTTPS", str(ctx.exception))
+
+    @mock.patch("server.routes.agents.github_install.fetch_skill_markdown",
+                return_value=dict(FETCHED, markdown="这不是 SKILL.md，只是一段普通文本"))
+    def test_direct_link_without_frontmatter_is_reported_readably(self, _fetch):
+        async def go():
+            return await main.agent_execute_step("install_skill", {
+                "url": "https://redskill.xiaohongshu.net/install.md",
+            })
+        result = asyncio.run(go())
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["code"], "skill_import_failed")
+        self.assertIn("该地址返回的不是合法 SKILL.md", result["error"])
+
     @mock.patch("server.routes.agents.github_install.fetch_skill_markdown", return_value=FETCHED)
     def test_agent_installs_and_activates(self, fetch):
         async def go():

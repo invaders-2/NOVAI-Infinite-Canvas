@@ -2,13 +2,13 @@
 """应用市场并入内置技能 + 「添加到助手」真正写进技能注册表。
 
 覆盖：
-  1. catalog：83 条市场条目之外并入注册表的系统 / 内置技能（builtin=true、installed=true、计数自洽）；
+  1. catalog：83 条市场条目之外并入注册表的系统 / 内置技能（builtin=true、默认 installed=false、计数自洽）；
   2. 去重：同名条目整条以注册表为准，不会出现两条；
   3. 容错：注册表读取异常时 catalog / 详情照常返回（内置技能本次缺席），不 500；
   4. 详情：内置技能返回 {item, detail}，正文标记来自注册表；
   5. install：市场技能写进 <DATA_DIR>/skills/<id>.json，/api/skills 立刻能看到、能导出；uninstall 后消失；
   6. 不误删用户自有技能：同名用户技能不被覆盖，卸载也不会删它；
-  7. 内置技能 install 幂等返回 {installed:true, builtin:true}，DELETE 不会真的卸掉。
+  7. 官方技能 install 把 enabled 置 true 并记安装标记，DELETE 只停用、保留定义文件（不删用户数据）。
 
 用临时数据目录（NOVAI_DATA_DIR）隔离，不碰日常数据。
 """
@@ -85,11 +85,19 @@ def write_json(path, data):
         json.dump(data, fh, ensure_ascii=False, indent=2)
 
 
+def set_skill_enabled(skill_id, enabled):
+    path = skill_file(skill_id)
+    raw = read_json(path)
+    raw["enabled"] = enabled
+    write_json(path, raw)
+
+
 class CatalogBuiltinSkillTests(unittest.TestCase):
 
     def setUp(self):
         self.c = client()
         store.save_installed([])
+        store.ensure_skills_gate()
         self.data = self.c.get("/api/store/catalog").json()
 
     def test_market_items_are_untouched_plus_builtin(self):
@@ -105,11 +113,12 @@ class CatalogBuiltinSkillTests(unittest.TestCase):
         for item in builtin:
             self.assertEqual(item["kind"], "skill")
             self.assertTrue(item["display_name"])
-            self.assertTrue(item["installed"])
+            # 官方技能默认不可用：market 的 installed 反映真实状态（没有安装标记就是 false）
+            self.assertFalse(item["installed"])
             self.assertTrue(item["store_visible"])
             self.assertTrue(item["store_available"])
-            self.assertTrue(item["enabled"])
-            self.assertEqual(item["cover_url"], "")
+            self.assertFalse(item["enabled"])
+            self.assertTrue(item["cover_url"] == "" or item["cover_url"].startswith("/static/store/covers/"))
 
     def test_builtin_skills_are_in_visible_counts(self):
         visible = [item for item in self.data["items"] if item["store_visible"]]
@@ -156,6 +165,8 @@ class BuiltinSkillDetailTests(unittest.TestCase):
     def setUp(self):
         self.c = client()
         store.save_installed([])
+        store.ensure_skills_gate()
+        set_skill_enabled(BUILTIN_ID, False)
 
     def test_detail_returns_item_and_registry_meta(self):
         body = self.c.get("/api/store/items/skill/%s" % BUILTIN_ID).json()
@@ -163,7 +174,7 @@ class BuiltinSkillDetailTests(unittest.TestCase):
         item = body["item"]
         self.assertTrue(item["builtin"])
         self.assertEqual(item["display_name"], BUILTIN_DISPLAY)
-        self.assertTrue(item["installed"])
+        self.assertFalse(item["installed"])
         self.assertTrue(item["has_skill_body"])
         self.assertGreater(item["skill_body_chars"], 100)
         self.assertEqual(item["skill_body_source"], "registry")
@@ -267,14 +278,27 @@ class BuiltinSkillInstallTests(unittest.TestCase):
     def setUp(self):
         self.c = client()
         store.save_installed([])
+        store.ensure_skills_gate()
+        set_skill_enabled(BUILTIN_ID, False)
 
-    def test_install_is_idempotent_and_stays_installed(self):
+    def _skills(self):
+        return {skill["id"]: skill for skill in self.c.get("/api/skills").json()["skills"]}
+
+    def test_install_enables_skill_and_uninstall_disables_it(self):
         url = "/api/store/items/skill/%s/install" % BUILTIN_ID
+        self.assertFalse(self._skills()[BUILTIN_ID]["enabled"])
         self.assertEqual(self.c.post(url).json(), {"installed": True, "builtin": True})
-        self.assertEqual(self.c.post(url).json(), {"installed": True, "builtin": True})
-        self.assertEqual(store.load_installed(), [])            # 内置技能不写安装记录
-        self.assertEqual(self.c.delete(url).json(), {"installed": True, "builtin": True})
-        self.assertIn(BUILTIN_ID, [skill["id"] for skill in self.c.get("/api/skills").json()["skills"]])
+        self.assertEqual(store.load_installed(), ["skill:%s" % BUILTIN_ID])
+        self.assertTrue(self._skills()[BUILTIN_ID]["enabled"])
+        catalog = self.c.get("/api/store/catalog").json()["items"]
+        self.assertTrue(next(i for i in catalog if i["name"] == BUILTIN_ID)["installed"])
+        self.assertEqual(self.c.post(url).json(), {"installed": True, "builtin": True})   # 幂等
+        self.assertEqual(store.load_installed(), ["skill:%s" % BUILTIN_ID])
+
+        self.assertEqual(self.c.delete(url).json(), {"installed": False, "builtin": True})
+        self.assertEqual(store.load_installed(), [])
+        self.assertFalse(self._skills()[BUILTIN_ID]["enabled"])
+        self.assertTrue(os.path.isfile(skill_file(BUILTIN_ID)))   # 只停用，不删用户数据
 
 
 class BuiltinSkillLaunchTests(unittest.TestCase):

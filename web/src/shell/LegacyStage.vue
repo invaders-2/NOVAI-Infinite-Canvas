@@ -96,7 +96,7 @@ onBeforeUnmount(() => {
 <template>
     <div class="ls">
         <iframe v-for="p in legacy" :key="p.id" :id="'frame-' + p.id" class="ls-frame" :class="{ 'is-on': state.active === p.id && (p.id !== 'canvas' || state.canvasOpen) }"
-                :title="p.label" allow="clipboard-read; clipboard-write; fullscreen" @load="onLoad(p.id)"></iframe>
+                :title="p.label" allow="clipboard-read; clipboard-write; fullscreen; microphone" @load="onLoad(p.id)"></iframe>
         <div v-if="loading[state.active] && (state.active !== 'canvas' || state.canvasOpen)" class="ls-skel" aria-hidden="true">
             <div class="nv-skel" style="width: 42%; height: 34px"></div>
             <div class="nv-skel" style="width: 62%; height: 12px; margin-top: 18px"></div>

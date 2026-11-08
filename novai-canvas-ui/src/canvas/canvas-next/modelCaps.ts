@@ -5,7 +5,7 @@
  *   - n_max 只是批量张数上限，batch 必须按需求展开成 [1..min(n_max, 8)]；
  *   - 视频 modes 可能是接口值（text_to_video），统一翻译成 VMODES 的中文名。
  */
-import { VMODES } from "./model";
+import { GIF_FRAME_FALLBACK, VMODES, type GifFrameSpec } from "./model";
 
 export type ModelCapsItem = {
   provider?: string;
@@ -28,6 +28,8 @@ export type ModelCapsItem = {
   thinking_mode?: unknown;
   /** 输出格式（png / jpeg / webp / gif / svg）；没声明 = 后端没给这个能力 */
   output_formats?: unknown;
+  /** GIF 帧参数 { min, max, default, durationDefault }；旧后端没这个字段 → 前端用兜底 */
+  gif_frames?: unknown;
   /** 只返回提示词、不产视频（如 MiniMax-H3-Context-IR）：true 时面板不给视频参数 */
   prompt_only?: unknown;
   /** Midjourney 专属参数：{ versions, speeds, hd }（后端只给这几个数组） */
@@ -72,6 +74,23 @@ export function clampImageSize(size: string, limits: SizeLimits): { size: string
 
 const VIDEO_MODE_BY_API = new Map(Object.entries(VMODES).map(([label, value]) => [value.api, label]));
 const AUTO_RATIO = /^(auto|adaptive|自动|自适应)$/i;
+
+/** 能力表里的 GIF 帧参数：缺字段 / 脏值一律落到兜底 2–16 / 默认 9 / 200ms（面板控件不因此消失） */
+export function normalizeGifFrames(value: unknown): GifFrameSpec {
+  const row = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const num = (raw: unknown) => {
+    const parsed = Math.floor(Number(raw));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  };
+  const min = Math.max(2, num(row.min) || GIF_FRAME_FALLBACK.min);
+  const max = Math.max(min, num(row.max) || GIF_FRAME_FALLBACK.max);
+  return {
+    min,
+    max,
+    default: Math.max(min, Math.min(max, num(row.default) || GIF_FRAME_FALLBACK.default)),
+    durationDefault: num(row.durationDefault) || GIF_FRAME_FALLBACK.durationDefault,
+  };
+}
 
 /** Midjourney 规格：{ versions, speeds, hd }；缺哪个就空着，前端不猜取值 */
 export function normalizeMjSpec(value: unknown): { versions: string[]; speeds: string[]; hd: string[] } | null {
@@ -141,7 +160,11 @@ export function modelCapsUi(kind: "image" | "video", item: ModelCapsItem | null 
     if (Array.isArray(item.qualities)) ui.qualities = strings(item.qualities);
     if (item.thinking_mode === true) ui.thinkingMode = true;
     // 输出格式：空数组也保留（后端明确没有动图/矢量能力），面板据此不给入口
-    if (Array.isArray(item.output_formats)) ui.outputFormats = [...new Set(strings(item.output_formats).map((value) => value.toLowerCase()))];
+    if (Array.isArray(item.output_formats)) {
+      ui.outputFormats = [...new Set(strings(item.output_formats).map((value) => value.toLowerCase()))];
+      // 声明了 gif 就一定带帧参数：旧后端没下发 gif_frames 时用兜底，面板照常显示 2–16 / 9 / 200
+      if ((ui.outputFormats as string[]).includes("gif") || item.gif_frames !== undefined) ui.gifFrames = normalizeGifFrames(item.gif_frames);
+    }
   } else {
     if (Array.isArray(item.resolutions)) ui.res = resolutions(item.resolutions, kind);
     if (Array.isArray(item.durations)) {

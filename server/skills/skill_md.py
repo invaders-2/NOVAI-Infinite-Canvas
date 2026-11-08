@@ -16,6 +16,8 @@
     正文（技能的完整说明，导入后作为 skill_prompt）
 
 这里只实现 YAML 的一个安全子集：顶层 key: value、一层嵌套 map、字符串数组、| / > 块标量。
+不认识的顶层字段整段忽略（SKILL.md 里常见的 version / author 等不能被当成错误），
+但已知字段的格式、必填与结构错误照常报可读错误。
 不引 PyYAML（零新依赖），也不执行任何代码。
 
 Python 3.9 约束：注解用 Optional/Dict/List，禁止 X | Y 联合写法。
@@ -112,9 +114,13 @@ def _parse_yaml_subset(text: str) -> Dict[str, Any]:
         rest = rest.strip()
         if not sep or not KEY_RE.match(key):
             raise SkillMdError("frontmatter 第 %d 行不是 key: value：%s" % (index + 1, raw.strip()[:60]))
-        if key not in _ALLOWED_KEYS:
-            raise SkillMdError("frontmatter 不支持字段 %r（可用：%s）" % (key, "、".join(_ALLOWED_KEYS)))
         index += 1
+        if key not in _ALLOWED_KEYS:
+            # 未知顶层字段整段跳过（标量 / 块标量 / 数组 / 嵌套 map 都一样）：
+            # 现实里的 SKILL.md 常带 version、author，不能因为不认识就拒绝安装
+            while index < len(lines) and (not lines[index].strip() or lines[index][:1] in " \t"):
+                index += 1
+            continue
         if rest in ("|", ">", "|-", ">-", "|+", ">+"):
             block: List[str] = []
             while index < len(lines) and (not lines[index].strip() or lines[index][:1] in " \t"):

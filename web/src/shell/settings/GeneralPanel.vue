@@ -1,6 +1,6 @@
 <script setup>
-// 通用：窗口行为 / 启动 / 数据目录 / 存储与缓存 / 视频口播转写 / 更新
-// 视频口播转写是本次新增卡（旧外壳 /legacy 的设置弹窗没有这一项）
+// 通用：窗口行为 / 启动 / 数据目录 / 存储与缓存 / 语音转写 / 更新
+// 语音转写是本次新增卡（旧外壳 /legacy 的设置弹窗没有这一项）
 import { ref, reactive, computed, onMounted } from 'vue';
 import SetCard from './SetCard.vue';
 import SetRow from './SetRow.vue';
@@ -93,7 +93,7 @@ async function resetOutput() {
     } catch (e) { toast('恢复失败：' + ((e && e.message) || ''), { danger: true, icon: 'alert' }); }
 }
 
-/* 视频口播转写（ASR）：平台与模型都由用户选，不写死；选中即保存 */
+/* 语音转写（ASR）：视频口播和画布助手语音输入共用；平台与模型都由用户选，不写死；选中即保存 */
 const asr = reactive({ provider: '', model: '', source: 'none' });
 const asrProviders = ref([]);
 const asrReady = ref(false);
@@ -111,7 +111,7 @@ const ASR_SOURCE = {
     env: { label: '环境变量', text: '当前由环境变量 NOVAI_ASR_PROVIDER / NOVAI_ASR_MODEL 覆盖，这里的界面选择暂不生效。' },
     user: { label: '界面设置', text: '当前使用这里选择的平台与模型。' },
     config: { label: '配置文件', text: '当前由 config/capability_inputs.json 的 video.asr 指定。' },
-    none: { label: '未启用', text: '当前未启用：视频口播转写会如实报告不可用。' },
+    none: { label: '未启用', text: '当前未启用：视频口播转写会如实报告不可用；画布助手语音输入跟随画布助手模型。' },
 };
 const asrSource = computed(() => ASR_SOURCE[asr.source] || ASR_SOURCE.none);
 async function refreshAsr() {
@@ -136,7 +136,7 @@ async function saveAsr(provider, model) {
         asr.provider = String((d && d.provider) || '');
         asr.model = String((d && d.model) || '');
         asr.source = String((d && d.source) || 'none');
-        toast(provider && model ? '已保存视频口播转写平台与模型' : '已关闭视频口播转写', { icon: 'check' });
+        toast(provider && model ? '已保存语音转写平台与模型' : '已关闭语音转写', { icon: 'check' });
     } catch (e) {
         toast('保存失败：' + ((e && e.message) || '接口不可用'), { danger: true, icon: 'alert' });
         refreshAsr();
@@ -387,10 +387,10 @@ onMounted(() => {
                 <NvSwitch :model-value="network.skip_ssl_verify" label="跳过 SSL 校验" @update:model-value="v => saveNetwork('skip_ssl_verify', v)" />
             </SetRow>
         </SetCard>
-        <SetCard title="视频口播转写" desc="视频能力运行时用哪个平台与模型把口播转成文字；不启用则如实报告不可用。">
+        <SetCard title="语音转写（口播 / 语音输入）" desc="视频口播和画布助手的语音输入都用这里的平台与模型把录音转成文字；未选择时跟随画布助手模型。">
             <SetRow label="转写平台" desc="只列出已配置且含对话模型的平台">
                 <span class="asr-sel">
-                    <select :value="asr.provider" :disabled="!asrReady || asrSaving" aria-label="视频口播转写平台" @change="pickAsrPlatform($event.target.value)">
+                    <select :value="asr.provider" :disabled="!asrReady || asrSaving" aria-label="语音转写平台" @change="pickAsrPlatform($event.target.value)">
                         <option value="">不启用</option>
                         <option v-for="p in asrPlatforms" :key="p.id" :value="p.id">{{ p.name }}</option>
                     </select>
@@ -399,7 +399,7 @@ onMounted(() => {
             </SetRow>
             <SetRow label="转写模型" desc="该平台的对话模型；换平台时自动切到第一个可用模型">
                 <span class="asr-sel">
-                    <select :value="asr.model" :disabled="!asr.provider || !asrReady || asrSaving" aria-label="视频口播转写模型" @change="pickAsrModel($event.target.value)">
+                    <select :value="asr.model" :disabled="!asr.provider || !asrReady || asrSaving" aria-label="语音转写模型" @change="pickAsrModel($event.target.value)">
                         <option value="" disabled>请选择模型</option>
                         <option v-for="m in asrModelOptions" :key="m" :value="m">{{ m }}</option>
                     </select>

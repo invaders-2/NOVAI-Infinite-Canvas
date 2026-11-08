@@ -34,6 +34,7 @@ export function normalizeItem(raw) {
         marketingLine: neutralText(item.marketing_line || item.marketingLine || ''),
         // 上游数据里有 12 条封面还是上游站内路径（/app-store/...），本地没有这些文件：只认已本地化的 /static/ 地址，否则退到海报图
         coverUrl: localCover(item.cover_url || item.coverUrl) || localCover(item.cover_poster_url),
+        posterUrl: localCover(item.cover_poster_url || item.coverPosterUrl) || localCover(item.cover_url || item.coverUrl),
         coverVideoUrl: localCover(item.cover_video_url || item.coverVideoUrl),
         iconUrl: str(item.icon_url || item.iconUrl || ''),
         icon: str(item.icon || ''),

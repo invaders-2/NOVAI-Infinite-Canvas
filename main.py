@@ -381,6 +381,13 @@ async def startup_event():
         _start_lan_discovery()
     except Exception as exc:
         print(f"[LAN] 局域网自动发现启动失败（不影响使用）: {exc}")
+    # 应用市场技能闸门（一次性迁移）：官方技能默认不可用，必须先在市场添加。
+    # 迁移失败只记日志，不影响启动；下次访问市场还会重试。
+    try:
+        from server.routes.store import ensure_skills_gate as _ensure_store_skills_gate
+        await asyncio.to_thread(_ensure_store_skills_gate)
+    except Exception as exc:
+        print(f"[Store] 技能闸门迁移失败（不影响启动）: {exc}")
 
 @app.websocket("/ws/stats")
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
@@ -4079,6 +4086,11 @@ class OnlineImageRequest(BaseModel):
     # 输出格式（GPT Image 2.6 家族支持 png/jpeg/webp/gif/svg）：'' = 平台默认静态图；
     # 只有能力表声明 output_formats 的模型才接受，校验见 image_output_format_fields。
     output_format: str = ""
+    # GIF 帧参数（仅 APIMart gpt-image-2.6 家族；0 = 未指定，按能力表默认 9 帧 / 200ms）
+    frame_count: int = 0
+    frame_duration_ms: int = 0
+    # SVG 输出的文本模型（上游 svg.model 必填，按该文本模型 token 计费）；'' = 能力表默认 gpt-5.4-mini
+    svg_model: str = ""
     reference_images: List[AIReference] = []
 
 class ImageTaskQueryRequest(BaseModel):
@@ -13424,6 +13436,144 @@ def gpt_image_2_size_exceeds_supported(size):
     width, height = parse_size_pair(size)
     return bool(width and height and (max(width, height) > GPT_IMAGE2_MAX_EDGE or width * height > GPT_IMAGE2_MAX_PIXELS))
 
+# GIF 输出（APIMart gpt-image-2.6 家族）的上游规则：size 是「每帧」像素，frame_count 默认 9，
+# 各帧拼成整版提交，整版必须 ≤3840 单边、≤829 万像素、比例 ≤3:1，否则提交即 400 invalid_size。
+GIF_FRAME_COUNT_MIN = 2
+GIF_FRAME_COUNT_MAX = 16
+GIF_FRAME_COUNT_DEFAULT = 9
+GIF_FRAME_DURATION_DEFAULT = 200
+GIF_FRAME_DURATION_MIN = 20
+GIF_FRAME_EDGE_STEP = 16
+GIF_FRAME_MIN_EDGE = 64
+
+def gif_frame_layout(frame_count, frame_ratio=1.0):
+    """帧拼版行列：2–8 帧 4x2、9 帧 3x3、10–12 帧 4x3、13–16 帧 4x4。
+    行列可互换，两种朝向都试，取整版四约束下每帧允许面积更大的那种。"""
+    try:
+        count = int(frame_count or 0)
+    except (TypeError, ValueError):
+        count = 0
+    count = max(GIF_FRAME_COUNT_MIN, min(count, GIF_FRAME_COUNT_MAX))
+    if count <= 8:
+        base = (4, 2)
+    elif count == 9:
+        base = (3, 3)
+    elif count <= 12:
+        base = (4, 3)
+    else:
+        base = (4, 4)
+    ratio = float(frame_ratio or 1.0)
+    return max((base, (base[1], base[0])),
+               key=lambda pair: _gif_frame_area(pair[0], pair[1], ratio))
+
+def _gif_frame_area(cols, rows, frame_ratio):
+    """该朝向在整版约束下允许的每帧最大面积（连续值）；比例装不进整版时为 0。"""
+    if cols <= 0 or rows <= 0 or frame_ratio <= 0:
+        return 0.0
+    sheet_ratio = (cols / float(rows)) * frame_ratio
+    if sheet_ratio > 3 or sheet_ratio < 1 / 3.0:
+        return 0.0
+    width = min(
+        GPT_IMAGE2_MAX_EDGE / float(cols),
+        GPT_IMAGE2_MAX_EDGE / float(rows) * frame_ratio,
+        math.sqrt(GPT_IMAGE2_MAX_PIXELS / float(cols * rows) * frame_ratio),
+    )
+    return width * width / frame_ratio
+
+def max_gif_frame_size(width, height, frame_count):
+    """整版四约束下每帧能取到的最大像素：保持宽高比，两边 16 的倍数、不小于 64。"""
+    width = max(1, int(width or 0))
+    height = max(1, int(height or 0))
+    ratio = width / float(height)
+    cols, rows = gif_frame_layout(frame_count, ratio)
+    if _gif_frame_area(cols, rows, ratio) <= 0:
+        # 比例超出该拼版能装下的区间：先夹到 3:1~1:3（3x3/4x4 的硬边界）再算
+        ratio = min(3.0, max(1 / 3.0, ratio))
+        cols, rows = gif_frame_layout(frame_count, ratio)
+    height_limit = max(GIF_FRAME_MIN_EDGE,
+                       (GPT_IMAGE2_MAX_EDGE // rows) // GIF_FRAME_EDGE_STEP * GIF_FRAME_EDGE_STEP)
+    width_limit = max(GIF_FRAME_MIN_EDGE, min(
+        GPT_IMAGE2_MAX_EDGE / float(cols),
+        GPT_IMAGE2_MAX_EDGE / float(rows) * ratio,
+        math.sqrt(GPT_IMAGE2_MAX_PIXELS / float(cols * rows) * ratio),
+    ))
+    start = int(width_limit / GIF_FRAME_EDGE_STEP + 0.5) * GIF_FRAME_EDGE_STEP
+    for strict in (True, False):
+        for step in range(0, 512):
+            frame_width = start - step * GIF_FRAME_EDGE_STEP
+            if frame_width < GIF_FRAME_MIN_EDGE:
+                break
+            frame_height = max(GIF_FRAME_MIN_EDGE, min(
+                int(round(frame_width / ratio / GIF_FRAME_EDGE_STEP)) * GIF_FRAME_EDGE_STEP,
+                height_limit))
+            if cols * frame_width > GPT_IMAGE2_MAX_EDGE or rows * frame_height > GPT_IMAGE2_MAX_EDGE:
+                continue
+            if cols * rows * frame_width * frame_height > GPT_IMAGE2_MAX_PIXELS:
+                continue
+            sheet_ratio = (cols * frame_width) / float(rows * frame_height)
+            if sheet_ratio > 3 or sheet_ratio < 1 / 3.0:
+                continue
+            if strict and abs((frame_width / float(frame_height)) / ratio - 1) > 0.009:
+                continue
+            return frame_width, frame_height
+    return (max(GIF_FRAME_MIN_EDGE, width_limit // GIF_FRAME_EDGE_STEP * GIF_FRAME_EDGE_STEP),
+            max(GIF_FRAME_MIN_EDGE, height_limit // GIF_FRAME_EDGE_STEP * GIF_FRAME_EDGE_STEP))
+
+def gif_ratio_frame_pixels(ratio):
+    """比例名 -> 参考每帧像素：先走对话页比例表，表外按整数比 ×128 展开。"""
+    options = CHAT_RATIO_SIZE_OPTIONS.get(str(ratio or "").strip().lower())
+    if options:
+        return options[0]
+    match = re.fullmatch(r"\s*(\d+)\s*[:x]\s*(\d+)\s*", str(ratio or "").strip().lower())
+    if not match:
+        return ""
+    left, right = int(match.group(1)), int(match.group(2))
+    if left <= 0 or right <= 0:
+        return ""
+    return f"{left * 128}x{right * 128}"
+
+def normalize_gif_frame_size(size, frame_count=GIF_FRAME_COUNT_DEFAULT):
+    """GIF 每帧尺寸：空/auto -> 512x512；比例名先换算成像素；再按整版上限收敛（已合法就原样保留）。"""
+    raw = str(size or "").strip().lower()
+    if not raw or raw == "auto":
+        return "512x512"
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        width, height = parse_size_pair(gif_ratio_frame_pixels(raw))
+        if not width or not height:
+            return "512x512"
+    width = max(GIF_FRAME_MIN_EDGE, width // GIF_FRAME_EDGE_STEP * GIF_FRAME_EDGE_STEP)
+    height = max(GIF_FRAME_MIN_EDGE, height // GIF_FRAME_EDGE_STEP * GIF_FRAME_EDGE_STEP)
+    max_width, max_height = max_gif_frame_size(width, height, frame_count)
+    if width <= max_width and height <= max_height:
+        return f"{width}x{height}"
+    return f"{max_width}x{max_height}"
+
+def gif_frame_count(value, caps_gif=None):
+    """帧数夹在能力表范围（默认 2–16）；未指定走默认（默认 9 帧）。"""
+    caps_gif = caps_gif if isinstance(caps_gif, dict) else {}
+    try:
+        count = int(value or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if not count:
+        count = int(caps_gif.get("default") or GIF_FRAME_COUNT_DEFAULT)
+    low = int(caps_gif.get("min") or GIF_FRAME_COUNT_MIN)
+    high = int(caps_gif.get("max") or GIF_FRAME_COUNT_MAX)
+    return max(low, min(count, high))
+
+def gif_frame_duration(value, caps_gif=None):
+    """帧间隔毫秒：未指定走默认 200；最小 20，按 10ms 取整。"""
+    caps_gif = caps_gif if isinstance(caps_gif, dict) else {}
+    try:
+        duration = int(value or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    if not duration:
+        duration = int(caps_gif.get("durationDefault") or GIF_FRAME_DURATION_DEFAULT)
+    duration = int(duration / 10.0 + 0.5) * 10
+    return max(GIF_FRAME_DURATION_MIN, duration)
+
 # APIMart 官方「size × resolution → 实际像素」映射表（docs.apimart.ai gpt-image-2 generation）。
 # 档位是独立参数，不能按长边/像素阈值反推：官方表里的像素一律还原成官方档位，表外像素才退回旧口径。
 APIMART_ASPECT_RATIOS = [
@@ -13564,6 +13714,8 @@ def is_apimart_official_image_model(model=""):
 #   * gpt-image-2.6 例外：ext 与 flare/sunburst 能力不同（ext 只 1k、n 仅 1；flare/sunburst 1k/2k/4k、n 1–4），
 #     所以 2.6 拆成三条独立条目，靠「最长 key 命中」保证不会落到 "gpt-image-2" 老家族表。
 # 结论：flare/sunburst 不是漏表，是「同家族多版本」；上游文档若给出差异能力，才在这里单独加条目。
+# SVG 输出的文本模型（上游 svg.model 必填，按该文本模型的 token 计费）：文档举例 gpt-5.4-mini / gpt-5.6-sol。
+APIMART_SVG_DEFAULT_MODEL = "gpt-5.4-mini"
 APIMART_IMAGE_MODEL_CAPS = {
     # GPT-Image-2 家族共用上游文档的像素上限（长边 3840 / 总像素约 829 万 / 最低 655360）：
     # 精确像素请求（exact_size）也按它收敛，否则 4K 16:9 的 4096x2304 会被上游直接 400 拒掉。
@@ -13595,6 +13747,8 @@ APIMART_IMAGE_MODEL_CAPS = {
         "ref_max": 16, "qualities": ("auto", "low", "medium", "high", "xhigh", "max"),
         "quality_levels_documented": True, "official_fallback": False,
         "output_formats": ("png", "jpeg", "webp", "svg", "gif"),
+        "gif_frames": {"min": 2, "max": 16, "default": 9, "durationDefault": 200},
+        "svg": {"model": APIMART_SVG_DEFAULT_MODEL},
     },
     "gpt-image-2-6-flare": {
         # 文档确证：auto + 15 个比例；分辨率 1k/2k/4k；quality 6 档；n 1–4；
@@ -13605,6 +13759,8 @@ APIMART_IMAGE_MODEL_CAPS = {
         "mask_url": True, "base64_refs": True, "ref_max": 16,
         "qualities": ("auto", "low", "medium", "high", "xhigh", "max"), "official_fallback": False,
         "output_formats": ("png", "jpeg", "webp", "svg", "gif"),
+        "gif_frames": {"min": 2, "max": 16, "default": 9, "durationDefault": 200},
+        "svg": {"model": APIMART_SVG_DEFAULT_MODEL},
         "max_long_edge": 3840, "max_pixels": 8294400, "min_pixels": 655360,
     },
     "gpt-image-2-6-sunburst": {
@@ -13614,6 +13770,8 @@ APIMART_IMAGE_MODEL_CAPS = {
         "mask_url": True, "base64_refs": True, "ref_max": 16,
         "qualities": ("auto", "low", "medium", "high", "xhigh", "max"), "official_fallback": False,
         "output_formats": ("png", "jpeg", "webp", "svg", "gif"),
+        "gif_frames": {"min": 2, "max": 16, "default": 9, "durationDefault": 200},
+        "svg": {"model": APIMART_SVG_DEFAULT_MODEL},
         "max_long_edge": 3840, "max_pixels": 8294400, "min_pixels": 655360,
     },
     # muse-image-ext：文档只给了 aspect_ratio/size/n/webhook/language + ≤9 张参考图，
@@ -13868,6 +14026,19 @@ def apimart_output_format_fields(model, caps, output_format, n=1, has_refs=False
     return fields
 
 
+def apimart_svg_model(caps=None, override=""):
+    """SVG 请求的文本模型（上游 svg.model 必填）：payload 覆盖 > 能力表默认 > 常量默认。"""
+    value = str(override or "").strip()
+    if value:
+        return value
+    svg = caps.get("svg") if isinstance(caps, dict) else None
+    if isinstance(svg, dict):
+        value = str(svg.get("model") or "").strip()
+        if value:
+            return value
+    return APIMART_SVG_DEFAULT_MODEL
+
+
 def image_output_extension(mime_type="", url=""):
     """落盘扩展名：MIME 优先，缺失/octet-stream 时按 URL 扩展名兜底，都不认识回退 .png。"""
     mime = str(mime_type or "").strip().lower()
@@ -14088,6 +14259,32 @@ def friendly_image_error_detail(text, size="", model=""):
     if looks_like_html_response(text):
         return ("上游返回的是网关的 HTML 错误页，不是生图接口的正常响应（常见于中转站网关临时故障或请求被拦）。"
                 "请稍后重试；若反复出现，减少参考图数量或换更小的参考图。")
+    # GIF 的 400 来自「帧拼版整张图」超限，不是静态图的像素上限，别让下面的 GPT 尺寸分支把它吞掉。
+    gif_sheet_error = (
+        ("gif" in lower_text and any(token in lower_text for token in ("sheet", "frame")))
+        or (("invalid_size" in lower_text or "invalid size" in lower_text)
+            and any(token in lower_text for token in ("frame_count", "sheet")))
+    )
+    if gif_sheet_error:
+        return ("GIF 输出有帧拼版上限：帧数×每帧尺寸合成的整张图必须 ≤3840 单边、≤829 万像素（9 帧 3x3）。"
+                "请减小每帧尺寸或减少帧数；512x512 支持 2–16 帧。")
+    # SVG：账号按张固定计费时不支持 SVG；缺 svg.model 是上游文本模型参数问题，别被下面的尺寸分支吞掉。
+    svg_fixed_pricing = (
+        "svg" in lower_text
+        and any(token in lower_text for token in (
+            "fixed price", "fixed-price", "fixed pricing", "per-image pricing", "per image pricing",
+            "pay-per-image", "pay per image", "按张计费", "固定计费", "固定按张"))
+    )
+    if svg_fixed_pricing:
+        return ("当前 APIMart 账号是固定按张计费，暂不支持 SVG 矢量输出；"
+                "可改用静态图，或到平台上换成按量 token 计费的账号。")
+    svg_model_error = (
+        "svg" in lower_text
+        and any(token in lower_text for token in ("svg.model", "svg_model", "requires svg"))
+    )
+    if svg_model_error:
+        return ("SVG 输出需要上游指定的文本模型参数 svg.model（例如 gpt-5.4-mini，按该模型的文本 token 计费）。"
+                "这是上游文本模型参数问题，不是尺寸问题：请补上 svg.model，或改用静态图。")
     if is_gpt_image_2_model(model) and gpt_image_2_size_exceeds_supported(size):
         return gpt_image_2_size_error_message(size)
     mentions_size = any(token in lower_text for token in ["size", "resolution", "dimension"])
@@ -16230,11 +16427,11 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {**{"videos": local_urls, "task_id": task_id, "raw": result}, **build_canvas_meta(local_urls, payload, "video")}
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format=""):
+async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model=""):
     async with provider_slot(get_api_provider(provider_id)):
-        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out, n, midjourney_version, midjourney_hd, thinking_mode, output_format)
+        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out, n, midjourney_version, midjourney_hd, thinking_mode, output_format, frame_count, frame_duration_ms, svg_model)
 
-async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format=""):
+async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model=""):
     provider = get_api_provider(provider_id)
     if str(model or "").strip().lower().startswith("pixverse-image"):
         # 拍我AI 的图片模版生成要 template_id + 参考图 id（专属接口 /openapi/v2/image/template/generate），
@@ -16281,7 +16478,10 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
     image_request_mode = effective_image_request_mode(provider, model)
     # 到这里已经是「没有平台专属组装函数」的通用分支（apimart 的非默认 image_request_mode 也走这里）：
     # 用与助手链路同一套 caps 兜一次尺寸收敛，避免同一条尺寸在两条链路上被两套口径处理。
-    capped_size, caps_size_notice = direct_image_size_caps(provider, model, size)
+    # GIF 的尺寸按「每帧」重新收敛（见 APIMart 分支），不先按静态图口径缩一次。
+    capped_size, caps_size_notice = (
+        ("", "") if normalize_image_output_format(output_format) == "gif"
+        else direct_image_size_caps(provider, model, size))
     if capped_size and str(capped_size) != str(size):
         if size_notice_out is not None and caps_size_notice and not size_notice_out.get("size_notice"):
             size_notice_out["size_notice"] = caps_size_notice
@@ -16376,24 +16576,51 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
             resolution = apimart_image_resolution_from_size_for_model(size, model, caps=apimart_caps)
             apimart_requested_ratio = apimart_size
             apimart_requested_resolution = _base_resolution
+            # GIF 的 size 是「每帧」像素：上游只收 16 的倍数，且按帧数拼版后整版仍要满足上限。
+            # 透明背景会把输出格式强制回 png，这种组合按静态图口径走。
+            gif_selected = (normalize_image_output_format(output_format) == "gif"
+                            and not native_background)
+            gif_frame_total = (gif_frame_count(frame_count, apimart_caps.get("gif_frames"))
+                               if gif_selected else 0)
+            # SVG 的文本模型必填（svg.model）；透明背景会把格式强制回 png，这种组合不算 SVG。
+            svg_selected = (normalize_image_output_format(output_format) == "svg"
+                            and not native_background)
+            if mask_refs and gif_selected:
+                raise HTTPException(
+                    status_code=400,
+                    detail="GIF 输出不支持蒙版局部重绘（上游 GIF 不接受 mask_url），请改用静态图，或去掉蒙版后重试。",
+                )
+            gif_size_notice = ""
             exact_width, exact_height = parse_size_pair(size)
-            if apimart_caps.get("exact_size") and exact_width and exact_height:
+            if gif_selected:
+                requested_frame_size = str(size or "").strip()
+                apimart_size = normalize_gif_frame_size(requested_frame_size, gif_frame_total)
+                if (requested_frame_size and requested_frame_size.lower() != "auto"
+                        and apimart_size != requested_frame_size):
+                    gif_size_notice = (f"GIF 每帧尺寸 {requested_frame_size} → {apimart_size}"
+                                       "（整版需 ≤3840/829 万像素）")
+            elif apimart_caps.get("exact_size") and exact_width and exact_height:
                 apimart_size = f"{exact_width}x{exact_height}"
             else:
                 apimart_size = apimart_clamp_ratio(apimart_size, apimart_caps.get("ratios"))
             resolution = apimart_image_resolution_for_model(model, resolution, caps=apimart_caps)
             if size_notice_out is not None:
-                apimart_notice = apimart_size_notice(
-                    apimart_requested_ratio, apimart_size, apimart_requested_resolution, resolution)
-                if apimart_notice:
-                    size_notice_out["size_notice"] = apimart_notice
+                if gif_selected:
+                    gif_notices = [part for part in (size_notice_out.get("size_notice"), gif_size_notice) if part]
+                    if gif_notices:
+                        size_notice_out["size_notice"] = "；".join(gif_notices)
+                else:
+                    apimart_notice = apimart_size_notice(
+                        apimart_requested_ratio, apimart_size, apimart_requested_resolution, resolution)
+                    if apimart_notice:
+                        size_notice_out["size_notice"] = apimart_notice
             apimart_official = is_apimart_official_image_model(model)
             request_model, request_version = apimart_image_request_identity(model)
             body = {"model": request_model, "prompt": prompt}
             if request_version:
                 body["version"] = request_version
             body[apimart_caps.get("size_field") or "size"] = apimart_size
-            if apimart_caps.get("send_resolution", True):
+            if apimart_caps.get("send_resolution", True) and not gif_selected:
                 body["resolution"] = resolution
             if apimart_caps.get("send_n", True):
                 body["n"] = max(1, min(int(n or 1), int(apimart_caps.get("n_max") or 1)))
@@ -16403,6 +16630,12 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
             if native_background:
                 body["background"] = "transparent"
                 body["output_format"] = "png"
+            if gif_selected:
+                body["frame_count"] = gif_frame_total
+                body["frame_duration_ms"] = gif_frame_duration(
+                    frame_duration_ms, apimart_caps.get("gif_frames"))
+            if svg_selected:
+                body["svg"] = {"model": apimart_svg_model(apimart_caps, svg_model)}
             apimart_quality = apimart_quality_for_model(model, requested_quality, caps=apimart_caps)
             if apimart_quality and not (image_refs and apimart_caps.get("quality_text_only")):
                 body["quality"] = apimart_quality
@@ -20618,7 +20851,7 @@ def video_mode_required_inputs(mode):
 def _caps_payload(ratios=None, resolutions=None, n_max=None, durations=None, modes=None, qualities=None,
                   max_long_edge=None, max_pixels=None, min_pixels=None, thinking_mode=False,
                    ref_max=None, video_ref_max=None, audio_ref_max=None, output_formats=None,
-                   sizes=None, batch=None, mj=None, prompt_only=False):
+                   sizes=None, batch=None, mj=None, prompt_only=False, gif_frames=None):
     """caps 条目：n_max / modes 用「字段缺失 = 后端不掌握」的表达，不再下发 null/空占位。
     max_long_edge / max_pixels / min_pixels 只给「精确像素生成」的模型（目前是 GPT-Image 家族）：
     前端据此在组装请求时就把尺寸钳进上游上限。"""
@@ -20654,6 +20887,17 @@ def _caps_payload(ratios=None, resolutions=None, n_max=None, durations=None, mod
             payload[key] = number
     if output_formats is not None:
         payload["output_formats"] = _caps_list(output_formats)
+    if isinstance(gif_frames, dict) and gif_frames:
+        gif_defaults = {
+            "min": GIF_FRAME_COUNT_MIN, "max": GIF_FRAME_COUNT_MAX,
+            "default": GIF_FRAME_COUNT_DEFAULT, "durationDefault": GIF_FRAME_DURATION_DEFAULT,
+        }
+        payload["gif_frames"] = {}
+        for key, fallback in gif_defaults.items():
+            try:
+                payload["gif_frames"][key] = int(gif_frames.get(key) or fallback)
+            except (TypeError, ValueError):
+                payload["gif_frames"][key] = fallback
     if sizes is not None:
         payload["sizes"] = _caps_list(sizes)
     if batch is not None:
@@ -20762,6 +21006,7 @@ def model_caps_for(provider, model, kind):
                                     thinking_mode=bool(table.get("thinking_mode")),
                                     ref_max=table.get("ref_max"),
                                     output_formats=table.get("output_formats"),
+                                    gif_frames=table.get("gif_frames"),
                                     sizes=table.get("sizes"),
                                     batch=table.get("batch"),
                                     mj=table.get("mj"))
@@ -21506,6 +21751,19 @@ async def api_set_asr_settings(payload: AsrSettingsPayload):
     os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
     write_json_atomic(SETTINGS_FILE, cfg, ensure_ascii=False, indent=2)
     return asr_settings_detail()
+
+@app.get("/api/asr/status")
+async def api_asr_status():
+    """画布助手语音输入：当前转写通道是否可用，提示用户下一步去哪配置。"""
+    from server.integrations.asr import asr_status
+    return asr_status()
+
+@app.post("/api/asr/transcribe")
+async def api_asr_transcribe(audio: UploadFile = File(...), lang: str = Form("zh")):
+    """画布助手语音输入：收一段录音返回文本；业务失败也用 200 + ok=false，和前端约定一致。"""
+    from server.integrations.asr import MAX_AUDIO_BYTES, transcribe_audio
+    raw = await audio.read(MAX_AUDIO_BYTES + 1)
+    return await transcribe_audio(raw, audio.filename or "", lang)
 
 # ── 存储用量与上限（设置页用）──
 
@@ -22573,7 +22831,8 @@ async def build_online_image_result(payload: OnlineImageRequest):
             payload.prompt, effective_size, payload.quality, model, image_refs,
             provider["id"], payload.background, notice, request_n,
             payload.midjourney_version, payload.midjourney_hd,
-            getattr(payload, "thinking_mode", None), output_format)
+            getattr(payload, "thinking_mode", None), output_format,
+            payload.frame_count, payload.frame_duration_ms, payload.svg_model)
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
@@ -35999,11 +36258,19 @@ def _agent_tool_activate_skill_run(args):
 
 
 def _agent_tool_install_skill_validate(args):
+    from server.skills import redskill_install
+
     url = str((args or {}).get("url") or "").strip()
     if not url:
-        raise AgentToolError("url 不能为空（GitHub 仓库或 SKILL.md 地址）", code="invalid_args")
+        raise AgentToolError(
+            "url 不能为空（RedSkill 技能名如 redskill:avant-garde-chromatic-fashion，"
+            "或任意 HTTPS 的 SKILL.md 直链 / GitHub 仓库地址）", code="invalid_args")
     if len(url) > 2048:
-        raise AgentToolError("GitHub 地址最长 2048 字符", code="invalid_args")
+        raise AgentToolError("技能地址最长 2048 字符", code="invalid_args")
+    if url.lower().startswith("redskill:") and not redskill_install.parse_redskill_ref(url):
+        raise AgentToolError(
+            "RedSkill 技能名不合法：只能用小写字母、数字、- 和 _，以字母或数字开头，最长 64 位"
+            "（例：redskill:avant-garde-chromatic-fashion）", code="invalid_args")
     return {
         "url": url,
         "path": str((args or {}).get("path") or "").strip(),
@@ -36014,36 +36281,60 @@ def _agent_tool_install_skill_validate(args):
 
 async def _agent_tool_install_skill_run(args):
     from server.routes.agents import _import_skill_md
-    from server.skills import github_install
+    from server.skills import github_install, redskill_install
 
+    redskill_id = redskill_install.parse_redskill_ref(args.get("url"))
+    redskill_meta = None
     try:
-        fetched = await asyncio.to_thread(
-            github_install.fetch_skill_markdown,
-            args["url"],
-            path=args.get("path") or "",
-            ref=args.get("ref") or "",
-        )
+        if redskill_id:
+            fetched = await asyncio.to_thread(redskill_install.fetch_skill_bundle, redskill_id)
+            source = {"repository": "redskill", "ref": fetched["version"], "path": "SKILL.md"}
+            redskill_meta = {
+                "identifier": fetched["identifier"],
+                "version": fetched["version"],
+                "sha256": fetched["sha256"],
+                "bundle_files": fetched["bundle_files"],
+                "source_url": fetched["source_url"],
+            }
+        else:
+            fetched = await asyncio.to_thread(
+                github_install.fetch_skill_markdown,
+                args["url"],
+                path=args.get("path") or "",
+                ref=args.get("ref") or "",
+            )
+            source = {"repository": fetched["repository"], "ref": fetched["ref"],
+                      "path": fetched["path"]}
         installed = _import_skill_md(fetched["markdown"], bool(args.get("overwrite")))
+    except redskill_install.RedSkillError as exc:
+        raise AgentToolError(str(exc), code="redskill_install_failed", status_code=exc.status_code)
     except github_install.GitHubSkillError as exc:
         raise AgentToolError(str(exc), code="github_skill_install_failed", status_code=exc.status_code)
     except HTTPException as exc:
-        raise AgentToolError(str(exc.detail), code="skill_import_failed", status_code=exc.status_code)
+        detail = str(exc.detail)
+        if exc.status_code == 400:          # 400 只有正文为空/超限/解析失败这三种
+            detail = "该地址返回的不是合法 SKILL.md：%s" % detail
+        raise AgentToolError(detail, code="skill_import_failed", status_code=exc.status_code)
     skill = installed["skill"]
     activation = _agent_tool_activate_skill_run({"name": skill["id"]})
-    return {
+    payload = {
         "ok": True,
         "skill": skill,
         "created": installed["created"],
-        "repository": fetched["repository"],
-        "ref": fetched["ref"],
-        "path": fetched["path"],
+        "repository": source["repository"],
+        "ref": source["ref"],
+        "path": source["path"],
         "activation": activation,
     }
+    if redskill_meta is not None:
+        payload["redskill"] = redskill_meta
+    return payload
 
 
 def _agent_tool_install_skill_preview(args):
     url = str((args or {}).get("url") or "").strip()
-    return {"type": "skill_install", "url": url, "title": "从 GitHub 安装技能"}
+    return {"type": "skill_install", "url": url,
+            "title": "从 RedSkill 技能名、SKILL.md 直链或 GitHub 仓库安装技能"}
 
 
 def _agent_tool_activate_skill_preview(args):
@@ -37788,11 +38079,13 @@ AGENT_TOOLS = {
         "mutates_canvas": False,
     },
     "install_skill": {
-        "description": "从 GitHub 仓库或 SKILL.md 链接下载、校验并安装技能，成功后立即加载技能手册。"
-                       "只读取文本，不执行仓库脚本、git clone 或终端命令。url 支持仓库根地址、/tree/、/blob/ 和 raw 地址；"
+        "description": "从 RedSkill 技能名（redskill:<名>，例如 redskill:avant-garde-chromatic-fashion）、"
+                       "任意 HTTPS 的 SKILL.md 直链，或 GitHub 仓库地址下载、校验并安装技能，成功后立即加载技能手册。"
+                       "只读取文本，不执行仓库脚本、git clone 或终端命令。GitHub 地址支持仓库根地址、/tree/、/blob/ 和 raw 地址；"
+                       "其它主机只接受 https 直链（拒绝内网/保留地址和重定向到这些地址的链接，正文上限 1MB）。"
                        "有多个 SKILL.md 时用 path 指定，ref 可指定分支或标签，overwrite=true 才允许覆盖已有技能。",
         "schema": {"type": "object", "properties": {
-            "url": {"type": "string", "description": "GitHub 仓库或 SKILL.md 地址"},
+            "url": {"type": "string", "description": "RedSkill 技能名（redskill:<名>）、任意 HTTPS 的 SKILL.md 直链，或 GitHub 仓库地址"},
             "path": {"type": "string", "description": "可选：仓库内 SKILL.md 路径"},
             "ref": {"type": "string", "description": "可选：分支或标签"},
             "overwrite": {"type": "boolean", "description": "是否覆盖同 ID 的已有技能，默认 false"}},
@@ -42201,8 +42494,8 @@ def _agent_skill_index_block():
         return ""
     lines = ["\n\n【技能索引】当前可用技能（系统只给了索引；需要完整操作说明时调用 "
              "activate_skill(name)，name 用每行开头的技能 id。没调用前不要假设技能细节。"
-             "用户给 GitHub 仓库或 SKILL.md 链接并要求安装时调用 install_skill(url)，"
-             "只下载并校验文本，不执行仓库脚本、git clone 或终端命令）："]
+             "用户给 RedSkill 技能名（redskill:<名>）、任意 HTTPS 的 SKILL.md 直链或 GitHub 仓库地址"
+             "并要求安装时调用 install_skill(url)，只下载并校验文本，不执行仓库脚本、git clone 或终端命令）："]
     for skill in skills[:AGENT_SKILL_INDEX_MAX]:
         desc = str(skill.get("description") or "").strip().replace("\n", " ")
         lines.append("- %s | %s | %s" % (skill.get("id"), skill.get("name") or skill.get("id"), desc[:80]))

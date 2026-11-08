@@ -25,13 +25,14 @@ const legacy = {
     { id: 'video', type: 'video', x: 720, y: 0, apiProvider: 'apimart', model: 'veo3-fast', aspectRatio: '16:9', duration: 8 },
     { id: 'output', type: 'output', x: 1080, y: 0, images: [{ url: '/output/test.png', kind: 'image', width: 1024, height: 1024 }] },
     { id: 'group', type: 'group', x: -40, y: -40, title: '旧分组', items: ['prompt', 'generator'] },
+    { id: 'smart-prompt', type: 'smart-prompt', x: 0, y: 360, w: 316, h: 240, title: '旧智能画布的提示词节点', text: '写好的提示词正文', promptSeparator: ';', llmEnabled: false },
   ],
   connections: [{ id: 'edge', from: 'prompt', to: 'generator' }],
 };
 const converted = serverDocToDoc(legacy);
 assert.equal(converted.migrated, true);
-assert.equal(converted.doc.nodes.length, 5);
-assert.deepEqual(converted.doc.nodes.map((node) => node.kind), ['text', 'image', 'video', 'image', 'group']);
+assert.equal(converted.doc.nodes.length, 6);
+assert.deepEqual(converted.doc.nodes.map((node) => node.kind), ['text', 'image', 'video', 'image', 'group', 'text']);
 assert.equal(converted.doc.nodes[0].data.gen.hist[0].text, '原始提示词');
 assert.equal(converted.doc.nodes[0].data.gen.manual, true);
 assert.equal(converted.doc.nodes[1].data.gen.params.model, 'comfly::gpt-image-2');
@@ -41,6 +42,8 @@ assert.equal(converted.doc.nodes[2].data.gen.params.dur, 8);
 assert.equal(converted.doc.nodes[3].data.gen.hist[0].url, '/output/test.png');
 assert.deepEqual(converted.doc.nodes[4].children, ['prompt', 'generator']);
 assert.equal(converted.doc.nodes[1].data.legacy.type, 'generator');
+assert.equal(converted.doc.nodes[5].data.gen.title, '旧智能画布的提示词节点');
+assert.equal(converted.doc.nodes[5].data.gen.hist[0].text, '写好的提示词正文');
 assert.deepEqual(converted.doc.edges, [{ id: 'edge', from: 'prompt', to: 'generator' }]);
 
 const roundTrip = docToServerDoc(converted.doc);

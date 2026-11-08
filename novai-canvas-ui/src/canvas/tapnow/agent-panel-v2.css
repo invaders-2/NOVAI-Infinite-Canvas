@@ -578,6 +578,128 @@
 }
 .cn-root #agent.ap2-agent .ap2-btn:hover { background: var(--sunken); color: var(--fg); }
 .cn-root #agent.ap2-agent .ap2-btn.on { background: var(--sunken); color: var(--fg); }
+/* ── 语音输入（方案 7）：录音/转写时 #aMic 原位变身成胶囊 ──────────────
+   宽度用 max-width 过渡（width:auto 本身不可动画），收起时 overflow 裁掉内容；
+   全程不画描边，红色统一用 --bad，浅色主题下也够对比。 */
+.cn-root #agent.ap2-agent .ap2-foot .ap2-btn#aMic:not(.voice-live) {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 30px;
+  max-width: 30px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width .18s var(--e-std), padding .18s var(--e-std), background var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
+}
+.cn-root #agent.ap2-agent .ap2-btn.voice-live {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 30px;
+  max-width: 220px;
+  padding: 0 10px;
+  gap: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1;
+  transition: max-width .18s var(--e-std), padding .18s var(--e-std), background var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
+}
+.cn-root #agent.ap2-agent .ap2-btn.voice-live.rec {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  color: var(--bad);
+}
+.cn-root #agent.ap2-agent .ap2-btn.voice-live.rec:hover { background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad); }
+.cn-root #agent.ap2-agent .ap2-btn.voice-live:not(.rec) { background: var(--sunken); color: var(--fg2); }
+.cn-root #agent.ap2-agent .ap2-btn.voice-live.rec svg { stroke: var(--bad); }
+.cn-root #agent.ap2-agent .ap2-btn.voice-live:disabled { opacity: .82; cursor: default; }
+/* 录音红点：9px，脉冲只改透明度/缩放，reduce motion 下停 */
+.cn-root #agent.ap2-agent .ap2-vdot {
+  display: block;
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: var(--bad);
+  animation: ap2-vpulse 1.2s var(--ease) infinite;
+}
+@keyframes ap2-vpulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .45; transform: scale(.78); }
+}
+.cn-root #agent.ap2-agent .ap2-vtime { font-size: 12px; font-variant-numeric: tabular-nums; color: inherit; white-space: nowrap; }
+.cn-root #agent.ap2-agent .ap2-vstop {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bad);
+}
+.cn-root #agent.ap2-agent .ap2-vstop i { display: block; width: 7px; height: 7px; border-radius: 2px; background: #fff; }
+/* 转写 spinner：线性描边圆环，13px */
+.cn-root #agent.ap2-agent .ap2-vspin {
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg2);
+}
+.cn-root #agent.ap2-agent .ap2-vspin svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  animation: ap2-vturn .9s linear infinite;
+}
+@keyframes ap2-vturn { to { transform: rotate(360deg); } }
+/* 取消：录音和转写时都显示，紧跟在胶囊后面 */
+.cn-root #agent.ap2-agent .ap2-voice-x {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--fg3);
+  transition: background var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
+}
+.cn-root #agent.ap2-agent .ap2-voice-x:hover { background: var(--hover); color: var(--fg); }
+/* 让位：只有右侧参数与上下文环收起，左侧 + / 文件夹 / 截图保持不动 */
+.cn-root #agent.ap2-agent .ap2-foot #aMode,
+.cn-root #agent.ap2-agent .ap2-foot #aThink,
+.cn-root #agent.ap2-agent .ap2-foot #aThinkLevel,
+.cn-root #agent.ap2-agent .ap2-foot #aModel,
+.cn-root #agent.ap2-agent .ap2-foot #aRing {
+  transition: opacity .18s var(--e-std), width .18s var(--e-std), flex-basis .18s var(--e-std), padding .18s var(--e-std), background-color var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
+}
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="recording"] #aMode,
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="recording"] #aThink,
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="recording"] #aThinkLevel,
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="recording"] #aModel,
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="recording"] #aRing,
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="transcribing"] #aMode,
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="transcribing"] #aThink,
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="transcribing"] #aThinkLevel,
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="transcribing"] #aModel,
+.cn-root #agent.ap2-agent .ap2-foot[data-voice="transcribing"] #aRing {
+  opacity: 0;
+  width: 0;
+  min-width: 0;
+  flex: 0 0 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 .cn-root #agent.ap2-agent .ap2-pill {
   display: inline-flex;
   height: 30px;
@@ -639,6 +761,8 @@
 @media (prefers-reduced-motion: reduce) {
   .cn-root #agent.ap2-agent .ap2-item[data-entering] { animation: none; }
   .cn-root #agent.ap2-agent .ap2-sug:hover { translate: none; }
+  .cn-root #agent.ap2-agent .ap2-vdot,
+  .cn-root #agent.ap2-agent .ap2-vspin svg { animation: none; }
 }
 
 /* ── T8 补丁：主题级覆盖（canvas-next.css 的 [data-theme=light] #agent 同特异性但更靠后） ── */
@@ -1035,6 +1159,13 @@
 .cn-root .combo-item .ic { position: relative; }
 .cn-root .combo-item .ic > .nv-skill-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 .cn-root .combo-item .ic:has(> .nv-skill-thumb) { background: var(--sunken); }
+/* / 技能弹窗、管理技能弹窗的图标槽同样叠封面；24px / 28px 槽位不变，行高不受影响 */
+.cn-root #pop .ap2-pal-ic,
+.cn-root .skrow .ic { position: relative; overflow: hidden; }
+.cn-root #pop .ap2-pal-ic > .nv-skill-thumb,
+.cn-root .skrow .ic > .nv-skill-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+.cn-root #pop .ap2-pal-ic:has(> .nv-skill-thumb),
+.cn-root .skrow .ic:has(> .nv-skill-thumb) { background: var(--sunken); }
 .cn-root .skrow .m b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cn-root #pop .ap2-pal-copy small { display: block; overflow: hidden; color: var(--fg3); font-size: 11px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .cn-root #pop .ap2-pal-tag { flex: 0 0 auto; color: var(--fg3); font-size: 10.5px; }

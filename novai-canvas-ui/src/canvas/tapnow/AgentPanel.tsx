@@ -16,7 +16,7 @@ import { useBeatActivity } from "../canvas-next/ui/useBeatActivity";
 import { publishAgentBeat } from "../canvas-next/ui/useOrbActivity";
 import { Icon } from "../canvas-next/ui/Icon";
 import { EffortSlider } from "../canvas-next/ui/EffortSlider";
-import { closeModal, ModalHead, openModal, openPop } from "../canvas-next/ui/overlay";
+import { closeModal, closePop, ModalHead, openModal, openPop } from "../canvas-next/ui/overlay";
 import { placePopover } from "../canvas-next/ui/placement";
 import { ThumbImg } from "../canvas-next/ui/thumb";
 import { Markdown } from "../canvas-next/ui/markdown";
@@ -24,9 +24,10 @@ import { ruleAnswer } from "../canvas-next/agent/planner";
 import { runAgentQueued } from "../canvas-next/agent/autorun";
 import { cancelReveal, nodeIdSet, revealAddedNodes } from "../canvas-next/agent/revealNodes";
 import type { CanvasStore } from "../canvas-next/store";
+import { startVoiceCapture, transcribeVoice, voiceErrorText, type VoiceCapture, type VoicePhase } from "../canvas-next/voiceInput";
 import type { AgentDraft } from "../canvas-next/homeSeed";
 
-/** 技能缩略图：技能名 → 市场封面 id（gen-<id>-sq.webp）；没对上就退回原来的 ✨ 图标 */
+/** 官方技能：技能名 → 市场封面 id（gen-<id>-sq.webp）；没对上就退回原来的 ✨ 图标 */
 const SKILL_THUMB: Record<string, string> = {
   "一万条提示词库": "ai-image-prompts-skill",
   "Amazon 主图规范": "amazon-listing-images",
@@ -49,6 +50,26 @@ const SKILL_THUMB: Record<string, string> = {
   "提示词优化器": "text-to-image-prompt-optimizer",
   "服装大片 · 胶片暗房": "fashion-editorial",
 };
+/** RedSkill 技能：SKILL.md 内部 id / 显示名 → 封面文件名里的 slug（封面按 redskill-<slug>-sq.webp 取） */
+const REDSKILL_THUMB: Record<string, string> = {
+  "avant-garde-chromatic-fashion": "avant-garde-chromatic-fashion",
+  "先锋色块时装大片": "avant-garde-chromatic-fashion",
+  "retro-romantic-garden-lookbook": "retro-romantic-garden-lookbook",
+  "复古英伦花园写真": "retro-romantic-garden-lookbook",
+  "create-y2k-fashion-images": "create-y2k-fashion-images",
+  "千禧 Y2K 时尚大片": "create-y2k-fashion-images",
+  "avant-fashion-editorial": "0867678-avant-fashion-editorial",
+  "先锋档案时尚摄影": "0867678-avant-fashion-editorial",
+};
+/** 技能缩略图地址：先查 RedSkill 映射，再按官方技能的 gen-<id> 规则；都没有就返回空串（保持 ✨） */
+function thumbUrl(skill: { id?: string; name?: string; src?: string }): string {
+  const id = skill.id || "";
+  const name = skill.name || "";
+  const red = REDSKILL_THUMB[id] || REDSKILL_THUMB[name];
+  if (red) return `/static/store/covers/redskill-${red}-sq.webp`;
+  const sid = SKILL_THUMB[name] || (skill.src === "官方" ? id : "");
+  return sid ? `/static/store/covers/gen-${sid}-sq.webp` : "";
+}
 
 /** 助手改完画布后拉权威版本：本端还有没存完的编辑时先存掉再拉一次，别让助手建的节点因为「跳过刷新」而看不见 */
 /** 保存状态（读最新值；运行中会变，别让 TS 按上一次比较收窄） */
@@ -170,6 +191,8 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   /* 收起对话时面板还在挂载，所以由它把「助手在干什么」广播给右下角的悬浮球，不用为球再建一套 AgentState */
   useEffect(() => { publishAgentBeat(beat.state, beat.progress); }, [beat.state, beat.progress]);
   const edRef = useRef<MentionInputHandle | null>(null); const scrollRef = useRef<HTMLDivElement>(null); const boxRef = useRef<HTMLDivElement>(null);
+  /** / 技能面板是当前打开的弹层：删掉触发字符时只关它，不误关别的弹层 */
+  const slashPaletteOpen = useRef(false);
   const [sugPage, setSugPage] = useState(0);
   /* 空状态建议卡轮播：悬停 / 键盘聚焦 / 面板收起 / 已有对话都停；没暂停时每 5 秒自动换一批 */
   const [sugHover, setSugHover] = useState(false);
@@ -287,7 +310,117 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
 
   const ctxBreak = (): Array<[string, number]> => [["系统与工具", 3200], ["技能", a.skill ? 900 : 0], ["记忆", a.memory().length * 60], ["画布与已选节点", ctxNodes().length * 600 + doc.nodes.length * 80], ["对话历史", a.msgs.reduce((s, m) => s + m.text.length * 2 + (m.tools ? m.tools.length * 180 : 0), 0)]];
   const used = ctxBreak().reduce((s, x) => s + x[1], 0);
-  const setDraft = (t: string) => { a.draft = t; a.emit(); setTimeout(() => edRef.current?.focus(), 0); };
+  const setDraft = (t: string) => { stopVoiceTyping(); a.draft = t; a.emit(); setTimeout(() => edRef.current?.focus(), 0); };
+  /* 语音输入：#aMic 走本机录音 + 后端转写（Web Speech API 在 Electron / 国内不可用） */
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
+  const [voiceSecs, setVoiceSecs] = useState(0);
+  const voiceCap = useRef<VoiceCapture | null>(null);
+  const voiceTick = useRef<number | null>(null);
+  const voiceStarting = useRef(false);
+  const voiceToken = useRef(0);
+  /** 卸载时权限弹窗可能还没回来：回来后再拿到的 cap 要立刻取消，别把麦克风留在开着的状态 */
+  const voiceAlive = useRef(true);
+  const stopVoiceTick = () => { if (voiceTick.current !== null) { window.clearInterval(voiceTick.current); voiceTick.current = null; } };
+  const voiceTyping = useRef<number | null>(null);
+  const voiceTypingToken = useRef(0);
+  /** 取消 / 卸载 / 重新录音都要停掉逐字上屏，避免两个动画同时写草稿、迟到结果再覆盖 */
+  const stopVoiceTyping = () => {
+    voiceTypingToken.current += 1;
+    if (voiceTyping.current !== null) { window.clearInterval(voiceTyping.current); voiceTyping.current = null; }
+  };
+  /** 取消后迟到回来的转写结果不能再回填，所以每次取消推进一个令牌 */
+  const resetVoice = () => {
+    voiceToken.current += 1;
+    stopVoiceTyping();
+    stopVoiceTick();
+    voiceCap.current?.cancel();
+    voiceCap.current = null;
+    setVoiceSecs(0);
+    setVoicePhase("idle");
+  };
+  /** 说完后逐字上屏：后端一次返回整段，这里用 28ms/步近似「边说边出字」，40 步封顶约 1.1s */
+  const typeIntoDraft = (text: string) => {
+    stopVoiceTyping();
+    const token = voiceTypingToken.current;
+    const base = a.draft;
+    const prefix = base ? base + " " : "";
+    const step = Math.max(1, Math.ceil(text.length / 40));
+    let i = 0;
+    a.draft = prefix;
+    a.emit();
+    voiceTyping.current = window.setInterval(() => {
+      if (token !== voiceTypingToken.current) {
+        if (voiceTyping.current !== null) { window.clearInterval(voiceTyping.current); voiceTyping.current = null; }
+        return;
+      }
+      i = Math.min(text.length, i + step);
+      a.draft = prefix + text.slice(0, i);
+      a.emit();
+      if (i >= text.length) {
+        if (voiceTyping.current !== null) { window.clearInterval(voiceTyping.current); voiceTyping.current = null; }
+        // 只在整段结束后 focus 一次，逐帧 focus 会把光标抢得没法输入
+        setTimeout(() => edRef.current?.focus(), 0);
+      }
+    }, 28);
+  };
+  const transcribeIntoDraft = async (blob: Blob) => {
+    const token = voiceToken.current;
+    const result = await transcribeVoice(blob);
+    if (token !== voiceToken.current) return;
+    if (result.ok && result.text) typeIntoDraft(result.text);
+    else store.toast(voiceErrorText(result.code, result.error));
+    setVoiceSecs(0);
+    setVoicePhase("idle");
+  };
+  const finishVoice = (blob: Blob) => {
+    stopVoiceTick();
+    voiceCap.current = null;
+    setVoicePhase("transcribing");
+    void transcribeIntoDraft(blob);
+  };
+  const toggleVoice = async () => {
+    if (voicePhase === "transcribing" || voiceStarting.current) return;
+    if (voicePhase === "recording") {
+      const cap = voiceCap.current;
+      // 到时长上限自动结束时 finishVoice 已经接管，这次点击直接忽略
+      if (!cap) return;
+      voiceCap.current = null;
+      stopVoiceTick();
+      setVoicePhase("transcribing");
+      let blob: Blob | null = null;
+      try { blob = await cap.stop(); } catch { blob = null; }
+      if (!blob) { setVoiceSecs(0); setVoicePhase("idle"); return; }
+      await transcribeIntoDraft(blob);
+      return;
+    }
+    voiceStarting.current = true;
+    stopVoiceTyping();
+    setVoiceSecs(0);
+    try {
+      const cap = await startVoiceCapture({ maxSeconds: 90, onAutoStop: finishVoice });
+      if (!voiceAlive.current) { cap.cancel(); return; }
+      voiceCap.current = cap;
+      setVoicePhase("recording");
+      voiceTick.current = window.setInterval(() => setVoiceSecs((n) => Math.min(90, n + 1)), 1000);
+    } catch (error) {
+      const err = error as { name?: string; message?: string } | null;
+      store.toast(voiceErrorText(err?.name, err?.message));
+    } finally {
+      voiceStarting.current = false;
+    }
+  };
+  // 面板收起 / 切画布时别把麦克风一直开着：卸载直接取消
+  useEffect(() => {
+    voiceAlive.current = true;
+    return () => {
+      voiceAlive.current = false;
+      voiceToken.current += 1;
+      stopVoiceTyping();
+      stopVoiceTick();
+      voiceCap.current?.cancel();
+      voiceCap.current = null;
+    };
+  }, []);
   // 同一个 seq 只处理一次：技能列表异步回来会让这个 effect 再跑，重填会把刚发出去的话又塞回输入框
   const handledDraft = useRef(0);
   /** 种子里的 skillRef 先到、技能列表后到时暂存在这，等 a.skills 回来再补胶囊 */
@@ -490,6 +623,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   /** 发一条消息。outgoing = 队列里的上下文快照（文本 / 技能 / 引用 / 固定与选中节点 / 联网），
    *  此时不发完清空草稿——用户可能正在输入下一条。 */
   async function send(fromQa = false, outgoing?: QueuedMsg["snap"]) {
+    stopVoiceTyping();
     const refs = outgoing ? outgoing.refs : a.refs;
     const rawText = outgoing ? outgoing.text : a.draft;
     const skillName = outgoing ? outgoing.skill : a.skill;
@@ -609,6 +743,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
 
   /** 忙碌时 Enter：把当前输入 + 引用快照排进队列，并清空输入区（草稿 / 胶囊 / 技能 / 联网） */
   const enqueueDraft = () => {
+    stopVoiceTyping();
     const raw = a.draft;
     const label = plainMentionText(raw, (kind, id) => chipFor(a.refs, kind, id)) || (a.skill ? a.skills.find((s) => s.name === a.skill)?.desc || a.skill : "");
     if (!label) return;
@@ -678,7 +813,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   useEffect(() => () => { if (flushTimer.current) window.clearTimeout(flushTimer.current); }, []);
 
   /** 输入框里的记号（@{节点} / @ref{} / @app{} / @skill{}）变化 */
-  const onDraftInput = (v: string) => { a.draft = v; a.emit(); };
+  const onDraftInput = (v: string) => { stopVoiceTyping(); a.draft = v; a.emit(); };
   /** 记号 → 胶囊内容：节点走画布文档，素材 / 应用走传入的 refs（渲染用当前引用；发送排队消息用快照里的），技能走 a.skills */
   const chipFor = (refs: AgentState["refs"], kind: MentionKind, id: string): MentionChip | null => {
     if (kind === "node") {
@@ -715,7 +850,14 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   const slashPalette = () => {
     const box = boxRef.current!;
     void webAccessEnabled().then((on) => setWebOn(on !== false)).catch(() => {});
-    openPop(box, (close) => <Palette a={a} onClose={close} onPick={(s) => { close(); a.skill = s; a.emit(); edRef.current?.insertMention({ kind: "skill", id: s, title: s, icon: "sparkle", badge: "技能" }); }} onPlugin={(on) => { close(); setWebPlugin(on); edRef.current?.dropTrigger(); }} webOn={webOn} webPlugin={webPlugin} width={box.offsetWidth} />, "up", "left", "palette");
+    slashPaletteOpen.current = true;
+    openPop(box, (close) => <Palette a={a} onClose={() => { slashPaletteOpen.current = false; close(); }} onPick={(s) => { slashPaletteOpen.current = false; close(); a.skill = s; a.emit(); edRef.current?.insertMention({ kind: "skill", id: s, title: s, icon: "sparkle", badge: "技能" }); }} onPlugin={(on) => { slashPaletteOpen.current = false; close(); setWebPlugin(on); edRef.current?.dropTrigger(); }} webOn={webOn} webPlugin={webPlugin} width={box.offsetWidth} />, "up", "left", "palette");
+  };
+  /** 输入框里的 / 被删掉 / 替换：斜杠面板跟着关；@ 的提及面板不受影响 */
+  const onTriggerGone = () => {
+    if (!slashPaletteOpen.current) return;
+    slashPaletteOpen.current = false;
+    if (document.querySelector('#pop:not(.closing) [data-slash-palette]')) closePop();
   };
   const mentionMenu = () => openPop(boxRef.current!, (close) => <MentionPalette nodes={store.state.doc.nodes} onNode={(n) => { close(); insertNodeChip(n); }} onRef={(ref) => { close(); insertRefChip(ref); }} />, "up", "left", "palette");
   /** 光标前刚打出 @ / 斜杠：开对应的选择面板 */
@@ -847,12 +989,12 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
           {ui.agentPick ? <span className="cchip">点画布上的节点加入上下文 · Esc 结束</span> : null}
         </div>
         <InputGroup className="ap2-input"><MentionInput id="aiInput" ref={edRef} value={a.draft}
-          placeholder={a.busy ? (full ? "助手执行中 · 按 Enter 加入队列" : "Enter 加入队列") : (full ? "描述创意或需求，/ 使用技能，@ 引用参考或使用应用" : "随心输入")}
-          onChange={onDraftInput} onEnter={() => { if (a.busy) enqueueDraft(); else void send(); }} onTrigger={onMentionTrigger}
+          placeholder={a.busy ? (full ? "助手执行中 · 按 Enter 加入队列" : "Enter 加入队列") : voicePhase === "recording" ? "正在聆听…" : voicePhase === "transcribing" ? "正在转写…" : (full ? "描述创意或需求，/ 使用技能，@ 引用参考或使用应用" : "随心输入")}
+          onChange={onDraftInput} onEnter={() => { if (a.busy) enqueueDraft(); else void send(); }} onTrigger={onMentionTrigger} onTriggerGone={onTriggerGone}
           resolve={resolveChip} onRemove={dropMention}
           onChipHover={(chip, rect) => { if (chip && rect) hoverChip(chip, rect); else leaveChip(); }}
           onFocus={() => setSugFocus(true)} onBlur={() => setSugFocus(false)} /></InputGroup>
-        <div className="foot ap2-foot">
+        <div className="foot ap2-foot" data-voice={voicePhase}>
           <button className="ib ap2-btn" id="aPlus" aria-label="添加" onClick={(e) => plusMenu(ctl, a, e.currentTarget, () => slashPalette())}><Icon name="plus" size="s" /></button>
           <FolderButton ctl={ctl} a={a} />
           <CaptureButton ctl={ctl} a={a} />
@@ -872,7 +1014,15 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
             {full ? <><Icon name="gauge" size="s" />{thinkLabel ? "模型强度 " + thinkLabel : "模型强度"}</> : thinkLabel ? <span>{thinkLabel}</span> : <Icon name="gauge" size="s" />}
           </button> : null}
           <button className="pill ghost tipT ap2-pill" id="aModel" aria-label={modelHint} data-tip={modelHint} onClick={(e) => modelMenu(e.currentTarget, e.detail === 0)}><Icon name="sparkle" size="s" /><span className="amodel-name ap2-amodel">{modelLabel}</span></button>
-          <button className="ib ap2-btn" id="aMic" aria-label="语音输入" onClick={(e) => micInput(ctl, e.currentTarget, (t) => setDraft((a.draft ? a.draft + " " : "") + t))}><Icon name="mic" size="s" /></button>
+          {/* 录音/转写时 #aMic 原位变身成胶囊（方案 7）：红点 + 计时；不额外占一行，其它按钮位置保持 */}
+          <button className={"ib ap2-btn" + (voicePhase === "idle" ? "" : " voice-live") + (voicePhase === "recording" ? " rec" : "")} id="aMic" aria-label={voicePhase === "recording" ? "结束语音输入" : voicePhase === "transcribing" ? "正在转写" : "语音输入"} aria-pressed={voicePhase === "recording"} data-voice-phase={voicePhase} disabled={voicePhase === "transcribing"} onClick={() => void toggleVoice()}>
+            {voicePhase === "recording"
+              ? <><i className="ap2-vdot" aria-hidden="true" /><span className="ap2-vtime tnum">{voiceClock(voiceSecs)}</span><span className="ap2-vstop" aria-hidden="true"><i /></span></>
+              : voicePhase === "transcribing"
+                ? <><i className="ap2-vspin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" /></svg></i><span className="ap2-vtime">正在转写…</span></>
+                : <Icon name="mic" size="s" />}
+          </button>
+          {voicePhase !== "idle" ? <button className="ap2-voice-x" type="button" aria-label="取消语音输入" title="取消语音输入" onClick={resetVoice}><Icon name="x" size="xs" /></button> : null}
           {a.busy ? <button className="send busy ap2-send" id="aSend" title="停止" aria-label="停止" onClick={() => { void stopTask(); }}><i className="ring"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" /></svg></i><span className="sqr" /></button>
             : <button className="send ap2-send" id="aSend" title="发送 ↵" aria-label="发送" onClick={() => void send()}><Icon name="send" size="s" /></button>}
         </div>
@@ -1109,6 +1259,14 @@ function ResultCard({ id, ctl }: { id: string; ctl: Ctl }) {
   return <button className="rcard" onClick={() => { if (ctl.store.state.ui.agentFull) ctl.store.setUI({ agentFull: false }); setTimeout(() => ctl.focusNode(id), 60); }}>{src ? <ThumbImg src={src} width={96} fallback={<span className="ri"><Icon name={n.kind === "table" ? "grid" : TYPE_ICON[n.kind as GenKind] || "layers"} size="s" /></span>} /> : <span className="ri"><Icon name={n.kind === "table" ? "grid" : TYPE_ICON[n.kind as GenKind] || "layers"} size="s" /></span>}<span className="rt">{title(n)}</span></button>;
 }
 
+/** 技能图标：✨ 打底，封面加载成功才盖住图标；没有封面 / 加载失败就保持原来的 ✨ */
+function SkillIcon({ skill, className }: { skill: { id?: string; name?: string; src?: string }; className: string }) {
+  const src = thumbUrl(skill);
+  return <span className={className}><Icon name="sparkle" size="s" />{src ? <img className="nv-skill-thumb" alt="" loading="lazy" src={src}
+    onLoad={(e) => { const sv = e.currentTarget.parentElement?.querySelector("svg"); if (sv) sv.style.display = "none"; }}
+    onError={(e) => { e.currentTarget.remove(); }} /> : null}</span>;
+}
+
 /* ---------- 菜单 / 面板 ---------- */
 /** 输入 / 的弹窗：插件（联网搜索）+ 技能两组，↑↓ 选、回车用、Esc 关；选中后输入区出现胶囊 */
 function Palette({ a, onPick, onPlugin, webOn, webPlugin, onClose, width }: { a: AgentState; onPick: (s: string) => void; onPlugin: (on: boolean) => void; webOn: boolean; webPlugin: boolean; onClose: () => void; width: number }) {
@@ -1117,7 +1275,7 @@ function Palette({ a, onPick, onPlugin, webOn, webPlugin, onClose, width }: { a:
   const list = a.skillsOn().filter((k) => !q || (k.name + k.desc).includes(q));
   const rows = 1 + list.length;
   const pick = (index: number) => { if (index === 0) { onPlugin(!webPlugin); return; } const k = list[index - 1]; if (k) onPick(k.name); };
-  return <div className="ap2-pal" style={{ width }}>
+  return <div className="ap2-pal" data-slash-palette="1" style={{ width }}>
     <div className="pal-s ap2-pal-search"><Icon name="search" size="s" /><input autoFocus placeholder="搜索技能或插件" value={q} onChange={(e) => { setQ(e.target.value); setHi(0); }} onKeyDown={(e) => {
       e.stopPropagation();
       if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setHi((h) => (h + (e.key === "ArrowDown" ? 1 : -1) + rows) % Math.max(1, rows)); return; }
@@ -1135,7 +1293,7 @@ function Palette({ a, onPick, onPlugin, webOn, webPlugin, onClose, width }: { a:
     <div className="ap2-pal-group">
       <div className="mh">技能</div>
       {list.map((k, i) => <button className={"mi ap2-pal-row" + (hi === i + 1 ? " active" : "") + (a.skill === k.name ? " on" : "")} key={k.name} onMouseEnter={() => setHi(i + 1)} onClick={() => onPick(k.name)} type="button">
-        <span className="ap2-pal-ic"><Icon name="sparkle" size="s" /></span>
+        <SkillIcon className="ap2-pal-ic" skill={k} />
         <span className="ap2-pal-copy"><b title={k.desc}>{k.name}</b></span>
         <span className="ap2-pal-tag">{k.src}</span>
       </button>)}
@@ -1179,14 +1337,11 @@ function plusMenu(ctl: Ctl, a: AgentState, anchor: Element, slash: () => void) {
         items={a.skillsOn()}
         label={(k) => k.name}
         onPick={(k) => { close(); a.skill = k.name; a.emit(); }}
-        renderItem={(k) => {
-          const sid = k.id || SKILL_THUMB[k.name];
-          return <><span className="ic"><Icon name="sparkle" size="s" />
-            {sid ? <img className="nv-skill-thumb" alt="" loading="lazy" src={`/static/store/covers/gen-${sid}-sq.webp`}
-              onLoad={(e) => { const sv = e.currentTarget.parentElement?.querySelector("svg"); if (sv) sv.style.display = "none"; }}
-              onError={(e) => { e.currentTarget.remove(); }} /> : null}
-          </span><span className="ap2-skill-name" title={k.desc}>{k.name}</span>{k.src === "我的" ? <span className="k">我的</span> : null}</>;
-        }}
+        renderItem={(k) => <>
+          <SkillIcon className="ic" skill={k} />
+          <span className="ap2-skill-name" title={k.desc}>{k.name}</span>
+          {k.src === "我的" ? <span className="k">我的</span> : null}
+        </>}
         searchPlaceholder="搜索技能"
         searchable
       /> : <Root close={close} go={setV} />}
@@ -1339,17 +1494,8 @@ function compact(ctl: Ctl, a: AgentState) {
   a.msgs = [{ id: mid(), role: "a", summary: true, text: `【对话摘要】之前 ${asks.length} 轮：${asks.map((t) => "「" + t.slice(0, 18) + "」").join("、")}${made.length ? `；新建了 ${made.join("、")}` : ""}。` }, ...keep];
   a.emit(); ctl.store.toast(`已把 ${old.length} 条早期消息压缩成 1 条摘要`);
 }
-let activeMic: { stop: () => void } | null = null;
-function micInput(ctl: Ctl, btn: HTMLElement, onText: (t: string) => void) {
-  const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-  if (!SR) { ctl.store.toast("当前环境没有语音识别服务，可以用系统听写输入"); return; }
-  // 正在听：再点一次（或再按一次 V）就结束
-  if (activeMic) { try { activeMic.stop(); } catch { /* 忽略 */ } return; }
-  const r = new SR(); r.lang = "zh-CN"; activeMic = r; btn.classList.add("rec");
-  r.onresult = (e: any) => onText(String(e.results?.[0]?.[0]?.transcript || ""));
-  r.onend = () => { btn.classList.remove("rec"); if (activeMic === r) activeMic = null; };
-  r.onerror = () => ctl.store.toast("没有听清，可以再试一次"); r.start();
-}
+/** 录音计时条用 mm:ss */
+const voiceClock = (seconds: number) => String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0");
 
 /* ---------- 记忆 / 技能 ---------- */
 export function memoryModal(a: AgentState) { openModal(() => <MemoryView a={a} />); }
@@ -1373,7 +1519,7 @@ function SkillsView({ a }: { a: AgentState }) {
   useAgent(a); const [q, setQ] = useState(""); const list = a.skills.filter((k) => !q || (k.name + k.desc).includes(q));
   return <><ModalHead title="管理技能" icon="sparkle" /><div className="mbd">
     <div className="pal-s" style={{ margin: "0 0 10px" }}><Icon name="search" size="s" /><input placeholder="搜索技能" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></div>
-    {(["我的", "官方"] as const).map((src) => { const l = list.filter((k) => k.src === src); return l.length ? <div key={src}><div className="mh" style={{ paddingLeft: 0 }}>{src === "我的" ? "我的技能" : "官方技能"} · {l.length}</div>{l.map((k) => <div key={k.name} className="skrow"><span className="ic"><Icon name="sparkle" size="s" /></span><span className="m"><b title={k.desc}>{k.name}</b></span><button className="linkbtn" onClick={() => skillEditor(a, k)}>查看</button><button className={"sw" + (k.on ? " on" : "")} aria-label="启用" onClick={() => { k.on = !k.on; a.saveSkills(k); }} /></div>)}</div> : null; })}
+    {(["我的", "官方"] as const).map((src) => { const l = list.filter((k) => k.src === src); return l.length ? <div key={src}><div className="mh" style={{ paddingLeft: 0 }}>{src === "我的" ? "我的技能" : "官方技能"} · {l.length}</div>{l.map((k) => <div key={k.name} className="skrow"><SkillIcon className="ic" skill={k} /><span className="m"><b title={k.desc}>{k.name}</b></span><button className="linkbtn" onClick={() => skillEditor(a, k)}>查看</button><button className={"sw" + (k.on ? " on" : "")} aria-label="启用" onClick={() => { k.on = !k.on; a.saveSkills(k); }} /></div>)}</div> : null; })}
     <div className="memadd" style={{ marginTop: 12 }}><button className="btn" onClick={() => uploadSkill(a)}><Icon name="upload" size="s" />上传技能文件</button><button className="btn solid" onClick={() => skillEditor(a)}><Icon name="plus" size="s" />创建技能</button></div>
   </div></>;
 }

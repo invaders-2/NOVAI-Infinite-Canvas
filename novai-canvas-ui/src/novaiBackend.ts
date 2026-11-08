@@ -1,7 +1,7 @@
 import { hostRoot } from "./novaiBridgeRoot";
 import type { CanvasBackend, ChatMessage, EditRequest, GenEvent, GenRequest, GenResult, LoadedDoc, MattingModelStatus, SavedDoc, UpscaleResult, UpscaleRuntimeStatus } from "./canvas/canvas-next/backend/types";
 import { GenError } from "./canvas/canvas-next/backend/types";
-import { defaultParams, outputFormatForRequest, qualityForRequest, ratioWH, specFor, thinkingForRequest, withGen, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./canvas/canvas-next/model";
+import { defaultParams, gifFrameFieldsForRequest, outputFormatForRequest, qualityForRequest, ratioWH, specFor, thinkingForRequest, withGen, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./canvas/canvas-next/model";
 import { emptyDoc, hasContent, readDoc, sanitizeDoc, type CanvasDoc, type CanvasNode, type NodeKind } from "./canvas/react-canvas/reactCanvasStore";
 import { queueLocalMirror } from "./canvas/canvas-next/localMirror";
 import { clampImageSize, indexModelCaps, mergeCapsReferenceCapability, modelCapsKey, modelCapsUi, type ModelCapsItem } from "./canvas/canvas-next/modelCaps";
@@ -75,6 +75,8 @@ function splitModel(id: string): { provider: string; model: string } {
   return at >= 0 ? { provider: id.slice(0, at), model: id.slice(at + 2) } : { provider: "comfly", model: id };
 }
 
+const warnedLegacyTypes = new Set<string>();
+
 function legacyKind(raw: Row): NodeKind {
   if (NODE_KINDS.has(raw.kind)) return raw.kind;
   const type = String(raw.type || "");
@@ -98,8 +100,13 @@ function legacyKind(raw: Row): NodeKind {
   if (type === "smart-image") return "image";
   if (type === "smart-video") return "video";
   if (type === "smart-audio") return "audio";
-  if (type === "smart-text") return "text";
+  if (type === "smart-text" || type === "smart-prompt") return "text";
   if (type === "smart-group") return "group";
+  if (type === "smart-label") return "note";
+  if (!warnedLegacyTypes.has(type)) {
+    warnedLegacyTypes.add(type);
+    console.warn(`[novai-canvas] 未知节点类型「${type || "(空)"}」按便签渲染`);
+  }
   return "note";
 }
 
@@ -269,6 +276,8 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
   const quality = qualityForRequest(params.quality);
   const thinking = thinkingForRequest(params.thinking);
   const outputFormat = outputFormatForRequest(params.outputFormat);
+  // GIF 帧参数只在 outputFormat=gif 时下发（后端 0/缺省 = 9 帧 / 200ms；这里先按 caps 夹成合法值）
+  const gifFrameFields = gifFrameFieldsForRequest(params, req.model);
   // Midjourney 的版本 / HD 是独立字段（后端 OnlineImageRequest 只认这两个，速度与风格化走提示词 flag）
   const isMidjourneyModel = !!req.model?.mj;
   const mjVersion = isMidjourneyModel ? String(params.mj?.version || "").trim() : "";
@@ -283,6 +292,7 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
     ...(quality ? { quality } : {}),
     ...(thinking === undefined ? {} : { thinking_mode: thinking }),
     ...(outputFormat ? { output_format: outputFormat } : {}),
+    ...gifFrameFields,
     ...(mjVersion ? { midjourney_version: mjVersion } : {}),
     ...(mjHd ? { midjourney_hd: true } : {}),
   };
@@ -291,7 +301,9 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
   onEvent({ type: "started", runId: String(task.task_id) });
   const result = await pollTask(String(task.task_id), "image", signal, onEvent, req.model?.secs || 20);
   const rows = Array.isArray(result.images) ? result.images : [];
-  const outputs = rows.map((row: any) => ({ url: urlOf(row), w: Number(row?.width) || undefined, h: Number(row?.height) || undefined, meta: { model: req.model?.name || selected.model, ratio: params.ratio, size: params.size, at: Date.now(), runId: String(task.task_id) } })).filter((output: GenOutput) => output.url);
+  // 后端把「尺寸被收敛」的说明放在任务结果的 size_notice（如 GIF 每帧尺寸缩小），挂到 meta 上让引擎 toast 一次
+  const notice = String(result.size_notice || "").trim();
+  const outputs = rows.map((row: any) => ({ url: urlOf(row), w: Number(row?.width) || undefined, h: Number(row?.height) || undefined, meta: { model: req.model?.name || selected.model, ratio: params.ratio, size: params.size, at: Date.now(), runId: String(task.task_id), ...(notice ? { notice } : {}) } })).filter((output: GenOutput) => output.url);
   if (!outputs.length) throw new GenError("NO_OUTPUT", "生成结果缺少图片地址");
   return outputs;
 }

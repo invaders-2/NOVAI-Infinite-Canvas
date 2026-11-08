@@ -243,6 +243,9 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
     // 后端没返回像素宽高时用真实文件兜底（失败 / 超时都只是原样返回，不阻塞写回）
     const measured = await Promise.all(outs.map((o) => measureOutput(store, req.kind, o)));
     applyOutputs(store, id, measured);
+    // 后端提示尺寸被收敛（如 GIF 每帧尺寸按拼版上限缩小）：写回成功后 toast 一次，别让用户以为「选了 2K 却拿到小图」
+    const sizeNotice = measured.map((o) => String(o.meta?.notice || "").trim()).find(Boolean) || "";
+    if (sizeNotice) store.toast(sizeNotice, 6000);
     store.setRun(id, null);
     const cur = store.node(id)!;
     store.logRun({ node: id, title: label || genOf(cur).title, type: cur.kind as GenKind, model: req.model.name, status: "done", secs: Math.round((performance.now() - t0) / 1000), thumb: outOf(cur)?.url && cur.kind === "image" ? outOf(cur)!.url : outOf(cur)?.frame, out: runOut(outOf(cur)), prompt: plainPrompt(req.prompt, store.state.doc) });

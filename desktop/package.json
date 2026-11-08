@@ -101,6 +101,7 @@
       "category": "public.app-category.graphics-design",
       "icon": "icons/icon.icns",
       "extendInfo": {
+        "NSMicrophoneUsageDescription": "NOVAI 需要用麦克风把你说的话转成文字，填进画布助手。",
         "NSLocalNetworkUsageDescription": "NOVAI 需要在局域网内发现并连接好友的电脑。"
       },
       "target": [
