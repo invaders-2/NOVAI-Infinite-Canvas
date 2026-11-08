@@ -79,9 +79,13 @@ class GenerationCardTests(unittest.TestCase):
         self.assertEqual(model_calls, [])                        # 出结果后不再让模型接着做
         message = done_of(events)["message"]
         self.assertIn("杯身变形", message)
-        self.assertIn("这批结果符合你的要求吗", message)
+        self.assertIn("要重新生成吗", message)                     # 审查不合格：直接问要不要重做
         block = json.loads(message.split("```novai-questions\n", 1)[1].split("\n```", 1)[0])
         self.assertEqual(block["kind"], "confirm")                 # 结果确认卡
+        self.assertEqual(block["questions"][0]["options"], ["重新生成", "先不重做"])
+        regen = block["regenerate"]["items"]                       # 刷新后仍能一键重生成
+        self.assertEqual(regen[0]["node_id"], "n1")
+        self.assertEqual(regen[0]["prompt"], "杯身笔直")
         self.assertEqual([d["summary"] for n, d in events if n == "review"], ["杯身有点变形"])
 
 

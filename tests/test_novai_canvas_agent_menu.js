@@ -34,6 +34,6 @@ assert.ok(panel.includes('id="agent-model-options"') && panel.includes('role="gr
 assert.ok(panel.includes('"data-agent-model": m.id') && panel.includes('onPick={(m) => { close(); onChoose(m.id); }}'), '二级模型项可选中并回调');
 assert.ok(panel.includes('placePopover({ anchor: box(active.row)'), '二级 flyout 仍有视口夹取/翻边');
 assert.ok(css.includes('.cn-root #pop.model-pop{overflow:visible}'), '模型菜单 #pop 不裁剪二级 flyout');
-assert.ok(css.includes('.cn-root .model-providers{max-height:min(520px,calc(100vh - 120px));overflow-y:auto'), '供应商列表自己滚动，避免菜单超出视口');
+assert.ok(css.includes('.cn-root .model-providers{max-height:min(300px,calc(100vh - 320px));overflow-y:auto'), '供应商列表自己滚动（收紧到 300px，给模型强度滑块留位置）');
 
 console.log('[PASS] 任务卡移除 / 菜单滚动条隐藏 / 助手二级模型菜单可点可选（3 组）');

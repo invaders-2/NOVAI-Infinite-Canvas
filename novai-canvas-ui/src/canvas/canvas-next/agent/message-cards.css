@@ -578,3 +578,328 @@
 .cn-root .nv-gen-vendor-name, .cn-root .nv-gen-model-name { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .cn-root .nv-gen-count { flex: none; font-size: 10.5px; color: var(--fg3); }
 .cn-root .nv-gen-vendor.is-on .nv-gen-vendor-name, .cn-root .nv-gen-model.is-on .nv-gen-model-name { font-weight: 600; color: var(--hi); }
+
+/* ══ 联网搜索结果（Rare UI WebSearch 的 BEAT 版） ══════════════════════════
+   写在这份卡面文件末尾、不新开 web-search.css：卡面令牌（--sunken / --card-hi /
+   --fg1..3 / --ease）本来就集中在这里，新文件只会多一次 import 和一次样式表请求。
+   规则照本文件的口径抬到 .cn-root .wsearch-xxx[class]，压过 canvas-next.css 的等特异性规则；
+   层级只用软底 / 柔影 / 间距，不用 border / inset 描边。 */
+.cn-root .websearch-cards[class] { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.cn-root .wsearch[class] {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    /* 面板最窄 360px 时来源网格要退到 2 列，用容器查询按卡片自己的宽度判断（不看视口） */
+    container: wsearch / inline-size;
+}
+
+/* 触发胶囊 */
+.cn-root .wsearch-trigger[class] {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    align-self: flex-start;
+    max-width: 100%;
+    height: 40px;
+    padding: 0 12px 0 6px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--sunken);
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--d-quick) var(--ease), box-shadow var(--d-quick) var(--ease);
+}
+.cn-root .wsearch-trigger[class]:hover {
+    background: color-mix(in srgb, var(--fg) 10%, transparent);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 4px 14px rgba(0, 0, 0, .12);
+}
+.cn-root[data-theme="light"] .wsearch-trigger[class]:hover {
+    background: var(--card);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 14px rgba(15, 23, 42, .08);
+}
+.cn-root .wsearch-trigger[class]:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--fg) 34%, transparent);
+    outline-offset: 2px;
+}
+
+/* 地球圆片 + 顺时针进度环 */
+.cn-root .wsearch-globe[class] {
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--fg) 12%, transparent);
+    color: var(--fg3);
+    transition: color var(--d-quick) var(--ease);
+}
+/* 浅色下参考图是白圆片（--card 在浅色就是纯白），深色用比胶囊底略亮的一层 */
+.cn-root[data-theme="light"] .wsearch-globe[class] {
+    background: var(--card);
+    color: var(--fg2);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .06);
+}
+.cn-root .wsearch-trigger[class]:hover .wsearch-globe[class] { color: var(--fg); }
+.cn-root .wsearch-globe[class] > svg:first-child { width: 15px; height: 15px; }
+
+.cn-root .wsearch-ring[class] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+    transition: opacity var(--d-std) var(--ease);
+}
+.cn-root .wsearch-ring[class] circle {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+}
+.cn-root .wsearch-ring-track[class] { opacity: .14; }
+/* pathLength=1 让 dasharray/dashoffset 直接用 0..1，不需要算周长 */
+.cn-root .wsearch-ring-fill[class] { stroke-dasharray: 1; transition: stroke-dashoffset .6s var(--ease); }
+/* 进度环只在搜索中有意义：完成 / 未开启 / 失败都收掉，别在胶囊上留一个满圈 */
+.cn-root .wsearch:not([data-status="searching"]) .wsearch-ring[class] { opacity: 0; }
+
+/* 标签：换字带位移模糊；搜索中走一遍光泽 */
+.cn-root .wsearch-label[class] { min-width: 0; overflow: hidden; color: inherit; }
+.cn-root .wsearch-label-in[class] {
+    display: block;
+    overflow: hidden;
+    color: var(--fg);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 20px;
+    letter-spacing: -.01em;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    animation: wsearch-swap .28s var(--ease) both;
+}
+.cn-root .wsearch-label-in.is-searching[class] {
+    color: transparent;
+    background-image: linear-gradient(90deg, var(--fg2) 40%, var(--hi) 50%, var(--fg2) 60%);
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation: wsearch-swap .28s var(--ease) both, wsearch-shimmer 1.6s linear infinite;
+}
+@keyframes wsearch-swap {
+    from { opacity: 0; transform: translateY(5px); filter: blur(3px); }
+    to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes wsearch-shimmer {
+    from { background-position: 100% 0; }
+    to { background-position: 0% 0; }
+}
+
+/* 站点图标叠层：默认叠起来，hover 时错开 */
+.cn-root .wsearch-stack[class] { display: inline-flex; flex: none; align-items: center; }
+.cn-root .wsearch-stack[class] .wsearch-fav[class] { margin-left: -6px; transition: margin var(--d-std) var(--ease); }
+.cn-root .wsearch-stack[class] .wsearch-fav[class]:first-child { margin-left: 0; }
+.cn-root .wsearch-trigger[class]:hover .wsearch-stack[class] .wsearch-fav[class] { margin-left: 1px; }
+.cn-root .wsearch-trigger[class]:hover .wsearch-stack[class] .wsearch-fav[class]:first-child { margin-left: 0; }
+.cn-root .wsearch-stack.is-inline[class] .wsearch-fav[class] { margin-left: -5px; }
+.cn-root .wsearch-stack.is-inline[class] .wsearch-fav[class]:first-child { margin-left: 0; }
+
+.cn-root .wsearch-caret[class] {
+    display: inline-flex;
+    flex: none;
+    margin-left: -2px;
+    color: var(--fg3);
+    transition: transform var(--d-std) var(--ease), color var(--d-quick) var(--ease);
+}
+.cn-root .wsearch[data-open] .wsearch-caret[class] { transform: rotate(180deg); }
+.cn-root .wsearch-trigger[class]:hover .wsearch-caret[class] { color: var(--fg); }
+.cn-root .wsearch-caret[class] svg { width: 14px; height: 14px; }
+
+/* 展开区：0fr → 1fr，不用 max-height 拍数字 */
+.cn-root .wsearch-body[class] {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition: grid-template-rows var(--d-spatial) var(--ease), opacity var(--d-quick) var(--ease);
+}
+.cn-root .wsearch[data-open] .wsearch-body[class] { grid-template-rows: 1fr; opacity: 1; }
+.cn-root .wsearch-body-in[class] { min-height: 0; overflow: hidden; }
+
+.cn-root .wsearch-grid[class] {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+    /* 底部多留 8px：hover 的柔影会被 .wsearch-body-in 的 overflow 裁掉，没这段就直接切出硬边 */
+    padding: 10px 1px 8px;
+    list-style: none;
+}
+@container wsearch (max-width: 430px) {
+    .cn-root .wsearch-grid[class] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.cn-root .wsearch-cell[class] { min-width: 0; animation: wsearch-card-in .42s var(--ease) both; }
+@keyframes wsearch-card-in {
+    from { opacity: 0; transform: translateY(8px) scale(.98); filter: blur(5px); }
+    to { opacity: 1; transform: none; filter: blur(0); }
+}
+
+/* 来源卡：84px 高、14px 圆角、软底；hover 上浮 2px + 柔和投影 */
+.cn-root .wsearch-card[class] {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+    height: 84px;
+    padding: 10px;
+    border: 0;
+    border-radius: 14px;
+    background: var(--card-hi);
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform var(--d-quick) var(--ease), background var(--d-quick) var(--ease), box-shadow var(--d-quick) var(--ease);
+}
+.cn-root .wsearch-card[class]:hover {
+    transform: translateY(-2px);
+    background: color-mix(in srgb, var(--fg) 4%, var(--card-hi));
+    box-shadow: 0 6px 16px rgba(0, 0, 0, .18), 0 2px 5px rgba(0, 0, 0, .12);
+}
+.cn-root[data-theme="light"] .wsearch-card[class]:hover {
+    background: var(--card);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, .1), 0 2px 5px rgba(15, 23, 42, .06);
+}
+.cn-root .wsearch-card[class]:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--fg) 34%, transparent);
+    outline-offset: 2px;
+}
+.cn-root .wsearch-card-title[class] {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--fg1);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 17px;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+.cn-root .wsearch-card[class]:hover .wsearch-card-title[class] { color: var(--hi); }
+.cn-root .wsearch-card-foot[class] { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cn-root .wsearch-card-site[class] {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--fg3);
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 16px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.cn-root .wsearch-card-n[class] {
+    flex: none;
+    color: var(--fg3);
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    opacity: .7;
+}
+
+/* 站点图标：有 favicon 用图，失败退回渐变底 + 首字母 */
+.cn-root .wsearch-fav[class] {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 50%;
+    background: var(--s3);
+    color: #fff;
+    font-weight: 700;
+    line-height: 1;
+}
+.cn-root .wsearch-fav[class] img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cn-root .wsearch-fav[class] b { font-size: inherit; font-weight: 700; }
+
+/* 骨架卡：微光扫过 */
+.cn-root .wsearch-skel[class] { position: relative; overflow: hidden; pointer-events: none; }
+.cn-root .wsearch-skel-lines[class] { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.cn-root .wsearch-skel-lines[class] i { display: block; height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.cn-root .wsearch-skel-lines[class] i.is-w1 { width: 88%; }
+.cn-root .wsearch-skel-lines[class] i.is-w2 { width: 60%; }
+.cn-root .wsearch-skel-foot[class] { display: flex; align-items: center; gap: 6px; }
+.cn-root .wsearch-skel-foot[class] i { display: block; border-radius: 999px; background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.cn-root .wsearch-skel-foot[class] i.is-dot { width: 14px; height: 14px; }
+.cn-root .wsearch-skel-foot[class] i.is-site { width: 48px; height: 8px; }
+.cn-root .wsearch-skel-shine[class] {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--fg) 10%, transparent), transparent);
+    transform: translateX(-100%);
+    animation: wsearch-shine 1.3s ease-in-out infinite;
+}
+@keyframes wsearch-shine { to { transform: translateX(100%); } }
+
+.cn-root button.wsearch-more[class] {
+    align-items: flex-start;
+    justify-content: space-between;
+    background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.cn-root button.wsearch-more[class]:hover {
+    transform: translateY(-2px);
+    background: var(--card-hi);
+    box-shadow: none;
+}
+.cn-root .wsearch-more-text[class] { color: var(--fg2); font-size: 12.5px; font-weight: 600; line-height: 17px; }
+.cn-root button.wsearch-less[class] {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    background: transparent;
+    color: var(--fg3);
+    font-size: 12.5px;
+    font-weight: 600;
+}
+.cn-root button.wsearch-less[class]:hover { transform: translateY(-2px); background: var(--card-hi); color: var(--fg); box-shadow: none; }
+.cn-root button.wsearch-less[class] svg { width: 14px; height: 14px; }
+
+/* 关闭联网 / 失败 / 空结果的说明：只给可读指引，不铺假结果 */
+.cn-root .wsearch-note[class] {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 10px 1px 1px;
+    padding: 9px 10px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--fg) 4%, transparent);
+    color: var(--fg2);
+    font-size: 12px;
+    line-height: 1.55;
+}
+.cn-root .wsearch-note.is-bad[class] { background: color-mix(in srgb, var(--bad) 8%, transparent); color: var(--bad); }
+.cn-root .wsearch-note[class] svg { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+    .cn-root .wsearch-cell[class],
+    .cn-root .wsearch-label-in[class],
+    .cn-root .wsearch-label-in.is-searching[class],
+    .cn-root .wsearch-skel-shine[class] { animation: none; }
+    .cn-root .wsearch-body[class],
+    .cn-root .wsearch-card[class],
+    .cn-root .wsearch-caret[class],
+    .cn-root .wsearch-ring-fill[class],
+    .cn-root .wsearch-stack[class] .wsearch-fav[class],
+    .cn-root .wsearch-trigger[class] { transition: none; }
+    .cn-root .wsearch-card[class]:hover,
+    .cn-root button.wsearch-more[class]:hover,
+    .cn-root button.wsearch-less[class]:hover { transform: none; }
+}
+

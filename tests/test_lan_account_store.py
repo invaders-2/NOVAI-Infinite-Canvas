@@ -100,8 +100,10 @@ def main() -> int:
     me = client.get("/api/lan/me")
     check("GET /me 200", me.status_code == 200, str(me.status_code))
     account = me.json().get("me") or {}
-    code_match = re.search(r"^NOVAI-([23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6})$", str(account.get("friend_code") or ""))
-    check("好友码格式 NOVAI-<6位短码>", bool(code_match), str(account.get("friend_code")))
+    code_match = re.search(r"^NOVAI-(\d{6})$", str(account.get("friend_code") or ""))
+    check("好友码格式 NOVAI-<6位数字码>", bool(code_match), str(account.get("friend_code")))
+    check("好友码数字在 100000..999999",
+          bool(code_match) and 100000 <= int(code_match.group(1)) <= 999999, str(account.get("friend_code")))
     check("me.code 与好友码一致", account.get("code") == (code_match.group(1) if code_match else ""), str(account.get("code")))
     check("默认昵称", account.get("nickname") == "本机用户", str(account.get("nickname")))
     check("账号文件落盘", os.path.isfile(os.path.join(data_dir, lan.ACCOUNT_FILE)))

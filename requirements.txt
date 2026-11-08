@@ -5,6 +5,7 @@ aiofiles>=22.1
 pydantic>=2.0
 python-multipart>=0.0.6
 httpx>=0.24
+socksio>=1.0
 pillow>=9.0
 pystray>=0.19
 qrcode>=7.4

@@ -456,6 +456,35 @@ async function taskCommand(input: Row): Promise<Row> {
     if (response.body) void response.body.cancel().catch(() => undefined);
     return { ok: true, taskId, status: "RUNNING" };
   }
+  if (type === "task/regenerate") {
+    // 审查不合格 → 后端按修订提示词 / 用户描述改节点参数并立刻开跑，跑完自动复审再问
+    const items = (Array.isArray(payload.items) ? payload.items : []).map((item: Row) => ({
+      node_id: String(item?.node_id || ""),
+      label: String(item?.label || "").slice(0, 60),
+      kind: String(item?.kind || ""),
+      prompt: String(item?.prompt || "").slice(0, 2000),
+      issues: Array.isArray(item?.issues) ? item.issues.map(String).slice(0, 8) : [],
+    })).filter((item: Row) => !!item.node_id);
+    if (!items.length) throw new Error("没有要重新生成的结果");
+    // provider / model 拿不到就留空，后端回退默认模型
+    const configId = String(payload.modelConfigId || "");
+    const splitAt = configId.indexOf("::");
+    const response = await fetch("/api/agent/regenerate", json({
+      canvas_id: String(payload.canvasId || ""),
+      thread_id: String(payload.threadId || ""),
+      description: String(payload.description || "").slice(0, 1200),
+      items,
+      provider: splitAt >= 0 ? configId.slice(0, splitAt) : String(payload.provider || ""),
+      model: splitAt >= 0 ? configId.slice(splitAt + 2) : String(payload.model || ""),
+      think_level: String(payload.thinkLevel || ""),
+    }));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || data.error || `HTTP ${response.status}`);
+    // 和 task/run 一样：拿到 run id 就走既有的 task/get 快照监听
+    const taskId = String(data.taskId || data.runId || "");
+    if (!taskId) throw new Error("重新生成没有返回任务 ID");
+    return { ok: true, taskId, status: String(data.status || "RUNNING"), steps: Number(data.steps) || 0 };
+  }
   if (type === "task/get") return commandOf(`/api/agent/runs/${encodeURIComponent(String(payload.taskId || ""))}/snapshot`);
   if (type === "task/list") return commandOf("/api/agent/tasks");
   if (type === "task/cancel") return commandOf(`/api/agent/runs/${encodeURIComponent(String(payload.taskId || ""))}/cancel`, json({}));

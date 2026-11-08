@@ -69,6 +69,7 @@ function syncTheme(theme?: string) {
 function NovaiCanvas() {
   const backend = useMemo(() => createNovaiBackend(), []);
   const [name, setName] = useState("画布");
+  const [nickname, setNickname] = useState("本机用户");
   const [agentDraft, setAgentDraft] = useState<AgentDraft | null>(null);
   useEffect(() => {
     syncTheme();
@@ -83,6 +84,30 @@ function NovaiCanvas() {
     }).catch(() => undefined);
     return () => { alive = false; };
   }, []);
+  /** 昵称以 LAN 账号为准：旧后端没有 /api/lan/me 时静默保持「本机用户」；外壳改名走 novai:profile，画布内改名走 novai:profile-local */
+  useEffect(() => {
+    let alive = true;
+    const loadNickname = () => {
+      void fetch("/api/lan/me", { credentials: "same-origin", headers: { Accept: "application/json" } })
+        .then((response) => response.ok ? response.json() : null)
+        .then((data) => { const next = String(data?.me?.nickname || ""); if (alive && next) setNickname(next); })
+        .catch(() => undefined);
+    };
+    loadNickname();
+    const onVisible = () => { if (document.visibilityState === "visible") loadNickname(); };
+    const onMessage = (event: MessageEvent) => { if (event.data?.type === "novai:profile") loadNickname(); };
+    window.addEventListener("focus", loadNickname);
+    window.addEventListener("message", onMessage);
+    window.addEventListener("novai:profile-local", loadNickname);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      alive = false;
+      window.removeEventListener("focus", loadNickname);
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("novai:profile-local", loadNickname);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
   const host = useMemo<HostActions>(() => ({
     backToList,
     openModelSettings: () => navigate("api-settings"),
@@ -96,9 +121,9 @@ function NovaiCanvas() {
       const data = await response.json();
       return (data.canvases || []).filter((canvas: any) => (canvas.kind || "classic") === "classic").map((canvas: any) => ({ id: String(canvas.id), name: String(canvas.title || "未命名画布"), nodes: Number(canvas.node_count) || undefined }));
     },
-    user: { name: "本机用户", initial: "我" },
+    user: { name: nickname, initial: "我" },
     badge: "",
-  }), []);
+  }), [nickname]);
   return <CanvasApp backend={backend} canvasId={canvasId} name={name} host={host} agentDraft={agentDraft} onReady={(store) => {
     (window as any).__cn = store;
     // 铺参考图要等图片尺寸，异步补上：不挡画布加载；种子读一次就删，重复调用只会拿到 null

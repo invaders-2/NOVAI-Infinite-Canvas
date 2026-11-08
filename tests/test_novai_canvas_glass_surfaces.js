@@ -31,6 +31,15 @@ assert.ok(!group.includes('inset'), '统一覆盖块不再用 inset 发丝线');
 assert.ok(editors.includes('background:var(--glass-bg)') && editors.includes('backdrop-filter:var(--glass-blur)'), '图片编辑素材选择器也是玻璃');
 assert.ok(!/近乎不透明实底|厚底例外/.test(editors), '去掉旧的近实底例外注释');
 
+// ---- 画布节点参数编辑器 #gp：磨砂玻璃（88% 主题底 + 44px blur，无 inset 描边） ----
+const gpRule = (css.match(/\.cn-root #gp\{[^}]*\}/) || [''])[0];
+assert.ok(gpRule, '#gp 规则存在');
+assert.ok(/background:color-mix\(in srgb,var\(--panel\) 88%,transparent\)/.test(gpRule), '#gp 磨砂玻璃底 88% 主题面板');
+assert.ok(/-webkit-backdrop-filter:blur\(44px\) saturate\(190%\)/.test(gpRule) && /backdrop-filter:blur\(44px\) saturate\(190%\)/.test(gpRule), '#gp blur(44px) saturate(190%)，含 -webkit-');
+assert.ok(/box-shadow:var\(--glass-shadow\)/.test(gpRule), '#gp 用统一 glass-shadow（深浅色自动适配）');
+assert.ok(!/inset/.test(gpRule) && !/background:var\(--s1\)/.test(gpRule), '#gp 去掉旧 s1 实底与 inset 描边');
+assert.ok(!/\.cn-root\[data-theme=light\][^{}]*#gp[^{}]*\{[^}]*inset/.test(css), '浅色主题不给 #gp 加发丝线 / inset');
+
 // ---- 方案卡窄面板不横向溢出 ----
 const planRule = (css.match(/\.cn-root \.plan\{[^}]*\}/) || [''])[0];
 const stepRule = (css.match(/\.cn-root \.plan \.cgrid \.plan-step\{[^}]*\}/) || [''])[0];
@@ -55,7 +64,7 @@ assert.ok(/\.cn-root #pop\.agent-pop[^{]*\{[^}]*var\(--glass-bg\)/.test(menusCss
 assert.ok(agentPanel.includes('createPortal') && agentPanel.includes('model-flyout-portal') && agentPanel.includes('document.querySelector(".cn-root")'), '二级模型 flyout portal 到 .cn-root 根级');
 assert.ok(overlay.includes('model-flyout'), 'portal flyout 不触发外部点击关闭');
 assert.ok(menusCss.includes('.cn-root .model-flyout.model-flyout-portal') && menusCss.includes('position:fixed') && menusCss.includes('z-index:61') && menusCss.includes('blur(42px) saturate(180%)') && menusCss.includes('color-mix(in srgb,var(--panel) 84%,transparent)'), '二级 flyout 独立 backdrop root + 84% 底 + 42px blur');
-assert.ok(menusCss.includes('color-mix(in srgb,var(--panel) 86%,transparent)') && menusCss.includes('color-mix(in srgb,var(--panel) 82%,transparent)'), '一级供应商 86%/82% 防透字');
+assert.ok(menusCss.includes('color-mix(in srgb,var(--panel) 86%,transparent)') && menusCss.includes('color-mix(in srgb,var(--panel) 82%,transparent)'), '一级/think 磨砂 86%；旧的 .model-flyout 82% 兜底仍保留');
 assert.ok(menusCss.includes('.cn-root .model-flyout.model-flyout-portal') && /inset 0 1px 0 rgba\(255,255,255,\.06\)/.test(menusCss), '二级 flyout 内高光');
 assert.ok(/\.cn-root #pop\.model-pop \.mi\.on/.test(menusCss) && /color-mix\(in srgb,var\(--ink\) 9%,transparent\)/.test(menusCss), '选中/悬停用半透明软底');
 assert.ok(menusCss.includes('border:0') && menusCss.includes("model-flyout-portal") , '两级模型弹窗无 1px 描边');

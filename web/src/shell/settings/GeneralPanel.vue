@@ -222,6 +222,77 @@ async function saveWebAccess(value) {
     refreshWebAccess();
 }
 
+/* 联网代理：画布助手的 web_search / fetch_url 走哪条线路。auto = 由后端读系统代理，
+   direct = 不走代理，url = 自定义地址（存后端 settings.json，所有客户端共用）。
+   老后端没有这个接口时 GET 404，这里静默降级成只读的「跟随系统」，不弹任何错。 */
+const PROXY_MODES = [
+    { value: 'auto', label: '跟随系统' },
+    { value: 'direct', label: '直连' },
+    { value: 'url', label: '自定义' },
+];
+const proxy = reactive({ mode: 'auto', proxy: '', detected: '', note: '', supported: false, saving: false });
+const proxyUrl = ref('');
+const proxyHint = computed(() => {
+    if (!proxy.supported) return '当前后端未提供代理设置';
+    if (proxy.mode !== 'auto') return '';
+    return proxy.detected || '未检测到系统代理';
+});
+function applyProxy(d) {
+    const v = d || {};
+    const mode = String(v.mode || 'auto');
+    proxy.mode = PROXY_MODES.some(m => m.value === mode) ? mode : 'auto';
+    proxy.proxy = String(v.proxy || '');
+    proxy.detected = String(v.detected || '');
+    proxy.note = String(v.note || '');
+    if (proxy.mode === 'url') proxyUrl.value = proxy.proxy;
+}
+async function refreshProxy() {
+    try {
+        const r = await fetch('/api/agent/web-proxy', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        applyProxy(await r.json());
+        proxy.supported = true;
+    } catch (e) { proxy.supported = false; }
+}
+async function commitProxy(mode, url) {
+    if (proxy.saving) return;
+    const prevMode = proxy.mode;
+    const prevUrl = proxy.proxy;
+    proxy.saving = true;
+    proxy.mode = mode;
+    if (mode === 'url') proxyUrl.value = url;
+    try {
+        const r = await fetch('/api/agent/web-proxy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(mode === 'url' ? { mode, proxy: url } : { mode }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error((d && (d.message || d.detail)) || '');
+        applyProxy(d);
+        proxy.supported = true;
+        toast(mode === 'auto' ? '已改为跟随系统代理' : mode === 'direct' ? '已改为直连' : '已保存自定义代理', { icon: 'check' });
+    } catch (e) {
+        proxy.mode = prevMode;
+        proxy.proxy = prevUrl;
+        proxyUrl.value = prevUrl;
+        toast('保存联网代理失败' + (e && e.message ? '：' + e.message : ''), { danger: true, icon: 'alert' });
+    }
+    proxy.saving = false;
+}
+function pickProxyMode(mode) {
+    if (!proxy.supported || proxy.saving || mode === proxy.mode) return;
+    if (mode !== 'url') { commitProxy(mode); return; }
+    /* 切自定义先展开输入框：有已保存地址或检测到的系统代理就预填并直接落库，没有就等用户填完再 PUT */
+    const seed = String(proxy.proxy || proxy.detected || '').trim();
+    proxyUrl.value = seed;
+    if (seed) commitProxy('url', seed);
+    else proxy.mode = 'url';
+}
+function saveProxyUrl() {
+    if (!proxy.supported || proxy.saving || proxy.mode !== 'url') return;
+    const url = String(proxyUrl.value || '').trim();
+    if (!url) { toast('请先填写代理地址', { danger: true, icon: 'alert' }); return; }
+    if (url === proxy.proxy) return;
+    commitProxy('url', url);
+}
+
 /* 网络：走系统代理 / 跳过 SSL 校验。存 settings.json、保存即生效；
    环境变量 NOVAI_USE_PROXY / NOVAI_SKIP_SSL_VERIFY 设了则以环境变量为准（界面开关置灰提示）。 */
 const network = reactive({ use_system_proxy: false, skip_ssl_verify: false, proxy_source: 'default', ssl_source: 'default' });
@@ -251,6 +322,7 @@ onMounted(() => {
     load();
     refreshStorage();
     refreshWebAccess();
+    refreshProxy();
     refreshNetwork();
     refreshAsr();
     loadPromptOptimize();
@@ -295,6 +367,16 @@ onMounted(() => {
         <SetCard title="画布助手联网" desc="默认关闭。开启后仅允许搜索公开网页和读取网页正文，不允许访问内网或执行代码。">
             <SetRow label="允许联网搜索" desc="开启后画布助手可使用 web_search 和 fetch_url；MCP 与生成接口不受影响">
                 <NvSwitch :model-value="webAccess" label="允许画布助手联网搜索" @update:model-value="saveWebAccess" />
+            </SetRow>
+            <SetRow label="联网代理" desc="被墙的站点（Pinterest / Instagram 等）需要走代理；跟随系统会自动读 macOS / Windows 的系统代理设置">
+                <NvPills :model-value="proxy.mode" :options="PROXY_MODES" label="联网代理" :disabled="!proxy.supported || proxy.saving" @update:model-value="pickProxyMode" />
+                <span v-if="proxyHint" class="wp-hint" :title="proxy.note || proxyHint">{{ proxyHint }}</span>
+            </SetRow>
+            <SetRow v-if="proxy.mode === 'url'" label="代理地址" desc="形如 http://127.0.0.1:7897；只对画布助手的联网请求生效">
+                <label class="nv-field wp-url">
+                    <input v-model="proxyUrl" type="text" placeholder="http://127.0.0.1:7897" aria-label="联网代理地址" autocomplete="off" spellcheck="false" @blur="saveProxyUrl" @keydown.enter.prevent="saveProxyUrl" />
+                </label>
+                <button type="button" class="nv-btn sm ghost" :disabled="proxy.saving" @click="saveProxyUrl">保存</button>
             </SetRow>
         </SetCard>
         <SetCard title="网络" desc="接口请求的网络行为，保存后立即生效；设了对应环境变量时以环境变量为准。">
@@ -363,6 +445,8 @@ onMounted(() => {
 .path-row.wide { padding: 0; width: 100%; }
 .path { flex: 1; min-width: 0; height: 32px; padding: 0 12px; border-radius: var(--radius-md); background: var(--solid); display: flex; align-items: center; font: 400 12px/1 var(--font-mono); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .muted { color: var(--ink-4); font-size: 12px; }
+.wp-hint { max-width: 220px; font: 400 11.5px/1.3 var(--font-mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wp-url { width: 240px; }
 .spin.sm { width: 12px; height: 12px; }
 .asr-sel { position: relative; display: inline-flex; align-items: center; min-width: 200px; }
 .asr-sel select { width: 100%; height: 32px; padding: 0 26px 0 12px; border: 0; outline: 0; border-radius: var(--radius-md); background: var(--solid); appearance: none; -webkit-appearance: none; font: 400 12.5px/32px var(--font-sans); color: var(--ink); cursor: pointer; text-overflow: ellipsis; transition: background var(--duration-fast) var(--ease-out); }

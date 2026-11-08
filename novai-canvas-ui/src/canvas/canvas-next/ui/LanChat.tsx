@@ -524,7 +524,7 @@ export function LanChatHost() {
 
   const addFriend = async () => {
     const parsed = parseFriendCode(codeDraft);
-    if (!parsed) { setLan({ error: "好友码格式不对：应为 6 位码（如 7K3F9Q），或旧的 NOVAI-IP:端口-口令" }); return; }
+    if (!parsed) { setLan({ error: "好友码格式不对：应为 6 位数字 ID（如 483920），或旧的 NOVAI-IP:端口-口令" }); return; }
     setLan({ sending: true, error: "", notice: "" });
     const result = await api("/api/lan/friends", { method: "POST", body: JSON.stringify({ code: codeDraft.trim() }) });
     if (!result.ok) { setLan({ sending: false, error: result.error }); return; }
@@ -544,6 +544,8 @@ export function LanChatHost() {
     if (!result.ok) { setLan({ error: result.error }); return; }
     setLan({ me: result.data?.me || snapshot.me, error: "", notice: "已保存昵称和头像" });
     notify("已保存昵称和头像");
+    // 画布内改名：问候语挂在 main.tsx 的昵称状态上，广播给它立刻重拉（外壳改名走 postMessage 的 novai:profile）
+    window.dispatchEvent(new Event("novai:profile-local"));
     void loadFriends();
   };
 
@@ -575,7 +577,8 @@ export function LanChatHost() {
     }
   };
 
-  const copyCode = () => void copyValue(snap.me?.friend_code || "", "好友码已复制，发给对方即可加你", "[data-lan-code]");
+  const copyCode = () => void copyValue(snap.me?.friend_code || "", "6 位数字好友码已复制，发给对方即可加你", "[data-lan-code]");
+  const copyDirectCode = () => void copyValue(snap.me?.direct_code || "", "直连好友码已复制，发给对方粘贴即可", "[data-lan-direct-code]");
   const copyId = () => void copyValue(snap.me?.code || "", "我的 ID 已复制");
 
   const removeFriend = async (friend: LanFriend) => {
@@ -666,7 +669,7 @@ export function LanChatHost() {
                 <div className="lan-empty">
                   <span className="lan-empty-ic"><Icon name="user" /></span>
                   <b>还没有好友</b>
-                  <span>和对方各自打开 NOVAI，交换好友码就能聊天、发画布。</span>
+                  <span>和对方各自打开 NOVAI，交换 6 位数字好友 ID 就能聊天、发画布。</span>
                   <button className="lan-btn pri" onClick={() => setLan({ view: "add" })}>用好友码加好友</button>
                 </div>
               )}
@@ -732,8 +735,8 @@ export function LanChatHost() {
 
           {snap.view === "add" ? (
             <div className="lan-body" data-lan-view="add">
-              <div className="lan-hint">让对方在「好友 → 我的资料」里复制 6 位好友码，粘贴到这里。两台电脑要在同一个局域网。</div>
-              <input className="lan-input" data-lan-code-input autoFocus value={codeDraft} placeholder="7K3F9Q"
+              <div className="lan-hint">让对方在「好友 → 我的资料」里复制 6 位数字好友码（如 483920），粘贴到这里。两台电脑要在同一个局域网。自动发现不到时，可以让对方发「直连好友码」（NOVAI-IP:端口-口令），整串粘贴进来。</div>
+              <input className="lan-input" data-lan-code-input autoFocus value={codeDraft} placeholder="123456"
                 onChange={(e) => { setCodeDraft(e.target.value); if (snap.error) setLan({ error: "" }); }}
                 onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") void addFriend(); }} />
               <div className="lan-foot">
@@ -774,12 +777,18 @@ export function LanChatHost() {
                       <Icon name="copy" size="xs" />
                     </button>
                   </div>
-                  <label className="lan-label">我的好友码</label>
+                  <label className="lan-label">我的好友码（6 位数字）</label>
                   <div className="lan-code">
                     <input data-lan-code readOnly value={snap.me?.friend_code || "读取中…"} onFocus={(e) => e.currentTarget.select()} />
                     <button className="lan-btn" data-lan-copy onClick={() => void copyCode()}><Icon name="copy" size="xs" />复制</button>
                   </div>
-                  <div className="lan-hint">同一局域网内会自动发现对方；把好友码发给对方，对方加你之后两边互相可见。</div>
+                  <div className="lan-hint">同一局域网内会自动发现对方；把上面的 6 位数字好友码发给对方，对方加你之后两边互相可见。</div>
+                  <label className="lan-label">直连好友码</label>
+                  <div className="lan-code">
+                    <input data-lan-direct-code readOnly value={snap.me?.direct_code || "读取中…"} onFocus={(e) => e.currentTarget.select()} />
+                    <button className="lan-btn" data-lan-direct-copy onClick={() => void copyDirectCode()}><Icon name="copy" size="xs" />复制</button>
+                  </div>
+                  <div className="lan-hint">这个码带本机地址和口令，只发给要加好友的人；自动发现不到时把整串发给对方，对方在「加好友」里粘贴即可。</div>
                   <div className="lan-foot">
                     <button className="lan-btn" data-lan-back onClick={() => setLan({ view: "list", error: "" })}>返回</button>
                     <button className="lan-btn pri" data-lan-save disabled={!name.trim()} onClick={() => void saveMe()}>保存</button>

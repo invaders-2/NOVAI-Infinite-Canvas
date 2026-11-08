@@ -6,7 +6,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import ProfileDialog from '../../shell/ProfileDialog.vue';
 import { state, toast } from '../../lib/store.js';
-import { frameEl, navigate, openCanvasUrl } from '../../lib/bridge.js';
+import { broadcast, frameEl, navigate, openCanvasUrl } from '../../lib/bridge.js';
 import NvSwitch from '../../components/NvSwitch.vue';
 import { auth, loadAuth, openAuth, logout as authLogout, getAuthSettings, setInviteRequired, createInvite } from '../../lib/auth.js';
 
@@ -199,6 +199,7 @@ function openProfile() { profileOpen.value = true; }
 function onProfileSaved(next) {
     if (next && typeof next === 'object') lan.value = next;   // 保存后头像和昵称立即更新，不用刷新页面
     else loadLan();
+    broadcast({ type: 'novai:profile' });   // 已挂载的画布 iframe 也立刻换昵称
 }
 function go(path) { location.assign(path); }
 async function logout() {

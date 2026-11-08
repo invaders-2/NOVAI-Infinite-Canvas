@@ -7,6 +7,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import NvVeilBg from '../../components/NvVeilBg.vue';
+import EffortSlider from '../../components/EffortSlider.vue';
 import { state, toast } from '../../lib/store.js';
 import { openCanvasUrl, navigate } from '../../lib/bridge.js';
 import { CATS, TEMPLATES, TEMPLATE_MAP, SEED_PREFIX } from './templates.js';
@@ -256,13 +257,13 @@ function coverOf(c) { const u = (c.thumbnails || []).filter(Boolean)[0]; return 
 function onCoverError(c) { c.thumbnails = (c.thumbnails || []).slice(1); }
 function openProject(c) { openCanvasUrl(canvasUrl(c, { ctx: 'beat' })); }
 function allProjects() { navigate('canvas'); }
-function onPageFocus(e) { if (e.detail && e.detail.id === 'home') { loadRecent(); loadPlugins(); } }
+function onPageFocus(e) { if (e.detail && e.detail.id === 'home') { loadRecent(); loadPlugins(); loadDefaultModel(); } }
 // 在设置 / 应用市场里改了插件或技能，回到首页时同步
 watch(() => state.settingsOpen, open => { if (!open) { loadPlugins(); if (skillsState.value === 'ready') loadSkills(); } });
 
 /* ───────── 弹层：添加 / 技能 / 插件 ───────── */
 const pop = ref('');            // '' | add | skill | plugin
-function togglePop(id) { closeMention(); pop.value = pop.value === id ? '' : id; if (pop.value === 'skill') loadSkills(); if (pop.value === 'plugin') loadPlugins(); }
+function togglePop(id) { closeMention(); pop.value = pop.value === id ? '' : id; if (pop.value === 'skill') loadSkills(); if (pop.value === 'plugin') loadPlugins(); if (pop.value === 'model') openModelPop(); }
 function closePop() { pop.value = ''; }
 function onDocDown(e) {
     if (pop.value && !e.target.closest('.hp-pop, .hp-chip')) closePop();
@@ -332,6 +333,172 @@ async function toggleMcp(s) {
     finally { mcpBusy.value = ''; }
 }
 function openSettings(tab) { closePop(); state.settingsTab = tab; state.settingsOpen = true; }
+
+/* ───────── 对话模型：底栏 chip + 两级菜单（先供应商，再模型） ─────────
+   默认模型存服务端（GET/PUT /api/agent/default-model，"平台id::模型名"，空串 = 跟随系统设置）；
+   画布助手打开时读 localStorage canvas-next:agent:model 当自己选中的模型，所以两边一起写。
+   只影响之后新建的画布，不改当前页面。 */
+const chatModel = ref('');              // '' = 跟随系统设置的默认模型
+const modelVendors = ref([]);           // [{ id, name, models: [{ id, name }] }]
+const modelVendor = ref('');            // 二级 flyout 打开的供应商（'' = 没开）
+const modelTop = ref(0);                // 二级浮层 top：相对 .hp-model-wrap = 当前供应商行的 top
+const modelQ = ref('');
+const modelState = ref('idle');         // idle | loading | ready | error
+const modelPopEl = ref(null);           // 打开时把当前模型滚到可见位置
+const modelName = id => (id ? String(id).split('::').slice(1).join('::') || String(id) : '');
+const chatModelLabel = computed(() => (chatModel.value ? modelName(chatModel.value) : '默认模型'));
+/* 模型强度：/api/config 的 provider.model_caps[模型名].think 是档位真值源（后端按模型能力下发）；
+   和画布助手共用 canvas-next:agent:think（空串 = 删除）。没档位 / 没选中模型时滑块不显示。 */
+const THINK_KEYS = ['low', 'mid', 'high', 'xhigh', 'max'];
+const thinkLevel = ref('');
+try { thinkLevel.value = localStorage.getItem('canvas-next:agent:think') || ''; } catch (e) {}
+function normalizeThinkLevels(raw) {
+    const known = (Array.isArray(raw) ? raw : []).map(v => String(v == null ? '' : v).trim()).filter(v => THINK_KEYS.includes(v));
+    return [...new Set(known)].sort((a, b) => THINK_KEYS.indexOf(a) - THINK_KEYS.indexOf(b));
+}
+const chatThinkLevels = computed(() => {
+    if (!chatModel.value) return [];
+    for (const g of modelVendors.value) {
+        const hit = (g.models || []).find(m => m.id === chatModel.value);
+        if (hit) return hit.think || [];
+    }
+    return [];
+});
+function applyThinkLevel(level) {
+    const next = String(level == null ? '' : level).trim();
+    thinkLevel.value = next;
+    try { if (next) localStorage.setItem('canvas-next:agent:think', next); else localStorage.removeItem('canvas-next:agent:think'); } catch (e) {}
+}
+// 换模型后收敛到合法档位；模型不支持（没档位）只隐藏滑块，不清掉和画布助手共用的偏好
+watch(chatThinkLevels, (levels) => {
+    if (!levels.length) return;
+    if (thinkLevel.value && !levels.includes(thinkLevel.value)) applyThinkLevel(levels[0]);
+});
+const activeVendor = computed(() => modelVendors.value.find(v => v.id === modelVendor.value) || null);
+const activeModels = computed(() => {
+    const list = activeVendor.value ? activeVendor.value.models : [];
+    const q = modelQ.value.trim().toLowerCase();
+    return q ? list.filter(m => m.name.toLowerCase().includes(q)) : list;
+});
+async function loadDefaultModel() {
+    try {
+        const r = await fetch('/api/agent/default-model', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        chatModel.value = (d && d.model) || '';
+    } catch (e) { /* 读不到就保持原样，chip 还显示上一次的值 */ }
+}
+async function loadModelGroups() {
+    modelState.value = 'loading';
+    try {
+        const r = await fetch('/api/config', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const cfg = await r.json();
+        const rows = Array.isArray(cfg && cfg.api_providers) ? cfg.api_providers : [];
+        // 过滤规则照 novai-canvas-ui/src/novaiBackend.ts 的 listModels
+        const groups = rows.filter(p => {
+            if (!p || p.enabled === false) return false;
+            const protocol = String(p.protocol || '').toLowerCase();
+            const local = /local|ollama|comfy|本机/i.test(String(p.id || '') + ' ' + String(p.name || ''));
+            return p.has_key === true || p.has_wallet_key === true || local || ['jimeng', 'codex', 'gemini-cli'].includes(protocol);
+        }).map(p => {
+            const pid = String(p.id || '');
+            const caps = p.model_caps && typeof p.model_caps === 'object' ? p.model_caps : {};
+            const models = (Array.isArray(p.chat_models) ? p.chat_models : []).map(v => String(v || '').trim()).filter(Boolean)
+                .map(name => ({ id: pid + '::' + name, name, think: normalizeThinkLevels(caps[name] && caps[name].think) }));
+            return { id: pid, name: String(p.name || p.id), models };
+        }).filter(g => g.id);
+        // 当前模型所在供应商不在 /api/config 里：补一个「当前」分组，别让 chip 的状态在菜单里找不到
+        if (chatModel.value) {
+            const pid = chatModel.value.split('::')[0];
+            const hit = groups.find(g => g.id === pid);
+            if (hit) { if (!hit.models.some(m => m.id === chatModel.value)) hit.models.unshift({ id: chatModel.value, name: modelName(chatModel.value), think: [] }); }
+            else groups.unshift({ id: pid, name: '当前', models: [{ id: chatModel.value, name: modelName(chatModel.value), think: [] }] });
+        }
+        modelVendors.value = groups;
+        modelState.value = 'ready';
+        return groups;
+    } catch (e) {
+        modelState.value = 'error';
+        return [];
+    }
+}
+/* 二级 = 一级左侧的子菜单浮层：绝对定位（right:100%，贴边无间隙），top 跟着当前供应商行。
+   一级始终保留；鼠标划过别的供应商就换内容 + 换 top，不靠 pointerleave 关闭。
+   关闭：点菜单外 / 选模型 / Esc；「默认对话模型」行也会收起二级。 */
+function closeFlyout() { modelVendor.value = ''; modelQ.value = ''; }
+/* 模型列表滚到当前模型（尽量居中）；没有当前模型就回顶部。
+   用 offsetTop 直接算，不碰 scrollIntoView，免得把整页带着滚。 */
+function scrollModelList() {
+    const root = modelPopEl.value; if (!root) return;
+    const box = root.querySelector('.hp-mpanel-models .hp-list'); if (!box) return;
+    const cur = box.querySelector('.hp-it.cur');
+    if (!cur) { box.scrollTop = 0; return; }
+    const top = cur.offsetTop - box.offsetTop;
+    box.scrollTop = Math.max(0, top - Math.max(0, (box.clientHeight - cur.offsetHeight) / 2));
+}
+watch(modelVendor, v => { if (v) nextTick(scrollModelList); });
+function showVendor(id, event) {
+    if (event && event.currentTarget && modelPopEl.value) {
+        const rr = event.currentTarget.getBoundingClientRect();
+        const wr = modelPopEl.value.getBoundingClientRect();
+        modelTop.value = Math.max(0, Math.round(rr.top - wr.top));
+    }
+    if (modelVendor.value === id) return;
+    modelQ.value = '';
+    modelVendor.value = id;
+}
+function clickVendor(id, event) {
+    showVendor(id, event);
+    nextTick(() => {
+        const input = modelPopEl.value && modelPopEl.value.querySelector('.hp-mpanel-models .hp-search input');
+        if (input) input.focus();
+    });
+}
+/* 菜单 Teleport 到 #nv-layer 用 fixed 定位：composer 自己是 backdrop root，菜单留在里面磨砂会变平色、二级还会被裁。
+   位置按 composer 的视口矩形算：下方 6px、右边对齐（距视口右 14）。页面一滚/一缩放就关掉，别让它飘。 */
+const modelPos = ref({ top: '0px', right: '0px' });
+function computeModelPos() {
+    const el = document.querySelector('.hp-composer');
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    modelPos.value = { top: Math.round(r.bottom + 6) + 'px', right: Math.round(window.innerWidth - r.right + 14) + 'px' };
+}
+function onModelViewportChange(e) {
+    if (pop.value !== 'model') return;
+    // 模型列表自己滚动（滚到当前模型、手动滚）不算页面滚动，别误关
+    const t = e && e.target;
+    if (t && t.closest && t.closest('.hp-model-wrap')) return;
+    closePop();
+}
+function openModelPop() {
+    modelQ.value = '';
+    modelVendor.value = '';
+    computeModelPos();
+    loadModelGroups();
+}
+async function setDefaultModel(id, name) {
+    try {
+        const r = await fetch('/api/agent/default-model', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: id }),
+        });
+        if (!r.ok) {
+            const body = await r.json().catch(() => ({}));
+            throw new Error(body.detail || ('HTTP ' + r.status));
+        }
+        chatModel.value = id;
+        try {
+            if (id) localStorage.setItem('canvas-next:agent:model', id);
+            else localStorage.removeItem('canvas-next:agent:model');
+        } catch (e) {}
+        closePop();
+        toast(id ? '已切换对话模型：' + (name || modelName(id)) : '已恢复默认对话模型', { icon: 'check' });
+    } catch (e) {
+        toast('切换对话模型失败：' + ((e && e.message) || '未知错误'), { danger: true, icon: 'alert' });
+    }
+}
+function pickModel(m) { setDefaultModel(m.id, m.name); }
+function useDefaultModel() { setDefaultModel('', ''); }
 
 /* ───────── 输入框里的 @ 和 / ─────────
    @  引用素材：已经加进来的参考素材 + 素材库里的图片 / 视频（选库里的会顺手加进参考素材）
@@ -623,6 +790,26 @@ const templates = computed(() => {
     return TEMPLATES.filter(t => (cat.value === '全部' || t.cat === cat.value)
         && (!q || [t.title, t.desc, t.cat].some(x => x && String(x).toLowerCase().includes(q))));
 });
+const isTplSearch = computed(() => tplQ.value.trim() !== '');
+/* bento 栅格：每 5 张一组（前 2 大 16:9 + 后 3 小 4:3），最后一组按剩余张数收尾；搜索态退回原来的等宽 5 列 */
+function bentoClass(index) {
+    if (isTplSearch.value) return '';
+    const n = templates.value.length;
+    if (!n) return '';
+    if (n <= 4) {
+        if (n === 1) return 'is-full';
+        if (n === 2) return 'is-half';
+        if (n === 3) return 'is-third';
+        return 'is-half';
+    }
+    const pos = index % 5;
+    const rest = n - index + pos;
+    if (rest >= 5) return pos < 2 ? 'is-wide' : 'is-small';
+    if (rest === 1) return 'is-full';
+    if (rest === 2) return 'is-half';
+    if (rest === 3) return 'is-third';
+    return 'is-half';
+}
 const preview = ref(null);      // 正在预览的模板
 function openPreview(t) { preview.value = t; }
 
@@ -632,13 +819,25 @@ function cardVideoOut(e) { const v = e.currentTarget.querySelector('video'); if 
 async function usePreviewed(opts) { const t = preview.value; if (!t) return; const ok = await useTemplate(t.id, opts); if (ok) preview.value = null; }
 
 /* ───────── 生命周期 ───────── */
+/* 输入框是首页唯一需要盯着的动效：指针进来或聚焦就把背后的光幕停掉（光幕是 GPU 大头），
+   离开时只有在焦点也离开 composer 的情况下才恢复——弹层是 composer 的子节点，不会误判 */
+const veilHold = ref(false);
+function onComposerLeave(e) {
+    const to = e.relatedTarget;
+    if (to && e.currentTarget && e.currentTarget.contains(to)) return;
+    veilHold.value = false;
+}
+
 onMounted(() => {
     autoGrow();
     startTypewriter();
     loadPlugins();
     loadRecent();
+    loadDefaultModel();
     window.addEventListener('novai-page-focus', onPageFocus);
     window.addEventListener('novai-canvas-focus', loadRecent);
+    window.addEventListener('scroll', onModelViewportChange, true);
+    window.addEventListener('resize', onModelViewportChange);
     document.addEventListener('mousedown', onDocDown, true);
     document.addEventListener('keydown', onEsc);
 });
@@ -648,18 +847,21 @@ onBeforeUnmount(() => {
     document.removeEventListener('keydown', onEsc);
     window.removeEventListener('novai-page-focus', onPageFocus);
     window.removeEventListener('novai-canvas-focus', loadRecent);
+    window.removeEventListener('scroll', onModelViewportChange, true);
+    window.removeEventListener('resize', onModelViewportChange);
 });
 </script>
 
 <template>
     <div class="hp">
-        <NvVeilBg />
+        <NvVeilBg :hold="veilHold" />
         <div class="hp-scroll">
             <div class="hp-inner">
                 <h1 class="hp-title" aria-label="今天想创作点什么？"><span aria-hidden="true">{{ typed }}</span><span class="hp-caret" :class="{ typing }" aria-hidden="true"></span></h1>
 
                 <!-- 输入框 -->
-                <div class="hp-composer" :class="{ drag, shaking }" @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop">
+                <div class="hp-composer" data-beam="hp" data-active="" :class="{ drag, shaking }" @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop"
+                     @pointerenter="veilHold = true" @pointerleave="onComposerLeave" @focusin="veilHold = true" @focusout="onComposerLeave">
                     <div v-if="refs.length" class="hp-attached">
                         <span v-for="r in refs" :key="r.id" class="hp-att" :class="{ loading: r.loading }">
                             <img v-if="r.preview && r.kind === 'image'" :src="r.preview" alt="" />
@@ -678,9 +880,14 @@ onBeforeUnmount(() => {
                             <button type="button" class="hp-chip" :class="{ open: pop === 'plugin' }" @click="togglePop('plugin')"><NvIcon name="plug" />插件<span v-if="pluginCount" class="n">{{ pluginCount }}</span></button>
                             <button type="button" class="hp-chip ghost" @click="openPicker"><NvIcon name="library" />素材</button>
                         </div>
-                        <button type="button" class="hp-send" :disabled="!canSend" aria-label="发送" title="新建画布，交给画布助手" @click="submit">
-                            <span v-if="busy" class="hp-spin"></span><NvIcon v-else name="up" />
-                        </button>
+                        <div class="hp-right">
+                            <button type="button" class="hp-chip hp-model-chip" :class="{ open: pop === 'model' }" :title="'对话模型：' + chatModelLabel" aria-haspopup="dialog" :aria-expanded="pop === 'model'" @click="togglePop('model')">
+                                <NvIcon name="sparkles" /><span class="mn">{{ chatModelLabel }}</span><NvIcon name="chev" class="cd" />
+                            </button>
+                            <button type="button" class="hp-send" :disabled="!canSend" aria-label="发送" title="新建画布，交给画布助手" @click="submit">
+                                <span v-if="busy" class="hp-spin"></span><NvIcon v-else name="up" />
+                            </button>
+                        </div>
                     </div>
                     <input ref="fileEl" type="file" multiple hidden accept="image/*,video/*,audio/*,.pdf,.txt,.md,.doc,.docx,.xlsx,.xls,.csv" @change="e => { addFiles(e.target.files); e.target.value = ''; }" />
 
@@ -753,6 +960,49 @@ onBeforeUnmount(() => {
                             <div class="hp-foot"><button type="button" @click="openSettings('mcp')">管理插件</button><button type="button" @click="openSettings('mcp')">添加 MCP 服务</button></div>
                         </div>
                     </Transition>
+                    <Teleport to="#nv-layer">
+                    <Transition name="hp-pop">
+                        <div v-if="pop === 'model'" ref="modelPopEl" class="hp-pop hp-model-wrap" :style="modelPos" role="dialog" aria-label="对话模型">
+                            <div class="hp-mpanel hp-mpanel-vendors">
+                                <div class="hp-mpanel-hd"><b>对话模型</b><small>· 选择供应商</small></div>
+                                <div class="hp-mv-list">
+                                    <button type="button" class="hp-mv def" :class="{ cur: !chatModel }" @pointerenter="closeFlyout()" @click="useDefaultModel()">
+                                        <span class="nm">默认对话模型<small>跟随系统设置</small></span>
+                                        <NvIcon v-if="!chatModel" name="check" class="chk" />
+                                    </button>
+                                    <button v-for="g in modelVendors" :key="g.id" type="button" class="hp-mv" :class="{ on: modelVendor === g.id }"
+                                            @pointerenter="showVendor(g.id, $event)" @click="clickVendor(g.id, $event)">
+                                        <span class="nm">{{ g.name }}</span>
+                                        <NvIcon v-if="chatModel && chatModel.split('::')[0] === g.id" name="check" class="chk" />
+                                        <span class="n">{{ g.models.length }} 个模型</span>
+                                        <NvIcon name="chevr" class="ar" />
+                                    </button>
+                                    <div v-if="modelState === 'loading'" class="hp-empty">正在读取供应商…</div>
+                                    <div v-else-if="modelState === 'error'" class="hp-empty">模型列表读取失败</div>
+                                    <div v-else-if="!modelVendors.length" class="hp-empty">没有可用的供应商</div>
+                                </div>
+                                <EffortSlider v-if="chatModel && chatThinkLevels.length > 1" class="hp-effort" :levels="chatThinkLevels" :value="thinkLevel" @update:value="applyThinkLevel" />
+                                <div class="hp-mpanel-foot">
+                                    <button type="button" @click="openSettings('api-settings')">模型设置</button>
+                                    <button v-if="modelState === 'error'" type="button" @click="openModelPop()">重试</button>
+                                </div>
+                            </div>
+                            <Transition name="hp-pop">
+                                <div v-if="modelVendor && activeVendor" class="hp-mpanel hp-mpanel-models" :style="{ top: modelTop + 'px' }">
+                                    <label v-if="activeVendor.models.length > 8" class="hp-search"><NvIcon name="search" /><input v-model="modelQ" placeholder="搜索模型" autocomplete="off" /></label>
+                                    <div class="hp-list">
+                                        <button v-for="m in activeModels" :key="m.id" type="button" class="hp-it" :class="{ cur: chatModel === m.id }" :title="m.id" @click="pickModel(m)">
+                                            <span class="tx"><b>{{ m.name }}</b></span>
+                                            <NvIcon v-if="chatModel === m.id" name="check" class="chk" />
+                                        </button>
+                                        <div v-if="!activeModels.length" class="hp-empty">{{ modelQ.trim() ? '没有匹配的模型' : '这个供应商还没有模型' }}</div>
+                                    </div>
+                                </div>
+                            </Transition>
+                        </div>
+                    </Transition>
+                    </Teleport>
+                    <div data-beam-bloom aria-hidden="true"></div>
                 </div>
 
                 <!-- 快速开始 -->
@@ -782,8 +1032,8 @@ onBeforeUnmount(() => {
                         <label class="hp-tpl-search"><NvIcon name="search" /><input v-model="tplQ" type="search" placeholder="搜索模板" aria-label="搜索模板" autocomplete="off" /><button v-if="tplQ" type="button" aria-label="清空" @click="tplQ = ''"><NvIcon name="x" /></button></label>
                     </div>
                     <p v-if="!templates.length" class="hp-tpl-empty">没有找到「{{ tplQ }}」相关的模板</p>
-                    <div class="hp-grid">
-                        <button v-for="t in templates" :key="t.id" type="button" class="hp-card" :title="t.desc" @pointerenter="cardVideoIn" @pointerleave="cardVideoOut" @click="openPreview(t)">
+                    <div class="hp-grid" :class="{ 'is-search': isTplSearch }">
+                        <button v-for="(t, i) in templates" :key="t.id" type="button" class="hp-card" :class="bentoClass(i)" :title="t.desc" @pointerenter="cardVideoIn" @pointerleave="cardVideoOut" @click="openPreview(t)">
                             <img :src="t.media" alt="" loading="lazy" />
                             <video v-if="t.video" :src="t.video" muted loop playsinline preload="none" aria-hidden="true"></video>
                             <span class="tag">{{ t.cat }}</span>
@@ -844,6 +1094,217 @@ onBeforeUnmount(() => {
 .hp-composer.drag { box-shadow: var(--shadow-lift), 0 0 0 2px var(--ink-4); }
 .hp-composer.shaking { animation: hpShake .4s; }
 @keyframes hpShake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+
+/* 流光边框：npm border-beam@1.4.1 原版移植（size=md / colorVariant=colorful / borderRadius=20）。
+   结构与数值照官方：容器转 --beam-angle-hp + 淡入 --beam-opacity-hp；::after 是 1px 环（白/黑扫光 conic + 9 颗彩色径向光斑）；
+   ::before 是跟着扫光走的内层泛光；[data-beam-bloom] 是 blur(8px) 的外泛光。test1 → hp；
+   深浅色只差 9 处（环与泛光颜色、三层不透明度、内阴影、bloom 饱和度），用变量切。
+   与官方的两处差别（2026-11 流畅度）：① 官方 1.96s 一圈是按 348 宽的 demo 卡的，780 宽卡上每帧位移太大，放慢到
+   --beam-duration: 3.6s；② 去掉官方 12s 的 hue-shift（两个全尺寸 filter 动画，纯烧 GPU），彩色光斑用静态配色。
+   官方在这里有 overflow: hidden，去掉——技能/插件弹层要伸到卡片外。 */
+@property --beam-angle-hp { syntax: "<angle>"; initial-value: 0deg; inherits: true; }
+@property --beam-opacity-hp { syntax: "<number>"; initial-value: 0; inherits: true; }
+
+[data-beam="hp"] {
+    position: relative;
+    border-radius: 20px;
+    --hp-ring-rgb: 0, 0, 0;
+    --hp-ring-a1: 0.08; --hp-ring-a2: 0.2; --hp-ring-a3: 0.4; --hp-ring-a4: 0.55;
+    --hp-stroke-opacity: 0.12;
+    --hp-inner-shadow: rgba(0, 0, 0, 0.14);
+    --hp-inner-opacity: 0.26;
+    --hp-bloom-rgb: 0, 0, 0;
+    --hp-bloom-a1: 0.02; --hp-bloom-a4: 0.4; --hp-bloom-a5: 0.6;
+    --hp-bloom-saturate: 1.5;
+    --hp-bloom-opacity: 0.34;
+}
+html.theme-dark [data-beam="hp"] {
+    --hp-ring-rgb: 255, 255, 255;
+    --hp-ring-a1: 0.1; --hp-ring-a2: 0.3; --hp-ring-a3: 0.6; --hp-ring-a4: 0.75;
+    --hp-stroke-opacity: 0.26;
+    --hp-inner-shadow: rgba(255, 255, 255, 0.27);
+    --hp-inner-opacity: 0.42;
+    --hp-bloom-rgb: 255, 255, 255;
+    --hp-bloom-a1: 0.03; --hp-bloom-a4: 0.45; --hp-bloom-a5: 0.85;
+    --hp-bloom-saturate: 1.2;
+    --hp-bloom-opacity: 0.24;
+}
+
+[data-beam="hp"][data-active] {
+    --beam-duration: 3.6s;
+    animation: beam-spin-hp var(--beam-duration) linear infinite, beam-fade-in-hp 0.6s ease forwards;
+}
+[data-beam="hp"][data-fading] {
+    --beam-duration: 3.6s;
+    animation: beam-spin-hp var(--beam-duration) linear infinite, beam-fade-out-hp 0.5s ease forwards;
+}
+
+[data-beam="hp"][data-active]::after,
+[data-beam="hp"][data-fading]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 19px;
+    padding: 1px;
+    clip-path: inset(0 round 20px);
+    background: conic-gradient(
+            from var(--beam-angle-hp),
+            transparent 0%, transparent 54%,
+            rgba(var(--hp-ring-rgb), var(--hp-ring-a1)) 57%,
+            rgba(var(--hp-ring-rgb), var(--hp-ring-a2)) 60%,
+            rgba(var(--hp-ring-rgb), var(--hp-ring-a3)) 63%,
+            rgba(var(--hp-ring-rgb), var(--hp-ring-a4)) 66%,
+            rgba(var(--hp-ring-rgb), var(--hp-ring-a3)) 69%,
+            rgba(var(--hp-ring-rgb), var(--hp-ring-a2)) 72%,
+            rgba(var(--hp-ring-rgb), var(--hp-ring-a1)) 75%,
+            transparent 78%, transparent 100%
+        ),
+        radial-gradient(ellipse 70px 40px at 33% -7.4%, rgb(255, 50, 100), transparent),
+        radial-gradient(ellipse 60px 35px at 12% -5%, rgb(40, 140, 255), transparent),
+        radial-gradient(ellipse 40px 70px at 2.1% 68.3%, rgb(50, 200, 80), transparent),
+        radial-gradient(ellipse 20px 35px at 2.1% 68.3%, rgb(30, 185, 170), transparent),
+        radial-gradient(ellipse 180px 32px at 74.4% 100%, rgb(100, 70, 255), transparent),
+        radial-gradient(ellipse 85px 26px at 55% 100%, rgb(40, 140, 255), transparent),
+        radial-gradient(ellipse 74px 32px at 93.9% 0%, rgb(255, 120, 40), transparent),
+        radial-gradient(ellipse 26px 42px at 100% 27.1%, rgb(240, 50, 180), transparent),
+        radial-gradient(ellipse 52px 48px at 100% 27.1%, rgb(180, 40, 240), transparent);
+    -webkit-mask:
+        conic-gradient(
+            from var(--beam-angle-hp),
+            transparent 0%, transparent 30%,
+            rgba(255, 255, 255, 0.1) 36%, rgba(255, 255, 255, 0.35) 44%,
+            white 52%, white 80%,
+            rgba(255, 255, 255, 0.35) 86%, rgba(255, 255, 255, 0.1) 92%,
+            transparent 95%, transparent 100%
+        ),
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: source-in, xor;
+    mask:
+        conic-gradient(
+            from var(--beam-angle-hp),
+            transparent 0%, transparent 30%,
+            rgba(255, 255, 255, 0.1) 36%, rgba(255, 255, 255, 0.35) 44%,
+            white 52%, white 80%,
+            rgba(255, 255, 255, 0.35) 86%, rgba(255, 255, 255, 0.1) 92%,
+            transparent 95%, transparent 100%
+        ),
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    mask-composite: intersect, exclude;
+    pointer-events: none;
+    z-index: 2;
+    opacity: calc(var(--beam-opacity-hp) * var(--hp-stroke-opacity) * var(--beam-stroke-opacity, 1) * var(--beam-strength, 1));
+}
+
+[data-beam="hp"][data-active]::before,
+[data-beam="hp"][data-fading]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 20px;
+    background: radial-gradient(ellipse 63px 36px at 33% -7.4%, rgba(255, 50, 100, 0.45), transparent),
+        radial-gradient(ellipse 54px 32px at 12% -5%, rgba(40, 140, 255, 0.45), transparent),
+        radial-gradient(ellipse 36px 63px at 2.1% 68.3%, rgba(50, 200, 80, 0.45), transparent),
+        radial-gradient(ellipse 18px 32px at 2.1% 68.3%, rgba(30, 185, 170, 0.45), transparent),
+        radial-gradient(ellipse 162px 29px at 74.4% 100%, rgba(100, 70, 255, 0.45), transparent),
+        radial-gradient(ellipse 77px 23px at 55% 100%, rgba(40, 140, 255, 0.45), transparent),
+        radial-gradient(ellipse 67px 29px at 93.9% 0%, rgba(255, 120, 40, 0.45), transparent),
+        radial-gradient(ellipse 23px 38px at 100% 27.1%, rgba(240, 50, 180, 0.45), transparent),
+        radial-gradient(ellipse 47px 43px at 100% 27.1%, rgba(180, 40, 240, 0.45), transparent);
+    box-shadow: inset 0 0 9px 1px var(--hp-inner-shadow);
+    -webkit-mask-image:
+        conic-gradient(
+            from var(--beam-angle-hp),
+            transparent 0%, transparent 30%,
+            rgba(255, 255, 255, 0.1) 36%, rgba(255, 255, 255, 0.35) 44%,
+            white 52%, white 80%,
+            rgba(255, 255, 255, 0.35) 86%, rgba(255, 255, 255, 0.1) 92%,
+            transparent 95%, transparent 100%
+        ),
+        linear-gradient(white, transparent 28px, transparent calc(100% - 28px), white),
+        linear-gradient(to right, white, transparent 28px, transparent calc(100% - 28px), white);
+    -webkit-mask-composite: source-in, source-over;
+    mask-image:
+        conic-gradient(
+            from var(--beam-angle-hp),
+            transparent 0%, transparent 30%,
+            rgba(255, 255, 255, 0.1) 36%, rgba(255, 255, 255, 0.35) 44%,
+            white 52%, white 80%,
+            rgba(255, 255, 255, 0.35) 86%, rgba(255, 255, 255, 0.1) 92%,
+            transparent 95%, transparent 100%
+        ),
+        linear-gradient(white, transparent 28px, transparent calc(100% - 28px), white),
+        linear-gradient(to right, white, transparent 28px, transparent calc(100% - 28px), white);
+    mask-composite: intersect, add;
+    pointer-events: none;
+    z-index: 1;
+    opacity: calc(var(--beam-opacity-hp) * var(--hp-inner-opacity) * var(--beam-inner-opacity, 1) * var(--beam-strength, 1));
+    clip-path: inset(0 round 20px);
+}
+
+[data-beam="hp"] [data-beam-bloom] {
+    display: none;
+    position: absolute;
+    inset: 0;
+    border-radius: 19px;
+    clip-path: inset(0 round 20px);
+    background: conic-gradient(
+        from var(--beam-angle-hp),
+        transparent 0%, transparent 58%,
+        rgba(var(--hp-bloom-rgb), var(--hp-bloom-a1)) 62%,
+        rgba(var(--hp-bloom-rgb), 0.08) 65%,
+        rgba(var(--hp-bloom-rgb), 0.2) 67%,
+        rgba(var(--hp-bloom-rgb), var(--hp-bloom-a4)) 69%,
+        rgba(var(--hp-bloom-rgb), var(--hp-bloom-a5)) 70%,
+        rgba(var(--hp-bloom-rgb), var(--hp-bloom-a5)) 70.5%,
+        rgba(var(--hp-bloom-rgb), var(--hp-bloom-a4)) 71.5%,
+        rgba(var(--hp-bloom-rgb), 0.2) 73%,
+        rgba(var(--hp-bloom-rgb), 0.08) 75%,
+        rgba(var(--hp-bloom-rgb), var(--hp-bloom-a1)) 78%,
+        transparent 82%
+    );
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    padding: 1px;
+    filter: blur(8px) brightness(1.30) saturate(var(--hp-bloom-saturate));
+    pointer-events: none;
+    z-index: 3;
+    opacity: 0;
+}
+[data-beam="hp"][data-active] [data-beam-bloom],
+[data-beam="hp"][data-fading] [data-beam-bloom] {
+    display: block;
+    opacity: calc(var(--beam-opacity-hp) * var(--hp-bloom-opacity) * var(--beam-bloom-opacity, 1) * var(--beam-strength, 1));
+}
+
+@keyframes beam-spin-hp {
+    to { --beam-angle-hp: 360deg; }
+}
+@keyframes beam-fade-in-hp {
+    to { --beam-opacity-hp: 1; }
+}
+@keyframes beam-fade-out-hp {
+    from { --beam-opacity-hp: 1; }
+    to { --beam-opacity-hp: 0; }
+}
+[data-beam="hp"][data-paused],
+[data-beam="hp"][data-paused]::after,
+[data-beam="hp"][data-paused]::before,
+[data-beam="hp"][data-paused] [data-beam-bloom] {
+    animation-play-state: paused !important;
+}
+
+/* 关动效时容器没有 fade-in，--beam-opacity-hp 会停在 0（光消失），显式给 1 留一帧静态光 */
+@media (prefers-reduced-motion: reduce) {
+    [data-beam="hp"],
+    [data-beam="hp"]::before,
+    [data-beam="hp"]::after,
+    [data-beam="hp"] [data-beam-bloom] { animation: none !important; }
+    [data-beam="hp"] { --beam-opacity-hp: 1; }
+}
 .hp-attached { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px 8px; }
 .hp-att { height: 30px; max-width: 220px; padding: 0 6px 0 3px; border-radius: 9px; background: var(--hp-card); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .hp-att img, .hp-att .gi { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
@@ -868,6 +1329,57 @@ onBeforeUnmount(() => {
 .hp-chip.ghost { background: transparent; }
 .hp-chip.ic { width: 30px; padding: 0; justify-content: center; }
 .hp-chip .n { font-size: 11px; color: var(--ink-4); }
+.hp-model-chip .mn { max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hp-model-chip .cd { width: 12px; height: 12px; color: var(--ink-4); flex-shrink: 0; }
+.hp-model-chip.open .cd { color: var(--ink-2); }
+
+/* 对话模型：画布助手式两级菜单（一级供应商 hover 开二级模型），磨砂玻璃。
+   Teleport 到 #nv-layer + fixed：composer 自己是 backdrop root，留在里面磨砂会采样不到页面背景、变成平色，二级还会被裁。 */
+.hp-pop.hp-model-wrap {
+    position: fixed; z-index: 60; width: auto; padding: 0; background: transparent; box-shadow: none;
+    /* .hp 上的页面变量 Teleport 出去后拿不到，这里补一份 */
+    --hp-pop: #fff; --hp-card: rgba(0, 0, 0, .04); --hp-card-h: rgba(0, 0, 0, .07);
+}
+html.theme-dark .hp-pop.hp-model-wrap { --hp-pop: #1e1e20; --hp-card: rgba(255, 255, 255, .04); --hp-card-h: rgba(255, 255, 255, .07); }
+/* 磨砂玻璃（一级 / 二级共用）+ 柔和投影；零 border / 零发丝线。 */
+.hp-mpanel {
+    width: 300px; padding: 6px; border-radius: 14px; border: 0;
+    background: color-mix(in srgb, var(--hp-pop) 86%, transparent);
+    -webkit-backdrop-filter: blur(42px) saturate(180%);
+    backdrop-filter: blur(42px) saturate(180%);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, .14), 0 4px 12px rgba(0, 0, 0, .07);
+}
+html.theme-dark .hp-mpanel { box-shadow: 0 18px 40px rgba(0, 0, 0, .36), 0 4px 12px rgba(0, 0, 0, .22); }
+/* 二级子菜单：绝对定位在一级面板左侧，right:100% 贴边（中间不留缝），top = 当前供应商行（内联 style 覆盖） */
+.hp-mpanel-models { position: absolute; top: 0; right: 100%; width: 300px; display: flex; flex-direction: column; z-index: 2; }
+.hp-mpanel-hd { display: flex; align-items: baseline; gap: 6px; padding: 4px 8px 6px; }
+.hp-mpanel-hd b { font: 400 11px/1.2 var(--font-sans); color: var(--ink-3); }
+.hp-mpanel-hd small { font-size: 11px; color: var(--ink-4); }
+.hp-mv-list { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow: auto; }
+.hp-effort { margin: 4px 0 2px; }
+.hp-mv { min-height: 36px; padding: 0 8px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); display: flex; align-items: center; gap: 6px;
+    font: 400 13px/1 var(--font-sans); cursor: pointer; text-align: left; transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.hp-mv:hover, .hp-mv.on { background: var(--hp-card-h); color: var(--ink); }
+.hp-mv.cur { background: var(--hp-card); color: var(--ink); }
+.hp-mv.def { min-height: 40px; padding: 6px 8px; }
+.hp-mv .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hp-mv.def .nm { white-space: normal; }
+.hp-mv .nm small { display: block; font-size: 11px; color: var(--ink-4); margin-top: 2px; }
+.hp-mv .n { font-size: 11px; color: var(--ink-4); flex-shrink: 0; }
+.hp-mv .chk { width: 13px; height: 13px; color: var(--ink); flex-shrink: 0; }
+.hp-mv .ar { width: 12px; height: 12px; color: var(--ink-4); flex-shrink: 0; }
+.hp-mpanel-foot { display: flex; justify-content: space-between; gap: 8px; padding: 8px 8px 2px; margin-top: 4px; }
+.hp-mpanel-foot button { border: 0; background: transparent; padding: 0; color: var(--ink-3); font: 400 11px/1.4 var(--font-sans); cursor: pointer; }
+.hp-mpanel-models .hp-search { margin-bottom: 4px; }
+.hp-mpanel-models .hp-list { max-height: 300px; }
+/* 二级模型列表：Prompt Input 版式 —— 行高 38px、13px 左对齐，选中不铺色块，只在右侧出 14px 线性对勾 + 字重 600 */
+.hp-mpanel-models .hp-it { min-height: 38px; padding: 0 10px; border-radius: 9px; gap: 8px; }
+.hp-mpanel-models .hp-it .tx { min-width: 0; }
+.hp-mpanel-models .hp-it b { font-size: 13px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hp-mpanel-models .hp-it.cur { background: transparent; }
+.hp-mpanel-models .hp-it.cur b { font-weight: 600; }
+.hp-mpanel-models .hp-it .chk { width: 14px; height: 14px; color: var(--ink); flex-shrink: 0; }
+.hp-right { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .hp-send { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: opacity var(--duration-fast), transform var(--duration-instant); }
 .hp-send:active { transform: scale(.94); }
 .hp-send:disabled { opacity: .3; cursor: default; transform: none; }
@@ -942,7 +1454,7 @@ onBeforeUnmount(() => {
 .hp-new:hover, .hp-pj:hover { background: var(--hp-glass-h); transform: translateY(-2px); }
 .hp-new { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 196px; font: 500 13px/1 var(--font-sans); }
 .hp-new .nv-i { width: 22px; height: 22px; color: var(--ink-2); }
-.hp-pj { display: flex; flex-direction: column; gap: 8px; padding: 6px; }
+.hp-pj { display: flex; flex-direction: column; gap: 8px; padding: 6px; overflow: hidden; }
 .hp-pj .cv { position: relative; display: block; aspect-ratio: 16 / 10; border-radius: 12px; overflow: hidden; background: var(--hp-card); }
 .hp-pj .cv img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .hp-pj .cv .ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--ink-4); }
@@ -955,9 +1467,9 @@ onBeforeUnmount(() => {
 .hp-pj .cv.art .ln { stroke: var(--hp-ill); }
 .hp-pj .cv.art .pt { fill: var(--shell-bg); stroke: var(--hp-ill); }
 .hp-pj .cv.art .d { fill: var(--hp-ill); }
-.hp-pj .mt { display: flex; align-items: baseline; gap: 8px; padding: 0 4px; min-width: 0; }
-.hp-pj .mt b { flex: 1; min-width: 0; font: 500 12px/16px var(--font-sans); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hp-pj .mt em { font: normal 400 11px/16px var(--font-sans); color: var(--ink-3); white-space: nowrap; flex: none; }
+.hp-pj .mt { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px; padding: 0 4px; min-width: 0; overflow: hidden; }
+.hp-pj .mt b { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px/16px var(--font-sans); color: var(--ink-2); }
+.hp-pj .mt em { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: normal 400 11px/16px var(--font-sans); color: var(--ink-3); white-space: nowrap; }
 .hp-pj .go { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: 10px; background: var(--hp-card); }
 .hp-pj:hover .go { background: var(--hp-card-h); }
 .hp-pj .go span { flex: 1; min-width: 0; font: 500 12px/1 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -988,18 +1500,38 @@ onBeforeUnmount(() => {
 .hp-tabs button { height: 28px; padding: 0 12px; border: 0; border-radius: 14px; background: transparent; color: var(--ink-3); font: 500 12px/1 var(--font-sans); cursor: pointer; }
 .hp-tabs button:hover { color: var(--ink); }
 .hp-tabs button.on { background: var(--hp-card-h); color: var(--ink); }
-.hp-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.hp-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; }
+/* bento 栅格：每 5 张一组（2 大 16:9 + 3 小 4:3），尾组按剩余张数用 is-full / is-half / is-third 收尾 */
+.hp-grid .hp-card.is-wide { grid-column: span 3; aspect-ratio: 16 / 9; }
+.hp-grid .hp-card.is-half { grid-column: span 3; aspect-ratio: 16 / 9; }
+.hp-grid .hp-card.is-small { grid-column: span 2; aspect-ratio: 4 / 3; }
+.hp-grid .hp-card.is-third { grid-column: span 2; aspect-ratio: 4 / 3; }
+.hp-grid .hp-card.is-full { grid-column: span 6; aspect-ratio: 21 / 9; }
+.hp-grid:not(.is-search) .hp-card { border-radius: 20px; }
+.hp-card.is-wide .t b { font-size: 16px; }
+.hp-card.is-full .t b { font-size: 18px; }
+/* 搜索态退回原来的 5 列等宽卡片 */
+.hp-grid.is-search { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+/* <=1100 统一干净的两列：所有 bento 卡都占半宽、4:3，避免大小卡混排留半格空洞 */
+@media (max-width: 1100px) {
+    .hp-grid, .hp-grid.is-search { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .hp-grid .hp-card.is-wide, .hp-grid .hp-card.is-half, .hp-grid .hp-card.is-full, .hp-grid .hp-card.is-small, .hp-grid .hp-card.is-third { grid-column: span 1; aspect-ratio: 4 / 3; }
+}
+@media (max-width: 560px) {
+    .hp-grid, .hp-grid.is-search { grid-template-columns: minmax(0, 1fr); }
+    .hp-grid .hp-card.is-wide, .hp-grid .hp-card.is-half, .hp-grid .hp-card.is-full, .hp-grid .hp-card.is-small, .hp-grid .hp-card.is-third { grid-column: span 1; aspect-ratio: 4 / 3; }
+}
 .hp-card { position: relative; display: block; width: 100%; aspect-ratio: 3 / 4; border: 0; padding: 0; border-radius: 16px; overflow: hidden; background: var(--hp-card); text-align: left; cursor: pointer;
     transition: transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out); }
 .hp-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .hp-card video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; pointer-events: none; transition: opacity var(--duration-fast); }
 .hp-card:hover video, .hp-card:focus-visible video { opacity: 1; }
-.hp-card::after { content: ''; position: absolute; inset: 45% 0 0; background: linear-gradient(transparent, rgba(0,0,0,.62)); }
+.hp-card::after { content: ''; position: absolute; inset: 68% 0 0; background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,.22) 40%, rgba(0,0,0,.66) 100%); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%); -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 50%); mask-image: linear-gradient(180deg, transparent 0%, #000 50%); pointer-events: none; }
 .hp-card .t { position: absolute; left: 14px; right: 14px; bottom: 12px; z-index: 1; color: #fff; }
 .hp-card .t b { display: block; font: 600 13px/1.3 var(--font-sans); }
 .hp-card .t small { display: block; font-size: 11px; opacity: .8; margin-top: 3px; }
 .hp-card .tag { position: absolute; top: 10px; left: 10px; z-index: 1; height: 22px; padding: 0 8px; border-radius: 11px; font-size: 11px; color: #fff; background: rgba(0,0,0,.32); backdrop-filter: blur(12px); display: flex; align-items: center; }
-.hp-card .use { position: absolute; right: 10px; top: 10px; z-index: 1; height: 26px; padding: 0 10px; border-radius: 13px; background: #fff; color: #0a0a0a; font: 500 11px/1 var(--font-sans); display: flex; align-items: center; gap: 4px;
+.hp-card .use { position: absolute; right: 10px; top: 10px; z-index: 1; height: 26px; padding: 0 10px; border-radius: 13px; background: rgba(0,0,0,.32); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 4px 14px rgba(0,0,0,.18); color: #fff; font: 500 11px/1 var(--font-sans); display: flex; align-items: center; gap: 4px;
     opacity: 0; transform: translateY(-3px); transition: opacity .16s, transform .16s; }
 .hp-card .use .nv-i { width: 12px; height: 12px; }
 .hp-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
@@ -1013,13 +1545,14 @@ onBeforeUnmount(() => {
 .hp-bfx i:nth-child(3) { backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%); -webkit-mask: linear-gradient(to top, #000 15%, transparent 55%); mask: linear-gradient(to top, #000 15%, transparent 55%); }
 .hp-bfx i:nth-child(4) { background: linear-gradient(to top, var(--tb-tint), transparent 85%); }
 
-@media (max-width: 1100px) { .hp-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-@media (max-width: 860px) { .hp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 640px) {
     .hp-inner { padding-left: 16px; padding-right: 16px; }
     .hp-quick, .hp-recent { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .hp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .hp-pop { left: 0 !important; width: calc(100vw - 48px) !important; }
+    /* 模型菜单是 fixed 的 teleport 容器，不吃上面那条宽度/左对齐 */
+    .hp-pop.hp-model-wrap { left: auto !important; width: auto !important; }
+    /* 二级浮层贴在一级左侧：窄屏跟一级同宽，切换时不横向跳 */
+    .hp-mpanel { width: 200px; }
 }
 @media (prefers-reduced-motion: reduce) { .hp-caret { display: none; } .hp-card, .hp-q .art { transition: none; } }
 </style>

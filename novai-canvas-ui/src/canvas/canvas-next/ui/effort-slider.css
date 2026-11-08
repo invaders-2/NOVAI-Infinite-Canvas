@@ -1,0 +1,144 @@
+/* 模型强度滑块（HextaUI Prompt Input Effort 版式）
+   零 border / 零发丝线 / 零 inset 描边：层级只靠 28px 胶囊软底轨道、流体渐变、柔和投影与间距。 */
+.cn-root .ev-slider {
+  --ev-spring: cubic-bezier(.34, 1.42, .62, 1);
+  --ev-drop: rgba(0, 0, 0, .42);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 0 6px;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cn-root .ev-head { display: flex; align-items: center; gap: 6px; min-height: 18px; }
+.cn-root .ev-label { font-size: 11px; line-height: 1.2; color: var(--fg3); font-weight: 400; }
+.cn-root .ev-value { font-size: 13px; line-height: 1.2; color: var(--fg2); font-weight: 400; transition: color var(--d-quick) var(--e-std); }
+.cn-root .ev-value.is-on { color: var(--fg); font-weight: 500; }
+/* 「?」外层：承接右对齐，tooltip 以它为定位基准 */
+.cn-root .ev-info-wrap { position: relative; display: inline-flex; flex: none; margin-left: auto; }
+.cn-root .ev-info {
+  flex: none;
+  width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px;
+  display: grid; place-items: center;
+  background: transparent; color: var(--fg3); cursor: help;
+  transition: background-color var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
+}
+.cn-root .ev-info:hover { background: rgba(var(--ink), .07); color: var(--fg2); }
+.cn-root .ev-info svg.i { width: 14px; height: 14px; }
+/* 说明：hover / focus 出的项目内 tooltip（原生 title 已移除），定位在图标右上方 */
+.cn-root .ev-tip {
+  position: absolute;
+  right: -2px;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+  width: max-content;
+  max-width: 220px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--s3);
+  color: var(--fg);
+  font-size: 11.5px;
+  line-height: 1.5;
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .22), 0 2px 8px rgba(0, 0, 0, .1);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(2px);
+  pointer-events: none;
+  transition: opacity .12s var(--e-std), transform .12s var(--e-std), visibility .12s var(--e-std);
+}
+.cn-root .ev-tip[data-show] { opacity: 1; visibility: visible; transform: translateY(0); }
+.cn-root .ev-caption { display: flex; justify-content: space-between; font-size: 11px; line-height: 1.2; color: var(--fg3); }
+
+/* 轨道 28px / 完整胶囊（两端半圆）/ 软底；拖动时 touch-action 关掉页面滚动，指针捕获跟手 */
+.cn-root .ev-track {
+  position: relative;
+  height: 28px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(var(--ink), .06);
+  touch-action: none;
+  cursor: grab;
+  outline: none;
+}
+.cn-root .ev-track[data-dragging] { cursor: grabbing; }
+.cn-root .ev-track:focus-visible { outline: 2px solid rgba(var(--ink), .55); outline-offset: 2px; }
+
+/* 左侧填充：宽度 = 42px + share·(W-42)，右缘 = 拇指右缘 + 2px —— 拇指上/下/左/右各露 2px 渐变，
+   形成参考图那种细渐变描边（不是灰轨道边）。min() 100% 兜底：Max 档正好填到轨道右端。 */
+.cn-root .ev-fill-wrap {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  width: min(var(--ev-fill), 100%);
+  border-radius: 999px;
+  overflow: hidden;
+  pointer-events: none;
+  transition: width .5s var(--ev-spring);
+}
+.cn-root .ev-track[data-dragging] .ev-fill-wrap { transition: none; }
+.cn-root .ev-fill { position: absolute; inset: 0; display: block; }
+.cn-root .ev-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.cn-root .ev-fill-grad { position: absolute; inset: 0; display: block; }
+
+/* 档位圆点：每档一颗 4px，过档点亮；两端 padding 21px。
+   点中心要落在 21 + i·(W-42)/(n-1)：4px 点中心比外框左缘多 2px，所以圆点层左右各放宽 2px
+   （inset: 0 -2px），内容盒回到 19px → 首点中心 21px、末点中心 W-21px，
+   与 --ev-thumb 的 2 + 19 + share·(W-42) / 「推荐」小字同一条线；不再用负外边距。 */
+.cn-root .ev-dots {
+  position: absolute; inset: 0 -2px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 21px;
+  pointer-events: none;
+}
+.cn-root .ev-dot {
+  width: 4px; height: 4px; flex: none; border-radius: 50%;
+  background: rgba(var(--ink), .18);
+  transition: background-color var(--d-quick) var(--e-std), transform var(--d-quick) var(--ev-spring);
+}
+/* 过档点纯白，不加蓝柔光 */
+.cn-root .ev-dot[data-on] { background: #fff; }
+.cn-root .ev-dot[data-pop] { transform: scale(1.8); }
+
+/* 拇指：38×24 白色胶囊（上下各留 2px）/ 只有轻投影（不画 border / ring / inset / 外层雾圈） */
+.cn-root .ev-thumb {
+  position: absolute; top: 2px;
+  left: min(var(--ev-thumb), calc(100% - 40px));
+  width: 38px; height: 24px;
+  border-radius: 999px; border: 0;
+  background: #fff;
+  box-shadow: 0 2px 6px var(--ev-drop);
+  pointer-events: none;
+  transition: left .5s var(--ev-spring), box-shadow var(--d-quick) var(--e-std);
+}
+.cn-root .ev-track[data-dragging] .ev-thumb { transition: none; box-shadow: 0 3px 10px var(--ev-drop); }
+.cn-root .ev-track:hover:not([data-dragging]) .ev-thumb { box-shadow: 0 2px 8px var(--ev-drop); }
+
+/* 推荐：轨道下方小字，位置跟着推荐档位的圆心走 */
+.cn-root .ev-rec { position: relative; height: 14px; font-size: 11px; line-height: 14px; color: var(--fg3); }
+.cn-root .ev-rec span { position: absolute; left: var(--ev-rec); transform: translateX(-50%); white-space: nowrap; }
+
+.cn-root .ev-restore { display: flex; justify-content: flex-end; margin-top: -1px; }
+.cn-root .ev-restore button {
+  border: 0; background: transparent; padding: 0;
+  color: var(--fg3); font-size: 11px; line-height: 1.4; font-family: inherit; cursor: pointer;
+  transition: color var(--d-quick) var(--e-std);
+}
+.cn-root .ev-restore button:hover { color: var(--fg2); }
+
+/* 浅色主题：拇指投影更轻（无 ring / 无蓝边） */
+.cn-root[data-theme=light] .ev-slider {
+  --ev-drop: rgba(15, 23, 42, .14);
+}
+.cn-root[data-theme=dark] .ev-thumb { background: rgba(245, 245, 247, .96); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cn-root .ev-fill-wrap,
+  .cn-root .ev-thumb,
+  .cn-root .ev-dot,
+  .cn-root .ev-value,
+  .cn-root .ev-tip { transition: none; }
+}

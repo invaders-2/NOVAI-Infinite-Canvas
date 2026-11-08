@@ -28,26 +28,42 @@
 
 ### search_images
 ```json
-{"query": "搜索关键词，必填", "count": 12, "orientation": "any|landscape|portrait|square",
- "sources": ["huaban", "zcool", "bing", "360"]}
+{"query": "搜索关键词，必填", "count": 24, "orientation": "any|landscape|portrait|square",
+ "sources": ["huaban", "duitang", "bing", "360", "bingglobal", "pinterest", "artstation"]}
 ```
-`sources` 可选，不传=全部可用来源。返回：
+`sources` 可选，不传=默认全网七站。`count` 默认 24、上限 24（7 站轮转，默认分配下每站至少 3 条：7×3=21≤24）。
+返回：
 ```json
 {"engine": "multi", "query": "原样回显", "note": "可选，写各来源的真实失败原因",
  "sources": {"huaban": 12, "zcool": 6, "bing": 6}, "items": [ImageItem]}
 ```
-来源覆盖（实测结论，2026-11-03）：
-- **稳定可用（默认来源）**：花瓣（huaban.com/v3/search，原图无尺寸后缀）、堆糖（duitang.com/search）、
-  必应图片、360 图片；
+来源覆盖（实测结论，2026-11-08）：
+- **稳定可用（默认七站 = 全网）**：花瓣（huaban.com/v3/search，原图无尺寸后缀）、堆糖（duitang.com/search）、
+  必应图片（cn.bing.com）、360 图片、必应国际（www.bing.com，mkt=en-US）、Pinterest（需要代理）、
+  ArtStation；
 - 尽力（不进默认）：站酷——img.zcool.cn 直连 403（带 Referer 也 403），搜索页拿不到原图，只写真实原因；
-- **不可用（明确告知用户，不要假装支持）**：小红书（需登录 + x-s/x-t 签名）、Pinterest（本机不可达）、
+- **不可用（明确告知用户，不要假装支持）**：小红书（需登录 + x-s/x-t 签名）、
   百度图片（Forbid spider access）、昵图（soso 500）、图虫（rest 404）、
   Unsplash/Pexels/Pixabay（需 API key / 被 Cloudflare 拦）。
 
+新来源的实测接口契约（2026-11-08，系统代理 127.0.0.1:7897 下验证）：
+
+| 来源 | source_kind | 接口 | 关键点 |
+|---|---|---|---|
+| Pinterest | `pinterest` | 先 `GET https://www.pinterest.com/`，再 `GET /resource/BaseSearchResource/get/?source_url=..&data=..` | 必须先拿 cookie（csrftoken / _pinterest_sess）；缺 `X-APP-VERSION` / `X-Pinterest-PWS-Handler` / `x-csrftoken` 任一都 403；**没有代理直接跳过**并写 note，不要等超时 |
+| ArtStation | `artstation` | `GET https://www.artstation.com/api/v2/search/projects.json?query=..&page=1&per_page=N` | `per_page` 必填（不给返回 400）；原图把 `smaller_square_cover_url` 里的 `/smaller_square/` 换成 `/large/`（实测 200）；导入时个别 large 404 会自动退回 smaller_square 重下一次；`source_page` 取作品 `url` |
+| 必应国际 | `bingglobal` | `GET https://www.bing.com/images/async?q=..&first=1&count=N&mkt=en-US` | 会 302 到 cn.bing.com（mkt 保留），解析复用 `_BingImageParser` 的 `iusc` |
+
+Pinterest 解析：`resource_response.data.results[]`，标题取 `title / grid_title / auto_alt_text`，
+原图取 `images.orig.url`（宽高同节点），出处页取 `link` 否则 `https://www.pinterest.com/pin/<id>/`。
+无代理时单站直接跳过、note 写明「需要代理」，不影响其它来源。
+单站超时默认 12s，Pinterest 因为多一次首页请求放宽到 20s。
+
 ### find_similar_images（反图）
 ```json
-{"image_url": "/uploads/xxx.jpg 或 data: 或 https://...", "count": 12}
+{"image_url": "/uploads/xxx.jpg 或 data: 或 https://...", "count": 24}
 ```
+`count` 默认 24、上限 24；多组检索词合并后仍按 7 站轮转分配。
 返回：
 ```json
 {"engine": "bing|360|merged", "query": "首个检索词",
@@ -83,9 +99,12 @@
 3. 搜不到就返回空 `items` + `note` 写真实原因（引擎超时 / 被限流 / 关键词无结果）。
 4. 单个工具结果 `items` 上限 24 条。
 5. **多来源**：一份结果可以来自多个素材站，每条 `ImageItem` 必须带
-   `source_kind`（bing / 360 / huaban / zcool / nipic / duitang / tuchong / 空串）与
-   `source_site`（展示用域名）；结果里带 `sources`（{"huaban": 12, "bing": 6}）便于前端按来源筛选。
+   `source_kind`（huaban / duitang / bing / 360 / bingglobal / pinterest / artstation /
+   zcool / nipic / tuchong / 空串）与 `source_site`（展示用域名）；结果里带 `sources`
+   （{"huaban": 12, "bingglobal": 6}）便于前端按来源筛选。
    某站失败不能让整次搜索失败：其它站的图照常返回，失败原因写进 `note`。
+   默认来源是七站（全网）、默认 `count`=24；`count` 是合并后的总条数，多站轮转分配，
+   默认分配下每站至少 3 条（7×3=21≤24）；某站候选不足或跨站 original_url 重复时会少于 3 条。
 
 ## 4. HTTP 接口（两个前端直接调）
 
@@ -124,7 +143,7 @@
 
 ### POST /api/agent/images/reverse（反图，面板直调，不经过一轮对话）
 ```json
-{"image_url": "/assets/uploads/xxx.jpg 或 https://...", "count": 12}
+{"image_url": "/assets/uploads/xxx.jpg 或 https://...", "count": 24}
 ```
 > 本地路径统一支持 `/assets/...`、`/output/...`、`data:`、`https://`；
 > 本地解析必须用项目现成的 `main.py output_file_from_url()`（已做路径越权校验），
@@ -161,3 +180,11 @@
 - 不做第三方以图搜图上传（百度/必应识图实测不可用）。
 - 不改现有工具名和 schema（`web_search` / `fetch_url` 保留），只把 `web_search` 的引擎换成可用的。
 - 不改 agent 事件协议、不动 `/api/agent/run` 的请求体。
+
+## 7. 已知限制
+
+- **必应国际会被必应国内吃掉一部分**：两站结果重叠较大，合并时按 `original_url` 跨站去重、
+  先出现的来源拿归属，所以默认合并结果里 `bingglobal` 的条数可能少于它单站能拿到的
+  （单站搜 `bingglobal` 正常）。不为此改去重规则（避免同一张图重复出现）。
+- Pinterest 必须走代理；没代理时直接跳过并写 note，不影响其它来源。
+- 某站候选不足（例如 360 对部分英文词只回 2 条）时，合并结果会少于默认 24 条。

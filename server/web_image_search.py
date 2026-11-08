@@ -25,7 +25,7 @@ from urllib.parse import quote, urljoin, urlparse, urlunparse
 
 import httpx
 
-from server import web_access
+from server import net_proxy, web_access
 
 MAX_ITEMS = 24
 MAX_IMPORT_URLS = 12
@@ -45,22 +45,27 @@ _SO360_ACCEPT = "application/json, text/plain, */*"
 _SO360_RETRY_DELAY = 0.3
 
 # ---------------------------------------------------------------------------
-# 图片来源：默认只跑稳定可用的四站；站酷/昵图/图虫要么需要登录签名、要么接口没了，
-# 明确标注不可用，用户点名时才尝试（抓不到就把真实原因写进 note，不假装支持）。
+# 图片来源：默认 7 站「全网」（国内四站 + 必应国际 + Pinterest + ArtStation）；
+# 站酷/昵图/图虫等要么需要登录签名、要么接口没了，明确标注不可用，用户点名时才尝试
+# （抓不到就把真实原因写进 note，不假装支持）。
 # ---------------------------------------------------------------------------
 SOURCE_TIMEOUT = 12.0
-DEFAULT_SOURCES = ("huaban", "duitang", "bing", "360")
-ALL_SOURCES = ("huaban", "duitang", "bing", "360", "zcool")
+# Pinterest 要先 GET 首页拿 cookie 再打资源接口，两次请求，单独放宽一点
+PINTEREST_TIMEOUT = SOURCE_TIMEOUT + 8.0
+_SOURCE_TIMEOUTS = {"pinterest": PINTEREST_TIMEOUT}
+DEFAULT_SOURCES = ("huaban", "duitang", "bing", "360", "bingglobal", "pinterest", "artstation")
+ALL_SOURCES = ("huaban", "duitang", "bing", "360", "zcool",
+               "bingglobal", "pinterest", "artstation")
 SOURCE_LABELS = {
     "huaban": "花瓣", "duitang": "堆糖", "bing": "必应图片", "360": "360 图片", "zcool": "站酷",
+    "bingglobal": "必应国际", "pinterest": "Pinterest", "artstation": "ArtStation",
     "nipic": "昵图网", "tuchong": "图虫",
-    "xiaohongshu": "小红书", "pinterest": "Pinterest", "baidu": "百度图片",
+    "xiaohongshu": "小红书", "baidu": "百度图片",
     "unsplash": "Unsplash", "pexels": "Pexels", "pixabay": "Pixabay",
 }
 # 明确不接的来源 + 原因（会写进工具结果 note，前端/用户能看到真实结论）
 UNSUPPORTED_SOURCES = {
     "xiaohongshu": "需要登录并带 x-s/x-t 签名，拿不到原图",
-    "pinterest": "当前网络不可达（连接超时）",
     "baidu": "返回 Forbid spider access（反爬）",
     "unsplash": "匿名接口 401（需要 API key）",
     "pexels": "接口 403（需要 API key）",
@@ -72,12 +77,17 @@ _SOURCE_ALIASES = {
     "huaban": "huaban", "花瓣": "huaban", "花瓣网": "huaban",
     "duitang": "duitang", "堆糖": "duitang", "堆糖网": "duitang",
     "bing": "bing", "必应": "bing", "必应图片": "bing", "bing图片": "bing",
+    "bingglobal": "bingglobal", "必应国际": "bingglobal", "全网": "bingglobal",
+    "global": "bingglobal", "web": "bingglobal", "bing国际": "bingglobal",
     "360": "360", "so": "360", "360图片": "360",
     "zcool": "zcool", "站酷": "zcool", "站酷网": "zcool",
     "nipic": "nipic", "昵图": "nipic", "昵图网": "nipic",
     "tuchong": "tuchong", "图虫": "tuchong", "图虫网": "tuchong",
     "xiaohongshu": "xiaohongshu", "xhs": "xiaohongshu", "小红书": "xiaohongshu", "redbook": "xiaohongshu",
-    "pinterest": "pinterest", "baidu": "baidu", "百度": "baidu", "百度图片": "baidu",
+    "pinterest": "pinterest", "p站": "pinterest", "pin站": "pinterest",
+    "artstation": "artstation", "a站": "artstation", "美术站": "artstation",
+    "artstation.com": "artstation",
+    "baidu": "baidu", "百度": "baidu", "百度图片": "baidu",
     "unsplash": "unsplash", "pexels": "pexels", "pixabay": "pixabay",
 }
 
@@ -276,11 +286,16 @@ def _merge_items(groups: List[List[Dict[str, Any]]], limit: int) -> List[Dict[st
     return picked
 
 
-def _reason(exc: BaseException) -> str:
+def _source_timeout(name: str) -> float:
+    """单站超时：Pinterest 多一次首页请求，单独放宽。"""
+    return _SOURCE_TIMEOUTS.get(str(name or ""), SOURCE_TIMEOUT)
+
+
+def _reason(exc: BaseException, timeout: float = SOURCE_TIMEOUT) -> str:
     if isinstance(exc, WebImageSearchError):
         return str(exc)
     if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
-        return f"请求超时（超过 {int(SOURCE_TIMEOUT)} 秒）"
+        return f"请求超时（超过 {int(timeout)} 秒）"
     if isinstance(exc, httpx.ConnectError):
         return f"连接失败：{exc}"
     if isinstance(exc, httpx.HTTPError):
@@ -352,7 +367,39 @@ async def _search_bing_images(client: httpx.AsyncClient, query: str, count: int,
 
 
 # ---------------------------------------------------------------------------
-# 引擎 2：360 图片（JSON：list[].img 原图 / thumb 缩略图 / width/height / link / site）
+# 引擎 2：必应国际 / 全网（www.bing.com + mkt=en-US，HTML 结构与国内版一致）
+# www.bing.com 会 302 到 cn.bing.com，mkt 参数保留，所以这里跟随重定向。
+# ---------------------------------------------------------------------------
+
+async def _search_bing_global(client: httpx.AsyncClient, query: str, count: int,
+                              orientation: str) -> List[Dict[str, Any]]:
+    params = {"q": query, "first": 1, "count": count, "mkt": "en-US", "adlt": "off"}
+    if orientation in _BING_ORIENTATION_FILTERS:
+        params["qft"] = _BING_ORIENTATION_FILTERS[orientation]
+    response = await client.get("https://www.bing.com/images/async", params=params,
+                                headers={"User-Agent": BROWSER_UA,
+                                         "Accept": "text/html,application/xhtml+xml",
+                                         "Accept-Language": "en-US,en;q=0.9",
+                                         "Referer": "https://www.bing.com/images/"},
+                                follow_redirects=True)
+    response.raise_for_status()
+    parser = _BingImageParser()
+    parser.feed(web_access.decode_html(response.content, response.headers.get("content-type", "")))
+    parser.close()
+    items = []
+    for entry in parser.entries:
+        item = _make_item(entry["murl"], entry["turl"], entry["title"], None, None,
+                          entry["purl"], _site_of(entry["purl"]) or _site_of(entry["murl"]),
+                          source_kind="bingglobal")
+        if item and _orientation_matches(item, orientation):
+            items.append(item)
+        if len(items) >= count:
+            break
+    return items
+
+
+# ---------------------------------------------------------------------------
+# 引擎 3：360 图片（JSON：list[].img 原图 / thumb 缩略图 / width/height / link / site）
 # ---------------------------------------------------------------------------
 
 async def _search_360_images(client: httpx.AsyncClient, query: str, count: int,
@@ -519,20 +566,200 @@ async def _search_zcool(client: httpx.AsyncClient, query: str, count: int,
     return items
 
 
+# ---------------------------------------------------------------------------
+# 引擎 6：Pinterest（需要代理；先 GET 首页拿 cookie，再打 BaseSearchResource）
+# 实测缺 X-APP-VERSION / X-Pinterest-PWS-Handler / x-csrftoken 任一个都会 403。
+# ---------------------------------------------------------------------------
+
+_PINTEREST_HOME = "https://www.pinterest.com/"
+_PINTEREST_RESOURCE = "https://www.pinterest.com/resource/BaseSearchResource/get/"
+_PINTEREST_HEADERS = {
+    "Accept": "application/json, text/javascript, */*, q=0.01",
+    "X-Requested-With": "XMLHttpRequest",
+    "X-Pinterest-AppState": "active",
+    "X-APP-VERSION": "a1a7a7a",
+    "X-Pinterest-PWS-Handler": "www/[username]/[slug].js",
+}
+PINTEREST_PROXY_NOTE = "Pinterest 在当前网络不可达，需要代理（设置 › 通用 › 画布助手联网 › 联网代理）"
+
+
+def _cookie_value(client: Any, response: Any, name: str) -> str:
+    """cookie 优先从本次响应、其次从共享 client 的 cookie jar 取（首页可能 302）。"""
+    for jar in (getattr(response, "cookies", None), getattr(client, "cookies", None)):
+        if jar is None:
+            continue
+        try:
+            value = jar.get(name)
+        except Exception:
+            value = None
+        if value:
+            return str(value)
+    return ""
+
+
+def _pinterest_pin_item(pin: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(pin, dict):
+        return None
+    images = pin.get("images") if isinstance(pin.get("images"), dict) else {}
+    orig = images.get("orig") if isinstance(images.get("orig"), dict) else {}
+    original = str(orig.get("url") or "").strip()
+    if not original:
+        return None
+    thumb_info = images.get("236x") if isinstance(images.get("236x"), dict) else {}
+    thumb = str(thumb_info.get("url") or "").strip() or original
+    pin_id = pin.get("id") or pin.get("node_id") or ""
+    page = str(pin.get("link") or "").strip()
+    if not page and pin_id:
+        page = f"https://www.pinterest.com/pin/{pin_id}/"
+    title = pin.get("title") or pin.get("grid_title") or pin.get("auto_alt_text") or ""
+    # domain 常是「Uploaded by user」这类文案而不是域名，只有真域名才拿来当来源站点
+    domain = str(pin.get("domain") or "").strip()
+    site = domain if ("." in domain and " " not in domain) else _site_of(original)
+    return _make_item(original, thumb, title, orig.get("width"), orig.get("height"),
+                      page, site, source_kind="pinterest")
+
+
+async def _search_pinterest(client: httpx.AsyncClient, query: str, count: int,
+                            orientation: str = "any") -> List[Dict[str, Any]]:
+    if not net_proxy.resolve_web_proxy():
+        # 没代理时直连必然超时：调用方会提前跳过，这里兜底不浪费 12 秒
+        raise WebImageSearchError(PINTEREST_PROXY_NOTE)
+    home = await client.get(_PINTEREST_HOME,
+                            headers={"User-Agent": BROWSER_UA,
+                                     "Accept": "text/html,application/xhtml+xml",
+                                     "Referer": _PINTEREST_HOME})
+    csrf = _cookie_value(client, home, "csrftoken")
+    if not csrf:
+        raise WebImageSearchError(
+            f"Pinterest 没有拿到 csrftoken（首页 HTTP {getattr(home, 'status_code', '?')}），可能被限流")
+    body = {"options": {"query": query, "scope": "pins", "page_size": max(24, count),
+                        "bookmarks": []},
+            "context": {}}
+    url = (_PINTEREST_RESOURCE
+           + "?source_url=" + quote(f"/search/pins/?q={query}", safe="/")
+           + "&data=" + quote(json.dumps(body, separators=(",", ":")), safe=""))
+    headers = dict(_PINTEREST_HEADERS)
+    headers.update({"User-Agent": BROWSER_UA, "x-csrftoken": csrf,
+                    "Referer": f"https://www.pinterest.com/search/pins/?q={quote(query)}"})
+    response = await client.get(url, headers=headers)
+    if response.status_code >= 400:
+        raise WebImageSearchError(
+            f"Pinterest 搜索返回 HTTP {response.status_code}（可能被限制，稍后重试或换代理）")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise WebImageSearchError("Pinterest 返回的不是 JSON（" + _response_hint(response) + "）") from exc
+    resource = payload.get("resource_response") if isinstance(payload, dict) else None
+    data = resource.get("data") if isinstance(resource, dict) else None
+    results = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(results, list):
+        raise WebImageSearchError("Pinterest 返回结构异常（缺 resource_response.data.results）")
+    items: List[Dict[str, Any]] = []
+    for pin in results:
+        item = _pinterest_pin_item(pin)
+        if item and _orientation_matches(item, orientation):
+            items.append(item)
+        if len(items) >= count:
+            break
+    return items
+
+
+# ---------------------------------------------------------------------------
+# 引擎 7：ArtStation（JSON API；per_page 必填，不给返回 400）
+# 原图把封面里的 /smaller_square/ 换成 /large/（实测 200，约 1MB）。
+# ---------------------------------------------------------------------------
+
+_ARTSTATION_API = "https://www.artstation.com/api/v2/search/projects.json"
+ARTSTATION_PROXY_NOTE = "ArtStation 在当前网络不可达，需要代理（设置 › 通用 › 画布助手联网 › 联网代理）"
+
+# 需要代理才能访问的来源 → 无代理时直接跳过并写 note（别让直连超时拖慢整轮）
+_PROXY_REQUIRED_SOURCES = {
+    "pinterest": PINTEREST_PROXY_NOTE,
+    "artstation": ARTSTATION_PROXY_NOTE,
+}
+
+
+def artstation_original_url(cover_url: Any) -> str:
+    """smaller_square 封面 → large 原图；没有该路径段就原样返回。"""
+    text = str(cover_url or "").strip()
+    if "/smaller_square/" in text:
+        return text.replace("/smaller_square/", "/large/")
+    return text
+
+
+def _artstation_cover(project: Dict[str, Any]) -> str:
+    cover = str(project.get("smaller_square_cover_url") or "").strip()
+    if cover:
+        return cover
+    icons = project.get("icons") if isinstance(project.get("icons"), dict) else {}
+    best, best_width = "", -1
+    for value in icons.values():
+        if not isinstance(value, dict):
+            continue
+        url = str(value.get("url") or "").strip()
+        if not url:
+            continue
+        width = _positive_int(value.get("width")) or 0
+        if width > best_width:
+            best, best_width = url, width
+    return best
+
+
+async def _search_artstation(client: httpx.AsyncClient, query: str, count: int,
+                             orientation: str = "any") -> List[Dict[str, Any]]:
+    if not net_proxy.resolve_web_proxy():
+        # 和 Pinterest 一样：没代理直连会超时，调用方会提前跳过，这里兜底
+        raise WebImageSearchError(ARTSTATION_PROXY_NOTE)
+    params = {"query": query, "page": 1, "per_page": max(20, count)}   # per_page 必填
+    response = await client.get(_ARTSTATION_API, params=params,
+                                headers={"User-Agent": BROWSER_UA,
+                                         "Accept": "application/json",
+                                         "Referer": "https://www.artstation.com/"})
+    if response.status_code >= 400:
+        raise WebImageSearchError(
+            f"ArtStation 搜索返回 HTTP {response.status_code}（per_page 必填；也可能被限流）")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise WebImageSearchError("ArtStation 返回的不是 JSON（" + _response_hint(response) + "）") from exc
+    projects = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(projects, list):
+        raise WebImageSearchError("ArtStation 返回结构异常（缺 data 数组）")
+    items: List[Dict[str, Any]] = []
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        cover = _artstation_cover(project)
+        if not cover:
+            continue
+        item = _make_item(artstation_original_url(cover), cover, project.get("title"),
+                          None, None, project.get("url"), "artstation.com",
+                          source_kind="artstation")
+        if item and _orientation_matches(item, orientation):
+            items.append(item)
+        if len(items) >= count:
+            break
+    return items
+
+
 def _client_kwargs(verify: Any, trust_env: Any, timeout: float) -> Dict[str, Any]:
-    options: Dict[str, Any] = {"http2": False, "timeout": timeout, "follow_redirects": False}
+    options: Dict[str, Any] = {"http2": False, "timeout": timeout, "follow_redirects": False,
+                               # 本机 brotlicffi 1.2 + httpx 0.28 解 br 会报错；搜索/图片只要 gzip 就够
+                               "headers": {"Accept-Encoding": "gzip, deflate"}}
     if verify is not None:
         options["verify"] = verify
     if trust_env is not None:
         options["trust_env"] = trust_env
+    # 搜图/下原图走和读网页同一套代理（系统代理或设置页自定义）；没有代理时显式关掉 env 代理
+    options.update(net_proxy.httpx_proxy(net_proxy.resolve_web_proxy()))
     return options
 
 
 def normalize_sources(sources: Any) -> List[str]:
     """把 sources 参数归一成已知来源名列表（支持中英文名）；不认识的直接报错，让模型别乱写。
 
-    不传 / 空 → 默认稳定可用的四站（花瓣、堆糖、必应图片、360 图片）。
-    已知但不可用的来源（小红书/Pinterest/百度等）保留在结果里，由调用方写进 note。"""
+    不传 / 空 → 默认全网七站（花瓣、堆糖、必应图片、360、必应国际、Pinterest、ArtStation）。
+    已知但不可用的来源（小红书/百度等）保留在结果里，由调用方写进 note。"""
     if sources is None or sources == [] or sources == "":
         return list(DEFAULT_SOURCES)
     if isinstance(sources, str):
@@ -563,23 +790,27 @@ def _source_adapters() -> Dict[str, Any]:
         "bing": _search_bing_images,
         "360": _search_360_images,
         "zcool": _search_zcool,
+        "bingglobal": _search_bing_global,
+        "pinterest": _search_pinterest,
+        "artstation": _search_artstation,
     }
 
 
-async def search_images(query: str, count: int = 12, orientation: str = "any",
+async def search_images(query: str, count: int = 24, orientation: str = "any",
                         sources: Any = None, verify: Any = None,
                         trust_env: Any = None) -> Dict[str, Any]:
-    """多来源图片搜索：默认花瓣/堆糖/必应图片/360 图片并发，单站失败不影响其它站。
+    """多来源图片搜索：默认全网七站并发、默认取 24 条（7 站轮转，每站至少 3 条），单站失败不影响其它站。
 
+    Pinterest 需要代理：没有代理时直接跳过并写 note，不浪费一次 12 秒超时。
     返回 {engine:"multi", query, sources:{来源:条数}, note?, items}；某站失败的真实原因写进 note。
     """
     text_query = str(query or "").strip()
     if not text_query:
         raise WebImageSearchError("搜索关键词不能为空")
     try:
-        top = max(1, min(int(count or 12), MAX_ITEMS))
+        top = max(1, min(int(count or 24), MAX_ITEMS))
     except (TypeError, ValueError):
-        top = 12
+        top = 24
     mode = str(orientation or "any").strip().lower()
     if mode not in ORIENTATIONS:
         mode = "any"
@@ -587,10 +818,17 @@ async def search_images(query: str, count: int = 12, orientation: str = "any",
     notes: List[str] = []
     tasks: List[Tuple[str, Any]] = []
     adapters = _source_adapters()
+    # 只在确实要搜需要代理的站时才探测代理（设置读取有成本），没代理就跳过别等超时
+    proxy_available = True
+    if any(name in _PROXY_REQUIRED_SOURCES for name in requested):
+        proxy_available = bool(net_proxy.resolve_web_proxy())
     for name in requested:
         label = SOURCE_LABELS.get(name, name)
         if name in UNSUPPORTED_SOURCES:
             notes.append(f"{label}：{UNSUPPORTED_SOURCES[name]}（未接入，已跳过）")
+            continue
+        if name in _PROXY_REQUIRED_SOURCES and not proxy_available:
+            notes.append(_PROXY_REQUIRED_SOURCES[name])
             continue
         adapter = adapters.get(name)
         if adapter is None:
@@ -601,13 +839,13 @@ async def search_images(query: str, count: int = 12, orientation: str = "any",
     if tasks:
         async with httpx.AsyncClient(**_client_kwargs(verify, trust_env, DOWNLOAD_TIMEOUT)) as client:
             results = await asyncio.gather(
-                *[asyncio.wait_for(adapter(client, text_query, top, mode), timeout=SOURCE_TIMEOUT)
-                  for _name, adapter in tasks],
+                *[asyncio.wait_for(adapter(client, text_query, top, mode), timeout=_source_timeout(name))
+                  for name, adapter in tasks],
                 return_exceptions=True)
         for (name, _adapter), result in zip(tasks, results):
             label = SOURCE_LABELS.get(name, name)
             if isinstance(result, BaseException):
-                notes.append(f"{label}：{_reason(result)}")
+                notes.append(f"{label}：{_reason(result, _source_timeout(name))}")
                 continue
             items = result or []
             if items:
@@ -630,7 +868,7 @@ async def search_images(query: str, count: int = 12, orientation: str = "any",
     return result
 
 
-async def find_similar_images(image_url: str, count: int = 12,
+async def find_similar_images(image_url: str, count: int = 24,
                               describe: Optional[Any] = None,
                               verify: Any = None, trust_env: Any = None) -> Dict[str, Any]:
     """反图：describe(image_url) 由 main.py 注入（项目现有看图链路），返回
@@ -653,9 +891,9 @@ async def find_similar_images(image_url: str, count: int = 12,
     if not queries:
         raise WebImageSearchError("视觉模型读到了图，但没有给出可用的检索词（它可能没按格式返回）")
     try:
-        top = max(1, min(int(count or 12), MAX_ITEMS))
+        top = max(1, min(int(count or 24), MAX_ITEMS))
     except (TypeError, ValueError):
-        top = 12
+        top = 24
     failures: List[str] = []
     groups: List[List[Dict[str, Any]]] = []
     engines: List[str] = []
@@ -826,6 +1064,18 @@ async def import_images(urls: Any, dest_dir: str, url_prefix: str, name: str = "
     return {"items": items}
 
 
+async def _fetch_original_with_fallback(client: httpx.AsyncClient, url: str,
+                                            referer: str) -> Dict[str, Any]:
+    """ArtStation /large/ 个别 404 时退回 /smaller_square/ 再下一次（其它错误原样抛）。"""
+    try:
+        return await fetch_image(client, url, referer=referer)
+    except WebImageSearchError as exc:
+        if "/large/" not in url or "HTTP 404" not in str(exc):
+            raise
+        fallback = url.replace("/large/", "/smaller_square/", 1)
+        return await fetch_image(client, fallback, referer=referer)
+
+
 async def _import_one(client: httpx.AsyncClient, url: str, dest_dir: str,
                       url_prefix: str, name: str, source_page: str = "") -> Dict[str, Any]:
     item: Dict[str, Any] = {"source_url": url, "ok": False, "url": "", "width": None,
@@ -839,7 +1089,7 @@ async def _import_one(client: httpx.AsyncClient, url: str, dest_dir: str,
         item.update({"error": "只拿到缩略图", "code": "thumbnail_only", "detail": thumb_reason})
         return item
     try:
-        info = await fetch_image(client, url, referer=_origin(source_page) or _origin(url))
+        info = await _fetch_original_with_fallback(client, url, _origin(source_page) or _origin(url))
     except WebImageSearchError as exc:
         message = str(exc)
         if "MB 上限" in message:

@@ -47,6 +47,9 @@ function Root({ children, inset }: { children: React.ReactNode; inset?: number }
       el.style.setProperty("--cn-chrome-top", (Number(d.top) || 16) + "px");
       // 收到这条消息说明画布在桌面外壳里：顶部渐变磨砂只在这个场景出现
       el.classList.add("has-topfx");
+      // Windows 外壳的三键浮在窗口右上，会压住助手卡片顶栏图标：right>0 是「三键那套」（同 bridge 的判据），
+      // 给 root 挂标记让 agent-panel-v2.css 把卡片下移；mac（right=0）/ 纯浏览器不受影响
+      el.classList.toggle("has-win-controls", Number(d.right) > 0);
     };
     addEventListener("message", onMsg);
     try { parent.postMessage({ type: "novai:canvas-chrome-request" }, "*"); } catch { /* 普通窗口里 parent 就是自己 */ }

@@ -386,7 +386,7 @@ export function outputFormatLabel(value: unknown): string {
 }
 /** 面板选项：静态图永远有；GIF / SVG 只在 caps 声明时才出现，一个都没有 = 返回空 = 不给入口 */
 export function outputFormatOptions(model: ModelSpec | null | undefined): Array<{ value: "" | ImageOutputFormat; label: string }> {
-  const caps = (model?.outputFormats || []).map((item) => String(item ?? "").trim().toLowerCase());
+  const caps = (Array.isArray(model?.outputFormats) ? model.outputFormats : []).map((item) => String(item ?? "").trim().toLowerCase());
   const extra = (["gif", "svg"] as ImageOutputFormat[]).filter((value) => caps.includes(value));
   return extra.length ? [{ value: "", label: OUTPUT_FORMAT_LABEL[""] }, ...extra.map((value) => ({ value, label: OUTPUT_FORMAT_LABEL[value] }))] : [];
 }
@@ -555,7 +555,7 @@ export function clampParams(kind: GenKind, p: AnyParams, m: ModelSpec): AnyParam
     if (thinking === undefined) delete q.thinking; else q.thinking = thinking;
     // 输出格式：新模型没声明就清掉（也顺手把空串 / 脏值挡在参数外）
     const outputFormat = outputFormatForRequest(q.outputFormat);
-    const outputFormats = (m.outputFormats || []).map((item) => String(item ?? "").trim().toLowerCase());
+    const outputFormats = (Array.isArray(m.outputFormats) ? m.outputFormats : []).map((item) => String(item ?? "").trim().toLowerCase());
     if (outputFormat && outputFormats.includes(outputFormat)) q.outputFormat = outputFormat; else delete q.outputFormat;
     return q;
   }

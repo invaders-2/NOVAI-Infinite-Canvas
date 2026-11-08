@@ -6,9 +6,14 @@ AI 创作工具：无限画布 + 多模型调用（OpenAI API、ComfyUI、火山
 
 - 启动：Windows 双击 `启动.bat`（桌面窗口模式走 `novai-desktop.py`，浏览器模式走 `main.py`）；macOS 用 `启动.command`。
 - 端口：环境变量 **`NOVAI_PORT`**，默认 3000。（旧启动脚本里的 `DEPLOY_RUN_PORT` 只是别名，Python 侧读的是 `NOVAI_PORT`。）
+- **3000 端口是「正式安装版」的后端，任何改动版 / 预览版永远不许碰它**（用户明确、长期规则，优先于下面「不要起新后端」那条）：不 kill、不重启、不停、不发写请求、不改它的数据。改动版一律用独立端口 + 独立数据目录跑自己的后端（例：`NOVAI_PORT=3931 NOVAI_DATA_DIR=/tmp/novai-preview python main.py`），所有检查只打自己起的那个端口，用完自己收尾。
 - 依赖：`pip install -r requirements.txt`。
 - 测试：`node tests/run-all.js` 跑全部 node 测试。**自动化 / 手动验证一律用独立数据目录**：`NOVAI_DATA_DIR=/tmp/novai-test python main.py`，不要在日常数据里建 `TEMP-*` / `VERIFY-*` 画布（清理见 `tools/cleanup_test_canvases.py`）。
 - 允许自行改文件、起服务、反复重试，不需要每步问我；只有对外发布（git push / 发版 / 改远端数据）时才先问。
+- **预览 / 验收在后台跑，不要弹窗**（用户明确要求）：不要启动 GUI 窗口、不要抢前台；预览只连自己那个独立端口的后端，**3000（正式安装版）一律不碰**。渲染与截图用无头浏览器 + CDP（`Page.captureScreenshot`），日志写到 /tmp 再看，不要在会话里等窗口。
+  - 关缓存：每次用全新 `--user-data-dir=/tmp/xxx`，别复用。
+  - 关进程：脚本自己 `proc.kill()` 收尾，别用 `pkill -f "..."`——模式串会匹配到执行命令本身的 shell，把自己杀掉、输出全丢（踩过）。
+  - 改画布 UI 必须改 `novai-canvas-ui/` 源码再 `npm run build`；只改 `static/novai-canvas/` 会被下次构建覆盖（踩过：补丁被清空、`skill-thumbs.js` 变 404）。
 
 ## 改之前先看的坑
 
@@ -29,8 +34,9 @@ AI 创作工具：无限画布 + 多模型调用（OpenAI API、ComfyUI、火山
 
 - **不画线框、不画发丝线**：不要用 `border`、`border-color`、`box-shadow: inset 0 0 0 1px`、1px 高光/描边来表达分隔、层级或选中态。这条针对新写的样式，也针对改动时顺手看到的旧样式。
 - **层级靠别的表达**：分隔用间距/留白；容器靠磨砂玻璃底 + 柔和投影；选中态用「半透明软底 + 文字色提亮 + 字重变化」（本项目的滑块高亮 `.nv-glide-pill` / `--nv-glide-bg` 就是这套），必要时加一颗小圆点，不要描边。
+- **背景框一律不用透明，默认就是磨砂玻璃质感**（用户 2026-11 明确，硬规则，优先级最高）：任何背景容器 / 卡片 / 面板 / 弹层 / 工具面板都不许用裸 `transparent`，也不许靠低透明度让背后的图片或文字透出来；默认形态 = 半透明底 + `backdrop-filter` 模糊 + 柔和投影，且底色要保证模糊不生效、或背后是高对比图片时文字依然可读。
 - **磨砂玻璃配方**（弹层/浮层的标准写法，照抄 `.smart-popover` / `.smart-node-floating-menu`）：`border:0` + `background:color-mix(in srgb, var(--panel) 78%, transparent)`（深色 70%）+ `backdrop-filter:blur(44px) saturate(190%)`（含 `-webkit-`）+ 两层柔和投影。底色要保证 `backdrop-filter` 失效时文字仍可读。
-  - **小弹层 / 下拉 / 工具面板例外**（2026-09 起）：它们常盖在图片或文字上，且嵌在编辑栏、节点这些 backdrop root 里时模糊采样不到后面的内容，78% 会透字、被图片染色。统一用近乎不透明的实底（浅 `rgba(255,255,255,.96)`、深 `rgba(24,24,24,.95)`），规则集中在 `smart-canvas.css` 末尾「弹层底色加厚」一段；大面积的编辑栏仍用磨砂。
+  - **小弹层 / 下拉 / 工具面板例外**（2026-09 起）：它们常盖在图片或文字上，且嵌在编辑栏、节点这些 backdrop root 里时模糊采样不到后面的内容，78% 会透字、被图片染色。统一用加厚底（浅 `rgba(255,255,255,.96)`、深 `rgba(24,24,24,.95)`）+ **仍然保留 `backdrop-filter` 模糊和柔和投影**，不是纯实色平涂（按 2026-11「默认磨砂玻璃」要求），规则集中在 `smart-canvas.css` 末尾「弹层底色加厚」一段；大面积的编辑栏用标准 78% 磨砂。
 - 例外只有「本身是图形/图标」的描边，例如比例格子里表示画幅的小方框。
 - **图标一律保持线性（描边）风格**：下拉三角、比例/画幅图标、播放三角、缩放把手、端口 ⊕、对勾、spinner 这些是「图形/图标」，用描边（border / currentColor 笔画 / lucide 线性图标）画，**不要**改成实心填充、也不要去掉它们的笔画。改 UI 时这部分原样保留。
   图标动效由三端共用的 static/css/nv-icons.css 提供（vite 构建用 @import 引入），图标数据由 tools/icons/gen.mjs 从 lucide 生成到 web/src/lib/icons.js 与 tools/icons/canonical.json，改图标先改生成器再重跑，别手改产物；React 画布端对应 novai-canvas-ui/src/canvas/canvas-next/ui/iconData.ts（改了 nv-icons.css 要通知重建 static/novai-canvas）。

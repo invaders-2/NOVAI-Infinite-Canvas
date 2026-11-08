@@ -12860,8 +12860,11 @@ async def save_ai_image_to_output(image_data, prefix="online_", category="output
             response = await client.get(value)
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "")
-            # Content-Type 缺失或 octet-stream 时按 URL 扩展名兜底，别把 svg/gif 存成 .png
+            # Content-Type 缺失或 octet-stream 时按 URL 扩展名兜底，别把 svg/gif 存成 .png；
+            # 两者都判不出时再看前 512 字节魔数（SVG/GIF 常常以 octet-stream 返回）。
             extension = image_output_extension(content_type, value)
+            if extension == ".png":
+                extension = image_output_extension_from_bytes(response.content[:512]) or extension
             if extension != ".png":
                 filename = filename[:-4] + extension
                 path = output_path_for(filename, category)
@@ -13847,6 +13850,24 @@ def image_output_format_fields(model, caps, output_format):
     return {"output_format": fmt}
 
 
+def apimart_output_format_fields(model, caps, output_format, n=1, has_refs=False):
+    """APIMart 输出格式请求字段。
+
+    文档确证：n 为 1-4（GIF 是动画帧数）；SVG 要求 n=1，且不能带参考图/mask/markup/output_compression。
+    所以 SVG 一律把 n 收敛成 1，带参考图/蒙版直接 400；其它格式原样透传。
+    """
+    fields = image_output_format_fields(model, caps, output_format)
+    if fields.get("output_format") != "svg":
+        return fields
+    if has_refs:
+        raise HTTPException(
+            status_code=400,
+            detail="SVG 矢量输出不支持参考图或蒙版，请改用静态图或 GIF，或移除参考图后重试。",
+        )
+    fields["n"] = 1
+    return fields
+
+
 def image_output_extension(mime_type="", url=""):
     """落盘扩展名：MIME 优先，缺失/octet-stream 时按 URL 扩展名兜底，都不认识回退 .png。"""
     mime = str(mime_type or "").strip().lower()
@@ -13865,6 +13886,17 @@ def image_output_extension(mime_type="", url=""):
     if extension in {".svg", ".gif", ".jpg", ".jpeg", ".webp"}:
         return ".jpg" if extension in {".jpg", ".jpeg"} else extension
     return ".png"
+
+
+def image_output_extension_from_bytes(head):
+    """按文件头识别 SVG / GIF（返回扩展名），其它一律返回 ''，让调用方保持 .png。"""
+    data = bytes(head or b"")
+    stripped = data.lstrip(b"\xef\xbb\xbf \t\r\n")
+    if stripped.startswith(b"<svg") or (stripped.startswith(b"<?xml") and b"<svg" in data):
+        return ".svg"
+    if stripped.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    return ""
 
 
 def apimart_video_caps_for(provider, model=""):
@@ -16365,7 +16397,8 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
                 body["resolution"] = resolution
             if apimart_caps.get("send_n", True):
                 body["n"] = max(1, min(int(n or 1), int(apimart_caps.get("n_max") or 1)))
-            body.update(image_output_format_fields(model, apimart_caps, output_format))
+            body.update(apimart_output_format_fields(
+                model, apimart_caps, output_format, n, bool(image_refs or mask_refs)))
             # 透明背景必须 png：原生透明下覆盖用户选的输出格式
             if native_background:
                 body["background"] = "transparent"
@@ -22500,7 +22533,10 @@ def http_error_detail(exc):
 async def build_online_image_result(payload: OnlineImageRequest):
     provider = get_api_provider(payload.provider_id)
     model = preferred_image_model(provider, payload.model)
-    # 输出格式：静态图下发 ''（不发字段）；非 APIMart 平台没有这个能力，直接拒绝而不是悄悄忽略
+    refs = [ref.dict() for ref in payload.reference_images if ref.url]
+    image_refs = image_references(refs)
+    # 输出格式：静态图下发 ''（不发字段）；非 APIMart 平台没有这个能力，直接拒绝而不是悄悄忽略。
+    # refs 已包含蒙版（role=mask / name 以 _mask.png 结尾同样在 reference_images 里），SVG 有引用即提前 400。
     output_format = normalize_image_output_format(getattr(payload, "output_format", ""))
     if output_format:
         if not is_apimart_provider(provider):
@@ -22508,9 +22544,8 @@ async def build_online_image_result(payload: OnlineImageRequest):
                 status_code=400,
                 detail=f"{provider.get('name') or provider['id']} 不支持选择输出格式，请改用默认输出。",
             )
-        image_output_format_fields(model, apimart_image_caps_for(provider, model), output_format)
-    refs = [ref.dict() for ref in payload.reference_images if ref.url]
-    image_refs = image_references(refs)
+        apimart_output_format_fields(
+            model, apimart_image_caps_for(provider, model), output_format, has_refs=bool(refs))
     # 张数上限与助手链路同一套 caps（direct_image_request_count），不再只认 apimart 分支里的那张表
     count = direct_image_request_count(provider, model, payload.n)
     native_n_max = int((model_caps_for(provider, model, "image") or {}).get("n_max") or 1)
@@ -38072,6 +38107,42 @@ def set_agent_web_access(payload: AgentWebAccessPayload):
     return {"enabled": agent_web_enabled()}
 
 
+class AgentWebProxyPayload(BaseModel):
+    # auto=跟随系统代理（默认）/ direct=直连 / url=自定义地址（配 proxy）
+    mode: Optional[str] = Field(None, max_length=20)
+    proxy: Optional[str] = Field(None, max_length=500)
+
+
+@app.get("/api/agent/web-proxy")
+def get_agent_web_proxy():
+    from server import net_proxy
+    return net_proxy.web_proxy_status(refresh=True)
+
+
+@app.put("/api/agent/web-proxy")
+def set_agent_web_proxy(payload: AgentWebProxyPayload):
+    from server import net_proxy
+
+    cfg = load_settings()
+    proxy_input = payload.proxy
+    # 只切模式不重填地址时，自定义 URL 沿用已存的，别因为少传 proxy 就把设置弄丢
+    if proxy_input is None and str(payload.mode or "").strip().lower() == "url":
+        proxy_input = cfg.get("agent_web_proxy_url")
+    try:
+        mode, proxy = net_proxy.normalize_proxy_update(payload.mode, proxy_input)
+    except ValueError as exc:
+        return _agent_web_http_error(400, "invalid_web_proxy", str(exc))
+    if mode == "url":
+        cfg["agent_web_proxy"] = "url"
+        cfg["agent_web_proxy_url"] = proxy
+    else:
+        cfg["agent_web_proxy"] = mode
+        cfg.pop("agent_web_proxy_url", None)
+    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+    write_json_atomic(SETTINGS_FILE, cfg, ensure_ascii=False, indent=2)
+    return net_proxy.web_proxy_status(cfg, refresh=True)
+
+
 class AgentDefaultModelPayload(BaseModel):
     # "provider::model"；空串 = 不指定，回到对话模型列表里的第一个
     model: str = Field("", max_length=200)
@@ -38180,9 +38251,11 @@ async def _agent_vision_image_payload(raw_url):
         raise AgentToolError("图片地址只能是本地素材路径（/assets/...、/output/...）、data: 或 http(s) 链接",
                              code="invalid_args")
     try:
+        from server import net_proxy
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV,
                                      timeout=web_image_search.DOWNLOAD_TIMEOUT,
-                                     follow_redirects=False) as client:
+                                     follow_redirects=False,
+                                     **net_proxy.httpx_proxy(net_proxy.resolve_web_proxy())) as client:
             info = await web_image_search.fetch_image(client, text, referer=_agent_referer_origin(text))
     except web_image_search.WebImageSearchError as exc:
         raise AgentToolError(f"下载这张图失败，没法交给视觉模型：{_agent_clean_error_text(exc)}",
@@ -38267,7 +38340,7 @@ async def _agent_vision_read_image_for_search(image_url, chat=None):
                          code="vision_failed")
 
 
-async def _agent_search_images(query, count=12, orientation="any", sources=None):
+async def _agent_search_images(query, count=24, orientation="any", sources=None):
     from server import web_image_search
 
     try:
@@ -38278,7 +38351,7 @@ async def _agent_search_images(query, count=12, orientation="any", sources=None)
         raise AgentToolError(str(exc), code="image_search_failed")
 
 
-async def _agent_reverse_image_search(image_url, count=12, chat=None):
+async def _agent_reverse_image_search(image_url, count=24, chat=None):
     """反图的唯一实现：工具与 HTTP /api/agent/images/reverse 共用这一份。"""
     from server import web_image_search
 
@@ -38364,7 +38437,7 @@ def _agent_tool_search_images_validate(args):
     if not query:
         raise AgentToolError("搜索关键词不能为空", code="invalid_args")
     try:
-        count = int(args.get("count") if args.get("count") is not None else 12)
+        count = int(args.get("count") if args.get("count") is not None else 24)
     except (TypeError, ValueError):
         raise AgentToolError("count 必须是数字", code="invalid_args")
     orientation = str(args.get("orientation") or "any").strip().lower()
@@ -38393,7 +38466,7 @@ def _agent_tool_find_similar_images_validate(args):
     if not image_url:
         raise AgentToolError("image_url 不能为空", code="invalid_args")
     try:
-        count = int(args.get("count") if args.get("count") is not None else 12)
+        count = int(args.get("count") if args.get("count") is not None else 24)
     except (TypeError, ValueError):
         raise AgentToolError("count 必须是数字", code="invalid_args")
     return {"image_url": image_url, "count": max(1, min(count, _AGENT_IMAGES_ITEM_MAX))}
@@ -38444,31 +38517,36 @@ def _agent_web_tool_entries():
             "validate": validate, "run": fetch, "mutates_canvas": False,
         },
         "search_images": {
-            "description": "联网搜索图片原图（多来源并发）：默认 花瓣(huaban) / 堆糖(duitang) / 必应图片(bing) / 360 图片，"
-                           "可传 sources 指定来源；返回原图直链、缩略图、尺寸与出处页。"
-                           "明确不支持：小红书（需登录+签名）、Pinterest（网络不可达）、百度图片（反爬）、"
+            "description": "联网搜索图片原图（多来源并发，默认全网）：花瓣(huaban) / 堆糖(duitang) / 必应图片(bing) / "
+                           "360 图片 / 必应国际(bingglobal) / Pinterest / ArtStation，"
+                           "可传 sources 指定来源；默认返回 24 条（7 站轮转，每站至少 3 条），"
+                           "返回原图直链、缩略图、尺寸与出处页。"
+                           "Pinterest 需要系统代理或设置里的联网代理，没代理会跳过并在 note 说明。"
+                           "明确不支持：小红书（需登录+签名）、百度图片（反爬）、"
                            "昵图（HTTP 500）、图虫（接口 404）、Unsplash/Pexels/Pixabay（需要 API key）；"
                            "站酷直连 403，基本拿不到原图。这些不要假装能搜，搜不到就如实说明原因。"
                            "只出候选，具体用哪张由用户在卡片上自己选，不要替用户决定。仅在用户开启画布助手联网后可用。",
             "schema": {"type": "object", "properties": {
                 "query": {"type": "string", "description": "搜索关键词"},
-                "count": {"type": "integer", "default": 12, "maximum": 24},
+                "count": {"type": "integer", "default": 24, "maximum": 24},
                 "orientation": {"type": "string", "enum": ["any", "landscape", "portrait", "square"],
                                 "default": "any", "description": "画幅方向偏好"},
                 "sources": {"type": "array", "items": {"type": "string"},
-                            "description": "可选：指定来源（huaban/duitang/bing/360 或中文名 花瓣/堆糖/必应/360）；"
-                                           "不传=默认四个稳定来源。不可用来源会写进 note，不会假装成功"}},
+                            "description": "可选：指定来源（huaban/duitang/bing/360/bingglobal/pinterest/artstation "
+                                           "或中文名 花瓣/堆糖/必应/必应国际/Pinterest/ArtStation）；"
+                                           "不传=默认全网七站。不可用来源会写进 note，不会假装成功"}},
                 "required": ["query"]},
             "validate": _agent_tool_search_images_validate, "run": _agent_tool_search_images_run,
             "mutates_canvas": False,
         },
         "find_similar_images": {
             "description": "以图搜图（反图）：先用视觉模型读图得到画面描述与检索词，再走和 search_images 同一套多来源"
-                           "（花瓣/堆糖/必应/360）搜同款或相似图片。只出候选，具体用哪张由用户在卡片上自己选。仅在用户开启画布助手联网后可用。",
+                           "（默认全网七站：花瓣/堆糖/必应/360/必应国际/Pinterest/ArtStation；默认取 24 条）搜同款或相似图片。"
+                           "Pinterest 需要代理，没代理会在 note 说明。只出候选，具体用哪张由用户在卡片上自己选。仅在用户开启画布助手联网后可用。",
             "schema": {"type": "object", "properties": {
                 "image_url": {"type": "string",
                               "description": "图片地址：本地素材（/assets/...、/output/...）、data: 或 http(s) 链接"},
-                "count": {"type": "integer", "default": 12, "maximum": 24}}, "required": ["image_url"]},
+                "count": {"type": "integer", "default": 24, "maximum": 24}}, "required": ["image_url"]},
             "validate": _agent_tool_find_similar_images_validate, "run": _agent_tool_find_similar_images_run,
             "mutates_canvas": False,
         },
@@ -38515,7 +38593,7 @@ class AgentImagesAddToCanvasPayload(BaseModel):
 
 class AgentImagesReversePayload(BaseModel):
     image_url: str
-    count: int = 12
+    count: int = 24
 
 
 def _agent_images_web_disabled_response():
@@ -39361,7 +39439,8 @@ _AGENT_RUN_SYSTEM_PROMPT = (
     "inputs=[\"{{step0.node_id}}\"], settings={{\"provider\": \"comfly\", \"model\": \"<该平台声明的生图模型名>\", "
     "\"ratio\": \"3:4\", \"resolution\": \"2k\"}}) 逐行出图；table → batch 之后必须再加一步 run_batch（args 写 "
     "{{\"canvas_id\": \"c1\", \"node_id\": \"{{step1.node_id}}\"}}）真正开跑，只建节点不出图。只有单张参考图或纯文本出图才用 generate_image / 单个 image 节点。\n"
-    "23) 联网搜图（仅在用户开启画布助手联网时可用）：用户要「找参考图 / 网上搜几张图」时用 search_images；"
+    "23) 联网搜图（仅在用户开启画布助手联网时可用）：默认全网多来源（含 Pinterest / ArtStation；Pinterest 需要代理）。"
+    "用户要「找参考图 / 网上搜几张图」时用 search_images；"
     "用户给了一张图要「找同款 / 类似图 / 以图搜图」时用 find_similar_images（image_url 传那张图的本地素材地址或链接）；"
     "禁止编造图片 URL，也不许拿缩略图当原图；搜不到就如实说搜不到并给出真实原因。"
     "搜到的图只是候选：选哪张由用户在参考图卡片上自己点，不要替用户选，也不要把候选图直接写进 generate_image 的参考图参数。\n"
@@ -40097,14 +40176,20 @@ def _agent_questions_clean(raw):
     return out
 
 
-def _agent_message_with_questions(message, questions, kind=""):
+def _agent_message_with_questions(message, questions, kind="", extra=None):
     """把问题按面板的问答卡协议（novai-questions 代码块）接在回复后面；面板渲染成可选可填的问答卡。
-    kind=confirm：「结果确认」卡（是否符合要求 / 哪里不满意），面板换成确认类的标题和按钮。"""
+    kind=confirm：「结果确认」卡（是否符合要求 / 哪里不满意），面板换成确认类的标题和按钮。
+    extra：追加进问题块的字段（如 regenerate），kind/questions 是面板的解析协议，extra 不能覆盖。"""
     qs = _agent_questions_clean(questions)
     text = str(message or "").strip()
     if not qs:
         return text
     body = {"kind": kind, "questions": qs} if kind else qs
+    extra = extra if isinstance(extra, dict) else {}
+    if extra:
+        merged = dict(body) if isinstance(body, dict) else {"questions": qs}
+        merged.update({k: v for k, v in extra.items() if k not in ("kind", "questions")})
+        body = merged
     return (text + "\n\n" if text else "") + "```novai-questions\n" + json.dumps(body, ensure_ascii=False) + "\n```"
 
 
@@ -40166,10 +40251,14 @@ def _agent_generation_plan(canvas_id, pending, intent="", roadmap=None):
 
 
 def _agent_review_question_text(review, outcomes):
-    """生成（+ 审查）完成后给用户的话：结果 + 审查结论 + 「是否符合要求」问答卡。"""
+    """生成（+ 审查）完成后给用户的话：结果 + 审查结论 + 「是否符合要求 / 要不要重新生成」问答卡。
+    问题块带 extra.regenerate（节点、审查问题、修订提示词），面板刷新后仍能一键重新生成。"""
     ok = [o for o in outcomes if o.get("ok")]
     lines = [f"这批生成完成了：{len(ok)} 个成功" + (f"，{len(outcomes) - len(ok)} 个失败" if len(outcomes) > len(ok) else "") + "。"]
     issues = []
+    judged = [v for v in ((review or {}).get("items") or [])
+              if isinstance(v, dict) and str(v.get("node_id") or "").strip()]
+    bad = [v for v in judged if not v.get("ok")]
     if review and not review.get("skipped"):
         if review.get("summary"):
             lines.append("自动审查：" + review["summary"])
@@ -40182,11 +40271,100 @@ def _agent_review_question_text(review, outcomes):
     for o in outcomes:
         if not o.get("ok"):
             lines.append("- " + str(o.get("text") or "")[:160])
-    options = ["符合要求，继续下一步", "基本可以，微调一下", "不满意，需要重做"]
-    detail = list(dict.fromkeys([str(x)[:40] for x in issues]))[:3] + ["构图 / 角度", "风格 / 色调", "产品外观 / 细节", "文字 / 字幕"]
-    questions = [{"question": "这批结果符合你的要求吗？", "options": options},
-                 {"question": "不满意的话，主要是哪里？（可多选，也可以直接写）", "options": list(dict.fromkeys(detail))[:6], "multi": True}]
-    return _agent_message_with_questions("\n".join(lines), questions, kind="confirm")
+    if bad:
+        # 审查已经明确指出不合格：默认动作是「按审查建议重做」，不要还是问「满不满意」
+        question = f"审查发现 {len(bad)} 个结果不符合要求，要重新生成吗？"
+        options = ["重新生成", "先不重做"]
+    else:
+        question = "这批结果符合你的要求吗？"
+        options = ["符合要求，继续下一步", "不满意，需要重做"]
+    # issues 最多 2 条：加上 4 个固定项正好 6 个（面板每题最多 6 个选项），固定项不会被裁掉
+    detail = list(dict.fromkeys([str(x)[:40] for x in issues]))[:2] + ["构图 / 角度", "风格 / 色调", "产品外观 / 细节", "文字 / 字幕"]
+    questions = [{"question": question, "options": options},
+                 {"question": "要改哪里？可以直接勾选，或者自己写（可多选）", "options": list(dict.fromkeys(detail)), "multi": True}]
+    # ok 必须带上：前端刷新后只剩问题块（审查事件已丢）时，靠它区分哪几个不合格、该重新生成哪几个
+    regenerate = {"items": [{"node_id": str(v.get("node_id") or "").strip(),
+                             "label": str(v.get("label") or ""),
+                             "kind": str(v.get("kind") or ""),
+                             "ok": bool(v.get("ok")),
+                             "issues": [str(x) for x in (v.get("issues") or []) if str(x).strip()],
+                             "prompt": "" if v.get("ok") else str(v.get("revised_prompt") or "")}
+                            for v in judged]}
+    return _agent_message_with_questions("\n".join(lines), questions, kind="confirm",
+                                         extra={"regenerate": regenerate})
+
+
+def _agent_regenerate_steps(canvas, items, prompts, canvas_id):
+    """重生成的步骤：先按审查建议（或用户描述）改提示词，再重新跑；timeline 只重新导出，不改提示词。"""
+    by_id = _agent_nodes_by_id(canvas)
+    prompts = prompts if isinstance(prompts, dict) else {}
+    steps = []
+    for item in (items if isinstance(items, list) else []):
+        if not isinstance(item, dict):
+            continue
+        node_id = str(item.get("node_id") or "").strip()
+        node = by_id.get(node_id)
+        if node is None:
+            continue
+        kind = str(node.get("kind") or "")
+        if kind not in ("image", "video", "timeline"):
+            continue
+        label = str(item.get("label") or "").strip() or _agent_beat_title(node) or node_id
+        prompt = str(prompts.get(node_id) or item.get("prompt") or "").strip()
+        if kind in ("image", "video") and prompt and prompt != _agent_beat_prompt(node):
+            steps.append({"tool": "update_node",
+                          "args": {"canvas_id": canvas_id, "node_id": node_id, "prompt": prompt},
+                          "description": f"按审查建议改「{label}」的提示词"})
+        steps.append({"tool": "run_generation", "args": {"canvas_id": canvas_id, "node_id": node_id},
+                      "description": f"重新生成「{label}」"})
+    return steps
+
+
+async def _agent_regenerate_prompts(chat, items, description):
+    """按用户描述 + 审查问题融合出完整的新提示词；模型用不了 / 解析失败返回 {}，由调用方按描述拼接兜底。"""
+    description = str(description or "").strip()
+    if (not description or not isinstance(chat, dict)
+            or not str(chat.get("base") or "").strip() or not str(chat.get("model") or "").strip()):
+        return {}
+    lines = []
+    for item in (items if isinstance(items, list) else []):
+        if not isinstance(item, dict) or not str(item.get("node_id") or "").strip():
+            continue
+        current = str(item.get("current_prompt") or item.get("prompt") or "").strip()
+        issues = "；".join(str(x) for x in (item.get("issues") or []) if str(x).strip())
+        lines.append(f"- node_id：{str(item.get('node_id')).strip()}\n  当前提示词：{current[:1200] or '（无）'}"
+                     f"\n  审查问题：{issues[:400] or '（无）'}")
+    if not lines:
+        return {}
+    system = ("你是生图 / 生视频的提示词工程师。用户对上一批结果不满意，请结合用户描述和审查问题，"
+              "把每个节点的提示词改写成一条完整、可直接生成的新提示词：保留原提示词里仍然有效的主体、构图、风格和文字，"
+              "只改用户 / 审查指出的问题。只返回 JSON：{\"items\":[{\"node_id\":\"...\",\"prompt\":\"...\"}]}，不要解释。")
+    try:
+        text = await _agent_run_chat(chat, [{"role": "system", "content": system},
+                                           {"role": "user",
+                                            "content": "用户描述：" + description + "\n\n" + "\n".join(lines)}])
+    except AgentRunError as exc:
+        print(f"[Agent] 重新生成时融合提示词失败：{exc.message}")
+        return {}
+    except Exception as exc:
+        print(f"[Agent] 重新生成时融合提示词出错：{type(exc).__name__}: {exc}")
+        return {}
+    json_text = _agent_extract_json(text or "")
+    if not json_text:
+        return {}
+    try:
+        data = _agent_json_loads(json_text)
+    except Exception:
+        return {}
+    out = {}
+    for item in ((data.get("items") if isinstance(data, dict) else None) or []):
+        if not isinstance(item, dict):
+            continue
+        node_id = str(item.get("node_id") or "").strip()
+        prompt = str(item.get("prompt") or "").strip()
+        if node_id and prompt:
+            out[node_id] = prompt[:4000]
+    return out
 
 
 def _agent_decision_thought(decision):
@@ -43641,6 +43819,10 @@ async def _agent_run_producer(req, queue, bus=None):
                 action_lines, step_refs = ctx.action_lines(history, after_snapshot_final)
                 touched_refs = ctx.touched_refs(undo_log, after_snapshot_final) + step_refs
                 records = [] if approved_steps else [{"role": "user", "text": instruction}]
+                # 重新生成接口直接带 approved_steps 起 run，没有对应的用户消息：把触发它的那句补进线程，回放时看得出是谁要的
+                regen_user_text = str(req.get("regenerate_user_text") or "").strip()
+                if approved_steps and regen_user_text:
+                    records.insert(0, {"role": "user", "text": regen_user_text})
                 reply = final_message
                 if plan_payload:
                     reply = (plan_payload.get("summary") or final_message) + "（方案待确认）"
@@ -43814,6 +43996,7 @@ def _agent_run_task_snapshot(bus):
                 "callId": f"step:{index}", "toolId": str(data.get("tool") or ""),
                 "description": str(data.get("description") or ""), "result": data.get("result"),
                 "error": data.get("error"), "code": data.get("code"),
+                "args": data.get("args"),
             }
         elif name == "plan":
             event["eventType"] = "harness.tool_proposed"
@@ -43964,6 +44147,130 @@ async def agent_run_approve(run_id: str, payload: AgentRunApproveRequest, reques
     new_bus["task"] = asyncio.create_task(_agent_run_bus_drive(req, new_bus))
     print(f"[Agent] run {run_id} approved -> {new_run_id} steps={len(steps)}", flush=True)
     return {"ok": True, "taskId": new_run_id, "runId": new_run_id, "status": "RUNNING"}
+
+
+class AgentRegenerateItem(BaseModel):
+    """一个要重新生成的结果：node_id 必给；prompt = 审查建议 / 用户描述融合后的新提示词。"""
+
+    node_id: str = ""
+    label: str = ""
+    kind: str = ""
+    prompt: str = ""
+    issues: List[str] = []
+
+    @field_validator("node_id", "label", "kind", "prompt", mode="before")
+    @classmethod
+    def _text(cls, value):
+        return value if isinstance(value, str) else ""
+
+    @field_validator("issues", mode="before")
+    @classmethod
+    def _issues_shape(cls, value):
+        return [str(x).strip()[:120] for x in (value if isinstance(value, list) else []) if str(x).strip()][:4]
+
+
+class AgentRegenerateRequest(BaseModel):
+    """结果确认卡上的「重新生成」：没写描述就按审查建议改提示词，写了描述就按描述融合。"""
+
+    canvas_id: str
+    thread_id: str = ""
+    provider: str = ""
+    model: str = ""
+    think_level: str = ""
+    description: str = ""
+    items: List[AgentRegenerateItem] = []
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def _items_shape(cls, value):
+        # 脏条目收敛掉：重生成只认节点与提示词，不能因为一条脏数据把整次操作变成 422
+        items = []
+        for item in (value if isinstance(value, list) else []):
+            if not isinstance(item, dict):
+                continue
+            items.append({key: item.get(key) for key in ("node_id", "label", "kind", "prompt", "issues")})
+        return items
+
+
+@app.post("/api/agent/regenerate")
+async def agent_regenerate(payload: AgentRegenerateRequest, request: Request):
+    """审查不合格后的一键重生成：按审查建议（或用户描述）改对应节点的提示词，直接重新生成。
+    用 approved_steps 起 run（跳过规划轮、立即开跑），生成完照旧自动等结果 → 复审 → 再问用户。"""
+    canvas_id = str(payload.canvas_id or "").strip()
+    if not canvas_id:
+        raise HTTPException(status_code=400, detail="canvas_id 不能为空")
+    canvas = load_canvas(canvas_id)   # 404 校验
+    require_canvas_access(canvas, request, "edit")
+    by_id = _agent_nodes_by_id(canvas)
+    items, seen = [], set()
+    for raw in payload.items or []:
+        node_id = str(raw.node_id or "").strip()
+        node = by_id.get(node_id)
+        if not node_id or node_id in seen or node is None:
+            continue
+        kind = str(node.get("kind") or "")
+        if kind not in ("image", "video", "timeline"):
+            continue
+        seen.add(node_id)
+        items.append({"node_id": node_id,
+                      "label": str(raw.label or "").strip() or _agent_beat_title(node) or node_id,
+                      "kind": kind,
+                      "prompt": str(raw.prompt or "").strip()[:4000],
+                      "issues": list(raw.issues or [])[:4],
+                      "current_prompt": _agent_beat_prompt(node)})
+        if len(items) >= 8:
+            break
+    if not items:
+        raise HTTPException(status_code=400, detail="没有可以重新生成的结果")
+    try:
+        chat = _agent_run_resolve_chat(payload.provider, payload.model, "")
+    except HTTPException:
+        # 对话模型用不了不影响重生成：没写描述时根本不需要模型，有描述就退化成按描述拼接
+        chat = {"provider": "", "base": "", "headers": {}, "model": "", "provider_cfg": {}}
+    chat["think_level"] = _thinking.normalize_think_level(payload.think_level)
+    description = str(payload.description or "").strip()[:2000]
+    prompts = await _agent_regenerate_prompts(chat, items, description) if description else {}
+    if description:
+        for item in items:
+            if prompts.get(item["node_id"]):
+                continue
+            base = item["prompt"] or item["current_prompt"]
+            prompts[item["node_id"]] = ((base + "\n用户补充修改要求：" + description).strip()
+                                        if base else "用户补充修改要求：" + description)
+    steps = _agent_regenerate_steps(canvas, items, prompts, canvas_id)
+    if not any(step["tool"] == "run_generation" for step in steps):
+        raise HTTPException(status_code=400, detail="没有可以重新生成的结果")
+    instruction = (f"按我的描述重新生成：{description}" if description
+                   else f"重新生成审查不合格的 {len(items)} 个结果")
+    run_id = f"run_{uuid.uuid4().hex[:16]}"
+    req = {
+        "run_id": run_id,
+        "canvas_id": canvas_id,
+        "instruction": instruction,
+        "focus": _agent_run_normalize_focus(None),
+        "history": [],
+        "thread_id": str(payload.thread_id or "").strip(),
+        "chat": chat,
+        "max_steps": 0,
+        "mode": "run",
+        "approved_steps": steps,
+        "skill_id": "", "skill_ref": "", "skill_prompt": "", "skill_name": "", "apps": [],
+        "image_provider": "", "image_model": "",
+        "renderer": "beat",
+        "auto_execute": False,
+        "use_thread": True,
+        "regenerate_user_text": instruction,
+        "enforce_write_confirmation": True,
+    }
+    # 与 agent_run 相同的总线写法：producer 放后台跑，客户端断开也能续传；approved_steps 跳过规划轮直接开跑
+    bus = _agent_run_bus_new(run_id, canvas_id)
+    bus["goal"] = instruction
+    bus["model_config_id"] = f"{chat.get('provider')}::{chat.get('model')}" if chat.get("model") else None
+    bus["mode"] = "run"
+    bus["request"] = req
+    bus["task"] = asyncio.create_task(_agent_run_bus_drive(req, bus))
+    print(f"[Agent] regenerate canvas={canvas_id} run={run_id} steps={len(steps)}", flush=True)
+    return {"ok": True, "taskId": run_id, "runId": run_id, "status": "RUNNING", "steps": len(steps)}
 
 
 # --- T05 素材路由接入（依赖全部定义完后才 bind）---

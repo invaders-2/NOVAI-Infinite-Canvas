@@ -157,18 +157,6 @@
 /* 窄面板顶栏的常驻头像：不参与 flex 收缩，边长交给组件自己的 size */
 .cn-root #agent.ap2-agent .ap2-beat-head { display: inline-flex; flex: none; }
 .cn-root #agent.ap2-agent .ap2-hi-t { font-size: 12px; line-height: 18px; color: var(--fg2); }
-.cn-root #agent.ap2-agent .ap2-shuffle {
-  margin-left: auto;
-  display: inline-flex;
-  width: 30px;
-  height: 30px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9px;
-  color: var(--fg2);
-  transition: background var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
-}
-.cn-root #agent.ap2-agent .ap2-shuffle:hover { background: var(--sunken); color: var(--fg); }
 .cn-root #agent.ap2-agent .ap2-hello h2 {
   margin: 0;
   font-size: 27px;
@@ -369,12 +357,12 @@
 .cn-root #agent.ap2-agent .ap2-pstat { display: flex; align-items: center; gap: 7px; color: var(--fg2); font-size: 12.5px; }
 
 /* ── 卡片统一：方案 / 问答 / 技能安装 / 参考图 / 结果 ───────────────── */
-.cn-root #agent.ap2-agent :is(.plan, .confirm, .qa-card, .qa, .skill-install, .webimg-card) {
+.cn-root #agent.ap2-agent :is(.plan, .confirm, .qa-card, .qa, .skill-install) {
   border-radius: 16px;
   background: var(--card);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16), 0 10px 22px rgba(0, 0, 0, 0.16);
 }
-.cn-root[data-theme=light] #agent.ap2-agent :is(.plan, .confirm, .qa-card, .qa, .skill-install, .webimg-card) {
+.cn-root[data-theme=light] #agent.ap2-agent :is(.plan, .confirm, .qa-card, .qa, .skill-install) {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 10px 22px rgba(15, 23, 42, 0.08);
 }
 .cn-root #agent.ap2-agent .mention,
@@ -414,6 +402,87 @@
   background: color-mix(in srgb, var(--fg) 5%, #fff);
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05), 0 18px 40px rgba(15, 23, 42, 0.12);
 }
+/* ── 待发送消息队列：输入区上方，助手忙碌时 Enter 入队（软底，不画描边） ── */
+.cn-root #agent.ap2-agent .ap2-queue {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.cn-root #agent.ap2-agent .ap2-queue-hd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 3px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg3);
+}
+.cn-root #agent.ap2-agent .ap2-queue-count { font-variant-numeric: tabular-nums; }
+.cn-root #agent.ap2-agent .ap2-queue-hint { margin-left: auto; font-size: 10.5px; color: var(--fg3); white-space: nowrap; }
+.cn-root #agent.ap2-agent .ap2-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 140px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.cn-root #agent.ap2-agent .ap2-queue-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 27px;
+  gap: 6px;
+  padding: 1px 2px 1px 3px;
+  border-radius: 8px;
+}
+.cn-root #agent.ap2-agent .ap2-queue-row:hover { background: var(--hover); }
+.cn-root #agent.ap2-agent .ap2-queue-idx {
+  flex: 0 0 13px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--fg3);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.cn-root #agent.ap2-agent .ap2-queue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg2);
+}
+.cn-root #agent.ap2-agent .ap2-queue-acts {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0.55;
+  transition: opacity var(--d-quick) var(--e-std);
+}
+.cn-root #agent.ap2-agent .ap2-queue-row:hover .ap2-queue-acts,
+.cn-root #agent.ap2-agent .ap2-queue-row:focus-within .ap2-queue-acts { opacity: 1; }
+.cn-root #agent.ap2-agent .ap2-queue-btn {
+  display: inline-flex;
+  width: 23px;
+  height: 23px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg2);
+  transition: background var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
+}
+.cn-root #agent.ap2-agent .ap2-queue-btn:hover { background: var(--sunken); color: var(--fg); }
+.cn-root #agent.ap2-agent .ap2-queue-btn[aria-label="立即发送"] { color: var(--fg); }
+
 .cn-root #agent.ap2-agent .ap2-ctxrow { gap: 5px; padding: 2px 2px 0; }
 .cn-root #agent.ap2-agent .ap2-input {
   border: 0;
@@ -962,6 +1031,10 @@
 .cn-root #pop .ap2-pal-row { min-height: 34px; }
 /* 技能弹层（列表 + 管理弹窗）只留名称：超长名字单行省略，desc 只在 title 悬浮提示里 */
 .cn-root .ap2-skill-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 技能列表左侧：✨ 图标上叠缩略图，图片加载成功才隐藏图标 */
+.cn-root .combo-item .ic { position: relative; }
+.cn-root .combo-item .ic > .nv-skill-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+.cn-root .combo-item .ic:has(> .nv-skill-thumb) { background: var(--sunken); }
 .cn-root .skrow .m b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cn-root #pop .ap2-pal-copy small { display: block; overflow: hidden; color: var(--fg3); font-size: 11px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .cn-root #pop .ap2-pal-tag { flex: 0 0 auto; color: var(--fg3); font-size: 10.5px; }
@@ -1003,19 +1076,24 @@
 .cn-root #agent.ap2-agent .ap2-earlier:hover:not(:disabled) { color: var(--fg2); background: color-mix(in srgb, var(--fg) 6%, transparent); }
 .cn-root #agent.ap2-agent .ap2-earlier:disabled { cursor: default; }
 
-/* 结果审查卡：轻底、无描边；一行一个结果，不合格的行字色提亮 */
-.cn-root #agent.ap2-agent .ap2-review { margin: 8px 0 4px; padding: 10px 12px; border-radius: 14px; background: color-mix(in srgb, var(--fg) 4%, transparent); display: flex; flex-direction: column; gap: 6px; }
-.cn-root #agent.ap2-agent .ap2-review-hd { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg2); }
-.cn-root #agent.ap2-agent .ap2-review-hd b { font-weight: 600; color: var(--hi); }
-.cn-root #agent.ap2-agent .ap2-review-m { margin-left: auto; font-size: 10.5px; color: var(--fg3); }
-.cn-root #agent.ap2-agent .ap2-review-sum { font-size: 11.5px; line-height: 1.55; color: var(--fg3); }
-.cn-root #agent.ap2-agent .ap2-review-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 4px; border: 0; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; }
-.cn-root #agent.ap2-agent .ap2-review-row:hover { background: color-mix(in srgb, var(--fg) 5%, transparent); }
-.cn-root #agent.ap2-agent .ap2-review-th { width: 28px; height: 28px; flex: none; border-radius: 7px; overflow: hidden; display: grid; place-items: center; background: color-mix(in srgb, var(--fg) 6%, transparent); color: var(--fg3); }
-.cn-root #agent.ap2-agent .ap2-review-th img { width: 100%; height: 100%; object-fit: cover; }
-.cn-root #agent.ap2-agent .ap2-review-b { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.cn-root #agent.ap2-agent .ap2-review-b b { font-size: 12px; font-weight: 600; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cn-root #agent.ap2-agent .ap2-review-b span { font-size: 11px; line-height: 1.5; color: var(--fg3); }
-.cn-root #agent.ap2-agent .ap2-review-row.bad .ap2-review-b span { color: var(--fg2); }
-.cn-root #agent.ap2-agent .ap2-review-st { flex: none; font-size: 10.5px; color: var(--fg3); padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 6%, transparent); }
-.cn-root #agent.ap2-agent .ap2-review-row.bad .ap2-review-st { color: var(--hi); font-weight: 600; }
+/* 结果审查卡已拆到 agent/ReviewCard.tsx（Image Studio 版式，样式在 agent/image-studio.css） */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Windows 桌面壳：窗口右上三键占 y 16..56，原本卡片顶边 12、顶栏图标 y 25..55
+   正好落在三键底下。收到外壳 chrome 消息且 right>0 时给 .cn-root 挂 has-win-controls
+   （CanvasApp.tsx），卡片整体下移 52 → 顶边 64（三键底边 56 + 8 空隙）。
+   mac / 纯浏览器收不到 right>0，保持 12px 不变。
+   ══════════════════════════════════════════════════════════════════════════ */
+.cn-root.has-win-controls #agent.ap2-agent:not(.full) {
+  /* 覆盖第 12 行的 margin:12px…：卡片顶边 = top 安全区 + 48 */
+  margin-top: calc(var(--cn-chrome-top, 16px) + 48px);
+}
+/* 窄屏是 absolute + top/bottom 定位，margin 不参与计算：直接给 top，别叠成 12+52 */
+.cn-root[data-w=narrow].has-win-controls #agent.ap2-agent:not(.full) {
+  margin-top: 0;
+  top: calc(var(--cn-chrome-top, 16px) + 48px);
+}
+/* 全屏助手仍是 inset:0，用内边距把内容推到 64，不把整块往下挪露出画布 */
+.cn-root.has-win-controls #agent.ap2-agent.full {
+  padding-top: calc(var(--cn-chrome-top, 16px) + 48px);
+}

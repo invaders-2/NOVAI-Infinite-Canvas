@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""T52：6 位短好友码 + UDP 局域网发现的契约测试。
+"""T52：6 位数字短好友码（兼容旧字母码）+ UDP 局域网发现的契约测试。
 
 和 test_lan_account_store.py 一样不启动 main.py：用 deps 绑测试桩直接跑路由与纯函数。
 UDP 广播本身不在这里起真 socket：启动 / 幂等用替身循环验证，真实端口留给临时实例手工验收。
@@ -29,7 +29,8 @@ from server.routes import lan_account as lan  # noqa: E402
 FAILED = 0
 PEER_ID = "e1f2a3b4c5d60718"
 PEER_TOKEN = "f" * 48
-PEER_CODE = "7K3F9Q"
+PEER_CODE = "483920"
+LEGACY_PEER_CODE = "WHLWER"
 LEGACY_TOKEN = "0123456789abcdef0123456789abcdef"
 
 
@@ -75,7 +76,8 @@ def main() -> int:
     check("GET /me 200", me.status_code == 200, str(me.status_code))
     account = me.json().get("me") or {}
     code = str(account.get("code") or "")
-    check("code 是 6 位合法字符", bool(re.match(r"^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$", code)), code)
+    check("code 是 6 位纯数字", bool(re.match(r"^\d{6}$", code)), code)
+    check("code 在 100000..999999（无前导 0）", code.isdigit() and 100000 <= int(code) <= 999999, code)
     check("friend_code = NOVAI-<code>", account.get("friend_code") == "NOVAI-" + code, str(account.get("friend_code")))
     check("旧字段仍在（id/nickname/avatar/lan_ip/port/version）",
           all(key in account for key in ("id", "nickname", "avatar", "lan_ip", "port", "version")),
@@ -85,6 +87,8 @@ def main() -> int:
 
     own = lan.load_account()
     own_id, own_token = str(own.get("id") or ""), str(own.get("token") or "")
+    check("direct_code = NOVAI-<lan_ip>:<port>-<token>",
+          account.get("direct_code") == "NOVAI-10.25.1.8:3000-" + own_token, str(account.get("direct_code")))
     peer.accounts = {own_token: own_id, PEER_TOKEN: PEER_ID}
     check("重新加载 code 不变", lan.load_account().get("code") == code)
     check("friend_code_of = NOVAI-<code>", lan.friend_code_of(lan.load_account()) == "NOVAI-" + code)
@@ -103,6 +107,15 @@ def main() -> int:
     raw = json.load(open(os.path.join(data_dir, lan.ACCOUNT_FILE), encoding="utf-8"))
     check("老账号 code 写回文件", raw.get("code") == expected, str(raw.get("code")))
     check("同一 id 派生结果稳定", lan.derive_account_code("0123456789abcdef") == expected)
+
+    # 2b. 老账号文件里存着旧字母码：第一次加载迁移成数字码并写回
+    lan.save_account(dict(legacy, code=LEGACY_PEER_CODE))
+    migrated_letter = lan.load_account()
+    check("老字母码迁移成数字码", migrated_letter.get("code") == expected, str(migrated_letter.get("code")))
+    check("迁移后的码是 6 位纯数字",
+          bool(re.match(r"^\d{6}$", str(migrated_letter.get("code") or ""))), str(migrated_letter.get("code")))
+    raw = json.load(open(os.path.join(data_dir, lan.ACCOUNT_FILE), encoding="utf-8"))
+    check("迁移后的数字码写回文件", raw.get("code") == expected, str(raw.get("code")))
     check("不同 id 派生不同 code", lan.derive_account_code("fedcba9876543210") != expected)
     own_id, own_token = str(migrated.get("id") or ""), str(migrated.get("token") or "")
     peer.accounts = {own_token: own_id, PEER_TOKEN: PEER_ID}
@@ -119,9 +132,15 @@ def main() -> int:
 
     short = lan.parse_friend_code("NOVAI-" + PEER_CODE)
     check("新码 NOVAI-<CODE> 解析", bool(short) and short.get("kind") == "short" and short.get("code") == PEER_CODE, str(short))
-    bare = lan.parse_friend_code(PEER_CODE.lower())
-    check("裸小写短码解析并归一", bool(bare) and bare.get("code") == PEER_CODE, str(bare))
+    bare = lan.parse_friend_code(PEER_CODE)
+    check("裸 6 位数字码解析", bool(bare) and bare.get("kind") == "short" and bare.get("code") == PEER_CODE, str(bare))
+    old_short = lan.parse_friend_code("NOVAI-7K3F9Q")
+    check("旧字母码仍解析为 short", bool(old_short) and old_short.get("kind") == "short"
+          and old_short.get("code") == "7K3F9Q", str(old_short))
+    old_lower = lan.parse_friend_code("novai-7k3f9q")
+    check("旧字母码小写也归一成大写", bool(old_lower) and old_lower.get("code") == "7K3F9Q", str(old_lower))
     check("非法短码 None", lan.parse_friend_code("NOVAI-7K3F9") is None)
+    check("数字与字母混排 None", lan.parse_friend_code("NOVAI-12345A") is None)
     check("空串 None", lan.parse_friend_code("") is None)
     check("乱写 None", lan.parse_friend_code("hello") is None)
 
@@ -160,6 +179,15 @@ def main() -> int:
     check("/discover 不返回 ip/port/token",
           len(peers) == 1 and all(key not in peers[0] for key in ("ip", "port", "token")), str(peers))
 
+    # 5b. 老版本客户端广播旧字母码：发现表仍收，且能按字母码找到
+    lan._remember_peer({"novai_lan": 1, "code": LEGACY_PEER_CODE.lower(), "id": PEER_ID, "port": 3997,
+                        "nickname": "B 君", "avatar": "🐳", "token": PEER_TOKEN},
+                       "10.25.1.11", own_id)
+    legacy_found = lan.find_peer(LEGACY_PEER_CODE.lower())
+    check("旧字母码仍能收进发现表", bool(legacy_found) and legacy_found.get("ip") == "10.25.1.11"
+          and legacy_found.get("code") == LEGACY_PEER_CODE, str(legacy_found))
+    lan._PEERS.pop(LEGACY_PEER_CODE, None)
+
     # 6. 短码加好友：查发现表 → 拼 base_url + 用发现到的 token 走原有 ping 流程
     short_add = client.post("/api/lan/friends", json={"code": "NOVAI-" + PEER_CODE})
     check("短码加好友 200", short_add.status_code == 200, short_add.text[:160])
@@ -171,10 +199,13 @@ def main() -> int:
     updated = [item for item in friends if item.get("id") == PEER_ID]
     check("好友列表每项都有 code 字段", len(updated) == 1 and updated[0].get("code") == PEER_CODE, str(updated))
 
-    missing = client.post("/api/lan/friends", json={"code": "NOVAI-ABCDEF"})
+    missing = client.post("/api/lan/friends", json={"code": "NOVAI-999999"})
     check("发现不到短码 400", missing.status_code == 400, str(missing.status_code))
     check("发现不到错误文案精确",
           (missing.json().get("detail") or "").startswith("没在局域网里发现这个 ID"),
+          str((missing.json() or {}).get("detail")))
+    check("发现不到时提示直连好友码",
+          "直连好友码" in str((missing.json() or {}).get("detail") or ""),
           str((missing.json() or {}).get("detail")))
     self_add = client.post("/api/lan/friends", json={"code": "NOVAI-" + own_short})
     check("加自己的短码 400", self_add.status_code == 400, str(self_add.status_code))
@@ -203,6 +234,13 @@ def main() -> int:
         stop.set()
         lan._discovery_loop = real_loop
         lan._DISCOVERY_STARTED = False
+
+    # 9. 广播目标：每个本机网卡 /24 的定向广播 + 全局广播，去重且不含回环
+    targets = lan.broadcast_targets()
+    check("broadcast_targets 含 10.25.1.255", "10.25.1.255" in targets, str(targets))
+    check("broadcast_targets 含全局广播", lan.DISCOVERY_BROADCAST in targets, str(targets))
+    check("broadcast_targets 不含回环地址", not any(item.startswith("127.") for item in targets), str(targets))
+    check("broadcast_targets 无重复", len(targets) == len(set(targets)), str(targets))
 
     shutil.rmtree(data_dir, ignore_errors=True)
     print("")

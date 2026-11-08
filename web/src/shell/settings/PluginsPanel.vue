@@ -29,7 +29,7 @@ onMounted(load);
 <template>
     <div>
         <SetCard title="内置插件">
-            <SetRow label="联网搜索" desc="让画布助手搜索公开网页、读取网页正文；不会登录任何网站。">
+            <SetRow label="联网搜索" desc="让画布助手搜索公开网页、读取网页正文；不会登录任何网站。被墙的站点需要在「常用 → 通用 → 联网代理」里开代理。">
                 <NvSwitch :model-value="web" :disabled="!ready || busy" label="联网搜索" @update:model-value="setWeb" />
             </SetRow>
         </SetCard>

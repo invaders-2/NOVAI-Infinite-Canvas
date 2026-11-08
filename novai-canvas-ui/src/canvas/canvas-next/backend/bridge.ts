@@ -665,6 +665,10 @@ export function createBridgeBackend(): CanvasBackend {
       const res = await cmd({ type: "task/run", payload: { goal: req.goal, canvasContext: req.context, threadId: req.context.threadId } }).catch(() => null);
       return res ? { ok: res.ok === true, taskId: typeof res.taskId === "string" ? res.taskId : undefined, status: typeof res.status === "string" ? res.status : undefined, error: typeof res.error === "string" ? res.error : undefined } : { ok: false, error: "TASK_UNAVAILABLE" };
     },
+    // 旧桌面 openarc 没有「审查后重新生成」这个接口：面板据此回退成把一段指令发给 Agent
+    async regenerateAgentResults() {
+      return { ok: false, error: "TASK_UNAVAILABLE" };
+    },
     async defaultChatModel() {
       const cmd = modelCmd(); if (!cmd) return null;
       const res = await cmd({ command: "defaults/get" }).catch(() => null);

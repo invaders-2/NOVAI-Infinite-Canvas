@@ -1,0 +1,694 @@
+/**
+ * Image Studio 版式（结果审查 / 参考图共用）。
+ * 批次直接落在消息背景上，层级靠标题行 + 留白 + 方图间距；图片用 12px 圆角、8px 间距。
+ * hover 才出底部渐变与深色玻璃动作按钮；全屏查看器是磨砂遮罩 + 底部玻璃信息条。
+ * 颜色全部走 .cn-root 的主题变量，亮/暗自动跟随；不画 border / 发丝线 / inset 描边。
+ */
+
+/* ══ 批次标题行 ══════════════════════════════════════════════════════ */
+.cn-root .studio-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cn-root .studio-batch-hd {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cn-root .studio-batch-hd-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.cn-root .studio-batch-title {
+  flex: none;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.cn-root .studio-batch-meta {
+  min-width: 0;
+  color: var(--fg3);
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cn-root .studio-batch-sum {
+  margin: 0;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+/* ══ 网格 ════════════════════════════════════════════════════════════ */
+.cn-root .studio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.cn-root .studio-tile {
+  position: relative;
+  min-width: 0;
+}
+
+.cn-root .studio-tile-frame {
+  position: relative;
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--sunken);
+  isolation: isolate;
+}
+
+.cn-root .studio-tile-media {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cn-root .studio-tile-media :is(img, canvas) {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform var(--d-spatial) var(--e-std);
+}
+
+.cn-root .studio-tile:hover .studio-tile-media :is(img, canvas) {
+  transform: scale(1.02);
+}
+
+.cn-root .studio-tile-ph {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  height: 100%;
+  color: var(--fg3);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.cn-root .studio-tile-ph em { font-style: normal; }
+
+.cn-root .studio-tile-skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, var(--sunken) 30%, color-mix(in srgb, var(--fg) 9%, transparent) 46%, var(--sunken) 62%);
+  background-size: 240% 100%;
+  animation: studio-shimmer 1.4s linear infinite;
+}
+
+/* ══ 角标 / 选中 ══════════════════════════════════════════════════════ */
+.cn-root .studio-tile-badge {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  z-index: 4;
+  max-width: calc(100% - 12px);
+  padding: 2px 7px;
+  border-radius: 999px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--bad) 12%, color-mix(in srgb, var(--card) 82%, transparent));
+  color: var(--bad);
+  pointer-events: none;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 16px;
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+  backdrop-filter: blur(10px) saturate(150%);
+}
+
+.cn-root .studio-tile-kind {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(18, 18, 20, 0.5);
+  color: #fff;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  backdrop-filter: blur(10px) saturate(160%);
+}
+
+.cn-root .studio-tile-pick {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(18, 18, 20, 0.48);
+  color: #fff;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.88);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  backdrop-filter: blur(10px) saturate(160%);
+  transition: opacity var(--d-feedback) var(--e-std), transform var(--d-quick) var(--e-std), background-color var(--d-feedback) var(--e-std);
+}
+
+.cn-root .studio-tile.has-badge .studio-tile-pick {
+  right: auto;
+  left: 6px;
+}
+
+.cn-root .studio-tile:hover .studio-tile-pick,
+.cn-root .studio-tile:focus-within .studio-tile-pick,
+.cn-root .studio-tile.is-picked .studio-tile-pick {
+  opacity: 1;
+  transform: none;
+}
+
+.cn-root .studio-tile-pick.on { background: var(--solid); color: var(--on-solid); }
+.cn-root .studio-tile-pick.added { background: var(--s4); color: var(--hi); }
+
+/* ══ hover：底部渐变 + 左下图元 + 动作按钮 ═══════════════════════════ */
+.cn-root .studio-tile-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.64) 0%, rgba(0, 0, 0, 0.22) 42%, rgba(0, 0, 0, 0) 68%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--d-quick) var(--e-std);
+}
+
+.cn-root .studio-tile:hover .studio-tile-veil,
+.cn-root .studio-tile:focus-within .studio-tile-veil {
+  opacity: 1;
+}
+
+.cn-root .studio-tile-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cn-root .studio-tile-name,
+.cn-root .studio-tile-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+}
+
+.cn-root .studio-tile-name { color: rgba(255, 255, 255, 0.94); font-size: 11.5px; line-height: 15px; font-weight: 500; }
+.cn-root .studio-tile-meta { color: rgba(255, 255, 255, 0.66); font-size: 10.5px; line-height: 14px; font-variant-numeric: tabular-nums; }
+
+.cn-root .studio-tile-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.cn-root .studio-act {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: rgba(22, 22, 24, 0.52);
+  color: #fff;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(12px) saturate(170%);
+  backdrop-filter: blur(12px) saturate(170%);
+  transition: background-color var(--d-feedback) var(--e-std), transform var(--d-quick) var(--e-std);
+}
+
+.cn-root .studio-act:hover { background: rgba(255, 255, 255, 0.24); }
+.cn-root .studio-act:active { transform: scale(0.94); }
+.cn-root .studio-act.bad:hover { background: color-mix(in srgb, var(--bad) 66%, rgba(0, 0, 0, 0.4)); }
+.cn-root .studio-act:focus-visible,
+.cn-root .studio-tile-hit:focus-visible,
+.cn-root .studio-linkbtn:focus-visible,
+.cn-root .studio-primary:focus-visible,
+.cn-root .studio-lb-nav:focus-visible,
+.cn-root .studio-lb-close:focus-visible,
+.cn-root .studio-lb-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--solid) 52%, transparent);
+  outline-offset: 2px;
+}
+
+.cn-root .studio-act-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.cn-root .studio-tile-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 0;
+  padding: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* ══ 胶囊 / 文字按钮 / 主按钮 / 软底提示 ═════════════════════════════ */
+.cn-root .studio-chips {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.cn-root .studio-chips > span {
+  color: var(--fg3);
+  font-size: 11px;
+}
+
+.cn-root .studio-chip {
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--fg2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std), color var(--d-feedback) var(--e-std);
+}
+
+.cn-root .studio-chip:hover { background: var(--hover); color: var(--hi); }
+.cn-root .studio-chip.on { background: var(--solid); color: var(--on-solid); font-weight: 500; }
+
+.cn-root .studio-q {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cn-root .studio-q span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--fg3);
+  font-size: 11px;
+}
+
+.cn-root .studio-linkbtn {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std), color var(--d-feedback) var(--e-std);
+}
+
+.cn-root .studio-linkbtn:hover { background: var(--hover); color: var(--fg); }
+.cn-root .studio-batch-hd .studio-linkbtn { margin-left: auto; }
+
+.cn-root .studio-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--solid);
+  color: var(--on-solid);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std), opacity var(--d-feedback) var(--e-std);
+}
+
+.cn-root .studio-primary:hover { background: var(--hi); }
+.cn-root .studio-primary:disabled { opacity: 0.45; cursor: default; }
+.cn-root .studio-primary:disabled:hover { background: var(--solid); }
+
+.cn-root .studio-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--sunken);
+}
+
+.cn-root .studio-note b { color: var(--fg2); font-size: 12px; font-weight: 600; line-height: 17px; }
+.cn-root .studio-note p { margin: 0; color: var(--fg3); font-size: 11.5px; line-height: 1.6; }
+.cn-root .studio-note.bad { background: color-mix(in srgb, var(--bad) 9%, transparent); }
+.cn-root .studio-note.bad b { color: var(--bad); }
+
+.cn-root .studio-note-inline {
+  margin: 0;
+  color: var(--bad);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.cn-root .studio-phase {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cn-root .studio-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 22px 14px;
+  border-radius: 12px;
+  background: var(--sunken);
+  color: var(--fg3);
+  text-align: center;
+}
+
+.cn-root .studio-empty b { color: var(--fg2); font-size: 12.5px; font-weight: 600; }
+.cn-root .studio-empty p { margin: 0; max-width: 300px; font-size: 11.5px; line-height: 1.6; }
+
+/* ══ 全屏查看器：磨砂遮罩 + 底部玻璃信息条 ═══════════════════════════ */
+.cn-root .studio-lb {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 24px 20px;
+  background: rgba(0, 0, 0, 0.62);
+  -webkit-backdrop-filter: blur(30px) saturate(150%);
+  backdrop-filter: blur(30px) saturate(150%);
+  animation: studio-lb-in var(--d-std) var(--e-std);
+}
+
+.cn-root .studio-lb-stage {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 92vw;
+  max-height: 78vh;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cn-root .studio-lb-stage :is(img, canvas) {
+  display: block;
+  max-width: 92vw;
+  max-height: 100%;
+  border-radius: 16px;
+  object-fit: contain;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.cn-root .studio-lb-media {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cn-root .studio-lb-skeleton {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(52vw, 52vh);
+  height: min(52vw, 52vh);
+  transform: translate(-50%, -50%);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07);
+  animation: studio-pulse 1.6s var(--e-std) infinite;
+}
+
+.cn-root .studio-lb-broken {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 40px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+}
+
+.cn-root .studio-lb-close,
+.cn-root .studio-lb-nav {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  transition: background-color var(--d-feedback) var(--e-std);
+}
+
+.cn-root .studio-lb-close:hover,
+.cn-root .studio-lb-nav:hover { background: rgba(255, 255, 255, 0.26); }
+
+.cn-root .studio-lb-close { right: 18px; top: 18px; width: 34px; height: 34px; }
+.cn-root .studio-lb-nav { top: 50%; width: 40px; height: 40px; margin-top: -20px; }
+.cn-root .studio-lb-nav.prev { left: 18px; }
+.cn-root .studio-lb-nav.next { right: 18px; }
+
+.cn-root .studio-lb-bar {
+  flex: 0 0 auto;
+  width: min(92vw, 720px);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.cn-root .studio-lb-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 34vh;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(28, 28, 30, 0.9);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+  color: #f5f5f7;
+}
+
+.cn-root .studio-lb-info::-webkit-scrollbar { width: 0; height: 0; }
+
+.cn-root .studio-lb-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cn-root .studio-lb-head b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cn-root .studio-lb-count { flex: none; margin-left: auto; color: rgba(255, 255, 255, 0.55); font-size: 11px; }
+
+.cn-root .studio-lb-state {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.cn-root .studio-lb-state.bad { background: color-mix(in srgb, var(--bad) 64%, rgba(0, 0, 0, 0.3)); color: #fff; }
+.cn-root .studio-lb-state.ok { background: rgba(255, 255, 255, 0.16); color: rgba(255, 255, 255, 0.92); }
+
+.cn-root .studio-lb-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: rgba(255, 255, 255, 0.69);
+  font-size: 12px;
+}
+
+.cn-root .studio-lb-meta a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  text-decoration: none;
+}
+
+.cn-root .studio-lb-meta a:hover { background: rgba(255, 255, 255, 0.24); }
+.cn-root .studio-lb-note { color: var(--warn); }
+
+.cn-root .studio-lb-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding-left: 15px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.cn-root .studio-lb-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.cn-root .studio-lb-prompt-t { color: rgba(255, 255, 255, 0.5); font-size: 10.5px; line-height: 15px; }
+
+.cn-root .studio-lb-prompt p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.cn-root .studio-lb-prompt p.open { display: block; overflow: visible; -webkit-line-clamp: unset; }
+
+.cn-root .studio-lb-prompt .studio-linkbtn {
+  align-self: flex-start;
+  height: 20px;
+  padding: 0 6px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.cn-root .studio-lb-prompt .studio-linkbtn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+
+.cn-root .studio-lb-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.cn-root .studio-lb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std);
+}
+
+.cn-root .studio-lb-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.cn-root .studio-lb-hint { color: rgba(255, 255, 255, 0.42); font-size: 11px; text-align: center; }
+
+@media (max-width: 640px) {
+  .cn-root .studio-lb { padding: 38px 12px 16px; }
+  .cn-root .studio-lb-nav.prev { left: 8px; }
+  .cn-root .studio-lb-nav.next { right: 8px; }
+}
+
+@keyframes studio-shimmer {
+  from { background-position: 130% 0; }
+  to { background-position: -130% 0; }
+}
+
+@keyframes studio-lb-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes studio-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.9; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cn-root .studio-tile-media :is(img, canvas) { transition: none; }
+  .cn-root .studio-tile:hover .studio-tile-media :is(img, canvas) { transform: none; }
+  .cn-root .studio-tile-veil,
+  .cn-root .studio-tile-pick,
+  .cn-root .studio-act,
+  .cn-root .studio-lb,
+  .cn-root .studio-lb-close,
+  .cn-root .studio-lb-nav { transition: none; animation: none; }
+  .cn-root .studio-tile-skeleton { animation: none; background: var(--sunken); }
+  .cn-root .studio-lb-skeleton { animation: none; }
+}

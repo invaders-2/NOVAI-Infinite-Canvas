@@ -9,7 +9,10 @@
  *   不得将该组件单独再分发或出售；本版权声明须保留。
  * 本项目的改动：噪点固定为 0；加入彩色程度（此处为 0，黑白）与浅色主题映射。
  */
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+
+/* hold：前台要让出 GPU 时（比如首页鼠标停在输入框上）暂停绘制，不再排新的 rAF */
+const props = defineProps({ hold: { type: Boolean, default: false } });
 
 /* 用户在预览里定下的参数 */
 const SETTINGS = { hue: 180, sat: 0, warp: 0, scan: 0, speed: 1.0 };
@@ -37,7 +40,7 @@ function resize() {
     const w = Math.max(1, Math.round(c.clientWidth * r)), h = Math.max(1, Math.round(c.clientHeight * r));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; gl.viewport(0, 0, w, h); }
     /* 不在 ResizeObserver 回调里同步画（会把 GPU 等待算进切页那一帧），放到下一帧 */
-    if (!raf) raf = requestAnimationFrame(draw);
+    if (!raf && !props.hold) raf = requestAnimationFrame(draw);
 }
 function draw(now) {
     raf = 0; if (!prog) return;
@@ -52,9 +55,9 @@ function draw(now) {
     gl.uniform1f(u.uScan, SETTINGS.scan); gl.uniform1f(u.uScanFreq, 0); gl.uniform1f(u.uWarp, SETTINGS.warp);
     gl.uniform1f(u.uSat, SETTINGS.sat); gl.uniform1f(u.uLight, isDark() ? 0 : 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (visible && !reduce && !document.hidden && !busy) raf = requestAnimationFrame(draw);
+    if (visible && !reduce && !document.hidden && !busy && !props.hold) raf = requestAnimationFrame(draw);
 }
-function start() { if (!raf && prog && !busy) { last = 0; raf = requestAnimationFrame(draw); } }
+function start() { if (!raf && prog && !busy && !props.hold) { last = 0; raf = requestAnimationFrame(draw); } }
 /* 导航胶囊等前景动画进行时暂停（见 GooeyNav 的 nv-motion-busy），结束后自动继续 */
 let busy = false, busyTimer = 0;
 function onBusy(e) {
@@ -65,6 +68,10 @@ function onBusy(e) {
 }
 function stop() { if (raf) cancelAnimationFrame(raf); raf = 0; }
 const onVis = () => (document.hidden ? stop() : visible && start());
+watch(() => props.hold, (v) => {
+    if (v) stop();
+    else if (visible && !document.hidden && !busy) start();
+});
 
 onMounted(() => {
     const c = el.value;
@@ -86,7 +93,7 @@ onMounted(() => {
     io = new IntersectionObserver(([e]) => { visible = e.isIntersecting; visible ? start() : stop(); });
     io.observe(c);
     /* 切换深浅色时立刻重画（动画关闭时也要更新） */
-    mo = new MutationObserver(() => { if (!raf) raf = requestAnimationFrame(draw); });
+    mo = new MutationObserver(() => { if (!raf && !props.hold) raf = requestAnimationFrame(draw); });
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('nv-motion-busy', onBusy);

@@ -49,6 +49,17 @@ function testFriendCode(lan) {
     assert.equal(lan.parseFriendCode(''), null);
     assert.equal(lan.parseFriendCode(null), null);
     assert.equal(lan.parseFriendCode(undefined), null);
+
+    // 6 位纯数字好友码；旧版 6 位字母码仍兼容并归一成大写
+    const short = lan.parseFriendCode('483920');
+    assert.equal(short.code, '483920');
+    assert.equal(short.ip, '');
+    assert.equal(short.port, 0);
+    assert.equal(short.base_url, '');
+    assert.equal(lan.parseFriendCode('NOVAI-483920').code, '483920');
+    assert.equal(lan.parseFriendCode('7K3F9Q').code, '7K3F9Q');
+    assert.equal(lan.parseFriendCode('NOVAI-7k3f9q').code, '7K3F9Q');
+    assert.equal(lan.parseFriendCode('NOVAI-12345A'), null);
     console.log('[lan-doc] 好友码解析通过');
 }
 

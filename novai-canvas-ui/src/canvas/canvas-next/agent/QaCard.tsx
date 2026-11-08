@@ -25,9 +25,11 @@ export function QaCardView({ card, busy, onChange, onSubmit, onSkip }: { card: Q
   const items = useMemo(() => card.questions.map((q, qi) => ({ name: "q" + qi, choices: q.options.map((value) => ({ value })) })), [card.questions]);
   useEffect(() => { setActive("q0"); }, [card.goal]);
   const confirm = card.kind === "confirm";
+  /** 有没有不合格项要重做：决定 skip 按钮是「先不重做，继续」还是「满意，继续」 */
+  const regenBad = !!card.regen?.items.some((it) => it.ok === false);
   const title = open ? (confirm ? "结果确认" : "先确认几个问题")
     : card.status === "answered" ? (confirm ? "已反馈" : "已回答")
-    : (confirm ? "满意，继续下一步" : "已跳过，交给 Agent 决定");
+    : (confirm ? (regenBad ? "先不重做，继续" : "满意，继续下一步") : "已跳过，交给 Agent 决定");
   return <Card className={"message-card qa-card" + (open ? "" : " is-done")} data-qa={card.status} size="sm">
     <CardHeader className="mc-head">
       <div className="mc-head-row">
@@ -76,7 +78,7 @@ export function QaCardView({ card, busy, onChange, onSubmit, onSkip }: { card: Q
     </CardContent>
     {open ? <CardFooter className="mc-foot">
       <div className="mc-actions mc-actions-split">
-        <Button className="mc-btn-ghost" data-qa-skip disabled={busy} onClick={onSkip} size="sm" variant="ghost">{confirm ? "满意，继续" : "跳过，你来决定"}</Button>
+        <Button className="mc-btn-ghost" data-qa-skip disabled={busy} onClick={onSkip} size="sm" variant="ghost">{confirm ? (regenBad ? "先不重做，继续" : "满意，继续") : "跳过，你来决定"}</Button>
         <Button className="mc-btn-solid" data-qa-go disabled={busy} onClick={onSubmit} size="sm" variant="default"><Icon name="send" size="s" />{confirm ? "提交反馈" : n ? "提交回答" : "直接继续"}</Button>
       </div>
     </CardFooter> : null}

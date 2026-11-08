@@ -26,6 +26,7 @@ import { closePop, openPop } from "./overlay";
 import { ThumbImg } from "./thumb";
 import { OptCards, normRatio, ratioShape } from "./OptCards";
 import { OptimizeButton } from "./OptimizeButton";
+import { EffortSlider } from "./EffortSlider";
 import { useEditorState } from "./editors/registry";
 import { draftToFinal, smartClip, trimToNode } from "../videoTools";
 import { videoAiMenu } from "./VideoTools";
@@ -535,7 +536,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   // 没配置模型：仍把同一套控件渲染出来（灰显），顶部保留引导 + 「打开模型设置」；有模型时行为不变。
   const dis = !m;
   const mm = m || placeholderSpec(kind);
-  const pop = (render: (close: () => void) => React.ReactNode) => openPop(anchor, (close) => <>
+  const pop = (render: (close: () => void) => React.ReactNode, cls?: string) => openPop(anchor, (close) => <>
     {dis ? <>
       <div className="mh">{TYPE_LABEL[kind]}参数</div>
       <div className="gp-nomodel" data-nomodel><Icon name="alert" size="s" /><span>还没有可用的{TYPE_LABEL[kind]}模型：下面是可调档位（灰显），添加模型后即可修改。</span></div>
@@ -543,7 +544,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
       <div className="msep" />
     </> : null}
     {render(close)}
-  </>, "up");
+  </>, "up", "left", cls);
   if (k === "think") return pop((close) => {
     const levels = thinkLevelsFor(store.modelOf(node));
     const curThink = String((cur().g.params as TextParams).think || "");
@@ -562,23 +563,24 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
       </button>
     </>;
   });
-  if (k === "quality") return pop((close) => {
-    // 菜单只列 caps 的档位：auto 与「默认」都不发字段，合并成一项（caps 没有 auto 时第一项叫「默认」）
+  if (k === "quality") return pop(() => {
+    // 质量档来自 caps：auto 和「默认」都不发字段，合并成第一档（caps 没有 auto 时第一档叫「默认」）
     const choices = qualityChoices(store.modelOf(node));
+    const labels = Object.fromEntries(choices.map((choice) => [choice.value, choice.label]));
     const curQuality = String((cur().g.params as ImageParams).quality || "");
-    return <>
-      <div className="mh">质量 · {mm.name}</div>
-      {choices.map((choice) => {
-        const picked = choice.isDefault ? isQualityDefault(curQuality) : curQuality === choice.value;
-        return <button key={choice.value || "default"} className={"mi" + (picked ? " on" : "")} data-quality={choice.value || "default"} aria-pressed={picked}
-          onClick={() => { close(); set({ quality: choice.isDefault ? undefined : choice.value }); }}>
-          <span className="ic"><Icon name="sparkle" size="s" /></span>
-          <span>{choice.label}<span className="d">{choice.isDefault ? "不指定质量档，跟随上游" : choice.value}</span></span>
-          {picked ? <span className="k"><Icon name="check" size="s" /></span> : null}
-        </button>;
-      })}
-    </>;
-  });
+    return <EffortSlider
+      levels={choices.map((choice) => choice.value)}
+      labels={labels}
+      label="质量"
+      hint="档位越高，画质越精细，耗时越长"
+      leftLabel="更低"
+      rightLabel="更高"
+      recommended={null}
+      showRestore={false}
+      value={isQualityDefault(curQuality) ? choices[0].value : curQuality}
+      onChange={(level) => set({ quality: !level || level.toLowerCase() === "auto" ? undefined : level })}
+    />;
+  }, "quality-pop");
   if (k === "thinking") return pop((close) => {
     const curThinking = (cur().g.params as ImageParams).thinking;
     const rows: Array<{ key: string; label: string; desc: string; value: boolean | undefined }> = [
@@ -671,12 +673,6 @@ function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?:
   const formats = outputFormatOptions(m);
   const format = outputFormatForRequest(p.outputFormat);
   return <>
-    {formats.length ? <>
-      <div className="mh">输出格式</div>
-      <div className="seg" data-p="output-format">
-        {formats.map((f) => <button key={f.value || "static"} className={format === f.value ? "on" : ""} disabled={disabled} title={OUTPUT_FORMAT_TIP[f.value]} onClick={() => set({ outputFormat: f.value || undefined })}>{f.label}</button>)}
-      </div>
-    </> : null}
     <div className="mh">分辨率</div>
     <OptCards cols={(m.sizes || []).length} items={(m.sizes || []).map((s) => ({ key: s, label: s, on: p.size === s, disabled, pick: () => chooseSize(s) }))} />
     <div className="mh">比例</div>
@@ -684,8 +680,14 @@ function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?:
       const needSource = r === "自适应" && !hasSource;
       return { key: r, label: ratioDisplayLabel(r), shape: shape(r), on: p.ratio === r, disabled: disabled || needSource, title: needSource ? "需要有参考图或节点已有图" : undefined, pick: () => chooseRatio(r) };
     })} />
+    {m.search ? <><div className="mh">联网搜索</div><div className="seg"><button className={p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: true })}>开</button><button className={!p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: false })}>关</button></div></> : null}
+    {formats.length ? <>
+      <div className="mh">输出格式</div>
+      <div className="seg" data-p="output-format">
+        {formats.map((f) => <button key={f.value || "static"} className={format === f.value ? "on" : ""} disabled={disabled} title={OUTPUT_FORMAT_TIP[f.value]} onClick={() => set({ outputFormat: f.value || undefined })}>{f.label}</button>)}
+      </div>
+    </> : null}
     {ratios.includes("自适应") && !hasSource ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>原图比例需要有参考图</span></div> : null}
-    {m.search ? <><div className="mh">联网搜索</div><div className="seg"><button className={p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: true })}>开</button><button className={!p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: false })}>关</button></div></> : <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>{m.name} 不支持联网搜索</span></div>}
   </>;
 }
 /** Midjourney 参数：版本 / 速度 / HD / 风格化（只列服务商规格声明的取值） */

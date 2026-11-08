@@ -9,9 +9,10 @@ export type LanMe = {
   id: string;
   nickname: string;
   avatar: string;
-  /** 6 位好友 ID（如 7K3F9Q），聊天/列表里的 "#CODE" 用它 */
+  /** 6 位数字好友 ID（如 483920），聊天/列表里的 "#CODE" 用它；旧版字母码仍可能出现在这里 */
   code: string;
   friend_code: string;
+  direct_code?: string;
   lan_ip: string;
   port: string;
   version: string;
@@ -45,11 +46,11 @@ export type LanMessage = {
 
 /** 旧好友码：NOVAI-<局域网IP>:<端口>-<32+ 位口令>（与后端 parse_friend_code 同一套规则） */
 const FRIEND_CODE = /^NOVAI-((?:\d{1,3}\.){3}\d{1,3}):(\d{1,5})-([A-Za-z0-9_-]{32,})$/;
-/** 新的 6 位短码，允许带 NOVAI- 前缀（用户可能从好友码里抄后半截） */
-const SHORT_CODE = /^(?:NOVAI-)?([A-Za-z0-9]{6})$/;
+/** 6 位数字短码（如 483920），也兼容旧版 6 位字母码；允许带 NOVAI- 前缀（用户可能从好友码里抄后半截） */
+const SHORT_CODE = /^(?:NOVAI-)?(\d{6}|[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6})$/i;
 
 export type ParsedFriendCode = {
-  /** 6 位短码；旧格式没有，为空串 */
+  /** 6 位数字短码（旧版字母码归一成大写）；旧格式没有，为空串 */
   code: string;
   /** 旧格式（ip:port-token）才有，短码为空 */
   ip: string;

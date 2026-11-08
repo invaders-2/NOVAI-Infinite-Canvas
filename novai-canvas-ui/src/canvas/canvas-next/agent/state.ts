@@ -2,7 +2,13 @@ import { hostRoot } from "../../../novaiBridgeRoot";
 import { useSyncExternalStore } from "react";
 import { newCard, parseQuestions } from "./qa";
 
-export type ToolStep = { label: string; state: "wait" | "run" | "done" | "skip" | "error"; secs?: string };
+export type ToolStep = {
+    label: string;
+    state: "wait" | "run" | "done" | "skip" | "error";
+    secs?: string;
+    /** 事件里的 callId：联网搜索的结果卡靠它把同一次搜索的步骤行从「处理过程」里摘掉 */
+    callId?: string;
+};
 export type AgentMsg = {
   id: string;
   role: "u" | "a";
@@ -29,6 +35,8 @@ export type AgentMsg = {
   skillInstall?: import("./skillInstallIntent").SkillInstallMessage;
   /** 联网搜图 / 反图的参考图选择卡（来自 tool.execution.succeeded 的 result.items） */
   webImages?: import("./webImages").WebImageCardData[];
+  /** 联网搜索的结果卡（web_search 的 started / succeeded / failed 事件按 callId 归并） */
+  webSearch?: import("./webSearch").WebSearchCardData[];
   /** 生成结果的自动审查（后端 review 事件）：每批结果一张审查卡 */
   reviews?: import("./task").AgentReview[];
 };
@@ -66,13 +74,13 @@ function markOpenQa(msgs: AgentMsg[]) {
 
 function historyMessage(raw: Record<string, any>, index: number): AgentMsg | null {
   const parsedQ = raw?.role === "assistant" ? parseQuestions(String(raw.text ?? raw.content ?? "")) : null;
-  if (parsedQ) raw = { ...raw, text: parsedQ.rest || "开始之前想先确认几件事：", content: undefined, _qa: parsedQ.questions, _qaKind: parsedQ.kind };
+  if (parsedQ) raw = { ...raw, text: parsedQ.rest || "开始之前想先确认几件事：", content: undefined, _qa: parsedQ.questions, _qaKind: parsedQ.kind, _qaRegen: parsedQ.regen };
   const role = raw?.role === "user" ? "u" : raw?.role === "assistant" ? "a" : null;
   if (!role) return null;
   const at = Number(raw.at || 0) * 1000;
   const msg: AgentMsg = { id: "h" + index + "_" + Math.round(at), role, text: String(raw.text ?? raw.content ?? ""), at: at || undefined };
   // 历史里的问答卡：先当已回答，最后一条在 markOpenQa 里放开
-  if (Array.isArray(raw._qa)) msg.qa = { ...newCard("", raw._qa, raw._qaKind), status: "answered" };
+  if (Array.isArray(raw._qa)) msg.qa = { ...newCard("", raw._qa, raw._qaKind, raw._qaRegen), status: "answered" };
   const steps = Array.isArray(raw.steps) ? raw.steps : [];
   if (steps.length) {
     msg.tools = steps.map((step: Record<string, any>) => ({
@@ -90,6 +98,8 @@ export class AgentState {
   busy = false;
   stop = false;
   draft = "";
+  /** 待发送队列（仅内存，不持久化；切对话 / 新建对话会清空，避免发到别的线程） */
+  queue: import("./queue").QueuedMsg[] = [];
   skill: string | null = null;
   mode: "manual" | "auto" = "manual";
   model = "Auto";
@@ -145,7 +155,7 @@ export class AgentState {
       if (next === this.account) return;
       this.account = next;
       this.generation++;
-      this.memUser = []; this.memCanvas = []; this.threads = []; this.activeThreadId = "";
+      this.memUser = []; this.memCanvas = []; this.threads = []; this.activeThreadId = ""; this.queue = [];
       this.threadsReady = false; this.threadsLoading = null; this.historyRestored = false; this.skills = customSkills();
       this.businessError = ""; this.importState = ""; this.loading = true; this.emit();
       void this.loadAll();
@@ -318,6 +328,7 @@ export class AgentState {
     const switched = await this.threadCommand("thread/switch", { threadId: id });
     if (!switched?.ok) { this.businessError = String(switched?.error || "切换对话失败"); this.emit(); return false; }
     this.activeThreadId = id; this.businessError = "";
+    this.queue = [];
     const loaded = await this.loadThreadMessages(id);
     if (!loaded) { this.businessError = "这条对话的消息读取失败"; this.emit(); }
     return loaded;
@@ -330,7 +341,7 @@ export class AgentState {
     const created = await this.threadCommand("thread/new");
     const id = String(created?.thread?.id || "");
     if (!created?.ok || !id) { this.businessError = String(created?.error || "新建对话失败"); this.emit(); return false; }
-    this.msgs = []; this.lockedModel = null; this.activeThreadId = id; this.historyStart = 0; this.historyHasMore = false;
+    this.msgs = []; this.lockedModel = null; this.activeThreadId = id; this.historyStart = 0; this.historyHasMore = false; this.queue = [];
     await this.loadThreads();
     this.emit(); return true;
   }

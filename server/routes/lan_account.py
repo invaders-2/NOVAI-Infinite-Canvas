@@ -7,8 +7,9 @@
 
 与云账号（server/auth）无关，不注册、不登录、不上公网：
 - 数据落 <DATA_DIR>/lan_account.json、lan_friends.json、lan_chat/<friendId>.json（全部原子写）；
-- 好友码 = NOVAI-<6 位短码>（新）或 NOVAI-<局域网IP>:<端口>-<本机口令>（旧码继续可用），
-  短码只由账号 id 派生，IP / 端口靠 UDP 47823 广播自动发现；
+- 好友码 = NOVAI-<6 位数字码>（新，如 NOVAI-483920）或 NOVAI-<局域网IP>:<端口>-<本机口令>（旧码继续可用），
+  6 位纯数字只由账号 id 派生、无前导 0；老版本客户端广播的 6 位字母码仍可解析 / 发现，
+  IP / 端口靠 UDP 47823 广播自动发现；
 - 口令同时是对方 POST /api/lan/messages 的凭据；
 - 在线状态靠 ping（超时 1.5s，结果缓存 3s），前端 5s 轮询，最迟 8s 变离线。
 
@@ -75,10 +76,9 @@ LAN_JSON_STEP_SECONDS = 10.0        # 每多 10MB 多给 10s
 LAN_JSON_MAX_TIMEOUT = 300.0        # 50MB+ 大画布首次打开留足时间（上限 300s）
 FRIEND_CODE_RE = re.compile(r"^NOVAI-((?:\d{1,3}\.){3}\d{1,3}):(\d{1,5})-([A-Za-z0-9_-]{32,})$")
 FRIEND_ID_RE = re.compile(r"^[0-9a-f]{8,40}$")
-SHORT_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"   # 去掉 0/O/1/I，读出来不会认错
-SHORT_CODE_LEN = 6
 SHORT_CODE_PREFIX = "NOVAI-"
-SHORT_CODE_RE = re.compile(r"^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$")
+SHORT_CODE_RE = re.compile(r"^\d{6}$")
+LEGACY_SHORT_CODE_RE = re.compile(r"^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$")   # 旧版字母码，只用于兼容
 # 局域网 UDP 发现：短码里没有 IP / 端口，只能靠广播互相报一下
 DISCOVERY_PORT = 47823
 DISCOVERY_BROADCAST = "255.255.255.255"
@@ -181,6 +181,48 @@ def _port() -> str:
     return os.environ.get("NOVAI_PORT", "").strip() or "3000"
 
 
+def _local_ipv4s() -> List[str]:
+    found: List[str] = []
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip()
+        parts = text.split(".")
+        if len(parts) != 4:
+            return
+        for part in parts:
+            if not part.isdigit() or int(part) > 255:
+                return
+        if text.startswith("127.") or text in found:
+            return
+        found.append(text)
+
+    try:
+        add(_lan_ip())
+    except Exception:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            try:
+                add(info[4][0])
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return found
+
+
+def broadcast_targets() -> List[str]:
+    """VPN / 多网卡 / 部分路由下 255.255.255.255 直接不可达，按 /24 再加一份定向广播。"""
+    targets: List[str] = []
+    for ip in _local_ipv4s():
+        target = ".".join(ip.split(".")[:3] + ["255"])
+        if target not in targets:
+            targets.append(target)
+    if DISCOVERY_BROADCAST not in targets:
+        targets.append(DISCOVERY_BROADCAST)
+    return targets
+
+
 def _version() -> str:
     value = deps.get("APP_VERSION")
     return str(value or "novai-v16")
@@ -190,10 +232,10 @@ def _version() -> str:
 
 def derive_account_code(account_id: Any) -> str:
     """短码只由账号 id 派生：改昵称 / 头像 / IP 都不换码，对方记住的码一直有效。
-    5 bit 取一位字符表，6 位 = 30 bit，一个局域网里够用。"""
+    前 8 字节取整数后映射到 100000..999999，永远 6 位、无前导 0。"""
     digest = hashlib.sha256(("novai-lan-code:" + str(account_id or "")).encode("utf-8")).digest()
     value = int.from_bytes(digest[:8], "big")
-    return "".join(SHORT_CODE_ALPHABET[(value >> (5 * index)) & 31] for index in range(SHORT_CODE_LEN))
+    return str(100000 + value % 900000)
 
 
 def account_code(account: Dict[str, Any]) -> str:
@@ -222,7 +264,7 @@ def parse_friend_code(code: Any) -> Optional[Dict[str, str]]:
                 "base_url": "http://%s:%s" % (ip, port)}
     candidate = text[len(SHORT_CODE_PREFIX):] if text[:len(SHORT_CODE_PREFIX)].upper() == SHORT_CODE_PREFIX else text
     short = candidate.strip().upper()
-    if SHORT_CODE_RE.match(short):
+    if SHORT_CODE_RE.match(short) or LEGACY_SHORT_CODE_RE.match(short):
         return {"kind": "short", "code": short}
     return None
 
@@ -289,6 +331,15 @@ def _sanitize_avatar(value: Any) -> str:
     return text
 
 
+def direct_code_of(account: Dict[str, Any]) -> str:
+    """完整好友码：自动发现不可用时唯一能手动加好友的路子，回环地址下没有意义。"""
+    token = str(account.get("token") or "")
+    ip = _lan_ip()
+    if not token or not ip or ip.startswith("127."):
+        return ""
+    return "NOVAI-%s:%s-%s" % (ip, _port(), token)
+
+
 def me_payload(account: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": str(account.get("id") or ""),
@@ -296,6 +347,7 @@ def me_payload(account: Dict[str, Any]) -> Dict[str, Any]:
         "avatar": str(account.get("avatar") or DEFAULT_AVATAR),
         "code": account_code(account),
         "friend_code": friend_code_of(account),
+        "direct_code": direct_code_of(account),
         "lan_ip": _lan_ip(),
         "port": _port(),
         "version": _version(),
@@ -691,7 +743,7 @@ def find_peer(code: Any) -> Optional[Dict[str, Any]]:
 def _remember_peer(packet: Dict[str, Any], ip: str, own_id: str) -> None:
     code = str(packet.get("code") or "").strip().upper()
     peer_id = str(packet.get("id") or "").strip()
-    if not SHORT_CODE_RE.match(code) or not FRIEND_ID_RE.match(peer_id):
+    if not (SHORT_CODE_RE.match(code) or LEGACY_SHORT_CODE_RE.match(code)) or not FRIEND_ID_RE.match(peer_id):
         return
     if peer_id == str(own_id or ""):
         return
@@ -733,55 +785,91 @@ def _discovery_payload() -> Dict[str, Any]:
     }
 
 
+def _broadcast_once(sock: socket.socket, warned: bool) -> bool:
+    """逐个目标发一遍；只有全部失败才算失败，且只提示一次（成功一次就复位）。"""
+    try:
+        raw = json.dumps(_discovery_payload(), ensure_ascii=False).encode("utf-8")
+    except Exception:
+        return warned
+    last_error: Optional[BaseException] = None
+    sent = False
+    for target in broadcast_targets():
+        try:
+            sock.sendto(raw, (target, DISCOVERY_PORT))
+            sent = True
+        except Exception as exc:
+            last_error = exc
+    if sent:
+        return False
+    if last_error is None:
+        return warned
+    if not warned:
+        print("[LAN] 局域网广播发送失败：%s" % last_error, flush=True)
+    return True
+
+
+def _run_discovery_socket(sock: socket.socket) -> None:
+    broadcast_warned = False
+    last_broadcast = 0.0
+    while True:
+        now = time.monotonic()
+        if now - last_broadcast >= DISCOVERY_INTERVAL:
+            last_broadcast = now
+            broadcast_warned = _broadcast_once(sock, broadcast_warned)
+        try:
+            data, addr = sock.recvfrom(DISCOVERY_PACKET_BYTES)
+        except socket.timeout:
+            continue
+        try:
+            packet = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if not isinstance(packet, dict):
+            continue
+        try:
+            if int(packet.get("novai_lan") or 0) != 1:
+                continue
+            _remember_peer(packet, str(addr[0] if addr else ""),
+                           str(load_account().get("id") or ""))
+        except Exception:
+            continue
+
+
 def _discovery_loop() -> None:
     global _DISCOVERY_STARTED
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    broadcast_warned = False
     try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.bind(("", DISCOVERY_PORT))
-        sock.settimeout(DISCOVERY_TICK)
-        last_broadcast = 0.0
         while True:
-            now = time.monotonic()
-            if now - last_broadcast >= DISCOVERY_INTERVAL:
-                last_broadcast = now
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                if hasattr(socket, "SO_REUSEPORT"):
+                    # 同机第二个实例也要能收广播；不支持就按老的独占端口跑
+                    try:
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+                    except Exception:
+                        pass
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                sock.bind(("", DISCOVERY_PORT))
+                sock.settimeout(DISCOVERY_TICK)
+            except Exception as exc:
+                print("[LAN] 局域网自动发现不可用（不影响使用）：%s，稍后重试" % exc, flush=True)
                 try:
-                    raw = json.dumps(_discovery_payload(), ensure_ascii=False).encode("utf-8")
-                    sock.sendto(raw, (DISCOVERY_BROADCAST, DISCOVERY_PORT))
-                    broadcast_warned = False
-                except OSError as exc:
-                    # 被系统 / 防火墙拦住时只提示一次，别每 3 秒刷屏
-                    if not broadcast_warned:
-                        broadcast_warned = True
-                        print("[LAN] 局域网广播发送失败：%s" % exc, flush=True)
+                    sock.close()
                 except Exception:
                     pass
-            try:
-                data, addr = sock.recvfrom(DISCOVERY_PACKET_BYTES)
-            except socket.timeout:
+                time.sleep(5)
                 continue
             try:
-                packet = json.loads(data.decode("utf-8"))
-            except (UnicodeDecodeError, ValueError):
-                continue
-            if not isinstance(packet, dict):
-                continue
-            try:
-                if int(packet.get("novai_lan") or 0) != 1:
-                    continue
-                _remember_peer(packet, str(addr[0] if addr else ""),
-                               str(load_account().get("id") or ""))
-            except Exception:
-                continue
-    except Exception as exc:
-        print("[LAN] 局域网自动发现不可用（不影响使用）：%s" % exc, flush=True)
+                _run_discovery_socket(sock)
+            except Exception as exc:
+                print("[LAN] 局域网自动发现不可用（不影响使用）：%s，稍后重试" % exc, flush=True)
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+            time.sleep(5)
     finally:
-        try:
-            sock.close()
-        except Exception:
-            pass
         with _DISCOVERY_LOCK:
             _DISCOVERY_STARTED = False
 
@@ -898,7 +986,7 @@ def list_friends() -> Dict[str, Any]:
 def add_friend(payload: FriendAddRequest) -> Dict[str, Any]:
     parsed = parse_friend_code(payload.code)
     if not parsed:
-        raise HTTPException(status_code=400, detail="好友码格式不对：应为 NOVAI-XXXXXX 或 NOVAI-IP:端口-口令")
+        raise HTTPException(status_code=400, detail="好友码格式不对：应为 6 位数字 ID（如 483920），或旧的 NOVAI-IP:端口-口令")
     account = load_account()
     if parsed.get("kind") == "short":
         # 短码里没有地址：只认广播表里 30s 内见过的机器，否则没法知道往哪台机器发请求
@@ -906,7 +994,7 @@ def add_friend(payload: FriendAddRequest) -> Dict[str, Any]:
             raise HTTPException(status_code=400, detail="这是你自己的好友码，发给对方才对")
         peer = find_peer(parsed["code"])
         if not peer:
-            raise HTTPException(status_code=400, detail="没在局域网里发现这个 ID：确认两台电脑在同一个网络，或让对方向你发送完整好友码")
+            raise HTTPException(status_code=400, detail="没在局域网里发现这个 ID：确认两台电脑在同一个网络；也可以让对方在「我的资料」复制「直连好友码」，整串粘贴进加好友输入框即可，不依赖自动发现")
         parsed = {
             "kind": "short",
             "code": parsed["code"],

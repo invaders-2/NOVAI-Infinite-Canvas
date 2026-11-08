@@ -820,6 +820,12 @@ export function createNovaiBackend(): CanvasBackend {
       const result = await command({ type: "task/approve", payload: { taskId, steps } }).catch(() => null);
       return result ? { ok: result.ok === true, taskId: typeof result.taskId === "string" ? result.taskId : undefined, status: typeof result.status === "string" ? result.status : undefined, error: typeof result.error === "string" ? result.error : undefined } : { ok: false, error: "TASK_UNAVAILABLE" };
     },
+    async regenerateAgentResults(req) {
+      const command = hostRoot<any>()?.task?.command;
+      if (!command) return { ok: false, error: "TASK_UNAVAILABLE" };
+      const result = await command({ type: "task/regenerate", payload: { canvasId: req.canvasId, threadId: req.threadId, description: req.description, items: req.items } }).catch(() => null);
+      return result ? { ok: result.ok === true, taskId: typeof result.taskId === "string" ? result.taskId : undefined, status: typeof result.status === "string" ? result.status : undefined, error: typeof result.error === "string" ? result.error : undefined } : { ok: false, error: "TASK_UNAVAILABLE" };
+    },
     async cancelAgentTask(taskId) {
       const command = hostRoot<any>()?.task?.command;
       if (!command) return { ok: false, error: "TASK_UNAVAILABLE" };

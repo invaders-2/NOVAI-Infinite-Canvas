@@ -38,7 +38,7 @@ export function taskToolSteps(snapshot: AgentTaskSnapshot): ToolStep[] {
     const name = String(payload.description || payload.toolId || payload.name || "NOVAI 工具");
     let step = byCall.get(callId);
     if (!step) {
-      step = { label: name, state: "wait" };
+      step = { label: name, state: "wait", callId };
       byCall.set(callId, step);
       steps.push(step);
     }

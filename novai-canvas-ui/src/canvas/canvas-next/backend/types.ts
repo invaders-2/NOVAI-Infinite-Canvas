@@ -126,6 +126,22 @@ export type AgentTaskPlan = {
   nodes?: Array<{ node_id: string; title: string; kind: string; prompt?: string }>;
   total_generations?: number;
 };
+/** 重新生成一项：node_id 指向画布节点，prompt 是审查给的修订提示词（可为空，后端按 issues 自己改） */
+export type AgentRegenerateItem = {
+  node_id: string;
+  label?: string;
+  kind?: string;
+  prompt?: string;
+  issues?: string[];
+};
+/** 审查不合格后的一键重新生成：后端改提示词并立即开跑，跑完自动复审再问 */
+export type AgentRegenerateRequest = {
+  canvasId: string;
+  threadId?: string;
+  /** 用户自己写的修改描述（结果确认卡里选 / 写的反馈），可空 */
+  description?: string;
+  items: AgentRegenerateItem[];
+};
 export type AgentTaskSnapshot = {
   taskId: string;
   status: string;
@@ -167,6 +183,8 @@ export interface CanvasBackend {
   cancelAgentTask?(taskId: string): Promise<{ ok: boolean; error?: string }>;
   /** 用户在方案卡上点「执行」：批准步骤后返回新的任务 ID（后续照旧 watchAgentTask） */
   approveAgentTask?(taskId: string, steps: AgentTaskPlan["steps"]): Promise<{ ok: boolean; taskId?: string; status?: string; error?: string }>;
+  /** 审查不合格后的一键重新生成：后端按修订提示词 / 用户描述改节点参数并立刻开跑（返回 taskId，后续照旧 watchAgentTask） */
+  regenerateAgentResults?(req: AgentRegenerateRequest): Promise<{ ok: boolean; taskId?: string; status?: string; error?: string }>;
   /** 本地文件 / data URL 存进资源库，返回画布里可保存的地址（novai-asset:… 或原地址） */
   importAsset(canvasId: string, dataUrl: string, name: string): Promise<string>;
   /** 模型返回的远程结果（https）下载进资源库，返回 novai-asset 引用；失败时原样返回 url */

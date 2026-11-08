@@ -13,7 +13,11 @@ import type { ThinkingLevel } from "./state";
 export type QaQuestion = { q: string; options: string[]; multi?: boolean };
 /** kind：ask = 动手前先问清楚（默认）；confirm = 结果出来后问「是否符合要求 / 哪里不满意」 */
 export type QaKind = "ask" | "confirm";
-export type QaCard = { goal: string; questions: QaQuestion[]; picks: string[][]; other: string[]; status: "open" | "answered" | "skipped"; kind?: QaKind };
+/** 审查后一键重生成的一项：后端给修订提示词 / 问题清单；ok=false 的才是要重做的 */
+export type QaRegenItem = { node_id: string; label: string; kind: string; prompt: string; issues: string[]; ok?: boolean };
+/** 结果确认卡上的「重新生成」清单（空 = 没有不合格项，不显示重生成入口） */
+export type QaRegen = { items: QaRegenItem[] };
+export type QaCard = { goal: string; questions: QaQuestion[]; picks: string[][]; other: string[]; status: "open" | "answered" | "skipped"; kind?: QaKind; regen?: QaRegen };
 /** 后端没标 kind 时按第一题兜底识别「结果确认」类问题 */
 const CONFIRM_Q = /符合.{0,8}要求|满意|对口|可以吗|没问题吗/;
 
@@ -21,8 +25,34 @@ export const QA_MAX = 4;
 const BLOCK = /```(?:novai|openarc)-questions\s*\n?([\s\S]*?)```/i;
 const clean = (v: unknown, max: number) => String(v == null ? "" : v).replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max);
 
+/** 后端 /api/agent/regenerate 一次最多收 8 项（多余的它自己会丢） */
+const REGEN_MAX = 8;
+const REGEN_KINDS = new Set(["image", "video", "timeline", "audio", "text"]);
+/** 结果确认块里的 regenerate：要重做的结果清单；node_id 为空的丢掉，其余字段截长 / 净化 */
+function parseRegen(raw: unknown): QaRegen | undefined {
+  const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" && Array.isArray((raw as { items?: unknown }).items) ? (raw as { items: unknown[] }).items : null;
+  if (!list) return undefined;
+  const items: QaRegenItem[] = [];
+  for (const it of list) {
+    if (items.length >= REGEN_MAX) break;
+    const o = it && typeof it === "object" ? (it as { node_id?: unknown; label?: unknown; kind?: unknown; prompt?: unknown; issues?: unknown; ok?: unknown }) : null;
+    const nodeId = clean(o?.node_id, 80);
+    if (!nodeId) continue;
+    const kind = String(o?.kind == null ? "" : o.kind);
+    items.push({
+      node_id: nodeId,
+      label: clean(o?.label, 60) || "未命名结果",
+      kind: REGEN_KINDS.has(kind) ? kind : "",
+      prompt: clean(o?.prompt, 1200),
+      issues: Array.isArray(o?.issues) ? o.issues.map((x) => clean(x, 80)).filter(Boolean).slice(0, 6) : [],
+      ...(typeof o?.ok === "boolean" ? { ok: o.ok } : {}),
+    });
+  }
+  return items.length ? { items } : undefined;
+}
+
 /** 从回复里取出问题块；没有或格式不对返回 null（原文照常显示） */
-export function parseQuestions(text: string): { rest: string; questions: QaQuestion[]; kind: QaKind } | null {
+export function parseQuestions(text: string): { rest: string; questions: QaQuestion[]; kind: QaKind; regen?: QaRegen } | null {
   const m = BLOCK.exec(String(text || "")); if (!m) return null;
   let raw: unknown; try { raw = JSON.parse(m[1]); } catch { return null; }
   const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" && Array.isArray((raw as { questions?: unknown }).questions) ? (raw as { questions: unknown[] }).questions : null;
@@ -38,12 +68,23 @@ export function parseQuestions(text: string): { rest: string; questions: QaQuest
   if (!questions.length) return null;
   const marked = raw && typeof raw === "object" && !Array.isArray(raw) ? String((raw as { kind?: unknown }).kind || "") : "";
   const kind: QaKind = marked === "confirm" || (!marked && CONFIRM_Q.test(questions[0].q)) ? "confirm" : "ask";
-  return { rest: String(text).replace(BLOCK, "").trim(), questions, kind };
+  const regen = raw && typeof raw === "object" && !Array.isArray(raw) ? parseRegen((raw as { regenerate?: unknown }).regenerate) : undefined;
+  return { rest: String(text).replace(BLOCK, "").trim(), questions, kind, ...(regen ? { regen } : {}) };
 }
 
-export function newCard(goal: string, questions: QaQuestion[], kind: QaKind = "ask"): QaCard {
+export function newCard(goal: string, questions: QaQuestion[], kind: QaKind = "ask", regen?: QaRegen): QaCard {
   const qs = questions.slice(0, QA_MAX);
-  return { goal, questions: qs, picks: qs.map(() => []), other: qs.map(() => ""), status: "open", kind };
+  return { goal, questions: qs, picks: qs.map(() => []), other: qs.map(() => ""), status: "open", kind, ...(regen && regen.items.length ? { regen } : {}) };
+}
+
+/** 要重做哪几项：卡里标了 ok=false 的优先，其次对上审查卡里不合格的节点，都没有就全部 */
+export function regenTargets(card: QaCard, reviewItems: Array<{ node_id: string; ok: boolean }> = []): QaRegenItem[] {
+  const items = card.regen?.items || [];
+  const marked = items.filter((it) => it.ok === false);
+  if (marked.length) return marked;
+  const bad = new Set(reviewItems.filter((it) => !it.ok).map((it) => String(it.node_id || "")));
+  const fromReview = items.filter((it) => bad.has(it.node_id));
+  return fromReview.length ? fromReview : items;
 }
 
 export function togglePick(card: QaCard, qi: number, opt: string): QaCard {

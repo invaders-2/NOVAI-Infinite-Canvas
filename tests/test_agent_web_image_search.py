@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from io import BytesIO
 from pathlib import Path
@@ -129,7 +130,7 @@ class SearchTests(unittest.TestCase):
         self.assertIsNone(result.get("note"))
         self.assertTrue(all(item["source_kind"] for item in result["items"]))
 
-    def test_default_sources_are_the_four_stable_sites(self):
+    def test_default_sources_are_the_seven_web_sources(self):
         calls = []
 
         def make(name):
@@ -139,10 +140,31 @@ class SearchTests(unittest.TestCase):
             return adapter
 
         mapping = {name: make(name) for name in web_image_search.DEFAULT_SOURCES}
-        with self._client_ctx(), self._patch_adapters(mapping):
+        with self._client_ctx(), self._patch_adapters(mapping), \
+                patch.object(web_image_search.net_proxy, "resolve_web_proxy",
+                             return_value="http://127.0.0.1:7897"):
             result = asyncio.run(web_image_search.search_images("客厅", 8))
         self.assertEqual(sorted(calls), sorted(web_image_search.DEFAULT_SOURCES))
         self.assertEqual(result["sources"], {name: 1 for name in web_image_search.DEFAULT_SOURCES})
+
+    def test_default_count_is_24_and_each_source_gets_three(self):
+        # 默认不传 count：24 条 = 7 站轮转 3 轮（21）再补 3 条，每个国际站至少 3 条
+        def make(name):
+            async def adapter(client, query, count, orientation):
+                return [self._item(name, f"https://{name}.example/{index}.jpg") for index in range(10)]
+            return adapter
+
+        mapping = {name: make(name) for name in web_image_search.DEFAULT_SOURCES}
+        with self._client_ctx(), self._patch_adapters(mapping), \
+                patch.object(web_image_search.net_proxy, "resolve_web_proxy",
+                             return_value="http://127.0.0.1:7897"):
+            result = asyncio.run(web_image_search.search_images("客厅"))
+        self.assertEqual(len(result["items"]), 24)
+        self.assertEqual(set(result["sources"]), set(web_image_search.DEFAULT_SOURCES))
+        for name in web_image_search.DEFAULT_SOURCES:
+            self.assertGreaterEqual(result["sources"].get(name, 0), 3)
+        for name in ("pinterest", "artstation", "bingglobal"):
+            self.assertGreaterEqual(result["sources"].get(name, 0), 3)
 
     def test_partial_failure_notes_single_site_reason(self):
         async def ok_huaban(client, query, count, orientation):
@@ -408,6 +430,302 @@ class So360EngineTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 2)
 
 
+class PinterestAdapterTests(unittest.TestCase):
+    """Pinterest：必须带齐 x-csrftoken / X-APP-VERSION / X-Pinterest-PWS-Handler，否则 403。"""
+
+    class _Resp:
+        def __init__(self, status=200, payload=None, cookies=None, body=b"{}", content_type="application/json"):
+            self.status_code = status
+            self._payload = payload
+            self.cookies = cookies or {}
+            self.content = body
+            self.headers = {"content-type": content_type}
+
+        @property
+        def text(self):
+            return self.content.decode("utf-8", "replace")
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        def __init__(self, responses):
+            self.responses = list(responses)
+            self.calls = []
+
+        async def get(self, url, params=None, headers=None, **kwargs):
+            self.calls.append({"url": url, "params": params, "headers": dict(headers or {})})
+            return self.responses.pop(0)
+
+    def _proxy(self):
+        return patch.object(web_image_search.net_proxy, "resolve_web_proxy",
+                            return_value="http://127.0.0.1:7897")
+
+    def _payload(self, pin=None):
+        pin = pin or {
+            "id": "123",
+            "title": "咖啡海报",
+            "grid_title": "网格标题",
+            "images": {
+                "orig": {"url": "https://i.pinimg.com/originals/a.png", "width": 1089, "height": 1445},
+                "236x": {"url": "https://i.pinimg.com/236x/a.png"},
+            },
+            "link": "https://example.com/post/1",
+            "domain": "example.com",
+        }
+        return {"resource_response": {"data": {"results": [pin]}}}
+
+    def test_parses_results_with_required_headers(self):
+        client = self._Client([
+            self._Resp(cookies={"csrftoken": "csrf123"}, content_type="text/html"),
+            self._Resp(payload=self._payload()),
+        ])
+        with self._proxy():
+            items = asyncio.run(web_image_search._search_pinterest(client, "咖啡海报", 10))
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item["source_kind"], "pinterest")
+        self.assertEqual(item["original_url"], "https://i.pinimg.com/originals/a.png")
+        self.assertEqual(item["title"], "咖啡海报")
+        self.assertEqual((item["width"], item["height"]), (1089, 1445))
+        self.assertEqual(item["source_page"], "https://example.com/post/1")
+        self.assertEqual(item["source_site"], "example.com")
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(client.calls[0]["url"], "https://www.pinterest.com/")
+        headers = client.calls[1]["headers"]
+        self.assertEqual(headers["x-csrftoken"], "csrf123")
+        self.assertEqual(headers["X-APP-VERSION"], "a1a7a7a")
+        self.assertEqual(headers["X-Pinterest-PWS-Handler"], "www/[username]/[slug].js")
+        self.assertEqual(headers["X-Requested-With"], "XMLHttpRequest")
+        self.assertIn("BaseSearchResource/get/", client.calls[1]["url"])
+        self.assertIn("data=", client.calls[1]["url"])
+        self.assertIn("source_url=", client.calls[1]["url"])
+
+    def test_missing_link_falls_back_to_pin_url(self):
+        pin = {
+            "id": "abc",
+            "grid_title": "只有网格标题",
+            "images": {"orig": {"url": "https://i.pinimg.com/originals/b.jpg"}},
+            "domain": "Uploaded by user",
+        }
+        client = self._Client([self._Resp(cookies={"csrftoken": "x"}), self._Resp(payload=self._payload(pin))])
+        with self._proxy():
+            items = asyncio.run(web_image_search._search_pinterest(client, "咖啡", 10))
+        self.assertEqual(items[0]["source_page"], "https://www.pinterest.com/pin/abc/")
+        # domain 是文案不是域名时退回图片 CDN 域名
+        self.assertEqual(items[0]["source_site"], "i.pinimg.com")
+
+    def test_403_reports_real_reason(self):
+        client = self._Client([
+            self._Resp(cookies={"csrftoken": "x"}),
+            self._Resp(status=403, body=b"Invalid Resource Request", content_type="text/plain"),
+        ])
+        with self._proxy():
+            with self.assertRaises(web_image_search.WebImageSearchError) as ctx:
+                asyncio.run(web_image_search._search_pinterest(client, "咖啡", 10))
+        self.assertIn("HTTP 403", str(ctx.exception))
+
+    def test_missing_csrf_cookie_reports_reason(self):
+        client = self._Client([self._Resp(content_type="text/html")])
+        with self._proxy():
+            with self.assertRaises(web_image_search.WebImageSearchError) as ctx:
+                asyncio.run(web_image_search._search_pinterest(client, "咖啡", 10))
+        self.assertIn("csrftoken", str(ctx.exception))
+
+    def test_without_proxy_reports_proxy_needed(self):
+        with patch.object(web_image_search.net_proxy, "resolve_web_proxy", return_value=None):
+            with self.assertRaises(web_image_search.WebImageSearchError) as ctx:
+                asyncio.run(web_image_search._search_pinterest(self._Client([]), "咖啡", 10))
+        self.assertIn("需要代理", str(ctx.exception))
+
+
+class ArtStationAdapterTests(unittest.TestCase):
+    class _Resp:
+        def __init__(self, status=200, payload=None, body=b"{}"):
+            self.status_code = status
+            self._payload = payload
+            self.content = body
+            self.headers = {"content-type": "application/json"}
+
+        @property
+        def text(self):
+            return self.content.decode("utf-8", "replace")
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        def __init__(self, response):
+            self.response = response
+            self.calls = []
+
+        async def get(self, url, params=None, headers=None, **kwargs):
+            self.calls.append({"url": url, "params": params, "headers": dict(headers or {})})
+            return self.response
+
+    def test_builds_large_original_and_sends_per_page(self):
+        cover = "https://cdna.artstation.com/p/assets/covers/images/052/smaller_square/a.jpg"
+        payload = {"total_count": 1, "data": [{
+            "title": "Coffee Poster",
+            "url": "https://www.artstation.com/artwork/3qzQqB",
+            "smaller_square_cover_url": cover,
+            "icons": {},
+        }]}
+        client = self._Client(self._Resp(payload=payload))
+        items = asyncio.run(web_image_search._search_artstation(client, "coffee poster", 12))
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item["source_kind"], "artstation")
+        self.assertEqual(item["source_page"], "https://www.artstation.com/artwork/3qzQqB")
+        self.assertEqual(item["source_site"], "artstation.com")
+        self.assertEqual(item["original_url"],
+                         "https://cdna.artstation.com/p/assets/covers/images/052/large/a.jpg")
+        self.assertEqual(item["thumb_url"], cover)
+        self.assertIn("/api/v2/search/projects.json", client.calls[0]["url"])
+        self.assertGreaterEqual(client.calls[0]["params"]["per_page"], 12)
+        self.assertEqual(client.calls[0]["headers"]["Referer"], "https://www.artstation.com/")
+        self.assertEqual(client.calls[0]["headers"]["Accept"], "application/json")
+
+    def test_icon_fallback_when_no_cover(self):
+        payload = {"data": [{
+            "title": "No Cover",
+            "url": "https://www.artstation.com/artwork/x",
+            "icons": {"image": {"url": "https://cdna.artstation.com/i.jpg", "width": 800}},
+        }]}
+        items = asyncio.run(web_image_search._search_artstation(
+            self._Client(self._Resp(payload=payload)), "coffee", 10))
+        self.assertEqual(items[0]["thumb_url"], "https://cdna.artstation.com/i.jpg")
+        self.assertEqual(items[0]["original_url"], "https://cdna.artstation.com/i.jpg")
+
+    def test_without_proxy_reports_proxy_needed(self):
+        with patch.object(web_image_search.net_proxy, "resolve_web_proxy", return_value=None):
+            with self.assertRaises(web_image_search.WebImageSearchError) as ctx:
+                asyncio.run(web_image_search._search_artstation(self._Client(self._Resp(payload={})), "coffee", 10))
+        self.assertIn("ArtStation", str(ctx.exception))
+        self.assertIn("需要代理", str(ctx.exception))
+
+    def test_http_400_reports_per_page_reason(self):
+        client = self._Client(self._Resp(status=400, body=b"per_page should be given"))
+        with self.assertRaises(web_image_search.WebImageSearchError) as ctx:
+            asyncio.run(web_image_search._search_artstation(client, "coffee", 10))
+        self.assertIn("HTTP 400", str(ctx.exception))
+        self.assertIn("per_page", str(ctx.exception))
+
+
+class BingGlobalEngineTests(unittest.TestCase):
+    class _Resp:
+        def __init__(self, content, status=200):
+            self.status_code = status
+            self.content = content
+            self.headers = {"content-type": "text/html; charset=utf-8"}
+
+        @property
+        def text(self):
+            return self.content.decode("utf-8", "replace")
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise web_image_search.WebImageSearchError(f"HTTP {self.status_code}")
+
+    class _Client:
+        def __init__(self, response):
+            self.response = response
+            self.calls = []
+
+        async def get(self, url, params=None, headers=None, **kwargs):
+            self.calls.append({"url": url, "params": params, "headers": dict(headers or {}), "kwargs": kwargs})
+            return self.response
+
+    def test_parses_iusc_and_uses_en_us(self):
+        meta = json.dumps({"murl": "https://img.example.com/a.jpg",
+                           "turl": "https://tse1.mm.bing.net/th?id=x",
+                           "purl": "https://page.example.com/post",
+                           "t": "Coffee poster"}, ensure_ascii=False)
+        page = ('<a class="iusc" m=\'' + meta + '\'>x</a>').encode("utf-8")
+        client = self._Client(self._Resp(page))
+        items = asyncio.run(web_image_search._search_bing_global(client, "coffee poster", 12, "any"))
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item["source_kind"], "bingglobal")
+        self.assertEqual(item["original_url"], "https://img.example.com/a.jpg")
+        self.assertEqual(item["source_page"], "https://page.example.com/post")
+        self.assertEqual(client.calls[0]["params"]["mkt"], "en-US")
+        self.assertIn("www.bing.com/images/async", client.calls[0]["url"])
+        self.assertEqual(client.calls[0]["headers"]["Referer"], "https://www.bing.com/images/")
+        self.assertTrue(client.calls[0]["kwargs"].get("follow_redirects"))
+
+
+class DefaultSourcesAndProxySkipTests(unittest.TestCase):
+    def test_default_sources_are_seven_and_pinterest_is_supported(self):
+        self.assertEqual(tuple(web_image_search.DEFAULT_SOURCES),
+                         ("huaban", "duitang", "bing", "360", "bingglobal", "pinterest", "artstation"))
+        self.assertNotIn("pinterest", web_image_search.UNSUPPORTED_SOURCES)
+        self.assertEqual(web_image_search.SOURCE_LABELS["bingglobal"], "必应国际")
+        self.assertEqual(web_image_search.SOURCE_LABELS["artstation"], "ArtStation")
+
+    def test_aliases_for_new_sources(self):
+        self.assertEqual(web_image_search.normalize_sources(["P站", "A站", "全网"]),
+                         ["pinterest", "artstation", "bingglobal"])
+        self.assertEqual(web_image_search.normalize_sources(["必应国际", "global", "美术站"]),
+                         ["bingglobal", "artstation"])
+
+    def test_pinterest_is_skipped_instantly_without_proxy(self):
+        calls = []
+
+        async def never_called(client, query, count, orientation):
+            calls.append(1)
+            return []
+
+        started = time.monotonic()
+        with patch.object(web_image_search.net_proxy, "resolve_web_proxy", return_value=None), \
+                patch.object(web_image_search, "_source_adapters", lambda: {"pinterest": never_called}):
+            result = asyncio.run(web_image_search.search_images("coffee poster", 12, sources=["pinterest"]))
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 1.0)
+        self.assertEqual(calls, [])
+        self.assertEqual(result["items"], [])
+        self.assertIn("Pinterest", result["note"])
+        self.assertIn("需要代理", result["note"])
+
+    def test_artstation_is_skipped_instantly_without_proxy(self):
+        # ArtStation 直连也会超时，没代理必须和 Pinterest 一样立即跳过，不能拖 12 秒
+        calls = []
+
+        async def never_called(client, query, count, orientation):
+            calls.append(1)
+            return []
+
+        started = time.monotonic()
+        with patch.object(web_image_search.net_proxy, "resolve_web_proxy", return_value=None), \
+                patch.object(web_image_search, "_source_adapters", lambda: {"artstation": never_called}):
+            result = asyncio.run(web_image_search.search_images("coffee poster", 24, sources=["artstation"]))
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 1.0)
+        self.assertEqual(calls, [])
+        self.assertEqual(result["items"], [])
+        self.assertIn("ArtStation", result["note"])
+        self.assertIn("需要代理", result["note"])
+
+    def test_artstation_and_pinterest_skipped_together_without_proxy(self):
+        calls = []
+
+        async def never_called(client, query, count, orientation):
+            calls.append(1)
+            return []
+
+        started = time.monotonic()
+        with patch.object(web_image_search.net_proxy, "resolve_web_proxy", return_value=None), \
+                patch.object(web_image_search, "_source_adapters",
+                             lambda: {"pinterest": never_called, "artstation": never_called}):
+            result = asyncio.run(web_image_search.search_images(
+                "coffee poster", 24, sources=["pinterest", "artstation"]))
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 1.0)
+        self.assertEqual(calls, [])
+        self.assertIn("Pinterest", result["note"])
+        self.assertIn("ArtStation", result["note"])
+
+
 class ImportTests(unittest.TestCase):
     def _import(self, urls, name=""):
         with tempfile.TemporaryDirectory() as dest:
@@ -586,6 +904,27 @@ class ImportTests(unittest.TestCase):
         with self.assertRaises(web_image_search.WebImageSearchError):
             asyncio.run(web_image_search.import_images(
                 ["https://example.com/%d.jpg" % i for i in range(13)], "/tmp/x", "/assets/uploads/agent-web"))
+
+
+    def test_artstation_large_404_falls_back_to_smaller_square(self):
+        payload = _image_bytes(800, 800)
+        calls = []
+
+        async def fake_fetch(client, url, referer="", max_bytes=web_image_search.MAX_DOWNLOAD_BYTES):
+            calls.append(url)
+            if "/large/" in url:
+                raise web_image_search.WebImageSearchError("下载原图失败：HTTP 404")
+            return {"data": payload, "ext": ".png", "final_url": url, "content_type": "image/png",
+                    "width": 800, "height": 800}
+
+        large = "https://cdna.artstation.com/p/assets/covers/images/052/large/a.jpg"
+        smaller = large.replace("/large/", "/smaller_square/", 1)
+        with tempfile.TemporaryDirectory() as dest:
+            with patch.object(web_image_search, "fetch_image", fake_fetch):
+                result = asyncio.run(web_image_search.import_images(
+                    [large], dest, "/assets/uploads/agent-web"))
+        self.assertTrue(result["items"][0]["ok"])
+        self.assertEqual(calls, [large, smaller])
 
 
 class ReverseTests(unittest.TestCase):

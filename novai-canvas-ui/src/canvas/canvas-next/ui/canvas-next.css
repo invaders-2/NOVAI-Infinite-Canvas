@@ -140,7 +140,8 @@
 .cn-root [data-tip]:hover:after{opacity:1;visibility:visible;transition:opacity var(--d-feedback) var(--e-std) .5s,visibility 0s linear .5s}
 .cn-root .tipR[data-tip]:after{left:calc(100% + 10px);top:50%;bottom:auto;transform:translateY(-50%)}
 .cn-root .tipB[data-tip]:after{top:calc(100% + 8px);bottom:auto}
-.cn-root #tl{left:max(16px,calc(16px + var(--cn-chrome-left,0px)));top:calc(var(--cn-chrome-top,16px) + env(safe-area-inset-top,0px));height:40px;display:flex;align-items:center;gap:8px;padding:0 10px 0 6px}
+/* 标题栏上边距跟随外壳（mac 6px），与红绿灯同一条水平线；左边距 84（灯后 20px），对齐 TapNow */
+.cn-root #tl{left:max(16px,var(--cn-chrome-left,0px));top:calc(var(--cn-chrome-top,16px) + env(safe-area-inset-top,0px));height:40px;display:flex;align-items:center;gap:8px;padding:0 10px 0 6px}
 .cn-root #tl .logo{width:28px;height:28px;border-radius:8px;display:grid;place-items:center}
 .cn-root #tl .sep{width:1px;height:16px;background:var(--line)}
 .cn-root #tl .ttl{font-weight:500;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 6px;border-radius:6px}
@@ -210,7 +211,7 @@
 .cn-root[data-theme=light] #ntb.ntb-empty-upload{background:rgba(255,255,255,.96);box-shadow:0 24px 64px rgba(0,0,0,.14),0 8px 20px rgba(0,0,0,.10)}
 .cn-root[data-theme=light] #ntb.ntb-empty-upload .ib{color:var(--fg)}
 .cn-root[data-theme=light] #ntb.ntb-empty-upload .ib:hover{background:rgba(0,0,0,.06)}
-.cn-root #gp{width:min(640px,calc(100vw - 32px));border-radius:20px;background:var(--s1);box-shadow:0 0 0 1px rgba(var(--ink),.06) inset,0 18px 48px #0000008c;z-index:25;display:flex;flex-direction:column}
+.cn-root #gp{width:min(640px,calc(100vw - 32px));border-radius:20px;background:color-mix(in srgb,var(--panel) 88%,transparent);-webkit-backdrop-filter:blur(44px) saturate(190%);backdrop-filter:blur(44px) saturate(190%);box-shadow:var(--glass-shadow);z-index:25;display:flex;flex-direction:column}
 .cn-root .gp-in{display:flex;align-items:center;gap:6px;padding:12px 12px 4px;flex-wrap:wrap}
 .cn-root .gp-in .sq{flex:0 0 40px;width:40px;height:40px;min-width:40px;min-height:40px;max-width:40px;max-height:40px;aspect-ratio:1;border-radius:10px;display:grid;place-items:center;background:var(--sunken);color:var(--fg2)}
 .cn-root .gp-in .sq:hover{background:var(--hover);color:var(--hi)}
@@ -917,7 +918,9 @@
 .cn-root .ctxbar i{background:var(--solid);height:100%}
 .cn-root .ctxk span{display:flex;align-items:center;gap:8px}
 .cn-root .ctxk span i{width:8px;height:8px;border-radius:2px;background:var(--solid)}
-.cn-root[data-theme=light] .cap,.cn-root[data-theme=light] #gp,.cn-root[data-theme=light] #pop,.cn-root[data-theme=light] .modal{box-shadow:0 0 0 1px #0000000f,0 8px 24px #0000001a}
+.cn-root[data-theme=light] .cap,.cn-root[data-theme=light] #pop,.cn-root[data-theme=light] .modal{box-shadow:0 0 0 1px #0000000f,0 8px 24px #0000001a}
+/* 标题栏投影 5%，比通用浮层更淡；带上 float.cap 才能盖过 focus-ring.css 的标题栏投影 */
+.cn-root[data-theme=light] #tl.float.cap{box-shadow:0 0 0 1px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.05)}
 .cn-root[data-theme=light] .nbody{outline-color:#0000001a;box-shadow:0 1px 3px #0000000f}
 .cn-root[data-theme=light] .node.sel .nbody{outline-color:#000}
 .cn-root[data-theme=light] .modal-bg{background:#00000040}
@@ -1913,7 +1916,7 @@
 .cn-root[data-theme=light] .model-flyout{box-shadow:0 8px 24px #0000001a}
 .cn-root .model-flyout,.cn-root .model-vendor.left .model-flyout{position:absolute;inset:auto auto auto 8px}
 .cn-root #pop.model-pop{overflow:visible}
-.cn-root .model-providers{max-height:min(520px,calc(100vh - 120px));overflow-y:auto;scrollbar-width:none;-ms-overflow-style:none}
+.cn-root .model-providers{max-height:min(300px,calc(100vh - 320px));overflow-y:auto;scrollbar-width:none;-ms-overflow-style:none}
 .cn-root .model-providers::-webkit-scrollbar{display:none;width:0;height:0}
 .cn-root #pop,.cn-root #ctx,.cn-root #modal,.cn-root .model-flyout,.cn-root .model-providers,.cn-root .tpl-lib-grid,.cn-root .tpl-lib-nav,.cn-root .tpl-body,.cn-root .tpl-dt-steps,.cn-root .mention-results,.cn-root .folder-files,.cn-root .capture-sources,.cn-root .style-list,.cn-root .pinlist,.cn-root .cthread,.cn-root .pm-body,.cn-root .lg-src,.cn-root .memlist,.cn-root .gp-prev,.cn-root .skill-install-docs,.cn-root .skill-install-scripts ul,.cn-root .cset-body{scrollbar-width:none;-ms-overflow-style:none}
 .cn-root #pop::-webkit-scrollbar,.cn-root #ctx::-webkit-scrollbar,.cn-root #modal::-webkit-scrollbar,.cn-root .model-flyout::-webkit-scrollbar,.cn-root .model-providers::-webkit-scrollbar,.cn-root .tpl-lib-grid::-webkit-scrollbar,.cn-root .tpl-lib-nav::-webkit-scrollbar,.cn-root .tpl-body::-webkit-scrollbar,.cn-root .tpl-dt-steps::-webkit-scrollbar,.cn-root .mention-results::-webkit-scrollbar,.cn-root .folder-files::-webkit-scrollbar,.cn-root .capture-sources::-webkit-scrollbar,.cn-root .style-list::-webkit-scrollbar,.cn-root .pinlist::-webkit-scrollbar,.cn-root .cthread::-webkit-scrollbar,.cn-root .pm-body::-webkit-scrollbar,.cn-root .lg-src::-webkit-scrollbar,.cn-root .memlist::-webkit-scrollbar,.cn-root .gp-prev::-webkit-scrollbar,.cn-root .skill-install-docs::-webkit-scrollbar,.cn-root .skill-install-scripts ul::-webkit-scrollbar,.cn-root .cset-body::-webkit-scrollbar{display:none;width:0;height:0}
@@ -1953,10 +1956,7 @@ html.agent-layer-open .cn-root #agent{-webkit-backdrop-filter:none;backdrop-filt
 .cn-root #pop.model-pop .model-menu .model-vendor.open > .mi,
 .cn-root #pop.model-pop .model-menu > .mi.on{background:rgba(var(--ink),.075)}
 .cn-root #pop.model-pop{background:linear-gradient(color-mix(in srgb,var(--glass-tint) 60%,transparent),color-mix(in srgb,var(--glass-tint) 60%,transparent)),color-mix(in srgb,var(--panel) 86%,transparent);-webkit-backdrop-filter:blur(42px) saturate(180%);backdrop-filter:blur(42px) saturate(180%);border:0;box-shadow:var(--glass-shadow)}
-.cn-root[data-theme=dark] #pop.model-pop{background:linear-gradient(color-mix(in srgb,var(--glass-tint) 60%,transparent),color-mix(in srgb,var(--glass-tint) 60%,transparent)),color-mix(in srgb,var(--panel) 82%,transparent)}
 .cn-root .model-flyout.model-flyout-portal{position:fixed;z-index:61;background:linear-gradient(color-mix(in srgb,var(--glass-tint) 60%,transparent),color-mix(in srgb,var(--glass-tint) 60%,transparent)),color-mix(in srgb,var(--panel) 84%,transparent);-webkit-backdrop-filter:blur(42px) saturate(180%);backdrop-filter:blur(42px) saturate(180%);border:0;box-shadow:var(--glass-shadow),inset 0 1px #ffffff0f}
-.cn-root[data-theme=light] .model-flyout.model-flyout-portal{box-shadow:var(--glass-shadow),inset 0 1px #ffffff8c}
-.cn-root[data-theme=dark] .model-flyout.model-flyout-portal{background:linear-gradient(color-mix(in srgb,var(--glass-tint) 60%,transparent),color-mix(in srgb,var(--glass-tint) 60%,transparent)),color-mix(in srgb,var(--panel) 82%,transparent)}
 
 /* custom library */
 .cn-root .lib-folders{flex-wrap:wrap;overflow-x:visible;row-gap:4px;scrollbar-width:none;align-items:center}
@@ -2339,6 +2339,74 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
 .cn-root .opt-grid button:hover:not(.on):not(:disabled),
 .cn-root .opt-grid button:hover:not(:disabled){background:transparent;color:var(--fg)}
 
+/* ---------- 选择模型菜单（HextaUI Prompt Input 版式）：一级供应商 + 二级模型 ----------
+   参考 prompt-controls.tsx 的 PromptInputModelSelect：安静的文字行、紧凑浮层，行内只有模型名 + 右侧线性对勾，
+   没有标题/描述副文案。底色是磨砂玻璃：主题面板 86%（二级 84%）+ blur(42px) saturate(180%)，
+   深浅色随 --panel / --glass-shadow 自动适配；零 border / 零发丝线 / 零 inset 描边 —— 层级只靠间距、软底与柔和投影。 */
+.cn-root #pop.model-pop{
+  width:304px;min-width:304px;max-width:304px;padding:6px;
+  border-radius:14px;border:0;
+  background:color-mix(in srgb,var(--panel) 86%,transparent);
+  -webkit-backdrop-filter:blur(42px) saturate(180%);backdrop-filter:blur(42px) saturate(180%);
+  box-shadow:var(--glass-shadow);
+}
+.cn-root #pop.model-pop .model-menu{display:flex;flex-direction:column}
+.cn-root #pop.model-pop .mh{padding:4px 8px 6px;font-size:11px;font-weight:400;color:var(--fg3)}
+.cn-root #pop.model-pop .model-menu .mi{
+  min-height:36px;padding:0 8px;border-radius:9px;gap:8px;
+  font-size:13px;font-weight:400;color:var(--fg2);
+}
+.cn-root #pop.model-pop .model-menu .mi .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root #pop.model-pop .model-menu .mi .n{flex:none;color:var(--fg3);font-size:11px;font-variant-numeric:tabular-nums}
+.cn-root #pop.model-pop .model-menu .mi svg.i{margin-left:2px;color:var(--fg3)}
+.cn-root #pop.model-pop .model-menu .mi:hover:not(:disabled),
+.cn-root #pop.model-pop .model-menu .mi.open:not(:disabled),
+.cn-root #pop.model-pop .model-menu .model-vendor.open>.mi{background:rgba(var(--ink),.07);color:var(--fg)}
+.cn-root #pop.model-pop .model-menu>.mi.on{background:rgba(var(--ink),.06);color:var(--fg)}
+.cn-root #pop.model-pop .model-menu .mi.on:after{width:14px;height:14px}
+.cn-root #pop.model-pop .model-menu > .mi:last-child{margin-top:4px}
+/* 模型强度滑块：一级供应商列表下方、模型设置上方；两侧 6px 内距让轨道落到 280px */
+.cn-root #pop.model-pop .model-effort{margin:6px 0 2px;padding:0 0 2px}
+.cn-root #pop.think-pop{
+  width:304px;min-width:304px;max-width:304px;padding:6px;
+  border-radius:14px;border:0;
+  background:color-mix(in srgb,var(--panel) 86%,transparent);
+  -webkit-backdrop-filter:blur(42px) saturate(180%);backdrop-filter:blur(42px) saturate(180%);
+  box-shadow:var(--glass-shadow);
+  overflow:visible;
+}
+.cn-root #pop.think-pop .mh{padding:4px 8px 6px;font-size:11px;font-weight:400;color:var(--fg3)}
+/* 图片「质量」档：与模型强度同款滑块弹层（304 / 14px 圆角 / 6px 内距；轨道落在 280） */
+.cn-root #pop.quality-pop{
+  width:304px;min-width:304px;max-width:304px;padding:6px;
+  border-radius:14px;border:0;
+  background:color-mix(in srgb,var(--panel) 86%,transparent);
+  -webkit-backdrop-filter:blur(42px) saturate(180%);backdrop-filter:blur(42px) saturate(180%);
+  box-shadow:var(--glass-shadow);
+  overflow:visible;
+}
+
+/* 二级模型浮层：300-320px、14px 圆角、6px 内距、磨砂玻璃底（84% + 42px blur）；行 38px / 13px，选中只留右侧对勾 */
+.cn-root .model-flyout.model-flyout-portal{
+  width:308px;padding:6px;border-radius:14px;border:0;
+  background:color-mix(in srgb,var(--panel) 84%,transparent);
+  -webkit-backdrop-filter:blur(42px) saturate(180%);backdrop-filter:blur(42px) saturate(180%);
+  box-shadow:var(--glass-shadow);
+}
+.cn-root .model-flyout-portal .combo{max-height:min(460px,calc(100vh - 48px))}
+.cn-root .model-flyout-portal .combo-s{height:32px;padding:0 10px;margin:0 0 4px;border-radius:10px;background:var(--sunken);color:var(--fg3)}
+.cn-root .model-flyout-portal .combo-in{font-size:12px}
+.cn-root .model-flyout-portal .combo .mi.combo-item{
+  min-height:38px;padding:0 10px;border-radius:9px;gap:8px;
+  font-size:13px;font-weight:400;color:var(--fg2);
+}
+.cn-root .model-flyout-portal .combo .mi.combo-item .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .model-flyout-portal .combo .combo-item.on{background:transparent;color:var(--fg);font-weight:600}
+.cn-root .model-flyout-portal .combo .combo-item.on::before{content:none}
+.cn-root .model-flyout-portal .combo .combo-item.on:after{width:14px;height:14px;margin-left:auto}
+.cn-root .model-flyout-portal .combo-empty{padding:0;font-size:12px;color:var(--fg3)}
+.cn-root .model-flyout-portal .combo-empty:not(:empty){padding:10px}
+
 /* ---------- 工作流导入 / 导出面板 ---------- */
 /* 层级靠软底与间距表达：不画边框、不用发丝线；拖拽区是整块 sunken 面，悬停提亮。 */
 .cn-root .modal.wf-panel{width:min(560px,100%)}
@@ -2357,5 +2425,9 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
 .cn-root .wf-result{margin:14px 2px 0;font-size:12px;color:var(--fg2);line-height:1.6}
 .cn-root .wf-foot{display:flex;justify-content:flex-end;margin-top:16px}
 
-
-
+/* Windows 桌面壳的窗口三键是窗口级浮层，钉在窗口右上；画布右上这排图标必须一直贴着三键，
+   不能跟着画布区走 —— 助手展开时 #stage 窄 380，锚在 stage 上的图标会整体左移 380。
+   锚到窗口（iframe 视口）只能用 fixed：--cn-chrome-right 仍是 128 = 三键左 8px，
+   top 沿用 16，正好落在助手卡片顶边 64 上方那条空档里；#stage 是 overflow:hidden，只有 fixed 能越出裁切。
+   mac 下 --cn-chrome-right 为 0、不挂 has-win-controls，规则不生效，保持 #stage 相对定位。 */
+.cn-root.has-win-controls #tr { position: fixed; }

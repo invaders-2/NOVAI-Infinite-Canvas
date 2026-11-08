@@ -9,7 +9,9 @@
   1. normalize_image_output_format：空/static/静态图 -> 空，jpg -> jpeg，未登记的值 -> 空；
   2. image_output_format_fields：空不发字段、能力表支持才发、没声明或不在其中 -> 400 并列出可选项；
   3. image_output_extension：MIME 优先，缺失/octet-stream 按 URL 扩展名兜底，都不认识回退 .png；
-  4. looks_like_generated_image_url 识别 .svg（含 query 串与大小写）。
+  4. looks_like_generated_image_url 识别 .svg（含 query 串与大小写）；
+  5. apimart_output_format_fields：SVG 强制 n=1、带参考图/蒙版 400，其它格式不带 n；
+  6. image_output_extension_from_bytes：按魔数识别 SVG（含 <?xml 声明）/ GIF，其它返回空。
 """
 import os
 import sys
@@ -81,6 +83,34 @@ class ImageOutputFormatFieldsTests(unittest.TestCase):
             self.assertIn("不支持", str(caught.exception.detail))
 
 
+class ApimartOutputFormatFieldsTests(unittest.TestCase):
+
+    CAPS = {"output_formats": ("png", "jpeg", "webp", "svg", "gif")}
+
+    def test_svg_forces_single_image(self):
+        self.assertEqual(
+            main.apimart_output_format_fields("gpt-image-2.6-sunburst", self.CAPS, "svg", n=4),
+            {"output_format": "svg", "n": 1})
+
+    def test_svg_with_references_raises_400(self):
+        with self.assertRaises(HTTPException) as caught:
+            main.apimart_output_format_fields(
+                "gpt-image-2.6-sunburst", self.CAPS, "svg", n=1, has_refs=True)
+        self.assertEqual(caught.exception.status_code, 400)
+        detail = str(caught.exception.detail)
+        self.assertIn("SVG", detail)
+        self.assertIn("参考图", detail)
+
+    def test_other_formats_do_not_send_n(self):
+        self.assertEqual(
+            main.apimart_output_format_fields("gpt-image-2.6-sunburst", self.CAPS, "gif", n=4),
+            {"output_format": "gif"})
+        self.assertEqual(
+            main.apimart_output_format_fields("gpt-image-2.6-sunburst", self.CAPS, "", n=4), {})
+        self.assertEqual(
+            main.apimart_output_format_fields("gpt-image-2.6-sunburst", self.CAPS, "static", n=4), {})
+
+
 class ImageOutputExtensionTests(unittest.TestCase):
 
     def test_mime_type_wins(self):
@@ -101,6 +131,26 @@ class ImageOutputExtensionTests(unittest.TestCase):
         self.assertEqual(main.image_output_extension("", ""), ".png")
         self.assertEqual(main.image_output_extension("application/octet-stream", "https://cdn.example.com/a.bin"), ".png")
         self.assertEqual(main.image_output_extension("text/html", "https://cdn.example.com/a.html"), ".png")
+
+
+class ImageOutputExtensionFromBytesTests(unittest.TestCase):
+
+    def test_svg_magic(self):
+        self.assertEqual(main.image_output_extension_from_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"></svg>'), ".svg")
+        self.assertEqual(main.image_output_extension_from_bytes(b"\xef\xbb\xbf  <svg></svg>"), ".svg")
+        self.assertEqual(main.image_output_extension_from_bytes(
+            b'<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg"></svg>'), ".svg")
+
+    def test_gif_magic(self):
+        self.assertEqual(main.image_output_extension_from_bytes(b"GIF87a\x01\x00"), ".gif")
+        self.assertEqual(main.image_output_extension_from_bytes(b"GIF89a\x01\x00"), ".gif")
+
+    def test_other_bytes_return_empty(self):
+        self.assertEqual(main.image_output_extension_from_bytes(b"\x89PNG\r\n\x1a\n"), "")
+        self.assertEqual(main.image_output_extension_from_bytes(b"RIFF....WEBP"), "")
+        self.assertEqual(main.image_output_extension_from_bytes(b"<?xml version='1.0'?><root/>"), "")
+        self.assertEqual(main.image_output_extension_from_bytes(b""), "")
+        self.assertEqual(main.image_output_extension_from_bytes(None), "")
 
 
 class GeneratedImageUrlSvgTests(unittest.TestCase):
