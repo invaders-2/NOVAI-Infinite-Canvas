@@ -280,10 +280,11 @@ Full history, installers and checksums are on [Releases](https://github.com/inva
 
 ## License
 
-This project is released under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
+This project is released under the [PolyForm Noncommercial License 1.0.0](LICENSE).
 
-- You may use, modify and redistribute it, including commercially;
-- If you distribute a modified version, or run a modified version as a network service for others, you must publish its complete source under AGPL-3.0 and keep the original copyright and license notices.
+- **Free to use** for personal learning, research, hobby projects, teaching, and non-profit or charitable purposes, including modifying the source for your own use.
+- **Commercial use requires a license**: using the software in a business, offering paid services or products built on it, selling it or derivatives, or bundling it into commercial software requires prior written permission from the author.
+- **Keep the notices**: redistributing the original or modified versions must retain this license and copyright notices.
 
-See [LICENSE](LICENSE) for the full terms.
+> **Version note**: v2.0.04 and earlier were released under AGPL-3.0, and anyone who obtained those versions may continue to use them under AGPL-3.0 (including commercially). Versions from this commit onward are under PolyForm Noncommercial 1.0.0. For commercial licensing or partnership, contact the maintainer via GitHub Issues or [@invaders-2](https://github.com/invaders-2).
 
