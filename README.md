@@ -1,12 +1,15 @@
 <div align="center">
 
-<img src="static/images/logo_256.png" width="92" alt="NOVAI" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="static/images/logo_light_512.png">
+  <img src="static/images/logo_512.png" width="92" alt="NOVAI" />
+</picture>
 
 <h1>NOVAI · 无限画布 AI 创作平台</h1>
 
 <p>在无限画布上生成图片与视频，用节点串联工作流；画布助手一句话就能自己规划并动手。</p>
 
-<a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases"><img src="static/images/badges/release.svg" alt="release: v2.0.04" /></a> <img src="static/images/badges/platform.svg" alt="platform: Windows | macOS | Linux" /> <img src="static/images/badges/quickstart.svg" alt="quickstart: 3 commands" /> <img src="static/images/badges/readme.svg" alt="README: 中文 | English" />
+<a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases"><img src="static/images/badges/release.svg" alt="release: v2.0.05" /></a> <img src="static/images/badges/platform.svg" alt="platform: Windows | macOS | Linux" /> <img src="static/images/badges/quickstart.svg" alt="quickstart: 3 commands" /> <img src="static/images/badges/readme.svg" alt="README: 中文 | English" />
 
 <p><a href="https://invaders-2.github.io/NOVAI-Infinite-Canvas/">官网</a> · <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases">下载</a> · <a href="https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html">帮助文档</a> · <a href="#最近更新">更新日志</a></p>
 
@@ -263,6 +266,14 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 ---
 
 ## 最近更新
+
+### v2.0.05 · 2026-11-08
+
+- **GIF 动图输出**：生图可选 2–16 帧与每帧时长，每帧尺寸按上游拼版上限自动缩小，出图后会提示实际尺寸。
+- **SVG 矢量输出**：自动补上游必需的文本模型参数，产出无脚本、无外链的静态 .svg。
+- **语音输入**：画布节点提示词与画布助手输入框都能说话转文字；设置 → 通用新增「语音转写」，平台与模型自选，未选择时跟随画布助手模型。
+- **应用市场**：官方技能默认不再自动启用，需到市场添加（卸载只停用、不删本地文件）；新增 4 个 RedSkill 技能（带封面）。
+- **首页导航**：选中块改成液态玻璃，跟随指针滑动、去掉实底胶囊；市场竖版封面不再被压成窄条。
 
 ### v2.0.04 · 2026-11-08
 

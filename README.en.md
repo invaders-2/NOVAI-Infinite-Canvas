@@ -1,12 +1,15 @@
 <div align="center">
 
-<img src="static/images/logo_256.png" width="92" alt="NOVAI" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="static/images/logo_light_512.png">
+  <img src="static/images/logo_512.png" width="92" alt="NOVAI" />
+</picture>
 
 <h1>NOVAI · Infinite Canvas AI Creation Platform</h1>
 
 <p>Generate images and video on an infinite canvas, wire up workflows with nodes, and let the canvas agent do the work.</p>
 
-<a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases"><img src="static/images/badges/release.svg" alt="release: v2.0.04" /></a> <img src="static/images/badges/platform.svg" alt="platform: Windows | macOS | Linux" /> <img src="static/images/badges/quickstart.svg" alt="quickstart: 3 commands" /> <img src="static/images/badges/readme.svg" alt="README: 中文 | English" />
+<a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases"><img src="static/images/badges/release.svg" alt="release: v2.0.05" /></a> <img src="static/images/badges/platform.svg" alt="platform: Windows | macOS | Linux" /> <img src="static/images/badges/quickstart.svg" alt="quickstart: 3 commands" /> <img src="static/images/badges/readme.svg" alt="README: 中文 | English" />
 
 <p><a href="https://invaders-2.github.io/NOVAI-Infinite-Canvas/">Website</a> · <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases">Download</a> · <a href="https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html">Docs</a> · <a href="#recent-updates">Changelog</a></p>
 
@@ -264,6 +267,14 @@ expression follow the original motion. No subtitles, no watermark.
 ---
 
 ## Recent Updates
+
+### v2.0.05 · November 8, 2026
+
+- **GIF output** — image generation can produce animated GIFs with 2–16 frames and a per-frame duration; each frame is scaled down to fit the provider's sheet limits and the actual size is shown after generation.
+- **SVG output** — the required upstream text model is filled in automatically, producing a static .svg with no scripts and no external links.
+- **Voice input** — dictate into canvas node prompts and the canvas agent; Settings → General now has a "Speech transcription" card where you pick the provider and model (falls back to the canvas agent model when unset).
+- **Marketplace** — official skills are no longer enabled by default and must be added in the marketplace (removing one only disables it); four new RedSkill entries with covers.
+- **Home navigation** — the selected block is now liquid glass that follows the pointer instead of a solid pill; portrait marketplace covers are no longer squeezed into narrow strips.
 
 ### v2.0.04 · November 8, 2026
 
