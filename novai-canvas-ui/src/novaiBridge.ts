@@ -347,7 +347,8 @@ async function skillCommand(input: Row): Promise<Row> {
     const data = await request("/api/skills");
     const disabled = disabledSkills();
     // 内置技能包（skill_type=system）也是真技能：以前按类型过滤掉，/ 菜单就空了
-    const rows: Row[] = Array.isArray(data.skills) ? data.skills : [];
+    // 官方技能要先去应用市场「添加到助手」（后端据此置 enabled）；未添加的不列进画布技能中心
+    const rows: Row[] = (Array.isArray(data.skills) ? data.skills : []).filter((skill: Row) => !(skill.skill_type === "system" && skill.enabled === false));
     const bodies = await mapLimit(rows, 4, (skill: Row) => skillInstructions(String(skill.id || "")));
     return { ok: true, value: { items: rows.map((skill: Row, index: number) => {
       const id = String(skill.id || "");
