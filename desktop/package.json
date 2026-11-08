@@ -1,6 +1,6 @@
 {
   "name": "novai-desktop",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "NOVAI 无限画布 AI 创作平台 — 桌面客户端 (Electron)",
   "main": "main.js",
   "homepage": "https://github.com/invaders-2/NOVAI",
@@ -100,6 +100,9 @@
     "mac": {
       "category": "public.app-category.graphics-design",
       "icon": "icons/icon.icns",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "NOVAI 需要在局域网内发现并连接好友的电脑。"
+      },
       "target": [
         "dmg",
         "zip"
