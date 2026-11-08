@@ -178,7 +178,7 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                             <button v-for="it in byAvail(storeSkills).slice(0, 9)" :key="it.name" type="button" class="sk" @click="openStore(it)">
                                 <span class="ico"><img v-if="it.coverUrl" :src="it.coverUrl" alt="" loading="lazy" decoding="async" @error="e => (e.target.style.visibility = 'hidden')"><NvIcon v-else :name="skillIcon(it)" /></span>
                                 <span class="tx"><b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small></span>
-                                <span v-if="it.builtin" class="st">官方</span>
+                                <span v-if="it.builtin" class="st">官方{{ it.installed ? ' · 已添加' : '' }}</span>
                                 <span v-else-if="!it.storeAvailable" class="st">即将上线</span>
                                 <span v-else-if="it.installed" class="st">已添加</span>
                                 <span v-else class="go"><NvIcon name="chevr" /></span>
@@ -229,7 +229,7 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                                 <button v-for="it in skillList" :key="it.name" type="button" class="sk" @click="openStore(it)">
                                     <span class="ico"><img v-if="it.coverUrl" :src="it.coverUrl" alt="" loading="lazy" decoding="async" @error="e => (e.target.style.visibility = 'hidden')"><NvIcon v-else :name="skillIcon(it)" /></span>
                                     <span class="tx"><b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small></span>
-                                    <span v-if="it.builtin" class="st">官方</span>
+                                    <span v-if="it.builtin" class="st">官方{{ it.installed ? ' · 已添加' : '' }}</span>
                                     <span v-else-if="!it.storeAvailable" class="st">即将上线</span>
                                     <span v-else-if="it.installed" class="st">已添加</span>
                                     <span v-else class="go"><NvIcon name="chevr" /></span>

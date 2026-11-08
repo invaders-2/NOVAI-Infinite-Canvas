@@ -203,7 +203,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true));
                 </div>
                 <footer class="md-f">
                     <template v-if="isStore">
-                        <button type="button" class="nv-btn sm" :disabled="!available || installing || !!item.builtin" :title="item.builtin ? '内置技能本来就在画布助手里' : ''" @click="toggleInstall">
+                        <button type="button" class="nv-btn sm" :disabled="!available || installing" @click="toggleInstall">
                             <span v-if="installing" class="spin"></span><NvIcon v-else :name="installed ? 'check' : 'plus'" />{{ installed ? '已添加到助手' : '添加到助手' }}
                         </button>
                         <button type="button" class="nv-btn sm primary" :disabled="!available || !!launching" @click="launch()">
