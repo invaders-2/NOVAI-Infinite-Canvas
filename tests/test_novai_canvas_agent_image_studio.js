@@ -214,6 +214,6 @@ const html = read('static/canvas.html');
 const versions = [...html.matchAll(/canvas\.(?:css|js)\?v=([0-9.]+)/g)].map((m) => m[1]);
 assert.strictEqual(versions.length, 2, 'canvas.css / canvas.js 各一处 ?v=');
 assert.strictEqual(versions[0], versions[1], 'canvas.css / canvas.js 版本号必须一致');
-assert.ok(/^2\.0\.04\.\d+$/.test(versions[0]), '版本号前缀 2.0.04.<epoch 秒>');
+assert.ok(/^2\.0\.05\.\d+$/.test(versions[0]), '版本号前缀 2.0.05.<epoch 秒>');
 
 console.log('\nALL PASS · 源码契约 ' + '60+ 项');
