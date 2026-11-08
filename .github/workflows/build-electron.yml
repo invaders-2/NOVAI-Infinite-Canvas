@@ -6,6 +6,19 @@ name: build-electron
 
 on:
   workflow_dispatch:
+    # platforms 留空 = 三平台全量（与 tag push 行为一致）；非空 = 只打指定平台，
+    # 元素形如 {"platform":"windows-latest","builder":"--win"}
+    inputs:
+      platforms:
+        description: '只构建指定平台时传入 JSON 数组（例：[{"platform":"windows-latest","builder":"--win"}]）；留空 = 三平台全量'
+        required: false
+        default: ''
+        type: string
+      release_tag:
+        description: '手动重打单平台时发布到已有 Release 的 tag（例：v2.0.04）；留空 = 只在 v* tag push 时发布'
+        required: false
+        default: ''
+        type: string
   push:
     tags:
       - 'v*'
@@ -19,13 +32,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: macos-latest
-            builder: --mac
-          - platform: windows-latest
-            builder: --win
-          - platform: ubuntu-latest
-            builder: --linux
+        # workflow_dispatch 传了 platforms 时只打该平台；其它情况（tag push / 空参数）走原三平台默认数组。
+        # 用 event_name 短路，push 事件不依赖 inputs 上下文是否存在。
+        include: ${{ fromJSON((github.event_name == 'workflow_dispatch' && github.event.inputs.platforms) || '[{"platform":"macos-latest","builder":"--mac"},{"platform":"windows-latest","builder":"--win"},{"platform":"ubuntu-latest","builder":"--linux"}]') }}
 
     runs-on: ${{ matrix.platform }}
 
@@ -74,9 +83,36 @@ jobs:
           # .version / ../requirements.txt 拷到同一目标路径，再拷一份会因
           # 目标重名（EEXIST hard link 冲突）导致 mac/linux 打包失败。
 
+      # electron 的 postinstall 要下载二进制，云端偶尔 504（Windows 任务尤其明显）。
+      # 前两次走默认源，第 3 次换国内镜像兜底；三次都失败才让任务失败。
       - name: Install Electron deps
         working-directory: desktop
-        run: npm install --no-audit --no-fund
+        shell: bash
+        run: |
+          ok=0
+          for attempt in 1 2 3; do
+            if [ "$attempt" = "3" ]; then
+              export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+              echo "npm install 第 $attempt/3 次，使用 ELECTRON_MIRROR=$ELECTRON_MIRROR"
+            else
+              echo "npm install 第 $attempt/3 次（默认源）"
+            fi
+            if npm install --no-audit --no-fund; then
+              ok=1
+              break
+            fi
+            echo "第 $attempt 次失败：清理 node_modules，等待 15 秒后重试"
+            rm -rf node_modules
+            sleep 15
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::npm install 连续 3 次失败（electron 二进制下载）"
+            exit 1
+          fi
+          if [ ! -d node_modules/electron ]; then
+            echo "::error::安装后缺少 node_modules/electron"
+            exit 1
+          fi
 
       # 把 PyInstaller 后端二进制登记进 electron-builder 的 extraResources，
       # 使安装包内 Resources/backend 包含可执行后端（目标机免 Python）。
@@ -154,13 +190,17 @@ jobs:
             desktop/release/latest*.yml
           if-no-files-found: warn
 
-      - name: Release (tag only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Release (tag or manual release_tag)
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
         uses: softprops/action-gh-release@v2
         with:
+          # tag push 时取不到 event.inputs → 落到 github.ref_name（行为不变）；
+          # 手动重打单平台时用它指定的已有 Release。用 event_name 短路，push 事件不依赖 inputs 上下文。
+          tag_name: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag) || github.ref_name }}
           # 版本号带 "-"（如 v1.0.112-beta.1）的 tag 标记为 prerelease，
-          # 正式版客户端（allowPrerelease=false）不会收到测试版更新
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          # 正式版客户端（allowPrerelease=false）不会收到测试版更新；
+          # 手动重打时也按 event.inputs.release_tag 判断，避免把预发布版误改成正式版
+          prerelease: ${{ contains((github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag) || github.ref_name, '-') }}
           files: |
             desktop/release/*.dmg
             desktop/release/*.zip
