@@ -6,7 +6,17 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>智能画布BEAT</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("dark");document.documentElement.classList.add("theme-dark");document.documentElement.classList.add("studio-theme-dark");}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/novai-canvas/canvas.css?v=2.0.05.1794151656">
+    <style>
+        /* 画布首帧底色：.cn-root 要等 React 挂载才有背景，iframe 会先露出 Chromium 默认白底。
+           值同 canvas-next.css 的 --bg（浅 #f2f2f4 / 深 #000），跟着 <html> 上的主题 class 走。 */
+        html, body, #root { height: 100%; }
+        body { margin: 0; }
+        html { background: #f2f2f4; color-scheme: light; }
+        body { background: #f2f2f4; }
+        html.dark, html.theme-dark, html.studio-theme-dark { background: #000; color-scheme: dark; }
+        html.dark body, html.theme-dark body, html.studio-theme-dark body { background: #000; }
+    </style>
+    <link rel="stylesheet" href="/static/novai-canvas/canvas.css?v=2.0.05.1794196730">
     <link rel="stylesheet" href="/static/css/glide.css?v=2.0.05.1789742566">
     <link rel="stylesheet" href="/static/css/source-browser.css?v=2.0.05.1793698294">
     <link rel="stylesheet" href="/static/css/canvas-agent-resize.css?v=2.0.05.1794019983">
@@ -85,7 +95,7 @@
             </svg>
         </div>
     </aside>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=2.0.05.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=2.0.05.1794194019"></script>
     <script defer src="/static/js/shared/icons.js?v=2.0.05.1793785599"></script>
     <script src="/static/js/shared/glide.js?v=2.0.05.1789742748"></script>
     <script defer src="/static/js/source-browser.js?v=2.0.05.1793698287"></script>
@@ -121,7 +131,7 @@
             if (label) label.textContent = names[tab.getAttribute('data-source-key')] || '';
         }, true);
     </script>
-    <script type="module" src="/static/novai-canvas/canvas.js?v=2.0.05.1794151656"></script>
+    <script type="module" src="/static/novai-canvas/canvas.js?v=2.0.05.1794196730"></script>
     <script defer src="/static/js/canvas-agent-resize.js?v=2.0.05.1793754290"></script>
 </body>
 </html>

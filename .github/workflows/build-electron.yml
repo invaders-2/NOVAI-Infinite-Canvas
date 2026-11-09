@@ -42,6 +42,94 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Windows 安装包内置 GPL 静态版 ffmpeg/ffprobe：下载 BtbN FFmpeg-Builds → 解压 → 只取
+      # bin/ffmpeg.exe、bin/ffprobe.exe、LICENSE.txt 到 desktop/vendor/ffmpeg/win/，由 package.json 的
+      # win.extraResources 打进 resources/bin/win（mac/linux 任务不跑这步，包内容不变）。
+      # 用 GPL 构建：GPL 版含 libx264 / libx265；LGPL 版不含这两个 GPL-only 编码器，而 main.py 的
+      # 云压缩与时间线 / 剪辑导出写死 libx264，只有 GPL 版才能跑通。
+      # GPL 分发义务 = 随包提供 FFmpeg 的 LICENSE（GPLv3 原文）与源码获取地址（本步骤生成 SOURCE.txt）。
+      - name: Download bundled ffmpeg (windows, GPL static)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = 'desktop/vendor/ffmpeg/win'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP 'ffmpeg-win64-gpl.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'ffmpeg-win64-gpl'
+          # 尝试顺序（每个 URL 最多 2 次，全部失败才 ::error:: 退出）：
+          #   1) latest 的 master 静态 GPL 构建（滚动入口）；
+          #   2) 带版本的 autobuild 静态 GPL 资产兜底。BtbN 的 latest release 现在只有
+          #      master / winarm64 构建，ffmpeg-n7.1-latest-*.zip 这类资产已不存在（实测 404），
+          #      所以固定 BtbN 保留策略里"每月最后一个构建"（保留 2 年）的 2026-10 资产；
+          #      若它将来也 404，去 https://github.com/BtbN/FFmpeg-Builds/releases 换一个
+          #      ffmpeg-N-*-win64-gpl.zip（不要带 -shared 的）。
+          $urls = @(
+            'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+            'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-N-128227-g4811625b5f-win64-gpl.zip'
+          )
+          $downloaded = $false
+          foreach ($url in $urls) {
+            for ($attempt = 1; $attempt -le 2; $attempt++) {
+              try {
+                Write-Host "下载 $url（第 $attempt/2 次）"
+                Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -TimeoutSec 600
+                $downloaded = $true
+                break
+              } catch {
+                Write-Host "::warning::下载失败（$url 第 $attempt 次）：$($_.Exception.Message)"
+                if (Test-Path $zip) { Remove-Item $zip -Force }
+                Start-Sleep -Seconds 5
+              }
+            }
+            if ($downloaded) { break }
+          }
+          if (-not $downloaded) {
+            Write-Host '::error::ffmpeg 下载失败：两个候选 URL 各重试 2 次仍失败'
+            exit 1
+          }
+          if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+          $ffmpeg = Get-ChildItem -Path $extract -Filter 'ffmpeg.exe' -Recurse -File | Select-Object -First 1
+          $ffprobe = Get-ChildItem -Path $extract -Filter 'ffprobe.exe' -Recurse -File | Select-Object -First 1
+          if (-not $ffmpeg -or $ffmpeg.Length -lt 1MB) {
+            Write-Host '::error::压缩包里没有有效的 bin/ffmpeg.exe'
+            exit 1
+          }
+          if (-not $ffprobe -or $ffprobe.Length -lt 1MB) {
+            Write-Host '::error::压缩包里没有有效的 bin/ffprobe.exe'
+            exit 1
+          }
+          Copy-Item -LiteralPath $ffmpeg.FullName -Destination (Join-Path $dest 'ffmpeg.exe') -Force
+          Copy-Item -LiteralPath $ffprobe.FullName -Destination (Join-Path $dest 'ffprobe.exe') -Force
+          $license = Get-ChildItem -Path $extract -Filter 'LICENSE.txt' -Recurse -File | Select-Object -First 1
+          if (-not $license) {
+            Write-Host '::error::压缩包里没找到 LICENSE.txt：GPL 分发义务要求随包附许可原文'
+            exit 1
+          }
+          Copy-Item -LiteralPath $license.FullName -Destination (Join-Path $dest 'LICENSE.txt') -Force
+          foreach ($exe in @('ffmpeg.exe', 'ffprobe.exe')) {
+            $path = Join-Path $dest $exe
+            $size = (Get-Item -LiteralPath $path).Length
+            if ($size -lt 1MB) {
+              Write-Host "::error::$path 大小异常（$size 字节）"
+              exit 1
+            }
+            Write-Host "$exe = $size 字节"
+          }
+          # GPL 源码义务：把实际构建版本（含提交号）与源码获取地址随包落成 SOURCE.txt。
+          $versionLine = (& (Join-Path $dest 'ffmpeg.exe') -version | Select-Object -First 1)
+          @(
+            'FFmpeg / FFprobe — GPL 静态构建（BtbN FFmpeg-Builds，未修改）'
+            "版本：$versionLine"
+            '许可：GPLv3，原文见同目录 LICENSE.txt'
+            '构建来源：https://github.com/BtbN/FFmpeg-Builds/releases'
+            '源码获取：https://github.com/FFmpeg/FFmpeg（版本行 N-<号>-g<提交> 即对应 commit）'
+            '          构建脚本：https://github.com/BtbN/FFmpeg-Builds'
+          ) | Set-Content -LiteralPath (Join-Path $dest 'SOURCE.txt') -Encoding utf8
+          Write-Host $versionLine
+          & (Join-Path $dest 'ffprobe.exe') -version | Select-Object -First 1
+
       - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
@@ -158,6 +246,34 @@ jobs:
         run: npx electron-builder ${{ matrix.builder }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      # 断言安装包产物（win-unpacked）里真的有 ffmpeg/ffprobe，而不是只下载到了工作区。
+      - name: Smoke-test bundled ffmpeg in package (windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          base=desktop/release/win-unpacked/resources/bin/win
+          ok=1
+          for exe in ffmpeg.exe ffprobe.exe; do
+            file="$base/$exe"
+            if [ ! -s "$file" ]; then
+              echo "::error::桌面产物缺少 $file"
+              ok=0
+              continue
+            fi
+            size=$(wc -c < "$file" | tr -d ' ')
+            echo "$file = $size 字节"
+            if [ "$size" -lt 1048576 ]; then
+              echo "::error::$file 体积异常（$size 字节）"
+              ok=0
+            fi
+          done
+          if [ "$ok" != "1" ]; then
+            ls -R desktop/release/win-unpacked/resources 2>/dev/null | head -100 || true
+            exit 1
+          fi
+          "$base/ffmpeg.exe" -version | head -1
+          "$base/ffprobe.exe" -version | head -1
 
       # 无开发者证书时只能 ad-hoc 签名（desktop/scripts/adhoc-sign.js 在 afterPack 里做）；
       # 这里把结果打出来：没签上会在 Actions 里以 warning 标注，避免又发一个「已损坏」的 dmg。

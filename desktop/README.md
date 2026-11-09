@@ -92,6 +92,31 @@ npm run pack          # 仅解包目录（免安装快速验证）
 
 产物输出到 `desktop/release/`。
 
+### Windows 安装包内置 ffmpeg / ffprobe
+
+Windows 安装包自带 **ffmpeg / ffprobe**（[BtbN FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) 的 **GPL 静态版**，含 `libx264` / `libx265`），
+视频探测、首帧/缩略图、纯转封装，以及视频云压缩 / 时间线剪辑导出都不再依赖用户机器预装。CI
+（`.github/workflows/build-electron.yml` 的 `Download bundled ffmpeg (windows, GPL static)` 步骤）把它下载到
+`vendor/ffmpeg/win/`，再经 `package.json` 的 **win 专属** `extraResources` 打进产物 `resources/bin/win/`：
+
+- 主进程启动后端时注入 `FFMPEG_PATH` / `FFPROBE_PATH`（仅 win32；用户已显式设置环境变量时不覆盖）；
+- 后端 `main.py` 的 `ffmpeg_binary()` / `ffprobe_binary()` 按「环境变量 → 安装包内置 → PATH」解析；
+- macOS / Linux 包不含该二进制，仍使用系统 ffmpeg（macOS 可 `brew install ffmpeg`），打包行为不变。
+
+> 第三方组件：FFmpeg / FFprobe（**GPL 静态构建**，含 `libx264` / `libx265`，未修改）。`LICENSE.txt`（GPLv3 原文）
+> 与 `SOURCE.txt`（实际构建版本 + 源码获取地址）随包复制到 `resources/bin/win/`。GPLv3 分发义务靠这两份文件
+> 满足：版本行形如 `ffmpeg version N-128227-g4811625b5f-...`，`g` 后即 FFmpeg 提交号，源码见
+> https://github.com/FFmpeg/FFmpeg ；构建脚本与 release 产物见 https://github.com/BtbN/FFmpeg-Builds 。
+> 体积（2026-11-09 从 GPL zip 中央目录核对）：`ffmpeg.exe` 162.0MB + `ffprobe.exe` 161.8MB（解压后），zip 约 201.7MB，
+> Windows 安装包体积约 **+120~150MB**（NSIS 压缩后估算）。
+>
+> **libx264 已可用**：原 LGPL 方案不含 GPL-only 的 `libx264`，`main.py` 的云压缩
+> （`compress_video_for_cloud_upload`）与时间线 / 剪辑导出（写死 `libx264`）在 Windows 上会报
+> `Unknown encoder 'libx264'`；换 GPL 静态版后这条阻塞解除。
+>
+> 本地直接在 Windows 上 `npm run dist:win` 时，若没有 `vendor/ffmpeg/win/ffmpeg.exe`，
+> electron-builder 只打一条 warning、产物不含内置 ffmpeg；请先按 CI 的下载步骤准备该目录。
+
 ## 自动更新（electron-updater）
 
 - 打包后启动 8 秒检查 **GitHub Releases**（`invaders-2/NOVAI`）新版本。

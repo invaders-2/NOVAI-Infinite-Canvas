@@ -255,6 +255,7 @@ class ApimartMockUpstreamTests(unittest.TestCase):
     def setUp(self):
         self.server.upload_status = 200
         self.server.reject_remote_image_urls = False
+        main._APIMART_UPLOAD_CACHE.clear()
         with self.server.log_lock:
             self.server.requests.clear()
 

@@ -183,7 +183,7 @@ function Ports({ h, only }: { h: number; only?: "out" }) {
 function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean; hover: boolean }) {
   const { node, out, running } = p; const g = genOf(node);
   // 文本节点生成中：同 TapNow 用骨架线；流式有内容后直接按 Markdown 渲染并跟随光标
-  if (running && node.kind === "text") return p.run?.stream ? <div className="ntext md-wrap streaming"><Markdown text={p.run.stream} /><span className="caret" /></div> : <TextSkeleton />;
+  if (running && node.kind === "text") return p.run?.stream ? <div className="ntext md-wrap streaming"><Markdown streaming text={p.run.stream} /></div> : <TextSkeleton />;
   if (running) return <><Loading /><span className="nl-lab tnum">{p.run?.batch ? `逐行生成 ${p.run.batch.done}/${p.run.batch.total}` : "生成中"}</span></>;
   if (node.kind === "image") {
     if (out?.url) return <MediaImg src={out.url} alpha={false} px={node.w} play={p.hover} />;

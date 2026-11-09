@@ -27,6 +27,30 @@ import type { CanvasStore } from "../canvas-next/store";
 import { startVoiceCapture, transcribeVoice, voiceErrorText, type VoiceCapture, type VoicePhase } from "../canvas-next/voiceInput";
 import type { AgentDraft } from "../canvas-next/homeSeed";
 
+/** 桌面壳（pywebview）标记：主进程把它拼进 userAgent（desktop/README.md）。画布常跑在 iframe 里，顶层 / 父窗口也要看 */
+function desktopShell(): boolean {
+  const hit = (w: Window | null | undefined) => {
+    try {
+      if (!w) return false;
+      if (/pywebview/i.test(String(w.navigator?.userAgent || ""))) return true;
+      return Boolean((w as Window & { pywebview?: { api?: unknown } }).pywebview?.api);
+    } catch { return false; }
+  };
+  if (typeof window === "undefined") return false;
+  let top: Window | null = null; let parent: Window | null = null;
+  try { top = window.top; } catch { top = null; }
+  try { parent = window.parent; } catch { parent = null; }
+  return hit(window) || hit(top) || hit(parent);
+}
+/** mac 判定：和 shortcuts.tsx 的 IS_MAC 同口径（userAgentData.platform → platform → userAgent） */
+const IS_MAC_PLATFORM = (() => {
+  if (typeof navigator === "undefined") return false;
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+  return /mac|iphone|ipad|ipod/i.test(nav.userAgentData?.platform || nav.platform || nav.userAgent || "");
+})();
+/** Electron hiddenInset：红绿灯由系统画在网页之上，mac 桌面端全屏助手要把顶栏左侧让出来（尺寸写在 CSS 里） */
+const MAC_LIGHTS = IS_MAC_PLATFORM && desktopShell();
+
 /** 官方技能：技能名 → 市场封面 id（gen-<id>-sq.webp）；没对上就退回原来的 ✨ 图标 */
 const SKILL_THUMB: Record<string, string> = {
   "一万条提示词库": "ai-image-prompts-skill",
@@ -896,8 +920,10 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     a.emit();
   };
   return (
-    <aside id="agent" className={(ui.agentOpen ? "" : "closed") + (full ? " full" : "") + " ap2-agent"}>
+    <aside id="agent" data-mac-lights={MAC_LIGHTS ? "1" : undefined} className={(ui.agentOpen ? "" : "closed") + (full ? " full" : "") + " ap2-agent"}>
       <div className="ah ap2-ah">
+        {/* mac 桌面端全屏时给系统红绿灯让位：这 88px 是空的，同时充当窗口拖拽区（CSS 只在 #agent.full[data-mac-lights] 下显示） */}
+        <span className="ap2-lights-gap" aria-hidden="true" />
         {/* 顶栏最左常驻头像：全屏模式原本就有一个 26px 的封面槽位，直接复用它（同尺寸），
             窄面板没有这个槽位，就在最左挂一个 20px 的——两种模式都不会并排出现两张脸 */}
         {full
@@ -1172,7 +1198,7 @@ function Msg({ m, i, isNew, a, ctl, models, onRetry, onBranch, onQ, onSkillInsta
     {m.webSearch?.length ? <div className="websearch-cards">{m.webSearch.map((card) => <WebSearchCard card={card} key={card.key} />)}</div> : null}
     {m.memSaved ? <div className="memrow"><Icon name="check" size="xs" />已写入{m.memSaved.scope}记忆：{m.memSaved.text}<button className="linkbtn" onClick={() => memoryModal(a)}>管理</button></div> : null}
     {m.streaming && !m.text ? <div aria-hidden="true" className="ap2-skeleton"><Skeleton className="ap2-skeleton-line" /><Skeleton className="ap2-skeleton-line is-short" /><Skeleton className="ap2-skeleton-line" /></div> : null}
-    {m.text ? <Message align="start" className="ap2-msg-a"><MessageContent className="ap2-mc"><div className="md-chat ap2-bub-a"><Markdown text={m.text} />{m.streaming ? <span className="caret" /> : null}</div></MessageContent></Message> : null}
+    {m.text ? <Message align="start" className="ap2-msg-a"><MessageContent className="ap2-mc"><div className="md-chat ap2-bub-a"><Markdown streaming={m.streaming} text={m.text} /></div></MessageContent></Message> : null}
     {m.error ? <Alert className="ap2-alert"><Icon name="alert" size="s" /><AlertTitle>{m.error}</AlertTitle><AlertClose aria-label="关闭错误提示" onClick={() => patch({ error: undefined })} /></Alert> : null}
     <div className="ap2-cards">
       {m.webImages?.length ? <div className="webimgs">{m.webImages.map((card) => <WebImageCard key={card.key} card={card} ctl={ctl} />)}</div> : null}

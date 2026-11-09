@@ -67,7 +67,6 @@
 .cn-root .ntext{position:absolute;inset:0;padding:12px 14px;overflow:auto;white-space:pre-wrap;font-size:12px;line-height:1.6;color:var(--fg1);user-select:none;scrollbar-width:none}
 .cn-root .ntext::-webkit-scrollbar{display:none;width:0;height:0}
 .cn-root .ntext.edit,.cn-root .ntext.edit textarea{user-select:text}
-.cn-root .ntext .caret{display:inline-block;width:6px;height:13px;background:var(--hi);vertical-align:-2px;animation:blink 1s steps(2) infinite}
 @keyframes blink{50%{opacity:0}}
 .cn-root .ntext.edit{background:var(--s0)}
 .cn-root .ntext textarea{width:100%;height:100%;resize:none;font-size:12px;line-height:1.6}
@@ -845,7 +844,6 @@
 .cn-root .sug{transform:rotate(var(--r,0deg));transition:transform var(--d-quick) var(--e-std),background-color var(--d-feedback)}
 .cn-root .sug:hover{transform:none}
 .cn-root .sug .si{width:30px;height:30px;border-radius:9px;background:var(--sunken);display:grid;place-items:center;flex:none;color:var(--fg2)}
-.cn-root .bub .caret{display:inline-block;width:6px;height:13px;background:var(--hi);vertical-align:-2px;margin-left:2px;animation:blink 1s steps(2) infinite}
 .cn-root .thinkrow .th{display:inline-flex;align-items:center;gap:4px;color:var(--fg3);font-size:12px;padding:2px 0}
 .cn-root .thinkrow .th:hover{color:var(--fg2)}
 .cn-root .thinkrow.open .th svg{transform:rotate(180deg)}
@@ -933,7 +931,6 @@
 .cn-root[data-theme=light] .node.sel .nbody{outline-color:#000}
 .cn-root[data-theme=light] .modal-bg{background:#00000040}
 .cn-root[data-theme=light] .toast,.cn-root[data-theme=light] [data-tip]:after{box-shadow:0 0 0 1px #0000000f,0 10px 30px #00000024}
-.cn-root[data-theme=light] .ntext .caret,.cn-root[data-theme=light] .bub .caret{background:#000}
 .cn-root[data-theme=light] .port{background:#fff}
 .cn-root .tnode{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;border-radius:14px;background:var(--card)}
 .cn-root .tgrid{flex:1;min-height:0;overflow:auto;scrollbar-width:thin}
@@ -1034,25 +1031,76 @@
 .cn-root{--md-strong:#f5f5f5;--md-fg:#cccccc;--md-line:rgba(255,255,255,.1)}
 .cn-root[data-theme=light]{--md-strong:#1d1d1f;--md-fg:#3a3a3c;--md-line:rgba(0,0,0,.1)}
 .cn-root .ntext.md-wrap{white-space:normal;padding:10px 14px;font-size:13px;line-height:1.65;color:var(--md-fg)}
+/* Markdown 显示统一走 streamdown：文本节点 / 聊天共用这套排版，颜色接 --md-*；
+   表格线属于内容排版，用 --md-line；代码块 / 表格的层级靠半透明软底，不画外框。 */
+.cn-root .md-sd{min-width:0;overflow-wrap:anywhere}
+.cn-root .md-sd>*{margin-top:0;margin-bottom:0}
 .cn-root .md>:first-child{margin-top:0!important}
+.cn-root .md>:last-child{margin-bottom:0!important}
 .cn-root .md h1{font-size:22px;line-height:1.3;font-weight:600;color:var(--md-strong);margin:0 0 10px}
 .cn-root .md h2{font-size:18px;line-height:1.35;font-weight:600;color:var(--md-strong);margin:14px 0 8px}
 .cn-root .md h3{font-size:15px;line-height:1.4;font-weight:600;color:var(--md-fg);margin:12px 0 6px}
 .cn-root .md h4{font-size:14px;line-height:1.4;font-weight:600;color:var(--md-fg);margin:10px 0 4px}
+.cn-root .md h5{font-size:12px;line-height:1.45;font-weight:600;color:var(--md-fg);margin:8px 0 4px}
+.cn-root .md h6{font-size:11px;line-height:1.45;font-weight:600;color:var(--md-fg);margin:8px 0 3px}
 .cn-root .md p{margin:4px 0;line-height:1.7}
-.cn-root .md ul,.cn-root .md ol{margin:6px 0;padding-left:1.5em;color:var(--md-strong)}
-.cn-root .md li{padding-left:3.2px;color:var(--md-fg);margin:2px 0}
+.cn-root .md ul,.cn-root .md ol{margin:6px 0;padding-left:1.5em;list-style-position:outside;color:var(--md-strong)}
+.cn-root .md li{padding:0 0 0 3.2px;color:var(--md-fg);margin:2px 0}
+.cn-root .md li>ul,.cn-root .md li>ol{margin:2px 0;padding-left:1.35em}
 .cn-root .md strong{font-weight:700;color:inherit}
+.cn-root .md a{color:var(--fg);font-weight:500;text-decoration:underline;text-decoration-color:var(--md-line);text-underline-offset:2px;overflow-wrap:anywhere}
+.cn-root .md a:hover{text-decoration-color:currentColor}
 .cn-root .md code{font:.9em var(--mono);background:var(--sunken);padding:1px 4px;border-radius:4px}
 .cn-root .md pre{background:var(--sunken);padding:8px 10px;border-radius:8px;overflow:auto;font-size:13px}
 .cn-root .md pre code{background:none;padding:0}
-.cn-root .md blockquote{margin:8px 0;padding-left:12px;border-left:2px solid var(--md-line)}
+.cn-root .md blockquote{margin:8px 0;padding-left:12px;border-left:2px solid var(--md-line);color:var(--fg2);font-style:normal}
 .cn-root .md hr{border:0;border-top:1px solid var(--md-line);margin:16px 0}
 .cn-root .md table{border-collapse:collapse;font-size:12px;line-height:1.55;margin:8px 0;width:100%}
-.cn-root .md th{font-weight:500;color:var(--md-strong);text-align:left;padding:6px 10px 6px 0;border-bottom:1px solid var(--md-line)}
-.cn-root .md td{padding:6px 10px 6px 0;border-bottom:1px solid var(--md-line);vertical-align:top}
+.cn-root .md th{font-weight:500;color:var(--md-strong);text-align:left;padding:6px 12px;border-bottom:1px solid var(--md-line)}
+.cn-root .md td{padding:6px 12px;border-bottom:1px solid var(--md-line);vertical-align:top}
 .cn-root .md tr:last-child td{border-bottom:0}
-.cn-root .ntext.streaming .caret{margin-left:2px}
+/* streamdown 默认组件只有 Tailwind 布局类，边框色是 transparent（项目不画发丝线），这里补层级 */
+.cn-root .md [data-streamdown=image-wrapper]{display:block;max-width:100%;margin:8px 0}
+.cn-root .md [data-streamdown=image]{display:block;max-width:100%;height:auto;border-radius:8px;background:var(--sunken)}
+.cn-root .md [data-streamdown=image-overlay]{display:none}
+.cn-root .md [data-streamdown=table-wrapper]{position:relative;display:block;margin:8px 0;padding:0;border:0;border-radius:10px;background:rgba(var(--ink),.03);gap:0}
+.cn-root .md [data-streamdown=table-wrapper]>div:first-child{position:absolute;top:4px;right:6px;z-index:2;justify-content:flex-end;gap:2px;padding:2px;border-radius:6px;background:var(--card);box-shadow:0 4px 14px rgba(0,0,0,.14);opacity:0;pointer-events:none;transition:opacity var(--d-quick) var(--e-std)}
+.cn-root .md [data-streamdown=table-wrapper]:hover>div:first-child,.cn-root .md [data-streamdown=table-wrapper]:focus-within>div:first-child{opacity:1;pointer-events:auto}
+.cn-root .md [data-streamdown=table-wrapper]>div:last-child{max-height:none;border:0;border-radius:inherit;background:none}
+.cn-root .md [data-streamdown=table]{width:100%}
+.cn-root .md [data-streamdown=table-header]{background:none}
+.cn-root .md [data-streamdown=table-body]{border:0}
+.cn-root .md [data-streamdown=table-wrapper] button{color:var(--fg3);padding:2px;border-radius:5px}
+.cn-root .md [data-streamdown=table-wrapper] button:hover{background:var(--hover);color:var(--fg)}
+.cn-root .md [data-streamdown=code-block]{margin:8px 0;padding:0;border:0;border-radius:10px;background:var(--sunken);gap:0;overflow:hidden}
+.cn-root .md [data-streamdown=code-block-header]{height:26px;padding:0 10px;color:var(--fg3);font-size:11px;background:rgba(var(--ink),.04)}
+.cn-root .md [data-streamdown=code-block-header] span{font-family:var(--mono)}
+.cn-root .md [data-streamdown=code-block-body]{margin:0;padding:10px 12px;border:0;border-radius:0;background:none;font-size:12px;line-height:1.6}
+.cn-root .md [data-streamdown=code-block-body] pre{background:none;padding:0;margin:0;font-size:12px;line-height:1.6;overflow:visible}
+.cn-root .md [data-streamdown=code-block-actions]{opacity:0;pointer-events:none;padding:0;gap:2px;border:0;background:none;box-shadow:none;transition:opacity var(--d-quick) var(--e-std)}
+.cn-root .md [data-streamdown=code-block]:hover [data-streamdown=code-block-actions],.cn-root .md [data-streamdown=code-block]:focus-within [data-streamdown=code-block-actions]{opacity:1;pointer-events:auto}
+.cn-root .md [data-streamdown=code-block-actions] button{color:var(--fg3);padding:2px;border-radius:5px}
+.cn-root .md [data-streamdown=code-block-actions] button:hover{background:var(--hover);color:var(--fg)}
+/* GFM 任务列表：streamdown 输出原生 checkbox，默认尺寸 / 颜色和项目不搭 */
+.cn-root .md input[type=checkbox]{width:13px;height:13px;margin:0 6px 0 0;accent-color:var(--solid);vertical-align:-2px;cursor:default}
+.cn-root .md li:has(>input[type=checkbox]){list-style:none}
+.cn-root .md li:has(>input[type=checkbox])>input{margin-left:-1.15em}
+/* 数学公式：KaTeX 自带排版，这里只补在窄气泡里不撑破 */
+.cn-root .md .katex{font-size:1.04em}
+.cn-root .md .katex-display{margin:8px 0;overflow-x:auto;overflow-y:hidden}
+.cn-root .md [data-streamdown=image]{cursor:zoom-in}
+/* 触屏没有 hover：表格 / 代码块的浮层按钮常显，桌面端仍是 hover 才出 */
+@media (hover:none){
+  .cn-root .md [data-streamdown=table-wrapper]>div:first-child{opacity:.72;pointer-events:auto}
+  .cn-root .md [data-streamdown=code-block-actions]{opacity:.72;pointer-events:auto}
+}
+/* 图片放大遮罩挂在 body 上：不在 .cn-root 里，主题变量取不到，颜色与动效写死 */
+.md-lb{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:40px;background:rgba(0,0,0,.74);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);animation:fadeIn .14s ease;cursor:zoom-out}
+.md-lb img{max-width:100%;max-height:calc(100vh - 80px);border-radius:12px;box-shadow:0 24px 80px rgba(0,0,0,.55);cursor:default}
+.md-lb-x{position:fixed;top:18px;right:18px;width:38px;height:38px;padding:0;border:0;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);transition:background .16s ease}
+.md-lb-x:hover{background:rgba(255,255,255,.24)}
+.md-lb-x svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+@media(max-width:720px),(max-height:560px){.md-lb{padding:16px}.md-lb img{max-height:calc(100vh - 32px)}}
 .cn-root .tsk{position:absolute;left:12px;right:12px;top:12px;display:flex;flex-direction:column;gap:10px}
 .cn-root .tsk i{display:block;height:10px;border-radius:5px;background:rgba(var(--ink),.22);animation:tskPulse 1.4s ease-in-out infinite}
 .cn-root .tsk i:nth-child(2){animation-delay:.15s}
@@ -1092,13 +1140,18 @@
 .cn-root .proc .prow.error .ps{color:var(--bad)}
 .cn-root .proc .pthink{margin:2px 0 4px 24px;padding:6px 10px;border-left:2px solid var(--line);color:var(--fg3);font-size:12px;line-height:1.6}
 .cn-root .proc .pthink p{margin:0}
-.cn-root .bub.md-chat .md{font-size:13px;line-height:1.7;color:inherit}
-.cn-root .bub.md-chat .md h1{font-size:18px;line-height:1.4;margin:6px 0;color:inherit}
-.cn-root .bub.md-chat .md h2{font-size:16px;line-height:1.4;margin:10px 0 6px;color:inherit}
-.cn-root .bub.md-chat .md h3,.cn-root .bub.md-chat .md h4{font-size:14px;line-height:1.4;margin:8px 0 4px;color:inherit}
-.cn-root .bub.md-chat .md ul,.cn-root .bub.md-chat .md ol{margin:4px 0;color:inherit}
-.cn-root .bub.md-chat .md li{color:inherit}
-.cn-root .bub.md-chat .md table{font-size:12px}
+/* 聊天回答：面板用 Hexta 的 Message/BubbleContent，没有 .bub 类（旧选择器从没命中）。
+   正文 13px、标题收小到 18/16/14，颜色跟随气泡；ul/ol 缩进收紧，别把宽气泡撑满。 */
+.cn-root #agent.ap2-agent .md-chat .md{font-size:13px;line-height:1.7;color:inherit}
+.cn-root #agent.ap2-agent .md-chat .md h1{font-size:18px;line-height:1.4;margin:6px 0;color:inherit}
+.cn-root #agent.ap2-agent .md-chat .md h2{font-size:16px;line-height:1.4;margin:10px 0 6px;color:inherit}
+.cn-root #agent.ap2-agent .md-chat .md h3,.cn-root #agent.ap2-agent .md-chat .md h4{font-size:14px;line-height:1.4;margin:8px 0 4px;color:inherit}
+.cn-root #agent.ap2-agent .md-chat .md h5,.cn-root #agent.ap2-agent .md-chat .md h6{font-size:13px;line-height:1.4;margin:6px 0 4px;color:inherit}
+.cn-root #agent.ap2-agent .md-chat .md ul,.cn-root #agent.ap2-agent .md-chat .md ol{margin:4px 0;padding-left:1.35em;color:inherit}
+.cn-root #agent.ap2-agent .md-chat .md li{color:inherit;margin:1px 0}
+.cn-root #agent.ap2-agent .md-chat .md table{font-size:12px}
+.cn-root #agent.ap2-agent .md-chat .md code{background:rgba(var(--ink),.1)}
+.cn-root #agent.ap2-agent .md-chat .md [data-streamdown=code-block]{background:rgba(var(--ink),.07)}
 .cn-root .mentions{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
 .cn-root .mention{display:inline-flex;align-items:center;gap:4px;height:20px;max-width:160px;padding:0 6px 0 4px;border-radius:4px;background:#282828;color:#fff9;font-size:12px;transition:color var(--d-feedback),box-shadow var(--d-feedback)}
 .cn-root .mention:hover{color:#fffc;box-shadow:inset 0 0 0 1px #ffffff14}
@@ -1123,7 +1176,7 @@
 .cn-root .ntext.md-wrap .md p{margin:3px 0;line-height:1.65}
 .cn-root .ntext.md-wrap .md ul,.cn-root .ntext.md-wrap .md ol{margin:4px 0;padding-left:1.4em}
 .cn-root .ntext.md-wrap .md table{font-size:12px}
-.cn-root .ntext.md-wrap .md th,.cn-root .ntext.md-wrap .md td{padding:5px 10px 5px 0}
+.cn-root .ntext.md-wrap .md th,.cn-root .ntext.md-wrap .md td{padding:5px 10px}
 .cn-root .gnode .gbody{background:rgba(var(--ink),.035);border:1.5px dashed rgba(var(--ink),.18);box-shadow:none}
 .cn-root .gnode.sel .gbody{border-color:rgba(var(--ink),.45)}
 .cn-root .gnode .gbody.gtinted{background:color-mix(in srgb,var(--gtint) 18%,transparent)}
@@ -1190,17 +1243,33 @@
 .cn-root .textdoc .td-ed h1{font-size:40px;line-height:1.3;font-weight:600;color:var(--md-strong);margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid var(--md-line)}
 .cn-root .textdoc .td-ed h2{font-size:32px;line-height:1.3;font-weight:600;color:var(--md-fg);margin:16px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--md-line)}
 .cn-root .textdoc .td-ed h3{font-size:24px;line-height:1.3;font-weight:600;color:var(--md-fg);margin:12px 0 7px}
+.cn-root .textdoc .td-ed h4{font-size:20px;line-height:1.35;font-weight:600;color:var(--md-fg);margin:10px 0 6px}
+.cn-root .textdoc .td-ed h5{font-size:18px;line-height:1.4;font-weight:600;color:var(--md-fg);margin:8px 0 5px}
+.cn-root .textdoc .td-ed h6{font-size:16px;line-height:1.45;font-weight:600;color:var(--md-fg);margin:8px 0 4px}
+.cn-root .textdoc .td-ed img{max-width:100%;height:auto;border-radius:8px;margin:8px 0}
 .cn-root .textdoc .td-ed p{margin:0 0 4px;line-height:1.7}
 .cn-root .textdoc .td-ed li{line-height:1.5;margin:2.4px 0}
 .cn-root .textdoc .td-ed table{font-size:14px}
-.cn-root .textdoc .td-bar{flex:0 0 auto;align-self:center;margin:0 auto 14px;display:flex;align-items:center;gap:2px;padding:6px 10px;border-radius:999px;background:var(--menu);border:0;box-shadow:0 8px 28px #00000059}
+.cn-root .textdoc .td-bar{flex:0 0 auto;align-self:center;margin:0 auto 14px;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2px;padding:6px 10px;border-radius:22px;max-width:calc(100vw - 32px);background:var(--menu);border:0;box-shadow:0 8px 28px #00000059}
 .cn-root .textdoc .tdb{width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--fg2);display:grid;place-items:center;cursor:pointer;font:inherit}
 .cn-root .textdoc .tdb:hover,.cn-root .textdoc .tdb.on{background:var(--hover);color:var(--fg)}
 .cn-root .textdoc .tdb .hx{font-size:14px;font-weight:600;line-height:1}
 .cn-root .textdoc .tdb .hx sub{font-size:9px;vertical-align:-2px;margin-left:1px}
 .cn-root .textdoc .tdb .hx.it{font-style:italic;font-family:Georgia,serif;font-weight:500}
 .cn-root .textdoc .tdb .hx.ol{font-size:12px}
+.cn-root .textdoc .tdb .hx.q{font-size:20px;line-height:1;font-family:Georgia,"Times New Roman",serif;font-weight:500}
+.cn-root .textdoc .tdb .hx.code{font-size:11px;font-weight:600;letter-spacing:-.3px}
+.cn-root .textdoc .tdb .hx.pre{font-size:11px;font-weight:600;letter-spacing:-.3px;font-family:var(--mono)}
 .cn-root .textdoc .td-sep{width:1px;height:18px;background:rgba(var(--ink),.12);margin:0 6px}
+/* 链接 / 图片地址输入：桌面壳不实现 window.prompt，编辑器自己弹一层 */
+.cn-root .textdoc .td-ask{position:absolute;inset:0;z-index:4;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.32);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);animation:fadeIn .12s var(--e-std)}
+.cn-root .textdoc .td-ask-card{width:min(380px,100%);padding:16px;border-radius:14px;background:var(--card);box-shadow:0 18px 50px #00000059;display:flex;flex-direction:column;gap:10px;animation:popIn .14s var(--e-std)}
+.cn-root .textdoc .td-ask-t{font-size:13px;font-weight:600;color:var(--fg)}
+.cn-root .textdoc .td-ask-i{height:34px;padding:0 10px;border:0;border-radius:9px;background:var(--raised);color:var(--fg);font:inherit;font-size:13px}
+.cn-root .textdoc .td-ask-b{display:flex;justify-content:flex-end;gap:8px}
+.cn-root .textdoc .td-ask-b button{height:30px;padding:0 14px;border:0;border-radius:8px;background:var(--hover);color:var(--fg);font:inherit;font-size:12px;cursor:pointer}
+.cn-root .textdoc .td-ask-b button.primary{background:var(--solid);color:var(--on-solid);font-weight:600}
+.cn-root .textdoc .td-ask-b button.primary:hover{opacity:.86}
 @media(max-width:960px){
   .cn-root .textdoc .td-ed{padding:20px}
 }

@@ -21,51 +21,15 @@
 @source "./components/hexta";
 @source "./canvas/tapnow";
 @source "./canvas/canvas-next/agent";
+/* streamdown 的布局 / 工具按钮全靠 Tailwind 类（包内是运行期字符串），不扫就只剩裸文字 */
+@source "../node_modules/streamdown/dist/*.js";
 
 
-/* 未从 src/main.tsx 出发可达的 HextaUI 组件不参与 Tailwind 扫描（上面 @source 会全扫 66 个）。
-   源文件全部保留、只是不生成它们的 utility CSS。**要用被排除的组件，先删掉它对应的那一行 @source not**，
-   否则组件会掉样式（这条规则同样适用于运行时动态引用的场景）。
-   当前可达（27 个，从 src/main.tsx 出发实测）：
-   alert、aspect-ratio、attachment、badge、bubble、button-group、button、card、carousel、checkbox、collapsible、empty、input-group、input、item、kbd、marker、message-scroller、message、number-flow、progress、questionnaire、scroll-area、separator、skeleton、spinner、tooltip
-   说明：dialog / popover / sheet / tabs / toast 只被 date-picker、dialog、alert-dialog、drawer 这些「本身不可达」的组件引用，
-   不会进 bundle，所以也排除；scroll-area 经 attachment 可达，已放行。
-@source not "./components/hexta/accordion.tsx";
-@source not "./components/hexta/alert-dialog.tsx";
-@source not "./components/hexta/avatar.tsx";
-@source not "./components/hexta/breadcrumb.tsx";
-@source not "./components/hexta/calendar.tsx";
-@source not "./components/hexta/chart.tsx";
-@source not "./components/hexta/combobox.tsx";
-@source not "./components/hexta/command.tsx";
-@source not "./components/hexta/context-menu.tsx";
-@source not "./components/hexta/data-table.tsx";
-@source not "./components/hexta/date-picker.tsx";
-@source not "./components/hexta/dialog.tsx";
-@source not "./components/hexta/drawer.tsx";
-@source not "./components/hexta/field.tsx";
-@source not "./components/hexta/hover-card.tsx";
-@source not "./components/hexta/input-otp.tsx";
-@source not "./components/hexta/label.tsx";
-@source not "./components/hexta/menubar.tsx";
-@source not "./components/hexta/native-select.tsx";
-@source not "./components/hexta/navigation-menu.tsx";
-@source not "./components/hexta/pagination.tsx";
-@source not "./components/hexta/popover.tsx";
-@source not "./components/hexta/radio-group.tsx";
-@source not "./components/hexta/resizable.tsx";
-@source not "./components/hexta/safe-area.tsx";
-@source not "./components/hexta/sheet.tsx";
-@source not "./components/hexta/sidebar.tsx";
-@source not "./components/hexta/slider.tsx";
-@source not "./components/hexta/switch.tsx";
-@source not "./components/hexta/table.tsx";
-@source not "./components/hexta/tabs.tsx";
-@source not "./components/hexta/toast.tsx";
-@source not "./components/hexta/toggle-group.tsx";
-@source not "./components/hexta/toggle.tsx";
-@source not "./components/hexta/tree.tsx";
-@source not "./components/hexta/video-player.tsx";
+/* HextaUI 组件全部参与 Tailwind 扫描（上面 @source 扫 66 个，运行期动态引用也不会掉样式）。
+   源文件全保留；这里不再按「可达性」排除组件。老版本按需排除过 36 个，但实测 tailwindcss 4.3.4
+   的 @source not 压不住显式 @source 目录里的候选（在被排除的文件里加 z-[1377] 仍会产出 CSS），
+   所以那些排除从未生效：删掉前后 canvas.css 都是 840,501 B（gzip 126,317 B），逐字节一致。 */
+
 
 /* BEAT 把主题写在 .cn-root 的 data-theme 上（dark / light），HextaUI 组件的 dark: 类要跟着它切。 */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));

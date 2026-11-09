@@ -21,6 +21,8 @@ const { trayIconCandidates, firstExistingTrayIcon } = require('./tray-icon');
 // 若被无关程序占用，resolvePort 自动顺延到 3001+。
 const DEFAULT_PORT = 3000;
 let backendProc = null;
+// 后端实际使用的端口（自己 spawn 或复用已有进程都记录），更新前靠它释放端口。
+let backendPort = 0;
 let mainWindow = null;
 let tray = null;
 // 最近一次确定的应用地址：窗口被销毁后（托盘/二次启动）靠它重建窗口。
@@ -86,6 +88,49 @@ function resolveBackendBinary() {
     }
   }
   return null;
+}
+
+// Windows 安装包内置 GPL 静态版 ffmpeg/ffprobe（打包后位于 resources/bin/win；含 libx264，压缩 / 导出可用）。
+// 参数可注入，便于 node 单测（tests/test_desktop_bundled_ffmpeg.js）；平台不匹配一律返回 null。
+function resolveBundledFfmpeg(platform, resourcesPath) {
+  if ((platform || process.platform) !== 'win32') return null;
+  const root = resourcesPath === undefined ? process.resourcesPath : resourcesPath;
+  if (!root) return null;
+  const dir = path.join(root, 'bin', 'win');
+  const ffmpeg = path.join(dir, 'ffmpeg.exe');
+  const ffprobe = path.join(dir, 'ffprobe.exe');
+  try {
+    if (!fs.existsSync(ffmpeg)) return null;
+    return { ffmpeg, ffprobe: fs.existsSync(ffprobe) ? ffprobe : null };
+  } catch (_) {
+    return null;
+  }
+}
+
+// 把内置 ffmpeg 写进后端环境变量：只 win32；用户显式设置的 FFMPEG_PATH 优先（便于换自编译版本）。
+function applyBundledFfmpegEnv(backendEnv, platform, resourcesPath) {
+  if ((platform || process.platform) !== 'win32') return null;
+  const explicit = String(backendEnv.FFMPEG_PATH || '').trim();
+  if (explicit) {
+    return { ffmpeg: explicit, ffprobe: String(backendEnv.FFPROBE_PATH || '').trim() || null, keptExisting: true };
+  }
+  const bundled = resolveBundledFfmpeg(platform, resourcesPath);
+  if (!bundled) return null;
+  backendEnv.FFMPEG_PATH = bundled.ffmpeg;
+  if (bundled.ffprobe) backendEnv.FFPROBE_PATH = bundled.ffprobe;
+  return bundled;
+}
+
+// 版本探测只写日志：异步执行，失败不影响后端启动。
+function logFfmpegVersion(binary) {
+  execFile(binary, ['-version'], { timeout: 5000, windowsHide: true }, (err, stdout) => {
+    if (err) {
+      clog('boot', 'ffmpeg 版本探测失败: ' + (err.message || err));
+      return;
+    }
+    const firstLine = String(stdout || '').split(/\r?\n/)[0].trim();
+    if (firstLine) clog('boot', 'ffmpeg 版本: ' + firstLine);
+  });
 }
 
 // 数据目录：与正式版 launcher.py 完全一致（Windows = APPDATA/NOVAI，macOS/Linux = ~/NOVAI），
@@ -183,6 +228,7 @@ function looksLikeNovaiBackend(port) {
 function startBackend(port) {
   return new Promise(async (resolve, reject) => {
     backendStopExpected = false;
+    backendPort = port;
     const mainPy = resolveMainPy();
     const binary = resolveBackendBinary();
 
@@ -201,6 +247,16 @@ function startBackend(port) {
     // 后端写探测失败会自动回落到数据目录（~/NOVAI 或 APPDATA/NOVAI）。
     if (app.isPackaged && process.platform === 'win32') {
       backendEnv.NOVAI_INSTALL_DIR = path.dirname(process.execPath);
+    }
+    // Windows 安装包自带 ffmpeg/ffprobe（resources/bin/win）：注入给后端，不依赖用户机器预装。
+    // macOS/Linux 不设置，后端继续用系统 PATH 里的 ffmpeg，行为不变。
+    const bundledFfmpeg = applyBundledFfmpegEnv(backendEnv, process.platform, process.resourcesPath);
+    if (bundledFfmpeg) {
+      clog('boot', (bundledFfmpeg.keptExisting ? '沿用已设置的 FFMPEG_PATH: ' : '内置 ffmpeg: ')
+        + bundledFfmpeg.ffmpeg + (bundledFfmpeg.ffprobe ? '（含 ffprobe）' : '（缺少 ffprobe，后端会回退到 PATH）'));
+      if (!bundledFfmpeg.keptExisting) logFfmpegVersion(bundledFfmpeg.ffmpeg);
+    } else if (process.platform === 'win32') {
+      clog('boot', '未发现内置 ffmpeg，后端将使用系统 PATH 里的 ffmpeg');
     }
     // Windows 从开始菜单/桌面快捷方式启动时，进程 PATH 里没有 npm 全局目录和 OpenClaw 私有 Node，
     // 后端就找不到 openclaw.cmd / node.exe，扩展里的 openclaw 恒为不可用。
@@ -268,17 +324,105 @@ function startBackend(port) {
 }
 
 // ---------- 清理 ----------
+// Windows 上 PyInstaller 是“引导进程 + 同名子进程”，只 kill 父进程会留下子进程占住安装目录里的 exe。
 function shutdownBackend() {
   backendStopExpected = true;
-  if (backendProc && !backendProc.killed) {
-    try { backendProc.kill(); } catch (_) {}
+  if (!backendProc || backendProc.killed) return;
+  if (process.platform === 'win32') {
+    try { spawn('taskkill', ['/F', '/T', '/PID', String(backendProc.pid)], { stdio: 'ignore' }); } catch (_) {}
+    return;
   }
+  try { backendProc.kill(); } catch (_) {}
+}
+
+// 从 Windows netstat -ano 输出里解析在指定端口 LISTENING 的 PID。
+// 中文系统只有表头不同，状态列仍是 LISTENING；解析不到一律返回空数组，不抛错。
+function parseNetstatListenPids(text, port) {
+  try {
+    const target = Number(port);
+    if (!text || !Number.isFinite(target)) return [];
+    const pids = [];
+    const seen = new Set();
+    String(text).split(/\r?\n/).forEach((line) => {
+      const match = /^\s*TCP(?:v6)?\s+(\S+)\s+\S+\s+LISTENING\s+(\d+)\s*$/i.exec(line);
+      if (!match) return;
+      const pid = Number(match[2]);
+      if (!pid || seen.has(pid)) return;
+      const local = match[1];
+      const sep = local.lastIndexOf(':');
+      if (sep < 0 || Number(local.slice(sep + 1)) !== target) return;
+      seen.add(pid);
+      pids.push(pid);
+    });
+    return pids;
+  } catch (_) {
+    return [];
+  }
+}
+
+// 安装前彻底释放后端端口：backendProc 为空（复用外部/上次残留的后端）时，
+// 这个外部 Python 进程同样会占住安装目录里的文件，导致 Windows 安装器覆盖失败。
+function freeBackendPort(timeoutMs) {
+  const limit = timeoutMs || 8000;
+  const port = backendPort;
+  if (process.platform !== 'win32') return Promise.resolve(true);
+  if (!port) {
+    clog('updater', '本次没有使用本地后端端口，跳过端口释放');
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let startedAt = 0;
+    const finish = (freed) => {
+      if (settled) return;
+      settled = true;
+      resolve(freed);
+    };
+    const waitForRelease = () => {
+      if (!startedAt) startedAt = Date.now();
+      isPortInUse(port).then((inUse) => {
+        if (!inUse) {
+          clog('updater', '后端端口 ' + port + ' 已释放');
+          return finish(true);
+        }
+        if (Date.now() - startedAt >= limit) {
+          clog('updater', '后端端口 ' + port + ' 在 ' + limit + 'ms 内仍未释放，继续安装（安装器可能因文件占用失败）');
+          return finish(false);
+        }
+        setTimeout(waitForRelease, 300);
+      }).catch((err) => {
+        clog('updater', '检查端口 ' + port + ' 是否释放失败: ' + (err && err.message || err));
+        finish(false);
+      });
+    };
+    execFile('netstat', ['-ano'], { timeout: 5000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+      if (err) clog('updater', 'netstat -ano 执行失败，直接轮询端口: ' + (err && err.message || err));
+      const pids = err ? [] : parseNetstatListenPids(stdout, port);
+      if (!pids.length) {
+        clog('updater', 'netstat 未发现监听 ' + port + ' 的进程');
+        return waitForRelease();
+      }
+      clog('updater', '端口 ' + port + ' 被 PID ' + pids.join(', ') + ' 占用，逐个结束');
+      let index = 0;
+      const killNext = () => {
+        if (index >= pids.length) return waitForRelease();
+        const pid = pids[index];
+        index += 1;
+        execFile('taskkill', ['/F', '/T', '/PID', String(pid)], { timeout: 10000, windowsHide: true }, (killErr, killOut, killErrOut) => {
+          const detail = String(killOut || killErrOut || '').trim().replace(/\s+/g, ' ');
+          clog('updater', 'taskkill /F /T /PID ' + pid + ' → ' + (killErr ? '失败: ' + (killErr.message || killErr) : '成功') + (detail ? '（' + detail + '）' : ''));
+          killNext();
+        });
+      };
+      killNext();
+    });
+  });
 }
 
 // 安装新版前必须先让后端彻底退出，否则 Windows 安装程序覆盖 NOVAI.exe 会被占用中的文件挡住。
 function stopBackendForUpdate(timeoutMs) {
   const limit = timeoutMs || 15000;
-  return new Promise((resolve) => {
+  const stopOwnedProc = new Promise((resolve) => {
     const proc = backendProc;
     if (!proc || proc.killed || !proc.pid) return resolve();
     backendStopExpected = true;
@@ -305,6 +449,8 @@ function stopBackendForUpdate(timeoutMs) {
       try { proc.kill(); } catch (_) {}
     }
   });
+  // 即使 backendProc 为空（复用了外部/残留后端）也必须释放端口，这是 Windows 覆盖安装的前提。
+  return stopOwnedProc.then(() => freeBackendPort(Math.min(limit, 8000)));
 }
 
 // ---------- 托盘 ----------
@@ -2401,6 +2547,11 @@ let installPromptOpen = false;
 // 手动触发的检查结束（且没新版本）时要给用户一句反馈；启动自动检查不打扰
 let manualUpdateCheck = false;
 
+// 镜像更新地址：CI 把产物同步到 bllack/NOVAI-releases 模型仓库的 electron-release/ 目录。
+const UPDATE_MIRROR_URL = 'https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/electron-release';
+const MAC_MIRROR_MANIFEST_URL = UPDATE_MIRROR_URL + '/latest-mac.yml';
+const UPDATE_GITHUB_FEED = { provider: 'github', owner: 'invaders-2', repo: 'NOVAI-Infinite-Canvas' };
+
 function updaterSupported() {
   return !!(app.isPackaged && autoUpdater);
 }
@@ -2442,7 +2593,15 @@ function showUpdateInstallPrompt() {
   }).then(({ response }) => {
     installPromptOpen = false;
     if (response === 0) {
-      stopBackendForUpdate().then(() => autoUpdater.quitAndInstall());
+      sendUpdateProgress({ stage: 'installing', percent: 100, final: true });
+      stopBackendForUpdate().then(() => {
+        if (process.platform === 'win32') {
+          // Windows 一键安装包：静默覆盖并按 isForceRunAfter 自动拉起新版本，不再弹安装向导
+          autoUpdater.quitAndInstall(true, true);
+          return;
+        }
+        autoUpdater.quitAndInstall();
+      });
     }
   }).catch(() => { installPromptOpen = false; });
 }
@@ -2592,6 +2751,177 @@ function downloadMacUpdateZip(url, dest, expectedSha512, expectedSize) {
   });
 }
 
+// 版本比较：2.0.5 > 2.0.4；正式版比同号预发布版新。
+function compareUpdateVersions(a, b) {
+  const parse = (value) => {
+    const text = String(value || '').trim().replace(/^v/i, '');
+    const dash = text.indexOf('-');
+    const core = dash >= 0 ? text.slice(0, dash) : text;
+    return { nums: core.split('.').map((part) => Number(part) || 0), pre: dash >= 0 ? text.slice(dash + 1) : '' };
+  };
+  const left = parse(a);
+  const right = parse(b);
+  for (let i = 0; i < Math.max(left.nums.length, right.nums.length); i += 1) {
+    const diff = (left.nums[i] || 0) - (right.nums[i] || 0);
+    if (diff) return diff > 0 ? 1 : -1;
+  }
+  if (left.pre === right.pre) return 0;
+  if (!left.pre) return 1;
+  if (!right.pre) return -1;
+  return left.pre > right.pre ? 1 : -1;
+}
+
+// latest-mac.yml 是 electron-builder 固定结构，复用 mac-updater 的行解析，不引 yaml 依赖。
+function parseMirrorMacManifest(text) {
+  const yml = macUpdater.parseLatestMacYml(text);
+  const version = String(yml.version || '').trim();
+  if (!version) return { ok: false, reason: 'manifest-without-version' };
+  const zipFile = macUpdater.pickMacZipFile(yml.files);
+  if (!zipFile || !zipFile.url) return { ok: false, reason: 'manifest-without-zip' };
+  return {
+    ok: true,
+    version: version,
+    url: String(zipFile.url).trim(),
+    sha512: String(zipFile.sha512 || '').trim(),
+    size: Number(zipFile.size) || 0,
+  };
+}
+
+function resolveMirrorAssetUrl(fileUrl, mirrorBase) {
+  const raw = String(fileUrl || '').trim();
+  if (!raw) throw new Error('镜像安装包地址为空');
+  if (/^https:\/\//i.test(raw)) return raw;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) throw new Error('镜像安装包地址必须是 https: ' + raw.slice(0, 120));
+  return String(mirrorBase || '').replace(/\/+$/, '') + '/' + raw.replace(/^\/+/, '');
+}
+
+// 纯函数：镜像 manifest → 可用更新。字段缺失 / 版本不新都返回 ok:false，由调用方回退 GitHub。
+function pickMirrorMacUpdate(manifestText, currentVersion, mirrorBase) {
+  const manifest = parseMirrorMacManifest(manifestText);
+  if (!manifest.ok) return manifest;
+  if (compareUpdateVersions(manifest.version, currentVersion) <= 0) {
+    return { ok: false, reason: 'mirror-not-newer: ' + manifest.version + ' <= ' + String(currentVersion || ''), version: manifest.version };
+  }
+  try {
+    return {
+      ok: true,
+      version: manifest.version,
+      url: resolveMirrorAssetUrl(manifest.url, mirrorBase),
+      sha512: manifest.sha512,
+      size: manifest.size,
+    };
+  } catch (err) {
+    return { ok: false, reason: String(err && err.message || err) };
+  }
+}
+
+function fetchUpdateManifest(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const limit = Math.max(1000, Number(timeoutMs) || 15000);
+    let settled = false;
+    let timer = null;
+    let request = null;
+    const finish = (err, text) => {
+      if (settled) return;
+      settled = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (err) reject(err);
+      else resolve(text);
+    };
+    try { request = net.request({ url: url, method: 'GET', redirect: 'follow', cache: false }); } catch (err) { return finish(err); }
+    timer = setTimeout(() => {
+      try { request.abort(); } catch (_) {}
+      finish(new Error('镜像 manifest 请求超时'));
+    }, limit);
+    request.on('response', (response) => {
+      const status = Number(response.statusCode) || 0;
+      const chunks = [];
+      response.on('data', (chunk) => { if (!settled) chunks.push(chunk); });
+      response.on('end', () => {
+        if (status < 200 || status >= 300) return finish(new Error('HTTP ' + status));
+        finish(null, Buffer.concat(chunks).toString('utf8'));
+      });
+      response.on('error', (err) => finish(err));
+    });
+    request.on('error', (err) => finish(err));
+    request.end();
+  });
+}
+
+async function resolveMirrorMacUpdate(currentVersion) {
+  const text = await fetchUpdateManifest(MAC_MIRROR_MANIFEST_URL, 15000);
+  const picked = pickMirrorMacUpdate(text, currentVersion, UPDATE_MIRROR_URL);
+  if (picked.ok) clog('updater', '镜像 latest-mac.yml 可用: v' + picked.version + ' → ' + picked.url);
+  else clog('updater', '镜像 latest-mac.yml 不可用: ' + picked.reason);
+  return picked;
+}
+
+// 先镜像后 GitHub：镜像 manifest / 下载 / 校验任何一步失败都回退 GitHub 原逻辑，
+// 抛错只可能来自 GitHub 分支。
+async function withMacUpdateSource(mirrorAttempt, githubAttempt) {
+  let reason = '';
+  try {
+    const mirror = await mirrorAttempt();
+    if (mirror && mirror.ok) return mirror;
+    reason = (mirror && mirror.reason) || 'mirror-unavailable';
+  } catch (err) {
+    reason = String(err && err.message || err);
+  }
+  clog('updater', '镜像更新不可用，回退 GitHub: ' + reason);
+  const github = await githubAttempt();
+  return Object.assign({ source: 'github' }, github || {});
+}
+
+// 下载并校验一个来源的 zip（镜像和 GitHub 共用），校验失败抛错由上层决定是否回退。
+async function prepareMacZip(opts) {
+  const options = opts || {};
+  const source = options.source || 'github';
+  const version = String(options.version || '');
+  const zipUrl = String(options.zipUrl || '');
+  const updatesDir = macUpdatesDir();
+  fs.mkdirSync(updatesDir, { recursive: true });
+  const fileName = path.basename(new URL(zipUrl).pathname) || ('NOVAI-' + version + '-arm64-mac.zip');
+  const zipPath = path.join(updatesDir, fileName);
+  const expectedSha = String(options.sha512 || '');
+  const expectedSize = Number(options.size) || 0;
+  const attemptUrls = [zipUrl].concat((options.altUrls || []).filter((item) => item && item !== zipUrl));
+  const cached = fs.existsSync(zipPath)
+    && (!expectedSize || fs.statSync(zipPath).size === expectedSize)
+    && (!expectedSha || await macUpdater.verifySha512(zipPath, expectedSha));
+  if (cached) {
+    clog('updater', '复用已下载的安装包（源=' + source + '）: ' + zipPath);
+    sendUpdateProgress({ stage: 'downloading', percent: 100, transferred: expectedSize, total: expectedSize, cached: true });
+    return zipPath;
+  }
+  updateStage = 'downloading';
+  try { fs.rmSync(zipPath, { force: true }); } catch (_) {}
+  clog('updater', '开始下载 macOS 更新包（源=' + source + '，版本=' + version + '）: ' + attemptUrls[0]);
+  for (let attempt = 0; attempt < attemptUrls.length; attempt += 1) {
+    if (attempt > 0) clog('updater', '改用备用地址重试(' + attempt + '/' + (attemptUrls.length - 1) + '): ' + attemptUrls[attempt]);
+    try {
+      await downloadMacUpdateZip(attemptUrls[attempt], zipPath, expectedSha, expectedSize);
+      clog('updater', '更新包下载完成（源=' + source + '）: ' + attemptUrls[attempt]);
+      break;
+    } catch (err) {
+      const message = String(err && err.message || err);
+      clog('updater', '下载失败(' + (attempt + 1) + '/' + attemptUrls.length + '，源=' + source + '): ' + attemptUrls[attempt] + ' → ' + message);
+      if (!/HTTP \d+/.test(message) || attempt === attemptUrls.length - 1) throw err;
+    }
+  }
+  if (expectedSha && !(await macUpdater.verifySha512(zipPath, expectedSha))) {
+    try { fs.rmSync(zipPath, { force: true }); } catch (_) {}
+    throw new Error('安装包 sha512 校验失败（源=' + source + '）');
+  }
+  if (expectedSize) {
+    const actualSize = fs.statSync(zipPath).size;
+    if (actualSize !== expectedSize) {
+      try { fs.rmSync(zipPath, { force: true }); } catch (_) {}
+      throw new Error('安装包大小校验失败（源=' + source + '）: ' + actualSize + ' != ' + expectedSize);
+    }
+  }
+  return zipPath;
+}
+
 // 主流程：下载/复用缓存 → 解压 → 校验 .app → 生成安装脚本 → 启动脚本 → 停后端并退出。
 async function startMacSelfUpdate(info, skipPrompt) {
   if (process.platform !== 'darwin') return { ok: false, supported: false, reason: 'not-darwin' };
@@ -2609,60 +2939,49 @@ async function startMacSelfUpdate(info, skipPrompt) {
       if (!fs.existsSync(zipPath)) throw new Error('测试钩子指定的 zip 不存在: ' + zipPath);
       version = process.env.NOVAI_UPDATE_VERSION || macUpdater.versionFromZipName(zipPath);
     } else {
-      if (!info) throw new Error('缺少更新信息');
-      version = String(info.version || '');
-      const updateTag = info && info.tag;   // electron-updater 给的真实 Release tag，如 v2.0.03
-      const zipFile = macUpdater.pickMacZipFile(info && info.files);
-      if (!zipFile) throw new Error('更新信息里没有 zip 安装包');
-      const zipUrl = macUpdater.resolveMacZipUrl(zipFile.url, version, updateTag);
-      const fileName = path.basename(new URL(zipUrl).pathname) || ('NOVAI-' + version + '-arm64-mac.zip');
-      zipPath = path.join(updatesDir, fileName);
-      const expectedSha = String(zipFile.sha512 || '');
-      const expectedSize = Number(zipFile.size) || 0;
-      const cached = fs.existsSync(zipPath)
-        && (!expectedSize || fs.statSync(zipPath).size === expectedSize)
-        && (!expectedSha || await macUpdater.verifySha512(zipPath, expectedSha));
-      if (cached) {
-        clog('updater', '复用已下载的安装包: ' + zipPath + '（tag=' + (updateTag || '') + '）');
-        sendUpdateProgress({ stage: 'downloading', percent: 100, transferred: expectedSize, total: expectedSize, cached: true });
-      } else {
-        updateStage = 'downloading';
-        try { fs.rmSync(zipPath, { force: true }); } catch (_) {}
+      // 先试国内镜像（github.com 常被 reset），镜像任何一步失败都回退现有 GitHub 逻辑。
+      const prepared = await withMacUpdateSource(async () => {
+        const mirror = await resolveMirrorMacUpdate(app.getVersion());
+        if (!mirror.ok) return mirror;
+        const mirrorZip = await prepareMacZip({
+          source: 'mirror',
+          version: mirror.version,
+          zipUrl: mirror.url,
+          sha512: mirror.sha512,
+          size: mirror.size,
+        });
+        return { ok: true, source: 'mirror', version: mirror.version, zipPath: mirrorZip };
+      }, async () => {
+        if (!info) throw new Error('缺少更新信息');
+        const githubVersion = String(info.version || '');
+        const updateTag = info && info.tag;   // electron-updater 给的真实 Release tag，如 v2.0.03
+        const zipFile = macUpdater.pickMacZipFile(info && info.files);
+        if (!zipFile) throw new Error('更新信息里没有 zip 安装包');
+        const zipUrl = macUpdater.resolveMacZipUrl(zipFile.url, githubVersion, updateTag);
         // 主地址用真实 tag；下载返回非 2xx 时，再用「版本号补零」的 tag 兜底试一次
-        const attemptUrls = [zipUrl];
-        const altTag = macUpdater.releaseTagFromVersion(version);
+        const altUrls = [];
+        const altTag = macUpdater.releaseTagFromVersion(githubVersion);
         if (altTag) {
-          const altUrl = macUpdater.resolveMacZipUrl(zipFile.url, version, altTag);
-          if (altUrl && altUrl !== zipUrl) attemptUrls.push(altUrl);
+          const altUrl = macUpdater.resolveMacZipUrl(zipFile.url, githubVersion, altTag);
+          if (altUrl && altUrl !== zipUrl) altUrls.push(altUrl);
         }
-        clog('updater', '开始下载 macOS 更新包: ' + attemptUrls[0] + '（tag=' + (updateTag || '') + '）');
-        for (let attempt = 0; attempt < attemptUrls.length; attempt += 1) {
-          if (attempt > 0) clog('updater', '改用备用 tag 重试(' + attempt + '/' + (attemptUrls.length - 1) + '): ' + attemptUrls[attempt]);
-          try {
-            await downloadMacUpdateZip(attemptUrls[attempt], zipPath, expectedSha, expectedSize);
-            clog('updater', '更新包下载完成: ' + attemptUrls[attempt]);
-            break;
-          } catch (err) {
-            const message = String(err && err.message || err);
-            clog('updater', '下载失败(' + (attempt + 1) + '/' + attemptUrls.length + '): ' + attemptUrls[attempt] + ' → ' + message);
-            if (!/HTTP \d+/.test(message) || attempt === attemptUrls.length - 1) throw err;
-          }
-        }
-      }
-      if (expectedSha && !(await macUpdater.verifySha512(zipPath, expectedSha))) {
-        try { fs.rmSync(zipPath, { force: true }); } catch (_) {}
-        throw new Error('安装包 sha512 校验失败');
-      }
-      if (expectedSize) {
-        const actualSize = fs.statSync(zipPath).size;
-        if (actualSize !== expectedSize) {
-          try { fs.rmSync(zipPath, { force: true }); } catch (_) {}
-          throw new Error('安装包大小校验失败: ' + actualSize + ' != ' + expectedSize);
-        }
-      }
+        const githubZip = await prepareMacZip({
+          source: 'github',
+          version: githubVersion,
+          zipUrl: zipUrl,
+          altUrls: altUrls,
+          sha512: zipFile.sha512,
+          size: zipFile.size,
+        });
+        return { ok: true, source: 'github', version: githubVersion, zipPath: githubZip };
+      });
+      version = String(prepared.version || '');
+      zipPath = String(prepared.zipPath || '');
+      clog('updater', '本次 macOS 更新源=' + prepared.source + '，版本=' + (version || '') + '，安装包=' + zipPath);
     }
 
     updateStage = 'installing';
+    // 这里还不能算 install 已开始（后面解压/校验仍可能失败），final 等脚本真正启动再发。
     sendUpdateProgress({ stage: 'installing', percent: 100 });
     tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'novai-update-'));
     clog('updater', '解压更新包: ' + zipPath + ' → ' + tmpDir);
@@ -2699,7 +3018,7 @@ async function startMacSelfUpdate(info, skipPrompt) {
     const child = spawn('/bin/sh', [scriptPath], { detached: true, stdio: 'ignore' });
     child.unref();
     clog('updater', 'mac 自替换脚本已启动: ' + scriptPath + ' target=' + targetApp + ' version=' + (version || appCheck.version || ''));
-    sendUpdateProgress({ stage: 'installing', percent: 100, restarting: true });
+    sendUpdateProgress({ stage: 'installing', percent: 100, restarting: true, final: true });
     updateStage = 'installing';
     // 先让后端收尾再退：直接 app.exit 会留下半截进程/端口，替换脚本也可能被占用。
     setTimeout(() => {
@@ -2815,6 +3134,28 @@ function ensureAppUpdateConfig() {
   }
 }
 
+// 更新源顺序：Windows 上 GitHub Releases 常被 reset、镜像里的 exe 也可能没同步，
+// 镜像优先、失败回退 GitHub；其它平台保持原来的 GitHub 优先。
+function updateFeedOrder(platform) {
+  const mirror = { source: 'mirror', label: '国内镜像', config: { provider: 'generic', url: UPDATE_MIRROR_URL } };
+  const github = { source: 'github', label: 'GitHub', config: UPDATE_GITHUB_FEED };
+  return platform === 'win32' ? [mirror, github] : [github, mirror];
+}
+
+// 返回下一个还没试过的更新源（null = 都试过了）。每个源最多切一次，避免死循环。
+function nextUntriedFeed(order, attemptedSources) {
+  const list = Array.isArray(order) ? order : [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (!attemptedSources || !attemptedSources.has(list[i].source)) return list[i];
+  }
+  return null;
+}
+
+function applyUpdateFeed(feed) {
+  autoUpdater.setFeedURL(feed.config);
+  clog('updater', '更新源=' + feed.label + '（' + feed.source + '）' + (feed.config.url ? ': ' + feed.config.url : ''));
+}
+
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
   ensureAppUpdateConfig();
@@ -2826,14 +3167,20 @@ function setupAutoUpdate() {
   updateStage = 'checking';
   // 测试版（版本号含 -，如 1.0.112-beta.1）允许接收 prerelease 更新；正式版只看正式 Release。
   autoUpdater.allowPrerelease = app.getVersion().includes('-');
-  // 国内用户访问 GitHub Releases 常被阻断：检查失败时自动切换到该
-  // generic 更新地址，产物由 CI 同步到 bllack/NOVAI-releases 模型仓库的
-  // electron-release/ 目录。
-  const MIRROR_UPDATE_URL = 'https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/electron-release';
-  let switchedToMirror = false;
+  const feedOrder = updateFeedOrder(process.platform);
+  const attemptedSources = new Set();
+  let currentFeed = feedOrder[0];
+  let resumeDownloadAfterFeedSwitch = false;
+  attemptedSources.add(currentFeed.source);
+  try {
+    applyUpdateFeed(currentFeed);
+  } catch (err) {
+    clog('updater', '更新源初始化失败: ' + (err && err.message || err));
+  }
   autoUpdater.on('checking-for-update', () => { updateStage = 'checking'; });
   autoUpdater.on('update-not-available', () => {
     updateStage = 'idle';
+    resumeDownloadAfterFeedSwitch = false;
     // 只有用户主动点「一键更新」才提示「已是最新版本」，启动时的自动检查保持安静
     if (!manualUpdateCheck) return;
     manualUpdateCheck = false;
@@ -2848,44 +3195,74 @@ function setupAutoUpdate() {
     manualUpdateCheck = false;
     const next = info && info.version;
     // 版本号相同（镜像/缓存回放）不算更新，否则会一直停在 available 让「立即更新」重复下载
-    if (!next || next === app.getVersion()) { updateStage = 'idle'; return; }
+    if (!next || next === app.getVersion()) { updateStage = 'idle'; resumeDownloadAfterFeedSwitch = false; return; }
     updateStage = 'available';
     pendingUpdateInfo = info;
     if (process.platform === 'darwin') { showMacUpdateAvailablePrompt(info); return; }
+    // 上一个源是在下载阶段失败的：切源后直接续下，不再让用户点一次「立即更新」
+    if (resumeDownloadAfterFeedSwitch) {
+      resumeDownloadAfterFeedSwitch = false;
+      updateStage = 'downloading';
+      clog('updater', '切换后的更新源已找到 v' + next + '，继续下载');
+      try { autoUpdater.downloadUpdate(); return; } catch (err) { clog('updater', '切换后继续下载失败: ' + (err && err.message || err)); }
+    }
     showUpdateAvailablePrompt(info);
   });
-  autoUpdater.on('download-progress', () => { updateStage = 'downloading'; });
+  autoUpdater.on('download-progress', (p) => {
+    updateStage = 'downloading';
+    // macOS 走自替换链路，进度由 startMacSelfUpdate 自己发；Windows 需要在这里转发给界面
+    if (process.platform === 'darwin') return;
+    const info = p || {};
+    sendUpdateProgress({
+      stage: 'downloading',
+      percent: Math.round(info.percent || 0),
+      transferred: info.transferred || 0,
+      total: info.total || 0,
+    });
+  });
   autoUpdater.on('update-downloaded', () => {
     updateStage = 'downloaded';
     manualUpdateCheck = false;
     // macOS 走自替换链路（见 startMacSelfUpdate），不再弹旧的「手动覆盖安装」对话框
-    if (process.platform !== 'darwin') showUpdateInstallPrompt();
+    if (process.platform === 'darwin') return;
+    sendUpdateProgress({ stage: 'installing', percent: 100 });
+    showUpdateInstallPrompt();
   });
   autoUpdater.on('error', (err) => {
     // 后面还要按失败阶段选文案，先把阶段存下来（错误处理里会复位状态）
     const failedStage = updateStage;
     const stageLabel = { checking: '检查更新', available: '检查更新', downloading: '下载更新包', downloaded: '安装更新' }[failedStage] || '检查更新';
-    clog('updater', '[' + stageLabel + '] 更新失败: ' + (err && err.message || err));
-    // GitHub 不通时切换到国内镜像重试一次（仅切换一次，避免死循环）；安装阶段重试下载没有意义
-    if (!switchedToMirror && failedStage !== 'downloaded') {
-      switchedToMirror = true;
-      try {
-        autoUpdater.setFeedURL({ provider: 'generic', url: MIRROR_UPDATE_URL });
-        clog('updater', '已切换到国内镜像更新源: ' + MIRROR_UPDATE_URL);
-        updateStage = 'checking';
-        autoUpdater.checkForUpdates();
-        return;
-      } catch (e) {
-        clog('updater', '镜像更新源切换失败: ' + (e && e.message || e));
+    const rawError = String(err && err.message || err);
+    clog('updater', '[' + stageLabel + '] 更新失败（源=' + currentFeed.label + '）: ' + rawError);
+    // 当前源失败时切到下一个还没试过的源再试一次（每个源只切一次，避免死循环）；
+    // 安装阶段失败时包已下好，重试下载没有意义。
+    if (failedStage !== 'downloaded') {
+      resumeDownloadAfterFeedSwitch = failedStage === 'downloading';
+      const next = nextUntriedFeed(feedOrder, attemptedSources);
+      if (next) {
+        attemptedSources.add(next.source);
+        try {
+          clog('updater', '更新源 ' + currentFeed.label + ' 失败，切换到 ' + next.label + ' 重试一次');
+          currentFeed = next;
+          applyUpdateFeed(next);
+          updateStage = 'checking';
+          autoUpdater.checkForUpdates();
+          return;
+        } catch (e) {
+          currentFeed = next;
+          clog('updater', '切换更新源到 ' + next.label + ' 失败: ' + (e && e.message || e));
+        }
+      } else {
+        clog('updater', '所有更新源均失败（已尝试: ' + Array.from(attemptedSources).join(', ') + '）');
       }
     }
+    resumeDownloadAfterFeedSwitch = false;
     // 最终失败后允许用户再次触发检查/下载（安装阶段失败除外，包已下好）
     if (failedStage !== 'downloaded') updateStage = 'idle';
     manualUpdateCheck = false;
-    // 镜像也失败，或 macOS 未签名构建无法自动安装（Squirrel 要求签名）→
+    // 所有源都失败，或 macOS 未签名构建无法自动安装（Squirrel 要求签名）→
     // 引导手动下载覆盖安装，数据目录独立不受影响。
     if (!mainWindow) return;
-    const rawError = String(err && err.message || err);
     if (failedStage === 'downloaded') {
       dialog.showMessageBox(mainWindow, {
         type: 'info',
@@ -3143,6 +3520,7 @@ if (!gotLock) {
     try {
       clog('boot', '数据目录: ' + dataDir);
       if (reuseExisting) {
+        backendPort = port;
         clog('boot', '端口 ' + port + ' 已有 NOVAI 后端运行，直接复用（不重复启动）');
         createWindow(baseUrl);
         setupAutoUpdate();

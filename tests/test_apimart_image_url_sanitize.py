@@ -189,6 +189,7 @@ class ApimartImageUrlSanitizeTests(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def setUp(self):
+        main._APIMART_UPLOAD_CACHE.clear()
         with self.server.log_lock:
             self.server.requests.clear()
 

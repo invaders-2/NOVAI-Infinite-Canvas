@@ -7,6 +7,7 @@ import { applyShellTheme, shellDark } from "./canvas/canvas-next/ui/theme";
 import { SharePage } from "./canvas/canvas-next/ui/ShareView";
 import { createNovaiBackend } from "./novaiBackend";
 import { installNovaiBridge } from "./novaiBridge";
+import "streamdown/styles.css";
 import "./hexta.css";
 import "./styles.css";
 import "./canvas/canvas-next/ui/focus-ring.css";

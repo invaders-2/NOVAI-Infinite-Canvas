@@ -51,6 +51,22 @@
   background: transparent;
   box-shadow: none;
 }
+
+/* ── mac 桌面端（Electron hiddenInset）：红绿灯由系统画在网页之上，只能让位 ──────
+   只在「助手全屏 + mac 桌面壳」时生效；窄面板 / Windows / 网页模式一律不动。
+   data-mac-lights 由 AgentPanel.tsx 按 pywebview 标记 + mac 挂上，88px 写在这里方便调。 */
+.cn-root #agent.ap2-agent .ap2-lights-gap { display: none; }
+.cn-root #agent.ap2-agent.full[data-mac-lights] .ap2-ah { position: relative; padding-left: 88px; }
+.cn-root #agent.ap2-agent.full[data-mac-lights] .ap2-lights-gap {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 88px;
+  height: 100%;
+  flex: none;
+  -webkit-app-region: drag;
+}
 .cn-root #agent.ap2-agent .ap2-conv {
   height: 34px;
   max-width: 210px;

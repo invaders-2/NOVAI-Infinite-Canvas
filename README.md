@@ -9,7 +9,7 @@
 
 <p>在无限画布上生成图片与视频，用节点串联工作流；画布助手一句话就能自己规划并动手。</p>
 
-<a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases"><img src="static/images/badges/release.svg" alt="release: v2.0.05" /></a> <img src="static/images/badges/platform.svg" alt="platform: Windows | macOS | Linux" /> <img src="static/images/badges/quickstart.svg" alt="quickstart: 3 commands" /> <img src="static/images/badges/readme.svg" alt="README: 中文 | English" />
+<a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases"><img src="static/images/badges/release.svg" alt="release: v2.0.06" /></a> <img src="static/images/badges/platform.svg" alt="platform: Windows | macOS | Linux" /> <img src="static/images/badges/quickstart.svg" alt="quickstart: 3 commands" /> <img src="static/images/badges/readme.svg" alt="README: 中文 | English" />
 
 <p><a href="https://invaders-2.github.io/NOVAI-Infinite-Canvas/">官网</a> · <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases">下载</a> · <a href="https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html">帮助文档</a> · <a href="#最近更新">更新日志</a></p>
 
@@ -131,6 +131,8 @@ NOVAI 是一个把 AI 生成能力放进同一张无限画布的工作台。图�
 
 **Windows**：双击安装包按引导完成 → 双击桌面「NOVAI」→ 浏览器自动打开 `http://127.0.0.1:3000/`。
 
+> **Windows Electron 版的安装方式已从「选目录安装」改为一键静默安装**（装在当前用户目录）。老用户如果之前改过安装目录，首次升级可能仍需手动运行一次新版安装包，之后才会自动静默增量更新；`%APPDATA%\NOVAI` 里的画布与配置不受影响。
+
 **macOS**：打开 DMG，把 `NOVAI.app` 拖进「应用程序」→ 双击启动 → 浏览器自动打开 `http://127.0.0.1:3000/`。
 
 两种安装包装完共用同一份数据目录，可随时互换，详见[桌面客户端（Electron）](#桌面客户端electron)。
@@ -218,6 +220,7 @@ Electron 桌面端的自动更新顺序是 GitHub Releases（主源）→ ModelS
 - **与网页版数据完全互通**：共用 3000 端口和同一份数据目录（Windows `%APPDATA%/NOVAI`、macOS `~/NOVAI`），画布、配置、对话记录直接共享；正式版正在运行时自动复用其后端，不会双开端口。
 - **三源自动更新**：GitHub Releases 主源，国内检查失败自动切 ModelScope 镜像，Gitee Release 提供人工下载兜底。
 - **macOS 自替换更新**：下载新版本后自动退出、替换应用、清 quarantine 并重新打开；失败自动回滚。
+- **Windows 安装包内置 ffmpeg / ffprobe**：视频探测、缩略图、转封装，以及**视频云压缩 / 时间线剪辑导出**都不再依赖用户机器预装（GPL 静态版，含 libx264 / libx265，压缩与导出可直接用；两个 exe 解压后共约 324MB、安装包约 +120~150MB；macOS / Linux 仍用系统 ffmpeg）。
 - 源码与构建说明见 `desktop/README.md`。
 
 ---
@@ -267,6 +270,15 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 
 ## 最近更新
 
+### v2.0.06 · 2026-11-09
+
+- **技能安装**：画布助手支持任意 HTTPS 的 SKILL.md 直链和 RedSkill 技能名（`redskill:<名>`），自动取包、校验 sha256、内联 references；带 `version`/`author` 等扩展字段的 SKILL.md 也能正常导入。
+- **应用市场**：官方技能需在市场「添加」后才可用；新增 4 个 RedSkill 技能（中文名 + 真人时装封面）；技能详情改用竖版海报；「在新画布里使用」改为打开 BEAT 画布。
+- **画布助手**：技能列表带缩略图（/ 面板、我的技能、管理技能），删掉「/」自动收起面板；旧智能画布节点在 BEAT 不再降级成便签。
+- **更新体验**：Windows 更新前彻底释放后端端口（外部占用的也会清理）、一键静默安装并自动拉起、下载进度可见；mac/Windows 更新源改为镜像优先、失败回退 GitHub；修复设置里「一键更新」进度不刷新。
+- **媒体上传**：本地图片/视频优先走临时图床，尽量不消耗 APIMart 上传额度；大图压到 2048px / 900KB、大视频压到 720p 再上传，失败自动回退原文件。
+- **Windows 内置 FFmpeg**：安装包自带 FFmpeg（GPL 静态版，含 libx264）与 FFprobe，视频压缩、时间线剪辑与切分不再依赖用户机器环境；随包附带许可证与源码说明。
+
 ### v2.0.05 · 2026-11-08
 
 - **GIF 动图输出**：生图可选 2–16 帧与每帧时长，每帧尺寸按上游拼版上限自动缩小，出图后会提示实际尺寸。
@@ -295,6 +307,6 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 - **可以免费使用**：个人学习、研究、爱好项目、教学、公益与非营利组织，以及修改源码自用；
 - **商业用途需要授权**：在公司业务中使用、对外提供收费服务或产品、打包出售、集成进商业软件、用衍生品获利等，都必须先取得作者的书面授权；
 - **保留声明**：分发原版或修改版时，须保留本许可文本与版权声明。
+- **第三方组件**：Windows 安装包内含 FFmpeg / FFprobe（[BtbN FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) 的 **GPL 静态构建**，含 libx264 / libx265，未修改）。按 GPLv3 分发义务，许可原文随包位于安装目录 `resources/bin/win/LICENSE.txt`；同目录 `SOURCE.txt` 写明构建版本与源码获取地址（https://github.com/FFmpeg/FFmpeg ，版本行 `N-<号>-g<提交>` 即对应 commit；构建脚本见 https://github.com/BtbN/FFmpeg-Builds ）。
 
 > **版本授权说明**：v2.0.04 及更早的版本发布时采用 AGPL-3.0，已经拿到那些版本的人仍可按 AGPL-3.0 的条款使用（包括商用）；从本次提交开始的新版本改用 PolyForm Noncommercial 1.0.0。商业授权、合作或疑问，请通过仓库 Issue 或 [@invaders-2](https://github.com/invaders-2) 联系作者。
-

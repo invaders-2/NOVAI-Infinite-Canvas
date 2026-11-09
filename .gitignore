@@ -129,3 +129,5 @@ _diagnostics*
 :memory:*.ses
 # Electron 打包时的后端副本
 desktop/resources/
+# Windows 安装包内置 ffmpeg（CI 下载 BtbN GPL 静态版；二进制不入库，mac/linux 不用）
+desktop/vendor/ffmpeg/

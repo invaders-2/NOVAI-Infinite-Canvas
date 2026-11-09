@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const vm = require('vm');
 const { spawn, execFileSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
@@ -226,18 +227,86 @@ const goodSha = crypto.createHash('sha512').update(fs.readFileSync(hashFile)).di
     ok(/stopBackendForUpdate\(\)\.then\(\(\) => \{ app\.quit\(\); \}\)/.test(main), '先停后端再 app.quit（不用 app.exit）');
     ok(/NOVAI_UPDATE_ZIP/.test(main) && /NOVAI_UPDATE_TARGET/.test(main), '保留离线测试钩子（zip / target）');
     ok(/const updateTag = info && info\.tag/.test(main), '从 updateInfo.tag 取真实 Release tag');
-    ok(/macUpdater\.resolveMacZipUrl\(zipFile\.url, version, updateTag\)/.test(main), '解析下载地址时把 tag 传进去');
-    ok(/releaseTagFromVersion\(version\)/.test(main) && /attemptUrls\.push\(altUrl\)/.test(main), '非 2xx 时用补零 tag 再试一次');
-    ok(/改用备用 tag 重试/.test(main) && /下载失败\(/.test(main), '两次尝试都写日志');
+    ok(/macUpdater\.resolveMacZipUrl\(zipFile\.url, githubVersion, updateTag\)/.test(main), '解析下载地址时把 tag 传进去');
+    ok(/releaseTagFromVersion\(githubVersion\)/.test(main) && /altUrls\.push\(altUrl\)/.test(main), '非 2xx 时用补零 tag 再试一次');
+    ok(/改用备用地址重试/.test(main) && /下载失败\(/.test(main), '两次尝试都写日志');
     ok(/novai:update-progress/.test(main) && /sendUpdateProgress/.test(main), '主进程发进度事件');
     ok(/onProgress: \(cb\) =>/.test(preload) && /novai:update-progress/.test(preload), 'preload 暴露 onProgress 订阅');
-    ok(/desktop\.onProgress\(\(p\) =>/.test(updateJs) && /upd\.progress = \{/.test(updateJs), 'update.js 把进度写进 upd.progress');
+    ok(/desktop\.onProgress\(/.test(updateJs) && /upd\.progress = \{/.test(updateJs), 'update.js 把进度写进 upd.progress');
     ok(/installing: '正在替换安装'/.test(updateJs), '进度阶段文案包含替换安装');
     const pkg = JSON.parse(read('desktop/package.json'));
     ok(Array.isArray(pkg.build.files) && pkg.build.files.includes('mac-updater.js'), '打包 files 里包含 mac-updater.js');
     const ipcInstall = (main.match(/ipcMain\.handle\('novai:update-install'[\s\S]*?\n  \}\);/g) || [''])[0];
     ok(/process\.platform === 'darwin'\) \{/.test(ipcInstall) && /startMacSelfUpdate\(pendingUpdateInfo, true\)/.test(ipcInstall), 'renderer 点「立即更新」在 darwin 直接进入自替换');
-    ok(/if \(process\.platform !== 'darwin'\) showUpdateInstallPrompt\(\);/.test(main), 'darwin 不再弹旧的「手动覆盖安装」对话框');
+    ok(/if \(process\.platform === 'darwin'\) return;[\s\S]{0,200}showUpdateInstallPrompt\(\);/.test(main), 'darwin 不再弹旧的「手动覆盖安装」对话框');
+
+    console.log('[6] 镜像 latest-mac.yml 解析与「镜像失败回退 GitHub」');
+    function mainFunction(name) {
+        const lines = read('desktop/main.js').split('\n');
+        const start = lines.findIndex((line) => line.startsWith('function ' + name + '(') || line.startsWith('async function ' + name + '('));
+        if (start < 0) return '';
+        for (let i = start + 1; i < lines.length; i += 1) {
+            if (lines[i] === '}') return lines.slice(start, i + 1).join('\n');
+        }
+        return '';
+    }
+    const mirrorBase = 'https://mirror.example/electron-release';
+    const helperSrc = ['compareUpdateVersions', 'parseMirrorMacManifest', 'resolveMirrorAssetUrl', 'pickMirrorMacUpdate']
+        .map(mainFunction)
+        .join('\n');
+    const helper = vm.runInNewContext(helperSrc + '\n;({ compareUpdateVersions, parseMirrorMacManifest, resolveMirrorAssetUrl, pickMirrorMacUpdate })', { macUpdater: mac });
+    const mirrorYml = [
+        'version: 2.0.5',
+        'files:',
+        '  - url: NOVAI-2.0.5-arm64-mac.zip',
+        '    sha512: mirrorSHA==',
+        '    size: 333',
+        'path: NOVAI-2.0.5-arm64-mac.zip',
+        'sha512: mirrorSHA==',
+        "releaseDate: '2026-11-08T03:00:00.000Z'",
+        '',
+    ].join('\n');
+    const mirrorCandidate = helper.pickMirrorMacUpdate(mirrorYml, '2.0.4', mirrorBase);
+    ok(mirrorCandidate.ok === true && mirrorCandidate.version === '2.0.5', '镜像 manifest 解析出版本');
+    ok(mirrorCandidate.url === mirrorBase + '/NOVAI-2.0.5-arm64-mac.zip', '镜像相对路径补成完整地址');
+    ok(mirrorCandidate.sha512 === 'mirrorSHA==' && mirrorCandidate.size === 333, '带出 sha512 / size');
+    ok(helper.pickMirrorMacUpdate(mirrorYml, '2.0.5', mirrorBase).ok === false, '版本相等时不走镜像');
+    ok(helper.pickMirrorMacUpdate(mirrorYml, '2.0.6', mirrorBase).ok === false, '当前版本更新时不走镜像');
+    ok(helper.pickMirrorMacUpdate('files:\n  - url: NOVAI-2.0.5-arm64-mac.zip\n', '2.0.4', mirrorBase).reason === 'manifest-without-version', '缺 version 明确失败');
+    ok(helper.pickMirrorMacUpdate('version: 2.0.5\n', '2.0.4', mirrorBase).reason === 'manifest-without-zip', '缺 files/zip 明确失败');
+    const noHash = helper.pickMirrorMacUpdate('version: 2.0.5\nfiles:\n  - url: NOVAI-2.0.5-arm64-mac.zip\n', '2.0.4', mirrorBase);
+    ok(noHash.ok === true && noHash.sha512 === '' && noHash.size === 0, '缺 sha512 / size 仍可用');
+    ok(helper.pickMirrorMacUpdate('version: 2.0.5\nfiles:\n  - url: https://cdn.example/NOVAI-2.0.5-arm64-mac.zip\n', '2.0.4', mirrorBase).url === 'https://cdn.example/NOVAI-2.0.5-arm64-mac.zip', '绝对 https 地址原样用');
+    ok(helper.compareUpdateVersions('2.0.10', '2.0.9') === 1 && helper.compareUpdateVersions('2.0.5-beta.1', '2.0.5') === -1 && helper.compareUpdateVersions('2.0.5', '2.0.5') === 0, '版本比较');
+
+    const fallbackLogs = [];
+    const withSource = vm.runInNewContext(mainFunction('withMacUpdateSource') + '\nwithMacUpdateSource', {
+        clog: (area, msg) => fallbackLogs.push(area + ':' + msg),
+    });
+    const mirrorOk = await withSource(async () => ({ ok: true, source: 'mirror', version: '2.0.5', zipPath: '/tmp/m.zip' }), async () => { throw new Error('不该走 GitHub'); });
+    ok(mirrorOk.source === 'mirror' && mirrorOk.version === '2.0.5', '镜像可用时不回退 GitHub');
+    let githubCalled = 0;
+    const notNewer = await withSource(async () => ({ ok: false, reason: 'mirror-not-newer: 2.0.5 <= 2.0.5' }), async () => { githubCalled += 1; return { ok: true, version: '2.0.5', zipPath: '/tmp/g.zip' }; });
+    ok(notNewer.source === 'github' && githubCalled === 1, '镜像版本不新时回退 GitHub');
+    ok(fallbackLogs.some((m) => m.indexOf('回退 GitHub') >= 0), '回退 GitHub 写日志');
+    let githubCalls = 0;
+    const threw = await withSource(async () => { throw new Error('HTTP 404'); }, async () => { githubCalls += 1; return { ok: true, version: '2.0.5', zipPath: '/tmp/g.zip' }; });
+    ok(threw.source === 'github' && githubCalls === 1, '镜像 manifest/下载抛错时回退 GitHub');
+    let githubError = '';
+    try {
+        await withSource(async () => ({ ok: false, reason: 'manifest 404' }), async () => { throw new Error('GitHub reset'); });
+    } catch (err) { githubError = err.message; }
+    ok(githubError === 'GitHub reset', 'GitHub 也失败时把 GitHub 错误抛给上层（走原有失败提示）');
+
+    const startFn = mainFunction('startMacSelfUpdate');
+    ok(/withMacUpdateSource\(/.test(startFn), 'startMacSelfUpdate 先镜像后 GitHub');
+    ok(/resolveMirrorMacUpdate\(app\.getVersion\(\)\)/.test(startFn), '镜像 manifest 用当前版本判断');
+    ok(/source: 'mirror'/.test(startFn) && /source: 'github'/.test(startFn), '两个来源都传给 prepareMacZip');
+    ok(/本次 macOS 更新源=/.test(startFn), '日志记录最终使用的更新源');
+    const prepFn = mainFunction('prepareMacZip');
+    ok(/downloadMacUpdateZip\(attemptUrls\[attempt\], zipPath, expectedSha, expectedSize\)/.test(prepFn), '镜像和 GitHub 复用 downloadMacUpdateZip');
+    ok(/verifySha512\(zipPath, expectedSha\)/.test(prepFn) && /大小校验失败/.test(prepFn), '下载后校验 sha512 / size');
+    ok(/MAC_MIRROR_MANIFEST_URL/.test(read('desktop/main.js')), '镜像 manifest 地址已定义');
 
     console.log('');
     if (fails.length) {

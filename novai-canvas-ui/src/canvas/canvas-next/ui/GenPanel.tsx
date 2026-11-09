@@ -12,7 +12,7 @@ import { mentionable, mentionedIds, unmentionedInputs } from "../mentions";
 import { PromptEditor } from "./PromptEditor";
 import { requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
-import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, durationTiers, formatClock, genOf, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatLabel, outputFormatOptions, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
+import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, durationTiers, formatClock, genOf, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS } from "./ctx";
 import { startVoiceCapture, transcribeVoice, voiceErrorText, type VoiceCapture, type VoicePhase } from "../voiceInput";
@@ -118,6 +118,13 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   ];
   // TapNow 音频结果：颜色标记 ┃ 保存素材库 / 下载
   else if (node.kind === "audio" && out) items = [tagBtn(), <span key="s" className="vsep" />, B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store))];
+  // 多维表格：文件类操作（复制 / 导入 / 全屏）放顶部浮条，表内编辑（加行加列 / 分镜出片）留在节点底部 .tfoot。
+  // 复制与导入走自定义事件交回 TableNodeBody，那里才有 CsvImportDialog 和 csvFromTable。
+  else if (node.kind === "table") items = [
+    B("csv-copy", "copy", "把整张表（不含输入通道列）复制成 CSV，第一行是列名", "复制 CSV", () => window.dispatchEvent(new CustomEvent("cn:tablecsv", { detail: { id: node.id, action: "copy" } }))),
+    B("csv-import", "upload", "粘贴 CSV / TSV 替换整张表（保留标题、输入通道模式和列用途）", "导入 CSV", () => window.dispatchEvent(new CustomEvent("cn:tablecsv", { detail: { id: node.id, action: "import" } }))),
+    B("table-full", "expand", "全屏编辑表格", "全屏编辑", () => window.dispatchEvent(new CustomEvent("cn:tabledoc", { detail: node.id }))),
+  ];
   if (!items.length) return null;
   // 位置仍由 SelectionUI 用屏幕坐标算（pos.tb），这里只换外观/动效；
   // #ntb 在 .cn-root 层、不在画布 world 缩放下，所以显式 scale:1（别被 --zinv 放大）
@@ -398,7 +405,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       title={"先思考（" + (m?.name || "") + "）：" + (ip.thinking === true ? "开：先想再画" : ip.thinking === false ? "关：直接出图" : "默认（模型决定）")}
       onClick={(e) => paramPop(ctl, node, "thinking", e.currentTarget)}>先思考{ip.thinking === true ? " 开" : ip.thinking === false ? " 关" : " 默认"}</button>);
     const gifOn = outputFormatForRequest(ip.outputFormat) === "gif";
-    gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{/^(auto|adaptive|自适应)$/i.test(ip.ratio) ? "原图比例" : ip.ratio} · {ip.size}{formats.length ? " · " + outputFormatLabel(ip.outputFormat) : ""}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
+    gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{/^(auto|adaptive|自适应)$/i.test(ip.ratio) ? "原图比例" : ip.ratio} · {ip.size}{formats.length ? " · " + outputFormatShortLabel(ip.outputFormat) : ""}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
     if (gifOn) gline.push(gdot("cgif"), seg("gifframes", <>{gifFrameCountFor(ip.frameCount, m)} 帧 · {gifFrameDurationFor(ip.frameDuration, m)}ms</>));
     if (m?.mj) gline.push(gdot("cmj"), seg("mj", <>{mjSummary(ip.mj)}</>, !!(ip.mj && (ip.mj.version || ip.mj.hd || typeof ip.mj.stylize === "number" || (ip.mj.speed && ip.mj.speed !== "fast")))));
     // 风格 / 摄影机按「模型真的会转发」才渲染（没有能力就不给入口，不置灰）

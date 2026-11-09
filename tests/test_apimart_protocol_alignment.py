@@ -110,10 +110,10 @@ class ApimartImageBranchSourceTests(unittest.TestCase):
 
     def test_extension_channel_compresses_then_uploads_and_falls_back(self):
         helper = function_source(MAIN_SOURCE, "apimart_image_reference_inputs")
-        self.assertIn("apimart_reference_data_urls(refs, body)", helper)
+        self.assertIn("apimart_reference_data_urls_with_fit(refs, body)", helper)
         self.assertIn("upload_image_for_apimart(client, provider, url)", helper)
         self.assertIn("return compressed", helper)
-        fallback = function_source(MAIN_SOURCE, "apimart_reference_data_urls")
+        fallback = function_source(MAIN_SOURCE, "apimart_reference_data_urls_with_fit")
         self.assertIn("apimart_reference_fallback_data_url(ref, max_size, quality)", fallback)
         self.assertIn("APIMART_JSON_BODY_BUDGET", fallback)
         single = function_source(MAIN_SOURCE, "apimart_reference_fallback_data_url")

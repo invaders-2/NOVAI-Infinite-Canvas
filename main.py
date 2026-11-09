@@ -97,6 +97,82 @@ _UPDATE_SESSION = requests.Session()
 _UPDATE_SESSION.trust_env = _NO_PROXY_SESSION.trust_env
 _UPDATE_SESSION.verify = _SSL_VERIFY
 
+# ---------- ffmpeg / ffprobe 定位 ----------
+# Windows 安装包自带 GPL 静态版 ffmpeg/ffprobe（打进 resources/bin/win，Electron 主进程通过
+# FFMPEG_PATH/FFPROBE_PATH 告知后端）。GPL 构建含 libx264，故云压缩 / 剪辑导出可用（LGPL 版不含）。
+# macOS/Linux 包不含内置二进制，最终仍回退到系统 PATH，行为不变。
+def _existing_executable(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+    try:
+        if not os.path.isfile(path):
+            return None
+        if os.name != "nt" and not os.access(path, os.X_OK):
+            return None
+    except OSError:
+        return None
+    return path
+
+
+def _ffmpeg_name_variants(name: str) -> List[str]:
+    if os.name == "nt":
+        return [name + ".exe", name]
+    return [name]
+
+
+def _bundled_ffmpeg_dirs() -> List[str]:
+    """安装包里可能放 ffmpeg 的目录，按优先级排列；不存在的目录由调用方跳过。"""
+    dirs: List[str] = []
+
+    def add(path_value: str) -> None:
+        normalized = os.path.normpath(path_value) if path_value else ""
+        if normalized and normalized not in dirs:
+            dirs.append(normalized)
+
+    try:
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    except Exception:
+        exe_dir = ""
+    if exe_dir:
+        # PyInstaller 后端在 resources/backend/NOVAI.exe → ../bin/win 就是 resources/bin/win
+        add(os.path.join(exe_dir, "..", "bin", "win"))
+        add(os.path.join(exe_dir, "bin", "win"))
+    install_dir = (os.environ.get("NOVAI_INSTALL_DIR") or "").strip()
+    if install_dir:
+        add(os.path.join(install_dir, "bin", "win"))
+        add(os.path.join(install_dir, "resources", "bin", "win"))
+    app_dir = (os.environ.get("NOVAI_APP_DIR") or "").strip()
+    if app_dir:
+        add(os.path.join(app_dir, "..", "bin", "win"))
+    meipass = str(getattr(sys, "_MEIPASS", "") or "")
+    if meipass:
+        add(os.path.join(meipass, "bin", "win"))
+        add(meipass)
+    return dirs
+
+
+def _resolve_media_binary(name: str, env_var: str) -> Optional[str]:
+    env_path = _existing_executable((os.environ.get(env_var) or "").strip())
+    if env_path:
+        return env_path
+    for directory in _bundled_ffmpeg_dirs():
+        for candidate_name in _ffmpeg_name_variants(name):
+            bundled = _existing_executable(os.path.join(directory, candidate_name))
+            if bundled:
+                return bundled
+    return shutil.which(name)
+
+
+def ffmpeg_binary() -> Optional[str]:
+    """ffmpeg 路径：环境变量 FFMPEG_PATH → 安装包内置 bin/win → PATH。"""
+    return _resolve_media_binary("ffmpeg", "FFMPEG_PATH")
+
+
+def ffprobe_binary() -> Optional[str]:
+    """ffprobe 路径：环境变量 FFPROBE_PATH → 安装包内置 bin/win → PATH。"""
+    return _resolve_media_binary("ffprobe", "FFPROBE_PATH")
+
+
 def write_json_atomic(path: str, data: Any, **dump_kwargs) -> None:
     """先写同目录临时文件、fsync，再 os.replace 覆盖：进程崩溃或断电时旧文件保持完整，不会留下写了一半的 JSON。"""
     dump_kwargs.setdefault("ensure_ascii", False)
@@ -9311,7 +9387,7 @@ def _video_preview_image_via_cv2(path: str, width: int) -> Image.Image:
         cap.release()
 
 def generate_video_preview_image(path: str, width: int) -> Image.Image:
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = ffmpeg_binary()
     if not ffmpeg:
         try:
             return _video_preview_image_via_cv2(path, width)
@@ -10930,8 +11006,26 @@ def apimart_reference_fallback_data_url(ref, max_size, quality):
         detail=f"参考图读取失败，无法送达上游：{invalid_video_image_preview(source) or '空地址'}。请重新选择参考图后重试。",
     )
 
-def apimart_reference_data_urls(refs, body, budget_bytes=None):
-    """把参考图压成 data URL，逐级压缩直到整个 JSON 请求体低于预算；张数与顺序与 refs 一致。"""
+APIMART_DIRECT_DATA_URL_MAX_IMAGES = 3
+
+def apimart_direct_data_urls(refs, body, budget_bytes=None):
+    """单张/少量图片先压成 data URL 直发：进得了预算就完全不调用上传接口，也就不消耗上传额度。
+    返回 None 表示超预算（或图片压不出来），调用方再走上传换公网 URL。"""
+    if not refs or len(refs) > APIMART_DIRECT_DATA_URL_MAX_IMAGES:
+        return None
+    budget = APIMART_JSON_BODY_BUDGET if budget_bytes is None else budget_bytes
+    urls = [apimart_reference_fallback_data_url(ref, 1536, 88) for ref in refs]
+    if not all(valid_video_image_input(url) for url in urls):
+        return None
+    total = apimart_json_body_bytes(body, urls)
+    if total > budget:
+        print(f"APIMart 图片 data URL 直发超预算：{len(urls)} 张，请求体 {total} 字节 > {budget} 字节，改走上传")
+        return None
+    print(f"APIMart 图片 data URL 直发：{len(urls)} 张，请求体 {total} 字节，不调用上传接口")
+    return urls
+
+def apimart_reference_data_urls_with_fit(refs, body, budget_bytes=None):
+    """逐级压缩参考图，返回 (urls, 是否低于预算)；urls 的张数与顺序与 refs 一致。"""
     budget = APIMART_JSON_BODY_BUDGET if budget_bytes is None else budget_bytes
     urls = []
     for max_size, quality in apimart_fallback_compression_ladder(len(refs)):
@@ -10939,8 +11033,13 @@ def apimart_reference_data_urls(refs, body, budget_bytes=None):
         total = apimart_json_body_bytes(body, urls)
         if total <= budget:
             print(f"APIMart 参考图回退压缩：{len(urls)} 张，max_size={max_size} quality={quality}，请求体 {total} 字节")
-            return urls
+            return urls, True
     print(f"APIMart 参考图回退压缩：{len(urls)} 张压到最小仍超过预算 {budget} 字节，按最小档发送")
+    return urls, False
+
+def apimart_reference_data_urls(refs, body, budget_bytes=None):
+    """把参考图压成 data URL，逐级压缩直到整个 JSON 请求体低于预算；张数与顺序与 refs 一致。"""
+    urls, _fits = apimart_reference_data_urls_with_fit(refs, body, budget_bytes)
     return urls
 
 APIMART_IMAGE_URL_PREVIEW_CHARS = 60
@@ -11390,7 +11489,7 @@ def probe_local_audio_duration_seconds(value: str) -> Optional[float]:
     path = output_file_from_url(value)
     if not path or not os.path.isfile(path):
         return None
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = ffprobe_binary()
     if not ffprobe:
         return None
     try:
@@ -11417,7 +11516,7 @@ def probe_video_file_duration_seconds(path: str) -> Optional[float]:
     """探测本地视频文件（绝对路径）时长（秒）。探测失败返回 None。"""
     if not path or not os.path.isfile(path):
         return None
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = ffprobe_binary()
     if not ffprobe:
         return None
     try:
@@ -11456,7 +11555,7 @@ def volcengine_trim_video_to_seconds(value: str, max_seconds: float = 15.2) -> s
     path = output_file_from_url(text)
     if not path or not os.path.isfile(path):
         return text
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = ffmpeg_binary()
     if not ffmpeg:
         return text
     base = os.path.splitext(os.path.basename(path))[0]
@@ -11513,10 +11612,10 @@ def volcengine_mute_video(value: str) -> str:
     path = output_file_from_url(text)
     if not path or not os.path.isfile(path):
         return text
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = ffmpeg_binary()
     if not ffmpeg:
         return text
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = ffprobe_binary()
     if ffprobe:
         try:
             proc = subprocess.run(
@@ -11642,7 +11741,7 @@ def segment_video_file(src_path: str, out_dir: str, index: int, start: float, du
     frame_ready = os.path.isfile(frame_path) and os.path.getsize(frame_path) > 0
     if clip_ready and frame_ready:
         return {"clip_path": clip_path, "frame_path": frame_path}
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = ffmpeg_binary()
     if not ffmpeg:
         raise RuntimeError("服务器缺少 ffmpeg，无法切分视频")
     os.makedirs(out_dir, exist_ok=True)
@@ -11840,7 +11939,7 @@ async def video_reference_to_frame_data_urls(value, max_frames=6, max_size=768):
         return []
     frame_dir = tempfile.mkdtemp(prefix="canvas_llm_frames_")
     try:
-        ffmpeg = shutil.which("ffmpeg")
+        ffmpeg = ffmpeg_binary()
         if not ffmpeg:
             return []
         pattern = os.path.join(frame_dir, "frame_%03d.jpg")
@@ -12248,9 +12347,259 @@ def apimart_upload_shrink_reason(attempts) -> str:
     return (f"APIMart 上传失败({last['status']})：已按档位自动压缩重试，"
             f"最后一档 {last['bytes']} 字节（{last['tier']}）仍被网关拒绝。尝试记录：{tried}")
 
-async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
+APIMART_QUOTA_ERROR_MARK = "APIMart 图片上传额度已用尽"
+
+def apimart_upload_quota_exhausted(resp) -> bool:
+    """429 或响应体里带 quota/rate_limit 才算额度用尽，普通限流不算。"""
+    if resp is None:
+        return False
+    status = getattr(resp, "status_code", 0) or 0
+    text = str(getattr(resp, "text", "") or "").lower()
+    if status == 429:
+        return True
+    return status >= 400 and any(token in text for token in ("rate_limit", "quota", "upload limit"))
+
+def apimart_quota_reset_text(reset_at) -> str:
+    try:
+        moment = datetime.datetime.fromtimestamp(float(reset_at))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+    return f"{moment.strftime('%Y-%m-%d %H:%M')}（本地时间）"
+
+def apimart_upload_quota_reason(resp) -> str:
+    """429 额度用尽的可读原因：上限、已用、恢复时间（本地时区）与三条降低依赖的建议。"""
+    quota = {}
+    upstream_message = ""
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        if isinstance(payload.get("quota"), dict):
+            quota = payload["quota"]
+        error = payload.get("error")
+        if isinstance(error, dict):
+            upstream_message = str(error.get("message") or "")
+        elif isinstance(payload.get("message"), str):
+            upstream_message = payload["message"]
+
+    def _int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    limit = _int(quota.get("limit"))
+    used = _int(quota.get("used"))
+    remaining = _int(quota.get("remaining"))
+    window_hours = _int(quota.get("window_hours")) or 72
+    limit_text = f"{limit} 个文件/{window_hours} 小时" if limit is not None else f"2000 个文件/{window_hours} 小时"
+    used_text = f"已用 {used} 个" if used is not None else "已用数量未知"
+    if remaining is not None:
+        used_text += f"、剩余 {remaining} 个"
+    reset_text = apimart_quota_reset_text(quota.get("reset_at"))
+    head = f"{APIMART_QUOTA_ERROR_MARK}（429）：账号上限 {limit_text}，{used_text}"
+    head += f"，额度预计 {reset_text}恢复。" if reset_text else "，上游未返回额度恢复时间。"
+    advice = ("建议：1) 等额度恢复后再试；2) 换一个 APIMart 账号的 API Key；"
+              "3) 用更小的图片或减少参考图数量（本地图片压成 data URL 直发时不消耗上传额度）。")
+    detail = head + advice
+    if upstream_message:
+        detail += f" 上游原文：{upstream_message[:200]}"
+    return detail
+
+def apimart_upload_failure_detail(resp, attempts) -> str:
+    """上传失败原因：429 说额度、413 说压缩档位、其它给状态码。"""
+    if resp is None:
+        return "APIMart 上传失败：没有响应"
+    if apimart_upload_quota_exhausted(resp):
+        return apimart_upload_quota_reason(resp)
+    if resp.status_code == 413:
+        return apimart_upload_shrink_reason(attempts)
+    return f"APIMart 上传失败({resp.status_code})"
+
+def apimart_error_is_quota(value) -> bool:
+    return isinstance(value, str) and value.startswith(f"ERR:{APIMART_QUOTA_ERROR_MARK}")
+
+APIMART_UPLOAD_CACHE_MAX = 200
+# 图床直链有时效（uguu ≈3 小时、Litterbox 72 小时、temp.sh 3 天），按服务取保守 TTL：
+# 过期就当未命中重新上传，避免同 path 一直返回失效链接。
+APIMART_TEMP_HOST_URL_TTL = {
+    "uguu": 150 * 60,
+    "litterbox": 66 * 60 * 60,
+    "temp.sh": 66 * 60 * 60,
+}
+APIMART_UPLOAD_ASSET_TTL_SECONDS = int(os.getenv("APIMART_UPLOAD_ASSET_TTL_SECONDS", str(24 * 60 * 60)))
+APIMART_IMAGE_SOURCE_ENV = "APIMART_IMAGE_SOURCE"
+_APIMART_UPLOAD_CACHE = {}
+
+def apimart_cache_now() -> float:
+    return time.time()
+
+def apimart_image_source() -> str:
+    """本地图片转 APIMart 视频输入的优先级：temp=先临时图床（默认），apimart=先官方上传。"""
+    value = str(os.getenv(APIMART_IMAGE_SOURCE_ENV) or "").strip().lower()
+    return "apimart" if value in {"apimart", "official", "upload"} else "temp"
+
+def apimart_temp_host_url_ttl(service) -> int:
+    return int(APIMART_TEMP_HOST_URL_TTL.get(str(service or "").strip().lower(), 150 * 60))
+
+def apimart_upload_cache_key(path):
+    """本地图片缓存键：绝对路径 + mtime + size，文件被覆盖后自然失效。"""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return ""
+    return f"{os.path.abspath(path)}|{stat.st_mtime_ns}|{stat.st_size}"
+
+def apimart_upload_cache_get(key) -> str:
+    if not key:
+        return ""
+    entry = _APIMART_UPLOAD_CACHE.get(key)
+    if not entry:
+        return ""
+    expires_at = entry.get("expires_at")
+    if expires_at is not None and apimart_cache_now() >= float(expires_at):
+        _APIMART_UPLOAD_CACHE.pop(key, None)
+        print(f"APIMart 图片缓存已过期（{entry.get('source') or 'unknown'}），重新上传：{key.split('|', 1)[0]}")
+        return ""
+    _APIMART_UPLOAD_CACHE.pop(key)
+    _APIMART_UPLOAD_CACHE[key] = entry
+    return str(entry.get("url") or "")
+
+def apimart_upload_cache_put(key, url, ttl_seconds=None, source="") -> None:
+    if not key or not url:
+        return
+    expires_at = None if ttl_seconds is None else apimart_cache_now() + float(ttl_seconds)
+    _APIMART_UPLOAD_CACHE.pop(key, None)
+    _APIMART_UPLOAD_CACHE[key] = {
+        "url": str(url),
+        "expires_at": expires_at,
+        "source": str(source or ""),
+    }
+    while len(_APIMART_UPLOAD_CACHE) > APIMART_UPLOAD_CACHE_MAX:
+        _APIMART_UPLOAD_CACHE.pop(next(iter(_APIMART_UPLOAD_CACHE)))
+
+def apimart_data_url_over_budget_reason(image_urls, body) -> str:
+    """额度兜底三段文案的最后一段：压缩 data URL 也塞不进 JSON 预算时补上实际字节数。"""
+    total = apimart_json_body_bytes(body, image_urls)
+    return (f"；压缩 data URL 兜底也放不下：{len(image_urls)} 张压到最小后请求体 {total} 字节，"
+            f"仍超过预算 {APIMART_JSON_BODY_BUDGET} 字节。")
+
+APIMART_TEMP_IMAGE_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+    "image/tiff": ".tif",
+}
+
+def apimart_data_url_temp_image_file(raw: bytes, mime: str):
+    """data URL 输入在额度兜底前落盘：图床链路只接受 /output/ 或 /assets/ 下的本地路径。
+    返回 (临时文件对应的 URL, 实际路径)，调用方负责删除。"""
+    clean_mime = str(mime or "").split(";", 1)[0].strip().lower() or "image/png"
+    ext = APIMART_TEMP_IMAGE_EXTENSIONS.get(clean_mime) or mimetypes.guess_extension(clean_mime) or ".img"
+    filename = f"apimart_tmp_{uuid.uuid4().hex[:12]}{ext}"
+    path = output_path_for(filename, "output")
+    with open(path, "wb") as fh:
+        fh.write(raw)
+    return output_url_for(filename, "output"), path
+
+# 视频输入（VEO 等）首帧不需要 5000px：长边 >2048 或 >1.2MB 的大图先压到 900KB/2048px 再传图床，
+# 小图原样直传不重编码（保画质）；阈值沿用 APIMart 首个上传档位，网关 1MB 拦截同样覆盖。
+APIMART_VIDEO_INPUT_MAX_BYTES = 900_000
+APIMART_VIDEO_INPUT_MAX_DIM = 2048
+APIMART_VIDEO_INPUT_PASSTHROUGH_BYTES = int(1.2 * 1024 * 1024)
+APIMART_VIDEO_INPUT_THUMB_PREFIX = "apimart_thumb_"
+
+def apimart_video_input_thumbnail(ref_url: str):
+    """视频输入图床链路的上传 payload：大图压成 ≤900KB、长边 ≤2048 的 JPEG，小图原样直传。
+    返回 (上传用 ref_url, 临时文件路径)；不需要压缩或压缩失败时临时路径为空、ref_url 不变。"""
+    ref_url = str(ref_url or "").strip()
+    if not (ref_url.startswith("/output/") or ref_url.startswith("/assets/")):
+        return ref_url, ""
+    path = output_file_from_url(ref_url)
+    if not path:
+        return ref_url, ""
+    try:
+        size = os.path.getsize(path)
+        with Image.open(path) as opened:
+            width, height = opened.size
+            img = opened.copy()
+    except Exception as exc:
+        print(f"视频输入图床压缩跳过（读取失败，回退原图直传）：{ref_url} {exc}")
+        return ref_url, ""
+    if size <= APIMART_VIDEO_INPUT_PASSTHROUGH_BYTES and max(width, height) <= APIMART_VIDEO_INPUT_MAX_DIM:
+        return ref_url, ""
+    temp_path = ""
+    try:
+        stem = APIMART_VIDEO_INPUT_THUMB_PREFIX.rstrip("_")
+        _filename, payload, _content_type = apimart_jpeg_payload(
+            img, APIMART_VIDEO_INPUT_MAX_BYTES, APIMART_VIDEO_INPUT_MAX_DIM, stem)
+        with Image.open(BytesIO(payload)) as opened:
+            thumb_width, thumb_height = opened.size
+        filename = f"{APIMART_VIDEO_INPUT_THUMB_PREFIX}{uuid.uuid4().hex[:12]}.jpg"
+        temp_path = output_path_for(filename, "output")
+        with open(temp_path, "wb") as fh:
+            fh.write(payload)
+    except Exception as exc:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        print(f"视频输入图床压缩失败，回退原图直传：{ref_url} {exc}")
+        return ref_url, ""
+    print(f"视频输入图床压缩：{width}x{height} / {size} 字节 → "
+          f"{thumb_width}x{thumb_height} / {len(payload)} 字节")
+    return output_url_for(filename, "output"), temp_path
+
+async def apimart_image_via_temp_host(ref_url: str) -> Dict[str, str]:
+    """复用现有临时图床链路（uguu → Litterbox → temp.sh，CLOUD_MEDIA_UPLOAD_SERVICE 仍可覆盖）
+    换公网直链，再真发一次 GET 校验 image/*。上传前先把大图压到视频输入够用的档位，小图原样直传。
+    视频输入链路默认先走这里，尽量不消耗 APIMart 的 2000 个/72 小时上传额度；
+    图片生成链路只在 429 额度兜底时调用。成功返回 {"url", "service"}；失败抛 HTTPException。"""
+    upload_ref, thumb_path = apimart_video_input_thumbnail(ref_url)
+    try:
+        uploaded = await upload_local_video_to_cloud(upload_ref, "auto")
+    finally:
+        if thumb_path:
+            try:
+                os.remove(thumb_path)
+            except OSError:
+                pass
+    url = str((uploaded or {}).get("url") or "").strip()
+    service = str((uploaded or {}).get("service") or "auto").strip() or "auto"
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=502, detail=f"临时图床（{service}）没有返回可用的公网链接")
+    check = await verify_cloud_media_direct_url(url)
+    content_type = str(check.get("content_type") or "").strip().lower()
+    if not check.get("ok"):
+        raise HTTPException(status_code=502, detail=f"临时图床（{service}）直链校验失败：{check.get('reason') or '未知原因'}")
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=502, detail=f"临时图床（{service}）直链不是图片：Content-Type {content_type or '空'}")
+    print(f"本地图片已上传临时图床（temp-host({service})）：{url}")
+    return {"url": url, "service": service}
+
+async def apimart_quota_temp_host_fallback(ref_url: str, quota_reason: str) -> Dict[str, str]:
+    """额度用尽后先试临时图床：成功返回 {"url", "service"}；失败返回 {"error": "ERR:..."}。
+    错误串保持 "ERR:APIMart 图片上传额度已用尽" 前缀，apimart_error_is_quota 仍能识别。"""
+    try:
+        return await apimart_image_via_temp_host(ref_url)
+    except HTTPException as exc:
+        detail = str(exc.detail or "")
+    except Exception as exc:
+        detail = f"异常：{exc}"
+    print(f"APIMart 上传额度用尽，临时图床兜底失败（temp-host）：{detail}")
+    return {"error": f"ERR:{quota_reason}；临时图床兜底失败：{detail}"}
+
+async def upload_image_for_apimart(client, provider, ref_url: str, prefer_temp_host: bool = False) -> str:
     """把本地图片转成上游可接受的输入。
-    按 APIMart 文档上传到 /v1/uploads/images，拿到可用于生成接口的 http/https URL。
+    prefer_temp_host=True（视频输入链路默认）：先临时图床换公网直链并写入带 TTL 的缓存，
+    失败再走 APIMart /v1/uploads/images（413 逐档压缩保留；429 返回额度提示 + 图床失败原因，
+    调用方回退压缩 data URL）。
+    prefer_temp_host=False（图片生成链路）：保持官方上传优先，只有 429 才用图床兜底，
+    公网直链不扩散到图片生成。
     绝不把 /output/* 或 /assets/* 这类本地路径直接传给上游。
     返回上游可用 URL；返回值以 "ERR:" 开头表示具体失败原因（供前端展示）。"""
     ref_url = str(ref_url or "").strip()
@@ -12261,27 +12610,59 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
         return ref_url
     base_url = video_api_root(provider)
     upload_url = f"{base_url}/v1/uploads/images"
-    # data URL: 解码后直接上传到 APIMart
+    # data URL: 默认先临时图床（落盘 → 上传 → 删除），图床失败再上传到 APIMart
     if ref_url.startswith("data:"):
+        temp_host_error = ""
         try:
             if ";base64," not in ref_url:
                 return "ERR:不支持的 data URL（缺少 base64 段）"
             header, encoded = ref_url.split(";base64,", 1)
             mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else "image/png"
             raw = base64.b64decode(encoded)
+            if prefer_temp_host:
+                print(f"图片输入策略：temp-host 优先（{APIMART_IMAGE_SOURCE_ENV}=temp），data URL → 临时文件")
+                temp_ref, temp_path = "", ""
+                try:
+                    temp_ref, temp_path = apimart_data_url_temp_image_file(raw, mime)
+                    uploaded = await apimart_image_via_temp_host(temp_ref)
+                    return str(uploaded.get("url") or "")
+                except HTTPException as exc:
+                    temp_host_error = str(exc.detail or "")
+                except Exception as exc:
+                    temp_host_error = f"异常：{exc}"
+                finally:
+                    if temp_path:
+                        try:
+                            os.remove(temp_path)
+                        except OSError:
+                            pass
+                print(f"临时图床不可用，回退 APIMart 上传（temp-host）：{temp_host_error}")
             variants = apimart_upload_payload_variants(data=raw, mime=mime, name_hint="canvas_image")
             resp, attempts = await apimart_upload_with_shrink(client, upload_url, api_headers(json_body=False, provider=provider), variants)
             if resp.status_code in (200, 201):
                 rj = resp.json()
                 url = extract_apimart_asset_url(rj)
                 if valid_apimart_video_image_input(url):
+                    print(f"APIMart 上传成功（apimart-upload）：data URL → {url}")
                     return url
                 print(f"APIMart 上传 data URL 返回中未找到可用 asset/url: {str(rj)[:300]}")
                 return "ERR:APIMart 上传响应未包含可用 URL"
             print(f"APIMart 上传 data URL 失败 ({resp.status_code}): {resp.text[:300]}")
-            if resp.status_code == 413:
-                return f"ERR:{apimart_upload_shrink_reason(attempts)}"
-            return f"ERR:APIMart 上传失败({resp.status_code})"
+            if apimart_upload_quota_exhausted(resp):
+                if prefer_temp_host:
+                    return f"ERR:{apimart_upload_failure_detail(resp, attempts)}；临时图床兜底失败：{temp_host_error}"
+                temp_ref, temp_path = "", ""
+                try:
+                    temp_ref, temp_path = apimart_data_url_temp_image_file(raw, mime)
+                    fallback = await apimart_quota_temp_host_fallback(temp_ref, apimart_upload_failure_detail(resp, attempts))
+                    return str(fallback.get("url") or fallback.get("error") or "")
+                finally:
+                    if temp_path:
+                        try:
+                            os.remove(temp_path)
+                        except OSError:
+                            pass
+            return f"ERR:{apimart_upload_failure_detail(resp, attempts)}"
         except ValueError as e:
             return f"ERR:{e}"
         except Exception as e:
@@ -12293,6 +12674,25 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
         if not path:
             print(f"APIMart 上传跳过：本地文件不存在 {ref_url}")
             return "ERR:本地文件不存在或已被删除"
+        cache_key = apimart_upload_cache_key(path)
+        cached = apimart_upload_cache_get(cache_key)
+        if cached:
+            print(f"APIMart 图片缓存命中（跳过上传/图床）：{ref_url} → {cached}")
+            return cached
+        temp_host_error = ""
+        if prefer_temp_host:
+            print(f"图片输入策略：temp-host 优先（{APIMART_IMAGE_SOURCE_ENV}=temp）：{ref_url}")
+            try:
+                uploaded = await apimart_image_via_temp_host(ref_url)
+                url = str(uploaded.get("url") or "")
+                service = str(uploaded.get("service") or "")
+                apimart_upload_cache_put(cache_key, url, apimart_temp_host_url_ttl(service), f"temp-host:{service}")
+                return url
+            except HTTPException as exc:
+                temp_host_error = str(exc.detail or "")
+            except Exception as exc:
+                temp_host_error = f"异常：{exc}"
+            print(f"临时图床不可用，回退 APIMart 上传（temp-host）：{temp_host_error}")
         try:
             variants = apimart_upload_payload_variants(path=path)
             resp, attempts = await apimart_upload_with_shrink(client, upload_url, api_headers(json_body=False, provider=provider), variants)
@@ -12300,13 +12700,25 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
                 rj = resp.json()
                 url = extract_apimart_asset_url(rj)
                 if valid_apimart_video_image_input(url):
+                    apimart_upload_cache_put(cache_key, url, APIMART_UPLOAD_ASSET_TTL_SECONDS, "apimart-upload")
+                    print(f"APIMart 上传成功（apimart-upload）：{ref_url} → {url}")
                     return url
                 print(f"APIMart 文件上传返回中未找到可用 asset/url: {str(rj)[:300]}")
                 return "ERR:APIMart 上传响应未包含可用 URL"
             print(f"APIMart 文件上传失败 ({resp.status_code}): {resp.text[:300]}")
-            if resp.status_code == 413:
-                return f"ERR:{apimart_upload_shrink_reason(attempts)}"
-            return f"ERR:APIMart 上传失败({resp.status_code})"
+            quota_reason = apimart_upload_failure_detail(resp, attempts)
+            if apimart_upload_quota_exhausted(resp):
+                if prefer_temp_host:
+                    return f"ERR:{quota_reason}；临时图床兜底失败：{temp_host_error}"
+                fallback = await apimart_quota_temp_host_fallback(ref_url, quota_reason)
+                fallback_url = str(fallback.get("url") or "")
+                if fallback_url:
+                    service = str(fallback.get("service") or "")
+                    apimart_upload_cache_put(cache_key, fallback_url, apimart_temp_host_url_ttl(service), f"temp-host:{service}")
+                    print(f"APIMart 上传额度用尽，临时图床 URL 已写入缓存（temp-host）：{ref_url} → {fallback_url}")
+                    return fallback_url
+                return str(fallback.get("error") or f"ERR:{quota_reason}")
+            return f"ERR:{quota_reason}"
         except ValueError as e:
             return f"ERR:{e}"
         except Exception as e:
@@ -12314,12 +12726,25 @@ async def upload_image_for_apimart(client, provider, ref_url: str) -> str:
             return f"ERR:上传异常 {e}"
     return "ERR:不支持的图片来源（仅支持 http/https/asset/data 或本地 /output/ /assets/ 路径）"
 
+async def upload_video_image_for_apimart(client, provider, ref_url: str) -> str:
+    """APIMart 视频输入专用的本地图 → 可用输入：按 APIMART_IMAGE_SOURCE 决定优先级。
+    默认 temp：先临时图床（不消耗 APIMart 上传额度），失败再走官方上传；
+    apimart：旧顺序（官方上传优先，429 才用图床兜底）。
+    图片生成链路直接调用 upload_image_for_apimart，不经过这里，公网直链不会扩散到图片生成。"""
+    source = apimart_image_source()
+    if source != "temp":
+        print(f"图片输入策略：APIMart 上传优先（{APIMART_IMAGE_SOURCE_ENV}={source}）")
+    return await upload_image_for_apimart(
+        client, provider, ref_url, prefer_temp_host=source == "temp")
+
 async def apimart_image_reference_inputs(client, provider, refs, body):
-    """直发 data URL 放得下就走原路径、不上传；超预算时先压小再上传压缩图，换公网 URL 保住多图画质。"""
+    """直发 data URL 放得下就走原路径、不上传；超预算时先压小再上传压缩图，换公网 URL 保住多图画质。
+    上传撞上 429 额度用尽时先试临时图床，图床也失败才回退压缩 data URL；
+    压缩后仍塞不进预算才抛三段文案（额度用尽 → 图床失败原因 → data URL 超预算）。"""
     direct = [reference_to_data_url(ref, max_size=1536) for ref in refs]
     if apimart_json_body_bytes(body, direct) <= APIMART_JSON_BODY_BUDGET:
         return direct
-    compressed = apimart_reference_data_urls(refs, body)
+    compressed, fits = apimart_reference_data_urls_with_fit(refs, body)
     uploaded = []
     for url in compressed:
         try:
@@ -12328,15 +12753,171 @@ async def apimart_image_reference_inputs(client, provider, refs, body):
             print(f"APIMart 参考图上传异常，改用压缩 data URL：{invalid_video_image_preview(url)} {e}")
             return compressed
         if not str(up_url or "").strip().lower().startswith(("http://", "https://")):
-            print(f"APIMart 参考图上传不可用，改用压缩 data URL：{invalid_video_image_preview(url)} {up_url}")
+            if apimart_error_is_quota(up_url):
+                if not fits:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=str(up_url)[4:] + apimart_data_url_over_budget_reason(compressed, body),
+                    )
+                print(f"APIMart 上传额度用尽，回退压缩 data URL（data-url）：{invalid_video_image_preview(url)}")
+            else:
+                print(f"APIMart 参考图上传不可用，改用压缩 data URL（data-url）：{invalid_video_image_preview(url)} {up_url}")
             return compressed
         uploaded.append(up_url)
     return uploaded
 
-async def apimart_cloud_media_fallback(ref_url: str, reason: str) -> str:
-    """APIMart 没有可用的音视频上传端点时，退回公开网盘换 http(s) 链接。"""
+# 参考视频走临时图床前的可选压缩：原文件直传又慢又容易撞图床体积限制。
+VIDEO_CLOUD_COMPRESS_THRESHOLD_BYTES = int(os.getenv("VIDEO_CLOUD_COMPRESS_THRESHOLD_BYTES", str(24 * 1024 * 1024)))
+VIDEO_CLOUD_COMPRESS_MAX_EDGE = int(os.getenv("VIDEO_CLOUD_COMPRESS_MAX_EDGE", "1280"))
+VIDEO_CLOUD_COMPRESS_CRF = int(os.getenv("VIDEO_CLOUD_COMPRESS_CRF", "26"))
+VIDEO_CLOUD_COMPRESS_PRESET = (os.getenv("VIDEO_CLOUD_COMPRESS_PRESET") or "veryfast").strip() or "veryfast"
+VIDEO_CLOUD_COMPRESS_TIMEOUT = int(os.getenv("VIDEO_CLOUD_COMPRESS_TIMEOUT", "600"))
+
+def probe_video_dimensions(path: str) -> Tuple[int, int]:
+    """取视频宽高：优先 ffprobe，没装 ffprobe 时用 opencv；都失败返回 (0, 0)。"""
+    ffprobe = ffprobe_binary()
+    if ffprobe:
+        try:
+            proc = subprocess.run(
+                [ffprobe, "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", path],
+                capture_output=True, text=True, timeout=30,
+            )
+            lines = str(proc.stdout or "").strip().splitlines()
+            if proc.returncode == 0 and lines:
+                parts = lines[0].split("x")
+                width, height = int(parts[0]), int(parts[1])
+                if width > 0 and height > 0:
+                    return width, height
+        except Exception:
+            pass
     try:
-        uploaded = await upload_local_video_to_cloud(ref_url)
+        import cv2
+        cap = cv2.VideoCapture(path)
+        try:
+            if cap.isOpened():
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+                if width > 0 and height > 0:
+                    return width, height
+        finally:
+            cap.release()
+    except Exception:
+        pass
+    return 0, 0
+
+def video_has_audio_stream(ffprobe: Optional[str], path: str) -> Optional[bool]:
+    """ffprobe 判断有没有音轨；ffprobe 缺失或探测失败返回 None（按有音轨处理）。"""
+    if not ffprobe:
+        return None
+    try:
+        proc = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=20,
+        )
+        if proc.returncode != 0:
+            return None
+        return bool(str(proc.stdout or "").strip())
+    except Exception:
+        return None
+
+def compression_scale_filter(width: int, height: int) -> str:
+    """长边缩到 1280，短边按比例取偶数；只有一边超限时不放大另一边。"""
+    if width >= height:
+        return f"scale='min({VIDEO_CLOUD_COMPRESS_MAX_EDGE},iw)':-2"
+    return f"scale=-2:'min({VIDEO_CLOUD_COMPRESS_MAX_EDGE},ih)'"
+
+def compress_video_for_cloud_upload(path: str) -> Dict[str, Any]:
+    """视频传图床前按需压缩：>24MB 或长边 >1280 → H.264 MP4（长边 1280 / CRF 26 / veryfast）。
+    返回 {"path": 压缩产物路径或 "", "reason": 备注, "size", "width", "height", "duration"}；
+    压缩产物由调用方删除。没装 ffmpeg、探测不到、压缩失败或压完更大时一律用原文件。"""
+    info: Dict[str, Any] = {
+        "path": "", "reason": "", "size": 0, "width": 0, "height": 0,
+        "duration": probe_video_file_duration_seconds(path),
+    }
+    try:
+        info["size"] = os.path.getsize(path)
+    except OSError as exc:
+        info["reason"] = f"读取原视频失败：{exc}"
+        return info
+    width, height = probe_video_dimensions(path)
+    info["width"], info["height"] = width, height
+    long_edge = max(width, height)
+    if info["size"] <= VIDEO_CLOUD_COMPRESS_THRESHOLD_BYTES and long_edge <= VIDEO_CLOUD_COMPRESS_MAX_EDGE:
+        info["reason"] = "未超过压缩触发条件"
+        return info
+    ffmpeg = ffmpeg_binary()
+    if not ffmpeg:
+        info["reason"] = "未找到 ffmpeg，跳过压缩"
+        print(f"参考视频压缩跳过：未找到 ffmpeg，跳过压缩（原 {info['size']} 字节）")
+        return info
+    duration_text = f"{info['duration']:.1f}s" if info["duration"] else "时长未知"
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.splitext(os.path.basename(path))[0])[:40] or "video"
+    try:
+        fd, temp_path = tempfile.mkstemp(prefix=f"apimart_video_{stem}_", suffix=".mp4")
+        os.close(fd)
+    except OSError as exc:
+        info["reason"] = f"创建临时文件失败：{exc}"
+        print(f"参考视频压缩失败，回退原文件：{info['reason']}")
+        return info
+    audio_args = ["-c:a", "aac", "-b:a", "128k"]
+    if video_has_audio_stream(ffprobe_binary(), path) is False:
+        audio_args = ["-an"]
+    cmd = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-i", path,
+        "-vf", compression_scale_filter(width, height),
+        "-c:v", "libx264", "-crf", str(VIDEO_CLOUD_COMPRESS_CRF),
+        "-preset", VIDEO_CLOUD_COMPRESS_PRESET,
+        "-pix_fmt", "yuv420p",
+    ] + audio_args + ["-movflags", "+faststart", temp_path]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=VIDEO_CLOUD_COMPRESS_TIMEOUT)
+    except Exception as exc:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        info["reason"] = f"ffmpeg 执行异常：{exc}"
+        print(f"参考视频压缩失败，回退原文件：{info['reason']}")
+        return info
+    try:
+        new_size = os.path.getsize(temp_path)
+    except OSError:
+        new_size = 0
+    if proc.returncode != 0 or new_size <= 0:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        stderr = (proc.stderr or "").strip()[:300]
+        info["reason"] = f"ffmpeg 压缩失败：{stderr or '没有生成输出文件'}"
+        print(f"参考视频压缩失败，回退原文件：{info['reason']}")
+        return info
+    if new_size >= info["size"]:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        info["reason"] = f"压缩后更大（{new_size} >= {info['size']} 字节），回退原文件"
+        print(f"参考视频压缩未采用：{info['reason']}")
+        return info
+    info["path"] = temp_path
+    info["reason"] = "压缩成功"
+    print(f"参考视频压缩：原 {info['size']} 字节 {width}x{height} {duration_text} → 压缩后 {new_size} 字节"
+          f"（{new_size * 100 // info['size']}%）")
+    return info
+
+async def apimart_cloud_media_fallback(ref_url: str, reason: str, path_override: str = "") -> str:
+    """APIMart 没有可用的音视频上传端点时，退回公开网盘换 http(s) 链接。
+    path_override 非空时上传该本地文件（视频压缩后的临时文件），source 仍记原 ref_url。"""
+    try:
+        if path_override:
+            uploaded = await upload_local_video_to_cloud(ref_url, "auto", path_override)
+        else:
+            uploaded = await upload_local_video_to_cloud(ref_url)
     except HTTPException as exc:
         print(f"APIMart 参考素材云上传失败：{exc.detail}")
         return (f"ERR:APIMart 上传入口不可用（{reason}），云上传也失败：{exc.detail}。"
@@ -12347,9 +12928,37 @@ async def apimart_cloud_media_fallback(ref_url: str, reason: str) -> str:
                 "请检查网络后重试，或配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL 把本地素材暴露成公网地址。")
     url = str((uploaded or {}).get("url") or "").strip()
     if valid_apimart_video_image_input(url):
+        service = str((uploaded or {}).get("service") or "auto").strip() or "auto"
+        local_path = str(path_override or output_file_from_url(ref_url) or "")
+        size_note = ""
+        if local_path and os.path.isfile(local_path):
+            size_note = f"（{os.path.getsize(local_path)} 字节）"
+        print(f"参考素材已上传临时图床（{service}）：{url}{size_note}")
         return url
     return (f"ERR:APIMart 上传入口不可用（{reason}），云上传未返回可用的公网链接。"
             "请检查网络后重试，或配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL。")
+
+async def apimart_video_cloud_media_fallback(ref_url: str, reason: str) -> str:
+    """参考视频上传图床前的可选压缩：大视频先转 H.264 临时文件，上传完（成功失败都）删除。
+    原文件超过图床大小限制时不做压缩，保持原有「超过大小限制」报错。"""
+    try:
+        path = local_media_path_for_cloud_upload(ref_url)
+    except HTTPException:
+        return await apimart_cloud_media_fallback(ref_url, reason)
+    try:
+        compressed = await asyncio.to_thread(compress_video_for_cloud_upload, path)
+    except Exception as exc:
+        print(f"参考视频压缩异常，回退原文件：{exc}")
+        compressed = {"path": ""}
+    temp_path = str(compressed.get("path") or "")
+    try:
+        return await apimart_cloud_media_fallback(ref_url, reason, temp_path)
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 async def upload_video_for_apimart(client, provider, ref_url: str) -> str:
     """尽力把本地参考视频转换为 APIMart 可接受的 http/https 或 asset:// URL。
@@ -12371,7 +12980,7 @@ async def upload_video_for_apimart(client, provider, ref_url: str) -> str:
     if not ct.startswith("video/"):
         return "ERR:参考视频不是可识别的视频文件"
     if str(os.getenv("APIMART_TRY_VIDEO_UPLOAD") or "").strip().lower() not in {"1", "true", "yes", "on"}:
-        return await apimart_cloud_media_fallback(ref_url, "APIMART_TRY_VIDEO_UPLOAD 未开启")
+        return await apimart_video_cloud_media_fallback(ref_url, "APIMART_TRY_VIDEO_UPLOAD 未开启")
     base_url = video_api_root(provider)
     filename, content, content_type = apimart_upload_raw_file_payload(path)
     upload_paths = ("/v1/uploads/videos", "/v1/uploads/files", "/v1/uploads/images")
@@ -12394,7 +13003,7 @@ async def upload_video_for_apimart(client, provider, ref_url: str) -> str:
         except Exception as e:
             last_error = f"{upload_path} 异常：{e}"
             print(f"APIMart 视频上传异常: {last_error}")
-    return await apimart_cloud_media_fallback(ref_url, last_error or "上传端点返回 404")
+    return await apimart_video_cloud_media_fallback(ref_url, last_error or "上传端点返回 404")
 
 async def upload_audio_for_apimart(client, provider, ref_url: str) -> str:
     """把本地参考音频转换为 APIMart 可接受的 http/https 或 asset:// URL。
@@ -12815,11 +13424,16 @@ async def upload_cloud_media_verified(label: str, uploader, path: str, source_ur
         raise HTTPException(status_code=502, detail=f"{label} 上传后 GET 直读校验失败：{check['reason']}（{uploaded.get('url')}）")
     return uploaded
 
-async def upload_local_video_to_cloud(ref_url: str, service: str = "auto") -> Dict[str, str]:
+async def upload_local_video_to_cloud(ref_url: str, service: str = "auto", path_override: str = "") -> Dict[str, str]:
     ref_url = str(ref_url or "").strip()
     if ref_url.startswith("http://") or ref_url.startswith("https://"):
         return {"url": ref_url, "source": ref_url, "service": "existing"}
-    path = local_media_path_for_cloud_upload(ref_url)
+    path = str(path_override or "").strip()
+    if path:
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="本地媒体文件不存在或已被删除")
+    else:
+        path = local_media_path_for_cloud_upload(ref_url)
     service = str(service or "auto").strip().lower()
     if service in {"", "auto"}:
         service = str(os.getenv("CLOUD_MEDIA_UPLOAD_SERVICE") or os.getenv("CLOUD_VIDEO_UPLOAD_SERVICE") or "auto").strip().lower()
@@ -17531,7 +18145,7 @@ async def video_blur_faces(payload: VideoBlurFacesRequest):
         writer.release()
         out_filename = f"blurred_{uuid.uuid4().hex[:12]}.mp4"
         out_path = output_path_for(out_filename, "input")
-        ffmpeg_bin = shutil.which("ffmpeg")
+        ffmpeg_bin = ffmpeg_binary()
         if not ffmpeg_bin:
             raise RuntimeError("未找到 ffmpeg，无法把模糊后的视频编码为 mp4")
         subprocess.run(
@@ -18212,7 +18826,7 @@ async def video_extract_frame(payload: VideoFrameRequest):
     out_path = output_path_for(out_filename, "input")
 
     def _grab():
-        ffmpeg = shutil.which("ffmpeg")
+        ffmpeg = ffmpeg_binary()
         if ffmpeg:
             if which == "first":
                 cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", src_path, "-frames:v", "1", out_path]
@@ -18280,7 +18894,7 @@ class VideoConcatRequest(BaseModel):
 async def video_concat(payload: VideoConcatRequest):
     """把画布里选中的多段视频按顺序拼成一条。分辨率统一成第一段的尺寸（等比缩放 + 补边），30fps；
     全部有音轨时保留音频，否则统一用静音轨，保证拼接时各段参数一致。"""
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = ffmpeg_binary()
     if not ffmpeg:
         raise HTTPException(status_code=400, detail="未找到 ffmpeg，无法拼接视频")
     urls = [str(u or "").strip() for u in (payload.urls or []) if str(u or "").strip()]
@@ -18294,7 +18908,7 @@ async def video_concat(payload: VideoConcatRequest):
         if not src or not os.path.isfile(src):
             raise HTTPException(status_code=400, detail="只支持画布里的本地视频（有一段找不到文件）")
         sources.append(src)
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = ffprobe_binary()
     width, height = _video_probe_size(ffprobe, sources[0])
     if width <= 0 or height <= 0:
         width, height = 1280, 720
@@ -18407,8 +19021,8 @@ def _timeline_has_audio(ffprobe, path):
 
 def _timeline_render_sync(payload, sources, tmpdir):
     """按剪辑时间线渲染 MP4：画面按片段顺序拼接（交叉溶解用 xfade、黑场淡入用 fade），声音全部按时间轴位置混音。"""
-    ffmpeg = shutil.which("ffmpeg")
-    ffprobe = shutil.which("ffprobe")
+    ffmpeg = ffmpeg_binary()
+    ffprobe = ffprobe_binary()
     W = max(16, int(payload.width) // 2 * 2)
     H = max(16, int(payload.height) // 2 * 2)
     fps = max(10, min(60, int(payload.fps or 30)))
@@ -18543,7 +19157,7 @@ def _timeline_render_sync(payload, sources, tmpdir):
 @app.post("/api/timeline/render")
 async def timeline_render(payload: TimelineRenderRequest):
     """智能画布BEAT 剪辑时间线导出 MP4：片段位置 / 修剪 / 变速 / 音量 / 淡入淡出 / 转场 / 字幕 / 画幅全部按时间线渲染。"""
-    if not shutil.which("ffmpeg"):
+    if not ffmpeg_binary():
         raise HTTPException(status_code=400, detail="未找到 ffmpeg，无法导出 MP4（可以先用「导出 WebM」）")
     clips = [c for c in (payload.clips or []) if str(c.url or "").strip()]
     if not clips:
@@ -18594,9 +19208,9 @@ async def video_segments(payload: VideoSegmentsRequest):
         src_path = output_file_from_url(raw_url)
         if not src_path or not os.path.isfile(src_path):
             raise HTTPException(status_code=400, detail=f"找不到视频文件：{raw_url}")
-    if not shutil.which("ffprobe"):
+    if not ffprobe_binary():
         raise HTTPException(status_code=400, detail="服务器缺少 ffprobe，无法读取视频时长")
-    if not shutil.which("ffmpeg"):
+    if not ffmpeg_binary():
         raise HTTPException(status_code=400, detail="服务器缺少 ffmpeg，无法切分视频")
     duration = probe_video_file_duration_seconds(src_path)
     if not duration or duration <= 0:
@@ -25318,7 +25932,7 @@ def _pixverse_local_or_public_media(value):
 async def _pixverse_prepare_upload_video(path):
     if not path or os.path.getsize(path) <= 900_000:
         return "", path
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = ffmpeg_binary()
     if not ffmpeg:
         raise HTTPException(status_code=400, detail="上传副本超过 APIMart 网关限制，需要 FFmpeg 压缩后再上传")
     folder = tempfile.mkdtemp(prefix="novai-pixverse-upload-")
@@ -25344,7 +25958,7 @@ async def _pixverse_extract_voice_sample(video_url):
         path = output_file_from_url(saved)
     if not path:
         raise HTTPException(status_code=400, detail="无法读取原视频以提取人声样本")
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = ffmpeg_binary()
     if not ffmpeg:
         raise HTTPException(status_code=400, detail="提取原视频人声需要 FFmpeg；也可以直接上传声音样本或成品音频")
     folder = tempfile.mkdtemp(prefix="novai-pixverse-voice-")
@@ -25559,12 +26173,23 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                 if apimart_model == "veo3.1-lite" and payload.images:
                     raise HTTPException(status_code=400, detail="veo3.1-lite 不支持图片输入，请改用 veo3.1-fast 或 veo3.1-quality。")
                 image_limit = 0 if apimart_model == "veo3.1-lite" else (3 if is_veo31 else 9)
+                veo31_body = None
+                if is_veo31:
+                    veo31_body = {
+                        "prompt": payload.prompt,
+                        "model": apimart_model,
+                        "duration": apimart_veo31_duration(payload.duration),
+                        "aspect_ratio": apimart_veo31_aspect(payload.aspect_ratio),
+                        "resolution": apimart_veo31_resolution(payload.resolution),
+                    }
+                    if apimart_model != "veo3.1-lite":
+                        veo31_body["official_fallback"] = False
                 for ref in payload.images[:image_limit]:
                     if not ref.url:
                         continue
                     role = str(ref.role or "").strip()
                     if not is_veo31 and role in {"first_frame", "last_frame", "reference_image"}:
-                        up_url = await upload_image_for_apimart(client, provider, ref.url)
+                        up_url = await upload_video_image_for_apimart(client, provider, ref.url)
                         if valid_apimart_video_image_input(up_url):
                             image_with_roles.append({"url": up_url, "role": role})
                         else:
@@ -25572,15 +26197,38 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                             invalid_images.append((ref.url, reason))
                 image_payload = []
                 if not image_with_roles:
-                    for ref in payload.images[:image_limit]:
-                        if not ref.url:
-                            continue
-                        up_url = await upload_image_for_apimart(client, provider, ref.url)
-                        if valid_apimart_video_image_input(up_url):
-                            image_payload.append(up_url)
+                    image_refs = [ref for ref in payload.images[:image_limit] if ref.url]
+                    direct_inputs = apimart_direct_data_urls(
+                        [{"url": ref.url} for ref in image_refs], veo31_body
+                    ) if is_veo31 else None
+                    quota_reason = ""
+                    if direct_inputs is not None:
+                        print(f"APIMart VEO3.1 图片 data URL 直发 {len(direct_inputs)} 张，不调用上传接口")
+                        image_payload = direct_inputs
+                    else:
+                        for ref in image_refs:
+                            up_url = await upload_video_image_for_apimart(client, provider, ref.url)
+                            if valid_apimart_video_image_input(up_url):
+                                image_payload.append(up_url)
+                            else:
+                                reason = up_url[4:] if isinstance(up_url, str) and up_url.startswith("ERR:") else "未知错误"
+                                invalid_images.append((ref.url, reason))
+                                if apimart_error_is_quota(up_url):
+                                    quota_reason = reason
+                    if quota_reason and not image_payload and is_veo31 and veo31_body:
+                        fallback, fit = apimart_reference_data_urls_with_fit(
+                            [{"url": ref.url} for ref in image_refs], veo31_body
+                        )
+                        if fit:
+                            print(f"APIMart 上传额度用尽，VEO3.1 改用压缩 data URL（data-url）{len(fallback)} 张")
+                            image_payload = fallback
                         else:
-                            reason = up_url[4:] if isinstance(up_url, str) and up_url.startswith("ERR:") else "未知错误"
-                            invalid_images.append((ref.url, reason))
+                            sample = invalid_video_image_preview(image_refs[0].url if image_refs else "")
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"输入图片无法转换为视频接口支持的格式：{sample}\n原因："
+                                       f"{quota_reason}{apimart_data_url_over_budget_reason(fallback, veo31_body)}"
+                            )
                 if payload.images and not image_with_roles and not image_payload:
                     first_url, first_reason = invalid_images[0] if invalid_images else ("", "未知错误")
                     sample = invalid_video_image_preview(first_url)
@@ -25588,13 +26236,7 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                 # --- APIMart 请求体 ---
                 if is_veo31:
                     model = apimart_model
-                    body = {
-                        "prompt": payload.prompt,
-                        "model": model,
-                        "duration": apimart_veo31_duration(payload.duration),
-                        "aspect_ratio": apimart_veo31_aspect(payload.aspect_ratio),
-                        "resolution": apimart_veo31_resolution(payload.resolution),
-                    }
+                    body = veo31_body
                     if image_payload and model != "veo3.1-lite":
                         video_images = image_payload[:3]
                         if model == "veo3.1-quality" and len(video_images) > 2:
@@ -25604,8 +26246,6 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                             body["generation_type"] = "frame"
                         elif len(video_images) >= 3 and model != "veo3.1-quality":
                             body["generation_type"] = "reference"
-                    if model != "veo3.1-lite":
-                        body["official_fallback"] = False
                 else:
                     apimart_seedance_model = selected_model(payload.model, "doubao-seedance-2.0")
                     apimart_video_caps = apimart_video_model_caps(apimart_seedance_model)
@@ -31059,7 +31699,7 @@ def runninghub_is_image_to_video(value):
 
 @app.post("/api/smart-canvas/minimax-export")
 async def export_minimax_timeline(payload: MiniMaxTimelineExportRequest):
-    ffmpeg = shutil.which("ffmpeg")
+    ffmpeg = ffmpeg_binary()
     if not ffmpeg:
         raise HTTPException(status_code=500, detail="未找到 ffmpeg，无法导出完整剪辑")
     clips = [clip for clip in (payload.clips or []) if clip.url]
@@ -31073,7 +31713,7 @@ async def export_minimax_timeline(payload: MiniMaxTimelineExportRequest):
             if not src:
                 raise HTTPException(status_code=400, detail="完整剪辑导出只支持本地生成素材")
             clip_sources.append(src)
-        ffprobe = shutil.which("ffprobe")
+        ffprobe = ffprobe_binary()
         preserve_audio = bool(ffprobe)
         if ffprobe:
             for src in clip_sources:

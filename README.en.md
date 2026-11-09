@@ -9,7 +9,7 @@
 
 <p>Generate images and video on an infinite canvas, wire up workflows with nodes, and let the canvas agent do the work.</p>
 
-<a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases"><img src="static/images/badges/release.svg" alt="release: v2.0.05" /></a> <img src="static/images/badges/platform.svg" alt="platform: Windows | macOS | Linux" /> <img src="static/images/badges/quickstart.svg" alt="quickstart: 3 commands" /> <img src="static/images/badges/readme.svg" alt="README: 中文 | English" />
+<a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases"><img src="static/images/badges/release.svg" alt="release: v2.0.06" /></a> <img src="static/images/badges/platform.svg" alt="platform: Windows | macOS | Linux" /> <img src="static/images/badges/quickstart.svg" alt="quickstart: 3 commands" /> <img src="static/images/badges/readme.svg" alt="README: 中文 | English" />
 
 <p><a href="https://invaders-2.github.io/NOVAI-Infinite-Canvas/">Website</a> · <a href="https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases">Download</a> · <a href="https://invaders-2.github.io/NOVAI-Infinite-Canvas/docs.html">Docs</a> · <a href="#recent-updates">Changelog</a></p>
 
@@ -268,6 +268,15 @@ expression follow the original motion. No subtitles, no watermark.
 
 ## Recent Updates
 
+### v2.0.06 · November 9, 2026
+
+- **Skill install** — the canvas agent accepts any HTTPS SKILL.md link and RedSkill identifiers (`redskill:<name>`), fetches and verifies the bundle (sha256), inlines references, and tolerates extra front-matter fields such as `version`/`author`.
+- **Marketplace** — official skills must be added before use; four RedSkill entries with Chinese names and photo covers; skill detail uses the portrait poster; "use in a new canvas" now opens the BEAT canvas.
+- **Canvas agent** — skill thumbnails in the `/` palette, My Skills and Manage Skills; deleting the `/` closes the palette; legacy smart nodes no longer degrade to sticky notes in BEAT.
+- **Updater** — Windows frees the backend port (including externally started processes) before installing, installs silently and relaunches, and shows download progress; macOS/Windows prefer the mirror and fall back to GitHub; fixed the stuck progress in Settings.
+- **Media upload** — local images/videos go to a temporary host first to avoid APIMart's upload quota; large images are capped at 2048px/900KB and videos at 720p with fallback to the original file.
+- **Bundled FFmpeg on Windows** — the installer ships FFmpeg (GPL static, with libx264) and FFprobe, so video compression, timeline editing and clipping work without system dependencies; license and source notes are included.
+
 ### v2.0.05 · November 8, 2026
 
 - **GIF output** — image generation can produce animated GIFs with 2–16 frames and a per-frame duration; each frame is scaled down to fit the provider's sheet limits and the actual size is shown after generation.
@@ -298,4 +307,3 @@ This project is released under the [PolyForm Noncommercial License 1.0.0](LICENS
 - **Keep the notices**: redistributing the original or modified versions must retain this license and copyright notices.
 
 > **Version note**: v2.0.04 and earlier were released under AGPL-3.0, and anyone who obtained those versions may continue to use them under AGPL-3.0 (including commercially). Versions from this commit onward are under PolyForm Noncommercial 1.0.0. For commercial licensing or partnership, contact the maintainer via GitHub Issues or [@invaders-2](https://github.com/invaders-2).
-

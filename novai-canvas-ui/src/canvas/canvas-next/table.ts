@@ -602,6 +602,107 @@ export function keepMediaCells(t: TableData, old: TableData | null): TableData {
   return { ...t, rows, ...(kept.some(Boolean) ? { roles: kept } : {}) };
 }
 
+/* ---------- CSV 导入 / 导出 ---------- */
+/** RFC4180：含逗号、引号、换行的字段用双引号包住，内部双引号翻倍 */
+const csvCell = (v: string): string => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+/**
+ * 表格 → CSV 文本：第一行是列名，其余是数据行；不含左侧「输入 N」通道列（那是画布连线推导出来的，不属于表格数据）。
+ * 行尾用 CRLF（RFC4180 与 Excel 都认）。
+ */
+export function csvFromTable(t: TableData): string {
+  const line = (row: string[]) => t.columns.map((_, i) => csvCell(row[i] ?? "")).join(",");
+  return [line(t.columns), ...t.rows.map(line)].join("\r\n");
+}
+/** 首行引号外哪个分得多就当分隔符：Excel 复制出来是制表符，导出的文件是逗号 */
+function sniffDelimiter(text: string): "," | "\t" {
+  let quoted = false, tabs = 0, commas = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) { if (ch === '"') { if (text[i + 1] === '"') i++; else quoted = false; } continue; }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === "\n" || ch === "\r") break;
+    if (ch === "\t") tabs++; else if (ch === ",") commas++;
+  }
+  return tabs > commas ? "\t" : ",";
+}
+/** 按 RFC4180 解析成二维数组：双引号字段可含分隔符 / 换行，"" 表示一个双引号；CRLF、CR、LF 都算换行 */
+function parseDelimited(text: string): { rows: string[][]; delimiter: "," | "\t" } {
+  const src = String(text ?? "").replace(/^\uFEFF/, "");
+  const delimiter = sniffDelimiter(src);
+  const rows: string[][] = [];
+  let row: string[] = [], cell = "", quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch !== '"') { cell += ch; continue; }
+      if (src[i + 1] === '"') { cell += '"'; i++; continue; }
+      quoted = false; continue;
+    }
+    if (ch === '"' && !cell) { quoted = true; continue; }
+    if (ch === delimiter) { row.push(cell); cell = ""; continue; }
+    if (ch === "\r" || ch === "\n") { if (ch === "\r" && src[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; continue; }
+    cell += ch;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return { rows, delimiter };
+}
+export type CsvImport = {
+  table: TableData;
+  /** 超过 TABLE_LIMITS 被截掉的行 / 列数（0 = 没截），由调用方 toast 说明 */
+  droppedRows: number;
+  droppedCols: number;
+  delimiter: "," | "\t";
+};
+/**
+ * CSV / TSV 文本 → 表格：第一行是列名（空列名、重名回落「字段 N」），其余是数据行；
+ * 单元格原样保留（@引用、图片地址、换行都不动），只按 TABLE_LIMITS 截断。
+ * 替换当前表：保留 title / sourceId / inputModes，roles 按列位置沿用（新列给空 role）。
+ * 空内容或解析不出列返回 null（调用方 toast 报错，不改表格）。
+ */
+export function tableFromCsv(text: string, prev?: TableData | null): CsvImport | null {
+  const { rows, delimiter } = parseDelimited(String(text ?? ""));
+  // 只削掉首尾的空白行（粘贴时多敲的换行）；中间的空行是真数据，保留
+  const blank = (r: string[]) => !r.some((c) => c.trim() !== "");
+  let from = 0, to = rows.length;
+  while (from < to && blank(rows[from])) from++;
+  while (to > from && blank(rows[to - 1])) to--;
+  const data = rows.slice(from, to);
+  if (!data.length) return null;
+  const header = data[0], body = data.slice(1);
+  const width = Math.max(header.length, ...body.map((r) => r.length));
+  if (width < 1) return null;
+  const used = new Set<string>();
+  const names = Array.from({ length: width }, (_, i) => {
+    const raw = (header[i] ?? "").trim();
+    let name = raw && !used.has(raw) ? raw : `字段 ${i + 1}`;
+    if (used.has(name)) { let k = 2; while (used.has(`${name} (${k})`)) k++; name = `${name} (${k})`; }
+    used.add(name);
+    return name.slice(0, 120);
+  });
+  const columns = names.slice(0, TABLE_LIMITS.cols);
+  const kept = body.slice(0, TABLE_LIMITS.rows);
+  // 内嵌的 data URL 图片不截断，截了图就坏了（和 normalizeTable 一致）
+  const cell = (v: string) => (/^data:image\//.test(v) ? v : v.slice(0, TABLE_LIMITS.cell));
+  const inputModes = channelModesOf(prev?.inputModes);
+  const roles = columns.map((_, i) => (isRole(prev?.roles?.[i]) ? String(prev!.roles![i]) : ""));
+  return {
+    table: {
+      kind: "table", version: 1,
+      title: prev?.title || "多维表格",
+      columns,
+      rows: kept.map((r) => columns.map((_, i) => cell(r[i] ?? ""))),
+      ...(prev?.sourceId ? { sourceId: prev.sourceId } : {}),
+      // 旧文档只有 inputMode（只映射第一通道），留着免得导入后通道模式跳回默认
+      ...(prev?.inputMode ? { inputMode: prev.inputMode } : {}),
+      ...(Object.keys(inputModes).length ? { inputModes } : {}),
+      ...(roles.some(Boolean) ? { roles } : {}),
+    },
+    droppedRows: body.length - kept.length,
+    droppedCols: names.length - columns.length,
+    delimiter,
+  };
+}
+
 /** 画布上的图片节点拖到表格图片单元格上（cellId = 表格 id:行:列）：单图列替换，参考图列追加 */
 export function dropImageOnCell(store: { node: (id: string) => CanvasNode | undefined; updateNode: (id: string, fn: (n: CanvasNode) => CanvasNode, o?: { history?: boolean }) => void; toast: (s: string) => void }, cellId: string, imageId: string, multi: boolean): boolean {
   const [tid, rs, cs] = cellId.split(":"); const r = Number(rs), c = Number(cs);

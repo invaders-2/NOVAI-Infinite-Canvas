@@ -44,6 +44,8 @@ function loadUpdateModule(novaiUpdater, responseFor) {
     const calls = [];
     const toasts = [];
     const store = new Map();
+    const timers = new Map();
+    let timerSeq = 0;
     const sandbox = {
         console: { log() {}, warn() {}, error() {} },
         reactive: v => v,
@@ -55,8 +57,8 @@ function loadUpdateModule(novaiUpdater, responseFor) {
             removeItem: k => { store.delete(k); },
         },
         fetch: (url, opts) => { calls.push({ url, opts }); return responseFor(url, opts); },
-        setTimeout: () => 0,
-        clearTimeout: () => {},
+        setTimeout: (fn, ms) => { timerSeq += 1; timers.set(timerSeq, { fn, ms }); return timerSeq; },
+        clearTimeout: (id) => { timers.delete(id); },
         setInterval: () => 0,
         clearInterval: () => {},
         AbortController: FakeAbortController,
@@ -64,11 +66,11 @@ function loadUpdateModule(novaiUpdater, responseFor) {
     };
     const ctx = vm.createContext(sandbox);
     const exported = vm.runInContext(
-        src + '\n;({ upd, startUpdate, rollback, compareVersions })',
+        src + '\n;({ upd, startUpdate, rollback, compareVersions, closeUpdateModal, openUpdateModal, stopDesktopUpdateProgress })',
         ctx,
         { filename: 'web/src/lib/update.js' }
     );
-    return { ...exported, calls, toasts, store };
+    return { ...exported, calls, toasts, store, timers };
 }
 
 const okResponse = (body) => Promise.resolve({ ok: true, status: 200, json: async () => body });
@@ -95,7 +97,7 @@ const noResponse = () => Promise.resolve({ ok: false, status: 404, json: async (
     ok(!/downloadUpdate\(/.test(downloadedBranch), '已 downloaded 时不再调用 downloadUpdate');
 
     const installPrompt = topLevelFunction(main, 'showUpdateInstallPrompt');
-    ok(/stopBackendForUpdate\(\)\.then\(\(\) => autoUpdater\.quitAndInstall\(\)\)/.test(installPrompt), '安装前先 stopBackendForUpdate 再 quitAndInstall');
+    ok(/stopBackendForUpdate\(\)\.then\(\(\) => \{[\s\S]*?autoUpdater\.quitAndInstall\(true, true\)[\s\S]*?autoUpdater\.quitAndInstall\(\);/.test(installPrompt), '安装前先 stopBackendForUpdate 再 quitAndInstall（Windows 静默 / macOS 原样）');
     ok(/showUpdateAvailablePrompt/.test(topLevelFunction(main, 'setupAutoUpdate')), 'update-available 复用同一个确认框');
     ok(/autoUpdater\.on\('update-downloaded'/.test(main) && /showUpdateInstallPrompt\(\)/.test(main), 'update-downloaded 复用同一个安装确认框');
     ok(/manualUpdateCheck/.test(main), '手动检查才有「已是最新版本」提示（启动自动检查保持安静）');
@@ -179,6 +181,59 @@ const noResponse = () => Promise.resolve({ ok: false, status: 404, json: async (
         ok(bundle.includes('已转交桌面版更新'), '构建产物包含桌面版转交分支');
         ok(bundle.includes('novaiUpdater'), '构建产物包含 window.novaiUpdater 检测');
     }
+
+    console.log('[9] 桌面版进度订阅生命周期');
+    ok(/sendUpdateProgress\(\{ stage: 'installing', percent: 100, final: true \}\)/.test(main), '主进程在真正开始安装时发 final 标记（订阅据此退订）');
+    const makeDesktop = (label) => {
+        const handlers = [];
+        const offs = [];
+        return {
+            handlers,
+            offs,
+            updater: {
+                onProgress: (cb) => { handlers.push(cb); return () => offs.push(label + ':off'); },
+                downloadAndInstall: () => Promise.resolve({ ok: true, supported: true, stage: 'checking' }),
+            },
+        };
+    };
+
+    const live = makeDesktop('live');
+    const liveMod = loadUpdateModule(live.updater, () => { throw new Error('桌面模式下不应发 fetch'); });
+    await liveMod.startUpdate();
+    ok(liveMod.upd.running === false && liveMod.upd.progress === null, '没有进度事件时不显示 0% 假进度');
+    ok(live.handlers.length === 1 && live.offs.length === 0, 'downloadAndInstall 返回后订阅仍在（修复前 finally 里已退订）');
+    live.handlers[0]({ stage: 'downloading', percent: 42, transferred: 42, total: 100 });
+    ok(liveMod.upd.running === true && liveMod.upd.phase === 'running', 'Promise 结束后收到的进度进入 running');
+    ok(liveMod.upd.progress && liveMod.upd.progress.percent === 42, 'Promise 结束后进度百分比仍更新到弹窗');
+    live.handlers[0]({ stage: 'installing', percent: 100 });
+    ok(live.offs.length === 0 && liveMod.upd.running === true, 'installing（等待用户确认）不提前退订');
+    live.handlers[0]({ stage: 'installing', percent: 100, final: true });
+    ok(live.offs.length === 1 && liveMod.upd.phase === 'restarting', '真正开始安装后自动退订并进入 restarting');
+
+    const failing = makeDesktop('error');
+    const failMod = loadUpdateModule(failing.updater, () => { throw new Error('桌面模式下不应发 fetch'); });
+    await failMod.startUpdate();
+    failing.handlers[0]({ stage: 'error', error: 'HTTP 404' });
+    ok(failing.offs.length === 1 && failMod.upd.phase === 'error' && failMod.upd.running === false, 'error 终态退订并显示失败');
+
+    const closing = makeDesktop('close');
+    const closeMod = loadUpdateModule(closing.updater, () => noResponse());
+    await closeMod.startUpdate();
+    closing.handlers[0]({ stage: 'downloading', percent: 10 });
+    closeMod.closeUpdateModal();
+    ok(closing.offs.length === 1, '关闭弹窗后退订（不再收进度）');
+    closeMod.openUpdateModal();
+    ok(closing.handlers.length === 2, '重新打开弹窗时恢复订阅');
+    closeMod.closeUpdateModal();
+    ok(closing.offs.length === 2, '再次关闭后退订');
+
+    const timeout = makeDesktop('timeout');
+    const timeoutMod = loadUpdateModule(timeout.updater, () => { throw new Error('桌面模式下不应发 fetch'); });
+    await timeoutMod.startUpdate();
+    const pending = Array.from(timeoutMod.timers.values()).filter((item) => item.ms === 30 * 60 * 1000);
+    ok(pending.length === 1 && timeout.offs.length === 0, '订阅时挂了 30 分钟超时');
+    pending[0].fn();
+    ok(timeout.offs.length === 1, '30 分钟超时后退订');
 
     console.log('');
     if (fails.length) {

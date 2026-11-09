@@ -34,6 +34,58 @@ export const upd = reactive({
 });
 export const updDone = reactive({ open: false, version: '', notes: null });
 let abortCtl = null;
+/* 桌面版进度订阅：Windows 的下载在 downloadAndInstall 返回之后才开始，
+   Promise 结束时不能退订；保留到终态、用户关弹窗或 30 分钟超时。 */
+const DESKTOP_PROGRESS_TIMEOUT = 30 * 60 * 1000;
+let desktopProgressOff = null;
+let desktopProgressTimer = null;
+
+function releaseDesktopProgress() {
+    if (desktopProgressTimer) { clearTimeout(desktopProgressTimer); desktopProgressTimer = null; }
+    if (desktopProgressOff) {
+        const off = desktopProgressOff;
+        desktopProgressOff = null;
+        try { off(); } catch (e) {}
+    }
+}
+function applyDesktopProgress(payload) {
+    const p = payload || {};
+    const stage = p.stage || 'downloading';
+    if (stage === 'error') {
+        upd.running = false;
+        upd.phase = 'error';
+        upd.error = '自动更新没有完成，请稍后重试';
+        releaseDesktopProgress();
+        return;
+    }
+    upd.progress = {
+        stage,
+        percent: Math.max(0, Math.min(100, Number(p.percent) || 0)),
+        transferred: Number(p.transferred) || 0,
+        total: Number(p.total) || 0,
+    };
+    /* final 只由主进程「真正开始安装」时发；installing 也可能只是下载完成等待确认 */
+    if (stage === 'done' || p.final === true || p.restarting === true) {
+        upd.running = false;
+        upd.phase = stage === 'done' ? 'done' : 'restarting';
+        releaseDesktopProgress();
+        return;
+    }
+    upd.running = true;
+    upd.phase = 'running';
+}
+function ensureDesktopProgress(desktop) {
+    if (desktopProgressOff || !desktop || typeof desktop.onProgress !== 'function') return;
+    desktopProgressOff = desktop.onProgress(applyDesktopProgress);
+    if (desktopProgressTimer) clearTimeout(desktopProgressTimer);
+    desktopProgressTimer = setTimeout(() => {
+        desktopProgressTimer = null;
+        if (upd.running && !upd.progress) { upd.running = false; upd.phase = 'idle'; }
+        releaseDesktopProgress();
+    }, DESKTOP_PROGRESS_TIMEOUT);
+}
+/* 桌面更新弹窗关闭 / 组件卸载时由界面调用 */
+export function stopDesktopUpdateProgress() { releaseDesktopProgress(); }
 
 export function versionLabel(v, mode = 'full') {
     const text = String(v || '').trim();
@@ -123,11 +175,17 @@ export function dismissReminder() { if (upd.reminder) writeLS(DISMISSED_KEY, upd
 
 export function openUpdateModal() {
     if (!upd.running) { upd.phase = 'idle'; upd.error = ''; }
+    else {
+        /* 关弹窗时退订了；重新打开时恢复订阅（主进程下载还在继续） */
+        const desktop = desktopUpdater();
+        if (desktop) ensureDesktopProgress(desktop);
+    }
     upd.modalOpen = true;
     fetch('/api/changelog').then(r => (r.ok ? r.json() : null)).then(d => { if (d && Array.isArray(d.items) && d.items.length) upd.notes = d; }).catch(() => {});
 }
 export function closeUpdateModal() {
     if (upd.running) { try { abortCtl && abortCtl.abort(); } catch (e) {} }
+    releaseDesktopProgress();
     upd.modalOpen = false;
 }
 
@@ -165,47 +223,31 @@ export async function startUpdate() {
     const desktop = desktopUpdater();
     if (desktop) {
         upd.error = '';
-        /* macOS 走主进程自替换：下载百分比由 novai:update-progress 推过来，
-           这里接到弹窗进度条（Windows 仍是 electron-updater，没有进度事件）。 */
-        let offProgress = null;
-        if (typeof desktop.onProgress === 'function') {
-            offProgress = desktop.onProgress((p) => {
-                const payload = p || {};
-                if (payload.stage === 'error') {
-                    upd.running = false;
-                    upd.phase = 'error';
-                    upd.error = '自动更新没有完成，请稍后重试';
-                    return;
-                }
-                const percent = Math.max(0, Math.min(100, Number(payload.percent) || 0));
-                upd.running = true;
-                upd.phase = 'running';
-                upd.progress = {
-                    stage: payload.stage || 'downloading',
-                    percent,
-                    transferred: Number(payload.transferred) || 0,
-                    total: Number(payload.total) || 0,
-                };
-            });
-        }
+        if (!upd.running) { upd.phase = 'idle'; upd.progress = null; }
+        /* 进度由主进程的 novai:update-progress 推送。Windows 的下载在
+           downloadAndInstall 返回后才开始，订阅必须留到终态 / 关弹窗 / 超时。 */
+        ensureDesktopProgress(desktop);
         try {
             const res = await desktop.downloadAndInstall();
             if (res && res.supported === false) {
                 console.warn('[update] 桌面更新不可用', res.reason);
+                releaseDesktopProgress();
                 toast('当前桌面版不支持在线更新，点这里去下载新版本', { danger: true, icon: 'alert', onClick: () => window.open(RELEASE_LATEST_URL, '_blank', 'noopener') });
             } else if (res && res.ok === false) {
+                releaseDesktopProgress();
                 upd.running = false;
                 upd.phase = 'error';
                 upd.error = '自动更新没有完成，请稍后重试';
                 toast('桌面版更新没有完成，请稍后重试', { danger: true, icon: 'alert' });
             } else {
+                /* 还没有进度事件时不要显示一个假的 0%；事件到了再进入 running */
+                if (!upd.progress) { upd.running = false; upd.phase = 'idle'; }
                 toast('已转交桌面版更新，请按弹窗提示操作', { icon: 'arrowup' });
             }
         } catch (e) {
             console.error('[update] 转交桌面版更新失败：', e);
+            releaseDesktopProgress();
             toast('桌面版更新暂时不可用，请稍后重试', { danger: true, icon: 'alert' });
-        } finally {
-            if (offProgress) { try { offProgress(); } catch (e) {} }
         }
         return;
     }

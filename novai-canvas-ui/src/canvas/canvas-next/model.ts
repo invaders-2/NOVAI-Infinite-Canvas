@@ -386,6 +386,12 @@ export function outputFormatLabel(value: unknown): string {
   const key = String(value ?? "").trim().toLowerCase();
   return OUTPUT_FORMAT_LABEL[key] || OUTPUT_FORMAT_LABEL[""];
 }
+/** 底栏摘要用的短文案：静态图保持全称，GIF / SVG 只留名字（面板按钮仍用 OUTPUT_FORMAT_LABEL 全称） */
+export const OUTPUT_FORMAT_SHORT_LABEL: Record<string, string> = { "": "静态图", gif: "GIF", svg: "SVG" };
+export function outputFormatShortLabel(value: unknown): string {
+  const key = String(value ?? "").trim().toLowerCase();
+  return OUTPUT_FORMAT_SHORT_LABEL[key] || OUTPUT_FORMAT_SHORT_LABEL[""];
+}
 /** 面板选项：静态图永远有；GIF / SVG 只在 caps 声明时才出现，一个都没有 = 返回空 = 不给入口 */
 export function outputFormatOptions(model: ModelSpec | null | undefined): Array<{ value: "" | ImageOutputFormat; label: string }> {
   const caps = (Array.isArray(model?.outputFormats) ? model.outputFormats : []).map((item) => String(item ?? "").trim().toLowerCase());

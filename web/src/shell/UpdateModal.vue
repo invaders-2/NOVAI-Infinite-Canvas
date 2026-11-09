@@ -1,11 +1,11 @@
 <script setup>
 // 更新弹窗：只留「版本 + 更新内容 + 进度 + 一个按钮」。下载源统一在「设置 → 通用 → 更新源」选，
 // 连通性检测之类技术细节不在这里展示；失败也只说一句人话，技术原因在 console。
-import { computed } from 'vue';
+import { computed, onUnmounted } from 'vue';
 import NvIcon from '../components/NvIcon.vue';
 import NvProgress from '../components/NvProgress.vue';
 import { state } from '../lib/store.js';
-import { upd, versionLabel, startUpdate, closeUpdateModal, stageText } from '../lib/update.js';
+import { upd, versionLabel, startUpdate, closeUpdateModal, stageText, stopDesktopUpdateProgress } from '../lib/update.js';
 
 const title = computed(() => (upd.remote ? '发现新版本 ' + versionLabel(upd.remote) : '软件更新'));
 const versionLine = computed(() => (upd.remote
@@ -17,6 +17,7 @@ const phase = computed(() => (upd.running ? 'running' : upd.phase));
 const progressStage = computed(() => stageText(upd.progress));
 const progressPercent = computed(() => Number((upd.progress && upd.progress.percent) || 0));
 function onScrim(e) { if (e.target === e.currentTarget) closeUpdateModal(); }
+onUnmounted(stopDesktopUpdateProgress);
 </script>
 
 <template>

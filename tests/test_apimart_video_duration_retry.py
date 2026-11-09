@@ -137,7 +137,8 @@ def test_veo31_branch_also_gets_duration_retry(monkeypatch):
     assert client.posts[0]["body"]["duration"] == 4
     assert client.posts[1]["body"]["duration"] == 5
     assert client.posts[1]["body"]["aspect_ratio"] == "16:9"
-    assert len(uploads) == 1
+    assert len(uploads) == 0, "data URL 已能塞进预算，直发不调用上传（不消耗上传额度）"
+    assert client.posts[0]["body"]["image_urls"][0].startswith("data:image/")
 
 
 def test_non_duration_400_is_not_retried(monkeypatch):

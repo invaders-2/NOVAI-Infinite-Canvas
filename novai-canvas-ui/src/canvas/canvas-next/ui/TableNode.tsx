@@ -6,12 +6,12 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
-import { CHANNEL_MODES, CHANNEL_MODE_LABEL, channelItemsForRow, inputCellHeight, isMediaRef, mediaRefsIn, ROLE_META, ROLE_ORDER, rolesOf, rowHeight, tableChannels, tableOf, TABLE_CELL_PREVIEW_W, TABLE_INPUT_COL_W, TABLE_INPUT_MAX_SHOWN, TABLE_INPUT_PREVIEW_W, TABLE_LIMITS, withRole, withTable, guessRole, type ChannelMode, type ColRole, type TableData } from "../table";
+import { CHANNEL_MODES, CHANNEL_MODE_LABEL, channelItemsForRow, csvFromTable, inputCellHeight, isMediaRef, mediaRefsIn, ROLE_META, ROLE_ORDER, rolesOf, rowHeight, tableChannels, tableFromCsv, tableOf, TABLE_CELL_PREVIEW_W, TABLE_INPUT_COL_W, TABLE_INPUT_MAX_SHOWN, TABLE_INPUT_PREVIEW_W, TABLE_LIMITS, withRole, withTable, guessRole, type ChannelMode, type ColRole, type TableData } from "../table";
 import { storyboardPipeline } from "../tableFlow";
 import { plainPrompt } from "../mentions";
 import { MEDIA_UPLOAD_LIMIT } from "../actions";
 import type { CanvasStore } from "../store";
-import { openPop } from "./overlay";
+import { openModal, openPop } from "./overlay";
 import { useCtl, useS } from "./ctx";
 import { Icon } from "./Icon";
 import { PreviewImg } from "./thumb";
@@ -32,6 +32,22 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
   const addCol = () => { if (t.columns.length >= TABLE_LIMITS.cols) return store.toast("表格最多允许 200 列。"); save((x) => ({ ...x, columns: [...x.columns, "字段 " + (x.columns.length + 1)], rows: x.rows.map((r) => [...r, ""]), ...(x.roles ? { roles: [...x.roles, ""] } : {}) }), true); };
   const delCol = (i: number) => { if (t.columns.length <= 1) return store.toast("至少保留一列"); save((x) => ({ ...x, columns: x.columns.filter((_, j) => j !== i), rows: x.rows.map((r) => r.filter((_, j) => j !== i)), ...(x.roles ? { roles: x.roles.filter((_, j) => j !== i) } : {}) }), true); };
   const delRow = (i: number) => save((x) => ({ ...x, rows: x.rows.filter((_, j) => j !== i) }), true);
+  // 复制为 CSV：只导数据列，「输入 N」通道列由画布连线推导，不属于表格数据
+  const copyCsv = () => { void navigator.clipboard?.writeText(csvFromTable(tableOf(store.node(node.id) || node)))?.then(() => store.toast("已复制 CSV"), () => store.toast("剪贴板不可用，请用「全屏编辑」后手动复制")); };
+  const importCsv = () => openModal((close) => <CsvImportDialog store={store} nodeId={node.id} close={close} />);
+  // 顶部浮条（#ntb）只派事件，动作必须在这里做：CsvImportDialog / csvFromTable 都在本组件里。
+  // 全屏编辑时同一节点会再挂一份 body，靠 full 挡住，免得弹两层导入框。
+  useEffect(() => {
+    if (full) return;
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail as { id?: string; action?: string } | undefined;
+      if (!d || d.id !== node.id) return;
+      if (d.action === "copy") copyCsv();
+      else if (d.action === "import") importCsv();
+    };
+    addEventListener("cn:tablecsv", on);
+    return () => removeEventListener("cn:tablecsv", on);
+  });
   const roles = rolesOf(t);
   const setCell = (r: number, c: number, v: string, history = false) => save((x) => ({ ...x, rows: x.rows.map((rr, i) => (i === r ? rr.map((y, j) => (j === c ? (isMediaRef(v) ? v : v.slice(0, TABLE_LIMITS.cell)) : y)) : rr)) }), history);
   const hasFirst = roles.some((r) => r.role === "first");
@@ -77,12 +93,16 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
               </tbody>
             </table>
           </div>
-          <div className="tfoot">
+          <div className="tfoot" style={{ flexWrap: "wrap", rowGap: 4 }}>
             <button onPointerDown={(e) => { e.stopPropagation(); addRow(); }}><Icon name="plus" size="xs" />行</button>
             <button onPointerDown={(e) => { e.stopPropagation(); addCol(); }}><Icon name="plus" size="xs" />列</button>
             <button title={hasFirst ? "接出「首帧图」和「分镜视频」两个节点：先逐行出首帧并填回表格，再逐行出视频" : "补上首帧 / 尾帧两列，并接出「首帧图」和「分镜视频」两个节点"} data-act="storyboard-flow" onPointerDown={(e) => { e.stopPropagation(); storyboardPipeline(store, node.id); }}><Icon name="video" size="xs" />分镜出片</button>
+            {/* 复制 / 导入在节点上是顶部浮条的事；全屏页里浮条被弹层盖住，这里留一份入口 */}
+            {full ? <>
+              <button data-act="table-csv-copy" title="把整张表（不含输入通道列）复制成 CSV，第一行是列名" style={{ whiteSpace: "nowrap" }} onPointerDown={(e) => e.stopPropagation()} onClick={copyCsv}><Icon name="copy" size="xs" />复制 CSV</button>
+              <button data-act="table-csv-import" title="粘贴 CSV / TSV 替换整张表（保留标题、输入通道模式和列用途）" style={{ whiteSpace: "nowrap" }} onPointerDown={(e) => e.stopPropagation()} onClick={importCsv}><Icon name="upload" size="xs" />导入 CSV</button>
+            </> : null}
             <span className="sp" />
-            {full ? null : <button data-act="table-full" title="全屏编辑" onPointerDown={(e) => e.stopPropagation()} onClick={() => window.dispatchEvent(new CustomEvent("cn:tabledoc", { detail: node.id }))}><Icon name="expand" size="xs" />全屏编辑</button>}
             <span className="meta">双击单元格编辑</span>
           </div>
         </div>
@@ -110,6 +130,33 @@ export function TableDocLayer() {
       <div className="td-top"><button className="td-back" aria-label="返回" data-tip="返回画布" onClick={close}><Icon name="left" /></button><span className="td-title">{title}</span></div>
       <TableNodeBody node={n} sel full />
     </div>
+  </div>;
+}
+
+/**
+ * 导入 CSV 弹层：粘贴文本 → 按 RFC4180 解析（逗号 / 制表符都认）→ 替换整张表。
+ * 界面只负责取文本和报错，解析 / 截断 / 保留标题与通道模式都在 table.ts 的 tableFromCsv 里。
+ */
+function CsvImportDialog({ store, nodeId, close }: { store: CanvasStore; nodeId: string; close: () => void }) {
+  const [text, setText] = useState(""); const [err, setErr] = useState("");
+  const run = () => {
+    const n = store.node(nodeId); if (!n) { close(); return; }
+    const res = tableFromCsv(text, tableOf(n));
+    if (!res) { setErr("没有解析出任何列：请确认第一行是列名，逗号或制表符分隔"); return; }
+    store.updateNode(nodeId, (x) => withTable(x, res.table), { history: true });
+    close();
+    const cut = [res.droppedRows ? `截掉 ${res.droppedRows} 行` : "", res.droppedCols ? `截掉 ${res.droppedCols} 列` : ""].filter(Boolean).join("、");
+    store.toast(`已导入 ${res.table.rows.length} 行 × ${res.table.columns.length} 列` + (cut ? `（超过表格上限，${cut}）` : ""));
+  };
+  return <div className="folder-dialog">
+    <div className="fd-head"><b>导入 CSV</b><button className="ib" aria-label="关闭" onClick={close}><Icon name="x" size="s" /></button></div>
+    <textarea autoFocus value={text} data-csv-input aria-label="CSV 内容"
+      placeholder={"第一行是列名，其余是数据行；逗号或制表符分隔都行。\n\n镜头,画面\n1,雨夜街头，霓虹倒影"}
+      style={{ minHeight: 180, resize: "vertical", border: 0, borderRadius: 9, background: "var(--sunken)", color: "var(--fg)", padding: 10, font: "12px/1.6 var(--mono)", outline: "none" }}
+      onChange={(e) => { setText(e.target.value); setErr(""); }} onKeyDown={(e) => e.stopPropagation()} />
+    <p>导入会替换整张表：保留标题、输入通道模式和按列位置对应的列用途；超过 {TABLE_LIMITS.rows} 行 / {TABLE_LIMITS.cols} 列会自动截断。</p>
+    {err ? <div className="fd-err">{err}</div> : null}
+    <div className="fd-foot"><button className="btn" onClick={close}>取消</button><button className="btn solid" onClick={run}>导入</button></div>
   </div>;
 }
 
