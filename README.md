@@ -308,5 +308,3 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 - **商业用途需要授权**：在公司业务中使用、对外提供收费服务或产品、打包出售、集成进商业软件、用衍生品获利等，都必须先取得作者的书面授权；
 - **保留声明**：分发原版或修改版时，须保留本许可文本与版权声明。
 - **第三方组件**：Windows 安装包内含 FFmpeg / FFprobe（[BtbN FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) 的 **GPL 静态构建**，含 libx264 / libx265，未修改）。按 GPLv3 分发义务，许可原文随包位于安装目录 `resources/bin/win/LICENSE.txt`；同目录 `SOURCE.txt` 写明构建版本与源码获取地址（https://github.com/FFmpeg/FFmpeg ，版本行 `N-<号>-g<提交>` 即对应 commit；构建脚本见 https://github.com/BtbN/FFmpeg-Builds ）。
-
-> **版本授权说明**：v2.0.04 及更早的版本发布时采用 AGPL-3.0，已经拿到那些版本的人仍可按 AGPL-3.0 的条款使用（包括商用）；从本次提交开始的新版本改用 PolyForm Noncommercial 1.0.0。商业授权、合作或疑问，请通过仓库 Issue 或 [@invaders-2](https://github.com/invaders-2) 联系作者。
