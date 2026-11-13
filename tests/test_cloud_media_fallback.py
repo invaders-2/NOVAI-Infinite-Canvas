@@ -356,16 +356,41 @@ class CloudMediaFallbackTests(unittest.TestCase):
         self.assertEqual(body.get("video_urls"), [self.base + "/files/uguu.mp4"], body)
         self.assertFalse(any("data:" in str(url) for url in body["video_urls"]), body)
 
-    def test_apimart_video_upload_404_falls_back_to_cloud_upload(self):
-        os.environ["APIMART_TRY_VIDEO_UPLOAD"] = "1"
+    def test_apimart_video_prefers_free_host_over_upload_quota(self):
+        # 图床能通就不打 APIMart 上传端点：顺序是 免费图床 → APIMart 原生兜底，别白烧额度
+        self.server.upload_endpoint_status = 200
         result = self._run_video(videos=["/assets/output/ref.mp4"])
         self.assertTrue(result.get("videos"), result)
-        upload_paths = [item["path"] for item in self.posts("/v1/uploads/")]
-        self.assertEqual(upload_paths,
-                         ["/v1/uploads/videos", "/v1/uploads/files", "/v1/uploads/images"])
         body = self.posts("/v1/videos/generations")[0]["body"]
         self.assertEqual(body.get("video_urls"), [self.base + "/files/uguu.mp4"], body)
         self.assertFalse(any("data:" in str(url) for url in body["video_urls"]), body)
+        self.assertFalse(self.posts("/v1/uploads/"), "图床可用时不应消耗 APIMart 上传额度")
+
+    def test_apimart_video_native_upload_used_when_all_hosts_fail(self):
+        # 2026-11-13 线上实况：uguu 502、Litterbox 500、temp.sh 只回 HTML 查看页
+        # → 必须落到 APIMart 自己的上传端点，否则用户就是「云上传也失败」
+        self.server.uguu_status = 500
+        self.server.litterbox_status = 500
+        self.server.cloud_status = 500
+        self.server.upload_endpoint_status = 200
+        result = self._run_video(videos=["/assets/output/ref.mp4"])
+        self.assertTrue(result.get("videos"), result)
+        self.assertEqual([item["path"] for item in self.posts("/v1/uploads/")], ["/v1/uploads/videos"])
+        body = self.posts("/v1/videos/generations")[0]["body"]
+        self.assertEqual(body.get("video_urls"), [self.base + "/files/uploaded_asset"], body)
+
+    def test_apimart_video_native_upload_can_be_disabled(self):
+        os.environ["APIMART_TRY_VIDEO_UPLOAD"] = "0"
+        self.server.uguu_status = 500
+        self.server.litterbox_status = 500
+        self.server.cloud_status = 500
+        self.server.upload_endpoint_status = 200
+        with self.assertRaises(main.HTTPException) as caught:
+            self._run_video(videos=["/assets/output/ref.mp4"])
+        detail = str(caught.exception.detail)
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertIn("输入视频无法转换为 APIMart 支持的格式", detail)
+        self.assertFalse(self.posts("/v1/uploads/"), "APIMART_TRY_VIDEO_UPLOAD=0 时不应请求上传端点")
 
     def test_apimart_video_cloud_failure_returns_friendly_error(self):
         os.environ["APIMART_TRY_VIDEO_UPLOAD"] = "1"
