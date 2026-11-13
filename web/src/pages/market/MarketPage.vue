@@ -7,6 +7,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import MarketDetail from './MarketDetail.vue';
+import CoverMedia from './CoverMedia.vue';
 import { fetchCatalog } from './storeData.js';
 import { SHOWCASE } from './showcase.js';
 import { navigate } from '../../lib/bridge.js';
@@ -133,6 +134,9 @@ async function toggleMcp(s) {
 }
 
 const skillIcon = s => (s && s.icon && ICONS[s.icon] ? s.icon : 'wand2');
+// 封面视频：列表卡只在悬停时播（48px 也不预加载），离开就暂停；轮播只播当前这张
+function playCover(e) { const v = e.currentTarget.querySelector('video'); if (v) v.play().catch(() => {}); }
+function pauseCover(e) { const v = e.currentTarget.querySelector('video'); if (v) v.pause(); }
 function onFocus(e) { if (e.detail && e.detail.id === 'store') loadPlugins(); }
 watch(() => state.settingsOpen, open => { if (!open && state.active === 'store') loadPlugins(); });
 onMounted(() => { load(); autoplay(); window.addEventListener('novai-page-focus', onFocus); });
@@ -164,7 +168,8 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                         </div>
                         <div class="cf" @mouseenter="hovering = true" @mouseleave="hovering = false">
                             <div v-for="(it, i) in SHOWCASE" :key="it.id" class="cf-card" :class="{ on: i === cf }" :style="cfStyle(i)" role="button" :tabindex="i === cf ? 0 : -1" :aria-label="it.title" @click="cfClick(i, it)" @keydown.enter="cfClick(i, it)">
-                                <img :src="it.cover" alt="" loading="lazy" decoding="async">
+                                <video v-if="it.video && i === cf" :src="it.video" :poster="it.cover" autoplay muted loop playsinline></video>
+                                <img v-else :src="it.cover" alt="" loading="lazy" decoding="async">
                                 <span class="t"><b>{{ it.title }}</b><small>{{ it.desc }}</small></span>
                                 <span class="cat"><NvIcon :name="it.icon" />{{ it.tag }}</span>
                             </div>
@@ -175,8 +180,8 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                     <section v-if="storeSkills.length" class="mk-sec">
                         <div class="mk-sh"><h2>精选技能</h2><button type="button" class="more" @click="setTab('skill')">查看全部<NvIcon name="chevr" /></button></div>
                         <div class="sk-grid">
-                            <button v-for="it in byAvail(storeSkills).slice(0, 9)" :key="it.name" type="button" class="sk" @click="openStore(it)">
-                                <span class="ico"><img v-if="it.coverUrl" :src="it.coverUrl" alt="" loading="lazy" decoding="async" @error="e => (e.target.style.visibility = 'hidden')"><NvIcon v-else :name="skillIcon(it)" /></span>
+                            <button v-for="it in byAvail(storeSkills).slice(0, 9)" :key="it.name" type="button" class="sk" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
+                                <span class="ico"><CoverMedia :item="it" :icon="skillIcon(it)" /></span>
                                 <span class="tx"><b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small></span>
                                 <span v-if="it.builtin" class="st">官方{{ it.installed ? ' · 已添加' : '' }}</span>
                                 <span v-else-if="!it.storeAvailable" class="st">即将上线</span>
@@ -208,8 +213,8 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                     <section v-if="storeApps.length" class="mk-sec">
                         <div class="mk-sh"><h2>应用</h2><button type="button" class="more" @click="setTab('app')">查看全部<NvIcon name="chevr" /></button></div>
                         <div class="ap-grid">
-                            <button v-for="it in byAvail(storeApps).slice(0, 4)" :key="it.name" type="button" class="app" @click="openStore(it)">
-                                <span class="acv"><img v-if="it.coverUrl" :src="it.coverUrl" alt="" loading="lazy" decoding="async" @error="e => (e.target.style.visibility = 'hidden')"><span v-if="!it.storeAvailable" class="soon">即将上线</span></span>
+                            <button v-for="it in byAvail(storeApps).slice(0, 4)" :key="it.name" type="button" class="app" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
+                                <span class="acv"><CoverMedia :item="it" /><span v-if="!it.storeAvailable" class="soon">即将上线</span></span>
                                 <b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small>
                             </button>
                         </div>
@@ -226,8 +231,8 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                         </div>
                         <template v-if="skillList.length">
                             <div class="sk-grid">
-                                <button v-for="it in skillList" :key="it.name" type="button" class="sk" @click="openStore(it)">
-                                    <span class="ico"><img v-if="it.coverUrl" :src="it.coverUrl" alt="" loading="lazy" decoding="async" @error="e => (e.target.style.visibility = 'hidden')"><NvIcon v-else :name="skillIcon(it)" /></span>
+                                <button v-for="it in skillList" :key="it.name" type="button" class="sk" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
+                                    <span class="ico"><CoverMedia :item="it" :icon="skillIcon(it)" /></span>
                                     <span class="tx"><b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small></span>
                                     <span v-if="it.builtin" class="st">官方{{ it.installed ? ' · 已添加' : '' }}</span>
                                     <span v-else-if="!it.storeAvailable" class="st">即将上线</span>
@@ -268,8 +273,8 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                     <section class="mk-sec">
                         <div class="mk-sh"><h2>应用</h2></div>
                         <div v-if="appList.length" class="ap-grid">
-                            <button v-for="it in appList" :key="it.name" type="button" class="app" @click="openStore(it)">
-                                <span class="acv"><img v-if="it.coverUrl" :src="it.coverUrl" alt="" loading="lazy" decoding="async" @error="e => (e.target.style.visibility = 'hidden')"><span v-if="!it.storeAvailable" class="soon">即将上线</span></span>
+                            <button v-for="it in appList" :key="it.name" type="button" class="app" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
+                                <span class="acv"><CoverMedia :item="it" /><span v-if="!it.storeAvailable" class="soon">即将上线</span></span>
                                 <b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small>
                             </button>
                         </div>
@@ -289,8 +294,8 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                     <section class="mk-sec">
                         <div class="mk-sh"><h2>已安装</h2></div>
                         <div v-if="installedStore.length" class="sk-grid">
-                            <button v-for="it in installedStore.filter(hitStore)" :key="it.kind + it.name" type="button" class="sk" @click="openStore(it)">
-                                <span class="ico"><img v-if="it.coverUrl" :src="it.coverUrl" alt="" loading="lazy" decoding="async" @error="e => (e.target.style.visibility = 'hidden')"><NvIcon v-else :name="skillIcon(it)" /></span>
+                            <button v-for="it in installedStore.filter(hitStore)" :key="it.kind + it.name" type="button" class="sk" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
+                                <span class="ico"><CoverMedia :item="it" :icon="skillIcon(it)" /></span>
                                 <span class="tx"><b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small></span>
                                 <span class="go"><NvIcon name="chevr" /></span>
                             </button>
@@ -359,6 +364,8 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
   transition: transform .55s cubic-bezier(.2,.8,.2,1), opacity .55s, filter .55s, box-shadow .2s; will-change: transform; }
 .cf-card:focus-visible { box-shadow: var(--shadow-pop); }
 .cf-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 封面视频：轮播当前卡自动播；列表 / 应用卡由悬停触发（preload=none，不悬停不下载） */
+.cf-card video, .sk .ico video, .app .acv video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cf-card::after { content: ""; position: absolute; inset: 34% 0 0; background: linear-gradient(transparent, rgba(0,0,0,.72)); pointer-events: none; }
 .cf-card .t { position: absolute; left: 18px; right: 124px; bottom: 15px; z-index: 1; color: #fff; }
 .cf-card .t b { display: block; font: 600 15px/21px var(--font-sans); letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

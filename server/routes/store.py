@@ -417,6 +417,17 @@ def builtin_cover_url(skill_id: str) -> str:
     return ""
 
 
+def builtin_cover_video_url(skill_id: str) -> str:
+    """内置技能的封面视频：gen-<id>.mp4 存在就用它（列表悬停播、详情自动播），没生成过留空。"""
+    clean = str(skill_id or "").strip()
+    if not clean or not all(ch.isalnum() or ch in "._-" for ch in clean):
+        return ""
+    filename = "gen-%s.mp4" % clean
+    if os.path.isfile(os.path.join(_repo_root(), "static", "store", "covers", filename)):
+        return "/static/store/covers/" + filename
+    return ""
+
+
 def builtin_installed(skill: Dict[str, Any], installed: List[str], gate_initialized: bool) -> bool:
     """官方技能的真实安装态：本店标记优先；迁移标记还没写成功时沿用老的 enabled 状态。"""
     sid = str(skill.get("id") or "").strip()
@@ -444,7 +455,7 @@ def builtin_store_item(skill: Dict[str, Any], installed: bool = False) -> Dict[s
         "marketing_line": _short_line(description),
         "cover_url": builtin_cover_url(sid),
         "cover_poster_url": builtin_cover_url(sid),
-        "cover_video_url": "",
+        "cover_video_url": builtin_cover_video_url(sid),
         "icon_url": "",
         "icon": str(skill.get("icon") or "").strip(),
         "business_scenario": "",

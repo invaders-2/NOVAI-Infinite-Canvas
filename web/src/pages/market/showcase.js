@@ -63,6 +63,8 @@ export const SHOWCASE = [
         tag: '技能',
         icon: 'film',
         cover: '/static/images/market/showcase-hypit.jpg',
+        // 轮播里当前这张自动播放（同一个封面视频，列表卡悬停时才播）
+        video: '/static/store/covers/gen-hypit.mp4',
         to: 'skills',
     },
 ];
