@@ -72,6 +72,11 @@ ART_DIRECTION_ZH = (
 
 # 每条技能一个「主体」，英文写进提示词，中文进报告给人看。
 SUBJECTS = {
+    "hypit": (
+        "a video editing desk at night: a reference clip playing on a small glass monitor, a timeline where caption blocks "
+        "and motion marks hang from single words, and three alternative takes of the same scene fanned out as film stills, "
+        "warm practical lamp against cool screen glow",
+        "视频复刻台：参考片 + 锚在词上的字幕时间线 + 三版变体"),
     "primordia-creator-skills": (
         "a director's pre-production table: character portrait sheets, a miniature film set model and a hand-drawn shot list "
         "pinned on a dark studio wall under a warm desk lamp",

@@ -56,4 +56,13 @@ export const SHOWCASE = [
         cover: '/static/images/market/showcase-fashion.jpg',
         to: 'skills',
     },
+    {
+        id: 'hypit',
+        title: 'Hypit 视频复刻',
+        desc: '一条参考视频拆成完整 workflow，复刻出 100 个变体',
+        tag: '技能',
+        icon: 'film',
+        cover: '/static/images/market/showcase-hypit.jpg',
+        to: 'skills',
+    },
 ];

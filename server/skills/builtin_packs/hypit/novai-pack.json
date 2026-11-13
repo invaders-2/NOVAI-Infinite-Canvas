@@ -1,0 +1,16 @@
+{
+  "display_name": "Hypit 视频复刻",
+  "category": "视频创作",
+  "icon": "film",
+  "tags": [
+    "视频",
+    "复刻",
+    "爆款",
+    "分镜",
+    "SVML",
+    "Hypit",
+    "短片",
+    "口播"
+  ],
+  "description": "把一条参考视频拆成可运行的 Hypit workflow，复刻出 100 个变体：A-roll / B-roll、字幕、动效全部锚定在词上而不是秒上；也能从模板或一句话从零写一条视频。"
+}

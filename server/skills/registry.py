@@ -245,7 +245,8 @@ def _build_pack_definition(pack_dir, skill_id, parsed, target_dir, version):
         "name": str(manifest.get("display_name") or skill_id).strip(),
         "category": str(manifest.get("category") or "内置技能").strip(),
         "icon": str(manifest.get("icon") or "").strip(),
-        "description": str(parsed.get("description") or "").strip(),
+        # 清单可覆盖 SKILL.md 的英文 description：市场卡片要显示中文，又不想改上游正文
+        "description": str(manifest.get("description") or parsed.get("description") or "").strip(),
         "tags": [str(item) for item in tags if str(item or "").strip()],
         "platforms": [],
         "scenarios": [],
@@ -254,7 +255,9 @@ def _build_pack_definition(pack_dir, skill_id, parsed, target_dir, version):
         "input_schema": {"files": [], "params": []},
         "deliverables": [],
         "skill_prompt": "%s\n\n%s" % (header, body.replace("<skill-root>", root)),
-        "enabled": True,
+        # 新装的官方技能包默认不启用：跟「官方技能需在应用市场添加」一致，
+        # 否则老用户升级后市场显示未添加、助手却已经能用（2026-11 用户要求固定上架）
+        "enabled": False,
         "available": True,
         "skill_type": "system",
         "builtin_pack": os.path.basename(os.path.normpath(pack_dir)),
