@@ -12539,6 +12539,18 @@ _VOLCENGINE_EDIT_PROMPT_KEYWORDS = (
     "extend", "swap", "alter",
 )
 
+# 智能画布BEAT 发来的参考图角色（engine.ts rolesFor → "reference"），火山侧对应 reference_image
+VOLCENGINE_CANVAS_REFERENCE_ROLES = ("reference", "ref")
+# 这些生成方式下参考视频必须整段提交（不能抽帧成静态参考图）
+VOLCENGINE_FULL_VIDEO_MODES = ("reference_video_to_video", "video_edit", "video_extend")
+
+
+def volcengine_model_accepts_reference_video(model: str) -> bool:
+    """Seedance 2.x 原生支持 reference_video（多模态参考）：参考视频整段提交，别抽帧。"""
+    name = str(model or "").lower()
+    return "seedance-2" in name or "seedance2" in name
+
+
 def is_volcengine_edit_prompt(text: str) -> bool:
     value = str(text or "").strip().lower()
     if not value:
@@ -27359,11 +27371,16 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                                     return True
                         return False
                     is_edit_task = _volc_edit_task_flag()
+                    explicit_video_mode = _agent_video_mode(getattr(payload, "mode", ""))
                     for ref in payload.images[:9]:
                         url = volcengine_media_reference_url(ref.url, max_image_size=1536)
                         if not url:
                             continue
                         role = volcengine_content_role(ref.role, "image")
+                        if role is None and str(ref.role or "").strip().lower() in VOLCENGINE_CANVAS_REFERENCE_ROLES:
+                            # 智能画布BEAT 的参考图 role 是 "reference"：以前这里认不出，落到「只取第一张当首帧」，
+                            # 产品白底图被当成视频首帧、其余参考图（人物 / 第二张产品图）全被丢掉
+                            role = "reference_image"
                         if role in {"first_frame", "last_frame"}:
                             # 编辑任务：首尾帧与编辑目标视频互斥（火山组合限制），降级为参考图，
                             # 参考图（如新鞋外观）必须全部保留，不能只取第一张。
@@ -27371,7 +27388,7 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                                 append_volcengine_image(url, "reference_image")
                             else:
                                 append_volcengine_image(url, role)
-                        elif payload.multimodal or is_edit_task:
+                        elif payload.multimodal or is_edit_task or role == "reference_image":
                             # 智能多帧/多参模式或编辑任务：多张图作为参考图提交，不能伪装成首帧。
                             append_volcengine_image(url, "reference_image")
                         elif not frame_roles_used["first_frame"]:
@@ -27437,7 +27454,13 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                                 )
                         # 视频编辑/局部替换：目标视频 role 用 reference_video（火山要求），
                         # 编辑目标判定已在上方时长校验处提前算好（时长截取也在公网化前完成）。
-                        as_target = is_edit_target
+                        # 明确是「参考视频」（画布 role=reference_video、生成方式=参考视频生视频 / 视频编辑 / 视频延长，
+                        # 或 Seedance 2.x 这类原生支持参考视频的模型）：整段视频提交。以前只有提示词里带「替换 / 编辑」
+                        # 才整段提交，否则被抽成 4 张 768px 静帧当参考图——动作、运镜、节奏全丢，深度通道还会把灰度画面带进成片。
+                        as_target = (is_edit_target
+                                     or explicit_role == "reference_video"
+                                     or explicit_video_mode in VOLCENGINE_FULL_VIDEO_MODES
+                                     or volcengine_model_accepts_reference_video(volc_model))
                         video_items = await volcengine_video_reference_content_items(media_url, as_target=as_target)
                         body["content"].extend(video_items)
                         volc_video_count += 1
@@ -39230,6 +39253,48 @@ def _agent_tool_generate_video_validate(args):
     return norm
 
 
+AGENT_MOTION_TRANSFER_NOTE_MAX = 1200
+
+
+def agent_motion_transfer_prompt(user_prompt, image_count, video_count=1):
+    """动作迁移 / 动作复刻提示词。
+
+    以前的模板写死「外观保持参考图一致（身份、服装、造型）……场景、镜头……其他一切保持不变，仅替换动作」，
+    用户的要求截到 200 字、排在最后当「用户补充」：
+      · 模板只认识「人物」，从不提产品，产品图没有任何角色说明；
+      · 参考视频本来就带着原动作，「仅替换动作、其余不变」等于告诉模型什么都别换，原片里的旧产品被原样保留；
+      · 用户写的「把手里的杯子换成图 2 的保温杯」被模板压在后面，还可能被截断。
+    现在：用户要求放最前、不截短；按「视频N / 图片N」给每个素材分配职责（参考视频只管动作、运镜、节奏和空间关系，
+    参考图负责要换进去的人物 / 产品 / 场景外观），并明确要求原片里的旧产品整体替换、外形和 logo 以参考图为准。"""
+    note = str(user_prompt or "").strip()
+    if len(note) > AGENT_MOTION_TRANSFER_NOTE_MAX:
+        note = note[:AGENT_MOTION_TRANSFER_NOTE_MAX]
+    try:
+        image_count = max(0, int(image_count or 0))
+    except (TypeError, ValueError):
+        image_count = 0
+    video_label = "视频1" if int(video_count or 0) <= 1 else "视频1–视频%d" % int(video_count)
+    image_labels = "、".join(f"图片{i}" for i in range(1, image_count + 1)) or "参考图"
+    parts = []
+    if note:
+        parts.append(f"任务：{note}")
+    parts.append(
+        f"素材分工：{video_label} 只提供动作、手势、表演节奏、站位、运镜和空间关系，不提供外观；"
+        f"{image_labels} 提供要换进新视频的外观（人物身份 / 服装，产品的外形、颜色、材质、logo 与包装文字，或新场景），"
+        f"各张图分别对应什么以上面的任务描述为准。"
+    )
+    parts.append(
+        f"替换规则：凡是 {video_label} 里出现原产品的画面（手持、展示、特写、使用过程），都整体换成参考图里的新产品，"
+        f"外形比例、颜色、logo 和文字严格以参考图为准，不要保留或混入原产品的形状和标识；"
+        f"手部与产品的接触、握持方式随新产品外形自然调整。"
+    )
+    parts.append(
+        f"任务里没要求改的部分保持与 {video_label} 一致：动作时间点、镜头运动、构图和景别不变；"
+        f"不要继承参考视频的画质瑕疵、灰度 / 深度图外观或原有字幕水印。"
+    )
+    return "\n".join(parts)
+
+
 async def _agent_tool_generate_video_run_classic(args):
     """建「提示词节点 → 视频节点」完整工作流（含连线，ComfyUI 式管线）
     → 真实视频生成任务（Task Engine）→ 结果自动落画布视频节点。
@@ -39238,15 +39303,7 @@ async def _agent_tool_generate_video_run_classic(args):
     # 动作迁移：按模板组装提示词，明确编辑边界（只换动作，其余保持不变）
     eff_prompt = args["prompt"]
     if args.get("motion_transfer"):
-        user_note = eff_prompt.strip()
-        if len(user_note) > 200:
-            user_note = user_note[:200]
-        eff_prompt = (
-            f"动作迁移：让画面中的主体严格按照参考视频的动作骨架表演，"
-            f"外观保持参考图一致（身份、服装、造型、材质等不变）。"
-            f"场景、镜头、光影、构图等其他一切内容保持不变，仅替换动作。"
-            f"用户补充：{user_note}"
-        )
+        eff_prompt = agent_motion_transfer_prompt(eff_prompt, len(args["reference_urls"]), len(args["reference_video"]))
     count = len(load_canvas(canvas_id).get("nodes") or [])
     rx = 220 + (count % 5) * 70
     ry = 160 + (count % 4) * 70
@@ -40031,9 +40088,8 @@ async def _agent_generate_smart(args, kind):
     canvas_id = args["canvas_id"]
     prompt = args["prompt"]
     if kind == "video" and args.get("motion_transfer"):
-        note = prompt.strip()[:200]
-        prompt = ("动作迁移：让画面中的主体严格按照参考视频的动作骨架表演，外观保持参考图一致（身份、服装、造型、材质等不变）。"
-                  f"场景、镜头、光影、构图等其他一切内容保持不变，仅替换动作。用户补充：{note}")
+        prompt = agent_motion_transfer_prompt(prompt, len(args.get("reference_urls") or []),
+                                              len(args.get("reference_video") or []))
     label = "Video" if kind == "video" else "Image"
     base_title = args.get("title") or label
     prompt_res = _agent_tool_create_node_run(_agent_tool_create_node_validate({
@@ -44466,7 +44522,9 @@ _AGENT_PLAN_SYSTEM_PROMPT = (
     "仅当用户明确要求「先建节点、稍后再生成」时，才拆成 create_node + run_generation。\n"
     "5.5 动作迁移（用户说「让照片/角色图做这个视频里的动作」「动作模仿/动作迁移」「让画面里的人按视频动作表演」等）："
     "用 generate_video 一步完成，motion_transfer=true，reference_urls 填角色图/外观参考（首图=主体外观），"
-    "reference_video 填动作参考视频（1 个），prompt 简述用户要求即可（系统会自动套动作迁移模板，时长/比例自动按编辑任务处理）。"
+    "reference_video 填动作参考视频（1 个），prompt 写清用户要求并按 reference_urls 顺序点名每张图的职责"
+    "（如「图片1 是新模特，图片2 是新产品保温杯，把视频1里手上的旧产品换成图片2」；换产品时产品图必须放进 reference_urls），"
+    "系统会自动补素材分工与替换规则，时长/比例自动按编辑任务处理。"
     "画布摘要或素材库中有角色图 URL 与视频 URL 时直接填入。\n"
     "5.5b 用户要求「克隆原声」「修改台词并对口型」「声音配音后重新对口型」时：用 lipsync_video，"
     "reference_video 填原视频，prompt 填新台词；有成品音频时填 audio 跳过克隆，否则 voice_sample 可填声音样本、"

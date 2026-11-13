@@ -335,6 +335,16 @@ assert.deepStrictEqual(r10c.inputs.filter((x) => x.nodeId === 'self_vid').map((x
 const selfVid2 = genNode('self_vid2', 'video', { title: '本节点视频2', prompt: '用 @{self_vid2}', gen: { hist: [{ url: PIX }], hi: 0, params: { ...model.defaultParams('video', VIDEO_REF_SPEC), mode: '文生视频' } } });
 const d10d = doc([t1, selfVid2], [edge('e1', 't1', 'self_vid2')]);
 assert.strictEqual(engine.requestForNode(makeStore(d10d), d10d.nodes[1]).inputs.filter((x) => x.nodeId === 'self_vid2').length, 0, '文生视频不接受视频输入：不伪造发送');
+// 10.3b 参考视频生视频 + 参考图（动作复刻换产品 / 换人物）：参考图不能被丢掉，和参考视频一起发
+const mtProd = genNode('mt_prod', 'image', { title: '产品图', gen: { hist: [{ url: PIX, w: 512, h: 512 }], hi: 0 } });
+const mtClip = genNode('mt_clip', 'video', { title: '动作参考', gen: { hist: [{ url: PIX, frame: PIX }], hi: 0 } });
+const MT_SPEC = model.specFor({ configId: 'apimart::video-mt', label: 'video-mt', vendor: 'APIMART', kind: 'video', specSource: 'spec', ui: { ratios: ['16:9'], res: ['720p'], durs: [5], modes: ['文生视频', '参考生视频', '参考视频生视频'], times: [1], maxRefs: 4 } });
+SPECS[MT_SPEC.id] = MT_SPEC;
+const mtOut = genNode('mt_out', 'video', { title: '复刻', prompt: '按参考视频的动作复刻，产品换成参考图', gen: { hist: [], hi: 0, params: { ...model.defaultParams('video', MT_SPEC), mode: '参考视频生视频' } } });
+const d10mt = doc([mtProd, mtClip, mtOut], [edge('e_mt1', 'mt_prod', 'mt_out'), edge('e_mt2', 'mt_clip', 'mt_out')]);
+const r10mt = engine.requestForNode(makeStore(d10mt), d10mt.nodes[2]);
+assert.deepStrictEqual(r10mt.inputs.filter((x) => x.nodeId === 'mt_prod').map((x) => x.role), ['reference'], '参考视频生视频：参考图（产品 / 人物）按 reference 发送，不能丢');
+assert.deepStrictEqual(r10mt.inputs.filter((x) => x.nodeId === 'mt_clip').map((x) => x.role), ['reference_video'], '参考视频生视频：视频仍是 reference_video');
 // 10.4 文本 / 音频：@ 面板不出「本节点」条目
 assert.strictEqual(mentions.selfRefOf(t1), null, '文本节点不能 @ 自己');
 const selfAud = genNode('self_aud', 'audio', { title: '本节点音频', gen: { hist: [{ url: PIX }], hi: 0 } });
